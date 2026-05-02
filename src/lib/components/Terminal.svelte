@@ -160,7 +160,10 @@
         !e.altKey &&
         code === "Enter"
       ) {
+        e.preventDefault();
+        e.stopPropagation();
         if (ptyId) void ptyWrite(ptyId, new Uint8Array([0x0a]));
+        queueMicrotask(() => term?.focus());
         return false;
       }
 
@@ -191,8 +194,8 @@
       ptyId = await ptySpawn(
         {
           cwd: project.cwd,
-          cmd: project.defaultCmd,
-          args: project.defaultArgs,
+          cmd: thread.cmd,
+          args: thread.args,
           cols,
           rows,
         },

@@ -17,19 +17,31 @@ export interface Thread {
   ptyId: string | null;
   label: string;
   title: string | null;
+  cmd: string;
+  args: string[];
   status: "idle" | "running" | "ready" | "done" | "exited" | "error";
   exitCode: number | null;
   createdAt: number;
 }
 
+export type View = "terminal" | "settings";
+
 class AppState {
   projects = $state<Project[]>([]);
   threads = $state<Thread[]>([]);
   activeThreadId = $state<string | null>(null);
+  selectedProjectId = $state<string | null>(null);
+  view = $state<View>("terminal");
   ready = $state(false);
 
   get activeThread(): Thread | null {
     return this.threads.find((t) => t.id === this.activeThreadId) ?? null;
+  }
+
+  get currentProjectId(): string | null {
+    if (this.activeThread) return this.activeThread.projectId;
+    if (this.selectedProjectId) return this.selectedProjectId;
+    return this.projects[0]?.id ?? null;
   }
 
   threadsByProject(projectId: string): Thread[] {

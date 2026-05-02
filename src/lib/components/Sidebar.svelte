@@ -9,14 +9,12 @@
   import MoreHorizontal from "@lucide/svelte/icons/more-horizontal";
 
   type Props = {
-    onNewThread: (projectId: string) => void;
     onCloseThread: (threadId: string) => void;
     onNewProject: () => void;
     onRemoveProject: (projectId: string) => void;
     onOpenSettings: () => void;
   };
   let {
-    onNewThread,
     onCloseThread,
     onNewProject,
     onRemoveProject,
@@ -32,6 +30,11 @@
 
   function closeMenu() {
     menuFor = null;
+  }
+
+  function selectProject(projectId: string) {
+    app.selectedProjectId = projectId;
+    app.view = "terminal";
   }
 </script>
 
@@ -70,9 +73,12 @@
     {/if}
 
     {#each app.projects as project (project.id)}
+      {@const isSelected = app.currentProjectId === project.id}
       <div class="mb-1.5">
         <div
-          class="group/project relative flex items-center gap-2 rounded-md px-2 py-1.5"
+          class="group/project relative flex items-center gap-2 rounded-md px-2 py-1.5 transition {isSelected
+            ? 'bg-accent/40'
+            : ''}"
         >
           <div
             class="flex size-5 shrink-0 items-center justify-center overflow-hidden rounded bg-[var(--color-surface-3)]"
@@ -90,12 +96,14 @@
               </span>
             {/if}
           </div>
-          <span
-            class="min-w-0 flex-1 truncate text-xs font-medium text-foreground/90"
+          <button
+            type="button"
+            class="min-w-0 flex-1 truncate text-left text-xs font-medium text-foreground/90"
             title={project.cwd}
+            onclick={() => selectProject(project.id)}
           >
             {project.name}
-          </span>
+          </button>
 
           <div
             class="flex items-center opacity-0 transition group-hover/project:opacity-100"
@@ -108,15 +116,6 @@
               title="More"
             >
               <MoreHorizontal class="size-3" />
-            </button>
-            <button
-              type="button"
-              class="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-              onclick={() => onNewThread(project.id)}
-              aria-label="New thread in {project.name}"
-              title="New thread"
-            >
-              <Plus class="size-3" />
             </button>
           </div>
 
@@ -141,37 +140,42 @@
           {/if}
         </div>
 
-        <ul class="ml-2 space-y-0.5 border-l border-border/60 pl-2">
-          {#each app.threadsByProject(project.id) as thread (thread.id)}
-            <li class="group/thread">
-              <div
-                class="flex items-center gap-2 rounded-md px-2 py-1.5 transition {app.activeThreadId ===
-                thread.id
-                  ? 'bg-accent text-foreground'
-                  : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground'}"
-              >
-                <StatusDot status={thread.status} />
-                <button
-                  type="button"
-                  class="min-w-0 flex-1 truncate text-left text-[12.5px]"
-                  onclick={() => (app.activeThreadId = thread.id)}
-                  title={thread.title ?? thread.label}
+        {#if app.threadsByProject(project.id).length > 0}
+          <ul class="ml-2 space-y-0.5 border-l border-border/60 pl-2">
+            {#each app.threadsByProject(project.id) as thread (thread.id)}
+              <li class="group/thread">
+                <div
+                  class="flex items-center gap-2 rounded-md px-2 py-1.5 transition {app.activeThreadId ===
+                    thread.id && app.view === 'terminal'
+                    ? 'bg-accent text-foreground'
+                    : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground'}"
                 >
-                  {thread.title ?? thread.label}
-                </button>
-                <button
-                  type="button"
-                  class="rounded p-0.5 text-muted-foreground/60 opacity-0 transition hover:bg-background hover:text-foreground group-hover/thread:opacity-100"
-                  onclick={() => onCloseThread(thread.id)}
-                  aria-label="Close {thread.label}"
-                  title="Close thread"
-                >
-                  <X class="size-3" />
-                </button>
-              </div>
-            </li>
-          {/each}
-        </ul>
+                  <StatusDot status={thread.status} />
+                  <button
+                    type="button"
+                    class="min-w-0 flex-1 truncate text-left text-[12.5px]"
+                    onclick={() => {
+                      app.activeThreadId = thread.id;
+                      app.view = "terminal";
+                    }}
+                    title={thread.title ?? thread.label}
+                  >
+                    {thread.title ?? thread.label}
+                  </button>
+                  <button
+                    type="button"
+                    class="rounded p-0.5 text-muted-foreground/60 opacity-0 transition hover:bg-background hover:text-foreground group-hover/thread:opacity-100"
+                    onclick={() => onCloseThread(thread.id)}
+                    aria-label="Close {thread.label}"
+                    title="Close thread"
+                  >
+                    <X class="size-3" />
+                  </button>
+                </div>
+              </li>
+            {/each}
+          </ul>
+        {/if}
       </div>
     {/each}
   </div>
@@ -180,12 +184,14 @@
     class="flex items-center justify-between border-t border-border/80 bg-[var(--color-surface-2)] px-3 py-2"
   >
     <span class="text-[10px] text-muted-foreground/70">
-      {app.projects.length}
-      proj · {app.threads.length} thread{app.threads.length === 1 ? "" : "s"}
+      {app.threads.length} thread{app.threads.length === 1 ? "" : "s"} in
+      {app.projects.length} project{app.projects.length === 1 ? "" : "s"}
     </span>
     <button
       type="button"
-      class="rounded-md p-1.5 text-muted-foreground transition hover:bg-accent hover:text-foreground"
+      class="rounded-md p-1.5 transition {app.view === 'settings'
+        ? 'bg-accent text-foreground'
+        : 'text-muted-foreground hover:bg-accent hover:text-foreground'}"
       onclick={onOpenSettings}
       aria-label="Settings"
       title="Settings"
