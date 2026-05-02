@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { app } from "$lib/app/store.svelte";
+  import pkg from "../../../../package.json";
   import Minus from "@lucide/svelte/icons/minus";
   import Square from "@lucide/svelte/icons/square";
   import Copy from "@lucide/svelte/icons/copy";
@@ -97,9 +98,14 @@
 
   <div
     data-tauri-drag-region
-    class="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-[13px] font-semibold tracking-tight text-foreground/90"
+    class="pointer-events-none absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-baseline gap-1.5"
   >
-    {title}
+    <span class="text-[13px] font-semibold tracking-tight text-foreground/90">
+      {title}
+    </span>
+    <span class="font-mono text-[10px] text-muted-foreground/60">
+      v{pkg.version}
+    </span>
   </div>
 
   <div data-tauri-drag-region class="flex-1"></div>

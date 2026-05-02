@@ -107,6 +107,11 @@ class SettingsStore {
     notifications.success(id ? `Default shell: ${id}` : "Default shell: none");
   }
 
+  async setDefaultShellIdQuiet(id: string | null) {
+    this.state.defaultShellId = id;
+    await this.persist();
+  }
+
   async setSidebarWidth(px: number) {
     const clamped = Math.max(180, Math.min(480, Math.round(px)));
     this.state.sidebarWidth = clamped;

@@ -28,6 +28,7 @@
   let resizeObserver: ResizeObserver | null = null;
   let ptyId: string | null = null;
   let spawned = $state(false);
+  let lastOutputAt = 0;
 
   // Dingbats + Misc Symbols cover all spinner/asterisk glyphs Claude rotates through.
   const TITLE_GLYPH_RE = /^[✀-➿☀-⛿✨✳✴]+\s*/u;
@@ -42,6 +43,7 @@
   function handleEvent(event: PtyEvent) {
     if (!term) return;
     if (event.type === "output") {
+      lastOutputAt = Date.now();
       term.write(new Uint8Array(event.data));
     } else if (event.type === "title") {
       applyTitle(event.value);
@@ -135,9 +137,27 @@
     if (plan.pendingInput && ptyId) {
       const targetPtyId = ptyId;
       const text = plan.pendingInput;
+      const encoded = new TextEncoder().encode(text);
+      lastOutputAt = Date.now();
+      let injected = false;
+
+      const tryInject = () => {
+        if (injected) return;
+        if (Date.now() - lastOutputAt > 350) {
+          injected = true;
+          void ptyWrite(targetPtyId, encoded);
+          return;
+        }
+        setTimeout(tryInject, 120);
+      };
+      setTimeout(tryInject, 250);
+
       setTimeout(() => {
-        void ptyWrite(targetPtyId, new TextEncoder().encode(text));
-      }, 600);
+        if (!injected) {
+          injected = true;
+          void ptyWrite(targetPtyId, encoded);
+        }
+      }, 5000);
     }
 
     if (!thread.sessionId) {

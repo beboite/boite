@@ -57,6 +57,18 @@ class AppState {
   async init() {
     if (this.ready) return;
     await Promise.all([settings.init(), platform.init()]);
+
+    if (settings.state.defaultShellId === null && platform.shells.length > 0) {
+      const preferred = platform.isWindows
+        ? ["pwsh", "powershell", "git-bash", "cmd"]
+        : ["zsh", "bash", "fish", "sh"];
+      const pick =
+        preferred
+          .map((id) => platform.shells.find((s) => s.id === id))
+          .find((s) => s != null) ?? platform.shells[0];
+      if (pick) await settings.setDefaultShellIdQuiet(pick.id);
+    }
+
     try {
       this.projects = await loadProjects();
     } catch (err) {
