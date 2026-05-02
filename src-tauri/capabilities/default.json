@@ -19,6 +19,9 @@
     "sql:allow-select",
     "sql:allow-close",
     "dialog:allow-open",
+    "os:default",
+    "os:allow-platform",
+    "os:allow-version",
     "clipboard-manager:allow-read-text",
     "clipboard-manager:allow-write-text"
   ]

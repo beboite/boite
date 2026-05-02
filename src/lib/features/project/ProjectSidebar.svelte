@@ -1,6 +1,7 @@
 <script lang="ts">
   import { app } from "$lib/app/store.svelte";
   import StatusDot from "$lib/shared/components/StatusDot.svelte";
+  import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
   import Plus from "@lucide/svelte/icons/plus";
   import X from "@lucide/svelte/icons/x";
   import FolderOpen from "@lucide/svelte/icons/folder-open";
@@ -144,6 +145,9 @@
                     : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground'}"
                 >
                   <StatusDot status={thread.status} />
+                  <span class="flex size-3.5 shrink-0 items-center justify-center">
+                    <ShortcutIcon iconKey={thread.iconKey} size={12} />
+                  </span>
                   <button
                     type="button"
                     class="min-w-0 flex-1 truncate text-left text-[12.5px]"

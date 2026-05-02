@@ -1,10 +1,10 @@
 <script lang="ts">
   import { settings } from "$lib/features/settings/store.svelte";
   import { app } from "$lib/app/store.svelte";
-  import { launchShortcut, launchBlankTerminal } from "$lib/features/thread/api";
+  import { launchShortcut } from "$lib/features/thread/api";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
+  import ShellPicker from "./ShellPicker.svelte";
   import { resolveIconKey } from "$lib/shared/icons/detect";
-  import Plus from "@lucide/svelte/icons/plus";
 
   function launch(shortcutId: string) {
     const shortcut = settings.state.shortcuts.find((s) => s.id === shortcutId);
@@ -12,12 +12,6 @@
     const projectId = app.currentProjectId;
     if (!projectId) return;
     void launchShortcut(shortcut, projectId);
-  }
-
-  function openBlank() {
-    const projectId = app.currentProjectId;
-    if (!projectId) return;
-    void launchBlankTerminal(projectId);
   }
 
   function openSettings() {
@@ -42,17 +36,7 @@
     </button>
   {/each}
 
-  <button
-    type="button"
-    class="flex items-center gap-1 rounded-md border border-dashed border-border px-2 py-1 text-[11px] text-muted-foreground transition hover:border-foreground/30 hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-    disabled={app.currentProjectId === null}
-    onclick={openBlank}
-    title="New blank terminal"
-    aria-label="New terminal"
-  >
-    <Plus class="size-3" />
-    <span>Terminal</span>
-  </button>
+  <ShellPicker />
 
   <div class="flex-1"></div>
 

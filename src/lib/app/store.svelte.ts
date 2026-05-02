@@ -1,6 +1,7 @@
 import type { Project, Thread, ThreadStatus, View } from "$lib/types";
 import { loadProjects, saveProject, deleteProject } from "$lib/storage/db";
 import { settings } from "$lib/features/settings/store.svelte";
+import { platform } from "$lib/storage/platform.svelte";
 import {
   loadThreads,
   saveThread,
@@ -32,7 +33,7 @@ class AppState {
 
   async init() {
     if (this.ready) return;
-    await settings.init();
+    await Promise.all([settings.init(), platform.init()]);
     try {
       this.projects = await loadProjects();
     } catch (err) {

@@ -4,6 +4,7 @@ import { getDefaultShell } from "$lib/storage/shell";
 import { parseCommand } from "$lib/features/settings/store.svelte";
 import { resolveIconKey } from "$lib/shared/icons/detect";
 import type { IconKey, Shortcut, Thread } from "$lib/types";
+import type { ShellOption } from "$lib/storage/platform.svelte";
 
 function buildThread(
   projectId: string,
@@ -44,6 +45,26 @@ export async function launchShortcut(
     parsed.args,
     `${shortcut.label} #${count}`,
     iconKey,
+  );
+  await app.upsertThread(thread);
+  app.activeThreadId = thread.id;
+  app.view = "terminal";
+  return thread;
+}
+
+export async function launchShell(
+  shell: ShellOption,
+  projectId: string | null,
+): Promise<Thread | null> {
+  const project = projectId ? app.projects.find((p) => p.id === projectId) : null;
+  if (!project) return null;
+  const count = app.threadsByProject(project.id).length + 1;
+  const thread = buildThread(
+    project.id,
+    shell.cmd,
+    [...shell.args],
+    `${shell.label} #${count}`,
+    "terminal",
   );
   await app.upsertThread(thread);
   app.activeThreadId = thread.id;
