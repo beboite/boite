@@ -6,9 +6,11 @@
   import { WebLinksAddon } from "@xterm/addon-web-links";
   import { Unicode11Addon } from "@xterm/addon-unicode11";
   import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
-  import { ptySpawn, ptyWrite, ptyResize, type PtyEvent } from "$lib/pty";
-  import { app, type Thread } from "$lib/store.svelte";
-  import { settings } from "$lib/settings.svelte";
+  import { ptySpawn, ptyWrite, ptyResize } from "$lib/storage/pty";
+  import type { PtyEvent } from "$lib/storage/pty";
+  import { app } from "$lib/app/store.svelte";
+  import { settings } from "$lib/features/settings/store.svelte";
+  import type { Thread } from "$lib/types";
 
   type Props = { thread: Thread; active: boolean };
   let { thread, active }: Props = $props();
@@ -18,36 +20,28 @@
   let fit: FitAddon | null = null;
   let resizeObserver: ResizeObserver | null = null;
   let ptyId: string | null = null;
-  const decoder = new TextDecoder("utf-8", { fatal: false });
+  let spawned = $state(false);
 
-  // ✱ U+2731 = Claude idle/ready glyph
-  const READY_RE = /✱/;
-  // Thinking/processing glyphs Claude rotates through
-  const THINKING_RE = /[✦✧✺✻✨✳❖✷]/;
+  // Dingbats + Misc Symbols cover all spinner/asterisk glyphs Claude rotates through.
+  const TITLE_GLYPH_RE = /^[✀-➿☀-⛿✨✳✴]+\s*/u;
 
-  function detectStatus(text: string) {
-    if (READY_RE.test(text)) {
-      app.setThreadStatus(thread.id, "ready");
-    } else if (THINKING_RE.test(text)) {
-      app.setThreadStatus(thread.id, "running");
-    }
+  function applyTitle(raw: string) {
+    const isWorking = TITLE_GLYPH_RE.test(raw);
+    app.setThreadStatus(thread.id, isWorking ? "running" : "ready");
+    const cleaned = raw.replace(TITLE_GLYPH_RE, "").trim();
+    app.setThreadTitle(thread.id, cleaned || raw);
   }
 
   function handleEvent(event: PtyEvent) {
     if (!term) return;
     if (event.type === "output") {
-      const bytes = new Uint8Array(event.data);
-      term.write(bytes);
-      const text = decoder.decode(bytes, { stream: true });
-      detectStatus(text);
+      term.write(new Uint8Array(event.data));
     } else if (event.type === "title") {
-      const cleaned = event.value
-        .replace(/^[✱✻✦✺✧✨✳✳❖✴✵]+\s*/, "")
-        .trim();
-      app.setThreadTitle(thread.id, cleaned || event.value);
+      applyTitle(event.value);
     } else if (event.type === "exit") {
       const code = event.code ?? null;
       app.setThreadStatus(thread.id, code === 0 ? "done" : "exited", code);
+      app.setThreadPtyId(thread.id, null);
     } else if (event.type === "error") {
       term.write(`\r\n[boite] ${event.message}\r\n`);
       app.setThreadStatus(thread.id, "error");
@@ -87,7 +81,54 @@
     }
   }
 
-  onMount(async () => {
+  async function spawn() {
+    if (spawned || !term || !fit) return;
+    spawned = true;
+
+    const project = app.projects.find((p) => p.id === thread.projectId);
+    if (!project) {
+      term.write("\r\n[boite] no project found\r\n");
+      return;
+    }
+
+    const cols = term.cols;
+    const rows = term.rows;
+
+    try {
+      ptyId = await ptySpawn(
+        {
+          cwd: project.cwd,
+          cmd: thread.cmd,
+          args: thread.args,
+          cols,
+          rows,
+        },
+        handleEvent,
+      );
+      app.setThreadPtyId(thread.id, ptyId);
+      app.setThreadStatus(thread.id, "running");
+    } catch (err) {
+      term.write(`\r\n[boite] spawn failed: ${err}\r\n`);
+      app.setThreadStatus(thread.id, "error");
+      return;
+    }
+
+    term.onData((data) => {
+      if (!ptyId) return;
+      const bytes = new TextEncoder().encode(data);
+      void ptyWrite(ptyId, bytes);
+      if (thread.status === "ready") {
+        app.setThreadStatus(thread.id, "running");
+      }
+    });
+
+    term.onResize(({ cols, rows }) => {
+      if (!ptyId) return;
+      void ptyResize(ptyId, cols, rows);
+    });
+  }
+
+  onMount(() => {
     term = new Terminal({
       cursorBlink: true,
       cursorStyle: "bar",
@@ -101,27 +142,27 @@
       macOptionIsMeta: true,
       rightClickSelectsWord: false,
       theme: {
-        background: "#13151a",
-        foreground: "#e4e6eb",
-        cursor: "#d8dadf",
-        cursorAccent: "#13151a",
-        selectionBackground: "rgba(220, 220, 220, 0.22)",
-        black: "#1c1f26",
+        background: "#0a0a0a",
+        foreground: "#e4e4e7",
+        cursor: "#d4d4d8",
+        cursorAccent: "#0a0a0a",
+        selectionBackground: "rgba(228, 228, 231, 0.18)",
+        black: "#18181b",
         red: "#f07178",
         green: "#c3e88d",
         yellow: "#ffcb6b",
         blue: "#82aaff",
         magenta: "#c792ea",
         cyan: "#89ddff",
-        white: "#e4e6eb",
-        brightBlack: "#545863",
+        white: "#e4e4e7",
+        brightBlack: "#52525b",
         brightRed: "#ff8b92",
         brightGreen: "#ddffa7",
         brightYellow: "#ffe585",
         brightBlue: "#9cc4ff",
         brightMagenta: "#e1acff",
         brightCyan: "#a3f7ff",
-        brightWhite: "#ffffff",
+        brightWhite: "#fafafa",
       },
     });
 
@@ -155,7 +196,6 @@
         return false;
       }
 
-      // Shift+Enter: send LF (Ctrl+J equivalent) for PowerShell multi-line input.
       if (
         settings.state.powershellNewline &&
         e.shiftKey &&
@@ -184,51 +224,7 @@
     fit.fit();
     if (active) term.focus();
 
-    const project = app.projects.find((p) => p.id === thread.projectId);
-    if (!project) {
-      term.write("\r\n[boite] no project found\r\n");
-      return;
-    }
-
-    const cols = term.cols;
-    const rows = term.rows;
-
-    try {
-      ptyId = await ptySpawn(
-        {
-          cwd: project.cwd,
-          cmd: thread.cmd,
-          args: thread.args,
-          cols,
-          rows,
-        },
-        handleEvent,
-      );
-      const t = app.threads.find((x) => x.id === thread.id);
-      if (t) {
-        t.ptyId = ptyId;
-        t.status = "running";
-      }
-    } catch (err) {
-      term.write(`\r\n[boite] spawn failed: ${err}\r\n`);
-      app.setThreadStatus(thread.id, "error");
-      return;
-    }
-
-    term.onData((data) => {
-      if (!ptyId) return;
-      const bytes = new TextEncoder().encode(data);
-      void ptyWrite(ptyId, bytes);
-      // User typed something — likely sending a prompt to Claude → running.
-      if (thread.status === "ready") {
-        app.setThreadStatus(thread.id, "running");
-      }
-    });
-
-    term.onResize(({ cols, rows }) => {
-      if (!ptyId) return;
-      void ptyResize(ptyId, cols, rows);
-    });
+    void spawn();
 
     resizeObserver = new ResizeObserver(() => {
       if (active) fit?.fit();

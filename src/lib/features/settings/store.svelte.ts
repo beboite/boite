@@ -1,26 +1,5 @@
-import { loadSettings, saveSettings } from "./db";
-
-export type IconKey =
-  | "claude"
-  | "codex"
-  | "gemini"
-  | "cursor"
-  | "copilot"
-  | "opencode"
-  | "terminal"
-  | null;
-
-export interface Shortcut {
-  id: string;
-  label: string;
-  command: string;
-  iconKey?: IconKey;
-}
-
-export interface Settings {
-  shortcuts: Shortcut[];
-  powershellNewline: boolean;
-}
+import { loadSettings, saveSettings } from "$lib/storage/db";
+import type { Settings, Shortcut } from "$lib/types";
 
 export const PRESET_SHORTCUTS: Shortcut[] = [
   { id: "claude", label: "Claude", command: "claude", iconKey: "claude" },

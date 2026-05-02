@@ -1,30 +1,12 @@
-import { loadProjects, saveProject, deleteProject } from "./db";
-import { settings } from "./settings.svelte";
-import type { PtyInfo } from "./pty";
-
-export interface Project {
-  id: string;
-  name: string;
-  cwd: string;
-  defaultCmd: string;
-  defaultArgs: string[];
-  icon: string | null;
-}
-
-export interface Thread {
-  id: string;
-  projectId: string;
-  ptyId: string | null;
-  label: string;
-  title: string | null;
-  cmd: string;
-  args: string[];
-  status: "idle" | "running" | "ready" | "done" | "exited" | "error";
-  exitCode: number | null;
-  createdAt: number;
-}
-
-export type View = "terminal" | "settings";
+import type { Project, Thread, ThreadStatus, View } from "$lib/types";
+import { loadProjects, saveProject, deleteProject } from "$lib/storage/db";
+import { settings } from "$lib/features/settings/store.svelte";
+import {
+  loadThreads,
+  saveThread,
+  deleteThread as dbDeleteThread,
+} from "$lib/storage/db";
+import type { PtyInfo } from "$lib/storage/pty";
 
 class AppState {
   projects = $state<Project[]>([]);
@@ -56,23 +38,38 @@ class AppState {
     } catch (err) {
       console.error("loadProjects failed:", err);
     }
+    try {
+      this.threads = await loadThreads();
+    } catch (err) {
+      console.error("loadThreads failed:", err);
+    }
     this.ready = true;
   }
 
-  upsertThread(thread: Thread) {
+  async upsertThread(thread: Thread) {
     const i = this.threads.findIndex((t) => t.id === thread.id);
     if (i >= 0) this.threads[i] = thread;
     else this.threads.push(thread);
+    try {
+      await saveThread(thread);
+    } catch (err) {
+      console.error("saveThread failed:", err);
+    }
   }
 
-  removeThread(id: string) {
+  async removeThread(id: string) {
     this.threads = this.threads.filter((t) => t.id !== id);
     if (this.activeThreadId === id) {
       this.activeThreadId = this.threads[0]?.id ?? null;
     }
+    try {
+      await dbDeleteThread(id);
+    } catch (err) {
+      console.error("deleteThread failed:", err);
+    }
   }
 
-  setThreadStatus(id: string, status: Thread["status"], exitCode: number | null = null) {
+  setThreadStatus(id: string, status: ThreadStatus, exitCode: number | null = null) {
     const t = this.threads.find((x) => x.id === id);
     if (!t) return;
     t.status = status;
@@ -83,6 +80,13 @@ class AppState {
     const t = this.threads.find((x) => x.id === id);
     if (!t) return;
     t.title = title;
+    void saveThread($state.snapshot(t) as Thread);
+  }
+
+  setThreadPtyId(id: string, ptyId: string | null) {
+    const t = this.threads.find((x) => x.id === id);
+    if (!t) return;
+    t.ptyId = ptyId;
   }
 
   async addProject(project: Project) {
@@ -95,8 +99,16 @@ class AppState {
   }
 
   async removeProject(id: string) {
+    const orphanThreads = this.threads.filter((t) => t.projectId === id);
     this.projects = this.projects.filter((p) => p.id !== id);
     this.threads = this.threads.filter((t) => t.projectId !== id);
+    for (const t of orphanThreads) {
+      try {
+        await dbDeleteThread(t.id);
+      } catch {
+        // ignore
+      }
+    }
     try {
       await deleteProject(id);
     } catch (err) {

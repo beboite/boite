@@ -1,10 +1,10 @@
 <script lang="ts">
-  import type { Thread } from "$lib/store.svelte";
+  import type { ThreadStatus } from "$lib/types";
 
-  type Props = { status: Thread["status"] };
+  type Props = { status: ThreadStatus };
   let { status }: Props = $props();
 
-  const colorByStatus: Record<Thread["status"], string> = {
+  const colorByStatus: Record<ThreadStatus, string> = {
     idle: "bg-muted-foreground/30",
     running: "bg-warning animate-pulse",
     ready: "bg-success",

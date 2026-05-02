@@ -2,26 +2,28 @@
 @import "@xterm/xterm/css/xterm.css";
 
 @theme {
-  /* Neutral grayscale base, very subtle warm tint */
-  --color-background: oklch(0.16 0.005 250);
-  --color-foreground: oklch(0.97 0 0);
-  --color-muted: oklch(0.22 0.005 250);
-  --color-muted-foreground: oklch(0.66 0.005 250);
-  --color-border: oklch(0.27 0.005 250);
-  --color-accent: oklch(0.27 0.006 250);
-  --color-accent-foreground: oklch(0.97 0 0);
-  --color-primary: oklch(0.95 0 0);
-  --color-primary-foreground: oklch(0.16 0.005 250);
-  --color-success: oklch(0.78 0.16 145);
-  --color-warning: oklch(0.83 0.15 80);
-  --color-danger: oklch(0.7 0.2 25);
-  --color-info: oklch(0.78 0.07 230);
+  /* Pure neutral grayscale — no chromatic accent. */
+  --color-background: #0a0a0a;
+  --color-foreground: #fafafa;
+  --color-muted: #1f1f1f;
+  --color-muted-foreground: #a1a1aa;
+  --color-border: #27272a;
+  --color-accent: #2a2a2a;
+  --color-accent-foreground: #fafafa;
+  --color-primary: #fafafa;
+  --color-primary-foreground: #0a0a0a;
 
-  /* Stacked surfaces */
-  --color-titlebar: oklch(0.13 0.005 250);
-  --color-surface: oklch(0.18 0.005 250);
-  --color-surface-2: oklch(0.21 0.006 250);
-  --color-surface-3: oklch(0.25 0.006 250);
+  /* Status — only chromatic touch. */
+  --color-success: #4ade80;
+  --color-warning: #facc15;
+  --color-danger: #f87171;
+  --color-info: #a1a1aa;
+
+  /* Stacked surfaces (each ~3% lighter). */
+  --color-titlebar: #060606;
+  --color-surface: #131313;
+  --color-surface-2: #1a1a1a;
+  --color-surface-3: #232323;
 
   --font-mono: "JetBrains Mono", "SF Mono", "Cascadia Code", Consolas, "Liberation Mono", Menlo, monospace;
 }
@@ -45,7 +47,7 @@ body,
 }
 
 ::selection {
-  background: oklch(0.5 0 0 / 0.5);
+  background: rgba(255, 255, 255, 0.18);
 }
 
 button {

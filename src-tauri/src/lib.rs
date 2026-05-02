@@ -37,6 +37,21 @@ pub fn run() {
             );",
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 4,
+            description: "create_threads",
+            sql: "CREATE TABLE IF NOT EXISTS threads (\
+                id TEXT PRIMARY KEY,\
+                project_id TEXT NOT NULL,\
+                label TEXT NOT NULL,\
+                title TEXT,\
+                cmd TEXT NOT NULL,\
+                args TEXT NOT NULL,\
+                exit_code INTEGER,\
+                created_at INTEGER NOT NULL\
+            );",
+            kind: MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()

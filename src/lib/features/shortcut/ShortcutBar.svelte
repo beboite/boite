@@ -1,8 +1,9 @@
 <script lang="ts">
-  import { settings } from "$lib/settings.svelte";
-  import { app } from "$lib/store.svelte";
-  import { launchShortcut, launchBlankTerminal } from "$lib/projects";
-  import ShortcutIcon from "./ShortcutIcon.svelte";
+  import { settings } from "$lib/features/settings/store.svelte";
+  import { app } from "$lib/app/store.svelte";
+  import { launchShortcut, launchBlankTerminal } from "$lib/features/thread/api";
+  import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
+  import { resolveIconKey } from "$lib/shared/icons/detect";
   import Plus from "@lucide/svelte/icons/plus";
 
   function launch(shortcutId: string) {
@@ -10,7 +11,7 @@
     if (!shortcut) return;
     const projectId = app.currentProjectId;
     if (!projectId) return;
-    launchShortcut(shortcut, projectId);
+    void launchShortcut(shortcut, projectId);
   }
 
   function openBlank() {
@@ -28,6 +29,7 @@
   class="flex h-10 shrink-0 items-center gap-1.5 border-b border-border bg-[var(--color-surface)] px-3"
 >
   {#each settings.state.shortcuts as shortcut (shortcut.id)}
+    {@const iconKey = resolveIconKey(shortcut.iconKey, shortcut.label, shortcut.command)}
     <button
       type="button"
       class="group flex items-center gap-1.5 rounded-md border border-transparent bg-[var(--color-surface-2)] px-2.5 py-1 text-[11.5px] text-foreground/85 transition hover:border-border hover:bg-[var(--color-surface-3)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
@@ -35,7 +37,7 @@
       onclick={() => launch(shortcut.id)}
       title={shortcut.command || "Empty command"}
     >
-      <ShortcutIcon iconKey={shortcut.iconKey ?? null} size={13} />
+      <ShortcutIcon {iconKey} size={13} />
       <span class="font-medium">{shortcut.label}</span>
     </button>
   {/each}

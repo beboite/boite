@@ -1,24 +1,13 @@
 <script lang="ts">
-  import { app } from "$lib/store.svelte";
-  import { ptyKill } from "$lib/pty";
-  import { pickAndAddProject } from "$lib/projects";
-  import Sidebar from "$lib/components/Sidebar.svelte";
-  import Terminal from "$lib/components/Terminal.svelte";
-  import TitleBar from "$lib/components/TitleBar.svelte";
-  import SettingsPanel from "$lib/components/SettingsPanel.svelte";
-  import ShortcutBar from "$lib/components/ShortcutBar.svelte";
-
-  async function closeThread(threadId: string) {
-    const t = app.threads.find((x) => x.id === threadId);
-    if (t?.ptyId) {
-      try {
-        await ptyKill(t.ptyId);
-      } catch {
-        // already exited
-      }
-    }
-    app.removeThread(threadId);
-  }
+  import { app } from "$lib/app/store.svelte";
+  import { pickAndAddProject } from "$lib/features/project/api";
+  import { ptyKill } from "$lib/storage/pty";
+  import { closeThread } from "$lib/features/thread/api";
+  import TitleBar from "$lib/shared/components/TitleBar.svelte";
+  import ProjectSidebar from "$lib/features/project/ProjectSidebar.svelte";
+  import ShortcutBar from "$lib/features/shortcut/ShortcutBar.svelte";
+  import SettingsPanel from "$lib/features/settings/SettingsPanel.svelte";
+  import Terminal from "$lib/features/terminal/Terminal.svelte";
 
   async function addProject() {
     await pickAndAddProject();
@@ -43,11 +32,10 @@
   <TitleBar />
 
   <div class="flex min-h-0 flex-1">
-    <Sidebar
+    <ProjectSidebar
       onCloseThread={closeThread}
       onNewProject={addProject}
       onRemoveProject={removeProject}
-      onOpenSettings={() => (app.view = "settings")}
     />
 
     <main class="flex min-w-0 flex-1 flex-col">
@@ -77,7 +65,7 @@
           </div>
         {/if}
 
-        <div class="relative min-h-0 flex-1 bg-[#13151a]">
+        <div class="relative min-h-0 flex-1 bg-[var(--color-background)]">
           {#each app.threads as thread (thread.id)}
             <div
               class="absolute inset-0"

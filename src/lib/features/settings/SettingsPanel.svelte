@@ -1,7 +1,8 @@
 <script lang="ts">
-  import { settings, PRESET_SHORTCUTS, type IconKey } from "$lib/settings.svelte";
-  import { app } from "$lib/store.svelte";
-  import ShortcutIcon from "./ShortcutIcon.svelte";
+  import { settings, PRESET_SHORTCUTS } from "$lib/features/settings/store.svelte";
+  import { app } from "$lib/app/store.svelte";
+  import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
+  import { resolveIconKey } from "$lib/shared/icons/detect";
   import X from "@lucide/svelte/icons/x";
   import Plus from "@lucide/svelte/icons/plus";
   import Trash2 from "@lucide/svelte/icons/trash-2";
@@ -10,17 +11,15 @@
 
   let draggedId = $state<string | null>(null);
   let overId = $state<string | null>(null);
+  let dragArmed = $state(false);
 
-  const ICON_OPTIONS: { key: IconKey; label: string }[] = [
-    { key: null, label: "None" },
-    { key: "claude", label: "Claude" },
-    { key: "codex", label: "Codex" },
-    { key: "gemini", label: "Gemini" },
-    { key: "cursor", label: "Cursor" },
-    { key: "copilot", label: "Copilot" },
-    { key: "opencode", label: "Opencode" },
-    { key: "terminal", label: "Terminal" },
-  ];
+  function armDrag() {
+    dragArmed = true;
+  }
+
+  function disarmDrag() {
+    dragArmed = false;
+  }
 
   function close() {
     app.view = "terminal";
@@ -62,6 +61,10 @@
   }
 
   function onDragStart(id: string, e: DragEvent) {
+    if (!dragArmed) {
+      e.preventDefault();
+      return;
+    }
     draggedId = id;
     if (e.dataTransfer) {
       e.dataTransfer.effectAllowed = "move";
@@ -85,6 +88,7 @@
     const from = draggedId;
     draggedId = null;
     overId = null;
+    dragArmed = false;
     if (!from || from === targetId) return;
     const ids = settings.state.shortcuts.map((s) => s.id);
     const fromIdx = ids.indexOf(from);
@@ -98,6 +102,7 @@
   function onDragEnd() {
     draggedId = null;
     overId = null;
+    dragArmed = false;
   }
 </script>
 
@@ -128,7 +133,7 @@
               Shortcuts
             </h3>
             <p class="mt-1 text-[12px] text-muted-foreground/80">
-              Drag to reorder. Edit the command to pass arguments or use an alias.
+              Drag the grip to reorder. Edit the command to pass arguments or use an alias.
             </p>
           </div>
           <div class="flex items-center gap-1.5">
@@ -161,8 +166,9 @@
           {#each settings.state.shortcuts as shortcut (shortcut.id)}
             {@const isDragged = draggedId === shortcut.id}
             {@const isOver = overId === shortcut.id && draggedId !== shortcut.id}
+            {@const iconKey = resolveIconKey(shortcut.iconKey, shortcut.label, shortcut.command)}
             <div
-              draggable="true"
+              draggable={dragArmed}
               ondragstart={(e) => onDragStart(shortcut.id, e)}
               ondragover={(e) => onDragOver(shortcut.id, e)}
               ondragleave={() => onDragLeave(shortcut.id)}
@@ -173,16 +179,20 @@
                 ? 'opacity-40'
                 : ''} {isOver ? 'border-t-2 border-t-foreground/40' : ''}"
             >
-              <button
-                type="button"
-                class="flex size-4 cursor-grab items-center justify-center text-muted-foreground/40 hover:text-muted-foreground active:cursor-grabbing"
-                aria-label="Drag to reorder"
+              <span
+                class="flex size-4 cursor-grab items-center justify-center text-muted-foreground/40 transition hover:text-muted-foreground active:cursor-grabbing"
+                onmousedown={armDrag}
+                onmouseup={disarmDrag}
+                onmouseleave={disarmDrag}
+                role="button"
                 tabindex="-1"
+                aria-label="Drag to reorder"
+                title="Drag to reorder"
               >
                 <GripVertical class="size-3" />
-              </button>
+              </span>
               <div class="flex size-6 items-center justify-center">
-                <ShortcutIcon iconKey={shortcut.iconKey ?? null} size={16} />
+                <ShortcutIcon {iconKey} size={16} />
               </div>
               <input
                 type="text"

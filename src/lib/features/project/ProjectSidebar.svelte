@@ -1,25 +1,18 @@
 <script lang="ts">
-  import { app } from "$lib/store.svelte";
-  import StatusDot from "./StatusDot.svelte";
+  import { app } from "$lib/app/store.svelte";
+  import StatusDot from "$lib/shared/components/StatusDot.svelte";
   import Plus from "@lucide/svelte/icons/plus";
   import X from "@lucide/svelte/icons/x";
   import FolderOpen from "@lucide/svelte/icons/folder-open";
   import Trash2 from "@lucide/svelte/icons/trash-2";
-  import Settings from "@lucide/svelte/icons/settings";
   import MoreHorizontal from "@lucide/svelte/icons/more-horizontal";
 
   type Props = {
     onCloseThread: (threadId: string) => void;
     onNewProject: () => void;
     onRemoveProject: (projectId: string) => void;
-    onOpenSettings: () => void;
   };
-  let {
-    onCloseThread,
-    onNewProject,
-    onRemoveProject,
-    onOpenSettings,
-  }: Props = $props();
+  let { onCloseThread, onNewProject, onRemoveProject }: Props = $props();
 
   let menuFor = $state<string | null>(null);
 
@@ -41,7 +34,7 @@
 <svelte:window onclick={closeMenu} />
 
 <aside
-  class="flex h-full w-64 shrink-0 flex-col border-r border-border bg-[var(--color-surface)]"
+  class="flex h-full w-60 shrink-0 flex-col border-r border-border bg-[var(--color-surface)]"
 >
   <header class="flex items-center justify-between px-3 py-2.5">
     <span
@@ -179,24 +172,4 @@
       </div>
     {/each}
   </div>
-
-  <footer
-    class="flex items-center justify-between border-t border-border/80 bg-[var(--color-surface-2)] px-3 py-2"
-  >
-    <span class="text-[10px] text-muted-foreground/70">
-      {app.threads.length} thread{app.threads.length === 1 ? "" : "s"} in
-      {app.projects.length} project{app.projects.length === 1 ? "" : "s"}
-    </span>
-    <button
-      type="button"
-      class="rounded-md p-1.5 transition {app.view === 'settings'
-        ? 'bg-accent text-foreground'
-        : 'text-muted-foreground hover:bg-accent hover:text-foreground'}"
-      onclick={onOpenSettings}
-      aria-label="Settings"
-      title="Settings"
-    >
-      <Settings class="size-3.5" />
-    </button>
-  </footer>
 </aside>
