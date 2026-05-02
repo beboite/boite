@@ -1,0 +1,32 @@
+[package]
+name = "boite"
+version = "0.1.0"
+description = "Lightweight multi-agent terminal multiplexer"
+authors = ["mtsu"]
+edition = "2021"
+
+[lib]
+name = "boite_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-sql = { version = "2", features = ["sqlite"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-clipboard-manager = "2"
+which = "7"
+base64 = "0.22"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+portable-pty = "0.9"
+tokio = { version = "1", features = ["sync", "rt-multi-thread", "macros", "io-util"] }
+vte = "0.13"
+uuid = { version = "1", features = ["v4"] }
+parking_lot = "0.12"
+anyhow = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = "0.3"
