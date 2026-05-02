@@ -21,6 +21,8 @@ export interface Thread {
   title: string | null;
   cmd: string;
   args: string[];
+  iconKey: IconKey;
+  sessionId: string | null;
   status: ThreadStatus;
   exitCode: number | null;
   createdAt: number;

@@ -10,6 +10,8 @@
   import type { PtyEvent } from "$lib/storage/pty";
   import { app } from "$lib/app/store.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
+  import { buildResumeArgs, getDetector } from "$lib/features/thread/session";
+  import { saveThread } from "$lib/storage/db";
   import type { Thread } from "$lib/types";
 
   type Props = { thread: Thread; active: boolean };
@@ -94,12 +96,15 @@
     const cols = term.cols;
     const rows = term.rows;
 
+    const spawnArgs = buildResumeArgs(thread);
+    const spawnedAt = Date.now();
+
     try {
       ptyId = await ptySpawn(
         {
           cwd: project.cwd,
           cmd: thread.cmd,
-          args: thread.args,
+          args: spawnArgs,
           cols,
           rows,
         },
@@ -111,6 +116,21 @@
       term.write(`\r\n[boite] spawn failed: ${err}\r\n`);
       app.setThreadStatus(thread.id, "error");
       return;
+    }
+
+    if (!thread.sessionId) {
+      const detector = getDetector(thread.iconKey);
+      if (detector) {
+        setTimeout(() => {
+          void detector(project.cwd, spawnedAt - 2000).then((id) => {
+            if (!id) return;
+            const t = app.threads.find((x) => x.id === thread.id);
+            if (!t) return;
+            t.sessionId = id;
+            void saveThread($state.snapshot(t) as Thread);
+          });
+        }, 5000);
+      }
     }
 
     term.onData((data) => {

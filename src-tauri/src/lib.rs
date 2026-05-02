@@ -1,6 +1,7 @@
 mod commands;
 mod project;
 mod pty;
+mod session;
 mod shell;
 
 use pty::PtyManager;
@@ -52,6 +53,13 @@ pub fn run() {
             );",
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 5,
+            description: "add_thread_session_and_icon",
+            sql: "ALTER TABLE threads ADD COLUMN session_id TEXT;\
+                  ALTER TABLE threads ADD COLUMN icon_key TEXT;",
+            kind: MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()
@@ -71,6 +79,7 @@ pub fn run() {
             commands::pty_list,
             project::inspect_project,
             shell::default_shell,
+            session::find_claude_session,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

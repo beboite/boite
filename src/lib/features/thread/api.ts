@@ -2,13 +2,15 @@ import { app } from "$lib/app/store.svelte";
 import { ptyKill } from "$lib/storage/pty";
 import { getDefaultShell } from "$lib/storage/shell";
 import { parseCommand } from "$lib/features/settings/store.svelte";
-import type { Shortcut, Thread } from "$lib/types";
+import { resolveIconKey } from "$lib/shared/icons/detect";
+import type { IconKey, Shortcut, Thread } from "$lib/types";
 
 function buildThread(
   projectId: string,
   cmd: string,
   args: string[],
   label: string,
+  iconKey: IconKey,
 ): Thread {
   return {
     id: crypto.randomUUID(),
@@ -18,6 +20,8 @@ function buildThread(
     title: null,
     cmd,
     args,
+    iconKey,
+    sessionId: null,
     status: "idle",
     exitCode: null,
     createdAt: Date.now(),
@@ -33,11 +37,13 @@ export async function launchShortcut(
   const parsed = parseCommand(shortcut.command || shortcut.label);
   if (!parsed.cmd) return null;
   const count = app.threadsByProject(project.id).length + 1;
+  const iconKey = resolveIconKey(shortcut.iconKey, shortcut.label, shortcut.command);
   const thread = buildThread(
     project.id,
     parsed.cmd,
     parsed.args,
     `${shortcut.label} #${count}`,
+    iconKey,
   );
   await app.upsertThread(thread);
   app.activeThreadId = thread.id;
@@ -52,7 +58,13 @@ export async function launchBlankTerminal(
   if (!project) return null;
   const shell = await getDefaultShell();
   const count = app.threadsByProject(project.id).length + 1;
-  const thread = buildThread(project.id, shell, [], `Terminal #${count}`);
+  const thread = buildThread(
+    project.id,
+    shell,
+    [],
+    `Terminal #${count}`,
+    "terminal",
+  );
   await app.upsertThread(thread);
   app.activeThreadId = thread.id;
   app.view = "terminal";

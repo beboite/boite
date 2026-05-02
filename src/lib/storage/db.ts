@@ -52,13 +52,15 @@ interface ThreadRow {
   cmd: string;
   args: string;
   exit_code: number | null;
+  session_id: string | null;
+  icon_key: string | null;
   created_at: number;
 }
 
 export async function loadThreads(): Promise<Thread[]> {
   const db = await getDb();
   const rows = await db.select<ThreadRow[]>(
-    "SELECT id, project_id, label, title, cmd, args, exit_code, created_at FROM threads ORDER BY created_at ASC",
+    "SELECT id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, created_at FROM threads ORDER BY created_at ASC",
   );
   return rows.map((r) => ({
     id: r.id,
@@ -68,6 +70,8 @@ export async function loadThreads(): Promise<Thread[]> {
     title: r.title,
     cmd: r.cmd,
     args: JSON.parse(r.args) as string[],
+    iconKey: (r.icon_key ?? null) as Thread["iconKey"],
+    sessionId: r.session_id,
     status: "idle",
     exitCode: r.exit_code,
     createdAt: r.created_at,
@@ -77,7 +81,7 @@ export async function loadThreads(): Promise<Thread[]> {
 export async function saveThread(thread: Thread): Promise<void> {
   const db = await getDb();
   await db.execute(
-    "INSERT OR REPLACE INTO threads (id, project_id, label, title, cmd, args, exit_code, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT OR REPLACE INTO threads (id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     [
       thread.id,
       thread.projectId,
@@ -86,6 +90,8 @@ export async function saveThread(thread: Thread): Promise<void> {
       thread.cmd,
       JSON.stringify(thread.args),
       thread.exitCode,
+      thread.sessionId,
+      thread.iconKey,
       thread.createdAt,
     ],
   );
