@@ -7,7 +7,6 @@
   import Copy from "@lucide/svelte/icons/copy";
   import X from "@lucide/svelte/icons/x";
   import Settings from "@lucide/svelte/icons/settings";
-  import TerminalIcon from "@lucide/svelte/icons/terminal";
 
   type Props = { title?: string };
   let { title = "Boite" }: Props = $props();
@@ -63,10 +62,20 @@
         ? 'bg-accent text-foreground'
         : 'text-muted-foreground hover:bg-accent hover:text-foreground'}"
       onclick={showTerminal}
-      title="Terminal"
-      aria-label="Terminal"
+      title="Boite"
+      aria-label="Boite"
     >
-      <TerminalIcon class="size-3.5" />
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        viewBox="0 -960 960 960"
+        class="size-4"
+        fill="currentColor"
+        aria-hidden="true"
+      >
+        <path
+          d="M440-181v-281L160-621v283l280 157Zm80 0 280-157v-283L520-462v281Zm-40-350 137-78-280-156-137 77 280 157Zm203-115 137-77-280-157-137 76 280 158ZM360-110 120-244q-19-11-29.5-29T80-313v-334q0-22 10.5-40t29.5-29l240-135q19-11 40-11t40 11l240 135q19 11 29.5 29t10.5 40v334q0 22-10.5 40T680-244L440-110q-19 11-40 11t-40-11Zm120-370Z"
+        />
+      </svg>
     </button>
     <button
       type="button"
