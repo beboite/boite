@@ -2,22 +2,37 @@
   import { onMount } from "svelte";
   import { app } from "$lib/app/store.svelte";
   import { platform } from "$lib/storage/platform.svelte";
-  import { launchShell } from "$lib/features/thread/api";
+  import { settings } from "$lib/features/settings/store.svelte";
+  import { launchShell, launchBlankTerminal } from "$lib/features/thread/api";
   import type { ShellOption } from "$lib/storage/platform.svelte";
   import Plus from "@lucide/svelte/icons/plus";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
 
   let open = $state(false);
-  let trigger: HTMLButtonElement | null = $state(null);
+  let triggerRoot: HTMLDivElement | null = $state(null);
   let menu: HTMLDivElement | null = $state(null);
+
+  const defaultShell = $derived(
+    settings.state.defaultShellId
+      ? platform.shells.find((s) => s.id === settings.state.defaultShellId) ?? null
+      : null,
+  );
+  const defaultLabel = $derived(defaultShell?.label ?? "Terminal");
 
   function toggle(e: MouseEvent) {
     e.stopPropagation();
     open = !open;
   }
 
-  function closeMenu() {
+  async function launchDefault() {
     open = false;
+    const projectId = app.currentProjectId;
+    if (!projectId) return;
+    if (defaultShell) {
+      await launchShell(defaultShell, projectId);
+    } else {
+      await launchBlankTerminal(projectId);
+    }
   }
 
   async function pick(shell: ShellOption) {
@@ -30,19 +45,12 @@
   function handleDocClick(e: MouseEvent) {
     if (!open) return;
     const target = e.target as Node;
-    if (
-      trigger?.contains(target) ||
-      menu?.contains(target)
-    ) {
-      return;
-    }
+    if (triggerRoot?.contains(target) || menu?.contains(target)) return;
     open = false;
   }
 
   function handleKeydown(e: KeyboardEvent) {
-    if (e.key === "Escape" && open) {
-      open = false;
-    }
+    if (e.key === "Escape" && open) open = false;
   }
 
   onMount(() => {
@@ -55,21 +63,29 @@
   });
 </script>
 
-<div class="relative">
+<div bind:this={triggerRoot} class="relative flex items-stretch">
   <button
-    bind:this={trigger}
     type="button"
-    class="flex items-center gap-1 rounded-md border border-dashed border-border px-2 py-1 text-[11px] text-muted-foreground transition hover:border-foreground/30 hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+    class="flex items-center gap-1.5 rounded-l-md border border-r-0 border-dashed border-border px-2 py-1 text-[11px] text-muted-foreground transition hover:border-foreground/30 hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
     disabled={app.currentProjectId === null}
-    onclick={toggle}
-    title="New terminal"
-    aria-label="New terminal"
-    aria-expanded={open}
-    aria-haspopup="menu"
+    onclick={launchDefault}
+    title={defaultShell ? `Launch ${defaultShell.label}` : "New blank terminal"}
+    aria-label="Launch terminal"
   >
     <Plus class="size-3" />
-    <span>Terminal</span>
-    <ChevronDown class="size-3 opacity-60" />
+    <span>{defaultLabel}</span>
+  </button>
+  <button
+    type="button"
+    class="flex items-center justify-center rounded-r-md border border-dashed border-border px-1 text-muted-foreground transition hover:border-foreground/30 hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+    disabled={app.currentProjectId === null || platform.shells.length === 0}
+    onclick={toggle}
+    aria-haspopup="menu"
+    aria-expanded={open}
+    title="Pick a shell"
+    aria-label="Pick a shell"
+  >
+    <ChevronDown class="size-3" />
   </button>
 
   {#if open}
@@ -91,9 +107,7 @@
           onclick={() => pick(shell)}
         >
           <span class="font-medium">{shell.label}</span>
-          <span class="font-mono text-[10px] text-muted-foreground/70">
-            {shell.id}
-          </span>
+          <span class="font-mono text-[10px] text-muted-foreground/70">{shell.id}</span>
         </button>
       {/each}
     </div>

@@ -1,8 +1,9 @@
 import { app } from "$lib/app/store.svelte";
 import { ptyKill } from "$lib/storage/pty";
 import { getDefaultShell } from "$lib/storage/shell";
-import { parseCommand } from "$lib/features/settings/store.svelte";
+import { parseCommand, settings } from "$lib/features/settings/store.svelte";
 import { resolveIconKey } from "$lib/shared/icons/detect";
+import { platform } from "$lib/storage/platform.svelte";
 import type { IconKey, Shortcut, Thread } from "$lib/types";
 import type { ShellOption } from "$lib/storage/platform.svelte";
 
@@ -77,13 +78,28 @@ export async function launchBlankTerminal(
 ): Promise<Thread | null> {
   const project = projectId ? app.projects.find((p) => p.id === projectId) : null;
   if (!project) return null;
-  const shell = await getDefaultShell();
+
+  let cmd: string;
+  let args: string[] = [];
+  let label = "Terminal";
+
+  const preferred = settings.state.defaultShellId
+    ? platform.shells.find((s) => s.id === settings.state.defaultShellId)
+    : null;
+  if (preferred) {
+    cmd = preferred.cmd;
+    args = [...preferred.args];
+    label = preferred.label;
+  } else {
+    cmd = await getDefaultShell();
+  }
+
   const count = app.threadsByProject(project.id).length + 1;
   const thread = buildThread(
     project.id,
-    shell,
-    [],
-    `Terminal #${count}`,
+    cmd,
+    args,
+    `${label} #${count}`,
     "terminal",
   );
   await app.upsertThread(thread);

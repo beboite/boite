@@ -8,6 +8,7 @@
   import ShortcutBar from "$lib/features/shortcut/ShortcutBar.svelte";
   import SettingsPanel from "$lib/features/settings/SettingsPanel.svelte";
   import Terminal from "$lib/features/terminal/Terminal.svelte";
+  import Toaster from "$lib/features/notifications/Toaster.svelte";
 
   async function addProject() {
     await pickAndAddProject();
@@ -80,3 +81,5 @@
     </main>
   </div>
 </div>
+
+<Toaster />

@@ -11,6 +11,11 @@
   import { app } from "$lib/app/store.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
   import { buildResumeArgs, getDetector } from "$lib/features/thread/session";
+  import {
+    planDirectSpawn,
+    planSpawnInShell,
+  } from "$lib/features/thread/shell-wrap";
+  import { platform } from "$lib/storage/platform.svelte";
   import { saveThread } from "$lib/storage/db";
   import type { Thread } from "$lib/types";
 
@@ -28,8 +33,8 @@
   const TITLE_GLYPH_RE = /^[✀-➿☀-⛿✨✳✴]+\s*/u;
 
   function applyTitle(raw: string) {
-    const isWorking = TITLE_GLYPH_RE.test(raw);
-    app.setThreadStatus(thread.id, isWorking ? "running" : "ready");
+    const hasGlyph = TITLE_GLYPH_RE.test(raw);
+    app.setThreadStatus(thread.id, hasGlyph ? "ready" : "running");
     const cleaned = raw.replace(TITLE_GLYPH_RE, "").trim();
     app.setThreadTitle(thread.id, cleaned || raw);
   }
@@ -96,15 +101,24 @@
     const cols = term.cols;
     const rows = term.rows;
 
-    const spawnArgs = buildResumeArgs(thread);
+    const userArgs = buildResumeArgs(thread);
+    const wrapShell = settings.state.defaultShellId
+      ? platform.shells.find((s) => s.id === settings.state.defaultShellId) ?? null
+      : null;
+    const isBlankTerminal = thread.iconKey === "terminal";
+    const plan =
+      wrapShell && !isBlankTerminal
+        ? planSpawnInShell(wrapShell, thread.cmd, userArgs)
+        : planDirectSpawn(thread.cmd, userArgs);
+
     const spawnedAt = Date.now();
 
     try {
       ptyId = await ptySpawn(
         {
           cwd: project.cwd,
-          cmd: thread.cmd,
-          args: spawnArgs,
+          cmd: plan.cmd,
+          args: plan.args,
           cols,
           rows,
         },
@@ -116,6 +130,14 @@
       term.write(`\r\n[boite] spawn failed: ${err}\r\n`);
       app.setThreadStatus(thread.id, "error");
       return;
+    }
+
+    if (plan.pendingInput && ptyId) {
+      const targetPtyId = ptyId;
+      const text = plan.pendingInput;
+      setTimeout(() => {
+        void ptyWrite(targetPtyId, new TextEncoder().encode(text));
+      }, 600);
     }
 
     if (!thread.sessionId) {

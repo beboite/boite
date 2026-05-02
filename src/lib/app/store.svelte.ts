@@ -31,6 +31,29 @@ class AppState {
     return this.threads.filter((t) => t.projectId === projectId);
   }
 
+  get sortedProjects(): Project[] {
+    const order = settings.state.projectOrder ?? [];
+    const idx = new Map(order.map((id, i) => [id, i]));
+    return [...this.projects].sort((a, b) => {
+      const ai = idx.get(a.id) ?? Number.MAX_SAFE_INTEGER;
+      const bi = idx.get(b.id) ?? Number.MAX_SAFE_INTEGER;
+      if (ai !== bi) return ai - bi;
+      return a.name.localeCompare(b.name);
+    });
+  }
+
+  threadsByProjectSorted(projectId: string): Thread[] {
+    const list = this.threadsByProject(projectId);
+    const order = settings.state.threadOrderByProject?.[projectId] ?? [];
+    const idx = new Map(order.map((id, i) => [id, i]));
+    return [...list].sort((a, b) => {
+      const ai = idx.get(a.id) ?? Number.MAX_SAFE_INTEGER;
+      const bi = idx.get(b.id) ?? Number.MAX_SAFE_INTEGER;
+      if (ai !== bi) return ai - bi;
+      return a.createdAt - b.createdAt;
+    });
+  }
+
   async init() {
     if (this.ready) return;
     await Promise.all([settings.init(), platform.init()]);

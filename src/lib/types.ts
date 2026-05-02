@@ -48,6 +48,11 @@ export interface Shortcut {
 export interface Settings {
   shortcuts: Shortcut[];
   powershellNewline: boolean;
+  defaultShellId: string | null;
+  sidebarWidth: number;
+  uiScalePercent: number;
+  projectOrder: string[];
+  threadOrderByProject: Record<string, string[]>;
 }
 
 export type View = "terminal" | "settings";

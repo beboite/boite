@@ -1,4 +1,5 @@
 import { loadSettings, saveSettings } from "$lib/storage/db";
+import { notifications } from "$lib/features/notifications/store.svelte";
 import type { Settings, Shortcut } from "$lib/types";
 
 export const PRESET_SHORTCUTS: Shortcut[] = [
@@ -13,6 +14,11 @@ export const PRESET_SHORTCUTS: Shortcut[] = [
 const DEFAULTS: Settings = {
   shortcuts: PRESET_SHORTCUTS,
   powershellNewline: true,
+  defaultShellId: null,
+  sidebarWidth: 240,
+  uiScalePercent: 100,
+  projectOrder: [],
+  threadOrderByProject: {},
 };
 
 export function parseCommand(input: string): { cmd: string; args: string[] } {
@@ -54,6 +60,25 @@ class SettingsStore {
           typeof stored.powershellNewline === "boolean"
             ? stored.powershellNewline
             : DEFAULTS.powershellNewline,
+        defaultShellId:
+          typeof stored.defaultShellId === "string"
+            ? stored.defaultShellId
+            : DEFAULTS.defaultShellId,
+        sidebarWidth:
+          typeof stored.sidebarWidth === "number" && stored.sidebarWidth > 0
+            ? stored.sidebarWidth
+            : DEFAULTS.sidebarWidth,
+        uiScalePercent:
+          typeof stored.uiScalePercent === "number" && stored.uiScalePercent > 0
+            ? stored.uiScalePercent
+            : DEFAULTS.uiScalePercent,
+        projectOrder: Array.isArray(stored.projectOrder)
+          ? stored.projectOrder
+          : structuredClone(DEFAULTS.projectOrder),
+        threadOrderByProject:
+          stored.threadOrderByProject && typeof stored.threadOrderByProject === "object"
+            ? stored.threadOrderByProject
+            : structuredClone(DEFAULTS.threadOrderByProject),
       };
     } catch (err) {
       console.error("loadSettings failed:", err);
@@ -66,11 +91,44 @@ class SettingsStore {
       await saveSettings($state.snapshot(this.state) as Settings);
     } catch (err) {
       console.error("saveSettings failed:", err);
+      notifications.error("Failed to save settings");
     }
   }
 
   async setPowershellNewline(value: boolean) {
     this.state.powershellNewline = value;
+    await this.persist();
+    notifications.success(value ? "PowerShell newline on" : "PowerShell newline off");
+  }
+
+  async setDefaultShellId(id: string | null) {
+    this.state.defaultShellId = id;
+    await this.persist();
+    notifications.success(id ? `Default shell: ${id}` : "Default shell: none");
+  }
+
+  async setSidebarWidth(px: number) {
+    const clamped = Math.max(180, Math.min(480, Math.round(px)));
+    this.state.sidebarWidth = clamped;
+    await this.persist();
+  }
+
+  async setUiScalePercent(percent: number) {
+    const clamped = Math.max(75, Math.min(150, Math.round(percent)));
+    this.state.uiScalePercent = clamped;
+    await this.persist();
+  }
+
+  async setProjectOrder(ids: string[]) {
+    this.state.projectOrder = ids;
+    await this.persist();
+  }
+
+  async setThreadOrder(projectId: string, ids: string[]) {
+    this.state.threadOrderByProject = {
+      ...this.state.threadOrderByProject,
+      [projectId]: ids,
+    };
     await this.persist();
   }
 
@@ -83,6 +141,7 @@ class SettingsStore {
     };
     this.state.shortcuts.push(shortcut);
     await this.persist();
+    notifications.success(`Added ${shortcut.label}`);
     return shortcut;
   }
 
@@ -93,11 +152,14 @@ class SettingsStore {
     if (patch.command !== undefined) s.command = patch.command;
     if (patch.iconKey !== undefined) s.iconKey = patch.iconKey;
     await this.persist();
+    notifications.success("Shortcut saved");
   }
 
   async removeShortcut(id: string) {
-    this.state.shortcuts = this.state.shortcuts.filter((s) => s.id !== id);
+    const s = this.state.shortcuts.find((x) => x.id === id);
+    this.state.shortcuts = this.state.shortcuts.filter((x) => x.id !== id);
     await this.persist();
+    notifications.success(`Removed ${s?.label ?? "shortcut"}`);
   }
 
   async reorderShortcuts(orderedIds: string[]) {
@@ -115,6 +177,7 @@ class SettingsStore {
   async resetShortcutsToPresets() {
     this.state.shortcuts = structuredClone(PRESET_SHORTCUTS);
     await this.persist();
+    notifications.success("Shortcuts reset to defaults");
   }
 }
 
