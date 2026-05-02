@@ -3,6 +3,7 @@
   import { onMount } from "svelte";
   import { app } from "$lib/app/store.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
+  import { closeThread, launchBlankTerminal } from "$lib/features/thread/api";
 
   let { children } = $props();
 
@@ -15,20 +16,106 @@
     if (!e.ctrlKey) return;
     e.preventDefault();
     const delta = e.deltaY > 0 ? -5 : 5;
-    void settings.setUiScalePercent(settings.state.uiScalePercent + delta);
+    settings.setUiScalePercent(settings.state.uiScalePercent + delta);
+  }
+
+  function isTextInput(target: EventTarget | null): boolean {
+    if (!(target instanceof HTMLElement)) return false;
+    if (target.isContentEditable) return true;
+    const tag = target.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA") return true;
+    return false;
+  }
+
+  function cycleThread(direction: 1 | -1) {
+    const list = app.threads;
+    if (list.length === 0) return;
+    const idx = list.findIndex((t) => t.id === app.activeThreadId);
+    const next = idx < 0 ? 0 : (idx + direction + list.length) % list.length;
+    app.activeThreadId = list[next].id;
+    app.view = "terminal";
+  }
+
+  function jumpToThreadN(n: number) {
+    const projectId = app.currentProjectId;
+    if (!projectId) return;
+    const inProject = app.threadsByProjectSorted(projectId);
+    const target = inProject[n - 1];
+    if (!target) return;
+    app.activeThreadId = target.id;
+    app.view = "terminal";
   }
 
   function handleKeydown(e: KeyboardEvent) {
-    if (!e.ctrlKey) return;
+    if (e.key === "Escape") {
+      if (app.view === "settings") {
+        e.preventDefault();
+        app.view = "terminal";
+      }
+      return;
+    }
+
+    const mod = e.ctrlKey || e.metaKey;
+    if (!mod) return;
+
+    // UI zoom
     if (e.key === "+" || e.key === "=") {
       e.preventDefault();
-      void settings.setUiScalePercent(settings.state.uiScalePercent + 5);
-    } else if (e.key === "-" || e.key === "_") {
+      settings.setUiScalePercent(settings.state.uiScalePercent + 5);
+      return;
+    }
+    if (e.key === "-" || e.key === "_") {
       e.preventDefault();
-      void settings.setUiScalePercent(settings.state.uiScalePercent - 5);
-    } else if (e.key === "0") {
+      settings.setUiScalePercent(settings.state.uiScalePercent - 5);
+      return;
+    }
+    if (e.key === "0") {
       e.preventDefault();
-      void settings.setUiScalePercent(100);
+      settings.setUiScalePercent(100);
+      return;
+    }
+
+    // Sidebar toggle
+    if ((e.key === "b" || e.key === "B") && !e.altKey) {
+      e.preventDefault();
+      settings.toggleSidebar();
+      return;
+    }
+
+    // Settings
+    if (e.key === ",") {
+      e.preventDefault();
+      app.view = app.view === "settings" ? "terminal" : "settings";
+      return;
+    }
+
+    // Cycle threads — never override Tab inside text inputs.
+    if (e.key === "Tab" && !isTextInput(e.target)) {
+      e.preventDefault();
+      cycleThread(e.shiftKey ? -1 : 1);
+      return;
+    }
+
+    // New blank terminal in current project
+    if ((e.key === "t" || e.key === "T") && !e.shiftKey && !e.altKey) {
+      e.preventDefault();
+      void launchBlankTerminal(app.currentProjectId);
+      return;
+    }
+
+    // Close active thread
+    if ((e.key === "w" || e.key === "W") && !e.shiftKey && !e.altKey) {
+      if (!app.activeThreadId) return;
+      e.preventDefault();
+      void closeThread(app.activeThreadId);
+      return;
+    }
+
+    // Jump to thread N (1-9) in current project
+    if (/^[1-9]$/.test(e.key)) {
+      e.preventDefault();
+      jumpToThreadN(Number(e.key));
+      return;
     }
   }
 

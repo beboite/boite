@@ -18,6 +18,7 @@
   import { platform } from "$lib/storage/platform.svelte";
   import { saveThread } from "$lib/storage/db";
   import { notifications } from "$lib/features/notifications/store.svelte";
+  import { notifyWhenUnfocused } from "$lib/storage/notify";
   import type { Thread } from "$lib/types";
 
   type Props = { thread: Thread; active: boolean };
@@ -335,16 +336,25 @@
     //     a token counter)  → running (orange spinner)
     //   - otherwise                                                   → ready (green)
     // Final states (done/exited/error) are sticky — set on PTY exit/spawn fail.
+    let prevStatus: Thread["status"] | null = null;
     statusTimer = setInterval(() => {
       const t = app.threads.find((x) => x.id === thread.id);
       if (!t) return;
-      if (t.status === "done" || t.status === "exited" || t.status === "error") return;
+      if (t.status === "done" || t.status === "exited" || t.status === "error") {
+        prevStatus = t.status;
+        return;
+      }
       const working =
         lastWorkingAt > 0 && Date.now() - lastWorkingAt < 2000;
       const next = working ? "running" : "ready";
       if (t.status !== next) {
         app.setThreadStatus(thread.id, next);
       }
+      if (prevStatus === "running" && next === "ready") {
+        const label = t.title ?? t.label;
+        void notifyWhenUnfocused(label, "Ready for input");
+      }
+      prevStatus = next;
     }, 500);
   });
 

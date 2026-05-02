@@ -1,5 +1,6 @@
 <script lang="ts">
   import { app } from "$lib/app/store.svelte";
+  import { settings } from "$lib/features/settings/store.svelte";
   import { pickAndAddProject } from "$lib/features/project/api";
   import { ptyKill } from "$lib/storage/pty";
   import { closeThread } from "$lib/features/thread/api";
@@ -72,12 +73,14 @@
   <TitleBar />
 
   <div class="flex min-h-0 flex-1">
-    <ProjectSidebar
-      onCloseThread={handleCloseThread}
-      onActivateThread={activateThread}
-      onNewProject={addProject}
-      onRemoveProject={removeProject}
-    />
+    {#if !settings.state.sidebarCollapsed}
+      <ProjectSidebar
+        onCloseThread={handleCloseThread}
+        onActivateThread={activateThread}
+        onNewProject={addProject}
+        onRemoveProject={removeProject}
+      />
+    {/if}
 
     <main class="flex min-w-0 flex-1 flex-col">
       {#if !app.ready}

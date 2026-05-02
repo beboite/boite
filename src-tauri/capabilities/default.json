@@ -22,6 +22,10 @@
     "os:default",
     "os:allow-platform",
     "os:allow-version",
+    "notification:default",
+    "notification:allow-notify",
+    "notification:allow-is-permission-granted",
+    "notification:allow-request-permission",
     "clipboard-manager:allow-read-text",
     "clipboard-manager:allow-write-text"
   ]

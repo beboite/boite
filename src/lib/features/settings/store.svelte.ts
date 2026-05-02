@@ -17,6 +17,7 @@ const DEFAULTS: Settings = {
   powershellNewline: true,
   defaultShellId: null,
   sidebarWidth: 240,
+  sidebarCollapsed: false,
   uiScalePercent: 100,
   projectOrder: [],
   threadOrderByProject: {},
@@ -69,6 +70,10 @@ class SettingsStore {
           typeof stored.sidebarWidth === "number" && stored.sidebarWidth > 0
             ? stored.sidebarWidth
             : DEFAULTS.sidebarWidth,
+        sidebarCollapsed:
+          typeof stored.sidebarCollapsed === "boolean"
+            ? stored.sidebarCollapsed
+            : DEFAULTS.sidebarCollapsed,
         uiScalePercent:
           typeof stored.uiScalePercent === "number" && stored.uiScalePercent > 0
             ? stored.uiScalePercent
@@ -123,6 +128,17 @@ class SettingsStore {
     if (this.state.sidebarWidth === clamped) return;
     this.state.sidebarWidth = clamped;
     this.persistSoon();
+  }
+
+  toggleSidebar() {
+    this.state.sidebarCollapsed = !this.state.sidebarCollapsed;
+    void this.persist();
+  }
+
+  setSidebarCollapsed(value: boolean) {
+    if (this.state.sidebarCollapsed === value) return;
+    this.state.sidebarCollapsed = value;
+    void this.persist();
   }
 
   setUiScalePercent(percent: number) {

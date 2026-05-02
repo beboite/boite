@@ -50,6 +50,7 @@ export interface Settings {
   powershellNewline: boolean;
   defaultShellId: string | null;
   sidebarWidth: number;
+  sidebarCollapsed: boolean;
   uiScalePercent: number;
   projectOrder: string[];
   threadOrderByProject: Record<string, string[]>;

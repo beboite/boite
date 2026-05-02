@@ -2,12 +2,14 @@
   import { onMount } from "svelte";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { app } from "$lib/app/store.svelte";
+  import { settings } from "$lib/features/settings/store.svelte";
   import pkg from "../../../../package.json";
   import Minus from "@lucide/svelte/icons/minus";
   import Square from "@lucide/svelte/icons/square";
   import Copy from "@lucide/svelte/icons/copy";
   import X from "@lucide/svelte/icons/x";
   import Settings from "@lucide/svelte/icons/settings";
+  import PanelLeft from "@lucide/svelte/icons/panel-left";
 
   type Props = { title?: string };
   let { title = "Boite" }: Props = $props();
@@ -85,10 +87,19 @@
         ? 'bg-accent text-foreground'
         : 'text-muted-foreground hover:bg-accent hover:text-foreground'}"
       onclick={showSettings}
-      title="Settings"
+      title="Settings (Ctrl+,)"
       aria-label="Settings"
     >
       <Settings class="size-[15px]" />
+    </button>
+    <button
+      type="button"
+      class="flex h-7 items-center justify-center rounded-md px-2 text-muted-foreground transition hover:bg-accent hover:text-foreground"
+      onclick={() => settings.toggleSidebar()}
+      title={settings.state.sidebarCollapsed ? "Show sidebar (Ctrl+B)" : "Hide sidebar (Ctrl+B)"}
+      aria-label="Toggle sidebar"
+    >
+      <PanelLeft class="size-[15px]" />
     </button>
     <span class="ml-1.5 hidden text-[11px] text-muted-foreground/70 md:inline">
       {app.threads.length} thread{app.threads.length === 1 ? "" : "s"} in
