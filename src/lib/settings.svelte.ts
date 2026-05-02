@@ -1,9 +1,20 @@
 import { loadSettings, saveSettings } from "./db";
 
+export type IconKey =
+  | "claude"
+  | "codex"
+  | "gemini"
+  | "cursor"
+  | "copilot"
+  | "opencode"
+  | "terminal"
+  | null;
+
 export interface Shortcut {
   id: string;
   label: string;
   command: string;
+  iconKey?: IconKey;
 }
 
 export interface Settings {
@@ -12,12 +23,12 @@ export interface Settings {
 }
 
 export const PRESET_SHORTCUTS: Shortcut[] = [
-  { id: "claude", label: "Claude CLI", command: "claude" },
-  { id: "codex", label: "Codex", command: "codex" },
-  { id: "opencode", label: "Opencode", command: "opencode" },
-  { id: "cursor", label: "Cursor Agent", command: "cursor-agent" },
-  { id: "gemini", label: "Gemini CLI", command: "gemini" },
-  { id: "copilot", label: "Copilot CLI", command: "gh copilot" },
+  { id: "claude", label: "Claude", command: "claude", iconKey: "claude" },
+  { id: "codex", label: "Codex", command: "codex", iconKey: "codex" },
+  { id: "opencode", label: "Opencode", command: "opencode", iconKey: "opencode" },
+  { id: "cursor", label: "Cursor Agent", command: "cursor-agent", iconKey: "cursor" },
+  { id: "gemini", label: "Gemini", command: "gemini", iconKey: "gemini" },
+  { id: "copilot", label: "Copilot", command: "gh copilot", iconKey: "copilot" },
 ];
 
 const DEFAULTS: Settings = {
@@ -89,6 +100,7 @@ class SettingsStore {
       id: crypto.randomUUID(),
       label: partial.label?.trim() || "Shortcut",
       command: partial.command?.trim() ?? "",
+      iconKey: partial.iconKey ?? null,
     };
     this.state.shortcuts.push(shortcut);
     await this.persist();
@@ -100,11 +112,24 @@ class SettingsStore {
     if (!s) return;
     if (patch.label !== undefined) s.label = patch.label;
     if (patch.command !== undefined) s.command = patch.command;
+    if (patch.iconKey !== undefined) s.iconKey = patch.iconKey;
     await this.persist();
   }
 
   async removeShortcut(id: string) {
     this.state.shortcuts = this.state.shortcuts.filter((s) => s.id !== id);
+    await this.persist();
+  }
+
+  async reorderShortcuts(orderedIds: string[]) {
+    const map = new Map(this.state.shortcuts.map((s) => [s.id, s]));
+    const reordered: Shortcut[] = [];
+    for (const id of orderedIds) {
+      const s = map.get(id);
+      if (s) reordered.push(s);
+    }
+    if (reordered.length !== this.state.shortcuts.length) return;
+    this.state.shortcuts = reordered;
     await this.persist();
   }
 

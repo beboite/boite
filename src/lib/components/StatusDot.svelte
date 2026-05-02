@@ -7,7 +7,7 @@
   const colorByStatus: Record<Thread["status"], string> = {
     idle: "bg-muted-foreground/30",
     running: "bg-warning animate-pulse",
-    ready: "bg-info",
+    ready: "bg-success",
     done: "bg-success",
     exited: "bg-danger",
     error: "bg-danger",

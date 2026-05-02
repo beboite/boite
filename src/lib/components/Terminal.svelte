@@ -41,7 +41,10 @@
       const text = decoder.decode(bytes, { stream: true });
       detectStatus(text);
     } else if (event.type === "title") {
-      app.setThreadTitle(thread.id, event.value);
+      const cleaned = event.value
+        .replace(/^[✱✻✦✺✧✨✳✳❖✴✵]+\s*/, "")
+        .trim();
+      app.setThreadTitle(thread.id, cleaned || event.value);
     } else if (event.type === "exit") {
       const code = event.code ?? null;
       app.setThreadStatus(thread.id, code === 0 ? "done" : "exited", code);

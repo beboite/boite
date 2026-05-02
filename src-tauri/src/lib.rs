@@ -1,6 +1,7 @@
 mod commands;
 mod project;
 mod pty;
+mod shell;
 
 use pty::PtyManager;
 use tauri_plugin_sql::{Migration, MigrationKind};
@@ -54,6 +55,7 @@ pub fn run() {
             commands::pty_kill,
             commands::pty_list,
             project::inspect_project,
+            shell::default_shell,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
