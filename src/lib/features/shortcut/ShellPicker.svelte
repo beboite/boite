@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, onDestroy } from "svelte";
   import { app } from "$lib/app/store.svelte";
   import { platform } from "$lib/storage/platform.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
@@ -17,7 +17,6 @@
       ? platform.shells.find((s) => s.id === settings.state.defaultShellId) ?? null
       : null,
   );
-  const defaultLabel = $derived(defaultShell?.label ?? "Terminal");
 
   function toggle(e: MouseEvent) {
     e.stopPropagation();
@@ -56,28 +55,29 @@
   onMount(() => {
     document.addEventListener("click", handleDocClick);
     document.addEventListener("keydown", handleKeydown);
-    return () => {
-      document.removeEventListener("click", handleDocClick);
-      document.removeEventListener("keydown", handleKeydown);
-    };
+  });
+
+  onDestroy(() => {
+    document.removeEventListener("click", handleDocClick);
+    document.removeEventListener("keydown", handleKeydown);
   });
 </script>
 
 <div bind:this={triggerRoot} class="relative flex items-stretch">
   <button
     type="button"
-    class="flex items-center gap-1.5 rounded-l-md border border-r-0 border-dashed border-border px-2 py-1 text-[11px] text-muted-foreground transition hover:border-foreground/30 hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+    class="flex shrink-0 items-center gap-1.5 rounded-l-md border border-r-0 border-dashed border-border px-2.5 py-1 text-xs text-muted-foreground transition hover:border-foreground/30 hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
     disabled={app.currentProjectId === null}
     onclick={launchDefault}
     title={defaultShell ? `Launch ${defaultShell.label}` : "New blank terminal"}
     aria-label="Launch terminal"
   >
-    <Plus class="size-3" />
-    <span>{defaultLabel}</span>
+    <Plus class="size-3.5" />
+    <span>Terminal</span>
   </button>
   <button
     type="button"
-    class="flex items-center justify-center rounded-r-md border border-dashed border-border px-1 text-muted-foreground transition hover:border-foreground/30 hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+    class="flex shrink-0 items-center justify-center rounded-r-md border border-dashed border-border px-1.5 py-1 text-muted-foreground transition hover:border-foreground/30 hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
     disabled={app.currentProjectId === null || platform.shells.length === 0}
     onclick={toggle}
     aria-haspopup="menu"
@@ -85,7 +85,7 @@
     title="Pick a shell"
     aria-label="Pick a shell"
   >
-    <ChevronDown class="size-3" />
+    <ChevronDown class="size-3.5" />
   </button>
 
   {#if open}

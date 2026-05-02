@@ -18,6 +18,15 @@ interface ProjectRow {
   created_at: number;
 }
 
+function safeParseArgs(raw: string): string[] {
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((v) => typeof v === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 export async function loadProjects(): Promise<Project[]> {
   const db = await getDb();
   const rows = await db.select<ProjectRow[]>(
@@ -69,7 +78,7 @@ export async function loadThreads(): Promise<Thread[]> {
     label: r.label,
     title: r.title,
     cmd: r.cmd,
-    args: JSON.parse(r.args) as string[],
+    args: safeParseArgs(r.args),
     iconKey: (r.icon_key ?? null) as Thread["iconKey"],
     sessionId: r.session_id,
     status: "idle",

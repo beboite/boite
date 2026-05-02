@@ -53,9 +53,9 @@
 
 <div
   data-tauri-drag-region
-  class="relative flex h-10 shrink-0 select-none items-center border-b border-border bg-[var(--color-titlebar)]"
+  class="relative flex h-9 shrink-0 select-none items-center border-b border-border bg-[var(--color-titlebar)]"
 >
-  <div class="flex items-center gap-1 pl-2">
+  <div class="flex items-center gap-0.5 pl-1.5">
     <button
       type="button"
       class="flex h-7 items-center justify-center rounded-md px-2 transition {app.view ===
@@ -69,7 +69,7 @@
       <svg
         xmlns="http://www.w3.org/2000/svg"
         viewBox="0 -960 960 960"
-        class="size-4"
+        class="size-[17px]"
         fill="currentColor"
         aria-hidden="true"
       >
@@ -88,9 +88,9 @@
       title="Settings"
       aria-label="Settings"
     >
-      <Settings class="size-3.5" />
+      <Settings class="size-[15px]" />
     </button>
-    <span class="ml-1 text-[10px] text-muted-foreground/70">
+    <span class="ml-1.5 hidden text-[11px] text-muted-foreground/70 md:inline">
       {app.threads.length} thread{app.threads.length === 1 ? "" : "s"} in
       {app.projects.length} project{app.projects.length === 1 ? "" : "s"}
     </span>
@@ -100,10 +100,10 @@
     data-tauri-drag-region
     class="pointer-events-none absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-baseline gap-1.5"
   >
-    <span class="text-[13px] font-semibold tracking-tight text-foreground/90">
+    <span class="text-[14px] font-semibold tracking-tight text-foreground/90">
       {title}
     </span>
-    <span class="font-mono text-[10px] text-muted-foreground/60">
+    <span class="hidden font-mono text-[10.5px] text-muted-foreground/60 sm:inline">
       v{pkg.version}
     </span>
   </div>

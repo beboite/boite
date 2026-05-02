@@ -10,8 +10,22 @@
   import Terminal from "$lib/features/terminal/Terminal.svelte";
   import Toaster from "$lib/features/notifications/Toaster.svelte";
 
+  let activated = $state<Record<string, true>>({});
+
+  function activateThread(id: string) {
+    activated[id] = true;
+    app.activeThreadId = id;
+    app.view = "terminal";
+  }
+
   async function addProject() {
     await pickAndAddProject();
+  }
+
+  async function handleCloseThread(id: string) {
+    await closeThread(id);
+    delete activated[id];
+    activated = { ...activated };
   }
 
   async function removeProject(projectId: string) {
@@ -24,9 +38,34 @@
           // already exited
         }
       }
+      delete activated[t.id];
     }
+    activated = { ...activated };
     await app.removeProject(projectId);
   }
+
+  // Pre-activate any thread that becomes active via shortcut/blank-terminal launch.
+  $effect(() => {
+    const id = app.activeThreadId;
+    if (id && app.threads.some((t) => t.id === id) && !activated[id]) {
+      activated[id] = true;
+    }
+  });
+
+  // Drop activation entries for threads that no longer exist (project removed,
+  // thread deleted from another path, etc.). Keeps the map from accumulating
+  // dead keys during a long session.
+  $effect(() => {
+    const valid = new Set(app.threads.map((t) => t.id));
+    let dirty = false;
+    for (const id of Object.keys(activated)) {
+      if (!valid.has(id)) {
+        delete activated[id];
+        dirty = true;
+      }
+    }
+    if (dirty) activated = { ...activated };
+  });
 </script>
 
 <div class="flex h-screen w-screen flex-col overflow-hidden bg-background">
@@ -34,13 +73,18 @@
 
   <div class="flex min-h-0 flex-1">
     <ProjectSidebar
-      onCloseThread={closeThread}
+      onCloseThread={handleCloseThread}
+      onActivateThread={activateThread}
       onNewProject={addProject}
       onRemoveProject={removeProject}
     />
 
     <main class="flex min-w-0 flex-1 flex-col">
-      {#if app.view === "settings"}
+      {#if !app.ready}
+        <div class="flex h-full items-center justify-center">
+          <p class="font-mono text-xs text-muted-foreground/60">Loading…</p>
+        </div>
+      {:else if app.view === "settings"}
         <SettingsPanel />
       {:else}
         <ShortcutBar />
@@ -64,17 +108,25 @@
               {/if}
             </div>
           </div>
+        {:else if app.activeThreadId === null}
+          <div class="flex h-full items-center justify-center">
+            <p class="text-sm text-muted-foreground">
+              Pick a thread on the left to bring it to life.
+            </p>
+          </div>
         {/if}
 
         <div class="relative min-h-0 flex-1 bg-[var(--color-background)]">
           {#each app.threads as thread (thread.id)}
-            <div
-              class="absolute inset-0"
-              style:visibility={app.activeThreadId === thread.id ? "visible" : "hidden"}
-              aria-hidden={app.activeThreadId !== thread.id}
-            >
-              <Terminal {thread} active={app.activeThreadId === thread.id} />
-            </div>
+            {#if activated[thread.id]}
+              <div
+                class="absolute inset-0"
+                style:visibility={app.activeThreadId === thread.id ? "visible" : "hidden"}
+                aria-hidden={app.activeThreadId !== thread.id}
+              >
+                <Terminal {thread} active={app.activeThreadId === thread.id} />
+              </div>
+            {/if}
           {/each}
         </div>
       {/if}

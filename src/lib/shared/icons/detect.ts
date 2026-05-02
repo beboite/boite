@@ -7,7 +7,7 @@ interface DetectionRule {
 
 const RULES: DetectionRule[] = [
   { key: "claude", patterns: [/\bclaude\b/i, /\banthropic\b/i, /\bcc\b/i] },
-  { key: "codex", patterns: [/\bcodex\b/i, /\bopenai\b/i, /\bchatgpt\b/i] },
+  { key: "codex", patterns: [/\bcodex\b/i, /\bchatgpt\b/i, /\bopenai\b/i, /\bgpt\b/i] },
   { key: "opencode", patterns: [/\bopencode\b/i] },
   { key: "cursor", patterns: [/\bcursor\b/i, /cursor-agent/i] },
   { key: "gemini", patterns: [/\bgemini\b/i] },

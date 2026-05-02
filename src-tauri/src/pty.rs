@@ -233,10 +233,8 @@ fn read_loop(
             Ok(0) => break,
             Ok(n) => {
                 let chunk = buf[..n].to_vec();
-                if channel
-                    .send(PtyEvent::Output { data: chunk })
-                    .is_err()
-                {
+                if let Err(err) = channel.send(PtyEvent::Output { data: chunk }) {
+                    eprintln!("[boite/pty] output channel closed: {err}");
                     break;
                 }
                 for byte in &buf[..n] {

@@ -17,6 +17,7 @@
   } from "$lib/features/thread/shell-wrap";
   import { platform } from "$lib/storage/platform.svelte";
   import { saveThread } from "$lib/storage/db";
+  import { notifications } from "$lib/features/notifications/store.svelte";
   import type { Thread } from "$lib/types";
 
   type Props = { thread: Thread; active: boolean };
@@ -29,24 +30,38 @@
   let ptyId: string | null = null;
   let spawned = $state(false);
   let lastOutputAt = 0;
+  let lastWorkingAt = 0;
+  let statusTimer: ReturnType<typeof setInterval> | null = null;
+  let sessionTimer: ReturnType<typeof setInterval> | null = null;
+  const decoder = new TextDecoder("utf-8", { fatal: false });
 
-  // Dingbats + Misc Symbols cover all spinner/asterisk glyphs Claude rotates through.
-  const TITLE_GLYPH_RE = /^[✀-➿☀-⛿✨✳✴]+\s*/u;
+  function cleanTitle(raw: string): string {
+    const m = raw.match(/[\p{L}\p{N}]/u);
+    if (!m || m.index === undefined) return raw.trim();
+    return raw.slice(m.index).trim();
+  }
 
-  function applyTitle(raw: string) {
-    const hasGlyph = TITLE_GLYPH_RE.test(raw);
-    app.setThreadStatus(thread.id, hasGlyph ? "ready" : "running");
-    const cleaned = raw.replace(TITLE_GLYPH_RE, "").trim();
-    app.setThreadTitle(thread.id, cleaned || raw);
+  function detectWorkingFromOutput(text: string) {
+    // Claude prints a status line like
+    //   ✻ Frobnicating… (12s · ↓ 3.4k tokens · esc to interrupt)
+    // Match either the human "esc to interrupt" hint or the token counter.
+    if (/esc to interrupt/i.test(text) || /\(\d+s\s+·/.test(text)) {
+      lastWorkingAt = Date.now();
+      app.setThreadStatus(thread.id, "running");
+    }
   }
 
   function handleEvent(event: PtyEvent) {
     if (!term) return;
     if (event.type === "output") {
+      const bytes = new Uint8Array(event.data);
       lastOutputAt = Date.now();
-      term.write(new Uint8Array(event.data));
+      term.write(bytes);
+      const text = decoder.decode(bytes, { stream: true });
+      detectWorkingFromOutput(text);
     } else if (event.type === "title") {
-      applyTitle(event.value);
+      const cleaned = cleanTitle(event.value);
+      if (cleaned) app.setThreadTitle(thread.id, cleaned);
     } else if (event.type === "exit") {
       const code = event.code ?? null;
       app.setThreadStatus(thread.id, code === 0 ? "done" : "exited", code);
@@ -161,17 +176,39 @@
     }
 
     if (!thread.sessionId) {
-      const detector = getDetector(thread.iconKey);
+      const detector = getDetector(thread);
       if (detector) {
-        setTimeout(() => {
-          void detector(project.cwd, spawnedAt - 2000).then((id) => {
-            if (!id) return;
-            const t = app.threads.find((x) => x.id === thread.id);
-            if (!t) return;
+        const cwd = project.cwd;
+        const since = spawnedAt - 5000;
+        const scanOnce = async (): Promise<boolean> => {
+          const t = app.threads.find((x) => x.id === thread.id);
+          if (!t) return true;
+          if (t.sessionId) return true;
+          try {
+            const id = await detector(cwd, since);
+            if (!id) return false;
             t.sessionId = id;
+            t.iconKey = t.iconKey ?? "claude";
             void saveThread($state.snapshot(t) as Thread);
+            notifications.success(`Session captured (${t.label})`);
+            return true;
+          } catch (err) {
+            console.error("session detect failed:", err);
+            return false;
+          }
+        };
+        // Try a few times early, then settle on a slow poll while the thread
+        // stays alive without a captured session id.
+        setTimeout(() => void scanOnce(), 3000);
+        setTimeout(() => void scanOnce(), 8000);
+        sessionTimer = setInterval(() => {
+          void scanOnce().then((done) => {
+            if (done && sessionTimer) {
+              clearInterval(sessionTimer);
+              sessionTimer = null;
+            }
           });
-        }, 5000);
+        }, 12000);
       }
     }
 
@@ -292,6 +329,23 @@
       if (active) fit?.fit();
     });
     resizeObserver.observe(container);
+
+    // Status state machine:
+    //   - working signal seen recently (Claude printed "esc to interrupt" or
+    //     a token counter)  → running (orange spinner)
+    //   - otherwise                                                   → ready (green)
+    // Final states (done/exited/error) are sticky — set on PTY exit/spawn fail.
+    statusTimer = setInterval(() => {
+      const t = app.threads.find((x) => x.id === thread.id);
+      if (!t) return;
+      if (t.status === "done" || t.status === "exited" || t.status === "error") return;
+      const working =
+        lastWorkingAt > 0 && Date.now() - lastWorkingAt < 2000;
+      const next = working ? "running" : "ready";
+      if (t.status !== next) {
+        app.setThreadStatus(thread.id, next);
+      }
+    }, 500);
   });
 
   $effect(() => {
@@ -304,6 +358,10 @@
   });
 
   onDestroy(() => {
+    if (statusTimer) clearInterval(statusTimer);
+    statusTimer = null;
+    if (sessionTimer) clearInterval(sessionTimer);
+    sessionTimer = null;
     resizeObserver?.disconnect();
     term?.dispose();
     term = null;

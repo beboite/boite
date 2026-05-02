@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { detectIconKey } from "$lib/shared/icons/detect";
 import type { IconKey, Thread } from "$lib/types";
 
 export type SessionDetector = (
@@ -20,9 +21,14 @@ const detectors: Partial<Record<NonNullable<IconKey>, SessionDetector>> = {
   },
 };
 
-export function getDetector(iconKey: IconKey): SessionDetector | null {
-  if (!iconKey) return null;
-  return detectors[iconKey] ?? null;
+function resolveKey(thread: Thread): IconKey {
+  return thread.iconKey ?? detectIconKey(thread.cmd, thread.label);
+}
+
+export function getDetector(thread: Thread): SessionDetector | null {
+  const key = resolveKey(thread);
+  if (!key) return null;
+  return detectors[key] ?? null;
 }
 
 export type ResumeBuilder = (sessionId: string, args: string[]) => string[];
@@ -48,8 +54,10 @@ const builders: Partial<Record<NonNullable<IconKey>, ResumeBuilder>> = {
 };
 
 export function buildResumeArgs(thread: Thread): string[] {
-  if (!thread.sessionId || !thread.iconKey) return thread.args;
-  const builder = builders[thread.iconKey];
+  if (!thread.sessionId) return thread.args;
+  const key = resolveKey(thread);
+  if (!key) return thread.args;
+  const builder = builders[key];
   if (!builder) return thread.args;
   return builder(thread.sessionId, thread.args);
 }

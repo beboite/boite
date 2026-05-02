@@ -108,20 +108,21 @@ class AppState {
   setThreadStatus(id: string, status: ThreadStatus, exitCode: number | null = null) {
     const t = this.threads.find((x) => x.id === id);
     if (!t) return;
+    if (t.status === status && t.exitCode === exitCode) return;
     t.status = status;
     t.exitCode = exitCode;
   }
 
   setThreadTitle(id: string, title: string) {
     const t = this.threads.find((x) => x.id === id);
-    if (!t) return;
+    if (!t || t.title === title) return;
     t.title = title;
     void saveThread($state.snapshot(t) as Thread);
   }
 
   setThreadPtyId(id: string, ptyId: string | null) {
     const t = this.threads.find((x) => x.id === id);
-    if (!t) return;
+    if (!t || t.ptyId === ptyId) return;
     t.ptyId = ptyId;
   }
 

@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { app } from "$lib/app/store.svelte";
+import { notifications } from "$lib/features/notifications/store.svelte";
 import type { Project } from "$lib/types";
 
 interface ProjectInspection {
@@ -9,7 +10,14 @@ interface ProjectInspection {
 }
 
 export async function pickAndAddProject(): Promise<Project | null> {
-  const selected = await open({ directory: true, multiple: false });
+  let selected: string | string[] | null;
+  try {
+    selected = await open({ directory: true, multiple: false });
+  } catch (err) {
+    console.error("dialog open failed:", err);
+    notifications.error("Could not open folder picker");
+    return null;
+  }
   if (!selected || Array.isArray(selected)) return null;
   const path = selected;
 
@@ -33,8 +41,15 @@ export async function pickAndAddProject(): Promise<Project | null> {
     cwd: path,
     icon: inspection.icon,
   };
-  await app.addProject(project);
+  try {
+    await app.addProject(project);
+  } catch (err) {
+    console.error("addProject failed:", err);
+    notifications.error("Failed to add project");
+    return null;
+  }
   app.selectedProjectId = project.id;
+  notifications.success(`Added ${project.name}`);
   return project;
 }
 

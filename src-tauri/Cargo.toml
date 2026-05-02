@@ -1,6 +1,6 @@
 [package]
 name = "boite"
-version = "0.2.2"
+version = "0.2.3"
 description = "Lightweight multi-agent terminal multiplexer"
 authors = ["mtsu"]
 edition = "2021"
@@ -24,11 +24,6 @@ dirs = "6"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 portable-pty = "0.9"
-tokio = { version = "1", features = ["sync", "rt-multi-thread", "macros", "io-util"] }
 vte = "0.13"
 uuid = { version = "1", features = ["v4"] }
 parking_lot = "0.12"
-anyhow = "1"
-thiserror = "2"
-tracing = "0.1"
-tracing-subscriber = "0.3"

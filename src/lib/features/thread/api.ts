@@ -4,6 +4,7 @@ import { getDefaultShell } from "$lib/storage/shell";
 import { parseCommand, settings } from "$lib/features/settings/store.svelte";
 import { resolveIconKey } from "$lib/shared/icons/detect";
 import { platform } from "$lib/storage/platform.svelte";
+import { notifications } from "$lib/features/notifications/store.svelte";
 import type { IconKey, Shortcut, Thread } from "$lib/types";
 import type { ShellOption } from "$lib/storage/platform.svelte";
 
@@ -35,9 +36,15 @@ export async function launchShortcut(
   projectId: string | null,
 ): Promise<Thread | null> {
   const project = projectId ? app.projects.find((p) => p.id === projectId) : null;
-  if (!project) return null;
+  if (!project) {
+    notifications.error("Pick a project first");
+    return null;
+  }
   const parsed = parseCommand(shortcut.command || shortcut.label);
-  if (!parsed.cmd) return null;
+  if (!parsed.cmd) {
+    notifications.error(`${shortcut.label}: empty command`);
+    return null;
+  }
   const count = app.threadsByProject(project.id).length + 1;
   const iconKey = resolveIconKey(shortcut.iconKey, shortcut.label, shortcut.command);
   const thread = buildThread(
@@ -47,7 +54,13 @@ export async function launchShortcut(
     `${shortcut.label} #${count}`,
     iconKey,
   );
-  await app.upsertThread(thread);
+  try {
+    await app.upsertThread(thread);
+  } catch (err) {
+    console.error("upsertThread failed:", err);
+    notifications.error("Failed to create thread");
+    return null;
+  }
   app.activeThreadId = thread.id;
   app.view = "terminal";
   return thread;
@@ -58,7 +71,10 @@ export async function launchShell(
   projectId: string | null,
 ): Promise<Thread | null> {
   const project = projectId ? app.projects.find((p) => p.id === projectId) : null;
-  if (!project) return null;
+  if (!project) {
+    notifications.error("Pick a project first");
+    return null;
+  }
   const count = app.threadsByProject(project.id).length + 1;
   const thread = buildThread(
     project.id,
@@ -67,7 +83,13 @@ export async function launchShell(
     `${shell.label} #${count}`,
     "terminal",
   );
-  await app.upsertThread(thread);
+  try {
+    await app.upsertThread(thread);
+  } catch (err) {
+    console.error("upsertThread failed:", err);
+    notifications.error("Failed to create thread");
+    return null;
+  }
   app.activeThreadId = thread.id;
   app.view = "terminal";
   return thread;
@@ -77,7 +99,10 @@ export async function launchBlankTerminal(
   projectId: string | null,
 ): Promise<Thread | null> {
   const project = projectId ? app.projects.find((p) => p.id === projectId) : null;
-  if (!project) return null;
+  if (!project) {
+    notifications.error("Pick a project first");
+    return null;
+  }
 
   let cmd: string;
   let args: string[] = [];
@@ -102,7 +127,13 @@ export async function launchBlankTerminal(
     `${label} #${count}`,
     "terminal",
   );
-  await app.upsertThread(thread);
+  try {
+    await app.upsertThread(thread);
+  } catch (err) {
+    console.error("upsertThread failed:", err);
+    notifications.error("Failed to create thread");
+    return null;
+  }
   app.activeThreadId = thread.id;
   app.view = "terminal";
   return thread;

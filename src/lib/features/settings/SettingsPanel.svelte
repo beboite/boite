@@ -2,13 +2,15 @@
   import { app } from "$lib/app/store.svelte";
   import SettingsGeneralTab from "./SettingsGeneralTab.svelte";
   import SettingsTerminalTab from "./SettingsTerminalTab.svelte";
+  import SettingsAppearanceTab from "./SettingsAppearanceTab.svelte";
   import X from "@lucide/svelte/icons/x";
 
-  type TabId = "general" | "terminal";
+  type TabId = "general" | "terminal" | "appearance";
 
   const TABS: { id: TabId; label: string }[] = [
     { id: "general", label: "General" },
     { id: "terminal", label: "Terminal" },
+    { id: "appearance", label: "Appearance" },
   ];
 
   let activeTab = $state<TabId>("general");
@@ -20,9 +22,9 @@
 
 <div class="flex h-full min-h-0 flex-col bg-background">
   <header
-    class="flex shrink-0 items-center justify-between border-b border-border bg-[var(--color-surface)] px-5 py-3"
+    class="flex shrink-0 items-center justify-between border-b border-border bg-[var(--color-surface)] px-4 py-2"
   >
-    <h2 class="text-sm font-semibold tracking-tight">Settings</h2>
+    <h2 class="text-[13px] font-semibold tracking-tight">Settings</h2>
     <button
       type="button"
       class="rounded-md p-1 text-muted-foreground transition hover:bg-accent hover:text-foreground"
@@ -34,14 +36,14 @@
     </button>
   </header>
 
-  <div class="border-b border-border bg-[var(--color-surface)] px-5">
-    <div class="flex gap-1" role="tablist">
+  <div class="border-b border-border bg-[var(--color-surface)] px-4">
+    <div class="flex gap-0.5" role="tablist">
       {#each TABS as tab (tab.id)}
         <button
           type="button"
           role="tab"
           aria-selected={activeTab === tab.id}
-          class="relative -mb-px border-b-2 px-3 py-2 text-xs font-medium transition {activeTab ===
+          class="relative -mb-px border-b-2 px-2.5 py-1.5 text-[12px] font-medium transition {activeTab ===
           tab.id
             ? 'border-foreground text-foreground'
             : 'border-transparent text-muted-foreground hover:text-foreground'}"
@@ -53,12 +55,14 @@
     </div>
   </div>
 
-  <div class="flex-1 overflow-y-auto px-6 py-5">
-    <div class="mx-auto flex max-w-3xl flex-col gap-4">
+  <div class="flex-1 overflow-y-auto px-4 py-3">
+    <div class="mx-auto flex max-w-3xl flex-col gap-2.5">
       {#if activeTab === "general"}
         <SettingsGeneralTab />
       {:else if activeTab === "terminal"}
         <SettingsTerminalTab />
+      {:else if activeTab === "appearance"}
+        <SettingsAppearanceTab />
       {/if}
     </div>
   </div>

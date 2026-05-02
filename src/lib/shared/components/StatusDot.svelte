@@ -17,15 +17,15 @@
 
 {#if status === "running"}
   <span
-    class="inline-flex size-2 shrink-0 items-center justify-center text-warning"
+    class="inline-flex size-2.5 shrink-0 items-center justify-center text-warning"
     aria-label={status}
     title={status}
   >
-    <UnicodeSpinner size={10} />
+    <UnicodeSpinner size={12} />
   </span>
 {:else}
   <span
-    class="inline-block size-2 shrink-0 rounded-full {colorByStatus[status]}"
+    class="inline-block size-2.5 shrink-0 rounded-full {colorByStatus[status]}"
     aria-label={status}
     title={status}
   ></span>

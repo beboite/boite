@@ -1,5 +1,6 @@
 import { loadSettings, saveSettings } from "$lib/storage/db";
 import { notifications } from "$lib/features/notifications/store.svelte";
+import { debounce } from "$lib/shared/utils/debounce";
 import type { Settings, Shortcut } from "$lib/types";
 
 export const PRESET_SHORTCUTS: Shortcut[] = [
@@ -95,6 +96,11 @@ class SettingsStore {
     }
   }
 
+  // Coalesce rapid writes (slider drag, wheel zoom) into one DB hit.
+  private persistSoon = debounce(() => {
+    void this.persist();
+  }, 250);
+
   async setPowershellNewline(value: boolean) {
     this.state.powershellNewline = value;
     await this.persist();
@@ -112,16 +118,18 @@ class SettingsStore {
     await this.persist();
   }
 
-  async setSidebarWidth(px: number) {
+  setSidebarWidth(px: number) {
     const clamped = Math.max(180, Math.min(480, Math.round(px)));
+    if (this.state.sidebarWidth === clamped) return;
     this.state.sidebarWidth = clamped;
-    await this.persist();
+    this.persistSoon();
   }
 
-  async setUiScalePercent(percent: number) {
+  setUiScalePercent(percent: number) {
     const clamped = Math.max(75, Math.min(150, Math.round(percent)));
+    if (this.state.uiScalePercent === clamped) return;
     this.state.uiScalePercent = clamped;
-    await this.persist();
+    this.persistSoon();
   }
 
   async setProjectOrder(ids: string[]) {

@@ -14,7 +14,7 @@
   const brand = $derived(iconKey ? getBrandGlyph(iconKey) : null);
 
   const ASSET_BY_KEY: Partial<Record<NonNullable<IconKey>, string>> = {
-    codex: "/icons/codex.svg",
+    codex: "/icons/chatgpt.svg",
     gemini: "/icons/gemini.svg",
     opencode: "/icons/opencode.svg",
   };

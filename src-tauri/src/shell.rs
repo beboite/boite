@@ -13,18 +13,52 @@ pub struct ShellOption {
 pub fn default_shell() -> String {
     #[cfg(target_os = "windows")]
     {
-        if which::which("pwsh").is_ok() {
-            return "pwsh".to_string();
+        if let Ok(p) = which::which("pwsh") {
+            return p.to_string_lossy().into_owned();
         }
-        if which::which("powershell").is_ok() {
-            return "powershell".to_string();
+        if let Ok(p) = which::which("powershell") {
+            return p.to_string_lossy().into_owned();
         }
-        std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string())
+        if let Ok(comspec) = std::env::var("COMSPEC") {
+            if let Ok(p) = which::which(&comspec) {
+                return p.to_string_lossy().into_owned();
+            }
+            return comspec;
+        }
+        if let Ok(p) = which::which("cmd.exe") {
+            return p.to_string_lossy().into_owned();
+        }
+        "cmd.exe".to_string()
     }
     #[cfg(not(target_os = "windows"))]
     {
-        std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string())
+        if let Ok(shell) = std::env::var("SHELL") {
+            if let Ok(p) = which::which(&shell) {
+                return p.to_string_lossy().into_owned();
+            }
+            return shell;
+        }
+        "/bin/bash".to_string()
     }
+}
+
+#[cfg(target_os = "windows")]
+fn git_bash_path() -> Option<std::path::PathBuf> {
+    let candidates = [
+        std::env::var("PROGRAMFILES").ok(),
+        std::env::var("ProgramW6432").ok(),
+        std::env::var("ProgramFiles(x86)").ok(),
+        std::env::var("LOCALAPPDATA")
+            .ok()
+            .map(|l| format!("{}\\Programs", l)),
+    ];
+    for base in candidates.into_iter().flatten() {
+        let p = std::path::Path::new(&base).join("Git").join("bin").join("bash.exe");
+        if p.is_file() {
+            return Some(p);
+        }
+    }
+    which::which("bash").ok()
 }
 
 #[tauri::command]
@@ -60,9 +94,7 @@ pub fn available_shells() -> Vec<ShellOption> {
             icon_key: Some("terminal".into()),
         });
 
-        let git_bash =
-            std::path::Path::new("C:\\Program Files\\Git\\bin\\bash.exe").to_path_buf();
-        if git_bash.is_file() {
+        if let Some(git_bash) = git_bash_path() {
             shells.push(ShellOption {
                 id: "git-bash".into(),
                 label: "Git Bash".into(),

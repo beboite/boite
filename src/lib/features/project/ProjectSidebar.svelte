@@ -9,22 +9,27 @@
   import FolderOpen from "@lucide/svelte/icons/folder-open";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import MoreHorizontal from "@lucide/svelte/icons/more-horizontal";
-  import GripVertical from "@lucide/svelte/icons/grip-vertical";
 
   type Props = {
     onCloseThread: (threadId: string) => void;
+    onActivateThread: (threadId: string) => void;
     onNewProject: () => void;
     onRemoveProject: (projectId: string) => void;
   };
-  let { onCloseThread, onNewProject, onRemoveProject }: Props = $props();
+  let {
+    onCloseThread,
+    onActivateThread,
+    onNewProject,
+    onRemoveProject,
+  }: Props = $props();
 
   let menuFor = $state<string | null>(null);
   let confirmThreadId = $state<string | null>(null);
   let confirmProjectId = $state<string | null>(null);
 
-  // Drag-arm flags so the row only becomes draggable when grabbing the grip.
-  let projectArmed = $state<string | null>(null);
-  let threadArmed = $state<string | null>(null);
+  // Track the element where the most recent mousedown happened so dragstart
+  // can opt out when the user pressed on a button/input rather than the row.
+  let mouseDownTarget: HTMLElement | null = null;
 
   let projectDragging = $state<string | null>(null);
   let projectOver = $state<string | null>(null);
@@ -33,6 +38,14 @@
 
   let resizing = $state(false);
   let asideEl: HTMLElement | null = $state(null);
+
+  function isInteractive(el: HTMLElement | null): boolean {
+    return !!el?.closest("button, input, textarea, select, [data-no-drag]");
+  }
+
+  function rowMouseDown(e: MouseEvent) {
+    mouseDownTarget = e.target as HTMLElement;
+  }
 
   function toggleMenu(id: string, e: MouseEvent) {
     e.stopPropagation();
@@ -48,9 +61,9 @@
     app.view = "terminal";
   }
 
-  // ----- Project drag reorder -----
+  // ----- Project drag -----
   function projectDragStart(id: string, e: DragEvent) {
-    if (projectArmed !== id) {
+    if (isInteractive(mouseDownTarget)) {
       e.preventDefault();
       return;
     }
@@ -71,7 +84,6 @@
     const from = projectDragging;
     projectDragging = null;
     projectOver = null;
-    projectArmed = null;
     if (!from || from === id) return;
     const ids = app.sortedProjects.map((p) => p.id);
     const fromIdx = ids.indexOf(from);
@@ -84,12 +96,12 @@
   function projectDragEnd() {
     projectDragging = null;
     projectOver = null;
-    projectArmed = null;
+    mouseDownTarget = null;
   }
 
-  // ----- Thread drag reorder (within project only) -----
+  // ----- Thread drag (within same project only) -----
   function threadDragStart(id: string, projectId: string, e: DragEvent) {
-    if (threadArmed !== id) {
+    if (isInteractive(mouseDownTarget)) {
       e.preventDefault();
       return;
     }
@@ -110,7 +122,6 @@
     const drag = threadDragging;
     threadDragging = null;
     threadOver = null;
-    threadArmed = null;
     if (!drag || drag.projectId !== projectId || drag.id === id) return;
     const ids = app.threadsByProjectSorted(projectId).map((t) => t.id);
     const fromIdx = ids.indexOf(drag.id);
@@ -123,7 +134,7 @@
   function threadDragEnd() {
     threadDragging = null;
     threadOver = null;
-    threadArmed = null;
+    mouseDownTarget = null;
   }
 
   // ----- Sidebar resize -----
@@ -186,9 +197,9 @@
     : ''}"
   style:width="{settings.state.sidebarWidth}px"
 >
-  <header class="flex items-center justify-between px-3 py-2.5">
+  <header class="flex items-center justify-between px-3 py-2">
     <span
-      class="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground"
+      class="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground"
     >
       Projects
     </span>
@@ -199,7 +210,7 @@
       aria-label="Add project"
       title="Add project from folder"
     >
-      <Plus class="size-3.5" />
+      <Plus class="size-4" />
     </button>
   </header>
 
@@ -219,11 +230,11 @@
       {@const isSelected = app.currentProjectId === project.id}
       {@const isProjectDragged = projectDragging === project.id}
       {@const isProjectOver = projectOver === project.id && projectDragging !== project.id}
+      <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
       <div
-        class="mb-1.5 transition {isProjectDragged ? 'opacity-40' : ''} {isProjectOver
-          ? 'border-t-2 border-t-foreground/40'
-          : ''}"
-        draggable={projectArmed === project.id}
+        class="mb-1.5"
+        draggable="true"
+        onmousedown={rowMouseDown}
         ondragstart={(e) => projectDragStart(project.id, e)}
         ondragover={(e) => projectDragOver(project.id, e)}
         ondrop={(e) => projectDrop(project.id, e)}
@@ -231,24 +242,14 @@
         role="listitem"
       >
         <div
-          class="group/project relative flex items-center gap-1.5 rounded-md px-1.5 py-1.5 transition {isSelected
+          class="group/project relative flex items-center gap-2 rounded-md px-2 py-1.5 transition {isSelected
             ? 'bg-accent/40'
+            : ''} {isProjectDragged ? 'opacity-40' : ''} {isProjectOver
+            ? 'border-t-2 border-t-foreground/40'
             : ''}"
         >
-          <span
-            class="flex size-3.5 shrink-0 cursor-grab items-center justify-center text-muted-foreground/0 transition group-hover/project:text-muted-foreground/50 active:cursor-grabbing"
-            onmousedown={() => (projectArmed = project.id)}
-            onmouseup={() => (projectArmed = null)}
-            onmouseleave={() => (projectArmed = null)}
-            role="button"
-            tabindex="-1"
-            aria-label="Drag project"
-            title="Drag to reorder"
-          >
-            <GripVertical class="size-3" />
-          </span>
           <div
-            class="flex size-5 shrink-0 items-center justify-center overflow-hidden rounded bg-[var(--color-surface-3)]"
+            class="flex size-6 shrink-0 items-center justify-center overflow-hidden rounded bg-[var(--color-surface-3)]"
           >
             {#if project.icon}
               <img
@@ -259,14 +260,14 @@
                 draggable="false"
               />
             {:else}
-              <span class="text-[10px] font-semibold text-muted-foreground">
+              <span class="text-[11px] font-semibold text-muted-foreground">
                 {project.name.charAt(0).toUpperCase()}
               </span>
             {/if}
           </div>
           <button
             type="button"
-            class="min-w-0 flex-1 truncate text-left text-xs font-medium text-foreground/90"
+            class="min-w-0 flex-1 truncate text-left text-[13px] font-medium text-foreground/90"
             title={project.cwd}
             onclick={() => selectProject(project.id)}
           >
@@ -280,7 +281,7 @@
             aria-label="Project options"
             title="More"
           >
-            <MoreHorizontal class="size-3" />
+            <MoreHorizontal class="size-3.5" />
           </button>
 
           {#if menuFor === project.id}
@@ -311,9 +312,11 @@
                 threadOver === thread.id && threadDragging?.id !== thread.id}
               {@const isActive =
                 app.activeThreadId === thread.id && app.view === "terminal"}
+              <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
               <li
                 class="group/thread"
-                draggable={threadArmed === thread.id}
+                draggable="true"
+                onmousedown={rowMouseDown}
                 ondragstart={(e) => threadDragStart(thread.id, thread.projectId, e)}
                 ondragover={(e) => threadDragOver(thread.id, thread.projectId, e)}
                 ondrop={(e) => threadDrop(thread.id, thread.projectId, e)}
@@ -321,30 +324,29 @@
                 role="listitem"
               >
                 <div
-                  class="flex items-center gap-1.5 rounded-md px-1.5 py-1.5 transition {isActive
+                  class="flex items-center gap-2 rounded-md px-2 py-1.5 transition {isActive
                     ? 'bg-accent text-foreground'
                     : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground'} {isThreadDragged
                     ? 'opacity-40'
                     : ''} {isThreadOver ? 'border-t-2 border-t-foreground/40' : ''}"
                 >
-                  <span
-                    class="flex size-3 shrink-0 cursor-grab items-center justify-center text-muted-foreground/0 transition group-hover/thread:text-muted-foreground/50 active:cursor-grabbing"
-                    onmousedown={() => (threadArmed = thread.id)}
-                    onmouseup={() => (threadArmed = null)}
-                    onmouseleave={() => (threadArmed = null)}
-                    role="button"
-                    tabindex="-1"
-                    aria-label="Drag thread"
-                    title="Drag to reorder"
-                  >
-                    <GripVertical class="size-2.5" />
-                  </span>
                   <StatusDot status={thread.status} />
-                  <span class="relative flex size-3.5 shrink-0 items-center justify-center">
+                  <button
+                    type="button"
+                    class="min-w-0 flex-1 truncate text-left text-[13px]"
+                    onclick={() => onActivateThread(thread.id)}
+                    title={thread.title ?? thread.label}
+                  >
+                    {thread.title ?? thread.label}
+                  </button>
+                  <span
+                    class="relative flex size-4 shrink-0 items-center justify-center"
+                    data-no-drag
+                  >
                     <span
                       class="absolute inset-0 flex items-center justify-center transition-opacity group-hover/thread:opacity-0"
                     >
-                      <ShortcutIcon iconKey={thread.iconKey} size={12} />
+                      <ShortcutIcon iconKey={thread.iconKey} size={14} />
                     </span>
                     <button
                       type="button"
@@ -356,20 +358,9 @@
                       aria-label="Close {thread.label}"
                       title="Close thread"
                     >
-                      <X class="size-3" />
+                      <X class="size-3.5" />
                     </button>
                   </span>
-                  <button
-                    type="button"
-                    class="min-w-0 flex-1 truncate text-left text-[12.5px]"
-                    onclick={() => {
-                      app.activeThreadId = thread.id;
-                      app.view = "terminal";
-                    }}
-                    title={thread.title ?? thread.label}
-                  >
-                    {thread.title ?? thread.label}
-                  </button>
                 </div>
               </li>
             {/each}
