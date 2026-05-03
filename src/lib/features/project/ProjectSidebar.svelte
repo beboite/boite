@@ -40,6 +40,7 @@
   let confirmProjectId = $state<string | null>(null);
 
   type RowSnapshot = { id: string; top: number; height: number };
+  type SourceRect = { left: number; top: number; width: number; height: number };
   type DragState = {
     kind: "project" | "thread";
     id: string;
@@ -51,6 +52,9 @@
     y: number;
     active: boolean;
     sourceHeight: number;
+    sourceRect: SourceRect | null;
+    grabX: number;
+    grabY: number;
     siblings: RowSnapshot[];
     slotIndex: number | null;
   };
@@ -95,6 +99,9 @@
       y: e.clientY,
       active: false,
       sourceHeight: 0,
+      sourceRect: null,
+      grabX: 0,
+      grabY: 0,
       siblings: [],
       slotIndex: null,
     });
@@ -140,6 +147,9 @@
       y: e.clientY,
       active: false,
       sourceHeight: 0,
+      sourceRect: null,
+      grabX: 0,
+      grabY: 0,
       siblings: [],
       slotIndex: null,
     });
@@ -170,6 +180,25 @@
     drag.siblings = snaps;
     const me = snaps.find((s) => s.id === drag.id);
     drag.sourceHeight = me?.height ?? 36;
+    const sourceEl = rows.find((el) => {
+      const id =
+        drag.kind === "project"
+          ? el.dataset.projectRow ?? ""
+          : el.dataset.threadRow ?? "";
+      return id === drag.id;
+    });
+    if (sourceEl) {
+      const r = sourceEl.getBoundingClientRect();
+      drag.sourceRect = {
+        left: r.left,
+        top: r.top,
+        width: r.width,
+        height: r.height,
+      };
+      drag.grabX = drag.startX - r.left;
+      drag.grabY = drag.startY - r.top;
+      drag.sourceHeight = r.height;
+    }
   }
 
   function pointerDragMove(e: PointerEvent) {
@@ -502,6 +531,20 @@
     return list.findIndex((t) => t.id === liveDrag.id);
   });
 
+  const threadDragGhost = $derived.by(() => {
+    if (!liveDrag || liveDrag.kind !== "thread" || !liveDrag.sourceRect) {
+      return null;
+    }
+    const thread = app.threads.find((t) => t.id === liveDrag.id);
+    if (!thread) return null;
+    return {
+      thread,
+      left: liveDrag.x - liveDrag.grabX,
+      top: liveDrag.y - liveDrag.grabY,
+      width: liveDrag.sourceRect.width,
+    };
+  });
+
   onDestroy(() => {
     cleanupPointerDrag();
     stopResize();
@@ -659,7 +702,7 @@
                 data-thread-id={thread.id}
                 data-project-id={thread.projectId}
                 style:transform={isThreadSource
-                  ? `translate(0px, ${dragOffset}px) scale(1.02)`
+                  ? "none"
                   : `translateY(${shiftY}px)`}
                 style:transition={isThreadSource ? "none" : "transform 180ms cubic-bezier(0.22, 1, 0.36, 1)"}
                 style:z-index={isThreadSource ? 50 : "auto"}
@@ -735,6 +778,27 @@
   ></button>
 </aside>
 
+{#if threadDragGhost}
+  <div
+    class="drag-ghost fixed flex items-center gap-2 rounded-md px-2 py-1.5 text-muted-foreground"
+    style:left="{threadDragGhost.left}px"
+    style:top="{threadDragGhost.top}px"
+    style:width="{threadDragGhost.width}px"
+    aria-hidden="true"
+  >
+    <StatusDot status={threadDragGhost.thread.status} />
+    <span
+      class="min-w-0 flex-1 truncate text-left text-[13px]"
+      title={threadDragGhost.thread.title ?? threadDragGhost.thread.label}
+    >
+      {threadDragGhost.thread.title ?? threadDragGhost.thread.label}
+    </span>
+    <span class="flex size-4 shrink-0 items-center justify-center">
+      <ShortcutIcon iconKey={threadDragGhost.thread.iconKey} size={14} />
+    </span>
+  </div>
+{/if}
+
 <ConfirmDialog
   open={pendingThread !== null}
   title="Close thread?"
@@ -791,12 +855,19 @@
   }
 
   .project-block.source > .project-row,
-  .thread-row.source > .thread-card {
+  .drag-ghost {
     box-shadow:
       0 12px 28px rgba(0, 0, 0, 0.5),
       0 0 0 1px rgba(255, 255, 255, 0.08);
     background: color-mix(in srgb, var(--color-surface-2, #1a1a1a) 90%, transparent);
     backdrop-filter: blur(6px);
+  }
+  .drag-ghost {
+    pointer-events: none;
+    z-index: 9999;
+  }
+  .thread-row.source > .thread-card {
+    opacity: 0;
   }
   .thread-row.source {
     pointer-events: none;
