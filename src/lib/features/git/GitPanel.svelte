@@ -4,7 +4,7 @@
   import { gitStore } from "./store.svelte";
   import GitGraph from "./GitGraph.svelte";
   import type { ChangeEntry } from "./api";
-  import RefreshCw from "@lucide/svelte/icons/refresh-cw";
+  import CloudDownload from "@lucide/svelte/icons/cloud-download";
   import GitBranch from "@lucide/svelte/icons/git-branch";
   import Plus from "@lucide/svelte/icons/plus";
   import Minus from "@lucide/svelte/icons/minus";
@@ -12,6 +12,8 @@
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import ArrowUp from "@lucide/svelte/icons/arrow-up";
   import ArrowDown from "@lucide/svelte/icons/arrow-down";
+
+  const AUTO_REFRESH_MS = 3000;
 
   type SectionMode = "staged" | "unstaged" | "conflict";
   interface SectionArgs {
@@ -39,6 +41,26 @@
     void gitStore.refresh(project.id);
   });
 
+  $effect(() => {
+    if (!project) return;
+    const id = project.id;
+    const tick = () => {
+      if (!document.hidden) void gitStore.refresh(id);
+    };
+    const interval = window.setInterval(tick, AUTO_REFRESH_MS);
+    const onFocus = () => void gitStore.refresh(id);
+    const onVisibility = () => {
+      if (!document.hidden) void gitStore.refresh(id);
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  });
+
   const gs = $derived(project ? gitStore.get(project.id) : null);
 
   let stagedOpen = $state(true);
@@ -50,8 +72,8 @@
   );
   const topPercent = $derived(settings.state.gitSplitFraction * 100);
 
-  function refresh() {
-    if (project) void gitStore.refresh(project.id);
+  function fetch() {
+    if (project) void gitStore.fetch(project.id);
   }
 
   function commitKey(e: KeyboardEvent) {
@@ -171,12 +193,12 @@
     <button
       type="button"
       class="ml-auto rounded p-1 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:opacity-40"
-      onclick={refresh}
-      disabled={!project || gs?.loading}
-      title="Refresh"
-      aria-label="Refresh git status"
+      onclick={fetch}
+      disabled={!project || gs?.fetching}
+      title="Fetch from remote"
+      aria-label="Fetch from remote"
     >
-      <RefreshCw class="size-3.5 {gs?.loading ? 'animate-spin' : ''}" />
+      <CloudDownload class="size-3.5 {gs?.fetching ? 'animate-pulse' : ''}" />
     </button>
   </header>
 

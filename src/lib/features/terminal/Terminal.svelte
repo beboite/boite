@@ -332,7 +332,14 @@
   }
 
   async function spawn() {
-    if (spawned || !term || !fit) return;
+    if (spawned) return;
+    if (!term || !fit) {
+      logger.warn(
+        "spawn",
+        `${thread.label}: skip — term=${!!term} fit=${!!fit}`,
+      );
+      return;
+    }
     spawned = true;
 
     const project = app.projects.find((p) => p.id === thread.projectId);
@@ -538,6 +545,7 @@
     });
     setTimeout(initialFit, 100);
     setTimeout(initialFit, 350);
+    setTimeout(() => void spawn(), 500);
 
     resizeObserver = new ResizeObserver(() => {
       scheduleFit();

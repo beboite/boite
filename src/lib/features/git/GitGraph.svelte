@@ -216,12 +216,23 @@
           {/if}
         {/each}
 
-        <circle
-          cx={laneX(row.col)}
-          cy={ROW_H / 2}
-          r={DOT_R}
-          fill={laneColor(row.col)}
-        />
+        {#if row.commit.localOnly}
+          <circle
+            cx={laneX(row.col)}
+            cy={ROW_H / 2}
+            r={DOT_R}
+            fill="var(--color-warning)"
+            stroke="var(--color-warning)"
+            stroke-width="1.5"
+          />
+        {:else}
+          <circle
+            cx={laneX(row.col)}
+            cy={ROW_H / 2}
+            r={DOT_R}
+            fill={laneColor(row.col)}
+          />
+        {/if}
       </svg>
 
       <div
@@ -275,6 +286,12 @@
     <div class="mt-1 text-[10.5px] text-muted-foreground/65">
       {fmtTime(c.time)}
     </div>
+    {#if c.localOnly}
+      <div class="mt-1.5 flex items-center gap-1 text-[10px] text-[var(--color-warning)]">
+        <span class="inline-block size-1.5 rounded-full bg-[var(--color-warning)]"></span>
+        Local — not pushed
+      </div>
+    {/if}
     {#if c.refs.length > 0}
       <div class="mt-2 flex flex-wrap gap-1">
         {#each c.refs as r (r)}

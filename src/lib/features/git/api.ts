@@ -24,6 +24,7 @@ export interface Commit {
   time: number;
   summary: string;
   refs: string[];
+  localOnly: boolean;
 }
 
 interface RawRepoInfo {
@@ -43,6 +44,7 @@ interface RawCommit {
   time: number;
   summary: string;
   refs: string[];
+  local_only: boolean;
 }
 
 export async function gitRepoInfo(path: string): Promise<RepoInfo> {
@@ -75,6 +77,7 @@ export async function gitLog(
     time: r.time,
     summary: r.summary,
     refs: r.refs,
+    localOnly: r.local_only,
   }));
 }
 
@@ -92,4 +95,8 @@ export function gitDiscard(path: string, files: string[]): Promise<void> {
 
 export function gitCommit(path: string, message: string): Promise<string> {
   return invoke<string>("git_commit", { path, message });
+}
+
+export function gitFetch(path: string): Promise<void> {
+  return invoke("git_fetch", { path });
 }

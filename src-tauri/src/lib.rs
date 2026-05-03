@@ -162,6 +162,7 @@ pub fn run() {
             git::git_unstage,
             git::git_discard,
             git::git_commit,
+            git::git_fetch,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
