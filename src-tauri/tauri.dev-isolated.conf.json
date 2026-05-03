@@ -1,0 +1,22 @@
+{
+  "productName": "Boite Dev",
+  "identifier": "dev.boite.dev",
+  "build": {
+    "beforeDevCommand": "bun run dev -- --port 1430",
+    "devUrl": "http://localhost:1430"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Boite Dev",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 720,
+        "minHeight": 480,
+        "decorations": false,
+        "transparent": true,
+        "visible": false
+      }
+    ]
+  }
+}
