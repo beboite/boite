@@ -30,6 +30,8 @@ pub struct Commit {
     pub email: String,
     pub time: i64,
     pub summary: String,
+    pub additions: u32,
+    pub deletions: u32,
     pub refs: Vec<String>,
     pub local_only: bool,
 }
@@ -278,10 +280,10 @@ fn log_blocking(path: &str, limit: u32, skip: u32) -> Result<Vec<Commit>, String
         "--remotes",
         "HEAD",
         "--topo-order",
-        "--date-order",
+        "--numstat",
         &format!("-n{}", limit),
         &format!("--skip={}", skip),
-        "--pretty=format:%H%x1f%h%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%D%x1f%s%x1e",
+        "--pretty=format:%x1e%H%x1f%h%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%D%x1f%s%n",
     ]);
     let stdout = match run(cmd) {
         Ok(b) => b,
@@ -294,7 +296,11 @@ fn log_blocking(path: &str, limit: u32, skip: u32) -> Result<Vec<Commit>, String
         if trimmed.is_empty() {
             continue;
         }
-        let mut fields = trimmed.split('\u{1f}');
+        let mut lines = trimmed.lines();
+        let Some(header) = lines.next() else {
+            continue;
+        };
+        let mut fields = header.split('\u{1f}');
         let sha = fields.next().unwrap_or("").to_string();
         let short_sha = fields.next().unwrap_or("").to_string();
         let parents = fields
@@ -317,6 +323,19 @@ fn log_blocking(path: &str, limit: u32, skip: u32) -> Result<Vec<Commit>, String
         if sha.is_empty() {
             continue;
         }
+        let mut additions = 0u32;
+        let mut deletions = 0u32;
+        for line in lines {
+            let mut parts = line.split('\t');
+            let added = parts.next().unwrap_or("");
+            let deleted = parts.next().unwrap_or("");
+            if let Ok(n) = added.parse::<u32>() {
+                additions = additions.saturating_add(n);
+            }
+            if let Ok(n) = deleted.parse::<u32>() {
+                deletions = deletions.saturating_add(n);
+            }
+        }
         commits.push(Commit {
             sha,
             short_sha,
@@ -325,6 +344,8 @@ fn log_blocking(path: &str, limit: u32, skip: u32) -> Result<Vec<Commit>, String
             email,
             time,
             summary,
+            additions,
+            deletions,
             refs,
             local_only: false,
         });

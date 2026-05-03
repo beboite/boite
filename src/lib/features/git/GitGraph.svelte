@@ -17,10 +17,10 @@
     parentEdges: Edge[];
   }
 
-  const LANE_W = 12;
-  const ROW_H = 24;
-  const DOT_R = 3;
-  const STROKE = 1.25;
+  const LANE_W = 16;
+  const ROW_H = 28;
+  const DOT_R = 3.5;
+  const STROKE = 1.5;
 
   // Muted lane palette. Primary lane stays neutral to match boite's grayscale.
   const COLORS = [
@@ -97,6 +97,18 @@
     return COLORS[col % COLORS.length];
   }
 
+  function cleanRef(ref: string): string {
+    return ref.replace(/^HEAD -> /, "");
+  }
+
+  function rowRefs(refs: string[]): string[] {
+    return refs.filter((r) => !cleanRef(r).endsWith("/HEAD")).slice(0, 2);
+  }
+
+  function hiddenRefCount(refs: string[]): number {
+    return Math.max(0, refs.filter((r) => !cleanRef(r).endsWith("/HEAD")).length - 2);
+  }
+
   function fmtTime(ts: number): string {
     if (!ts) return "";
     const d = new Date(ts * 1000);
@@ -111,7 +123,7 @@
 
   let hovered = $state<{ row: Row; x: number; y: number } | null>(null);
   const POPUP_W = 380;
-  const POPUP_H = 160;
+  const POPUP_H = 184;
 
   function showPopup(row: Row, e: MouseEvent) {
     const target = e.currentTarget as HTMLElement;
@@ -143,6 +155,10 @@
 
 <div class="flex flex-col">
   {#each rows as row (row.commit.sha)}
+    {@const dotColor = row.commit.localOnly ? "var(--color-warning)" : laneColor(row.col)}
+    {@const isMerge = row.commit.parents.length > 1}
+    {@const visibleRefs = rowRefs(row.commit.refs)}
+    {@const hiddenRefs = hiddenRefCount(row.commit.refs)}
     <div
       class="flex items-stretch transition hover:bg-[var(--color-surface-2)]"
       style:height="{ROW_H}px"
@@ -167,6 +183,7 @@
                 y2={ROW_H / 2}
                 stroke={laneColor(row.col)}
                 stroke-width={STROKE}
+                stroke-linecap="round"
               />
             {:else}
               <line
@@ -176,6 +193,8 @@
                 y2={ROW_H / 2}
                 stroke={laneColor(k)}
                 stroke-width={STROKE}
+                stroke-linecap="round"
+                opacity="0.65"
               />
             {/if}
           {/if}
@@ -190,6 +209,8 @@
               y2={ROW_H}
               stroke={laneColor(k)}
               stroke-width={STROKE}
+              stroke-linecap="round"
+              opacity="0.65"
             />
           {/if}
         {/each}
@@ -203,6 +224,7 @@
               y2={ROW_H}
               stroke={laneColor(e.toCol)}
               stroke-width={STROKE}
+              stroke-linecap="round"
             />
           {:else}
             <path
@@ -211,28 +233,32 @@
               )} {ROW_H}"
               stroke={laneColor(e.toCol)}
               stroke-width={STROKE}
+              stroke-linecap="round"
+              stroke-linejoin="round"
               fill="none"
             />
           {/if}
         {/each}
 
-        {#if row.commit.localOnly}
+        {#if isMerge}
           <circle
             cx={laneX(row.col)}
             cy={ROW_H / 2}
-            r={DOT_R}
-            fill="var(--color-warning)"
-            stroke="var(--color-warning)"
-            stroke-width="1.5"
-          />
-        {:else}
-          <circle
-            cx={laneX(row.col)}
-            cy={ROW_H / 2}
-            r={DOT_R}
-            fill={laneColor(row.col)}
+            r={DOT_R + 3}
+            fill="none"
+            stroke={dotColor}
+            stroke-width="1"
+            opacity="0.8"
           />
         {/if}
+        <circle
+          cx={laneX(row.col)}
+          cy={ROW_H / 2}
+          r={isMerge ? DOT_R + 0.75 : DOT_R}
+          fill={dotColor}
+          stroke="var(--color-background)"
+          stroke-width={isMerge ? 2 : 1}
+        />
       </svg>
 
       <div
@@ -241,8 +267,8 @@
         <span class="min-w-0 flex-1 truncate text-[11.5px] text-foreground/85">
           {row.commit.summary}
         </span>
-        {#each row.commit.refs as r (r)}
-          {@const clean = r.replace(/^HEAD -> /, "")}
+        {#each visibleRefs as r (r)}
+          {@const clean = cleanRef(r)}
           {@const isHead = r.startsWith("HEAD")}
           <span
             class="shrink-0 rounded px-1 py-px font-mono text-[9px] {isHead
@@ -252,6 +278,11 @@
             {clean}
           </span>
         {/each}
+        {#if hiddenRefs > 0}
+          <span class="shrink-0 rounded bg-[var(--color-surface-3)] px-1 py-px font-mono text-[9px] text-muted-foreground/70">
+            +{hiddenRefs}
+          </span>
+        {/if}
         <span
           class="shrink-0 font-mono text-[9.5px] text-muted-foreground/55"
         >
@@ -285,6 +316,14 @@
     </div>
     <div class="mt-1 text-[10.5px] text-muted-foreground/65">
       {fmtTime(c.time)}
+    </div>
+    <div class="mt-2 flex items-center gap-2 font-mono text-[10.5px]">
+      <span class={c.additions > 0 ? "text-[var(--color-success)]" : "text-muted-foreground/45"}>
+        +{c.additions}
+      </span>
+      <span class={c.deletions > 0 ? "text-danger" : "text-muted-foreground/45"}>
+        -{c.deletions}
+      </span>
     </div>
     {#if c.localOnly}
       <div class="mt-1.5 flex items-center gap-1 text-[10px] text-[var(--color-warning)]">

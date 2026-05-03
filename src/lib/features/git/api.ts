@@ -23,6 +23,8 @@ export interface Commit {
   email: string;
   time: number;
   summary: string;
+  additions: number;
+  deletions: number;
   refs: string[];
   localOnly: boolean;
 }
@@ -43,6 +45,8 @@ interface RawCommit {
   email: string;
   time: number;
   summary: string;
+  additions: number;
+  deletions: number;
   refs: string[];
   local_only: boolean;
 }
@@ -76,6 +80,8 @@ export async function gitLog(
     email: r.email,
     time: r.time,
     summary: r.summary,
+    additions: r.additions,
+    deletions: r.deletions,
     refs: r.refs,
     localOnly: r.local_only,
   }));

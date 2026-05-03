@@ -234,17 +234,15 @@ export async function reloadThread(threadId: string) {
 
   const previousPtyId = t.ptyId;
   if (previousPtyId) {
-    try {
-      await ptyKill(previousPtyId);
-    } catch {
-      // already exited
-    }
+    void ptyKill(previousPtyId, false).catch(() => {});
   }
 
   t.ptyId = null;
   t.status = "idle";
   t.exitCode = null;
-  await saveThread({ ...t, args: [...t.args] });
+  void saveThread({ ...t, args: [...t.args] }).catch((err) => {
+    console.error("saveThread failed:", err);
+  });
 
   app.activeThreadId = t.id;
   app.selectedProjectId = t.projectId;

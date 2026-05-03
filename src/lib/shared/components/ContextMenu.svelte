@@ -77,6 +77,7 @@
         class="item"
         class:danger={item.danger}
         disabled={item.disabled}
+        onmousedown={(e) => e.preventDefault()}
         onclick={() => {
           item.action?.();
           onClose();
