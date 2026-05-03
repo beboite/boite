@@ -2,9 +2,11 @@
   import { settings } from "$lib/features/settings/store.svelte";
   import { app } from "$lib/app/store.svelte";
   import { launchShortcut } from "$lib/features/thread/api";
+  import { gitStore } from "$lib/features/git/store.svelte";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
   import ShellPicker from "./ShellPicker.svelte";
   import { resolveIconKey } from "$lib/shared/icons/detect";
+  import GitBranch from "@lucide/svelte/icons/git-branch";
 
   function launch(shortcutId: string) {
     const shortcut = settings.state.shortcuts.find((s) => s.id === shortcutId);
@@ -17,6 +19,17 @@
   function openSettings() {
     app.view = "settings";
   }
+
+  function toggleGit() {
+    void settings.toggleGitPanel();
+  }
+
+  const gitState = $derived(gitStore.get(app.currentProjectId));
+  const changeCount = $derived(
+    gitState
+      ? gitState.staged.length + gitState.unstaged.length + gitState.conflicts.length
+      : 0,
+  );
 </script>
 
 <div
@@ -46,7 +59,27 @@
         Add shortcuts
       </button>
     {/if}
+
+    <ShellPicker />
   </div>
 
-  <ShellPicker />
+  <button
+    type="button"
+    class="relative flex shrink-0 items-center gap-1 rounded-md border border-transparent bg-[var(--color-surface-2)] px-2 py-1 text-xs text-foreground/85 transition hover:border-border hover:bg-[var(--color-surface-3)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 {settings.state.gitPanelOpen ? 'border-border bg-[var(--color-surface-3)] text-foreground' : ''}"
+    onclick={toggleGit}
+    disabled={app.currentProjectId === null}
+    title={settings.state.gitPanelOpen ? "Hide git panel" : "Show git panel"}
+    aria-label="Toggle git panel"
+    aria-pressed={settings.state.gitPanelOpen}
+  >
+    <GitBranch class="size-3.5" />
+    {#if gitState?.branch}
+      <span class="max-w-24 truncate">{gitState.branch}</span>
+    {/if}
+    {#if changeCount > 0}
+      <span class="rounded-full bg-amber-400/20 px-1.5 text-[10px] font-medium text-amber-300">
+        {changeCount}
+      </span>
+    {/if}
+  </button>
 </div>

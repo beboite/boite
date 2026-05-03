@@ -42,7 +42,7 @@ export function getDetector(thread: Thread): SessionDetector | null {
 
 export type ResumeBuilder = (
   args: string[],
-  sessionId: string | null,
+  sessionId: string,
 ) => string[];
 
 function stripFlag(args: string[], flags: string[], takesValue: boolean): string[] {
@@ -64,52 +64,40 @@ function stripFlag(args: string[], flags: string[], takesValue: boolean): string
 }
 
 const builders: Partial<Record<NonNullable<IconKey>, ResumeBuilder>> = {
-  // claude --resume <id> picks specific session, --resume alone shows picker.
+  // claude --resume <id> picks a specific session.
   claude: (args, sessionId) => {
     const filtered = stripFlag(args, ["--resume", "-r"], true);
-    return sessionId
-      ? [...filtered, "--resume", sessionId]
-      : [...filtered, "--resume"];
+    return [...filtered, "--resume", sessionId];
   },
-  // codex resume <id> subcommand-form. Without id: codex resume (picker).
+  // codex resume <id> subcommand-form.
   codex: (args, sessionId) => {
     const filtered = args[0] === "resume" ? args.slice(1) : args;
-    const stripped = sessionId
-      ? filtered.filter((a) => a !== sessionId)
-      : filtered;
-    return sessionId
-      ? ["resume", sessionId, ...stripped]
-      : ["resume", ...stripped];
+    const stripped = filtered.filter((a) => a !== sessionId);
+    return ["resume", sessionId, ...stripped];
   },
-  // opencode --session <id> for specific, --continue for last.
+  // opencode --session <id> picks a specific session.
   opencode: (args, sessionId) => {
     const filtered = stripFlag(
       args,
       ["--continue", "-c", "--session", "-s"],
       true,
     );
-    return sessionId
-      ? [...filtered, "--session", sessionId]
-      : [...filtered, "--continue"];
+    return [...filtered, "--session", sessionId];
   },
-  // cursor-agent --resume <chat-id> for specific, --continue for last.
+  // cursor-agent --resume <chat-id> picks a specific session.
   cursor: (args, sessionId) => {
     const filtered = stripFlag(args, ["--resume", "--continue"], true);
-    return sessionId
-      ? [...filtered, "--resume", sessionId]
-      : [...filtered, "--continue"];
+    return [...filtered, "--resume", sessionId];
   },
-  // gemini --resume <UUID> for specific, "latest" as fallback.
+  // gemini --resume <UUID> picks a specific session.
   gemini: (args, sessionId) => {
     const filtered = stripFlag(args, ["--resume", "-r"], true);
-    return [...filtered, "--resume", sessionId ?? "latest"];
+    return [...filtered, "--resume", sessionId];
   },
   // copilot --resume <UUID> picks specific session.
   copilot: (args, sessionId) => {
     const filtered = stripFlag(args, ["--resume"], true);
-    return sessionId
-      ? [...filtered, "--resume", sessionId]
-      : [...filtered, "--resume"];
+    return [...filtered, "--resume", sessionId];
   },
 };
 
@@ -136,6 +124,16 @@ export function buildResumeArgs(thread: Thread): string[] {
     );
     return thread.args;
   }
+
+  if (!thread.sessionId) {
+    logger.info(
+      "resume",
+      `${thread.id} (${key}): no captured session, spawn original command`,
+      { cmd: thread.cmd },
+    );
+    return thread.args;
+  }
+
   const out = builder(thread.args, thread.sessionId);
   logger.info(
     "resume",

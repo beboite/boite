@@ -22,6 +22,8 @@
     "sql:allow-select",
     "sql:allow-close",
     "dialog:allow-open",
+    "opener:allow-open-url",
+    "opener:allow-default-urls",
     "os:allow-platform",
     "notification:allow-notify",
     "notification:allow-is-permission-granted",

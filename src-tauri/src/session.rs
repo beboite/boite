@@ -6,6 +6,13 @@ use std::time::SystemTime;
 use rusqlite::{Connection, OpenFlags};
 use serde::Deserialize;
 
+async fn run_lookup<F>(f: F) -> Option<String>
+where
+    F: FnOnce() -> Option<String> + Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(f).await.ok().flatten()
+}
+
 #[derive(Deserialize)]
 struct ClaudeSessionLine {
     #[serde(rename = "sessionId", alias = "session_id")]
@@ -80,8 +87,7 @@ fn read_claude_session_meta(path: &Path) -> Option<(Option<String>, Option<Strin
     Some((found_session, found_cwd))
 }
 
-#[tauri::command]
-pub fn find_claude_session(cwd: String, after_unix_ms: i64) -> Option<String> {
+fn find_claude_session_blocking(cwd: String, after_unix_ms: i64) -> Option<String> {
     let home = dirs::home_dir()?;
     let projects_dir = home.join(".claude").join("projects");
     if !projects_dir.is_dir() {
@@ -190,8 +196,7 @@ fn read_codex_session_meta(path: &Path) -> Option<(String, String)> {
     Some((payload.id?, payload.cwd?))
 }
 
-#[tauri::command]
-pub fn find_codex_session(cwd: String, after_unix_ms: i64) -> Option<String> {
+fn find_codex_session_blocking(cwd: String, after_unix_ms: i64) -> Option<String> {
     let home = dirs::home_dir()?;
     let sessions_dir = home.join(".codex").join("sessions");
     if !sessions_dir.is_dir() {
@@ -230,8 +235,7 @@ fn opencode_db_path() -> Option<PathBuf> {
     Some(base.join("opencode").join("opencode.db"))
 }
 
-#[tauri::command]
-pub fn find_opencode_session(cwd: String, after_unix_ms: i64) -> Option<String> {
+fn find_opencode_session_blocking(cwd: String, after_unix_ms: i64) -> Option<String> {
     let db_path = opencode_db_path()?;
     if !db_path.is_file() {
         return None;
@@ -280,8 +284,7 @@ fn copilot_db_path() -> Option<PathBuf> {
     }
 }
 
-#[tauri::command]
-pub fn find_copilot_session(cwd: String, after_unix_ms: i64) -> Option<String> {
+fn find_copilot_session_blocking(cwd: String, after_unix_ms: i64) -> Option<String> {
     let db_path = copilot_db_path()?;
     if !db_path.is_file() {
         return None;
@@ -374,8 +377,7 @@ fn is_leap(y: i64) -> bool {
     (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
 }
 
-#[tauri::command]
-pub fn find_cursor_session(_cwd: String, after_unix_ms: i64) -> Option<String> {
+fn find_cursor_session_blocking(_cwd: String, after_unix_ms: i64) -> Option<String> {
     let home = dirs::home_dir()?;
     let chats_dir = home.join(".cursor").join("chats");
     if !chats_dir.is_dir() {
@@ -436,8 +438,7 @@ fn read_gemini_session_id(path: &Path) -> Option<String> {
     stem.strip_prefix("session-").map(|s| s.to_string())
 }
 
-#[tauri::command]
-pub fn find_gemini_session(cwd: String, after_unix_ms: i64) -> Option<String> {
+fn find_gemini_session_blocking(cwd: String, after_unix_ms: i64) -> Option<String> {
     let home = dirs::home_dir()?;
     let projects_file = home.join(".gemini").join("projects.json");
     let tmp_dir = home.join(".gemini").join("tmp");
@@ -493,4 +494,34 @@ pub fn find_gemini_session(cwd: String, after_unix_ms: i64) -> Option<String> {
         }
     }
     best.map(|(id, _)| id)
+}
+
+#[tauri::command]
+pub async fn find_claude_session(cwd: String, after_unix_ms: i64) -> Option<String> {
+    run_lookup(move || find_claude_session_blocking(cwd, after_unix_ms)).await
+}
+
+#[tauri::command]
+pub async fn find_codex_session(cwd: String, after_unix_ms: i64) -> Option<String> {
+    run_lookup(move || find_codex_session_blocking(cwd, after_unix_ms)).await
+}
+
+#[tauri::command]
+pub async fn find_opencode_session(cwd: String, after_unix_ms: i64) -> Option<String> {
+    run_lookup(move || find_opencode_session_blocking(cwd, after_unix_ms)).await
+}
+
+#[tauri::command]
+pub async fn find_cursor_session(cwd: String, after_unix_ms: i64) -> Option<String> {
+    run_lookup(move || find_cursor_session_blocking(cwd, after_unix_ms)).await
+}
+
+#[tauri::command]
+pub async fn find_gemini_session(cwd: String, after_unix_ms: i64) -> Option<String> {
+    run_lookup(move || find_gemini_session_blocking(cwd, after_unix_ms)).await
+}
+
+#[tauri::command]
+pub async fn find_copilot_session(cwd: String, after_unix_ms: i64) -> Option<String> {
+    run_lookup(move || find_copilot_session_blocking(cwd, after_unix_ms)).await
 }

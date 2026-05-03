@@ -10,7 +10,24 @@ pub struct ShellOption {
 }
 
 #[tauri::command]
-pub fn default_shell() -> String {
+pub async fn default_shell() -> String {
+    tauri::async_runtime::spawn_blocking(default_shell_blocking)
+        .await
+        .unwrap_or_else(|_| fallback_shell())
+}
+
+fn fallback_shell() -> String {
+    #[cfg(target_os = "windows")]
+    {
+        "cmd.exe".to_string()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        "/bin/bash".to_string()
+    }
+}
+
+fn default_shell_blocking() -> String {
     #[cfg(target_os = "windows")]
     {
         if let Ok(p) = which::which("pwsh") {
@@ -62,7 +79,13 @@ fn git_bash_path() -> Option<std::path::PathBuf> {
 }
 
 #[tauri::command]
-pub fn available_shells() -> Vec<ShellOption> {
+pub async fn available_shells() -> Vec<ShellOption> {
+    tauri::async_runtime::spawn_blocking(available_shells_blocking)
+        .await
+        .unwrap_or_default()
+}
+
+fn available_shells_blocking() -> Vec<ShellOption> {
     let mut shells: Vec<ShellOption> = Vec::new();
 
     #[cfg(target_os = "windows")]

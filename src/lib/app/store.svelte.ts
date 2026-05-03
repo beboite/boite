@@ -114,9 +114,14 @@ class AppState {
   }
 
   async removeThread(id: string) {
+    const removed = this.threads.find((t) => t.id === id);
     this.threads = this.threads.filter((t) => t.id !== id);
     if (this.activeThreadId === id) {
-      this.activeThreadId = this.threads[0]?.id ?? null;
+      const projectId = removed?.projectId ?? this.selectedProjectId;
+      this.selectedProjectId = projectId ?? this.selectedProjectId;
+      this.activeThreadId = projectId
+        ? (this.threadsByProjectSorted(projectId)[0]?.id ?? null)
+        : null;
     }
     try {
       await dbDeleteThread(id);

@@ -4,12 +4,15 @@ use crate::BootState;
 use crate::pty::{PtyEvent, PtyManager, PtySpawnArgs};
 
 #[tauri::command]
-pub fn pty_spawn(
+pub async fn pty_spawn(
     manager: State<'_, PtyManager>,
     on_event: Channel<PtyEvent>,
     spec: PtySpawnArgs,
 ) -> Result<String, String> {
-    manager.spawn(on_event, spec)
+    let manager = manager.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || manager.spawn(on_event, spec))
+        .await
+        .map_err(|e| format!("pty spawn task failed: {e}"))?
 }
 
 #[tauri::command]

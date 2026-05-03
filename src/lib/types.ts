@@ -57,6 +57,8 @@ export interface Settings {
   idleTimeoutMinutes: number;
   idleAutocloseByIcon: Record<string, boolean>;
   confirmCloseThread: boolean;
+  gitPanelOpen: boolean;
+  gitPanelWidth: number;
 }
 
 export type View = "terminal" | "settings";

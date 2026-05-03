@@ -1,12 +1,32 @@
 import { app } from "$lib/app/store.svelte";
 import { ptyKill } from "$lib/storage/pty";
 import { getDefaultShell } from "$lib/storage/shell";
+import { saveThread } from "$lib/storage/db";
 import { parseCommand, settings } from "$lib/features/settings/store.svelte";
 import { resolveIconKey } from "$lib/shared/icons/detect";
 import { platform } from "$lib/storage/platform.svelte";
 import { notifications } from "$lib/features/notifications/store.svelte";
+import { statusEngine } from "$lib/features/thread/statusEngine";
 import type { IconKey, Shortcut, Thread } from "$lib/types";
 import type { ShellOption } from "$lib/storage/platform.svelte";
+
+const closedThreads: Thread[] = [];
+const MAX_CLOSED_THREADS = 20;
+
+function snapshotThread(thread: Thread): Thread {
+  return {
+    ...thread,
+    args: [...thread.args],
+    ptyId: null,
+    status: "idle",
+    exitCode: null,
+  };
+}
+
+function rememberClosedThread(thread: Thread) {
+  closedThreads.push(snapshotThread(thread));
+  if (closedThreads.length > MAX_CLOSED_THREADS) closedThreads.shift();
+}
 
 function buildThread(
   projectId: string,
@@ -142,6 +162,7 @@ export async function launchBlankTerminal(
 
 export async function closeThread(threadId: string) {
   const t = app.threads.find((x) => x.id === threadId);
+  if (t) rememberClosedThread(t);
   if (t?.ptyId) {
     try {
       await ptyKill(t.ptyId);
@@ -150,4 +171,51 @@ export async function closeThread(threadId: string) {
     }
   }
   await app.removeThread(threadId);
+}
+
+export async function restoreLastClosedThread(): Promise<Thread | null> {
+  while (closedThreads.length > 0) {
+    const thread = closedThreads.pop();
+    if (!thread) break;
+    if (!app.projects.some((p) => p.id === thread.projectId)) {
+      continue;
+    }
+
+    const restored = snapshotThread(thread);
+    await app.upsertThread(restored);
+    app.activeThreadId = restored.id;
+    app.selectedProjectId = restored.projectId;
+    app.view = "terminal";
+    statusEngine.markViewed(restored.id);
+    notifications.success(`Restored ${restored.title ?? restored.label}`);
+    return restored;
+  }
+
+  notifications.error("No closed thread to restore");
+  return null;
+}
+
+export async function reloadThread(threadId: string) {
+  const t = app.threads.find((x) => x.id === threadId);
+  if (!t) return;
+
+  const previousPtyId = t.ptyId;
+  if (previousPtyId) {
+    try {
+      await ptyKill(previousPtyId);
+    } catch {
+      // already exited
+    }
+  }
+
+  t.ptyId = null;
+  t.status = "idle";
+  t.exitCode = null;
+  await saveThread({ ...t, args: [...t.args] });
+
+  app.activeThreadId = t.id;
+  app.selectedProjectId = t.projectId;
+  app.view = "terminal";
+  statusEngine.markViewed(t.id);
+  app.bumpRespawn(t.id);
 }

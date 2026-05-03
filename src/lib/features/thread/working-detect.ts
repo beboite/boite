@@ -23,6 +23,9 @@ const WORKING_BY_KEY: Partial<Record<NonNullable<IconKey>, RegExp[]>> = {
     /esc\s+to\s+(?:interrupt|cancel|stop)/i,
     /\bgenerating\b/i,
     /\bthinking\b/i,
+    /\bworking\b/i,
+    /\brunning\b/i,
+    /\bprocessing\b/i,
     /\(\d+s\s*[·•]/,
   ],
   cursor: [

@@ -1,13 +1,15 @@
 import { app } from "$lib/app/store.svelte";
 import { settings } from "$lib/features/settings/store.svelte";
+import { paneStore, leavesOf } from "$lib/features/panes/store.svelte";
 import { notifyWhenUnfocused } from "$lib/storage/notify";
 import { ptyKill } from "$lib/storage/pty";
 import { logger } from "$lib/shared/services/logger.svelte";
 
 const TICK_MS = 500;
-const WORKING_TTL_MS = 2000;
+const DEFAULT_WORKING_TTL_MS = 2000;
 
 const lastWorkingAt = new Map<string, number>();
+const workingTtlMs = new Map<string, number>();
 const lastViewedAt = new Map<string, number>();
 const prevStatus = new Map<string, string>();
 let timer: ReturnType<typeof setInterval> | null = null;
@@ -31,15 +33,35 @@ function maybeAutoClose(threadId: string, iconKey: string | null | undefined) {
   });
 }
 
+function visibleThreadIds(): Set<string> {
+  const id = app.activeThreadId;
+  if (!id) return new Set();
+  const g = paneStore.groupOf(id);
+  if (!g) return new Set([id]);
+  return new Set(leavesOf(g.root));
+}
+
 function tick() {
   const now = Date.now();
+  const visible = visibleThreadIds();
+  for (const id of visible) lastViewedAt.set(id, now);
+
   for (const t of app.threads) {
+    if (!t.ptyId) {
+      lastWorkingAt.delete(t.id);
+      prevStatus.delete(t.id);
+      if (t.status === "ready" || t.status === "running") {
+        app.setThreadStatus(t.id, "idle");
+      }
+      continue;
+    }
     if (t.status === "done" || t.status === "exited" || t.status === "error") {
       prevStatus.set(t.id, t.status);
       continue;
     }
     const stamp = lastWorkingAt.get(t.id) ?? 0;
-    const working = stamp > 0 && now - stamp < WORKING_TTL_MS;
+    const ttl = workingTtlMs.get(t.id) ?? DEFAULT_WORKING_TTL_MS;
+    const working = stamp > 0 && now - stamp < ttl;
     const next = working ? "running" : "ready";
     if (t.status !== next) {
       app.setThreadStatus(t.id, next);
@@ -50,15 +72,16 @@ function tick() {
     }
     prevStatus.set(t.id, next);
 
-    if (next === "ready" && t.id !== app.activeThreadId) {
+    if (next === "ready" && !visible.has(t.id)) {
       maybeAutoClose(t.id, t.iconKey);
     }
   }
 }
 
 export const statusEngine = {
-  markWorking(threadId: string) {
+  markWorking(threadId: string, ttlMs = DEFAULT_WORKING_TTL_MS) {
     lastWorkingAt.set(threadId, Date.now());
+    workingTtlMs.set(threadId, ttlMs);
   },
 
   markViewed(threadId: string) {
@@ -75,6 +98,7 @@ export const statusEngine = {
   release(threadId: string) {
     refCount = Math.max(0, refCount - 1);
     lastWorkingAt.delete(threadId);
+    workingTtlMs.delete(threadId);
     lastViewedAt.delete(threadId);
     prevStatus.delete(threadId);
     if (refCount === 0 && timer !== null) {

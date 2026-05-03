@@ -10,7 +10,13 @@ pub struct ProjectInspection {
 }
 
 #[tauri::command]
-pub fn inspect_project(path: String) -> Result<ProjectInspection, String> {
+pub async fn inspect_project(path: String) -> Result<ProjectInspection, String> {
+    tauri::async_runtime::spawn_blocking(move || inspect_project_blocking(path))
+        .await
+        .map_err(|e| format!("inspect_project task failed: {e}"))?
+}
+
+fn inspect_project_blocking(path: String) -> Result<ProjectInspection, String> {
     let p = Path::new(&path);
     if !p.is_dir() {
         return Err("not a directory".into());

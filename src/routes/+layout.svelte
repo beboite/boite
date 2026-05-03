@@ -5,8 +5,13 @@
   import { getCurrentWebview } from "@tauri-apps/api/webview";
   import { app } from "$lib/app/store.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
-  import { closeThread, launchBlankTerminal } from "$lib/features/thread/api";
+  import {
+    closeThread,
+    launchBlankTerminal,
+    restoreLastClosedThread,
+  } from "$lib/features/thread/api";
   import { addProjectByPath } from "$lib/features/project/api";
+  import { paneStore, leavesOf } from "$lib/features/panes/store.svelte";
 
   let { children } = $props();
 
@@ -102,6 +107,33 @@
     if (e.key === "Tab" && !isTextInput(e.target)) {
       e.preventDefault();
       cycleThread(e.shiftKey ? -1 : 1);
+      return;
+    }
+
+    // Cycle pane within active group (Ctrl+Alt+Arrow)
+    if (
+      e.altKey &&
+      (e.key === "ArrowLeft" || e.key === "ArrowRight" ||
+        e.key === "ArrowUp" || e.key === "ArrowDown")
+    ) {
+      const id = app.activeThreadId;
+      if (!id) return;
+      const g = paneStore.groupOf(id);
+      if (!g) return;
+      const leaves = leavesOf(g.root);
+      if (leaves.length < 2) return;
+      e.preventDefault();
+      const idx = leaves.indexOf(id);
+      const dir = e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : -1;
+      const next = leaves[(idx + dir + leaves.length) % leaves.length];
+      app.activeThreadId = next;
+      return;
+    }
+
+    // Restore last closed thread
+    if ((e.key === "t" || e.key === "T") && e.shiftKey && !e.altKey) {
+      e.preventDefault();
+      void restoreLastClosedThread();
       return;
     }
 

@@ -5,11 +5,13 @@
   import { WebglAddon } from "@xterm/addon-webgl";
   import { WebLinksAddon } from "@xterm/addon-web-links";
   import { Unicode11Addon } from "@xterm/addon-unicode11";
+  import { openUrl } from "@tauri-apps/plugin-opener";
   import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
   import { ptySpawn, ptyWrite, ptyResize } from "$lib/storage/pty";
   import type { PtyEvent } from "$lib/storage/pty";
   import { app } from "$lib/app/store.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
+  import { reloadThread, restoreLastClosedThread } from "$lib/features/thread/api";
   import { buildResumeArgs, getDetector } from "$lib/features/thread/session";
   import {
     planDirectSpawn,
@@ -24,10 +26,12 @@
     titleSignalsWorking,
   } from "$lib/features/thread/working-detect";
   import { statusEngine } from "$lib/features/thread/statusEngine";
+  import ContextMenu from "$lib/shared/components/ContextMenu.svelte";
+  import type { ContextMenuItem } from "$lib/shared/components/ContextMenu.svelte";
   import type { Thread } from "$lib/types";
 
-  type Props = { thread: Thread; active: boolean };
-  let { thread, active }: Props = $props();
+  type Props = { thread: Thread; visible: boolean; focused: boolean };
+  let { thread, visible, focused }: Props = $props();
 
   let container: HTMLDivElement;
   let term: Terminal | null = null;
@@ -35,17 +39,26 @@
   let resizeObserver: ResizeObserver | null = null;
   let ptyId: string | null = null;
   let spawned = $state(false);
+  let ctxMenu = $state<{ x: number; y: number; items: ContextMenuItem[] } | null>(
+    null,
+  );
   let lastOutputAt = 0;
   let sessionTimer: ReturnType<typeof setInterval> | null = null;
   let fitRafId: number | null = null;
+  let removeWheelCapture: (() => void) | null = null;
   let lastDetectAt = 0;
+  let detectBuffer = "";
   const decoder = new TextDecoder("utf-8", { fatal: false });
+  const encoder = new TextEncoder();
+  const LF = new Uint8Array([0x0a]);
+  const DETECT_BUFFER_MAX = 4000;
+  const OPENCODE_ACTIVITY_TTL_MS = 10_000;
 
   function scheduleFit() {
     if (fitRafId !== null) return;
     fitRafId = requestAnimationFrame(() => {
       fitRafId = null;
-      if (active) fit?.fit();
+      if (visible) fit?.fit();
     });
   }
 
@@ -55,13 +68,27 @@
     return raw.slice(m.index).trim();
   }
 
+  function markRunning(ttlMs?: number) {
+    statusEngine.markWorking(thread.id, ttlMs);
+    app.setThreadStatus(thread.id, "running");
+  }
+
+  function appendDetectBuffer(text: string) {
+    detectBuffer += text;
+    if (detectBuffer.length > DETECT_BUFFER_MAX) {
+      detectBuffer = detectBuffer.slice(-DETECT_BUFFER_MAX);
+    }
+  }
+
   function detectWorkingFromOutput(text: string) {
+    appendDetectBuffer(text);
     const now = Date.now();
     if (now - lastDetectAt < 120) return;
     lastDetectAt = now;
-    if (detectWorking(text, thread.iconKey)) {
-      statusEngine.markWorking(thread.id);
-      app.setThreadStatus(thread.id, "running");
+    if (detectWorking(detectBuffer, thread.iconKey)) {
+      markRunning();
+    } else if (thread.iconKey === "opencode" && text.trim().length > 0) {
+      markRunning(OPENCODE_ACTIVITY_TTL_MS);
     }
   }
 
@@ -77,8 +104,7 @@
       const cleaned = cleanTitle(event.value);
       if (cleaned) app.setThreadTitle(thread.id, cleaned);
       if (titleSignalsWorking(event.value)) {
-        statusEngine.markWorking(thread.id);
-        app.setThreadStatus(thread.id, "running");
+        markRunning();
       }
     } else if (event.type === "exit") {
       const code = event.code ?? null;
@@ -112,15 +138,107 @@
     return true;
   }
 
-  function handleContextMenu(e: MouseEvent) {
+  function openTerminalContextMenu(e: MouseEvent) {
     e.preventDefault();
     if (!term) return;
     const sel = term.getSelection();
-    if (sel) {
-      void copySelection().then(() => term?.clearSelection());
-    } else {
-      void pasteFromClipboard();
+    const items: ContextMenuItem[] = [
+      {
+        label: "Copy",
+        disabled: !sel,
+        action: () => {
+          void copySelection().then(() => term?.clearSelection());
+        },
+      },
+      {
+        label: "Paste",
+        action: () => {
+          void pasteFromClipboard();
+        },
+      },
+      { separator: true },
+      {
+        label: "Reload thread",
+        action: () => {
+          void reloadThread(thread.id);
+        },
+      },
+    ];
+    ctxMenu = { x: e.clientX, y: e.clientY, items };
+  }
+
+  function closeContextMenu() {
+    ctxMenu = null;
+  }
+
+  async function openTerminalLink(event: MouseEvent, uri: string) {
+    if (event.button !== 0 || (!event.ctrlKey && !event.metaKey)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    try {
+      await openUrl(uri);
+    } catch (err) {
+      logger.error("terminal", `open link failed: ${uri}`, String(err));
+      notifications.error("Failed to open link");
     }
+  }
+
+  function shouldSendLineFeed(e: KeyboardEvent, code: string): boolean {
+    const isEnter = code === "Enter" || code === "NumpadEnter";
+    const isCodex = thread.iconKey === "codex";
+    if (
+      isEnter &&
+      e.shiftKey &&
+      !e.ctrlKey &&
+      !e.altKey &&
+      (settings.state.powershellNewline || isCodex)
+    ) {
+      return true;
+    }
+    return isCodex && e.ctrlKey && !e.shiftKey && !e.altKey && code === "KeyJ";
+  }
+
+  function sendLineFeed(e: KeyboardEvent): boolean {
+    e.preventDefault();
+    e.stopPropagation();
+    if (ptyId) void ptyWrite(ptyId, LF);
+    queueMicrotask(() => term?.focus());
+    return false;
+  }
+
+  function wheelLines(e: WheelEvent): number {
+    const raw =
+      e.deltaMode === 1
+        ? e.deltaY
+        : e.deltaMode === 2
+          ? e.deltaY * (term?.rows ?? 24)
+          : e.deltaY / 20;
+    if (raw === 0) return 0;
+    return Math.sign(raw) * Math.max(1, Math.min(12, Math.round(Math.abs(raw))));
+  }
+
+  function handleCodexWheel(e: WheelEvent) {
+    if (thread.iconKey !== "codex" || e.ctrlKey || e.metaKey || !term) return;
+    if (e.deltaY === 0) return;
+
+    const mouseMode = term.element?.classList.contains("enable-mouse-events") ?? false;
+    if (!mouseMode) return;
+
+    const lines = wheelLines(e);
+    if (lines === 0) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    const buffer = term.buffer.active;
+    if (buffer.baseY > 0) {
+      term.scrollLines(lines);
+      return;
+    }
+
+    if (!ptyId) return;
+    const seq = lines < 0 ? "\x1b[A" : "\x1b[B";
+    void ptyWrite(ptyId, encoder.encode(seq.repeat(Math.abs(lines))));
   }
 
   async function spawn() {
@@ -135,30 +253,6 @@
 
     const cols = term.cols;
     const rows = term.rows;
-
-    if (!thread.sessionId) {
-      const detector = getDetector(thread);
-      if (detector) {
-        try {
-          const id = await detector(project.cwd, thread.createdAt - 1000);
-          if (id) {
-            const t = app.threads.find((x) => x.id === thread.id);
-            if (t) {
-              t.sessionId = id;
-              thread.sessionId = id;
-              void saveThread($state.snapshot(t) as Thread);
-              logger.info(
-                "session",
-                `pre-spawn capture for ${t.label}`,
-                { id, iconKey: t.iconKey },
-              );
-            }
-          }
-        } catch (err) {
-          logger.error("session", `pre-spawn detect failed`, String(err));
-        }
-      }
-    }
 
     const userArgs = buildResumeArgs(thread);
     const wrapShell = settings.state.defaultShellId
@@ -271,6 +365,9 @@
       if (thread.status === "ready") {
         app.setThreadStatus(thread.id, "running");
       }
+      if (thread.iconKey === "opencode" && data.includes("\r")) {
+        markRunning(OPENCODE_ACTIVITY_TTL_MS);
+      }
     });
 
     term.onResize(({ cols, rows }) => {
@@ -319,7 +416,9 @@
 
     fit = new FitAddon();
     term.loadAddon(fit);
-    term.loadAddon(new WebLinksAddon());
+    term.loadAddon(new WebLinksAddon((event, uri) => {
+      void openTerminalLink(event, uri);
+    }));
     term.loadAddon(new Unicode11Addon());
     term.unicode.activeVersion = "11";
 
@@ -346,25 +445,28 @@
         void pasteFromClipboard();
         return false;
       }
-
-      if (
-        settings.state.powershellNewline &&
-        e.shiftKey &&
-        !e.ctrlKey &&
-        !e.altKey &&
-        code === "Enter"
-      ) {
+      if (e.ctrlKey && e.shiftKey && !e.altKey && code === "KeyT") {
         e.preventDefault();
         e.stopPropagation();
-        if (ptyId) void ptyWrite(ptyId, new Uint8Array([0x0a]));
-        queueMicrotask(() => term?.focus());
+        void restoreLastClosedThread();
         return false;
+      }
+
+      if (shouldSendLineFeed(e, code)) {
+        return sendLineFeed(e);
       }
 
       return true;
     });
 
     term.open(container);
+    container.addEventListener("wheel", handleCodexWheel, {
+      capture: true,
+      passive: false,
+    });
+    removeWheelCapture = () => {
+      container.removeEventListener("wheel", handleCodexWheel, { capture: true });
+    };
 
     try {
       term.loadAddon(new WebglAddon());
@@ -373,7 +475,7 @@
     }
 
     fit.fit();
-    if (active) term.focus();
+    if (focused) term.focus();
 
     void spawn();
 
@@ -386,11 +488,14 @@
   });
 
   $effect(() => {
-    if (active && term) {
-      queueMicrotask(() => {
-        fit?.fit();
-        term?.focus();
-      });
+    if (visible && term) {
+      queueMicrotask(() => fit?.fit());
+    }
+  });
+
+  $effect(() => {
+    if (focused && term) {
+      queueMicrotask(() => term?.focus());
     }
   });
 
@@ -401,6 +506,8 @@
     if (fitRafId !== null) cancelAnimationFrame(fitRafId);
     fitRafId = null;
     resizeObserver?.disconnect();
+    removeWheelCapture?.();
+    removeWheelCapture = null;
     term?.dispose();
     term = null;
     fit = null;
@@ -410,6 +517,15 @@
 <div
   bind:this={container}
   class="h-full w-full bg-[var(--color-background)] px-3 py-2"
-  oncontextmenu={handleContextMenu}
+  oncontextmenu={openTerminalContextMenu}
   role="presentation"
 ></div>
+
+{#if ctxMenu}
+  <ContextMenu
+    items={ctxMenu.items}
+    x={ctxMenu.x}
+    y={ctxMenu.y}
+    onClose={closeContextMenu}
+  />
+{/if}

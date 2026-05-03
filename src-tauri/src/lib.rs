@@ -1,4 +1,5 @@
 mod commands;
+mod git;
 mod project;
 mod pty;
 mod session;
@@ -91,6 +92,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_os::init())
+        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_notification::init())
         .plugin(
@@ -128,6 +130,13 @@ pub fn run() {
             session::find_cursor_session,
             session::find_gemini_session,
             session::find_copilot_session,
+            git::git_repo_info,
+            git::git_status,
+            git::git_log,
+            git::git_stage,
+            git::git_unstage,
+            git::git_discard,
+            git::git_commit,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

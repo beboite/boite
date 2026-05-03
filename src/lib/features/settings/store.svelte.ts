@@ -24,6 +24,8 @@ const DEFAULTS: Settings = {
   idleTimeoutMinutes: 10,
   idleAutocloseByIcon: { claude: true, codex: true },
   confirmCloseThread: true,
+  gitPanelOpen: false,
+  gitPanelWidth: 320,
 };
 
 export function parseCommand(input: string): { cmd: string; args: string[] } {
@@ -100,6 +102,14 @@ class SettingsStore {
           typeof stored.confirmCloseThread === "boolean"
             ? stored.confirmCloseThread
             : DEFAULTS.confirmCloseThread,
+        gitPanelOpen:
+          typeof stored.gitPanelOpen === "boolean"
+            ? stored.gitPanelOpen
+            : DEFAULTS.gitPanelOpen,
+        gitPanelWidth:
+          typeof stored.gitPanelWidth === "number" && stored.gitPanelWidth > 0
+            ? stored.gitPanelWidth
+            : DEFAULTS.gitPanelWidth,
       };
     } catch (err) {
       console.error("loadSettings failed:", err);
@@ -236,6 +246,18 @@ class SettingsStore {
   async setConfirmCloseThread(value: boolean) {
     this.state.confirmCloseThread = value;
     await this.persist();
+  }
+
+  async toggleGitPanel() {
+    this.state.gitPanelOpen = !this.state.gitPanelOpen;
+    await this.persist();
+  }
+
+  setGitPanelWidth(px: number) {
+    const clamped = Math.max(240, Math.min(600, Math.round(px)));
+    if (this.state.gitPanelWidth === clamped) return;
+    this.state.gitPanelWidth = clamped;
+    this.persistSoon();
   }
 }
 

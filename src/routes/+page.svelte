@@ -12,10 +12,33 @@
   import Terminal from "$lib/features/terminal/Terminal.svelte";
   import Toaster from "$lib/features/notifications/Toaster.svelte";
   import BoiteLogo from "$lib/shared/components/BoiteLogo.svelte";
+  import GitPanel from "$lib/features/git/GitPanel.svelte";
+  import { paneStore } from "$lib/features/panes/store.svelte";
+  import PaneShell from "$lib/features/panes/PaneShell.svelte";
+  import PaneOverlay from "$lib/features/panes/PaneOverlay.svelte";
 
   let activated = $state<Record<string, true>>({});
 
+  $effect(() => {
+    void app.threads.length;
+    paneStore.syncWithThreads();
+  });
+
+  const activeGroupId = $derived.by(() => {
+    if (!app.activeThreadId) return null;
+    return paneStore.groupOf(app.activeThreadId)?.id ?? null;
+  });
+
+  $effect(() => {
+    const id = app.activeThreadId;
+    if (!id) return;
+    const g = paneStore.groupOf(id);
+    if (g && g.focusedThreadId !== id) g.focusedThreadId = id;
+  });
+
   function activateThread(id: string) {
+    if (app.activeThreadId === id && app.view === "terminal") return;
+
     const t = app.threads.find((x) => x.id === id);
     const isFinished =
       t && (t.status === "done" || t.status === "exited" || t.status === "error");
@@ -27,6 +50,11 @@
     if (isFinished) {
       app.bumpRespawn(id);
     }
+  }
+
+  function focusPane(threadId: string) {
+    if (app.activeThreadId === threadId) return;
+    activateThread(threadId);
   }
 
   async function addProject() {
@@ -55,7 +83,6 @@
     await app.removeProject(projectId);
   }
 
-  // Pre-activate any thread that becomes active via shortcut/blank-terminal launch.
   $effect(() => {
     const id = app.activeThreadId;
     if (id && app.threads.some((t) => t.id === id) && !activated[id]) {
@@ -64,9 +91,16 @@
     }
   });
 
-  // Drop activation entries for threads that no longer exist (project removed,
-  // thread deleted from another path, etc.). Keeps the map from accumulating
-  // dead keys during a long session.
+  $effect(() => {
+    const g = paneStore.groups.find((x) => x.id === activeGroupId);
+    if (!g) return;
+    for (const leafId of paneStore.visibleLeaves(activeGroupId)) {
+      if (!activated[leafId] && app.threads.some((t) => t.id === leafId)) {
+        activated[leafId] = true;
+      }
+    }
+  });
+
   $effect(() => {
     const valid = new Set(app.threads.map((t) => t.id));
     let dirty = false;
@@ -135,17 +169,43 @@
             </div>
           {/if}
 
-          <div class="relative min-h-0 flex-1 bg-[var(--color-background)]">
+          <div
+            class="relative min-h-0 flex-1 bg-[var(--color-background)]"
+            data-pane-viewport
+          >
+            {#each paneStore.groups as group (group.id)}
+              {@const visible = activeGroupId === group.id && app.view === "terminal"}
+              <div
+                class="absolute inset-0"
+                style:visibility={visible ? "visible" : "hidden"}
+                aria-hidden={!visible}
+              >
+                <PaneShell {group} />
+              </div>
+            {/each}
+
             {#each app.threads as thread (thread.id)}
-              {#if activated[thread.id]}
+              {@const group = paneStore.groupOf(thread.id)}
+              {@const visible =
+                group?.id === activeGroupId && app.view === "terminal"}
+              {@const focused =
+                visible && group?.focusedThreadId === thread.id}
+              {@const rect = paneStore.rects[thread.id]}
+              {#if activated[thread.id] && rect && group}
                 <div
-                  class="absolute inset-0"
-                  style:visibility={app.activeThreadId === thread.id && app.view === "terminal" ? "visible" : "hidden"}
-                  aria-hidden={!(app.activeThreadId === thread.id && app.view === "terminal")}
+                  class="absolute"
+                  style:left="{rect.x}px"
+                  style:top="{rect.y}px"
+                  style:width="{rect.w}px"
+                  style:height="{rect.h}px"
+                  style:visibility={visible ? "visible" : "hidden"}
+                  aria-hidden={!visible}
+                  onpointerdowncapture={() => focusPane(thread.id)}
                 >
                   {#key app.respawnNonce[thread.id] ?? 0}
-                    <Terminal {thread} active={app.activeThreadId === thread.id && app.view === "terminal"} />
+                    <Terminal {thread} {visible} {focused} />
                   {/key}
+                  <PaneOverlay {thread} {group} {focused} />
                 </div>
               {/if}
             {/each}
@@ -159,6 +219,10 @@
         {/if}
       {/if}
     </main>
+
+    {#if app.ready && settings.state.gitPanelOpen}
+      <GitPanel />
+    {/if}
   </div>
 </div>
 

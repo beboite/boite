@@ -38,7 +38,7 @@ struct PtyHandle {
     killer: Arc<Mutex<Box<dyn ChildKiller + Send + Sync>>>,
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct PtyManager {
     inner: Arc<Mutex<HashMap<String, PtyHandle>>>,
 }

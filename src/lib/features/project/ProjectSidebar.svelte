@@ -1,15 +1,21 @@
 <script lang="ts">
   import { app } from "$lib/app/store.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
+  import { paneStore, countLeaves } from "$lib/features/panes/store.svelte";
+  import { reloadThread } from "$lib/features/thread/api";
   import StatusDot from "$lib/shared/components/StatusDot.svelte";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
   import ConfirmDialog from "$lib/shared/components/ConfirmDialog.svelte";
+  import ContextMenu from "$lib/shared/components/ContextMenu.svelte";
+  import type { ContextMenuItem } from "$lib/shared/components/ContextMenu.svelte";
   import type { Thread } from "$lib/types";
   import Plus from "@lucide/svelte/icons/plus";
   import X from "@lucide/svelte/icons/x";
   import FolderOpen from "@lucide/svelte/icons/folder-open";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import MoreHorizontal from "@lucide/svelte/icons/more-horizontal";
+
+  const DRAG_MIME = "application/x-boite-thread";
 
   type Props = {
     onCloseThread: (threadId: string) => void;
@@ -46,6 +52,18 @@
 
   function rowMouseDown(e: MouseEvent) {
     mouseDownTarget = e.target as HTMLElement;
+  }
+
+  function threadMouseDown(e: MouseEvent) {
+    rowMouseDown(e);
+    if (e.button === 1) e.preventDefault();
+  }
+
+  function threadAuxClick(id: string, e: MouseEvent) {
+    if (e.button !== 1) return;
+    e.preventDefault();
+    e.stopPropagation();
+    requestRemoveThread(id);
   }
 
   function toggleMenu(id: string, e: MouseEvent) {
@@ -111,9 +129,11 @@
       return;
     }
     threadDragging = { id, projectId };
+    paneStore.draggingThreadId = id;
     if (e.dataTransfer) {
       e.dataTransfer.effectAllowed = "move";
       e.dataTransfer.setData("text/plain", id);
+      e.dataTransfer.setData(DRAG_MIME, id);
     }
   }
   function threadDragOver(id: string, projectId: string, e: DragEvent) {
@@ -124,9 +144,11 @@
   }
   function threadDrop(id: string, projectId: string, e: DragEvent) {
     e.preventDefault();
+    e.stopPropagation();
     const drag = threadDragging;
     threadDragging = null;
     threadOver = null;
+    paneStore.draggingThreadId = null;
     if (!drag || drag.projectId !== projectId || drag.id === id) return;
     const ids = app.threadsByProjectSorted(projectId).map((t) => t.id);
     const fromIdx = ids.indexOf(drag.id);
@@ -139,7 +161,64 @@
   function threadDragEnd() {
     threadDragging = null;
     threadOver = null;
+    paneStore.draggingThreadId = null;
     mouseDownTarget = null;
+  }
+
+  function asideDragOver(e: DragEvent) {
+    if (!e.dataTransfer?.types.includes(DRAG_MIME)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+  }
+
+  function asideDrop(e: DragEvent) {
+    const id = e.dataTransfer?.getData(DRAG_MIME);
+    if (!id) return;
+    e.preventDefault();
+    paneStore.unsplit(id);
+  }
+
+  function threadHoverEnter(id: string) {
+    paneStore.hoveredThreadId = id;
+  }
+  function threadHoverLeave(id: string) {
+    if (paneStore.hoveredThreadId === id) paneStore.hoveredThreadId = null;
+  }
+
+  // ----- Context menu -----
+  let ctxMenu = $state<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
+
+  function openThreadContextMenu(thread: Thread, e: MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    const group = paneStore.groupOf(thread.id);
+    const inMultiPane = !!group && countLeaves(group.root) > 1;
+    const items: ContextMenuItem[] = [];
+    if (inMultiPane) {
+      items.push({
+        label: "Détacher du groupe",
+        action: () => {
+          paneStore.unsplit(thread.id);
+        },
+      });
+      items.push({ separator: true });
+    }
+    items.push({
+      label: "Reload thread",
+      action: () => {
+        void reloadThread(thread.id);
+      },
+    });
+    items.push({ separator: true });
+    items.push({
+      label: "Fermer",
+      action: () => requestRemoveThread(thread.id),
+      danger: true,
+    });
+    ctxMenu = { x: e.clientX, y: e.clientY, items };
+  }
+  function closeContextMenu() {
+    ctxMenu = null;
   }
 
   // ----- Sidebar resize -----
@@ -213,6 +292,8 @@
     ? 'select-none'
     : ''}"
   style:width="{settings.state.sidebarWidth}px"
+  ondragover={asideDragOver}
+  ondrop={asideDrop}
 >
   <header class="flex items-center justify-between px-3 py-2">
     <span
@@ -333,11 +414,14 @@
               <li
                 class="group/thread"
                 draggable="true"
-                onmousedown={rowMouseDown}
+                onmousedown={threadMouseDown}
                 ondragstart={(e) => threadDragStart(thread.id, thread.projectId, e)}
                 ondragover={(e) => threadDragOver(thread.id, thread.projectId, e)}
                 ondrop={(e) => threadDrop(thread.id, thread.projectId, e)}
                 ondragend={threadDragEnd}
+                onmouseenter={() => threadHoverEnter(thread.id)}
+                onmouseleave={() => threadHoverLeave(thread.id)}
+                oncontextmenu={(e) => openThreadContextMenu(thread, e)}
                 role="listitem"
               >
                 <div
@@ -349,6 +433,7 @@
                   role="button"
                   tabindex="0"
                   onclick={() => onActivateThread(thread.id)}
+                  onauxclick={(e) => threadAuxClick(thread.id, e)}
                   onkeydown={(e) => {
                     if (e.key === "Enter" || e.key === " ") {
                       e.preventDefault();
@@ -427,3 +512,12 @@
   onConfirm={confirmRemoveProject}
   onCancel={cancelRemoveProject}
 />
+
+{#if ctxMenu}
+  <ContextMenu
+    items={ctxMenu.items}
+    x={ctxMenu.x}
+    y={ctxMenu.y}
+    onClose={closeContextMenu}
+  />
+{/if}
