@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
@@ -30,6 +31,7 @@ pub struct Commit {
     pub time: i64,
     pub summary: String,
     pub refs: Vec<String>,
+    pub local_only: bool,
 }
 
 fn git(path: &Path) -> Command {
@@ -324,9 +326,40 @@ fn log_blocking(path: &str, limit: u32, skip: u32) -> Result<Vec<Commit>, String
             time,
             summary,
             refs,
+            local_only: false,
         });
     }
+
+    let local_set = local_only_set(p);
+    if !local_set.is_empty() {
+        for c in &mut commits {
+            if local_set.contains(&c.sha) {
+                c.local_only = true;
+            }
+        }
+    }
+
     Ok(commits)
+}
+
+fn local_only_set(path: &Path) -> HashSet<String> {
+    let mut cmd = git(path);
+    cmd.args([
+        "rev-list",
+        "HEAD",
+        "--branches",
+        "--tags",
+        "--not",
+        "--remotes",
+    ]);
+    match run(cmd) {
+        Ok(b) => String::from_utf8_lossy(&b)
+            .lines()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect(),
+        Err(_) => HashSet::new(),
+    }
 }
 
 #[tauri::command]
@@ -380,6 +413,23 @@ fn run_files(path: &str, sub: &str, files: &[String], with_dashes: bool) -> Resu
     for f in files {
         cmd.arg(f);
     }
+    run(cmd).map(|_| ())
+}
+
+#[tauri::command]
+pub async fn git_fetch(path: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || fetch_blocking(&path))
+        .await
+        .map_err(|e| format!("git_fetch task failed: {e}"))?
+}
+
+fn fetch_blocking(path: &str) -> Result<(), String> {
+    let p = Path::new(path);
+    if !p.is_dir() {
+        return Err("not a directory".into());
+    }
+    let mut cmd = git(p);
+    cmd.args(["fetch", "--all", "--prune", "--quiet"]);
     run(cmd).map(|_| ())
 }
 

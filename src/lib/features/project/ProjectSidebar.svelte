@@ -618,13 +618,15 @@
             : ''}"
         >
           <div
-            class="flex size-6 shrink-0 items-center justify-center overflow-hidden rounded bg-[var(--color-surface-3)]"
+            class="flex size-6 shrink-0 items-center justify-center overflow-hidden"
+            class:rounded={!project.icon}
+            style:background={project.icon ? "transparent" : "var(--color-surface-3)"}
           >
             {#if project.icon}
               <img
                 src={project.icon}
                 alt=""
-                class="size-full object-cover"
+                class="size-full object-contain"
                 loading="lazy"
                 draggable="false"
               />

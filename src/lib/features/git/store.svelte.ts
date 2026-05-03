@@ -1,6 +1,7 @@
 import {
   gitCommit,
   gitDiscard,
+  gitFetch,
   gitLog,
   gitRepoInfo,
   gitStage,
@@ -24,6 +25,7 @@ export interface GitState {
   log: Commit[];
   loading: boolean;
   committing: boolean;
+  fetching: boolean;
   message: string;
 }
 
@@ -39,6 +41,7 @@ function emptyState(): GitState {
     log: [],
     loading: false,
     committing: false,
+    fetching: false,
     message: "",
   };
 }
@@ -139,6 +142,22 @@ class GitStore {
       await this.refresh(projectId);
     } catch (err) {
       notifications.error(`Discard failed: ${err}`);
+    }
+  }
+
+  async fetch(projectId: string) {
+    const cwd = this.cwds.get(projectId);
+    const state = this.states[projectId];
+    if (!cwd || !state) return;
+    if (state.fetching) return;
+    state.fetching = true;
+    try {
+      await gitFetch(cwd);
+      await this.refresh(projectId);
+    } catch (err) {
+      notifications.error(`Fetch failed: ${err}`);
+    } finally {
+      state.fetching = false;
     }
   }
 

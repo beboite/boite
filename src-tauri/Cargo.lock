@@ -371,7 +371,7 @@ dependencies = [
 
 [[package]]
 name = "boite"
-version = "0.4.5"
+version = "0.4.7"
 dependencies = [
  "base64 0.22.1",
  "dirs",
