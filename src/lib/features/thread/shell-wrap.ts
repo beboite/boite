@@ -5,11 +5,11 @@ function quoteArg(arg: string): string {
   return `"${arg.replace(/"/g, '\\"')}"`;
 }
 
-export function buildCommandLine(cmd: string, args: string[]): string {
+function buildCommandLine(cmd: string, args: string[]): string {
   return [cmd, ...args].map(quoteArg).join(" ");
 }
 
-export interface SpawnPlan {
+interface SpawnPlan {
   cmd: string;
   args: string[];
   pendingInput: string | null;

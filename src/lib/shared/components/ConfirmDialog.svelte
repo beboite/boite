@@ -20,17 +20,36 @@
     onCancel,
   }: Props = $props();
 
+  let confirmBtn: HTMLButtonElement | null = $state(null);
+
+  $effect(() => {
+    if (open && confirmBtn) {
+      confirmBtn.focus();
+    }
+  });
+
   function backdropClick(e: MouseEvent) {
     if (e.target === e.currentTarget) onCancel();
   }
 
-  function keydown(e: KeyboardEvent) {
-    if (e.key === "Escape") onCancel();
-    else if (e.key === "Enter") onConfirm();
+  function handleWindowKeydown(e: KeyboardEvent) {
+    if (!open) return;
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      onCancel();
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      e.stopPropagation();
+      onConfirm();
+    }
   }
 </script>
 
+<svelte:window onkeydown={handleWindowKeydown} />
+
 {#if open}
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
   <div
     class="fixed inset-0 z-50 flex items-center justify-center bg-black/65 backdrop-blur-sm"
     role="dialog"
@@ -38,7 +57,6 @@
     aria-labelledby="confirm-title"
     tabindex="-1"
     onclick={backdropClick}
-    onkeydown={keydown}
   >
     <div
       class="w-[360px] overflow-hidden rounded-xl border border-border bg-[var(--color-surface)] shadow-2xl"
@@ -62,6 +80,7 @@
           {cancelLabel}
         </button>
         <button
+          bind:this={confirmBtn}
           type="button"
           class="rounded-md px-3 py-1.5 text-xs font-medium transition {danger
             ? 'bg-danger text-white hover:bg-danger/90'

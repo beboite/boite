@@ -1,47 +1,36 @@
 export type ToastKind = "info" | "success" | "error";
 
-export interface ToastAction {
-  label: string;
-  run: () => void;
-}
-
 export interface Toast {
   id: string;
   kind: ToastKind;
   message: string;
   durationMs: number | null;
-  action?: ToastAction;
 }
 
-export interface AddToastOptions {
+interface AddOptions {
   kind?: ToastKind;
   durationMs?: number | null;
-  action?: ToastAction;
 }
 
 class NotificationsStore {
   toasts = $state<Toast[]>([]);
 
-  push(message: string, opts: AddToastOptions = {}): string {
+  private push(message: string, opts: AddOptions = {}): string {
     const id = crypto.randomUUID();
     this.toasts.push({
       id,
       kind: opts.kind ?? "info",
       message,
       durationMs: opts.durationMs ?? 3000,
-      action: opts.action,
     });
     return id;
   }
 
-  success(message: string, opts: Omit<AddToastOptions, "kind"> = {}) {
-    return this.push(message, { ...opts, kind: "success", durationMs: opts.durationMs ?? 1800 });
+  success(message: string, durationMs?: number | null) {
+    return this.push(message, { kind: "success", durationMs: durationMs ?? 1800 });
   }
-  error(message: string, opts: Omit<AddToastOptions, "kind"> = {}) {
-    return this.push(message, { ...opts, kind: "error", durationMs: opts.durationMs ?? 4500 });
-  }
-  info(message: string, opts: Omit<AddToastOptions, "kind"> = {}) {
-    return this.push(message, { ...opts, kind: "info" });
+  error(message: string, durationMs?: number | null) {
+    return this.push(message, { kind: "error", durationMs: durationMs ?? 4500 });
   }
 
   dismiss(id: string) {

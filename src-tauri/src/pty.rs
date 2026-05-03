@@ -32,19 +32,7 @@ pub struct PtySpawnArgs {
     pub env: Option<HashMap<String, String>>,
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
-pub struct PtyInfo {
-    pub id: String,
-    pub cwd: String,
-    pub cmd: String,
-    pub args: Vec<String>,
-    pub title: Option<String>,
-    pub exited: bool,
-    pub exit_code: Option<i32>,
-}
-
 struct PtyHandle {
-    info: PtyInfo,
     master: Arc<Mutex<Box<dyn MasterPty + Send>>>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     killer: Arc<Mutex<Box<dyn ChildKiller + Send + Sync>>>,
@@ -99,15 +87,6 @@ impl PtyManager {
         let killer = child.clone_killer();
 
         let id = Uuid::new_v4().to_string();
-        let info = PtyInfo {
-            id: id.clone(),
-            cwd: spec.cwd.clone(),
-            cmd: spec.cmd.clone(),
-            args: spec.args.clone(),
-            title: None,
-            exited: false,
-            exit_code: None,
-        };
 
         let writer = pair
             .master
@@ -125,7 +104,6 @@ impl PtyManager {
             Arc::new(Mutex::new(killer));
 
         let handle = PtyHandle {
-            info: info.clone(),
             master: master_arc,
             writer: writer_arc,
             killer: killer_arc,
@@ -138,20 +116,12 @@ impl PtyManager {
         let id_clone = id.clone();
         let channel_clone = channel.clone();
         std::thread::spawn(move || {
-            read_loop(reader, channel_clone.clone(), inner_clone.clone(), id_clone.clone());
+            read_loop(reader, channel_clone.clone());
             let exit_code = match child.wait() {
                 Ok(status) => status.exit_code() as i32,
                 Err(_) => -1,
             };
-            // Mark exited and remove from active map so closed PTYs don't leak.
-            {
-                let mut map = inner_clone.lock();
-                if let Some(handle) = map.get_mut(&id_clone) {
-                    handle.info.exited = true;
-                    handle.info.exit_code = Some(exit_code);
-                }
-                map.remove(&id_clone);
-            }
+            inner_clone.lock().remove(&id_clone);
             let _ = channel_clone.send(PtyEvent::Exit {
                 code: Some(exit_code),
             });
@@ -205,27 +175,12 @@ impl PtyManager {
         // Don't remove the handle here — the reader thread cleans up after wait() returns.
         Ok(())
     }
-
-    pub fn list(&self) -> Vec<PtyInfo> {
-        self.inner
-            .lock()
-            .values()
-            .map(|h| h.info.clone())
-            .collect()
-    }
 }
 
-fn read_loop(
-    mut reader: Box<dyn Read + Send>,
-    channel: Channel<PtyEvent>,
-    inner: Arc<Mutex<HashMap<String, PtyHandle>>>,
-    id: String,
-) {
+fn read_loop(mut reader: Box<dyn Read + Send>, channel: Channel<PtyEvent>) {
     let mut parser = Parser::new();
     let mut osc = OscPerform {
         channel: channel.clone(),
-        inner,
-        id,
     };
     let mut buf = [0u8; 8192];
     loop {
@@ -248,8 +203,6 @@ fn read_loop(
 
 struct OscPerform {
     channel: Channel<PtyEvent>,
-    inner: Arc<Mutex<HashMap<String, PtyHandle>>>,
-    id: String,
 }
 
 impl Perform for OscPerform {
@@ -265,11 +218,9 @@ impl Perform for OscPerform {
         let Ok(title) = std::str::from_utf8(params[1]) else {
             return;
         };
-        let value = title.to_string();
-        if let Some(handle) = self.inner.lock().get_mut(&self.id) {
-            handle.info.title = Some(value.clone());
-        }
-        let _ = self.channel.send(PtyEvent::Title { value });
+        let _ = self.channel.send(PtyEvent::Title {
+            value: title.to_string(),
+        });
     }
 
     fn print(&mut self, _: char) {}

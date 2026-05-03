@@ -1,6 +1,6 @@
 [package]
 name = "boite"
-version = "0.2.4"
+version = "0.3.1"
 description = "Lightweight multi-agent terminal multiplexer"
 authors = ["mtsu"]
 edition = "2021"
@@ -8,12 +8,13 @@ edition = "2021"
 [lib]
 name = "boite_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
+doctest = false
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2.11.0", features = [] }
 tauri-plugin-sql = { version = "2", features = ["sqlite"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-clipboard-manager = "2"
@@ -29,3 +30,4 @@ portable-pty = "0.9"
 vte = "0.13"
 uuid = { version = "1", features = ["v4"] }
 parking_lot = "0.12"
+rusqlite = { version = "0.31", features = ["bundled"] }

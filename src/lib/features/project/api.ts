@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { app } from "$lib/app/store.svelte";
 import { notifications } from "$lib/features/notifications/store.svelte";
+import { logger } from "$lib/shared/services/logger.svelte";
 import type { Project } from "$lib/types";
 
 interface ProjectInspection {
@@ -19,8 +20,10 @@ export async function pickAndAddProject(): Promise<Project | null> {
     return null;
   }
   if (!selected || Array.isArray(selected)) return null;
-  const path = selected;
+  return addProjectByPath(selected);
+}
 
+export async function addProjectByPath(path: string): Promise<Project | null> {
   const existing = app.projects.find((p) => p.cwd === path);
   if (existing) {
     app.selectedProjectId = existing.id;
@@ -31,7 +34,7 @@ export async function pickAndAddProject(): Promise<Project | null> {
   try {
     inspection = await invoke<ProjectInspection>("inspect_project", { path });
   } catch (err) {
-    console.error("inspect_project failed:", err);
+    logger.warn("project", `inspect_project failed for ${path}, using fallback`, String(err));
     inspection = { name: deriveBasename(path), icon: null };
   }
 
@@ -50,6 +53,7 @@ export async function pickAndAddProject(): Promise<Project | null> {
   }
   app.selectedProjectId = project.id;
   notifications.success(`Added ${project.name}`);
+  logger.info("project", `added project ${project.name}`, { cwd: project.cwd });
   return project;
 }
 

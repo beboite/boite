@@ -1,9 +1,12 @@
 <script lang="ts">
   import "../app.css";
   import { onMount } from "svelte";
+  import { invoke } from "@tauri-apps/api/core";
+  import { getCurrentWebview } from "@tauri-apps/api/webview";
   import { app } from "$lib/app/store.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
   import { closeThread, launchBlankTerminal } from "$lib/features/thread/api";
+  import { addProjectByPath } from "$lib/features/project/api";
 
   let { children } = $props();
 
@@ -46,8 +49,14 @@
     app.view = "terminal";
   }
 
+  function isModalOpen(): boolean {
+    if (typeof document === "undefined") return false;
+    return document.querySelector('[role="dialog"][aria-modal="true"]') !== null;
+  }
+
   function handleKeydown(e: KeyboardEvent) {
     if (e.key === "Escape") {
+      if (isModalOpen()) return;
       if (app.view === "settings") {
         e.preventDefault();
         app.view = "terminal";
@@ -121,6 +130,29 @@
 
   onMount(() => {
     void app.init();
+
+    // Wait one rAF after mount so the first paint hits the GPU before the
+    // window becomes visible. Avoids the white flash on launch.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        void invoke("finish_boot").catch(() => {});
+      });
+    });
+
+    let unlisten: (() => void) | null = null;
+    void getCurrentWebview()
+      .onDragDropEvent(async (event) => {
+        if (event.payload.type !== "drop") return;
+        const paths = event.payload.paths ?? [];
+        for (const p of paths) {
+          await addProjectByPath(p);
+        }
+      })
+      .then((u) => (unlisten = u));
+
+    return () => {
+      unlisten?.();
+    };
   });
 </script>
 

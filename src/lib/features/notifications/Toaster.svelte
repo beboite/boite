@@ -13,7 +13,6 @@
       message={toast.message}
       kind={toast.kind}
       durationMs={toast.durationMs}
-      action={toast.action}
       onDone={() => notifications.dismiss(toast.id)}
     />
   {/each}

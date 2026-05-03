@@ -1,8 +1,9 @@
 use std::ffi::OsStr;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+use rusqlite::{Connection, OpenFlags};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -20,10 +21,7 @@ fn normalize(p: &str) -> String {
         .to_lowercase()
 }
 
-/// Claude encodes a project directory by replacing every non-alphanumeric
-/// char with `-`. Reproducing that here lets us match a session folder by
-/// name when the JSONL body lacks a `cwd` field.
-fn encode_project_dir(p: &str) -> String {
+fn encode_claude_project_dir(p: &str) -> String {
     p.chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
         .collect::<String>()
@@ -36,7 +34,28 @@ fn ms_since_epoch(t: SystemTime) -> i64 {
         .unwrap_or(0)
 }
 
-fn read_session_meta(path: &Path) -> Option<(Option<String>, Option<String>)> {
+fn collect_files(root: &Path, out: &mut Vec<(PathBuf, i64)>, depth: usize, max_depth: usize) {
+    if depth > max_depth {
+        return;
+    }
+    let Ok(entries) = fs::read_dir(root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if file_type.is_dir() {
+            collect_files(&entry.path(), out, depth + 1, max_depth);
+        } else if file_type.is_file() {
+            let Ok(meta) = entry.metadata() else { continue };
+            let Ok(modified) = meta.modified() else { continue };
+            out.push((entry.path(), ms_since_epoch(modified)));
+        }
+    }
+}
+
+fn read_claude_session_meta(path: &Path) -> Option<(Option<String>, Option<String>)> {
     let content = fs::read_to_string(path).ok()?;
     let mut found_session: Option<String> = None;
     let mut found_cwd: Option<String> = None;
@@ -70,10 +89,10 @@ pub fn find_claude_session(cwd: String, after_unix_ms: i64) -> Option<String> {
     }
 
     let target_cwd = normalize(&cwd);
-    let target_encoded = encode_project_dir(&target_cwd);
+    let target_encoded = encode_claude_project_dir(&target_cwd);
 
     struct Candidate {
-        path: std::path::PathBuf,
+        path: PathBuf,
         modified_ms: i64,
         dir_name_lower: String,
     }
@@ -125,7 +144,7 @@ pub fn find_claude_session(cwd: String, after_unix_ms: i64) -> Option<String> {
             cand.dir_name_lower == target_encoded || target_encoded.contains(&cand.dir_name_lower);
 
         let (session_id, session_cwd) =
-            read_session_meta(&cand.path).unwrap_or((None, None));
+            read_claude_session_meta(&cand.path).unwrap_or((None, None));
 
         let cwd_matches = session_cwd
             .as_deref()
@@ -145,4 +164,333 @@ pub fn find_claude_session(cwd: String, after_unix_ms: i64) -> Option<String> {
     }
 
     None
+}
+
+#[derive(Deserialize)]
+struct CodexSessionMeta {
+    payload: Option<CodexPayload>,
+    #[serde(rename = "type")]
+    kind: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct CodexPayload {
+    id: Option<String>,
+    cwd: Option<String>,
+}
+
+fn read_codex_session_meta(path: &Path) -> Option<(String, String)> {
+    let content = fs::read_to_string(path).ok()?;
+    let first = content.lines().find(|l| !l.trim().is_empty())?;
+    let meta: CodexSessionMeta = serde_json::from_str(first).ok()?;
+    if meta.kind.as_deref() != Some("session_meta") {
+        return None;
+    }
+    let payload = meta.payload?;
+    Some((payload.id?, payload.cwd?))
+}
+
+#[tauri::command]
+pub fn find_codex_session(cwd: String, after_unix_ms: i64) -> Option<String> {
+    let home = dirs::home_dir()?;
+    let sessions_dir = home.join(".codex").join("sessions");
+    if !sessions_dir.is_dir() {
+        return None;
+    }
+
+    let target = normalize(&cwd);
+    let mut files: Vec<(PathBuf, i64)> = Vec::new();
+    collect_files(&sessions_dir, &mut files, 0, 6);
+    files.retain(|(p, t)| {
+        *t >= after_unix_ms && p.extension() == Some(OsStr::new("jsonl"))
+    });
+    files.sort_by_key(|(_, t)| std::cmp::Reverse(*t));
+
+    for (path, _) in files {
+        if let Some((id, scwd)) = read_codex_session_meta(&path) {
+            if normalize(&scwd) == target {
+                return Some(id);
+            }
+        }
+    }
+    None
+}
+
+fn open_readonly(path: &Path) -> rusqlite::Result<Connection> {
+    Connection::open_with_flags(
+        path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI,
+    )
+}
+
+fn opencode_db_path() -> Option<PathBuf> {
+    // XDG_DATA_HOME on Linux (~/.local/share), %APPDATA% on Windows,
+    // ~/Library/Application Support on macOS.
+    let base = dirs::data_dir()?;
+    Some(base.join("opencode").join("opencode.db"))
+}
+
+#[tauri::command]
+pub fn find_opencode_session(cwd: String, after_unix_ms: i64) -> Option<String> {
+    let db_path = opencode_db_path()?;
+    if !db_path.is_file() {
+        return None;
+    }
+
+    let conn = open_readonly(&db_path).ok()?;
+    let target = normalize(&cwd);
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, directory, time_created \
+             FROM session \
+             WHERE time_created >= ? \
+             ORDER BY time_created DESC \
+             LIMIT 50",
+        )
+        .ok()?;
+    let rows = stmt
+        .query_map([after_unix_ms], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+            ))
+        })
+        .ok()?;
+
+    for row in rows.flatten() {
+        let (id, directory) = row;
+        if normalize(&directory) == target {
+            return Some(id);
+        }
+    }
+    None
+}
+
+fn copilot_db_path() -> Option<PathBuf> {
+    #[cfg(target_os = "windows")]
+    {
+        let base = dirs::data_dir()?;
+        Some(base.join("GitHub Copilot").join("session-store.db"))
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let home = dirs::home_dir()?;
+        Some(home.join(".copilot").join("session-store.db"))
+    }
+}
+
+#[tauri::command]
+pub fn find_copilot_session(cwd: String, after_unix_ms: i64) -> Option<String> {
+    let db_path = copilot_db_path()?;
+    if !db_path.is_file() {
+        return None;
+    }
+
+    let conn = open_readonly(&db_path).ok()?;
+    let target = normalize(&cwd);
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, cwd, created_at \
+             FROM sessions \
+             ORDER BY datetime(created_at) DESC \
+             LIMIT 50",
+        )
+        .ok()?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                row.get::<_, String>(2)?,
+            ))
+        })
+        .ok()?;
+
+    for row in rows.flatten() {
+        let (id, scwd, created_at) = row;
+        if normalize(&scwd) != target {
+            continue;
+        }
+        if let Some(ts) = parse_iso_ms(&created_at) {
+            if ts < after_unix_ms {
+                continue;
+            }
+        }
+        return Some(id);
+    }
+    None
+}
+
+fn parse_iso_ms(s: &str) -> Option<i64> {
+    let trimmed = s.trim().trim_end_matches('Z');
+    let (date_part, time_part) = trimmed.split_once('T').or_else(|| trimmed.split_once(' '))?;
+    let date_segs: Vec<&str> = date_part.split('-').collect();
+    let time_segs: Vec<&str> = time_part.split(':').collect();
+    if date_segs.len() != 3 || time_segs.len() != 3 {
+        return None;
+    }
+    let y: i64 = date_segs[0].parse().ok()?;
+    let mo: i64 = date_segs[1].parse().ok()?;
+    let d: i64 = date_segs[2].parse().ok()?;
+    let h: i64 = time_segs[0].parse().ok()?;
+    let mi: i64 = time_segs[1].parse().ok()?;
+    let sec_part = time_segs[2];
+    let (sec_str, frac_str) = sec_part.split_once('.').unwrap_or((sec_part, "0"));
+    let s_v: i64 = sec_str.parse().ok()?;
+    let frac_ms: i64 = {
+        let mut f = String::from(frac_str);
+        while f.len() < 3 {
+            f.push('0');
+        }
+        f.truncate(3);
+        f.parse().unwrap_or(0)
+    };
+    let days = days_since_epoch(y, mo, d)?;
+    Some(((days * 86400 + h * 3600 + mi * 60 + s_v) * 1000) + frac_ms)
+}
+
+fn days_since_epoch(y: i64, m: i64, d: i64) -> Option<i64> {
+    if !(1..=12).contains(&m) || !(1..=31).contains(&d) {
+        return None;
+    }
+    let days_in_months = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let mut days: i64 = 0;
+    for year in 1970..y {
+        days += if is_leap(year) { 366 } else { 365 };
+    }
+    for month in 1..m {
+        days += days_in_months[(month - 1) as usize] as i64;
+        if month == 2 && is_leap(y) {
+            days += 1;
+        }
+    }
+    days += d - 1;
+    Some(days)
+}
+
+fn is_leap(y: i64) -> bool {
+    (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
+}
+
+#[tauri::command]
+pub fn find_cursor_session(_cwd: String, after_unix_ms: i64) -> Option<String> {
+    let home = dirs::home_dir()?;
+    let chats_dir = home.join(".cursor").join("chats");
+    if !chats_dir.is_dir() {
+        return None;
+    }
+
+    let mut best: Option<(String, i64)> = None;
+    let workspaces = fs::read_dir(&chats_dir).ok()?;
+    for ws in workspaces.flatten() {
+        let Ok(t) = ws.file_type() else { continue };
+        if !t.is_dir() {
+            continue;
+        }
+        let chats = match fs::read_dir(ws.path()) {
+            Ok(it) => it,
+            Err(_) => continue,
+        };
+        for chat in chats.flatten() {
+            let Ok(t) = chat.file_type() else { continue };
+            if !t.is_dir() {
+                continue;
+            }
+            let store = chat.path().join("store.db");
+            let Ok(meta) = fs::metadata(&store) else {
+                continue;
+            };
+            let Ok(modified) = meta.modified() else {
+                continue;
+            };
+            let mtime = ms_since_epoch(modified);
+            if mtime < after_unix_ms {
+                continue;
+            }
+            let chat_id = chat.file_name().to_string_lossy().into_owned();
+            if best.as_ref().is_none_or(|(_, t)| mtime > *t) {
+                best = Some((chat_id, mtime));
+            }
+        }
+    }
+    best.map(|(id, _)| id)
+}
+
+#[derive(Deserialize)]
+struct GeminiSessionFile {
+    #[serde(rename = "sessionId")]
+    session_id: Option<String>,
+}
+
+fn read_gemini_session_id(path: &Path) -> Option<String> {
+    let content = fs::read_to_string(path).ok()?;
+    let first = content.lines().find(|l| !l.trim().is_empty())?;
+    if let Ok(parsed) = serde_json::from_str::<GeminiSessionFile>(first) {
+        if parsed.session_id.is_some() {
+            return parsed.session_id;
+        }
+    }
+    let stem = path.file_stem()?.to_str()?;
+    stem.strip_prefix("session-").map(|s| s.to_string())
+}
+
+#[tauri::command]
+pub fn find_gemini_session(cwd: String, after_unix_ms: i64) -> Option<String> {
+    let home = dirs::home_dir()?;
+    let projects_file = home.join(".gemini").join("projects.json");
+    let tmp_dir = home.join(".gemini").join("tmp");
+    if !tmp_dir.is_dir() {
+        return None;
+    }
+
+    let target = normalize(&cwd);
+
+    let mut project_name: Option<String> = None;
+    if let Ok(content) = fs::read_to_string(&projects_file) {
+        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&content) {
+            if let Some(map) = parsed.get("projects").and_then(|v| v.as_object()) {
+                for (k, v) in map {
+                    if normalize(k) == target {
+                        if let Some(name) = v.as_str() {
+                            project_name = Some(name.to_string());
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let chats_dir = if let Some(name) = project_name {
+        tmp_dir.join(name).join("chats")
+    } else {
+        return None;
+    };
+    if !chats_dir.is_dir() {
+        return None;
+    }
+
+    let mut best: Option<(String, i64)> = None;
+    let entries = fs::read_dir(&chats_dir).ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let ext = path.extension().and_then(|s| s.to_str());
+        if ext != Some("jsonl") && ext != Some("json") {
+            continue;
+        }
+        let Ok(meta) = entry.metadata() else { continue };
+        let Ok(modified) = meta.modified() else { continue };
+        let mtime = ms_since_epoch(modified);
+        if mtime < after_unix_ms {
+            continue;
+        }
+        if let Some(id) = read_gemini_session_id(&path) {
+            if best.as_ref().is_none_or(|(_, t)| mtime > *t) {
+                best = Some((id, mtime));
+            }
+        }
+    }
+    best.map(|(id, _)| id)
 }

@@ -21,6 +21,9 @@ const DEFAULTS: Settings = {
   uiScalePercent: 100,
   projectOrder: [],
   threadOrderByProject: {},
+  idleTimeoutMinutes: 10,
+  idleAutocloseByIcon: { claude: true, codex: true },
+  confirmCloseThread: true,
 };
 
 export function parseCommand(input: string): { cmd: string; args: string[] } {
@@ -85,6 +88,18 @@ class SettingsStore {
           stored.threadOrderByProject && typeof stored.threadOrderByProject === "object"
             ? stored.threadOrderByProject
             : structuredClone(DEFAULTS.threadOrderByProject),
+        idleTimeoutMinutes:
+          typeof stored.idleTimeoutMinutes === "number" && stored.idleTimeoutMinutes >= 0
+            ? stored.idleTimeoutMinutes
+            : DEFAULTS.idleTimeoutMinutes,
+        idleAutocloseByIcon:
+          stored.idleAutocloseByIcon && typeof stored.idleAutocloseByIcon === "object"
+            ? stored.idleAutocloseByIcon
+            : structuredClone(DEFAULTS.idleAutocloseByIcon),
+        confirmCloseThread:
+          typeof stored.confirmCloseThread === "boolean"
+            ? stored.confirmCloseThread
+            : DEFAULTS.confirmCloseThread,
       };
     } catch (err) {
       console.error("loadSettings failed:", err);
@@ -132,12 +147,6 @@ class SettingsStore {
 
   toggleSidebar() {
     this.state.sidebarCollapsed = !this.state.sidebarCollapsed;
-    void this.persist();
-  }
-
-  setSidebarCollapsed(value: boolean) {
-    if (this.state.sidebarCollapsed === value) return;
-    this.state.sidebarCollapsed = value;
     void this.persist();
   }
 
@@ -207,6 +216,26 @@ class SettingsStore {
     this.state.shortcuts = structuredClone(PRESET_SHORTCUTS);
     await this.persist();
     notifications.success("Shortcuts reset to defaults");
+  }
+
+  setIdleTimeoutMinutes(value: number) {
+    const clamped = Math.max(0, Math.min(240, Math.round(value)));
+    if (this.state.idleTimeoutMinutes === clamped) return;
+    this.state.idleTimeoutMinutes = clamped;
+    this.persistSoon();
+  }
+
+  async setIdleAutocloseForIcon(iconKey: string, on: boolean) {
+    this.state.idleAutocloseByIcon = {
+      ...this.state.idleAutocloseByIcon,
+      [iconKey]: on,
+    };
+    await this.persist();
+  }
+
+  async setConfirmCloseThread(value: boolean) {
+    this.state.confirmCloseThread = value;
+    await this.persist();
   }
 }
 

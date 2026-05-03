@@ -4,8 +4,33 @@ mod pty;
 mod session;
 mod shell;
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use pty::PtyManager;
+use tauri::Manager;
 use tauri_plugin_sql::{Migration, MigrationKind};
+
+#[derive(Default)]
+pub struct BootState {
+    completed: AtomicBool,
+}
+
+impl BootState {
+    pub fn mark_completed(&self) -> bool {
+        !self.completed.swap(true, Ordering::SeqCst)
+    }
+
+    pub fn is_completed(&self) -> bool {
+        self.completed.load(Ordering::SeqCst)
+    }
+}
+
+fn show_main_window(handle: &tauri::AppHandle) {
+    if let Some(win) = handle.get_webview_window("main") {
+        let _ = win.show();
+        let _ = win.set_focus();
+    }
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -74,16 +99,35 @@ pub fn run() {
                 .build(),
         )
         .manage(PtyManager::new())
+        .manage(BootState::default())
+        .setup(|app| {
+            // Failsafe: if frontend fails to call finish_boot within 5s, show anyway.
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(5000));
+                let state = handle.state::<BootState>();
+                if !state.is_completed() {
+                    state.mark_completed();
+                    show_main_window(&handle);
+                }
+            });
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             commands::pty_spawn,
             commands::pty_write,
             commands::pty_resize,
             commands::pty_kill,
-            commands::pty_list,
+            commands::finish_boot,
             project::inspect_project,
             shell::default_shell,
             shell::available_shells,
             session::find_claude_session,
+            session::find_codex_session,
+            session::find_opencode_session,
+            session::find_cursor_session,
+            session::find_gemini_session,
+            session::find_copilot_session,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,6 +1,7 @@
-use tauri::{State, ipc::Channel};
+use tauri::{AppHandle, Manager, State, ipc::{Channel, InvokeBody, Request}};
 
-use crate::pty::{PtyEvent, PtyInfo, PtyManager, PtySpawnArgs};
+use crate::BootState;
+use crate::pty::{PtyEvent, PtyManager, PtySpawnArgs};
 
 #[tauri::command]
 pub fn pty_spawn(
@@ -14,10 +15,18 @@ pub fn pty_spawn(
 #[tauri::command]
 pub fn pty_write(
     manager: State<'_, PtyManager>,
-    id: String,
-    data: Vec<u8>,
+    request: Request<'_>,
 ) -> Result<(), String> {
-    manager.write(&id, &data)
+    let id = request
+        .headers()
+        .get("x-pty-id")
+        .and_then(|v| v.to_str().ok())
+        .ok_or_else(|| "missing x-pty-id header".to_string())?;
+    let bytes: &[u8] = match request.body() {
+        InvokeBody::Raw(b) => b.as_slice(),
+        InvokeBody::Json(_) => return Err("expected raw body".into()),
+    };
+    manager.write(id, bytes)
 }
 
 #[tauri::command]
@@ -36,6 +45,12 @@ pub fn pty_kill(manager: State<'_, PtyManager>, id: String) -> Result<(), String
 }
 
 #[tauri::command]
-pub fn pty_list(manager: State<'_, PtyManager>) -> Vec<PtyInfo> {
-    manager.list()
+pub fn finish_boot(app: AppHandle, boot: State<'_, BootState>) {
+    if !boot.mark_completed() {
+        return;
+    }
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.show();
+        let _ = win.set_focus();
+    }
 }

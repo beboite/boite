@@ -7,7 +7,6 @@ import {
   saveThread,
   deleteThread as dbDeleteThread,
 } from "$lib/storage/db";
-import type { PtyInfo } from "$lib/storage/pty";
 
 class AppState {
   projects = $state<Project[]>([]);
@@ -16,14 +15,35 @@ class AppState {
   selectedProjectId = $state<string | null>(null);
   view = $state<View>("terminal");
   ready = $state(false);
+  respawnNonce = $state<Record<string, number>>({});
+  freshThreadIds = new Set<string>();
+
+  bumpRespawn(threadId: string) {
+    this.respawnNonce = {
+      ...this.respawnNonce,
+      [threadId]: (this.respawnNonce[threadId] ?? 0) + 1,
+    };
+  }
+
+  markFresh(threadId: string) {
+    this.freshThreadIds.add(threadId);
+  }
+
+  consumeFresh(threadId: string): boolean {
+    if (this.freshThreadIds.has(threadId)) {
+      this.freshThreadIds.delete(threadId);
+      return true;
+    }
+    return false;
+  }
 
   get activeThread(): Thread | null {
     return this.threads.find((t) => t.id === this.activeThreadId) ?? null;
   }
 
   get currentProjectId(): string | null {
-    if (this.activeThread) return this.activeThread.projectId;
     if (this.selectedProjectId) return this.selectedProjectId;
+    if (this.activeThread) return this.activeThread.projectId;
     return this.projects[0]?.id ?? null;
   }
 
@@ -111,6 +131,9 @@ class AppState {
     if (t.status === status && t.exitCode === exitCode) return;
     t.status = status;
     t.exitCode = exitCode;
+    if (status === "done" || status === "exited" || status === "error") {
+      void saveThread($state.snapshot(t) as Thread);
+    }
   }
 
   setThreadTitle(id: string, title: string) {
@@ -153,17 +176,6 @@ class AppState {
     }
   }
 
-  syncFromPtyList(list: PtyInfo[]) {
-    for (const p of list) {
-      const t = this.threads.find((x) => x.ptyId === p.id);
-      if (!t) continue;
-      t.title = p.title;
-      if (p.exited) {
-        t.status = p.exitCode === 0 ? "done" : "exited";
-        t.exitCode = p.exitCode;
-      }
-    }
-  }
 }
 
 export const app = new AppState();

@@ -3,14 +3,16 @@
   import SettingsGeneralTab from "./SettingsGeneralTab.svelte";
   import SettingsTerminalTab from "./SettingsTerminalTab.svelte";
   import SettingsAppearanceTab from "./SettingsAppearanceTab.svelte";
+  import SettingsLogsTab from "./SettingsLogsTab.svelte";
   import X from "@lucide/svelte/icons/x";
 
-  type TabId = "general" | "terminal" | "appearance";
+  type TabId = "general" | "terminal" | "appearance" | "logs";
 
   const TABS: { id: TabId; label: string }[] = [
     { id: "general", label: "General" },
     { id: "terminal", label: "Terminal" },
     { id: "appearance", label: "Appearance" },
+    { id: "logs", label: "Logs" },
   ];
 
   let activeTab = $state<TabId>("general");
@@ -63,6 +65,8 @@
         <SettingsTerminalTab />
       {:else if activeTab === "appearance"}
         <SettingsAppearanceTab />
+      {:else if activeTab === "logs"}
+        <SettingsLogsTab />
       {/if}
     </div>
   </div>

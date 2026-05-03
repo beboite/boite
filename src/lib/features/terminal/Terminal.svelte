@@ -18,7 +18,12 @@
   import { platform } from "$lib/storage/platform.svelte";
   import { saveThread } from "$lib/storage/db";
   import { notifications } from "$lib/features/notifications/store.svelte";
-  import { notifyWhenUnfocused } from "$lib/storage/notify";
+  import { logger } from "$lib/shared/services/logger.svelte";
+  import {
+    detectWorking,
+    titleSignalsWorking,
+  } from "$lib/features/thread/working-detect";
+  import { statusEngine } from "$lib/features/thread/statusEngine";
   import type { Thread } from "$lib/types";
 
   type Props = { thread: Thread; active: boolean };
@@ -31,10 +36,18 @@
   let ptyId: string | null = null;
   let spawned = $state(false);
   let lastOutputAt = 0;
-  let lastWorkingAt = 0;
-  let statusTimer: ReturnType<typeof setInterval> | null = null;
   let sessionTimer: ReturnType<typeof setInterval> | null = null;
+  let fitRafId: number | null = null;
+  let lastDetectAt = 0;
   const decoder = new TextDecoder("utf-8", { fatal: false });
+
+  function scheduleFit() {
+    if (fitRafId !== null) return;
+    fitRafId = requestAnimationFrame(() => {
+      fitRafId = null;
+      if (active) fit?.fit();
+    });
+  }
 
   function cleanTitle(raw: string): string {
     const m = raw.match(/[\p{L}\p{N}]/u);
@@ -43,11 +56,11 @@
   }
 
   function detectWorkingFromOutput(text: string) {
-    // Claude prints a status line like
-    //   ✻ Frobnicating… (12s · ↓ 3.4k tokens · esc to interrupt)
-    // Match either the human "esc to interrupt" hint or the token counter.
-    if (/esc to interrupt/i.test(text) || /\(\d+s\s+·/.test(text)) {
-      lastWorkingAt = Date.now();
+    const now = Date.now();
+    if (now - lastDetectAt < 120) return;
+    lastDetectAt = now;
+    if (detectWorking(text, thread.iconKey)) {
+      statusEngine.markWorking(thread.id);
       app.setThreadStatus(thread.id, "running");
     }
   }
@@ -63,6 +76,10 @@
     } else if (event.type === "title") {
       const cleaned = cleanTitle(event.value);
       if (cleaned) app.setThreadTitle(thread.id, cleaned);
+      if (titleSignalsWorking(event.value)) {
+        statusEngine.markWorking(thread.id);
+        app.setThreadStatus(thread.id, "running");
+      }
     } else if (event.type === "exit") {
       const code = event.code ?? null;
       app.setThreadStatus(thread.id, code === 0 ? "done" : "exited", code);
@@ -119,6 +136,30 @@
     const cols = term.cols;
     const rows = term.rows;
 
+    if (!thread.sessionId) {
+      const detector = getDetector(thread);
+      if (detector) {
+        try {
+          const id = await detector(project.cwd, thread.createdAt - 1000);
+          if (id) {
+            const t = app.threads.find((x) => x.id === thread.id);
+            if (t) {
+              t.sessionId = id;
+              thread.sessionId = id;
+              void saveThread($state.snapshot(t) as Thread);
+              logger.info(
+                "session",
+                `pre-spawn capture for ${t.label}`,
+                { id, iconKey: t.iconKey },
+              );
+            }
+          }
+        } catch (err) {
+          logger.error("session", `pre-spawn detect failed`, String(err));
+        }
+      }
+    }
+
     const userArgs = buildResumeArgs(thread);
     const wrapShell = settings.state.defaultShellId
       ? platform.shells.find((s) => s.id === settings.state.defaultShellId) ?? null
@@ -143,10 +184,16 @@
         handleEvent,
       );
       app.setThreadPtyId(thread.id, ptyId);
-      app.setThreadStatus(thread.id, "running");
+      app.setThreadStatus(thread.id, "ready");
+      logger.info(
+        "spawn",
+        `${thread.label} (${thread.iconKey ?? "?"}): spawned`,
+        { cmd: plan.cmd, args: plan.args, cwd: project.cwd },
+      );
     } catch (err) {
       term.write(`\r\n[boite] spawn failed: ${err}\r\n`);
       app.setThreadStatus(thread.id, "error");
+      logger.error("spawn", `${thread.label}: spawn failed`, String(err));
       return;
     }
 
@@ -189,12 +236,16 @@
             const id = await detector(cwd, since);
             if (!id) return false;
             t.sessionId = id;
-            t.iconKey = t.iconKey ?? "claude";
             void saveThread($state.snapshot(t) as Thread);
+            logger.info(
+              "session",
+              `captured ${t.iconKey ?? "?"} session for ${t.label}`,
+              { id, cwd },
+            );
             notifications.success(`Session captured (${t.label})`);
             return true;
           } catch (err) {
-            console.error("session detect failed:", err);
+            logger.error("session", `detect failed for ${t.label}`, String(err));
             return false;
           }
         };
@@ -327,35 +378,11 @@
     void spawn();
 
     resizeObserver = new ResizeObserver(() => {
-      if (active) fit?.fit();
+      scheduleFit();
     });
     resizeObserver.observe(container);
 
-    // Status state machine:
-    //   - working signal seen recently (Claude printed "esc to interrupt" or
-    //     a token counter)  → running (orange spinner)
-    //   - otherwise                                                   → ready (green)
-    // Final states (done/exited/error) are sticky — set on PTY exit/spawn fail.
-    let prevStatus: Thread["status"] | null = null;
-    statusTimer = setInterval(() => {
-      const t = app.threads.find((x) => x.id === thread.id);
-      if (!t) return;
-      if (t.status === "done" || t.status === "exited" || t.status === "error") {
-        prevStatus = t.status;
-        return;
-      }
-      const working =
-        lastWorkingAt > 0 && Date.now() - lastWorkingAt < 2000;
-      const next = working ? "running" : "ready";
-      if (t.status !== next) {
-        app.setThreadStatus(thread.id, next);
-      }
-      if (prevStatus === "running" && next === "ready") {
-        const label = t.title ?? t.label;
-        void notifyWhenUnfocused(label, "Ready for input");
-      }
-      prevStatus = next;
-    }, 500);
+    statusEngine.acquire();
   });
 
   $effect(() => {
@@ -368,10 +395,11 @@
   });
 
   onDestroy(() => {
-    if (statusTimer) clearInterval(statusTimer);
-    statusTimer = null;
+    statusEngine.release(thread.id);
     if (sessionTimer) clearInterval(sessionTimer);
     sessionTimer = null;
+    if (fitRafId !== null) cancelAnimationFrame(fitRafId);
+    fitRafId = null;
     resizeObserver?.disconnect();
     term?.dispose();
     term = null;
@@ -381,7 +409,7 @@
 
 <div
   bind:this={container}
-  class="h-full w-full px-3 py-2"
+  class="h-full w-full bg-[var(--color-background)] px-3 py-2"
   oncontextmenu={handleContextMenu}
   role="presentation"
 ></div>

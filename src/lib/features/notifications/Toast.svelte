@@ -1,19 +1,17 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import type { ToastKind, ToastAction } from "./store.svelte";
+  import type { ToastKind } from "./store.svelte";
 
   type Props = {
     message: string;
     durationMs?: number | null;
     kind?: ToastKind;
-    action?: ToastAction;
     onDone: () => void;
   };
   let {
     message,
     durationMs = 3000,
     kind = "info",
-    action,
     onDone,
   }: Props = $props();
 
@@ -24,11 +22,6 @@
     const timer = setTimeout(() => onDone(), durationMs);
     return () => clearTimeout(timer);
   });
-
-  function runAction() {
-    action?.run();
-    onDone();
-  }
 </script>
 
 <div class="toast" class:success={kind === "success"} class:error={kind === "error"}>
@@ -59,9 +52,6 @@
       {/if}
     </svg>
     <span class="text">{message}</span>
-    {#if action}
-      <button type="button" class="action" onclick={runAction}>{action.label}</button>
-    {/if}
   </div>
 </div>
 
@@ -104,21 +94,5 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-  }
-  .action {
-    flex-shrink: 0;
-    margin-left: 4px;
-    padding: 2px 8px;
-    border: none;
-    border-radius: 3px;
-    background: color-mix(in srgb, var(--toast-accent) 20%, transparent);
-    color: var(--toast-accent);
-    font-size: 11px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background 100ms;
-  }
-  .action:hover {
-    background: color-mix(in srgb, var(--toast-accent) 32%, transparent);
   }
 </style>

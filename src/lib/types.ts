@@ -54,6 +54,9 @@ export interface Settings {
   uiScalePercent: number;
   projectOrder: string[];
   threadOrderByProject: Record<string, string[]>;
+  idleTimeoutMinutes: number;
+  idleAutocloseByIcon: Record<string, boolean>;
+  confirmCloseThread: boolean;
 }
 
 export type View = "terminal" | "settings";

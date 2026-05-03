@@ -4,6 +4,7 @@
   import StatusDot from "$lib/shared/components/StatusDot.svelte";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
   import ConfirmDialog from "$lib/shared/components/ConfirmDialog.svelte";
+  import type { Thread } from "$lib/types";
   import Plus from "@lucide/svelte/icons/plus";
   import X from "@lucide/svelte/icons/x";
   import FolderOpen from "@lucide/svelte/icons/folder-open";
@@ -58,6 +59,10 @@
 
   function selectProject(projectId: string) {
     app.selectedProjectId = projectId;
+    if (app.activeThread && app.activeThread.projectId !== projectId) {
+      const firstInProject = app.threadsByProjectSorted(projectId)[0];
+      app.activeThreadId = firstInProject ? firstInProject.id : null;
+    }
     app.view = "terminal";
   }
 
@@ -158,6 +163,10 @@
 
   // ----- Confirm handlers -----
   function requestRemoveThread(id: string) {
+    if (!settings.state.confirmCloseThread) {
+      onCloseThread(id);
+      return;
+    }
     confirmThreadId = id;
   }
   function confirmRemoveThread() {
@@ -186,6 +195,14 @@
   const pendingProject = $derived(
     confirmProjectId ? app.projects.find((p) => p.id === confirmProjectId) : null,
   );
+
+  const threadsByProject = $derived.by(() => {
+    const map = new Map<string, Thread[]>();
+    for (const p of app.sortedProjects) {
+      map.set(p.id, app.threadsByProjectSorted(p.id));
+    }
+    return map;
+  });
 </script>
 
 <svelte:window onclick={closeMenu} />
@@ -304,9 +321,9 @@
           {/if}
         </div>
 
-        {#if app.threadsByProjectSorted(project.id).length > 0}
-          <ul class="ml-3 space-y-0.5 border-l border-border/60 pl-2">
-            {#each app.threadsByProjectSorted(project.id) as thread (thread.id)}
+        {#if (threadsByProject.get(project.id) ?? []).length > 0}
+          <ul class="ml-3 space-y-0.5 border-l border-dashed border-border/60 pl-2">
+            {#each threadsByProject.get(project.id) ?? [] as thread (thread.id)}
               {@const isThreadDragged = threadDragging?.id === thread.id}
               {@const isThreadOver =
                 threadOver === thread.id && threadDragging?.id !== thread.id}
@@ -324,21 +341,28 @@
                 role="listitem"
               >
                 <div
-                  class="flex items-center gap-2 rounded-md px-2 py-1.5 transition {isActive
+                  class="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 transition {isActive
                     ? 'bg-accent text-foreground'
                     : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground'} {isThreadDragged
                     ? 'opacity-40'
                     : ''} {isThreadOver ? 'border-t-2 border-t-foreground/40' : ''}"
+                  role="button"
+                  tabindex="0"
+                  onclick={() => onActivateThread(thread.id)}
+                  onkeydown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      onActivateThread(thread.id);
+                    }
+                  }}
                 >
                   <StatusDot status={thread.status} />
-                  <button
-                    type="button"
+                  <span
                     class="min-w-0 flex-1 truncate text-left text-[13px]"
-                    onclick={() => onActivateThread(thread.id)}
                     title={thread.title ?? thread.label}
                   >
                     {thread.title ?? thread.label}
-                  </button>
+                  </span>
                   <span
                     class="relative flex size-4 shrink-0 items-center justify-center"
                     data-no-drag

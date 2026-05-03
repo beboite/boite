@@ -1,0 +1,18 @@
+<script lang="ts">
+  type Props = { size?: number; class?: string };
+  let { size = 17, class: klass = "" }: Props = $props();
+</script>
+
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 -960 960 960"
+  width={size}
+  height={size}
+  fill="currentColor"
+  aria-hidden="true"
+  class={klass}
+>
+  <path
+    d="M200-80q-33 0-56.5-23.5T120-160v-451q-18-11-29-28.5T80-682v-138q0-33 23.5-56.5T160-900h640q33 0 56.5 23.5T880-820v138q0 25-11 42.5T840-611v451q0 33-23.5 56.5T760-80H200Zm0-520v440h560v-440H200Zm-40-80h640v-140H160v140Zm200 280h240v-80H360v80Zm120 20Z"
+  />
+</svg>

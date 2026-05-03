@@ -39,13 +39,3 @@ const REGISTRY: Partial<Record<NonNullable<IconKey>, BrandGlyph>> = {
 export function getBrandGlyph(key: NonNullable<IconKey>): BrandGlyph | null {
   return REGISTRY[key] ?? null;
 }
-
-export const BRAND_KEYS: NonNullable<IconKey>[] = [
-  "claude",
-  "codex",
-  "opencode",
-  "cursor",
-  "gemini",
-  "copilot",
-  "terminal",
-];

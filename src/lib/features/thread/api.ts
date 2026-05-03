@@ -54,6 +54,7 @@ export async function launchShortcut(
     `${shortcut.label} #${count}`,
     iconKey,
   );
+  app.markFresh(thread.id);
   try {
     await app.upsertThread(thread);
   } catch (err) {

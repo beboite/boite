@@ -12,17 +12,6 @@ export interface PtySpawnArgs {
   args: string[];
   cols: number;
   rows: number;
-  env?: Record<string, string>;
-}
-
-export interface PtyInfo {
-  id: string;
-  cwd: string;
-  cmd: string;
-  args: string[];
-  title: string | null;
-  exited: boolean;
-  exitCode: number | null;
 }
 
 export async function ptySpawn(
@@ -35,7 +24,7 @@ export async function ptySpawn(
 }
 
 export async function ptyWrite(id: string, data: Uint8Array): Promise<void> {
-  await invoke("pty_write", { id, data: Array.from(data) });
+  await invoke("pty_write", data, { headers: { "x-pty-id": id } });
 }
 
 export async function ptyResize(id: string, cols: number, rows: number): Promise<void> {
@@ -44,8 +33,4 @@ export async function ptyResize(id: string, cols: number, rows: number): Promise
 
 export async function ptyKill(id: string): Promise<void> {
   await invoke("pty_kill", { id });
-}
-
-export async function ptyList(): Promise<PtyInfo[]> {
-  return invoke<PtyInfo[]>("pty_list");
 }

@@ -37,8 +37,6 @@
       </button>
     {/each}
 
-    <ShellPicker />
-
     {#if settings.state.shortcuts.length === 0}
       <button
         type="button"
@@ -49,4 +47,6 @@
       </button>
     {/if}
   </div>
+
+  <ShellPicker />
 </div>
