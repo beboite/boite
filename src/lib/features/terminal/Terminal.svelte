@@ -7,7 +7,7 @@
   import { Unicode11Addon } from "@xterm/addon-unicode11";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
-  import { ptySpawn, ptyWrite, ptyResize } from "$lib/storage/pty";
+  import { ptySpawn, ptyWrite, ptyResize, ptyKill } from "$lib/storage/pty";
   import type { PtyEvent } from "$lib/storage/pty";
   import { app } from "$lib/app/store.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
@@ -39,6 +39,9 @@
   let resizeObserver: ResizeObserver | null = null;
   let ptyId: string | null = null;
   let spawned = $state(false);
+  let spawning = false;
+  let destroyed = false;
+  let spawnRetryTimer: ReturnType<typeof setTimeout> | null = null;
   let ctxMenu = $state<{ x: number; y: number; items: ContextMenuItem[] } | null>(
     null,
   );
@@ -55,6 +58,36 @@
   const LF = new Uint8Array([0x0a]);
   const DETECT_BUFFER_MAX = 4000;
   const SESSION_SCAN_INTERVAL_MS = 12_000;
+
+  function focusTerminalSoon() {
+    queueMicrotask(() => term?.focus());
+    requestAnimationFrame(() => term?.focus());
+  }
+
+  function consumeTerminalShortcut(e: KeyboardEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+
+  function clearSpawnRetry() {
+    if (spawnRetryTimer === null) return;
+    clearTimeout(spawnRetryTimer);
+    spawnRetryTimer = null;
+  }
+
+  function scheduleSpawnRetry(delay = 120) {
+    if (spawned || spawning || destroyed || spawnRetryTimer !== null) return;
+    spawnRetryTimer = setTimeout(() => {
+      spawnRetryTimer = null;
+      void spawn();
+    }, delay);
+  }
+
+  function hasUsableTerminalSize(): boolean {
+    if (!container?.isConnected) return false;
+    const rect = container.getBoundingClientRect();
+    return rect.width >= 16 && rect.height >= 16;
+  }
 
   function scheduleFit() {
     if (fitRafId !== null) return;
@@ -126,12 +159,15 @@
   }
 
   async function pasteFromClipboard() {
-    if (!term) return;
+    const target = term;
+    if (!target) return;
     try {
       const text = await readText();
-      if (text) term.paste(text);
+      if (text) target.paste(text);
     } catch (err) {
       console.error("clipboard read failed:", err);
+    } finally {
+      focusTerminalSoon();
     }
   }
 
@@ -156,7 +192,9 @@
         label: "Copy",
         disabled: !sel,
         action: () => {
-          void copySelection().then(() => term?.clearSelection());
+          void copySelection()
+            .then(() => term?.clearSelection())
+            .finally(focusTerminalSoon);
         },
       },
       {
@@ -170,6 +208,7 @@
         label: "Reload thread",
         action: () => {
           void reloadThread(thread.id);
+          focusTerminalSoon();
         },
       },
     ];
@@ -332,15 +371,27 @@
   }
 
   async function spawn() {
-    if (spawned) return;
+    if (spawned || spawning || destroyed) return;
     if (!term || !fit) {
       logger.warn(
         "spawn",
         `${thread.label}: skip — term=${!!term} fit=${!!fit}`,
       );
+      scheduleSpawnRetry();
       return;
     }
-    spawned = true;
+
+    if (!hasUsableTerminalSize()) {
+      scheduleSpawnRetry();
+      return;
+    }
+
+    try {
+      fit.fit();
+    } catch {
+      scheduleSpawnRetry();
+      return;
+    }
 
     const project = app.projects.find((p) => p.id === thread.projectId);
     if (!project) {
@@ -348,8 +399,9 @@
       return;
     }
 
-    const cols = term.cols;
-    const rows = term.rows;
+    spawning = true;
+    const cols = Math.max(2, term.cols || 80);
+    const rows = Math.max(1, term.rows || 24);
 
     const userArgs = buildResumeArgs(thread);
     const wrapShell = settings.state.defaultShellId
@@ -364,7 +416,7 @@
     const spawnedAt = Date.now();
 
     try {
-      ptyId = await ptySpawn(
+      const nextPtyId = await ptySpawn(
         {
           cwd: project.cwd,
           cmd: plan.cmd,
@@ -374,6 +426,12 @@
         },
         handleEvent,
       );
+      if (destroyed || !term) {
+        void ptyKill(nextPtyId, false).catch(() => {});
+        return;
+      }
+      ptyId = nextPtyId;
+      spawned = true;
       app.setThreadPtyId(thread.id, ptyId);
       app.setThreadStatus(thread.id, "ready");
       logger.info(
@@ -382,10 +440,12 @@
         { cmd: plan.cmd, args: plan.args, cwd: project.cwd },
       );
     } catch (err) {
-      term.write(`\r\n[boite] spawn failed: ${err}\r\n`);
-      app.setThreadStatus(thread.id, "error");
+      term?.write(`\r\n[boite] spawn failed: ${err}\r\n`);
+      if (!destroyed) app.setThreadStatus(thread.id, "error");
       logger.error("spawn", `${thread.label}: spawn failed`, String(err));
       return;
+    } finally {
+      spawning = false;
     }
 
     if (plan.pendingInput && ptyId) {
@@ -484,21 +544,25 @@
       const code = e.code;
 
       if (e.ctrlKey && e.shiftKey && code === "KeyC") {
+        consumeTerminalShortcut(e);
         void copySelection();
         return false;
       }
       if (e.ctrlKey && e.shiftKey && code === "KeyV") {
+        consumeTerminalShortcut(e);
         void pasteFromClipboard();
         return false;
       }
       if (e.ctrlKey && !e.shiftKey && !e.altKey && code === "KeyC") {
         const sel = term?.getSelection();
         if (sel) {
+          consumeTerminalShortcut(e);
           void copySelection().then(() => term?.clearSelection());
           return false;
         }
       }
       if (e.ctrlKey && !e.shiftKey && !e.altKey && code === "KeyV") {
+        consumeTerminalShortcut(e);
         void pasteFromClipboard();
         return false;
       }
@@ -557,7 +621,10 @@
 
   $effect(() => {
     if (visible && term) {
-      queueMicrotask(() => fit?.fit());
+      queueMicrotask(() => {
+        fit?.fit();
+        void spawn();
+      });
     }
   });
 
@@ -568,8 +635,10 @@
   });
 
   onDestroy(() => {
+    destroyed = true;
     statusEngine.release(thread.id);
     stopSessionMonitor();
+    clearSpawnRetry();
     if (fitRafId !== null) cancelAnimationFrame(fitRafId);
     fitRafId = null;
     resizeObserver?.disconnect();
