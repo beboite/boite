@@ -123,10 +123,17 @@ export interface PaneRect {
   h: number;
 }
 
+export interface DropPreview {
+  targetThreadId: string;
+  side: DropSide;
+  refused: boolean;
+}
+
 class PaneStore {
   groups = $state<PaneGroup[]>([]);
   hoveredThreadId = $state<string | null>(null);
   draggingThreadId = $state<string | null>(null);
+  dropPreview = $state<DropPreview | null>(null);
   rects = $state<Record<string, PaneRect>>({});
 
   setRect(threadId: string, rect: PaneRect) {
@@ -196,6 +203,9 @@ class PaneStore {
     for (const id of Object.keys(this.rects)) {
       if (!valid.has(id)) delete this.rects[id];
     }
+    if (this.dropPreview && !valid.has(this.dropPreview.targetThreadId)) {
+      this.dropPreview = null;
+    }
   }
 
   setFocused(groupId: string, threadId: string) {
@@ -221,9 +231,13 @@ class PaneStore {
     const dragged = app.threads.find((t) => t.id === draggedThreadId);
     if (!targetGroup || !dragged) return false;
     if (dragged.projectId !== targetGroup.projectId) return false;
-    if (countLeaves(targetGroup.root) >= MAX_LEAVES) return false;
 
     const sourceGroup = this.groupOf(draggedThreadId);
+    const movingWithinTarget = sourceGroup?.id === targetGroup.id;
+    if (countLeaves(targetGroup.root) >= MAX_LEAVES && !movingWithinTarget) {
+      return false;
+    }
+
     if (sourceGroup) {
       const pruned = pruneLeaf(sourceGroup.root, draggedThreadId);
       if (sourceGroup.id === targetGroup.id) {

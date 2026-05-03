@@ -5,12 +5,50 @@ import type { Settings, Shortcut } from "$lib/types";
 
 export const PRESET_SHORTCUTS: Shortcut[] = [
   { id: "claude", label: "Claude", command: "claude", iconKey: "claude" },
-  { id: "codex", label: "Codex", command: "codex", iconKey: "codex" },
+  {
+    id: "codex",
+    label: "Codex",
+    command: "codex --no-alt-screen",
+    iconKey: "codex",
+  },
   { id: "opencode", label: "Opencode", command: "opencode", iconKey: "opencode" },
   { id: "cursor", label: "Cursor Agent", command: "cursor-agent", iconKey: "cursor" },
   { id: "gemini", label: "Gemini", command: "gemini", iconKey: "gemini" },
   { id: "copilot", label: "Copilot", command: "gh copilot", iconKey: "copilot" },
 ];
+
+function migrateShortcuts(raw: unknown): { shortcuts: Shortcut[]; changed: boolean } {
+  if (!Array.isArray(raw)) {
+    return { shortcuts: structuredClone(DEFAULTS.shortcuts), changed: false };
+  }
+
+  let changed = false;
+  const shortcuts = raw
+    .filter((shortcut): shortcut is Shortcut => {
+      return (
+        shortcut &&
+        typeof shortcut === "object" &&
+        "id" in shortcut &&
+        "label" in shortcut &&
+        "command" in shortcut &&
+        typeof shortcut.id === "string" &&
+        typeof shortcut.label === "string" &&
+        typeof shortcut.command === "string"
+      );
+    })
+    .map((shortcut) => {
+      if (
+        shortcut.iconKey === "codex" &&
+        shortcut.command.trim() === "codex"
+      ) {
+        changed = true;
+        return { ...shortcut, command: "codex --no-alt-screen" };
+      }
+      return shortcut;
+    });
+
+  return { shortcuts, changed };
+}
 
 const DEFAULTS: Settings = {
   shortcuts: PRESET_SHORTCUTS,
@@ -26,6 +64,7 @@ const DEFAULTS: Settings = {
   confirmCloseThread: true,
   gitPanelOpen: false,
   gitPanelWidth: 320,
+  gitSplitFraction: 0.5,
 };
 
 export function parseCommand(input: string): { cmd: string; args: string[] } {
@@ -59,10 +98,9 @@ class SettingsStore {
     if (this.ready) return;
     try {
       const stored = await loadSettings();
+      const migratedShortcuts = migrateShortcuts(stored.shortcuts);
       this.state = {
-        shortcuts: Array.isArray(stored.shortcuts)
-          ? stored.shortcuts
-          : structuredClone(DEFAULTS.shortcuts),
+        shortcuts: migratedShortcuts.shortcuts,
         powershellNewline:
           typeof stored.powershellNewline === "boolean"
             ? stored.powershellNewline
@@ -110,7 +148,16 @@ class SettingsStore {
           typeof stored.gitPanelWidth === "number" && stored.gitPanelWidth > 0
             ? stored.gitPanelWidth
             : DEFAULTS.gitPanelWidth,
+        gitSplitFraction:
+          typeof stored.gitSplitFraction === "number" &&
+          stored.gitSplitFraction > 0 &&
+          stored.gitSplitFraction < 1
+            ? stored.gitSplitFraction
+            : DEFAULTS.gitSplitFraction,
       };
+      if (migratedShortcuts.changed) {
+        await this.persist();
+      }
     } catch (err) {
       console.error("loadSettings failed:", err);
     }
@@ -257,6 +304,13 @@ class SettingsStore {
     const clamped = Math.max(240, Math.min(600, Math.round(px)));
     if (this.state.gitPanelWidth === clamped) return;
     this.state.gitPanelWidth = clamped;
+    this.persistSoon();
+  }
+
+  setGitSplitFraction(value: number) {
+    const clamped = Math.max(0.15, Math.min(0.85, value));
+    if (Math.abs(this.state.gitSplitFraction - clamped) < 0.001) return;
+    this.state.gitSplitFraction = clamped;
     this.persistSoon();
   }
 }

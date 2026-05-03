@@ -1,21 +1,26 @@
 <script lang="ts">
+  import { onDestroy } from "svelte";
   import { app } from "$lib/app/store.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
-  import { paneStore, countLeaves } from "$lib/features/panes/store.svelte";
-  import { reloadThread } from "$lib/features/thread/api";
+  import {
+    paneStore,
+    countLeaves,
+    MAX_LEAVES,
+  } from "$lib/features/panes/store.svelte";
+  import { reloadThread, stopThread } from "$lib/features/thread/api";
+  import { notifications } from "$lib/features/notifications/store.svelte";
   import StatusDot from "$lib/shared/components/StatusDot.svelte";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
   import ConfirmDialog from "$lib/shared/components/ConfirmDialog.svelte";
   import ContextMenu from "$lib/shared/components/ContextMenu.svelte";
   import type { ContextMenuItem } from "$lib/shared/components/ContextMenu.svelte";
+  import type { DropSide } from "$lib/features/panes/types";
   import type { Thread } from "$lib/types";
   import Plus from "@lucide/svelte/icons/plus";
   import X from "@lucide/svelte/icons/x";
   import FolderOpen from "@lucide/svelte/icons/folder-open";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import MoreHorizontal from "@lucide/svelte/icons/more-horizontal";
-
-  const DRAG_MIME = "application/x-boite-thread";
 
   type Props = {
     onCloseThread: (threadId: string) => void;
@@ -34,36 +39,72 @@
   let confirmThreadId = $state<string | null>(null);
   let confirmProjectId = $state<string | null>(null);
 
-  // Track the element where the most recent mousedown happened so dragstart
-  // can opt out when the user pressed on a button/input rather than the row.
-  let mouseDownTarget: HTMLElement | null = null;
-
-  let projectDragging = $state<string | null>(null);
-  let projectOver = $state<string | null>(null);
-  let threadDragging = $state<{ id: string; projectId: string } | null>(null);
-  let threadOver = $state<string | null>(null);
+  type RowSnapshot = { id: string; top: number; height: number };
+  type DragState = {
+    kind: "project" | "thread";
+    id: string;
+    projectId: string;
+    pointerId: number;
+    startX: number;
+    startY: number;
+    x: number;
+    y: number;
+    active: boolean;
+    sourceHeight: number;
+    siblings: RowSnapshot[];
+    slotIndex: number | null;
+  };
+  let dragState = $state<DragState | null>(null);
+  let suppressClickFor = $state<string | null>(null);
 
   let resizing = $state(false);
   let asideEl: HTMLElement | null = $state(null);
 
-  function isInteractive(el: HTMLElement | null): boolean {
-    return !!el?.closest("button, input, textarea, select, [data-no-drag]");
+  const liveDrag = $derived(dragState?.active ? dragState : null);
+  const draggingId = $derived(liveDrag?.id ?? null);
+  const draggingKind = $derived(liveDrag?.kind ?? null);
+  const dragOffset = $derived(
+    liveDrag ? liveDrag.y - liveDrag.startY : 0,
+  );
+
+  $effect(() => {
+    if (!liveDrag) {
+      document.body.classList.remove("dragging-card");
+      return;
+    }
+    document.body.classList.add("dragging-card");
+    return () => document.body.classList.remove("dragging-card");
+  });
+
+  function isDragBlocked(el: HTMLElement | null): boolean {
+    return !!el?.closest("input, textarea, select, [data-no-drag], [data-drag-block]");
   }
 
-  function rowMouseDown(e: MouseEvent) {
-    mouseDownTarget = e.target as HTMLElement;
-  }
-
-  function threadMouseDown(e: MouseEvent) {
-    rowMouseDown(e);
+  function threadPointerDown(thread: Thread, e: PointerEvent) {
     if (e.button === 1) e.preventDefault();
+    if (e.button !== 0 || isDragBlocked(e.target as HTMLElement)) return;
+    e.stopPropagation();
+    startPointerDrag({
+      kind: "thread",
+      id: thread.id,
+      projectId: thread.projectId,
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      x: e.clientX,
+      y: e.clientY,
+      active: false,
+      sourceHeight: 0,
+      siblings: [],
+      slotIndex: null,
+    });
   }
 
   function threadAuxClick(id: string, e: MouseEvent) {
     if (e.button !== 1) return;
     e.preventDefault();
     e.stopPropagation();
-    requestRemoveThread(id);
+    void stopThread(id);
   }
 
   function toggleMenu(id: string, e: MouseEvent) {
@@ -84,98 +125,260 @@
     app.view = "terminal";
   }
 
-  // ----- Project drag -----
-  function projectDragStart(id: string, e: DragEvent) {
-    if (isInteractive(mouseDownTarget)) {
-      e.preventDefault();
+  function projectPointerDown(projectId: string, e: PointerEvent) {
+    if (e.button !== 0 || isDragBlocked(e.target as HTMLElement)) return;
+    const project = app.projects.find((p) => p.id === projectId);
+    if (!project) return;
+    startPointerDrag({
+      kind: "project",
+      id: project.id,
+      projectId: project.id,
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      x: e.clientX,
+      y: e.clientY,
+      active: false,
+      sourceHeight: 0,
+      siblings: [],
+      slotIndex: null,
+    });
+  }
+
+  function startPointerDrag(next: DragState) {
+    cleanupPointerDrag();
+    dragState = next;
+    document.addEventListener("pointermove", pointerDragMove);
+    document.addEventListener("pointerup", pointerDragEnd);
+    document.addEventListener("pointercancel", pointerDragEnd);
+  }
+
+  function captureSiblings(drag: DragState) {
+    const sel =
+      drag.kind === "project"
+        ? "[data-project-row]"
+        : `[data-thread-row][data-project-id="${drag.projectId}"]`;
+    const rows = Array.from(document.querySelectorAll<HTMLElement>(sel));
+    const snaps: RowSnapshot[] = rows.map((el) => {
+      const r = el.getBoundingClientRect();
+      const id =
+        drag.kind === "project"
+          ? el.dataset.projectRow ?? ""
+          : el.dataset.threadRow ?? "";
+      return { id, top: r.top, height: r.height };
+    });
+    drag.siblings = snaps;
+    const me = snaps.find((s) => s.id === drag.id);
+    drag.sourceHeight = me?.height ?? 36;
+  }
+
+  function pointerDragMove(e: PointerEvent) {
+    const drag = dragState;
+    if (!drag || e.pointerId !== drag.pointerId) return;
+
+    drag.x = e.clientX;
+    drag.y = e.clientY;
+
+    if (!drag.active) {
+      const moved = Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY);
+      if (moved < 5) {
+        dragState = { ...drag };
+        return;
+      }
+      drag.active = true;
+      suppressClickFor = drag.id;
+      closeMenu();
+      closeContextMenu();
+      captureSiblings(drag);
+      if (drag.kind === "thread") paneStore.draggingThreadId = drag.id;
+    }
+
+    e.preventDefault();
+    if (drag.kind === "project") {
+      drag.slotIndex = computeSlotIndex(drag);
+      paneStore.dropPreview = null;
+    } else {
+      updateThreadDrag(drag, e);
+    }
+    dragState = { ...drag };
+  }
+
+  function computeSlotIndex(drag: DragState): number | null {
+    if (drag.siblings.length === 0) return null;
+    const sourceIdx = drag.siblings.findIndex((s) => s.id === drag.id);
+    if (sourceIdx < 0) return null;
+    const reduced = drag.siblings.filter((_, i) => i !== sourceIdx);
+    if (reduced.length === 0) return 0;
+    const cy = drag.y;
+    for (let i = 0; i < reduced.length; i++) {
+      const mid = reduced[i].top + reduced[i].height / 2;
+      if (cy < mid) return i;
+    }
+    return reduced.length;
+  }
+
+  function updateThreadDrag(drag: DragState, e: PointerEvent) {
+    const previewPicked = updatePaneDropPreview(drag, e.clientX, e.clientY);
+    if (previewPicked) {
+      drag.slotIndex = null;
       return;
     }
-    projectDragging = id;
-    if (e.dataTransfer) {
-      e.dataTransfer.effectAllowed = "move";
-      e.dataTransfer.setData("text/plain", id);
+    const overEl = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
+    const inAside = !!overEl?.closest("[data-sidebar-root]");
+    const sameProjectList = !!overEl?.closest(
+      `[data-thread-list][data-project-id="${drag.projectId}"]`,
+    );
+    const overSourceProjectHeader = !!overEl?.closest(
+      `[data-project-row="${drag.projectId}"]`,
+    );
+    if (inAside && (sameProjectList || overSourceProjectHeader)) {
+      drag.slotIndex = computeSlotIndex(drag);
+    } else {
+      drag.slotIndex = null;
     }
   }
-  function projectDragOver(id: string, e: DragEvent) {
-    if (!projectDragging) return;
-    e.preventDefault();
-    if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
-    projectOver = id;
+
+  function updatePaneDropPreview(
+    drag: DragState,
+    clientX: number,
+    clientY: number,
+  ): boolean {
+    const viewport = document.querySelector("[data-pane-viewport]") as HTMLElement | null;
+    if (!viewport) {
+      paneStore.dropPreview = null;
+      return false;
+    }
+    const rootRect = viewport.getBoundingClientRect();
+    const x = clientX - rootRect.left;
+    const y = clientY - rootRect.top;
+    if (x < 0 || y < 0 || x > rootRect.width || y > rootRect.height) {
+      paneStore.dropPreview = null;
+      return false;
+    }
+
+    for (const [targetThreadId, rect] of Object.entries(paneStore.rects)) {
+      if (
+        targetThreadId === drag.id ||
+        x < rect.x ||
+        y < rect.y ||
+        x > rect.x + rect.w ||
+        y > rect.y + rect.h
+      ) {
+        continue;
+      }
+      const target = app.threads.find((t) => t.id === targetThreadId);
+      const group = paneStore.groupOf(targetThreadId);
+      if (!target || target.projectId !== drag.projectId || !group) {
+        paneStore.dropPreview = null;
+        return false;
+      }
+      const sourceGroup = paneStore.groupOf(drag.id);
+      const refused =
+        countLeaves(group.root) >= MAX_LEAVES && sourceGroup?.id !== group.id;
+      paneStore.dropPreview = {
+        targetThreadId,
+        side: sideFromRect(rect, x, y),
+        refused,
+      };
+      return true;
+    }
+
+    paneStore.dropPreview = null;
+    return false;
   }
-  function projectDrop(id: string, e: DragEvent) {
-    e.preventDefault();
-    const from = projectDragging;
-    projectDragging = null;
-    projectOver = null;
-    if (!from || from === id) return;
+
+  function sideFromRect(
+    rect: { x: number; y: number; w: number; h: number },
+    x: number,
+    y: number,
+  ): DropSide {
+    const localX = x - rect.x;
+    const localY = y - rect.y;
+    const dx = Math.min(localX, rect.w - localX) / rect.w;
+    const dy = Math.min(localY, rect.h - localY) / rect.h;
+    if (dx < dy) return localX < rect.w / 2 ? "left" : "right";
+    return localY < rect.h / 2 ? "top" : "bottom";
+  }
+
+  function pointerDragEnd(e: PointerEvent) {
+    const drag = dragState;
+    if (!drag || e.pointerId !== drag.pointerId) return;
+    if (drag.active) {
+      e.preventDefault();
+      if (drag.kind === "project") commitProjectDrag(drag);
+      else commitThreadDrag(drag, e);
+      setTimeout(() => {
+        if (suppressClickFor === drag.id) suppressClickFor = null;
+      }, 0);
+    }
+    cleanupPointerDrag();
+  }
+
+  function cleanupPointerDrag() {
+    if (typeof document !== "undefined") {
+      document.removeEventListener("pointermove", pointerDragMove);
+      document.removeEventListener("pointerup", pointerDragEnd);
+      document.removeEventListener("pointercancel", pointerDragEnd);
+    }
+    dragState = null;
+    paneStore.draggingThreadId = null;
+    paneStore.dropPreview = null;
+  }
+
+  function commitProjectDrag(drag: DragState) {
+    const slot = drag.slotIndex;
+    if (slot === null) return;
     const ids = app.sortedProjects.map((p) => p.id);
-    const fromIdx = ids.indexOf(from);
-    const toIdx = ids.indexOf(id);
-    if (fromIdx < 0 || toIdx < 0) return;
+    const fromIdx = ids.indexOf(drag.id);
+    if (fromIdx < 0) return;
     ids.splice(fromIdx, 1);
-    ids.splice(toIdx, 0, from);
+    const insertAt = Math.min(slot, ids.length);
+    ids.splice(insertAt, 0, drag.id);
     void settings.setProjectOrder(ids);
   }
-  function projectDragEnd() {
-    projectDragging = null;
-    projectOver = null;
-    mouseDownTarget = null;
-  }
 
-  // ----- Thread drag (within same project only) -----
-  function threadDragStart(id: string, projectId: string, e: DragEvent) {
-    if (isInteractive(mouseDownTarget)) {
-      e.preventDefault();
+  function commitThreadDrag(drag: DragState, e: PointerEvent) {
+    const preview = paneStore.dropPreview;
+    if (preview) {
+      if (preview.refused) {
+        notifications.error(`Max ${MAX_LEAVES} panes per group`);
+        return;
+      }
+      paneStore.splitInto(preview.targetThreadId, drag.id, preview.side);
       return;
     }
-    threadDragging = { id, projectId };
-    paneStore.draggingThreadId = id;
-    if (e.dataTransfer) {
-      e.dataTransfer.effectAllowed = "move";
-      e.dataTransfer.setData("text/plain", id);
-      e.dataTransfer.setData(DRAG_MIME, id);
+
+    if (drag.slotIndex !== null) {
+      const ids = app.threadsByProjectSorted(drag.projectId).map((t) => t.id);
+      const fromIdx = ids.indexOf(drag.id);
+      if (fromIdx < 0) return;
+      ids.splice(fromIdx, 1);
+      const insertAt = Math.min(drag.slotIndex, ids.length);
+      ids.splice(insertAt, 0, drag.id);
+      void settings.setThreadOrder(drag.projectId, ids);
+      return;
+    }
+
+    if (asideEl) {
+      const asideRect = asideEl.getBoundingClientRect();
+      const insideAside =
+        e.clientX >= asideRect.left &&
+        e.clientX <= asideRect.right &&
+        e.clientY >= asideRect.top &&
+        e.clientY <= asideRect.bottom;
+      const group = paneStore.groupOf(drag.id);
+      if (insideAside && group && countLeaves(group.root) > 1) {
+        paneStore.unsplit(drag.id);
+      }
     }
   }
-  function threadDragOver(id: string, projectId: string, e: DragEvent) {
-    if (!threadDragging || threadDragging.projectId !== projectId) return;
-    e.preventDefault();
-    if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
-    threadOver = id;
-  }
-  function threadDrop(id: string, projectId: string, e: DragEvent) {
-    e.preventDefault();
-    e.stopPropagation();
-    const drag = threadDragging;
-    threadDragging = null;
-    threadOver = null;
-    paneStore.draggingThreadId = null;
-    if (!drag || drag.projectId !== projectId || drag.id === id) return;
-    const ids = app.threadsByProjectSorted(projectId).map((t) => t.id);
-    const fromIdx = ids.indexOf(drag.id);
-    const toIdx = ids.indexOf(id);
-    if (fromIdx < 0 || toIdx < 0) return;
-    ids.splice(fromIdx, 1);
-    ids.splice(toIdx, 0, drag.id);
-    void settings.setThreadOrder(projectId, ids);
-  }
-  function threadDragEnd() {
-    threadDragging = null;
-    threadOver = null;
-    paneStore.draggingThreadId = null;
-    mouseDownTarget = null;
-  }
 
-  function asideDragOver(e: DragEvent) {
-    if (!e.dataTransfer?.types.includes(DRAG_MIME)) return;
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
-  }
-
-  function asideDrop(e: DragEvent) {
-    const id = e.dataTransfer?.getData(DRAG_MIME);
-    if (!id) return;
-    e.preventDefault();
-    paneStore.unsplit(id);
+  function rowShift(idx: number, sourceIdx: number, slot: number, height: number): number {
+    if (idx === sourceIdx) return 0;
+    const eff = idx < sourceIdx ? idx : idx - 1;
+    const base = idx > sourceIdx ? -height : 0;
+    const drop = eff >= slot ? height : 0;
+    return base + drop;
   }
 
   function threadHoverEnter(id: string) {
@@ -185,7 +388,6 @@
     if (paneStore.hoveredThreadId === id) paneStore.hoveredThreadId = null;
   }
 
-  // ----- Context menu -----
   let ctxMenu = $state<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
 
   function openThreadContextMenu(thread: Thread, e: MouseEvent) {
@@ -221,7 +423,6 @@
     ctxMenu = null;
   }
 
-  // ----- Sidebar resize -----
   function startResize(e: MouseEvent) {
     e.preventDefault();
     resizing = true;
@@ -236,11 +437,17 @@
   }
   function stopResize() {
     resizing = false;
+    if (typeof document === "undefined") return;
     document.removeEventListener("mousemove", onResize);
     document.removeEventListener("mouseup", stopResize);
   }
 
-  // ----- Confirm handlers -----
+  function consumeDragClick(id: string): boolean {
+    if (suppressClickFor !== id) return false;
+    suppressClickFor = null;
+    return true;
+  }
+
   function requestRemoveThread(id: string) {
     if (!settings.state.confirmCloseThread) {
       onCloseThread(id);
@@ -282,18 +489,35 @@
     }
     return map;
   });
+
+  const projectSourceIdx = $derived(
+    liveDrag && liveDrag.kind === "project"
+      ? app.sortedProjects.findIndex((p) => p.id === liveDrag.id)
+      : -1,
+  );
+
+  const threadSourceIdx = $derived.by(() => {
+    if (!liveDrag || liveDrag.kind !== "thread") return -1;
+    const list = threadsByProject.get(liveDrag.projectId) ?? [];
+    return list.findIndex((t) => t.id === liveDrag.id);
+  });
+
+  onDestroy(() => {
+    cleanupPointerDrag();
+    stopResize();
+    document.body.classList.remove("dragging-card");
+  });
 </script>
 
 <svelte:window onclick={closeMenu} />
 
 <aside
   bind:this={asideEl}
+  data-sidebar-root
   class="relative flex h-full shrink-0 flex-col border-r border-border bg-[var(--color-surface)] {resizing
     ? 'select-none'
     : ''}"
   style:width="{settings.state.sidebarWidth}px"
-  ondragover={asideDragOver}
-  ondrop={asideDrop}
 >
   <header class="flex items-center justify-between px-3 py-2">
     <span
@@ -324,26 +548,30 @@
       </button>
     {/if}
 
-    {#each app.sortedProjects as project (project.id)}
+    {#each app.sortedProjects as project, projectIdx (project.id)}
       {@const isSelected = app.currentProjectId === project.id}
-      {@const isProjectDragged = projectDragging === project.id}
-      {@const isProjectOver = projectOver === project.id && projectDragging !== project.id}
+      {@const isProjectSource = liveDrag?.kind === "project" && liveDrag.id === project.id}
+      {@const projectShiftY =
+        liveDrag && liveDrag.kind === "project" && liveDrag.slotIndex !== null && projectSourceIdx >= 0
+          ? rowShift(projectIdx, projectSourceIdx, liveDrag.slotIndex, liveDrag.sourceHeight)
+          : 0}
       <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
       <div
-        class="mb-1.5"
-        draggable="true"
-        onmousedown={rowMouseDown}
-        ondragstart={(e) => projectDragStart(project.id, e)}
-        ondragover={(e) => projectDragOver(project.id, e)}
-        ondrop={(e) => projectDrop(project.id, e)}
-        ondragend={projectDragEnd}
+        class="project-block mb-1.5"
+        class:dragging={isProjectSource}
+        class:source={isProjectSource}
+        data-project-row={project.id}
+        style:transform={isProjectSource
+          ? `translate(0px, ${dragOffset}px) scale(1.015)`
+          : `translateY(${projectShiftY}px)`}
+        style:transition={isProjectSource ? "none" : "transform 180ms cubic-bezier(0.22, 1, 0.36, 1)"}
+        style:z-index={isProjectSource ? 50 : "auto"}
+        onpointerdown={(e) => projectPointerDown(project.id, e)}
         role="listitem"
       >
         <div
-          class="group/project relative flex items-center gap-2 rounded-md px-2 py-1.5 transition {isSelected
+          class="project-row group/project relative flex cursor-grab items-center gap-2 rounded-md px-2 py-1.5 transition hover:bg-accent/40 hover:text-foreground {isSelected
             ? 'bg-accent/40'
-            : ''} {isProjectDragged ? 'opacity-40' : ''} {isProjectOver
-            ? 'border-t-2 border-t-foreground/40'
             : ''}"
         >
           <div
@@ -365,9 +593,12 @@
           </div>
           <button
             type="button"
-            class="min-w-0 flex-1 truncate text-left text-[13px] font-medium text-foreground/90"
+            class="min-w-0 flex-1 truncate text-left text-[13px] font-medium text-foreground/90 transition group-hover/project:text-foreground"
             title={project.cwd}
-            onclick={() => selectProject(project.id)}
+            onclick={() => {
+              if (consumeDragClick(project.id)) return;
+              selectProject(project.id);
+            }}
           >
             {project.name}
           </button>
@@ -376,6 +607,7 @@
             type="button"
             class="rounded p-1 text-muted-foreground/0 transition hover:bg-accent hover:text-foreground group-hover/project:text-muted-foreground"
             onclick={(e) => toggleMenu(project.id, e)}
+            data-drag-block
             aria-label="Project options"
             title="More"
           >
@@ -403,36 +635,50 @@
         </div>
 
         {#if (threadsByProject.get(project.id) ?? []).length > 0}
-          <ul class="ml-3 space-y-0.5 border-l border-dashed border-border/60 pl-2">
-            {#each threadsByProject.get(project.id) ?? [] as thread (thread.id)}
-              {@const isThreadDragged = threadDragging?.id === thread.id}
-              {@const isThreadOver =
-                threadOver === thread.id && threadDragging?.id !== thread.id}
+          {@const threads = threadsByProject.get(project.id) ?? []}
+          {@const dragInThisProject =
+            liveDrag?.kind === "thread" && liveDrag.projectId === project.id}
+          <ul
+            class="ml-3 space-y-0.5 border-l border-dashed border-border/60 pl-2"
+            data-thread-list
+            data-project-id={project.id}
+          >
+            {#each threads as thread, threadIdx (thread.id)}
+              {@const isThreadSource = liveDrag?.kind === "thread" && liveDrag.id === thread.id}
               {@const isActive =
                 app.activeThreadId === thread.id && app.view === "terminal"}
+              {@const shiftY =
+                dragInThisProject && liveDrag.slotIndex !== null && threadSourceIdx >= 0
+                  ? rowShift(threadIdx, threadSourceIdx, liveDrag.slotIndex, liveDrag.sourceHeight)
+                  : 0}
               <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
               <li
-                class="group/thread"
-                draggable="true"
-                onmousedown={threadMouseDown}
-                ondragstart={(e) => threadDragStart(thread.id, thread.projectId, e)}
-                ondragover={(e) => threadDragOver(thread.id, thread.projectId, e)}
-                ondrop={(e) => threadDrop(thread.id, thread.projectId, e)}
-                ondragend={threadDragEnd}
+                class="thread-row group/thread"
+                class:source={isThreadSource}
+                data-thread-row={thread.id}
+                data-thread-id={thread.id}
+                data-project-id={thread.projectId}
+                style:transform={isThreadSource
+                  ? `translate(0px, ${dragOffset}px) scale(1.02)`
+                  : `translateY(${shiftY}px)`}
+                style:transition={isThreadSource ? "none" : "transform 180ms cubic-bezier(0.22, 1, 0.36, 1)"}
+                style:z-index={isThreadSource ? 50 : "auto"}
+                onpointerdown={(e) => threadPointerDown(thread, e)}
                 onmouseenter={() => threadHoverEnter(thread.id)}
                 onmouseleave={() => threadHoverLeave(thread.id)}
                 oncontextmenu={(e) => openThreadContextMenu(thread, e)}
                 role="listitem"
               >
                 <div
-                  class="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 transition {isActive
+                  class="thread-card flex cursor-grab items-center gap-2 rounded-md px-2 py-1.5 transition {isActive
                     ? 'bg-accent text-foreground'
-                    : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground'} {isThreadDragged
-                    ? 'opacity-40'
-                    : ''} {isThreadOver ? 'border-t-2 border-t-foreground/40' : ''}"
+                    : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground'}"
                   role="button"
                   tabindex="0"
-                  onclick={() => onActivateThread(thread.id)}
+                  onclick={() => {
+                    if (consumeDragClick(thread.id)) return;
+                    onActivateThread(thread.id);
+                  }}
                   onauxclick={(e) => threadAuxClick(thread.id, e)}
                   onkeydown={(e) => {
                     if (e.key === "Enter" || e.key === " ") {
@@ -521,3 +767,41 @@
     onClose={closeContextMenu}
   />
 {/if}
+
+<style>
+  :global(body.dragging-card) {
+    user-select: none !important;
+    cursor: grabbing !important;
+  }
+  :global(body.dragging-card *) {
+    cursor: grabbing !important;
+  }
+
+  .project-block {
+    transform-origin: left center;
+    will-change: transform;
+  }
+  .thread-row {
+    transform-origin: left center;
+    will-change: transform;
+  }
+  .project-row,
+  .thread-card {
+    user-select: none;
+  }
+
+  .project-block.source > .project-row,
+  .thread-row.source > .thread-card {
+    box-shadow:
+      0 12px 28px rgba(0, 0, 0, 0.5),
+      0 0 0 1px rgba(255, 255, 255, 0.08);
+    background: color-mix(in srgb, var(--color-surface-2, #1a1a1a) 90%, transparent);
+    backdrop-filter: blur(6px);
+  }
+  .thread-row.source {
+    pointer-events: none;
+  }
+  .project-block.source {
+    pointer-events: none;
+  }
+</style>

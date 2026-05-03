@@ -11,7 +11,7 @@ import {
 } from "./api";
 import { notifications } from "$lib/features/notifications/store.svelte";
 
-const LOG_PAGE = 100;
+const LOG_PAGE = 300;
 
 export interface GitState {
   isRepo: boolean;

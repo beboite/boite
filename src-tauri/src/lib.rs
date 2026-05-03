@@ -1,5 +1,6 @@
 mod commands;
 mod git;
+mod logging;
 mod project;
 mod pty;
 mod session;
@@ -103,12 +104,32 @@ pub fn run() {
         .manage(PtyManager::new())
         .manage(BootState::default())
         .setup(|app| {
+            let setup_handle = app.handle().clone();
+            if let Err(e) = logging::begin_log_session(&setup_handle) {
+                eprintln!("[boite/logging] begin_log_session failed: {e}");
+            }
+            logging::install_panic_hook(setup_handle.clone());
+            let _ = logging::append_app_log(
+                &setup_handle,
+                "info",
+                "backend.startup",
+                "App setup started",
+                None,
+            );
+
             // Failsafe: if frontend fails to call finish_boot within 5s, show anyway.
             let handle = app.handle().clone();
             std::thread::spawn(move || {
                 std::thread::sleep(std::time::Duration::from_millis(5000));
                 let state = handle.state::<BootState>();
                 if !state.is_completed() {
+                    let _ = logging::append_app_log(
+                        &handle,
+                        "warn",
+                        "backend.boot-failsafe",
+                        "Failsafe triggered after 5000ms; forcing main window visibility",
+                        None,
+                    );
                     state.mark_completed();
                     show_main_window(&handle);
                 }
@@ -121,6 +142,10 @@ pub fn run() {
             commands::pty_resize,
             commands::pty_kill,
             commands::finish_boot,
+            commands::log_app_event,
+            commands::read_app_log,
+            commands::clear_app_log,
+            commands::log_file_path,
             project::inspect_project,
             shell::default_shell,
             shell::available_shells,

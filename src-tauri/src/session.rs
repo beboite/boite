@@ -1,7 +1,9 @@
+use std::collections::HashSet;
+use std::env;
 use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use rusqlite::{Connection, OpenFlags};
 use serde::Deserialize;
@@ -87,7 +89,11 @@ fn read_claude_session_meta(path: &Path) -> Option<(Option<String>, Option<Strin
     Some((found_session, found_cwd))
 }
 
-fn find_claude_session_blocking(cwd: String, after_unix_ms: i64) -> Option<String> {
+fn find_claude_session_blocking(
+    cwd: String,
+    after_unix_ms: i64,
+    exclude: &HashSet<String>,
+) -> Option<String> {
     let home = dirs::home_dir()?;
     let projects_dir = home.join(".claude").join("projects");
     if !projects_dir.is_dir() {
@@ -162,9 +168,15 @@ fn find_claude_session_blocking(cwd: String, after_unix_ms: i64) -> Option<Strin
         }
 
         if let Some(id) = session_id {
+            if exclude.contains(&id) {
+                continue;
+            }
             return Some(id);
         }
         if let Some(stem) = cand.path.file_stem().and_then(|s| s.to_str()) {
+            if exclude.contains(stem) {
+                continue;
+            }
             return Some(stem.to_string());
         }
     }
@@ -196,7 +208,11 @@ fn read_codex_session_meta(path: &Path) -> Option<(String, String)> {
     Some((payload.id?, payload.cwd?))
 }
 
-fn find_codex_session_blocking(cwd: String, after_unix_ms: i64) -> Option<String> {
+fn find_codex_session_blocking(
+    cwd: String,
+    after_unix_ms: i64,
+    exclude: &HashSet<String>,
+) -> Option<String> {
     let home = dirs::home_dir()?;
     let sessions_dir = home.join(".codex").join("sessions");
     if !sessions_dir.is_dir() {
@@ -213,7 +229,7 @@ fn find_codex_session_blocking(cwd: String, after_unix_ms: i64) -> Option<String
 
     for (path, _) in files {
         if let Some((id, scwd)) = read_codex_session_meta(&path) {
-            if normalize(&scwd) == target {
+            if normalize(&scwd) == target && !exclude.contains(&id) {
                 return Some(id);
             }
         }
@@ -229,21 +245,87 @@ fn open_readonly(path: &Path) -> rusqlite::Result<Connection> {
 }
 
 fn opencode_db_path() -> Option<PathBuf> {
-    // XDG_DATA_HOME on Linux (~/.local/share), %APPDATA% on Windows,
-    // ~/Library/Application Support on macOS.
-    let base = dirs::data_dir()?;
-    Some(base.join("opencode").join("opencode.db"))
-}
+    let mut candidates = Vec::new();
 
-fn find_opencode_session_blocking(cwd: String, after_unix_ms: i64) -> Option<String> {
-    let db_path = opencode_db_path()?;
-    if !db_path.is_file() {
-        return None;
+    if let Ok(data_home) = env::var("XDG_DATA_HOME") {
+        if !data_home.trim().is_empty() {
+            candidates.push(PathBuf::from(data_home).join("opencode").join("opencode.db"));
+        }
     }
 
-    let conn = open_readonly(&db_path).ok()?;
-    let target = normalize(&cwd);
+    if let Some(home) = dirs::home_dir() {
+        candidates.push(
+            home.join(".local")
+                .join("share")
+                .join("opencode")
+                .join("opencode.db"),
+        );
+    }
 
+    if let Some(base) = dirs::data_dir() {
+        candidates.push(base.join("opencode").join("opencode.db"));
+    }
+
+    if let Some(base) = dirs::data_local_dir() {
+        candidates.push(base.join("opencode").join("opencode.db"));
+    }
+
+    candidates
+        .iter()
+        .find(|path| path.is_file())
+        .cloned()
+        .or_else(|| candidates.into_iter().next())
+}
+
+fn find_opencode_session_by_activity(
+    conn: &Connection,
+    target: &str,
+    after_unix_ms: i64,
+    exclude: &HashSet<String>,
+) -> Option<String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT s.id, s.directory, \
+                    max( \
+                        coalesce(s.time_updated, 0), \
+                        coalesce(s.time_created, 0), \
+                        coalesce((SELECT max(m.time_updated) FROM message m WHERE m.session_id = s.id), 0), \
+                        coalesce((SELECT max(p.time_updated) FROM part p WHERE p.session_id = s.id), 0), \
+                        coalesce((SELECT max(se.time_updated) FROM session_entry se WHERE se.session_id = s.id), 0) \
+                    ) AS activity \
+             FROM session s \
+             ORDER BY activity DESC \
+             LIMIT 100",
+        )
+        .ok()?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                row.get::<_, i64>(2)?,
+            ))
+        })
+        .ok()?;
+
+    for row in rows.flatten() {
+        let (id, directory, activity_ms) = row;
+        if activity_ms >= after_unix_ms
+            && normalize(&directory) == target
+            && !exclude.contains(&id)
+        {
+            return Some(id);
+        }
+    }
+    None
+}
+
+fn find_opencode_session_by_created(
+    conn: &Connection,
+    target: &str,
+    after_unix_ms: i64,
+    exclude: &HashSet<String>,
+) -> Option<String> {
     let mut stmt = conn
         .prepare(
             "SELECT id, directory, time_created \
@@ -264,11 +346,30 @@ fn find_opencode_session_blocking(cwd: String, after_unix_ms: i64) -> Option<Str
 
     for row in rows.flatten() {
         let (id, directory) = row;
-        if normalize(&directory) == target {
+        if normalize(&directory) == target && !exclude.contains(&id) {
             return Some(id);
         }
     }
     None
+}
+
+fn find_opencode_session_blocking(
+    cwd: String,
+    after_unix_ms: i64,
+    exclude: &HashSet<String>,
+) -> Option<String> {
+    let db_path = opencode_db_path()?;
+    if !db_path.is_file() {
+        return None;
+    }
+
+    let conn = open_readonly(&db_path).ok()?;
+    let _ = conn.busy_timeout(Duration::from_millis(250));
+    let target = normalize(&cwd);
+
+    find_opencode_session_by_activity(&conn, &target, after_unix_ms, exclude)
+        .or_else(|| find_opencode_session_by_created(&conn, &target, after_unix_ms, exclude))
+        .or_else(|| find_opencode_session_by_activity(&conn, &target, 0, exclude))
 }
 
 fn copilot_db_path() -> Option<PathBuf> {
@@ -284,7 +385,11 @@ fn copilot_db_path() -> Option<PathBuf> {
     }
 }
 
-fn find_copilot_session_blocking(cwd: String, after_unix_ms: i64) -> Option<String> {
+fn find_copilot_session_blocking(
+    cwd: String,
+    after_unix_ms: i64,
+    exclude: &HashSet<String>,
+) -> Option<String> {
     let db_path = copilot_db_path()?;
     if !db_path.is_file() {
         return None;
@@ -320,6 +425,9 @@ fn find_copilot_session_blocking(cwd: String, after_unix_ms: i64) -> Option<Stri
             if ts < after_unix_ms {
                 continue;
             }
+        }
+        if exclude.contains(&id) {
+            continue;
         }
         return Some(id);
     }
@@ -377,7 +485,11 @@ fn is_leap(y: i64) -> bool {
     (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
 }
 
-fn find_cursor_session_blocking(_cwd: String, after_unix_ms: i64) -> Option<String> {
+fn find_cursor_session_blocking(
+    _cwd: String,
+    after_unix_ms: i64,
+    exclude: &HashSet<String>,
+) -> Option<String> {
     let home = dirs::home_dir()?;
     let chats_dir = home.join(".cursor").join("chats");
     if !chats_dir.is_dir() {
@@ -412,6 +524,9 @@ fn find_cursor_session_blocking(_cwd: String, after_unix_ms: i64) -> Option<Stri
                 continue;
             }
             let chat_id = chat.file_name().to_string_lossy().into_owned();
+            if exclude.contains(&chat_id) {
+                continue;
+            }
             if best.as_ref().is_none_or(|(_, t)| mtime > *t) {
                 best = Some((chat_id, mtime));
             }
@@ -438,7 +553,11 @@ fn read_gemini_session_id(path: &Path) -> Option<String> {
     stem.strip_prefix("session-").map(|s| s.to_string())
 }
 
-fn find_gemini_session_blocking(cwd: String, after_unix_ms: i64) -> Option<String> {
+fn find_gemini_session_blocking(
+    cwd: String,
+    after_unix_ms: i64,
+    exclude: &HashSet<String>,
+) -> Option<String> {
     let home = dirs::home_dir()?;
     let projects_file = home.join(".gemini").join("projects.json");
     let tmp_dir = home.join(".gemini").join("tmp");
@@ -488,6 +607,9 @@ fn find_gemini_session_blocking(cwd: String, after_unix_ms: i64) -> Option<Strin
             continue;
         }
         if let Some(id) = read_gemini_session_id(&path) {
+            if exclude.contains(&id) {
+                continue;
+            }
             if best.as_ref().is_none_or(|(_, t)| mtime > *t) {
                 best = Some((id, mtime));
             }
@@ -496,32 +618,66 @@ fn find_gemini_session_blocking(cwd: String, after_unix_ms: i64) -> Option<Strin
     best.map(|(id, _)| id)
 }
 
-#[tauri::command]
-pub async fn find_claude_session(cwd: String, after_unix_ms: i64) -> Option<String> {
-    run_lookup(move || find_claude_session_blocking(cwd, after_unix_ms)).await
+fn build_exclude(ids: Option<Vec<String>>) -> HashSet<String> {
+    ids.unwrap_or_default().into_iter().collect()
 }
 
 #[tauri::command]
-pub async fn find_codex_session(cwd: String, after_unix_ms: i64) -> Option<String> {
-    run_lookup(move || find_codex_session_blocking(cwd, after_unix_ms)).await
+pub async fn find_claude_session(
+    cwd: String,
+    after_unix_ms: i64,
+    exclude_ids: Option<Vec<String>>,
+) -> Option<String> {
+    let exclude = build_exclude(exclude_ids);
+    run_lookup(move || find_claude_session_blocking(cwd, after_unix_ms, &exclude)).await
 }
 
 #[tauri::command]
-pub async fn find_opencode_session(cwd: String, after_unix_ms: i64) -> Option<String> {
-    run_lookup(move || find_opencode_session_blocking(cwd, after_unix_ms)).await
+pub async fn find_codex_session(
+    cwd: String,
+    after_unix_ms: i64,
+    exclude_ids: Option<Vec<String>>,
+) -> Option<String> {
+    let exclude = build_exclude(exclude_ids);
+    run_lookup(move || find_codex_session_blocking(cwd, after_unix_ms, &exclude)).await
 }
 
 #[tauri::command]
-pub async fn find_cursor_session(cwd: String, after_unix_ms: i64) -> Option<String> {
-    run_lookup(move || find_cursor_session_blocking(cwd, after_unix_ms)).await
+pub async fn find_opencode_session(
+    cwd: String,
+    after_unix_ms: i64,
+    exclude_ids: Option<Vec<String>>,
+) -> Option<String> {
+    let exclude = build_exclude(exclude_ids);
+    run_lookup(move || find_opencode_session_blocking(cwd, after_unix_ms, &exclude)).await
 }
 
 #[tauri::command]
-pub async fn find_gemini_session(cwd: String, after_unix_ms: i64) -> Option<String> {
-    run_lookup(move || find_gemini_session_blocking(cwd, after_unix_ms)).await
+pub async fn find_cursor_session(
+    cwd: String,
+    after_unix_ms: i64,
+    exclude_ids: Option<Vec<String>>,
+) -> Option<String> {
+    let exclude = build_exclude(exclude_ids);
+    run_lookup(move || find_cursor_session_blocking(cwd, after_unix_ms, &exclude)).await
 }
 
 #[tauri::command]
-pub async fn find_copilot_session(cwd: String, after_unix_ms: i64) -> Option<String> {
-    run_lookup(move || find_copilot_session_blocking(cwd, after_unix_ms)).await
+pub async fn find_gemini_session(
+    cwd: String,
+    after_unix_ms: i64,
+    exclude_ids: Option<Vec<String>>,
+) -> Option<String> {
+    let exclude = build_exclude(exclude_ids);
+    run_lookup(move || find_gemini_session_blocking(cwd, after_unix_ms, &exclude)).await
+}
+
+#[tauri::command]
+pub async fn find_copilot_session(
+    cwd: String,
+    after_unix_ms: i64,
+    exclude_ids: Option<Vec<String>>,
+) -> Option<String> {
+    let exclude = build_exclude(exclude_ids);
+    run_lookup(move || find_copilot_session_blocking(cwd, after_unix_ms, &exclude)).await
 }

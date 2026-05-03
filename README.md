@@ -2,7 +2,7 @@
 
 Lightweight multi-agent terminal multiplexer. Run Claude Code, Codex,
 Opencode, Cursor, Gemini, GitHub Copilot, and plain shells side-by-side
-under one frameless window — each in its own PTY, grouped by project.
+under one frameless window. Each in its own PTY, grouped by project.
 
 Built on Tauri 2 (Rust backend, frameless window), SvelteKit (SPA, Svelte 5
 runes, Tailwind 4), and xterm 6 with the WebGL renderer.
@@ -26,7 +26,7 @@ surface is small and focused.
   capabilities, no `core:default` blanket).
 - **Frontend**: SvelteKit (`adapter-static`, SSR off), Svelte 5 runes,
   Tailwind 4, xterm 6 + addons (fit, webgl, weblinks, unicode11).
-- **Backend**: Rust — `portable-pty` for the PTY, `vte` for OSC parsing,
+- **Backend**: Rust. `portable-pty` for the PTY, `vte` for OSC parsing,
   `tauri-plugin-sql` (sqlx) for the project/thread/settings store, `which`
   for PATH resolution, `rusqlite` (read-only) for poking each agent's
   session DB to capture the resume id.
@@ -36,7 +36,7 @@ surface is small and focused.
 ## Features
 
 - Per-project sidebar with drag-to-reorder, custom logo, and a thread tree.
-- Per-thread status dot driven by the OSC title — yellow when the agent is
+- Per-thread status dot driven by the OSC title: yellow when the agent is
   working, green when ready, red on error/non-zero exit.
 - Shortcut bar with brand icons (simple-icons) for Claude, Codex, Opencode,
   Cursor, Gemini, Copilot, and a blank shell.

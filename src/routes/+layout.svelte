@@ -103,7 +103,7 @@
       return;
     }
 
-    // Cycle threads — never override Tab inside text inputs.
+    // Cycle threads. Never override Tab inside text inputs.
     if (e.key === "Tab" && !isTextInput(e.target)) {
       e.preventDefault();
       cycleThread(e.shiftKey ? -1 : 1);

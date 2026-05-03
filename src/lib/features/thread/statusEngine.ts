@@ -27,7 +27,7 @@ function maybeAutoClose(threadId: string, iconKey: string | null | undefined) {
   const t = app.threads.find((x) => x.id === threadId);
   if (!t || !t.ptyId) return;
   const pid = t.ptyId;
-  void ptyKill(pid).catch(() => {});
+  void ptyKill(pid, false).catch(() => {});
   logger.info("idle", `auto-closed ${t.label} after ${minutes}m idle`, {
     iconKey,
   });

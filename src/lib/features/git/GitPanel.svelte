@@ -2,26 +2,25 @@
   import { app } from "$lib/app/store.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
   import { gitStore } from "./store.svelte";
+  import GitGraph from "./GitGraph.svelte";
   import type { ChangeEntry } from "./api";
-
-  type SectionMode = "staged" | "unstaged" | "conflict";
-  interface SectionArgs {
-    label: string;
-    count: number;
-    entries: ChangeEntry[];
-    mode: SectionMode;
-    open: boolean;
-    toggle: () => void;
-  }
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import GitBranch from "@lucide/svelte/icons/git-branch";
-  import GitCommit from "@lucide/svelte/icons/git-commit-horizontal";
   import Plus from "@lucide/svelte/icons/plus";
   import Minus from "@lucide/svelte/icons/minus";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import ArrowUp from "@lucide/svelte/icons/arrow-up";
   import ArrowDown from "@lucide/svelte/icons/arrow-down";
+
+  type SectionMode = "staged" | "unstaged" | "conflict";
+  interface SectionArgs {
+    label: string;
+    entries: ChangeEntry[];
+    mode: SectionMode;
+    open: boolean;
+    toggle: () => void;
+  }
 
   const project = $derived(
     app.currentProjectId
@@ -30,7 +29,9 @@
   );
 
   let panelEl: HTMLElement | null = $state(null);
-  let resizing = $state(false);
+  let bodyEl: HTMLElement | null = $state(null);
+  let resizingX = $state(false);
+  let resizingY = $state(false);
 
   $effect(() => {
     if (!project) return;
@@ -43,7 +44,11 @@
   let stagedOpen = $state(true);
   let changesOpen = $state(true);
   let conflictsOpen = $state(true);
-  let logOpen = $state(true);
+
+  const totalChanges = $derived(
+    gs ? gs.staged.length + gs.unstaged.length + gs.conflicts.length : 0,
+  );
+  const topPercent = $derived(settings.state.gitSplitFraction * 100);
 
   function refresh() {
     if (project) void gitStore.refresh(project.id);
@@ -60,31 +65,49 @@
     if (project) void gitStore.commit(project.id);
   }
 
-  function startResize(e: MouseEvent) {
+  function startResizeX(e: MouseEvent) {
     e.preventDefault();
-    resizing = true;
-    document.addEventListener("mousemove", onResize);
-    document.addEventListener("mouseup", stopResize);
+    resizingX = true;
+    document.addEventListener("mousemove", onResizeX);
+    document.addEventListener("mouseup", stopResizeX);
   }
-  function onResize(e: MouseEvent) {
+  function onResizeX(e: MouseEvent) {
     if (!panelEl) return;
     const rect = panelEl.getBoundingClientRect();
-    const next = rect.right - e.clientX;
-    settings.setGitPanelWidth(next);
+    settings.setGitPanelWidth(rect.right - e.clientX);
   }
-  function stopResize() {
-    resizing = false;
-    document.removeEventListener("mousemove", onResize);
-    document.removeEventListener("mouseup", stopResize);
+  function stopResizeX() {
+    resizingX = false;
+    document.removeEventListener("mousemove", onResizeX);
+    document.removeEventListener("mouseup", stopResizeX);
+  }
+
+  function startResizeY(e: MouseEvent) {
+    e.preventDefault();
+    resizingY = true;
+    document.addEventListener("mousemove", onResizeY);
+    document.addEventListener("mouseup", stopResizeY);
+  }
+  function onResizeY(e: MouseEvent) {
+    if (!bodyEl) return;
+    const rect = bodyEl.getBoundingClientRect();
+    if (rect.height <= 0) return;
+    const fraction = (e.clientY - rect.top) / rect.height;
+    settings.setGitSplitFraction(fraction);
+  }
+  function stopResizeY() {
+    resizingY = false;
+    document.removeEventListener("mousemove", onResizeY);
+    document.removeEventListener("mouseup", stopResizeY);
   }
 
   function statusColor(s: string): string {
-    if (s === "M") return "text-amber-400";
-    if (s === "A") return "text-emerald-400";
-    if (s === "D") return "text-red-400";
-    if (s === "R") return "text-sky-400";
-    if (s === "?") return "text-emerald-300";
-    if (s === "U") return "text-red-500";
+    if (s === "M") return "text-[var(--color-warning)]";
+    if (s === "A") return "text-[var(--color-success)]";
+    if (s === "D") return "text-[var(--color-danger)]";
+    if (s === "R") return "text-[var(--color-success)]";
+    if (s === "?") return "text-muted-foreground";
+    if (s === "U") return "text-[var(--color-danger)]";
     return "text-muted-foreground";
   }
 
@@ -98,24 +121,24 @@
     return idx >= 0 ? path.slice(0, idx) : "";
   }
 
-  function fmtTime(ts: number): string {
-    if (!ts) return "";
-    const d = new Date(ts * 1000);
-    const now = new Date();
-    const sameYear = d.getFullYear() === now.getFullYear();
-    return d.toLocaleString(undefined, {
-      month: "short",
-      day: "2-digit",
-      year: sameYear ? undefined : "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
+  function stagePaths(files: string[]) {
+    if (project) void gitStore.stage(project.id, files);
+  }
+  function unstagePaths(files: string[]) {
+    if (project) void gitStore.unstage(project.id, files);
+  }
+  function discardPath(path: string) {
+    if (!project) return;
+    if (confirm(`Discard changes to ${path}?\nThis cannot be undone.`)) {
+      void gitStore.discard(project.id, [path]);
+    }
   }
 </script>
 
 <aside
   bind:this={panelEl}
-  class="relative flex h-full shrink-0 flex-col border-l border-border bg-[var(--color-surface)] {resizing
+  class="relative flex h-full shrink-0 flex-col border-l border-border bg-[var(--color-surface)] {resizingX ||
+  resizingY
     ? 'select-none'
     : ''}"
   style:width="{settings.state.gitPanelWidth}px"
@@ -129,225 +152,238 @@
         {gs.branch ?? "(detached)"}
       </span>
       {#if gs.ahead > 0}
-        <span class="flex items-center gap-0.5 text-[10.5px] text-muted-foreground">
+        <span
+          class="flex items-center gap-0.5 text-[10.5px] text-muted-foreground"
+        >
           <ArrowUp class="size-3" />{gs.ahead}
         </span>
       {/if}
       {#if gs.behind > 0}
-        <span class="flex items-center gap-0.5 text-[10.5px] text-muted-foreground">
+        <span
+          class="flex items-center gap-0.5 text-[10.5px] text-muted-foreground"
+        >
           <ArrowDown class="size-3" />{gs.behind}
         </span>
       {/if}
     {:else}
       <span class="truncate text-xs text-muted-foreground">Not a git repo</span>
     {/if}
-    <div class="ml-auto flex items-center gap-1">
-      <button
-        type="button"
-        class="rounded p-1 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:opacity-40"
-        onclick={refresh}
-        disabled={!project || gs?.loading}
-        title="Refresh"
-        aria-label="Refresh git status"
-      >
-        <RefreshCw class="size-3.5 {gs?.loading ? 'animate-spin' : ''}" />
-      </button>
-    </div>
+    <button
+      type="button"
+      class="ml-auto rounded p-1 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:opacity-40"
+      onclick={refresh}
+      disabled={!project || gs?.loading}
+      title="Refresh"
+      aria-label="Refresh git status"
+    >
+      <RefreshCw class="size-3.5 {gs?.loading ? 'animate-spin' : ''}" />
+    </button>
   </header>
 
   {#if !project}
-    <div class="flex flex-1 items-center justify-center px-3 text-center text-xs text-muted-foreground">
+    <div
+      class="flex flex-1 items-center justify-center px-3 text-center text-xs text-muted-foreground"
+    >
       Pick a project.
     </div>
   {:else if !gs?.isRepo}
-    <div class="flex flex-1 items-center justify-center px-3 text-center text-xs text-muted-foreground">
+    <div
+      class="flex flex-1 items-center justify-center px-3 text-center text-xs text-muted-foreground"
+    >
       This folder is not a git repository.
     </div>
   {:else}
-    <div class="flex min-h-0 flex-1 flex-col">
-      <!-- Commit box -->
-      <div class="shrink-0 border-b border-border p-2">
-        <textarea
-          class="w-full resize-none rounded-md border border-border bg-[var(--color-background)] px-2 py-1.5 text-xs text-foreground placeholder:text-muted-foreground/60 focus:border-foreground/30 focus:outline-none"
-          rows="2"
-          placeholder="Commit message  (Ctrl+Enter)"
-          bind:value={gs.message}
-          onkeydown={commitKey}
-          disabled={gs.committing}
-        ></textarea>
-        <button
-          type="button"
-          class="mt-1.5 flex w-full items-center justify-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2 py-1 text-xs font-medium text-foreground/85 transition hover:bg-[var(--color-surface-3)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-          onclick={doCommit}
-          disabled={gs.committing || gs.staged.length === 0 || !gs.message.trim()}
+    <div bind:this={bodyEl} class="flex min-h-0 flex-1 flex-col">
+      <!-- Changes (top) -->
+      <section
+        class="flex min-h-0 flex-col"
+        style:flex="0 0 {topPercent}%"
+      >
+        <div
+          class="flex h-7 shrink-0 items-center gap-1.5 border-b border-border px-3"
         >
-          <GitCommit class="size-3.5" />
-          Commit ({gs.staged.length})
-        </button>
-      </div>
+          <span
+            class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
+          >
+            Changes
+          </span>
+          {#if totalChanges > 0}
+            <span
+              class="rounded-full bg-[var(--color-surface-2)] px-1.5 text-[10px] text-foreground/75"
+            >
+              {totalChanges}
+            </span>
+          {/if}
+        </div>
 
-      <!-- Top: changes -->
-      <div class="flex min-h-0 flex-1 flex-col overflow-y-auto">
-        {#if gs.conflicts.length > 0}
-          {@render section({
-            label: "Merge changes",
-            count: gs.conflicts.length,
-            entries: gs.conflicts,
-            mode: "conflict",
-            open: conflictsOpen,
-            toggle: () => (conflictsOpen = !conflictsOpen),
-          })}
-        {/if}
-        {#if gs.staged.length > 0}
-          {@render section({
-            label: "Staged",
-            count: gs.staged.length,
-            entries: gs.staged,
-            mode: "staged",
-            open: stagedOpen,
-            toggle: () => (stagedOpen = !stagedOpen),
-          })}
-        {/if}
-        {#if gs.unstaged.length > 0}
-          {@render section({
-            label: "Changes",
-            count: gs.unstaged.length,
-            entries: gs.unstaged,
-            mode: "unstaged",
-            open: changesOpen,
-            toggle: () => (changesOpen = !changesOpen),
-          })}
-        {/if}
-        {#if gs.staged.length === 0 && gs.unstaged.length === 0 && gs.conflicts.length === 0}
-          <div class="px-3 py-4 text-center text-[11px] text-muted-foreground">
-            Working tree clean.
-          </div>
-        {/if}
-
-        <!-- Bottom: log -->
-        <div class="mt-1 border-t border-border">
+        <div class="shrink-0 border-b border-border p-2">
+          <textarea
+            class="w-full resize-none rounded-md border border-border bg-[var(--color-background)] px-2 py-1.5 text-xs text-foreground placeholder:text-muted-foreground/60 focus:border-foreground/30 focus:outline-none"
+            rows="2"
+            placeholder="Commit message  (Ctrl+Enter)"
+            bind:value={gs.message}
+            onkeydown={commitKey}
+            disabled={gs.committing}
+          ></textarea>
           <button
             type="button"
-            class="flex w-full items-center gap-1 px-2 py-1 text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground transition hover:text-foreground"
-            onclick={() => (logOpen = !logOpen)}
+            class="mt-1.5 flex w-full items-center justify-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2 py-1 text-xs font-medium text-foreground/85 transition hover:bg-[var(--color-surface-3)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+            onclick={doCommit}
+            disabled={gs.committing ||
+              gs.staged.length === 0 ||
+              !gs.message.trim()}
           >
-            <ChevronDown class="size-3 transition {logOpen ? '' : '-rotate-90'}" />
-            <span>Commits</span>
-            <span class="ml-1 text-muted-foreground/60">{gs.log.length}</span>
+            Commit ({gs.staged.length})
           </button>
-          {#if logOpen}
-            <div class="flex flex-col">
-              {#each gs.log as c (c.sha)}
-                <div
-                  class="group flex items-start gap-2 px-2 py-1.5 hover:bg-[var(--color-surface-2)]"
-                  title={c.sha}
-                >
-                  <span class="mt-1 size-1.5 shrink-0 rounded-full bg-foreground/40"></span>
-                  <div class="min-w-0 flex-1">
-                    <div class="flex items-center gap-1.5">
-                      <span class="truncate text-[11.5px] text-foreground/90">
-                        {c.summary}
-                      </span>
-                      {#each c.refs as r (r)}
-                        <span class="shrink-0 rounded bg-[var(--color-surface-3)] px-1 py-px font-mono text-[9px] text-muted-foreground">
-                          {r.replace(/^HEAD -> /, "")}
-                        </span>
-                      {/each}
-                    </div>
-                    <div class="mt-0.5 flex items-center gap-1.5 font-mono text-[10px] text-muted-foreground/70">
-                      <span>{c.shortSha}</span>
-                      <span class="truncate">{c.author}</span>
-                      <span>·</span>
-                      <span>{fmtTime(c.time)}</span>
-                    </div>
-                  </div>
-                </div>
-              {/each}
-              {#if gs.log.length === 0}
-                <div class="px-3 py-3 text-center text-[10.5px] text-muted-foreground/70">
-                  No commits.
-                </div>
-              {/if}
+        </div>
+
+        <div class="min-h-0 flex-1 overflow-y-auto">
+          {#if gs.conflicts.length > 0}
+            {@render section({
+              label: "Merge changes",
+              entries: gs.conflicts,
+              mode: "conflict",
+              open: conflictsOpen,
+              toggle: () => (conflictsOpen = !conflictsOpen),
+            })}
+          {/if}
+          {#if gs.staged.length > 0}
+            {@render section({
+              label: "Staged",
+              entries: gs.staged,
+              mode: "staged",
+              open: stagedOpen,
+              toggle: () => (stagedOpen = !stagedOpen),
+            })}
+          {/if}
+          {#if gs.unstaged.length > 0}
+            {@render section({
+              label: "Changes",
+              entries: gs.unstaged,
+              mode: "unstaged",
+              open: changesOpen,
+              toggle: () => (changesOpen = !changesOpen),
+            })}
+          {/if}
+          {#if totalChanges === 0}
+            <div
+              class="px-3 py-4 text-center text-[11px] text-muted-foreground/70"
+            >
+              Working tree clean.
             </div>
           {/if}
         </div>
-      </div>
+      </section>
+
+      <!-- Splitter -->
+      <button
+        type="button"
+        onmousedown={startResizeY}
+        class="relative h-1 shrink-0 cursor-row-resize bg-transparent transition hover:bg-foreground/10"
+        aria-label="Resize sections"
+        tabindex="-1"
+      ></button>
+
+      <!-- Commits (bottom) -->
+      <section class="flex min-h-0 flex-1 flex-col border-t border-border">
+        <div
+          class="flex h-7 shrink-0 items-center gap-1.5 border-b border-border px-3"
+        >
+          <span
+            class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
+          >
+            Commits
+          </span>
+          {#if gs.log.length > 0}
+            <span
+              class="rounded-full bg-[var(--color-surface-2)] px-1.5 text-[10px] text-foreground/75"
+            >
+              {gs.log.length}
+            </span>
+          {/if}
+        </div>
+        <div class="min-h-0 flex-1 overflow-auto">
+          {#if gs.log.length === 0}
+            <div
+              class="px-3 py-4 text-center text-[11px] text-muted-foreground/70"
+            >
+              No commits.
+            </div>
+          {:else}
+            <GitGraph commits={gs.log} />
+          {/if}
+        </div>
+      </section>
     </div>
   {/if}
 
-  <!-- Resize handle (left edge) -->
   <button
     type="button"
     class="absolute left-0 top-0 z-10 h-full w-1 cursor-col-resize bg-transparent transition hover:bg-foreground/10"
-    onmousedown={startResize}
+    onmousedown={startResizeX}
     aria-label="Resize git panel"
     tabindex="-1"
   ></button>
 </aside>
 
-{#snippet section({ label, count, entries, mode, open, toggle }: SectionArgs)}
+{#snippet section({ label, entries, mode, open, toggle }: SectionArgs)}
   <div class="flex flex-col">
-    <button
-      type="button"
-      class="flex items-center gap-1 px-2 py-1 text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground transition hover:text-foreground"
-      onclick={toggle}
-    >
-      <ChevronDown class="size-3 transition {open ? '' : '-rotate-90'}" />
-      <span>{label}</span>
-      <span class="ml-1 text-muted-foreground/60">{count}</span>
-      {#if mode !== "conflict"}
-        <span class="ml-auto flex gap-0.5">
-          {#if mode === "staged"}
-            <span
-              class="rounded p-0.5 text-muted-foreground hover:bg-[var(--color-surface-3)] hover:text-foreground"
-              role="button"
-              tabindex="-1"
-              title="Unstage all"
-              onclick={(e) => {
-                e.stopPropagation();
-                if (project) void gitStore.unstage(project.id, entries.map((x) => x.path));
-              }}
-              onkeydown={() => {}}
-            >
-              <Minus class="size-3" />
-            </span>
-          {:else}
-            <span
-              class="rounded p-0.5 text-muted-foreground hover:bg-[var(--color-surface-3)] hover:text-foreground"
-              role="button"
-              tabindex="-1"
-              title="Stage all"
-              onclick={(e) => {
-                e.stopPropagation();
-                if (project) void gitStore.stage(project.id, entries.map((x) => x.path));
-              }}
-              onkeydown={() => {}}
-            >
-              <Plus class="size-3" />
-            </span>
-          {/if}
-        </span>
+    <div class="flex items-center gap-1 px-2 py-1">
+      <button
+        type="button"
+        class="flex flex-1 items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground transition hover:text-foreground"
+        onclick={toggle}
+      >
+        <ChevronDown class="size-3 transition {open ? '' : '-rotate-90'}" />
+        <span>{label}</span>
+        <span class="text-muted-foreground/50">{entries.length}</span>
+      </button>
+      {#if mode === "staged"}
+        <button
+          type="button"
+          class="rounded p-0.5 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground"
+          title="Unstage all"
+          aria-label="Unstage all"
+          onclick={() => unstagePaths(entries.map((x) => x.path))}
+        >
+          <Minus class="size-3" />
+        </button>
+      {:else if mode === "unstaged"}
+        <button
+          type="button"
+          class="rounded p-0.5 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground"
+          title="Stage all"
+          aria-label="Stage all"
+          onclick={() => stagePaths(entries.map((x) => x.path))}
+        >
+          <Plus class="size-3" />
+        </button>
       {/if}
-    </button>
+    </div>
     {#if open}
       {#each entries as entry (entry.path + ":" + entry.staged + ":" + entry.conflicted)}
         <div
-          class="group/row flex items-center gap-2 px-2 py-1 text-[11.5px] hover:bg-[var(--color-surface-2)]"
+          class="group/row flex items-center gap-1.5 px-2 py-1 text-[11px] hover:bg-[var(--color-surface-2)]"
           title={entry.path}
         >
           <span class="min-w-0 flex-1 truncate text-foreground/85">
             {basename(entry.path)}
             {#if dirname(entry.path)}
-              <span class="ml-1 text-muted-foreground/60">{dirname(entry.path)}</span>
+              <span class="ml-1 text-muted-foreground/55"
+                >{dirname(entry.path)}</span
+              >
             {/if}
           </span>
-          <div class="flex shrink-0 items-center gap-0.5 opacity-0 transition group-hover/row:opacity-100">
+          <div
+            class="flex shrink-0 items-center gap-0.5 opacity-0 transition group-hover/row:opacity-100"
+          >
             {#if mode === "staged"}
               <button
                 type="button"
                 class="rounded p-0.5 text-muted-foreground hover:bg-[var(--color-surface-3)] hover:text-foreground"
                 title="Unstage"
-                onclick={() => project && gitStore.unstage(project.id, [entry.path])}
+                aria-label="Unstage file"
+                onclick={() => unstagePaths([entry.path])}
               >
                 <Minus class="size-3" />
               </button>
@@ -356,14 +392,8 @@
                 type="button"
                 class="rounded p-0.5 text-muted-foreground hover:bg-[var(--color-surface-3)] hover:text-foreground"
                 title="Discard"
-                onclick={() => {
-                  if (!project) return;
-                  if (
-                    confirm(`Discard changes to ${entry.path}?\nThis cannot be undone.`)
-                  ) {
-                    void gitStore.discard(project.id, [entry.path]);
-                  }
-                }}
+                aria-label="Discard file"
+                onclick={() => discardPath(entry.path)}
               >
                 <Trash2 class="size-3" />
               </button>
@@ -371,13 +401,18 @@
                 type="button"
                 class="rounded p-0.5 text-muted-foreground hover:bg-[var(--color-surface-3)] hover:text-foreground"
                 title="Stage"
-                onclick={() => project && gitStore.stage(project.id, [entry.path])}
+                aria-label="Stage file"
+                onclick={() => stagePaths([entry.path])}
               >
                 <Plus class="size-3" />
               </button>
             {/if}
           </div>
-          <span class="w-3 shrink-0 text-center font-mono text-[11px] {statusColor(entry.status)}">
+          <span
+            class="w-3 shrink-0 text-center font-mono text-[10.5px] {statusColor(
+              entry.status,
+            )}"
+          >
             {entry.status}
           </span>
         </div>

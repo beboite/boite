@@ -162,17 +162,32 @@ impl PtyManager {
         Ok(())
     }
 
-    pub fn kill(&self, id: &str) -> Result<(), String> {
+    pub fn kill(&self, id: &str, wait: bool) -> Result<(), String> {
         let killer = {
             let map = self.inner.lock();
-            let handle = map.get(id).ok_or_else(|| "pty not found".to_string())?;
-            handle.killer.clone()
+            match map.get(id) {
+                Some(handle) => handle.killer.clone(),
+                None => return Ok(()),
+            }
         };
         killer
             .lock()
             .kill()
             .map_err(|e| format!("kill failed: {e}"))?;
-        // Don't remove the handle here — the reader thread cleans up after wait() returns.
+        if !wait {
+            return Ok(());
+        }
+        // Wait for the reader thread to clean up after child.wait() returns,
+        // so the caller can safely spawn a fresh PTY without the previous
+        // process still being alive (e.g. two Claude `--resume <session>`
+        // racing on the same session file).
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while std::time::Instant::now() < deadline {
+            if !self.inner.lock().contains_key(id) {
+                return Ok(());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
         Ok(())
     }
 }

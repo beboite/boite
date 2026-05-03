@@ -31,6 +31,6 @@ export async function ptyResize(id: string, cols: number, rows: number): Promise
   await invoke("pty_resize", { id, cols, rows });
 }
 
-export async function ptyKill(id: string): Promise<void> {
-  await invoke("pty_kill", { id });
+export async function ptyKill(id: string, wait = true): Promise<void> {
+  await invoke("pty_kill", { id, wait });
 }

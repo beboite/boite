@@ -1,6 +1,7 @@
 use tauri::{AppHandle, Manager, State, ipc::{Channel, InvokeBody, Request}};
 
 use crate::BootState;
+use crate::logging::{self, LogEntry};
 use crate::pty::{PtyEvent, PtyManager, PtySpawnArgs};
 
 #[tauri::command]
@@ -43,8 +44,16 @@ pub fn pty_resize(
 }
 
 #[tauri::command]
-pub fn pty_kill(manager: State<'_, PtyManager>, id: String) -> Result<(), String> {
-    manager.kill(&id)
+pub async fn pty_kill(
+    manager: State<'_, PtyManager>,
+    id: String,
+    wait: Option<bool>,
+) -> Result<(), String> {
+    let manager = manager.inner().clone();
+    let wait = wait.unwrap_or(true);
+    tauri::async_runtime::spawn_blocking(move || manager.kill(&id, wait))
+        .await
+        .map_err(|e| format!("pty kill task failed: {e}"))?
 }
 
 #[tauri::command]
@@ -56,4 +65,35 @@ pub fn finish_boot(app: AppHandle, boot: State<'_, BootState>) {
         let _ = win.show();
         let _ = win.set_focus();
     }
+}
+
+#[tauri::command]
+pub fn log_app_event(
+    app: AppHandle,
+    level: String,
+    source: String,
+    message: String,
+    details: Option<String>,
+) -> Result<(), String> {
+    logging::append_app_log(&app, &level, &source, &message, details.as_deref())
+}
+
+#[tauri::command]
+pub fn read_app_log(app: AppHandle, scope: String) -> Result<Vec<LogEntry>, String> {
+    let path = match scope.as_str() {
+        "previous" => logging::previous_log_file_path(&app)?,
+        _ => logging::log_file_path(&app)?,
+    };
+    logging::read_log_file(&path)
+}
+
+#[tauri::command]
+pub fn clear_app_log(app: AppHandle) -> Result<(), String> {
+    logging::clear_log(&app)
+}
+
+#[tauri::command]
+pub fn log_file_path(app: AppHandle) -> Result<String, String> {
+    let path = logging::log_file_path(&app)?;
+    Ok(path.to_string_lossy().to_string())
 }

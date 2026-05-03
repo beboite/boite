@@ -1,51 +1,125 @@
 <script lang="ts">
-  import { logger, type LogLevel } from "$lib/shared/services/logger.svelte";
+  import { onMount } from "svelte";
+  import { logger, type LogEntry } from "$lib/shared/services/logger.svelte";
+  import { notifications } from "$lib/features/notifications/store.svelte";
+  import RotateCw from "@lucide/svelte/icons/rotate-cw";
+  import Copy from "@lucide/svelte/icons/copy";
+  import Trash2 from "@lucide/svelte/icons/trash-2";
+  import FolderOpen from "@lucide/svelte/icons/folder-open";
 
-  let levelFilter = $state<LogLevel | "all">("all");
-  let scopeFilter = $state<string>("");
+  type Scope = "current" | "previous";
+
+  let scope = $state<Scope>("current");
+  let entries = $state<LogEntry[]>([]);
+  let loading = $state(false);
+  let levelFilter = $state<string>("all");
+  let sourceFilter = $state<string>("");
+  let logPath = $state<string>("");
 
   const filtered = $derived.by(() => {
-    return logger.entries.filter((e) => {
+    return entries.filter((e) => {
       if (levelFilter !== "all" && e.level !== levelFilter) return false;
-      if (scopeFilter && !e.scope.toLowerCase().includes(scopeFilter.toLowerCase())) {
+      if (sourceFilter && !e.source.toLowerCase().includes(sourceFilter.toLowerCase())) {
         return false;
       }
       return true;
     });
   });
 
-  const levelClass: Record<LogLevel, string> = {
+  const levelClass: Record<string, string> = {
     debug: "text-muted-foreground/70",
     info: "text-foreground/80",
     warn: "text-warning",
     error: "text-danger",
   };
 
-  function formatTime(ts: number): string {
-    const d = new Date(ts);
+  function formatTime(ms: number): string {
+    if (!ms) return "--:--:--";
+    const d = new Date(ms);
     const hh = String(d.getHours()).padStart(2, "0");
     const mm = String(d.getMinutes()).padStart(2, "0");
     const ss = String(d.getSeconds()).padStart(2, "0");
-    const ms = String(d.getMilliseconds()).padStart(3, "0");
-    return `${hh}:${mm}:${ss}.${ms}`;
+    const millis = String(d.getMilliseconds()).padStart(3, "0");
+    return `${hh}:${mm}:${ss}.${millis}`;
+  }
+
+  async function refresh() {
+    loading = true;
+    try {
+      entries = await logger.read(scope);
+    } catch (err) {
+      notifications.error(`Read log failed: ${String(err)}`);
+      entries = [];
+    } finally {
+      loading = false;
+    }
   }
 
   function copyAll() {
     const text = filtered
-      .map(
-        (e) =>
-          `${formatTime(e.timestamp)} ${e.level.toUpperCase()} [${e.scope}] ${e.message}${
-            e.data !== undefined ? " " + JSON.stringify(e.data) : ""
-          }`,
-      )
+      .map((e) => {
+        const head = `${formatTime(e.tsMs)} ${e.level.toUpperCase().padEnd(5)} [${e.source}] ${e.message}`;
+        return e.details ? `${head} ${e.details}` : head;
+      })
       .join("\n");
     void navigator.clipboard.writeText(text);
+    notifications.success(`Copied ${filtered.length} entries`);
   }
+
+  async function clear() {
+    try {
+      await logger.clear();
+      notifications.success("Log cleared");
+      await refresh();
+    } catch (err) {
+      notifications.error(`Clear failed: ${String(err)}`);
+    }
+  }
+
+  async function copyPath() {
+    if (!logPath) return;
+    void navigator.clipboard.writeText(logPath);
+    notifications.success("Log path copied");
+  }
+
+  $effect(() => {
+    void refresh();
+    void scope;
+  });
+
+  onMount(() => {
+    void logger
+      .filePath()
+      .then((p) => (logPath = p))
+      .catch(() => {});
+  });
 </script>
 
 <section class="flex flex-col gap-2">
   <header class="flex items-center justify-between">
-    <h3 class="text-[12px] font-semibold tracking-tight">Logs</h3>
+    <div class="flex items-center gap-2">
+      <h3 class="text-[12px] font-semibold tracking-tight">Logs</h3>
+      <div class="flex rounded-md border border-border bg-[var(--color-surface)] p-0.5 text-[11px]">
+        <button
+          type="button"
+          class="rounded-sm px-2 py-0.5 transition {scope === 'current'
+            ? 'bg-accent text-foreground'
+            : 'text-muted-foreground hover:text-foreground'}"
+          onclick={() => (scope = "current")}
+        >
+          Current
+        </button>
+        <button
+          type="button"
+          class="rounded-sm px-2 py-0.5 transition {scope === 'previous'
+            ? 'bg-accent text-foreground'
+            : 'text-muted-foreground hover:text-foreground'}"
+          onclick={() => (scope = "previous")}
+        >
+          Previous
+        </button>
+      </div>
+    </div>
     <div class="flex items-center gap-2">
       <select
         bind:value={levelFilter}
@@ -58,44 +132,63 @@
         <option value="error">Error</option>
       </select>
       <input
-        bind:value={scopeFilter}
-        placeholder="Scope filter"
+        bind:value={sourceFilter}
+        placeholder="Source filter"
         class="w-32 rounded-md border border-border bg-[var(--color-surface)] px-2 py-1 text-[11px] outline-none focus:border-foreground/30"
       />
       <button
         type="button"
-        class="rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground transition hover:bg-accent hover:text-foreground"
-        onclick={copyAll}
+        class="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground transition hover:bg-accent hover:text-foreground"
+        onclick={refresh}
+        title="Refresh"
       >
-        Copy
+        <RotateCw class="size-3 {loading ? 'animate-spin' : ''}" />
+        Refresh
       </button>
       <button
         type="button"
-        class="rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground transition hover:bg-danger/15 hover:text-danger"
-        onclick={() => logger.clear()}
+        class="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground transition hover:bg-accent hover:text-foreground"
+        onclick={copyAll}
+        title="Copy filtered entries"
       >
-        Clear
+        <Copy class="size-3" />
+        Copy
       </button>
+      {#if scope === "current"}
+        <button
+          type="button"
+          class="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground transition hover:bg-danger/15 hover:text-danger"
+          onclick={clear}
+          title="Truncate current log"
+        >
+          <Trash2 class="size-3" />
+          Clear
+        </button>
+      {/if}
     </div>
   </header>
 
   <div
     class="max-h-[60vh] min-h-[200px] overflow-y-auto rounded-md border border-border bg-[var(--color-titlebar)] p-2 font-mono text-[11px]"
   >
-    {#if filtered.length === 0}
-      <p class="py-4 text-center text-muted-foreground/60">No log entries</p>
+    {#if loading && entries.length === 0}
+      <p class="py-4 text-center text-muted-foreground/60">Loading…</p>
+    {:else if filtered.length === 0}
+      <p class="py-4 text-center text-muted-foreground/60">
+        {scope === "previous" ? "No previous session log" : "No log entries"}
+      </p>
     {:else}
-      {#each filtered as entry (entry.id)}
-        <div class="flex gap-2 py-0.5 {levelClass[entry.level]}">
-          <span class="shrink-0 text-muted-foreground/60">{formatTime(entry.timestamp)}</span>
+      {#each filtered as entry, i (i)}
+        <div class="flex gap-2 py-0.5 {levelClass[entry.level] ?? 'text-foreground/80'}">
+          <span class="shrink-0 text-muted-foreground/60">{formatTime(entry.tsMs)}</span>
           <span class="w-12 shrink-0 uppercase">{entry.level}</span>
-          <span class="w-20 shrink-0 truncate text-muted-foreground">[{entry.scope}]</span>
+          <span class="w-32 shrink-0 truncate text-muted-foreground" title={entry.source}>
+            [{entry.source}]
+          </span>
           <span class="min-w-0 flex-1 break-words">
             {entry.message}
-            {#if entry.data !== undefined}
-              <span class="text-muted-foreground/60">
-                {JSON.stringify(entry.data)}
-              </span>
+            {#if entry.details}
+              <span class="text-muted-foreground/60"> {entry.details}</span>
             {/if}
           </span>
         </div>
@@ -103,7 +196,18 @@
     {/if}
   </div>
 
-  <p class="text-[10.5px] text-muted-foreground/60">
-    {filtered.length} entries (max 1000 retained in memory)
-  </p>
+  <div class="flex items-center justify-between text-[10.5px] text-muted-foreground/60">
+    <span>{filtered.length} / {entries.length} entries</span>
+    {#if logPath}
+      <button
+        type="button"
+        class="flex items-center gap-1 transition hover:text-foreground"
+        onclick={copyPath}
+        title="Copy log file path"
+      >
+        <FolderOpen class="size-3" />
+        <span class="truncate font-mono">{logPath}</span>
+      </button>
+    {/if}
+  </div>
 </section>

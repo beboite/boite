@@ -3,8 +3,6 @@ import type { IconKey } from "$lib/types";
 const COMMON_PATTERNS: RegExp[] = [
   /esc\s+to\s+(?:interrupt|cancel|stop)/i,
   /ctrl\s*\+\s*c\s+to\s+(?:cancel|stop|interrupt)/i,
-  /\bgenerating\b/i,
-  /\bthinking\b/i,
 ];
 
 const WORKING_BY_KEY: Partial<Record<NonNullable<IconKey>, RegExp[]>> = {
@@ -15,8 +13,6 @@ const WORKING_BY_KEY: Partial<Record<NonNullable<IconKey>, RegExp[]>> = {
   ],
   codex: [
     /esc\s+to\s+(?:interrupt|cancel|stop)/i,
-    /\bthinking\b/i,
-    /\bworking\b/i,
     /\(\d+s\s*[·•]/,
   ],
   opencode: [
@@ -24,7 +20,6 @@ const WORKING_BY_KEY: Partial<Record<NonNullable<IconKey>, RegExp[]>> = {
     /\bgenerating\b/i,
     /\bthinking\b/i,
     /\bworking\b/i,
-    /\brunning\b/i,
     /\bprocessing\b/i,
     /\(\d+s\s*[·•]/,
   ],

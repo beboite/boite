@@ -2,7 +2,7 @@
 @import "@xterm/xterm/css/xterm.css";
 
 @theme {
-  /* Pure neutral grayscale — no chromatic accent. */
+  /* Pure neutral grayscale, no chromatic accent. */
   --color-background: #0a0a0a;
   --color-foreground: #fafafa;
   --color-muted: #1f1f1f;
@@ -10,7 +10,7 @@
   --color-border: #27272a;
   --color-accent: #2a2a2a;
 
-  /* Status — only chromatic touch. */
+  /* Status: only chromatic touch. */
   --color-success: #4ade80;
   --color-warning: #facc15;
   --color-danger: #f87171;
@@ -71,6 +71,6 @@ button {
 .xterm-viewport {
   background-color: transparent !important;
 }
-.xterm .xterm-screen {
-  padding: 4px;
+.xterm {
+  height: 100%;
 }

@@ -7,12 +7,17 @@ import type { IconKey, Thread } from "$lib/types";
 export type SessionDetector = (
   cwd: string,
   afterUnixMs: number,
+  excludeIds: string[],
 ) => Promise<string | null>;
 
 function makeDetector(command: string, scope: string): SessionDetector {
-  return async (cwd, afterUnixMs) => {
+  return async (cwd, afterUnixMs, excludeIds) => {
     try {
-      const id = await invoke<string | null>(command, { cwd, afterUnixMs });
+      const id = await invoke<string | null>(command, {
+        cwd,
+        afterUnixMs,
+        excludeIds,
+      });
       return id ?? null;
     } catch (err) {
       logger.error("session", `${scope}: detect failed`, String(err));
@@ -45,6 +50,8 @@ export type ResumeBuilder = (
   sessionId: string,
 ) => string[];
 
+const CODEX_NO_ALT_SCREEN = "--no-alt-screen";
+
 function stripFlag(args: string[], flags: string[], takesValue: boolean): string[] {
   const out: string[] = [];
   let skipNext = false;
@@ -63,6 +70,23 @@ function stripFlag(args: string[], flags: string[], takesValue: boolean): string
   return out;
 }
 
+function withCodexNoAltScreen(args: string[]): string[] {
+  if (args.includes(CODEX_NO_ALT_SCREEN)) return args;
+  return [CODEX_NO_ALT_SCREEN, ...args];
+}
+
+function withOpencodeContinue(args: string[]): string[] {
+  if (
+    args.includes("--continue") ||
+    args.includes("-c") ||
+    args.includes("--session") ||
+    args.includes("-s")
+  ) {
+    return args;
+  }
+  return [...args, "--continue"];
+}
+
 const builders: Partial<Record<NonNullable<IconKey>, ResumeBuilder>> = {
   // claude --resume <id> picks a specific session.
   claude: (args, sessionId) => {
@@ -71,15 +95,18 @@ const builders: Partial<Record<NonNullable<IconKey>, ResumeBuilder>> = {
   },
   // codex resume <id> subcommand-form.
   codex: (args, sessionId) => {
-    const filtered = args[0] === "resume" ? args.slice(1) : args;
-    const stripped = filtered.filter((a) => a !== sessionId);
-    return ["resume", sessionId, ...stripped];
+    const stripped = args.filter(
+      (a) =>
+        a !== "resume" && a !== sessionId && a !== CODEX_NO_ALT_SCREEN,
+    );
+    return [CODEX_NO_ALT_SCREEN, ...stripped, "resume", sessionId];
   },
-  // opencode --session <id> picks a specific session.
+  // Current opencode uses --session <id>; strip legacy resume args too.
   opencode: (args, sessionId) => {
+    const withoutContinue = stripFlag(args, ["--continue", "-c"], false);
     const filtered = stripFlag(
-      args,
-      ["--continue", "-c", "--session", "-s"],
+      withoutContinue,
+      ["--session", "-s", "--resume", "-r"],
       true,
     );
     return [...filtered, "--session", sessionId];
@@ -115,6 +142,7 @@ export function buildResumeArgs(thread: Thread): string[] {
     logger.debug("resume", `${thread.id}: no builder for ${key}`, {});
     return thread.args;
   }
+  const args = key === "codex" ? withCodexNoAltScreen(thread.args) : thread.args;
   const isFreshFirstSpawn = app.consumeFresh(thread.id);
   if (isFreshFirstSpawn) {
     logger.info(
@@ -122,19 +150,28 @@ export function buildResumeArgs(thread: Thread): string[] {
       `${thread.id} (${key}): first spawn, no resume`,
       { cmd: thread.cmd },
     );
-    return thread.args;
+    return args;
   }
 
   if (!thread.sessionId) {
+    if (key === "opencode") {
+      const out = withOpencodeContinue(args);
+      logger.info(
+        "resume",
+        `${thread.id} (${key}): no captured session, continue latest`,
+        { cmd: thread.cmd, args: out },
+      );
+      return out;
+    }
     logger.info(
       "resume",
       `${thread.id} (${key}): no captured session, spawn original command`,
       { cmd: thread.cmd },
     );
-    return thread.args;
+    return args;
   }
 
-  const out = builder(thread.args, thread.sessionId);
+  const out = builder(args, thread.sessionId);
   logger.info(
     "resume",
     `${thread.id} (${key}): respawn → ${thread.cmd} ${out.join(" ")}`,

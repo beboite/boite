@@ -11,7 +11,8 @@ export type ThreadStatus =
   | "ready"
   | "done"
   | "exited"
-  | "error";
+  | "error"
+  | "stopped";
 
 export interface Thread {
   id: string;
@@ -59,6 +60,7 @@ export interface Settings {
   confirmCloseThread: boolean;
   gitPanelOpen: boolean;
   gitPanelWidth: number;
+  gitSplitFraction: number;
 }
 
 export type View = "terminal" | "settings";

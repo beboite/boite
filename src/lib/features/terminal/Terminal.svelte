@@ -44,15 +44,18 @@
   );
   let lastOutputAt = 0;
   let sessionTimer: ReturnType<typeof setInterval> | null = null;
+  let sessionTimeouts: ReturnType<typeof setTimeout>[] = [];
+  let sessionScanInFlight = false;
   let fitRafId: number | null = null;
-  let removeWheelCapture: (() => void) | null = null;
+  let lastInputAt = 0;
   let lastDetectAt = 0;
+  let lastDetectOutputAt = 0;
   let detectBuffer = "";
   const decoder = new TextDecoder("utf-8", { fatal: false });
   const encoder = new TextEncoder();
   const LF = new Uint8Array([0x0a]);
   const DETECT_BUFFER_MAX = 4000;
-  const OPENCODE_ACTIVITY_TTL_MS = 10_000;
+  const SESSION_SCAN_INTERVAL_MS = 12_000;
 
   function scheduleFit() {
     if (fitRafId !== null) return;
@@ -81,14 +84,16 @@
   }
 
   function detectWorkingFromOutput(text: string) {
-    appendDetectBuffer(text);
     const now = Date.now();
+    if (lastDetectOutputAt && now - lastDetectOutputAt > 1500) {
+      detectBuffer = "";
+    }
+    lastDetectOutputAt = now;
+    appendDetectBuffer(text);
     if (now - lastDetectAt < 120) return;
     lastDetectAt = now;
     if (detectWorking(detectBuffer, thread.iconKey)) {
       markRunning();
-    } else if (thread.iconKey === "opencode" && text.trim().length > 0) {
-      markRunning(OPENCODE_ACTIVITY_TTL_MS);
     }
   }
 
@@ -107,6 +112,11 @@
         markRunning();
       }
     } else if (event.type === "exit") {
+      const exitedPtyId = ptyId;
+      ptyId = null;
+      stopSessionMonitor();
+      const current = app.threads.find((x) => x.id === thread.id);
+      if (current?.ptyId !== exitedPtyId) return;
       const code = event.code ?? null;
       app.setThreadStatus(thread.id, code === 0 ? "done" : "exited", code);
       app.setThreadPtyId(thread.id, null);
@@ -171,6 +181,84 @@
     ctxMenu = null;
   }
 
+  function stopSessionMonitor() {
+    if (sessionTimer) clearInterval(sessionTimer);
+    sessionTimer = null;
+    for (const timeout of sessionTimeouts) clearTimeout(timeout);
+    sessionTimeouts = [];
+  }
+
+  async function persistSessionId(t: Thread, id: string, cwd: string) {
+    if (t.sessionId === id) return;
+    const previous = t.sessionId;
+    t.sessionId = id;
+    await saveThread($state.snapshot(t) as Thread);
+    logger.info(
+      "session",
+      `${previous ? "updated" : "captured"} ${t.iconKey ?? "?"} session for ${t.label}`,
+      { id, previous, cwd },
+    );
+    notifications.success(
+      previous ? `Session updated (${t.label})` : `Session captured (${t.label})`,
+    );
+  }
+
+  function sessionProbeSince(t: Thread, initialSince: number): number | null {
+    if (!t.sessionId) return initialSince;
+    const localActivityAt = Math.max(lastInputAt, lastOutputAt);
+    if (!localActivityAt) return null;
+    if (Date.now() - localActivityAt > SESSION_SCAN_INTERVAL_MS * 2) return null;
+    return Math.max(initialSince, localActivityAt - 2000);
+  }
+
+  function startSessionMonitor(
+    cwd: string,
+    detector: NonNullable<ReturnType<typeof getDetector>>,
+    since: number,
+    targetPtyId: string,
+  ) {
+    stopSessionMonitor();
+
+    const scanOnce = async (): Promise<boolean> => {
+      if (sessionScanInFlight) return false;
+      const t = app.threads.find((x) => x.id === thread.id);
+      if (!t || t.ptyId !== targetPtyId || ptyId !== targetPtyId) return true;
+      const probeSince = sessionProbeSince(t, since);
+      if (probeSince == null) return false;
+
+      const excludeIds = app.threads
+        .filter((x) => x.id !== thread.id && x.sessionId)
+        .map((x) => x.sessionId as string);
+
+      sessionScanInFlight = true;
+      try {
+        const id = await detector(cwd, probeSince, excludeIds);
+        if (!id) return false;
+        if (
+          app.threads.some((x) => x.id !== thread.id && x.sessionId === id)
+        ) {
+          return false;
+        }
+        await persistSessionId(t, id, cwd);
+        return false;
+      } catch (err) {
+        logger.error("session", `detect failed for ${t.label}`, String(err));
+        return false;
+      } finally {
+        sessionScanInFlight = false;
+      }
+    };
+
+    const runScan = () => {
+      void scanOnce().then((done) => {
+        if (done) stopSessionMonitor();
+      });
+    };
+
+    sessionTimeouts = [setTimeout(runScan, 3000), setTimeout(runScan, 8000)];
+    sessionTimer = setInterval(runScan, SESSION_SCAN_INTERVAL_MS);
+  }
+
   async function openTerminalLink(event: MouseEvent, uri: string) {
     if (event.button !== 0 || (!event.ctrlKey && !event.metaKey)) return;
     event.preventDefault();
@@ -208,24 +296,21 @@
 
   function wheelLines(e: WheelEvent): number {
     const raw =
-      e.deltaMode === 1
+      e.deltaMode === WheelEvent.DOM_DELTA_LINE
         ? e.deltaY
-        : e.deltaMode === 2
+        : e.deltaMode === WheelEvent.DOM_DELTA_PAGE
           ? e.deltaY * (term?.rows ?? 24)
           : e.deltaY / 20;
     if (raw === 0) return 0;
     return Math.sign(raw) * Math.max(1, Math.min(12, Math.round(Math.abs(raw))));
   }
 
-  function handleCodexWheel(e: WheelEvent) {
-    if (thread.iconKey !== "codex" || e.ctrlKey || e.metaKey || !term) return;
-    if (e.deltaY === 0) return;
-
-    const mouseMode = term.element?.classList.contains("enable-mouse-events") ?? false;
-    if (!mouseMode) return;
+  function handleCodexWheel(e: WheelEvent): boolean {
+    if (thread.iconKey !== "codex" || e.ctrlKey || e.metaKey || !term) return true;
+    if (e.deltaY === 0) return true;
 
     const lines = wheelLines(e);
-    if (lines === 0) return;
+    if (lines === 0) return true;
 
     e.preventDefault();
     e.stopPropagation();
@@ -233,12 +318,13 @@
     const buffer = term.buffer.active;
     if (buffer.baseY > 0) {
       term.scrollLines(lines);
-      return;
+      return false;
     }
 
-    if (!ptyId) return;
+    if (!ptyId) return false;
     const seq = lines < 0 ? "\x1b[A" : "\x1b[B";
     void ptyWrite(ptyId, encoder.encode(seq.repeat(Math.abs(lines))));
+    return false;
   }
 
   async function spawn() {
@@ -317,57 +403,17 @@
       }, 5000);
     }
 
-    if (!thread.sessionId) {
-      const detector = getDetector(thread);
-      if (detector) {
-        const cwd = project.cwd;
-        const since = spawnedAt - 5000;
-        const scanOnce = async (): Promise<boolean> => {
-          const t = app.threads.find((x) => x.id === thread.id);
-          if (!t) return true;
-          if (t.sessionId) return true;
-          try {
-            const id = await detector(cwd, since);
-            if (!id) return false;
-            t.sessionId = id;
-            void saveThread($state.snapshot(t) as Thread);
-            logger.info(
-              "session",
-              `captured ${t.iconKey ?? "?"} session for ${t.label}`,
-              { id, cwd },
-            );
-            notifications.success(`Session captured (${t.label})`);
-            return true;
-          } catch (err) {
-            logger.error("session", `detect failed for ${t.label}`, String(err));
-            return false;
-          }
-        };
-        // Try a few times early, then settle on a slow poll while the thread
-        // stays alive without a captured session id.
-        setTimeout(() => void scanOnce(), 3000);
-        setTimeout(() => void scanOnce(), 8000);
-        sessionTimer = setInterval(() => {
-          void scanOnce().then((done) => {
-            if (done && sessionTimer) {
-              clearInterval(sessionTimer);
-              sessionTimer = null;
-            }
-          });
-        }, 12000);
-      }
+    const detector = getDetector(thread);
+    if (detector && ptyId) {
+      const since = Math.max(0, spawnedAt - (thread.sessionId ? 1000 : 5000));
+      startSessionMonitor(project.cwd, detector, since, ptyId);
     }
 
     term.onData((data) => {
       if (!ptyId) return;
+      lastInputAt = Date.now();
       const bytes = new TextEncoder().encode(data);
       void ptyWrite(ptyId, bytes);
-      if (thread.status === "ready") {
-        app.setThreadStatus(thread.id, "running");
-      }
-      if (thread.iconKey === "opencode" && data.includes("\r")) {
-        markRunning(OPENCODE_ACTIVITY_TTL_MS);
-      }
     });
 
     term.onResize(({ cols, rows }) => {
@@ -459,25 +505,35 @@
       return true;
     });
 
+    term.attachCustomWheelEventHandler(handleCodexWheel);
+
     term.open(container);
-    container.addEventListener("wheel", handleCodexWheel, {
-      capture: true,
-      passive: false,
-    });
-    removeWheelCapture = () => {
-      container.removeEventListener("wheel", handleCodexWheel, { capture: true });
-    };
 
     try {
       term.loadAddon(new WebglAddon());
     } catch {
-      // WebGL unavailable — fall back to default DOM renderer.
+      // WebGL unavailable. Fall back to default DOM renderer.
     }
 
-    fit.fit();
+    const initialFit = () => {
+      try {
+        fit?.fit();
+      } catch {
+        // ignore
+      }
+    };
+    initialFit();
     if (focused) term.focus();
 
-    void spawn();
+    requestAnimationFrame(() => {
+      initialFit();
+      requestAnimationFrame(() => {
+        initialFit();
+        void spawn();
+      });
+    });
+    setTimeout(initialFit, 100);
+    setTimeout(initialFit, 350);
 
     resizeObserver = new ResizeObserver(() => {
       scheduleFit();
@@ -501,13 +557,10 @@
 
   onDestroy(() => {
     statusEngine.release(thread.id);
-    if (sessionTimer) clearInterval(sessionTimer);
-    sessionTimer = null;
+    stopSessionMonitor();
     if (fitRafId !== null) cancelAnimationFrame(fitRafId);
     fitRafId = null;
     resizeObserver?.disconnect();
-    removeWheelCapture?.();
-    removeWheelCapture = null;
     term?.dispose();
     term = null;
     fit = null;
@@ -515,11 +568,19 @@
 </script>
 
 <div
-  bind:this={container}
-  class="h-full w-full bg-[var(--color-background)] px-3 py-2"
+  class="relative h-full w-full overflow-hidden bg-[var(--color-background)] px-3 py-2"
   oncontextmenu={openTerminalContextMenu}
   role="presentation"
-></div>
+>
+  <div bind:this={container} class="h-full w-full min-h-0 overflow-hidden"></div>
+  {#if thread.status === "stopped"}
+    <div
+      class="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-black text-xs text-muted-foreground/60"
+    >
+      ( -_-) zzZ
+    </div>
+  {/if}
+</div>
 
 {#if ctxMenu}
   <ContextMenu

@@ -28,6 +28,19 @@ function rememberClosedThread(thread: Thread) {
   if (closedThreads.length > MAX_CLOSED_THREADS) closedThreads.shift();
 }
 
+function nextLabelSuffix(projectId: string, prefix: string): number {
+  const escaped = prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`^${escaped} #(\\d+)$`);
+  let max = 0;
+  for (const t of app.threadsByProject(projectId)) {
+    const m = re.exec(t.label);
+    if (!m) continue;
+    const n = Number.parseInt(m[1], 10);
+    if (Number.isFinite(n) && n > max) max = n;
+  }
+  return max + 1;
+}
+
 function buildThread(
   projectId: string,
   cmd: string,
@@ -65,7 +78,7 @@ export async function launchShortcut(
     notifications.error(`${shortcut.label}: empty command`);
     return null;
   }
-  const count = app.threadsByProject(project.id).length + 1;
+  const count = nextLabelSuffix(project.id, shortcut.label);
   const iconKey = resolveIconKey(shortcut.iconKey, shortcut.label, shortcut.command);
   const thread = buildThread(
     project.id,
@@ -96,7 +109,7 @@ export async function launchShell(
     notifications.error("Pick a project first");
     return null;
   }
-  const count = app.threadsByProject(project.id).length + 1;
+  const count = nextLabelSuffix(project.id, shell.label);
   const thread = buildThread(
     project.id,
     shell.cmd,
@@ -140,7 +153,7 @@ export async function launchBlankTerminal(
     cmd = await getDefaultShell();
   }
 
-  const count = app.threadsByProject(project.id).length + 1;
+  const count = nextLabelSuffix(project.id, label);
   const thread = buildThread(
     project.id,
     cmd,
@@ -164,13 +177,33 @@ export async function closeThread(threadId: string) {
   const t = app.threads.find((x) => x.id === threadId);
   if (t) rememberClosedThread(t);
   if (t?.ptyId) {
-    try {
-      await ptyKill(t.ptyId);
-    } catch {
-      // already exited
-    }
+    void ptyKill(t.ptyId, false).catch(() => {});
   }
   await app.removeThread(threadId);
+}
+
+export async function stopThread(threadId: string) {
+  const t = app.threads.find((x) => x.id === threadId);
+  if (!t) return;
+  if (!t.ptyId) return;
+
+  const previousPtyId = t.ptyId;
+  app.setThreadPtyId(t.id, null);
+  app.setThreadStatus(t.id, "stopped", null);
+  await saveThread({
+    ...t,
+    ptyId: null,
+    status: "stopped",
+    exitCode: null,
+    args: [...t.args],
+  });
+
+  if (!previousPtyId) return;
+  try {
+    await ptyKill(previousPtyId, false);
+  } catch {
+    // already exited
+  }
 }
 
 export async function restoreLastClosedThread(): Promise<Thread | null> {

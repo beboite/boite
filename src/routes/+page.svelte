@@ -16,6 +16,7 @@
   import { paneStore } from "$lib/features/panes/store.svelte";
   import PaneShell from "$lib/features/panes/PaneShell.svelte";
   import PaneOverlay from "$lib/features/panes/PaneOverlay.svelte";
+  import PaneDropOverlay from "$lib/features/panes/PaneDropOverlay.svelte";
 
   let activated = $state<Record<string, true>>({});
 
@@ -37,23 +38,30 @@
   });
 
   function activateThread(id: string) {
-    if (app.activeThreadId === id && app.view === "terminal") return;
-
     const t = app.threads.find((x) => x.id === id);
     const isFinished =
-      t && (t.status === "done" || t.status === "exited" || t.status === "error");
+      t &&
+      (t.status === "done" ||
+        t.status === "exited" ||
+        t.status === "error" ||
+        t.status === "stopped");
+
+    if (app.activeThreadId === id && app.view === "terminal" && !isFinished) {
+      return;
+    }
+
     activated[id] = true;
     app.activeThreadId = id;
     if (t) app.selectedProjectId = t.projectId;
     app.view = "terminal";
     statusEngine.markViewed(id);
     if (isFinished) {
+      app.setThreadStatus(id, "idle");
       app.bumpRespawn(id);
     }
   }
 
   function focusPane(threadId: string) {
-    if (app.activeThreadId === threadId) return;
     activateThread(threadId);
   }
 
@@ -71,11 +79,7 @@
     const threads = app.threadsByProject(projectId);
     for (const t of threads) {
       if (t.ptyId) {
-        try {
-          await ptyKill(t.ptyId);
-        } catch {
-          // already exited
-        }
+        void ptyKill(t.ptyId, false).catch(() => {});
       }
       delete activated[t.id];
     }
@@ -209,6 +213,8 @@
                 </div>
               {/if}
             {/each}
+
+            <PaneDropOverlay />
           </div>
         </div>
 
@@ -218,6 +224,7 @@
           </div>
         {/if}
       {/if}
+      <Toaster />
     </main>
 
     {#if app.ready && settings.state.gitPanelOpen}
@@ -225,5 +232,3 @@
     {/if}
   </div>
 </div>
-
-<Toaster />

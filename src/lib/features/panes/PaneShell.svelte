@@ -15,8 +15,9 @@
       frame = null;
       const root = el.closest("[data-pane-viewport]") as HTMLElement | null;
       if (!root) return;
-      const rRoot = root.getBoundingClientRect();
       const r = el.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0) return;
+      const rRoot = root.getBoundingClientRect();
       paneStore.setRect(currentId, {
         x: r.left - rRoot.left,
         y: r.top - rRoot.top,

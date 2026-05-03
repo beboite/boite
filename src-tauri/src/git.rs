@@ -271,7 +271,12 @@ fn log_blocking(path: &str, limit: u32, skip: u32) -> Result<Vec<Commit>, String
     let mut cmd = git(p);
     cmd.args([
         "log",
-        "--all",
+        "--branches",
+        "--tags",
+        "--remotes",
+        "HEAD",
+        "--topo-order",
+        "--date-order",
         &format!("-n{}", limit),
         &format!("--skip={}", skip),
         "--pretty=format:%H%x1f%h%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%D%x1f%s%x1e",

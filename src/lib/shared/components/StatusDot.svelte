@@ -12,6 +12,7 @@
     done: "bg-success",
     exited: "bg-danger",
     error: "bg-danger",
+    stopped: "bg-muted-foreground/30",
   };
 </script>
 
