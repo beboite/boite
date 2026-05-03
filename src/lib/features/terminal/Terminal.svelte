@@ -52,7 +52,6 @@
   let lastDetectOutputAt = 0;
   let detectBuffer = "";
   const decoder = new TextDecoder("utf-8", { fatal: false });
-  const encoder = new TextEncoder();
   const LF = new Uint8Array([0x0a]);
   const DETECT_BUFFER_MAX = 4000;
   const SESSION_SCAN_INTERVAL_MS = 12_000;
@@ -274,6 +273,15 @@
   function shouldSendLineFeed(e: KeyboardEvent, code: string): boolean {
     const isEnter = code === "Enter" || code === "NumpadEnter";
     const isCodex = thread.iconKey === "codex";
+    const isCtrlJ =
+      e.ctrlKey &&
+      !e.shiftKey &&
+      !e.altKey &&
+      (code === "KeyJ" ||
+        e.key === "j" ||
+        e.key === "J" ||
+        e.key === "\n" ||
+        e.key === "LineFeed");
     if (
       isEnter &&
       e.shiftKey &&
@@ -283,7 +291,7 @@
     ) {
       return true;
     }
-    return isCodex && e.ctrlKey && !e.shiftKey && !e.altKey && code === "KeyJ";
+    return isCodex && isCtrlJ;
   }
 
   function sendLineFeed(e: KeyboardEvent): boolean {
@@ -312,19 +320,15 @@
     const lines = wheelLines(e);
     if (lines === 0) return true;
 
-    e.preventDefault();
-    e.stopPropagation();
-
     const buffer = term.buffer.active;
     if (buffer.baseY > 0) {
+      e.preventDefault();
+      e.stopPropagation();
       term.scrollLines(lines);
       return false;
     }
 
-    if (!ptyId) return false;
-    const seq = lines < 0 ? "\x1b[A" : "\x1b[B";
-    void ptyWrite(ptyId, encoder.encode(seq.repeat(Math.abs(lines))));
-    return false;
+    return true;
   }
 
   async function spawn() {
