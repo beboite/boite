@@ -7,59 +7,85 @@
   interface Edge {
     fromCol: number;
     toCol: number;
+    color: string;
   }
   interface Row {
     commit: Commit;
     col: number;
     before: (string | null)[];
     after: (string | null)[];
+    beforeColors: string[];
+    afterColors: string[];
     incoming: boolean[];
     parentEdges: Edge[];
+    dotColor: string;
   }
 
   const LANE_W = 16;
   const ROW_H = 28;
   const DOT_R = 3.5;
   const STROKE = 1.5;
+  const MAX_STRIP_W = 72;
 
-  // Muted lane palette. Primary lane stays neutral to match boite's grayscale.
-  const COLORS = [
-    "#a1a1aa",
+  const BASE_COLOR = "#fbbf24";
+  const REMOTE_ONLY_COLOR = "#38bdf8";
+  const FALLBACK_COLOR = "#a1a1aa";
+  const BRANCH_COLORS = [
+    "#f472b6",
     "#86efac",
-    "#fcd34d",
-    "#7dd3fc",
-    "#f9a8d4",
-    "#c4b5fd",
-    "#fda4af",
-    "#fdba74",
+    "#a78bfa",
+    "#fb7185",
+    "#2dd4bf",
+    "#f97316",
+    "#60a5fa",
+    "#c084fc",
   ];
+
+  const currentBranch = $derived.by((): string | null => {
+    for (const c of commits) {
+      const head = c.refs.find((r) => r.startsWith("HEAD -> "));
+      if (head) return cleanRef(head);
+    }
+    return null;
+  });
 
   const rows = $derived.by((): Row[] => {
     const out: Row[] = [];
     let prev: (string | null)[] = [];
+    let prevColors: string[] = [];
     for (const c of commits) {
       const before: (string | null)[] = prev.slice();
+      const beforeColors = prevColors.slice();
       let col = before.indexOf(c.sha);
       if (col === -1) {
         col = before.findIndex((s) => s === null);
         if (col === -1) {
           col = before.length;
           before.push(c.sha);
+          beforeColors[col] = commitColor(c, currentBranch);
         } else {
           before[col] = c.sha;
+          beforeColors[col] = commitColor(c, currentBranch);
         }
+      }
+      if (!beforeColors[col]) {
+        beforeColors[col] = commitColor(c, currentBranch);
       }
       const incoming = before.map(
         (s, k) => s != null && k < prev.length && prev[k] === s,
       );
 
       const after: (string | null)[] = before.slice();
+      const afterColors: string[] = beforeColors.slice();
+      const dotColor = beforeColors[col] || commitColor(c, currentBranch);
       after[col] = null;
+      afterColors[col] = "";
       const parentEdges: Edge[] = [];
 
       for (let pi = 0; pi < c.parents.length; pi++) {
         const p = c.parents[pi];
         let pCol = after.indexOf(p);
+        const parentColor = pi === 0 ? dotColor : commitColorBySha(p, currentBranch);
         if (pCol === -1) {
           if (pi === 0 && after[col] === null) {
             pCol = col;
@@ -68,19 +94,36 @@
             if (pCol === -1) {
               pCol = after.length;
               after.push(p);
-              parentEdges.push({ fromCol: col, toCol: pCol });
+              afterColors[pCol] = parentColor;
+              parentEdges.push({ fromCol: col, toCol: pCol, color: parentColor });
               continue;
             }
           }
           after[pCol] = p;
+          afterColors[pCol] = parentColor;
         }
-        parentEdges.push({ fromCol: col, toCol: pCol });
+        if (!afterColors[pCol]) afterColors[pCol] = parentColor;
+        parentEdges.push({ fromCol: col, toCol: pCol, color: afterColors[pCol] || parentColor });
       }
 
-      while (after.length > 0 && after[after.length - 1] === null) after.pop();
+      while (after.length > 0 && after[after.length - 1] === null) {
+        after.pop();
+        afterColors.pop();
+      }
 
-      out.push({ commit: c, col, before, after, incoming, parentEdges });
+      out.push({
+        commit: c,
+        col,
+        before,
+        after,
+        beforeColors,
+        afterColors,
+        incoming,
+        parentEdges,
+        dotColor,
+      });
       prev = after;
+      prevColors = afterColors;
     }
     return out;
   });
@@ -89,24 +132,65 @@
     rows.reduce((m, r) => Math.max(m, r.before.length, r.after.length), 1),
   );
   const stripWidth = $derived(Math.max(totalCols, 1) * LANE_W);
+  const stripViewportWidth = $derived(Math.min(stripWidth, MAX_STRIP_W));
 
   function laneX(col: number): number {
     return col * LANE_W + LANE_W / 2;
   }
-  function laneColor(col: number): string {
-    return COLORS[col % COLORS.length];
-  }
-
   function cleanRef(ref: string): string {
     return ref.replace(/^HEAD -> /, "");
   }
 
+  function isTagRef(ref: string): boolean {
+    return cleanRef(ref).startsWith("tag: ");
+  }
+
+  function isRemoteHeadRef(ref: string): boolean {
+    return cleanRef(ref).endsWith("/HEAD");
+  }
+
+  function commitBranchKey(commit: Commit): string | null {
+    const refs = commit.refs
+      .map(cleanRef)
+      .filter((r) => r && !r.startsWith("tag: ") && !r.endsWith("/HEAD"));
+    const local = refs.find((r) => !r.includes("/"));
+    if (local) return local;
+    return refs[0] ?? null;
+  }
+
+  function hashBranch(name: string): number {
+    let out = 0;
+    for (let i = 0; i < name.length; i++) {
+      out = (out * 31 + name.charCodeAt(i)) | 0;
+    }
+    return Math.abs(out);
+  }
+
+  function branchColor(branch: string | null, baseBranch: string | null): string {
+    if (!branch) return FALLBACK_COLOR;
+    if (baseBranch && (branch === baseBranch || branch.endsWith(`/${baseBranch}`))) {
+      return BASE_COLOR;
+    }
+    return BRANCH_COLORS[hashBranch(branch) % BRANCH_COLORS.length];
+  }
+
+  function commitColor(commit: Commit, baseBranch: string | null): string {
+    if (commit.localOnly) return "var(--color-warning)";
+    if (commit.remoteOnly) return REMOTE_ONLY_COLOR;
+    return branchColor(commitBranchKey(commit), baseBranch);
+  }
+
+  function commitColorBySha(sha: string, baseBranch: string | null): string {
+    const commit = commits.find((c) => c.sha === sha);
+    return commit ? commitColor(commit, baseBranch) : FALLBACK_COLOR;
+  }
+
   function rowRefs(refs: string[]): string[] {
-    return refs.filter((r) => !cleanRef(r).endsWith("/HEAD")).slice(0, 2);
+    return refs.filter((r) => !isRemoteHeadRef(r) && !isTagRef(r)).slice(0, 2);
   }
 
   function hiddenRefCount(refs: string[]): number {
-    return Math.max(0, refs.filter((r) => !cleanRef(r).endsWith("/HEAD")).length - 2);
+    return Math.max(0, refs.filter((r) => !isRemoteHeadRef(r) && !isTagRef(r)).length - 2);
   }
 
   function fmtTime(ts: number): string {
@@ -153,14 +237,14 @@
   }
 </script>
 
-<div class="flex flex-col">
+<div class="flex min-w-0 flex-col">
   {#each rows as row (row.commit.sha)}
-    {@const dotColor = row.commit.localOnly ? "var(--color-warning)" : laneColor(row.col)}
+    {@const dotColor = row.dotColor}
     {@const isMerge = row.commit.parents.length > 1}
     {@const visibleRefs = rowRefs(row.commit.refs)}
     {@const hiddenRefs = hiddenRefCount(row.commit.refs)}
     <div
-      class="flex items-stretch transition hover:bg-[var(--color-surface-2)]"
+      class="flex min-w-0 items-stretch transition hover:bg-[var(--color-surface-2)]"
       style:height="{ROW_H}px"
       onmouseenter={(e) => showPopup(row, e)}
       onmouseleave={hidePopup}
@@ -168,9 +252,9 @@
     >
       <svg
         class="shrink-0"
-        width={stripWidth}
+        width={stripViewportWidth}
         height={ROW_H}
-        viewBox="0 0 {stripWidth} {ROW_H}"
+        viewBox="0 0 {stripViewportWidth} {ROW_H}"
         aria-hidden="true"
       >
         {#each row.before as sha, k (k)}
@@ -181,7 +265,7 @@
                 y1={0}
                 x2={laneX(row.col)}
                 y2={ROW_H / 2}
-                stroke={laneColor(row.col)}
+                stroke={row.beforeColors[row.col] || dotColor}
                 stroke-width={STROKE}
                 stroke-linecap="round"
               />
@@ -191,7 +275,7 @@
                 y1={0}
                 x2={laneX(k)}
                 y2={ROW_H / 2}
-                stroke={laneColor(k)}
+                stroke={row.beforeColors[k] || FALLBACK_COLOR}
                 stroke-width={STROKE}
                 stroke-linecap="round"
                 opacity="0.65"
@@ -207,7 +291,7 @@
               y1={ROW_H / 2}
               x2={laneX(k)}
               y2={ROW_H}
-              stroke={laneColor(k)}
+              stroke={row.afterColors[k] || row.beforeColors[k] || FALLBACK_COLOR}
               stroke-width={STROKE}
               stroke-linecap="round"
               opacity="0.65"
@@ -222,7 +306,7 @@
               y1={ROW_H / 2}
               x2={laneX(e.toCol)}
               y2={ROW_H}
-              stroke={laneColor(e.toCol)}
+              stroke={e.color}
               stroke-width={STROKE}
               stroke-linecap="round"
             />
@@ -231,7 +315,7 @@
               d="M{laneX(e.fromCol)} {ROW_H / 2} Q{laneX(e.fromCol)} {ROW_H}, {laneX(
                 e.toCol,
               )} {ROW_H}"
-              stroke={laneColor(e.toCol)}
+              stroke={e.color}
               stroke-width={STROKE}
               stroke-linecap="round"
               stroke-linejoin="round"

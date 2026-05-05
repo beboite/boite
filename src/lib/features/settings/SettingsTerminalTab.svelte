@@ -18,6 +18,10 @@
   const SUPPORTED_AUTOCLOSE: IconRow[] = [
     { iconKey: "claude", label: "Claude" },
     { iconKey: "codex", label: "Codex" },
+    { iconKey: "opencode", label: "Opencode" },
+    { iconKey: "cursor", label: "Cursor" },
+    { iconKey: "gemini", label: "Gemini" },
+    { iconKey: "copilot", label: "Copilot" },
   ];
 </script>
 

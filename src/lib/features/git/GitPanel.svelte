@@ -87,6 +87,10 @@
     if (project) void gitStore.commit(project.id);
   }
 
+  function loadMoreCommits() {
+    if (project) void gitStore.loadMore(project.id);
+  }
+
   function startResizeX(e: MouseEvent) {
     e.preventDefault();
     resizingX = true;
@@ -320,7 +324,7 @@
             <span
               class="rounded-full bg-[var(--color-surface-2)] px-1.5 text-[10px] text-foreground/75"
             >
-              {gs.log.length}
+              {gs.log.length}{gs.logHasMore ? "+" : ""}
             </span>
           {/if}
         </div>
@@ -333,6 +337,18 @@
             </div>
           {:else}
             <GitGraph commits={gs.log} />
+            {#if gs.logHasMore}
+              <div class="border-t border-border p-2">
+                <button
+                  type="button"
+                  class="w-full rounded-md border border-border bg-[var(--color-surface-2)] px-2 py-1 text-[11px] text-muted-foreground transition hover:bg-[var(--color-surface-3)] hover:text-foreground disabled:opacity-50"
+                  onclick={loadMoreCommits}
+                  disabled={gs.logLoadingMore}
+                >
+                  {gs.logLoadingMore ? "Loading..." : "Load more commits"}
+                </button>
+              </div>
+            {/if}
           {/if}
         </div>
       </section>

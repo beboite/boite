@@ -60,7 +60,14 @@ const DEFAULTS: Settings = {
   projectOrder: [],
   threadOrderByProject: {},
   idleTimeoutMinutes: 10,
-  idleAutocloseByIcon: { claude: true, codex: true },
+  idleAutocloseByIcon: {
+    claude: true,
+    codex: true,
+    opencode: true,
+    cursor: true,
+    gemini: true,
+    copilot: true,
+  },
   confirmCloseThread: true,
   gitPanelOpen: false,
   gitPanelWidth: 320,
@@ -134,7 +141,10 @@ class SettingsStore {
             : DEFAULTS.idleTimeoutMinutes,
         idleAutocloseByIcon:
           stored.idleAutocloseByIcon && typeof stored.idleAutocloseByIcon === "object"
-            ? stored.idleAutocloseByIcon
+            ? {
+                ...structuredClone(DEFAULTS.idleAutocloseByIcon),
+                ...stored.idleAutocloseByIcon,
+              }
             : structuredClone(DEFAULTS.idleAutocloseByIcon),
         confirmCloseThread:
           typeof stored.confirmCloseThread === "boolean"
