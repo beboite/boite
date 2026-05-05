@@ -2,6 +2,7 @@ import { app } from "$lib/app/store.svelte";
 import { settings } from "$lib/features/settings/store.svelte";
 import { paneStore, leavesOf } from "$lib/features/panes/store.svelte";
 import { notifyWhenUnfocused } from "$lib/storage/notify";
+import { saveThread } from "$lib/storage/db";
 import { ptyKill } from "$lib/storage/pty";
 import { logger } from "$lib/shared/services/logger.svelte";
 
@@ -16,20 +17,44 @@ let timer: ReturnType<typeof setInterval> | null = null;
 let refCount = 0;
 
 function maybeAutoClose(threadId: string, iconKey: string | null | undefined) {
-  if (!iconKey) return;
+  if (!iconKey || iconKey === "terminal") return;
   const minutes = settings.state.idleTimeoutMinutes;
   if (!minutes || minutes <= 0) return;
-  const enabled = settings.state.idleAutocloseByIcon[iconKey];
+  const enabled = settings.state.idleAutocloseByIcon[iconKey] === true;
   if (!enabled) return;
-  const viewed = lastViewedAt.get(threadId);
-  if (!viewed) return;
-  if (Date.now() - viewed < minutes * 60_000) return;
   const t = app.threads.find((x) => x.id === threadId);
   if (!t || !t.ptyId) return;
+  const now = Date.now();
+  const viewed = lastViewedAt.get(threadId);
+  if (!viewed) {
+    lastViewedAt.set(threadId, now);
+    logger.debug("idle", `armed auto-sleep for ${t.label}`, {
+      iconKey,
+      timeoutMinutes: minutes,
+    });
+    return;
+  }
+  const idleMs = now - viewed;
+  if (idleMs < minutes * 60_000) return;
   const pid = t.ptyId;
-  void ptyKill(pid, false).catch(() => {});
-  logger.info("idle", `auto-closed ${t.label} after ${minutes}m idle`, {
+  app.setThreadPtyId(t.id, null);
+  app.setThreadStatus(t.id, "stopped", null);
+  void saveThread({
+    ...t,
+    ptyId: null,
+    status: "stopped",
+    exitCode: null,
+    args: [...t.args],
+  }).catch((err) => {
+    logger.warn("idle", `failed to persist auto-sleep for ${t.label}`, String(err));
+  });
+  void ptyKill(pid, false).catch((err) => {
+    logger.warn("idle", `failed to kill ${t.label} during auto-sleep`, String(err));
+  });
+  logger.info("idle", `auto-slept ${t.label} after ${minutes}m idle`, {
     iconKey,
+    idleMs,
+    ptyId: pid,
   });
 }
 

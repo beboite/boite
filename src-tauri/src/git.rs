@@ -34,6 +34,7 @@ pub struct Commit {
     pub deletions: u32,
     pub refs: Vec<String>,
     pub local_only: bool,
+    pub remote_only: bool,
 }
 
 fn git(path: &Path) -> Command {
@@ -348,14 +349,23 @@ fn log_blocking(path: &str, limit: u32, skip: u32) -> Result<Vec<Commit>, String
             deletions,
             refs,
             local_only: false,
+            remote_only: false,
         });
     }
 
     let local_set = local_only_set(p);
+    let remote_set = remote_only_set(p);
     if !local_set.is_empty() {
         for c in &mut commits {
             if local_set.contains(&c.sha) {
                 c.local_only = true;
+            }
+        }
+    }
+    if !remote_set.is_empty() {
+        for c in &mut commits {
+            if remote_set.contains(&c.sha) {
+                c.remote_only = true;
             }
         }
     }
@@ -372,6 +382,25 @@ fn local_only_set(path: &Path) -> HashSet<String> {
         "--tags",
         "--not",
         "--remotes",
+    ]);
+    match run(cmd) {
+        Ok(b) => String::from_utf8_lossy(&b)
+            .lines()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect(),
+        Err(_) => HashSet::new(),
+    }
+}
+
+fn remote_only_set(path: &Path) -> HashSet<String> {
+    let mut cmd = git(path);
+    cmd.args([
+        "rev-list",
+        "--remotes",
+        "--not",
+        "--branches",
+        "--tags",
     ]);
     match run(cmd) {
         Ok(b) => String::from_utf8_lossy(&b)

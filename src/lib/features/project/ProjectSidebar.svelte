@@ -285,6 +285,9 @@
       return false;
     }
 
+    const activeGroupId = app.activeThreadId
+      ? paneStore.groupOf(app.activeThreadId)?.id ?? null
+      : null;
     for (const [targetThreadId, rect] of Object.entries(paneStore.rects)) {
       if (
         targetThreadId === drag.id ||
@@ -298,8 +301,10 @@
       const target = app.threads.find((t) => t.id === targetThreadId);
       const group = paneStore.groupOf(targetThreadId);
       if (!target || target.projectId !== drag.projectId || !group) {
-        paneStore.dropPreview = null;
-        return false;
+        continue;
+      }
+      if (activeGroupId && group.id !== activeGroupId) {
+        continue;
       }
       const sourceGroup = paneStore.groupOf(drag.id);
       const refused =
@@ -373,7 +378,8 @@
         notifications.error(`Max ${MAX_LEAVES} panes per group`);
         return;
       }
-      paneStore.splitInto(preview.targetThreadId, drag.id, preview.side);
+      const ok = paneStore.splitInto(preview.targetThreadId, drag.id, preview.side);
+      if (!ok) notifications.error("Couldn't split pane");
       return;
     }
 

@@ -27,6 +27,7 @@ export interface Commit {
   deletions: number;
   refs: string[];
   localOnly: boolean;
+  remoteOnly: boolean;
 }
 
 interface RawRepoInfo {
@@ -49,6 +50,7 @@ interface RawCommit {
   deletions: number;
   refs: string[];
   local_only: boolean;
+  remote_only: boolean;
 }
 
 export async function gitRepoInfo(path: string): Promise<RepoInfo> {
@@ -84,6 +86,7 @@ export async function gitLog(
     deletions: r.deletions,
     refs: r.refs,
     localOnly: r.local_only,
+    remoteOnly: r.remote_only,
   }));
 }
 

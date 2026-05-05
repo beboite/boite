@@ -12,7 +12,11 @@ import {
 } from "./api";
 import { notifications } from "$lib/features/notifications/store.svelte";
 
-const LOG_PAGE = 300;
+const LOG_PAGE = 80;
+
+interface RefreshOptions {
+  reloadLog?: boolean;
+}
 
 export interface GitState {
   isRepo: boolean;
@@ -23,6 +27,8 @@ export interface GitState {
   unstaged: ChangeEntry[];
   conflicts: ChangeEntry[];
   log: Commit[];
+  logHasMore: boolean;
+  logLoadingMore: boolean;
   loading: boolean;
   committing: boolean;
   fetching: boolean;
@@ -39,6 +45,8 @@ function emptyState(): GitState {
     unstaged: [],
     conflicts: [],
     log: [],
+    logHasMore: false,
+    logLoadingMore: false,
     loading: false,
     committing: false,
     fetching: false,
@@ -69,7 +77,10 @@ class GitStore {
     this.cwds.delete(projectId);
   }
 
-  async refresh(projectId: string): Promise<void> {
+  async refresh(
+    projectId: string,
+    options: RefreshOptions = {},
+  ): Promise<void> {
     const cwd = this.cwds.get(projectId);
     if (!cwd) return;
     const existing = this.inflight.get(projectId);
@@ -77,13 +88,14 @@ class GitStore {
 
     const state = this.ensure(projectId, cwd);
     state.loading = true;
+    const shouldLoadLog = options.reloadLog || state.log.length === 0;
 
     const task = (async () => {
       try {
         const [info, entries, log] = await Promise.all([
           gitRepoInfo(cwd),
           gitStatus(cwd),
-          gitLog(cwd, LOG_PAGE, 0).catch(() => []),
+          shouldLoadLog ? gitLog(cwd, LOG_PAGE, 0).catch(() => []) : null,
         ]);
         state.isRepo = info.isRepo;
         state.branch = info.branch;
@@ -100,7 +112,10 @@ class GitStore {
         state.staged = staged;
         state.unstaged = unstaged;
         state.conflicts = conflicts;
-        state.log = log;
+        if (log) {
+          state.log = log;
+          state.logHasMore = log.length === LOG_PAGE;
+        }
       } catch (err) {
         console.error("git refresh failed:", err);
       } finally {
@@ -110,6 +125,23 @@ class GitStore {
     })();
     this.inflight.set(projectId, task);
     return task;
+  }
+
+  async loadMore(projectId: string): Promise<void> {
+    const cwd = this.cwds.get(projectId);
+    const state = this.states[projectId];
+    if (!cwd || !state || state.logLoadingMore || !state.logHasMore) return;
+    state.logLoadingMore = true;
+    try {
+      const rows = await gitLog(cwd, LOG_PAGE, state.log.length);
+      const existing = new Set(state.log.map((c) => c.sha));
+      state.log = [...state.log, ...rows.filter((c) => !existing.has(c.sha))];
+      state.logHasMore = rows.length === LOG_PAGE;
+    } catch (err) {
+      notifications.error(`Load commits failed: ${err}`);
+    } finally {
+      state.logLoadingMore = false;
+    }
   }
 
   async stage(projectId: string, files: string[]) {
@@ -153,7 +185,7 @@ class GitStore {
     state.fetching = true;
     try {
       await gitFetch(cwd);
-      await this.refresh(projectId);
+      await this.refresh(projectId, { reloadLog: true });
     } catch (err) {
       notifications.error(`Fetch failed: ${err}`);
     } finally {
@@ -179,7 +211,7 @@ class GitStore {
       await gitCommit(cwd, msg);
       state.message = "";
       notifications.success("Commit created");
-      await this.refresh(projectId);
+      await this.refresh(projectId, { reloadLog: true });
     } catch (err) {
       notifications.error(`Commit failed: ${err}`);
     } finally {
