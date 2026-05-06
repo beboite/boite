@@ -36,6 +36,7 @@ struct PtyHandle {
     master: Arc<Mutex<Box<dyn MasterPty + Send>>>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     killer: Arc<Mutex<Box<dyn ChildKiller + Send + Sync>>>,
+    pid: Option<u32>,
 }
 
 #[derive(Clone, Default)]
@@ -102,11 +103,13 @@ impl PtyManager {
         let writer_arc: Arc<Mutex<Box<dyn Write + Send>>> = Arc::new(Mutex::new(writer));
         let killer_arc: Arc<Mutex<Box<dyn ChildKiller + Send + Sync>>> =
             Arc::new(Mutex::new(killer));
+        let pid = child.process_id();
 
         let handle = PtyHandle {
             master: master_arc,
             writer: writer_arc,
             killer: killer_arc,
+            pid,
         };
 
         self.inner.lock().insert(id.clone(), handle);
@@ -163,17 +166,28 @@ impl PtyManager {
     }
 
     pub fn kill(&self, id: &str, wait: bool) -> Result<(), String> {
-        let killer = {
+        let (killer, pid) = {
             let map = self.inner.lock();
             match map.get(id) {
-                Some(handle) => handle.killer.clone(),
+                Some(handle) => (handle.killer.clone(), handle.pid),
                 None => return Ok(()),
             }
         };
-        killer
-            .lock()
-            .kill()
-            .map_err(|e| format!("kill failed: {e}"))?;
+        #[cfg(target_os = "windows")]
+        {
+            if let Some(pid) = pid {
+                force_kill_process_tree(pid);
+            }
+            let _ = killer.lock().kill();
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = pid;
+            killer
+                .lock()
+                .kill()
+                .map_err(|e| format!("kill failed: {e}"))?;
+        }
         if !wait {
             return Ok(());
         }
@@ -190,6 +204,21 @@ impl PtyManager {
         }
         Ok(())
     }
+}
+
+#[cfg(target_os = "windows")]
+fn force_kill_process_tree(pid: u32) {
+    use std::os::windows::process::CommandExt;
+    use std::process::{Command, Stdio};
+
+    let pid_arg = pid.to_string();
+    let _ = Command::new("taskkill")
+        .args(["/PID", pid_arg.as_str(), "/T", "/F"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+        .status();
 }
 
 fn read_loop(mut reader: Box<dyn Read + Send>, channel: Channel<PtyEvent>) {

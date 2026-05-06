@@ -176,16 +176,14 @@ export async function launchBlankTerminal(
 export async function closeThread(threadId: string) {
   const t = app.threads.find((x) => x.id === threadId);
   if (t) rememberClosedThread(t);
-  if (t?.ptyId) {
-    void ptyKill(t.ptyId, false).catch(() => {});
-  }
+  const kill = t?.ptyId ? ptyKill(t.ptyId, true).catch(() => {}) : Promise.resolve();
   await app.removeThread(threadId);
+  await kill;
 }
 
 export async function stopThread(threadId: string) {
   const t = app.threads.find((x) => x.id === threadId);
   if (!t) return;
-  if (!t.ptyId) return;
 
   const previousPtyId = t.ptyId;
   app.setThreadPtyId(t.id, null);
@@ -198,11 +196,12 @@ export async function stopThread(threadId: string) {
     args: [...t.args],
   });
 
-  if (!previousPtyId) return;
-  try {
-    await ptyKill(previousPtyId, false);
-  } catch {
-    // already exited
+  if (previousPtyId) {
+    try {
+      await ptyKill(previousPtyId, true);
+    } catch {
+      // already exited
+    }
   }
 }
 
