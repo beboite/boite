@@ -42,6 +42,7 @@
   let spawning = false;
   let destroyed = false;
   let spawnRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  let pendingInputTimers: ReturnType<typeof setTimeout>[] = [];
   let ctxMenu = $state<{ x: number; y: number; items: ContextMenuItem[] } | null>(
     null,
   );
@@ -75,6 +76,40 @@
     spawnRetryTimer = null;
   }
 
+  function clearPendingInputTimers() {
+    for (const timer of pendingInputTimers) clearTimeout(timer);
+    pendingInputTimers = [];
+  }
+
+  function schedulePendingInputTimer(callback: () => void, delay: number) {
+    const timer = setTimeout(() => {
+      pendingInputTimers = pendingInputTimers.filter((t) => t !== timer);
+      callback();
+    }, delay);
+    pendingInputTimers.push(timer);
+  }
+
+  function currentThread(): Thread | null {
+    return app.threads.find((x) => x.id === thread.id) ?? null;
+  }
+
+  function shouldUsePty(targetPtyId: string | null): targetPtyId is string {
+    if (!targetPtyId || destroyed || ptyId !== targetPtyId) return false;
+    const current = currentThread();
+    return !!current && current.status !== "stopped" && current.ptyId === targetPtyId;
+  }
+
+  function stopLocalPty(wait = false) {
+    clearSpawnRetry();
+    clearPendingInputTimers();
+    const targetPtyId = ptyId;
+    ptyId = null;
+    spawned = false;
+    if (targetPtyId) {
+      void ptyKill(targetPtyId, wait).catch(() => {});
+    }
+  }
+
   function scheduleSpawnRetry(delay = 120) {
     if (spawned || spawning || destroyed || spawnRetryTimer !== null) return;
     spawnRetryTimer = setTimeout(() => {
@@ -103,7 +138,25 @@
     return raw.slice(m.index).trim();
   }
 
+  function syncAliveThread(nextStatus: "ready" | "running" = "ready") {
+    if (!ptyId) return;
+    const current = app.threads.find((x) => x.id === thread.id);
+    if (!current) return;
+    if (current.status === "stopped") return;
+    if (current.ptyId !== ptyId) {
+      app.setThreadPtyId(thread.id, ptyId);
+      logger.warn("terminal", `${thread.label}: repaired missing pty id`, {
+        ptyId,
+        status: current.status,
+      });
+    }
+    if (current.status === "idle") {
+      app.setThreadStatus(thread.id, nextStatus, null);
+    }
+  }
+
   function markRunning(ttlMs?: number) {
+    syncAliveThread("running");
     statusEngine.markWorking(thread.id, ttlMs);
     app.setThreadStatus(thread.id, "running");
   }
@@ -131,13 +184,19 @@
 
   function handleEvent(event: PtyEvent) {
     if (!term) return;
+    const current = currentThread();
+    if (!current || current.status === "stopped") return;
+    if (ptyId && current.ptyId && current.ptyId !== ptyId) return;
+
     if (event.type === "output") {
+      syncAliveThread();
       const bytes = new Uint8Array(event.data);
       lastOutputAt = Date.now();
       term.write(bytes);
       const text = decoder.decode(bytes, { stream: true });
       detectWorkingFromOutput(text);
     } else if (event.type === "title") {
+      syncAliveThread();
       const cleaned = cleanTitle(event.value);
       if (cleaned) app.setThreadTitle(thread.id, cleaned);
       if (titleSignalsWorking(event.value)) {
@@ -145,7 +204,10 @@
       }
     } else if (event.type === "exit") {
       const exitedPtyId = ptyId;
+      if (!exitedPtyId) return;
       ptyId = null;
+      spawned = false;
+      clearPendingInputTimers();
       stopSessionMonitor();
       const current = app.threads.find((x) => x.id === thread.id);
       if (current?.ptyId !== exitedPtyId) return;
@@ -372,6 +434,8 @@
 
   async function spawn() {
     if (spawned || spawning || destroyed) return;
+    const current = currentThread();
+    if (!current || current.status === "stopped") return;
     if (!term || !fit) {
       logger.warn(
         "spawn",
@@ -426,8 +490,9 @@
         },
         handleEvent,
       );
-      if (destroyed || !term) {
-        void ptyKill(nextPtyId, false).catch(() => {});
+      const current = currentThread();
+      if (destroyed || !term || !current || current.status === "stopped") {
+        void ptyKill(nextPtyId, true).catch(() => {});
         return;
       }
       ptyId = nextPtyId;
@@ -441,7 +506,9 @@
       );
     } catch (err) {
       term?.write(`\r\n[boite] spawn failed: ${err}\r\n`);
-      if (!destroyed) app.setThreadStatus(thread.id, "error");
+      if (!destroyed && currentThread()?.status !== "stopped") {
+        app.setThreadStatus(thread.id, "error");
+      }
       logger.error("spawn", `${thread.label}: spawn failed`, String(err));
       return;
     } finally {
@@ -455,23 +522,23 @@
       lastOutputAt = Date.now();
       let injected = false;
 
+      const inject = () => {
+        if (injected || !shouldUsePty(targetPtyId)) return;
+        injected = true;
+        void ptyWrite(targetPtyId, encoded).catch(() => {});
+      };
+
       const tryInject = () => {
-        if (injected) return;
+        if (injected || !shouldUsePty(targetPtyId)) return;
         if (Date.now() - lastOutputAt > 350) {
-          injected = true;
-          void ptyWrite(targetPtyId, encoded);
+          inject();
           return;
         }
-        setTimeout(tryInject, 120);
+        schedulePendingInputTimer(tryInject, 120);
       };
-      setTimeout(tryInject, 250);
+      schedulePendingInputTimer(tryInject, 250);
 
-      setTimeout(() => {
-        if (!injected) {
-          injected = true;
-          void ptyWrite(targetPtyId, encoded);
-        }
-      }, 5000);
+      schedulePendingInputTimer(inject, 5000);
     }
 
     const detector = getDetector(thread);
@@ -481,14 +548,15 @@
     }
 
     term.onData((data) => {
-      if (!ptyId) return;
+      if (!shouldUsePty(ptyId)) return;
+      syncAliveThread();
       lastInputAt = Date.now();
       const bytes = new TextEncoder().encode(data);
       void ptyWrite(ptyId, bytes);
     });
 
     term.onResize(({ cols, rows }) => {
-      if (!ptyId) return;
+      if (!shouldUsePty(ptyId)) return;
       void ptyResize(ptyId, cols, rows);
     });
   }
@@ -629,6 +697,12 @@
   });
 
   $effect(() => {
+    if (thread.status === "stopped") {
+      stopLocalPty(false);
+    }
+  });
+
+  $effect(() => {
     if (focused && term) {
       queueMicrotask(() => term?.focus());
     }
@@ -638,7 +712,7 @@
     destroyed = true;
     statusEngine.release(thread.id);
     stopSessionMonitor();
-    clearSpawnRetry();
+    stopLocalPty(false);
     if (fitRafId !== null) cancelAnimationFrame(fitRafId);
     fitRafId = null;
     resizeObserver?.disconnect();
