@@ -6,6 +6,7 @@ export interface RepoInfo {
   upstream: string | null;
   ahead: number;
   behind: number;
+  refsVersion: string | null;
 }
 
 export interface ChangeEntry {
@@ -36,6 +37,7 @@ interface RawRepoInfo {
   upstream: string | null;
   ahead: number;
   behind: number;
+  refs_version: string | null;
 }
 
 interface RawCommit {
@@ -61,6 +63,7 @@ export async function gitRepoInfo(path: string): Promise<RepoInfo> {
     upstream: r.upstream,
     ahead: r.ahead,
     behind: r.behind,
+    refsVersion: r.refs_version,
   };
 }
 

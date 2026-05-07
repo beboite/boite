@@ -2,6 +2,7 @@
   import { app } from "$lib/app/store.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
   import { gitStore } from "./store.svelte";
+  import { editorStore } from "$lib/features/editor/store.svelte";
   import GitGraph from "./GitGraph.svelte";
   import type { ChangeEntry } from "./api";
   import CloudDownload from "@lucide/svelte/icons/cloud-download";
@@ -30,9 +31,7 @@
       : null,
   );
 
-  let panelEl: HTMLElement | null = $state(null);
   let bodyEl: HTMLElement | null = $state(null);
-  let resizingX = $state(false);
   let resizingY = $state(false);
 
   $effect(() => {
@@ -91,23 +90,6 @@
     if (project) void gitStore.loadMore(project.id);
   }
 
-  function startResizeX(e: MouseEvent) {
-    e.preventDefault();
-    resizingX = true;
-    document.addEventListener("mousemove", onResizeX);
-    document.addEventListener("mouseup", stopResizeX);
-  }
-  function onResizeX(e: MouseEvent) {
-    if (!panelEl) return;
-    const rect = panelEl.getBoundingClientRect();
-    settings.setGitPanelWidth(rect.right - e.clientX);
-  }
-  function stopResizeX() {
-    resizingX = false;
-    document.removeEventListener("mousemove", onResizeX);
-    document.removeEventListener("mouseup", stopResizeX);
-  }
-
   function startResizeY(e: MouseEvent) {
     e.preventDefault();
     resizingY = true;
@@ -159,18 +141,32 @@
       void gitStore.discard(project.id, [path]);
     }
   }
+
+  async function openDiff(entry: ChangeEntry) {
+    if (!project) return;
+    if (entry.status === "?") {
+      const sep = project.cwd.includes("\\") ? "\\" : "/";
+      const root = project.cwd.endsWith(sep) ? project.cwd : project.cwd + sep;
+      await editorStore.openFile(root + entry.path.replace(/[\\/]/g, sep));
+      app.view = "editor";
+      return;
+    }
+    const mode = entry.staged ? "staged" : "unstaged";
+    await editorStore.openDiff({
+      projectId: project.id,
+      repoPath: project.cwd,
+      file: entry.path,
+      mode,
+    });
+    app.view = "editor";
+  }
 </script>
 
-<aside
-  bind:this={panelEl}
-  class="relative flex h-full shrink-0 flex-col border-l border-border bg-[var(--color-surface)] {resizingX ||
-  resizingY
-    ? 'select-none'
-    : ''}"
-  style:width="{settings.state.gitPanelWidth}px"
+<div
+  class="flex h-full min-h-0 flex-col {resizingY ? 'select-none' : ''}"
 >
   <header
-    class="flex h-10 shrink-0 items-center gap-2 border-b border-border px-3"
+    class="flex h-9 shrink-0 items-center gap-2 border-b border-border px-3"
   >
     <GitBranch class="size-4 text-muted-foreground" />
     {#if gs?.isRepo}
@@ -355,14 +351,7 @@
     </div>
   {/if}
 
-  <button
-    type="button"
-    class="absolute left-0 top-0 z-10 h-full w-1 cursor-col-resize bg-transparent transition hover:bg-foreground/10"
-    onmousedown={startResizeX}
-    aria-label="Resize git panel"
-    tabindex="-1"
-  ></button>
-</aside>
+</div>
 
 {#snippet section({ label, entries, mode, open, toggle }: SectionArgs)}
   <div class="flex flex-col">
@@ -404,14 +393,18 @@
           class="group/row flex items-center gap-1.5 px-2 py-1 text-[11px] hover:bg-[var(--color-surface-2)]"
           title={entry.path}
         >
-          <span class="min-w-0 flex-1 truncate text-foreground/85">
+          <button
+            type="button"
+            class="min-w-0 flex-1 truncate text-left text-foreground/85 hover:text-foreground"
+            onclick={() => openDiff(entry)}
+          >
             {basename(entry.path)}
             {#if dirname(entry.path)}
               <span class="ml-1 text-muted-foreground/55"
                 >{dirname(entry.path)}</span
               >
             {/if}
-          </span>
+          </button>
           <div
             class="flex shrink-0 items-center gap-0.5 opacity-0 transition group-hover/row:opacity-100"
           >

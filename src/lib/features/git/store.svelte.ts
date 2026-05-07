@@ -16,6 +16,7 @@ const LOG_PAGE = 80;
 
 interface RefreshOptions {
   reloadLog?: boolean;
+  notifyErrors?: boolean;
 }
 
 export interface GitState {
@@ -23,6 +24,7 @@ export interface GitState {
   branch: string | null;
   ahead: number;
   behind: number;
+  refsVersion: string | null;
   staged: ChangeEntry[];
   unstaged: ChangeEntry[];
   conflicts: ChangeEntry[];
@@ -41,6 +43,7 @@ function emptyState(): GitState {
     branch: null,
     ahead: 0,
     behind: 0,
+    refsVersion: null,
     staged: [],
     unstaged: [],
     conflicts: [],
@@ -58,6 +61,7 @@ class GitStore {
   states = $state<Record<string, GitState>>({});
   cwds = new Map<string, string>();
   private inflight = new Map<string, Promise<void>>();
+  private pendingReloadLog = new Set<string>();
 
   ensure(projectId: string, cwd: string): GitState {
     this.cwds.set(projectId, cwd);
@@ -84,23 +88,46 @@ class GitStore {
     const cwd = this.cwds.get(projectId);
     if (!cwd) return;
     const existing = this.inflight.get(projectId);
-    if (existing) return existing;
+    if (existing) {
+      if (!options.reloadLog) return existing;
+      this.pendingReloadLog.add(projectId);
+      return existing.catch(() => undefined).then(() => {
+        if (!this.pendingReloadLog.has(projectId)) return;
+        this.pendingReloadLog.delete(projectId);
+        return this.refresh(projectId, options);
+      });
+    }
 
     const state = this.ensure(projectId, cwd);
     state.loading = true;
-    const shouldLoadLog = options.reloadLog || state.log.length === 0;
+    const previous = {
+      isRepo: state.isRepo,
+      branch: state.branch,
+      ahead: state.ahead,
+      behind: state.behind,
+      refsVersion: state.refsVersion,
+    };
 
     const task = (async () => {
       try {
-        const [info, entries, log] = await Promise.all([
+        const [info, entries] = await Promise.all([
           gitRepoInfo(cwd),
           gitStatus(cwd),
-          shouldLoadLog ? gitLog(cwd, LOG_PAGE, 0).catch(() => []) : null,
         ]);
+        const shouldLoadLog =
+          options.reloadLog ||
+          state.log.length === 0 ||
+          previous.isRepo !== info.isRepo ||
+          previous.branch !== info.branch ||
+          previous.ahead !== info.ahead ||
+          previous.behind !== info.behind ||
+          previous.refsVersion !== info.refsVersion;
+        const log = info.isRepo && shouldLoadLog ? await gitLog(cwd, LOG_PAGE, 0) : null;
         state.isRepo = info.isRepo;
         state.branch = info.branch;
         state.ahead = info.ahead;
         state.behind = info.behind;
+        state.refsVersion = info.refsVersion;
         const staged: ChangeEntry[] = [];
         const unstaged: ChangeEntry[] = [];
         const conflicts: ChangeEntry[] = [];
@@ -115,9 +142,13 @@ class GitStore {
         if (log) {
           state.log = log;
           state.logHasMore = log.length === LOG_PAGE;
+        } else if (!info.isRepo) {
+          state.log = [];
+          state.logHasMore = false;
         }
       } catch (err) {
         console.error("git refresh failed:", err);
+        if (options.notifyErrors) throw err;
       } finally {
         state.loading = false;
         this.inflight.delete(projectId);
@@ -185,7 +216,7 @@ class GitStore {
     state.fetching = true;
     try {
       await gitFetch(cwd);
-      await this.refresh(projectId, { reloadLog: true });
+      await this.refresh(projectId, { reloadLog: true, notifyErrors: true });
     } catch (err) {
       notifications.error(`Fetch failed: ${err}`);
     } finally {

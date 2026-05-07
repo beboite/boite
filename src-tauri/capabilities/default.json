@@ -23,6 +23,8 @@
     "sql:allow-close",
     "dialog:allow-open",
     "opener:allow-open-url",
+    "opener:allow-open-path",
+    "opener:allow-reveal-item-in-dir",
     "opener:allow-default-urls",
     "os:allow-platform",
     "notification:allow-notify",

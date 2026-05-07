@@ -58,9 +58,11 @@ export interface Settings {
   idleTimeoutMinutes: number;
   idleAutocloseByIcon: Record<string, boolean>;
   confirmCloseThread: boolean;
-  gitPanelOpen: boolean;
-  gitPanelWidth: number;
+  rightPanel: RightPanelTab;
+  rightPanelWidth: number;
   gitSplitFraction: number;
 }
 
-export type View = "terminal" | "settings";
+export type RightPanelTab = "git" | "explorer" | null;
+
+export type View = "terminal" | "settings" | "editor";

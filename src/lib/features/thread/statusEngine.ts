@@ -11,7 +11,6 @@ const DEFAULT_WORKING_TTL_MS = 2000;
 
 const lastWorkingAt = new Map<string, number>();
 const workingTtlMs = new Map<string, number>();
-const lastViewedAt = new Map<string, number>();
 const prevStatus = new Map<string, string>();
 let timer: ReturnType<typeof setInterval> | null = null;
 let refCount = 0;
@@ -25,16 +24,16 @@ function maybeAutoClose(threadId: string, iconKey: string | null | undefined) {
   const t = app.threads.find((x) => x.id === threadId);
   if (!t || !t.ptyId) return;
   const now = Date.now();
-  const viewed = lastViewedAt.get(threadId);
-  if (!viewed) {
-    lastViewedAt.set(threadId, now);
+  const worked = lastWorkingAt.get(threadId);
+  if (!worked) {
+    lastWorkingAt.set(threadId, now);
     logger.debug("idle", `armed auto-sleep for ${t.label}`, {
       iconKey,
       timeoutMinutes: minutes,
     });
     return;
   }
-  const idleMs = now - viewed;
+  const idleMs = now - worked;
   if (idleMs < minutes * 60_000) return;
   const pid = t.ptyId;
   app.setThreadPtyId(t.id, null);
@@ -69,7 +68,6 @@ function visibleThreadIds(): Set<string> {
 function tick() {
   const now = Date.now();
   const visible = visibleThreadIds();
-  for (const id of visible) lastViewedAt.set(id, now);
 
   for (const t of app.threads) {
     if (!t.ptyId) {
@@ -109,10 +107,6 @@ export const statusEngine = {
     workingTtlMs.set(threadId, ttlMs);
   },
 
-  markViewed(threadId: string) {
-    lastViewedAt.set(threadId, Date.now());
-  },
-
   acquire() {
     refCount++;
     if (timer === null) {
@@ -124,7 +118,6 @@ export const statusEngine = {
     refCount = Math.max(0, refCount - 1);
     lastWorkingAt.delete(threadId);
     workingTtlMs.delete(threadId);
-    lastViewedAt.delete(threadId);
     prevStatus.delete(threadId);
     if (refCount === 0 && timer !== null) {
       clearInterval(timer);

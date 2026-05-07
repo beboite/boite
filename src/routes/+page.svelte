@@ -4,7 +4,6 @@
   import { pickAndAddProject } from "$lib/features/project/api";
   import { ptyKill } from "$lib/storage/pty";
   import { closeThread } from "$lib/features/thread/api";
-  import { statusEngine } from "$lib/features/thread/statusEngine";
   import TitleBar from "$lib/shared/components/TitleBar.svelte";
   import ProjectSidebar from "$lib/features/project/ProjectSidebar.svelte";
   import ShortcutBar from "$lib/features/shortcut/ShortcutBar.svelte";
@@ -12,11 +11,12 @@
   import Terminal from "$lib/features/terminal/Terminal.svelte";
   import Toaster from "$lib/features/notifications/Toaster.svelte";
   import BoiteLogo from "$lib/shared/components/BoiteLogo.svelte";
-  import GitPanel from "$lib/features/git/GitPanel.svelte";
+  import RightPanel from "$lib/features/panes/RightPanel.svelte";
   import { paneStore } from "$lib/features/panes/store.svelte";
   import PaneShell from "$lib/features/panes/PaneShell.svelte";
   import PaneOverlay from "$lib/features/panes/PaneOverlay.svelte";
   import PaneDropOverlay from "$lib/features/panes/PaneDropOverlay.svelte";
+  import EditorPanel from "$lib/features/editor/EditorPanel.svelte";
 
   let activated = $state<Record<string, true>>({});
 
@@ -54,7 +54,6 @@
     app.activeThreadId = id;
     if (t) app.selectedProjectId = t.projectId;
     app.view = "terminal";
-    statusEngine.markViewed(id);
     if (isFinished) {
       app.setThreadStatus(id, "idle");
       app.bumpRespawn(id);
@@ -91,7 +90,6 @@
     const id = app.activeThreadId;
     if (id && app.threads.some((t) => t.id === id) && !activated[id]) {
       activated[id] = true;
-      statusEngine.markViewed(id);
     }
   });
 
@@ -223,12 +221,18 @@
             <SettingsPanel />
           </div>
         {/if}
+
+        {#if app.view === "editor"}
+          <div class="absolute inset-0 z-10 bg-[var(--color-background)]">
+            <EditorPanel />
+          </div>
+        {/if}
       {/if}
       <Toaster />
     </main>
 
-    {#if app.ready && settings.state.gitPanelOpen}
-      <GitPanel />
+    {#if app.ready && settings.state.rightPanel}
+      <RightPanel />
     {/if}
   </div>
 </div>

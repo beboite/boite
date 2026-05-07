@@ -15,7 +15,7 @@
   import ContextMenu from "$lib/shared/components/ContextMenu.svelte";
   import type { ContextMenuItem } from "$lib/shared/components/ContextMenu.svelte";
   import type { DropSide } from "$lib/features/panes/types";
-  import type { Thread } from "$lib/types";
+  import type { Thread, ThreadStatus } from "$lib/types";
   import Plus from "@lucide/svelte/icons/plus";
   import X from "@lucide/svelte/icons/x";
   import FolderOpen from "@lucide/svelte/icons/folder-open";
@@ -126,8 +126,7 @@
   function selectProject(projectId: string) {
     app.selectedProjectId = projectId;
     if (app.activeThread && app.activeThread.projectId !== projectId) {
-      const firstInProject = app.threadsByProjectSorted(projectId)[0];
-      app.activeThreadId = firstInProject ? firstInProject.id : null;
+      app.activeThreadId = null;
     }
     app.view = "terminal";
   }
@@ -421,6 +420,16 @@
   }
   function threadHoverLeave(id: string) {
     if (paneStore.hoveredThreadId === id) paneStore.hoveredThreadId = null;
+  }
+
+  function displayThreadStatus(thread: Thread): ThreadStatus {
+    if (
+      thread.ptyId &&
+      (thread.status === "idle" || thread.status === "stopped")
+    ) {
+      return "ready";
+    }
+    return thread.status;
   }
 
   let ctxMenu = $state<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
@@ -738,7 +747,7 @@
                     }
                   }}
                 >
-                  <StatusDot status={thread.status} />
+                  <StatusDot status={displayThreadStatus(thread)} />
                   <span
                     class="min-w-0 flex-1 truncate text-left text-[13px]"
                     title={thread.title ?? thread.label}
@@ -794,7 +803,7 @@
     style:width="{threadDragGhost.width}px"
     aria-hidden="true"
   >
-    <StatusDot status={threadDragGhost.thread.status} />
+    <StatusDot status={displayThreadStatus(threadDragGhost.thread)} />
     <span
       class="min-w-0 flex-1 truncate text-left text-[13px]"
       title={threadDragGhost.thread.title ?? threadDragGhost.thread.label}
