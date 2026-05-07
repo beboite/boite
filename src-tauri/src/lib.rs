@@ -1,4 +1,6 @@
 mod commands;
+mod editor;
+mod explorer;
 mod git;
 mod logging;
 mod project;
@@ -147,6 +149,9 @@ pub fn run() {
             commands::clear_app_log,
             commands::log_file_path,
             project::inspect_project,
+            explorer::read_dir,
+            editor::read_text_file,
+            editor::write_text_file,
             shell::default_shell,
             shell::available_shells,
             session::find_claude_session,
@@ -163,6 +168,7 @@ pub fn run() {
             git::git_discard,
             git::git_commit,
             git::git_fetch,
+            git::git_file_versions,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

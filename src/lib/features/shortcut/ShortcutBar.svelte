@@ -7,6 +7,7 @@
   import ShellPicker from "./ShellPicker.svelte";
   import { resolveIconKey } from "$lib/shared/icons/detect";
   import GitBranch from "@lucide/svelte/icons/git-branch";
+  import FolderTree from "@lucide/svelte/icons/folder-tree";
 
   function launch(shortcutId: string) {
     const shortcut = settings.state.shortcuts.find((s) => s.id === shortcutId);
@@ -21,10 +22,16 @@
   }
 
   function toggleGit() {
-    void settings.toggleGitPanel();
+    void settings.toggleRightPanel("git");
+  }
+
+  function toggleExplorer() {
+    void settings.toggleRightPanel("explorer");
   }
 
   const gitState = $derived(gitStore.get(app.currentProjectId));
+  const gitActive = $derived(settings.state.rightPanel === "git");
+  const explorerActive = $derived(settings.state.rightPanel === "explorer");
   const changeCount = $derived(
     gitState
       ? gitState.staged.length + gitState.unstaged.length + gitState.conflicts.length
@@ -65,12 +72,24 @@
 
   <button
     type="button"
-    class="relative flex shrink-0 items-center gap-1 rounded-md border border-transparent bg-[var(--color-surface-2)] px-2 py-1 text-xs text-foreground/85 transition hover:border-border hover:bg-[var(--color-surface-3)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 {settings.state.gitPanelOpen ? 'border-border bg-[var(--color-surface-3)] text-foreground' : ''}"
+    class="relative flex shrink-0 items-center gap-1 rounded-md border border-transparent bg-[var(--color-surface-2)] px-2 py-1 text-xs text-foreground/85 transition hover:border-border hover:bg-[var(--color-surface-3)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 {explorerActive ? 'border-border bg-[var(--color-surface-3)] text-foreground' : ''}"
+    onclick={toggleExplorer}
+    disabled={app.currentProjectId === null}
+    title={explorerActive ? "Hide files panel" : "Show files panel"}
+    aria-label="Toggle files panel"
+    aria-pressed={explorerActive}
+  >
+    <FolderTree class="size-3.5" />
+  </button>
+
+  <button
+    type="button"
+    class="relative flex shrink-0 items-center gap-1 rounded-md border border-transparent bg-[var(--color-surface-2)] px-2 py-1 text-xs text-foreground/85 transition hover:border-border hover:bg-[var(--color-surface-3)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 {gitActive ? 'border-border bg-[var(--color-surface-3)] text-foreground' : ''}"
     onclick={toggleGit}
     disabled={app.currentProjectId === null}
-    title={settings.state.gitPanelOpen ? "Hide git panel" : "Show git panel"}
+    title={gitActive ? "Hide git panel" : "Show git panel"}
     aria-label="Toggle git panel"
-    aria-pressed={settings.state.gitPanelOpen}
+    aria-pressed={gitActive}
   >
     <GitBranch class="size-3.5" />
     {#if gitState?.branch}

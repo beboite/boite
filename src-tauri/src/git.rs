@@ -1,4 +1,7 @@
 use std::collections::HashSet;
+use std::collections::hash_map::DefaultHasher;
+use std::fs;
+use std::hash::{Hash, Hasher};
 use std::path::Path;
 use std::process::{Command, Stdio};
 
@@ -11,6 +14,7 @@ pub struct RepoInfo {
     pub upstream: Option<String>,
     pub ahead: u32,
     pub behind: u32,
+    pub refs_version: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -96,6 +100,7 @@ fn repo_info_blocking(path: &str) -> Result<RepoInfo, String> {
         upstream: None,
         ahead: 0,
         behind: 0,
+        refs_version: refs_version(p),
     };
     for line in text.lines() {
         if let Some(rest) = line.strip_prefix("# branch.head ") {
@@ -125,6 +130,38 @@ fn empty_repo() -> RepoInfo {
         upstream: None,
         ahead: 0,
         behind: 0,
+        refs_version: None,
+    }
+}
+
+fn refs_version(path: &Path) -> Option<String> {
+    let mut hasher = DefaultHasher::new();
+    let mut hashed = false;
+
+    let mut head = git(path);
+    head.args(["rev-parse", "--verify", "HEAD"]);
+    if let Ok(stdout) = run(head) {
+        stdout.hash(&mut hasher);
+        hashed = true;
+    }
+
+    let mut refs = git(path);
+    refs.args([
+        "for-each-ref",
+        "--format=%(refname)%00%(objectname)",
+        "refs/heads",
+        "refs/remotes",
+        "refs/tags",
+    ]);
+    if let Ok(stdout) = run(refs) {
+        stdout.hash(&mut hasher);
+        hashed = true;
+    }
+
+    if hashed {
+        Some(format!("{:016x}", hasher.finish()))
+    } else {
+        None
     }
 }
 
@@ -144,7 +181,8 @@ fn status_blocking(path: &str) -> Result<Vec<ChangeEntry>, String> {
     cmd.args([
         "status",
         "--porcelain=v2",
-        "--untracked-files=all",
+        "--untracked-files=no",
+        "--ignored=no",
         "-z",
     ]);
     let stdout = run(cmd)?;
@@ -273,13 +311,16 @@ fn log_blocking(path: &str, limit: u32, skip: u32) -> Result<Vec<Commit>, String
         return Ok(Vec::new());
     }
     let limit = limit.clamp(1, 500);
+    let upstream = upstream_ref(p);
     let mut cmd = git(p);
     cmd.args([
         "log",
-        "--branches",
-        "--tags",
-        "--remotes",
         "HEAD",
+    ]);
+    if let Some(ref u) = upstream {
+        cmd.arg(u);
+    }
+    cmd.args([
         "--topo-order",
         "--numstat",
         &format!("-n{}", limit),
@@ -353,8 +394,8 @@ fn log_blocking(path: &str, limit: u32, skip: u32) -> Result<Vec<Commit>, String
         });
     }
 
-    let local_set = local_only_set(p);
-    let remote_set = remote_only_set(p);
+    let local_set = local_only_set(p, upstream.as_deref());
+    let remote_set = remote_only_set(p, upstream.as_deref());
     if !local_set.is_empty() {
         for c in &mut commits {
             if local_set.contains(&c.sha) {
@@ -373,16 +414,28 @@ fn log_blocking(path: &str, limit: u32, skip: u32) -> Result<Vec<Commit>, String
     Ok(commits)
 }
 
-fn local_only_set(path: &Path) -> HashSet<String> {
+fn upstream_ref(path: &Path) -> Option<String> {
     let mut cmd = git(path);
     cmd.args([
-        "rev-list",
-        "HEAD",
-        "--branches",
-        "--tags",
-        "--not",
-        "--remotes",
+        "rev-parse",
+        "--abbrev-ref",
+        "--symbolic-full-name",
+        "HEAD@{upstream}",
     ]);
+    let out = cmd.output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if s.is_empty() { None } else { Some(s) }
+}
+
+fn local_only_set(path: &Path, upstream: Option<&str>) -> HashSet<String> {
+    let Some(up) = upstream else {
+        return HashSet::new();
+    };
+    let mut cmd = git(path);
+    cmd.args(["rev-list", "HEAD", &format!("^{up}")]);
     match run(cmd) {
         Ok(b) => String::from_utf8_lossy(&b)
             .lines()
@@ -393,15 +446,12 @@ fn local_only_set(path: &Path) -> HashSet<String> {
     }
 }
 
-fn remote_only_set(path: &Path) -> HashSet<String> {
+fn remote_only_set(path: &Path, upstream: Option<&str>) -> HashSet<String> {
+    let Some(up) = upstream else {
+        return HashSet::new();
+    };
     let mut cmd = git(path);
-    cmd.args([
-        "rev-list",
-        "--remotes",
-        "--not",
-        "--branches",
-        "--tags",
-    ]);
+    cmd.args(["rev-list", up, "^HEAD"]);
     match run(cmd) {
         Ok(b) => String::from_utf8_lossy(&b)
             .lines()
@@ -488,6 +538,84 @@ pub async fn git_commit(path: String, message: String) -> Result<String, String>
     tauri::async_runtime::spawn_blocking(move || commit_blocking(&path, &message))
         .await
         .map_err(|e| format!("git_commit task failed: {e}"))?
+}
+
+#[derive(Serialize)]
+pub struct FileVersions {
+    pub head: Option<String>,
+    pub index: Option<String>,
+    pub work: Option<String>,
+    pub binary: bool,
+}
+
+#[tauri::command]
+pub async fn git_file_versions(
+    path: String,
+    file: String,
+) -> Result<FileVersions, String> {
+    tauri::async_runtime::spawn_blocking(move || file_versions_blocking(&path, &file))
+        .await
+        .map_err(|e| format!("git_file_versions task failed: {e}"))?
+}
+
+fn file_versions_blocking(path: &str, file: &str) -> Result<FileVersions, String> {
+    let p = Path::new(path);
+    if !p.is_dir() {
+        return Err("not a directory".into());
+    }
+    let rel = file.replace('\\', "/");
+
+    let head = git_show(p, &format!("HEAD:{}", rel));
+    let index = git_show(p, &format!(":{}", rel));
+
+    let abs = p.join(&rel);
+    let work = match fs::metadata(&abs) {
+        Ok(meta) if meta.is_file() => match fs::read(&abs) {
+            Ok(bytes) => {
+                if bytes_binary(&bytes) {
+                    return Ok(FileVersions {
+                        head,
+                        index,
+                        work: None,
+                        binary: true,
+                    });
+                }
+                Some(String::from_utf8_lossy(&bytes).into_owned())
+            }
+            Err(_) => None,
+        },
+        _ => None,
+    };
+
+    let binary = head.as_deref().is_some_and(|s| s.contains('\u{0}'))
+        || index.as_deref().is_some_and(|s| s.contains('\u{0}'));
+
+    Ok(FileVersions {
+        head,
+        index,
+        work,
+        binary,
+    })
+}
+
+fn git_show(repo: &Path, spec: &str) -> Option<String> {
+    let mut cmd = git(repo);
+    cmd.args(["show", spec]);
+    match cmd.output() {
+        Ok(out) if out.status.success() => {
+            if bytes_binary(&out.stdout) {
+                None
+            } else {
+                Some(String::from_utf8_lossy(&out.stdout).into_owned())
+            }
+        }
+        _ => None,
+    }
+}
+
+fn bytes_binary(bytes: &[u8]) -> bool {
+    let head = &bytes[..bytes.len().min(8192)];
+    head.contains(&0u8)
 }
 
 fn commit_blocking(path: &str, message: &str) -> Result<String, String> {

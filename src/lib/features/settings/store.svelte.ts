@@ -1,7 +1,7 @@
 import { loadSettings, saveSettings } from "$lib/storage/db";
 import { notifications } from "$lib/features/notifications/store.svelte";
 import { debounce } from "$lib/shared/utils/debounce";
-import type { Settings, Shortcut } from "$lib/types";
+import type { RightPanelTab, Settings, Shortcut } from "$lib/types";
 
 export const PRESET_SHORTCUTS: Shortcut[] = [
   { id: "claude", label: "Claude", command: "claude", iconKey: "claude" },
@@ -69,10 +69,27 @@ const DEFAULTS: Settings = {
     copilot: true,
   },
   confirmCloseThread: true,
-  gitPanelOpen: false,
-  gitPanelWidth: 320,
+  rightPanel: null,
+  rightPanelWidth: 320,
   gitSplitFraction: 0.5,
 };
+
+function migrateRightPanel(stored: Record<string, unknown>): RightPanelTab {
+  const raw = stored.rightPanel;
+  if (raw === "git" || raw === "explorer" || raw === null) return raw;
+  if (stored.gitPanelOpen === true) return "git";
+  return DEFAULTS.rightPanel;
+}
+
+function migrateRightPanelWidth(stored: Record<string, unknown>): number {
+  if (typeof stored.rightPanelWidth === "number" && stored.rightPanelWidth > 0) {
+    return stored.rightPanelWidth;
+  }
+  if (typeof stored.gitPanelWidth === "number" && stored.gitPanelWidth > 0) {
+    return stored.gitPanelWidth;
+  }
+  return DEFAULTS.rightPanelWidth;
+}
 
 export function parseCommand(input: string): { cmd: string; args: string[] } {
   const tokens: string[] = [];
@@ -105,6 +122,7 @@ class SettingsStore {
     if (this.ready) return;
     try {
       const stored = await loadSettings();
+      const raw = stored as unknown as Record<string, unknown>;
       const migratedShortcuts = migrateShortcuts(stored.shortcuts);
       this.state = {
         shortcuts: migratedShortcuts.shortcuts,
@@ -150,14 +168,8 @@ class SettingsStore {
           typeof stored.confirmCloseThread === "boolean"
             ? stored.confirmCloseThread
             : DEFAULTS.confirmCloseThread,
-        gitPanelOpen:
-          typeof stored.gitPanelOpen === "boolean"
-            ? stored.gitPanelOpen
-            : DEFAULTS.gitPanelOpen,
-        gitPanelWidth:
-          typeof stored.gitPanelWidth === "number" && stored.gitPanelWidth > 0
-            ? stored.gitPanelWidth
-            : DEFAULTS.gitPanelWidth,
+        rightPanel: migrateRightPanel(raw),
+        rightPanelWidth: migrateRightPanelWidth(raw),
         gitSplitFraction:
           typeof stored.gitSplitFraction === "number" &&
           stored.gitSplitFraction > 0 &&
@@ -305,15 +317,21 @@ class SettingsStore {
     await this.persist();
   }
 
-  async toggleGitPanel() {
-    this.state.gitPanelOpen = !this.state.gitPanelOpen;
+  async toggleRightPanel(tab: Exclude<RightPanelTab, null>) {
+    this.state.rightPanel = this.state.rightPanel === tab ? null : tab;
     await this.persist();
   }
 
-  setGitPanelWidth(px: number) {
+  async setRightPanel(tab: RightPanelTab) {
+    if (this.state.rightPanel === tab) return;
+    this.state.rightPanel = tab;
+    await this.persist();
+  }
+
+  setRightPanelWidth(px: number) {
     const clamped = Math.max(240, Math.min(600, Math.round(px)));
-    if (this.state.gitPanelWidth === clamped) return;
-    this.state.gitPanelWidth = clamped;
+    if (this.state.rightPanelWidth === clamped) return;
+    this.state.rightPanelWidth = clamped;
     this.persistSoon();
   }
 

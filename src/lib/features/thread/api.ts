@@ -6,7 +6,6 @@ import { parseCommand, settings } from "$lib/features/settings/store.svelte";
 import { resolveIconKey } from "$lib/shared/icons/detect";
 import { platform } from "$lib/storage/platform.svelte";
 import { notifications } from "$lib/features/notifications/store.svelte";
-import { statusEngine } from "$lib/features/thread/statusEngine";
 import type { IconKey, Shortcut, Thread } from "$lib/types";
 import type { ShellOption } from "$lib/storage/platform.svelte";
 
@@ -218,7 +217,6 @@ export async function restoreLastClosedThread(): Promise<Thread | null> {
     app.activeThreadId = restored.id;
     app.selectedProjectId = restored.projectId;
     app.view = "terminal";
-    statusEngine.markViewed(restored.id);
     notifications.success(`Restored ${restored.title ?? restored.label}`);
     return restored;
   }
@@ -246,6 +244,5 @@ export async function reloadThread(threadId: string) {
   app.activeThreadId = t.id;
   app.selectedProjectId = t.projectId;
   app.view = "terminal";
-  statusEngine.markViewed(t.id);
   app.bumpRespawn(t.id);
 }
