@@ -48,6 +48,9 @@
   }
 
   onMount(() => {
+    if (menuRef && menuRef.parentElement !== document.body) {
+      document.body.appendChild(menuRef);
+    }
     void positionMenu();
     document.addEventListener("mousedown", handleClickOutside);
     document.addEventListener("keydown", handleKeydown);
@@ -58,6 +61,9 @@
     document.removeEventListener("mousedown", handleClickOutside);
     document.removeEventListener("keydown", handleKeydown);
     window.removeEventListener("resize", positionMenu);
+    if (menuRef && menuRef.parentElement === document.body) {
+      menuRef.remove();
+    }
   });
 </script>
 
@@ -92,7 +98,7 @@
 <style>
   .ctx-menu {
     position: fixed;
-    z-index: 1200;
+    z-index: 99999;
     min-width: 180px;
     padding: 4px;
     background: var(--color-surface-2, #18181b);
