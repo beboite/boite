@@ -653,9 +653,11 @@
     term.open(container);
 
     try {
-      term.loadAddon(new WebglAddon());
+      const webgl = new WebglAddon();
+      webgl.onContextLoss(() => webgl.dispose());
+      term.loadAddon(webgl);
     } catch {
-      // WebGL unavailable. Fall back to default DOM renderer.
+      // WebGL unavailable (e.g. webkit2gtk without GPU). Fall back to DOM renderer.
     }
 
     const initialFit = () => {

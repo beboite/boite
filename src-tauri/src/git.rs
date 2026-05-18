@@ -172,6 +172,82 @@ pub async fn git_status(path: String) -> Result<Vec<ChangeEntry>, String> {
         .map_err(|e| format!("git_status task failed: {e}"))?
 }
 
+#[derive(Serialize)]
+pub struct PathStatus {
+    pub path: String,
+    pub status: String,
+}
+
+#[tauri::command]
+pub async fn git_changed_paths(path: String) -> Result<Vec<PathStatus>, String> {
+    tauri::async_runtime::spawn_blocking(move || changed_paths_blocking(&path))
+        .await
+        .map_err(|e| format!("git_changed_paths task failed: {e}"))?
+}
+
+fn changed_paths_blocking(path: &str) -> Result<Vec<PathStatus>, String> {
+    let p = Path::new(path);
+    if !p.is_dir() {
+        return Ok(Vec::new());
+    }
+    let mut cmd = git(p);
+    cmd.args([
+        "status",
+        "--porcelain=v2",
+        "--untracked-files=normal",
+        "--ignored=no",
+        "-z",
+    ]);
+    let stdout = match run(cmd) {
+        Ok(b) => b,
+        Err(_) => return Ok(Vec::new()),
+    };
+    let entries = parse_porcelain_v2(&stdout);
+
+    use std::collections::HashMap;
+    let mut best: HashMap<String, char> = HashMap::new();
+    for e in entries {
+        let new_status = e
+            .status
+            .chars()
+            .next()
+            .unwrap_or('?');
+        match best.get(&e.path).copied() {
+            Some(existing) => {
+                if rank(new_status) > rank(existing) {
+                    best.insert(e.path, new_status);
+                }
+            }
+            None => {
+                best.insert(e.path, new_status);
+            }
+        }
+    }
+
+    let mut out: Vec<PathStatus> = best
+        .into_iter()
+        .map(|(rel, status)| PathStatus {
+            path: rel,
+            status: status.to_string(),
+        })
+        .collect();
+    out.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(out)
+}
+
+fn rank(c: char) -> u8 {
+    match c {
+        'U' => 6,
+        'D' => 5,
+        'A' => 4,
+        'M' => 3,
+        'R' => 2,
+        'C' => 2,
+        '?' => 1,
+        _ => 0,
+    }
+}
+
 fn status_blocking(path: &str) -> Result<Vec<ChangeEntry>, String> {
     let p = Path::new(path);
     if !p.is_dir() {

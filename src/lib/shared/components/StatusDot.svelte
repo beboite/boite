@@ -2,8 +2,8 @@
   import type { ThreadStatus } from "$lib/types";
   import UnicodeSpinner from "./UnicodeSpinner.svelte";
 
-  type Props = { status: ThreadStatus };
-  let { status }: Props = $props();
+  type Props = { status: ThreadStatus; asleep?: boolean };
+  let { status, asleep = false }: Props = $props();
 
   const colorByStatus: Record<ThreadStatus, string> = {
     idle: "bg-muted-foreground/30",
@@ -16,7 +16,13 @@
   };
 </script>
 
-{#if status === "running"}
+{#if asleep}
+  <span
+    class="animate-breathe inline-block size-2.5 shrink-0 rounded-full bg-success"
+    aria-label="asleep"
+    title="asleep (afk)"
+  ></span>
+{:else if status === "running"}
   <span
     class="inline-flex size-2.5 shrink-0 items-center justify-center text-warning"
     aria-label={status}

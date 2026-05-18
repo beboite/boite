@@ -3,6 +3,7 @@ export interface Project {
   name: string;
   cwd: string;
   icon: string | null;
+  archived: boolean;
 }
 
 export type ThreadStatus =
@@ -27,6 +28,7 @@ export interface Thread {
   status: ThreadStatus;
   exitCode: number | null;
   createdAt: number;
+  autoSlept?: boolean;
 }
 
 export type IconKey =

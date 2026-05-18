@@ -5,10 +5,10 @@
   import { editorStore } from "$lib/features/editor/store.svelte";
   import { app } from "$lib/app/store.svelte";
   import TreeNode from "./TreeNode.svelte";
+  import FileTypeIcon from "./FileTypeIcon.svelte";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import Folder from "@lucide/svelte/icons/folder";
   import FolderOpen from "@lucide/svelte/icons/folder-open";
-  import FileIcon from "@lucide/svelte/icons/file";
   import type { DirEntry } from "./api";
 
   interface Props {
@@ -22,6 +22,19 @@
   const children = $derived(explorerStore.entriesByPath[entry.path] ?? null);
   const isLoading = $derived(!!explorerStore.loading[entry.path]);
   const errMsg = $derived(explorerStore.errorByPath[entry.path] ?? null);
+  const status = $derived(explorerStore.statusFor(entry.path, entry.isDir));
+  const visible = $derived(explorerStore.isVisible(entry.path, entry.isDir));
+
+  function statusColor(s: string): string {
+    if (s === "U" || s === "D") return "var(--color-danger)";
+    if (s === "A" || s === "?") return "var(--color-success)";
+    return "var(--color-warning)";
+  }
+
+  function statusLabel(s: string): string {
+    if (s === "?") return "U";
+    return s;
+  }
 
   async function activate(e: MouseEvent) {
     if (entry.isDir) {
@@ -51,6 +64,7 @@
   }
 </script>
 
+{#if visible}
 <div>
   <button
     type="button"
@@ -71,9 +85,18 @@
       {/if}
     {:else}
       <span class="size-3 shrink-0"></span>
-      <FileIcon class="size-3.5 shrink-0 text-muted-foreground/85" />
+      <FileTypeIcon filename={entry.name} size={14} />
     {/if}
     <span class="truncate">{entry.name}</span>
+    {#if status}
+      <span
+        class="ml-auto pl-1 font-mono text-[10px] leading-none tabular-nums"
+        style:color={statusColor(status)}
+        aria-label="git status {status}"
+      >
+        {statusLabel(status)}
+      </span>
+    {/if}
   </button>
 
   {#if entry.isDir && isOpen}
@@ -106,3 +129,4 @@
     {/if}
   {/if}
 </div>
+{/if}

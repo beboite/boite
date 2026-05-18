@@ -43,6 +43,7 @@ export async function addProjectByPath(path: string): Promise<Project | null> {
     name: inspection.name,
     cwd: path,
     icon: inspection.icon,
+    archived: false,
   };
   try {
     await app.addProject(project);

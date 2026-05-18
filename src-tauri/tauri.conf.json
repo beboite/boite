@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Boite",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "identifier": "dev.boite.app",
   "build": {
     "beforeDevCommand": "bun run dev",
@@ -29,6 +29,20 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "category": "DeveloperTool",
+    "shortDescription": "Lightweight multi-agent terminal multiplexer",
+    "longDescription": "Run Claude Code, Codex, Opencode, Cursor, Gemini and Copilot side-by-side in one frameless window, grouped per project.",
+    "linux": {
+      "deb": {
+        "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0", "libayatana-appindicator3-1"]
+      },
+      "rpm": {
+        "depends": ["webkit2gtk4.1", "gtk3", "libayatana-appindicator-gtk3"]
+      },
+      "appimage": {
+        "bundleMediaFramework": true
+      }
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

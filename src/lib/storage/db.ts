@@ -15,6 +15,7 @@ interface ProjectRow {
   name: string;
   cwd: string;
   icon: string | null;
+  archived: number;
   created_at: number;
 }
 
@@ -30,22 +31,40 @@ function safeParseArgs(raw: string): string[] {
 export async function loadProjects(): Promise<Project[]> {
   const db = await getDb();
   const rows = await db.select<ProjectRow[]>(
-    "SELECT id, name, cwd, icon, created_at FROM projects ORDER BY created_at ASC",
+    "SELECT id, name, cwd, icon, archived, created_at FROM projects ORDER BY created_at ASC",
   );
   return rows.map((r) => ({
     id: r.id,
     name: r.name,
     cwd: r.cwd,
     icon: r.icon,
+    archived: r.archived === 1,
   }));
 }
 
 export async function saveProject(project: Project): Promise<void> {
   const db = await getDb();
   await db.execute(
-    "INSERT OR REPLACE INTO projects (id, name, cwd, default_cmd, default_args, icon, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-    [project.id, project.name, project.cwd, "", "[]", project.icon, Date.now()],
+    "INSERT OR REPLACE INTO projects (id, name, cwd, default_cmd, default_args, icon, archived, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    [
+      project.id,
+      project.name,
+      project.cwd,
+      "",
+      "[]",
+      project.icon,
+      project.archived ? 1 : 0,
+      Date.now(),
+    ],
   );
+}
+
+export async function setProjectArchived(id: string, archived: boolean): Promise<void> {
+  const db = await getDb();
+  await db.execute("UPDATE projects SET archived = ? WHERE id = ?", [
+    archived ? 1 : 0,
+    id,
+  ]);
 }
 
 export async function deleteProject(id: string): Promise<void> {

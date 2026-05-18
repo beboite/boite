@@ -165,11 +165,19 @@
 
     // Wait one rAF after mount so the first paint hits the GPU before the
     // window becomes visible. Avoids the white flash on launch.
+    // Under software-rendered webkit2gtk (some Linux configs) rAF can stall
+    // for several seconds; the timeout is a frontend-side fallback so the
+    // window does not depend on the slower 8s Rust failsafe.
+    let booted = false;
+    const finishBoot = () => {
+      if (booted) return;
+      booted = true;
+      void invoke("finish_boot").catch(() => {});
+    };
     requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        void invoke("finish_boot").catch(() => {});
-      });
+      requestAnimationFrame(() => finishBoot());
     });
+    setTimeout(finishBoot, 1500);
 
     let unlisten: (() => void) | null = null;
     void getCurrentWebview()

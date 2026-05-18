@@ -322,6 +322,11 @@ class SettingsStore {
     await this.persist();
   }
 
+  async togglePanelRight() {
+    this.state.rightPanel = this.state.rightPanel === null ? "git" : null;
+    await this.persist();
+  }
+
   async setRightPanel(tab: RightPanelTab) {
     if (this.state.rightPanel === tab) return;
     this.state.rightPanel = tab;

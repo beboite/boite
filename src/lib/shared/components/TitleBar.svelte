@@ -10,6 +10,7 @@
   import X from "@lucide/svelte/icons/x";
   import Settings from "@lucide/svelte/icons/settings";
   import PanelLeft from "@lucide/svelte/icons/panel-left";
+  import PanelRight from "@lucide/svelte/icons/panel-right";
   import BoiteLogo from "$lib/shared/components/BoiteLogo.svelte";
 
   type Props = { title?: string };
@@ -111,6 +112,22 @@
   </div>
 
   <div data-tauri-drag-region class="flex-1"></div>
+
+  <div class="flex items-center gap-0.5 pr-1.5">
+    <button
+      type="button"
+      class="flex h-7 items-center justify-center rounded-md px-2 transition {settings.state
+        .rightPanel !== null
+        ? 'bg-accent text-foreground'
+        : 'text-muted-foreground hover:bg-accent hover:text-foreground'}"
+      onclick={() => settings.togglePanelRight()}
+      title={settings.state.rightPanel !== null ? "Hide side panel" : "Show side panel"}
+      aria-label="Toggle side panel"
+      aria-pressed={settings.state.rightPanel !== null}
+    >
+      <PanelRight class="size-[15px]" />
+    </button>
+  </div>
 
   <div class="flex h-full items-stretch">
     <button
