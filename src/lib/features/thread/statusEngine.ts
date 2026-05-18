@@ -23,6 +23,12 @@ function maybeAutoClose(threadId: string, iconKey: string | null | undefined) {
   if (!enabled) return;
   const t = app.threads.find((x) => x.id === threadId);
   if (!t || !t.ptyId) return;
+  if (!t.sessionId) {
+    logger.debug("idle", `skip auto-sleep for ${t.label}: no session captured yet`, {
+      iconKey,
+    });
+    return;
+  }
   const now = Date.now();
   const worked = lastWorkingAt.get(threadId);
   if (!worked) {
@@ -38,6 +44,7 @@ function maybeAutoClose(threadId: string, iconKey: string | null | undefined) {
   const pid = t.ptyId;
   app.setThreadPtyId(t.id, null);
   app.setThreadStatus(t.id, "stopped", null);
+  app.setThreadAutoSlept(t.id, true);
   void saveThread({
     ...t,
     ptyId: null,

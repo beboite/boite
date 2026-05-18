@@ -1,5 +1,10 @@
 import type { Project, Thread, ThreadStatus, View } from "$lib/types";
-import { loadProjects, saveProject, deleteProject } from "$lib/storage/db";
+import {
+  loadProjects,
+  saveProject,
+  deleteProject,
+  setProjectArchived,
+} from "$lib/storage/db";
 import { settings } from "$lib/features/settings/store.svelte";
 import { platform } from "$lib/storage/platform.svelte";
 import {
@@ -54,12 +59,20 @@ class AppState {
   get sortedProjects(): Project[] {
     const order = settings.state.projectOrder ?? [];
     const idx = new Map(order.map((id, i) => [id, i]));
-    return [...this.projects].sort((a, b) => {
-      const ai = idx.get(a.id) ?? Number.MAX_SAFE_INTEGER;
-      const bi = idx.get(b.id) ?? Number.MAX_SAFE_INTEGER;
-      if (ai !== bi) return ai - bi;
-      return a.name.localeCompare(b.name);
-    });
+    return this.projects
+      .filter((p) => !p.archived)
+      .sort((a, b) => {
+        const ai = idx.get(a.id) ?? Number.MAX_SAFE_INTEGER;
+        const bi = idx.get(b.id) ?? Number.MAX_SAFE_INTEGER;
+        if (ai !== bi) return ai - bi;
+        return a.name.localeCompare(b.name);
+      });
+  }
+
+  get archivedProjects(): Project[] {
+    return this.projects
+      .filter((p) => p.archived)
+      .sort((a, b) => a.name.localeCompare(b.name));
   }
 
   threadsByProjectSorted(projectId: string): Thread[] {
@@ -134,9 +147,16 @@ class AppState {
     if (t.status === status && t.exitCode === exitCode) return;
     t.status = status;
     t.exitCode = exitCode;
+    if (status !== "stopped" && t.autoSlept) t.autoSlept = false;
     if (status === "done" || status === "exited" || status === "error") {
       void saveThread($state.snapshot(t) as Thread);
     }
+  }
+
+  setThreadAutoSlept(id: string, value: boolean) {
+    const t = this.threads.find((x) => x.id === id);
+    if (!t || (t.autoSlept ?? false) === value) return;
+    t.autoSlept = value;
   }
 
   setThreadTitle(id: string, title: string) {
@@ -158,6 +178,34 @@ class AppState {
       await saveProject(project);
     } catch (err) {
       console.error("saveProject failed:", err);
+    }
+  }
+
+  async archiveProject(id: string) {
+    const p = this.projects.find((x) => x.id === id);
+    if (!p || p.archived) return;
+    p.archived = true;
+    if (this.selectedProjectId === id) {
+      this.selectedProjectId = this.sortedProjects[0]?.id ?? null;
+    }
+    if (this.activeThread?.projectId === id) {
+      this.activeThreadId = null;
+    }
+    try {
+      await setProjectArchived(id, true);
+    } catch (err) {
+      console.error("archiveProject failed:", err);
+    }
+  }
+
+  async unarchiveProject(id: string) {
+    const p = this.projects.find((x) => x.id === id);
+    if (!p || !p.archived) return;
+    p.archived = false;
+    try {
+      await setProjectArchived(id, false);
+    } catch (err) {
+      console.error("unarchiveProject failed:", err);
     }
   }
 

@@ -74,3 +74,18 @@ button {
 .xterm {
   height: 100%;
 }
+
+@keyframes breathe {
+  0%, 100% {
+    transform: scale(0.85);
+    opacity: 0.6;
+  }
+  50% {
+    transform: scale(1.1);
+    opacity: 1;
+  }
+}
+
+.animate-breathe {
+  animation: breathe 1.8s ease-in-out infinite;
+}

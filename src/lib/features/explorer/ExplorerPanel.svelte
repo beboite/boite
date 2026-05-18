@@ -5,6 +5,8 @@
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import ChevronsDownUp from "@lucide/svelte/icons/chevrons-down-up";
   import FolderTree from "@lucide/svelte/icons/folder-tree";
+  import Search from "@lucide/svelte/icons/search";
+  import X from "@lucide/svelte/icons/x";
 
   const project = $derived(
     app.currentProjectId
@@ -16,9 +18,17 @@
   const entries = $derived(root ? explorerStore.entriesByPath[root] ?? null : null);
   const loading = $derived(root ? !!explorerStore.loading[root] : false);
   const err = $derived(root ? explorerStore.errorByPath[root] ?? null : null);
+  const filterActive = $derived(explorerStore.filterText.trim().length > 0);
+  const hitCount = $derived(explorerStore.searchHits.length);
+  const searching = $derived(explorerStore.searching);
+
+  let filterInput = $state<HTMLInputElement | null>(null);
 
   $effect(() => {
-    if (root) void explorerStore.load(root);
+    if (root) {
+      void explorerStore.load(root);
+      void explorerStore.loadGitStatus(root);
+    }
   });
 
   function refresh() {
@@ -27,6 +37,23 @@
 
   function collapseAll() {
     explorerStore.collapseAll();
+  }
+
+  function onFilterInput(e: Event) {
+    const value = (e.currentTarget as HTMLInputElement).value;
+    explorerStore.setFilter(value, root);
+  }
+
+  function clearFilter() {
+    explorerStore.clearFilter();
+    filterInput?.focus();
+  }
+
+  function onFilterKey(e: KeyboardEvent) {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      clearFilter();
+    }
   }
 </script>
 
@@ -61,6 +88,48 @@
       <RefreshCw class="size-3.5 {loading ? 'animate-spin' : ''}" />
     </button>
   </header>
+
+  <div class="shrink-0 border-b border-border px-2 py-1.5">
+    <div
+      class="flex items-center gap-1.5 rounded bg-[var(--color-surface)] px-2 py-1 text-[11.5px] focus-within:bg-[var(--color-surface-2)]"
+    >
+      <Search class="size-3 shrink-0 text-muted-foreground/70" />
+      <input
+        bind:this={filterInput}
+        type="text"
+        placeholder="Filter files…"
+        value={explorerStore.filterText}
+        oninput={onFilterInput}
+        onkeydown={onFilterKey}
+        disabled={!root}
+        class="min-w-0 flex-1 bg-transparent text-foreground/90 outline-none placeholder:text-muted-foreground/60 disabled:opacity-40"
+      />
+      {#if filterActive}
+        <button
+          type="button"
+          class="shrink-0 rounded p-0.5 text-muted-foreground/70 transition hover:bg-[var(--color-surface-3)] hover:text-foreground"
+          onclick={clearFilter}
+          title="Clear filter (Esc)"
+          aria-label="Clear filter"
+        >
+          <X class="size-3" />
+        </button>
+      {/if}
+    </div>
+    {#if filterActive}
+      <div class="mt-1 px-1 text-[10px] text-muted-foreground/70">
+        {#if searching}
+          Searching…
+        {:else if hitCount === 0}
+          No matches.
+        {:else if hitCount === 1}
+          1 match.
+        {:else}
+          {hitCount} matches.
+        {/if}
+      </div>
+    {/if}
+  </div>
 
   <div class="min-h-0 flex-1 overflow-auto py-1">
     {#if !project}

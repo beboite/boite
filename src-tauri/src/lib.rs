@@ -89,6 +89,12 @@ pub fn run() {
                   ALTER TABLE threads ADD COLUMN icon_key TEXT;",
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 6,
+            description: "add_project_archived",
+            sql: "ALTER TABLE projects ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;",
+            kind: MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()
@@ -119,17 +125,18 @@ pub fn run() {
                 None,
             );
 
-            // Failsafe: if frontend fails to call finish_boot within 5s, show anyway.
+            // Failsafe: if frontend fails to call finish_boot within 8s, show anyway.
+            // 8s tolerates slow webkit2gtk paint loops on Linux software rendering.
             let handle = app.handle().clone();
             std::thread::spawn(move || {
-                std::thread::sleep(std::time::Duration::from_millis(5000));
+                std::thread::sleep(std::time::Duration::from_millis(8000));
                 let state = handle.state::<BootState>();
                 if !state.is_completed() {
                     let _ = logging::append_app_log(
                         &handle,
                         "warn",
                         "backend.boot-failsafe",
-                        "Failsafe triggered after 5000ms; forcing main window visibility",
+                        "Failsafe triggered after 8000ms; forcing main window visibility",
                         None,
                     );
                     state.mark_completed();
@@ -150,6 +157,7 @@ pub fn run() {
             commands::log_file_path,
             project::inspect_project,
             explorer::read_dir,
+            explorer::explorer_search,
             editor::read_text_file,
             editor::write_text_file,
             shell::default_shell,
@@ -162,6 +170,7 @@ pub fn run() {
             session::find_copilot_session,
             git::git_repo_info,
             git::git_status,
+            git::git_changed_paths,
             git::git_log,
             git::git_stage,
             git::git_unstage,

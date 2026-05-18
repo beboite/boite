@@ -21,6 +21,9 @@
   import FolderOpen from "@lucide/svelte/icons/folder-open";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import MoreHorizontal from "@lucide/svelte/icons/more-horizontal";
+  import Archive from "@lucide/svelte/icons/archive";
+  import ArchiveRestore from "@lucide/svelte/icons/archive-restore";
+  import ArrowLeft from "@lucide/svelte/icons/arrow-left";
 
   type Props = {
     onCloseThread: (threadId: string) => void;
@@ -38,6 +41,7 @@
   let menuFor = $state<string | null>(null);
   let confirmThreadId = $state<string | null>(null);
   let confirmProjectId = $state<string | null>(null);
+  let showArchived = $state(false);
 
   type RowSnapshot = { id: string; top: number; height: number };
   type SourceRect = { left: number; top: number; width: number; height: number };
@@ -132,6 +136,7 @@
   }
 
   function projectPointerDown(projectId: string, e: PointerEvent) {
+    if (showArchived) return;
     if (e.button !== 0 || isDragBlocked(e.target as HTMLElement)) return;
     const project = app.projects.find((p) => p.id === projectId);
     if (!project) return;
@@ -511,6 +516,35 @@
     closeMenu();
     confirmProjectId = id;
   }
+
+  function openProjectContextMenu(project: { id: string; archived: boolean }, e: MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    closeMenu();
+    const items: ContextMenuItem[] = [];
+    if (project.archived) {
+      items.push({
+        label: "Désarchiver",
+        action: () => {
+          void app.unarchiveProject(project.id);
+        },
+      });
+    } else {
+      items.push({
+        label: "Archiver",
+        action: () => {
+          void app.archiveProject(project.id);
+        },
+      });
+    }
+    items.push({ separator: true });
+    items.push({
+      label: "Remove project",
+      action: () => requestRemoveProject(project.id),
+      danger: true,
+    });
+    ctxMenu = { x: e.clientX, y: e.clientY, items };
+  }
   function confirmRemoveProject() {
     if (confirmProjectId) onRemoveProject(confirmProjectId);
     confirmProjectId = null;
@@ -526,9 +560,13 @@
     confirmProjectId ? app.projects.find((p) => p.id === confirmProjectId) : null,
   );
 
+  const visibleProjects = $derived(
+    showArchived ? app.archivedProjects : app.sortedProjects,
+  );
+
   const threadsByProject = $derived.by(() => {
     const map = new Map<string, Thread[]>();
-    for (const p of app.sortedProjects) {
+    for (const p of visibleProjects) {
       map.set(p.id, app.threadsByProjectSorted(p.id));
     }
     return map;
@@ -536,7 +574,7 @@
 
   const projectSourceIdx = $derived(
     liveDrag && liveDrag.kind === "project"
-      ? app.sortedProjects.findIndex((p) => p.id === liveDrag.id)
+      ? visibleProjects.findIndex((p) => p.id === liveDrag.id)
       : -1,
   );
 
@@ -578,24 +616,59 @@
   style:width="{settings.state.sidebarWidth}px"
 >
   <header class="flex items-center justify-between px-3 py-2">
-    <span
-      class="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground"
-    >
-      Projects
-    </span>
-    <button
-      type="button"
-      class="rounded-md p-1 text-muted-foreground transition hover:bg-accent hover:text-foreground"
-      onclick={onNewProject}
-      aria-label="Add project"
-      title="Add project from folder"
-    >
-      <Plus class="size-4" />
-    </button>
+    {#if showArchived}
+      <button
+        type="button"
+        class="flex items-center gap-1.5 rounded text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground transition hover:text-foreground"
+        onclick={() => (showArchived = false)}
+        aria-label="Back to projects"
+        title="Retour aux projets"
+      >
+        <ArrowLeft class="size-3.5" />
+        Archives
+      </button>
+    {:else}
+      <span
+        class="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground"
+      >
+        Projects
+      </span>
+    {/if}
+    <div class="flex items-center gap-0.5">
+      <button
+        type="button"
+        class="rounded-md p-1 text-muted-foreground transition hover:bg-accent hover:text-foreground {showArchived
+          ? 'bg-accent text-foreground'
+          : ''}"
+        onclick={() => (showArchived = !showArchived)}
+        aria-label="Show archived projects"
+        title="Projets archivés"
+      >
+        <Archive class="size-4" />
+      </button>
+      {#if !showArchived}
+        <button
+          type="button"
+          class="rounded-md p-1 text-muted-foreground transition hover:bg-accent hover:text-foreground"
+          onclick={onNewProject}
+          aria-label="Add project"
+          title="Add project from folder"
+        >
+          <Plus class="size-4" />
+        </button>
+      {/if}
+    </div>
   </header>
 
   <div class="flex-1 overflow-y-auto px-2 pb-2">
-    {#if app.projects.length === 0}
+    {#if showArchived && visibleProjects.length === 0}
+      <div
+        class="mx-1 mt-2 flex w-[calc(100%-0.5rem)] flex-col items-center gap-2 rounded-lg border border-dashed border-border bg-transparent px-3 py-7 text-xs text-muted-foreground"
+      >
+        <Archive class="size-5 opacity-70" />
+        <span>Aucun projet archivé</span>
+      </div>
+    {:else if !showArchived && app.projects.length === 0}
       <button
         type="button"
         class="mx-1 mt-2 flex w-[calc(100%-0.5rem)] flex-col items-center gap-2 rounded-lg border border-dashed border-border bg-transparent px-3 py-7 text-xs text-muted-foreground transition hover:border-foreground/30 hover:bg-accent/30 hover:text-foreground"
@@ -606,7 +679,7 @@
       </button>
     {/if}
 
-    {#each app.sortedProjects as project, projectIdx (project.id)}
+    {#each visibleProjects as project, projectIdx (project.id)}
       {@const isSelected = app.currentProjectId === project.id}
       {@const isProjectSource = liveDrag?.kind === "project" && liveDrag.id === project.id}
       {@const projectShiftY =
@@ -627,10 +700,12 @@
         onpointerdown={(e) => projectPointerDown(project.id, e)}
         role="listitem"
       >
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
-          class="project-row group/project relative flex cursor-grab items-center gap-2 rounded-md px-2 py-1.5 transition hover:bg-accent/40 hover:text-foreground {isSelected
-            ? 'bg-accent/40'
-            : ''}"
+          class="project-row group/project relative flex items-center gap-2 rounded-md px-2 py-1.5 transition hover:bg-accent/40 hover:text-foreground {showArchived
+            ? ''
+            : 'cursor-grab'} {isSelected ? 'bg-accent/40' : ''}"
+          oncontextmenu={(e) => openProjectContextMenu(project, e)}
         >
           <div
             class="flex size-6 shrink-0 items-center justify-center overflow-hidden"
@@ -657,28 +732,58 @@
             title={project.cwd}
             onclick={() => {
               if (consumeDragClick(project.id)) return;
+              if (showArchived) return;
               selectProject(project.id);
             }}
           >
             {project.name}
           </button>
 
-          <button
-            type="button"
-            class="rounded p-1 text-muted-foreground/0 transition hover:bg-accent hover:text-foreground group-hover/project:text-muted-foreground"
-            onclick={(e) => toggleMenu(project.id, e)}
-            data-drag-block
-            aria-label="Project options"
-            title="More"
-          >
-            <MoreHorizontal class="size-3.5" />
-          </button>
+          {#if showArchived}
+            <button
+              type="button"
+              class="rounded p-1 text-muted-foreground transition hover:bg-accent hover:text-foreground"
+              onclick={(e) => {
+                e.stopPropagation();
+                void app.unarchiveProject(project.id);
+              }}
+              data-drag-block
+              aria-label="Unarchive project"
+              title="Désarchiver"
+            >
+              <ArchiveRestore class="size-3.5" />
+            </button>
+          {:else}
+            <button
+              type="button"
+              class="rounded p-1 text-muted-foreground/0 transition hover:bg-accent hover:text-foreground group-hover/project:text-muted-foreground"
+              onclick={(e) => toggleMenu(project.id, e)}
+              data-drag-block
+              aria-label="Project options"
+              title="More"
+            >
+              <MoreHorizontal class="size-3.5" />
+            </button>
+          {/if}
 
           {#if menuFor === project.id}
             <div
               class="absolute right-2 top-full z-20 mt-1 flex min-w-36 flex-col rounded-md border bg-[var(--color-surface-2)] p-1 shadow-xl"
               role="menu"
             >
+              <button
+                type="button"
+                class="flex items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-foreground transition hover:bg-accent"
+                onclick={(e) => {
+                  e.stopPropagation();
+                  closeMenu();
+                  void app.archiveProject(project.id);
+                }}
+              >
+                <Archive class="size-3" />
+                Archiver
+              </button>
+              <div class="my-1 h-px bg-border"></div>
               <button
                 type="button"
                 class="flex items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-danger transition hover:bg-danger/15"
@@ -694,7 +799,7 @@
           {/if}
         </div>
 
-        {#if (threadsByProject.get(project.id) ?? []).length > 0}
+        {#if !showArchived && (threadsByProject.get(project.id) ?? []).length > 0}
           {@const threads = threadsByProject.get(project.id) ?? []}
           {@const dragInThisProject =
             liveDrag?.kind === "thread" && liveDrag.projectId === project.id}
@@ -747,7 +852,10 @@
                     }
                   }}
                 >
-                  <StatusDot status={displayThreadStatus(thread)} />
+                  <StatusDot
+                    status={displayThreadStatus(thread)}
+                    asleep={thread.autoSlept ?? false}
+                  />
                   <span
                     class="min-w-0 flex-1 truncate text-left text-[13px]"
                     title={thread.title ?? thread.label}
@@ -803,7 +911,10 @@
     style:width="{threadDragGhost.width}px"
     aria-hidden="true"
   >
-    <StatusDot status={displayThreadStatus(threadDragGhost.thread)} />
+    <StatusDot
+      status={displayThreadStatus(threadDragGhost.thread)}
+      asleep={threadDragGhost.thread.autoSlept ?? false}
+    />
     <span
       class="min-w-0 flex-1 truncate text-left text-[13px]"
       title={threadDragGhost.thread.title ?? threadDragGhost.thread.label}
