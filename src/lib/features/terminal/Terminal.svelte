@@ -326,19 +326,47 @@
       const probeSince = sessionProbeSince(t, since);
       if (probeSince == null) return false;
 
-      const excludeIds = app.threads
+      const otherIds = app.threads
         .filter((x) => x.id !== thread.id && x.sessionId)
         .map((x) => x.sessionId as string);
+      const excludeIds = t.sessionId ? [...otherIds, t.sessionId] : otherIds;
 
       sessionScanInFlight = true;
       try {
         const id = await detector(cwd, probeSince, excludeIds);
-        if (!id) return false;
+        if (!id) {
+          if (t.sessionId) {
+            logger.debug(
+              "session",
+              `${t.label}: locked on ${t.sessionId}, no new session detected`,
+              { cwd, probeSince, excludeIds },
+            );
+          }
+          return false;
+        }
+        if (id === t.sessionId) {
+          logger.debug(
+            "session",
+            `${t.label}: detector returned current session, skip`,
+            { id },
+          );
+          return false;
+        }
         if (
           app.threads.some((x) => x.id !== thread.id && x.sessionId === id)
         ) {
+          logger.warn(
+            "session",
+            `${t.label}: detector returned id owned by sibling thread, skip`,
+            { id, current: t.sessionId },
+          );
           return false;
         }
+        logger.info(
+          "session",
+          `${t.label}: manual session switch detected ${t.sessionId ?? "(none)"} → ${id}`,
+          { cwd, previous: t.sessionId, next: id },
+        );
         await persistSessionId(t, id, cwd);
         return false;
       } catch (err) {
@@ -433,9 +461,21 @@
   }
 
   async function spawn() {
-    if (spawned || spawning || destroyed) return;
+    if (spawned || spawning || destroyed) {
+      logger.debug(
+        "spawn",
+        `${thread.label}: skip — spawned=${spawned} spawning=${spawning} destroyed=${destroyed}`,
+      );
+      return;
+    }
     const current = currentThread();
-    if (!current || current.status === "stopped") return;
+    if (!current || current.status === "stopped") {
+      logger.debug(
+        "spawn",
+        `${thread.label}: skip — missing=${!current} status=${current?.status}`,
+      );
+      return;
+    }
     if (!term || !fit) {
       logger.warn(
         "spawn",
@@ -446,13 +486,15 @@
     }
 
     if (!hasUsableTerminalSize()) {
+      logger.debug("spawn", `${thread.label}: retry — terminal not sized yet`);
       scheduleSpawnRetry();
       return;
     }
 
     try {
       fit.fit();
-    } catch {
+    } catch (err) {
+      logger.warn("spawn", `${thread.label}: fit threw, retrying`, String(err));
       scheduleSpawnRetry();
       return;
     }
