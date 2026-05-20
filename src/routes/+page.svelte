@@ -3,7 +3,7 @@
   import { settings } from "$lib/features/settings/store.svelte";
   import { pickAndAddProject } from "$lib/features/project/api";
   import { ptyKill } from "$lib/storage/pty";
-  import { closeThread } from "$lib/features/thread/api";
+  import { closeThread, reloadThread } from "$lib/features/thread/api";
   import TitleBar from "$lib/shared/components/TitleBar.svelte";
   import ProjectSidebar from "$lib/features/project/ProjectSidebar.svelte";
   import ShortcutBar from "$lib/features/shortcut/ShortcutBar.svelte";
@@ -51,13 +51,13 @@
     }
 
     activated[id] = true;
+    if (isFinished) {
+      void reloadThread(id);
+      return;
+    }
     app.activeThreadId = id;
     if (t) app.selectedProjectId = t.projectId;
     app.view = "terminal";
-    if (isFinished) {
-      app.setThreadStatus(id, "idle");
-      app.bumpRespawn(id);
-    }
   }
 
   function focusPane(threadId: string) {

@@ -18,10 +18,16 @@
 
 {#if asleep}
   <span
-    class="animate-breathe inline-block size-2.5 shrink-0 rounded-full bg-success"
+    class="inline-flex size-2.5 shrink-0 items-center justify-center text-success"
     aria-label="asleep"
     title="asleep (afk)"
-  ></span>
+  >
+    <UnicodeSpinner
+      size={12}
+      intervalMs={200}
+      frames={["⠀", "⠄", "⠆", "⠇", "⠧", "⠷", "⠿", "⠷", "⠧", "⠇", "⠆", "⠄"]}
+    />
+  </span>
 {:else if status === "running"}
   <span
     class="inline-flex size-2.5 shrink-0 items-center justify-center text-warning"
