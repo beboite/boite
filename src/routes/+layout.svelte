@@ -72,6 +72,13 @@
     const mod = e.ctrlKey || e.metaKey;
     if (!mod) return;
 
+    // DevTools (Ctrl+Shift+I / Cmd+Opt+I). Only available in debug builds.
+    if (e.shiftKey && (e.key === "I" || e.key === "i")) {
+      e.preventDefault();
+      void invoke("toggle_devtools").catch(() => {});
+      return;
+    }
+
     // UI zoom
     if (e.key === "+" || e.key === "=") {
       e.preventDefault();

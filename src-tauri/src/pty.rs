@@ -72,6 +72,8 @@ impl PtyManager {
         for arg in &spec.args {
             command.arg(arg);
         }
+        command.env("TERM", "xterm-256color");
+        command.env("COLORTERM", "truecolor");
         if let Some(env) = &spec.env {
             for (k, v) in env {
                 command.env(k, v);

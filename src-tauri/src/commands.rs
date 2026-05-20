@@ -97,3 +97,17 @@ pub fn log_file_path(app: AppHandle) -> Result<String, String> {
     let path = logging::log_file_path(&app)?;
     Ok(path.to_string_lossy().to_string())
 }
+
+#[tauri::command]
+pub fn toggle_devtools(app: AppHandle) {
+    #[cfg(debug_assertions)]
+    if let Some(win) = app.get_webview_window("main") {
+        if win.is_devtools_open() {
+            win.close_devtools();
+        } else {
+            win.open_devtools();
+        }
+    }
+    #[cfg(not(debug_assertions))]
+    let _ = app;
+}

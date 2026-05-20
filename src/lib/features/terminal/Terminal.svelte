@@ -223,14 +223,23 @@
   async function pasteFromClipboard() {
     const target = term;
     if (!target) return;
+    let text = "";
     try {
-      const text = await readText();
-      if (text) target.paste(text);
+      text = await readText();
     } catch (err) {
-      console.error("clipboard read failed:", err);
-    } finally {
-      focusTerminalSoon();
+      // readText fails when the clipboard holds non-text content (image, etc.).
+      // Fall through to the ^V pass-through below so the running app can read
+      // the image directly (e.g. Claude Code's clipboard-image handling).
+      console.warn("clipboard readText failed (likely non-text):", err);
     }
+    if (text) {
+      target.paste(text);
+    } else if (ptyId) {
+      // No text on the clipboard — forward a literal ^V (0x16) so the foreground
+      // process can handle a non-text paste itself.
+      void ptyWrite(ptyId, new Uint8Array([0x16])).catch(() => {});
+    }
+    focusTerminalSoon();
   }
 
   async function copySelection() {
@@ -567,7 +576,7 @@
       cursorStyle: "bar",
       fontSize: 13,
       fontFamily:
-        '"JetBrains Mono", "SF Mono", "Cascadia Code", Consolas, "Liberation Mono", Menlo, monospace',
+        '"MesloLGS Nerd Font Mono", "JetBrainsMono Nerd Font Mono", "JetBrains Mono", "SF Mono", "Cascadia Code", Consolas, "Liberation Mono", Menlo, monospace',
       lineHeight: 1.25,
       letterSpacing: 0,
       scrollback: 10_000,
@@ -652,12 +661,18 @@
 
     term.open(container);
 
-    try {
-      const webgl = new WebglAddon();
-      webgl.onContextLoss(() => webgl.dispose());
-      term.loadAddon(webgl);
-    } catch {
-      // WebGL unavailable (e.g. webkit2gtk without GPU). Fall back to DOM renderer.
+    // WebGL renderer is disabled on Linux: webkit2gtk's GL stack frequently
+    // initializes the addon without throwing yet renders a blank canvas, so
+    // we stick to the default canvas renderer there. macOS/Windows still
+    // benefit from the GPU path.
+    if (!platform.isLinux) {
+      try {
+        const webgl = new WebglAddon();
+        webgl.onContextLoss(() => webgl.dispose());
+        term.loadAddon(webgl);
+      } catch {
+        // WebGL unavailable. Fall back to DOM renderer.
+      }
     }
 
     const initialFit = () => {

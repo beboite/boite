@@ -155,6 +155,7 @@ pub fn run() {
             commands::read_app_log,
             commands::clear_app_log,
             commands::log_file_path,
+            commands::toggle_devtools,
             project::inspect_project,
             explorer::read_dir,
             explorer::explorer_search,
