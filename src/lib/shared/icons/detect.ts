@@ -10,7 +10,7 @@ const RULES: DetectionRule[] = [
   { key: "codex", patterns: [/\bcodex\b/i, /\bchatgpt\b/i, /\bopenai\b/i, /\bgpt\b/i] },
   { key: "opencode", patterns: [/\bopencode\b/i] },
   { key: "cursor", patterns: [/\bcursor\b/i, /cursor-agent/i] },
-  { key: "gemini", patterns: [/\bgemini\b/i] },
+  { key: "antigravity", patterns: [/\bantigravity\b/i, /\bagy\b/i] },
   { key: "copilot", patterns: [/\bcopilot\b/i, /\bgh\s+copilot\b/i] },
   {
     key: "terminal",

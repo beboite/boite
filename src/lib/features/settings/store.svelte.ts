@@ -13,7 +13,7 @@ export const PRESET_SHORTCUTS: Shortcut[] = [
   },
   { id: "opencode", label: "Opencode", command: "opencode", iconKey: "opencode" },
   { id: "cursor", label: "Cursor Agent", command: "cursor-agent", iconKey: "cursor" },
-  { id: "gemini", label: "Gemini", command: "gemini", iconKey: "gemini" },
+  { id: "antigravity", label: "Antigravity", command: "agy", iconKey: "antigravity" },
   { id: "copilot", label: "Copilot", command: "gh copilot", iconKey: "copilot" },
 ];
 
@@ -23,29 +23,44 @@ function migrateShortcuts(raw: unknown): { shortcuts: Shortcut[]; changed: boole
   }
 
   let changed = false;
-  const shortcuts = raw
-    .filter((shortcut): shortcut is Shortcut => {
-      return (
-        shortcut &&
-        typeof shortcut === "object" &&
-        "id" in shortcut &&
-        "label" in shortcut &&
-        "command" in shortcut &&
-        typeof shortcut.id === "string" &&
-        typeof shortcut.label === "string" &&
-        typeof shortcut.command === "string"
-      );
-    })
-    .map((shortcut) => {
-      if (
-        shortcut.iconKey === "codex" &&
-        shortcut.command.trim() === "codex"
-      ) {
-        changed = true;
-        return { ...shortcut, command: "codex --no-alt-screen" };
-      }
-      return shortcut;
-    });
+  const filtered = raw.filter((shortcut): shortcut is Shortcut => {
+    return (
+      shortcut &&
+      typeof shortcut === "object" &&
+      "id" in shortcut &&
+      "label" in shortcut &&
+      "command" in shortcut &&
+      typeof shortcut.id === "string" &&
+      typeof shortcut.label === "string" &&
+      typeof shortcut.command === "string"
+    );
+  });
+
+  const withoutGemini = filtered.filter((shortcut) => {
+    const drop =
+      shortcut.iconKey === ("gemini" as unknown as Shortcut["iconKey"]) ||
+      shortcut.id === "gemini" ||
+      /^gemini(\s|$)/i.test(shortcut.command.trim());
+    if (drop) changed = true;
+    return !drop;
+  });
+
+  const shortcuts = withoutGemini.map((shortcut) => {
+    if (
+      shortcut.iconKey === "codex" &&
+      shortcut.command.trim() === "codex"
+    ) {
+      changed = true;
+      return { ...shortcut, command: "codex --no-alt-screen" };
+    }
+    return shortcut;
+  });
+
+  const antigravityPreset = PRESET_SHORTCUTS.find((s) => s.id === "antigravity");
+  if (antigravityPreset && !shortcuts.some((s) => s.id === "antigravity")) {
+    shortcuts.push(structuredClone(antigravityPreset));
+    changed = true;
+  }
 
   return { shortcuts, changed };
 }
@@ -65,7 +80,7 @@ const DEFAULTS: Settings = {
     codex: true,
     opencode: true,
     cursor: true,
-    gemini: true,
+    antigravity: true,
     copilot: true,
   },
   confirmCloseThread: true,

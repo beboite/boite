@@ -20,7 +20,7 @@
     { iconKey: "codex", label: "Codex" },
     { iconKey: "opencode", label: "Opencode" },
     { iconKey: "cursor", label: "Cursor" },
-    { iconKey: "gemini", label: "Gemini" },
+    { iconKey: "antigravity", label: "Antigravity" },
     { iconKey: "copilot", label: "Copilot" },
   ];
 </script>

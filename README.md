@@ -1,7 +1,7 @@
 # Boite
 
 Lightweight multi-agent terminal multiplexer. Run Claude Code, Codex,
-Opencode, Cursor, Gemini, GitHub Copilot, and plain shells side-by-side
+Opencode, Cursor, Antigravity, GitHub Copilot, and plain shells side-by-side
 under one frameless window. Each in its own PTY, grouped by project.
 
 Built on Tauri 2 (Rust backend, frameless window), SvelteKit (SPA, Svelte 5
@@ -39,7 +39,7 @@ surface is small and focused.
 - Per-thread status dot driven by the OSC title: yellow when the agent is
   working, green when ready, red on error/non-zero exit.
 - Shortcut bar with brand icons (simple-icons) for Claude, Codex, Opencode,
-  Cursor, Gemini, Copilot, and a blank shell.
+  Cursor, Antigravity, Copilot, and a blank shell.
 - Auto-detect of running agents in the same cwd via each tool's own
   session store, so `claude --resume`, `codex resume`, etc. land on the
   right conversation.

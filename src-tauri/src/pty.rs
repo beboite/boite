@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::io::{Read, Write};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
@@ -23,7 +24,9 @@ pub enum PtyEvent {
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
 pub struct PtySpawnArgs {
+    pub thread_id: String,
     pub cwd: String,
     pub cmd: String,
     pub args: Vec<String>,
@@ -32,11 +35,47 @@ pub struct PtySpawnArgs {
     pub env: Option<HashMap<String, String>>,
 }
 
+const SCROLLBACK_CAPACITY: usize = 512 * 1024;
+
+struct RingBuffer {
+    buf: Vec<u8>,
+    capacity: usize,
+}
+
+impl RingBuffer {
+    fn new(capacity: usize) -> Self {
+        Self {
+            buf: Vec::with_capacity(capacity.min(64 * 1024)),
+            capacity,
+        }
+    }
+
+    fn push(&mut self, data: &[u8]) {
+        if data.len() >= self.capacity {
+            self.buf.clear();
+            self.buf
+                .extend_from_slice(&data[data.len() - self.capacity..]);
+            return;
+        }
+        let overflow = (self.buf.len() + data.len()).saturating_sub(self.capacity);
+        if overflow > 0 {
+            self.buf.drain(..overflow);
+        }
+        self.buf.extend_from_slice(data);
+    }
+
+    fn snapshot(&self) -> Vec<u8> {
+        self.buf.clone()
+    }
+}
+
 struct PtyHandle {
     master: Arc<Mutex<Box<dyn MasterPty + Send>>>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     killer: Arc<Mutex<Box<dyn ChildKiller + Send + Sync>>>,
     pid: Option<u32>,
+    scrollback: Arc<Mutex<RingBuffer>>,
+    scrollback_path: Option<PathBuf>,
 }
 
 #[derive(Clone, Default)]
@@ -53,6 +92,7 @@ impl PtyManager {
         &self,
         channel: Channel<PtyEvent>,
         spec: PtySpawnArgs,
+        scrollback_path: Option<PathBuf>,
     ) -> Result<String, String> {
         let pty_system = native_pty_system();
         let pair = pty_system
@@ -104,12 +144,15 @@ impl PtyManager {
         let killer_arc: Arc<Mutex<Box<dyn ChildKiller + Send + Sync>>> =
             Arc::new(Mutex::new(killer));
         let pid = child.process_id();
+        let scrollback = Arc::new(Mutex::new(RingBuffer::new(SCROLLBACK_CAPACITY)));
 
         let handle = PtyHandle {
             master: master_arc,
             writer: writer_arc,
             killer: killer_arc,
             pid,
+            scrollback: scrollback.clone(),
+            scrollback_path: scrollback_path.clone(),
         };
 
         self.inner.lock().insert(id.clone(), handle);
@@ -118,12 +161,22 @@ impl PtyManager {
         let inner_clone = self.inner.clone();
         let id_clone = id.clone();
         let channel_clone = channel.clone();
+        let scrollback_for_loop = scrollback.clone();
         std::thread::spawn(move || {
-            read_loop(reader, channel_clone.clone());
+            read_loop(reader, channel_clone.clone(), scrollback_for_loop);
             let exit_code = match child.wait() {
                 Ok(status) => status.exit_code() as i32,
                 Err(_) => -1,
             };
+            let final_bytes = scrollback.lock().snapshot();
+            if let Some(path) = scrollback_path.as_ref() {
+                if !final_bytes.is_empty() {
+                    if let Some(parent) = path.parent() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
+                    let _ = std::fs::write(path, &final_bytes);
+                }
+            }
             inner_clone.lock().remove(&id_clone);
             let _ = channel_clone.send(PtyEvent::Exit {
                 code: Some(exit_code),
@@ -165,7 +218,36 @@ impl PtyManager {
         Ok(())
     }
 
+    pub fn snapshot_scrollback(&self, id: &str) -> Option<Vec<u8>> {
+        let scrollback = {
+            let map = self.inner.lock();
+            map.get(id).map(|h| h.scrollback.clone())?
+        };
+        let bytes = scrollback.lock().snapshot();
+        Some(bytes)
+    }
+
+    pub fn flush_scrollback_to_disk(&self, id: &str) {
+        let (scrollback, path) = {
+            let map = self.inner.lock();
+            match map.get(id) {
+                Some(h) => (h.scrollback.clone(), h.scrollback_path.clone()),
+                None => return,
+            }
+        };
+        let Some(path) = path else { return };
+        let bytes = scrollback.lock().snapshot();
+        if bytes.is_empty() {
+            return;
+        }
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(path, bytes);
+    }
+
     pub fn kill(&self, id: &str, wait: bool) -> Result<(), String> {
+        self.flush_scrollback_to_disk(id);
         let (killer, pid) = {
             let map = self.inner.lock();
             match map.get(id) {
@@ -221,16 +303,21 @@ fn force_kill_process_tree(pid: u32) {
         .status();
 }
 
-fn read_loop(mut reader: Box<dyn Read + Send>, channel: Channel<PtyEvent>) {
+fn read_loop(
+    mut reader: Box<dyn Read + Send>,
+    channel: Channel<PtyEvent>,
+    scrollback: Arc<Mutex<RingBuffer>>,
+) {
     let mut parser = Parser::new();
     let mut osc = OscPerform {
         channel: channel.clone(),
     };
-    let mut buf = [0u8; 8192];
+    let mut buf = [0u8; 65536];
     loop {
         match reader.read(&mut buf) {
             Ok(0) => break,
             Ok(n) => {
+                scrollback.lock().push(&buf[..n]);
                 let chunk = buf[..n].to_vec();
                 if let Err(err) = channel.send(PtyEvent::Output { data: chunk }) {
                     eprintln!("[boite/pty] output channel closed: {err}");
