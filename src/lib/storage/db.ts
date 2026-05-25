@@ -1,6 +1,7 @@
 import Database from "@tauri-apps/plugin-sql";
 import type { Project, Settings, Thread } from "$lib/types";
 import { redactArgs } from "$lib/shared/utils/redact";
+import { isGenericTitle } from "$lib/features/thread/title-filter";
 
 let dbPromise: Promise<Database> | null = null;
 
@@ -106,7 +107,7 @@ export async function loadThreads(): Promise<Thread[]> {
     projectId: r.project_id,
     ptyId: null,
     label: r.label,
-    title: r.title,
+    title: isGenericTitle(r.title) ? null : r.title,
     cmd: r.cmd,
     args: safeParseArgs(r.args),
     iconKey: (r.icon_key ?? null) as Thread["iconKey"],

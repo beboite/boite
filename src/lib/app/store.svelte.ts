@@ -25,6 +25,9 @@ class AppState {
   ready = $state(false);
   respawnNonce = $state<Record<string, number>>({});
   freshThreadIds = new Set<string>();
+  // Threads whose sessionId was nulled by legacy dedup. Used to flag them
+  // in the UI on first activation so the user knows to /resume manually.
+  unboundByDedup = $state<Set<string>>(new Set());
 
   // Title bursts (OSC during agent streaming) would write SQLite per token.
   // Coalesce to one write per thread per window.
@@ -155,6 +158,7 @@ class AppState {
       );
       for (const t of threads) {
         t.sessionId = null;
+        this.unboundByDedup.add(t.id);
         cleared++;
         void saveThread($state.snapshot(t) as Thread);
       }
