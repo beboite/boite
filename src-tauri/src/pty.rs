@@ -246,6 +246,13 @@ impl PtyManager {
         let _ = std::fs::write(path, bytes);
     }
 
+    pub fn kill_all(&self) {
+        let ids: Vec<String> = self.inner.lock().keys().cloned().collect();
+        for id in ids {
+            let _ = self.kill(&id, false);
+        }
+    }
+
     pub fn kill(&self, id: &str, wait: bool) -> Result<(), String> {
         self.flush_scrollback_to_disk(id);
         let (killer, pid) = {
