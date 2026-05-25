@@ -237,6 +237,7 @@ export async function reloadThread(threadId: string) {
   t.ptyId = null;
   t.status = "idle";
   t.exitCode = null;
+  t.autoSlept = false;
   void saveThread({ ...t, args: [...t.args] }).catch((err) => {
     console.error("saveThread failed:", err);
   });
