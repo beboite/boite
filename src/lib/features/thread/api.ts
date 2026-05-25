@@ -1,6 +1,5 @@
 import { app } from "$lib/app/store.svelte";
 import { ptyKill } from "$lib/storage/pty";
-import { deleteScrollback } from "$lib/storage/scrollback";
 import { getDefaultShell } from "$lib/storage/shell";
 import { saveThread } from "$lib/storage/db";
 import { parseCommand, settings } from "$lib/features/settings/store.svelte";
@@ -179,7 +178,6 @@ export async function closeThread(threadId: string) {
   const kill = t?.ptyId ? ptyKill(t.ptyId, true).catch(() => {}) : Promise.resolve();
   await app.removeThread(threadId);
   await kill;
-  void deleteScrollback(threadId).catch(() => {});
 }
 
 export async function stopThread(threadId: string) {
@@ -227,15 +225,15 @@ export async function restoreLastClosedThread(): Promise<Thread | null> {
   return null;
 }
 
-export interface ReloadOptions {
-  keepScrollback?: boolean;
-}
-
-export async function reloadThread(threadId: string, opts: ReloadOptions = {}) {
+export async function reloadThread(threadId: string) {
   const t = app.threads.find((x) => x.id === threadId);
   if (!t) return;
 
   const previousPtyId = t.ptyId;
+  if (previousPtyId) {
+    void ptyKill(previousPtyId, false).catch(() => {});
+  }
+
   t.ptyId = null;
   t.status = "idle";
   t.exitCode = null;
@@ -246,18 +244,5 @@ export async function reloadThread(threadId: string, opts: ReloadOptions = {}) {
   app.activeThreadId = t.id;
   app.selectedProjectId = t.projectId;
   app.view = "terminal";
-
-  // Tear the previous PTY down to completion before the remount triggers
-  // a fresh spawn. Otherwise two `claude --resume <id>` (or any other
-  // session-locking CLI) race on the same backing file and the new one
-  // can attach to a half-dead session.
-  if (previousPtyId) {
-    await ptyKill(previousPtyId, true).catch(() => {});
-  }
-
-  if (!opts.keepScrollback) {
-    await deleteScrollback(threadId).catch(() => {});
-  }
-
   app.bumpRespawn(t.id);
 }

@@ -52,8 +52,7 @@
 
     activated[id] = true;
     if (isFinished) {
-      const wasStopped = t?.status === "stopped";
-      void reloadThread(id, { keepScrollback: wasStopped });
+      void reloadThread(id);
       app.view = "terminal";
       return;
     }

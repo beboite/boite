@@ -1,6 +1,3 @@
-use std::collections::HashSet;
-use std::path::PathBuf;
-
 use tauri::{
     AppHandle, Manager, State,
     ipc::{Channel, InvokeBody, Request},
@@ -10,24 +7,14 @@ use crate::BootState;
 use crate::logging::{self, LogEntry};
 use crate::pty::{PtyEvent, PtyManager, PtySpawnArgs};
 
-fn scrollback_path(app: &AppHandle, thread_id: &str) -> Result<PathBuf, String> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("app_data_dir failed: {e}"))?;
-    Ok(dir.join("scrollback").join(format!("{thread_id}.bin")))
-}
-
 #[tauri::command]
 pub async fn pty_spawn(
-    app: AppHandle,
     manager: State<'_, PtyManager>,
     on_event: Channel<PtyEvent>,
     spec: PtySpawnArgs,
 ) -> Result<String, String> {
-    let path = scrollback_path(&app, &spec.thread_id).ok();
     let manager = manager.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || manager.spawn(on_event, spec, path))
+    tauri::async_runtime::spawn_blocking(move || manager.spawn(on_event, spec))
         .await
         .map_err(|e| format!("pty spawn task failed: {e}"))?
 }
@@ -70,68 +57,6 @@ pub async fn pty_kill(
     tauri::async_runtime::spawn_blocking(move || manager.kill(&id, wait))
         .await
         .map_err(|e| format!("pty kill task failed: {e}"))?
-}
-
-#[tauri::command]
-pub fn pty_snapshot(
-    manager: State<'_, PtyManager>,
-    id: String,
-) -> Result<Vec<u8>, String> {
-    Ok(manager.snapshot_scrollback(&id).unwrap_or_default())
-}
-
-#[tauri::command]
-pub async fn load_scrollback(
-    app: AppHandle,
-    thread_id: String,
-) -> Result<Vec<u8>, String> {
-    let path = scrollback_path(&app, &thread_id)?;
-    if !path.exists() {
-        return Ok(Vec::new());
-    }
-    std::fs::read(&path).map_err(|e| format!("read scrollback: {e}"))
-}
-
-#[tauri::command]
-pub async fn delete_scrollback(
-    app: AppHandle,
-    thread_id: String,
-) -> Result<(), String> {
-    let path = scrollback_path(&app, &thread_id)?;
-    if path.exists() {
-        std::fs::remove_file(&path).map_err(|e| format!("delete scrollback: {e}"))?;
-    }
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn prune_orphan_scrollbacks(
-    app: AppHandle,
-    keep_thread_ids: Vec<String>,
-) -> Result<u32, String> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("app_data_dir failed: {e}"))?
-        .join("scrollback");
-    if !dir.is_dir() {
-        return Ok(0);
-    }
-    let keep: HashSet<String> = keep_thread_ids.into_iter().collect();
-    let entries = std::fs::read_dir(&dir).map_err(|e| format!("read scrollback dir: {e}"))?;
-    let mut pruned = 0u32;
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
-            continue;
-        };
-        if !keep.contains(stem) {
-            if std::fs::remove_file(&path).is_ok() {
-                pruned += 1;
-            }
-        }
-    }
-    Ok(pruned)
 }
 
 #[tauri::command]
