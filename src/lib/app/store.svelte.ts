@@ -14,6 +14,7 @@ import {
 } from "$lib/storage/db";
 import { pruneOrphanScrollbacks } from "$lib/storage/scrollback";
 import { debounce } from "$lib/shared/utils/debounce";
+import { notifications } from "$lib/features/notifications/store.svelte";
 
 class AppState {
   projects = $state<Project[]>([]);
@@ -130,29 +131,42 @@ class AppState {
     this.ready = true;
   }
 
-  // Legacy fix: pre-0.5.5 builds could let two threads capture the same
-  // session id. Keep the most recently created thread for each session id,
-  // null out the older siblings so they respawn fresh next time.
+  // Legacy fix: pre-0.5.5 builds could let multiple threads capture the
+  // same session id. We can't know which thread was the "real" owner, so
+  // when a collision is detected we null EVERY conflicting thread. Each one
+  // respawns fresh on next wake; user rebinds via /resume in the AI CLI.
   private deduplicateSessionIds() {
-    const seen = new Map<string, Thread>();
-    const losers: Thread[] = [];
-    const sorted = [...this.threads].sort((a, b) => b.createdAt - a.createdAt);
-    for (const t of sorted) {
-      if (!t.sessionId) continue;
-      const winner = seen.get(t.sessionId);
-      if (winner) {
-        losers.push(t);
-      } else {
-        seen.set(t.sessionId, t);
+    const withSession = this.threads.filter((t) => t.sessionId);
+    console.info(
+      `[boite] session dedup: ${this.threads.length} threads loaded, ${withSession.length} with sessionId`,
+    );
+    const bySession = new Map<string, Thread[]>();
+    for (const t of withSession) {
+      const list = bySession.get(t.sessionId as string) ?? [];
+      list.push(t);
+      bySession.set(t.sessionId as string, list);
+    }
+    let cleared = 0;
+    for (const [sid, threads] of bySession) {
+      if (threads.length < 2) continue;
+      const labels = threads.map((t) => t.label).join(", ");
+      console.warn(
+        `[boite] sessionId ${sid} shared by ${threads.length} threads (${labels}); clearing all to break cross-talk`,
+      );
+      for (const t of threads) {
+        t.sessionId = null;
+        cleared++;
+        void saveThread($state.snapshot(t) as Thread);
       }
     }
-    for (const loser of losers) {
-      const winnerLabel = seen.get(loser.sessionId as string)?.label ?? "?";
+    if (cleared > 0) {
       console.warn(
-        `[boite] dropped duplicate sessionId on ${loser.label}: collided with ${winnerLabel}`,
+        `[boite] cleared ${cleared} legacy thread session bindings. Use /resume in your AI CLI to rebind each thread to its conversation.`,
       );
-      loser.sessionId = null;
-      void saveThread($state.snapshot(loser) as Thread);
+      notifications.error(
+        `Cleared ${cleared} colliding session bindings. Use /resume in each thread to rebind.`,
+        8000,
+      );
     }
   }
 
