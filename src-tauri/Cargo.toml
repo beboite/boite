@@ -1,6 +1,6 @@
 [package]
 name = "boite"
-version = "0.5.8"
+version = "0.5.9"
 description = "Lightweight multi-agent terminal multiplexer"
 authors = ["mtsu"]
 edition = "2021"

@@ -25,9 +25,22 @@ class AppState {
   ready = $state(false);
   respawnNonce = $state<Record<string, number>>({});
   freshThreadIds = new Set<string>();
-  // Threads whose sessionId was nulled by legacy dedup. Used to flag them
-  // in the UI on first activation so the user knows to /resume manually.
-  unboundByDedup = $state<Set<string>>(new Set());
+  // Threads whose sessionId was nulled by legacy dedup. Reactive array so
+  // sidebar can show a red status dot on each until the binding is restored
+  // (via /resume in the AI CLI -> session monitor's steal logic).
+  unboundByDedup = $state<string[]>([]);
+
+  markUnbound(id: string) {
+    if (!this.unboundByDedup.includes(id)) {
+      this.unboundByDedup = [...this.unboundByDedup, id];
+    }
+  }
+
+  clearUnbound(id: string) {
+    if (this.unboundByDedup.includes(id)) {
+      this.unboundByDedup = this.unboundByDedup.filter((x) => x !== id);
+    }
+  }
 
   // Title bursts (OSC during agent streaming) would write SQLite per token.
   // Coalesce to one write per thread per window.
@@ -158,7 +171,7 @@ class AppState {
       );
       for (const t of threads) {
         t.sessionId = null;
-        this.unboundByDedup.add(t.id);
+        this.markUnbound(t.id);
         cleared++;
         void saveThread($state.snapshot(t) as Thread);
       }
