@@ -599,17 +599,30 @@
         void ptyWrite(targetPtyId, encoded).catch(() => {});
       };
 
+      // pwsh / cmd / bash all settle into a recognisable prompt before they
+      // are ready to accept stdin. Injecting before that point makes the
+      // shell eat random chars (pwsh banner + first letters of `claude`).
+      const looksLikePrompt = (buffer: string): boolean => {
+        const tail = buffer.slice(-256);
+        return /(?:PS\s+[^\r\n]+>\s*$)|(?:[>$#❯➜]\s*$)/m.test(tail);
+      };
+
       const tryInject = () => {
         if (injected || !shouldUsePty(targetPtyId)) return;
-        if (Date.now() - lastOutputAt > 350) {
+        const idle = Date.now() - lastOutputAt;
+        if (idle > 600 && looksLikePrompt(detectBuffer)) {
           inject();
           return;
         }
-        schedulePendingInputTimer(tryInject, 120);
+        if (idle > 2000) {
+          inject();
+          return;
+        }
+        schedulePendingInputTimer(tryInject, 150);
       };
-      schedulePendingInputTimer(tryInject, 250);
+      schedulePendingInputTimer(tryInject, 400);
 
-      schedulePendingInputTimer(inject, 5000);
+      schedulePendingInputTimer(inject, 8000);
     }
 
     const detector = getDetector(thread);

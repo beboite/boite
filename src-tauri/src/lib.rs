@@ -190,6 +190,12 @@ pub fn run() {
             git::git_fetch,
             git::git_file_versions,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            if let tauri::RunEvent::ExitRequested { .. } = event {
+                let manager = app_handle.state::<PtyManager>();
+                manager.kill_all();
+            }
+        });
 }
