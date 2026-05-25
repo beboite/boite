@@ -215,7 +215,12 @@ class AppState {
     if (t.status === status && t.exitCode === exitCode) return;
     t.status = status;
     t.exitCode = exitCode;
-    if (status !== "stopped" && t.autoSlept) t.autoSlept = false;
+    if (status !== "stopped" && t.autoSlept) {
+      // Route through setThreadAutoSlept so the flag clear is persisted;
+      // otherwise auto-slept threads keep their zZ animation in DB even
+      // after the user wakes them, and reappear asleep on next launch.
+      this.setThreadAutoSlept(id, false);
+    }
     if (
       status === "done" ||
       status === "exited" ||
@@ -231,7 +236,9 @@ class AppState {
     const t = this.threads.find((x) => x.id === id);
     if (!t || (t.autoSlept ?? false) === value) return;
     t.autoSlept = value;
-    void saveThread($state.snapshot(t) as Thread);
+    // Visual-only flag, never persisted. After a restart all threads come
+    // back without the zZ animation; clicking re-spawns them like any
+    // other stopped thread.
   }
 
   setThreadTitle(id: string, title: string) {

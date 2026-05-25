@@ -84,7 +84,6 @@ interface ThreadRow {
   session_id: string | null;
   icon_key: string | null;
   status: string | null;
-  auto_slept: number | null;
   created_at: number;
 }
 
@@ -99,7 +98,7 @@ function normalizeStatus(raw: string | null): Thread["status"] {
 export async function loadThreads(): Promise<Thread[]> {
   const db = await getDb();
   const rows = await db.select<ThreadRow[]>(
-    "SELECT id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, status, auto_slept, created_at FROM threads ORDER BY created_at ASC",
+    "SELECT id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, status, created_at FROM threads ORDER BY created_at ASC",
   );
   return rows.map((r) => ({
     id: r.id,
@@ -114,7 +113,7 @@ export async function loadThreads(): Promise<Thread[]> {
     status: normalizeStatus(r.status),
     exitCode: r.exit_code,
     createdAt: r.created_at,
-    autoSlept: r.auto_slept === 1,
+    autoSlept: false,
   }));
 }
 
@@ -127,7 +126,7 @@ export async function saveThread(thread: Thread): Promise<void> {
     );
   }
   await db.execute(
-    "INSERT OR REPLACE INTO threads (id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, status, auto_slept, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT OR REPLACE INTO threads (id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     [
       thread.id,
       thread.projectId,
@@ -139,7 +138,6 @@ export async function saveThread(thread: Thread): Promise<void> {
       thread.sessionId,
       thread.iconKey,
       thread.status,
-      thread.autoSlept ? 1 : 0,
       thread.createdAt,
     ],
   );
