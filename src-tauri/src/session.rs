@@ -535,87 +535,41 @@ fn find_cursor_session_blocking(
     best.map(|(id, _)| id)
 }
 
-#[derive(Deserialize)]
-struct GeminiSessionFile {
-    #[serde(rename = "sessionId")]
-    session_id: Option<String>,
-}
-
-fn read_gemini_session_id(path: &Path) -> Option<String> {
-    let content = fs::read_to_string(path).ok()?;
-    let first = content.lines().find(|l| !l.trim().is_empty())?;
-    if let Ok(parsed) = serde_json::from_str::<GeminiSessionFile>(first) {
-        if parsed.session_id.is_some() {
-            return parsed.session_id;
-        }
-    }
-    let stem = path.file_stem()?.to_str()?;
-    stem.strip_prefix("session-").map(|s| s.to_string())
-}
-
-fn find_gemini_session_blocking(
+fn find_antigravity_session_blocking(
     cwd: String,
     after_unix_ms: i64,
     exclude: &HashSet<String>,
 ) -> Option<String> {
     let home = dirs::home_dir()?;
-    let projects_file = home.join(".gemini").join("projects.json");
-    let tmp_dir = home.join(".gemini").join("tmp");
-    if !tmp_dir.is_dir() {
-        return None;
-    }
+    let cli_dir = home.join(".gemini").join("antigravity-cli");
+    let cache_file = cli_dir.join("cache").join("last_conversations.json");
+    let brain_dir = cli_dir.join("brain");
+
+    let content = fs::read_to_string(&cache_file).ok()?;
+    let parsed: serde_json::Value = serde_json::from_str(&content).ok()?;
+    let map = parsed.as_object()?;
 
     let target = normalize(&cwd);
-
-    let mut project_name: Option<String> = None;
-    if let Ok(content) = fs::read_to_string(&projects_file) {
-        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&content) {
-            if let Some(map) = parsed.get("projects").and_then(|v| v.as_object()) {
-                for (k, v) in map {
-                    if normalize(k) == target {
-                        if let Some(name) = v.as_str() {
-                            project_name = Some(name.to_string());
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    let chats_dir = if let Some(name) = project_name {
-        tmp_dir.join(name).join("chats")
-    } else {
-        return None;
-    };
-    if !chats_dir.is_dir() {
-        return None;
-    }
-
-    let mut best: Option<(String, i64)> = None;
-    let entries = fs::read_dir(&chats_dir).ok()?;
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let ext = path.extension().and_then(|s| s.to_str());
-        if ext != Some("jsonl") && ext != Some("json") {
+    for (key, val) in map {
+        if normalize(key) != target {
             continue;
         }
-        let Ok(meta) = entry.metadata() else { continue };
-        let Ok(modified) = meta.modified() else { continue };
-        let mtime = ms_since_epoch(modified);
+        let Some(id) = val.as_str() else { continue };
+        if exclude.contains(id) {
+            continue;
+        }
+        let brain = brain_dir.join(id);
+        let mtime = brain
+            .metadata()
+            .and_then(|m| m.modified())
+            .map(ms_since_epoch)
+            .unwrap_or(0);
         if mtime < after_unix_ms {
             continue;
         }
-        if let Some(id) = read_gemini_session_id(&path) {
-            if exclude.contains(&id) {
-                continue;
-            }
-            if best.as_ref().is_none_or(|(_, t)| mtime > *t) {
-                best = Some((id, mtime));
-            }
-        }
+        return Some(id.to_string());
     }
-    best.map(|(id, _)| id)
+    None
 }
 
 fn build_exclude(ids: Option<Vec<String>>) -> HashSet<String> {
@@ -663,13 +617,13 @@ pub async fn find_cursor_session(
 }
 
 #[tauri::command]
-pub async fn find_gemini_session(
+pub async fn find_antigravity_session(
     cwd: String,
     after_unix_ms: i64,
     exclude_ids: Option<Vec<String>>,
 ) -> Option<String> {
     let exclude = build_exclude(exclude_ids);
-    run_lookup(move || find_gemini_session_blocking(cwd, after_unix_ms, &exclude)).await
+    run_lookup(move || find_antigravity_session_blocking(cwd, after_unix_ms, &exclude)).await
 }
 
 #[tauri::command]

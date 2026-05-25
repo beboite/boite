@@ -34,7 +34,7 @@ export interface Thread {
 export type IconKey =
   | "claude"
   | "codex"
-  | "gemini"
+  | "antigravity"
   | "cursor"
   | "copilot"
   | "opencode"

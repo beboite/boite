@@ -28,10 +28,11 @@ const WORKING_BY_KEY: Partial<Record<NonNullable<IconKey>, RegExp[]>> = {
     /\bgenerating\b/i,
     /\bthinking\b/i,
   ],
-  gemini: [
+  antigravity: [
     /esc\s+to\s+(?:interrupt|cancel|stop)/i,
     /\bgenerating\b/i,
     /\bthinking\b/i,
+    /\bworking\b/i,
     /✨\s*generating/i,
   ],
 };

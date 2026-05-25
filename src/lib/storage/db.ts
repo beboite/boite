@@ -1,5 +1,6 @@
 import Database from "@tauri-apps/plugin-sql";
 import type { Project, Settings, Thread } from "$lib/types";
+import { redactArgs } from "$lib/shared/utils/redact";
 
 let dbPromise: Promise<Database> | null = null;
 
@@ -82,13 +83,23 @@ interface ThreadRow {
   exit_code: number | null;
   session_id: string | null;
   icon_key: string | null;
+  status: string | null;
+  auto_slept: number | null;
   created_at: number;
+}
+
+const TERMINAL_STATUSES: Thread["status"][] = ["done", "exited", "error", "stopped"];
+
+function normalizeStatus(raw: string | null): Thread["status"] {
+  if (!raw) return "idle";
+  if ((TERMINAL_STATUSES as string[]).includes(raw)) return raw as Thread["status"];
+  return "idle";
 }
 
 export async function loadThreads(): Promise<Thread[]> {
   const db = await getDb();
   const rows = await db.select<ThreadRow[]>(
-    "SELECT id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, created_at FROM threads ORDER BY created_at ASC",
+    "SELECT id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, status, auto_slept, created_at FROM threads ORDER BY created_at ASC",
   );
   return rows.map((r) => ({
     id: r.id,
@@ -100,26 +111,35 @@ export async function loadThreads(): Promise<Thread[]> {
     args: safeParseArgs(r.args),
     iconKey: (r.icon_key ?? null) as Thread["iconKey"],
     sessionId: r.session_id,
-    status: "idle",
+    status: normalizeStatus(r.status),
     exitCode: r.exit_code,
     createdAt: r.created_at,
+    autoSlept: r.auto_slept === 1,
   }));
 }
 
 export async function saveThread(thread: Thread): Promise<void> {
   const db = await getDb();
+  const { args: safeArgs, redacted } = redactArgs(thread.args);
+  if (redacted) {
+    console.warn(
+      `[boite] redacted secret-looking args for thread ${thread.id} (${thread.label}) before persisting`,
+    );
+  }
   await db.execute(
-    "INSERT OR REPLACE INTO threads (id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT OR REPLACE INTO threads (id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, status, auto_slept, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     [
       thread.id,
       thread.projectId,
       thread.label,
       thread.title,
       thread.cmd,
-      JSON.stringify(thread.args),
+      JSON.stringify(safeArgs),
       thread.exitCode,
       thread.sessionId,
       thread.iconKey,
+      thread.status,
+      thread.autoSlept ? 1 : 0,
       thread.createdAt,
     ],
   );

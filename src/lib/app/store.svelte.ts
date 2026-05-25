@@ -12,6 +12,8 @@ import {
   saveThread,
   deleteThread as dbDeleteThread,
 } from "$lib/storage/db";
+import { pruneOrphanScrollbacks } from "$lib/storage/scrollback";
+import { debounce } from "$lib/shared/utils/debounce";
 
 class AppState {
   projects = $state<Project[]>([]);
@@ -22,6 +24,15 @@ class AppState {
   ready = $state(false);
   respawnNonce = $state<Record<string, number>>({});
   freshThreadIds = new Set<string>();
+
+  // Title bursts (OSC during agent streaming) would write SQLite per token.
+  // Coalesce to one write per thread per window.
+  private pendingTitleSaves = new Map<string, Thread>();
+  private flushTitleSaves = debounce(() => {
+    const batch = [...this.pendingTitleSaves.values()];
+    this.pendingTitleSaves.clear();
+    for (const t of batch) void saveThread(t);
+  }, 500);
 
   bumpRespawn(threadId: string) {
     this.respawnNonce = {
@@ -112,7 +123,37 @@ class AppState {
     } catch (err) {
       console.error("loadThreads failed:", err);
     }
+    this.deduplicateSessionIds();
+    void pruneOrphanScrollbacks(this.threads.map((t) => t.id)).catch((err) => {
+      console.warn("pruneOrphanScrollbacks failed:", err);
+    });
     this.ready = true;
+  }
+
+  // Legacy fix: pre-0.5.5 builds could let two threads capture the same
+  // session id. Keep the most recently created thread for each session id,
+  // null out the older siblings so they respawn fresh next time.
+  private deduplicateSessionIds() {
+    const seen = new Map<string, Thread>();
+    const losers: Thread[] = [];
+    const sorted = [...this.threads].sort((a, b) => b.createdAt - a.createdAt);
+    for (const t of sorted) {
+      if (!t.sessionId) continue;
+      const winner = seen.get(t.sessionId);
+      if (winner) {
+        losers.push(t);
+      } else {
+        seen.set(t.sessionId, t);
+      }
+    }
+    for (const loser of losers) {
+      const winnerLabel = seen.get(loser.sessionId as string)?.label ?? "?";
+      console.warn(
+        `[boite] dropped duplicate sessionId on ${loser.label}: collided with ${winnerLabel}`,
+      );
+      loser.sessionId = null;
+      void saveThread($state.snapshot(loser) as Thread);
+    }
   }
 
   async upsertThread(thread: Thread) {
@@ -148,7 +189,13 @@ class AppState {
     t.status = status;
     t.exitCode = exitCode;
     if (status !== "stopped" && t.autoSlept) t.autoSlept = false;
-    if (status === "done" || status === "exited" || status === "error") {
+    if (
+      status === "done" ||
+      status === "exited" ||
+      status === "error" ||
+      status === "stopped" ||
+      status === "idle"
+    ) {
       void saveThread($state.snapshot(t) as Thread);
     }
   }
@@ -157,13 +204,15 @@ class AppState {
     const t = this.threads.find((x) => x.id === id);
     if (!t || (t.autoSlept ?? false) === value) return;
     t.autoSlept = value;
+    void saveThread($state.snapshot(t) as Thread);
   }
 
   setThreadTitle(id: string, title: string) {
     const t = this.threads.find((x) => x.id === id);
     if (!t || t.title === title) return;
     t.title = title;
-    void saveThread($state.snapshot(t) as Thread);
+    this.pendingTitleSaves.set(id, $state.snapshot(t) as Thread);
+    this.flushTitleSaves();
   }
 
   setThreadPtyId(id: string, ptyId: string | null) {

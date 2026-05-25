@@ -9,6 +9,7 @@
   import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
   import { ptySpawn, ptyWrite, ptyResize, ptyKill } from "$lib/storage/pty";
   import type { PtyEvent } from "$lib/storage/pty";
+  import { loadScrollback } from "$lib/storage/scrollback";
   import { app } from "$lib/app/store.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
   import { reloadThread, restoreLastClosedThread } from "$lib/features/thread/api";
@@ -42,6 +43,8 @@
   let spawning = false;
   let destroyed = false;
   let spawnRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  let spawnRetryCount = 0;
+  const SPAWN_RETRY_MAX = 30;
   let pendingInputTimers: ReturnType<typeof setTimeout>[] = [];
   let ctxMenu = $state<{ x: number; y: number; items: ContextMenuItem[] } | null>(
     null,
@@ -112,6 +115,14 @@
 
   function scheduleSpawnRetry(delay = 120) {
     if (spawned || spawning || destroyed || spawnRetryTimer !== null) return;
+    if (spawnRetryCount >= SPAWN_RETRY_MAX) {
+      logger.warn(
+        "spawn",
+        `${thread.label}: gave up after ${SPAWN_RETRY_MAX} retries — pane likely hidden`,
+      );
+      return;
+    }
+    spawnRetryCount++;
     spawnRetryTimer = setTimeout(() => {
       spawnRetryTimer = null;
       void spawn();
@@ -211,6 +222,10 @@
       stopSessionMonitor();
       const current = app.threads.find((x) => x.id === thread.id);
       if (current?.ptyId !== exitedPtyId) return;
+      if (current.status === "stopped") {
+        app.setThreadPtyId(thread.id, null);
+        return;
+      }
       const code = event.code ?? null;
       app.setThreadStatus(thread.id, code === 0 ? "done" : "exited", code);
       app.setThreadPtyId(thread.id, null);
@@ -524,6 +539,7 @@
     try {
       const nextPtyId = await ptySpawn(
         {
+          threadId: thread.id,
           cwd: project.cwd,
           cmd: plan.cmd,
           args: plan.args,
@@ -539,6 +555,7 @@
       }
       ptyId = nextPtyId;
       spawned = true;
+      spawnRetryCount = 0;
       app.setThreadPtyId(thread.id, ptyId);
       app.setThreadStatus(thread.id, "ready");
       logger.info(
@@ -712,16 +729,25 @@
     initialFit();
     if (focused) term.focus();
 
-    requestAnimationFrame(() => {
-      initialFit();
+    void (async () => {
+      try {
+        const bytes = await loadScrollback(thread.id);
+        if (bytes.length > 0 && term && !destroyed) {
+          term.write(bytes);
+        }
+      } catch (err) {
+        logger.debug(
+          "scrollback",
+          `${thread.label}: load failed`,
+          String(err),
+        );
+      }
+      if (destroyed) return;
       requestAnimationFrame(() => {
         initialFit();
         void spawn();
       });
-    });
-    setTimeout(initialFit, 100);
-    setTimeout(initialFit, 350);
-    setTimeout(() => void spawn(), 500);
+    })();
 
     resizeObserver = new ResizeObserver(() => {
       scheduleFit();

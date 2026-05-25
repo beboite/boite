@@ -1,5 +1,6 @@
 import { app } from "$lib/app/store.svelte";
 import { ptyKill } from "$lib/storage/pty";
+import { deleteScrollback } from "$lib/storage/scrollback";
 import { getDefaultShell } from "$lib/storage/shell";
 import { saveThread } from "$lib/storage/db";
 import { parseCommand, settings } from "$lib/features/settings/store.svelte";
@@ -178,6 +179,7 @@ export async function closeThread(threadId: string) {
   const kill = t?.ptyId ? ptyKill(t.ptyId, true).catch(() => {}) : Promise.resolve();
   await app.removeThread(threadId);
   await kill;
+  void deleteScrollback(threadId).catch(() => {});
 }
 
 export async function stopThread(threadId: string) {
@@ -225,7 +227,11 @@ export async function restoreLastClosedThread(): Promise<Thread | null> {
   return null;
 }
 
-export async function reloadThread(threadId: string) {
+export interface ReloadOptions {
+  keepScrollback?: boolean;
+}
+
+export async function reloadThread(threadId: string, opts: ReloadOptions = {}) {
   const t = app.threads.find((x) => x.id === threadId);
   if (!t) return;
 
@@ -240,6 +246,10 @@ export async function reloadThread(threadId: string) {
   void saveThread({ ...t, args: [...t.args] }).catch((err) => {
     console.error("saveThread failed:", err);
   });
+
+  if (!opts.keepScrollback) {
+    void deleteScrollback(threadId).catch(() => {});
+  }
 
   app.activeThreadId = t.id;
   app.selectedProjectId = t.projectId;

@@ -31,7 +31,7 @@ const detectors: Partial<Record<NonNullable<IconKey>, SessionDetector>> = {
   codex: makeDetector("find_codex_session", "codex"),
   opencode: makeDetector("find_opencode_session", "opencode"),
   cursor: makeDetector("find_cursor_session", "cursor"),
-  gemini: makeDetector("find_gemini_session", "gemini"),
+  antigravity: makeDetector("find_antigravity_session", "antigravity"),
   copilot: makeDetector("find_copilot_session", "copilot"),
 };
 
@@ -87,6 +87,17 @@ function withOpencodeContinue(args: string[]): string[] {
   return [...args, "--continue"];
 }
 
+function withAntigravityContinue(args: string[]): string[] {
+  if (
+    args.includes("--continue") ||
+    args.includes("-c") ||
+    args.includes("--conversation")
+  ) {
+    return args;
+  }
+  return [...args, "--continue"];
+}
+
 const builders: Partial<Record<NonNullable<IconKey>, ResumeBuilder>> = {
   // claude --resume <id> picks a specific session.
   claude: (args, sessionId) => {
@@ -116,10 +127,11 @@ const builders: Partial<Record<NonNullable<IconKey>, ResumeBuilder>> = {
     const filtered = stripFlag(args, ["--resume", "--continue"], true);
     return [...filtered, "--resume", sessionId];
   },
-  // gemini --resume <UUID> picks a specific session.
-  gemini: (args, sessionId) => {
-    const filtered = stripFlag(args, ["--resume", "-r"], true);
-    return [...filtered, "--resume", sessionId];
+  // agy --conversation <UUID> picks a specific conversation.
+  antigravity: (args, sessionId) => {
+    const withoutContinue = stripFlag(args, ["--continue", "-c"], false);
+    const filtered = stripFlag(withoutContinue, ["--conversation"], true);
+    return [...filtered, "--conversation", sessionId];
   },
   // copilot --resume <UUID> picks specific session.
   copilot: (args, sessionId) => {
@@ -156,6 +168,15 @@ export function buildResumeArgs(thread: Thread): string[] {
   if (!thread.sessionId) {
     if (key === "opencode") {
       const out = withOpencodeContinue(args);
+      logger.info(
+        "resume",
+        `${thread.id} (${key}): no captured session, continue latest`,
+        { cmd: thread.cmd, args: out },
+      );
+      return out;
+    }
+    if (key === "antigravity") {
+      const out = withAntigravityContinue(args);
       logger.info(
         "resume",
         `${thread.id} (${key}): no captured session, continue latest`,

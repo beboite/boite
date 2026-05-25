@@ -95,6 +95,13 @@ pub fn run() {
             sql: "ALTER TABLE projects ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;",
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 7,
+            description: "add_thread_status_and_autoslept",
+            sql: "ALTER TABLE threads ADD COLUMN status TEXT;\
+                  ALTER TABLE threads ADD COLUMN auto_slept INTEGER NOT NULL DEFAULT 0;",
+            kind: MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()
@@ -150,6 +157,10 @@ pub fn run() {
             commands::pty_write,
             commands::pty_resize,
             commands::pty_kill,
+            commands::pty_snapshot,
+            commands::load_scrollback,
+            commands::delete_scrollback,
+            commands::prune_orphan_scrollbacks,
             commands::finish_boot,
             commands::log_app_event,
             commands::read_app_log,
@@ -166,7 +177,7 @@ pub fn run() {
             session::find_codex_session,
             session::find_opencode_session,
             session::find_cursor_session,
-            session::find_gemini_session,
+            session::find_antigravity_session,
             session::find_copilot_session,
             git::git_repo_info,
             git::git_status,

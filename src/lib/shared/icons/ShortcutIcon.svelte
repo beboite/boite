@@ -15,7 +15,7 @@
 
   const ASSET_BY_KEY: Partial<Record<NonNullable<IconKey>, string>> = {
     codex: "/icons/chatgpt.svg",
-    gemini: "/icons/gemini.svg",
+    antigravity: "/icons/antigravity.svg",
     opencode: "/icons/opencode.svg",
   };
   const asset = $derived(iconKey ? ASSET_BY_KEY[iconKey] : null);

@@ -1,6 +1,5 @@
 import {
   siClaude,
-  siGooglegemini,
   siGithubcopilot,
   siCursor,
 } from "simple-icons";
@@ -19,11 +18,6 @@ const HEX_OVERRIDES: Partial<Record<NonNullable<IconKey>, string>> = {
 
 const REGISTRY: Partial<Record<NonNullable<IconKey>, BrandGlyph>> = {
   claude: { path: siClaude.path, hex: siClaude.hex, title: siClaude.title },
-  gemini: {
-    path: siGooglegemini.path,
-    hex: siGooglegemini.hex,
-    title: siGooglegemini.title,
-  },
   copilot: {
     path: siGithubcopilot.path,
     hex: HEX_OVERRIDES.copilot ?? siGithubcopilot.hex,

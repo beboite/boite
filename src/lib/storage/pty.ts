@@ -7,6 +7,7 @@ export type PtyEvent =
   | { type: "error"; message: string };
 
 export interface PtySpawnArgs {
+  threadId: string;
   cwd: string;
   cmd: string;
   args: string[];
@@ -21,6 +22,11 @@ export async function ptySpawn(
   const channel = new Channel<PtyEvent>();
   channel.onmessage = onEvent;
   return invoke<string>("pty_spawn", { onEvent: channel, spec });
+}
+
+export async function ptySnapshot(id: string): Promise<Uint8Array> {
+  const arr = await invoke<number[]>("pty_snapshot", { id });
+  return new Uint8Array(arr);
 }
 
 export async function ptyWrite(id: string, data: Uint8Array): Promise<void> {
