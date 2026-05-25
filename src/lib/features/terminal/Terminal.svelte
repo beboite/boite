@@ -26,6 +26,7 @@
     detectWorking,
     titleSignalsWorking,
   } from "$lib/features/thread/working-detect";
+  import { isGenericTitle } from "$lib/features/thread/title-filter";
   import { statusEngine } from "$lib/features/thread/statusEngine";
   import ContextMenu from "$lib/shared/components/ContextMenu.svelte";
   import type { ContextMenuItem } from "$lib/shared/components/ContextMenu.svelte";
@@ -209,7 +210,9 @@
     } else if (event.type === "title") {
       syncAliveThread();
       const cleaned = cleanTitle(event.value);
-      if (cleaned) app.setThreadTitle(thread.id, cleaned);
+      if (cleaned && !isGenericTitle(cleaned)) {
+        app.setThreadTitle(thread.id, cleaned);
+      }
       if (titleSignalsWorking(event.value)) {
         markRunning();
       }
@@ -303,19 +306,27 @@
     sessionTimeouts = [];
   }
 
-  async function persistSessionId(t: Thread, id: string, cwd: string) {
+  async function persistSessionId(
+    t: Thread,
+    id: string | null,
+    cwd: string,
+    opts: { silent?: boolean } = {},
+  ) {
     if (t.sessionId === id) return;
     const previous = t.sessionId;
     t.sessionId = id;
     await saveThread($state.snapshot(t) as Thread);
+    if (id) app.unboundByDedup.delete(t.id);
     logger.info(
       "session",
-      `${previous ? "updated" : "captured"} ${t.iconKey ?? "?"} session for ${t.label}`,
+      `${id ? (previous ? "updated" : "captured") : "cleared"} ${t.iconKey ?? "?"} session for ${t.label}`,
       { id, previous, cwd },
     );
-    notifications.success(
-      previous ? `Session updated (${t.label})` : `Session captured (${t.label})`,
-    );
+    if (!opts.silent && id) {
+      notifications.success(
+        previous ? `Session updated (${t.label})` : `Session captured (${t.label})`,
+      );
+    }
   }
 
   function sessionProbeSince(t: Thread, initialSince: number): number | null {
@@ -341,10 +352,7 @@
       const probeSince = sessionProbeSince(t, since);
       if (probeSince == null) return false;
 
-      const otherIds = app.threads
-        .filter((x) => x.id !== thread.id && x.sessionId)
-        .map((x) => x.sessionId as string);
-      const excludeIds = t.sessionId ? [...otherIds, t.sessionId] : otherIds;
+      const excludeIds = t.sessionId ? [t.sessionId] : [];
 
       sessionScanInFlight = true;
       try {
@@ -354,7 +362,7 @@
             logger.debug(
               "session",
               `${t.label}: locked on ${t.sessionId}, no new session detected`,
-              { cwd, probeSince, excludeIds },
+              { cwd, probeSince },
             );
           }
           return false;
@@ -367,19 +375,23 @@
           );
           return false;
         }
-        if (
-          app.threads.some((x) => x.id !== thread.id && x.sessionId === id)
-        ) {
+        const sibling = app.threads.find(
+          (x) => x.id !== thread.id && x.sessionId === id,
+        );
+        if (sibling) {
           logger.warn(
             "session",
-            `${t.label}: detector returned id owned by sibling thread, skip`,
-            { id, current: t.sessionId },
+            `${t.label}: claiming ${id} from sibling ${sibling.label}`,
+            { id, sibling: sibling.label },
           );
-          return false;
+          notifications.success(
+            `Session reassigned: ${sibling.label} → ${t.label}`,
+          );
+          await persistSessionId(sibling, null, cwd, { silent: true });
         }
         logger.info(
           "session",
-          `${t.label}: manual session switch detected ${t.sessionId ?? "(none)"} → ${id}`,
+          `${t.label}: ${t.sessionId ? "manual switch" : "captured"} ${t.sessionId ?? "(none)"} → ${id}`,
           { cwd, previous: t.sessionId, next: id },
         );
         await persistSessionId(t, id, cwd);

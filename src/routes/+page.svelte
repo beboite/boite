@@ -4,6 +4,7 @@
   import { pickAndAddProject } from "$lib/features/project/api";
   import { ptyKill } from "$lib/storage/pty";
   import { closeThread, reloadThread } from "$lib/features/thread/api";
+  import { notifications } from "$lib/features/notifications/store.svelte";
   import TitleBar from "$lib/shared/components/TitleBar.svelte";
   import ProjectSidebar from "$lib/features/project/ProjectSidebar.svelte";
   import ShortcutBar from "$lib/features/shortcut/ShortcutBar.svelte";
@@ -48,6 +49,20 @@
 
     if (app.activeThreadId === id && app.view === "terminal" && !isFinished) {
       return;
+    }
+
+    if (
+      t &&
+      t.iconKey &&
+      t.iconKey !== "terminal" &&
+      !t.sessionId &&
+      app.unboundByDedup.has(id)
+    ) {
+      notifications.error(
+        `${t.label}: no session bound — the CLI will pick its default. Rebind via /resume.`,
+        6000,
+      );
+      app.unboundByDedup.delete(id);
     }
 
     activated[id] = true;
