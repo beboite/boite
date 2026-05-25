@@ -316,7 +316,7 @@
     const previous = t.sessionId;
     t.sessionId = id;
     await saveThread($state.snapshot(t) as Thread);
-    if (id) app.unboundByDedup.delete(t.id);
+    if (id) app.clearUnbound(t.id);
     logger.info(
       "session",
       `${id ? (previous ? "updated" : "captured") : "cleared"} ${t.iconKey ?? "?"} session for ${t.label}`,
@@ -725,7 +725,13 @@
 
     try {
       const webgl = new WebglAddon();
-      webgl.onContextLoss(() => webgl.dispose());
+      webgl.onContextLoss(() => {
+        webgl.dispose();
+        // Force xterm to repaint with the DOM renderer fallback; otherwise
+        // the canvas stays blank after the browser kills the context for
+        // a backgrounded pane.
+        term?.refresh(0, (term?.rows ?? 24) - 1);
+      });
       term.loadAddon(webgl);
     } catch {
       // WebGL unavailable (e.g. webkit2gtk without GPU). Fall back to DOM renderer.
@@ -773,6 +779,7 @@
     if (visible && term) {
       queueMicrotask(() => {
         fit?.fit();
+        if (focused) term?.focus();
         void spawn();
       });
     }
@@ -785,8 +792,15 @@
   });
 
   $effect(() => {
-    if (focused && term) {
-      queueMicrotask(() => term?.focus());
+    if (focused && visible && term) {
+      // Background panes go visibility:hidden in CSS; xterm's hidden
+      // textarea can drop focus when its layout disappears. Re-focus
+      // across two animation frames so the focus call lands after the
+      // pane is repainted.
+      requestAnimationFrame(() => {
+        term?.focus();
+        requestAnimationFrame(() => term?.focus());
+      });
     }
   });
 

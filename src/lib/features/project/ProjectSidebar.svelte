@@ -428,6 +428,7 @@
   }
 
   function displayThreadStatus(thread: Thread): ThreadStatus {
+    if (app.unboundByDedup.includes(thread.id)) return "error";
     if (
       thread.ptyId &&
       (thread.status === "idle" || thread.status === "stopped")

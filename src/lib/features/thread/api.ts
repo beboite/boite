@@ -236,10 +236,6 @@ export async function reloadThread(threadId: string, opts: ReloadOptions = {}) {
   if (!t) return;
 
   const previousPtyId = t.ptyId;
-  if (previousPtyId) {
-    void ptyKill(previousPtyId, false).catch(() => {});
-  }
-
   t.ptyId = null;
   t.status = "idle";
   t.exitCode = null;
@@ -247,12 +243,21 @@ export async function reloadThread(threadId: string, opts: ReloadOptions = {}) {
     console.error("saveThread failed:", err);
   });
 
-  if (!opts.keepScrollback) {
-    void deleteScrollback(threadId).catch(() => {});
-  }
-
   app.activeThreadId = t.id;
   app.selectedProjectId = t.projectId;
   app.view = "terminal";
+
+  // Tear the previous PTY down to completion before the remount triggers
+  // a fresh spawn. Otherwise two `claude --resume <id>` (or any other
+  // session-locking CLI) race on the same backing file and the new one
+  // can attach to a half-dead session.
+  if (previousPtyId) {
+    await ptyKill(previousPtyId, true).catch(() => {});
+  }
+
+  if (!opts.keepScrollback) {
+    await deleteScrollback(threadId).catch(() => {});
+  }
+
   app.bumpRespawn(t.id);
 }
