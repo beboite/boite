@@ -9,7 +9,6 @@
   import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
   import { ptySpawn, ptyWrite, ptyResize, ptyKill } from "$lib/storage/pty";
   import type { PtyEvent } from "$lib/storage/pty";
-  import { loadScrollback } from "$lib/storage/scrollback";
   import { app } from "$lib/app/store.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
   import { reloadThread, restoreLastClosedThread } from "$lib/features/thread/api";
@@ -551,7 +550,6 @@
     try {
       const nextPtyId = await ptySpawn(
         {
-          threadId: thread.id,
           cwd: project.cwd,
           cmd: plan.cmd,
           args: plan.args,
@@ -738,13 +736,7 @@
 
     try {
       const webgl = new WebglAddon();
-      webgl.onContextLoss(() => {
-        webgl.dispose();
-        // Force xterm to repaint with the DOM renderer fallback; otherwise
-        // the canvas stays blank after the browser kills the context for
-        // a backgrounded pane.
-        term?.refresh(0, (term?.rows ?? 24) - 1);
-      });
+      webgl.onContextLoss(() => webgl.dispose());
       term.loadAddon(webgl);
     } catch {
       // WebGL unavailable (e.g. webkit2gtk without GPU). Fall back to DOM renderer.
@@ -760,25 +752,10 @@
     initialFit();
     if (focused) term.focus();
 
-    void (async () => {
-      try {
-        const bytes = await loadScrollback(thread.id);
-        if (bytes.length > 0 && term && !destroyed) {
-          term.write(bytes);
-        }
-      } catch (err) {
-        logger.debug(
-          "scrollback",
-          `${thread.label}: load failed`,
-          String(err),
-        );
-      }
-      if (destroyed) return;
-      requestAnimationFrame(() => {
-        initialFit();
-        void spawn();
-      });
-    })();
+    requestAnimationFrame(() => {
+      initialFit();
+      void spawn();
+    });
 
     resizeObserver = new ResizeObserver(() => {
       scheduleFit();
@@ -792,7 +769,6 @@
     if (visible && term) {
       queueMicrotask(() => {
         fit?.fit();
-        if (focused) term?.focus();
         void spawn();
       });
     }
@@ -805,15 +781,8 @@
   });
 
   $effect(() => {
-    if (focused && visible && term) {
-      // Background panes go visibility:hidden in CSS; xterm's hidden
-      // textarea can drop focus when its layout disappears. Re-focus
-      // across two animation frames so the focus call lands after the
-      // pane is repainted.
-      requestAnimationFrame(() => {
-        term?.focus();
-        requestAnimationFrame(() => term?.focus());
-      });
+    if (focused && term) {
+      queueMicrotask(() => term?.focus());
     }
   });
 

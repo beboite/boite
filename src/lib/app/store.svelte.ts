@@ -12,7 +12,6 @@ import {
   saveThread,
   deleteThread as dbDeleteThread,
 } from "$lib/storage/db";
-import { pruneOrphanScrollbacks } from "$lib/storage/scrollback";
 import { debounce } from "$lib/shared/utils/debounce";
 import { notifications } from "$lib/features/notifications/store.svelte";
 
@@ -141,9 +140,6 @@ class AppState {
       console.error("loadThreads failed:", err);
     }
     this.deduplicateSessionIds();
-    void pruneOrphanScrollbacks(this.threads.map((t) => t.id)).catch((err) => {
-      console.warn("pruneOrphanScrollbacks failed:", err);
-    });
     this.ready = true;
   }
 
