@@ -87,7 +87,12 @@ const DEFAULTS: Settings = {
   rightPanel: null,
   rightPanelWidth: 320,
   gitSplitFraction: 0.5,
+  gitAutoFetch: true,
+  gitAutoFetchSeconds: 180,
 };
+
+export const GIT_AUTOFETCH_MIN_SECONDS = 30;
+export const GIT_AUTOFETCH_MAX_SECONDS = 3600;
 
 function migrateRightPanel(stored: Record<string, unknown>): RightPanelTab {
   const raw = stored.rightPanel;
@@ -191,6 +196,15 @@ class SettingsStore {
           stored.gitSplitFraction < 1
             ? stored.gitSplitFraction
             : DEFAULTS.gitSplitFraction,
+        gitAutoFetch:
+          typeof stored.gitAutoFetch === "boolean"
+            ? stored.gitAutoFetch
+            : DEFAULTS.gitAutoFetch,
+        gitAutoFetchSeconds:
+          typeof stored.gitAutoFetchSeconds === "number" &&
+          stored.gitAutoFetchSeconds >= GIT_AUTOFETCH_MIN_SECONDS
+            ? Math.min(stored.gitAutoFetchSeconds, GIT_AUTOFETCH_MAX_SECONDS)
+            : DEFAULTS.gitAutoFetchSeconds,
       };
       if (migratedShortcuts.changed) {
         await this.persist();
@@ -359,6 +373,21 @@ class SettingsStore {
     const clamped = Math.max(0.15, Math.min(0.85, value));
     if (Math.abs(this.state.gitSplitFraction - clamped) < 0.001) return;
     this.state.gitSplitFraction = clamped;
+    this.persistSoon();
+  }
+
+  async setGitAutoFetch(value: boolean) {
+    this.state.gitAutoFetch = value;
+    await this.persist();
+  }
+
+  setGitAutoFetchSeconds(value: number) {
+    const clamped = Math.max(
+      GIT_AUTOFETCH_MIN_SECONDS,
+      Math.min(GIT_AUTOFETCH_MAX_SECONDS, Math.round(value)),
+    );
+    if (this.state.gitAutoFetchSeconds === clamped) return;
+    this.state.gitAutoFetchSeconds = clamped;
     this.persistSoon();
   }
 }

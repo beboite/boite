@@ -11,8 +11,13 @@ import {
   type Commit,
 } from "./api";
 import { notifications } from "$lib/features/notifications/store.svelte";
+import { settings } from "$lib/features/settings/store.svelte";
 
 const LOG_PAGE = 80;
+// Cap the exponential backoff at 2^4 = 16x the configured period so a repo
+// that keeps failing (offline, bad creds) retries at most ~once per period*16
+// instead of hammering the network or popping credential prompts.
+const MAX_BACKOFF_SHIFT = 4;
 
 interface RefreshOptions {
   reloadLog?: boolean;
@@ -62,6 +67,8 @@ class GitStore {
   cwds = new Map<string, string>();
   private inflight = new Map<string, Promise<void>>();
   private pendingReloadLog = new Set<string>();
+  private lastFetchAt = new Map<string, number>();
+  private fetchFails = new Map<string, number>();
 
   ensure(projectId: string, cwd: string): GitState {
     this.cwds.set(projectId, cwd);
@@ -79,6 +86,8 @@ class GitStore {
   drop(projectId: string) {
     delete this.states[projectId];
     this.cwds.delete(projectId);
+    this.lastFetchAt.delete(projectId);
+    this.fetchFails.delete(projectId);
   }
 
   async refresh(
@@ -208,17 +217,49 @@ class GitStore {
     }
   }
 
+  // Manual fetch (button). Always runs, ignores the rate-limit gap, surfaces
+  // errors, and resets the backoff counter on success.
   async fetch(projectId: string) {
     const cwd = this.cwds.get(projectId);
     const state = this.states[projectId];
-    if (!cwd || !state) return;
-    if (state.fetching) return;
+    if (!cwd || !state || state.fetching) return;
+    await this.runFetch(projectId, cwd, state, true);
+  }
+
+  // Background fetch (timer/focus). Self-gated by an exponential backoff window
+  // so it never double-fetches or spams a failing remote.
+  async autoFetch(projectId: string) {
+    if (!settings.state.gitAutoFetch) return;
+    const cwd = this.cwds.get(projectId);
+    const state = this.states[projectId];
+    if (!cwd || !state || !state.isRepo || state.fetching) return;
+    const baseMs =
+      Math.max(30, settings.state.gitAutoFetchSeconds) * 1000;
+    const shift = Math.min(this.fetchFails.get(projectId) ?? 0, MAX_BACKOFF_SHIFT);
+    const gap = baseMs * 2 ** shift;
+    const last = this.lastFetchAt.get(projectId) ?? 0;
+    if (Date.now() - last < gap) return;
+    await this.runFetch(projectId, cwd, state, false);
+  }
+
+  private async runFetch(
+    projectId: string,
+    cwd: string,
+    state: GitState,
+    manual: boolean,
+  ) {
     state.fetching = true;
+    // Stamp before awaiting so the rate-limit window holds even if the fetch
+    // fails or hangs, preventing a retry storm.
+    this.lastFetchAt.set(projectId, Date.now());
     try {
       await gitFetch(cwd);
-      await this.refresh(projectId, { reloadLog: true, notifyErrors: true });
+      this.fetchFails.delete(projectId);
+      await this.refresh(projectId, { reloadLog: true, notifyErrors: manual });
     } catch (err) {
-      notifications.error(`Fetch failed: ${err}`);
+      this.fetchFails.set(projectId, (this.fetchFails.get(projectId) ?? 0) + 1);
+      if (manual) notifications.error(`Fetch failed: ${err}`);
+      else console.error("git auto-fetch failed:", err);
     } finally {
       state.fetching = false;
     }

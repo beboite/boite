@@ -63,6 +63,8 @@ export interface Settings {
   rightPanel: RightPanelTab;
   rightPanelWidth: number;
   gitSplitFraction: number;
+  gitAutoFetch: boolean;
+  gitAutoFetchSeconds: number;
 }
 
 export type RightPanelTab = "git" | "explorer" | null;

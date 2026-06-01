@@ -14,6 +14,10 @@
     settings.setIdleTimeoutMinutes(value);
   }
 
+  function setAutoFetchSeconds(value: number) {
+    settings.setGitAutoFetchSeconds(value);
+  }
+
   type IconRow = { iconKey: string; label: string };
   const SUPPORTED_AUTOCLOSE: IconRow[] = [
     { iconKey: "claude", label: "Claude" },
@@ -99,6 +103,49 @@
     onToggle={() =>
       settings.setConfirmCloseThread(!settings.state.confirmCloseThread)}
   />
+</SettingsCard>
+
+<SettingsCard
+  title="Git auto-fetch"
+  description="Periodically run git fetch in the background so the Git panel's ahead/behind count and remote commits stay current. Fetch only — never pulls or merges."
+>
+  <ToggleSetting
+    label="Auto-fetch"
+    description="Fetch on first open and on a timer while the window is focused. Backs off automatically on repeated failures (offline, credential prompt)."
+    enabled={settings.state.gitAutoFetch}
+    onLabel="On"
+    offLabel="Off"
+    onToggle={() => settings.setGitAutoFetch(!settings.state.gitAutoFetch)}
+  />
+
+  <div
+    class="flex items-center gap-3"
+    class:opacity-50={!settings.state.gitAutoFetch}
+  >
+    <label
+      for="autofetch-period"
+      class="min-w-[140px] text-xs font-medium text-foreground"
+    >
+      Fetch every
+    </label>
+    <input
+      id="autofetch-period"
+      type="range"
+      min="30"
+      max="600"
+      step="30"
+      value={settings.state.gitAutoFetchSeconds}
+      disabled={!settings.state.gitAutoFetch}
+      oninput={(e) =>
+        setAutoFetchSeconds(Number((e.currentTarget as HTMLInputElement).value))}
+      class="flex-1 accent-foreground"
+    />
+    <span class="min-w-[56px] text-right font-mono text-xs text-muted-foreground">
+      {settings.state.gitAutoFetchSeconds < 60
+        ? `${settings.state.gitAutoFetchSeconds}s`
+        : `${Math.round(settings.state.gitAutoFetchSeconds / 60)} min`}
+    </span>
+  </div>
 </SettingsCard>
 
 <SettingsCard
