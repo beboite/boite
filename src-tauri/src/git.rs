@@ -2,8 +2,11 @@ use std::collections::HashSet;
 use std::collections::hash_map::DefaultHasher;
 use std::fs;
 use std::hash::{Hash, Hasher};
+use std::io::Read;
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
@@ -45,6 +48,10 @@ fn git(path: &Path) -> Command {
     let mut cmd = Command::new("git");
     cmd.current_dir(path);
     cmd.env("GIT_OPTIONAL_LOCKS", "0");
+    // Never block on an interactive credential/auth prompt: fail fast instead
+    // of hanging a background fetch forever.
+    cmd.env("GIT_TERMINAL_PROMPT", "0");
+    cmd.env("GCM_INTERACTIVE", "never");
     cmd.stdin(Stdio::null());
     #[cfg(target_os = "windows")]
     {
@@ -599,14 +606,69 @@ pub async fn git_fetch(path: String) -> Result<(), String> {
         .map_err(|e| format!("git_fetch task failed: {e}"))?
 }
 
+const FETCH_TIMEOUT: Duration = Duration::from_secs(20);
+
 fn fetch_blocking(path: &str) -> Result<(), String> {
     let p = Path::new(path);
     if !p.is_dir() {
         return Err("not a directory".into());
     }
+    if !has_remote(p) {
+        // Nothing to fetch from; treat as a successful no-op so the frontend
+        // does not count it as a failure and back off.
+        return Ok(());
+    }
     let mut cmd = git(p);
     cmd.args(["fetch", "--all", "--prune", "--quiet"]);
-    run(cmd).map(|_| ())
+    cmd.stdout(Stdio::null());
+    cmd.stderr(Stdio::piped());
+    run_with_timeout(cmd, FETCH_TIMEOUT)
+}
+
+fn has_remote(path: &Path) -> bool {
+    let mut cmd = git(path);
+    cmd.arg("remote");
+    match run(cmd) {
+        Ok(out) => !String::from_utf8_lossy(&out).trim().is_empty(),
+        Err(_) => false,
+    }
+}
+
+// Like `run`, but kills the child if it outlives `timeout`. Used for fetch,
+// the only git command that touches the network and can stall.
+fn run_with_timeout(mut cmd: Command, timeout: Duration) -> Result<(), String> {
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("git not found or failed to start: {e}"))?;
+    let start = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                if status.success() {
+                    return Ok(());
+                }
+                let mut err = String::new();
+                if let Some(mut s) = child.stderr.take() {
+                    let _ = s.read_to_string(&mut err);
+                }
+                let err = err.trim().to_string();
+                return Err(if err.is_empty() {
+                    format!("git exited with status {status}")
+                } else {
+                    err
+                });
+            }
+            Ok(None) => {
+                if start.elapsed() >= timeout {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err("git fetch timed out".into());
+                }
+                thread::sleep(Duration::from_millis(50));
+            }
+            Err(e) => return Err(format!("git wait failed: {e}")),
+        }
+    }
 }
 
 #[tauri::command]

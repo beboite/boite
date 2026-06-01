@@ -36,27 +36,29 @@
 
   $effect(() => {
     if (!project) return;
-    gitStore.ensure(project.id, project.cwd);
-    void gitStore.refresh(project.id);
+    const id = project.id;
+    gitStore.ensure(id, project.cwd);
+    // Local refresh first, then a background fetch once we know it's a repo.
+    void gitStore.refresh(id).then(() => gitStore.autoFetch(id));
   });
 
   $effect(() => {
     if (!project) return;
     const id = project.id;
-    const tick = () => {
-      if (!document.hidden) void gitStore.refresh(id);
+    // autoFetch self-rate-limits, so calling it every tick is cheap; the real
+    // network fetch only fires once the configured period has elapsed.
+    const poke = () => {
+      if (document.hidden) return;
+      void gitStore.refresh(id);
+      void gitStore.autoFetch(id);
     };
-    const interval = window.setInterval(tick, AUTO_REFRESH_MS);
-    const onFocus = () => void gitStore.refresh(id);
-    const onVisibility = () => {
-      if (!document.hidden) void gitStore.refresh(id);
-    };
-    window.addEventListener("focus", onFocus);
-    document.addEventListener("visibilitychange", onVisibility);
+    const interval = window.setInterval(poke, AUTO_REFRESH_MS);
+    window.addEventListener("focus", poke);
+    document.addEventListener("visibilitychange", poke);
     return () => {
       window.clearInterval(interval);
-      window.removeEventListener("focus", onFocus);
-      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("focus", poke);
+      document.removeEventListener("visibilitychange", poke);
     };
   });
 
