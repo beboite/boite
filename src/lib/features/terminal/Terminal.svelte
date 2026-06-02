@@ -351,7 +351,12 @@
       const probeSince = sessionProbeSince(t, since);
       if (probeSince == null) return false;
 
-      const excludeIds = t.sessionId ? [t.sessionId] : [];
+      // Exclude every sessionId already claimed by any thread (incl. self).
+      // Otherwise sibling monitors keep stealing each other's session in a
+      // loop because the detector always returns the newest jsonl in the cwd.
+      const excludeIds = app.threads
+        .map((x) => x.sessionId)
+        .filter((id): id is string => !!id);
 
       sessionScanInFlight = true;
       try {
