@@ -456,6 +456,13 @@
       items.push({ separator: true });
     }
     items.push({
+      label: thread.keepAwake ? "Autoriser la mise en veille" : "Empêcher la mise en veille",
+      action: () => {
+        app.toggleThreadKeepAwake(thread.id);
+      },
+    });
+    items.push({ separator: true });
+    items.push({
       label: "Reload thread",
       action: () => {
         void reloadThread(thread.id);
@@ -853,10 +860,25 @@
                     }
                   }}
                 >
-                  <StatusDot
-                    status={displayThreadStatus(thread)}
-                    asleep={thread.autoSlept ?? false}
-                  />
+                  <button
+                    type="button"
+                    data-no-drag
+                    class="inline-flex shrink-0 cursor-pointer items-center justify-center"
+                    onclick={(e) => {
+                      e.stopPropagation();
+                      app.toggleThreadKeepAwake(thread.id);
+                    }}
+                    title={thread.keepAwake
+                      ? "Veille empêchée — cliquer pour autoriser"
+                      : "Cliquer pour empêcher la mise en veille"}
+                    aria-label="Toggle keep awake"
+                  >
+                    <StatusDot
+                      status={displayThreadStatus(thread)}
+                      asleep={thread.autoSlept ?? false}
+                      keepAwake={thread.keepAwake ?? false}
+                    />
+                  </button>
                   <span
                     class="min-w-0 flex-1 truncate text-left text-[13px]"
                     title={thread.title ?? thread.label}
@@ -915,6 +937,7 @@
     <StatusDot
       status={displayThreadStatus(threadDragGhost.thread)}
       asleep={threadDragGhost.thread.autoSlept ?? false}
+      keepAwake={threadDragGhost.thread.keepAwake ?? false}
     />
     <span
       class="min-w-0 flex-1 truncate text-left text-[13px]"
