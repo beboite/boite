@@ -29,6 +29,7 @@ export interface Thread {
   exitCode: number | null;
   createdAt: number;
   autoSlept?: boolean;
+  keepAwake?: boolean;
 }
 
 export type IconKey =

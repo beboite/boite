@@ -241,6 +241,19 @@ class AppState {
     // other stopped thread.
   }
 
+  setThreadKeepAwake(id: string, value: boolean) {
+    const t = this.threads.find((x) => x.id === id);
+    if (!t || (t.keepAwake ?? false) === value) return;
+    t.keepAwake = value;
+    void saveThread($state.snapshot(t) as Thread);
+  }
+
+  toggleThreadKeepAwake(id: string) {
+    const t = this.threads.find((x) => x.id === id);
+    if (!t) return;
+    this.setThreadKeepAwake(id, !(t.keepAwake ?? false));
+  }
+
   setThreadTitle(id: string, title: string) {
     const t = this.threads.find((x) => x.id === id);
     if (!t || t.title === title) return;

@@ -23,6 +23,7 @@ function maybeAutoClose(threadId: string, iconKey: string | null | undefined) {
   if (!enabled) return;
   const t = app.threads.find((x) => x.id === threadId);
   if (!t || !t.ptyId) return;
+  if (t.keepAwake) return;
   if (!t.sessionId) {
     logger.debug("idle", `skip auto-sleep for ${t.label}: no session captured yet`, {
       iconKey,
