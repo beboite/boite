@@ -19,7 +19,6 @@
   import Plus from "@lucide/svelte/icons/plus";
   import X from "@lucide/svelte/icons/x";
   import FolderOpen from "@lucide/svelte/icons/folder-open";
-  import Trash2 from "@lucide/svelte/icons/trash-2";
   import MoreHorizontal from "@lucide/svelte/icons/more-horizontal";
   import Archive from "@lucide/svelte/icons/archive";
   import ArchiveRestore from "@lucide/svelte/icons/archive-restore";
@@ -38,7 +37,6 @@
     onRemoveProject,
   }: Props = $props();
 
-  let menuFor = $state<string | null>(null);
   let confirmThreadId = $state<string | null>(null);
   let confirmProjectId = $state<string | null>(null);
   let showArchived = $state(false);
@@ -116,15 +114,6 @@
     e.preventDefault();
     e.stopPropagation();
     void stopThread(id);
-  }
-
-  function toggleMenu(id: string, e: MouseEvent) {
-    e.stopPropagation();
-    menuFor = menuFor === id ? null : id;
-  }
-
-  function closeMenu() {
-    menuFor = null;
   }
 
   function selectProject(projectId: string) {
@@ -220,7 +209,6 @@
       }
       drag.active = true;
       suppressClickFor = drag.id;
-      closeMenu();
       closeContextMenu();
       captureSiblings(drag);
       if (drag.kind === "thread") paneStore.draggingThreadId = drag.id;
@@ -521,14 +509,12 @@
   }
 
   function requestRemoveProject(id: string) {
-    closeMenu();
     confirmProjectId = id;
   }
 
   function openProjectContextMenu(project: { id: string; archived: boolean }, e: MouseEvent) {
     e.preventDefault();
     e.stopPropagation();
-    closeMenu();
     const items: ContextMenuItem[] = [];
     if (project.archived) {
       items.push({
@@ -612,8 +598,6 @@
     document.body.classList.remove("dragging-card");
   });
 </script>
-
-<svelte:window onclick={closeMenu} />
 
 <aside
   bind:this={asideEl}
@@ -765,45 +749,13 @@
             <button
               type="button"
               class="rounded p-1 text-muted-foreground/0 transition hover:bg-accent hover:text-foreground group-hover/project:text-muted-foreground"
-              onclick={(e) => toggleMenu(project.id, e)}
+              onclick={(e) => openProjectContextMenu(project, e)}
               data-drag-block
               aria-label="Project options"
               title="More"
             >
               <MoreHorizontal class="size-3.5" />
             </button>
-          {/if}
-
-          {#if menuFor === project.id}
-            <div
-              class="absolute right-2 top-full z-20 mt-1 flex min-w-36 flex-col rounded-md border bg-[var(--color-surface-2)] p-1 shadow-xl"
-              role="menu"
-            >
-              <button
-                type="button"
-                class="flex items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-foreground transition hover:bg-accent"
-                onclick={(e) => {
-                  e.stopPropagation();
-                  closeMenu();
-                  void app.archiveProject(project.id);
-                }}
-              >
-                <Archive class="size-3" />
-                Archiver
-              </button>
-              <div class="my-1 h-px bg-border"></div>
-              <button
-                type="button"
-                class="flex items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-danger transition hover:bg-danger/15"
-                onclick={(e) => {
-                  e.stopPropagation();
-                  requestRemoveProject(project.id);
-                }}
-              >
-                <Trash2 class="size-3" />
-                Remove project
-              </button>
-            </div>
           {/if}
         </div>
 
