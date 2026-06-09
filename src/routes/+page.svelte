@@ -5,6 +5,7 @@
   import { ptyKill } from "$lib/storage/pty";
   import { closeThread, reloadThread } from "$lib/features/thread/api";
   import TitleBar from "$lib/shared/components/TitleBar.svelte";
+  import CloseGuard from "$lib/app/CloseGuard.svelte";
   import ProjectSidebar from "$lib/features/project/ProjectSidebar.svelte";
   import ShortcutBar from "$lib/features/shortcut/ShortcutBar.svelte";
   import SettingsPanel from "$lib/features/settings/SettingsPanel.svelte";
@@ -118,6 +119,7 @@
 </script>
 
 <div class="flex h-screen w-screen flex-col overflow-hidden bg-background">
+  <CloseGuard />
   <TitleBar />
 
   <div class="flex min-h-0 flex-1">

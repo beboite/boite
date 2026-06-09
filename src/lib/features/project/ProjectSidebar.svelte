@@ -828,7 +828,7 @@
                     <StatusDot
                       status={displayThreadStatus(thread)}
                       asleep={thread.autoSlept ?? false}
-                      keepAwake={thread.keepAwake ?? false}
+                      keepAwake={(thread.keepAwake ?? false) && !!thread.ptyId}
                     />
                   </button>
                   <span
@@ -889,7 +889,7 @@
     <StatusDot
       status={displayThreadStatus(threadDragGhost.thread)}
       asleep={threadDragGhost.thread.autoSlept ?? false}
-      keepAwake={threadDragGhost.thread.keepAwake ?? false}
+      keepAwake={(threadDragGhost.thread.keepAwake ?? false) && !!threadDragGhost.thread.ptyId}
     />
     <span
       class="min-w-0 flex-1 truncate text-left text-[13px]"
