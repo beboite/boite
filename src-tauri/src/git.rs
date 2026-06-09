@@ -21,11 +21,13 @@ pub struct RepoInfo {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ChangeEntry {
     pub path: String,
     pub status: String,
     pub staged: bool,
     pub conflicted: bool,
+    pub orig_path: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -264,7 +266,7 @@ fn status_blocking(path: &str) -> Result<Vec<ChangeEntry>, String> {
     cmd.args([
         "status",
         "--porcelain=v2",
-        "--untracked-files=no",
+        "--untracked-files=normal",
         "--ignored=no",
         "-z",
     ]);
@@ -298,11 +300,20 @@ fn parse_porcelain_v2(bytes: &[u8]) -> Vec<ChangeEntry> {
                     parts.next();
                 }
                 if let Some(path) = parts.next() {
-                    push_xy(&mut out, xy, path);
+                    push_xy(&mut out, xy, path, None);
                 }
             }
             b'2' => {
-                // 2 XY sub mH mI mW hH hI Xscore path\tOrig
+                // 2 XY sub mH mI mW hH hI Xscore path; the original path
+                // follows as its own NUL-terminated record.
+                let orig_end = bytes[i..]
+                    .iter()
+                    .position(|&b| b == 0)
+                    .map(|n| i + n)
+                    .unwrap_or(bytes.len());
+                let orig = String::from_utf8_lossy(&bytes[i..orig_end]).into_owned();
+                i = orig_end + 1;
+
                 let mut parts = line.splitn(10, ' ');
                 let _ = parts.next();
                 let xy = parts.next().unwrap_or("..");
@@ -311,15 +322,9 @@ fn parse_porcelain_v2(bytes: &[u8]) -> Vec<ChangeEntry> {
                 }
                 if let Some(rest) = parts.next() {
                     let path = rest.split('\t').next().unwrap_or(rest);
-                    push_xy(&mut out, xy, path);
+                    let orig = if orig.is_empty() { None } else { Some(orig.as_str()) };
+                    push_xy(&mut out, xy, path, orig);
                 }
-                // skip the original-path NUL record
-                let orig_end = bytes[i..]
-                    .iter()
-                    .position(|&b| b == 0)
-                    .map(|n| i + n)
-                    .unwrap_or(bytes.len());
-                i = orig_end + 1;
             }
             b'u' => {
                 // u XY sub m1 m2 m3 mW h1 h2 h3 path
@@ -335,6 +340,7 @@ fn parse_porcelain_v2(bytes: &[u8]) -> Vec<ChangeEntry> {
                         status: "U".into(),
                         staged: false,
                         conflicted: true,
+                        orig_path: None,
                     });
                 }
             }
@@ -346,6 +352,7 @@ fn parse_porcelain_v2(bytes: &[u8]) -> Vec<ChangeEntry> {
                         status: "?".into(),
                         staged: false,
                         conflicted: false,
+                        orig_path: None,
                     });
                 }
             }
@@ -355,7 +362,7 @@ fn parse_porcelain_v2(bytes: &[u8]) -> Vec<ChangeEntry> {
     out
 }
 
-fn push_xy(out: &mut Vec<ChangeEntry>, xy: &str, path: &str) {
+fn push_xy(out: &mut Vec<ChangeEntry>, xy: &str, path: &str, orig: Option<&str>) {
     let mut chars = xy.chars();
     let x = chars.next().unwrap_or('.');
     let y = chars.next().unwrap_or('.');
@@ -365,6 +372,7 @@ fn push_xy(out: &mut Vec<ChangeEntry>, xy: &str, path: &str) {
             status: x.to_string(),
             staged: true,
             conflicted: false,
+            orig_path: orig.map(|s| s.to_string()),
         });
     }
     if y != '.' && y != ' ' {
@@ -373,6 +381,7 @@ fn push_xy(out: &mut Vec<ChangeEntry>, xy: &str, path: &str) {
             status: y.to_string(),
             staged: false,
             conflicted: false,
+            orig_path: orig.map(|s| s.to_string()),
         });
     }
 }
@@ -570,20 +579,37 @@ fn unstage_blocking(path: &str, files: Vec<String>) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn git_discard(path: String, files: Vec<String>) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || discard_blocking(&path, files))
+pub async fn git_discard(
+    path: String,
+    files: Vec<String>,
+    untracked: Vec<String>,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || discard_blocking(&path, files, untracked))
         .await
         .map_err(|e| format!("git_discard task failed: {e}"))?
 }
 
-fn discard_blocking(path: &str, files: Vec<String>) -> Result<(), String> {
+fn discard_blocking(path: &str, files: Vec<String>, untracked: Vec<String>) -> Result<(), String> {
     let p = Path::new(path);
-    let mut cmd = git(p);
-    cmd.args(["checkout", "HEAD", "--"]);
-    for f in &files {
-        cmd.arg(f);
+    if !files.is_empty() {
+        // Restore from the index, NOT from HEAD: discarding working-tree
+        // changes must never wipe what the user has staged.
+        let mut cmd = git(p);
+        cmd.args(["checkout", "--"]);
+        for f in &files {
+            cmd.arg(f);
+        }
+        run(cmd)?;
     }
-    run(cmd).map(|_| ())
+    if !untracked.is_empty() {
+        let mut cmd = git(p);
+        cmd.args(["clean", "-fd", "--"]);
+        for f in &untracked {
+            cmd.arg(f);
+        }
+        run(cmd)?;
+    }
+    Ok(())
 }
 
 fn run_files(path: &str, sub: &str, files: &[String], with_dashes: bool) -> Result<(), String> {
@@ -671,6 +697,84 @@ fn run_with_timeout(mut cmd: Command, timeout: Duration) -> Result<(), String> {
     }
 }
 
+const PUSH_PULL_TIMEOUT: Duration = Duration::from_secs(60);
+
+#[tauri::command]
+pub async fn git_push(path: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || push_blocking(&path))
+        .await
+        .map_err(|e| format!("git_push task failed: {e}"))?
+}
+
+fn push_blocking(path: &str) -> Result<(), String> {
+    let p = Path::new(path);
+    if !p.is_dir() {
+        return Err("not a directory".into());
+    }
+    if !has_remote(p) {
+        return Err("No remote configured".into());
+    }
+    let mut cmd = git(p);
+    if upstream_ref(p).is_some() {
+        cmd.args(["push", "--quiet"]);
+    } else {
+        let branch = current_branch(p).ok_or("Cannot push: detached HEAD")?;
+        cmd.args(["push", "--quiet", "-u", "origin", &branch]);
+    }
+    cmd.stdout(Stdio::null());
+    cmd.stderr(Stdio::piped());
+    run_with_timeout(cmd, PUSH_PULL_TIMEOUT)
+}
+
+#[tauri::command]
+pub async fn git_pull(path: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || pull_blocking(&path))
+        .await
+        .map_err(|e| format!("git_pull task failed: {e}"))?
+}
+
+fn pull_blocking(path: &str) -> Result<(), String> {
+    let p = Path::new(path);
+    if !p.is_dir() {
+        return Err("not a directory".into());
+    }
+    if !has_remote(p) {
+        return Err("No remote configured".into());
+    }
+    // --ff-only: never create a merge commit behind the user's back. A
+    // diverged branch surfaces as an error they resolve in the terminal.
+    let mut cmd = git(p);
+    cmd.args(["pull", "--ff-only", "--quiet"]);
+    cmd.stdout(Stdio::null());
+    cmd.stderr(Stdio::piped());
+    run_with_timeout(cmd, PUSH_PULL_TIMEOUT)
+}
+
+fn current_branch(path: &Path) -> Option<String> {
+    let mut cmd = git(path);
+    cmd.args(["rev-parse", "--abbrev-ref", "HEAD"]);
+    let out = run(cmd).ok()?;
+    let s = String::from_utf8_lossy(&out).trim().to_string();
+    if s.is_empty() || s == "HEAD" { None } else { Some(s) }
+}
+
+#[tauri::command]
+pub async fn git_init(path: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || init_blocking(&path))
+        .await
+        .map_err(|e| format!("git_init task failed: {e}"))?
+}
+
+fn init_blocking(path: &str) -> Result<(), String> {
+    let p = Path::new(path);
+    if !p.is_dir() {
+        return Err("not a directory".into());
+    }
+    let mut cmd = git(p);
+    cmd.arg("init");
+    run(cmd).map(|_| ())
+}
+
 #[tauri::command]
 pub async fn git_commit(path: String, message: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || commit_blocking(&path, &message))
@@ -690,20 +794,29 @@ pub struct FileVersions {
 pub async fn git_file_versions(
     path: String,
     file: String,
+    head_file: Option<String>,
 ) -> Result<FileVersions, String> {
-    tauri::async_runtime::spawn_blocking(move || file_versions_blocking(&path, &file))
-        .await
-        .map_err(|e| format!("git_file_versions task failed: {e}"))?
+    tauri::async_runtime::spawn_blocking(move || {
+        file_versions_blocking(&path, &file, head_file.as_deref())
+    })
+    .await
+    .map_err(|e| format!("git_file_versions task failed: {e}"))?
 }
 
-fn file_versions_blocking(path: &str, file: &str) -> Result<FileVersions, String> {
+fn file_versions_blocking(
+    path: &str,
+    file: &str,
+    head_file: Option<&str>,
+) -> Result<FileVersions, String> {
     let p = Path::new(path);
     if !p.is_dir() {
         return Err("not a directory".into());
     }
     let rel = file.replace('\\', "/");
+    // Renamed files live under their old name in HEAD.
+    let head_rel = head_file.map(|f| f.replace('\\', "/")).unwrap_or_else(|| rel.clone());
 
-    let head = git_show(p, &format!("HEAD:{}", rel));
+    let head = git_show(p, &format!("HEAD:{}", head_rel));
     let index = git_show(p, &format!(":{}", rel));
 
     let abs = p.join(&rel);

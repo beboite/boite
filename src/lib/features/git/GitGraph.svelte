@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy } from "svelte";
   import type { Commit } from "./api";
 
   type Props = { commits: Commit[] };
@@ -27,7 +28,7 @@
   const STROKE = 1.5;
   const MAX_STRIP_W = 72;
 
-  const BASE_COLOR = "#fbbf24";
+  const BASE_COLOR = "var(--color-warning)";
   const REMOTE_ONLY_COLOR = "#38bdf8";
   const FALLBACK_COLOR = "#a1a1aa";
   const BRANCH_COLORS = [
@@ -40,6 +41,8 @@
     "#60a5fa",
     "#c084fc",
   ];
+
+  const bySha = $derived(new Map(commits.map((c) => [c.sha, c])));
 
   const currentBranch = $derived.by((): string | null => {
     for (const c of commits) {
@@ -181,7 +184,7 @@
   }
 
   function commitColorBySha(sha: string, baseBranch: string | null): string {
-    const commit = commits.find((c) => c.sha === sha);
+    const commit = bySha.get(sha);
     return commit ? commitColor(commit, baseBranch) : FALLBACK_COLOR;
   }
 
@@ -205,29 +208,71 @@
     });
   }
 
-  let hovered = $state<{ row: Row; x: number; y: number } | null>(null);
+  let hovered = $state<{ row: Row; x: number; rowTop: number; rowBottom: number } | null>(null);
+  let popupEl = $state<HTMLElement | null>(null);
+  let measuredH = $state(184);
+  let hoverTimer: ReturnType<typeof setTimeout> | null = null;
   const POPUP_W = 380;
-  const POPUP_H = 184;
+  const HOVER_DELAY_MS = 350;
 
   function showPopup(row: Row, e: MouseEvent) {
     const target = e.currentTarget as HTMLElement;
     const rect = target.getBoundingClientRect();
-    const flipUp = rect.bottom + POPUP_H + 8 > window.innerHeight;
-    const y = flipUp ? rect.top - POPUP_H - 4 : rect.bottom + 4;
     const x = Math.max(
       8,
       Math.min(rect.left, window.innerWidth - POPUP_W - 8),
     );
-    hovered = { row, x, y };
+    if (hoverTimer) clearTimeout(hoverTimer);
+    const next = { row, x, rowTop: rect.top, rowBottom: rect.bottom };
+    if (hovered) {
+      // A popup is already up; follow the cursor without re-delaying.
+      hovered = next;
+      return;
+    }
+    hoverTimer = setTimeout(() => {
+      hoverTimer = null;
+      hovered = next;
+    }, HOVER_DELAY_MS);
   }
 
   function hidePopup() {
+    if (hoverTimer) {
+      clearTimeout(hoverTimer);
+      hoverTimer = null;
+    }
     hovered = null;
   }
 
+  $effect(() => {
+    void hovered;
+    if (popupEl) measuredH = popupEl.offsetHeight;
+  });
+
+  const popupTop = $derived.by(() => {
+    if (!hovered) return 0;
+    const flipUp = hovered.rowBottom + measuredH + 8 > window.innerHeight;
+    return flipUp ? hovered.rowTop - measuredH - 4 : hovered.rowBottom + 4;
+  });
+
+  $effect(() => {
+    if (!hovered) return;
+    window.addEventListener("scroll", hidePopup, true);
+    return () => window.removeEventListener("scroll", hidePopup, true);
+  });
+
+  onDestroy(() => {
+    if (hoverTimer) clearTimeout(hoverTimer);
+  });
+
+  let now = $state(Date.now());
+  $effect(() => {
+    const t = setInterval(() => (now = Date.now()), 30_000);
+    return () => clearInterval(t);
+  });
+
   function relTime(ts: number): string {
     if (!ts) return "";
-    const diff = Date.now() / 1000 - ts;
+    const diff = now / 1000 - ts;
     if (diff < 60) return "now";
     if (diff < 3600) return `${Math.floor(diff / 60)}m`;
     if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
@@ -380,9 +425,10 @@
 {#if hovered}
   {@const c = hovered.row.commit}
   <div
+    bind:this={popupEl}
     class="pointer-events-none fixed z-50 rounded-md border border-border bg-[var(--color-surface-3)] p-2.5 shadow-xl"
     style:left="{hovered.x}px"
-    style:top="{hovered.y}px"
+    style:top="{popupTop}px"
     style:width="{POPUP_W}px"
   >
     <div

@@ -1,8 +1,10 @@
 <script lang="ts">
+  import { onDestroy } from "svelte";
   import { app } from "$lib/app/store.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
   import { gitStore } from "./store.svelte";
   import { editorStore } from "$lib/features/editor/store.svelte";
+  import { confirmDialog } from "$lib/shared/components/confirm.svelte";
   import GitGraph from "./GitGraph.svelte";
   import type { ChangeEntry } from "./api";
   import CloudDownload from "@lucide/svelte/icons/cloud-download";
@@ -10,9 +12,12 @@
   import Plus from "@lucide/svelte/icons/plus";
   import Minus from "@lucide/svelte/icons/minus";
   import Trash2 from "@lucide/svelte/icons/trash-2";
+  import Check from "@lucide/svelte/icons/check";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import ArrowUp from "@lucide/svelte/icons/arrow-up";
   import ArrowDown from "@lucide/svelte/icons/arrow-down";
+  import ArrowUpFromLine from "@lucide/svelte/icons/arrow-up-from-line";
+  import ArrowDownToLine from "@lucide/svelte/icons/arrow-down-to-line";
 
   const AUTO_REFRESH_MS = 3000;
 
@@ -77,6 +82,18 @@
     if (project) void gitStore.fetch(project.id);
   }
 
+  function push() {
+    if (project) void gitStore.push(project.id);
+  }
+
+  function pull() {
+    if (project) void gitStore.pull(project.id);
+  }
+
+  function initRepo() {
+    if (project) void gitStore.init(project.id);
+  }
+
   function commitKey(e: KeyboardEvent) {
     if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
       e.preventDefault();
@@ -111,12 +128,14 @@
     document.removeEventListener("mouseup", stopResizeY);
   }
 
+  onDestroy(stopResizeY);
+
   function statusColor(s: string): string {
     if (s === "M") return "text-[var(--color-warning)]";
     if (s === "A") return "text-[var(--color-success)]";
     if (s === "D") return "text-[var(--color-danger)]";
     if (s === "R") return "text-[var(--color-success)]";
-    if (s === "?") return "text-muted-foreground";
+    if (s === "?") return "text-[var(--color-success)]";
     if (s === "U") return "text-[var(--color-danger)]";
     return "text-muted-foreground";
   }
@@ -137,16 +156,26 @@
   function unstagePaths(files: string[]) {
     if (project) void gitStore.unstage(project.id, files);
   }
-  function discardPath(path: string) {
+  function markResolved(path: string) {
+    if (project) void gitStore.stage(project.id, [path]);
+  }
+  async function discardEntry(entry: ChangeEntry) {
     if (!project) return;
-    if (confirm(`Discard changes to ${path}?\nThis cannot be undone.`)) {
-      void gitStore.discard(project.id, [path]);
-    }
+    const untracked = entry.status === "?";
+    const ok = await confirmDialog.ask({
+      title: untracked ? "Delete untracked file?" : "Discard changes?",
+      message: untracked
+        ? `${entry.path} is not tracked by git. Deleting it cannot be undone.`
+        : `Working-tree changes to ${entry.path} will be lost. Staged changes are kept.`,
+      confirmLabel: untracked ? "Delete" : "Discard",
+      danger: true,
+    });
+    if (ok) void gitStore.discard(project.id, [entry]);
   }
 
   async function openDiff(entry: ChangeEntry) {
     if (!project) return;
-    if (entry.status === "?") {
+    if (entry.status === "?" || entry.conflicted) {
       const sep = project.cwd.includes("\\") ? "\\" : "/";
       const root = project.cwd.endsWith(sep) ? project.cwd : project.cwd + sep;
       await editorStore.openFile(root + entry.path.replace(/[\\/]/g, sep));
@@ -159,6 +188,7 @@
       repoPath: project.cwd,
       file: entry.path,
       mode,
+      headFile: entry.origPath ?? undefined,
     });
     app.view = "editor";
   }
@@ -192,16 +222,38 @@
     {:else}
       <span class="truncate text-xs text-muted-foreground">Not a git repo</span>
     {/if}
-    <button
-      type="button"
-      class="ml-auto rounded p-1 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:opacity-40"
-      onclick={fetch}
-      disabled={!project || gs?.fetching}
-      title="Fetch from remote"
-      aria-label="Fetch from remote"
-    >
-      <CloudDownload class="size-3.5 {gs?.fetching ? 'animate-pulse' : ''}" />
-    </button>
+    <div class="ml-auto flex items-center gap-0.5">
+      <button
+        type="button"
+        class="rounded p-1 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:opacity-40"
+        onclick={pull}
+        disabled={!gs?.isRepo || !gs.upstream || gs.pulling}
+        title="Pull (fast-forward only)"
+        aria-label="Pull"
+      >
+        <ArrowDownToLine class="size-3.5 {gs?.pulling ? 'animate-pulse' : ''}" />
+      </button>
+      <button
+        type="button"
+        class="rounded p-1 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:opacity-40"
+        onclick={push}
+        disabled={!gs?.isRepo || gs.pushing || (gs.upstream !== null && gs.ahead === 0)}
+        title={gs?.upstream ? "Push" : "Publish branch"}
+        aria-label="Push"
+      >
+        <ArrowUpFromLine class="size-3.5 {gs?.pushing ? 'animate-pulse' : ''}" />
+      </button>
+      <button
+        type="button"
+        class="rounded p-1 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:opacity-40"
+        onclick={fetch}
+        disabled={!project || gs?.fetching}
+        title="Fetch from remote"
+        aria-label="Fetch from remote"
+      >
+        <CloudDownload class="size-3.5 {gs?.fetching ? 'animate-pulse' : ''}" />
+      </button>
+    </div>
   </header>
 
   {#if !project}
@@ -210,11 +262,24 @@
     >
       Pick a project.
     </div>
-  {:else if !gs?.isRepo}
+  {:else if !gs || !gs.loaded}
     <div
-      class="flex flex-1 items-center justify-center px-3 text-center text-xs text-muted-foreground"
+      class="flex flex-1 items-center justify-center px-3 text-center text-xs text-muted-foreground/70"
     >
-      This folder is not a git repository.
+      Loading…
+    </div>
+  {:else if !gs.isRepo}
+    <div
+      class="flex flex-1 flex-col items-center justify-center gap-3 px-3 text-center text-xs text-muted-foreground"
+    >
+      <span>This folder is not a git repository.</span>
+      <button
+        type="button"
+        class="rounded-md border border-border bg-[var(--color-surface-2)] px-3 py-1.5 text-xs text-foreground/85 transition hover:bg-[var(--color-surface-3)] hover:text-foreground"
+        onclick={initRepo}
+      >
+        Initialize repository
+      </button>
     </div>
   {:else}
     <div bind:this={bodyEl} class="flex min-h-0 flex-1 flex-col">
@@ -303,7 +368,7 @@
       <button
         type="button"
         onmousedown={startResizeY}
-        class="relative h-1 shrink-0 cursor-row-resize bg-transparent transition hover:bg-foreground/10"
+        class="relative h-1 shrink-0 cursor-row-resize transition hover:bg-foreground/10 {resizingY ? 'bg-foreground/20' : 'bg-transparent'}"
         aria-label="Resize sections"
         tabindex="-1"
       ></button>
@@ -408,7 +473,7 @@
             {/if}
           </button>
           <div
-            class="flex shrink-0 items-center gap-0.5 opacity-0 transition group-hover/row:opacity-100"
+            class="flex shrink-0 items-center gap-0.5 opacity-0 transition group-hover/row:opacity-100 group-focus-within/row:opacity-100"
           >
             {#if mode === "staged"}
               <button
@@ -424,9 +489,9 @@
               <button
                 type="button"
                 class="rounded p-0.5 text-muted-foreground hover:bg-[var(--color-surface-3)] hover:text-foreground"
-                title="Discard"
-                aria-label="Discard file"
-                onclick={() => discardPath(entry.path)}
+                title={entry.status === "?" ? "Delete file" : "Discard changes"}
+                aria-label={entry.status === "?" ? "Delete file" : "Discard changes"}
+                onclick={() => discardEntry(entry)}
               >
                 <Trash2 class="size-3" />
               </button>
@@ -438,6 +503,16 @@
                 onclick={() => stagePaths([entry.path])}
               >
                 <Plus class="size-3" />
+              </button>
+            {:else if mode === "conflict"}
+              <button
+                type="button"
+                class="rounded p-0.5 text-muted-foreground hover:bg-[var(--color-surface-3)] hover:text-foreground"
+                title="Mark resolved (stage)"
+                aria-label="Mark resolved"
+                onclick={() => markResolved(entry.path)}
+              >
+                <Check class="size-3" />
               </button>
             {/if}
           </div>

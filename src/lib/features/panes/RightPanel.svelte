@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy } from "svelte";
   import { settings } from "$lib/features/settings/store.svelte";
   import GitPanel from "$lib/features/git/GitPanel.svelte";
   import ExplorerPanel from "$lib/features/explorer/ExplorerPanel.svelte";
@@ -25,6 +26,8 @@
     document.removeEventListener("mousemove", onResizeX);
     document.removeEventListener("mouseup", stopResizeX);
   }
+
+  onDestroy(stopResizeX);
 
   function selectTab(tab: "git" | "explorer") {
     void settings.setRightPanel(tab);
@@ -80,7 +83,7 @@
 
   <button
     type="button"
-    class="absolute left-0 top-0 z-10 h-full w-1 cursor-col-resize bg-transparent transition hover:bg-foreground/10"
+    class="absolute left-0 top-0 z-10 h-full w-1 cursor-col-resize transition hover:bg-foreground/10 {resizingX ? 'bg-foreground/20' : 'bg-transparent'}"
     onmousedown={startResizeX}
     aria-label="Resize panel"
     tabindex="-1"

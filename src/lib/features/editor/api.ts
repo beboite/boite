@@ -31,6 +31,11 @@ export interface FileVersions {
 export function gitFileVersions(
   repoPath: string,
   file: string,
+  headFile?: string,
 ): Promise<FileVersions> {
-  return invoke<FileVersions>("git_file_versions", { path: repoPath, file });
+  return invoke<FileVersions>("git_file_versions", {
+    path: repoPath,
+    file,
+    headFile: headFile ?? null,
+  });
 }

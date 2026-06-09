@@ -36,6 +36,11 @@
     return s;
   }
 
+  // OS-facing calls (explorer.exe) want native separators back.
+  function toNative(p: string): string {
+    return /^[a-zA-Z]:\//.test(p) ? p.replaceAll("/", "\\") : p;
+  }
+
   async function activate(e: MouseEvent) {
     if (entry.isDir) {
       await explorerStore.toggle(entry.path);
@@ -43,7 +48,7 @@
     }
     if (e.altKey) {
       try {
-        await openPath(entry.path);
+        await openPath(toNative(entry.path));
       } catch (err) {
         logger.warn("explorer", `openPath failed for ${entry.path}`, String(err));
       }
@@ -57,7 +62,7 @@
     e.preventDefault();
     e.stopPropagation();
     try {
-      await revealItemInDir(entry.path);
+      await revealItemInDir(toNative(entry.path));
     } catch (err) {
       logger.warn("explorer", `revealItemInDir failed for ${entry.path}`, String(err));
     }
@@ -68,7 +73,10 @@
 <div>
   <button
     type="button"
-    class="group flex w-full items-center gap-1 px-1 py-0.5 text-left text-[11.5px] transition hover:bg-[var(--color-surface-2)] {entry.isHidden ? 'text-foreground/55' : 'text-foreground/85'}"
+    data-tree-row
+    data-path={entry.path}
+    data-dir={entry.isDir ? "1" : "0"}
+    class="group flex w-full items-center gap-1 px-1 py-0.5 text-left text-[11.5px] transition hover:bg-[var(--color-surface-2)] focus-visible:bg-[var(--color-surface-2)] focus-visible:outline-none {entry.isHidden ? 'text-foreground/55' : 'text-foreground/85'}"
     style:padding-left="{depth * 12 + 4}px"
     onclick={activate}
     oncontextmenu={reveal}
