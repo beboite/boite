@@ -6,11 +6,12 @@
   import { app } from "$lib/app/store.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
   import {
-    closeThread,
+    closeThreadWithConfirm,
     launchBlankTerminal,
     restoreLastClosedThread,
   } from "$lib/features/thread/api";
   import { addProjectByPath } from "$lib/features/project/api";
+  import { editorStore } from "$lib/features/editor/store.svelte";
   import { paneStore, leavesOf } from "$lib/features/panes/store.svelte";
 
   let { children } = $props();
@@ -36,11 +37,14 @@
   }
 
   function cycleThread(direction: 1 | -1) {
-    const list = app.threads;
+    // Walk in sidebar order (project order, then per-project thread order)
+    // so Ctrl+Tab matches what the user sees, not creation order.
+    const list = app.sortedProjects.flatMap((p) => app.threadsByProjectSorted(p.id));
     if (list.length === 0) return;
     const idx = list.findIndex((t) => t.id === app.activeThreadId);
     const next = idx < 0 ? 0 : (idx + direction + list.length) % list.length;
     app.activeThreadId = list[next].id;
+    app.selectedProjectId = list[next].projectId;
     app.view = "terminal";
   }
 
@@ -62,7 +66,7 @@
   function handleKeydown(e: KeyboardEvent) {
     if (e.key === "Escape") {
       if (isModalOpen()) return;
-      if (app.view === "settings") {
+      if (app.view === "settings" || app.view === "editor") {
         e.preventDefault();
         app.view = "terminal";
       }
@@ -144,11 +148,31 @@
       return;
     }
 
-    // Close active thread
+    // Close what's in front: editor tab in editor view, settings view, or
+    // the active thread (honoring the confirm-before-close setting).
     if ((e.key === "w" || e.key === "W") && !e.shiftKey && !e.altKey) {
+      if (app.view === "editor") {
+        e.preventDefault();
+        const active = editorStore.activeId;
+        if (active) {
+          void editorStore.close(active).then((closed) => {
+            if (closed && editorStore.buffers.length === 0) {
+              app.view = "terminal";
+            }
+          });
+        } else {
+          app.view = "terminal";
+        }
+        return;
+      }
+      if (app.view === "settings") {
+        e.preventDefault();
+        app.view = "terminal";
+        return;
+      }
       if (!app.activeThreadId) return;
       e.preventDefault();
-      void closeThread(app.activeThreadId);
+      void closeThreadWithConfirm(app.activeThreadId);
       return;
     }
 

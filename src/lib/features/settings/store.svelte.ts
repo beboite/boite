@@ -68,6 +68,7 @@ function migrateShortcuts(raw: unknown): { shortcuts: Shortcut[]; changed: boole
 const DEFAULTS: Settings = {
   shortcuts: PRESET_SHORTCUTS,
   powershellNewline: true,
+  powershellNoProfile: false,
   defaultShellId: null,
   sidebarWidth: 240,
   sidebarCollapsed: false,
@@ -150,6 +151,10 @@ class SettingsStore {
           typeof stored.powershellNewline === "boolean"
             ? stored.powershellNewline
             : DEFAULTS.powershellNewline,
+        powershellNoProfile:
+          typeof stored.powershellNoProfile === "boolean"
+            ? stored.powershellNoProfile
+            : DEFAULTS.powershellNoProfile,
         defaultShellId:
           typeof stored.defaultShellId === "string"
             ? stored.defaultShellId
@@ -233,6 +238,14 @@ class SettingsStore {
     this.state.powershellNewline = value;
     await this.persist();
     notifications.success(value ? "PowerShell newline on" : "PowerShell newline off");
+  }
+
+  async setPowershellNoProfile(value: boolean) {
+    this.state.powershellNoProfile = value;
+    await this.persist();
+    notifications.success(
+      value ? "PowerShell profile skipped (-NoProfile)" : "PowerShell profile loaded",
+    );
   }
 
   async setDefaultShellId(id: string | null) {

@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::env;
 use std::ffi::OsStr;
 use std::fs;
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
@@ -65,10 +66,11 @@ fn collect_files(root: &Path, out: &mut Vec<(PathBuf, i64)>, depth: usize, max_d
 }
 
 fn read_claude_session_meta(path: &Path) -> Option<(Option<String>, Option<String>)> {
-    let content = fs::read_to_string(path).ok()?;
+    // Buffered: session jsonl files reach tens of MB; only the head matters.
+    let reader = BufReader::new(fs::File::open(path).ok()?);
     let mut found_session: Option<String> = None;
     let mut found_cwd: Option<String> = None;
-    for line in content.lines().take(80) {
+    for line in reader.lines().map_while(Result::ok).take(80) {
         let trimmed = line.trim();
         if trimmed.is_empty() {
             continue;
@@ -152,8 +154,10 @@ fn find_claude_session_blocking(
     candidates.sort_by_key(|c| std::cmp::Reverse(c.modified_ms));
 
     for cand in candidates {
-        let dir_matches =
-            cand.dir_name_lower == target_encoded || target_encoded.contains(&cand.dir_name_lower);
+        // Exact match only. A substring test let short project dir names
+        // match unrelated cwds, attaching the wrong session to a thread; the
+        // cwd read from the jsonl below remains the robust fallback.
+        let dir_matches = cand.dir_name_lower == target_encoded;
 
         let (session_id, session_cwd) =
             read_claude_session_meta(&cand.path).unwrap_or((None, None));
@@ -198,9 +202,13 @@ struct CodexPayload {
 }
 
 fn read_codex_session_meta(path: &Path) -> Option<(String, String)> {
-    let content = fs::read_to_string(path).ok()?;
-    let first = content.lines().find(|l| !l.trim().is_empty())?;
-    let meta: CodexSessionMeta = serde_json::from_str(first).ok()?;
+    let reader = BufReader::new(fs::File::open(path).ok()?);
+    let first = reader
+        .lines()
+        .map_while(Result::ok)
+        .take(10)
+        .find(|l| !l.trim().is_empty())?;
+    let meta: CodexSessionMeta = serde_json::from_str(&first).ok()?;
     if meta.kind.as_deref() != Some("session_meta") {
         return None;
     }
@@ -434,9 +442,35 @@ fn find_copilot_session_blocking(
     None
 }
 
+fn parse_offset_minutes(s: &str) -> Option<i64> {
+    let sign = match s.chars().next()? {
+        '+' => 1,
+        '-' => -1,
+        _ => return None,
+    };
+    let rest = &s[1..];
+    let (h, m) = match rest.split_once(':') {
+        Some((h, m)) => (h, m),
+        None if rest.len() == 4 => rest.split_at(2),
+        None => (rest, "0"),
+    };
+    let h: i64 = h.parse().ok()?;
+    let m: i64 = m.parse().ok()?;
+    Some(sign * (h * 60 + m))
+}
+
 fn parse_iso_ms(s: &str) -> Option<i64> {
     let trimmed = s.trim().trim_end_matches('Z');
-    let (date_part, time_part) = trimmed.split_once('T').or_else(|| trimmed.split_once(' '))?;
+    let (date_part, time_full) = trimmed.split_once('T').or_else(|| trimmed.split_once(' '))?;
+    // Numeric offsets (+02:00, -0530) used to fail the segment-count check,
+    // silently skipping the timestamp filter for Copilot sessions.
+    let (time_part, offset_min) = match time_full.rfind(['+', '-']) {
+        Some(idx) if idx > 0 => {
+            let (t, off) = time_full.split_at(idx);
+            (t, parse_offset_minutes(off).unwrap_or(0))
+        }
+        _ => (time_full, 0),
+    };
     let date_segs: Vec<&str> = date_part.split('-').collect();
     let time_segs: Vec<&str> = time_part.split(':').collect();
     if date_segs.len() != 3 || time_segs.len() != 3 {
@@ -459,7 +493,7 @@ fn parse_iso_ms(s: &str) -> Option<i64> {
         f.parse().unwrap_or(0)
     };
     let days = days_since_epoch(y, mo, d)?;
-    Some(((days * 86400 + h * 3600 + mi * 60 + s_v) * 1000) + frac_ms)
+    Some(((days * 86400 + h * 3600 + mi * 60 + s_v - offset_min * 60) * 1000) + frac_ms)
 }
 
 fn days_since_epoch(y: i64, m: i64, d: i64) -> Option<i64> {

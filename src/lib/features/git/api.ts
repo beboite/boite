@@ -32,66 +32,20 @@ export interface Commit {
   remoteOnly: boolean;
 }
 
-interface RawRepoInfo {
-  is_repo: boolean;
-  branch: string | null;
-  upstream: string | null;
-  ahead: number;
-  behind: number;
-  refs_version: string | null;
-}
-
-interface RawCommit {
-  sha: string;
-  short_sha: string;
-  parents: string[];
-  author: string;
-  email: string;
-  time: number;
-  summary: string;
-  additions: number;
-  deletions: number;
-  refs: string[];
-  local_only: boolean;
-  remote_only: boolean;
-}
-
-export async function gitRepoInfo(path: string): Promise<RepoInfo> {
-  const r = await invoke<RawRepoInfo>("git_repo_info", { path });
-  return {
-    isRepo: r.is_repo,
-    branch: r.branch,
-    upstream: r.upstream,
-    ahead: r.ahead,
-    behind: r.behind,
-    refsVersion: r.refs_version,
-  };
+export function gitRepoInfo(path: string): Promise<RepoInfo> {
+  return invoke<RepoInfo>("git_repo_info", { path });
 }
 
 export function gitStatus(path: string): Promise<ChangeEntry[]> {
   return invoke<ChangeEntry[]>("git_status", { path });
 }
 
-export async function gitLog(
+export function gitLog(
   path: string,
   limit: number,
   skip: number,
 ): Promise<Commit[]> {
-  const rows = await invoke<RawCommit[]>("git_log", { path, limit, skip });
-  return rows.map((r) => ({
-    sha: r.sha,
-    shortSha: r.short_sha,
-    parents: r.parents,
-    author: r.author,
-    email: r.email,
-    time: r.time,
-    summary: r.summary,
-    additions: r.additions,
-    deletions: r.deletions,
-    refs: r.refs,
-    localOnly: r.local_only,
-    remoteOnly: r.remote_only,
-  }));
+  return invoke<Commit[]>("git_log", { path, limit, skip });
 }
 
 export function gitStage(path: string, files: string[]): Promise<void> {

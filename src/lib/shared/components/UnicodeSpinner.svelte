@@ -5,13 +5,11 @@
     frames?: string[];
     intervalMs?: number;
     size?: number;
-    className?: string;
   };
   let {
     frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
     intervalMs = 80,
     size = 12,
-    className = "",
   }: Props = $props();
 
   let index = $state(0);
@@ -29,7 +27,7 @@
 </script>
 
 <span
-  class="inline-block font-mono leading-none {className}"
+  class="inline-block font-mono leading-none"
   style:font-size="{size}px"
   aria-hidden="true"
 >{frames[index]}</span>

@@ -6,7 +6,8 @@ import { parseCommand, settings } from "$lib/features/settings/store.svelte";
 import { resolveIconKey } from "$lib/shared/icons/detect";
 import { platform } from "$lib/storage/platform.svelte";
 import { notifications } from "$lib/features/notifications/store.svelte";
-import type { IconKey, Shortcut, Thread } from "$lib/types";
+import { confirmDialog } from "$lib/shared/components/confirm.svelte";
+import type { IconKey, Project, Shortcut, Thread } from "$lib/types";
 import type { ShellOption } from "$lib/storage/platform.svelte";
 
 const closedThreads: Thread[] = [];
@@ -63,30 +64,31 @@ function buildThread(
   };
 }
 
-export async function launchShortcut(
-  shortcut: Shortcut,
-  projectId: string | null,
+function requireProject(projectId: string | null): Project | null {
+  const project = projectId
+    ? app.projects.find((p) => p.id === projectId) ?? null
+    : null;
+  if (!project) notifications.error("Pick a project first");
+  return project;
+}
+
+async function createThread(
+  project: Project,
+  cmd: string,
+  args: string[],
+  labelPrefix: string,
+  iconKey: IconKey,
+  opts: { fresh?: boolean } = {},
 ): Promise<Thread | null> {
-  const project = projectId ? app.projects.find((p) => p.id === projectId) : null;
-  if (!project) {
-    notifications.error("Pick a project first");
-    return null;
-  }
-  const parsed = parseCommand(shortcut.command || shortcut.label);
-  if (!parsed.cmd) {
-    notifications.error(`${shortcut.label}: empty command`);
-    return null;
-  }
-  const count = nextLabelSuffix(project.id, shortcut.label);
-  const iconKey = resolveIconKey(shortcut.iconKey, shortcut.label, shortcut.command);
+  const count = nextLabelSuffix(project.id, labelPrefix);
   const thread = buildThread(
     project.id,
-    parsed.cmd,
-    parsed.args,
-    `${shortcut.label} #${count}`,
+    cmd,
+    args,
+    `${labelPrefix} #${count}`,
     iconKey,
   );
-  app.markFresh(thread.id);
+  if (opts.fresh) app.markFresh(thread.id);
   try {
     await app.upsertThread(thread);
   } catch (err) {
@@ -97,45 +99,39 @@ export async function launchShortcut(
   app.activeThreadId = thread.id;
   app.view = "terminal";
   return thread;
+}
+
+export async function launchShortcut(
+  shortcut: Shortcut,
+  projectId: string | null,
+): Promise<Thread | null> {
+  const project = requireProject(projectId);
+  if (!project) return null;
+  const parsed = parseCommand(shortcut.command || shortcut.label);
+  if (!parsed.cmd) {
+    notifications.error(`${shortcut.label}: empty command`);
+    return null;
+  }
+  const iconKey = resolveIconKey(shortcut.iconKey, shortcut.label, shortcut.command);
+  return createThread(project, parsed.cmd, parsed.args, shortcut.label, iconKey, {
+    fresh: true,
+  });
 }
 
 export async function launchShell(
   shell: ShellOption,
   projectId: string | null,
 ): Promise<Thread | null> {
-  const project = projectId ? app.projects.find((p) => p.id === projectId) : null;
-  if (!project) {
-    notifications.error("Pick a project first");
-    return null;
-  }
-  const count = nextLabelSuffix(project.id, shell.label);
-  const thread = buildThread(
-    project.id,
-    shell.cmd,
-    [...shell.args],
-    `${shell.label} #${count}`,
-    "terminal",
-  );
-  try {
-    await app.upsertThread(thread);
-  } catch (err) {
-    console.error("upsertThread failed:", err);
-    notifications.error("Failed to create thread");
-    return null;
-  }
-  app.activeThreadId = thread.id;
-  app.view = "terminal";
-  return thread;
+  const project = requireProject(projectId);
+  if (!project) return null;
+  return createThread(project, shell.cmd, [...shell.args], shell.label, "terminal");
 }
 
 export async function launchBlankTerminal(
   projectId: string | null,
 ): Promise<Thread | null> {
-  const project = projectId ? app.projects.find((p) => p.id === projectId) : null;
-  if (!project) {
-    notifications.error("Pick a project first");
-    return null;
-  }
+  const project = requireProject(projectId);
+  if (!project) return null;
 
   let cmd: string;
   let args: string[] = [];
@@ -152,24 +148,7 @@ export async function launchBlankTerminal(
     cmd = await getDefaultShell();
   }
 
-  const count = nextLabelSuffix(project.id, label);
-  const thread = buildThread(
-    project.id,
-    cmd,
-    args,
-    `${label} #${count}`,
-    "terminal",
-  );
-  try {
-    await app.upsertThread(thread);
-  } catch (err) {
-    console.error("upsertThread failed:", err);
-    notifications.error("Failed to create thread");
-    return null;
-  }
-  app.activeThreadId = thread.id;
-  app.view = "terminal";
-  return thread;
+  return createThread(project, cmd, args, label, "terminal");
 }
 
 export async function closeThread(threadId: string) {
@@ -180,20 +159,32 @@ export async function closeThread(threadId: string) {
   await kill;
 }
 
+// One close path for every entry point (sidebar X, context menu, Ctrl+W) so
+// the confirm-before-close setting is honored everywhere.
+export async function closeThreadWithConfirm(threadId: string): Promise<boolean> {
+  const t = app.threads.find((x) => x.id === threadId);
+  if (!t) return false;
+  if (settings.state.confirmCloseThread) {
+    const ok = await confirmDialog.ask({
+      title: "Close thread?",
+      message: `Close ${t.title ?? t.label}? Running process will be killed.`,
+      confirmLabel: "Close thread",
+      danger: true,
+    });
+    if (!ok) return false;
+  }
+  await closeThread(threadId);
+  return true;
+}
+
 export async function stopThread(threadId: string) {
   const t = app.threads.find((x) => x.id === threadId);
   if (!t) return;
 
   const previousPtyId = t.ptyId;
   app.setThreadPtyId(t.id, null);
+  // setThreadStatus persists terminal statuses itself.
   app.setThreadStatus(t.id, "stopped", null);
-  await saveThread({
-    ...t,
-    ptyId: null,
-    status: "stopped",
-    exitCode: null,
-    args: [...t.args],
-  });
 
   if (previousPtyId) {
     try {
@@ -213,7 +204,13 @@ export async function restoreLastClosedThread(): Promise<Thread | null> {
     }
 
     const restored = snapshotThread(thread);
-    await app.upsertThread(restored);
+    try {
+      await app.upsertThread(restored);
+    } catch (err) {
+      console.error("upsertThread failed:", err);
+      notifications.error("Failed to restore thread");
+      return null;
+    }
     app.activeThreadId = restored.id;
     app.selectedProjectId = restored.projectId;
     app.view = "terminal";
@@ -231,7 +228,10 @@ export async function reloadThread(threadId: string) {
 
   const previousPtyId = t.ptyId;
   if (previousPtyId) {
-    void ptyKill(previousPtyId, false).catch(() => {});
+    // wait=true: respawning before the old process is dead reopens the
+    // two-`claude --resume`-on-one-session-file race the backend kill
+    // semantics were built to prevent.
+    await ptyKill(previousPtyId, true).catch(() => {});
   }
 
   t.ptyId = null;

@@ -91,8 +91,13 @@
   .text {
     font-size: 12px;
     color: var(--color-foreground);
-    white-space: nowrap;
+    /* Errors are the messages users actually need to read — let them wrap
+       up to 3 lines instead of truncating on one. */
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    -webkit-box-orient: vertical;
     overflow: hidden;
-    text-overflow: ellipsis;
+    overflow-wrap: anywhere;
   }
 </style>

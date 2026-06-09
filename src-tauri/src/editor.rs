@@ -7,14 +7,22 @@ use serde::Serialize;
 const MAX_TEXT_BYTES: u64 = 10 * 1024 * 1024;
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TextFile {
     pub content: String,
     pub size: u64,
     pub is_readonly: bool,
+    // Non-UTF-8 input decoded lossily: replacement chars stand in for the
+    // original bytes, so saving this content back would corrupt the file.
+    pub lossy: bool,
 }
 
 #[tauri::command]
-pub async fn read_text_file(path: String) -> Result<TextFile, String> {
+pub async fn read_text_file(
+    scope: tauri::State<'_, crate::scope::ProjectRoots>,
+    path: String,
+) -> Result<TextFile, String> {
+    scope.ensure_allowed(&path)?;
     tauri::async_runtime::spawn_blocking(move || read_blocking(&path))
         .await
         .map_err(|e| format!("read_text_file task failed: {e}"))?
@@ -37,15 +45,16 @@ fn read_blocking(path: &str) -> Result<TextFile, String> {
     if looks_binary(&bytes) {
         return Err("binary file".into());
     }
-    let content = match String::from_utf8(bytes) {
-        Ok(s) => s,
-        Err(e) => String::from_utf8_lossy(&e.into_bytes()).into_owned(),
+    let (content, lossy) = match String::from_utf8(bytes) {
+        Ok(s) => (s, false),
+        Err(e) => (String::from_utf8_lossy(&e.into_bytes()).into_owned(), true),
     };
     let is_readonly = meta.permissions().readonly();
     Ok(TextFile {
         content,
         size,
         is_readonly,
+        lossy,
     })
 }
 
@@ -55,7 +64,12 @@ fn looks_binary(bytes: &[u8]) -> bool {
 }
 
 #[tauri::command]
-pub async fn write_text_file(path: String, content: String) -> Result<u64, String> {
+pub async fn write_text_file(
+    scope: tauri::State<'_, crate::scope::ProjectRoots>,
+    path: String,
+    content: String,
+) -> Result<u64, String> {
+    scope.ensure_allowed_for_write(&path)?;
     tauri::async_runtime::spawn_blocking(move || write_blocking(&path, &content))
         .await
         .map_err(|e| format!("write_text_file task failed: {e}"))?

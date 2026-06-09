@@ -7,7 +7,13 @@
   import { Unicode11Addon } from "@xterm/addon-unicode11";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
-  import { ptySpawn, ptyWrite, ptyResize, ptyKill } from "$lib/storage/pty";
+  import {
+    ptySpawn,
+    ptyWrite,
+    ptyResize,
+    ptyKill,
+    decodePtyOutput,
+  } from "$lib/storage/pty";
   import type { PtyEvent } from "$lib/storage/pty";
   import { app } from "$lib/app/store.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
@@ -16,9 +22,13 @@
   import {
     planDirectSpawn,
     planSpawnInShell,
+    withPowershellFastFlags,
   } from "$lib/features/thread/shell-wrap";
   import { platform } from "$lib/storage/platform.svelte";
-  import { saveThread } from "$lib/storage/db";
+  import {
+    startSessionMonitor,
+    type SessionMonitor,
+  } from "$lib/features/thread/session-monitor.svelte";
   import { notifications } from "$lib/features/notifications/store.svelte";
   import { logger } from "$lib/shared/services/logger.svelte";
   import {
@@ -50,9 +60,7 @@
     null,
   );
   let lastOutputAt = 0;
-  let sessionTimer: ReturnType<typeof setInterval> | null = null;
-  let sessionTimeouts: ReturnType<typeof setTimeout>[] = [];
-  let sessionScanInFlight = false;
+  let sessionMonitor: SessionMonitor | null = null;
   let fitRafId: number | null = null;
   let lastInputAt = 0;
   let lastDetectAt = 0;
@@ -61,7 +69,6 @@
   const decoder = new TextDecoder("utf-8", { fatal: false });
   const LF = new Uint8Array([0x0a]);
   const DETECT_BUFFER_MAX = 4000;
-  const SESSION_SCAN_INTERVAL_MS = 12_000;
 
   function focusTerminalSoon() {
     queueMicrotask(() => term?.focus());
@@ -193,20 +200,24 @@
     }
   }
 
-  function handleEvent(event: PtyEvent) {
-    if (!term) return;
-    const current = currentThread();
-    if (!current || current.status === "stopped") return;
-    if (ptyId && current.ptyId && current.ptyId !== ptyId) return;
+  // eventPtyId is captured per spawn so a stale channel still flushing after
+  // a reload can never write into — or mark exited — the replacement PTY.
+  function handleEvent(event: PtyEvent, eventPtyId: string) {
+    if (!term || destroyed) return;
+    if (eventPtyId !== ptyId) return;
 
     if (event.type === "output") {
+      const current = currentThread();
+      if (!current || current.status === "stopped") return;
       syncAliveThread();
-      const bytes = new Uint8Array(event.data);
+      const bytes = decodePtyOutput(event.data);
       lastOutputAt = Date.now();
       term.write(bytes);
       const text = decoder.decode(bytes, { stream: true });
       detectWorkingFromOutput(text);
     } else if (event.type === "title") {
+      const current = currentThread();
+      if (!current || current.status === "stopped") return;
       syncAliveThread();
       const cleaned = cleanTitle(event.value);
       if (cleaned && !isGenericTitle(cleaned)) {
@@ -216,14 +227,12 @@
         markRunning();
       }
     } else if (event.type === "exit") {
-      const exitedPtyId = ptyId;
-      if (!exitedPtyId) return;
       ptyId = null;
       spawned = false;
       clearPendingInputTimers();
       stopSessionMonitor();
-      const current = app.threads.find((x) => x.id === thread.id);
-      if (current?.ptyId !== exitedPtyId) return;
+      const current = currentThread();
+      if (current?.ptyId !== eventPtyId) return;
       if (current.status === "stopped") {
         app.setThreadPtyId(thread.id, null);
         return;
@@ -233,7 +242,10 @@
       app.setThreadPtyId(thread.id, null);
     } else if (event.type === "error") {
       term.write(`\r\n[boite] ${event.message}\r\n`);
-      app.setThreadStatus(thread.id, "error");
+      const current = currentThread();
+      if (current && current.status !== "stopped") {
+        app.setThreadStatus(thread.id, "error");
+      }
     }
   }
 
@@ -299,123 +311,8 @@
   }
 
   function stopSessionMonitor() {
-    if (sessionTimer) clearInterval(sessionTimer);
-    sessionTimer = null;
-    for (const timeout of sessionTimeouts) clearTimeout(timeout);
-    sessionTimeouts = [];
-  }
-
-  async function persistSessionId(
-    t: Thread,
-    id: string | null,
-    cwd: string,
-    opts: { silent?: boolean } = {},
-  ) {
-    if (t.sessionId === id) return;
-    const previous = t.sessionId;
-    t.sessionId = id;
-    await saveThread($state.snapshot(t) as Thread);
-    if (id) app.clearUnbound(t.id);
-    logger.info(
-      "session",
-      `${id ? (previous ? "updated" : "captured") : "cleared"} ${t.iconKey ?? "?"} session for ${t.label}`,
-      { id, previous, cwd },
-    );
-    if (!opts.silent && id) {
-      notifications.success(
-        previous ? `Session updated (${t.label})` : `Session captured (${t.label})`,
-      );
-    }
-  }
-
-  function sessionProbeSince(t: Thread, initialSince: number): number | null {
-    if (!t.sessionId) return initialSince;
-    const localActivityAt = Math.max(lastInputAt, lastOutputAt);
-    if (!localActivityAt) return null;
-    if (Date.now() - localActivityAt > SESSION_SCAN_INTERVAL_MS * 2) return null;
-    return Math.max(initialSince, localActivityAt - 2000);
-  }
-
-  function startSessionMonitor(
-    cwd: string,
-    detector: NonNullable<ReturnType<typeof getDetector>>,
-    since: number,
-    targetPtyId: string,
-  ) {
-    stopSessionMonitor();
-
-    const scanOnce = async (): Promise<boolean> => {
-      if (sessionScanInFlight) return false;
-      const t = app.threads.find((x) => x.id === thread.id);
-      if (!t || t.ptyId !== targetPtyId || ptyId !== targetPtyId) return true;
-      const probeSince = sessionProbeSince(t, since);
-      if (probeSince == null) return false;
-
-      // Exclude every sessionId already claimed by any thread (incl. self).
-      // Otherwise sibling monitors keep stealing each other's session in a
-      // loop because the detector always returns the newest jsonl in the cwd.
-      const excludeIds = app.threads
-        .map((x) => x.sessionId)
-        .filter((id): id is string => !!id);
-
-      sessionScanInFlight = true;
-      try {
-        const id = await detector(cwd, probeSince, excludeIds);
-        if (!id) {
-          if (t.sessionId) {
-            logger.debug(
-              "session",
-              `${t.label}: locked on ${t.sessionId}, no new session detected`,
-              { cwd, probeSince },
-            );
-          }
-          return false;
-        }
-        if (id === t.sessionId) {
-          logger.debug(
-            "session",
-            `${t.label}: detector returned current session, skip`,
-            { id },
-          );
-          return false;
-        }
-        const sibling = app.threads.find(
-          (x) => x.id !== thread.id && x.sessionId === id,
-        );
-        if (sibling) {
-          logger.warn(
-            "session",
-            `${t.label}: claiming ${id} from sibling ${sibling.label}`,
-            { id, sibling: sibling.label },
-          );
-          notifications.success(
-            `Session reassigned: ${sibling.label} → ${t.label}`,
-          );
-          await persistSessionId(sibling, null, cwd, { silent: true });
-        }
-        logger.info(
-          "session",
-          `${t.label}: ${t.sessionId ? "manual switch" : "captured"} ${t.sessionId ?? "(none)"} → ${id}`,
-          { cwd, previous: t.sessionId, next: id },
-        );
-        await persistSessionId(t, id, cwd);
-        return false;
-      } catch (err) {
-        logger.error("session", `detect failed for ${t.label}`, String(err));
-        return false;
-      } finally {
-        sessionScanInFlight = false;
-      }
-    };
-
-    const runScan = () => {
-      void scanOnce().then((done) => {
-        if (done) stopSessionMonitor();
-      });
-    };
-
-    sessionTimeouts = [setTimeout(runScan, 3000), setTimeout(runScan, 8000)];
-    sessionTimer = setInterval(runScan, SESSION_SCAN_INTERVAL_MS);
+    sessionMonitor?.stop();
+    sessionMonitor = null;
   }
 
   async function openTerminalLink(event: MouseEvent, uri: string) {
@@ -500,7 +397,10 @@
       return;
     }
     const current = currentThread();
-    if (!current || current.status === "stopped") {
+    // Only idle threads spawn. Finished threads (done/exited/error) used to
+    // auto-respawn whenever the pane became visible again; relaunch is an
+    // explicit user action that goes through reloadThread + remount.
+    if (!current || current.status !== "idle") {
       logger.debug(
         "spawn",
         `${thread.label}: skip — missing=${!current} status=${current?.status}`,
@@ -549,8 +449,25 @@
       wrapShell && !isBlankTerminal
         ? planSpawnInShell(wrapShell, thread.cmd, userArgs)
         : planDirectSpawn(thread.cmd, userArgs);
+    plan.args = withPowershellFastFlags(
+      plan.cmd,
+      plan.args,
+      settings.state.powershellNoProfile,
+    );
 
     const spawnedAt = Date.now();
+
+    // The reader thread can emit before invoke resolves with the pty id;
+    // queue those events and flush them once the id is known.
+    let channelPtyId: string | null = null;
+    const earlyEvents: PtyEvent[] = [];
+    const onEvent = (event: PtyEvent) => {
+      if (channelPtyId === null) {
+        earlyEvents.push(event);
+        return;
+      }
+      handleEvent(event, channelPtyId);
+    };
 
     try {
       const nextPtyId = await ptySpawn(
@@ -561,7 +478,7 @@
           cols,
           rows,
         },
-        handleEvent,
+        onEvent,
       );
       const current = currentThread();
       if (destroyed || !term || !current || current.status === "stopped") {
@@ -570,6 +487,10 @@
       }
       ptyId = nextPtyId;
       spawned = true;
+      channelPtyId = nextPtyId;
+      for (const event of earlyEvents.splice(0)) {
+        handleEvent(event, nextPtyId);
+      }
       spawnRetryCount = 0;
       app.setThreadPtyId(thread.id, ptyId);
       app.setThreadStatus(thread.id, "ready");
@@ -631,21 +552,17 @@
     const detector = getDetector(thread);
     if (detector && ptyId) {
       const since = Math.max(0, spawnedAt - (thread.sessionId ? 1000 : 5000));
-      startSessionMonitor(project.cwd, detector, since, ptyId);
+      stopSessionMonitor();
+      sessionMonitor = startSessionMonitor({
+        threadId: thread.id,
+        cwd: project.cwd,
+        detector,
+        since,
+        targetPtyId: ptyId,
+        isPtyCurrent: (id) => ptyId === id,
+        lastActivityAt: () => Math.max(lastInputAt, lastOutputAt),
+      });
     }
-
-    term.onData((data) => {
-      if (!shouldUsePty(ptyId)) return;
-      syncAliveThread();
-      lastInputAt = Date.now();
-      const bytes = new TextEncoder().encode(data);
-      void ptyWrite(ptyId, bytes);
-    });
-
-    term.onResize(({ cols, rows }) => {
-      if (!shouldUsePty(ptyId)) return;
-      void ptyResize(ptyId, cols, rows);
-    });
   }
 
   onMount(() => {
@@ -737,6 +654,22 @@
 
     term.attachCustomWheelEventHandler(handleCodexWheel);
 
+    // Registered once for the component's lifetime. These used to be
+    // re-registered at the end of every spawn(), stacking one handler per
+    // respawn and duplicating every keystroke N times into the live PTY.
+    term.onData((data) => {
+      if (!shouldUsePty(ptyId)) return;
+      syncAliveThread();
+      lastInputAt = Date.now();
+      const bytes = new TextEncoder().encode(data);
+      void ptyWrite(ptyId, bytes);
+    });
+
+    term.onResize(({ cols, rows }) => {
+      if (!shouldUsePty(ptyId)) return;
+      void ptyResize(ptyId, cols, rows);
+    });
+
     term.open(container);
 
     try {
@@ -816,6 +749,21 @@
       class="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-black text-xs text-muted-foreground/60"
     >
       ( -_-) zzZ
+    </div>
+  {:else if thread.status === "done" || thread.status === "exited" || thread.status === "error"}
+    <div class="absolute inset-x-0 bottom-3 z-10 flex justify-center">
+      <button
+        type="button"
+        class="rounded-md border border-border bg-[var(--color-surface)] px-3 py-1 text-xs text-muted-foreground shadow-lg transition hover:bg-[var(--color-surface-2)] hover:text-foreground"
+        onclick={() => void reloadThread(thread.id)}
+      >
+        {thread.status === "done"
+          ? "Process finished"
+          : thread.status === "error"
+            ? "Spawn failed"
+            : `Process exited (code ${thread.exitCode ?? "?"})`}
+        — click to relaunch
+      </button>
     </div>
   {/if}
 </div>

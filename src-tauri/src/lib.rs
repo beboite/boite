@@ -5,6 +5,7 @@ mod git;
 mod logging;
 mod project;
 mod pty;
+mod scope;
 mod session;
 mod shell;
 
@@ -111,6 +112,12 @@ pub fn run() {
     ];
 
     tauri::Builder::default()
+        // Must be the first plugin so a second launch is intercepted before
+        // anything else initializes. Two instances would share one SQLite
+        // file and race kill_all on exit.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            show_main_window(app);
+        }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_os::init())
@@ -124,6 +131,7 @@ pub fn run() {
         )
         .manage(PtyManager::new())
         .manage(BootState::default())
+        .manage(scope::ProjectRoots::default())
         .setup(|app| {
             let setup_handle = app.handle().clone();
             if let Err(e) = logging::begin_log_session(&setup_handle) {
@@ -168,6 +176,7 @@ pub fn run() {
             commands::read_app_log,
             commands::clear_app_log,
             commands::log_file_path,
+            scope::register_project_roots,
             project::inspect_project,
             explorer::read_dir,
             explorer::explorer_search,

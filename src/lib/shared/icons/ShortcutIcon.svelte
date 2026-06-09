@@ -7,9 +7,8 @@
   type Props = {
     iconKey?: IconKey;
     size?: number;
-    monochrome?: boolean;
   };
-  let { iconKey = null, size = 14, monochrome = false }: Props = $props();
+  let { iconKey = null, size = 14 }: Props = $props();
 
   const brand = $derived(iconKey ? getBrandGlyph(iconKey) : null);
 
@@ -39,7 +38,7 @@
     viewBox="0 0 24 24"
     width={size}
     height={size}
-    fill={monochrome ? "currentColor" : `#${brand.hex}`}
+    fill={`#${brand.hex}`}
     aria-hidden="true"
   >
     <path d={brand.path} />

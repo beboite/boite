@@ -2,7 +2,6 @@ import { app } from "$lib/app/store.svelte";
 import { settings } from "$lib/features/settings/store.svelte";
 import { paneStore, leavesOf } from "$lib/features/panes/store.svelte";
 import { notifyWhenUnfocused } from "$lib/storage/notify";
-import { saveThread } from "$lib/storage/db";
 import { ptyKill } from "$lib/storage/pty";
 import { logger } from "$lib/shared/services/logger.svelte";
 
@@ -12,6 +11,11 @@ const DEFAULT_WORKING_TTL_MS = 2000;
 const lastWorkingAt = new Map<string, number>();
 const workingTtlMs = new Map<string, number>();
 const prevStatus = new Map<string, string>();
+// Auto-sleep countdown anchors. Kept separate from lastWorkingAt: arming the
+// countdown by stamping lastWorkingAt made tick() see a fresh "working"
+// stamp, flipping hidden idle threads to running for 2s and firing a ghost
+// "Ready for input" notification on the way back.
+const idleSince = new Map<string, number>();
 let timer: ReturnType<typeof setInterval> | null = null;
 let refCount = 0;
 
@@ -31,30 +35,22 @@ function maybeAutoClose(threadId: string, iconKey: string | null | undefined) {
     return;
   }
   const now = Date.now();
-  const worked = lastWorkingAt.get(threadId);
-  if (!worked) {
-    lastWorkingAt.set(threadId, now);
+  const armed = idleSince.get(threadId);
+  if (!armed) {
+    idleSince.set(threadId, now);
     logger.debug("idle", `armed auto-sleep for ${t.label}`, {
       iconKey,
       timeoutMinutes: minutes,
     });
     return;
   }
-  const idleMs = now - worked;
+  const idleMs = now - armed;
   if (idleMs < minutes * 60_000) return;
   const pid = t.ptyId;
   app.setThreadPtyId(t.id, null);
+  // setThreadStatus persists terminal statuses; no second hand-built save.
   app.setThreadStatus(t.id, "stopped", null);
   app.setThreadAutoSlept(t.id, true);
-  void saveThread({
-    ...t,
-    ptyId: null,
-    status: "stopped",
-    exitCode: null,
-    args: [...t.args],
-  }).catch((err) => {
-    logger.warn("idle", `failed to persist auto-sleep for ${t.label}`, String(err));
-  });
   void ptyKill(pid, false).catch((err) => {
     logger.warn("idle", `failed to kill ${t.label} during auto-sleep`, String(err));
   });
@@ -81,6 +77,7 @@ function tick() {
     if (!t.ptyId) {
       lastWorkingAt.delete(t.id);
       prevStatus.delete(t.id);
+      idleSince.delete(t.id);
       if (t.status === "ready" || t.status === "running") {
         app.setThreadStatus(t.id, "idle");
       }
@@ -88,6 +85,7 @@ function tick() {
     }
     if (t.status === "done" || t.status === "exited" || t.status === "error") {
       prevStatus.set(t.id, t.status);
+      idleSince.delete(t.id);
       continue;
     }
     const stamp = lastWorkingAt.get(t.id) ?? 0;
@@ -105,6 +103,8 @@ function tick() {
 
     if (next === "ready" && !visible.has(t.id)) {
       maybeAutoClose(t.id, t.iconKey);
+    } else {
+      idleSince.delete(t.id);
     }
   }
 }
@@ -127,6 +127,7 @@ export const statusEngine = {
     lastWorkingAt.delete(threadId);
     workingTtlMs.delete(threadId);
     prevStatus.delete(threadId);
+    idleSince.delete(threadId);
     if (refCount === 0 && timer !== null) {
       clearInterval(timer);
       timer = null;

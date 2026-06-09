@@ -1,10 +1,11 @@
 <script lang="ts">
-  import { onDestroy } from "svelte";
   import { app } from "$lib/app/store.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
   import { gitStore } from "./store.svelte";
   import { editorStore } from "$lib/features/editor/store.svelte";
   import { confirmDialog } from "$lib/shared/components/confirm.svelte";
+  import { basename, dirname } from "$lib/shared/utils/path";
+  import { resizeHandle } from "$lib/shared/actions/resizeHandle";
   import GitGraph from "./GitGraph.svelte";
   import type { ChangeEntry } from "./api";
   import CloudDownload from "@lucide/svelte/icons/cloud-download";
@@ -109,26 +110,13 @@
     if (project) void gitStore.loadMore(project.id);
   }
 
-  function startResizeY(e: MouseEvent) {
-    e.preventDefault();
-    resizingY = true;
-    document.addEventListener("mousemove", onResizeY);
-    document.addEventListener("mouseup", stopResizeY);
-  }
-  function onResizeY(e: MouseEvent) {
+  function onResizeY(e: PointerEvent) {
     if (!bodyEl) return;
     const rect = bodyEl.getBoundingClientRect();
     if (rect.height <= 0) return;
     const fraction = (e.clientY - rect.top) / rect.height;
     settings.setGitSplitFraction(fraction);
   }
-  function stopResizeY() {
-    resizingY = false;
-    document.removeEventListener("mousemove", onResizeY);
-    document.removeEventListener("mouseup", stopResizeY);
-  }
-
-  onDestroy(stopResizeY);
 
   function statusColor(s: string): string {
     if (s === "M") return "text-[var(--color-warning)]";
@@ -138,16 +126,6 @@
     if (s === "?") return "text-[var(--color-success)]";
     if (s === "U") return "text-[var(--color-danger)]";
     return "text-muted-foreground";
-  }
-
-  function basename(path: string): string {
-    const idx = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
-    return idx >= 0 ? path.slice(idx + 1) : path;
-  }
-
-  function dirname(path: string): string {
-    const idx = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
-    return idx >= 0 ? path.slice(0, idx) : "";
   }
 
   function stagePaths(files: string[]) {
@@ -247,7 +225,7 @@
         type="button"
         class="rounded p-1 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:opacity-40"
         onclick={fetch}
-        disabled={!project || gs?.fetching}
+        disabled={!gs?.isRepo || gs.fetching}
         title="Fetch from remote"
         aria-label="Fetch from remote"
       >
@@ -367,7 +345,10 @@
       <!-- Splitter -->
       <button
         type="button"
-        onmousedown={startResizeY}
+        use:resizeHandle={{
+          onResize: onResizeY,
+          onStateChange: (r) => (resizingY = r),
+        }}
         class="relative h-1 shrink-0 cursor-row-resize transition hover:bg-foreground/10 {resizingY ? 'bg-foreground/20' : 'bg-transparent'}"
         aria-label="Resize sections"
         tabindex="-1"

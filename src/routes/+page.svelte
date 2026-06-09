@@ -1,9 +1,10 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { app } from "$lib/app/store.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
   import { pickAndAddProject } from "$lib/features/project/api";
   import { ptyKill } from "$lib/storage/pty";
-  import { closeThread, reloadThread } from "$lib/features/thread/api";
+  import { reloadThread } from "$lib/features/thread/api";
   import TitleBar from "$lib/shared/components/TitleBar.svelte";
   import CloseGuard from "$lib/app/CloseGuard.svelte";
   import ProjectSidebar from "$lib/features/project/ProjectSidebar.svelte";
@@ -24,7 +25,10 @@
 
   $effect(() => {
     void app.threads.length;
-    paneStore.syncWithThreads();
+    // untrack: syncWithThreads reads AND writes paneStore.groups/rects;
+    // tracked, this effect re-ran on its own writes and on every
+    // ResizeObserver tick during pane drags.
+    untrack(() => paneStore.syncWithThreads());
   });
 
   const activeGroupId = $derived.by(() => {
@@ -69,12 +73,6 @@
 
   async function addProject() {
     await pickAndAddProject();
-  }
-
-  async function handleCloseThread(id: string) {
-    await closeThread(id);
-    delete activated[id];
-    activated = { ...activated };
   }
 
   async function removeProject(projectId: string) {
@@ -126,7 +124,6 @@
   <div class="flex min-h-0 flex-1">
     {#if !settings.state.sidebarCollapsed}
       <ProjectSidebar
-        onCloseThread={handleCloseThread}
         onActivateThread={activateThread}
         onNewProject={addProject}
         onRemoveProject={removeProject}
@@ -169,9 +166,23 @@
             </div>
           {:else if app.activeThreadId === null}
             <div class="flex h-full items-center justify-center">
-              <p class="text-sm text-muted-foreground">
-                Pick a thread on the left to bring it to life.
-              </p>
+              <div class="flex flex-col items-center gap-5">
+                <p class="text-sm text-muted-foreground">
+                  Pick a thread on the left to bring it to life.
+                </p>
+                <div class="grid grid-cols-[auto_auto] gap-x-6 gap-y-1.5 text-xs text-muted-foreground/70">
+                  <span class="text-right"><kbd class="kbd">Ctrl</kbd> <kbd class="kbd">T</kbd></span>
+                  <span>New terminal</span>
+                  <span class="text-right"><kbd class="kbd">Ctrl</kbd> <kbd class="kbd">Tab</kbd></span>
+                  <span>Cycle threads</span>
+                  <span class="text-right"><kbd class="kbd">Ctrl</kbd> <kbd class="kbd">1–9</kbd></span>
+                  <span>Jump to thread</span>
+                  <span class="text-right"><kbd class="kbd">Ctrl</kbd> <kbd class="kbd">B</kbd></span>
+                  <span>Toggle sidebar</span>
+                  <span class="text-right"><kbd class="kbd">Ctrl</kbd> <kbd class="kbd">W</kbd></span>
+                  <span>Close thread</span>
+                </div>
+              </div>
             </div>
           {/if}
 
@@ -232,8 +243,10 @@
           </div>
         {/if}
       {/if}
-      <Toaster />
+      <!-- ConfirmHost first: both are z-50, so DOM order decides and toasts
+           must paint above the confirm backdrop, not dimmed under it. -->
       <ConfirmHost />
+      <Toaster />
     </main>
 
     {#if app.ready && settings.state.rightPanel}

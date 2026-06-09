@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { onDestroy } from "svelte";
   import { settings } from "$lib/features/settings/store.svelte";
+  import { resizeHandle } from "$lib/shared/actions/resizeHandle";
   import GitPanel from "$lib/features/git/GitPanel.svelte";
   import ExplorerPanel from "$lib/features/explorer/ExplorerPanel.svelte";
   import GitBranch from "@lucide/svelte/icons/git-branch";
@@ -10,24 +10,11 @@
   let panelEl: HTMLElement | null = $state(null);
   let resizingX = $state(false);
 
-  function startResizeX(e: MouseEvent) {
-    e.preventDefault();
-    resizingX = true;
-    document.addEventListener("mousemove", onResizeX);
-    document.addEventListener("mouseup", stopResizeX);
-  }
-  function onResizeX(e: MouseEvent) {
+  function onResizeX(e: PointerEvent) {
     if (!panelEl) return;
     const rect = panelEl.getBoundingClientRect();
     settings.setRightPanelWidth(rect.right - e.clientX);
   }
-  function stopResizeX() {
-    resizingX = false;
-    document.removeEventListener("mousemove", onResizeX);
-    document.removeEventListener("mouseup", stopResizeX);
-  }
-
-  onDestroy(stopResizeX);
 
   function selectTab(tab: "git" | "explorer") {
     void settings.setRightPanel(tab);
@@ -84,7 +71,10 @@
   <button
     type="button"
     class="absolute left-0 top-0 z-10 h-full w-1 cursor-col-resize transition hover:bg-foreground/10 {resizingX ? 'bg-foreground/20' : 'bg-transparent'}"
-    onmousedown={startResizeX}
+    use:resizeHandle={{
+      onResize: onResizeX,
+      onStateChange: (r) => (resizingX = r),
+    }}
     aria-label="Resize panel"
     tabindex="-1"
   ></button>

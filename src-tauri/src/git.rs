@@ -3,14 +3,15 @@ use std::collections::hash_map::DefaultHasher;
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use serde::Serialize;
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RepoInfo {
     pub is_repo: bool,
     pub branch: Option<String>,
@@ -31,6 +32,7 @@ pub struct ChangeEntry {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Commit {
     pub sha: String,
     pub short_sha: String,
@@ -79,7 +81,11 @@ fn run(mut cmd: Command) -> Result<Vec<u8>, String> {
 }
 
 #[tauri::command]
-pub async fn git_repo_info(path: String) -> Result<RepoInfo, String> {
+pub async fn git_repo_info(
+    scope: tauri::State<'_, crate::scope::ProjectRoots>,
+    path: String,
+) -> Result<RepoInfo, String> {
+    scope.ensure_allowed(&path)?;
     tauri::async_runtime::spawn_blocking(move || repo_info_blocking(&path))
         .await
         .map_err(|e| format!("git_repo_info task failed: {e}"))?
@@ -143,39 +149,71 @@ fn empty_repo() -> RepoInfo {
     }
 }
 
-fn refs_version(path: &Path) -> Option<String> {
-    let mut hasher = DefaultHasher::new();
-    let mut hashed = false;
-
-    let mut head = git(path);
-    head.args(["rev-parse", "--verify", "HEAD"]);
-    if let Ok(stdout) = run(head) {
-        stdout.hash(&mut hasher);
-        hashed = true;
+// Resolve the actual .git directory; worktrees and submodules use a `.git`
+// FILE containing "gitdir: <path>".
+fn git_dir(path: &Path) -> Option<PathBuf> {
+    let dotgit = path.join(".git");
+    let meta = fs::metadata(&dotgit).ok()?;
+    if meta.is_dir() {
+        return Some(dotgit);
     }
-
-    let mut refs = git(path);
-    refs.args([
-        "for-each-ref",
-        "--format=%(refname)%00%(objectname)",
-        "refs/heads",
-        "refs/remotes",
-        "refs/tags",
-    ]);
-    if let Ok(stdout) = run(refs) {
-        stdout.hash(&mut hasher);
-        hashed = true;
-    }
-
-    if hashed {
-        Some(format!("{:016x}", hasher.finish()))
+    let content = fs::read_to_string(&dotgit).ok()?;
+    let target = content.strip_prefix("gitdir:")?.trim();
+    let target_path = PathBuf::from(target);
+    Some(if target_path.is_absolute() {
+        target_path
     } else {
-        None
+        path.join(target_path)
+    })
+}
+
+fn hash_file_state(p: &Path, hasher: &mut DefaultHasher) {
+    let Ok(meta) = fs::metadata(p) else { return };
+    meta.len().hash(hasher);
+    if let Ok(modified) = meta.modified() {
+        let nanos = modified
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        nanos.hash(hasher);
     }
 }
 
+fn hash_refs_dir(dir: &Path, hasher: &mut DefaultHasher) {
+    let Ok(entries) = fs::read_dir(dir) else { return };
+    let mut paths: Vec<PathBuf> = entries.flatten().map(|e| e.path()).collect();
+    paths.sort();
+    for p in paths {
+        p.hash(hasher);
+        if p.is_dir() {
+            hash_refs_dir(&p, hasher);
+        } else {
+            hash_file_state(&p, hasher);
+        }
+    }
+}
+
+// Change detection without subprocesses: the old implementation spawned two
+// git processes (rev-parse + for-each-ref) every 3s poll just to hash refs.
+// Hashing HEAD content + mtimes/sizes of the ref stores detects the same
+// transitions for free.
+fn refs_version(path: &Path) -> Option<String> {
+    let dir = git_dir(path)?;
+    let mut hasher = DefaultHasher::new();
+    if let Ok(head) = fs::read(dir.join("HEAD")) {
+        head.hash(&mut hasher);
+    }
+    hash_file_state(&dir.join("packed-refs"), &mut hasher);
+    hash_refs_dir(&dir.join("refs"), &mut hasher);
+    Some(format!("{:016x}", hasher.finish()))
+}
+
 #[tauri::command]
-pub async fn git_status(path: String) -> Result<Vec<ChangeEntry>, String> {
+pub async fn git_status(
+    scope: tauri::State<'_, crate::scope::ProjectRoots>,
+    path: String,
+) -> Result<Vec<ChangeEntry>, String> {
+    scope.ensure_allowed(&path)?;
     tauri::async_runtime::spawn_blocking(move || status_blocking(&path))
         .await
         .map_err(|e| format!("git_status task failed: {e}"))?
@@ -188,7 +226,11 @@ pub struct PathStatus {
 }
 
 #[tauri::command]
-pub async fn git_changed_paths(path: String) -> Result<Vec<PathStatus>, String> {
+pub async fn git_changed_paths(
+    scope: tauri::State<'_, crate::scope::ProjectRoots>,
+    path: String,
+) -> Result<Vec<PathStatus>, String> {
+    scope.ensure_allowed(&path)?;
     tauri::async_runtime::spawn_blocking(move || changed_paths_blocking(&path))
         .await
         .map_err(|e| format!("git_changed_paths task failed: {e}"))?
@@ -320,8 +362,7 @@ fn parse_porcelain_v2(bytes: &[u8]) -> Vec<ChangeEntry> {
                 for _ in 0..7 {
                     parts.next();
                 }
-                if let Some(rest) = parts.next() {
-                    let path = rest.split('\t').next().unwrap_or(rest);
+                if let Some(path) = parts.next() {
                     let orig = if orig.is_empty() { None } else { Some(orig.as_str()) };
                     push_xy(&mut out, xy, path, orig);
                 }
@@ -388,10 +429,12 @@ fn push_xy(out: &mut Vec<ChangeEntry>, xy: &str, path: &str, orig: Option<&str>)
 
 #[tauri::command]
 pub async fn git_log(
+    scope: tauri::State<'_, crate::scope::ProjectRoots>,
     path: String,
     limit: u32,
     skip: u32,
 ) -> Result<Vec<Commit>, String> {
+    scope.ensure_allowed(&path)?;
     tauri::async_runtime::spawn_blocking(move || log_blocking(&path, limit, skip))
         .await
         .map_err(|e| format!("git_log task failed: {e}"))?
@@ -555,14 +598,24 @@ fn remote_only_set(path: &Path, upstream: Option<&str>) -> HashSet<String> {
 }
 
 #[tauri::command]
-pub async fn git_stage(path: String, files: Vec<String>) -> Result<(), String> {
+pub async fn git_stage(
+    scope: tauri::State<'_, crate::scope::ProjectRoots>,
+    path: String,
+    files: Vec<String>,
+) -> Result<(), String> {
+    scope.ensure_allowed(&path)?;
     tauri::async_runtime::spawn_blocking(move || run_files(&path, "add", &files, true))
         .await
         .map_err(|e| format!("git_stage task failed: {e}"))?
 }
 
 #[tauri::command]
-pub async fn git_unstage(path: String, files: Vec<String>) -> Result<(), String> {
+pub async fn git_unstage(
+    scope: tauri::State<'_, crate::scope::ProjectRoots>,
+    path: String,
+    files: Vec<String>,
+) -> Result<(), String> {
+    scope.ensure_allowed(&path)?;
     tauri::async_runtime::spawn_blocking(move || unstage_blocking(&path, files))
         .await
         .map_err(|e| format!("git_unstage task failed: {e}"))?
@@ -580,10 +633,12 @@ fn unstage_blocking(path: &str, files: Vec<String>) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn git_discard(
+    scope: tauri::State<'_, crate::scope::ProjectRoots>,
     path: String,
     files: Vec<String>,
     untracked: Vec<String>,
 ) -> Result<(), String> {
+    scope.ensure_allowed(&path)?;
     tauri::async_runtime::spawn_blocking(move || discard_blocking(&path, files, untracked))
         .await
         .map_err(|e| format!("git_discard task failed: {e}"))?
@@ -626,7 +681,11 @@ fn run_files(path: &str, sub: &str, files: &[String], with_dashes: bool) -> Resu
 }
 
 #[tauri::command]
-pub async fn git_fetch(path: String) -> Result<(), String> {
+pub async fn git_fetch(
+    scope: tauri::State<'_, crate::scope::ProjectRoots>,
+    path: String,
+) -> Result<(), String> {
+    scope.ensure_allowed(&path)?;
     tauri::async_runtime::spawn_blocking(move || fetch_blocking(&path))
         .await
         .map_err(|e| format!("git_fetch task failed: {e}"))?
@@ -660,24 +719,34 @@ fn has_remote(path: &Path) -> bool {
     }
 }
 
-// Like `run`, but kills the child if it outlives `timeout`. Used for fetch,
-// the only git command that touches the network and can stall.
+// Like `run`, but kills the child if it outlives `timeout`. Used for
+// network-touching commands (fetch/push/pull) that can stall.
 fn run_with_timeout(mut cmd: Command, timeout: Duration) -> Result<(), String> {
     let mut child = cmd
         .spawn()
         .map_err(|e| format!("git not found or failed to start: {e}"))?;
+    // Drain stderr concurrently: a chatty remote fills the pipe buffer,
+    // which blocks the child forever and turns it into a false "timed out".
+    let mut stderr_drain = child.stderr.take().map(|mut s| {
+        thread::spawn(move || {
+            let mut buf = String::new();
+            let _ = s.read_to_string(&mut buf);
+            buf
+        })
+    });
     let start = Instant::now();
     loop {
         match child.try_wait() {
             Ok(Some(status)) => {
+                let err = stderr_drain
+                    .take()
+                    .and_then(|h| h.join().ok())
+                    .unwrap_or_default()
+                    .trim()
+                    .to_string();
                 if status.success() {
                     return Ok(());
                 }
-                let mut err = String::new();
-                if let Some(mut s) = child.stderr.take() {
-                    let _ = s.read_to_string(&mut err);
-                }
-                let err = err.trim().to_string();
                 return Err(if err.is_empty() {
                     format!("git exited with status {status}")
                 } else {
@@ -688,7 +757,7 @@ fn run_with_timeout(mut cmd: Command, timeout: Duration) -> Result<(), String> {
                 if start.elapsed() >= timeout {
                     let _ = child.kill();
                     let _ = child.wait();
-                    return Err("git fetch timed out".into());
+                    return Err("git command timed out".into());
                 }
                 thread::sleep(Duration::from_millis(50));
             }
@@ -700,7 +769,11 @@ fn run_with_timeout(mut cmd: Command, timeout: Duration) -> Result<(), String> {
 const PUSH_PULL_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[tauri::command]
-pub async fn git_push(path: String) -> Result<(), String> {
+pub async fn git_push(
+    scope: tauri::State<'_, crate::scope::ProjectRoots>,
+    path: String,
+) -> Result<(), String> {
+    scope.ensure_allowed(&path)?;
     tauri::async_runtime::spawn_blocking(move || push_blocking(&path))
         .await
         .map_err(|e| format!("git_push task failed: {e}"))?
@@ -727,7 +800,11 @@ fn push_blocking(path: &str) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn git_pull(path: String) -> Result<(), String> {
+pub async fn git_pull(
+    scope: tauri::State<'_, crate::scope::ProjectRoots>,
+    path: String,
+) -> Result<(), String> {
+    scope.ensure_allowed(&path)?;
     tauri::async_runtime::spawn_blocking(move || pull_blocking(&path))
         .await
         .map_err(|e| format!("git_pull task failed: {e}"))?
@@ -759,7 +836,11 @@ fn current_branch(path: &Path) -> Option<String> {
 }
 
 #[tauri::command]
-pub async fn git_init(path: String) -> Result<(), String> {
+pub async fn git_init(
+    scope: tauri::State<'_, crate::scope::ProjectRoots>,
+    path: String,
+) -> Result<(), String> {
+    scope.ensure_allowed(&path)?;
     tauri::async_runtime::spawn_blocking(move || init_blocking(&path))
         .await
         .map_err(|e| format!("git_init task failed: {e}"))?
@@ -776,7 +857,12 @@ fn init_blocking(path: &str) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn git_commit(path: String, message: String) -> Result<String, String> {
+pub async fn git_commit(
+    scope: tauri::State<'_, crate::scope::ProjectRoots>,
+    path: String,
+    message: String,
+) -> Result<String, String> {
+    scope.ensure_allowed(&path)?;
     tauri::async_runtime::spawn_blocking(move || commit_blocking(&path, &message))
         .await
         .map_err(|e| format!("git_commit task failed: {e}"))?
@@ -792,10 +878,12 @@ pub struct FileVersions {
 
 #[tauri::command]
 pub async fn git_file_versions(
+    scope: tauri::State<'_, crate::scope::ProjectRoots>,
     path: String,
     file: String,
     head_file: Option<String>,
 ) -> Result<FileVersions, String> {
+    scope.ensure_allowed(&path)?;
     tauri::async_runtime::spawn_blocking(move || {
         file_versions_blocking(&path, &file, head_file.as_deref())
     })
@@ -816,51 +904,48 @@ fn file_versions_blocking(
     // Renamed files live under their old name in HEAD.
     let head_rel = head_file.map(|f| f.replace('\\', "/")).unwrap_or_else(|| rel.clone());
 
-    let head = git_show(p, &format!("HEAD:{}", head_rel));
-    let index = git_show(p, &format!(":{}", rel));
+    let (head, head_binary) = git_show(p, &format!("HEAD:{}", head_rel));
+    let (index, index_binary) = git_show(p, &format!(":{}", rel));
 
     let abs = p.join(&rel);
+    let mut work_binary = false;
     let work = match fs::metadata(&abs) {
         Ok(meta) if meta.is_file() => match fs::read(&abs) {
             Ok(bytes) => {
                 if bytes_binary(&bytes) {
-                    return Ok(FileVersions {
-                        head,
-                        index,
-                        work: None,
-                        binary: true,
-                    });
+                    work_binary = true;
+                    None
+                } else {
+                    Some(String::from_utf8_lossy(&bytes).into_owned())
                 }
-                Some(String::from_utf8_lossy(&bytes).into_owned())
             }
             Err(_) => None,
         },
         _ => None,
     };
 
-    let binary = head.as_deref().is_some_and(|s| s.contains('\u{0}'))
-        || index.as_deref().is_some_and(|s| s.contains('\u{0}'));
-
     Ok(FileVersions {
         head,
         index,
         work,
-        binary,
+        binary: head_binary || index_binary || work_binary,
     })
 }
 
-fn git_show(repo: &Path, spec: &str) -> Option<String> {
+// (content, is_binary) — binary blobs return (None, true) so the caller can
+// tell "binary" apart from "absent at this revision".
+fn git_show(repo: &Path, spec: &str) -> (Option<String>, bool) {
     let mut cmd = git(repo);
     cmd.args(["show", spec]);
     match cmd.output() {
         Ok(out) if out.status.success() => {
             if bytes_binary(&out.stdout) {
-                None
+                (None, true)
             } else {
-                Some(String::from_utf8_lossy(&out.stdout).into_owned())
+                (Some(String::from_utf8_lossy(&out.stdout).into_owned()), false)
             }
         }
-        _ => None,
+        _ => (None, false),
     }
 }
 

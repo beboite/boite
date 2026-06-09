@@ -150,10 +150,6 @@ class PaneStore {
     this.rects[threadId] = rect;
   }
 
-  clearRect(threadId: string) {
-    delete this.rects[threadId];
-  }
-
   groupOf(threadId: string): PaneGroup | null {
     for (const g of this.groups) {
       if (leavesOf(g.root).includes(threadId)) return g;

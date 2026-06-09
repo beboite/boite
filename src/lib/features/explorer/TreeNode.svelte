@@ -1,7 +1,10 @@
 <script lang="ts">
   import { explorerStore } from "./store.svelte";
-  import { revealItemInDir, openPath } from "@tauri-apps/plugin-opener";
+  import { treeMenu } from "./treeMenu.svelte";
+  import { revealItemInDir } from "@tauri-apps/plugin-opener";
+  import { writeText } from "@tauri-apps/plugin-clipboard-manager";
   import { logger } from "$lib/shared/services/logger.svelte";
+  import { notifications } from "$lib/features/notifications/store.svelte";
   import { editorStore } from "$lib/features/editor/store.svelte";
   import { app } from "$lib/app/store.svelte";
   import TreeNode from "./TreeNode.svelte";
@@ -9,6 +12,7 @@
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import Folder from "@lucide/svelte/icons/folder";
   import FolderOpen from "@lucide/svelte/icons/folder-open";
+  import type { ContextMenuItem } from "$lib/shared/components/ContextMenu.svelte";
   import type { DirEntry } from "./api";
 
   interface Props {
@@ -41,31 +45,70 @@
     return /^[a-zA-Z]:\//.test(p) ? p.replaceAll("/", "\\") : p;
   }
 
-  async function activate(e: MouseEvent) {
+  async function activate() {
     if (entry.isDir) {
       await explorerStore.toggle(entry.path);
-      return;
-    }
-    if (e.altKey) {
-      try {
-        await openPath(toNative(entry.path));
-      } catch (err) {
-        logger.warn("explorer", `openPath failed for ${entry.path}`, String(err));
-      }
       return;
     }
     await editorStore.openFile(entry.path);
     app.view = "editor";
   }
 
-  async function reveal(e: MouseEvent) {
-    e.preventDefault();
-    e.stopPropagation();
+  async function reveal() {
     try {
       await revealItemInDir(toNative(entry.path));
     } catch (err) {
       logger.warn("explorer", `revealItemInDir failed for ${entry.path}`, String(err));
     }
+  }
+
+  async function copyPath(p: string) {
+    try {
+      await writeText(p);
+      notifications.success("Path copied");
+    } catch (err) {
+      logger.warn("explorer", `copy path failed for ${p}`, String(err));
+    }
+  }
+
+  function relativePath(): string {
+    const project = app.currentProjectId
+      ? app.projects.find((p) => p.id === app.currentProjectId)
+      : null;
+    if (!project) return entry.path;
+    const root = project.cwd.replace(/\\/g, "/").replace(/\/+$/, "") + "/";
+    return entry.path.startsWith(root)
+      ? entry.path.slice(root.length)
+      : entry.path;
+  }
+
+  function openMenu(e: MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    const items: ContextMenuItem[] = [];
+    if (!entry.isDir) {
+      items.push({
+        label: "Open",
+        action: () => {
+          void editorStore.openFile(entry.path).then(() => (app.view = "editor"));
+        },
+      });
+      items.push({ separator: true });
+    }
+    items.push({
+      label: "Reveal in file manager",
+      action: () => void reveal(),
+    });
+    items.push({ separator: true });
+    items.push({
+      label: "Copy path",
+      action: () => void copyPath(toNative(entry.path)),
+    });
+    items.push({
+      label: "Copy relative path",
+      action: () => void copyPath(relativePath()),
+    });
+    treeMenu.open(e.clientX, e.clientY, items);
   }
 </script>
 
@@ -78,8 +121,12 @@
     data-dir={entry.isDir ? "1" : "0"}
     class="group flex w-full items-center gap-1 px-1 py-0.5 text-left text-[11.5px] transition hover:bg-[var(--color-surface-2)] focus-visible:bg-[var(--color-surface-2)] focus-visible:outline-none {entry.isHidden ? 'text-foreground/55' : 'text-foreground/85'}"
     style:padding-left="{depth * 12 + 4}px"
+    role="treeitem"
+    aria-expanded={entry.isDir ? isOpen : undefined}
+    aria-level={depth + 1}
+    aria-selected="false"
     onclick={activate}
-    oncontextmenu={reveal}
+    oncontextmenu={openMenu}
     title={entry.path}
   >
     {#if entry.isDir}
