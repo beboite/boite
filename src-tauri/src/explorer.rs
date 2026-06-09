@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DirEntry {
     pub name: String,
     pub path: String,
@@ -11,7 +12,11 @@ pub struct DirEntry {
 }
 
 #[tauri::command]
-pub async fn read_dir(path: String) -> Result<Vec<DirEntry>, String> {
+pub async fn read_dir(
+    scope: tauri::State<'_, crate::scope::ProjectRoots>,
+    path: String,
+) -> Result<Vec<DirEntry>, String> {
+    scope.ensure_allowed(&path)?;
     tauri::async_runtime::spawn_blocking(move || read_dir_blocking(path))
         .await
         .map_err(|e| format!("read_dir task failed: {e}"))?
@@ -48,6 +53,7 @@ fn read_dir_blocking(path: String) -> Result<Vec<DirEntry>, String> {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SearchHit {
     pub path: String,
     pub is_dir: bool,
@@ -77,10 +83,12 @@ const SKIP_DIRS: &[&str] = &[
 
 #[tauri::command]
 pub async fn explorer_search(
+    scope: tauri::State<'_, crate::scope::ProjectRoots>,
     path: String,
     query: String,
     limit: u32,
 ) -> Result<Vec<SearchHit>, String> {
+    scope.ensure_allowed(&path)?;
     tauri::async_runtime::spawn_blocking(move || search_blocking(&path, &query, limit))
         .await
         .map_err(|e| format!("explorer_search task failed: {e}"))?

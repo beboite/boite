@@ -52,6 +52,7 @@ export interface Shortcut {
 export interface Settings {
   shortcuts: Shortcut[];
   powershellNewline: boolean;
+  powershellNoProfile: boolean;
   defaultShellId: string | null;
   sidebarWidth: number;
   sidebarCollapsed: boolean;

@@ -1,7 +1,11 @@
 use std::collections::HashMap;
 use std::io::{Read, Write};
+use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::mpsc::Sender;
 
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64;
 use parking_lot::Mutex;
 use portable_pty::{ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use serde::{Deserialize, Serialize};
@@ -12,8 +16,11 @@ use vte::{Params, Parser, Perform};
 #[derive(Clone, Serialize, Deserialize, Debug)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum PtyEvent {
+    // base64: a Vec<u8> would serialize as a JSON number array (~4x the
+    // payload and an expensive parse webview-side, per chunk, for all
+    // terminal output).
     #[serde(rename_all = "camelCase")]
-    Output { data: Vec<u8> },
+    Output { data: String },
     #[serde(rename_all = "camelCase")]
     Title { value: String },
     #[serde(rename_all = "camelCase")]
@@ -35,7 +42,10 @@ pub struct PtySpawnArgs {
 
 struct PtyHandle {
     master: Arc<Mutex<Box<dyn MasterPty + Send>>>,
-    writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    // Writes go through a dedicated thread per PTY. A blocking write_all on
+    // the IPC thread froze the whole UI whenever the child stopped draining
+    // (big paste, suspended process, full ConPTY buffer).
+    writer_tx: Sender<Vec<u8>>,
     killer: Arc<Mutex<Box<dyn ChildKiller + Send + Sync>>>,
     pid: Option<u32>,
 }
@@ -43,11 +53,29 @@ struct PtyHandle {
 #[derive(Clone, Default)]
 pub struct PtyManager {
     inner: Arc<Mutex<HashMap<String, PtyHandle>>>,
+    // which() walks the full PATH x PATHEXT synchronously; memoize hits so
+    // respawns don't pay it again. Misses are not cached so a tool installed
+    // mid-session resolves on the next spawn.
+    which_cache: Arc<Mutex<HashMap<String, PathBuf>>>,
 }
 
 impl PtyManager {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    fn resolve_cmd(&self, cmd: &str) -> String {
+        if let Some(hit) = self.which_cache.lock().get(cmd) {
+            return hit.to_string_lossy().into_owned();
+        }
+        match which::which(cmd) {
+            Ok(path) => {
+                let resolved = path.to_string_lossy().into_owned();
+                self.which_cache.lock().insert(cmd.to_string(), path);
+                resolved
+            }
+            Err(_) => cmd.to_string(),
+        }
     }
 
     pub fn spawn(
@@ -65,9 +93,7 @@ impl PtyManager {
             })
             .map_err(|e| format!("openpty failed: {e}"))?;
 
-        let resolved_cmd = which::which(&spec.cmd)
-            .map(|p| p.to_string_lossy().into_owned())
-            .unwrap_or_else(|_| spec.cmd.clone());
+        let resolved_cmd = self.resolve_cmd(&spec.cmd);
         let mut command = CommandBuilder::new(&resolved_cmd);
         command.cwd(&spec.cwd);
         for arg in &spec.args {
@@ -90,7 +116,7 @@ impl PtyManager {
 
         let id = Uuid::new_v4().to_string();
 
-        let writer = pair
+        let mut writer = pair
             .master
             .take_writer()
             .map_err(|e| format!("take_writer failed: {e}"))?;
@@ -99,16 +125,25 @@ impl PtyManager {
             .try_clone_reader()
             .map_err(|e| format!("clone_reader failed: {e}"))?;
 
+        let (writer_tx, writer_rx) = std::sync::mpsc::channel::<Vec<u8>>();
+        std::thread::spawn(move || {
+            while let Ok(data) = writer_rx.recv() {
+                if writer.write_all(&data).is_err() {
+                    break;
+                }
+                let _ = writer.flush();
+            }
+        });
+
         let master_arc: Arc<Mutex<Box<dyn MasterPty + Send>>> =
             Arc::new(Mutex::new(pair.master));
-        let writer_arc: Arc<Mutex<Box<dyn Write + Send>>> = Arc::new(Mutex::new(writer));
         let killer_arc: Arc<Mutex<Box<dyn ChildKiller + Send + Sync>>> =
             Arc::new(Mutex::new(killer));
         let pid = child.process_id();
 
         let handle = PtyHandle {
             master: master_arc,
-            writer: writer_arc,
+            writer_tx,
             killer: killer_arc,
             pid,
         };
@@ -116,6 +151,7 @@ impl PtyManager {
         self.inner.lock().insert(id.clone(), handle);
 
         // Reader loop: forward bytes + parse OSC titles. Owns the child, calls wait() at EOF.
+        // Removing the handle from the map drops writer_tx, which ends the writer thread.
         let inner_clone = self.inner.clone();
         let id_clone = id.clone();
         let channel_clone = channel.clone();
@@ -135,17 +171,13 @@ impl PtyManager {
     }
 
     pub fn write(&self, id: &str, data: &[u8]) -> Result<(), String> {
-        let writer = {
+        let tx = {
             let map = self.inner.lock();
             let handle = map.get(id).ok_or_else(|| "pty not found".to_string())?;
-            handle.writer.clone()
+            handle.writer_tx.clone()
         };
-        let mut writer = writer.lock();
-        writer
-            .write_all(data)
-            .map_err(|e| format!("write failed: {e}"))?;
-        writer.flush().map_err(|e| format!("flush failed: {e}"))?;
-        Ok(())
+        tx.send(data.to_vec())
+            .map_err(|_| "pty writer closed".to_string())
     }
 
     pub fn resize(&self, id: &str, cols: u16, rows: u16) -> Result<(), String> {
@@ -167,9 +199,20 @@ impl PtyManager {
     }
 
     pub fn kill_all(&self) {
+        // Parallel: each kill shells out to taskkill (~100ms); N threads
+        // killed sequentially delayed app close by their sum.
         let ids: Vec<String> = self.inner.lock().keys().cloned().collect();
-        for id in ids {
-            let _ = self.kill(&id, false);
+        let joins: Vec<_> = ids
+            .into_iter()
+            .map(|id| {
+                let manager = self.clone();
+                std::thread::spawn(move || {
+                    let _ = manager.kill(&id, false);
+                })
+            })
+            .collect();
+        for join in joins {
+            let _ = join.join();
         }
     }
 
@@ -210,7 +253,7 @@ impl PtyManager {
             }
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
-        Ok(())
+        Err("pty kill timed out: process may still be alive".into())
     }
 }
 
@@ -239,8 +282,8 @@ fn read_loop(mut reader: Box<dyn Read + Send>, channel: Channel<PtyEvent>) {
         match reader.read(&mut buf) {
             Ok(0) => break,
             Ok(n) => {
-                let chunk = buf[..n].to_vec();
-                if let Err(err) = channel.send(PtyEvent::Output { data: chunk }) {
+                let encoded = BASE64.encode(&buf[..n]);
+                if let Err(err) = channel.send(PtyEvent::Output { data: encoded }) {
                     eprintln!("[boite/pty] output channel closed: {err}");
                     break;
                 }

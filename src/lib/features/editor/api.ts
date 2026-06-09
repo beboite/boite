@@ -4,17 +4,12 @@ export interface TextFile {
   content: string;
   size: number;
   isReadonly: boolean;
+  // Decoded lossily from non-UTF-8 bytes; saving would corrupt the file.
+  lossy: boolean;
 }
 
-interface RawTextFile {
-  content: string;
-  size: number;
-  is_readonly: boolean;
-}
-
-export async function readTextFile(path: string): Promise<TextFile> {
-  const r = await invoke<RawTextFile>("read_text_file", { path });
-  return { content: r.content, size: r.size, isReadonly: r.is_readonly };
+export function readTextFile(path: string): Promise<TextFile> {
+  return invoke<TextFile>("read_text_file", { path });
 }
 
 export function writeTextFile(path: string, content: string): Promise<number> {

@@ -7,11 +7,16 @@
     countLeaves,
     MAX_LEAVES,
   } from "$lib/features/panes/store.svelte";
-  import { reloadThread, stopThread } from "$lib/features/thread/api";
+  import {
+    closeThreadWithConfirm,
+    reloadThread,
+    stopThread,
+  } from "$lib/features/thread/api";
   import { notifications } from "$lib/features/notifications/store.svelte";
   import StatusDot from "$lib/shared/components/StatusDot.svelte";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
-  import ConfirmDialog from "$lib/shared/components/ConfirmDialog.svelte";
+  import { confirmDialog } from "$lib/shared/components/confirm.svelte";
+  import { resizeHandle } from "$lib/shared/actions/resizeHandle";
   import ContextMenu from "$lib/shared/components/ContextMenu.svelte";
   import type { ContextMenuItem } from "$lib/shared/components/ContextMenu.svelte";
   import type { DropSide } from "$lib/features/panes/types";
@@ -25,20 +30,12 @@
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
 
   type Props = {
-    onCloseThread: (threadId: string) => void;
     onActivateThread: (threadId: string) => void;
     onNewProject: () => void;
     onRemoveProject: (projectId: string) => void;
   };
-  let {
-    onCloseThread,
-    onActivateThread,
-    onNewProject,
-    onRemoveProject,
-  }: Props = $props();
+  let { onActivateThread, onNewProject, onRemoveProject }: Props = $props();
 
-  let confirmThreadId = $state<string | null>(null);
-  let confirmProjectId = $state<string | null>(null);
   let showArchived = $state(false);
 
   type RowSnapshot = { id: string; top: number; height: number };
@@ -90,6 +87,9 @@
     if (e.button === 1) e.preventDefault();
     if (e.button !== 0 || isDragBlocked(e.target as HTMLElement)) return;
     e.stopPropagation();
+    // Capture keeps the drag alive if the button is released outside the
+    // window; without it the row stayed glued to the cursor.
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     startPointerDrag({
       kind: "thread",
       id: thread.id,
@@ -129,6 +129,7 @@
     if (e.button !== 0 || isDragBlocked(e.target as HTMLElement)) return;
     const project = app.projects.find((p) => p.id === projectId);
     if (!project) return;
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     startPointerDrag({
       kind: "project",
       id: project.id,
@@ -436,7 +437,7 @@
     const items: ContextMenuItem[] = [];
     if (inMultiPane) {
       items.push({
-        label: "Détacher du groupe",
+        label: "Detach from group",
         action: () => {
           paneStore.unsplit(thread.id);
         },
@@ -444,7 +445,7 @@
       items.push({ separator: true });
     }
     items.push({
-      label: thread.keepAwake ? "Autoriser la mise en veille" : "Empêcher la mise en veille",
+      label: thread.keepAwake ? "Allow auto-sleep" : "Keep awake",
       action: () => {
         app.toggleThreadKeepAwake(thread.id);
       },
@@ -458,7 +459,7 @@
     });
     items.push({ separator: true });
     items.push({
-      label: "Fermer",
+      label: "Close thread",
       action: () => requestRemoveThread(thread.id),
       danger: true,
     });
@@ -468,23 +469,10 @@
     ctxMenu = null;
   }
 
-  function startResize(e: MouseEvent) {
-    e.preventDefault();
-    resizing = true;
-    document.addEventListener("mousemove", onResize);
-    document.addEventListener("mouseup", stopResize);
-  }
-  function onResize(e: MouseEvent) {
+  function onResize(e: PointerEvent) {
     if (!asideEl) return;
     const rect = asideEl.getBoundingClientRect();
-    const next = e.clientX - rect.left;
-    void settings.setSidebarWidth(next);
-  }
-  function stopResize() {
-    resizing = false;
-    if (typeof document === "undefined") return;
-    document.removeEventListener("mousemove", onResize);
-    document.removeEventListener("mouseup", stopResize);
+    void settings.setSidebarWidth(e.clientX - rect.left);
   }
 
   function consumeDragClick(id: string): boolean {
@@ -494,22 +482,19 @@
   }
 
   function requestRemoveThread(id: string) {
-    if (!settings.state.confirmCloseThread) {
-      onCloseThread(id);
-      return;
-    }
-    confirmThreadId = id;
-  }
-  function confirmRemoveThread() {
-    if (confirmThreadId) onCloseThread(confirmThreadId);
-    confirmThreadId = null;
-  }
-  function cancelRemoveThread() {
-    confirmThreadId = null;
+    void closeThreadWithConfirm(id);
   }
 
-  function requestRemoveProject(id: string) {
-    confirmProjectId = id;
+  async function requestRemoveProject(id: string) {
+    const project = app.projects.find((p) => p.id === id);
+    if (!project) return;
+    const ok = await confirmDialog.ask({
+      title: "Remove project?",
+      message: `Remove ${project.name}? All its threads will be killed and dropped.`,
+      confirmLabel: "Remove project",
+      danger: true,
+    });
+    if (ok) onRemoveProject(id);
   }
 
   function openProjectContextMenu(project: { id: string; archived: boolean }, e: MouseEvent) {
@@ -518,14 +503,14 @@
     const items: ContextMenuItem[] = [];
     if (project.archived) {
       items.push({
-        label: "Désarchiver",
+        label: "Unarchive",
         action: () => {
           void app.unarchiveProject(project.id);
         },
       });
     } else {
       items.push({
-        label: "Archiver",
+        label: "Archive",
         action: () => {
           void app.archiveProject(project.id);
         },
@@ -534,25 +519,11 @@
     items.push({ separator: true });
     items.push({
       label: "Remove project",
-      action: () => requestRemoveProject(project.id),
+      action: () => void requestRemoveProject(project.id),
       danger: true,
     });
     ctxMenu = { x: e.clientX, y: e.clientY, items };
   }
-  function confirmRemoveProject() {
-    if (confirmProjectId) onRemoveProject(confirmProjectId);
-    confirmProjectId = null;
-  }
-  function cancelRemoveProject() {
-    confirmProjectId = null;
-  }
-
-  const pendingThread = $derived(
-    confirmThreadId ? app.threads.find((t) => t.id === confirmThreadId) : null,
-  );
-  const pendingProject = $derived(
-    confirmProjectId ? app.projects.find((p) => p.id === confirmProjectId) : null,
-  );
 
   const visibleProjects = $derived(
     showArchived ? app.archivedProjects : app.sortedProjects,
@@ -594,7 +565,6 @@
 
   onDestroy(() => {
     cleanupPointerDrag();
-    stopResize();
     document.body.classList.remove("dragging-card");
   });
 </script>
@@ -614,7 +584,7 @@
         class="flex items-center gap-1.5 rounded text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground transition hover:text-foreground"
         onclick={() => (showArchived = false)}
         aria-label="Back to projects"
-        title="Retour aux projets"
+        title="Back to projects"
       >
         <ArrowLeft class="size-3.5" />
         Archives
@@ -634,7 +604,7 @@
           : ''}"
         onclick={() => (showArchived = !showArchived)}
         aria-label="Show archived projects"
-        title="Projets archivés"
+        title="Archived projects"
       >
         <Archive class="size-4" />
       </button>
@@ -652,13 +622,13 @@
     </div>
   </header>
 
-  <div class="flex-1 overflow-y-auto px-2 pb-2">
+  <div class="flex-1 overflow-y-auto px-2 pb-2" role="list">
     {#if showArchived && visibleProjects.length === 0}
       <div
         class="mx-1 mt-2 flex w-[calc(100%-0.5rem)] flex-col items-center gap-2 rounded-lg border border-dashed border-border bg-transparent px-3 py-7 text-xs text-muted-foreground"
       >
         <Archive class="size-5 opacity-70" />
-        <span>Aucun projet archivé</span>
+        <span>No archived projects</span>
       </div>
     {:else if !showArchived && app.projects.length === 0}
       <button
@@ -741,7 +711,7 @@
               }}
               data-drag-block
               aria-label="Unarchive project"
-              title="Désarchiver"
+              title="Unarchive"
             >
               <ArchiveRestore class="size-3.5" />
             </button>
@@ -815,14 +785,14 @@
                   <button
                     type="button"
                     data-no-drag
-                    class="inline-flex shrink-0 cursor-pointer items-center justify-center"
+                    class="-m-1 inline-flex shrink-0 cursor-pointer items-center justify-center p-1"
                     onclick={(e) => {
                       e.stopPropagation();
                       app.toggleThreadKeepAwake(thread.id);
                     }}
                     title={thread.keepAwake
-                      ? "Veille empêchée — cliquer pour autoriser"
-                      : "Cliquer pour empêcher la mise en veille"}
+                      ? "Keep-awake on — click to allow auto-sleep"
+                      : "Click to keep awake"}
                     aria-label="Toggle keep awake"
                   >
                     <StatusDot
@@ -870,8 +840,11 @@
 
   <button
     type="button"
-    class="absolute right-0 top-0 z-10 h-full w-1 cursor-col-resize bg-transparent transition hover:bg-foreground/10"
-    onmousedown={startResize}
+    class="absolute right-0 top-0 z-10 h-full w-1 cursor-col-resize transition hover:bg-foreground/10 {resizing ? 'bg-foreground/20' : 'bg-transparent'}"
+    use:resizeHandle={{
+      onResize,
+      onStateChange: (r) => (resizing = r),
+    }}
     aria-label="Resize sidebar"
     title="Resize sidebar"
     tabindex="-1"
@@ -902,30 +875,6 @@
     </span>
   </div>
 {/if}
-
-<ConfirmDialog
-  open={pendingThread !== null}
-  title="Close thread?"
-  message={pendingThread
-    ? `Close ${pendingThread.title ?? pendingThread.label}? Running process will be killed.`
-    : ""}
-  confirmLabel="Close thread"
-  danger
-  onConfirm={confirmRemoveThread}
-  onCancel={cancelRemoveThread}
-/>
-
-<ConfirmDialog
-  open={pendingProject !== null}
-  title="Remove project?"
-  message={pendingProject
-    ? `Remove ${pendingProject.name}? All its threads will be killed and dropped.`
-    : ""}
-  confirmLabel="Remove project"
-  danger
-  onConfirm={confirmRemoveProject}
-  onCancel={cancelRemoveProject}
-/>
 
 {#if ctxMenu}
   <ContextMenu

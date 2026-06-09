@@ -1,7 +1,9 @@
 <script lang="ts">
   import { app } from "$lib/app/store.svelte";
   import { explorerStore, normalizePath } from "./store.svelte";
+  import { treeMenu } from "./treeMenu.svelte";
   import TreeNode from "./TreeNode.svelte";
+  import ContextMenu from "$lib/shared/components/ContextMenu.svelte";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import ChevronsDownUp from "@lucide/svelte/icons/chevrons-down-up";
   import FolderTree from "@lucide/svelte/icons/folder-tree";
@@ -237,3 +239,12 @@
     {/if}
   </div>
 </div>
+
+{#if treeMenu.menu}
+  <ContextMenu
+    items={treeMenu.menu.items}
+    x={treeMenu.menu.x}
+    y={treeMenu.menu.y}
+    onClose={() => treeMenu.close()}
+  />
+{/if}

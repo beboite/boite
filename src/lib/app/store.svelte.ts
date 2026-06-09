@@ -10,9 +10,11 @@ import { platform } from "$lib/storage/platform.svelte";
 import {
   loadThreads,
   saveThread,
+  updateThreadTitle,
   deleteThread as dbDeleteThread,
 } from "$lib/storage/db";
-import { debounce } from "$lib/shared/utils/debounce";
+import { registerProjectRoots } from "$lib/storage/scope";
+import { gitStore } from "$lib/features/git/store.svelte";
 import { notifications } from "$lib/features/notifications/store.svelte";
 
 class AppState {
@@ -42,13 +44,24 @@ class AppState {
   }
 
   // Title bursts (OSC during agent streaming) would write SQLite per token.
-  // Coalesce to one write per thread per window.
-  private pendingTitleSaves = new Map<string, Thread>();
-  private flushTitleSaves = debounce(() => {
-    const batch = [...this.pendingTitleSaves.values()];
-    this.pendingTitleSaves.clear();
-    for (const t of batch) void saveThread(t);
-  }, 500);
+  // Fixed-window coalescing (not a trailing debounce — continuous bursts
+  // would starve a trailing debounce forever), and only the title column is
+  // written so a delayed flush can't clobber concurrent row updates.
+  private pendingTitleSaves = new Map<string, string | null>();
+  private titleFlushTimer: ReturnType<typeof setTimeout> | null = null;
+  private scheduleTitleFlush() {
+    if (this.titleFlushTimer !== null) return;
+    this.titleFlushTimer = setTimeout(() => {
+      this.titleFlushTimer = null;
+      const batch = [...this.pendingTitleSaves];
+      this.pendingTitleSaves.clear();
+      for (const [id, title] of batch) {
+        void updateThreadTitle(id, title).catch((err) => {
+          console.error("updateThreadTitle failed:", err);
+        });
+      }
+    }, 500);
+  }
 
   bumpRespawn(threadId: string) {
     this.respawnNonce = {
@@ -134,6 +147,9 @@ class AppState {
     } catch (err) {
       console.error("loadProjects failed:", err);
     }
+    // Before ready: panels start polling fs/git commands as soon as they
+    // mount, and those commands reject paths outside registered roots.
+    await this.syncRoots();
     try {
       this.threads = await loadThreads();
     } catch (err) {
@@ -187,11 +203,9 @@ class AppState {
     const i = this.threads.findIndex((t) => t.id === thread.id);
     if (i >= 0) this.threads[i] = thread;
     else this.threads.push(thread);
-    try {
-      await saveThread(thread);
-    } catch (err) {
-      console.error("saveThread failed:", err);
-    }
+    // Rethrow: callers show a "Failed to create thread" toast. Swallowing
+    // here left the thread memory-only, silently vanishing on restart.
+    await saveThread(thread);
   }
 
   async removeThread(id: string) {
@@ -258,8 +272,8 @@ class AppState {
     const t = this.threads.find((x) => x.id === id);
     if (!t || t.title === title) return;
     t.title = title;
-    this.pendingTitleSaves.set(id, $state.snapshot(t) as Thread);
-    this.flushTitleSaves();
+    this.pendingTitleSaves.set(id, title);
+    this.scheduleTitleFlush();
   }
 
   setThreadPtyId(id: string, ptyId: string | null) {
@@ -268,8 +282,17 @@ class AppState {
     t.ptyId = ptyId;
   }
 
+  private async syncRoots() {
+    try {
+      await registerProjectRoots(this.projects.map((p) => p.cwd));
+    } catch (err) {
+      console.error("registerProjectRoots failed:", err);
+    }
+  }
+
   async addProject(project: Project) {
     this.projects.push(project);
+    await this.syncRoots();
     try {
       await saveProject(project);
     } catch (err) {
@@ -309,6 +332,8 @@ class AppState {
     const orphanThreads = this.threads.filter((t) => t.projectId === id);
     this.projects = this.projects.filter((p) => p.id !== id);
     this.threads = this.threads.filter((t) => t.projectId !== id);
+    gitStore.drop(id);
+    void this.syncRoots();
     for (const t of orphanThreads) {
       try {
         await dbDeleteThread(t.id);

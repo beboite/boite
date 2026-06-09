@@ -2,20 +2,43 @@
   import { onMount } from "svelte";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { app } from "$lib/app/store.svelte";
+  import { editorStore } from "$lib/features/editor/store.svelte";
   import ConfirmDialog from "$lib/shared/components/ConfirmDialog.svelte";
 
   let pendingClose = $state(false);
   let allowClose = false;
 
-  const busyCount = $derived(
-    app.threads.filter((t) => t.ptyId && t.status === "running").length,
+  // Any live PTY counts, not just "running": a ready agent with a live
+  // process dies just as hard, and running/ready flaps between ticks.
+  const busyCount = $derived(app.threads.filter((t) => t.ptyId).length);
+  const dirtyCount = $derived(
+    editorStore.buffers.filter((b) => editorStore.isDirty(b)).length,
   );
+
+  const message = $derived.by(() => {
+    const parts: string[] = [];
+    if (busyCount > 0) {
+      parts.push(
+        busyCount === 1
+          ? "1 thread is still alive; closing the app will kill its process."
+          : `${busyCount} threads are still alive; closing the app will kill their processes.`,
+      );
+    }
+    if (dirtyCount > 0) {
+      parts.push(
+        dirtyCount === 1
+          ? "1 file has unsaved changes."
+          : `${dirtyCount} files have unsaved changes.`,
+      );
+    }
+    return parts.join(" ");
+  });
 
   onMount(() => {
     const win = getCurrentWindow();
     const unlisten = win.onCloseRequested((event) => {
       if (allowClose) return;
-      if (busyCount === 0) return;
+      if (busyCount === 0 && dirtyCount === 0) return;
       event.preventDefault();
       pendingClose = true;
     });
@@ -38,12 +61,10 @@
 <ConfirmDialog
   open={pendingClose}
   danger
-  title="Des threads travaillent encore"
-  message={busyCount === 1
-    ? "1 thread tourne encore. Fermer l'application va tuer son process."
-    : `${busyCount} threads tournent encore. Fermer l'application va tuer leurs process.`}
-  confirmLabel="Fermer quand même"
-  cancelLabel="Annuler"
+  title="Close boite?"
+  {message}
+  confirmLabel="Close anyway"
+  cancelLabel="Cancel"
   onConfirm={confirmClose}
   onCancel={cancelClose}
 />

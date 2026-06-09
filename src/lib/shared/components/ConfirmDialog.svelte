@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { fade, scale } from "svelte/transition";
+
   type Props = {
     open: boolean;
     title: string;
@@ -10,7 +12,7 @@
     onCancel: () => void;
   };
   let {
-    open = $bindable(),
+    open,
     title,
     message = "",
     confirmLabel = "Confirm",
@@ -20,6 +22,7 @@
     onCancel,
   }: Props = $props();
 
+  let dialogEl: HTMLDivElement | null = $state(null);
   let confirmBtn: HTMLButtonElement | null = $state(null);
 
   $effect(() => {
@@ -38,10 +41,34 @@
       e.preventDefault();
       e.stopPropagation();
       onCancel();
-    } else if (e.key === "Enter") {
+      return;
+    }
+    if (e.key === "Enter") {
+      // Only when focus is inside the dialog: a held Enter in the terminal
+      // at open time must not instantly confirm a destructive action.
+      if (!dialogEl?.contains(document.activeElement)) return;
       e.preventDefault();
       e.stopPropagation();
       onConfirm();
+      return;
+    }
+    if (e.key === "Tab") {
+      // Minimal focus trap: keep Tab cycling inside the dialog.
+      const focusables = dialogEl?.querySelectorAll<HTMLElement>("button");
+      if (!focusables || focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const active = document.activeElement;
+      if (!dialogEl?.contains(active)) {
+        e.preventDefault();
+        first.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      } else if (e.shiftKey && active === first) {
+        e.preventDefault();
+        last.focus();
+      }
     }
   }
 </script>
@@ -57,9 +84,12 @@
     aria-labelledby="confirm-title"
     tabindex="-1"
     onclick={backdropClick}
+    transition:fade={{ duration: 120 }}
   >
     <div
+      bind:this={dialogEl}
       class="w-[360px] overflow-hidden rounded-xl border border-border bg-[var(--color-surface)] shadow-2xl"
+      transition:scale={{ duration: 140, start: 0.97 }}
     >
       <div class="px-5 py-4">
         <h2 id="confirm-title" class="text-sm font-semibold tracking-tight text-foreground">

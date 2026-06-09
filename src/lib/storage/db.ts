@@ -2,13 +2,16 @@ import Database from "@tauri-apps/plugin-sql";
 import type { Project, Settings, Thread } from "$lib/types";
 import { redactArgs } from "$lib/shared/utils/redact";
 
-let dbPromise: Promise<Database> | null = null;
+let db: Database | null = null;
 
-function getDb(): Promise<Database> {
-  if (!dbPromise) {
-    dbPromise = Database.load("sqlite:boite.db");
+// The DB is preloaded Rust-side (plugins.sql.preload in tauri.conf.json), so
+// the webview never needs the sql:allow-load permission — `load` could open
+// or create SQLite files anywhere on disk.
+function getDb(): Database {
+  if (!db) {
+    db = Database.get("sqlite:boite.db");
   }
-  return dbPromise;
+  return db;
 }
 
 interface ProjectRow {
@@ -144,6 +147,17 @@ export async function saveThread(thread: Thread): Promise<void> {
       thread.createdAt,
     ],
   );
+}
+
+// Column-targeted on purpose: title bursts are flushed on a delay, and a
+// whole-row REPLACE built from a stale snapshot would overwrite concurrent
+// writes (sessionId capture, keepAwake, exit status) with old values.
+export async function updateThreadTitle(
+  id: string,
+  title: string | null,
+): Promise<void> {
+  const db = await getDb();
+  await db.execute("UPDATE threads SET title = ? WHERE id = ?", [title, id]);
 }
 
 export async function deleteThread(id: string): Promise<void> {

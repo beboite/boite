@@ -1,5 +1,7 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
+  import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+  import { notifications } from "$lib/features/notifications/store.svelte";
   import type { Commit } from "./api";
 
   type Props = { commits: Commit[] };
@@ -215,12 +217,26 @@
   const POPUP_W = 380;
   const HOVER_DELAY_MS = 350;
 
+  // Narrow windows can't fit the full 380px popup.
+  function popupWidth(): number {
+    return Math.min(POPUP_W, window.innerWidth - 16);
+  }
+
+  async function copySha(sha: string) {
+    try {
+      await writeText(sha);
+      notifications.success(`Copied ${sha}`);
+    } catch {
+      notifications.error("Copy failed");
+    }
+  }
+
   function showPopup(row: Row, e: MouseEvent) {
     const target = e.currentTarget as HTMLElement;
     const rect = target.getBoundingClientRect();
     const x = Math.max(
       8,
-      Math.min(rect.left, window.innerWidth - POPUP_W - 8),
+      Math.min(rect.left, window.innerWidth - popupWidth() - 8),
     );
     if (hoverTimer) clearTimeout(hoverTimer);
     const next = { row, x, rowTop: rect.top, rowBottom: rect.bottom };
@@ -289,11 +305,17 @@
     {@const visibleRefs = rowRefs(row.commit.refs)}
     {@const hiddenRefs = hiddenRefCount(row.commit.refs)}
     <div
-      class="flex min-w-0 items-stretch transition hover:bg-[var(--color-surface-2)]"
+      class="flex min-w-0 cursor-pointer items-stretch transition hover:bg-[var(--color-surface-2)]"
       style:height="{ROW_H}px"
       onmouseenter={(e) => showPopup(row, e)}
       onmouseleave={hidePopup}
-      role="presentation"
+      onclick={() => copySha(row.commit.shortSha)}
+      onkeydown={(e) => {
+        if (e.key === "Enter") copySha(row.commit.shortSha);
+      }}
+      role="button"
+      tabindex="-1"
+      title="Click to copy {row.commit.shortSha}"
     >
       <svg
         class="shrink-0"
@@ -429,7 +451,7 @@
     class="pointer-events-none fixed z-50 rounded-md border border-border bg-[var(--color-surface-3)] p-2.5 shadow-xl"
     style:left="{hovered.x}px"
     style:top="{popupTop}px"
-    style:width="{POPUP_W}px"
+    style:width="{popupWidth()}px"
   >
     <div
       class="whitespace-pre-wrap break-words text-[12px] font-medium leading-snug text-foreground"

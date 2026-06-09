@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
+  import { scale } from "svelte/transition";
   import { app } from "$lib/app/store.svelte";
   import { platform } from "$lib/storage/platform.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
@@ -11,6 +12,7 @@
   let open = $state(false);
   let triggerRoot: HTMLDivElement | null = $state(null);
   let menu: HTMLDivElement | null = $state(null);
+  let menuPos = $state({ x: 0, y: 0 });
 
   const defaultShell = $derived(
     settings.state.defaultShellId
@@ -20,6 +22,12 @@
 
   function toggle(e: MouseEvent) {
     e.stopPropagation();
+    if (!open && triggerRoot) {
+      // Fixed positioning: the shortcut bar is overflow-x-auto, which clips
+      // (or scrolls) an absolutely-positioned dropdown inside it.
+      const r = triggerRoot.getBoundingClientRect();
+      menuPos = { x: r.left, y: r.bottom + 4 };
+    }
     open = !open;
   }
 
@@ -92,7 +100,11 @@
     <div
       bind:this={menu}
       role="menu"
-      class="absolute left-0 top-full z-30 mt-1 flex min-w-44 flex-col rounded-md border border-border bg-[var(--color-surface-2)] p-1 shadow-xl"
+      class="fixed z-[9999] flex min-w-44 flex-col rounded-md border border-border bg-[var(--color-surface-2)] p-1 shadow-xl"
+      style:left="{menuPos.x}px"
+      style:top="{menuPos.y}px"
+      style:transform-origin="top left"
+      transition:scale={{ duration: 90, start: 0.96 }}
     >
       {#if platform.shells.length === 0}
         <div class="px-2 py-1.5 text-[11px] text-muted-foreground">

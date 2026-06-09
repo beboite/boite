@@ -2,6 +2,7 @@ import { readTextFile, writeTextFile, gitFileVersions } from "./api";
 import { notifications } from "$lib/features/notifications/store.svelte";
 import { confirmDialog } from "$lib/shared/components/confirm.svelte";
 import { logger } from "$lib/shared/services/logger.svelte";
+import { basename } from "$lib/shared/utils/path";
 
 export type DiffMode = "staged" | "unstaged";
 
@@ -12,7 +13,6 @@ export interface BaseBuffer {
   kind: "file" | "diff";
   path: string;
   displayName: string;
-  language: string | null;
   loading: boolean;
   error: string | null;
 }
@@ -41,11 +41,6 @@ export interface DiffBuffer extends BaseBuffer {
   binary: boolean;
 }
 
-function basename(p: string): string {
-  const idx = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));
-  return idx >= 0 ? p.slice(idx + 1) : p;
-}
-
 function fileBufferId(path: string): string {
   return `file:${path}`;
 }
@@ -60,12 +55,6 @@ class EditorStore {
 
   get active(): Buffer | null {
     return this.buffers.find((b) => b.id === this.activeId) ?? null;
-  }
-
-  get hasDirty(): boolean {
-    return this.buffers.some(
-      (b) => b.kind === "file" && b.content !== b.savedContent,
-    );
   }
 
   isDirty(b: Buffer): boolean {
@@ -90,7 +79,6 @@ class EditorStore {
       kind: "file",
       path: normalized,
       displayName: basename(normalized),
-      language: null,
       loading: true,
       error: null,
       content: "",
@@ -104,12 +92,19 @@ class EditorStore {
 
     try {
       const file = await readTextFile(normalized);
+      // Lossy decode = replacement chars instead of the original bytes;
+      // saving would silently corrupt the file. Open read-only instead.
       this.patch(id, {
         loading: false,
         content: file.content,
         savedContent: file.content,
-        isReadonly: file.isReadonly,
+        isReadonly: file.isReadonly || file.lossy,
       });
+      if (file.lossy) {
+        notifications.error(
+          `${basename(normalized)} is not UTF-8; opened read-only to avoid corrupting it`,
+        );
+      }
     } catch (err) {
       const msg = String(err);
       logger.warn("editor", `read_text_file failed for ${normalized}`, msg);
@@ -135,7 +130,7 @@ class EditorStore {
       if (fresh.content === fresh.savedContent) {
         fresh.content = file.content;
         fresh.savedContent = file.content;
-        fresh.isReadonly = file.isReadonly;
+        fresh.isReadonly = file.isReadonly || file.lossy;
         fresh.externalChange = false;
       } else {
         fresh.externalChange = true;
@@ -162,7 +157,7 @@ class EditorStore {
       this.patch(id, {
         content: file.content,
         savedContent: file.content,
-        isReadonly: file.isReadonly,
+        isReadonly: file.isReadonly || file.lossy,
         externalChange: false,
       });
     } catch (err) {
@@ -193,7 +188,6 @@ class EditorStore {
       kind: "diff",
       path: fullPath,
       displayName: `${basename(args.file)} · ${args.mode}`,
-      language: null,
       loading: true,
       error: null,
       mode: args.mode,
@@ -324,17 +318,6 @@ class EditorStore {
       this.activeId = next?.id ?? null;
     }
     return true;
-  }
-
-  closeAll(): void {
-    this.buffers = [];
-    this.activeId = null;
-  }
-
-  setLanguage(id: string, name: string | null) {
-    const b = this.buffers.find((x) => x.id === id);
-    if (!b) return;
-    b.language = name;
   }
 
   setActive(id: string) {

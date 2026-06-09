@@ -87,6 +87,15 @@
       onToggle={() =>
         settings.setPowershellNewline(!settings.state.powershellNewline)}
     />
+    <ToggleSetting
+      label="Skip PowerShell profile"
+      description="Start pwsh/powershell with -NoProfile for a much faster prompt. Aliases and functions from your profile won't be available."
+      enabled={settings.state.powershellNoProfile}
+      onLabel="On"
+      offLabel="Off"
+      onToggle={() =>
+        settings.setPowershellNoProfile(!settings.state.powershellNoProfile)}
+    />
   </SettingsCard>
 {/if}
 

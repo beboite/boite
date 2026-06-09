@@ -1,6 +1,6 @@
 [package]
 name = "boite"
-version = "0.6.1"
+version = "0.6.2"
 description = "Lightweight multi-agent terminal multiplexer"
 authors = ["mtsu"]
 edition = "2021"
@@ -22,6 +22,7 @@ tauri-plugin-os = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-window-state = "2"
 tauri-plugin-notification = "2"
+tauri-plugin-single-instance = "2"
 which = "7"
 base64 = "0.22"
 dirs = "6"
@@ -31,4 +32,8 @@ portable-pty = "0.9"
 vte = "0.13"
 uuid = { version = "1", features = ["v4"] }
 parking_lot = "0.12"
-rusqlite = { version = "0.31", features = ["bundled"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+[profile.release]
+lto = "thin"
+strip = true

@@ -41,7 +41,11 @@ const TITLE_GLYPHS = /[✱✻✦✺✧✨✳❖✷✴✵⠋⠙⠹⠸⠼⠴⠦⠧
 const HAS_LETTER = /[a-zA-Z]/;
 
 export function detectWorking(text: string, iconKey: IconKey): boolean {
-  if (TITLE_GLYPHS.test(text)) return true;
+  // Spinner glyphs only signal "working" for known AI CLIs. Plain terminals
+  // print braille spinners too (npm, vite), which flipped a vanilla shell to
+  // running and fired a ghost "Ready for input" notification afterwards.
+  const isKnownAgent = !!iconKey && iconKey in WORKING_BY_KEY;
+  if (isKnownAgent && TITLE_GLYPHS.test(text)) return true;
   if (!HAS_LETTER.test(text)) return false;
   const patterns = (iconKey && WORKING_BY_KEY[iconKey]) || COMMON_PATTERNS;
   for (const pat of patterns) {

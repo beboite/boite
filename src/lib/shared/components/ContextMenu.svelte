@@ -22,6 +22,9 @@
   let menuRef = $state<HTMLDivElement | null>(null);
   let adjustedX = $state(0);
   let adjustedY = $state(0);
+  // Hidden until the first clamp pass, so the menu never paints one frame at
+  // an unpositioned corner.
+  let positioned = $state(false);
   const EDGE_GAP = 4;
 
   async function positionMenu() {
@@ -32,6 +35,7 @@
     const vh = window.innerHeight;
     adjustedX = Math.max(EDGE_GAP, Math.min(x, vw - rect.width - EDGE_GAP));
     adjustedY = Math.max(EDGE_GAP, Math.min(y, vh - rect.height - EDGE_GAP));
+    positioned = true;
   }
 
   $effect(() => {
@@ -43,8 +47,30 @@
   function handleClickOutside(e: MouseEvent) {
     if (menuRef && !menuRef.contains(e.target as Node)) onClose();
   }
+
+  function focusableItems(): HTMLButtonElement[] {
+    return Array.from(
+      menuRef?.querySelectorAll<HTMLButtonElement>("button.item:not(:disabled)") ??
+        [],
+    );
+  }
+
   function handleKeydown(e: KeyboardEvent) {
-    if (e.key === "Escape") onClose();
+    if (e.key === "Escape") {
+      onClose();
+      return;
+    }
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      const buttons = focusableItems();
+      if (buttons.length === 0) return;
+      const idx = buttons.indexOf(document.activeElement as HTMLButtonElement);
+      const next =
+        e.key === "ArrowDown"
+          ? buttons[(idx + 1) % buttons.length]
+          : buttons[(idx - 1 + buttons.length) % buttons.length];
+      next.focus();
+    }
   }
 
   onMount(() => {
@@ -72,17 +98,19 @@
   bind:this={menuRef}
   style:left="{adjustedX}px"
   style:top="{adjustedY}px"
+  style:visibility={positioned ? "visible" : "hidden"}
   role="menu"
 >
   {#each items as item, i (i)}
     {#if item.separator}
-      <div class="separator"></div>
+      <div class="separator" role="separator"></div>
     {:else}
       <button
         type="button"
         class="item"
         class:danger={item.danger}
         disabled={item.disabled}
+        role="menuitem"
         onmousedown={(e) => e.preventDefault()}
         onclick={() => {
           item.action?.();
@@ -105,6 +133,14 @@
     border: 1px solid var(--color-border, rgba(255, 255, 255, 0.1));
     border-radius: 6px;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+    transform-origin: top left;
+    animation: ctx-in 90ms ease-out;
+  }
+  @keyframes ctx-in {
+    from {
+      opacity: 0;
+      transform: scale(0.96);
+    }
   }
   .item {
     display: flex;

@@ -3,6 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { app } from "$lib/app/store.svelte";
 import { notifications } from "$lib/features/notifications/store.svelte";
 import { logger } from "$lib/shared/services/logger.svelte";
+import { basename } from "$lib/shared/utils/path";
 import type { Project } from "$lib/types";
 
 interface ProjectInspection {
@@ -35,7 +36,7 @@ export async function addProjectByPath(path: string): Promise<Project | null> {
     inspection = await invoke<ProjectInspection>("inspect_project", { path });
   } catch (err) {
     logger.warn("project", `inspect_project failed for ${path}, using fallback`, String(err));
-    inspection = { name: deriveBasename(path), icon: null };
+    inspection = { name: basename(path) || "project", icon: null };
   }
 
   const project: Project = {
@@ -56,9 +57,4 @@ export async function addProjectByPath(path: string): Promise<Project | null> {
   notifications.success(`Added ${project.name}`);
   logger.info("project", `added project ${project.name}`, { cwd: project.cwd });
   return project;
-}
-
-function deriveBasename(path: string): string {
-  const parts = path.split(/[\\/]/).filter(Boolean);
-  return parts[parts.length - 1] ?? "project";
 }
