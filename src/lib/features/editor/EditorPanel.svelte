@@ -7,6 +7,7 @@
   import Save from "@lucide/svelte/icons/save";
   import FileText from "@lucide/svelte/icons/file-text";
   import TerminalSquare from "@lucide/svelte/icons/terminal-square";
+  import RotateCw from "@lucide/svelte/icons/rotate-cw";
 
   const active = $derived(editorStore.active);
 
@@ -79,6 +80,23 @@
       <span class="truncate flex-1" title={active.path}>{active.path}</span>
       {#if active.isReadonly}
         <span class="rounded bg-[var(--color-surface-2)] px-1.5 py-0.5 text-[9.5px] uppercase">read-only</span>
+      {/if}
+      {#if active.externalChange}
+        <span
+          class="rounded bg-[var(--color-warning)]/15 px-1.5 py-0.5 text-[9.5px] uppercase text-[var(--color-warning)]"
+          title="The file was modified outside the editor while you have unsaved changes"
+        >
+          changed on disk
+        </span>
+        <button
+          type="button"
+          class="rounded p-1 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground"
+          onclick={() => active && void editorStore.reloadFromDisk(active.id)}
+          title="Reload from disk (discards your edits)"
+          aria-label="Reload from disk"
+        >
+          <RotateCw class="size-3.5" />
+        </button>
       {/if}
       {#if active.content !== active.savedContent}
         <span class="text-foreground/80">●</span>

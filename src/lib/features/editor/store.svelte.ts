@@ -1,5 +1,6 @@
 import { readTextFile, writeTextFile, gitFileVersions } from "./api";
 import { notifications } from "$lib/features/notifications/store.svelte";
+import { confirmDialog } from "$lib/shared/components/confirm.svelte";
 import { logger } from "$lib/shared/services/logger.svelte";
 
 export type DiffMode = "staged" | "unstaged";
@@ -22,6 +23,8 @@ export interface FileBuffer extends BaseBuffer {
   savedContent: string;
   isReadonly: boolean;
   saving: boolean;
+  /** Disk content diverged while the buffer holds unsaved edits. */
+  externalChange: boolean;
 }
 
 export interface DiffBuffer extends BaseBuffer {
@@ -29,6 +32,8 @@ export interface DiffBuffer extends BaseBuffer {
   mode: DiffMode;
   projectId: string;
   repoPath: string;
+  /** HEAD-side path for renames (old file name). */
+  headFile: string | null;
   leftLabel: string;
   rightLabel: string;
   leftContent: string;
@@ -68,17 +73,23 @@ class EditorStore {
   }
 
   async openFile(path: string): Promise<string> {
-    const id = fileBufferId(path);
+    // One separator convention so the same file opened from the explorer
+    // (forward slashes) and the git panel (native) shares one buffer.
+    const normalized = path.replace(/\\/g, "/");
+    const id = fileBufferId(normalized);
     const existing = this.buffers.find((b) => b.id === id);
     if (existing) {
       this.activeId = id;
+      if (existing.kind === "file" && !existing.loading && !existing.error) {
+        void this.syncFromDisk(id);
+      }
       return id;
     }
     const buf: FileBuffer = {
       id,
       kind: "file",
-      path,
-      displayName: basename(path),
+      path: normalized,
+      displayName: basename(normalized),
       language: null,
       loading: true,
       error: null,
@@ -86,12 +97,13 @@ class EditorStore {
       savedContent: "",
       isReadonly: false,
       saving: false,
+      externalChange: false,
     };
     this.buffers = [...this.buffers, buf];
     this.activeId = id;
 
     try {
-      const file = await readTextFile(path);
+      const file = await readTextFile(normalized);
       this.patch(id, {
         loading: false,
         content: file.content,
@@ -100,11 +112,62 @@ class EditorStore {
       });
     } catch (err) {
       const msg = String(err);
-      logger.warn("editor", `read_text_file failed for ${path}`, msg);
+      logger.warn("editor", `read_text_file failed for ${normalized}`, msg);
       this.patch(id, { loading: false, error: msg });
-      notifications.error(`Cannot open ${basename(path)}: ${msg}`);
+      notifications.error(`Cannot open ${basename(normalized)}: ${msg}`);
     }
     return id;
+  }
+
+  // Re-read the file on activation: clean buffers silently pick up agent
+  // edits; dirty buffers get flagged instead of clobbered.
+  private async syncFromDisk(id: string): Promise<void> {
+    const b = this.buffers.find((x) => x.id === id);
+    if (!b || b.kind !== "file" || b.saving) return;
+    try {
+      const file = await readTextFile(b.path);
+      const fresh = this.buffers.find((x) => x.id === id);
+      if (!fresh || fresh.kind !== "file" || fresh.saving) return;
+      if (file.content === fresh.savedContent) {
+        fresh.externalChange = false;
+        return;
+      }
+      if (fresh.content === fresh.savedContent) {
+        fresh.content = file.content;
+        fresh.savedContent = file.content;
+        fresh.isReadonly = file.isReadonly;
+        fresh.externalChange = false;
+      } else {
+        fresh.externalChange = true;
+      }
+    } catch {
+      // Unreadable or deleted; keep the buffer as the last good copy.
+    }
+  }
+
+  async reloadFromDisk(id: string): Promise<void> {
+    const b = this.buffers.find((x) => x.id === id);
+    if (!b || b.kind !== "file") return;
+    if (this.isDirty(b)) {
+      const ok = await confirmDialog.ask({
+        title: "Reload from disk?",
+        message: `${b.displayName} has unsaved changes. Reloading will discard them.`,
+        confirmLabel: "Reload",
+        danger: true,
+      });
+      if (!ok) return;
+    }
+    try {
+      const file = await readTextFile(b.path);
+      this.patch(id, {
+        content: file.content,
+        savedContent: file.content,
+        isReadonly: file.isReadonly,
+        externalChange: false,
+      });
+    } catch (err) {
+      notifications.error(`Reload failed: ${err}`);
+    }
   }
 
   async openDiff(args: {
@@ -112,11 +175,15 @@ class EditorStore {
     repoPath: string;
     file: string;
     mode: DiffMode;
+    headFile?: string;
   }): Promise<string> {
     const id = diffBufferId(args.repoPath, args.file, args.mode);
     const fullPath = joinPath(args.repoPath, args.file);
     const existing = this.buffers.find((b) => b.id === id);
     if (existing) {
+      if (existing.kind === "diff") {
+        existing.headFile = args.headFile ?? null;
+      }
       this.activeId = id;
       void this.refreshDiff(id);
       return id;
@@ -132,6 +199,7 @@ class EditorStore {
       mode: args.mode,
       projectId: args.projectId,
       repoPath: args.repoPath,
+      headFile: args.headFile ?? null,
       leftLabel: "",
       rightLabel: "",
       leftContent: "",
@@ -149,7 +217,11 @@ class EditorStore {
     if (!b || b.kind !== "diff") return;
     this.patch(id, { loading: true, error: null });
     try {
-      const v = await gitFileVersions(b.repoPath, relativeTo(b.repoPath, b.path));
+      const v = await gitFileVersions(
+        b.repoPath,
+        relativeTo(b.repoPath, b.path),
+        b.headFile ?? undefined,
+      );
       let leftLabel: string;
       let rightLabel: string;
       let leftContent: string;
@@ -196,11 +268,31 @@ class EditorStore {
     if (b.content === b.savedContent) return true;
     this.patch(id, { saving: true });
     try {
+      // Lost-update guard: someone (an agent, most likely) may have written
+      // the file since we loaded it.
+      try {
+        const disk = await readTextFile(b.path);
+        if (disk.content !== b.savedContent) {
+          const ok = await confirmDialog.ask({
+            title: "File changed on disk",
+            message: `${b.displayName} was modified outside the editor. Saving will overwrite those changes.`,
+            confirmLabel: "Overwrite",
+            danger: true,
+          });
+          if (!ok) {
+            this.patch(id, { saving: false, externalChange: true });
+            return false;
+          }
+        }
+      } catch {
+        // Unreadable or deleted on disk; proceed and recreate it.
+      }
       await writeTextFile(b.path, b.content);
       const fresh = this.buffers.find((x) => x.id === id);
       if (fresh && fresh.kind === "file") {
         fresh.savedContent = fresh.content;
         fresh.saving = false;
+        fresh.externalChange = false;
       }
       notifications.success(`Saved ${b.displayName}`);
       return true;
@@ -213,13 +305,16 @@ class EditorStore {
     }
   }
 
-  close(id: string, force = false): boolean {
+  async close(id: string, force = false): Promise<boolean> {
     const b = this.buffers.find((x) => x.id === id);
     if (!b) return true;
     if (!force && this.isDirty(b)) {
-      const ok = confirm(
-        `${b.displayName} has unsaved changes. Discard?`,
-      );
+      const ok = await confirmDialog.ask({
+        title: "Discard unsaved changes?",
+        message: `${b.displayName} has unsaved changes.`,
+        confirmLabel: "Discard",
+        danger: true,
+      });
       if (!ok) return false;
     }
     const idx = this.buffers.findIndex((x) => x.id === id);
@@ -243,7 +338,14 @@ class EditorStore {
   }
 
   setActive(id: string) {
-    if (this.buffers.some((b) => b.id === id)) this.activeId = id;
+    const b = this.buffers.find((x) => x.id === id);
+    if (!b) return;
+    this.activeId = id;
+    if (b.kind === "file" && !b.loading && !b.error) {
+      void this.syncFromDisk(id);
+    } else if (b.kind === "diff") {
+      void this.refreshDiff(id);
+    }
   }
 
   private patch(id: string, fields: Partial<Buffer>) {

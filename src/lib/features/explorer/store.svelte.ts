@@ -7,7 +7,7 @@ import {
 } from "./api";
 import { logger } from "$lib/shared/services/logger.svelte";
 
-function normalizePath(p: string): string {
+export function normalizePath(p: string): string {
   return p.replace(/\\/g, "/").replace(/\/+$/, "");
 }
 
@@ -16,6 +16,8 @@ function joinPath(cwd: string, rel: string): string {
   const r = rel.replace(/^\/+/, "");
   return `${c}/${r}`;
 }
+
+export const SEARCH_LIMIT = 500;
 
 const STATUS_RANK: Record<string, number> = {
   U: 6,
@@ -32,6 +34,8 @@ function worse(a: string | undefined, b: string): string {
   return (STATUS_RANK[b] ?? 0) > (STATUS_RANK[a] ?? 0) ? b : a;
 }
 
+// All record keys in this store are normalized (forward-slash) paths; the
+// api layer guarantees entry paths arrive in the same form.
 class ExplorerStore {
   entriesByPath = $state<Record<string, DirEntry[]>>({});
   expanded = $state<Record<string, true>>({});
@@ -42,6 +46,7 @@ class ExplorerStore {
   filterText = $state<string>("");
   searchHits = $state<SearchHit[]>([]);
   searching = $state<boolean>(false);
+  searchTruncated = $state<boolean>(false);
   hitPathSet = $state<Record<string, true>>({});
   ancestorPathSet = $state<Record<string, true>>({});
   dirHitPrefixes = $state<string[]>([]);
@@ -49,45 +54,51 @@ class ExplorerStore {
   private debounceHandle: ReturnType<typeof setTimeout> | null = null;
 
   async load(path: string, force = false): Promise<void> {
-    if (!force && this.entriesByPath[path]) return;
-    if (this.loading[path]) return;
-    this.loading = { ...this.loading, [path]: true };
+    const key = normalizePath(path);
+    if (!force && this.entriesByPath[key]) return;
+    if (this.loading[key]) return;
+    this.loading = { ...this.loading, [key]: true };
     try {
-      const entries = await readDir(path);
-      this.entriesByPath = { ...this.entriesByPath, [path]: entries };
-      if (this.errorByPath[path]) {
+      const entries = (await readDir(key)).filter((e) => e.name !== ".git");
+      this.entriesByPath = { ...this.entriesByPath, [key]: entries };
+      if (this.errorByPath[key]) {
         const next = { ...this.errorByPath };
-        delete next[path];
+        delete next[key];
         this.errorByPath = next;
       }
     } catch (err) {
       const msg = String(err);
-      logger.warn("explorer", `read_dir failed for ${path}`, msg);
-      this.errorByPath = { ...this.errorByPath, [path]: msg };
+      logger.warn("explorer", `read_dir failed for ${key}`, msg);
+      this.errorByPath = { ...this.errorByPath, [key]: msg };
     } finally {
       const next = { ...this.loading };
-      delete next[path];
+      delete next[key];
       this.loading = next;
     }
   }
 
   async toggle(path: string): Promise<void> {
-    if (this.expanded[path]) {
+    const key = normalizePath(path);
+    if (this.expanded[key]) {
       const next = { ...this.expanded };
-      delete next[path];
+      delete next[key];
       this.expanded = next;
       return;
     }
-    this.expanded = { ...this.expanded, [path]: true };
-    await this.load(path);
+    this.expanded = { ...this.expanded, [key]: true };
+    await this.load(key);
   }
 
   async refresh(path: string): Promise<void> {
-    await this.load(path, true);
-    for (const key of Object.keys(this.expanded)) {
-      if (key.startsWith(path)) await this.load(key, true);
-    }
-    await this.loadGitStatus(path);
+    const root = normalizePath(path);
+    const expandedKeys = Object.keys(this.expanded).filter(
+      (k) => k === root || k.startsWith(root + "/"),
+    );
+    await Promise.all([
+      this.load(root, true),
+      ...expandedKeys.map((k) => this.load(k, true)),
+      this.loadGitStatus(root),
+    ]);
   }
 
   collapseAll(): void {
@@ -104,6 +115,7 @@ class ExplorerStore {
     if (!trimmed || !cwd) {
       this.searching = false;
       this.searchHits = [];
+      this.searchTruncated = false;
       this.hitPathSet = {};
       this.ancestorPathSet = {};
       this.dirHitPrefixes = [];
@@ -114,19 +126,20 @@ class ExplorerStore {
     this.searching = true;
     this.debounceHandle = setTimeout(() => {
       this.debounceHandle = null;
-      void this.runSearch(token, cwd, trimmed);
+      void this.runSearch(token, normalizePath(cwd), trimmed);
     }, 180);
   }
 
   private async runSearch(token: number, cwd: string, query: string): Promise<void> {
     try {
-      const hits = await explorerSearch(cwd, query, 500);
+      const hits = await explorerSearch(cwd, query, SEARCH_LIMIT);
       if (token !== this.searchToken) return;
       this.applyHits(hits, cwd);
     } catch (err) {
       if (token !== this.searchToken) return;
       logger.warn("explorer", `explorer_search failed for ${cwd}`, String(err));
       this.searchHits = [];
+      this.searchTruncated = false;
       this.hitPathSet = {};
       this.ancestorPathSet = {};
       this.dirHitPrefixes = [];
@@ -153,11 +166,12 @@ class ExplorerStore {
       }
     }
     this.searchHits = hits;
+    this.searchTruncated = hits.length >= SEARCH_LIMIT;
     this.hitPathSet = hitSet;
     this.ancestorPathSet = ancestorSet;
     this.dirHitPrefixes = dirPrefixes;
     const next = { ...this.expanded };
-    for (const key of Object.keys(ancestorSet)) next[normalizePath(key)] = true;
+    for (const key of Object.keys(ancestorSet)) next[key] = true;
     for (const hit of hits) {
       if (hit.isDir) next[normalizePath(hit.path)] = true;
     }
@@ -173,20 +187,11 @@ class ExplorerStore {
       if (slash > 0) toLoad.add(norm.slice(0, slash));
       if (hit.isDir) toLoad.add(norm);
     }
-    for (const folder of toLoad) {
-      const platform = folder.replace(/\//g, this.pathSeparator());
-      if (!this.entriesByPath[platform] && !this.entriesByPath[folder]) {
-        await this.load(platform);
-      }
-    }
-  }
-
-  private pathSeparator(): string {
-    for (const key of Object.keys(this.entriesByPath)) {
-      if (key.includes("\\")) return "\\";
-      if (key.includes("/")) return "/";
-    }
-    return "/";
+    await Promise.all(
+      [...toLoad]
+        .filter((folder) => !this.entriesByPath[folder])
+        .map((folder) => this.load(folder)),
+    );
   }
 
   isVisible(path: string, isDir: boolean): boolean {
@@ -204,26 +209,14 @@ class ExplorerStore {
     this.setFilter("", null);
   }
 
-  expandPath(path: string): void {
-    const norm = normalizePath(path);
-    const segments = norm.split("/");
-    const next = { ...this.expanded };
-    let acc = "";
-    for (let i = 0; i < segments.length - 1; i++) {
-      acc = i === 0 ? segments[0] : `${acc}/${segments[i]}`;
-      next[acc] = true;
-    }
-    this.expanded = next;
-  }
-
   async loadGitStatus(cwd: string): Promise<void> {
     try {
-      const rows = await gitChangedPaths(cwd);
+      const rows = await gitChangedPaths(normalizePath(cwd));
       const byPath: Record<string, string> = {};
       const folderStatus: Record<string, string> = {};
       const cwdNorm = normalizePath(cwd);
       for (const row of rows) {
-        const abs = normalizePath(joinPath(cwd, row.path));
+        const abs = joinPath(cwdNorm, row.path);
         byPath[abs] = row.status;
         let parent = abs;
         while (parent.length > cwdNorm.length) {
@@ -236,9 +229,9 @@ class ExplorerStore {
       this.statusByPath = byPath;
       this.folderStatusByPath = folderStatus;
     } catch (err) {
+      // Keep the previous badges: a transient failure (index.lock during a
+      // commit) should not blank the whole tree.
       logger.warn("explorer", `git_changed_paths failed for ${cwd}`, String(err));
-      this.statusByPath = {};
-      this.folderStatusByPath = {};
     }
   }
 

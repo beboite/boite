@@ -17,7 +17,7 @@
   function close(e: MouseEvent, id: string) {
     e.stopPropagation();
     e.preventDefault();
-    editorStore.close(id);
+    void editorStore.close(id);
   }
 </script>
 

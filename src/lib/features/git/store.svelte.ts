@@ -2,7 +2,10 @@ import {
   gitCommit,
   gitDiscard,
   gitFetch,
+  gitInit,
   gitLog,
+  gitPull,
+  gitPush,
   gitRepoInfo,
   gitStage,
   gitStatus,
@@ -27,6 +30,7 @@ interface RefreshOptions {
 export interface GitState {
   isRepo: boolean;
   branch: string | null;
+  upstream: string | null;
   ahead: number;
   behind: number;
   refsVersion: string | null;
@@ -36,9 +40,13 @@ export interface GitState {
   log: Commit[];
   logHasMore: boolean;
   logLoadingMore: boolean;
+  /** True once the first refresh has completed; gates the initial spinner. */
+  loaded: boolean;
   loading: boolean;
   committing: boolean;
   fetching: boolean;
+  pushing: boolean;
+  pulling: boolean;
   message: string;
 }
 
@@ -46,6 +54,7 @@ function emptyState(): GitState {
   return {
     isRepo: false,
     branch: null,
+    upstream: null,
     ahead: 0,
     behind: 0,
     refsVersion: null,
@@ -55,9 +64,12 @@ function emptyState(): GitState {
     log: [],
     logHasMore: false,
     logLoadingMore: false,
+    loaded: false,
     loading: false,
     committing: false,
     fetching: false,
+    pushing: false,
+    pulling: false,
     message: "",
   };
 }
@@ -134,6 +146,7 @@ class GitStore {
         const log = info.isRepo && shouldLoadLog ? await gitLog(cwd, LOG_PAGE, 0) : null;
         state.isRepo = info.isRepo;
         state.branch = info.branch;
+        state.upstream = info.upstream;
         state.ahead = info.ahead;
         state.behind = info.behind;
         state.refsVersion = info.refsVersion;
@@ -159,6 +172,7 @@ class GitStore {
         console.error("git refresh failed:", err);
         if (options.notifyErrors) throw err;
       } finally {
+        state.loaded = true;
         state.loading = false;
         this.inflight.delete(projectId);
       }
@@ -206,14 +220,60 @@ class GitStore {
     }
   }
 
-  async discard(projectId: string, files: string[]) {
+  async discard(projectId: string, entries: Pick<ChangeEntry, "path" | "status">[]) {
     const cwd = this.cwds.get(projectId);
-    if (!cwd || files.length === 0) return;
+    if (!cwd || entries.length === 0) return;
+    const tracked = entries.filter((e) => e.status !== "?").map((e) => e.path);
+    const untracked = entries.filter((e) => e.status === "?").map((e) => e.path);
     try {
-      await gitDiscard(cwd, files);
+      await gitDiscard(cwd, tracked, untracked);
       await this.refresh(projectId);
     } catch (err) {
       notifications.error(`Discard failed: ${err}`);
+    }
+  }
+
+  async push(projectId: string) {
+    const cwd = this.cwds.get(projectId);
+    const state = this.states[projectId];
+    if (!cwd || !state || state.pushing) return;
+    state.pushing = true;
+    try {
+      await gitPush(cwd);
+      notifications.success("Pushed");
+      await this.refresh(projectId, { reloadLog: true });
+    } catch (err) {
+      notifications.error(`Push failed: ${err}`);
+    } finally {
+      state.pushing = false;
+    }
+  }
+
+  async pull(projectId: string) {
+    const cwd = this.cwds.get(projectId);
+    const state = this.states[projectId];
+    if (!cwd || !state || state.pulling) return;
+    state.pulling = true;
+    try {
+      await gitPull(cwd);
+      notifications.success("Pulled");
+      await this.refresh(projectId, { reloadLog: true });
+    } catch (err) {
+      notifications.error(`Pull failed: ${err}`);
+    } finally {
+      state.pulling = false;
+    }
+  }
+
+  async init(projectId: string) {
+    const cwd = this.cwds.get(projectId);
+    if (!cwd) return;
+    try {
+      await gitInit(cwd);
+      notifications.success("Repository initialized");
+      await this.refresh(projectId, { reloadLog: true });
+    } catch (err) {
+      notifications.error(`git init failed: ${err}`);
     }
   }
 

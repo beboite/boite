@@ -14,6 +14,7 @@ export interface ChangeEntry {
   status: string;
   staged: boolean;
   conflicted: boolean;
+  origPath: string | null;
 }
 
 export interface Commit {
@@ -101,8 +102,12 @@ export function gitUnstage(path: string, files: string[]): Promise<void> {
   return invoke("git_unstage", { path, files });
 }
 
-export function gitDiscard(path: string, files: string[]): Promise<void> {
-  return invoke("git_discard", { path, files });
+export function gitDiscard(
+  path: string,
+  files: string[],
+  untracked: string[],
+): Promise<void> {
+  return invoke("git_discard", { path, files, untracked });
 }
 
 export function gitCommit(path: string, message: string): Promise<string> {
@@ -111,4 +116,16 @@ export function gitCommit(path: string, message: string): Promise<string> {
 
 export function gitFetch(path: string): Promise<void> {
   return invoke("git_fetch", { path });
+}
+
+export function gitPush(path: string): Promise<void> {
+  return invoke("git_push", { path });
+}
+
+export function gitPull(path: string): Promise<void> {
+  return invoke("git_pull", { path });
+}
+
+export function gitInit(path: string): Promise<void> {
+  return invoke("git_init", { path });
 }

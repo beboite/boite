@@ -11,6 +11,7 @@
   import SettingsPanel from "$lib/features/settings/SettingsPanel.svelte";
   import Terminal from "$lib/features/terminal/Terminal.svelte";
   import Toaster from "$lib/features/notifications/Toaster.svelte";
+  import ConfirmHost from "$lib/shared/components/ConfirmHost.svelte";
   import BoiteLogo from "$lib/shared/components/BoiteLogo.svelte";
   import RightPanel from "$lib/features/panes/RightPanel.svelte";
   import { paneStore } from "$lib/features/panes/store.svelte";
@@ -232,6 +233,7 @@
         {/if}
       {/if}
       <Toaster />
+      <ConfirmHost />
     </main>
 
     {#if app.ready && settings.state.rightPanel}

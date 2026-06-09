@@ -1,6 +1,6 @@
 <script lang="ts">
   import { app } from "$lib/app/store.svelte";
-  import { explorerStore } from "./store.svelte";
+  import { explorerStore, normalizePath } from "./store.svelte";
   import TreeNode from "./TreeNode.svelte";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import ChevronsDownUp from "@lucide/svelte/icons/chevrons-down-up";
@@ -8,21 +8,25 @@
   import Search from "@lucide/svelte/icons/search";
   import X from "@lucide/svelte/icons/x";
 
+  const AUTO_REFRESH_MS = 3000;
+
   const project = $derived(
     app.currentProjectId
       ? app.projects.find((p) => p.id === app.currentProjectId) ?? null
       : null,
   );
 
-  const root = $derived(project?.cwd ?? null);
+  const root = $derived(project ? normalizePath(project.cwd) : null);
   const entries = $derived(root ? explorerStore.entriesByPath[root] ?? null : null);
-  const loading = $derived(root ? !!explorerStore.loading[root] : false);
   const err = $derived(root ? explorerStore.errorByPath[root] ?? null : null);
   const filterActive = $derived(explorerStore.filterText.trim().length > 0);
   const hitCount = $derived(explorerStore.searchHits.length);
+  const truncated = $derived(explorerStore.searchTruncated);
   const searching = $derived(explorerStore.searching);
 
   let filterInput = $state<HTMLInputElement | null>(null);
+  let treeEl = $state<HTMLElement | null>(null);
+  let manualRefreshing = $state(false);
 
   $effect(() => {
     if (root) {
@@ -31,8 +35,29 @@
     }
   });
 
-  function refresh() {
-    if (root) void explorerStore.refresh(root);
+  $effect(() => {
+    if (!root) return;
+    const r = root;
+    const poke = () => {
+      if (document.hidden) return;
+      void explorerStore.refresh(r);
+    };
+    const interval = window.setInterval(poke, AUTO_REFRESH_MS);
+    window.addEventListener("focus", poke);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", poke);
+    };
+  });
+
+  async function refresh() {
+    if (!root || manualRefreshing) return;
+    manualRefreshing = true;
+    try {
+      await explorerStore.refresh(root);
+    } finally {
+      manualRefreshing = false;
+    }
   }
 
   function collapseAll() {
@@ -53,6 +78,55 @@
     if (e.key === "Escape") {
       e.preventDefault();
       clearFilter();
+    }
+  }
+
+  function treeRows(): HTMLButtonElement[] {
+    if (!treeEl) return [];
+    return Array.from(
+      treeEl.querySelectorAll<HTMLButtonElement>("[data-tree-row]"),
+    );
+  }
+
+  function onTreeKeydown(e: KeyboardEvent) {
+    const rows = treeRows();
+    if (rows.length === 0) return;
+    const active = document.activeElement;
+    const idx =
+      active instanceof HTMLButtonElement ? rows.indexOf(active) : -1;
+    const current = idx >= 0 ? rows[idx] : null;
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      rows[Math.min(idx + 1, rows.length - 1)]?.focus();
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      rows[Math.max(idx - 1, 0)]?.focus();
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      rows[0]?.focus();
+    } else if (e.key === "End") {
+      e.preventDefault();
+      rows[rows.length - 1]?.focus();
+    } else if (e.key === "ArrowRight" && current) {
+      const path = current.dataset.path;
+      if (!path) return;
+      e.preventDefault();
+      if (current.dataset.dir === "1" && !explorerStore.expanded[path]) {
+        void explorerStore.toggle(path);
+      } else {
+        rows[Math.min(idx + 1, rows.length - 1)]?.focus();
+      }
+    } else if (e.key === "ArrowLeft" && current) {
+      const path = current.dataset.path;
+      if (!path) return;
+      e.preventDefault();
+      if (current.dataset.dir === "1" && explorerStore.expanded[path]) {
+        void explorerStore.toggle(path);
+        return;
+      }
+      const parent = path.slice(0, path.lastIndexOf("/"));
+      rows.find((r) => r.dataset.path === parent)?.focus();
     }
   }
 </script>
@@ -81,11 +155,11 @@
       type="button"
       class="rounded p-1 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:opacity-40"
       onclick={refresh}
-      disabled={!root || loading}
+      disabled={!root || manualRefreshing}
       title="Refresh"
       aria-label="Refresh"
     >
-      <RefreshCw class="size-3.5 {loading ? 'animate-spin' : ''}" />
+      <RefreshCw class="size-3.5 {manualRefreshing ? 'animate-spin' : ''}" />
     </button>
   </header>
 
@@ -122,6 +196,8 @@
           Searching…
         {:else if hitCount === 0}
           No matches.
+        {:else if truncated}
+          {hitCount}+ matches — narrow the filter to see them all.
         {:else if hitCount === 1}
           1 match.
         {:else}
@@ -131,7 +207,13 @@
     {/if}
   </div>
 
-  <div class="min-h-0 flex-1 overflow-auto py-1">
+  <div
+    bind:this={treeEl}
+    class="min-h-0 flex-1 overflow-auto py-1"
+    role="tree"
+    tabindex="-1"
+    onkeydown={onTreeKeydown}
+  >
     {#if !project}
       <div class="px-3 py-4 text-center text-[11px] text-muted-foreground/70">
         Pick a project.
