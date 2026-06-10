@@ -86,10 +86,14 @@
     </button>
     <button
       type="button"
-      class="flex h-7 items-center justify-center rounded-md px-2 text-muted-foreground transition hover:bg-accent hover:text-foreground"
+      class="flex h-7 items-center justify-center rounded-md px-2 transition {!settings.state
+        .sidebarCollapsed
+        ? 'bg-accent text-foreground'
+        : 'text-muted-foreground hover:bg-accent hover:text-foreground'}"
       onclick={() => settings.toggleSidebar()}
       title={settings.state.sidebarCollapsed ? "Show sidebar (Ctrl+B)" : "Hide sidebar (Ctrl+B)"}
       aria-label="Toggle sidebar"
+      aria-pressed={!settings.state.sidebarCollapsed}
     >
       <PanelLeft class="size-[15px]" />
     </button>

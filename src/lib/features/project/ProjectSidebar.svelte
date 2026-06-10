@@ -58,6 +58,7 @@
     slotIndex: number | null;
   };
   let dragState = $state<DragState | null>(null);
+  let dragCaptureEl: HTMLElement | null = null;
   let suppressClickFor = $state<string | null>(null);
 
   let resizing = $state(false);
@@ -87,9 +88,7 @@
     if (e.button === 1) e.preventDefault();
     if (e.button !== 0 || isDragBlocked(e.target as HTMLElement)) return;
     e.stopPropagation();
-    // Capture keeps the drag alive if the button is released outside the
-    // window; without it the row stayed glued to the cursor.
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    dragCaptureEl = e.currentTarget as HTMLElement;
     startPointerDrag({
       kind: "thread",
       id: thread.id,
@@ -129,7 +128,7 @@
     if (e.button !== 0 || isDragBlocked(e.target as HTMLElement)) return;
     const project = app.projects.find((p) => p.id === projectId);
     if (!project) return;
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    dragCaptureEl = e.currentTarget as HTMLElement;
     startPointerDrag({
       kind: "project",
       id: project.id,
@@ -210,6 +209,15 @@
       }
       drag.active = true;
       suppressClickFor = drag.id;
+      // Capture keeps the drag alive if the button is released outside the
+      // window. Deferred until the drag really starts: capturing on
+      // pointerdown retargets the click to the row, so plain clicks never
+      // reached the activate/select handlers.
+      try {
+        dragCaptureEl?.setPointerCapture(drag.pointerId);
+      } catch {
+        // pointer already released
+      }
       closeContextMenu();
       captureSiblings(drag);
       if (drag.kind === "thread") paneStore.draggingThreadId = drag.id;
@@ -348,6 +356,7 @@
       document.removeEventListener("pointercancel", pointerDragEnd);
     }
     dragState = null;
+    dragCaptureEl = null;
     paneStore.draggingThreadId = null;
     paneStore.dropPreview = null;
   }
