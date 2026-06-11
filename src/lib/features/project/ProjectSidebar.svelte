@@ -675,7 +675,7 @@
         <div
           class="project-row group/project relative flex items-center gap-2 rounded-md px-2 py-1.5 transition hover:bg-accent/40 hover:text-foreground {showArchived
             ? ''
-            : 'cursor-grab'} {isSelected ? 'bg-accent/40' : ''}"
+            : 'cursor-pointer'} {isSelected ? 'bg-accent/40' : ''}"
           oncontextmenu={(e) => openProjectContextMenu(project, e)}
         >
           <div
@@ -774,7 +774,7 @@
                 role="listitem"
               >
                 <div
-                  class="thread-card flex cursor-grab items-center gap-2 rounded-md px-2 py-1.5 transition {isActive
+                  class="thread-card flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 transition {isActive
                     ? 'bg-accent text-foreground'
                     : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground'}"
                   role="button"
