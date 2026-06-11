@@ -40,6 +40,76 @@ pub struct PtySpawnArgs {
     pub env: Option<HashMap<String, String>>,
 }
 
+// Each child is assigned to a Windows Job object with KILL_ON_JOB_CLOSE:
+// TerminateJobObject kills the whole process tree in one syscall (the
+// taskkill shell-out it replaces took 0.5-2s per PTY and stalled app close),
+// and if boite dies without cleanup the OS closes the handle and reaps the
+// tree anyway.
+#[cfg(target_os = "windows")]
+mod job {
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows_sys::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+        SetInformationJobObject, TerminateJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    };
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, PROCESS_SET_QUOTA, PROCESS_TERMINATE,
+    };
+
+    pub struct Job(HANDLE);
+
+    unsafe impl Send for Job {}
+    unsafe impl Sync for Job {}
+
+    impl Job {
+        pub fn assign(pid: u32) -> Option<Self> {
+            unsafe {
+                let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+                if job.is_null() {
+                    return None;
+                }
+                let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+                info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+                if SetInformationJobObject(
+                    job,
+                    JobObjectExtendedLimitInformation,
+                    &info as *const _ as *const std::ffi::c_void,
+                    std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+                ) == 0
+                {
+                    CloseHandle(job);
+                    return None;
+                }
+                let process = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, 0, pid);
+                if process.is_null() {
+                    CloseHandle(job);
+                    return None;
+                }
+                let assigned = AssignProcessToJobObject(job, process);
+                CloseHandle(process);
+                if assigned == 0 {
+                    CloseHandle(job);
+                    return None;
+                }
+                Some(Self(job))
+            }
+        }
+
+        pub fn terminate(&self) -> bool {
+            unsafe { TerminateJobObject(self.0, 1) != 0 }
+        }
+    }
+
+    impl Drop for Job {
+        fn drop(&mut self) {
+            unsafe {
+                CloseHandle(self.0);
+            }
+        }
+    }
+}
+
 struct PtyHandle {
     master: Arc<Mutex<Box<dyn MasterPty + Send>>>,
     // Writes go through a dedicated thread per PTY. A blocking write_all on
@@ -47,7 +117,10 @@ struct PtyHandle {
     // (big paste, suspended process, full ConPTY buffer).
     writer_tx: Sender<Vec<u8>>,
     killer: Arc<Mutex<Box<dyn ChildKiller + Send + Sync>>>,
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     pid: Option<u32>,
+    #[cfg(target_os = "windows")]
+    job: Option<Arc<job::Job>>,
 }
 
 #[derive(Clone, Default)]
@@ -146,6 +219,8 @@ impl PtyManager {
             writer_tx,
             killer: killer_arc,
             pid,
+            #[cfg(target_os = "windows")]
+            job: pid.and_then(job::Job::assign).map(Arc::new),
         };
 
         self.inner.lock().insert(id.clone(), handle);
@@ -199,8 +274,8 @@ impl PtyManager {
     }
 
     pub fn kill_all(&self) {
-        // Parallel: each kill shells out to taskkill (~100ms); N threads
-        // killed sequentially delayed app close by their sum.
+        // Parallel; each kill is one TerminateJobObject syscall, the join
+        // only matters for the rare taskkill fallback.
         let ids: Vec<String> = self.inner.lock().keys().cloned().collect();
         let joins: Vec<_> = ids
             .into_iter()
@@ -217,23 +292,32 @@ impl PtyManager {
     }
 
     pub fn kill(&self, id: &str, wait: bool) -> Result<(), String> {
-        let (killer, pid) = {
-            let map = self.inner.lock();
-            match map.get(id) {
-                Some(handle) => (handle.killer.clone(), handle.pid),
-                None => return Ok(()),
-            }
-        };
         #[cfg(target_os = "windows")]
         {
-            if let Some(pid) = pid {
-                force_kill_process_tree(pid);
+            let (killer, pid, job) = {
+                let map = self.inner.lock();
+                match map.get(id) {
+                    Some(handle) => (handle.killer.clone(), handle.pid, handle.job.clone()),
+                    None => return Ok(()),
+                }
+            };
+            let tree_killed = job.map(|j| j.terminate()).unwrap_or(false);
+            if !tree_killed {
+                if let Some(pid) = pid {
+                    force_kill_process_tree(pid);
+                }
             }
             let _ = killer.lock().kill();
         }
         #[cfg(not(target_os = "windows"))]
         {
-            let _ = pid;
+            let killer = {
+                let map = self.inner.lock();
+                match map.get(id) {
+                    Some(handle) => handle.killer.clone(),
+                    None => return Ok(()),
+                }
+            };
             killer
                 .lock()
                 .kill()
