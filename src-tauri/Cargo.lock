@@ -371,7 +371,7 @@ dependencies = [
 
 [[package]]
 name = "boite"
-version = "0.6.3"
+version = "0.6.4"
 dependencies = [
  "base64 0.22.1",
  "dirs",
@@ -393,6 +393,7 @@ dependencies = [
  "uuid",
  "vte",
  "which",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]

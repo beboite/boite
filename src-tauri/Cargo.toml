@@ -1,6 +1,6 @@
 [package]
 name = "boite"
-version = "0.6.3"
+version = "0.6.4"
 description = "Lightweight multi-agent terminal multiplexer"
 authors = ["mtsu"]
 edition = "2021"
@@ -33,6 +33,13 @@ vte = "0.13"
 uuid = { version = "1", features = ["v4"] }
 parking_lot = "0.12"
 rusqlite = { version = "0.32", features = ["bundled"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.60", features = [
+    "Win32_Foundation",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+] }
 
 [profile.release]
 lto = "thin"
