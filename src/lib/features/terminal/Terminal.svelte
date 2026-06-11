@@ -531,20 +531,23 @@
         return /(?:PS\s+[^\r\n]+>\s*$)|(?:[>$#❯➜]\s*$)/m.test(tail);
       };
 
+      // Once the prompt is on screen the shell is reading stdin; a short
+      // idle window is enough (-NoLogo is forced, so there is no banner to
+      // race against). The longer idle path covers prompts the regex misses.
       const tryInject = () => {
         if (injected || !shouldUsePty(targetPtyId)) return;
         const idle = Date.now() - lastOutputAt;
-        if (idle > 600 && looksLikePrompt(detectBuffer)) {
+        if (idle > 250 && looksLikePrompt(detectBuffer)) {
           inject();
           return;
         }
-        if (idle > 2000) {
+        if (idle > 1500) {
           inject();
           return;
         }
-        schedulePendingInputTimer(tryInject, 150);
+        schedulePendingInputTimer(tryInject, 100);
       };
-      schedulePendingInputTimer(tryInject, 400);
+      schedulePendingInputTimer(tryInject, 150);
 
       schedulePendingInputTimer(inject, 8000);
     }
