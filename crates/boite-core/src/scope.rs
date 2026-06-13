@@ -51,11 +51,3 @@ impl ProjectRoots {
         Err("path is outside registered project roots".into())
     }
 }
-
-#[tauri::command]
-pub fn register_project_roots(
-    state: tauri::State<'_, ProjectRoots>,
-    roots: Vec<String>,
-) {
-    state.replace(roots);
-}

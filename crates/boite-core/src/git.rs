@@ -80,18 +80,7 @@ fn run(mut cmd: Command) -> Result<Vec<u8>, String> {
     Ok(out.stdout)
 }
 
-#[tauri::command]
-pub async fn git_repo_info(
-    scope: tauri::State<'_, crate::scope::ProjectRoots>,
-    path: String,
-) -> Result<RepoInfo, String> {
-    scope.ensure_allowed(&path)?;
-    tauri::async_runtime::spawn_blocking(move || repo_info_blocking(&path))
-        .await
-        .map_err(|e| format!("git_repo_info task failed: {e}"))?
-}
-
-fn repo_info_blocking(path: &str) -> Result<RepoInfo, String> {
+pub fn repo_info_blocking(path: &str) -> Result<RepoInfo, String> {
     let p = Path::new(path);
     if !p.is_dir() {
         return Ok(empty_repo());
@@ -208,35 +197,13 @@ fn refs_version(path: &Path) -> Option<String> {
     Some(format!("{:016x}", hasher.finish()))
 }
 
-#[tauri::command]
-pub async fn git_status(
-    scope: tauri::State<'_, crate::scope::ProjectRoots>,
-    path: String,
-) -> Result<Vec<ChangeEntry>, String> {
-    scope.ensure_allowed(&path)?;
-    tauri::async_runtime::spawn_blocking(move || status_blocking(&path))
-        .await
-        .map_err(|e| format!("git_status task failed: {e}"))?
-}
-
 #[derive(Serialize)]
 pub struct PathStatus {
     pub path: String,
     pub status: String,
 }
 
-#[tauri::command]
-pub async fn git_changed_paths(
-    scope: tauri::State<'_, crate::scope::ProjectRoots>,
-    path: String,
-) -> Result<Vec<PathStatus>, String> {
-    scope.ensure_allowed(&path)?;
-    tauri::async_runtime::spawn_blocking(move || changed_paths_blocking(&path))
-        .await
-        .map_err(|e| format!("git_changed_paths task failed: {e}"))?
-}
-
-fn changed_paths_blocking(path: &str) -> Result<Vec<PathStatus>, String> {
+pub fn changed_paths_blocking(path: &str) -> Result<Vec<PathStatus>, String> {
     let p = Path::new(path);
     if !p.is_dir() {
         return Ok(Vec::new());
@@ -299,7 +266,7 @@ fn rank(c: char) -> u8 {
     }
 }
 
-fn status_blocking(path: &str) -> Result<Vec<ChangeEntry>, String> {
+pub fn status_blocking(path: &str) -> Result<Vec<ChangeEntry>, String> {
     let p = Path::new(path);
     if !p.is_dir() {
         return Ok(Vec::new());
@@ -427,20 +394,7 @@ fn push_xy(out: &mut Vec<ChangeEntry>, xy: &str, path: &str, orig: Option<&str>)
     }
 }
 
-#[tauri::command]
-pub async fn git_log(
-    scope: tauri::State<'_, crate::scope::ProjectRoots>,
-    path: String,
-    limit: u32,
-    skip: u32,
-) -> Result<Vec<Commit>, String> {
-    scope.ensure_allowed(&path)?;
-    tauri::async_runtime::spawn_blocking(move || log_blocking(&path, limit, skip))
-        .await
-        .map_err(|e| format!("git_log task failed: {e}"))?
-}
-
-fn log_blocking(path: &str, limit: u32, skip: u32) -> Result<Vec<Commit>, String> {
+pub fn log_blocking(path: &str, limit: u32, skip: u32) -> Result<Vec<Commit>, String> {
     let p = Path::new(path);
     if !p.is_dir() {
         return Ok(Vec::new());
@@ -597,31 +551,7 @@ fn remote_only_set(path: &Path, upstream: Option<&str>) -> HashSet<String> {
     }
 }
 
-#[tauri::command]
-pub async fn git_stage(
-    scope: tauri::State<'_, crate::scope::ProjectRoots>,
-    path: String,
-    files: Vec<String>,
-) -> Result<(), String> {
-    scope.ensure_allowed(&path)?;
-    tauri::async_runtime::spawn_blocking(move || run_files(&path, "add", &files, true))
-        .await
-        .map_err(|e| format!("git_stage task failed: {e}"))?
-}
-
-#[tauri::command]
-pub async fn git_unstage(
-    scope: tauri::State<'_, crate::scope::ProjectRoots>,
-    path: String,
-    files: Vec<String>,
-) -> Result<(), String> {
-    scope.ensure_allowed(&path)?;
-    tauri::async_runtime::spawn_blocking(move || unstage_blocking(&path, files))
-        .await
-        .map_err(|e| format!("git_unstage task failed: {e}"))?
-}
-
-fn unstage_blocking(path: &str, files: Vec<String>) -> Result<(), String> {
+pub fn unstage_blocking(path: &str, files: Vec<String>) -> Result<(), String> {
     let p = Path::new(path);
     let mut cmd = git(p);
     cmd.args(["reset", "HEAD", "--"]);
@@ -631,20 +561,7 @@ fn unstage_blocking(path: &str, files: Vec<String>) -> Result<(), String> {
     run(cmd).map(|_| ())
 }
 
-#[tauri::command]
-pub async fn git_discard(
-    scope: tauri::State<'_, crate::scope::ProjectRoots>,
-    path: String,
-    files: Vec<String>,
-    untracked: Vec<String>,
-) -> Result<(), String> {
-    scope.ensure_allowed(&path)?;
-    tauri::async_runtime::spawn_blocking(move || discard_blocking(&path, files, untracked))
-        .await
-        .map_err(|e| format!("git_discard task failed: {e}"))?
-}
-
-fn discard_blocking(path: &str, files: Vec<String>, untracked: Vec<String>) -> Result<(), String> {
+pub fn discard_blocking(path: &str, files: Vec<String>, untracked: Vec<String>) -> Result<(), String> {
     let p = Path::new(path);
     if !files.is_empty() {
         // Restore from the index, NOT from HEAD: discarding working-tree
@@ -667,7 +584,7 @@ fn discard_blocking(path: &str, files: Vec<String>, untracked: Vec<String>) -> R
     Ok(())
 }
 
-fn run_files(path: &str, sub: &str, files: &[String], with_dashes: bool) -> Result<(), String> {
+pub fn run_files(path: &str, sub: &str, files: &[String], with_dashes: bool) -> Result<(), String> {
     let p = Path::new(path);
     let mut cmd = git(p);
     cmd.arg(sub);
@@ -680,20 +597,9 @@ fn run_files(path: &str, sub: &str, files: &[String], with_dashes: bool) -> Resu
     run(cmd).map(|_| ())
 }
 
-#[tauri::command]
-pub async fn git_fetch(
-    scope: tauri::State<'_, crate::scope::ProjectRoots>,
-    path: String,
-) -> Result<(), String> {
-    scope.ensure_allowed(&path)?;
-    tauri::async_runtime::spawn_blocking(move || fetch_blocking(&path))
-        .await
-        .map_err(|e| format!("git_fetch task failed: {e}"))?
-}
-
 const FETCH_TIMEOUT: Duration = Duration::from_secs(20);
 
-fn fetch_blocking(path: &str) -> Result<(), String> {
+pub fn fetch_blocking(path: &str) -> Result<(), String> {
     let p = Path::new(path);
     if !p.is_dir() {
         return Err("not a directory".into());
@@ -768,18 +674,7 @@ fn run_with_timeout(mut cmd: Command, timeout: Duration) -> Result<(), String> {
 
 const PUSH_PULL_TIMEOUT: Duration = Duration::from_secs(60);
 
-#[tauri::command]
-pub async fn git_push(
-    scope: tauri::State<'_, crate::scope::ProjectRoots>,
-    path: String,
-) -> Result<(), String> {
-    scope.ensure_allowed(&path)?;
-    tauri::async_runtime::spawn_blocking(move || push_blocking(&path))
-        .await
-        .map_err(|e| format!("git_push task failed: {e}"))?
-}
-
-fn push_blocking(path: &str) -> Result<(), String> {
+pub fn push_blocking(path: &str) -> Result<(), String> {
     let p = Path::new(path);
     if !p.is_dir() {
         return Err("not a directory".into());
@@ -799,18 +694,7 @@ fn push_blocking(path: &str) -> Result<(), String> {
     run_with_timeout(cmd, PUSH_PULL_TIMEOUT)
 }
 
-#[tauri::command]
-pub async fn git_pull(
-    scope: tauri::State<'_, crate::scope::ProjectRoots>,
-    path: String,
-) -> Result<(), String> {
-    scope.ensure_allowed(&path)?;
-    tauri::async_runtime::spawn_blocking(move || pull_blocking(&path))
-        .await
-        .map_err(|e| format!("git_pull task failed: {e}"))?
-}
-
-fn pull_blocking(path: &str) -> Result<(), String> {
+pub fn pull_blocking(path: &str) -> Result<(), String> {
     let p = Path::new(path);
     if !p.is_dir() {
         return Err("not a directory".into());
@@ -835,18 +719,7 @@ fn current_branch(path: &Path) -> Option<String> {
     if s.is_empty() || s == "HEAD" { None } else { Some(s) }
 }
 
-#[tauri::command]
-pub async fn git_init(
-    scope: tauri::State<'_, crate::scope::ProjectRoots>,
-    path: String,
-) -> Result<(), String> {
-    scope.ensure_allowed(&path)?;
-    tauri::async_runtime::spawn_blocking(move || init_blocking(&path))
-        .await
-        .map_err(|e| format!("git_init task failed: {e}"))?
-}
-
-fn init_blocking(path: &str) -> Result<(), String> {
+pub fn init_blocking(path: &str) -> Result<(), String> {
     let p = Path::new(path);
     if !p.is_dir() {
         return Err("not a directory".into());
@@ -854,18 +727,6 @@ fn init_blocking(path: &str) -> Result<(), String> {
     let mut cmd = git(p);
     cmd.arg("init");
     run(cmd).map(|_| ())
-}
-
-#[tauri::command]
-pub async fn git_commit(
-    scope: tauri::State<'_, crate::scope::ProjectRoots>,
-    path: String,
-    message: String,
-) -> Result<String, String> {
-    scope.ensure_allowed(&path)?;
-    tauri::async_runtime::spawn_blocking(move || commit_blocking(&path, &message))
-        .await
-        .map_err(|e| format!("git_commit task failed: {e}"))?
 }
 
 #[derive(Serialize)]
@@ -876,22 +737,7 @@ pub struct FileVersions {
     pub binary: bool,
 }
 
-#[tauri::command]
-pub async fn git_file_versions(
-    scope: tauri::State<'_, crate::scope::ProjectRoots>,
-    path: String,
-    file: String,
-    head_file: Option<String>,
-) -> Result<FileVersions, String> {
-    scope.ensure_allowed(&path)?;
-    tauri::async_runtime::spawn_blocking(move || {
-        file_versions_blocking(&path, &file, head_file.as_deref())
-    })
-    .await
-    .map_err(|e| format!("git_file_versions task failed: {e}"))?
-}
-
-fn file_versions_blocking(
+pub fn file_versions_blocking(
     path: &str,
     file: &str,
     head_file: Option<&str>,
@@ -954,7 +800,7 @@ fn bytes_binary(bytes: &[u8]) -> bool {
     head.contains(&0u8)
 }
 
-fn commit_blocking(path: &str, message: &str) -> Result<String, String> {
+pub fn commit_blocking(path: &str, message: &str) -> Result<String, String> {
     let trimmed = message.trim();
     if trimmed.is_empty() {
         return Err("Commit message is empty".into());

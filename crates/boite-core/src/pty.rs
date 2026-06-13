@@ -4,29 +4,29 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
 
-use base64::Engine as _;
-use base64::engine::general_purpose::STANDARD as BASE64;
 use parking_lot::Mutex;
 use portable_pty::{ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use serde::{Deserialize, Serialize};
-use tauri::ipc::Channel;
 use uuid::Uuid;
 use vte::{Params, Parser, Perform};
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
-#[serde(tag = "type", rename_all = "camelCase")]
+// Raw, transport-agnostic PTY event. The host adapter decides how to encode
+// it on the wire: the Tauri desktop adapter base64-encodes Output into its
+// IPC Channel; the server pushes raw bytes into a ring buffer + WS frame.
+#[derive(Clone, Debug)]
 pub enum PtyEvent {
-    // base64: a Vec<u8> would serialize as a JSON number array (~4x the
-    // payload and an expensive parse webview-side, per chunk, for all
-    // terminal output).
-    #[serde(rename_all = "camelCase")]
-    Output { data: String },
-    #[serde(rename_all = "camelCase")]
-    Title { value: String },
-    #[serde(rename_all = "camelCase")]
-    Exit { code: Option<i32> },
-    #[serde(rename_all = "camelCase")]
-    Error { message: String },
+    Output(Vec<u8>),
+    Title(String),
+    Exit(Option<i32>),
+    Error(String),
+}
+
+// Output destination for one PTY. `send` returns false when the sink is
+// permanently closed so the reader loop can stop (desktop: the IPC channel
+// died with the webview). A server sink that buffers scrollback returns true
+// forever, so the PTY survives every client disconnect.
+pub trait EventSink: Send + Sync + 'static {
+    fn send(&self, event: PtyEvent) -> bool;
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -158,7 +158,7 @@ impl PtyManager {
 
     pub fn spawn(
         &self,
-        channel: Channel<PtyEvent>,
+        sink: Arc<dyn EventSink>,
         spec: PtySpawnArgs,
     ) -> Result<String, String> {
         let pty_system = native_pty_system();
@@ -234,17 +234,15 @@ impl PtyManager {
         // Removing the handle from the map drops writer_tx, which ends the writer thread.
         let inner_clone = self.inner.clone();
         let id_clone = id.clone();
-        let channel_clone = channel.clone();
+        let sink_clone = sink.clone();
         std::thread::spawn(move || {
-            read_loop(reader, channel_clone.clone());
+            read_loop(reader, sink_clone.clone());
             let exit_code = match child.wait() {
                 Ok(status) => status.exit_code() as i32,
                 Err(_) => -1,
             };
             inner_clone.lock().remove(&id_clone);
-            let _ = channel_clone.send(PtyEvent::Exit {
-                code: Some(exit_code),
-            });
+            sink_clone.send(PtyEvent::Exit(Some(exit_code)));
         });
 
         Ok(id)
@@ -374,19 +372,16 @@ fn force_kill_process_tree(pid: u32) {
         .status();
 }
 
-fn read_loop(mut reader: Box<dyn Read + Send>, channel: Channel<PtyEvent>) {
+fn read_loop(mut reader: Box<dyn Read + Send>, sink: Arc<dyn EventSink>) {
     let mut parser = Parser::new();
-    let mut osc = OscPerform {
-        channel: channel.clone(),
-    };
+    let mut osc = OscPerform { sink: sink.clone() };
     let mut buf = [0u8; 65536];
     loop {
         match reader.read(&mut buf) {
             Ok(0) => break,
             Ok(n) => {
-                let encoded = BASE64.encode(&buf[..n]);
-                if let Err(err) = channel.send(PtyEvent::Output { data: encoded }) {
-                    eprintln!("[boite/pty] output channel closed: {err}");
+                if !sink.send(PtyEvent::Output(buf[..n].to_vec())) {
+                    eprintln!("[boite/pty] output sink closed");
                     break;
                 }
                 for byte in &buf[..n] {
@@ -399,7 +394,7 @@ fn read_loop(mut reader: Box<dyn Read + Send>, channel: Channel<PtyEvent>) {
 }
 
 struct OscPerform {
-    channel: Channel<PtyEvent>,
+    sink: Arc<dyn EventSink>,
 }
 
 impl Perform for OscPerform {
@@ -415,9 +410,7 @@ impl Perform for OscPerform {
         let Ok(title) = std::str::from_utf8(params[1]) else {
             return;
         };
-        let _ = self.channel.send(PtyEvent::Title {
-            value: title.to_string(),
-        });
+        self.sink.send(PtyEvent::Title(title.to_string()));
     }
 
     fn print(&mut self, _: char) {}

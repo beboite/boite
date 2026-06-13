@@ -1,17 +1,10 @@
 mod commands;
-mod editor;
-mod explorer;
-mod git;
 mod logging;
-mod project;
-mod pty;
-mod scope;
-mod session;
-mod shell;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use pty::PtyManager;
+use boite_core::pty::PtyManager;
+use boite_core::scope::ProjectRoots;
 use tauri::Manager;
 use tauri_plugin_sql::{Migration, MigrationKind};
 
@@ -131,7 +124,7 @@ pub fn run() {
         )
         .manage(PtyManager::new())
         .manage(BootState::default())
-        .manage(scope::ProjectRoots::default())
+        .manage(ProjectRoots::default())
         .setup(|app| {
             let setup_handle = app.handle().clone();
             if let Err(e) = logging::begin_log_session(&setup_handle) {
@@ -176,33 +169,33 @@ pub fn run() {
             commands::read_app_log,
             commands::clear_app_log,
             commands::log_file_path,
-            scope::register_project_roots,
-            project::inspect_project,
-            explorer::read_dir,
-            explorer::explorer_search,
-            editor::read_text_file,
-            editor::write_text_file,
-            shell::default_shell,
-            shell::available_shells,
-            session::find_claude_session,
-            session::find_codex_session,
-            session::find_opencode_session,
-            session::find_cursor_session,
-            session::find_antigravity_session,
-            session::find_copilot_session,
-            git::git_repo_info,
-            git::git_status,
-            git::git_changed_paths,
-            git::git_log,
-            git::git_stage,
-            git::git_unstage,
-            git::git_discard,
-            git::git_commit,
-            git::git_fetch,
-            git::git_push,
-            git::git_pull,
-            git::git_init,
-            git::git_file_versions,
+            commands::register_project_roots,
+            commands::inspect_project,
+            commands::read_dir,
+            commands::explorer_search,
+            commands::read_text_file,
+            commands::write_text_file,
+            commands::default_shell,
+            commands::available_shells,
+            commands::find_claude_session,
+            commands::find_codex_session,
+            commands::find_opencode_session,
+            commands::find_cursor_session,
+            commands::find_antigravity_session,
+            commands::find_copilot_session,
+            commands::git_repo_info,
+            commands::git_status,
+            commands::git_changed_paths,
+            commands::git_log,
+            commands::git_stage,
+            commands::git_unstage,
+            commands::git_discard,
+            commands::git_commit,
+            commands::git_fetch,
+            commands::git_push,
+            commands::git_pull,
+            commands::git_init,
+            commands::git_file_versions,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
