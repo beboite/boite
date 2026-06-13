@@ -102,6 +102,16 @@ class GitStore {
     this.fetchFails.delete(projectId);
   }
 
+  // Drop every cached repo so a workspace switch starts clean.
+  reset() {
+    this.states = {};
+    this.cwds.clear();
+    this.inflight.clear();
+    this.pendingReloadLog.clear();
+    this.lastFetchAt.clear();
+    this.fetchFails.clear();
+  }
+
   async refresh(
     projectId: string,
     options: RefreshOptions = {},

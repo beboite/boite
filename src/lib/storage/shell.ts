@@ -13,6 +13,12 @@ function fallback(): string {
   }
 }
 
+// The default shell differs per workspace (a Linux server vs the local OS), so
+// a workspace switch must drop the cache.
+export function resetShellCache(): void {
+  cached = null;
+}
+
 export async function getDefaultShell(): Promise<string> {
   if (cached) return cached;
   try {

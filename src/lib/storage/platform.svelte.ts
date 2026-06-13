@@ -34,6 +34,13 @@ class PlatformStore {
     this.ready = true;
   }
 
+  // Re-fetch shells on the next init (the remote workspace exposes its own,
+  // a Linux server's list differs from the desktop's).
+  reset() {
+    this.ready = false;
+    this.shells = [];
+  }
+
   get isWindows() {
     return this.current === "windows";
   }
