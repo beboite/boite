@@ -135,6 +135,30 @@ export function parseCommand(input: string): { cmd: string; args: string[] } {
   return { cmd: tokens[0] ?? "", args: tokens.slice(1) };
 }
 
+// Layout/device-scoped fields: per-machine, never stored in a workspace DB.
+// They live in localStorage so switching to a remote workspace keeps your
+// sidebar width and zoom while shortcuts/shells come from the server.
+const DEVICE_KEY = "boite.layout";
+const DEVICE_FIELDS = [
+  "sidebarWidth",
+  "sidebarCollapsed",
+  "uiScalePercent",
+  "rightPanel",
+  "rightPanelWidth",
+  "gitSplitFraction",
+] as const;
+type DeviceField = (typeof DEVICE_FIELDS)[number];
+
+function loadDeviceOverrides(): Partial<Settings> | null {
+  if (typeof localStorage === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(DEVICE_KEY);
+    return raw ? (JSON.parse(raw) as Partial<Settings>) : null;
+  } catch {
+    return null;
+  }
+}
+
 class SettingsStore {
   state = $state<Settings>(structuredClone(DEFAULTS));
   ready = $state(false);
@@ -211,6 +235,18 @@ class SettingsStore {
             ? Math.min(stored.gitAutoFetchSeconds, GIT_AUTOFETCH_MAX_SECONDS)
             : DEFAULTS.gitAutoFetchSeconds,
       };
+      // Device fields come from localStorage, overriding the backend blob. If
+      // there is none yet, seed it from what the blob carried (one-shot
+      // migration from the old whole-blob persistence).
+      const dev = loadDeviceOverrides();
+      if (dev) {
+        const target = this.state as unknown as Record<string, unknown>;
+        for (const k of DEVICE_FIELDS) {
+          if (dev[k] !== undefined) target[k] = dev[k];
+        }
+      } else {
+        this.persistDeviceNow();
+      }
       if (migratedShortcuts.changed) {
         await this.persist();
       }
@@ -226,18 +262,37 @@ class SettingsStore {
     this.ready = false;
   }
 
+  // Backend stores workspace fields only; device/layout fields go to
+  // localStorage so they never round-trip through a remote workspace DB.
   private async persist() {
     try {
-      await saveSettings($state.snapshot(this.state) as Settings);
+      const snap = $state.snapshot(this.state) as Settings;
+      const ws: Record<string, unknown> = { ...snap };
+      for (const k of DEVICE_FIELDS) delete ws[k];
+      await saveSettings(ws as unknown as Settings);
     } catch (err) {
       console.error("saveSettings failed:", err);
       notifications.error("Failed to save settings");
     }
   }
 
-  // Coalesce rapid writes (slider drag, wheel zoom) into one DB hit.
+  private persistDeviceNow() {
+    if (typeof localStorage === "undefined") return;
+    const d: Record<string, unknown> = {};
+    for (const k of DEVICE_FIELDS) d[k] = this.state[k];
+    try {
+      localStorage.setItem(DEVICE_KEY, JSON.stringify(d));
+    } catch (err) {
+      console.error("layout persist failed:", err);
+    }
+  }
+
+  // Coalesce rapid writes (slider drag, wheel zoom) into one write.
   private persistSoon = debounce(() => {
     void this.persist();
+  }, 250);
+  private persistDeviceSoon = debounce(() => {
+    this.persistDeviceNow();
   }, 250);
 
   async setPowershellNewline(value: boolean) {
@@ -269,19 +324,19 @@ class SettingsStore {
     const clamped = Math.max(180, Math.min(480, Math.round(px)));
     if (this.state.sidebarWidth === clamped) return;
     this.state.sidebarWidth = clamped;
-    this.persistSoon();
+    this.persistDeviceSoon();
   }
 
   toggleSidebar() {
     this.state.sidebarCollapsed = !this.state.sidebarCollapsed;
-    void this.persist();
+    this.persistDeviceNow();
   }
 
   setUiScalePercent(percent: number) {
     const clamped = Math.max(75, Math.min(150, Math.round(percent)));
     if (this.state.uiScalePercent === clamped) return;
     this.state.uiScalePercent = clamped;
-    this.persistSoon();
+    this.persistDeviceSoon();
   }
 
   async setProjectOrder(ids: string[]) {
@@ -365,34 +420,34 @@ class SettingsStore {
     await this.persist();
   }
 
-  async toggleRightPanel(tab: Exclude<RightPanelTab, null>) {
+  toggleRightPanel(tab: Exclude<RightPanelTab, null>) {
     this.state.rightPanel = this.state.rightPanel === tab ? null : tab;
-    await this.persist();
+    this.persistDeviceNow();
   }
 
-  async togglePanelRight() {
+  togglePanelRight() {
     this.state.rightPanel = this.state.rightPanel === null ? "git" : null;
-    await this.persist();
+    this.persistDeviceNow();
   }
 
-  async setRightPanel(tab: RightPanelTab) {
+  setRightPanel(tab: RightPanelTab) {
     if (this.state.rightPanel === tab) return;
     this.state.rightPanel = tab;
-    await this.persist();
+    this.persistDeviceNow();
   }
 
   setRightPanelWidth(px: number) {
     const clamped = Math.max(240, Math.min(600, Math.round(px)));
     if (this.state.rightPanelWidth === clamped) return;
     this.state.rightPanelWidth = clamped;
-    this.persistSoon();
+    this.persistDeviceSoon();
   }
 
   setGitSplitFraction(value: number) {
     const clamped = Math.max(0.15, Math.min(0.85, value));
     if (Math.abs(this.state.gitSplitFraction - clamped) < 0.001) return;
     this.state.gitSplitFraction = clamped;
-    this.persistSoon();
+    this.persistDeviceSoon();
   }
 
   async setGitAutoFetch(value: boolean) {
