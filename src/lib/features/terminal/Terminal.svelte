@@ -19,7 +19,7 @@
   import { app } from "$lib/app/store.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
   import { reloadThread, restoreLastClosedThread } from "$lib/features/thread/api";
-  import { buildResumeArgs, getDetector, ownsSessionId } from "$lib/features/thread/session";
+  import { buildResumeArgs, getDetector } from "$lib/features/thread/session";
   import {
     planDirectSpawn,
     planSpawnInShell,
@@ -573,9 +573,7 @@
       schedulePendingInputTimer(inject, 8000);
     }
 
-    // Threads that own their session id (claude) never need filesystem
-    // attribution, so skip the monitor: it can't overwrite our minted id.
-    const detector = ownsSessionId(thread) ? null : getDetector(thread);
+    const detector = getDetector(thread);
     if (detector && ptyId) {
       const since = Math.max(0, spawnedAt - (thread.sessionId ? 1000 : 5000));
       stopSessionMonitor();
