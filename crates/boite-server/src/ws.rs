@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -23,6 +24,14 @@ enum WsOut {
     Binary(Vec<u8>),
 }
 
+// Decrements the live-connection counter however handle_socket returns.
+struct ConnGuard<'a>(&'a std::sync::atomic::AtomicUsize);
+impl Drop for ConnGuard<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
 pub async fn handle_socket(socket: WebSocket, state: Arc<AppState>, addr: SocketAddr) {
     let (mut sink, mut stream) = socket.split();
     let (tx, mut rx) = mpsc::channel::<WsOut>(WRITER_CAP);
@@ -38,6 +47,16 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<AppState>, addr: Socket
             }
         }
     });
+
+    let n = state.conns.fetch_add(1, Ordering::Relaxed) + 1;
+    let _conn = ConnGuard(&state.conns);
+    if n > state.max_connections {
+        let _ = tx
+            .send(WsOut::Text(json_str(&Response::err(0, "server busy".into()))))
+            .await;
+        writer.abort();
+        return;
+    }
 
     if !authenticate(&mut stream, &state, addr, &tx).await {
         writer.abort();
@@ -57,7 +76,15 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<AppState>, addr: Socket
                         }
                     }
                 }
-                Err(RecvError::Lagged(_)) => continue,
+                // Dropped control events leave the client with stale thread
+                // state; tell it to refetch rather than silently diverge.
+                Err(RecvError::Lagged(_)) => {
+                    if let Ok(s) = serde_json::to_string(&Event::new("resync", json!({}))) {
+                        if tx_ctrl.send(WsOut::Text(s)).await.is_err() {
+                            break;
+                        }
+                    }
+                }
                 Err(RecvError::Closed) => break,
             }
         }
@@ -103,7 +130,10 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<AppState>, addr: Socket
             }
             Message::Binary(bytes) => {
                 if let Some((op, tid, payload)) = protocol::parse_frame(&bytes) {
-                    if op == protocol::FRAME_INPUT {
+                    // Only accept input for threads THIS socket attached to:
+                    // a known UUID alone must not let one client inject
+                    // keystrokes into another's PTY.
+                    if op == protocol::FRAME_INPUT && attached.contains_key(&tid.to_string()) {
                         let _ = state.registry.write(&tid.to_string(), payload);
                     }
                 }
@@ -174,6 +204,8 @@ async fn handle_attach(
 
             let txf = tx.clone();
             let mut rxf = snap.rx;
+            let registry = state.registry.clone();
+            let replay_id = thread_id.clone();
             let h = tokio::spawn(async move {
                 loop {
                     match rxf.recv().await {
@@ -186,7 +218,20 @@ async fn handle_attach(
                                 break;
                             }
                         }
-                        Err(RecvError::Lagged(_)) => continue,
+                        // Receiver fell behind the broadcast cap. Resend the
+                        // whole scrollback so xterm resyncs instead of rendering
+                        // a truncated escape stream.
+                        Err(RecvError::Lagged(_)) => {
+                            if let Some(buf) = registry.replay(&replay_id) {
+                                if txf
+                                    .send(WsOut::Binary(protocol::encode_output(&uuid, &buf)))
+                                    .await
+                                    .is_err()
+                                {
+                                    break;
+                                }
+                            }
+                        }
                         Err(RecvError::Closed) => break,
                     }
                 }

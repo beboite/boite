@@ -77,6 +77,9 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
         }
 
         "thread.spawn" => {
+            if state.registry.live_count() >= state.max_threads {
+                return Err(format!("thread limit reached ({})", state.max_threads));
+            }
             let mut thread: Thread = serde_json::from_value(
                 params
                     .get("thread")
@@ -127,12 +130,30 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
             if thread.created_at == 0 {
                 thread.created_at = now_ms();
             }
-            thread.status = "idle".to_string();
             thread.pty_id = None;
+            // saveThread doubles as create AND re-save (session-id dedup, label
+            // edit). The client is not authoritative for runtime state: on an
+            // EXISTING row keep the persisted status/exit_code (a running or
+            // closed thread must not be clobbered back to idle), and announce
+            // it as an update; only a genuinely new row is idle + created.
+            let existed = state.store.thread_status(&thread.id);
+            match &existed {
+                Some((status, exit_code)) => {
+                    thread.status = status.clone();
+                    thread.exit_code = *exit_code;
+                }
+                None => {
+                    thread.status = "idle".to_string();
+                    thread.exit_code = None;
+                }
+            }
             state.store.save_thread(&thread)?;
-            let _ = state
-                .events
-                .send(AppEvent::ThreadCreated(serde_json::to_value(&thread).unwrap()));
+            let value = serde_json::to_value(&thread).unwrap();
+            let _ = state.events.send(if existed.is_some() {
+                AppEvent::ThreadUpdated(value)
+            } else {
+                AppEvent::ThreadCreated(value)
+            });
             Ok(json!({ "thread": thread }))
         }
 
@@ -186,7 +207,15 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
                     .unwrap_or(ColVal::Null);
                 state.store.update_thread_field(&id, "title", v)?;
             }
-            let _ = state.events.send(AppEvent::ThreadUpdated(json!({ "id": id })));
+            // Emit the full persisted row so clients merge user-owned fields
+            // (label/title/iconKey/sessionId/keepAwake). Clients ignore the
+            // runtime fields (status/ptyId/exitCode) here; those flow via the
+            // thread.status control event and the live overlay.
+            if let Ok(Some(updated)) = state.store.load_thread(&id) {
+                let _ = state
+                    .events
+                    .send(AppEvent::ThreadUpdated(serde_json::to_value(&updated).unwrap()));
+            }
             Ok(json!({ "ok": true }))
         }
 
@@ -301,6 +330,13 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
             Ok(json!({ "session": result }))
         }
 
+        // Base dir for the web folder picker (Docker repos mount). Browsing
+        // happens via fs.readDir, which is allowed because workspace_dir is a
+        // registered root (state.refresh_roots).
+        "fs.workspaceRoot" => Ok(json!({
+            "root": state.workspace_dir.as_ref().map(|p| p.to_string_lossy().to_string())
+        })),
+
         "fs.readDir" => {
             let path = str_param(&params, "path")?;
             state.roots.ensure_allowed(&path)?;
@@ -330,6 +366,21 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
             state.roots.ensure_allowed_for_write(&path)?;
             let written = blocking(move || editor::write_blocking(&path, &content)).await??;
             Ok(json!({ "bytes": written }))
+        }
+
+        "notify.test" => {
+            let title = params
+                .get("title")
+                .and_then(|v| v.as_str())
+                .unwrap_or("Boite")
+                .to_string();
+            let body = params
+                .get("body")
+                .and_then(|v| v.as_str())
+                .unwrap_or("Test notification")
+                .to_string();
+            state.notifier.send(&title, &body, "test").await;
+            Ok(json!({ "ok": true, "enabled": state.notifier.enabled() }))
         }
 
         m if m.starts_with("git.") => dispatch_git(state, m, params).await,

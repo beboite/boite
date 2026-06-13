@@ -151,6 +151,52 @@ impl Store {
         rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
     }
 
+    pub fn load_thread(&self, id: &str) -> Result<Option<Thread>, String> {
+        let conn = self.conn.lock();
+        conn.query_row(
+            "SELECT id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, status, keep_awake, created_at
+             FROM threads WHERE id = ?1",
+            [id],
+            |r| {
+                let args_raw: String = r.get(5)?;
+                let args = serde_json::from_str::<Vec<String>>(&args_raw).unwrap_or_default();
+                Ok(Thread {
+                    id: r.get(0)?,
+                    project_id: r.get(1)?,
+                    pty_id: None,
+                    label: r.get(2)?,
+                    title: r.get(3)?,
+                    cmd: r.get(4)?,
+                    args,
+                    icon_key: r.get(8)?,
+                    session_id: r.get(7)?,
+                    status: normalize_status(r.get::<_, Option<String>>(9)?),
+                    exit_code: r.get(6)?,
+                    created_at: r.get(11)?,
+                    auto_slept: false,
+                    keep_awake: r.get::<_, i64>(10)? == 1,
+                })
+            },
+        )
+        .map(Some)
+        .or_else(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => Ok(None),
+            other => Err(other.to_string()),
+        })
+    }
+
+    /// Persisted (status, exit_code) for a thread, or None if the row is absent.
+    /// Lets thread.create preserve server-authoritative runtime state on re-save.
+    pub fn thread_status(&self, id: &str) -> Option<(String, Option<i32>)> {
+        let conn = self.conn.lock();
+        conn.query_row(
+            "SELECT status, exit_code FROM threads WHERE id = ?1",
+            [id],
+            |r| Ok((normalize_status(r.get::<_, Option<String>>(0)?), r.get::<_, Option<i32>>(1)?)),
+        )
+        .ok()
+    }
+
     pub fn save_thread(&self, t: &Thread) -> Result<(), String> {
         let conn = self.conn.lock();
         let args = serde_json::to_string(&t.args).unwrap_or_else(|_| "[]".to_string());
@@ -177,6 +223,18 @@ impl Store {
         }
         .map_err(|e| e.to_string())?;
         Ok(())
+    }
+
+    /// Display name for a thread, used by the notifier. Prefers the live OSC
+    /// title over the user label.
+    pub fn thread_label(&self, id: &str) -> Option<String> {
+        let conn = self.conn.lock();
+        conn.query_row(
+            "SELECT COALESCE(NULLIF(title, ''), label) FROM threads WHERE id = ?1",
+            [id],
+            |r| r.get::<_, String>(0),
+        )
+        .ok()
     }
 
     pub fn delete_thread(&self, id: &str) -> Result<(), String> {
