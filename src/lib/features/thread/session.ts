@@ -4,11 +4,16 @@ import { detectIconKey } from "$lib/shared/icons/detect";
 import { logger } from "$lib/shared/services/logger.svelte";
 import type { IconKey, Thread } from "$lib/types";
 
+// mtimeMs is the session file's last-write time when the backend can provide
+// it; the monitor uses it to attribute the file to the thread whose PTY was
+// active when it was written.
+export type SessionHit = { id: string; mtimeMs: number | null };
+
 export type SessionDetector = (
   cwd: string,
   afterUnixMs: number,
   excludeIds: string[],
-) => Promise<string | null>;
+) => Promise<SessionHit | null>;
 
 function makeDetector(command: string, scope: string): SessionDetector {
   return async (cwd, afterUnixMs, excludeIds) => {
@@ -18,7 +23,7 @@ function makeDetector(command: string, scope: string): SessionDetector {
         afterUnixMs,
         excludeIds,
       });
-      return id ?? null;
+      return id ? { id, mtimeMs: null } : null;
     } catch (err) {
       logger.error("session", `${scope}: detect failed`, String(err));
       return null;
@@ -26,8 +31,21 @@ function makeDetector(command: string, scope: string): SessionDetector {
   };
 }
 
+const claudeDetector: SessionDetector = async (cwd, afterUnixMs, excludeIds) => {
+  try {
+    const hit = await invoke<{ id: string; modifiedMs: number } | null>(
+      "find_claude_session",
+      { cwd, afterUnixMs, excludeIds },
+    );
+    return hit ? { id: hit.id, mtimeMs: hit.modifiedMs } : null;
+  } catch (err) {
+    logger.error("session", "claude: detect failed", String(err));
+    return null;
+  }
+};
+
 const detectors: Partial<Record<NonNullable<IconKey>, SessionDetector>> = {
-  claude: makeDetector("find_claude_session", "claude"),
+  claude: claudeDetector,
   codex: makeDetector("find_codex_session", "codex"),
   opencode: makeDetector("find_opencode_session", "opencode"),
   cursor: makeDetector("find_cursor_session", "cursor"),

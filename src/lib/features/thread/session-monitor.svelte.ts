@@ -6,10 +6,21 @@ import type { SessionDetector } from "./session";
 import type { Thread } from "$lib/types";
 
 const SESSION_SCAN_INTERVAL_MS = 12_000;
+// A session file written by a thread's process is modified while that PTY is
+// streaming, so file mtime and thread activity land within a few seconds of
+// each other.
+const ATTRIBUTION_WINDOW_MS = 5_000;
 
 // Single in-flight slot across ALL monitors. Two sibling terminals scanning
 // concurrently could both see the same unclaimed jsonl and both claim it.
 let scanInFlight = false;
+
+// Live monitors by threadId, so a scan can check whether a candidate session
+// file could belong to a sibling thread in the same cwd instead.
+const liveMonitors = new Map<
+  string,
+  { cwd: string; lastActivityAt: () => number }
+>();
 
 export interface SessionMonitor {
   stop(): void;
@@ -65,10 +76,30 @@ export function startSessionMonitor(opts: {
 
   const stop = () => {
     stopped = true;
+    if (liveMonitors.get(threadId)?.lastActivityAt === opts.lastActivityAt) {
+      liveMonitors.delete(threadId);
+    }
     if (timer) clearInterval(timer);
     timer = null;
     for (const t of timeouts) clearTimeout(t);
     timeouts = [];
+  };
+
+  // With several threads on the same cwd, "newest session file" alone picks
+  // the wrong owner: a /clear or new conversation in thread A used to get
+  // claimed by thread B's monitor, swapping their sessions. Only claim a file
+  // whose mtime correlates with OUR pty activity and with no sibling's.
+  const attributedToSelf = (mtimeMs: number): boolean => {
+    const siblings = [...liveMonitors.entries()].filter(
+      ([id, m]) => id !== threadId && m.cwd === cwd,
+    );
+    if (siblings.length === 0) return true;
+    const ownNear =
+      Math.abs(mtimeMs - opts.lastActivityAt()) <= ATTRIBUTION_WINDOW_MS;
+    const siblingNear = siblings.some(
+      ([, m]) => Math.abs(mtimeMs - m.lastActivityAt()) <= ATTRIBUTION_WINDOW_MS,
+    );
+    return ownNear && !siblingNear;
   };
 
   const scanOnce = async (): Promise<boolean> => {
@@ -89,8 +120,8 @@ export function startSessionMonitor(opts: {
 
     scanInFlight = true;
     try {
-      const id = await detector(cwd, sinceMs, excludeIds);
-      if (!id) {
+      const hit = await detector(cwd, sinceMs, excludeIds);
+      if (!hit) {
         if (t.sessionId) {
           logger.debug(
             "session",
@@ -98,6 +129,15 @@ export function startSessionMonitor(opts: {
             { cwd, probeSince: sinceMs },
           );
         }
+        return false;
+      }
+      const id = hit.id;
+      if (hit.mtimeMs != null && !attributedToSelf(hit.mtimeMs)) {
+        logger.debug(
+          "session",
+          `${t.label}: ${id} not attributable to this thread, deferring`,
+          { mtimeMs: hit.mtimeMs, lastActivityAt: opts.lastActivityAt() },
+        );
         return false;
       }
       if (id === t.sessionId) {
@@ -142,6 +182,7 @@ export function startSessionMonitor(opts: {
     });
   };
 
+  liveMonitors.set(threadId, { cwd, lastActivityAt: opts.lastActivityAt });
   timeouts = [setTimeout(runScan, 3000), setTimeout(runScan, 8000)];
   timer = setInterval(runScan, SESSION_SCAN_INTERVAL_MS);
 

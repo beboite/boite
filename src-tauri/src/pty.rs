@@ -111,7 +111,12 @@ mod job {
 }
 
 struct PtyHandle {
-    master: Arc<Mutex<Box<dyn MasterPty + Send>>>,
+    // Option so kill() can drop the master while the reader thread still owns
+    // the map entry: on Windows, ConPTY read() never returns EOF after the
+    // child dies until ClosePseudoConsole runs (which happens when the master
+    // is dropped). Without this, kill(wait=true) spends its full 5s timeout
+    // on every reload.
+    master: Arc<Mutex<Option<Box<dyn MasterPty + Send>>>>,
     // Writes go through a dedicated thread per PTY. A blocking write_all on
     // the IPC thread froze the whole UI whenever the child stopped draining
     // (big paste, suspended process, full ConPTY buffer).
@@ -208,8 +213,8 @@ impl PtyManager {
             }
         });
 
-        let master_arc: Arc<Mutex<Box<dyn MasterPty + Send>>> =
-            Arc::new(Mutex::new(pair.master));
+        let master_arc: Arc<Mutex<Option<Box<dyn MasterPty + Send>>>> =
+            Arc::new(Mutex::new(Some(pair.master)));
         let killer_arc: Arc<Mutex<Box<dyn ChildKiller + Send + Sync>>> =
             Arc::new(Mutex::new(killer));
         let pid = child.process_id();
@@ -262,7 +267,10 @@ impl PtyManager {
             handle.master.clone()
         };
         let guard = master.lock();
-        guard
+        let Some(master) = guard.as_ref() else {
+            return Err("pty closing".to_string());
+        };
+        master
             .resize(PtySize {
                 rows: rows.max(1),
                 cols: cols.max(1),
@@ -294,10 +302,15 @@ impl PtyManager {
     pub fn kill(&self, id: &str, wait: bool) -> Result<(), String> {
         #[cfg(target_os = "windows")]
         {
-            let (killer, pid, job) = {
+            let (killer, pid, job, master) = {
                 let map = self.inner.lock();
                 match map.get(id) {
-                    Some(handle) => (handle.killer.clone(), handle.pid, handle.job.clone()),
+                    Some(handle) => (
+                        handle.killer.clone(),
+                        handle.pid,
+                        handle.job.clone(),
+                        handle.master.clone(),
+                    ),
                     None => return Ok(()),
                 }
             };
@@ -308,13 +321,17 @@ impl PtyManager {
                 }
             }
             let _ = killer.lock().kill();
+            // Drop the master to close the pseudoconsole, otherwise the
+            // reader thread stays blocked in read() forever and the wait
+            // loop below burns its whole 5s deadline.
+            drop(master.lock().take());
         }
         #[cfg(not(target_os = "windows"))]
         {
-            let killer = {
+            let (killer, master) = {
                 let map = self.inner.lock();
                 match map.get(id) {
-                    Some(handle) => handle.killer.clone(),
+                    Some(handle) => (handle.killer.clone(), handle.master.clone()),
                     None => return Ok(()),
                 }
             };
@@ -322,6 +339,7 @@ impl PtyManager {
                 .lock()
                 .kill()
                 .map_err(|e| format!("kill failed: {e}"))?;
+            drop(master.lock().take());
         }
         if !wait {
             return Ok(());
