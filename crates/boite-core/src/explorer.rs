@@ -11,18 +11,7 @@ pub struct DirEntry {
     pub is_hidden: bool,
 }
 
-#[tauri::command]
-pub async fn read_dir(
-    scope: tauri::State<'_, crate::scope::ProjectRoots>,
-    path: String,
-) -> Result<Vec<DirEntry>, String> {
-    scope.ensure_allowed(&path)?;
-    tauri::async_runtime::spawn_blocking(move || read_dir_blocking(path))
-        .await
-        .map_err(|e| format!("read_dir task failed: {e}"))?
-}
-
-fn read_dir_blocking(path: String) -> Result<Vec<DirEntry>, String> {
+pub fn read_dir_blocking(path: String) -> Result<Vec<DirEntry>, String> {
     let p = Path::new(&path);
     if !p.is_dir() {
         return Err("not a directory".into());
@@ -81,20 +70,7 @@ const SKIP_DIRS: &[&str] = &[
     ".pytest_cache",
 ];
 
-#[tauri::command]
-pub async fn explorer_search(
-    scope: tauri::State<'_, crate::scope::ProjectRoots>,
-    path: String,
-    query: String,
-    limit: u32,
-) -> Result<Vec<SearchHit>, String> {
-    scope.ensure_allowed(&path)?;
-    tauri::async_runtime::spawn_blocking(move || search_blocking(&path, &query, limit))
-        .await
-        .map_err(|e| format!("explorer_search task failed: {e}"))?
-}
-
-fn search_blocking(root: &str, query: &str, limit: u32) -> Result<Vec<SearchHit>, String> {
+pub fn search_blocking(root: &str, query: &str, limit: u32) -> Result<Vec<SearchHit>, String> {
     let trimmed = query.trim();
     if trimmed.is_empty() {
         return Ok(Vec::new());

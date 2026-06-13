@@ -1,0 +1,227 @@
+use std::path::Path;
+
+use parking_lot::Mutex;
+use rusqlite::Connection;
+
+use crate::models::{Project, Thread};
+
+pub struct Store {
+    conn: Mutex<Connection>,
+}
+
+// Append-only, mirrors the tauri-plugin-sql migrations in src-tauri/src/lib.rs.
+// Each entry runs once, gated by PRAGMA user_version.
+const MIGRATIONS: &[&str] = &[
+    "CREATE TABLE IF NOT EXISTS projects (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        cwd TEXT NOT NULL,
+        default_cmd TEXT NOT NULL,
+        default_args TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+    );",
+    "ALTER TABLE projects ADD COLUMN icon TEXT;",
+    "CREATE TABLE IF NOT EXISTS settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+    );",
+    "CREATE TABLE IF NOT EXISTS threads (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        label TEXT NOT NULL,
+        title TEXT,
+        cmd TEXT NOT NULL,
+        args TEXT NOT NULL,
+        exit_code INTEGER,
+        created_at INTEGER NOT NULL
+    );",
+    "ALTER TABLE threads ADD COLUMN session_id TEXT;
+     ALTER TABLE threads ADD COLUMN icon_key TEXT;",
+    "ALTER TABLE projects ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;",
+    "ALTER TABLE threads ADD COLUMN status TEXT;
+     ALTER TABLE threads ADD COLUMN auto_slept INTEGER NOT NULL DEFAULT 0;",
+    "ALTER TABLE threads ADD COLUMN keep_awake INTEGER NOT NULL DEFAULT 0;",
+];
+
+impl Store {
+    pub fn open(path: &Path) -> Result<Store, String> {
+        let conn = Connection::open(path).map_err(|e| format!("open db failed: {e}"))?;
+        let store = Store {
+            conn: Mutex::new(conn),
+        };
+        store.migrate()?;
+        Ok(store)
+    }
+
+    fn migrate(&self) -> Result<(), String> {
+        let conn = self.conn.lock();
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .map_err(|e| format!("read user_version failed: {e}"))?;
+        let mut applied = version as usize;
+        while applied < MIGRATIONS.len() {
+            conn.execute_batch(MIGRATIONS[applied])
+                .map_err(|e| format!("migration {} failed: {e}", applied + 1))?;
+            applied += 1;
+        }
+        if applied as i64 != version {
+            conn.execute_batch(&format!("PRAGMA user_version = {applied};"))
+                .map_err(|e| format!("set user_version failed: {e}"))?;
+        }
+        Ok(())
+    }
+
+    pub fn load_projects(&self) -> Result<Vec<Project>, String> {
+        let conn = self.conn.lock();
+        let mut stmt = conn
+            .prepare("SELECT id, name, cwd, icon, archived FROM projects ORDER BY created_at ASC")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(Project {
+                    id: r.get(0)?,
+                    name: r.get(1)?,
+                    cwd: r.get(2)?,
+                    icon: r.get(3)?,
+                    archived: r.get::<_, i64>(4)? == 1,
+                })
+            })
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    }
+
+    pub fn save_project(&self, p: &Project, created_at: i64) -> Result<(), String> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "INSERT OR REPLACE INTO projects (id, name, cwd, default_cmd, default_args, icon, archived, created_at)
+             VALUES (?1, ?2, ?3, '', '[]', ?4, ?5, ?6)",
+            rusqlite::params![p.id, p.name, p.cwd, p.icon, p.archived as i64, created_at],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub fn set_project_archived(&self, id: &str, archived: bool) -> Result<(), String> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "UPDATE projects SET archived = ?1 WHERE id = ?2",
+            rusqlite::params![archived as i64, id],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub fn delete_project(&self, id: &str) -> Result<(), String> {
+        let conn = self.conn.lock();
+        conn.execute("DELETE FROM projects WHERE id = ?1", [id])
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub fn load_threads(&self) -> Result<Vec<Thread>, String> {
+        let conn = self.conn.lock();
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, status, keep_awake, created_at
+                 FROM threads ORDER BY created_at ASC",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |r| {
+                let args_raw: String = r.get(5)?;
+                let args = serde_json::from_str::<Vec<String>>(&args_raw).unwrap_or_default();
+                Ok(Thread {
+                    id: r.get(0)?,
+                    project_id: r.get(1)?,
+                    pty_id: None,
+                    label: r.get(2)?,
+                    title: r.get(3)?,
+                    cmd: r.get(4)?,
+                    args,
+                    icon_key: r.get(8)?,
+                    session_id: r.get(7)?,
+                    status: normalize_status(r.get::<_, Option<String>>(9)?),
+                    exit_code: r.get(6)?,
+                    created_at: r.get(11)?,
+                    auto_slept: false,
+                    keep_awake: r.get::<_, i64>(10)? == 1,
+                })
+            })
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    }
+
+    pub fn save_thread(&self, t: &Thread) -> Result<(), String> {
+        let conn = self.conn.lock();
+        let args = serde_json::to_string(&t.args).unwrap_or_else(|_| "[]".to_string());
+        conn.execute(
+            "INSERT OR REPLACE INTO threads
+             (id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, status, keep_awake, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            rusqlite::params![
+                t.id, t.project_id, t.label, t.title, t.cmd, args, t.exit_code,
+                t.session_id, t.icon_key, t.status, t.keep_awake as i64, t.created_at,
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub fn update_thread_field(&self, id: &str, column: &str, value: ColVal) -> Result<(), String> {
+        let conn = self.conn.lock();
+        let sql = format!("UPDATE threads SET {column} = ?1 WHERE id = ?2");
+        match value {
+            ColVal::Text(v) => conn.execute(&sql, rusqlite::params![v, id]),
+            ColVal::Int(v) => conn.execute(&sql, rusqlite::params![v, id]),
+            ColVal::Null => conn.execute(&sql, rusqlite::params![rusqlite::types::Null, id]),
+        }
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub fn delete_thread(&self, id: &str) -> Result<(), String> {
+        let conn = self.conn.lock();
+        conn.execute("DELETE FROM threads WHERE id = ?1", [id])
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub fn load_settings(&self) -> Result<serde_json::Value, String> {
+        let conn = self.conn.lock();
+        let raw: Option<String> = conn
+            .query_row("SELECT value FROM settings WHERE key = 'main'", [], |r| {
+                r.get(0)
+            })
+            .ok();
+        match raw {
+            Some(s) => Ok(serde_json::from_str(&s).unwrap_or(serde_json::json!({}))),
+            None => Ok(serde_json::json!({})),
+        }
+    }
+
+    pub fn save_settings(&self, value: &serde_json::Value) -> Result<(), String> {
+        let conn = self.conn.lock();
+        let s = serde_json::to_string(value).map_err(|e| e.to_string())?;
+        conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES ('main', ?1)",
+            [s],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+}
+
+pub enum ColVal {
+    Text(String),
+    Int(i64),
+    Null,
+}
+
+const TERMINAL_STATUSES: &[&str] = &["done", "exited", "error", "stopped"];
+
+fn normalize_status(raw: Option<String>) -> String {
+    match raw {
+        Some(s) if TERMINAL_STATUSES.contains(&s.as_str()) => s,
+        _ => "idle".to_string(),
+    }
+}

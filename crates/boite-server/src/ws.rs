@@ -1,0 +1,250 @@
+use std::collections::HashMap;
+use std::net::SocketAddr;
+use std::sync::Arc;
+use std::time::Duration;
+
+use axum::extract::ws::{Message, WebSocket};
+use futures_util::stream::{SplitStream, StreamExt};
+use futures_util::SinkExt;
+use serde_json::json;
+use tokio::sync::broadcast::error::RecvError;
+use tokio::sync::mpsc;
+use uuid::Uuid;
+
+use crate::protocol::{self, Event, Request, Response};
+use crate::rpc;
+use crate::state::AppState;
+
+const WRITER_CAP: usize = 1024;
+const AUTH_TIMEOUT: Duration = Duration::from_secs(5);
+
+enum WsOut {
+    Text(String),
+    Binary(Vec<u8>),
+}
+
+pub async fn handle_socket(socket: WebSocket, state: Arc<AppState>, addr: SocketAddr) {
+    let (mut sink, mut stream) = socket.split();
+    let (tx, mut rx) = mpsc::channel::<WsOut>(WRITER_CAP);
+
+    let writer = tokio::spawn(async move {
+        while let Some(out) = rx.recv().await {
+            let msg = match out {
+                WsOut::Text(s) => Message::Text(s),
+                WsOut::Binary(b) => Message::Binary(b),
+            };
+            if sink.send(msg).await.is_err() {
+                break;
+            }
+        }
+    });
+
+    if !authenticate(&mut stream, &state, addr, &tx).await {
+        writer.abort();
+        return;
+    }
+
+    // Fan control-plane events out to this client.
+    let mut events_rx = state.events.subscribe();
+    let tx_ctrl = tx.clone();
+    let control = tokio::spawn(async move {
+        loop {
+            match events_rx.recv().await {
+                Ok(ev) => {
+                    if let Ok(s) = serde_json::to_string(&ev.to_event()) {
+                        if tx_ctrl.send(WsOut::Text(s)).await.is_err() {
+                            break;
+                        }
+                    }
+                }
+                Err(RecvError::Lagged(_)) => continue,
+                Err(RecvError::Closed) => break,
+            }
+        }
+    });
+
+    let mut attached: HashMap<String, tokio::task::JoinHandle<()>> = HashMap::new();
+
+    while let Some(Ok(msg)) = stream.next().await {
+        match msg {
+            Message::Text(text) => {
+                let req: Request = match serde_json::from_str(&text) {
+                    Ok(r) => r,
+                    Err(_) => continue,
+                };
+                let id = req.id.unwrap_or(0);
+                match req.method.as_str() {
+                    "auth" => {
+                        let _ = tx
+                            .send(WsOut::Text(json_str(&Response::ok(id, json!({ "ok": true })))))
+                            .await;
+                    }
+                    "thread.attach" => {
+                        handle_attach(&state, &req.params, id, &tx, &mut attached).await;
+                    }
+                    "thread.detach" => {
+                        if let Some(tid) = req.params.get("threadId").and_then(|v| v.as_str()) {
+                            if let Some(h) = attached.remove(tid) {
+                                h.abort();
+                            }
+                        }
+                        let _ = tx
+                            .send(WsOut::Text(json_str(&Response::ok(id, json!({ "ok": true })))))
+                            .await;
+                    }
+                    _ => {
+                        let resp = match rpc::dispatch(&state, &req.method, req.params).await {
+                            Ok(v) => Response::ok(id, v),
+                            Err(e) => Response::err(id, e),
+                        };
+                        let _ = tx.send(WsOut::Text(json_str(&resp))).await;
+                    }
+                }
+            }
+            Message::Binary(bytes) => {
+                if let Some((op, tid, payload)) = protocol::parse_frame(&bytes) {
+                    if op == protocol::FRAME_INPUT {
+                        let _ = state.registry.write(&tid.to_string(), payload);
+                    }
+                }
+            }
+            Message::Close(_) => break,
+            _ => {}
+        }
+    }
+
+    for (_, h) in attached {
+        h.abort();
+    }
+    control.abort();
+    writer.abort();
+}
+
+async fn handle_attach(
+    state: &Arc<AppState>,
+    params: &serde_json::Value,
+    id: u64,
+    tx: &mpsc::Sender<WsOut>,
+    attached: &mut HashMap<String, tokio::task::JoinHandle<()>>,
+) {
+    let thread_id = match params.get("threadId").and_then(|v| v.as_str()) {
+        Some(s) => s.to_string(),
+        None => {
+            let _ = tx
+                .send(WsOut::Text(json_str(&Response::err(id, "missing threadId".into()))))
+                .await;
+            return;
+        }
+    };
+    let uuid = match Uuid::parse_str(&thread_id) {
+        Ok(u) => u,
+        Err(_) => {
+            let _ = tx
+                .send(WsOut::Text(json_str(&Response::err(
+                    id,
+                    "threadId must be a uuid".into(),
+                ))))
+                .await;
+            return;
+        }
+    };
+    let cols = params.get("cols").and_then(|v| v.as_u64()).unwrap_or(80) as u16;
+    let rows = params.get("rows").and_then(|v| v.as_u64()).unwrap_or(24) as u16;
+
+    if let Some(h) = attached.remove(&thread_id) {
+        h.abort();
+    }
+
+    match state.registry.attach(&thread_id, cols, rows) {
+        Some(snap) => {
+            // Replay marker carries the PTY size so the client can size its
+            // terminal before writing the scrollback burst that follows.
+            let marker = Event::new(
+                "replay",
+                json!({
+                    "threadId": thread_id,
+                    "size": { "cols": snap.cols, "rows": snap.rows },
+                    "bytes": snap.replay.len(),
+                }),
+            );
+            let _ = tx.send(WsOut::Text(json_str(&marker))).await;
+            let _ = tx
+                .send(WsOut::Binary(protocol::encode_output(&uuid, &snap.replay)))
+                .await;
+
+            let txf = tx.clone();
+            let mut rxf = snap.rx;
+            let h = tokio::spawn(async move {
+                loop {
+                    match rxf.recv().await {
+                        Ok(bytes) => {
+                            if txf
+                                .send(WsOut::Binary(protocol::encode_output(&uuid, &bytes)))
+                                .await
+                                .is_err()
+                            {
+                                break;
+                            }
+                        }
+                        Err(RecvError::Lagged(_)) => continue,
+                        Err(RecvError::Closed) => break,
+                    }
+                }
+            });
+            attached.insert(thread_id.clone(), h);
+
+            let _ = tx
+                .send(WsOut::Text(json_str(&Response::ok(
+                    id,
+                    json!({ "ok": true, "size": { "cols": snap.cols, "rows": snap.rows } }),
+                ))))
+                .await;
+        }
+        None => {
+            let _ = tx
+                .send(WsOut::Text(json_str(&Response::err(id, "thread not live".into()))))
+                .await;
+        }
+    }
+}
+
+async fn authenticate(
+    stream: &mut SplitStream<WebSocket>,
+    state: &Arc<AppState>,
+    addr: SocketAddr,
+    tx: &mpsc::Sender<WsOut>,
+) -> bool {
+    let ip = addr.ip();
+    if state.auth.is_locked(ip) {
+        return false;
+    }
+    let first = tokio::time::timeout(AUTH_TIMEOUT, stream.next()).await;
+    if let Ok(Some(Ok(Message::Text(text)))) = first {
+        if let Ok(req) = serde_json::from_str::<Request>(&text) {
+            if req.method == "auth" {
+                let token = req
+                    .params
+                    .get("token")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                if state.auth.verify(ip, token) {
+                    let _ = tx
+                        .send(WsOut::Text(json_str(&Response::ok(
+                            req.id.unwrap_or(0),
+                            json!({ "ok": true }),
+                        ))))
+                        .await;
+                    return true;
+                }
+            }
+        }
+    }
+    let _ = tx
+        .send(WsOut::Text(json_str(&Response::err(0, "auth failed".into()))))
+        .await;
+    false
+}
+
+fn json_str<T: serde::Serialize>(value: &T) -> String {
+    serde_json::to_string(value).unwrap_or_else(|_| "{}".to_string())
+}

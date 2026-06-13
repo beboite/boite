@@ -17,18 +17,7 @@ pub struct TextFile {
     pub lossy: bool,
 }
 
-#[tauri::command]
-pub async fn read_text_file(
-    scope: tauri::State<'_, crate::scope::ProjectRoots>,
-    path: String,
-) -> Result<TextFile, String> {
-    scope.ensure_allowed(&path)?;
-    tauri::async_runtime::spawn_blocking(move || read_blocking(&path))
-        .await
-        .map_err(|e| format!("read_text_file task failed: {e}"))?
-}
-
-fn read_blocking(path: &str) -> Result<TextFile, String> {
+pub fn read_blocking(path: &str) -> Result<TextFile, String> {
     let p = Path::new(path);
     if !p.is_file() {
         return Err("not a file".into());
@@ -63,19 +52,7 @@ fn looks_binary(bytes: &[u8]) -> bool {
     head.contains(&0u8)
 }
 
-#[tauri::command]
-pub async fn write_text_file(
-    scope: tauri::State<'_, crate::scope::ProjectRoots>,
-    path: String,
-    content: String,
-) -> Result<u64, String> {
-    scope.ensure_allowed_for_write(&path)?;
-    tauri::async_runtime::spawn_blocking(move || write_blocking(&path, &content))
-        .await
-        .map_err(|e| format!("write_text_file task failed: {e}"))?
-}
-
-fn write_blocking(path: &str, content: &str) -> Result<u64, String> {
+pub fn write_blocking(path: &str, content: &str) -> Result<u64, String> {
     let p = Path::new(path);
     let parent = p
         .parent()

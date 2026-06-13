@@ -1,0 +1,26 @@
+[package]
+name = "boite-server"
+version = "0.6.7"
+description = "Headless boite server: PTY orchestration over WebSocket"
+edition = "2021"
+
+[[bin]]
+name = "boite-server"
+path = "src/main.rs"
+
+[dependencies]
+boite-core = { path = "../boite-core" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "signal", "net"] }
+axum = { version = "0.7", features = ["ws"] }
+tower-http = { version = "0.6", features = ["fs", "trace"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+futures-util = "0.3"
+rusqlite = { version = "0.32", features = ["bundled"] }
+uuid = { version = "1", features = ["v4"] }
+parking_lot = "0.12"
+subtle = "2"
+rand = "0.8"
+dirs = "6"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

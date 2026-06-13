@@ -16,13 +16,6 @@ pub struct ClaudeSessionHit {
     pub modified_ms: i64,
 }
 
-async fn run_lookup<F>(f: F) -> Option<String>
-where
-    F: FnOnce() -> Option<String> + Send + 'static,
-{
-    tauri::async_runtime::spawn_blocking(f).await.ok().flatten()
-}
-
 #[derive(Deserialize)]
 struct ClaudeSessionLine {
     #[serde(rename = "sessionId", alias = "session_id")]
@@ -98,7 +91,7 @@ fn read_claude_session_meta(path: &Path) -> Option<(Option<String>, Option<Strin
     Some((found_session, found_cwd))
 }
 
-fn find_claude_session_blocking(
+pub fn find_claude_session_blocking(
     cwd: String,
     after_unix_ms: i64,
     exclude: &HashSet<String>,
@@ -229,7 +222,7 @@ fn read_codex_session_meta(path: &Path) -> Option<(String, String)> {
     Some((payload.id?, payload.cwd?))
 }
 
-fn find_codex_session_blocking(
+pub fn find_codex_session_blocking(
     cwd: String,
     after_unix_ms: i64,
     exclude: &HashSet<String>,
@@ -374,7 +367,7 @@ fn find_opencode_session_by_created(
     None
 }
 
-fn find_opencode_session_blocking(
+pub fn find_opencode_session_blocking(
     cwd: String,
     after_unix_ms: i64,
     exclude: &HashSet<String>,
@@ -406,7 +399,7 @@ fn copilot_db_path() -> Option<PathBuf> {
     }
 }
 
-fn find_copilot_session_blocking(
+pub fn find_copilot_session_blocking(
     cwd: String,
     after_unix_ms: i64,
     exclude: &HashSet<String>,
@@ -532,7 +525,7 @@ fn is_leap(y: i64) -> bool {
     (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
 }
 
-fn find_cursor_session_blocking(
+pub fn find_cursor_session_blocking(
     _cwd: String,
     after_unix_ms: i64,
     exclude: &HashSet<String>,
@@ -582,7 +575,7 @@ fn find_cursor_session_blocking(
     best.map(|(id, _)| id)
 }
 
-fn find_antigravity_session_blocking(
+pub fn find_antigravity_session_blocking(
     cwd: String,
     after_unix_ms: i64,
     exclude: &HashSet<String>,
@@ -619,71 +612,6 @@ fn find_antigravity_session_blocking(
     None
 }
 
-fn build_exclude(ids: Option<Vec<String>>) -> HashSet<String> {
+pub fn build_exclude(ids: Option<Vec<String>>) -> HashSet<String> {
     ids.unwrap_or_default().into_iter().collect()
-}
-
-#[tauri::command]
-pub async fn find_claude_session(
-    cwd: String,
-    after_unix_ms: i64,
-    exclude_ids: Option<Vec<String>>,
-) -> Option<ClaudeSessionHit> {
-    let exclude = build_exclude(exclude_ids);
-    tauri::async_runtime::spawn_blocking(move || {
-        find_claude_session_blocking(cwd, after_unix_ms, &exclude)
-    })
-    .await
-    .ok()
-    .flatten()
-}
-
-#[tauri::command]
-pub async fn find_codex_session(
-    cwd: String,
-    after_unix_ms: i64,
-    exclude_ids: Option<Vec<String>>,
-) -> Option<String> {
-    let exclude = build_exclude(exclude_ids);
-    run_lookup(move || find_codex_session_blocking(cwd, after_unix_ms, &exclude)).await
-}
-
-#[tauri::command]
-pub async fn find_opencode_session(
-    cwd: String,
-    after_unix_ms: i64,
-    exclude_ids: Option<Vec<String>>,
-) -> Option<String> {
-    let exclude = build_exclude(exclude_ids);
-    run_lookup(move || find_opencode_session_blocking(cwd, after_unix_ms, &exclude)).await
-}
-
-#[tauri::command]
-pub async fn find_cursor_session(
-    cwd: String,
-    after_unix_ms: i64,
-    exclude_ids: Option<Vec<String>>,
-) -> Option<String> {
-    let exclude = build_exclude(exclude_ids);
-    run_lookup(move || find_cursor_session_blocking(cwd, after_unix_ms, &exclude)).await
-}
-
-#[tauri::command]
-pub async fn find_antigravity_session(
-    cwd: String,
-    after_unix_ms: i64,
-    exclude_ids: Option<Vec<String>>,
-) -> Option<String> {
-    let exclude = build_exclude(exclude_ids);
-    run_lookup(move || find_antigravity_session_blocking(cwd, after_unix_ms, &exclude)).await
-}
-
-#[tauri::command]
-pub async fn find_copilot_session(
-    cwd: String,
-    after_unix_ms: i64,
-    exclude_ids: Option<Vec<String>>,
-) -> Option<String> {
-    let exclude = build_exclude(exclude_ids);
-    run_lookup(move || find_copilot_session_blocking(cwd, after_unix_ms, &exclude)).await
 }
