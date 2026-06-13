@@ -8,10 +8,11 @@
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
   import {
-    ptySpawn,
+    ptyOpen,
     ptyWrite,
     ptyResize,
     ptyKill,
+    ptyRelease,
   } from "$lib/storage/pty";
   import type { PtyEvent } from "$lib/storage/pty";
   import { app } from "$lib/app/store.svelte";
@@ -108,15 +109,24 @@
     return !!current && current.status !== "stopped" && current.ptyId === targetPtyId;
   }
 
-  function stopLocalPty(wait = false) {
+  function teardownPty(action: (key: string) => void) {
     clearSpawnRetry();
     clearPendingInputTimers();
     const targetPtyId = ptyId;
     ptyId = null;
     spawned = false;
-    if (targetPtyId) {
-      void ptyKill(targetPtyId, wait).catch(() => {});
-    }
+    if (targetPtyId) action(targetPtyId);
+  }
+
+  // Explicit terminate: stop the process, keep the thread row (stopped status).
+  function stopLocalPty(wait = false) {
+    teardownPty((key) => void ptyKill(key, wait).catch(() => {}));
+  }
+
+  // Unmount cleanup: local kills, remote detaches (the server keeps the PTY
+  // alive so the thread survives the client closing and can be reattached).
+  function releasePty() {
+    teardownPty((key) => void ptyRelease(key).catch(() => {}));
   }
 
   function scheduleSpawnRetry(delay = 120) {
@@ -469,13 +479,21 @@
     };
 
     try {
-      const nextPtyId = await ptySpawn(
+      const nextPtyId = await ptyOpen(
         {
-          cwd: project.cwd,
-          cmd: plan.cmd,
-          args: plan.args,
-          cols,
-          rows,
+          threadId: thread.id,
+          spec: {
+            cwd: project.cwd,
+            cmd: plan.cmd,
+            args: plan.args,
+            cols,
+            rows,
+          },
+          meta: {
+            projectId: thread.projectId,
+            label: thread.label,
+            iconKey: thread.iconKey,
+          },
         },
         onEvent,
       );
@@ -730,7 +748,7 @@
     destroyed = true;
     statusEngine.release(thread.id);
     stopSessionMonitor();
-    stopLocalPty(false);
+    releasePty();
     if (fitRafId !== null) cancelAnimationFrame(fitRafId);
     fitRafId = null;
     resizeObserver?.disconnect();

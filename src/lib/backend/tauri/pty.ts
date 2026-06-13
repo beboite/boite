@@ -1,5 +1,5 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
-import type { PtyApi, PtyEvent, PtySpawnArgs } from "../types";
+import type { PtyApi, PtyEvent, PtyOpenArgs } from "../types";
 
 // The Rust side base64-encodes output: a byte array would arrive as a JSON
 // number array, ~4x the payload and an expensive parse for every chunk. We
@@ -18,7 +18,10 @@ function decodeBase64(b64: string): Uint8Array {
 }
 
 export const tauriPty: PtyApi = {
-  spawn(spec: PtySpawnArgs, onEvent: (event: PtyEvent) => void): Promise<string> {
+  // threadId/meta are unused locally: the desktop spawns a fresh process and
+  // tracks thread identity in the store. They exist for RemoteBackend, where
+  // the server keys PTYs by thread.
+  open(args: PtyOpenArgs, onEvent: (event: PtyEvent) => void): Promise<string> {
     const channel = new Channel<WirePtyEvent>();
     channel.onmessage = (event) => {
       if (event.type === "output") {
@@ -27,18 +30,23 @@ export const tauriPty: PtyApi = {
         onEvent(event);
       }
     };
-    return invoke<string>("pty_spawn", { onEvent: channel, spec });
+    return invoke<string>("pty_spawn", { onEvent: channel, spec: args.spec });
   },
 
-  async write(id: string, data: Uint8Array): Promise<void> {
-    await invoke("pty_write", data, { headers: { "x-pty-id": id } });
+  async write(key: string, data: Uint8Array): Promise<void> {
+    await invoke("pty_write", data, { headers: { "x-pty-id": key } });
   },
 
-  async resize(id: string, cols: number, rows: number): Promise<void> {
-    await invoke("pty_resize", { id, cols, rows });
+  async resize(key: string, cols: number, rows: number): Promise<void> {
+    await invoke("pty_resize", { id: key, cols, rows });
   },
 
-  async kill(id: string, wait = true): Promise<void> {
-    await invoke("pty_kill", { id, wait });
+  async kill(key: string, wait = true): Promise<void> {
+    await invoke("pty_kill", { id: key, wait });
+  },
+
+  // No detached PTYs locally: releasing a terminal kills its process.
+  async release(key: string): Promise<void> {
+    await invoke("pty_kill", { id: key, wait: false });
   },
 };
