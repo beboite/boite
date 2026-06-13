@@ -1,0 +1,19 @@
+# Build artifacts and deps: rebuilt inside the image.
+target
+**/target
+node_modules
+**/node_modules
+build
+.svelte-kit
+
+# VCS + local
+.git
+.github
+*.log
+boite-data
+data
+workspace
+
+# Desktop bundles, never needed by the server build.
+src-tauri/gen
+src-tauri/icons
