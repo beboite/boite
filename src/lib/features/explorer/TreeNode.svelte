@@ -1,8 +1,8 @@
 <script lang="ts">
   import { explorerStore } from "./store.svelte";
   import { treeMenu } from "./treeMenu.svelte";
-  import { revealItemInDir } from "@tauri-apps/plugin-opener";
-  import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+  import { revealItemInDir } from "$lib/platform/opener";
+  import { writeText } from "$lib/platform/clipboard";
   import { logger } from "$lib/shared/services/logger.svelte";
   import { notifications } from "$lib/features/notifications/store.svelte";
   import { editorStore } from "$lib/features/editor/store.svelte";

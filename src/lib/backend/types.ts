@@ -106,6 +106,10 @@ export interface ShellApi {
 
 export interface ScopeApi {
   registerProjectRoots(roots: string[]): Promise<void>;
+  // The server's browsable base dir for adding projects via the web folder
+  // picker. Null on desktop (native dialog) and on servers with no
+  // BOITE_WORKSPACE_DIR set.
+  workspaceRoot(): Promise<string | null>;
 }
 
 export type SessionKind =

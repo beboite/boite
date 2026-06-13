@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
-  import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+  import { writeText } from "$lib/platform/clipboard";
   import { notifications } from "$lib/features/notifications/store.svelte";
   import type { Commit } from "./api";
 

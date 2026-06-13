@@ -1,14 +1,22 @@
-import { open } from "@tauri-apps/plugin-dialog";
 import { backend } from "$lib/backend";
+import { hasTauri } from "$lib/backend/env";
 import { app } from "$lib/app/store.svelte";
 import { notifications } from "$lib/features/notifications/store.svelte";
 import { logger } from "$lib/shared/services/logger.svelte";
 import { basename } from "$lib/shared/utils/path";
+import { folderBrowser } from "./folderBrowserStore.svelte";
 import type { Project } from "$lib/types";
 
 export async function pickAndAddProject(): Promise<Project | null> {
+  // Browser/PWA: no native dialog. Open the server-side folder browser, which
+  // adds the project itself on confirm.
+  if (!hasTauri()) {
+    folderBrowser.open = true;
+    return null;
+  }
   let selected: string | string[] | null;
   try {
+    const { open } = await import("@tauri-apps/plugin-dialog");
     selected = await open({ directory: true, multiple: false });
   } catch (err) {
     console.error("dialog open failed:", err);

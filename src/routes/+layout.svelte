@@ -4,6 +4,8 @@
   import { invoke } from "@tauri-apps/api/core";
   import { getCurrentWebview } from "@tauri-apps/api/webview";
   import { app } from "$lib/app/store.svelte";
+  import { hasTauri } from "$lib/backend/env";
+  import { bootRemoteWorkspace } from "$lib/app/workspace";
   import { settings } from "$lib/features/settings/store.svelte";
   import {
     closeThreadWithConfirm,
@@ -185,6 +187,19 @@
   }
 
   onMount(() => {
+    // No Tauri runtime: this is a browser/PWA. The only backend is the server
+    // that served the page; connect to it (or raise the login gate) instead of
+    // initializing a dead local workspace.
+    if (!hasTauri()) {
+      void bootRemoteWorkspace();
+      // Register the PWA service worker (installability + offline shell). Only
+      // works in a secure context (HTTPS or localhost); a no-op otherwise.
+      if (typeof navigator !== "undefined" && "serviceWorker" in navigator) {
+        void navigator.serviceWorker.register("/service-worker.js").catch(() => {});
+      }
+      return;
+    }
+
     void app.init();
 
     // Wait one rAF after mount so the first paint hits the GPU before the
