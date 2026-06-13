@@ -1,5 +1,5 @@
-import { invoke } from "@tauri-apps/api/core";
 import { platform as detectPlatform } from "@tauri-apps/plugin-os";
+import { backend } from "$lib/backend";
 
 export type Platform = "windows" | "macos" | "linux" | "unknown";
 
@@ -9,14 +9,6 @@ export interface ShellOption {
   cmd: string;
   args: string[];
   iconKey: string | null;
-}
-
-interface RawShellOption {
-  id: string;
-  label: string;
-  cmd: string;
-  args: string[];
-  icon_key: string | null;
 }
 
 class PlatformStore {
@@ -35,14 +27,7 @@ class PlatformStore {
       console.error("platform detect failed:", err);
     }
     try {
-      const list = await invoke<RawShellOption[]>("available_shells");
-      this.shells = list.map((s) => ({
-        id: s.id,
-        label: s.label,
-        cmd: s.cmd,
-        args: s.args,
-        iconKey: s.icon_key,
-      }));
+      this.shells = await backend().shell.availableShells();
     } catch (err) {
       console.error("available_shells failed:", err);
     }

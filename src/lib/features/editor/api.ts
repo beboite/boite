@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { backend } from "$lib/backend";
 
 export interface TextFile {
   content: string;
@@ -9,11 +9,11 @@ export interface TextFile {
 }
 
 export function readTextFile(path: string): Promise<TextFile> {
-  return invoke<TextFile>("read_text_file", { path });
+  return backend().editor.readTextFile(path);
 }
 
 export function writeTextFile(path: string, content: string): Promise<number> {
-  return invoke<number>("write_text_file", { path, content });
+  return backend().editor.writeTextFile(path, content);
 }
 
 export interface FileVersions {
@@ -28,9 +28,5 @@ export function gitFileVersions(
   file: string,
   headFile?: string,
 ): Promise<FileVersions> {
-  return invoke<FileVersions>("git_file_versions", {
-    path: repoPath,
-    file,
-    headFile: headFile ?? null,
-  });
+  return backend().editor.fileVersions(repoPath, file, headFile ?? null);
 }

@@ -1,15 +1,10 @@
-import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
+import { backend } from "$lib/backend";
 import { app } from "$lib/app/store.svelte";
 import { notifications } from "$lib/features/notifications/store.svelte";
 import { logger } from "$lib/shared/services/logger.svelte";
 import { basename } from "$lib/shared/utils/path";
 import type { Project } from "$lib/types";
-
-interface ProjectInspection {
-  name: string;
-  icon: string | null;
-}
 
 export async function pickAndAddProject(): Promise<Project | null> {
   let selected: string | string[] | null;
@@ -31,9 +26,9 @@ export async function addProjectByPath(path: string): Promise<Project | null> {
     return existing;
   }
 
-  let inspection: ProjectInspection;
+  let inspection: { name: string; icon: string | null };
   try {
-    inspection = await invoke<ProjectInspection>("inspect_project", { path });
+    inspection = await backend().project.inspect(path);
   } catch (err) {
     logger.warn("project", `inspect_project failed for ${path}, using fallback`, String(err));
     inspection = { name: basename(path) || "project", icon: null };

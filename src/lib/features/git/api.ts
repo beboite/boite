@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { backend } from "$lib/backend";
 
 export interface RepoInfo {
   isRepo: boolean;
@@ -33,11 +33,11 @@ export interface Commit {
 }
 
 export function gitRepoInfo(path: string): Promise<RepoInfo> {
-  return invoke<RepoInfo>("git_repo_info", { path });
+  return backend().git.repoInfo(path);
 }
 
 export function gitStatus(path: string): Promise<ChangeEntry[]> {
-  return invoke<ChangeEntry[]>("git_status", { path });
+  return backend().git.status(path);
 }
 
 export function gitLog(
@@ -45,15 +45,15 @@ export function gitLog(
   limit: number,
   skip: number,
 ): Promise<Commit[]> {
-  return invoke<Commit[]>("git_log", { path, limit, skip });
+  return backend().git.log(path, limit, skip);
 }
 
 export function gitStage(path: string, files: string[]): Promise<void> {
-  return invoke("git_stage", { path, files });
+  return backend().git.stage(path, files);
 }
 
 export function gitUnstage(path: string, files: string[]): Promise<void> {
-  return invoke("git_unstage", { path, files });
+  return backend().git.unstage(path, files);
 }
 
 export function gitDiscard(
@@ -61,25 +61,25 @@ export function gitDiscard(
   files: string[],
   untracked: string[],
 ): Promise<void> {
-  return invoke("git_discard", { path, files, untracked });
+  return backend().git.discard(path, files, untracked);
 }
 
 export function gitCommit(path: string, message: string): Promise<string> {
-  return invoke<string>("git_commit", { path, message });
+  return backend().git.commit(path, message);
 }
 
 export function gitFetch(path: string): Promise<void> {
-  return invoke("git_fetch", { path });
+  return backend().git.fetch(path);
 }
 
 export function gitPush(path: string): Promise<void> {
-  return invoke("git_push", { path });
+  return backend().git.push(path);
 }
 
 export function gitPull(path: string): Promise<void> {
-  return invoke("git_pull", { path });
+  return backend().git.pull(path);
 }
 
 export function gitInit(path: string): Promise<void> {
-  return invoke("git_init", { path });
+  return backend().git.init(path);
 }
