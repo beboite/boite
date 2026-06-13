@@ -142,8 +142,26 @@ export interface LogApi {
   filePath(): Promise<string>;
 }
 
+// Local derives thread status client-side (statusEngine + OSC/output sniffing)
+// and is authoritative. Remote treats the server as authoritative: status and
+// title arrive as control events; the client only projects them.
+export interface BackendCaps {
+  clientStatus: boolean;
+}
+
+// Server-pushed control plane (remote only). Loosely typed so the store can
+// switch on event name without the backend needing to know every consumer.
+export interface ControlEvent {
+  event: string;
+  data: unknown;
+}
+
 export interface Backend {
   readonly kind: "tauri" | "remote";
+  readonly caps: BackendCaps;
+  // Subscribe to server-pushed control events (remote only). Returns an
+  // unsubscribe fn. Absent on local, where there is no control plane.
+  subscribe?(cb: (event: ControlEvent) => void): () => void;
   readonly pty: PtyApi;
   readonly db: DbApi;
   readonly git: GitApi;

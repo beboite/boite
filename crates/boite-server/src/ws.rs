@@ -193,10 +193,18 @@ async fn handle_attach(
             });
             attached.insert(thread_id.clone(), h);
 
+            // The pty id is the client's stable key for this attachment (stored
+            // as thread.ptyId, used for write/resize/kill) and matches the live
+            // overlay in thread.list.
+            let pty_id = state.registry.live(&thread_id).map(|l| l.pty_id());
             let _ = tx
                 .send(WsOut::Text(json_str(&Response::ok(
                     id,
-                    json!({ "ok": true, "size": { "cols": snap.cols, "rows": snap.rows } }),
+                    json!({
+                        "ok": true,
+                        "ptyId": pty_id,
+                        "size": { "cols": snap.cols, "rows": snap.rows },
+                    }),
                 ))))
                 .await;
         }

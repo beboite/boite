@@ -14,6 +14,7 @@ import {
 
 export class TauriBackend implements Backend {
   readonly kind = "tauri" as const;
+  readonly caps = { clientStatus: true };
   readonly pty = tauriPty;
   readonly db = tauriDb;
   readonly git = tauriGit;
