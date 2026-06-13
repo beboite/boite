@@ -11,13 +11,34 @@ pub struct Config {
     /// Directory of the built SvelteKit SPA to serve. None disables static
     /// serving (the WS API still works).
     pub static_dir: Option<PathBuf>,
+    /// Max concurrent live PTYs; thread.spawn past this is rejected (DoS guard).
+    pub max_threads: usize,
+    /// Max concurrent authenticated WebSocket connections.
+    pub max_connections: usize,
+    /// Base directory clients may browse to add new projects (the mounted
+    /// repos dir in Docker). Added as an always-allowed filesystem root so the
+    /// web folder picker works before any project exists.
+    pub workspace_dir: Option<PathBuf>,
 }
 
 const DEFAULT_SCROLLBACK: usize = 1024 * 1024;
+const DEFAULT_MAX_THREADS: usize = 200;
+const DEFAULT_MAX_CONNECTIONS: usize = 64;
+
+fn env_usize(key: &str, default: usize) -> usize {
+    std::env::var(key)
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(default)
+}
 
 impl Config {
     pub fn from_env() -> Result<Config, String> {
-        let bind = std::env::var("BOITE_BIND").unwrap_or_else(|_| "0.0.0.0:7337".to_string());
+        // Loopback by default: a fresh install must not expose host-RCE-over-a-
+        // static-token on every interface. Container/LAN deploys set BOITE_BIND
+        // explicitly (and front it with TLS or a tunnel).
+        let bind = std::env::var("BOITE_BIND").unwrap_or_else(|_| "127.0.0.1:7337".to_string());
         let data_dir = std::env::var("BOITE_DATA_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(|_| PathBuf::from("./boite-data"));
@@ -32,6 +53,13 @@ impl Config {
             .unwrap_or(DEFAULT_SCROLLBACK);
 
         let static_dir = std::env::var("BOITE_STATIC_DIR").ok().map(PathBuf::from);
+        let max_threads = env_usize("BOITE_MAX_THREADS", DEFAULT_MAX_THREADS);
+        let max_connections = env_usize("BOITE_MAX_CONNECTIONS", DEFAULT_MAX_CONNECTIONS);
+        let workspace_dir = std::env::var("BOITE_WORKSPACE_DIR")
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from);
 
         Ok(Config {
             bind,
@@ -39,6 +67,9 @@ impl Config {
             token,
             scrollback_bytes,
             static_dir,
+            max_threads,
+            max_connections,
+            workspace_dir,
         })
     }
 }

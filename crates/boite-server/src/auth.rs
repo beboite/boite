@@ -46,14 +46,22 @@ impl Auth {
             map.remove(&ip);
             return true;
         }
+        // Bound memory under an IP-rotating spray: when the table grows large,
+        // drop entries that are not actively locked.
+        if map.len() > 4096 {
+            let now = Instant::now();
+            map.retain(|_, f| f.locked_until.map(|u| now < u).unwrap_or(false));
+        }
         let entry = map.entry(ip).or_insert(Failure {
             count: 0,
             locked_until: None,
         });
         entry.count += 1;
         if entry.count >= MAX_FAILURES {
+            // Keep the count across lockouts so a repeat offender stays
+            // throttled (one try per LOCKOUT) instead of a fresh batch each
+            // cycle.
             entry.locked_until = Some(Instant::now() + LOCKOUT);
-            entry.count = 0;
         }
         false
     }

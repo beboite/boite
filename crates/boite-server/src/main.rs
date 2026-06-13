@@ -2,6 +2,7 @@ mod auth;
 mod config;
 mod events;
 mod models;
+mod notify;
 mod protocol;
 mod registry;
 mod rpc;
@@ -60,6 +61,7 @@ async fn main() {
     let (events, _) = broadcast::channel::<AppEvent>(EVENT_CHANNEL_CAP);
     let registry = Registry::new(config.scrollback_bytes, events.clone());
     let roots = ProjectRoots::default();
+    let notifier = notify::Notifier::from_env();
 
     let state = Arc::new(AppState {
         store,
@@ -67,6 +69,11 @@ async fn main() {
         auth: Auth::new(config.token.clone()),
         roots,
         events: events.clone(),
+        notifier,
+        max_threads: config.max_threads,
+        max_connections: config.max_connections,
+        conns: std::sync::atomic::AtomicUsize::new(0),
+        workspace_dir: config.workspace_dir,
     });
 
     if let Err(e) = state.refresh_roots() {
@@ -74,9 +81,23 @@ async fn main() {
     }
 
     spawn_persistence_task(state.clone(), events.subscribe());
+    if state.notifier.enabled() {
+        tracing::info!("webhook notifications enabled");
+        spawn_notifier_task(state.clone(), events.subscribe());
+    }
 
-    tracing::info!("boite-server token: {}", config.token);
+    // Never log the token itself: logs land in journald/docker/CI where the
+    // on-disk token file's 0600 protection does not apply. The operator reads
+    // it from the data dir (or sets BOITE_TOKEN).
+    tracing::info!("auth token loaded ({} chars)", config.token.len());
     tracing::info!("listening on {}", config.bind);
+    if !config.bind.starts_with("127.") && !config.bind.starts_with("[::1]") {
+        tracing::warn!(
+            "bound to a routable interface ({}); the token is sent over plain ws:// \
+             unless you front it with TLS (reverse proxy) or a tunnel (WireGuard/SSH)",
+            config.bind
+        );
+    }
 
     let mut app = Router::new()
         .route("/api/health", get(health))
@@ -108,7 +129,12 @@ async fn main() {
         .with_graceful_shutdown(async move {
             shutdown_signal().await;
             tracing::info!("shutdown: killing PTYs");
-            registry_for_shutdown.pty_manager().kill_all();
+            // kill_all spawns + joins one OS thread per PTY; keep it off the
+            // async worker so a slow killer syscall can't stall the runtime.
+            let _ = tokio::task::spawn_blocking(move || {
+                registry_for_shutdown.pty_manager().kill_all();
+            })
+            .await;
         })
         .await
     {
@@ -179,6 +205,57 @@ fn spawn_persistence_task(state: Arc<AppState>, mut rx: broadcast::Receiver<AppE
                         "title",
                         ColVal::Text(title),
                     );
+                }
+                Ok(_) => {}
+                Err(RecvError::Lagged(_)) => continue,
+                Err(RecvError::Closed) => break,
+            }
+        }
+    });
+}
+
+// Fire a webhook on meaningful thread transitions: a turn finishing
+// (running -> ready, claude awaiting input) and process exit. Tracks the last
+// status per thread so a status that did not actually cross an edge is silent.
+fn spawn_notifier_task(state: Arc<AppState>, mut rx: broadcast::Receiver<AppEvent>) {
+    use std::collections::HashMap;
+    tokio::spawn(async move {
+        let mut last: HashMap<String, String> = HashMap::new();
+        loop {
+            match rx.recv().await {
+                Ok(AppEvent::ThreadStatus {
+                    thread_id, status, ..
+                }) => {
+                    let prev = last.insert(thread_id.clone(), status.clone());
+                    if prev.as_deref() == Some(status.as_str()) {
+                        continue;
+                    }
+                    let fire = match status.as_str() {
+                        "ready" => prev.as_deref() == Some("running"),
+                        "exited" | "error" | "done" => true,
+                        _ => false,
+                    };
+                    if !fire {
+                        continue;
+                    }
+                    let label = state
+                        .store
+                        .thread_label(&thread_id)
+                        .unwrap_or_else(|| "thread".to_string());
+                    let (title, body, tag) = match status.as_str() {
+                        "ready" => (format!("{label}: ready"), "Awaiting input".to_string(), "bell"),
+                        "done" => (
+                            format!("{label}: done"),
+                            "Process finished".to_string(),
+                            "white_check_mark",
+                        ),
+                        _ => (
+                            format!("{label}: {status}"),
+                            "Process exited".to_string(),
+                            "x",
+                        ),
+                    };
+                    state.notifier.send(&title, &body, tag).await;
                 }
                 Ok(_) => {}
                 Err(RecvError::Lagged(_)) => continue,

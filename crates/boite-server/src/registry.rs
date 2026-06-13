@@ -83,6 +83,19 @@ impl Registry {
         self.shared.threads.lock().get(thread_id).cloned()
     }
 
+    pub fn live_count(&self) -> usize {
+        self.shared.threads.lock().len()
+    }
+
+    /// Current scrollback for a thread, used to re-sync a client whose
+    /// broadcast receiver lagged (it missed live frames; resend the whole ring
+    /// so xterm repaints rather than desyncing on a truncated escape).
+    pub fn replay(&self, thread_id: &str) -> Option<Vec<u8>> {
+        let live = self.live(thread_id)?;
+        let snap = live.ring.lock().snapshot();
+        Some(snap)
+    }
+
     /// Snapshot of (thread_id -> (pty_id, status, title)) for thread.list.
     pub fn live_snapshot(&self) -> HashMap<String, (String, String, Option<String>)> {
         self.shared

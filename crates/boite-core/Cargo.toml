@@ -27,3 +27,6 @@ windows-sys = { version = "0.60", features = [
     "Win32_System_JobObjects",
     "Win32_System_Threading",
 ] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

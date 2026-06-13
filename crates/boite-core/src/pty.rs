@@ -122,7 +122,6 @@ struct PtyHandle {
     // (big paste, suspended process, full ConPTY buffer).
     writer_tx: Sender<Vec<u8>>,
     killer: Arc<Mutex<Box<dyn ChildKiller + Send + Sync>>>,
-    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     pid: Option<u32>,
     #[cfg(target_os = "windows")]
     job: Option<Arc<job::Job>>,
@@ -326,17 +325,24 @@ impl PtyManager {
         }
         #[cfg(not(target_os = "windows"))]
         {
-            let (killer, master) = {
+            let (killer, master, pid) = {
                 let map = self.inner.lock();
                 match map.get(id) {
-                    Some(handle) => (handle.killer.clone(), handle.master.clone()),
+                    Some(handle) => {
+                        (handle.killer.clone(), handle.master.clone(), handle.pid)
+                    }
                     None => return Ok(()),
                 }
             };
-            killer
-                .lock()
-                .kill()
-                .map_err(|e| format!("kill failed: {e}"))?;
+            // portable-pty setsid()s the child, so it leads its own process
+            // group (pgid == pid). Signal the whole group: killer.kill() only
+            // reaps the direct shell, orphaning claude and its descendants.
+            if let Some(pid) = pid {
+                unsafe {
+                    libc::kill(-(pid as i32), libc::SIGKILL);
+                }
+            }
+            let _ = killer.lock().kill();
             drop(master.lock().take());
         }
         if !wait {
