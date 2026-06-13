@@ -3,7 +3,7 @@
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { app } from "$lib/app/store.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
-  import pkg from "../../../../package.json";
+  import WorkspaceToggle from "$lib/features/workspace/WorkspaceToggle.svelte";
   import Minus from "@lucide/svelte/icons/minus";
   import Square from "@lucide/svelte/icons/square";
   import Copy from "@lucide/svelte/icons/copy";
@@ -12,9 +12,6 @@
   import PanelLeft from "@lucide/svelte/icons/panel-left";
   import PanelRight from "@lucide/svelte/icons/panel-right";
   import BoiteLogo from "$lib/shared/components/BoiteLogo.svelte";
-
-  type Props = { title?: string };
-  let { title = "Boite" }: Props = $props();
 
   const win = getCurrentWindow();
   let isMaximized = $state(false);
@@ -104,15 +101,9 @@
   </div>
 
   <div
-    data-tauri-drag-region
-    class="pointer-events-none absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-baseline gap-1.5"
+    class="pointer-events-none absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center"
   >
-    <span class="text-[14px] font-semibold tracking-tight text-foreground/90">
-      {title}
-    </span>
-    <span class="hidden font-mono text-[10.5px] text-muted-foreground/60 sm:inline">
-      v{pkg.version}
-    </span>
+    <WorkspaceToggle />
   </div>
 
   <div data-tauri-drag-region class="flex-1"></div>
