@@ -1,6 +1,7 @@
 <script lang="ts">
   import { untrack } from "svelte";
   import { app } from "$lib/app/store.svelte";
+  import { workspace } from "$lib/backend";
   import { settings } from "$lib/features/settings/store.svelte";
   import { pickAndAddProject } from "$lib/features/project/api";
   import { ptyKill } from "$lib/storage/pty";
@@ -22,6 +23,16 @@
   import EditorPanel from "$lib/features/editor/EditorPanel.svelte";
 
   let activated = $state<Record<string, true>>({});
+
+  // Colored inset outline marks the remote workspace: green connected, amber
+  // (pulsing) while connecting or dropped.
+  const outlineClass = $derived(
+    workspace.mode === "local"
+      ? ""
+      : workspace.connection === "connected"
+        ? "ws-remote-ok"
+        : "ws-remote-warn",
+  );
 
   $effect(() => {
     void app.threads.length;
@@ -117,10 +128,11 @@
   });
 </script>
 
-<div class="flex h-screen w-screen flex-col overflow-hidden bg-background">
+<div class="ws-frame flex h-screen w-screen flex-col overflow-hidden bg-background {outlineClass}">
   <CloseGuard />
   <TitleBar />
 
+  {#key workspace.epoch}
   <div class="flex min-h-0 flex-1">
     {#if !settings.state.sidebarCollapsed}
       <ProjectSidebar
@@ -253,4 +265,24 @@
       <RightPanel />
     {/if}
   </div>
+  {/key}
 </div>
+
+<style>
+  .ws-frame {
+    transition: box-shadow 150ms ease;
+  }
+  .ws-remote-ok {
+    box-shadow: inset 0 0 0 1.5px var(--color-success);
+  }
+  .ws-remote-warn {
+    box-shadow: inset 0 0 0 1.5px var(--color-warning);
+    animation: ws-pulse 1.2s ease-in-out infinite;
+  }
+  @keyframes ws-pulse {
+    50% {
+      box-shadow: inset 0 0 0 1.5px
+        color-mix(in srgb, var(--color-warning) 35%, transparent);
+    }
+  }
+</style>
