@@ -220,6 +220,12 @@ class SettingsStore {
     this.ready = true;
   }
 
+  // A workspace switch re-hydrates settings from the new backend.
+  reset() {
+    this.state = structuredClone(DEFAULTS);
+    this.ready = false;
+  }
+
   private async persist() {
     try {
       await saveSettings($state.snapshot(this.state) as Settings);

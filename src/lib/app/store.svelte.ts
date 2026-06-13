@@ -16,6 +16,8 @@ import {
 import { registerProjectRoots } from "$lib/storage/scope";
 import { gitStore } from "$lib/features/git/store.svelte";
 import { notifications } from "$lib/features/notifications/store.svelte";
+import { backend } from "$lib/backend";
+import type { ControlEvent } from "$lib/backend/types";
 
 class AppState {
   projects = $state<Project[]>([]);
@@ -30,6 +32,10 @@ class AppState {
   // sidebar can show a red status dot on each until the binding is restored
   // (via /resume in the AI CLI -> session monitor's steal logic).
   unboundByDedup = $state<string[]>([]);
+
+  // Unsubscribe from the remote control plane; set while a remote workspace is
+  // active so a switch can tear the subscription down.
+  #unsubscribeControl: (() => void) | null = null;
 
   markUnbound(id: string) {
     if (!this.unboundByDedup.includes(id)) {
@@ -156,7 +162,87 @@ class AppState {
       console.error("loadThreads failed:", err);
     }
     this.deduplicateSessionIds();
+
+    // Remote: the server is authoritative for thread runtime state and pushes
+    // it as control events. Local has no subscribe and derives status itself.
+    const be = backend();
+    if (be.subscribe) {
+      this.#unsubscribeControl = be.subscribe((ev) => this.applyControlEvent(ev));
+    }
+
     this.ready = true;
+  }
+
+  // Clear reactive state so a workspace switch re-hydrates from the new
+  // backend instead of mixing two workspaces' projects/threads.
+  reset() {
+    this.#unsubscribeControl?.();
+    this.#unsubscribeControl = null;
+    if (this.titleFlushTimer !== null) {
+      clearTimeout(this.titleFlushTimer);
+      this.titleFlushTimer = null;
+    }
+    this.pendingTitleSaves.clear();
+    this.freshThreadIds.clear();
+    this.projects = [];
+    this.threads = [];
+    this.activeThreadId = null;
+    this.selectedProjectId = null;
+    this.view = "terminal";
+    this.respawnNonce = {};
+    this.unboundByDedup = [];
+    this.ready = false;
+  }
+
+  // Apply a server-pushed control event (remote only). The server owns thread
+  // runtime state; the client projects it.
+  private applyControlEvent(ev: ControlEvent) {
+    const data = ev.data as Record<string, unknown> | null;
+    switch (ev.event) {
+      case "thread.status": {
+        const id = data?.threadId as string | undefined;
+        const t = id ? this.threads.find((x) => x.id === id) : undefined;
+        if (!t) return;
+        t.status = (data?.status as Thread["status"]) ?? t.status;
+        t.exitCode = (data?.exitCode as number | null) ?? null;
+        if (t.status === "done" || t.status === "exited" || t.status === "error") {
+          t.ptyId = null;
+        }
+        break;
+      }
+      case "thread.title": {
+        const id = data?.threadId as string | undefined;
+        const t = id ? this.threads.find((x) => x.id === id) : undefined;
+        if (t) t.title = (data?.title as string) ?? t.title;
+        break;
+      }
+      case "thread.created": {
+        const incoming = ev.data as Thread;
+        if (incoming?.id && !this.threads.some((x) => x.id === incoming.id)) {
+          this.threads.push(incoming);
+        }
+        break;
+      }
+      case "thread.updated": {
+        const id = data?.id as string | undefined;
+        const t = id ? this.threads.find((x) => x.id === id) : undefined;
+        if (t) Object.assign(t, data);
+        break;
+      }
+      case "thread.deleted": {
+        const id = data?.threadId as string | undefined;
+        if (id) this.threads = this.threads.filter((x) => x.id !== id);
+        break;
+      }
+      case "project.changed": {
+        void loadProjects()
+          .then((p) => {
+            this.projects = p;
+          })
+          .catch(() => {});
+        break;
+      }
+    }
   }
 
   // Legacy fix: pre-0.5.5 builds could let multiple threads capture the
@@ -235,6 +321,9 @@ class AppState {
       // after the user wakes them, and reappear asleep on next launch.
       this.setThreadAutoSlept(id, false);
     }
+    // Remote: the server persists runtime state and pushes it back; a client
+    // write would clobber it. Only the local backend persists status here.
+    if (!backend().caps.clientStatus) return;
     if (
       status === "done" ||
       status === "exited" ||
@@ -272,6 +361,8 @@ class AppState {
     const t = this.threads.find((x) => x.id === id);
     if (!t || t.title === title) return;
     t.title = title;
+    // Remote owns the title (parsed server-side, pushed as a control event).
+    if (!backend().caps.clientStatus) return;
     this.pendingTitleSaves.set(id, title);
     this.scheduleTitleFlush();
   }

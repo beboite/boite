@@ -15,6 +15,7 @@
     ptyRelease,
   } from "$lib/storage/pty";
   import type { PtyEvent } from "$lib/storage/pty";
+  import { backend } from "$lib/backend";
   import { app } from "$lib/app/store.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
   import { reloadThread, restoreLastClosedThread } from "$lib/features/thread/api";
@@ -183,6 +184,9 @@
   }
 
   function markRunning(ttlMs?: number) {
+    // Remote derives status server-side and pushes it; client-side sniffing
+    // would fight those events.
+    if (!backend().caps.clientStatus) return;
     syncAliveThread("running");
     statusEngine.markWorking(thread.id, ttlMs);
     app.setThreadStatus(thread.id, "running");
@@ -720,7 +724,10 @@
     });
     resizeObserver.observe(container);
 
-    statusEngine.acquire();
+    // The status engine (TTL demotion, idle auto-close) is local only: remote
+    // status comes from the server, and a local idle timer must not kill PTYs
+    // shared with other attached devices.
+    if (backend().caps.clientStatus) statusEngine.acquire();
   });
 
   $effect(() => {
