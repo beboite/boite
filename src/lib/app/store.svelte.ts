@@ -217,16 +217,27 @@ class AppState {
         break;
       }
       case "thread.created": {
-        const incoming = ev.data as Thread;
+        // Server emits data = { thread: {...} }.
+        const incoming = (ev.data as { thread?: Thread })?.thread;
         if (incoming?.id && !this.threads.some((x) => x.id === incoming.id)) {
           this.threads.push(incoming);
         }
         break;
       }
       case "thread.updated": {
-        const id = data?.id as string | undefined;
+        // data = { thread: {...} }. Merge user-owned fields only; runtime
+        // fields (status/ptyId/exitCode) are driven by thread.status and the
+        // live overlay, never clobbered by an update.
+        const incoming = (ev.data as { thread?: Partial<Thread> & { id?: string } })?.thread;
+        const id = incoming?.id;
         const t = id ? this.threads.find((x) => x.id === id) : undefined;
-        if (t) Object.assign(t, data);
+        if (t && incoming) {
+          const userFields: Record<string, unknown> = { ...incoming };
+          delete userFields.status;
+          delete userFields.ptyId;
+          delete userFields.exitCode;
+          Object.assign(t, userFields);
+        }
         break;
       }
       case "thread.deleted": {
@@ -242,6 +253,22 @@ class AppState {
           .catch(() => {});
         break;
       }
+      // The server lost track of which control events we missed (broadcast
+      // lag); refetch the durable lists so we don't diverge silently.
+      case "resync": {
+        void this.resyncFromServer();
+        break;
+      }
+    }
+  }
+
+  private async resyncFromServer() {
+    try {
+      const [projects, threads] = await Promise.all([loadProjects(), loadThreads()]);
+      this.projects = projects;
+      this.threads = threads;
+    } catch (err) {
+      console.error("resync failed:", err);
     }
   }
 
@@ -250,6 +277,11 @@ class AppState {
   // when a collision is detected we null EVERY conflicting thread. Each one
   // respawns fresh on next wake; user rebinds via /resume in the AI CLI.
   private deduplicateSessionIds() {
+    // Remote owns session bindings: this legacy local fix would write back via
+    // thread.create (clobbering server-owned state) and toast about /resume,
+    // which is meaningless remotely. Skip entirely when the server is
+    // authoritative.
+    if (!backend().caps.clientStatus) return;
     const withSession = this.threads.filter((t) => t.sessionId);
     console.info(
       `[boite] session dedup: ${this.threads.length} threads loaded, ${withSession.length} with sessionId`,

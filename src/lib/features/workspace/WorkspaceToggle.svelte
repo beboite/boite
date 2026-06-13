@@ -1,8 +1,11 @@
 <script lang="ts">
   import { workspace } from "$lib/backend";
+  import { hasTauri } from "$lib/backend/env";
   import { device } from "$lib/features/settings/device.svelte";
   import { switchToRemote, switchToLocal } from "$lib/app/workspace";
 
+  // No local backend in a browser/PWA: hide the Local pill, only Remote stands.
+  const isTauri = hasTauri();
   let open = $state(false);
   let url = $state(device.state.remoteUrl);
   let token = $state(device.state.remoteToken);
@@ -58,16 +61,18 @@
 
 <div class="pointer-events-auto relative flex items-center">
   <div class="flex items-center overflow-hidden rounded-md border border-border bg-[var(--color-surface)] text-[11px]">
-    <button
-      type="button"
-      class="px-2 py-0.5 transition {workspace.mode === 'local'
-        ? 'bg-accent text-foreground'
-        : 'text-muted-foreground hover:text-foreground'}"
-      onclick={goLocal}
-      disabled={busy}
-    >
-      Local
-    </button>
+    {#if isTauri}
+      <button
+        type="button"
+        class="px-2 py-0.5 transition {workspace.mode === 'local'
+          ? 'bg-accent text-foreground'
+          : 'text-muted-foreground hover:text-foreground'}"
+        onclick={goLocal}
+        disabled={busy}
+      >
+        Local
+      </button>
+    {/if}
     <button
       type="button"
       class="flex items-center gap-1 px-2 py-0.5 transition {workspace.mode === 'remote'

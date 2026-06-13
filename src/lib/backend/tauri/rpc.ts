@@ -76,6 +76,8 @@ export const tauriShell: ShellApi = {
 
 export const tauriScope: ScopeApi = {
   registerProjectRoots: (roots) => invoke("register_project_roots", { roots }),
+  // Desktop uses the native folder dialog, not a server-side browser.
+  workspaceRoot: () => Promise.resolve(null),
 };
 
 const SESSION_COMMANDS: Record<SessionKind, string> = {

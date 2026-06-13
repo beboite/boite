@@ -94,7 +94,11 @@ export class RemoteBackend implements Backend {
       resize: (key, cols, rows) => {
         const tid = threadIdOf(key);
         socket.setAttachSize(tid, cols, rows);
-        return rpc("thread.resize", { threadId: tid, cols, rows }).then(() => {});
+        // Tolerate a closed socket (reconnect window): Terminal fires resize
+        // as void; an unhandled "socket not open" rejection would surface.
+        return rpc("thread.resize", { threadId: tid, cols, rows })
+          .then(() => {})
+          .catch(() => {});
       },
       kill: (key, wait = true) => {
         const tid = threadIdOf(key);
@@ -181,6 +185,8 @@ export class RemoteBackend implements Backend {
     // clients never set roots directly.
     this.scope = {
       registerProjectRoots: () => Promise.resolve(),
+      workspaceRoot: () =>
+        rpc("fs.workspaceRoot").then((r) => (r.root as string | null) ?? null),
     };
 
     this.session = {

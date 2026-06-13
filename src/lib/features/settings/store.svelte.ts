@@ -258,6 +258,11 @@ class SettingsStore {
 
   // A workspace switch re-hydrates settings from the new backend.
   reset() {
+    // Cancel queued debounced writes: a slider drag right before a switch
+    // would otherwise flush ~250ms later against the swapped backend (backend()
+    // resolves lazily), writing one workspace's settings into the other's DB.
+    this.persistSoon.cancel();
+    this.persistDeviceSoon.cancel();
     this.state = structuredClone(DEFAULTS);
     this.ready = false;
   }

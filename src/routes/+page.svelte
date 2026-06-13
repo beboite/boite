@@ -15,6 +15,8 @@
   import Toaster from "$lib/features/notifications/Toaster.svelte";
   import ConfirmHost from "$lib/shared/components/ConfirmHost.svelte";
   import BoiteLogo from "$lib/shared/components/BoiteLogo.svelte";
+  import RemoteLogin from "$lib/features/workspace/RemoteLogin.svelte";
+  import FolderBrowser from "$lib/features/project/FolderBrowser.svelte";
   import RightPanel from "$lib/features/panes/RightPanel.svelte";
   import { paneStore } from "$lib/features/panes/store.svelte";
   import PaneShell from "$lib/features/panes/PaneShell.svelte";
@@ -131,8 +133,14 @@
 <div class="ws-frame flex h-screen w-screen flex-col overflow-hidden bg-background {outlineClass}">
   <CloseGuard />
   <TitleBar />
+  <FolderBrowser />
 
   {#key workspace.epoch}
+  {#if workspace.needsLogin}
+  <div class="flex min-h-0 flex-1">
+    <RemoteLogin />
+  </div>
+  {:else}
   <div class="flex min-h-0 flex-1">
     {#if !settings.state.sidebarCollapsed}
       <ProjectSidebar
@@ -265,6 +273,7 @@
       <RightPanel />
     {/if}
   </div>
+  {/if}
   {/key}
 </div>
 

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { getCurrentWindow } from "@tauri-apps/api/window";
+  import { hasTauri } from "$lib/backend/env";
   import { app } from "$lib/app/store.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
   import WorkspaceToggle from "$lib/features/workspace/WorkspaceToggle.svelte";
@@ -13,10 +14,15 @@
   import PanelRight from "@lucide/svelte/icons/panel-right";
   import BoiteLogo from "$lib/shared/components/BoiteLogo.svelte";
 
-  const win = getCurrentWindow();
+  // Window controls only exist in the desktop shell. In a browser/PWA there is
+  // no Tauri window object (getCurrentWindow would throw), and the OS/browser
+  // draws its own chrome, so we skip the custom min/max/close buttons.
+  const isTauri = hasTauri();
+  const win = isTauri ? getCurrentWindow() : null;
   let isMaximized = $state(false);
 
   async function syncMaximized() {
+    if (!win) return;
     try {
       isMaximized = await win.isMaximized();
     } catch {
@@ -25,6 +31,7 @@
   }
 
   onMount(() => {
+    if (!win) return;
     void syncMaximized();
     const unlisten = win.onResized(() => {
       void syncMaximized();
@@ -35,13 +42,13 @@
   });
 
   function minimize() {
-    void win.minimize();
+    void win?.minimize();
   }
   function toggleMax() {
-    void win.toggleMaximize().then(() => syncMaximized());
+    void win?.toggleMaximize().then(() => syncMaximized());
   }
   function close() {
-    void win.close();
+    void win?.close();
   }
 
   function showSettings() {
@@ -124,37 +131,39 @@
     </button>
   </div>
 
-  <div class="flex h-full items-stretch">
-    <button
-      type="button"
-      class="flex h-full w-11 items-center justify-center text-muted-foreground transition hover:bg-muted/50 hover:text-foreground"
-      onclick={minimize}
-      aria-label="Minimize"
-      title="Minimize"
-    >
-      <Minus class="size-3.5" />
-    </button>
-    <button
-      type="button"
-      class="flex h-full w-11 items-center justify-center text-muted-foreground transition hover:bg-muted/50 hover:text-foreground"
-      onclick={toggleMax}
-      aria-label={isMaximized ? "Restore" : "Maximize"}
-      title={isMaximized ? "Restore" : "Maximize"}
-    >
-      {#if isMaximized}
-        <Copy class="size-3" />
-      {:else}
-        <Square class="size-3" />
-      {/if}
-    </button>
-    <button
-      type="button"
-      class="flex h-full w-11 items-center justify-center text-muted-foreground transition hover:bg-danger hover:text-white"
-      onclick={close}
-      aria-label="Close"
-      title="Close"
-    >
-      <X class="size-3.5" />
-    </button>
-  </div>
+  {#if isTauri}
+    <div class="flex h-full items-stretch">
+      <button
+        type="button"
+        class="flex h-full w-11 items-center justify-center text-muted-foreground transition hover:bg-muted/50 hover:text-foreground"
+        onclick={minimize}
+        aria-label="Minimize"
+        title="Minimize"
+      >
+        <Minus class="size-3.5" />
+      </button>
+      <button
+        type="button"
+        class="flex h-full w-11 items-center justify-center text-muted-foreground transition hover:bg-muted/50 hover:text-foreground"
+        onclick={toggleMax}
+        aria-label={isMaximized ? "Restore" : "Maximize"}
+        title={isMaximized ? "Restore" : "Maximize"}
+      >
+        {#if isMaximized}
+          <Copy class="size-3" />
+        {:else}
+          <Square class="size-3" />
+        {/if}
+      </button>
+      <button
+        type="button"
+        class="flex h-full w-11 items-center justify-center text-muted-foreground transition hover:bg-danger hover:text-white"
+        onclick={close}
+        aria-label="Close"
+        title="Close"
+      >
+        <X class="size-3.5" />
+      </button>
+    </div>
+  {/if}
 </div>

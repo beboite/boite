@@ -11,6 +11,9 @@ class Workspace {
   mode = $state<"local" | "remote">("local");
   connection = $state<ConnState>("connected");
   remoteUrl = $state<string | null>(null);
+  // PWA boot: no Tauri runtime and no saved/working token, so the app gates on
+  // a remote login screen instead of initializing a dead local workspace.
+  needsLogin = $state(false);
   // Bumping this remounts the terminal tree ({#key}), so every Terminal
   // releases its PTY before the transport swaps under it.
   epoch = $state(0);
