@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { backend } from "$lib/backend";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
@@ -35,12 +35,9 @@ class Logger {
     else if (level === "debug") console.debug(tag, message, data ?? "");
     else console.log(tag, message, data ?? "");
 
-    void invoke("log_app_event", {
-      level,
-      source: scope,
-      message,
-      details: data == null ? null : serializeDetails(data),
-    }).catch(() => {});
+    void backend()
+      .log.event(level, scope, message, data == null ? null : serializeDetails(data))
+      .catch(() => {});
   }
 
   debug(scope: string, message: string, data?: unknown) {
@@ -57,15 +54,15 @@ class Logger {
   }
 
   read(scope: "current" | "previous" = "current"): Promise<LogEntry[]> {
-    return invoke<LogEntry[]>("read_app_log", { scope });
+    return backend().log.read(scope);
   }
 
   clear(): Promise<void> {
-    return invoke<void>("clear_app_log");
+    return backend().log.clear();
   }
 
   filePath(): Promise<string> {
-    return invoke<string>("log_file_path");
+    return backend().log.filePath();
   }
 }
 

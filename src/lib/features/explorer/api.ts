@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { backend } from "$lib/backend";
 
 export interface DirEntry {
   name: string;
@@ -15,7 +15,7 @@ function toUnix(p: string): string {
 }
 
 export async function readDir(path: string): Promise<DirEntry[]> {
-  const raw = await invoke<DirEntry[]>("read_dir", { path });
+  const raw = await backend().explorer.readDir(path);
   return raw.map((e) => ({ ...e, path: toUnix(e.path) }));
 }
 
@@ -25,7 +25,7 @@ export interface ChangedPath {
 }
 
 export function gitChangedPaths(path: string): Promise<ChangedPath[]> {
-  return invoke<ChangedPath[]>("git_changed_paths", { path });
+  return backend().explorer.changedPaths(path);
 }
 
 export interface SearchHit {
@@ -38,10 +38,6 @@ export async function explorerSearch(
   query: string,
   limit = 500,
 ): Promise<SearchHit[]> {
-  const raw = await invoke<SearchHit[]>("explorer_search", {
-    path,
-    query,
-    limit,
-  });
+  const raw = await backend().explorer.search(path, query, limit);
   return raw.map((h) => ({ ...h, path: toUnix(h.path) }));
 }

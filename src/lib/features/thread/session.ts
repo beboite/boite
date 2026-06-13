@@ -1,4 +1,5 @@
-import { invoke } from "@tauri-apps/api/core";
+import { backend } from "$lib/backend";
+import type { SessionHit, SessionKind } from "$lib/backend/types";
 import { app } from "$lib/app/store.svelte";
 import { detectIconKey } from "$lib/shared/icons/detect";
 import { logger } from "$lib/shared/services/logger.svelte";
@@ -7,7 +8,7 @@ import type { IconKey, Thread } from "$lib/types";
 // mtimeMs is the session file's last-write time when the backend can provide
 // it; the monitor uses it to attribute the file to the thread whose PTY was
 // active when it was written.
-export type SessionHit = { id: string; mtimeMs: number | null };
+export type { SessionHit } from "$lib/backend/types";
 
 export type SessionDetector = (
   cwd: string,
@@ -15,15 +16,10 @@ export type SessionDetector = (
   excludeIds: string[],
 ) => Promise<SessionHit | null>;
 
-function makeDetector(command: string, scope: string): SessionDetector {
+function makeDetector(kind: SessionKind, scope: string): SessionDetector {
   return async (cwd, afterUnixMs, excludeIds) => {
     try {
-      const id = await invoke<string | null>(command, {
-        cwd,
-        afterUnixMs,
-        excludeIds,
-      });
-      return id ? { id, mtimeMs: null } : null;
+      return await backend().session.find(kind, cwd, afterUnixMs, excludeIds);
     } catch (err) {
       logger.error("session", `${scope}: detect failed`, String(err));
       return null;
@@ -31,26 +27,13 @@ function makeDetector(command: string, scope: string): SessionDetector {
   };
 }
 
-const claudeDetector: SessionDetector = async (cwd, afterUnixMs, excludeIds) => {
-  try {
-    const hit = await invoke<{ id: string; modifiedMs: number } | null>(
-      "find_claude_session",
-      { cwd, afterUnixMs, excludeIds },
-    );
-    return hit ? { id: hit.id, mtimeMs: hit.modifiedMs } : null;
-  } catch (err) {
-    logger.error("session", "claude: detect failed", String(err));
-    return null;
-  }
-};
-
 const detectors: Partial<Record<NonNullable<IconKey>, SessionDetector>> = {
-  claude: claudeDetector,
-  codex: makeDetector("find_codex_session", "codex"),
-  opencode: makeDetector("find_opencode_session", "opencode"),
-  cursor: makeDetector("find_cursor_session", "cursor"),
-  antigravity: makeDetector("find_antigravity_session", "antigravity"),
-  copilot: makeDetector("find_copilot_session", "copilot"),
+  claude: makeDetector("claude", "claude"),
+  codex: makeDetector("codex", "codex"),
+  opencode: makeDetector("opencode", "opencode"),
+  cursor: makeDetector("cursor", "cursor"),
+  antigravity: makeDetector("antigravity", "antigravity"),
+  copilot: makeDetector("copilot", "copilot"),
 };
 
 function resolveKey(thread: Thread): IconKey {

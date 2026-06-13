@@ -12,7 +12,6 @@
     ptyWrite,
     ptyResize,
     ptyKill,
-    decodePtyOutput,
   } from "$lib/storage/pty";
   import type { PtyEvent } from "$lib/storage/pty";
   import { app } from "$lib/app/store.svelte";
@@ -210,7 +209,7 @@
       const current = currentThread();
       if (!current || current.status === "stopped") return;
       syncAliveThread();
-      const bytes = decodePtyOutput(event.data);
+      const bytes = event.bytes;
       lastOutputAt = Date.now();
       term.write(bytes);
       const text = decoder.decode(bytes, { stream: true });

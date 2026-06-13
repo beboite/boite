@@ -1,5 +1,5 @@
-import { invoke } from "@tauri-apps/api/core";
 import { platform as detectPlatform } from "@tauri-apps/plugin-os";
+import { backend } from "$lib/backend";
 
 let cached: string | null = null;
 
@@ -16,7 +16,7 @@ function fallback(): string {
 export async function getDefaultShell(): Promise<string> {
   if (cached) return cached;
   try {
-    cached = await invoke<string>("default_shell");
+    cached = await backend().shell.defaultShell();
   } catch (err) {
     console.error("default_shell failed:", err);
     cached = fallback();

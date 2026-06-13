@@ -1,7 +1,7 @@
-import { invoke } from "@tauri-apps/api/core";
+import { backend } from "$lib/backend";
 
 // Registers project cwds as the filesystem trust boundary backend-side.
 // Editor/explorer/git commands reject paths outside these roots.
 export function registerProjectRoots(roots: string[]): Promise<void> {
-  return invoke("register_project_roots", { roots });
+  return backend().scope.registerProjectRoots(roots);
 }
