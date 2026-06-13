@@ -1,0 +1,19 @@
+services:
+  boite:
+    build: .
+    image: boite-server:latest
+    container_name: boite
+    restart: unless-stopped
+    ports:
+      - "7337:7337"
+    environment:
+      # Required: the bearer token clients send as the first WS frame.
+      - BOITE_TOKEN=${BOITE_TOKEN:?set BOITE_TOKEN in .env}
+      - BOITE_BIND=0.0.0.0:7337
+      # Optional mobile notifications (ntfy/Discord/Gotify).
+      - BOITE_WEBHOOK_URL=${BOITE_WEBHOOK_URL:-}
+      - BOITE_WEBHOOK_FORMAT=${BOITE_WEBHOOK_FORMAT:-ntfy}
+    volumes:
+      - ./data:/data # SQLite DB + token
+      - ./workspace:/workspace # repos boite operates on
+      - ./claude:/root/.claude # claude OAuth creds + sessions
