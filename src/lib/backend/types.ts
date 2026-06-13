@@ -32,11 +32,24 @@ export interface PtySpawnArgs {
   rows: number;
 }
 
+export interface PtyOpenArgs {
+  threadId: string;
+  spec: PtySpawnArgs;
+  meta: { projectId: string; label: string; iconKey: string | null };
+}
+
 export interface PtyApi {
-  spawn(spec: PtySpawnArgs, onEvent: (event: PtyEvent) => void): Promise<string>;
-  write(id: string, data: Uint8Array): Promise<void>;
-  resize(id: string, cols: number, rows: number): Promise<void>;
-  kill(id: string, wait?: boolean): Promise<void>;
+  // Attach-or-spawn for a thread. Returns the live key (local ptyId / remote
+  // server pty id) that the caller stores as thread.ptyId; write/resize/kill
+  // take that key. Local always spawns (no detached PTYs yet); remote attaches
+  // to a live thread or spawns then attaches.
+  open(args: PtyOpenArgs, onEvent: (event: PtyEvent) => void): Promise<string>;
+  write(key: string, data: Uint8Array): Promise<void>;
+  resize(key: string, cols: number, rows: number): Promise<void>;
+  kill(key: string, wait?: boolean): Promise<void>;
+  // Detach this client without terminating. Local has no detached PTYs yet so
+  // it kills; remote detaches and the server keeps the process running.
+  release(key: string): Promise<void>;
 }
 
 export interface DbApi {

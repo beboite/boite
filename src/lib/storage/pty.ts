@@ -1,23 +1,27 @@
 import { backend } from "$lib/backend";
-import type { PtyEvent, PtySpawnArgs } from "$lib/backend/types";
+import type { PtyEvent, PtyOpenArgs } from "$lib/backend/types";
 
 export type { PtyEvent, PtySpawnArgs } from "$lib/backend/types";
 
-export function ptySpawn(
-  spec: PtySpawnArgs,
+export function ptyOpen(
+  args: PtyOpenArgs,
   onEvent: (event: PtyEvent) => void,
 ): Promise<string> {
-  return backend().pty.spawn(spec, onEvent);
+  return backend().pty.open(args, onEvent);
 }
 
-export function ptyWrite(id: string, data: Uint8Array): Promise<void> {
-  return backend().pty.write(id, data);
+export function ptyWrite(key: string, data: Uint8Array): Promise<void> {
+  return backend().pty.write(key, data);
 }
 
-export function ptyResize(id: string, cols: number, rows: number): Promise<void> {
-  return backend().pty.resize(id, cols, rows);
+export function ptyResize(key: string, cols: number, rows: number): Promise<void> {
+  return backend().pty.resize(key, cols, rows);
 }
 
-export function ptyKill(id: string, wait = true): Promise<void> {
-  return backend().pty.kill(id, wait);
+export function ptyKill(key: string, wait = true): Promise<void> {
+  return backend().pty.kill(key, wait);
+}
+
+export function ptyRelease(key: string): Promise<void> {
+  return backend().pty.release(key);
 }
