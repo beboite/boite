@@ -28,6 +28,7 @@ ws.binaryType = "arraybuffer";
 const dec = new TextDecoder();
 let collected = "";
 let nextId = 1;
+let idleCreateOk = false;
 const pending = new Map();
 
 function rpc(method, params) {
@@ -70,6 +71,18 @@ ws.onopen = async () => {
   console.log("auth:", r.ok);
   if (!r.ok) process.exit(1);
 
+  // thread.create: persist an idle row, no PTY.
+  const IDLE_ID = crypto.randomUUID();
+  r = await rpc("thread.create", {
+    thread: { id: IDLE_ID, projectId: "p1", label: "idle", cmd: "cmd", args: [], iconKey: null },
+  });
+  console.log("create idle ok:", r.ok);
+  r = await rpc("thread.list", {});
+  const idleRow = r.result.threads.find((x) => x.id === IDLE_ID);
+  idleCreateOk = !!idleRow && idleRow.status === "idle" && !idleRow.ptyId;
+  console.log("idle in list:", idleCreateOk, "status:", idleRow?.status, "ptyId:", idleRow?.ptyId);
+  await rpc("thread.delete", { threadId: IDLE_ID });
+
   r = await rpc("thread.spawn", {
     thread: { id: THREAD_ID, projectId: "p1", label: "smoke", cmd: "cmd", args: ["/c", `echo ${MARK} & ping -n 4 127.0.0.1 >NUL`], iconKey: null },
     cwd: process.cwd(),
@@ -104,7 +117,7 @@ ws.onopen = async () => {
   await rpc("thread.kill", { threadId: THREAD_ID, wait: false });
   await sleep(200);
 
-  const pass = sawLive && replaySawMark && t?.ptyId;
+  const pass = idleCreateOk && sawLive && replaySawMark && t?.ptyId;
   console.log(pass ? "\nSMOKE PASS" : "\nSMOKE FAIL");
   ws.close();
   process.exit(pass ? 0 : 1);

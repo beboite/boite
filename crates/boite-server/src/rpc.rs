@@ -112,6 +112,30 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
             Ok(json!({ "thread": thread }))
         }
 
+        // Persist an idle thread row without opening a PTY. Boite creates a
+        // thread the moment its shortcut is clicked; the PTY only opens when the
+        // terminal mounts (thread.spawn). status is forced idle: the client is
+        // not authoritative for runtime state.
+        "thread.create" => {
+            let mut thread: Thread = serde_json::from_value(
+                params
+                    .get("thread")
+                    .cloned()
+                    .ok_or("missing param: thread")?,
+            )
+            .map_err(|e| format!("bad thread: {e}"))?;
+            if thread.created_at == 0 {
+                thread.created_at = now_ms();
+            }
+            thread.status = "idle".to_string();
+            thread.pty_id = None;
+            state.store.save_thread(&thread)?;
+            let _ = state
+                .events
+                .send(AppEvent::ThreadCreated(serde_json::to_value(&thread).unwrap()));
+            Ok(json!({ "thread": thread }))
+        }
+
         "thread.resize" => {
             let id = str_param(&params, "threadId")?;
             let cols = u16_param(&params, "cols")?;
