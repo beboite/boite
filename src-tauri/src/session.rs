@@ -7,7 +7,14 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use rusqlite::{Connection, OpenFlags};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClaudeSessionHit {
+    pub id: String,
+    pub modified_ms: i64,
+}
 
 async fn run_lookup<F>(f: F) -> Option<String>
 where
@@ -95,7 +102,7 @@ fn find_claude_session_blocking(
     cwd: String,
     after_unix_ms: i64,
     exclude: &HashSet<String>,
-) -> Option<String> {
+) -> Option<ClaudeSessionHit> {
     let home = dirs::home_dir()?;
     let projects_dir = home.join(".claude").join("projects");
     if !projects_dir.is_dir() {
@@ -175,13 +182,19 @@ fn find_claude_session_blocking(
             if exclude.contains(&id) {
                 continue;
             }
-            return Some(id);
+            return Some(ClaudeSessionHit {
+                id,
+                modified_ms: cand.modified_ms,
+            });
         }
         if let Some(stem) = cand.path.file_stem().and_then(|s| s.to_str()) {
             if exclude.contains(stem) {
                 continue;
             }
-            return Some(stem.to_string());
+            return Some(ClaudeSessionHit {
+                id: stem.to_string(),
+                modified_ms: cand.modified_ms,
+            });
         }
     }
 
@@ -615,9 +628,14 @@ pub async fn find_claude_session(
     cwd: String,
     after_unix_ms: i64,
     exclude_ids: Option<Vec<String>>,
-) -> Option<String> {
+) -> Option<ClaudeSessionHit> {
     let exclude = build_exclude(exclude_ids);
-    run_lookup(move || find_claude_session_blocking(cwd, after_unix_ms, &exclude)).await
+    tauri::async_runtime::spawn_blocking(move || {
+        find_claude_session_blocking(cwd, after_unix_ms, &exclude)
+    })
+    .await
+    .ok()
+    .flatten()
 }
 
 #[tauri::command]
