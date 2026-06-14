@@ -368,7 +368,11 @@
             <span
               class="rounded-full bg-[var(--color-surface-2)] px-1.5 text-[10px] text-foreground/75"
             >
-              {gs.log.length}{gs.logHasMore ? "+" : ""}
+              {gs.commitCount || gs.log.length}{gs.commitCount
+                ? ""
+                : gs.logHasMore
+                  ? "+"
+                  : ""}
             </span>
           {/if}
         </div>

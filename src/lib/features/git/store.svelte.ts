@@ -34,6 +34,7 @@ export interface GitState {
   ahead: number;
   behind: number;
   refsVersion: string | null;
+  commitCount: number;
   staged: ChangeEntry[];
   unstaged: ChangeEntry[];
   conflicts: ChangeEntry[];
@@ -58,6 +59,7 @@ function emptyState(): GitState {
     ahead: 0,
     behind: 0,
     refsVersion: null,
+    commitCount: 0,
     staged: [],
     unstaged: [],
     conflicts: [],
@@ -160,6 +162,7 @@ class GitStore {
         state.ahead = info.ahead;
         state.behind = info.behind;
         state.refsVersion = info.refsVersion;
+        state.commitCount = info.commitCount;
         const staged: ChangeEntry[] = [];
         const unstaged: ChangeEntry[] = [];
         const conflicts: ChangeEntry[] = [];
