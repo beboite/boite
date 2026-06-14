@@ -19,6 +19,7 @@ pub struct RepoInfo {
     pub ahead: u32,
     pub behind: u32,
     pub refs_version: Option<String>,
+    pub commit_count: u32,
 }
 
 #[derive(Serialize)]
@@ -105,6 +106,7 @@ pub fn repo_info_blocking(path: &str) -> Result<RepoInfo, String> {
         ahead: 0,
         behind: 0,
         refs_version: refs_version(p),
+        commit_count: commit_count(p),
     };
     for line in text.lines() {
         if let Some(rest) = line.strip_prefix("# branch.head ") {
@@ -135,6 +137,19 @@ fn empty_repo() -> RepoInfo {
         ahead: 0,
         behind: 0,
         refs_version: None,
+        commit_count: 0,
+    }
+}
+
+// Total commits reachable from HEAD. Cheap (`rev-list --count`) and matches
+// what `git log` walks, so the panel can show the real repo size instead of
+// the paginated page length. Unborn HEAD / no commits => 0.
+fn commit_count(p: &Path) -> u32 {
+    let mut cmd = git(p);
+    cmd.args(["rev-list", "--count", "HEAD"]);
+    match run(cmd) {
+        Ok(b) => String::from_utf8_lossy(&b).trim().parse().unwrap_or(0),
+        Err(_) => 0,
     }
 }
 

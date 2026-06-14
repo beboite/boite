@@ -7,6 +7,7 @@ export interface RepoInfo {
   ahead: number;
   behind: number;
   refsVersion: string | null;
+  commitCount: number;
 }
 
 export interface ChangeEntry {
