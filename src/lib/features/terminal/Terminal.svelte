@@ -41,9 +41,12 @@
   import ContextMenu from "$lib/shared/components/ContextMenu.svelte";
   import type { ContextMenuItem } from "$lib/shared/components/ContextMenu.svelte";
   import type { Thread } from "$lib/types";
+  import Keyboard from "@lucide/svelte/icons/keyboard";
 
   type Props = { thread: Thread; visible: boolean; focused: boolean };
   let { thread, visible, focused }: Props = $props();
+
+  const mobile = $derived(settings.state.mobileLayout);
 
   let container: HTMLDivElement;
   let term: Terminal | null = null;
@@ -70,6 +73,19 @@
   const decoder = new TextDecoder("utf-8", { fatal: false });
   const LF = new Uint8Array([0x0a]);
   const DETECT_BUFFER_MAX = 4000;
+
+  // Soft keyboard is opt-in on phones: tapping a terminal should focus it for
+  // scroll/select without summoning the Android keyboard. `inputmode=none`
+  // keeps the textarea focusable (key routing, hardware keyboards) but stops
+  // the virtual keyboard; the floating button flips it on demand.
+  let keyboardOpen = $state(false);
+  const FONT_MIN = 8;
+  const FONT_MAX = 32;
+  let touchMode: "none" | "pinch" | "scroll" = "none";
+  let pinchStartDist = 0;
+  let pinchStartFont = 13;
+  let scrollLastY = 0;
+  let scrollAccum = 0;
 
   function focusTerminalSoon() {
     queueMicrotask(() => term?.focus());
@@ -401,6 +417,95 @@
     return true;
   }
 
+  function helperTextarea(): HTMLTextAreaElement | null {
+    return container?.querySelector(".xterm-helper-textarea") ?? null;
+  }
+
+  function syncMobileInput() {
+    const ta = helperTextarea();
+    if (!ta) return;
+    if (mobile && !keyboardOpen) ta.setAttribute("inputmode", "none");
+    else ta.removeAttribute("inputmode");
+  }
+
+  function toggleKeyboard() {
+    keyboardOpen = !keyboardOpen;
+    const ta = helperTextarea();
+    if (!ta) return;
+    if (keyboardOpen) {
+      // Mutate then focus inside the click gesture so Android raises the
+      // keyboard; doing it from an effect would not count as a user gesture.
+      ta.removeAttribute("inputmode");
+      ta.focus();
+    } else {
+      ta.setAttribute("inputmode", "none");
+      ta.blur();
+    }
+  }
+
+  function touchDist(t: TouchList): number {
+    return Math.hypot(
+      t[0].clientX - t[1].clientX,
+      t[0].clientY - t[1].clientY,
+    );
+  }
+
+  function onTouchStart(e: TouchEvent) {
+    if (!mobile || !term) return;
+    if (e.touches.length >= 2) {
+      touchMode = "pinch";
+      pinchStartDist = touchDist(e.touches);
+      pinchStartFont = term.options.fontSize ?? 13;
+      e.preventDefault();
+    } else {
+      touchMode = "scroll";
+      scrollLastY = e.touches[0].clientY;
+      scrollAccum = 0;
+    }
+  }
+
+  function onTouchMove(e: TouchEvent) {
+    if (!mobile || !term) return;
+    if (touchMode === "pinch" && e.touches.length >= 2) {
+      e.preventDefault();
+      if (pinchStartDist <= 0) return;
+      const ratio = touchDist(e.touches) / pinchStartDist;
+      const next = Math.max(
+        FONT_MIN,
+        Math.min(FONT_MAX, Math.round(pinchStartFont * ratio)),
+      );
+      if (next !== term.options.fontSize) {
+        term.options.fontSize = next;
+        scheduleFit();
+      }
+      return;
+    }
+    if (touchMode === "scroll" && e.touches.length === 1) {
+      const y = e.touches[0].clientY;
+      scrollAccum += y - scrollLastY;
+      scrollLastY = y;
+      const rowPx = (term.options.fontSize ?? 13) * 1.25;
+      const lines = Math.trunc(scrollAccum / rowPx);
+      if (lines !== 0) {
+        scrollAccum -= lines * rowPx;
+        // Content follows the finger: drag up (lines<0) reveals newer output.
+        term.scrollLines(-lines);
+        e.preventDefault();
+      }
+    }
+  }
+
+  function onTouchEnd(e: TouchEvent) {
+    if (e.touches.length === 0) {
+      touchMode = "none";
+    } else if (e.touches.length === 1) {
+      // Pinch released one finger: hand back to scroll cleanly.
+      touchMode = "scroll";
+      scrollLastY = e.touches[0].clientY;
+      scrollAccum = 0;
+    }
+  }
+
   async function spawn() {
     if (spawned || spawning || destroyed) {
       logger.debug(
@@ -695,6 +800,8 @@
     });
 
     term.open(container);
+    // Set inputmode before the focus below so the phone keyboard never flashes.
+    syncMobileInput();
 
     try {
       const webgl = new WebglAddon();
@@ -724,6 +831,11 @@
     });
     resizeObserver.observe(container);
 
+    container.addEventListener("touchstart", onTouchStart, { passive: false });
+    container.addEventListener("touchmove", onTouchMove, { passive: false });
+    container.addEventListener("touchend", onTouchEnd);
+    container.addEventListener("touchcancel", onTouchEnd);
+
     // The status engine (TTL demotion, idle auto-close) is local only: remote
     // status comes from the server, and a local idle timer must not kill PTYs
     // shared with other attached devices.
@@ -751,6 +863,14 @@
     }
   });
 
+  $effect(() => {
+    // Track both so the textarea flips when the layout toggles or the
+    // keyboard button is pressed.
+    void mobile;
+    void keyboardOpen;
+    if (term) syncMobileInput();
+  });
+
   onDestroy(() => {
     destroyed = true;
     statusEngine.release(thread.id);
@@ -759,6 +879,10 @@
     if (fitRafId !== null) cancelAnimationFrame(fitRafId);
     fitRafId = null;
     resizeObserver?.disconnect();
+    container?.removeEventListener("touchstart", onTouchStart);
+    container?.removeEventListener("touchmove", onTouchMove);
+    container?.removeEventListener("touchend", onTouchEnd);
+    container?.removeEventListener("touchcancel", onTouchEnd);
     term?.dispose();
     term = null;
     fit = null;
@@ -770,7 +894,28 @@
   oncontextmenu={openTerminalContextMenu}
   role="presentation"
 >
-  <div bind:this={container} class="h-full w-full min-h-0 overflow-hidden"></div>
+  <div
+    bind:this={container}
+    class="h-full w-full min-h-0 overflow-hidden"
+    class:touch-none={mobile}
+  ></div>
+  {#if mobile && focused && thread.status !== "stopped"}
+    <button
+      type="button"
+      class="absolute bottom-3 right-3 z-20 flex size-11 items-center justify-center rounded-full border border-border shadow-lg transition active:scale-95"
+      style:background-color={keyboardOpen
+        ? "var(--color-foreground)"
+        : "var(--color-surface-2)"}
+      style:color={keyboardOpen
+        ? "var(--color-background)"
+        : "var(--color-foreground)"}
+      onclick={toggleKeyboard}
+      aria-label={keyboardOpen ? "Hide keyboard" : "Show keyboard"}
+      title={keyboardOpen ? "Hide keyboard" : "Show keyboard"}
+    >
+      <Keyboard class="size-5" />
+    </button>
+  {/if}
   {#if thread.status === "stopped"}
     <div
       class="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-black text-xs text-muted-foreground/60"
