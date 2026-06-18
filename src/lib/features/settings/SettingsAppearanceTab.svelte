@@ -1,6 +1,7 @@
 <script lang="ts">
   import { settings } from "$lib/features/settings/store.svelte";
   import SettingsCard from "$lib/shared/components/SettingsCard.svelte";
+  import ToggleSetting from "$lib/shared/components/ToggleSetting.svelte";
   import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
 
   function onSlider(e: Event) {
@@ -46,6 +47,15 @@
     </span>
   </div>
 </SettingsCard>
+
+<ToggleSetting
+  label="Layout"
+  description="Mobile stacks everything into full-width pages with a bottom bar and bigger touch targets. PC keeps the sidebar and side panels."
+  enabled={settings.state.mobileLayout}
+  onLabel="Mobile"
+  offLabel="PC"
+  onToggle={() => settings.setMobileLayout(!settings.state.mobileLayout)}
+/>
 
 <style>
   .ui-slider {

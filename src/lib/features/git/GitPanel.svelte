@@ -1,5 +1,6 @@
 <script lang="ts">
   import { app } from "$lib/app/store.svelte";
+  import { workspace } from "$lib/backend";
   import { settings } from "$lib/features/settings/store.svelte";
   import { gitStore } from "./store.svelte";
   import { editorStore } from "$lib/features/editor/store.svelte";
@@ -55,10 +56,15 @@
     // network fetch only fires once the configured period has elapsed.
     const poke = () => {
       if (document.hidden) return;
+      // A remote workspace mid-reconnect would just pile up RPCs that time out
+      // 20s later; skip until the socket is back. Local is always "connected".
+      if (workspace.mode === "remote" && workspace.connection !== "connected") return;
       void gitStore.refresh(id);
       void gitStore.autoFetch(id);
     };
-    const interval = window.setInterval(poke, AUTO_REFRESH_MS);
+    // Phones on 4G poll lazily; the desktop keeps the snappy 3s cadence.
+    const periodMs = settings.state.mobileLayout ? 9000 : AUTO_REFRESH_MS;
+    const interval = window.setInterval(poke, periodMs);
     window.addEventListener("focus", poke);
     document.addEventListener("visibilitychange", poke);
     return () => {

@@ -91,7 +91,20 @@ const DEFAULTS: Settings = {
   gitSplitFraction: 0.5,
   gitAutoFetch: true,
   gitAutoFetchSeconds: 180,
+  mobileLayout: false,
 };
+
+// First-run guess: touch-primary, narrow screens (a phone TWA/PWA) default to
+// the mobile layout. The toggle in Appearance overrides it permanently after.
+function detectMobileDefault(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const coarse = window.matchMedia?.("(pointer: coarse)")?.matches ?? false;
+    return coarse && window.innerWidth < 900;
+  } catch {
+    return false;
+  }
+}
 
 export const GIT_AUTOFETCH_MIN_SECONDS = 30;
 export const GIT_AUTOFETCH_MAX_SECONDS = 3600;
@@ -147,6 +160,7 @@ const DEVICE_FIELDS = [
   "rightPanel",
   "rightPanelWidth",
   "gitSplitFraction",
+  "mobileLayout",
 ] as const;
 type DeviceField = (typeof DEVICE_FIELDS)[number];
 
@@ -235,6 +249,10 @@ class SettingsStore {
           stored.gitAutoFetchSeconds >= GIT_AUTOFETCH_MIN_SECONDS
             ? Math.min(stored.gitAutoFetchSeconds, GIT_AUTOFETCH_MAX_SECONDS)
             : DEFAULTS.gitAutoFetchSeconds,
+        mobileLayout:
+          typeof stored.mobileLayout === "boolean"
+            ? stored.mobileLayout
+            : DEFAULTS.mobileLayout,
       };
       // Device fields come from localStorage, overriding the backend blob. If
       // there is none yet, seed it from what the blob carried (one-shot
@@ -246,6 +264,9 @@ class SettingsStore {
           if (dev[k] !== undefined) target[k] = dev[k];
         }
       } else {
+        // No device blob yet: this machine's first run. Pick a sensible layout
+        // from the form factor before seeding localStorage.
+        this.state.mobileLayout = detectMobileDefault();
         this.persistDeviceNow();
       }
       if (migratedShortcuts.changed) {
@@ -335,6 +356,12 @@ class SettingsStore {
 
   toggleSidebar() {
     this.state.sidebarCollapsed = !this.state.sidebarCollapsed;
+    this.persistDeviceNow();
+  }
+
+  setMobileLayout(value: boolean) {
+    if (this.state.mobileLayout === value) return;
+    this.state.mobileLayout = value;
     this.persistDeviceNow();
   }
 

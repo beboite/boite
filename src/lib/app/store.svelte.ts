@@ -1,4 +1,4 @@
-import type { Project, Thread, ThreadStatus, View } from "$lib/types";
+import type { MobileTab, Project, Thread, ThreadStatus, View } from "$lib/types";
 import {
   loadProjects,
   saveProject,
@@ -25,6 +25,8 @@ class AppState {
   activeThreadId = $state<string | null>(null);
   selectedProjectId = $state<string | null>(null);
   view = $state<View>("terminal");
+  // Phone layout only: which bottom-bar page is showing. Desktop ignores it.
+  mobileTab = $state<MobileTab>("terminal");
   ready = $state(false);
   respawnNonce = $state<Record<string, number>>({});
   freshThreadIds = new Set<string>();
@@ -189,6 +191,7 @@ class AppState {
     this.activeThreadId = null;
     this.selectedProjectId = null;
     this.view = "terminal";
+    this.mobileTab = "terminal";
     this.respawnNonce = {};
     this.unboundByDedup = [];
     this.ready = false;

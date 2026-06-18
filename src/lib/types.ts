@@ -67,8 +67,14 @@ export interface Settings {
   gitSplitFraction: number;
   gitAutoFetch: boolean;
   gitAutoFetchSeconds: number;
+  mobileLayout: boolean;
 }
 
 export type RightPanelTab = "git" | "explorer" | null;
 
 export type View = "terminal" | "settings" | "editor";
+
+// Bottom-bar destinations in the phone layout. Independent of `View`: the
+// terminal/editor/settings desktop views still drive the shared viewport and
+// overlays, while `MobileTab` decides which page the bottom bar shows.
+export type MobileTab = "files" | "git" | "terminal" | "projects" | "settings";
