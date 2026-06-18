@@ -1,3 +1,5 @@
+import { uuid } from "$lib/shared/utils/uuid";
+
 export type ToastKind = "info" | "success" | "error";
 
 export interface Toast {
@@ -16,7 +18,7 @@ class NotificationsStore {
   toasts = $state<Toast[]>([]);
 
   private push(message: string, opts: AddOptions = {}): string {
-    const id = crypto.randomUUID();
+    const id = uuid();
     this.toasts.push({
       id,
       kind: opts.kind ?? "info",

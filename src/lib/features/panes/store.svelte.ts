@@ -6,9 +6,10 @@ import type {
   SplitDir,
 } from "./types";
 import { MAX_LEAVES, MIN_RATIO } from "./types";
+import { uuid } from "$lib/shared/utils/uuid";
 
 function uid(): string {
-  return crypto.randomUUID();
+  return uuid();
 }
 
 export function leavesOf(node: LayoutNode): string[] {

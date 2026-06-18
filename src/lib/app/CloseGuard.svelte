@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { getCurrentWindow } from "@tauri-apps/api/window";
+  import { hasTauri } from "$lib/backend/env";
   import { app } from "$lib/app/store.svelte";
   import { editorStore } from "$lib/features/editor/store.svelte";
   import ConfirmDialog from "$lib/shared/components/ConfirmDialog.svelte";
@@ -35,6 +36,11 @@
   });
 
   onMount(() => {
+    // The OS-window close lifecycle only exists in the desktop shell. In a
+    // browser/PWA getCurrentWindow() dereferences window.__TAURI_INTERNALS__,
+    // which is undefined, and the throw aborts the boot effect flush (the app
+    // stays stuck on "Loading…"). The browser handles its own tab close.
+    if (!hasTauri()) return;
     const win = getCurrentWindow();
     const unlisten = win.onCloseRequested((event) => {
       if (allowClose) return;

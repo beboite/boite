@@ -130,7 +130,7 @@
   });
 </script>
 
-<div class="ws-frame flex h-screen w-screen flex-col overflow-hidden bg-background {outlineClass}">
+<div class="flex h-screen w-screen flex-col overflow-hidden bg-background">
   <CloseGuard />
   <TitleBar />
   <FolderBrowser />
@@ -275,10 +275,18 @@
   </div>
   {/if}
   {/key}
+
+  {#if workspace.mode !== "local"}
+    <div class="ws-outline {outlineClass}" aria-hidden="true"></div>
+  {/if}
 </div>
 
 <style>
-  .ws-frame {
+  .ws-outline {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    pointer-events: none;
     transition: box-shadow 150ms ease;
   }
   .ws-remote-ok {

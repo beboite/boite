@@ -4,6 +4,7 @@ import { app } from "$lib/app/store.svelte";
 import { notifications } from "$lib/features/notifications/store.svelte";
 import { logger } from "$lib/shared/services/logger.svelte";
 import { basename } from "$lib/shared/utils/path";
+import { uuid } from "$lib/shared/utils/uuid";
 import { folderBrowser } from "./folderBrowserStore.svelte";
 import type { Project } from "$lib/types";
 
@@ -43,7 +44,7 @@ export async function addProjectByPath(path: string): Promise<Project | null> {
   }
 
   const project: Project = {
-    id: crypto.randomUUID(),
+    id: uuid(),
     name: inspection.name,
     cwd: path,
     icon: inspection.icon,

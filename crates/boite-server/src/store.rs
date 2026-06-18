@@ -41,6 +41,15 @@ const MIGRATIONS: &[&str] = &[
     "ALTER TABLE threads ADD COLUMN status TEXT;
      ALTER TABLE threads ADD COLUMN auto_slept INTEGER NOT NULL DEFAULT 0;",
     "ALTER TABLE threads ADD COLUMN keep_awake INTEGER NOT NULL DEFAULT 0;",
+    // Web Push subscriptions (server-global, like settings). endpoint is the
+    // browser-issued push URL and the natural primary key: re-subscribing the
+    // same browser replaces the row instead of duplicating it.
+    "CREATE TABLE IF NOT EXISTS push_subscriptions (
+        endpoint TEXT PRIMARY KEY,
+        p256dh TEXT NOT NULL,
+        auth TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+    );",
 ];
 
 impl Store {
@@ -267,6 +276,56 @@ impl Store {
         .map_err(|e| e.to_string())?;
         Ok(())
     }
+
+    pub fn add_push_subscription(
+        &self,
+        endpoint: &str,
+        p256dh: &str,
+        auth: &str,
+        created_at: i64,
+    ) -> Result<(), String> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "INSERT OR REPLACE INTO push_subscriptions (endpoint, p256dh, auth, created_at)
+             VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![endpoint, p256dh, auth, created_at],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub fn list_push_subscriptions(&self) -> Result<Vec<PushSub>, String> {
+        let conn = self.conn.lock();
+        let mut stmt = conn
+            .prepare("SELECT endpoint, p256dh, auth FROM push_subscriptions")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(PushSub {
+                    endpoint: r.get(0)?,
+                    p256dh: r.get(1)?,
+                    auth: r.get(2)?,
+                })
+            })
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    }
+
+    pub fn delete_push_subscription(&self, endpoint: &str) -> Result<(), String> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "DELETE FROM push_subscriptions WHERE endpoint = ?1",
+            [endpoint],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+}
+
+pub struct PushSub {
+    pub endpoint: String,
+    pub p256dh: String,
+    pub auth: String,
 }
 
 pub enum ColVal {

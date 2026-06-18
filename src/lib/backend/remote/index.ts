@@ -9,6 +9,7 @@ import type {
   LogApi,
   ProjectApi,
   PtyApi,
+  PushApi,
   ScopeApi,
   SessionApi,
   SessionHit,
@@ -48,6 +49,7 @@ export class RemoteBackend implements Backend {
   readonly scope: ScopeApi;
   readonly session: SessionApi;
   readonly log: LogApi;
+  readonly push: PushApi;
 
   #socket: Socket;
   #keyToThread = new Map<string, string>();
@@ -203,6 +205,12 @@ export class RemoteBackend implements Backend {
       read: () => Promise.resolve([]),
       clear: () => Promise.resolve(),
       filePath: () => Promise.resolve(""),
+    };
+
+    this.push = {
+      publicKey: () => rpc("push.publicKey").then((r) => (r.key as string) ?? null),
+      subscribe: (sub) => rpc("push.subscribe", sub).then(() => {}),
+      unsubscribe: (endpoint) => rpc("push.unsubscribe", { endpoint }).then(() => {}),
     };
   }
 

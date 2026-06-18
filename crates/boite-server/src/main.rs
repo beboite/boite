@@ -4,6 +4,7 @@ mod events;
 mod models;
 mod notify;
 mod protocol;
+mod push;
 mod registry;
 mod rpc;
 mod state;
@@ -57,11 +58,14 @@ async fn main() {
             std::process::exit(1);
         }
     };
+    let store = Arc::new(store);
 
     let (events, _) = broadcast::channel::<AppEvent>(EVENT_CHANNEL_CAP);
-    let registry = Registry::new(config.scrollback_bytes, events.clone());
+    let emit = make_event_emitter(store.clone(), events.clone());
+    let registry = Registry::new(config.scrollback_bytes, emit);
     let roots = ProjectRoots::default();
     let notifier = notify::Notifier::from_env();
+    let push = push::PushManager::load(&config.data_dir);
 
     let state = Arc::new(AppState {
         store,
@@ -70,21 +74,27 @@ async fn main() {
         roots,
         events: events.clone(),
         notifier,
+        push,
         max_threads: config.max_threads,
         max_connections: config.max_connections,
         conns: std::sync::atomic::AtomicUsize::new(0),
         workspace_dir: config.workspace_dir,
+        data_dir: config.data_dir,
     });
 
     if let Err(e) = state.refresh_roots() {
         tracing::warn!("failed to load project roots: {e}");
     }
 
-    spawn_persistence_task(state.clone(), events.subscribe());
+    // One task drives every outbound notification on thread transitions: the
+    // optional webhook plus Web Push. Push is always on (keys are generated at
+    // first run), so the task runs unconditionally; each sink no-ops when it has
+    // nothing to deliver (webhook unconfigured / no push subscriptions).
     if state.notifier.enabled() {
         tracing::info!("webhook notifications enabled");
-        spawn_notifier_task(state.clone(), events.subscribe());
     }
+    tracing::info!("web push enabled (VAPID public key in data dir)");
+    spawn_notifier_task(state.clone(), events.subscribe());
 
     // Never log the token itself: logs land in journald/docker/CI where the
     // on-disk token file's 0600 protection does not apply. The operator reads
@@ -101,6 +111,7 @@ async fn main() {
 
     let mut app = Router::new()
         .route("/api/health", get(health))
+        .route("/.well-known/assetlinks.json", get(assetlinks))
         .route("/ws", get(ws_upgrade));
 
     if let Some(dir) = &config.static_dir {
@@ -167,6 +178,23 @@ async fn health() -> &'static str {
     "ok"
 }
 
+// Digital Asset Links for the Android TWA: proves boite.net.tasbem.ch and the
+// signed APK belong together so the browser drops the URL bar. The file is
+// dropped into the data dir after the APK is built (it carries the signing
+// cert SHA-256), so it is served from disk, not baked into the binary. 404
+// until present, which is harmless for the PWA.
+async fn assetlinks(State(state): State<Arc<AppState>>) -> Response {
+    let path = state.data_dir.join("assetlinks.json");
+    match tokio::fs::read(&path).await {
+        Ok(bytes) => (
+            [(axum::http::header::CONTENT_TYPE, "application/json")],
+            bytes,
+        )
+            .into_response(),
+        Err(_) => axum::http::StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
 async fn ws_upgrade(
     ws: WebSocketUpgrade,
     State(state): State<Arc<AppState>>,
@@ -176,42 +204,44 @@ async fn ws_upgrade(
         .into_response()
 }
 
-// Persist status/title/exit transitions so thread.list is correct with zero
-// clients attached.
-fn spawn_persistence_task(state: Arc<AppState>, mut rx: broadcast::Receiver<AppEvent>) {
-    tokio::spawn(async move {
-        loop {
-            match rx.recv().await {
-                Ok(AppEvent::ThreadStatus {
-                    thread_id,
-                    status,
-                    exit_code,
-                }) => {
-                    let _ =
-                        state
-                            .store
-                            .update_thread_field(&thread_id, "status", ColVal::Text(status));
-                    if let Some(c) = exit_code {
-                        let _ = state.store.update_thread_field(
-                            &thread_id,
-                            "exit_code",
-                            ColVal::Int(c as i64),
-                        );
+// Persist critical thread transitions before fanning them out. Broadcast is a
+// lossy delivery mechanism under load; durable state must not depend on a
+// receiver task keeping up.
+fn make_event_emitter(
+    store: Arc<Store>,
+    tx: broadcast::Sender<AppEvent>,
+) -> Arc<dyn Fn(AppEvent) + Send + Sync> {
+    Arc::new(move |event: AppEvent| {
+        match &event {
+            AppEvent::ThreadStatus {
+                thread_id,
+                status,
+                exit_code,
+            } => {
+                if let Err(e) =
+                    store.update_thread_field(thread_id, "status", ColVal::Text(status.clone()))
+                {
+                    tracing::warn!("failed to persist thread status: {e}");
+                }
+                if let Some(c) = exit_code {
+                    if let Err(e) =
+                        store.update_thread_field(thread_id, "exit_code", ColVal::Int(*c as i64))
+                    {
+                        tracing::warn!("failed to persist thread exit code: {e}");
                     }
                 }
-                Ok(AppEvent::ThreadTitle { thread_id, title }) => {
-                    let _ = state.store.update_thread_field(
-                        &thread_id,
-                        "title",
-                        ColVal::Text(title),
-                    );
-                }
-                Ok(_) => {}
-                Err(RecvError::Lagged(_)) => continue,
-                Err(RecvError::Closed) => break,
             }
+            AppEvent::ThreadTitle { thread_id, title } => {
+                if let Err(e) =
+                    store.update_thread_field(thread_id, "title", ColVal::Text(title.clone()))
+                {
+                    tracing::warn!("failed to persist thread title: {e}");
+                }
+            }
+            _ => {}
         }
-    });
+        let _ = tx.send(event);
+    })
 }
 
 // Fire a webhook on meaningful thread transitions: a turn finishing
@@ -256,6 +286,7 @@ fn spawn_notifier_task(state: Arc<AppState>, mut rx: broadcast::Receiver<AppEven
                         ),
                     };
                     state.notifier.send(&title, &body, tag).await;
+                    state.push.notify_all(&state.store, &title, &body, tag).await;
                 }
                 Ok(_) => {}
                 Err(RecvError::Lagged(_)) => continue,

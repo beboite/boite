@@ -1,6 +1,6 @@
 [package]
 name = "boite-server"
-version = "0.6.7"
+version = "0.7.0"
 description = "Headless boite server: PTY orchestration over WebSocket"
 edition = "2021"
 
@@ -22,6 +22,14 @@ uuid = { version = "1", features = ["v4"] }
 parking_lot = "0.12"
 subtle = "2"
 rand = "0.8"
+# Web Push (VAPID, RFC 8291). web-push-native is pure RustCrypto (aes-gcm +
+# hkdf + p256), no OpenSSL/C bindings, so it cross-compiles to arm64 and builds
+# on Windows. It hands back an http::Request we POST with the existing
+# reqwest+rustls client. p256 generates/derives the VAPID keypair.
+web-push-native = "0.4"
+p256 = "0.13"
+base64 = "0.22"
+http = "1"
 dirs = "6"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
