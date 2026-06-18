@@ -263,6 +263,14 @@ class SettingsStore {
         for (const k of DEVICE_FIELDS) {
           if (dev[k] !== undefined) target[k] = dev[k];
         }
+        // Device blobs written before 0.7.1 have no mobileLayout key, so a
+        // phone that used an earlier build would stay on the PC layout. Seed it
+        // from the form factor (a no-op on desktops) and persist so the choice
+        // sticks; a manual toggle later overrides it for good.
+        if (dev.mobileLayout === undefined) {
+          this.state.mobileLayout = detectMobileDefault();
+          this.persistDeviceNow();
+        }
       } else {
         // No device blob yet: this machine's first run. Pick a sensible layout
         // from the form factor before seeding localStorage.

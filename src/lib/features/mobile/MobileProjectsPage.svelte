@@ -27,14 +27,23 @@
     app.mobileTab = "terminal";
   }
 
-  function selectProject(id: string) {
-    app.selectedProjectId = id;
-    app.mobileTab = "terminal";
-  }
-
   function launchInto(id: string) {
     app.selectedProjectId = id;
     launchOpen = true;
+  }
+
+  // Tapping a project should land on a live terminal: open its most recent
+  // thread, or the launch picker when it has none (selecting alone left the
+  // user on an empty terminal page).
+  function selectProject(id: string) {
+    app.selectedProjectId = id;
+    const threads = app.threadsByProjectSorted(id);
+    if (threads.length > 0) {
+      app.activeThreadId = threads[threads.length - 1].id;
+      app.mobileTab = "terminal";
+    } else {
+      launchInto(id);
+    }
   }
 </script>
 
