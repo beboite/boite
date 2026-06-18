@@ -28,8 +28,10 @@ docker exec -it boite claude
 # 4. Put repos to work on under ./workspace (mounted at /workspace).
 ```
 
-Then point the desktop app's Remote toggle at `ws://<host>:7337/ws` with the
-token, or open `http://<host>:7337/` in a browser / install the PWA.
+Then add it from the desktop app's workspace picker (titlebar) as
+`ws://<host>:7337/ws` with the token, or open `http://<host>:7337/` in a
+browser / install the PWA. The picker holds several boites; give each a name
+and color (synced to every connected device) to tell them apart.
 
 ## Configuration (env)
 
@@ -68,9 +70,21 @@ Gotify webhook). The server POSTs when a thread finishes a turn (running ->
 ready) or its process exits, so an ntfy app on the phone delivers a native
 push even with the app closed. `notify.test` (RPC) fires a test notification.
 
-Native PWA Web Push (VAPID) is a planned enhancement: it needs OpenSSL in the
-build and a real device to verify, and the webhook path already covers
-app-closed delivery, so it is intentionally not wired in this build.
+Native PWA Web Push (VAPID, RFC 8291) is also wired in: the server generates a
+keypair on first run, the PWA subscribes its browser push endpoint, and the
+server pushes on a thread going ready or exiting. It uses `web-push-native`
+(pure RustCrypto: aes-gcm + hkdf + p256), so there is no OpenSSL/C dependency
+and it cross-compiles cleanly. The webhook above is the complementary path for
+non-PWA targets (ntfy/Discord/Gotify).
+
+## Workspace identity
+
+Each server carries a cosmetic name + color, persisted in the settings table
+and shared by every connected device. `workspace.info` reads it; any client
+can change it with `workspace.setInfo` (name trimmed to 64 chars, color
+validated as a hex string), and the server broadcasts a `workspace.info`
+control event so the other devices update live. It is purely cosmetic: the
+client maps it to the workspace picker label and the connection outline color.
 
 ## Build without Docker
 

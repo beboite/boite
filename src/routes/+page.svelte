@@ -334,7 +334,11 @@
   {/if}
 
   {#if workspace.mode !== "local"}
-    <div class="ws-outline {outlineClass}" aria-hidden="true"></div>
+    <div
+      class="ws-outline {outlineClass}"
+      style:--ws-color={workspace.info.color || "var(--color-success)"}
+      aria-hidden="true"
+    ></div>
   {/if}
 </div>
 
@@ -353,7 +357,7 @@
     border-radius: 18px;
   }
   .ws-remote-ok {
-    box-shadow: inset 0 0 0 1.5px var(--color-success);
+    box-shadow: inset 0 0 0 1.5px var(--ws-color, var(--color-success));
   }
   .ws-remote-warn {
     box-shadow: inset 0 0 0 1.5px var(--color-warning);

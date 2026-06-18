@@ -14,6 +14,7 @@ import type {
   SessionApi,
   SessionHit,
   ShellApi,
+  WorkspaceMetaApi,
 } from "../types";
 import type { Project, Settings, Thread } from "$lib/types";
 import type { ShellOption } from "$lib/storage/platform.svelte";
@@ -50,6 +51,7 @@ export class RemoteBackend implements Backend {
   readonly session: SessionApi;
   readonly log: LogApi;
   readonly push: PushApi;
+  readonly meta: WorkspaceMetaApi;
 
   #socket: Socket;
   #keyToThread = new Map<string, string>();
@@ -211,6 +213,15 @@ export class RemoteBackend implements Backend {
       publicKey: () => rpc("push.publicKey").then((r) => (r.key as string) ?? null),
       subscribe: (sub) => rpc("push.subscribe", sub).then(() => {}),
       unsubscribe: (endpoint) => rpc("push.unsubscribe", { endpoint }).then(() => {}),
+    };
+
+    const readMeta = (r: { name?: unknown; color?: unknown } | undefined) => ({
+      name: typeof r?.name === "string" ? r.name : null,
+      color: typeof r?.color === "string" ? r.color : null,
+    });
+    this.meta = {
+      get: () => rpc("workspace.info").then(readMeta),
+      set: (patch) => rpc("workspace.setInfo", patch).then(readMeta),
     };
   }
 

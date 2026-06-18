@@ -11,6 +11,16 @@ class Workspace {
   mode = $state<"local" | "remote">("local");
   connection = $state<ConnState>("connected");
   remoteUrl = $state<string | null>(null);
+  // Which saved boite (device registry id) the active remote points at; null
+  // when local. Drives the picker's active row and where rename/color writes.
+  activeBoiteId = $state<string | null>(null);
+  // Server-synced cosmetic identity of the active remote: name replaces the
+  // "Remote" label, color tints the connection outline. Null fields fall back
+  // to the host and the default success color.
+  info = $state<{ name: string | null; color: string | null }>({
+    name: null,
+    color: null,
+  });
   // PWA boot: no Tauri runtime and no saved/working token, so the app gates on
   // a remote login screen instead of initializing a dead local workspace.
   needsLogin = $state(false);
@@ -48,9 +58,15 @@ class Workspace {
     if (this.#remote) this.mode = "remote";
   }
 
+  setActiveBoite(id: string | null): void {
+    this.activeBoiteId = id;
+  }
+
   activateLocal(): void {
     this.mode = "local";
     this.connection = "connected";
+    this.activeBoiteId = null;
+    this.info = { name: null, color: null };
     this.#disposeRemote();
   }
 

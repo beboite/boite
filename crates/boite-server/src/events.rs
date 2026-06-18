@@ -21,6 +21,10 @@ pub enum AppEvent {
     },
     ProjectChanged,
     SettingsChanged,
+    WorkspaceInfo {
+        name: Option<String>,
+        color: Option<String>,
+    },
 }
 
 impl AppEvent {
@@ -49,6 +53,10 @@ impl AppEvent {
             }
             AppEvent::ProjectChanged => Event::new("project.changed", serde_json::json!({})),
             AppEvent::SettingsChanged => Event::new("settings.changed", serde_json::json!({})),
+            AppEvent::WorkspaceInfo { name, color } => Event::new(
+                "workspace.info",
+                serde_json::json!({ "name": name, "color": color }),
+            ),
         }
     }
 }
