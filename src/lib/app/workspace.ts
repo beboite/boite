@@ -1,5 +1,5 @@
 import { tick } from "svelte";
-import { workspace } from "$lib/backend";
+import { backend, workspace } from "$lib/backend";
 import { hasTauri } from "$lib/backend/env";
 import { app } from "./store.svelte";
 import { settings } from "$lib/features/settings/store.svelte";
@@ -8,7 +8,7 @@ import { resetShellCache } from "$lib/storage/shell";
 import { gitStore } from "$lib/features/git/store.svelte";
 import { notifications } from "$lib/features/notifications/store.svelte";
 import { confirmDialog } from "$lib/shared/components/confirm.svelte";
-import { device } from "$lib/features/settings/device.svelte";
+import { device, type BoiteEntry } from "$lib/features/settings/device.svelte";
 import { registerPush } from "$lib/features/push/api";
 
 // In a browser/PWA the only backend is the server that served this page.
@@ -36,33 +36,62 @@ async function tearDownTerminals() {
   await tick();
 }
 
-export async function switchToRemote(url: string, token: string): Promise<boolean> {
-  if (
-    workspace.mode === "local" &&
-    app.threads.some((t) => t.ptyId)
-  ) {
-    const ok = await confirmDialog.ask({
-      title: "Switch to remote?",
-      message: "Local running processes will be killed.",
-      confirmLabel: "Switch",
-      danger: true,
-    });
-    if (!ok) return false;
-  }
-
+// Pull the server-synced name/color of the freshly connected boite and cache
+// it on the device registry so the picker can label it later without a
+// connection. Fire-and-forget: a failure just leaves the cached label.
+async function fetchAndApplyMeta() {
+  const meta = backend().meta;
+  if (!meta) return;
   try {
-    await workspace.createRemote(url, token);
+    const info = await meta.get();
+    workspace.info = { name: info.name, color: info.color };
+    if (workspace.activeBoiteId) {
+      device.updateBoite(workspace.activeBoiteId, {
+        name: info.name ?? "",
+        color: info.color ?? "",
+      });
+    }
+  } catch {
+    // keep the cached label
+  }
+}
+
+async function confirmLeaveLocal(): Promise<boolean> {
+  if (workspace.mode !== "local" || !app.threads.some((t) => t.ptyId)) return true;
+  return confirmDialog.ask({
+    title: "Switch workspace?",
+    message: "Local running processes will be killed.",
+    confirmLabel: "Switch",
+    danger: true,
+  });
+}
+
+// Connect to a saved boite and initialize the app against it. `reset` tears the
+// current workspace down first (store reset + terminal remount); it is skipped
+// at boot, where nothing is initialized yet.
+async function connectBoite(entry: BoiteEntry, reset: boolean): Promise<boolean> {
+  try {
+    await workspace.createRemote(entry.url, entry.token);
   } catch (err) {
     console.error("remote connect failed:", err);
     notifications.error("Remote connection failed");
     return false;
   }
-
-  await tearDownTerminals();
-  resetStores();
+  if (reset) {
+    await tearDownTerminals();
+    resetStores();
+  }
   workspace.activateRemote();
+  workspace.setActiveBoite(entry.id);
+  // Seed the label/color from the device cache so the pill shows this boite's
+  // identity immediately; fetchAndApplyMeta refreshes it from the server.
+  workspace.info = { name: entry.name || null, color: entry.color || null };
+  workspace.needsLogin = false;
+  device.setActive(entry.id);
   await app.init();
-  notifications.success("Connected to remote workspace");
+  void fetchAndApplyMeta();
+  // Fire-and-forget: a denied/unsupported push permission must not block boot.
+  void registerPush();
   return true;
 }
 
@@ -78,36 +107,62 @@ export async function switchToLocal(): Promise<boolean> {
   return true;
 }
 
-// PWA boot: connect to the serving origin with the saved token, or raise the
-// login gate. Called instead of app.init() when there is no Tauri runtime.
+// Switch to an already-saved boite. No-op when it is already the active,
+// connected workspace.
+export async function switchToBoite(id: string): Promise<boolean> {
+  const entry = device.getBoite(id);
+  if (!entry) return false;
+  if (
+    workspace.mode === "remote" &&
+    workspace.activeBoiteId === id &&
+    workspace.connection === "connected"
+  ) {
+    return true;
+  }
+  if (!(await confirmLeaveLocal())) return false;
+  return connectBoite(entry, app.ready);
+}
+
+// PWA boot: connect to the last-active saved boite, or raise the login gate.
+// Called instead of app.init() when there is no Tauri runtime.
 export async function bootRemoteWorkspace(): Promise<boolean> {
-  const url = device.state.remoteUrl || defaultRemoteWsUrl();
-  const token = device.state.remoteToken;
-  if (!token) {
+  const entry = device.active ?? device.boites[0] ?? null;
+  if (!entry) {
     workspace.needsLogin = true;
     return false;
   }
-  const ok = await connectAndInit(url, token);
+  const ok = await connectBoite(entry, false);
   if (!ok) workspace.needsLogin = true;
   return ok;
 }
 
-// Connect a remote backend and initialize the app against it. Used by the PWA
-// boot path and the login screen (not the desktop local<->remote switch, which
-// must reset stores first).
+// Register a new boite (or re-pair an existing URL) and connect to it. Used by
+// the login screen and the "add boite" action in the workspace picker.
 export async function connectAndInit(url: string, token: string): Promise<boolean> {
+  if (!(await confirmLeaveLocal())) return false;
+  const entry = device.addBoite(url, token);
+  return connectBoite(entry, app.ready);
+}
+
+// Push a cosmetic name/color change to the active boite. The server persists it
+// and broadcasts workspace.info, so every other connected device updates live.
+export async function setActiveBoiteInfo(patch: {
+  name?: string | null;
+  color?: string | null;
+}): Promise<void> {
+  const meta = backend().meta;
+  if (!meta) return;
   try {
-    await workspace.createRemote(url, token);
+    const res = await meta.set(patch);
+    workspace.info = { name: res.name, color: res.color };
+    if (workspace.activeBoiteId) {
+      device.updateBoite(workspace.activeBoiteId, {
+        name: res.name ?? "",
+        color: res.color ?? "",
+      });
+    }
   } catch (err) {
-    console.error("remote connect failed:", err);
-    notifications.error("Remote connection failed");
-    return false;
+    console.error("workspace setInfo failed:", err);
+    notifications.error("Update failed");
   }
-  workspace.activateRemote();
-  workspace.needsLogin = false;
-  device.setRemote(url, token);
-  await app.init();
-  // Fire-and-forget: a denied/unsupported push permission must not block boot.
-  void registerPush();
-  return true;
 }

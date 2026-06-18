@@ -4,9 +4,10 @@
   import BoiteLogo from "$lib/shared/components/BoiteLogo.svelte";
 
   // PWA / browser entry: there is no local backend, so the app gates here
-  // until it can reach a boite-server. URL defaults to the serving origin.
-  let url = $state(device.state.remoteUrl || defaultRemoteWsUrl());
-  let token = $state(device.state.remoteToken || "");
+  // until it can reach a boite-server. URL defaults to the last-saved boite,
+  // else the serving origin.
+  let url = $state(device.active?.url || defaultRemoteWsUrl());
+  let token = $state(device.active?.token || "");
   let busy = $state(false);
   let error = $state<string | null>(null);
 

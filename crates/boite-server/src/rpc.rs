@@ -291,6 +291,55 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
             Ok(json!({ "ok": true }))
         }
 
+        // Cosmetic workspace identity, server-synced so any connected device can
+        // rename/recolor a boite and the rest see it live.
+        "workspace.info" => {
+            let meta = state.store.load_workspace_meta()?;
+            Ok(json!({
+                "name": meta.get("name").and_then(|v| v.as_str()),
+                "color": meta.get("color").and_then(|v| v.as_str()),
+            }))
+        }
+
+        "workspace.setInfo" => {
+            let mut meta = state.store.load_workspace_meta()?;
+            let obj = meta
+                .as_object_mut()
+                .ok_or("corrupt workspace meta")?;
+            if let Some(name) = params.get("name") {
+                match name.as_str().map(|s| s.trim()) {
+                    Some(s) if !s.is_empty() => {
+                        obj.insert("name".into(), json!(s.chars().take(64).collect::<String>()));
+                    }
+                    // Explicit null or blank clears the override (falls back to host).
+                    _ => {
+                        obj.remove("name");
+                    }
+                }
+            }
+            if let Some(color) = params.get("color") {
+                match color.as_str() {
+                    // Reject anything that is not a hex color: the value lands in
+                    // a CSS custom property on every client.
+                    Some(s) if valid_hex_color(s) => {
+                        obj.insert("color".into(), json!(s));
+                    }
+                    _ if color.is_null() => {
+                        obj.remove("color");
+                    }
+                    _ => {}
+                }
+            }
+            state.store.save_workspace_meta(&meta)?;
+            let name = meta.get("name").and_then(|v| v.as_str()).map(str::to_string);
+            let color = meta.get("color").and_then(|v| v.as_str()).map(str::to_string);
+            let _ = state.events.send(AppEvent::WorkspaceInfo {
+                name: name.clone(),
+                color: color.clone(),
+            });
+            Ok(json!({ "name": name, "color": color }))
+        }
+
         "shell.default" => {
             let s = blocking(shell::default_shell_blocking).await?;
             Ok(json!({ "shell": s }))
@@ -423,6 +472,13 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
 
 fn id_or_null(opt: Option<String>) -> Value {
     opt.map(Value::String).unwrap_or(Value::Null)
+}
+
+fn valid_hex_color(s: &str) -> bool {
+    let Some(hex) = s.strip_prefix('#') else {
+        return false;
+    };
+    (hex.len() == 3 || hex.len() == 6) && hex.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
 async fn dispatch_git(state: &AppState, method: &str, params: Value) -> Result<Value, String> {

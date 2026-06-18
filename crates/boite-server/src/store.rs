@@ -277,6 +277,33 @@ impl Store {
         Ok(())
     }
 
+    /// Cosmetic workspace identity (name + color), shared by every connected
+    /// device so a rename on one phone shows up on the laptop. Stored in the
+    /// settings k/v under its own key; clients fetch it via workspace.info.
+    pub fn load_workspace_meta(&self) -> Result<serde_json::Value, String> {
+        let conn = self.conn.lock();
+        let raw: Option<String> = conn
+            .query_row("SELECT value FROM settings WHERE key = 'workspace'", [], |r| {
+                r.get(0)
+            })
+            .ok();
+        match raw {
+            Some(s) => Ok(serde_json::from_str(&s).unwrap_or_else(|_| serde_json::json!({}))),
+            None => Ok(serde_json::json!({})),
+        }
+    }
+
+    pub fn save_workspace_meta(&self, value: &serde_json::Value) -> Result<(), String> {
+        let conn = self.conn.lock();
+        let s = serde_json::to_string(value).map_err(|e| e.to_string())?;
+        conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES ('workspace', ?1)",
+            [s],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
     pub fn add_push_subscription(
         &self,
         endpoint: &str,

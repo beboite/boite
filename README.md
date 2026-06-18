@@ -48,6 +48,28 @@ surface is small and focused.
   settings, `Ctrl++/-/0` UI scale.
 - Window state, sidebar width, default shell, UI scale, and project/thread
   order persist between sessions.
+- **Remote workspaces**: connect the desktop app (or a phone PWA) to one or
+  more headless `boite-server` instances. Threads live on the server and
+  survive the client closing; reattaching replays the scrollback. Switch
+  between saved boites from the workspace picker in the titlebar.
+- **Mobile layout**: a phone-shaped UI (bottom tab bar, full-screen pages, no
+  sidebar) toggled in settings, defaulting on for touch devices. Pinch to
+  resize the terminal font, drag to scroll the scrollback, and an on-demand
+  keyboard button so tapping the terminal doesn't pop the soft keyboard.
+
+## Remote & mobile
+
+`boite-server` (in `crates/boite-server`) runs the PTY/git/fs core headless
+and serves the same SvelteKit SPA as an installable PWA. The desktop app
+reaches it over one WebSocket; a phone installs it from the browser. See
+[crates/boite-server/README.md](crates/boite-server/README.md) for Docker,
+tokens, and TLS/Tailscale setup.
+
+Each saved boite carries a **name and a status color**, stored on the server
+and synced to every connected device: rename or recolor it from any device
+and the rest update live. The connection outline around the window takes that
+color, so it is obvious which boite you are driving. The workspace picker
+keeps one connection active at a time (switching reconnects to the new boite).
 
 ## Build & dev
 

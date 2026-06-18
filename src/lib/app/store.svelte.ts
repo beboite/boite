@@ -16,7 +16,8 @@ import {
 import { registerProjectRoots } from "$lib/storage/scope";
 import { gitStore } from "$lib/features/git/store.svelte";
 import { notifications } from "$lib/features/notifications/store.svelte";
-import { backend } from "$lib/backend";
+import { backend, workspace } from "$lib/backend";
+import { device } from "$lib/features/settings/device.svelte";
 import type { ControlEvent } from "$lib/backend/types";
 
 class AppState {
@@ -254,6 +255,20 @@ class AppState {
             this.projects = p;
           })
           .catch(() => {});
+        break;
+      }
+      // Another device renamed/recolored this boite. Cosmetic; update the
+      // live identity and the cached label on the device registry.
+      case "workspace.info": {
+        const name = typeof data?.name === "string" ? data.name : null;
+        const color = typeof data?.color === "string" ? data.color : null;
+        workspace.info = { name, color };
+        if (workspace.activeBoiteId) {
+          device.updateBoite(workspace.activeBoiteId, {
+            name: name ?? "",
+            color: color ?? "",
+          });
+        }
         break;
       }
       // The server lost track of which control events we missed (broadcast

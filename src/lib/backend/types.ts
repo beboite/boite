@@ -174,6 +174,19 @@ export interface ControlEvent {
   data: unknown;
 }
 
+// Cosmetic, server-synced workspace identity. A connected device can rename or
+// recolor the boite; the server persists it and broadcasts a workspace.info
+// control event so every other connected device updates live. Remote-only.
+export interface WorkspaceMeta {
+  name: string | null;
+  color: string | null;
+}
+
+export interface WorkspaceMetaApi {
+  get(): Promise<WorkspaceMeta>;
+  set(patch: Partial<WorkspaceMeta>): Promise<WorkspaceMeta>;
+}
+
 export interface Backend {
   readonly kind: "tauri" | "remote";
   readonly caps: BackendCaps;
@@ -193,4 +206,7 @@ export interface Backend {
   // Web Push registration. Present only on remote (web/PWA); undefined on
   // desktop, which notifies through the OS directly.
   readonly push?: PushApi;
+  // Cosmetic workspace identity (name/color). Remote only; the local desktop
+  // workspace is always labeled "Local".
+  readonly meta?: WorkspaceMetaApi;
 }
