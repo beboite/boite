@@ -19,6 +19,7 @@
 
   function close() {
     app.view = "terminal";
+    app.mobileTab = "terminal";
   }
 </script>
 

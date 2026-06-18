@@ -23,8 +23,24 @@
   import PaneOverlay from "$lib/features/panes/PaneOverlay.svelte";
   import PaneDropOverlay from "$lib/features/panes/PaneDropOverlay.svelte";
   import EditorPanel from "$lib/features/editor/EditorPanel.svelte";
+  import GitPanel from "$lib/features/git/GitPanel.svelte";
+  import ExplorerPanel from "$lib/features/explorer/ExplorerPanel.svelte";
+  import MobileTopBar from "$lib/features/mobile/MobileTopBar.svelte";
+  import MobileBottomBar from "$lib/features/mobile/MobileBottomBar.svelte";
+  import MobileProjectsPage from "$lib/features/mobile/MobileProjectsPage.svelte";
 
   let activated = $state<Record<string, true>>({});
+
+  // Phone layout: no sidebar/side panel, a bottom bar drives full-width pages.
+  // The terminal viewport stays the single always-mounted PTY host in both
+  // layouts; only the chrome around it and what overlays it change.
+  const mobile = $derived(settings.state.mobileLayout);
+  const terminalActive = $derived(
+    mobile ? app.mobileTab === "terminal" : app.view === "terminal",
+  );
+  const settingsActive = $derived(
+    mobile ? app.mobileTab === "settings" : app.view === "settings",
+  );
 
   // Colored inset outline marks the remote workspace: green connected, amber
   // (pulsing) while connecting or dropped.
@@ -130,9 +146,16 @@
   });
 </script>
 
-<div class="flex h-screen w-screen flex-col overflow-hidden bg-background">
+<div
+  class="flex h-screen w-screen flex-col overflow-hidden bg-background"
+  class:mobile-mode={mobile}
+>
   <CloseGuard />
-  <TitleBar />
+  {#if mobile}
+    <MobileTopBar />
+  {:else}
+    <TitleBar />
+  {/if}
   <FolderBrowser />
 
   {#key workspace.epoch}
@@ -142,7 +165,7 @@
   </div>
   {:else}
   <div class="flex min-h-0 flex-1">
-    {#if !settings.state.sidebarCollapsed}
+    {#if !mobile && !settings.state.sidebarCollapsed}
       <ProjectSidebar
         onActivateThread={activateThread}
         onNewProject={addProject}
@@ -158,9 +181,11 @@
       {:else}
         <div
           class="flex h-full min-h-0 flex-col"
-          class:hidden={app.view !== "terminal"}
+          class:hidden={!terminalActive}
         >
-          <ShortcutBar />
+          {#if !mobile}
+            <ShortcutBar />
+          {/if}
 
           {#if app.threads.length === 0}
             <div class="flex h-full items-center justify-center">
@@ -171,7 +196,9 @@
                 <p class="text-sm text-muted-foreground">
                   {app.projects.length === 0
                     ? "Pick a folder to create your first project."
-                    : "Click a shortcut above to launch a terminal."}
+                    : mobile
+                      ? "Tap + to open a terminal."
+                      : "Click a shortcut above to launch a terminal."}
                 </p>
                 {#if app.projects.length === 0}
                   <button
@@ -183,6 +210,12 @@
                   </button>
                 {/if}
               </div>
+            </div>
+          {:else if app.activeThreadId === null && mobile}
+            <div class="flex h-full items-center justify-center px-8 text-center">
+              <p class="text-sm text-muted-foreground">
+                Tap + to open a terminal, or pick one from Projects.
+              </p>
             </div>
           {:else if app.activeThreadId === null}
             <div class="flex h-full items-center justify-center">
@@ -211,7 +244,7 @@
             data-pane-viewport
           >
             {#each paneStore.groups as group (group.id)}
-              {@const visible = activeGroupId === group.id && app.view === "terminal"}
+              {@const visible = activeGroupId === group.id && terminalActive}
               <div
                 class="absolute inset-0"
                 style:visibility={visible ? "visible" : "hidden"}
@@ -224,7 +257,7 @@
             {#each app.threads as thread (thread.id)}
               {@const group = paneStore.groupOf(thread.id)}
               {@const visible =
-                group?.id === activeGroupId && app.view === "terminal"}
+                group?.id === activeGroupId && terminalActive}
               {@const focused =
                 visible && group?.focusedThreadId === thread.id}
               {@const rect = paneStore.rects[thread.id]}
@@ -251,7 +284,7 @@
           </div>
         </div>
 
-        {#if app.view === "settings"}
+        {#if settingsActive}
           <div class="absolute inset-0 z-10 bg-[var(--color-background)]">
             <SettingsPanel />
           </div>
@@ -262,6 +295,26 @@
             <EditorPanel />
           </div>
         {/if}
+
+        <!-- Tab pages sit under the editor/settings overlays: a diff opened
+             from git sets view=editor and must win over the git page. -->
+        {#if mobile && app.view === "terminal" && app.mobileTab === "git"}
+          <div class="absolute inset-0 z-10 bg-[var(--color-background)]">
+            <GitPanel />
+          </div>
+        {/if}
+
+        {#if mobile && app.view === "terminal" && app.mobileTab === "files"}
+          <div class="absolute inset-0 z-10 bg-[var(--color-background)]">
+            <ExplorerPanel />
+          </div>
+        {/if}
+
+        {#if mobile && app.view === "terminal" && app.mobileTab === "projects"}
+          <div class="absolute inset-0 z-10 bg-[var(--color-background)]">
+            <MobileProjectsPage />
+          </div>
+        {/if}
       {/if}
       <!-- ConfirmHost first: both are z-50, so DOM order decides and toasts
            must paint above the confirm backdrop, not dimmed under it. -->
@@ -269,12 +322,16 @@
       <Toaster />
     </main>
 
-    {#if app.ready && settings.state.rightPanel}
+    {#if !mobile && app.ready && settings.state.rightPanel}
       <RightPanel />
     {/if}
   </div>
   {/if}
   {/key}
+
+  {#if mobile && !workspace.needsLogin}
+    <MobileBottomBar />
+  {/if}
 
   {#if workspace.mode !== "local"}
     <div class="ws-outline {outlineClass}" aria-hidden="true"></div>
@@ -287,7 +344,13 @@
     inset: 0;
     z-index: 100;
     pointer-events: none;
+    /* Inset shadows follow border-radius, so this rounds the connection
+       outline at the corners instead of squaring off the viewport. */
+    border-radius: 10px;
     transition: box-shadow 150ms ease;
+  }
+  :global(.mobile-mode) .ws-outline {
+    border-radius: 18px;
   }
   .ws-remote-ok {
     box-shadow: inset 0 0 0 1.5px var(--color-success);

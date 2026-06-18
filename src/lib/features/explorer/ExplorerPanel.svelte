@@ -1,5 +1,7 @@
 <script lang="ts">
   import { app } from "$lib/app/store.svelte";
+  import { workspace } from "$lib/backend";
+  import { settings } from "$lib/features/settings/store.svelte";
   import { explorerStore, normalizePath } from "./store.svelte";
   import { treeMenu } from "./treeMenu.svelte";
   import TreeNode from "./TreeNode.svelte";
@@ -42,13 +44,18 @@
     const r = root;
     const poke = () => {
       if (document.hidden) return;
+      // Don't queue directory reads against a dropped remote socket.
+      if (workspace.mode === "remote" && workspace.connection !== "connected") return;
       void explorerStore.refresh(r);
     };
-    const interval = window.setInterval(poke, AUTO_REFRESH_MS);
+    const periodMs = settings.state.mobileLayout ? 9000 : AUTO_REFRESH_MS;
+    const interval = window.setInterval(poke, periodMs);
     window.addEventListener("focus", poke);
+    document.addEventListener("visibilitychange", poke);
     return () => {
       window.clearInterval(interval);
       window.removeEventListener("focus", poke);
+      document.removeEventListener("visibilitychange", poke);
     };
   });
 
