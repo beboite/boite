@@ -1,6 +1,7 @@
 import { loadSettings, saveSettings } from "$lib/storage/db";
 import { notifications } from "$lib/features/notifications/store.svelte";
 import { debounce } from "$lib/shared/utils/debounce";
+import { uuid } from "$lib/shared/utils/uuid";
 import type { RightPanelTab, Settings, Shortcut } from "$lib/types";
 
 export const PRESET_SHORTCUTS: Shortcut[] = [
@@ -359,7 +360,7 @@ class SettingsStore {
 
   async addShortcut(partial: Partial<Shortcut> = {}) {
     const shortcut: Shortcut = {
-      id: crypto.randomUUID(),
+      id: uuid(),
       label: partial.label?.trim() || "Shortcut",
       command: partial.command?.trim() ?? "",
       iconKey: partial.iconKey ?? null,

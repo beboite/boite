@@ -16,6 +16,42 @@ self.addEventListener("activate", (event) => {
   );
 });
 
+// Web Push: the server sends {title, body, tag} when a thread finishes a turn
+// or its process exits. Show it as a system notification even with the app
+// closed (the push service woke this worker).
+self.addEventListener("push", (event) => {
+  let payload = { title: "Boite", body: "", tag: "boite" };
+  try {
+    if (event.data) payload = { ...payload, ...event.data.json() };
+  } catch {
+    if (event.data) payload.body = event.data.text();
+  }
+  event.waitUntil(
+    self.registration.showNotification(payload.title, {
+      body: payload.body,
+      tag: payload.tag,
+      icon: "/icons/icon-192.png",
+      badge: "/icons/icon-192.png",
+      data: { url: "/" },
+    }),
+  );
+});
+
+// Focus an existing window if one is open, otherwise open the app.
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const target = event.notification.data?.url || "/";
+  event.waitUntil(
+    (async () => {
+      const all = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+      for (const client of all) {
+        if ("focus" in client) return client.focus();
+      }
+      if (self.clients.openWindow) return self.clients.openWindow(target);
+    })(),
+  );
+});
+
 self.addEventListener("fetch", (event) => {
   const req = event.request;
   const url = new URL(req.url);

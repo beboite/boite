@@ -9,6 +9,7 @@ import { gitStore } from "$lib/features/git/store.svelte";
 import { notifications } from "$lib/features/notifications/store.svelte";
 import { confirmDialog } from "$lib/shared/components/confirm.svelte";
 import { device } from "$lib/features/settings/device.svelte";
+import { registerPush } from "$lib/features/push/api";
 
 // In a browser/PWA the only backend is the server that served this page.
 export function defaultRemoteWsUrl(): string {
@@ -106,5 +107,7 @@ export async function connectAndInit(url: string, token: string): Promise<boolea
   workspace.needsLogin = false;
   device.setRemote(url, token);
   await app.init();
+  // Fire-and-forget: a denied/unsupported push permission must not block boot.
+  void registerPush();
   return true;
 }

@@ -88,6 +88,7 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
             )
             .map_err(|e| format!("bad thread: {e}"))?;
             let cwd = str_param(&params, "cwd")?;
+            state.ensure_registered_path(&cwd)?;
             let cols = u16_param(&params, "cols").unwrap_or(80);
             let rows = u16_param(&params, "rows").unwrap_or(24);
             let env = params.get("env").and_then(|v| {
@@ -244,6 +245,7 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
                     .ok_or("missing param: project")?,
             )
             .map_err(|e| format!("bad project: {e}"))?;
+            state.ensure_project_path(&project.cwd)?;
             state.store.save_project(&project, now_ms())?;
             state.refresh_roots()?;
             let _ = state.events.send(AppEvent::ProjectChanged);
@@ -257,6 +259,7 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
             state.store.set_project_archived(&id, archived)?;
+            state.refresh_roots()?;
             let _ = state.events.send(AppEvent::ProjectChanged);
             Ok(json!({ "ok": true }))
         }
@@ -271,6 +274,7 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
 
         "project.inspect" => {
             let path = str_param(&params, "path")?;
+            state.ensure_project_path(&path)?;
             let inspection = blocking(move || project::inspect_project_blocking(path)).await??;
             Ok(serde_json::to_value(inspection).unwrap())
         }
@@ -381,6 +385,34 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
                 .to_string();
             state.notifier.send(&title, &body, "test").await;
             Ok(json!({ "ok": true, "enabled": state.notifier.enabled() }))
+        }
+
+        // Web Push: the PWA fetches the VAPID public key, subscribes its browser
+        // push endpoint, and registers it server-side. Subscriptions are global
+        // (every authenticated client shares them, like settings).
+        "push.publicKey" => Ok(json!({ "key": state.push.public_key() })),
+
+        "push.subscribe" => {
+            let endpoint = str_param(&params, "endpoint")?;
+            let keys = params.get("keys").ok_or("missing param: keys")?;
+            let p256dh = keys
+                .get("p256dh")
+                .and_then(|v| v.as_str())
+                .ok_or("missing param: keys.p256dh")?;
+            let auth = keys
+                .get("auth")
+                .and_then(|v| v.as_str())
+                .ok_or("missing param: keys.auth")?;
+            state
+                .store
+                .add_push_subscription(&endpoint, p256dh, auth, now_ms())?;
+            Ok(json!({ "ok": true }))
+        }
+
+        "push.unsubscribe" => {
+            let endpoint = str_param(&params, "endpoint")?;
+            state.store.delete_push_subscription(&endpoint)?;
+            Ok(json!({ "ok": true }))
         }
 
         m if m.starts_with("git.") => dispatch_git(state, m, params).await,

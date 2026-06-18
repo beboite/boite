@@ -2,8 +2,11 @@
   import { onMount } from "svelte";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { hasTauri } from "$lib/backend/env";
+  import { backend, workspace } from "$lib/backend";
   import { app } from "$lib/app/store.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
+  import { addProjectByPath } from "$lib/features/project/api";
+  import { launchBlankTerminal } from "$lib/features/thread/api";
   import WorkspaceToggle from "$lib/features/workspace/WorkspaceToggle.svelte";
   import Minus from "@lucide/svelte/icons/minus";
   import Square from "@lucide/svelte/icons/square";
@@ -54,8 +57,23 @@
   function showSettings() {
     app.view = "settings";
   }
-  function showTerminal() {
-    app.view = "terminal";
+
+  // The boite logo doubles as a context-aware "home" button:
+  //  - from the settings view it just returns to the terminal/threads view;
+  //  - already in the terminal view it opens a fresh terminal at the workspace
+  //    root (the "folder of folders"), creating the default workspace project
+  //    the first time so a bare install can start a shell with zero folder-
+  //    picking. Remote only — TauriBackend has no workspace root.
+  async function goHome() {
+    if (app.view === "settings") {
+      app.view = "terminal";
+      return;
+    }
+    if (workspace.mode === "local") return;
+    const root = await backend().scope.workspaceRoot().catch(() => null);
+    if (!root) return;
+    const project = await addProjectByPath(root);
+    if (project) await launchBlankTerminal(project.id);
   }
 </script>
 
@@ -70,9 +88,9 @@
       'terminal'
         ? 'bg-accent text-foreground'
         : 'text-muted-foreground hover:bg-accent hover:text-foreground'}"
-      onclick={showTerminal}
-      title="Boite"
-      aria-label="Boite"
+      onclick={goHome}
+      title="Boite — workspace"
+      aria-label="Boite — go to workspace"
     >
       <BoiteLogo size={17} />
     </button>

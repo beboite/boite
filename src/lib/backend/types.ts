@@ -146,6 +146,20 @@ export interface LogApi {
   filePath(): Promise<string>;
 }
 
+export interface PushSubscriptionJson {
+  endpoint: string;
+  keys: { p256dh: string; auth: string };
+}
+
+// Web Push, remote-only. The desktop uses native OS notifications, so
+// TauriBackend omits this entirely. publicKey returns the server's VAPID key
+// (applicationServerKey) the browser needs to subscribe.
+export interface PushApi {
+  publicKey(): Promise<string | null>;
+  subscribe(sub: PushSubscriptionJson): Promise<void>;
+  unsubscribe(endpoint: string): Promise<void>;
+}
+
 // Local derives thread status client-side (statusEngine + OSC/output sniffing)
 // and is authoritative. Remote treats the server as authoritative: status and
 // title arrive as control events; the client only projects them.
@@ -176,4 +190,7 @@ export interface Backend {
   readonly scope: ScopeApi;
   readonly session: SessionApi;
   readonly log: LogApi;
+  // Web Push registration. Present only on remote (web/PWA); undefined on
+  // desktop, which notifies through the OS directly.
+  readonly push?: PushApi;
 }

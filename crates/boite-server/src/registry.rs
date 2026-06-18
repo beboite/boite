@@ -48,7 +48,7 @@ impl LiveThread {
 
 struct Shared {
     threads: Mutex<HashMap<String, Arc<LiveThread>>>,
-    events: broadcast::Sender<AppEvent>,
+    events: Arc<dyn Fn(AppEvent) + Send + Sync>,
 }
 
 pub struct Registry {
@@ -65,7 +65,10 @@ pub struct AttachSnapshot {
 }
 
 impl Registry {
-    pub fn new(scrollback_bytes: usize, events: broadcast::Sender<AppEvent>) -> Arc<Registry> {
+    pub fn new(
+        scrollback_bytes: usize,
+        events: Arc<dyn Fn(AppEvent) + Send + Sync>,
+    ) -> Arc<Registry> {
         let shared = Arc::new(Shared {
             threads: Mutex::new(HashMap::new()),
             events,
@@ -77,6 +80,22 @@ impl Registry {
         });
         spawn_ticker(shared);
         registry
+    }
+
+    #[cfg(test)]
+    pub fn new_without_ticker(
+        scrollback_bytes: usize,
+        events: Arc<dyn Fn(AppEvent) + Send + Sync>,
+    ) -> Arc<Registry> {
+        let shared = Arc::new(Shared {
+            threads: Mutex::new(HashMap::new()),
+            events,
+        });
+        Arc::new(Registry {
+            pty: PtyManager::new(),
+            scrollback_bytes,
+            shared,
+        })
     }
 
     pub fn live(&self, thread_id: &str) -> Option<Arc<LiveThread>> {
@@ -191,6 +210,10 @@ struct ThreadSink {
 }
 
 impl ThreadSink {
+    fn emit(&self, event: AppEvent) {
+        (self.shared.events)(event);
+    }
+
     fn set_status(&self, next: ThreadStatus, exit_code: Option<i32>) {
         let changed = {
             let mut st = self.live.status.lock();
@@ -202,7 +225,7 @@ impl ThreadSink {
             }
         };
         if changed {
-            let _ = self.shared.events.send(AppEvent::ThreadStatus {
+            self.emit(AppEvent::ThreadStatus {
                 thread_id: self.live.thread_id.clone(),
                 status: next.as_str().to_string(),
                 exit_code,
@@ -231,7 +254,7 @@ impl EventSink for ThreadSink {
                     let clean = status::strip_leading_marker(&raw);
                     if !clean.is_empty() {
                         *self.live.title.lock() = clean.clone();
-                        let _ = self.shared.events.send(AppEvent::ThreadTitle {
+                        self.emit(AppEvent::ThreadTitle {
                             thread_id: self.live.thread_id.clone(),
                             title: clean,
                         });
@@ -245,7 +268,7 @@ impl EventSink for ThreadSink {
                     s.status = st;
                     s.last_working = None;
                 }
-                let _ = self.shared.events.send(AppEvent::ThreadStatus {
+                self.emit(AppEvent::ThreadStatus {
                     thread_id: self.live.thread_id.clone(),
                     status: st.as_str().to_string(),
                     exit_code: code,
@@ -292,7 +315,7 @@ fn spawn_ticker(shared: Arc<Shared>) {
                         }
                         st.status = ThreadStatus::Ready;
                     }
-                    let _ = shared.events.send(AppEvent::ThreadStatus {
+                    (shared.events)(AppEvent::ThreadStatus {
                         thread_id: id,
                         status: "ready".to_string(),
                         exit_code: None,

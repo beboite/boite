@@ -7,6 +7,7 @@ import { resolveIconKey } from "$lib/shared/icons/detect";
 import { platform } from "$lib/storage/platform.svelte";
 import { notifications } from "$lib/features/notifications/store.svelte";
 import { confirmDialog } from "$lib/shared/components/confirm.svelte";
+import { uuid } from "$lib/shared/utils/uuid";
 import type { IconKey, Project, Shortcut, Thread } from "$lib/types";
 import type { ShellOption } from "$lib/storage/platform.svelte";
 
@@ -49,7 +50,7 @@ function buildThread(
   iconKey: IconKey,
 ): Thread {
   return {
-    id: crypto.randomUUID(),
+    id: uuid(),
     projectId,
     ptyId: null,
     label,
