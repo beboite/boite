@@ -65,6 +65,10 @@ reaches it over one WebSocket; a phone installs it from the browser. See
 [crates/boite-server/README.md](crates/boite-server/README.md) for Docker,
 tokens, and TLS/Tailscale setup.
 
+For a native Android install, [`mobile/`](mobile/README.md) holds a Bubblewrap
+TWA wrapper that packages the PWA as an `.aab`/`.apk` (signing secrets stay out
+of the repo).
+
 Each saved boite carries a **name and a status color**, stored on the server
 and synced to every connected device: rename or recolor it from any device
 and the rest update live. The connection outline around the window takes that

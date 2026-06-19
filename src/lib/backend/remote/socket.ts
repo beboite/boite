@@ -6,6 +6,7 @@ const FRAME_OUTPUT = 0x01;
 const FRAME_INPUT = 0x02;
 const FRAME_OUTPUT_GZIP = 0x03;
 const RPC_TIMEOUT = 20_000;
+const CONNECT_TIMEOUT = 12_000;
 const BACKOFF_MIN = 500;
 const BACKOFF_MAX = 30_000;
 
@@ -191,9 +192,32 @@ export class Socket {
     return new Promise((resolve, reject) => {
       this.#setState("connecting");
       let settled = false;
-      const ws = new WebSocket(this.#url);
+      let ws: WebSocket;
+      // `new WebSocket` throws synchronously when CSP blocks the URL or it is
+      // malformed; turn that into a normal rejection instead of an unhandled
+      // throw inside the executor.
+      try {
+        ws = new WebSocket(this.#url);
+      } catch (e) {
+        this.#setState("disconnected");
+        reject(e instanceof Error ? e : new Error("WebSocket construction failed"));
+        return;
+      }
       ws.binaryType = "arraybuffer";
       this.#ws = ws;
+
+      // A blocked or unreachable host can sit in CONNECTING for the OS TCP
+      // timeout (~minutes). Bound it so the picker button does not hang.
+      const connectTimer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        try {
+          ws.close();
+        } catch {
+          // already closing
+        }
+        reject(new Error("connect timeout"));
+      }, CONNECT_TIMEOUT);
 
       ws.onopen = () => {
         this.rpc("auth", { token: this.#token })
@@ -210,12 +234,14 @@ export class Socket {
             }
             if (!settled) {
               settled = true;
+              clearTimeout(connectTimer);
               resolve();
             }
           })
           .catch((e) => {
             if (!settled) {
               settled = true;
+              clearTimeout(connectTimer);
               reject(e);
             }
             ws.close();
@@ -225,6 +251,7 @@ export class Socket {
       ws.onmessage = (ev) => this.#onMessage(ev);
 
       ws.onclose = () => {
+        clearTimeout(connectTimer);
         this.#failAllPending(new Error("socket closed"));
         this.#ws = null;
         this.#setState("disconnected");

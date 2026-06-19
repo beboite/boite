@@ -47,7 +47,16 @@ class Workspace {
     const remote = new RemoteBackend(url, token, (s) => {
       this.connection = s;
     });
-    await remote.connect();
+    try {
+      await remote.connect();
+    } catch (e) {
+      // Stop the orphaned socket's reconnect loop; otherwise its state callback
+      // keeps forcing connection back to "connecting" forever and the picker
+      // button stays stuck (and a re-add stacks another ghost socket).
+      remote.dispose();
+      this.connection = "connected";
+      throw e;
+    }
     this.#remote = remote;
     this.remoteUrl = url;
     this.connection = remote.connectionState;
