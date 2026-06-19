@@ -163,6 +163,18 @@
     rawWrite(out);
   }
 
+  // Text from the mobile input takeover. A single char honours armed Ctrl/Alt
+  // (so the CLI key-bar modifiers work with the soft keyboard); longer strings
+  // (a committed word, a paste) go straight through.
+  function sendInputText(data: string) {
+    if (!data) return;
+    if ((ctrlArmed || altArmed) && data.length === 1) {
+      emitChar(data);
+      return;
+    }
+    rawWrite(data);
+  }
+
   function pressBarKey(id: string) {
     if (id === "ctrl") {
       ctrlArmed = !ctrlArmed;
@@ -308,7 +320,11 @@
   // pty_detach. Remember local detaches so the return to this workspace
   // reattaches instead of spawning fresh. Explicit close uses stopLocalPty/kill.
   function releasePty() {
-    if (ptyId && backend().caps.clientStatus) parkedLocal.add(thread.id);
+    if (ptyId && backend().caps.clientStatus) {
+      // Remember the dot colour so the return to this workspace shows the
+      // thread connected (ready/running) instead of a reset idle grey.
+      parkedLocal.set(thread.id, currentThread()?.status ?? "ready");
+    }
     teardownPty((key) => void ptyRelease(key).catch(() => {}));
   }
 
@@ -604,6 +620,136 @@
     else ta.removeAttribute("inputmode");
   }
 
+  // Mobile input takeover. Android/Gboard drives xterm's helper textarea through
+  // predictive composition + keyCode-229 events whose value-diffing duplicates
+  // text: a tapped word-completion re-sends the whole line, deleted text comes
+  // back on the next key. We block those events from ever reaching xterm
+  // (capture-phase stopPropagation on the container, an ancestor of the
+  // textarea, so xterm's own textarea listeners never fire) and translate the
+  // intent-based `beforeinput`/composition events to PTY bytes ourselves:
+  // nothing is sent mid-composition, so a completed word is sent exactly once.
+  // The scratch textarea is kept empty between words so Backspace at line start
+  // still emits a real key event we can forward. Desktop/hardware keyboards are
+  // untouched — every handler early-returns when not in the mobile layout.
+  let imeComposing = false;
+  let disposeMobileInput: (() => void) | null = null;
+
+  function clearHelperTextarea() {
+    const ta = helperTextarea();
+    if (ta && ta.value !== "") ta.value = "";
+  }
+
+  function onImeCompositionStart(e: Event) {
+    if (!mobile) return;
+    e.stopPropagation();
+    imeComposing = true;
+  }
+
+  function onImeCompositionEnd(e: CompositionEvent) {
+    if (!mobile) return;
+    e.stopPropagation();
+    imeComposing = false;
+    sendInputText(e.data ?? "");
+    clearHelperTextarea();
+  }
+
+  function onImeBeforeInput(e: InputEvent) {
+    if (!mobile) return;
+    e.stopPropagation();
+    // Mid-composition keystrokes are committed together at compositionend.
+    if (imeComposing || e.inputType === "insertCompositionText") return;
+    switch (e.inputType) {
+      case "insertText":
+      case "insertReplacementText":
+      case "insertFromPaste":
+        if (e.cancelable) e.preventDefault();
+        sendInputText(e.data ?? "");
+        break;
+      case "insertLineBreak":
+      case "insertParagraph":
+        if (e.cancelable) e.preventDefault();
+        rawWrite("\r");
+        break;
+      case "deleteContentBackward":
+        if (e.cancelable) e.preventDefault();
+        rawWrite("\x7f");
+        break;
+      case "deleteWordBackward":
+        if (e.cancelable) e.preventDefault();
+        rawWrite("\x17"); // Ctrl+W
+        break;
+      case "deleteContentForward":
+        if (e.cancelable) e.preventDefault();
+        rawWrite("\x1b[3~");
+        break;
+    }
+  }
+
+  function onImeInput(e: Event) {
+    if (!mobile) return;
+    e.stopPropagation();
+    // beforeinput already produced the bytes; keep the scratch buffer empty so
+    // it can never accumulate a stale baseline (only when not mid-composition).
+    if (!imeComposing) clearHelperTextarea();
+  }
+
+  // Keys the soft keyboard emits as real key events (empty field, or a hardware
+  // key) rather than beforeinput. Handle them here and preventDefault so the
+  // matching beforeinput never fires — no double send.
+  function onImeKeyDown(e: KeyboardEvent) {
+    if (!mobile) return;
+    e.stopPropagation();
+    if (imeComposing || e.keyCode === 229) return;
+    const seq: string | null =
+      e.key === "Backspace"
+        ? "\x7f"
+        : e.key === "Enter"
+          ? "\r"
+          : e.key === "Tab"
+            ? "\t"
+            : e.key === "Escape"
+              ? "\x1b"
+              : e.key === "ArrowUp"
+                ? "\x1b[A"
+                : e.key === "ArrowDown"
+                  ? "\x1b[B"
+                  : e.key === "ArrowRight"
+                    ? "\x1b[C"
+                    : e.key === "ArrowLeft"
+                      ? "\x1b[D"
+                      : null;
+    if (seq === null) return; // printable: let beforeinput/composition handle it
+    e.preventDefault();
+    rawWrite(seq);
+  }
+
+  function onImeKeyOther(e: Event) {
+    if (!mobile) return;
+    e.stopPropagation();
+  }
+
+  function installMobileInput() {
+    const el = container;
+    if (!el) return;
+    const cap = { capture: true } as const;
+    el.addEventListener("compositionstart", onImeCompositionStart, cap);
+    el.addEventListener("compositionend", onImeCompositionEnd as EventListener, cap);
+    el.addEventListener("beforeinput", onImeBeforeInput as EventListener, cap);
+    el.addEventListener("input", onImeInput, cap);
+    el.addEventListener("keydown", onImeKeyDown as EventListener, cap);
+    el.addEventListener("keypress", onImeKeyOther, cap);
+    el.addEventListener("keyup", onImeKeyOther, cap);
+    disposeMobileInput = () => {
+      el.removeEventListener("compositionstart", onImeCompositionStart, cap);
+      el.removeEventListener("compositionend", onImeCompositionEnd as EventListener, cap);
+      el.removeEventListener("beforeinput", onImeBeforeInput as EventListener, cap);
+      el.removeEventListener("input", onImeInput, cap);
+      el.removeEventListener("keydown", onImeKeyDown as EventListener, cap);
+      el.removeEventListener("keypress", onImeKeyOther, cap);
+      el.removeEventListener("keyup", onImeKeyOther, cap);
+    };
+  }
+
   function toggleKeyboard() {
     keyboardOpen = !keyboardOpen;
     const ta = helperTextarea();
@@ -702,8 +848,16 @@
       current?.status === "stopped";
     // A local PTY parked by a workspace switch is still alive: reattach (replay
     // its ring) instead of spawning fresh, same as an explicit reattach.
+    // A remote thread the server already reports live (non-idle) is owned by the
+    // server too — attach to replay its ring rather than skip it (the old guard
+    // left it a black screen on first click) and never re-inject launch input.
+    // Remote idle still spawns fresh so wrap-shell launch input is typed.
+    const remote = !backend().caps.clientStatus;
+    const liveRemote = remote && !finished && current?.status !== "idle";
     const reattaching =
-      reattach || (backend().caps.clientStatus && parkedLocal.has(thread.id));
+      reattach ||
+      liveRemote ||
+      (backend().caps.clientStatus && parkedLocal.has(thread.id));
     const attachable = reattaching && current?.status !== "idle";
     if (!current || finished || (current.status !== "idle" && !attachable)) {
       logger.debug(
@@ -996,6 +1150,7 @@
     term.open(container);
     // Set inputmode before the focus below so the phone keyboard never flashes.
     syncMobileInput();
+    installMobileInput();
 
     try {
       const webgl = new WebglAddon();
@@ -1096,6 +1251,8 @@
     destroyed = true;
     statusEngine.release(thread.id);
     stopSessionMonitor();
+    disposeMobileInput?.();
+    disposeMobileInput = null;
     releasePty();
     if (fitRafId !== null) cancelAnimationFrame(fitRafId);
     fitRafId = null;
