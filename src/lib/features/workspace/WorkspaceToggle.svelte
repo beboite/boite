@@ -153,7 +153,7 @@
     {#if isTauri}
       <button
         type="button"
-        class="flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] transition hover:bg-accent disabled:opacity-50"
+        class={`flex items-center gap-2 rounded-md text-left transition hover:bg-accent disabled:opacity-50 ${mobile ? "px-3 py-3 text-sm" : "px-2 py-1.5 text-[12px]"}`}
         onclick={pickLocal}
         disabled={busy}
       >
@@ -171,7 +171,7 @@
       <div class="flex items-stretch gap-0.5">
         <button
           type="button"
-          class="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] transition hover:bg-accent disabled:opacity-50"
+          class={`flex min-w-0 flex-1 items-center gap-2 rounded-md text-left transition hover:bg-accent disabled:opacity-50 ${mobile ? "px-3 py-3 text-sm" : "px-2 py-1.5 text-[12px]"}`}
           onclick={() => pickBoite(b.id)}
           disabled={busy}
         >
@@ -193,7 +193,7 @@
         {#if !active}
           <button
             type="button"
-            class="flex w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition hover:bg-danger/20 hover:text-danger"
+            class={`flex shrink-0 items-center justify-center rounded-md text-muted-foreground transition hover:bg-danger/20 hover:text-danger ${mobile ? "w-11" : "w-8"}`}
             onclick={() => remove(b.id)}
             aria-label="Remove boite"
             title="Remove"
@@ -204,7 +204,7 @@
       </div>
 
       {#if active}
-        <div class="mb-1 flex flex-col gap-1.5 rounded-md bg-[var(--color-background)] px-2 py-2">
+        <div class="mb-1 flex flex-col gap-2 rounded-md bg-[var(--color-background)] px-2 py-2">
           <input
             bind:value={nameDraft}
             placeholder={hostOf(b.url)}
@@ -212,13 +212,13 @@
             autocapitalize="off"
             onblur={commitName}
             onkeydown={(e) => e.key === "Enter" && commitName()}
-            class="w-full rounded border border-border bg-[var(--color-surface)] px-1.5 py-1 text-[11px] text-foreground outline-none focus:border-foreground/40"
+            class={`w-full rounded border border-border bg-[var(--color-surface)] text-foreground outline-none focus:border-foreground/40 ${mobile ? "px-3 py-2.5 text-sm" : "px-1.5 py-1 text-[11px]"}`}
           />
-          <div class="flex flex-wrap gap-1.5">
+          <div class={`flex flex-wrap ${mobile ? "gap-2.5" : "gap-1.5"}`}>
             {#each PALETTE as c (c)}
               <button
                 type="button"
-                class="size-5 rounded-full border transition"
+                class={`shrink-0 rounded-full border-2 transition ${mobile ? "size-9" : "size-5"}`}
                 style:background-color={c}
                 style:border-color={(workspace.info.color ?? "") === c
                   ? "var(--color-foreground)"
@@ -239,20 +239,20 @@
           placeholder="ws://host:7337/ws"
           spellcheck="false"
           autocapitalize="off"
-          class="w-full rounded border border-border bg-[var(--color-background)] px-1.5 py-1 text-[11px] text-foreground outline-none focus:border-foreground/40"
+          class={`w-full rounded border border-border bg-[var(--color-background)] text-foreground outline-none focus:border-foreground/40 ${mobile ? "px-3 py-2.5 text-sm" : "px-1.5 py-1 text-[11px]"}`}
         />
         <input
           bind:value={addToken}
           type="password"
           placeholder="token"
           spellcheck="false"
-          class="w-full rounded border border-border bg-[var(--color-background)] px-1.5 py-1 text-[11px] text-foreground outline-none focus:border-foreground/40"
+          class={`w-full rounded border border-border bg-[var(--color-background)] text-foreground outline-none focus:border-foreground/40 ${mobile ? "px-3 py-2.5 text-sm" : "px-1.5 py-1 text-[11px]"}`}
         />
         <div class="flex justify-end gap-1.5">
           {#if device.boites.length > 0}
             <button
               type="button"
-              class="rounded px-2 py-1 text-[11px] text-muted-foreground transition hover:text-foreground"
+              class={`rounded text-muted-foreground transition hover:text-foreground ${mobile ? "px-3 py-2 text-sm" : "px-2 py-1 text-[11px]"}`}
               onclick={() => (showAdd = false)}
               disabled={busy}
             >
@@ -261,7 +261,7 @@
           {/if}
           <button
             type="button"
-            class="rounded bg-foreground px-2.5 py-1 text-[11px] font-medium text-background transition hover:bg-foreground/90 disabled:opacity-50"
+            class={`rounded bg-foreground font-medium text-background transition hover:bg-foreground/90 disabled:opacity-50 ${mobile ? "px-4 py-2 text-sm" : "px-2.5 py-1 text-[11px]"}`}
             onclick={submitAdd}
             disabled={busy || !addUrl.trim() || !addToken.trim()}
           >
@@ -272,7 +272,7 @@
     {:else}
       <button
         type="button"
-        class="flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] text-muted-foreground transition hover:bg-accent hover:text-foreground"
+        class={`flex items-center gap-2 rounded-md text-left text-muted-foreground transition hover:bg-accent hover:text-foreground ${mobile ? "px-3 py-3 text-sm" : "px-2 py-1.5 text-[12px]"}`}
         onclick={() => (showAdd = true)}
       >
         <Plus class="size-3.5 shrink-0" />

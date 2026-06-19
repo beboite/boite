@@ -91,6 +91,164 @@
   let scrollLastY = 0;
   let scrollAccum = 0;
 
+  // CLI key bar (mobile): the soft keyboard has no Esc/Ctrl/Tab/arrows, which a
+  // TUI like claude/codex leans on. A scrollable strip injects those sequences;
+  // Ctrl/Alt are sticky one-shot modifiers applied to the next bar key or to the
+  // next character typed on the soft keyboard (see term.onData).
+  let ctrlArmed = $state(false);
+  let altArmed = $state(false);
+  // The CLI strip is opt-in: long-press the keyboard button toggles it, a normal
+  // tap toggles the soft keyboard (so the terminal stays uncluttered by default).
+  let keyBarOpen = $state(false);
+  let lpTimer: ReturnType<typeof setTimeout> | null = null;
+  let lpFired = false;
+  const finished = $derived(
+    thread.status === "done" ||
+      thread.status === "exited" ||
+      thread.status === "error" ||
+      thread.status === "stopped",
+  );
+  const showKeyBar = $derived(mobile && focused && !finished && keyBarOpen);
+  const BAR_KEYS: { id: string; label: string }[] = [
+    { id: "esc", label: "Esc" },
+    { id: "ctrl", label: "Ctrl" },
+    { id: "alt", label: "Alt" },
+    { id: "tab", label: "Tab" },
+    { id: "intr", label: "^C" },
+    { id: "left", label: "←" },
+    { id: "up", label: "↑" },
+    { id: "down", label: "↓" },
+    { id: "right", label: "→" },
+    { id: "home", label: "Home" },
+    { id: "end", label: "End" },
+    { id: "pgup", label: "PgUp" },
+    { id: "pgdn", label: "PgDn" },
+    { id: "|", label: "|" },
+    { id: "/", label: "/" },
+    { id: "~", label: "~" },
+    { id: "-", label: "-" },
+  ];
+  const ARROW: Record<string, "A" | "B" | "C" | "D"> = {
+    up: "A",
+    down: "B",
+    right: "C",
+    left: "D",
+  };
+
+  function rawWrite(s: string) {
+    if (!shouldUsePty(ptyId)) return;
+    lastInputAt = Date.now();
+    void ptyWrite(ptyId, new TextEncoder().encode(s));
+  }
+
+  function applyCtrl(ch: string): string {
+    const c = ch.charCodeAt(0);
+    if (c >= 97 && c <= 122) return String.fromCharCode(c - 96); // a-z
+    if (c >= 64 && c <= 95) return String.fromCharCode(c - 64); // @A-Z[\]^_
+    return ch;
+  }
+
+  // Apply the armed Ctrl/Alt modifiers to a single typed/tapped character.
+  function emitChar(ch: string) {
+    let out = ch;
+    if (ctrlArmed) {
+      out = applyCtrl(out);
+      ctrlArmed = false;
+    }
+    if (altArmed) {
+      out = "\x1b" + out;
+      altArmed = false;
+    }
+    rawWrite(out);
+  }
+
+  function pressBarKey(id: string) {
+    if (id === "ctrl") {
+      ctrlArmed = !ctrlArmed;
+      return;
+    }
+    if (id === "alt") {
+      altArmed = !altArmed;
+      return;
+    }
+    switch (id) {
+      case "esc":
+        rawWrite("\x1b");
+        break;
+      case "tab":
+        rawWrite(altArmed ? "\x1b\t" : "\t");
+        break;
+      case "intr":
+        rawWrite("\x03");
+        break;
+      case "up":
+      case "down":
+      case "left":
+      case "right": {
+        const mod = 1 + (altArmed ? 2 : 0) + (ctrlArmed ? 4 : 0);
+        const l = ARROW[id];
+        rawWrite(mod === 1 ? `\x1b[${l}` : `\x1b[1;${mod}${l}`);
+        break;
+      }
+      case "home":
+        rawWrite("\x1b[H");
+        break;
+      case "end":
+        rawWrite("\x1b[F");
+        break;
+      case "pgup":
+        rawWrite("\x1b[5~");
+        break;
+      case "pgdn":
+        rawWrite("\x1b[6~");
+        break;
+      default:
+        emitChar(id); // literal char: honours armed modifiers
+        ctrlArmed = altArmed = false;
+        term?.focus();
+        return;
+    }
+    ctrlArmed = altArmed = false;
+    term?.focus();
+  }
+
+  // preventDefault keeps terminal focus (and the soft keyboard) on tap.
+  function keepFocus(e: PointerEvent) {
+    e.preventDefault();
+  }
+
+  function clearLongPress() {
+    if (lpTimer !== null) {
+      clearTimeout(lpTimer);
+      lpTimer = null;
+    }
+  }
+
+  // Keyboard button: tap = soft keyboard, long-press = CLI key strip.
+  function fabDown(e: PointerEvent) {
+    e.preventDefault(); // keep terminal focus
+    lpFired = false;
+    clearLongPress();
+    lpTimer = setTimeout(() => {
+      lpFired = true;
+      lpTimer = null;
+      keyBarOpen = !keyBarOpen;
+      navigator.vibrate?.(10);
+    }, 420);
+  }
+
+  function fabUp() {
+    const wasLong = lpFired;
+    clearLongPress();
+    lpFired = false;
+    if (!wasLong) toggleKeyboard();
+  }
+
+  function fabCancel() {
+    clearLongPress();
+    lpFired = false;
+  }
+
   function focusTerminalSoon() {
     queueMicrotask(() => term?.focus());
     requestAnimationFrame(() => term?.focus());
@@ -813,6 +971,10 @@
       if (!shouldUsePty(ptyId)) return;
       syncAliveThread();
       lastInputAt = Date.now();
+      if ((ctrlArmed || altArmed) && data.length === 1) {
+        emitChar(data);
+        return;
+      }
       const bytes = new TextEncoder().encode(data);
       void ptyWrite(ptyId, bytes);
     });
@@ -940,55 +1102,102 @@
 </script>
 
 <div
-  class="relative h-full w-full overflow-hidden bg-[var(--color-background)] px-3 py-2"
+  class="relative flex h-full w-full flex-col overflow-hidden bg-[var(--color-background)]"
   oncontextmenu={openTerminalContextMenu}
   role="presentation"
 >
-  <div
-    bind:this={container}
-    class="h-full w-full min-h-0 overflow-hidden"
-    class:touch-none={mobile}
-  ></div>
-  {#if mobile && focused && thread.status !== "stopped"}
-    <button
-      type="button"
-      class="absolute bottom-3 right-3 z-20 flex size-11 items-center justify-center rounded-full border border-border shadow-lg transition active:scale-95"
-      style:background-color={keyboardOpen
-        ? "var(--color-foreground)"
-        : "var(--color-surface-2)"}
-      style:color={keyboardOpen
-        ? "var(--color-background)"
-        : "var(--color-foreground)"}
-      onclick={toggleKeyboard}
-      aria-label={keyboardOpen ? "Hide keyboard" : "Show keyboard"}
-      title={keyboardOpen ? "Hide keyboard" : "Show keyboard"}
-    >
-      <Keyboard class="size-5" />
-    </button>
-  {/if}
-  {#if thread.status === "stopped"}
+  <div class="relative min-h-0 flex-1 px-3 py-2">
     <div
-      class="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-black text-xs text-muted-foreground/60"
-    >
-      ( -_-) zzZ
-    </div>
-  {:else if thread.status === "done" || thread.status === "exited" || thread.status === "error"}
-    <div class="absolute inset-x-0 bottom-3 z-10 flex justify-center">
+      bind:this={container}
+      class="h-full w-full min-h-0 overflow-hidden"
+      class:touch-none={mobile}
+    ></div>
+    {#if thread.status === "stopped"}
+      <div
+        class="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-black text-xs text-muted-foreground/60"
+      >
+        ( -_-) zzZ
+      </div>
+    {:else if thread.status === "done" || thread.status === "exited" || thread.status === "error"}
+      <div class="absolute inset-x-0 bottom-3 z-10 flex justify-center">
+        <button
+          type="button"
+          class="rounded-md border border-border bg-[var(--color-surface)] px-3 py-1 text-xs text-muted-foreground shadow-lg transition hover:bg-[var(--color-surface-2)] hover:text-foreground"
+          onclick={() => void reloadThread(thread.id)}
+        >
+          {thread.status === "done"
+            ? "Process finished"
+            : thread.status === "error"
+              ? "Spawn failed"
+              : `Process exited (code ${thread.exitCode ?? "?"})`}
+          — click to relaunch
+        </button>
+      </div>
+    {/if}
+    {#if mobile && focused && !finished}
       <button
         type="button"
-        class="rounded-md border border-border bg-[var(--color-surface)] px-3 py-1 text-xs text-muted-foreground shadow-lg transition hover:bg-[var(--color-surface-2)] hover:text-foreground"
-        onclick={() => void reloadThread(thread.id)}
+        class="absolute bottom-3 right-3 z-20 flex size-11 items-center justify-center rounded-full border shadow-lg transition active:scale-95"
+        style:background-color={keyboardOpen || keyBarOpen
+          ? "var(--color-foreground)"
+          : "var(--color-surface-2)"}
+        style:color={keyboardOpen || keyBarOpen
+          ? "var(--color-background)"
+          : "var(--color-foreground)"}
+        style:border-color={keyBarOpen
+          ? "var(--color-foreground)"
+          : "var(--color-border)"}
+        onpointerdown={fabDown}
+        onpointerup={fabUp}
+        onpointercancel={fabCancel}
+        onpointerleave={fabCancel}
+        aria-label="Keyboard (long-press for key bar)"
+        title="Tap: keyboard · Long-press: key bar"
       >
-        {thread.status === "done"
-          ? "Process finished"
-          : thread.status === "error"
-            ? "Spawn failed"
-            : `Process exited (code ${thread.exitCode ?? "?"})`}
-        — click to relaunch
+        <Keyboard class="size-5" />
       </button>
+    {/if}
+  </div>
+
+  {#if showKeyBar}
+    <div
+      class="flex shrink-0 items-stretch gap-1 border-t border-border bg-[var(--color-surface)] px-1 py-1"
+    >
+      <div class="keybar-scroll flex flex-1 items-stretch gap-1 overflow-x-auto">
+        {#each BAR_KEYS as k (k.id)}
+          {@const armed =
+            k.id === "ctrl" ? ctrlArmed : k.id === "alt" ? altArmed : false}
+          <button
+            type="button"
+            class="flex h-9 min-w-9 shrink-0 items-center justify-center rounded-md border border-border px-2 text-[13px] font-medium transition active:scale-95"
+            style:background-color={armed
+              ? "var(--color-foreground)"
+              : "var(--color-surface-2)"}
+            style:color={armed
+              ? "var(--color-background)"
+              : "var(--color-foreground)"}
+            onpointerdown={(e) => {
+              keepFocus(e);
+              pressBarKey(k.id);
+            }}
+          >
+            {k.label}
+          </button>
+        {/each}
+      </div>
     </div>
   {/if}
 </div>
+
+<style>
+  /* A scrollbar inside the 36px key strip would eat a third of it. */
+  .keybar-scroll {
+    scrollbar-width: none;
+  }
+  .keybar-scroll::-webkit-scrollbar {
+    display: none;
+  }
+</style>
 
 {#if ctxMenu}
   <ContextMenu
