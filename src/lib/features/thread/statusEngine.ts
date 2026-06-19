@@ -11,6 +11,17 @@ const DEFAULT_WORKING_TTL_MS = 2000;
 const lastWorkingAt = new Map<string, number>();
 const workingTtlMs = new Map<string, number>();
 const prevStatus = new Map<string, string>();
+// Auto-sleep liveness, kept apart from lastWorkingAt so they never light the
+// running/ready dot (a chatty plain shell or a just-finished agent would
+// masquerade as working). They only veto the idle countdown:
+//   lastOutputAt    — any raw PTY byte; an agent running a shell/subagent keeps
+//                     emitting output even when its "esc to interrupt" footer
+//                     scrolled out of the detect buffer.
+//   lastTranscriptAt — the agent's session jsonl was written (a tool call, a
+//                     subagent step, streamed tokens) while the terminal was
+//                     visually quiet. Fed by the session monitor.
+const lastOutputAt = new Map<string, number>();
+const lastTranscriptAt = new Map<string, number>();
 // Auto-sleep countdown anchors. Kept separate from lastWorkingAt: arming the
 // countdown by stamping lastWorkingAt made tick() see a fresh "working"
 // stamp, flipping hidden idle threads to running for 2s and firing a ghost
@@ -35,6 +46,19 @@ function maybeAutoClose(threadId: string, iconKey: string | null | undefined) {
     return;
   }
   const now = Date.now();
+  // Real recent activity vetoes the countdown: the agent's own working signal,
+  // any raw PTY output, or a freshly written session transcript. This is what
+  // keeps a long quiet tool call or an output-streaming subagent from getting
+  // its PTY killed mid-work while the dot reads "ready".
+  const lastActivity = Math.max(
+    lastWorkingAt.get(threadId) ?? 0,
+    lastOutputAt.get(threadId) ?? 0,
+    lastTranscriptAt.get(threadId) ?? 0,
+  );
+  if (lastActivity > 0 && now - lastActivity < minutes * 60_000) {
+    idleSince.delete(threadId);
+    return;
+  }
   const armed = idleSince.get(threadId);
   if (!armed) {
     idleSince.set(threadId, now);
@@ -76,6 +100,8 @@ function tick() {
   for (const t of app.threads) {
     if (!t.ptyId) {
       lastWorkingAt.delete(t.id);
+      lastOutputAt.delete(t.id);
+      lastTranscriptAt.delete(t.id);
       prevStatus.delete(t.id);
       idleSince.delete(t.id);
       if (t.status === "ready" || t.status === "running") {
@@ -115,6 +141,16 @@ export const statusEngine = {
     workingTtlMs.set(threadId, ttlMs);
   },
 
+  // Raw PTY output and transcript writes only defer auto-sleep; they must not
+  // touch lastWorkingAt or they would flip the dot to running.
+  markOutput(threadId: string) {
+    lastOutputAt.set(threadId, Date.now());
+  },
+
+  markTranscriptActive(threadId: string) {
+    lastTranscriptAt.set(threadId, Date.now());
+  },
+
   acquire() {
     refCount++;
     if (timer === null) {
@@ -125,6 +161,8 @@ export const statusEngine = {
   release(threadId: string) {
     refCount = Math.max(0, refCount - 1);
     lastWorkingAt.delete(threadId);
+    lastOutputAt.delete(threadId);
+    lastTranscriptAt.delete(threadId);
     workingTtlMs.delete(threadId);
     prevStatus.delete(threadId);
     idleSince.delete(threadId);
