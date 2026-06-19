@@ -9,6 +9,7 @@ import { gitStore } from "$lib/features/git/store.svelte";
 import { notifications } from "$lib/features/notifications/store.svelte";
 import { device, type BoiteEntry } from "$lib/features/settings/device.svelte";
 import { registerPush } from "$lib/features/push/api";
+import { parkedLocal } from "$lib/backend/tauri/parked";
 
 // In a browser/PWA the only backend is the server that served this page.
 export function defaultRemoteWsUrl(): string {
@@ -99,8 +100,19 @@ export async function switchToLocal(): Promise<boolean> {
   resetStores();
   workspace.activateLocal();
   await app.init();
+  restoreParkedStatuses();
   notifications.success("Back to local workspace");
   return true;
+}
+
+// Threads reload from SQLite as idle (ready/running are never persisted), but
+// their PTYs were only parked, not killed. Repaint the last-known dot colour so
+// the picker shows them connected; clicking one reattaches and resumes live
+// status. statusEngine skips parked threads, so this colour sticks until then.
+function restoreParkedStatuses() {
+  for (const [id, status] of parkedLocal) {
+    app.setThreadStatus(id, status);
+  }
 }
 
 // Switch to an already-saved boite. No-op when it is already the active,

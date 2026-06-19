@@ -1,6 +1,7 @@
 import { app } from "$lib/app/store.svelte";
 import { settings } from "$lib/features/settings/store.svelte";
 import { paneStore, leavesOf } from "$lib/features/panes/store.svelte";
+import { parkedLocal } from "$lib/backend/tauri/parked";
 import { notifyWhenUnfocused } from "$lib/storage/notify";
 import { ptyKill } from "$lib/storage/pty";
 import { logger } from "$lib/shared/services/logger.svelte";
@@ -99,6 +100,10 @@ function tick() {
 
   for (const t of app.threads) {
     if (!t.ptyId) {
+      // A parked local PTY is detached but still alive (workspace switch). Keep
+      // its status + dot colour until the pane reattaches; demoting it to idle
+      // would flatten the ping the user expects to stay lit.
+      if (parkedLocal.has(t.id)) continue;
       lastWorkingAt.delete(t.id);
       lastOutputAt.delete(t.id);
       lastTranscriptAt.delete(t.id);
