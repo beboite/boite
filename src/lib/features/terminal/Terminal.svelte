@@ -759,10 +759,23 @@
       // keyboard; doing it from an effect would not count as a user gesture.
       ta.removeAttribute("inputmode");
       ta.focus();
+      // The keyboard is about to cover the bottom rows; bring the prompt back
+      // above it. The visualViewport resize handles it too, but tapping the FAB
+      // does not always emit one, so nudge once the viewport settles.
+      setTimeout(() => term?.scrollToBottom(), 60);
     } else {
       ta.setAttribute("inputmode", "none");
       ta.blur();
     }
+  }
+
+  // The soft keyboard shrinks the layout (interactive-widget=resizes-content),
+  // so the container's ResizeObserver already refits. Keep the prompt visible:
+  // scroll the freshly resized terminal to the bottom once the reflow lands.
+  function onViewportResize() {
+    if (!mobile || !term || !visible) return;
+    scheduleFit();
+    requestAnimationFrame(() => term?.scrollToBottom());
   }
 
   function touchDist(t: TouchList): number {
@@ -1185,6 +1198,8 @@
     container.addEventListener("touchend", onTouchEnd);
     container.addEventListener("touchcancel", onTouchEnd);
 
+    window.visualViewport?.addEventListener("resize", onViewportResize);
+
     // The status engine (TTL demotion, idle auto-close) is local only: remote
     // status comes from the server, and a local idle timer must not kill PTYs
     // shared with other attached devices.
@@ -1247,6 +1262,15 @@
     if (term) syncMobileInput();
   });
 
+  // Opening/closing the CLI key bar resizes the terminal; keep the prompt in
+  // view (the ResizeObserver refits but does not scroll).
+  $effect(() => {
+    void showKeyBar;
+    if (mobile && term && visible) {
+      requestAnimationFrame(() => term?.scrollToBottom());
+    }
+  });
+
   onDestroy(() => {
     destroyed = true;
     statusEngine.release(thread.id);
@@ -1261,6 +1285,7 @@
     container?.removeEventListener("touchmove", onTouchMove);
     container?.removeEventListener("touchend", onTouchEnd);
     container?.removeEventListener("touchcancel", onTouchEnd);
+    window.visualViewport?.removeEventListener("resize", onViewportResize);
     term?.dispose();
     term = null;
     fit = null;
