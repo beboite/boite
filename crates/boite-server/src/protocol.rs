@@ -1,8 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 // Binary frame layout: [opcode: u8][thread uuid: 16 bytes][payload...].
-pub const FRAME_OUTPUT: u8 = 0x01; // server -> client (live + replay)
+pub const FRAME_OUTPUT: u8 = 0x01; // server -> client (live + raw replay)
 pub const FRAME_INPUT: u8 = 0x02; // client -> server
+pub const FRAME_OUTPUT_GZIP: u8 = 0x03; // server -> client, gzip-compressed replay
 
 #[derive(Deserialize)]
 pub struct Request {
@@ -56,10 +57,15 @@ impl Event {
     }
 }
 
-/// Build a binary output frame: opcode + 16-byte thread id + payload.
+/// Build a live binary output frame: opcode + 16-byte thread id + payload.
 pub fn encode_output(thread_id: &uuid::Uuid, payload: &[u8]) -> Vec<u8> {
+    encode_frame(FRAME_OUTPUT, thread_id, payload)
+}
+
+/// Build a binary frame with an explicit opcode (replay raw vs gzip).
+pub fn encode_frame(op: u8, thread_id: &uuid::Uuid, payload: &[u8]) -> Vec<u8> {
     let mut frame = Vec::with_capacity(1 + 16 + payload.len());
-    frame.push(FRAME_OUTPUT);
+    frame.push(op);
     frame.extend_from_slice(thread_id.as_bytes());
     frame.extend_from_slice(payload);
     frame

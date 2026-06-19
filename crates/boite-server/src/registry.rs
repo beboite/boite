@@ -61,6 +61,12 @@ pub struct AttachSnapshot {
     pub cols: u16,
     pub rows: u16,
     pub replay: Vec<u8>,
+    // Absolute offset the replay ends at; the client tracks this and sends it
+    // back as `since` on the next reattach.
+    pub offset: u64,
+    // True when the replay is the whole ring (client must clear its terminal
+    // first); false when it is a delta the client appends.
+    pub reset: bool,
     pub rx: broadcast::Receiver<Arc<Vec<u8>>>,
 }
 
@@ -106,13 +112,14 @@ impl Registry {
         self.shared.threads.lock().len()
     }
 
-    /// Current scrollback for a thread, used to re-sync a client whose
-    /// broadcast receiver lagged (it missed live frames; resend the whole ring
-    /// so xterm repaints rather than desyncing on a truncated escape).
-    pub fn replay(&self, thread_id: &str) -> Option<Vec<u8>> {
+    /// Current scrollback for a thread plus the offset it ends at, used to
+    /// re-sync a client whose broadcast receiver lagged (it missed live frames;
+    /// resend the whole ring so xterm repaints rather than desyncing on a
+    /// truncated escape).
+    pub fn replay(&self, thread_id: &str) -> Option<(Vec<u8>, u64)> {
         let live = self.live(thread_id)?;
-        let snap = live.ring.lock().snapshot();
-        Some(snap)
+        let ring = live.ring.lock();
+        Some((ring.snapshot(), ring.total()))
     }
 
     /// Snapshot of (thread_id -> (pty_id, status, title)) for thread.list.
@@ -158,13 +165,26 @@ impl Registry {
     }
 
     /// Subscribe to a thread's output and snapshot its scrollback atomically so
-    /// no byte is both replayed and streamed.
-    pub fn attach(&self, thread_id: &str, cols: u16, rows: u16) -> Option<AttachSnapshot> {
+    /// no byte is both replayed and streamed. `since` is the client's last known
+    /// offset: when it is still inside the ring only the delta is returned
+    /// (reset = false); otherwise the whole ring is sent (reset = true).
+    pub fn attach(
+        &self,
+        thread_id: &str,
+        cols: u16,
+        rows: u16,
+        since: Option<u64>,
+    ) -> Option<AttachSnapshot> {
         let live = self.live(thread_id)?;
         let pty_id = live.pty_id();
-        let (replay, rx) = {
+        let (replay, offset, reset, rx) = {
             let ring = live.ring.lock();
-            (ring.snapshot(), live.output.subscribe())
+            let total = ring.total();
+            let (bytes, reset) = match since.and_then(|s| ring.delta_from(s)) {
+                Some(delta) => (delta, false),
+                None => (ring.snapshot(), true),
+            };
+            (bytes, total, reset, live.output.subscribe())
         };
         // Resize the PTY to the attaching client (last attacher wins).
         let _ = self.pty.resize(&pty_id, cols, rows);
@@ -174,6 +194,8 @@ impl Registry {
             cols: c,
             rows: r,
             replay,
+            offset,
+            reset,
             rx,
         })
     }
@@ -329,6 +351,10 @@ fn spawn_ticker(shared: Arc<Shared>) {
 struct Ring {
     buf: VecDeque<u8>,
     cap: usize,
+    // Absolute count of bytes ever written. The oldest byte still in `buf` sits
+    // at offset `written - buf.len()`; clients track this offset so a reattach
+    // (reconnect or unhide) can ask for just the delta instead of the full ring.
+    written: u64,
 }
 
 impl Ring {
@@ -336,9 +362,11 @@ impl Ring {
         Ring {
             buf: VecDeque::new(),
             cap,
+            written: 0,
         }
     }
     fn extend(&mut self, bytes: &[u8]) {
+        self.written += bytes.len() as u64;
         if bytes.len() >= self.cap {
             self.buf.clear();
             self.buf.extend(&bytes[bytes.len() - self.cap..]);
@@ -349,7 +377,23 @@ impl Ring {
             self.buf.pop_front();
         }
     }
+    fn total(&self) -> u64 {
+        self.written
+    }
+    fn start(&self) -> u64 {
+        self.written - self.buf.len() as u64
+    }
     fn snapshot(&self) -> Vec<u8> {
         self.buf.iter().copied().collect()
+    }
+    /// Bytes written since absolute offset `since`, or None if `since` fell out
+    /// of the ring (caller must send a full snapshot + reset instead). An empty
+    /// vec means the client is already current.
+    fn delta_from(&self, since: u64) -> Option<Vec<u8>> {
+        if since < self.start() || since > self.written {
+            return None;
+        }
+        let skip = (since - self.start()) as usize;
+        Some(self.buf.iter().skip(skip).copied().collect())
     }
 }

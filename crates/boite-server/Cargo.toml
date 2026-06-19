@@ -1,6 +1,6 @@
 [package]
 name = "boite-server"
-version = "0.8.0"
+version = "0.8.1"
 description = "Headless boite server: PTY orchestration over WebSocket"
 edition = "2021"
 
@@ -30,6 +30,9 @@ web-push-native = "0.4"
 p256 = "0.13"
 base64 = "0.22"
 http = "1"
+# Pure-Rust deflate (miniz_oxide backend, no C) so it cross-compiles to arm64.
+# Used to gzip the one-shot scrollback replay frame.
+flate2 = "1"
 dirs = "6"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
