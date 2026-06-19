@@ -1,8 +1,11 @@
 <script lang="ts">
+  import { onMount, onDestroy } from "svelte";
+  import { scale } from "svelte/transition";
   import { workspace } from "$lib/backend";
   import { hasTauri } from "$lib/backend/env";
   import { device, type BoiteEntry } from "$lib/features/settings/device.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
+  import { portal } from "$lib/shared/actions/portal";
   import {
     switchToLocal,
     switchToBoite,
@@ -35,12 +38,17 @@
     "#facc15",
   ];
 
+  const MENU_W = 340;
+
   let open = $state(false);
   let showAdd = $state(false);
   let addUrl = $state("");
   let addToken = $state("");
   let busy = $state(false);
   let nameDraft = $state("");
+  let menuPos = $state({ x: 0, y: 0 });
+  let triggerRoot: HTMLDivElement | null = $state(null);
+  let menuEl: HTMLDivElement | null = $state(null);
 
   function hostOf(url: string): string {
     if (!url) return "";
@@ -76,14 +84,29 @@
         : "var(--color-warning)",
   );
 
+  // The titlebar centers this toggle with a CSS transform, which becomes the
+  // containing block for any `position: fixed` child. The menu is portaled to
+  // <body> to escape that (and the titlebar's stacking context, which paints
+  // below the main content / shortcut bar); position it from the trigger rect.
+  function place() {
+    if (!triggerRoot) return;
+    const r = triggerRoot.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const x = Math.max(8, Math.min(r.left + r.width / 2 - MENU_W / 2, vw - MENU_W - 8));
+    menuPos = { x, y: r.bottom + 6 };
+  }
+
   function toggle() {
-    open = !open;
     if (open) {
-      nameDraft = workspace.info.name ?? "";
-      // Always land on the list (Local + saved boites). Adding a server is an
-      // explicit step, not the default screen.
-      showAdd = false;
+      close();
+      return;
     }
+    nameDraft = workspace.info.name ?? "";
+    // Always land on the list (Local + saved boites). Adding a server is an
+    // explicit step, not the default screen.
+    showAdd = false;
+    place();
+    open = true;
   }
   function close() {
     open = false;
@@ -147,11 +170,31 @@
     if ((workspace.info.color ?? "") === c) return;
     await setActiveBoiteInfo({ color: c });
   }
+
+  function onDocPointer(e: MouseEvent) {
+    if (!open) return;
+    const t = e.target as Node;
+    if (triggerRoot?.contains(t) || menuEl?.contains(t)) return;
+    close();
+  }
+  function onKey(e: KeyboardEvent) {
+    if (e.key === "Escape" && open) close();
+  }
+  onMount(() => {
+    document.addEventListener("mousedown", onDocPointer);
+    document.addEventListener("keydown", onKey);
+    window.addEventListener("resize", place);
+  });
+  onDestroy(() => {
+    document.removeEventListener("mousedown", onDocPointer);
+    document.removeEventListener("keydown", onKey);
+    window.removeEventListener("resize", place);
+  });
 </script>
 
 {#snippet rowDot(color: string, lit: boolean, pulse: boolean)}
   <span
-    class="size-2 shrink-0 rounded-full"
+    class="size-2.5 shrink-0 rounded-full"
     class:animate-pulse={pulse}
     style:background-color={color}
     style:opacity={lit ? "1" : "0.4"}
@@ -159,10 +202,10 @@
 {/snippet}
 
 {#snippet panel()}
-  <div class="flex flex-col gap-0.5">
+  <div class="flex flex-col gap-1">
     {#if !mobile}
-      <div class="px-2 pb-1.5 pt-0.5">
-        <span class="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+      <div class="px-2 pb-1 pt-0.5">
+        <span class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
           Workspaces
         </span>
       </div>
@@ -171,14 +214,14 @@
     {#if isTauri}
       <button
         type="button"
-        class={`flex items-center gap-2 rounded-md text-left transition hover:bg-accent disabled:opacity-50 ${mobile ? "px-3 py-3 text-sm" : "px-2 py-1.5 text-[12px]"}`}
+        class={`flex items-center gap-2.5 rounded-lg text-left transition hover:bg-accent disabled:opacity-50 ${mobile ? "px-3 py-3 text-sm" : "px-2.5 py-2 text-[13px]"}`}
         onclick={pickLocal}
         disabled={busy}
       >
-        <Monitor class="size-3.5 shrink-0 text-muted-foreground" />
-        <span class="flex-1 text-foreground">Local</span>
+        <Monitor class="size-4 shrink-0 text-muted-foreground" />
+        <span class="flex-1 font-medium text-foreground">Local</span>
         {#if workspace.mode === "local"}
-          <Check class="size-3.5 text-foreground" />
+          <Check class="size-4 text-foreground" />
         {/if}
       </button>
     {/if}
@@ -186,10 +229,10 @@
     {#each device.boites as b (b.id)}
       {@const active = isActiveBoite(b.id)}
       {@const connected = active && workspace.connection === "connected"}
-      <div class="flex items-stretch gap-0.5">
+      <div class="flex items-stretch gap-1">
         <button
           type="button"
-          class={`flex min-w-0 flex-1 items-center gap-2 rounded-md text-left transition hover:bg-accent disabled:opacity-50 ${mobile ? "px-3 py-3 text-sm" : "px-2 py-1.5 text-[12px]"}`}
+          class={`flex min-w-0 flex-1 items-center gap-2.5 rounded-lg text-left transition hover:bg-accent disabled:opacity-50 ${mobile ? "px-3 py-3 text-sm" : "px-2.5 py-2 text-[13px]"}`}
           onclick={() => pickBoite(b.id)}
           disabled={busy}
         >
@@ -199,11 +242,11 @@
             active && !connected,
           )}
           <span class="flex min-w-0 flex-1 flex-col leading-tight">
-            <span class="truncate text-foreground">{labelOf(b)}</span>
-            <span class="truncate text-[10px] text-muted-foreground">{hostOf(b.url)}</span>
+            <span class="truncate font-medium text-foreground">{labelOf(b)}</span>
+            <span class="truncate text-[11px] text-muted-foreground">{hostOf(b.url)}</span>
           </span>
           {#if active}
-            <span class="shrink-0 text-[10px] text-muted-foreground">
+            <span class="shrink-0 text-[10px] uppercase tracking-wide text-muted-foreground">
               {connected ? "connected" : workspace.connection}
             </span>
           {/if}
@@ -211,59 +254,65 @@
         {#if !active}
           <button
             type="button"
-            class={`flex shrink-0 items-center justify-center rounded-md text-muted-foreground transition hover:bg-danger/20 hover:text-danger ${mobile ? "w-11" : "w-8"}`}
+            class={`flex shrink-0 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-danger/20 hover:text-danger ${mobile ? "w-11" : "w-9"}`}
             onclick={() => remove(b.id)}
             aria-label="Remove boite"
             title="Remove"
           >
-            <Trash2 class="size-3.5" />
+            <Trash2 class="size-4" />
           </button>
         {/if}
       </div>
 
       {#if active}
-        <div class="mb-1 flex flex-col gap-2 rounded-md bg-[var(--color-background)] px-2 py-2">
-          <input
-            bind:value={nameDraft}
-            placeholder={hostOf(b.url)}
-            spellcheck="false"
-            autocapitalize="off"
-            onblur={commitName}
-            onkeydown={(e) => e.key === "Enter" && commitName()}
-            class={`w-full rounded border border-border bg-[var(--color-surface)] text-foreground outline-none focus:border-foreground/40 ${mobile ? "px-3 py-2.5 text-sm" : "px-1.5 py-1 text-[11px]"}`}
-          />
-          <div class={`flex flex-wrap ${mobile ? "gap-2.5" : "gap-1.5"}`}>
-            {#each PALETTE as c (c)}
-              <button
-                type="button"
-                class={`shrink-0 rounded-full border-2 transition ${mobile ? "size-9" : "size-5"}`}
-                style:background-color={c}
-                style:border-color={(workspace.info.color ?? "") === c
-                  ? "var(--color-foreground)"
-                  : "transparent"}
-                onclick={() => pickColor(c)}
-                aria-label="Set color"
-              ></button>
-            {/each}
+        <div class="mb-1 flex flex-col gap-2.5 rounded-lg bg-[var(--color-background)] px-2.5 py-2.5">
+          <label class="flex flex-col gap-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+            Name
+            <input
+              bind:value={nameDraft}
+              placeholder={hostOf(b.url)}
+              spellcheck="false"
+              autocapitalize="off"
+              onblur={commitName}
+              onkeydown={(e) => e.key === "Enter" && commitName()}
+              class={`w-full rounded-md border border-border bg-[var(--color-surface)] normal-case tracking-normal text-foreground outline-none focus:border-foreground/40 ${mobile ? "px-3 py-2.5 text-sm" : "px-2.5 py-1.5 text-[13px]"}`}
+            />
+          </label>
+          <div class="flex flex-col gap-1.5">
+            <span class="text-[10px] uppercase tracking-wide text-muted-foreground">Color</span>
+            <div class={`flex flex-wrap ${mobile ? "gap-2.5" : "gap-2"}`}>
+              {#each PALETTE as c (c)}
+                <button
+                  type="button"
+                  class={`shrink-0 rounded-full border-2 transition hover:scale-110 ${mobile ? "size-9" : "size-6"}`}
+                  style:background-color={c}
+                  style:border-color={(workspace.info.color ?? "") === c
+                    ? "var(--color-foreground)"
+                    : "transparent"}
+                  onclick={() => pickColor(c)}
+                  aria-label="Set color"
+                ></button>
+              {/each}
+            </div>
           </div>
         </div>
       {/if}
     {/each}
 
     {#if showAdd}
-      <div class="mt-1 flex flex-col gap-3 border-t border-border px-1 pb-1 pt-2.5">
+      <div class="mt-1 flex flex-col gap-3 border-t border-border px-1 pb-1 pt-3">
         <div class="flex items-center gap-2">
           {#if device.boites.length > 0}
             <button
               type="button"
-              class="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground transition hover:bg-accent hover:text-foreground"
+              class="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition hover:bg-accent hover:text-foreground"
               onclick={() => (showAdd = false)}
               aria-label="Back to list"
             >
               <ArrowLeft class="size-4" />
             </button>
           {/if}
-          <span class="text-[12px] font-medium text-foreground">Add a boite server</span>
+          <span class="text-[13px] font-semibold text-foreground">Add a boite server</span>
         </div>
 
         <label class="flex flex-col gap-1 text-[10px] uppercase tracking-wide text-muted-foreground">
@@ -274,7 +323,7 @@
             spellcheck="false"
             autocapitalize="off"
             autocomplete="off"
-            class="w-full rounded-md border border-border bg-[var(--color-background)] px-3 py-2 font-mono text-sm normal-case tracking-normal text-foreground outline-none focus:border-foreground/40"
+            class="w-full rounded-md border border-border bg-[var(--color-background)] px-3 py-2.5 font-mono text-sm normal-case tracking-normal text-foreground outline-none focus:border-foreground/40"
           />
         </label>
         <label class="flex flex-col gap-1 text-[10px] uppercase tracking-wide text-muted-foreground">
@@ -285,7 +334,7 @@
             placeholder="••••••••"
             spellcheck="false"
             autocomplete="off"
-            class="w-full rounded-md border border-border bg-[var(--color-background)] px-3 py-2 font-mono text-sm normal-case tracking-normal text-foreground outline-none focus:border-foreground/40"
+            class="w-full rounded-md border border-border bg-[var(--color-background)] px-3 py-2.5 font-mono text-sm normal-case tracking-normal text-foreground outline-none focus:border-foreground/40"
           />
         </label>
 
@@ -293,7 +342,7 @@
           {#if device.boites.length > 0}
             <button
               type="button"
-              class={`rounded-md text-muted-foreground transition hover:text-foreground ${mobile ? "px-3 py-2 text-sm" : "px-2.5 py-1.5 text-[12px]"}`}
+              class={`rounded-md text-muted-foreground transition hover:text-foreground ${mobile ? "px-3 py-2 text-sm" : "px-3 py-1.5 text-[13px]"}`}
               onclick={() => (showAdd = false)}
               disabled={busy}
             >
@@ -302,7 +351,7 @@
           {/if}
           <button
             type="button"
-            class={`rounded-md bg-foreground font-medium text-background transition hover:bg-foreground/90 disabled:opacity-50 ${mobile ? "px-4 py-2 text-sm" : "px-3 py-1.5 text-[12px]"}`}
+            class={`rounded-md bg-foreground font-medium text-background transition hover:bg-foreground/90 disabled:opacity-50 ${mobile ? "px-4 py-2 text-sm" : "px-4 py-1.5 text-[13px]"}`}
             onclick={submitAdd}
             disabled={busy || !addUrl.trim() || !addToken.trim()}
           >
@@ -312,27 +361,29 @@
       </div>
     {:else}
       {#if device.boites.length === 0 && !isTauri}
-        <p class={`text-muted-foreground/70 ${mobile ? "px-3 py-2 text-sm" : "px-2 py-1.5 text-[11px]"}`}>
+        <p class={`text-muted-foreground/70 ${mobile ? "px-3 py-2 text-sm" : "px-2.5 py-2 text-[12px]"}`}>
           No boite server yet.
         </p>
       {/if}
       <button
         type="button"
-        class={`mt-0.5 flex items-center gap-2 rounded-md text-left text-muted-foreground transition hover:bg-accent hover:text-foreground ${mobile ? "px-3 py-3 text-sm" : "px-2 py-1.5 text-[12px]"}`}
+        class={`mt-0.5 flex items-center gap-2.5 rounded-lg border border-dashed border-border text-left text-muted-foreground transition hover:border-foreground/30 hover:bg-accent hover:text-foreground ${mobile ? "px-3 py-3 text-sm" : "px-2.5 py-2 text-[13px]"}`}
         onclick={openAdd}
       >
-        <Plus class="size-3.5 shrink-0" />
+        <Plus class="size-4 shrink-0" />
         Add boite server
       </button>
     {/if}
   </div>
 {/snippet}
 
-<div class="pointer-events-auto relative flex items-center">
+<div bind:this={triggerRoot} class="pointer-events-auto relative flex items-center">
   <button
     type="button"
     class="flex max-w-[40vw] items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface)] px-2 py-0.5 text-[11px] text-foreground transition hover:bg-[var(--color-surface-2)]"
     onclick={toggle}
+    aria-haspopup="menu"
+    aria-expanded={open}
     title="Workspaces"
   >
     {#if triggerDot}
@@ -351,14 +402,16 @@
       {@render panel()}
     </MobileSheet>
   {:else if open}
-    <button
-      type="button"
-      class="fixed inset-0 z-40 cursor-default"
-      aria-label="Close menu"
-      onclick={close}
-    ></button>
     <div
-      class="absolute left-1/2 top-[calc(100%+6px)] z-50 max-h-[70vh] w-80 -translate-x-1/2 overflow-y-auto rounded-lg border border-border bg-[var(--color-surface)] p-1.5 shadow-xl"
+      bind:this={menuEl}
+      use:portal
+      role="menu"
+      class="fixed z-[9999] max-h-[min(70vh,34rem)] overflow-y-auto rounded-xl border border-border bg-[var(--color-surface)] p-2 shadow-2xl"
+      style:left="{menuPos.x}px"
+      style:top="{menuPos.y}px"
+      style:width="{MENU_W}px"
+      style:transform-origin="top center"
+      transition:scale={{ duration: 100, start: 0.97 }}
     >
       {@render panel()}
     </div>
