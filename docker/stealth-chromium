@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Headful chromium under Xvfb with anti-automation flags, exposing a CDP
+# endpoint on 127.0.0.1:9222 for chrome-devtools-axi. Headful + a residential
+# egress IP + these flags is the practical best-effort against bot challenges;
+# interactive CAPTCHAs (Cloudflare Turnstile, reCAPTCHA) are not guaranteed.
+set -e
+export DISPLAY="${DISPLAY:-:99}"
+
+if ! pgrep -x Xvfb >/dev/null 2>&1; then
+  Xvfb :99 -screen 0 1280x800x24 -nolisten tcp >/tmp/xvfb.log 2>&1 &
+  sleep 1
+fi
+
+# Keep the spoofed UA major in lockstep with the real chromium so UA-CH does
+# not contradict the navigator.userAgent string.
+CHROME_VER="$(chromium --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+
+exec chromium \
+  --no-sandbox \
+  --remote-debugging-port=9222 \
+  --remote-debugging-address=127.0.0.1 \
+  --user-data-dir=/root/.chromium-profile \
+  --disable-blink-features=AutomationControlled \
+  --disable-features=IsolateOrigins,site-per-process,Translate \
+  --disable-infobars \
+  --no-first-run \
+  --no-default-browser-check \
+  --window-size=1280,800 \
+  --lang=en-US \
+  --user-agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${CHROME_VER:-149.0.0.0} Safari/537.36" \
+  "$@"
