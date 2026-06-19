@@ -56,6 +56,10 @@
   let spawned = $state(false);
   let spawning = false;
   let destroyed = false;
+  // Detached for visibility (remote + mobile): the PTY lives on, but its output
+  // stream is dropped while hidden to save 4G; set so the pane reattaches when
+  // shown again.
+  let released = false;
   let spawnRetryTimer: ReturnType<typeof setTimeout> | null = null;
   let spawnRetryCount = 0;
   const SPAWN_RETRY_MAX = 30;
@@ -235,12 +239,22 @@
     if (!term || destroyed) return;
     if (eventPtyId !== ptyId) return;
 
+    if (event.type === "reset") {
+      // Full replay incoming (the delta we asked for rolled out of the server
+      // ring): clear so it repaints cleanly instead of stacking onto stale
+      // scrollback.
+      term.reset();
+      detectBuffer = "";
+      return;
+    }
+
     if (event.type === "output") {
       const current = currentThread();
       if (!current || current.status === "stopped") return;
       syncAliveThread();
       const bytes = event.bytes;
       lastOutputAt = Date.now();
+      if (backend().caps.clientStatus) statusEngine.markOutput(thread.id);
       term.write(bytes);
       const text = decoder.decode(bytes, { stream: true });
       detectWorkingFromOutput(text);
@@ -506,7 +520,7 @@
     }
   }
 
-  async function spawn() {
+  async function spawn(reattach = false) {
     if (spawned || spawning || destroyed) {
       logger.debug(
         "spawn",
@@ -515,13 +529,20 @@
       return;
     }
     const current = currentThread();
-    // Only idle threads spawn. Finished threads (done/exited/error) used to
-    // auto-respawn whenever the pane became visible again; relaunch is an
-    // explicit user action that goes through reloadThread + remount.
-    if (!current || current.status !== "idle") {
+    // Idle threads spawn fresh. A reattach (a remote thread we detached for
+    // visibility) re-opens even though the server still reports it running/ready
+    // — ptyOpen attaches to the live PTY. Finished threads (done/exited/error)
+    // never auto-respawn; relaunch is explicit via reloadThread + remount.
+    const finished =
+      current?.status === "done" ||
+      current?.status === "exited" ||
+      current?.status === "error" ||
+      current?.status === "stopped";
+    const attachable = reattach && current?.status !== "idle";
+    if (!current || finished || (current.status !== "idle" && !attachable)) {
       logger.debug(
         "spawn",
-        `${thread.label}: skip — missing=${!current} status=${current?.status}`,
+        `${thread.label}: skip — missing=${!current} status=${current?.status} reattach=${reattach}`,
       );
       return;
     }
@@ -636,7 +657,9 @@
       spawning = false;
     }
 
-    if (plan.pendingInput && ptyId) {
+    // Reattach only re-opens the output stream; the process is already running,
+    // so never re-inject the launch input.
+    if (!reattach && plan.pendingInput && ptyId) {
       const targetPtyId = ptyId;
       const text = plan.pendingInput;
       const encoded = new TextEncoder().encode(text);
@@ -679,7 +702,7 @@
     }
 
     const detector = getDetector(thread);
-    if (detector && ptyId) {
+    if (!reattach && detector && ptyId) {
       const since = Math.max(0, spawnedAt - (thread.sessionId ? 1000 : 5000));
       stopSessionMonitor();
       sessionMonitor = startSessionMonitor({
@@ -848,6 +871,33 @@
         fit?.fit();
         void spawn();
       });
+    }
+  });
+
+  // Drop the output stream of a hidden remote thread on phones: the server keeps
+  // the PTY (and its scrollback ring) alive, status/title still arrive as
+  // control events, and the pane reattaches with just the delta when shown.
+  // Desktop and local keep every pane streaming for instant switching.
+  $effect(() => {
+    const shown = visible;
+    if (!term) return;
+    const remote = !backend().caps.clientStatus;
+    if (!remote || !mobile) return;
+    const cur = currentThread();
+    const finished =
+      cur?.status === "done" ||
+      cur?.status === "exited" ||
+      cur?.status === "error" ||
+      cur?.status === "stopped";
+    if (finished) return;
+    if (shown) {
+      if (released && !spawned && !spawning) {
+        released = false;
+        void spawn(true);
+      }
+    } else if (spawned && ptyId) {
+      released = true;
+      releasePty();
     }
   });
 

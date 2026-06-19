@@ -180,27 +180,33 @@ async fn handle_attach(
     };
     let cols = params.get("cols").and_then(|v| v.as_u64()).unwrap_or(80) as u16;
     let rows = params.get("rows").and_then(|v| v.as_u64()).unwrap_or(24) as u16;
+    // Client's last known byte offset (delta replay) and whether it can inflate
+    // a gzip replay frame (DecompressionStream support).
+    let since = params.get("since").and_then(|v| v.as_u64());
+    let gzip = params.get("gzip").and_then(|v| v.as_bool()).unwrap_or(false);
 
     if let Some(h) = attached.remove(&thread_id) {
         h.abort();
     }
 
-    match state.registry.attach(&thread_id, cols, rows) {
+    match state.registry.attach(&thread_id, cols, rows, since) {
         Some(snap) => {
-            // Replay marker carries the PTY size so the client can size its
-            // terminal before writing the scrollback burst that follows.
+            // Replay marker carries the PTY size (so the client sizes its
+            // terminal first), the end offset (tracked for the next reattach),
+            // and reset (full ring => clear first; delta => append).
             let marker = Event::new(
                 "replay",
                 json!({
                     "threadId": thread_id,
                     "size": { "cols": snap.cols, "rows": snap.rows },
                     "bytes": snap.replay.len(),
+                    "offset": snap.offset,
+                    "reset": snap.reset,
+                    "gzip": gzip && !snap.replay.is_empty(),
                 }),
             );
             let _ = tx.send(WsOut::Text(json_str(&marker))).await;
-            let _ = tx
-                .send(WsOut::Binary(protocol::encode_output(&uuid, &snap.replay)))
-                .await;
+            let _ = tx.send(replay_frame(&uuid, &snap.replay, gzip)).await;
 
             let txf = tx.clone();
             let mut rxf = snap.rx;
@@ -219,15 +225,24 @@ async fn handle_attach(
                             }
                         }
                         // Receiver fell behind the broadcast cap. Resend the
-                        // whole scrollback so xterm resyncs instead of rendering
-                        // a truncated escape stream.
+                        // whole scrollback (reset) so xterm resyncs instead of
+                        // rendering a truncated escape stream.
                         Err(RecvError::Lagged(_)) => {
-                            if let Some(buf) = registry.replay(&replay_id) {
-                                if txf
-                                    .send(WsOut::Binary(protocol::encode_output(&uuid, &buf)))
-                                    .await
-                                    .is_err()
-                                {
+                            if let Some((buf, off)) = registry.replay(&replay_id) {
+                                let marker = Event::new(
+                                    "replay",
+                                    json!({
+                                        "threadId": replay_id,
+                                        "bytes": buf.len(),
+                                        "offset": off,
+                                        "reset": true,
+                                        "gzip": gzip && !buf.is_empty(),
+                                    }),
+                                );
+                                if txf.send(WsOut::Text(json_str(&marker))).await.is_err() {
+                                    break;
+                                }
+                                if txf.send(replay_frame(&uuid, &buf, gzip)).await.is_err() {
                                     break;
                                 }
                             }
@@ -300,4 +315,30 @@ async fn authenticate(
 
 fn json_str<T: serde::Serialize>(value: &T) -> String {
     serde_json::to_string(value).unwrap_or_else(|_| "{}".to_string())
+}
+
+// Replay frames are bursty and one-shot (scrollback up to the ring size), so
+// gzip them when the client can inflate. Live frames stay raw: per-chunk
+// compression adds latency and barely helps on tiny writes.
+fn replay_frame(thread_id: &Uuid, bytes: &[u8], gzip: bool) -> WsOut {
+    if gzip && !bytes.is_empty() {
+        WsOut::Binary(protocol::encode_frame(
+            protocol::FRAME_OUTPUT_GZIP,
+            thread_id,
+            &gzip_bytes(bytes),
+        ))
+    } else {
+        WsOut::Binary(protocol::encode_output(thread_id, bytes))
+    }
+}
+
+fn gzip_bytes(data: &[u8]) -> Vec<u8> {
+    use flate2::write::GzEncoder;
+    use flate2::Compression;
+    use std::io::Write;
+    let mut enc = GzEncoder::new(Vec::new(), Compression::fast());
+    if enc.write_all(data).is_err() {
+        return data.to_vec();
+    }
+    enc.finish().unwrap_or_else(|_| data.to_vec())
 }

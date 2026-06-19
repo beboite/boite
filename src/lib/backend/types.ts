@@ -20,6 +20,9 @@ import type { LogEntry, LogLevel } from "$lib/shared/services/logger.svelte";
 // binary frames. Components see bytes either way.
 export type PtyEvent =
   | { type: "output"; bytes: Uint8Array }
+  // Server told the client to clear before the replay that follows (the delta
+  // it asked for had rolled out of the ring, so a full repaint is coming).
+  | { type: "reset" }
   | { type: "title"; value: string }
   | { type: "exit"; code: number | null }
   | { type: "error"; message: string };

@@ -4,9 +4,22 @@ export type ConnState = "connecting" | "connected" | "disconnected";
 
 const FRAME_OUTPUT = 0x01;
 const FRAME_INPUT = 0x02;
+const FRAME_OUTPUT_GZIP = 0x03;
 const RPC_TIMEOUT = 20_000;
 const BACKOFF_MIN = 500;
 const BACKOFF_MAX = 30_000;
+
+// DecompressionStream is missing on some older WebKitGTK builds; only advertise
+// gzip support to the server when we can actually inflate.
+const GZIP_OK = typeof DecompressionStream !== "undefined";
+
+async function inflateGzip(bytes: Uint8Array): Promise<Uint8Array> {
+  const stream = new Blob([bytes as BlobPart])
+    .stream()
+    .pipeThrough(new DecompressionStream("gzip"));
+  const buf = await new Response(stream).arrayBuffer();
+  return new Uint8Array(buf);
+}
 
 function uuidToBytes(u: string): Uint8Array {
   const hex = u.replace(/-/g, "");
@@ -31,6 +44,12 @@ interface AttachReg {
   cols: number;
   rows: number;
   onOutput: (bytes: Uint8Array) => void;
+  onReset: () => void;
+}
+
+interface PendingReplay {
+  reset: boolean;
+  offset: number;
 }
 
 // One multiplexed WebSocket per remote workspace: JSON control plane (auth,
@@ -49,6 +68,16 @@ export class Socket {
   #pending = new Map<number, Pending>();
   #control = new Set<(e: ControlEvent) => void>();
   #attached = new Map<string, AttachReg>();
+  // Per-thread byte offset (absolute count of output bytes consumed). Sent as
+  // `since` on reattach so the server replies with just the delta. Survives a
+  // detach so unhiding a thread costs only the bytes produced while hidden.
+  #offsets = new Map<string, number>();
+  // A "replay" marker sets this; the next binary frame for that thread is the
+  // replay body (reset => clear first), not a live frame.
+  #pendingReplay = new Map<string, PendingReplay>();
+  // Serialize binary-frame handling: a gzip replay inflates asynchronously and
+  // must not let the live frames behind it overtake it.
+  #binChain: Promise<void> = Promise.resolve();
   #closed = false;
   #backoff = BACKOFF_MIN;
   #reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -76,6 +105,8 @@ export class Socket {
     }
     this.#failAllPending(new Error("socket disposed"));
     this.#attached.clear();
+    this.#offsets.clear();
+    this.#pendingReplay.clear();
     const ws = this.#ws;
     this.#ws = null;
     ws?.close();
@@ -115,21 +146,32 @@ export class Socket {
     cols: number,
     rows: number,
     onOutput: (bytes: Uint8Array) => void,
+    onReset: () => void,
   ): Promise<{ ptyId?: string; size?: { cols: number; rows: number } }> {
-    this.#attached.set(threadId, { cols, rows, onOutput });
+    this.#attached.set(threadId, { cols, rows, onOutput, onReset });
     try {
-      return await this.rpc("thread.attach", { threadId, cols, rows });
+      return await this.rpc("thread.attach", this.#attachParams(threadId, cols, rows));
     } catch (e) {
       this.#attached.delete(threadId);
       throw e;
     }
   }
 
+  // Keep the offset across detach so reattaching only pulls the delta; drop the
+  // pending replay since no frame will follow once detached.
   detach(threadId: string): Promise<void> {
     this.#attached.delete(threadId);
+    this.#pendingReplay.delete(threadId);
     return this.rpc("thread.detach", { threadId })
       .then(() => {})
       .catch(() => {});
+  }
+
+  #attachParams(threadId: string, cols: number, rows: number): Record<string, unknown> {
+    const params: Record<string, unknown> = { threadId, cols, rows, gzip: GZIP_OK };
+    const since = this.#offsets.get(threadId);
+    if (since !== undefined) params.since = since;
+    return params;
   }
 
   setAttachSize(threadId: string, cols: number, rows: number): void {
@@ -158,13 +200,13 @@ export class Socket {
           .then(() => {
             this.#backoff = BACKOFF_MIN;
             this.#setState("connected");
-            // Reconnect: re-attach everything; the server replays scrollback.
+            // Reconnect: re-attach everything. The server sends only the delta
+            // since our tracked offset (full ring + reset if it rolled off).
             for (const [threadId, reg] of this.#attached) {
-              this.rpc("thread.attach", {
-                threadId,
-                cols: reg.cols,
-                rows: reg.rows,
-              }).catch(() => {});
+              this.rpc(
+                "thread.attach",
+                this.#attachParams(threadId, reg.cols, reg.rows),
+              ).catch(() => {});
             }
             if (!settled) {
               settled = true;
@@ -216,16 +258,58 @@ export class Socket {
         return;
       }
       if (typeof msg.event === "string") {
+        // Consumed here, not forwarded: the replay marker pairs with the binary
+        // frame that follows it, not the app-level control plane.
+        if (msg.event === "replay") {
+          this.#onReplayMarker(msg.data);
+          return;
+        }
         const ce: ControlEvent = { event: msg.event, data: msg.data };
         for (const cb of this.#control) cb(ce);
       }
       return;
     }
     const buf = new Uint8Array(ev.data as ArrayBuffer);
-    if (buf.length < 17 || buf[0] !== FRAME_OUTPUT) return;
+    if (buf.length < 17) return;
+    const op = buf[0];
+    if (op !== FRAME_OUTPUT && op !== FRAME_OUTPUT_GZIP) return;
+    // Chain so a gzip replay's async inflate keeps frame order intact.
+    this.#binChain = this.#binChain.then(() => this.#handleBinary(op, buf));
+  }
+
+  #onReplayMarker(data: unknown): void {
+    const d = data as { threadId?: string; reset?: boolean; offset?: number } | null;
+    if (!d?.threadId) return;
+    this.#pendingReplay.set(d.threadId, {
+      reset: !!d.reset,
+      offset: typeof d.offset === "number" ? d.offset : 0,
+    });
+  }
+
+  async #handleBinary(op: number, buf: Uint8Array): Promise<void> {
     const threadId = bytesToUuid(buf.subarray(1, 17));
     const reg = this.#attached.get(threadId);
-    if (reg) reg.onOutput(buf.subarray(17));
+    if (!reg) return;
+    let payload = buf.subarray(17);
+    if (op === FRAME_OUTPUT_GZIP) {
+      try {
+        payload = await inflateGzip(payload);
+      } catch {
+        return;
+      }
+    }
+    const pending = this.#pendingReplay.get(threadId);
+    if (pending) {
+      this.#pendingReplay.delete(threadId);
+      if (pending.reset) reg.onReset();
+      if (payload.length) reg.onOutput(payload);
+      // Replay ends exactly at the server's offset; trust it rather than the
+      // (possibly decompressed) length.
+      this.#offsets.set(threadId, pending.offset);
+    } else {
+      if (payload.length) reg.onOutput(payload);
+      this.#offsets.set(threadId, (this.#offsets.get(threadId) ?? 0) + payload.length);
+    }
   }
 
   #scheduleReconnect(): void {

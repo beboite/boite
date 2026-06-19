@@ -55,6 +55,9 @@ export class RemoteBackend implements Backend {
 
   #socket: Socket;
   #keyToThread = new Map<string, string>();
+  // Coalesce resize RPCs: a pinch-zoom refit or rotation fires many in a row,
+  // but the server only needs the final size.
+  #resizeTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(url: string, token: string, onState: (s: ConnState) => void = () => {}) {
     const socket = new Socket(url, token, onState);
@@ -67,9 +70,10 @@ export class RemoteBackend implements Backend {
       open: async (args, onEvent) => {
         const { threadId, spec, meta } = args;
         const onOutput = (bytes: Uint8Array) => onEvent({ type: "output", bytes });
+        const onReset = () => onEvent({ type: "reset" });
         let res: { ptyId?: string } | undefined;
         try {
-          res = await socket.attach(threadId, spec.cols, spec.rows, onOutput);
+          res = await socket.attach(threadId, spec.cols, spec.rows, onOutput, onReset);
         } catch (e) {
           if (!String(e).includes("not live")) throw e;
           await rpc("thread.spawn", {
@@ -85,7 +89,7 @@ export class RemoteBackend implements Backend {
             cols: spec.cols,
             rows: spec.rows,
           });
-          res = await socket.attach(threadId, spec.cols, spec.rows, onOutput);
+          res = await socket.attach(threadId, spec.cols, spec.rows, onOutput, onReset);
         }
         const key = res?.ptyId ? String(res.ptyId) : threadId;
         keyToThread.set(key, threadId);
@@ -97,12 +101,21 @@ export class RemoteBackend implements Backend {
       },
       resize: (key, cols, rows) => {
         const tid = threadIdOf(key);
+        // Update the re-attach size immediately (cheap, local); debounce only
+        // the RPC so a burst of refits collapses to one server resize.
         socket.setAttachSize(tid, cols, rows);
-        // Tolerate a closed socket (reconnect window): Terminal fires resize
-        // as void; an unhandled "socket not open" rejection would surface.
-        return rpc("thread.resize", { threadId: tid, cols, rows })
-          .then(() => {})
-          .catch(() => {});
+        const prev = this.#resizeTimers.get(tid);
+        if (prev) clearTimeout(prev);
+        this.#resizeTimers.set(
+          tid,
+          setTimeout(() => {
+            this.#resizeTimers.delete(tid);
+            // Tolerate a closed socket (reconnect window): an unhandled
+            // "socket not open" rejection would otherwise surface.
+            void rpc("thread.resize", { threadId: tid, cols, rows }).catch(() => {});
+          }, 150),
+        );
+        return Promise.resolve();
       },
       kill: (key, wait = true) => {
         const tid = threadIdOf(key);
@@ -230,6 +243,8 @@ export class RemoteBackend implements Backend {
   }
 
   dispose(): void {
+    for (const t of this.#resizeTimers.values()) clearTimeout(t);
+    this.#resizeTimers.clear();
     this.#socket.close();
   }
 
