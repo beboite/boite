@@ -8,12 +8,14 @@
     switchToBoite,
     connectAndInit,
     setActiveBoiteInfo,
+    defaultRemoteWsUrl,
   } from "$lib/app/workspace";
   import MobileSheet from "$lib/features/mobile/MobileSheet.svelte";
   import Plus from "@lucide/svelte/icons/plus";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import Check from "@lucide/svelte/icons/check";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import ArrowLeft from "@lucide/svelte/icons/arrow-left";
   import Monitor from "@lucide/svelte/icons/monitor";
 
   // No local backend in a browser/PWA: only saved boites stand.
@@ -78,12 +80,20 @@
     open = !open;
     if (open) {
       nameDraft = workspace.info.name ?? "";
-      showAdd = device.boites.length === 0;
+      // Always land on the list (Local + saved boites). Adding a server is an
+      // explicit step, not the default screen.
+      showAdd = false;
     }
   }
   function close() {
     open = false;
     showAdd = false;
+  }
+  function openAdd() {
+    // In a PWA the serving origin is the obvious default; on desktop the
+    // internal Tauri host is useless, so leave it to the placeholder.
+    if (!isTauri && !addUrl) addUrl = defaultRemoteWsUrl();
+    showAdd = true;
   }
 
   async function pickLocal() {
@@ -150,6 +160,14 @@
 
 {#snippet panel()}
   <div class="flex flex-col gap-0.5">
+    {#if !mobile}
+      <div class="px-2 pb-1.5 pt-0.5">
+        <span class="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+          Workspaces
+        </span>
+      </div>
+    {/if}
+
     {#if isTauri}
       <button
         type="button"
@@ -233,26 +251,49 @@
     {/each}
 
     {#if showAdd}
-      <div class="mt-1 flex flex-col gap-1.5 border-t border-border pt-2">
-        <input
-          bind:value={addUrl}
-          placeholder="ws://host:7337/ws"
-          spellcheck="false"
-          autocapitalize="off"
-          class={`w-full rounded border border-border bg-[var(--color-background)] text-foreground outline-none focus:border-foreground/40 ${mobile ? "px-3 py-2.5 text-sm" : "px-1.5 py-1 text-[11px]"}`}
-        />
-        <input
-          bind:value={addToken}
-          type="password"
-          placeholder="token"
-          spellcheck="false"
-          class={`w-full rounded border border-border bg-[var(--color-background)] text-foreground outline-none focus:border-foreground/40 ${mobile ? "px-3 py-2.5 text-sm" : "px-1.5 py-1 text-[11px]"}`}
-        />
-        <div class="flex justify-end gap-1.5">
+      <div class="mt-1 flex flex-col gap-3 border-t border-border px-1 pb-1 pt-2.5">
+        <div class="flex items-center gap-2">
           {#if device.boites.length > 0}
             <button
               type="button"
-              class={`rounded text-muted-foreground transition hover:text-foreground ${mobile ? "px-3 py-2 text-sm" : "px-2 py-1 text-[11px]"}`}
+              class="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground transition hover:bg-accent hover:text-foreground"
+              onclick={() => (showAdd = false)}
+              aria-label="Back to list"
+            >
+              <ArrowLeft class="size-4" />
+            </button>
+          {/if}
+          <span class="text-[12px] font-medium text-foreground">Add a boite server</span>
+        </div>
+
+        <label class="flex flex-col gap-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+          Server URL
+          <input
+            bind:value={addUrl}
+            placeholder="ws://host:7337/ws"
+            spellcheck="false"
+            autocapitalize="off"
+            autocomplete="off"
+            class="w-full rounded-md border border-border bg-[var(--color-background)] px-3 py-2 font-mono text-sm normal-case tracking-normal text-foreground outline-none focus:border-foreground/40"
+          />
+        </label>
+        <label class="flex flex-col gap-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+          Token
+          <input
+            bind:value={addToken}
+            type="password"
+            placeholder="••••••••"
+            spellcheck="false"
+            autocomplete="off"
+            class="w-full rounded-md border border-border bg-[var(--color-background)] px-3 py-2 font-mono text-sm normal-case tracking-normal text-foreground outline-none focus:border-foreground/40"
+          />
+        </label>
+
+        <div class="flex justify-end gap-2 pt-0.5">
+          {#if device.boites.length > 0}
+            <button
+              type="button"
+              class={`rounded-md text-muted-foreground transition hover:text-foreground ${mobile ? "px-3 py-2 text-sm" : "px-2.5 py-1.5 text-[12px]"}`}
               onclick={() => (showAdd = false)}
               disabled={busy}
             >
@@ -261,7 +302,7 @@
           {/if}
           <button
             type="button"
-            class={`rounded bg-foreground font-medium text-background transition hover:bg-foreground/90 disabled:opacity-50 ${mobile ? "px-4 py-2 text-sm" : "px-2.5 py-1 text-[11px]"}`}
+            class={`rounded-md bg-foreground font-medium text-background transition hover:bg-foreground/90 disabled:opacity-50 ${mobile ? "px-4 py-2 text-sm" : "px-3 py-1.5 text-[12px]"}`}
             onclick={submitAdd}
             disabled={busy || !addUrl.trim() || !addToken.trim()}
           >
@@ -270,13 +311,18 @@
         </div>
       </div>
     {:else}
+      {#if device.boites.length === 0 && !isTauri}
+        <p class={`text-muted-foreground/70 ${mobile ? "px-3 py-2 text-sm" : "px-2 py-1.5 text-[11px]"}`}>
+          No boite server yet.
+        </p>
+      {/if}
       <button
         type="button"
-        class={`flex items-center gap-2 rounded-md text-left text-muted-foreground transition hover:bg-accent hover:text-foreground ${mobile ? "px-3 py-3 text-sm" : "px-2 py-1.5 text-[12px]"}`}
-        onclick={() => (showAdd = true)}
+        class={`mt-0.5 flex items-center gap-2 rounded-md text-left text-muted-foreground transition hover:bg-accent hover:text-foreground ${mobile ? "px-3 py-3 text-sm" : "px-2 py-1.5 text-[12px]"}`}
+        onclick={openAdd}
       >
         <Plus class="size-3.5 shrink-0" />
-        Add boite
+        Add boite server
       </button>
     {/if}
   </div>
@@ -312,7 +358,7 @@
       onclick={close}
     ></button>
     <div
-      class="absolute left-1/2 top-[calc(100%+6px)] z-50 max-h-[70vh] w-72 -translate-x-1/2 overflow-y-auto rounded-md border border-border bg-[var(--color-surface)] p-1.5 shadow-xl"
+      class="absolute left-1/2 top-[calc(100%+6px)] z-50 max-h-[70vh] w-80 -translate-x-1/2 overflow-y-auto rounded-lg border border-border bg-[var(--color-surface)] p-1.5 shadow-xl"
     >
       {@render panel()}
     </div>
