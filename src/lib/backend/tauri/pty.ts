@@ -18,9 +18,9 @@ function decodeBase64(b64: string): Uint8Array {
 }
 
 export const tauriPty: PtyApi = {
-  // threadId/meta are unused locally: the desktop spawns a fresh process and
-  // tracks thread identity in the store. They exist for RemoteBackend, where
-  // the server keys PTYs by thread.
+  // Keyed by thread id: pty_open reattaches to a PTY that a workspace switch
+  // detached (replaying its scrollback ring) instead of always spawning, so
+  // local processes survive switching to a remote workspace and back.
   open(args: PtyOpenArgs, onEvent: (event: PtyEvent) => void): Promise<string> {
     const channel = new Channel<WirePtyEvent>();
     channel.onmessage = (event) => {
@@ -30,7 +30,11 @@ export const tauriPty: PtyApi = {
         onEvent(event);
       }
     };
-    return invoke<string>("pty_spawn", { onEvent: channel, spec: args.spec });
+    return invoke<string>("pty_open", {
+      threadId: args.threadId,
+      onEvent: channel,
+      spec: args.spec,
+    });
   },
 
   async write(key: string, data: Uint8Array): Promise<void> {
@@ -45,8 +49,9 @@ export const tauriPty: PtyApi = {
     await invoke("pty_kill", { id: key, wait });
   },
 
-  // No detached PTYs locally: releasing a terminal kills its process.
+  // Releasing on unmount detaches (keeps the process + a scrollback ring
+  // alive); a later pty_open reattaches. Explicit close still calls kill().
   async release(key: string): Promise<void> {
-    await invoke("pty_kill", { id: key, wait: false });
+    await invoke("pty_detach", { id: key });
   },
 };
