@@ -71,4 +71,10 @@
       {/if}
     </div>
   </div>
+
+  <footer
+    class="flex shrink-0 items-center justify-end border-t border-border bg-[var(--color-surface)] px-4 py-1.5"
+  >
+    <span class="font-mono text-[11px] text-muted-foreground/60">Boite v{__APP_VERSION__}</span>
+  </footer>
 </div>
