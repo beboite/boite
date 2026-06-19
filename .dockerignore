@@ -26,3 +26,6 @@ opencode-data
 # Desktop bundles, never needed by the server build.
 src-tauri/gen
 src-tauri/icons
+
+# Android TWA wrapper: packaging only, irrelevant to the server image.
+mobile
