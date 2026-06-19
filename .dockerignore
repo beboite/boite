@@ -14,6 +14,15 @@ boite-data
 data
 workspace
 
+# Runtime mount dirs (created by docker-compose on the server, root-owned and
+# unreadable to the build context). Never part of the image build.
+claude
+claude.json
+codex
+opencode
+opencode-data
+*.bak-*
+
 # Desktop bundles, never needed by the server build.
 src-tauri/gen
 src-tauri/icons
