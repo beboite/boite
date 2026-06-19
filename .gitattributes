@@ -1,0 +1,7 @@
+# Files executed inside Linux containers must keep LF line endings even when
+# checked out (or `git archive`d) on a Windows host with core.autocrlf=true.
+# A CRLF in a shebang makes the kernel look for `bash\r` => container crash-loop
+# with "/usr/bin/env: 'bash\r': No such file or directory".
+*.sh        text eol=lf
+docker/*    text eol=lf
+gradlew     text eol=lf
