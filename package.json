@@ -1,6 +1,6 @@
 {
   "name": "boite",
-  "version": "0.8.3",
+  "version": "0.8.4",
   "description": "Lightweight multi-agent terminal multiplexer",
   "type": "module",
   "scripts": {
