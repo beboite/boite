@@ -7,7 +7,6 @@ import { platform } from "$lib/storage/platform.svelte";
 import { resetShellCache } from "$lib/storage/shell";
 import { gitStore } from "$lib/features/git/store.svelte";
 import { notifications } from "$lib/features/notifications/store.svelte";
-import { confirmDialog } from "$lib/shared/components/confirm.svelte";
 import { device, type BoiteEntry } from "$lib/features/settings/device.svelte";
 import { registerPush } from "$lib/features/push/api";
 
@@ -56,14 +55,11 @@ async function fetchAndApplyMeta() {
   }
 }
 
+// Leaving the local workspace is non-destructive now: local PTYs are detached
+// (kept alive + buffering) on the switch and reattach when you come back, so
+// there is nothing to warn about.
 async function confirmLeaveLocal(): Promise<boolean> {
-  if (workspace.mode !== "local" || !app.threads.some((t) => t.ptyId)) return true;
-  return confirmDialog.ask({
-    title: "Switch workspace?",
-    message: "Local running processes will be killed.",
-    confirmLabel: "Switch",
-    danger: true,
-  });
+  return true;
 }
 
 // Connect to a saved boite and initialize the app against it. `reset` tears the

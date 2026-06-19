@@ -1,4 +1,5 @@
 mod commands;
+mod local_pty;
 mod logging;
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -123,6 +124,7 @@ pub fn run() {
                 .build(),
         )
         .manage(PtyManager::new())
+        .manage(local_pty::LocalSessions::new())
         .manage(BootState::default())
         .manage(ProjectRoots::default())
         .setup(|app| {
@@ -161,6 +163,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::pty_spawn,
+            commands::pty_open,
+            commands::pty_detach,
             commands::pty_write,
             commands::pty_resize,
             commands::pty_kill,

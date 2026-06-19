@@ -278,6 +278,12 @@ impl PtyManager {
         Ok(())
     }
 
+    // Is this PTY still tracked (reader alive, child not yet reaped)? Used by
+    // the desktop adapter to decide reattach-vs-spawn for a detached session.
+    pub fn is_alive(&self, id: &str) -> bool {
+        self.inner.lock().contains_key(id)
+    }
+
     pub fn kill_all(&self) {
         // Parallel; each kill is one TerminateJobObject syscall, the join
         // only matters for the rare taskkill fallback.

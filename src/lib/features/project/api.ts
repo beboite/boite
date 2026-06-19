@@ -1,4 +1,4 @@
-import { backend } from "$lib/backend";
+import { backend, workspace } from "$lib/backend";
 import { hasTauri } from "$lib/backend/env";
 import { app } from "$lib/app/store.svelte";
 import { notifications } from "$lib/features/notifications/store.svelte";
@@ -9,9 +9,11 @@ import { folderBrowser } from "./folderBrowserStore.svelte";
 import type { Project } from "$lib/types";
 
 export async function pickAndAddProject(): Promise<Project | null> {
-  // Browser/PWA: no native dialog. Open the server-side folder browser, which
-  // adds the project itself on confirm.
-  if (!hasTauri()) {
+  // The native dialog only browses THIS machine. In a remote workspace (and in
+  // any browser/PWA, which has no native dialog) open the server-side folder
+  // browser instead, so it lists the boite-server's filesystem and adds the
+  // project on confirm.
+  if (workspace.isRemote || !hasTauri()) {
     folderBrowser.open = true;
     return null;
   }

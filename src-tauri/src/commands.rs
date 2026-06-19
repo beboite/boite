@@ -18,6 +18,7 @@ use boite_core::shell::ShellOption;
 use boite_core::{editor, explorer, git, project, session, shell};
 
 use crate::BootState;
+use crate::local_pty::{LocalSessions, LocalSink};
 use crate::logging::{self, LogEntry};
 
 // Wire shape consumed by the webview xterm bridge. Output is base64-encoded
@@ -64,6 +65,46 @@ pub async fn pty_spawn(
         .map_err(|e| format!("pty spawn task failed: {e}"))?
 }
 
+// Attach-or-spawn keyed by thread id. Reattaches to a still-alive detached PTY
+// (replaying its scrollback ring and resizing to repaint) so local processes
+// survive a workspace switch; otherwise spawns a fresh process.
+#[tauri::command]
+pub async fn pty_open(
+    manager: State<'_, PtyManager>,
+    sessions: State<'_, LocalSessions>,
+    thread_id: String,
+    on_event: Channel<WirePtyEvent>,
+    spec: PtySpawnArgs,
+) -> Result<String, String> {
+    let manager = manager.inner().clone();
+    let sessions = sessions.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Some((pty_id, sink)) = sessions.get(&thread_id) {
+            if manager.is_alive(&pty_id) {
+                sink.set_channel(Some(on_event));
+                sink.replay();
+                let _ = manager.resize(&pty_id, spec.cols, spec.rows);
+                return Ok(pty_id);
+            }
+            sessions.remove_by_pty(&pty_id);
+        }
+        let sink = Arc::new(LocalSink::new(on_event));
+        let pty_id = manager.spawn(sink.clone(), spec)?;
+        sessions.insert(thread_id, pty_id.clone(), sink);
+        Ok(pty_id)
+    })
+    .await
+    .map_err(|e| format!("pty open task failed: {e}"))?
+}
+
+// Detach (do not kill): drop the channel but keep the child + reader alive and
+// buffering, so a later pty_open reattaches.
+#[tauri::command]
+pub fn pty_detach(sessions: State<'_, LocalSessions>, id: String) -> Result<(), String> {
+    sessions.detach_by_pty(&id);
+    Ok(())
+}
+
 #[tauri::command]
 pub fn pty_write(manager: State<'_, PtyManager>, request: Request<'_>) -> Result<(), String> {
     let id = request
@@ -91,14 +132,19 @@ pub fn pty_resize(
 #[tauri::command]
 pub async fn pty_kill(
     manager: State<'_, PtyManager>,
+    sessions: State<'_, LocalSessions>,
     id: String,
     wait: Option<bool>,
 ) -> Result<(), String> {
     let manager = manager.inner().clone();
+    let sessions = sessions.inner().clone();
     let wait = wait.unwrap_or(true);
-    tauri::async_runtime::spawn_blocking(move || manager.kill(&id, wait))
+    let pty_id = id.clone();
+    let res = tauri::async_runtime::spawn_blocking(move || manager.kill(&id, wait))
         .await
-        .map_err(|e| format!("pty kill task failed: {e}"))?
+        .map_err(|e| format!("pty kill task failed: {e}"))?;
+    sessions.remove_by_pty(&pty_id);
+    res
 }
 
 #[tauri::command]

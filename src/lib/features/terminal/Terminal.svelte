@@ -16,6 +16,7 @@
   } from "$lib/storage/pty";
   import type { PtyEvent } from "$lib/storage/pty";
   import { backend } from "$lib/backend";
+  import { parkedLocal } from "$lib/backend/tauri/parked";
   import { app } from "$lib/app/store.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
   import { reloadThread, restoreLastClosedThread } from "$lib/features/thread/api";
@@ -302,9 +303,12 @@
     teardownPty((key) => void ptyKill(key, wait).catch(() => {}));
   }
 
-  // Unmount cleanup: local kills, remote detaches (the server keeps the PTY
-  // alive so the thread survives the client closing and can be reattached).
+  // Unmount cleanup: both transports DETACH (keep the PTY alive). Remote keeps
+  // it server-side; local now keeps the process + a scrollback ring via
+  // pty_detach. Remember local detaches so the return to this workspace
+  // reattaches instead of spawning fresh. Explicit close uses stopLocalPty/kill.
   function releasePty() {
+    if (ptyId && backend().caps.clientStatus) parkedLocal.add(thread.id);
     teardownPty((key) => void ptyRelease(key).catch(() => {}));
   }
 
@@ -696,7 +700,11 @@
       current?.status === "exited" ||
       current?.status === "error" ||
       current?.status === "stopped";
-    const attachable = reattach && current?.status !== "idle";
+    // A local PTY parked by a workspace switch is still alive: reattach (replay
+    // its ring) instead of spawning fresh, same as an explicit reattach.
+    const reattaching =
+      reattach || (backend().caps.clientStatus && parkedLocal.has(thread.id));
+    const attachable = reattaching && current?.status !== "idle";
     if (!current || finished || (current.status !== "idle" && !attachable)) {
       logger.debug(
         "spawn",
@@ -793,6 +801,7 @@
       ptyId = nextPtyId;
       spawned = true;
       channelPtyId = nextPtyId;
+      parkedLocal.delete(thread.id);
       for (const event of earlyEvents.splice(0)) {
         handleEvent(event, nextPtyId);
       }
@@ -817,7 +826,7 @@
 
     // Reattach only re-opens the output stream; the process is already running,
     // so never re-inject the launch input.
-    if (!reattach && plan.pendingInput && ptyId) {
+    if (!reattaching && plan.pendingInput && ptyId) {
       const targetPtyId = ptyId;
       const text = plan.pendingInput;
       const encoded = new TextEncoder().encode(text);
@@ -860,7 +869,7 @@
     }
 
     const detector = getDetector(thread);
-    if (!reattach && detector && ptyId) {
+    if (!reattaching && detector && ptyId) {
       const since = Math.max(0, spawnedAt - (thread.sessionId ? 1000 : 5000));
       stopSessionMonitor();
       sessionMonitor = startSessionMonitor({
