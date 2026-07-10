@@ -84,6 +84,21 @@ pub fn is_generic_title(title: &str) -> bool {
     false
 }
 
+/// True when the title is just the project directory basename. Codex's
+/// default terminal_title is spinner + project dir, which would name every
+/// thread in a project after its folder.
+pub fn is_project_dir_title(title: &str, cwd: &str) -> bool {
+    let dir = cwd.replace('\\', "/");
+    let dir = dir.trim_end_matches('/');
+    let Some(name) = dir.rsplit('/').next() else {
+        return false;
+    };
+    if name.is_empty() {
+        return false;
+    }
+    title.trim().to_lowercase() == name.to_lowercase()
+}
+
 fn normalize_shell_path(title: &str) -> Option<String> {
     let trimmed = title.trim();
     if trimmed.is_empty() {

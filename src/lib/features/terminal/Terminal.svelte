@@ -80,6 +80,9 @@
   const encoder = new TextEncoder();
   const LF = new Uint8Array([0x0a]);
   const DETECT_BUFFER_MAX = 4000;
+  // Detection only ever looks at the DETECT_BUFFER_MAX tail, so decoding more
+  // than this per chunk is wasted main-thread work during big output bursts.
+  const DETECT_DECODE_MAX = 8192;
 
   // Soft keyboard is opt-in on phones: tapping a terminal should focus it for
   // scroll/select without summoning the Android keyboard. `inputmode=none`
@@ -366,9 +369,9 @@
     return raw.slice(m.index).trim();
   }
 
-  function syncAliveThread(nextStatus: "ready" | "running" = "ready") {
+  function syncAliveThread(nextStatus: "ready" | "running" = "ready", known?: Thread | null) {
     if (!ptyId) return;
-    const current = app.threads.find((x) => x.id === thread.id);
+    const current = known ?? app.threads.find((x) => x.id === thread.id);
     if (!current) return;
     if (current.status === "stopped") return;
     if (current.ptyId !== ptyId) {
@@ -431,19 +434,29 @@
     if (event.type === "output") {
       const current = currentThread();
       if (!current || current.status === "stopped") return;
-      syncAliveThread();
+      syncAliveThread("ready", current);
       const bytes = event.bytes;
       lastOutputAt = Date.now();
-      if (backend().caps.clientStatus) statusEngine.markOutput(thread.id);
       term.write(bytes);
-      const text = decoder.decode(bytes, { stream: true });
-      detectWorkingFromOutput(text);
+      // Status sniffing is local-only (remote pushes status server-side), so
+      // skip the decode entirely there. A non-stream decode on the tail-only
+      // path flushes decoder state — at worst one replacement char in the
+      // detection text, invisible to the regex.
+      if (backend().caps.clientStatus) {
+        statusEngine.markOutput(thread.id);
+        const text =
+          bytes.length > DETECT_DECODE_MAX
+            ? decoder.decode(bytes.subarray(bytes.length - DETECT_DECODE_MAX))
+            : decoder.decode(bytes, { stream: true });
+        detectWorkingFromOutput(text);
+      }
     } else if (event.type === "title") {
       const current = currentThread();
       if (!current || current.status === "stopped") return;
-      syncAliveThread();
+      syncAliveThread("ready", current);
       const cleaned = cleanTitle(event.value);
-      if (cleaned && !isGenericTitle(cleaned)) {
+      const cwd = app.projects.find((p) => p.id === thread.projectId)?.cwd;
+      if (cleaned && !isGenericTitle(cleaned, cwd)) {
         app.setThreadTitle(thread.id, cleaned);
       }
       if (titleSignalsWorking(event.value)) {

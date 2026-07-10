@@ -99,7 +99,9 @@ export interface EditorApi {
 }
 
 export interface ProjectApi {
-  inspect(path: string): Promise<{ name: string; icon: string | null }>;
+  inspect(
+    path: string,
+  ): Promise<{ name: string; icon: string | null; tech?: string | null }>;
 }
 
 export interface ShellApi {
@@ -126,6 +128,9 @@ export type SessionKind =
 export interface SessionHit {
   id: string;
   mtimeMs: number | null;
+  // First user prompt, for CLIs that never emit a descriptive OSC title
+  // (codex). Used to name the thread when it has no title yet.
+  title?: string | null;
 }
 
 export interface SessionApi {

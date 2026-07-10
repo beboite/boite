@@ -12,7 +12,7 @@
   import Search from "@lucide/svelte/icons/search";
   import X from "@lucide/svelte/icons/x";
 
-  const AUTO_REFRESH_MS = 3000;
+  const AUTO_REFRESH_MS = 10_000;
 
   const project = $derived(
     app.currentProjectId
@@ -48,7 +48,7 @@
       if (workspace.mode === "remote" && workspace.connection !== "connected") return;
       void explorerStore.refresh(r);
     };
-    const periodMs = settings.state.mobileLayout ? 9000 : AUTO_REFRESH_MS;
+    const periodMs = settings.state.mobileLayout ? 20_000 : AUTO_REFRESH_MS;
     const interval = window.setInterval(poke, periodMs);
     window.addEventListener("focus", poke);
     document.addEventListener("visibilitychange", poke);

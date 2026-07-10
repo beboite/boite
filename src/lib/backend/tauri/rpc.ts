@@ -49,7 +49,10 @@ export const tauriEditor: EditorApi = {
 
 export const tauriProject: ProjectApi = {
   inspect: (path) =>
-    invoke<{ name: string; icon: string | null }>("inspect_project", { path }),
+    invoke<{ name: string; icon: string | null; tech: string | null }>(
+      "inspect_project",
+      { path },
+    ),
 };
 
 interface RawShellOption {
@@ -99,6 +102,14 @@ export const tauriSession: SessionApi = {
         excludeIds,
       });
       return hit ? { id: hit.id, mtimeMs: hit.modifiedMs } : null;
+    }
+    if (kind === "codex") {
+      const hit = await invoke<{
+        id: string;
+        modifiedMs: number;
+        title: string | null;
+      } | null>(command, { cwd, afterUnixMs, excludeIds });
+      return hit ? { id: hit.id, mtimeMs: hit.modifiedMs, title: hit.title } : null;
     }
     const id = await invoke<string | null>(command, { cwd, afterUnixMs, excludeIds });
     return id ? { id, mtimeMs: null } : null;

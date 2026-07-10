@@ -194,6 +194,16 @@ pub fn find_claude_session_blocking(
     None
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexSessionHit {
+    pub id: String,
+    pub modified_ms: i64,
+    /// First real user prompt, used as the thread title: codex never emits a
+    /// conversation summary in its OSC title (only spinner/project/model/...).
+    pub title: Option<String>,
+}
+
 #[derive(Deserialize)]
 struct CodexSessionMeta {
     payload: Option<CodexPayload>,
@@ -205,6 +215,79 @@ struct CodexSessionMeta {
 struct CodexPayload {
     id: Option<String>,
     cwd: Option<String>,
+}
+
+// Injected user-role messages that precede (or interleave with) the real
+// prompt in codex rollout files.
+const CODEX_PROMPT_SKIP_PREFIXES: &[&str] = &[
+    "# AGENTS.md instructions",
+    "<environment_context",
+    "<permissions",
+    "<user_instructions",
+    "<turn_context",
+    "<INSTRUCTIONS",
+];
+
+const CODEX_TITLE_MAX_CHARS: usize = 60;
+
+fn codex_title_from_prompt(text: &str) -> Option<String> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if CODEX_PROMPT_SKIP_PREFIXES
+        .iter()
+        .any(|p| trimmed.starts_with(p))
+    {
+        return None;
+    }
+    let first_line = trimmed.lines().next()?.trim();
+    if first_line.is_empty() {
+        return None;
+    }
+    let mut title: String = first_line.chars().take(CODEX_TITLE_MAX_CHARS).collect();
+    if first_line.chars().count() > CODEX_TITLE_MAX_CHARS {
+        title.push('…');
+    }
+    Some(title)
+}
+
+fn read_codex_first_prompt(path: &Path) -> Option<String> {
+    let reader = BufReader::new(fs::File::open(path).ok()?);
+    for line in reader.lines().map_while(Result::ok).take(400) {
+        if !line.contains("\"role\":\"user\"") {
+            continue;
+        }
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) else {
+            continue;
+        };
+        if v.get("type").and_then(|t| t.as_str()) != Some("response_item") {
+            continue;
+        }
+        let Some(payload) = v.get("payload") else {
+            continue;
+        };
+        if payload.get("type").and_then(|t| t.as_str()) != Some("message")
+            || payload.get("role").and_then(|r| r.as_str()) != Some("user")
+        {
+            continue;
+        }
+        let Some(content) = payload.get("content").and_then(|c| c.as_array()) else {
+            continue;
+        };
+        for item in content {
+            if item.get("type").and_then(|t| t.as_str()) != Some("input_text") {
+                continue;
+            }
+            let Some(text) = item.get("text").and_then(|t| t.as_str()) else {
+                continue;
+            };
+            if let Some(title) = codex_title_from_prompt(text) {
+                return Some(title);
+            }
+        }
+    }
+    None
 }
 
 fn read_codex_session_meta(path: &Path) -> Option<(String, String)> {
@@ -226,7 +309,7 @@ pub fn find_codex_session_blocking(
     cwd: String,
     after_unix_ms: i64,
     exclude: &HashSet<String>,
-) -> Option<String> {
+) -> Option<CodexSessionHit> {
     let home = dirs::home_dir()?;
     let sessions_dir = home.join(".codex").join("sessions");
     if !sessions_dir.is_dir() {
@@ -241,10 +324,15 @@ pub fn find_codex_session_blocking(
     });
     files.sort_by_key(|(_, t)| std::cmp::Reverse(*t));
 
-    for (path, _) in files {
+    for (path, modified_ms) in files {
         if let Some((id, scwd)) = read_codex_session_meta(&path) {
             if normalize(&scwd) == target && !exclude.contains(&id) {
-                return Some(id);
+                let title = read_codex_first_prompt(&path);
+                return Some(CodexSessionHit {
+                    id,
+                    modified_ms,
+                    title,
+                });
             }
         }
     }

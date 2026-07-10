@@ -1,6 +1,6 @@
 import { app } from "$lib/app/store.svelte";
 import { backend } from "$lib/backend";
-import { saveThread } from "$lib/storage/db";
+import { saveThread, updateThreadTitle } from "$lib/storage/db";
 import { notifications } from "$lib/features/notifications/store.svelte";
 import { logger } from "$lib/shared/services/logger.svelte";
 import { statusEngine } from "./statusEngine";
@@ -54,6 +54,18 @@ export async function persistSessionId(
     notifications.success(
       previous ? `Session updated (${t.label})` : `Session captured (${t.label})`,
     );
+  }
+}
+
+// Prompt-derived titles (codex never emits a descriptive OSC title) only fill
+// an unnamed thread; an OSC-set or user-visible title always wins.
+function applySessionTitle(t: Thread, title: string | null | undefined) {
+  if (!title || t.title) return;
+  app.setThreadTitle(t.id, title);
+  // Remote: setThreadTitle skips persistence (the server owns OSC titles),
+  // but this title only exists client-side, so persist it explicitly.
+  if (!backend().caps.clientStatus) {
+    void updateThreadTitle(t.id, title).catch(() => {});
   }
 }
 
@@ -122,9 +134,13 @@ export function startSessionMonitor(opts: {
     // Exclude every sessionId already claimed by any thread (incl. self).
     // Otherwise sibling monitors keep stealing each other's session in a
     // loop because the detector always returns the newest jsonl in the cwd.
+    // Exception: while this thread has no title yet, keep its own session in
+    // play so the detector can return it again and backfill the prompt-derived
+    // title once the user's first message lands in the transcript.
     const excludeIds = app.threads
       .map((x) => x.sessionId)
-      .filter((id): id is string => !!id);
+      .filter((id): id is string => !!id)
+      .filter((id) => id !== t.sessionId || !!t.title);
 
     scanInFlight = true;
     try {
@@ -149,6 +165,7 @@ export function startSessionMonitor(opts: {
         return false;
       }
       if (id === t.sessionId) {
+        applySessionTitle(t, hit.title);
         logger.debug(
           "session",
           `${t.label}: detector returned current session, skip`,
@@ -174,6 +191,7 @@ export function startSessionMonitor(opts: {
         { cwd, previous: t.sessionId, next: id },
       );
       await persistSessionId(t, id, cwd);
+      applySessionTitle(t, hit.title);
       return false;
     } catch (err) {
       logger.error("session", `detect failed for ${t.label}`, String(err));

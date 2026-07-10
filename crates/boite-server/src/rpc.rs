@@ -363,7 +363,9 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
                     "claude" => session::find_claude_session_blocking(cwd, after, &exclude)
                         .map(|h| json!({ "id": h.id, "modifiedMs": h.modified_ms }))
                         .unwrap_or(Value::Null),
-                    "codex" => id_or_null(session::find_codex_session_blocking(cwd, after, &exclude)),
+                    "codex" => session::find_codex_session_blocking(cwd, after, &exclude)
+                        .map(|h| json!({ "id": h.id, "modifiedMs": h.modified_ms, "title": h.title }))
+                        .unwrap_or(Value::Null),
                     "opencode" => {
                         id_or_null(session::find_opencode_session_blocking(cwd, after, &exclude))
                     }

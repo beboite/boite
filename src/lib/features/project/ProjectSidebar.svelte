@@ -13,6 +13,7 @@
     stopThread,
   } from "$lib/features/thread/api";
   import { notifications } from "$lib/features/notifications/store.svelte";
+  import { refreshProjectIcon } from "$lib/features/project/api";
   import StatusDot from "$lib/shared/components/StatusDot.svelte";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
   import { confirmDialog } from "$lib/shared/components/confirm.svelte";
@@ -525,6 +526,13 @@
         },
       });
     }
+    items.push({
+      label: "Refresh icon",
+      action: () => {
+        const p = app.projects.find((x) => x.id === project.id);
+        if (p) void refreshProjectIcon(p);
+      },
+    });
     items.push({ separator: true });
     items.push({
       label: "Remove project",

@@ -27,6 +27,7 @@ pub struct LiveThread {
     title: Mutex<String>,
     status: Mutex<StatusState>,
     size: Mutex<(u16, u16)>,
+    cwd: String,
 }
 
 impl LiveThread {
@@ -151,6 +152,7 @@ impl Registry {
                 last_working: Some(Instant::now()),
             }),
             size: Mutex::new((spec.cols.max(1), spec.rows.max(1))),
+            cwd: spec.cwd.clone(),
         });
 
         let sink = Arc::new(ThreadSink {
@@ -274,7 +276,7 @@ impl EventSink for ThreadSink {
                 }
                 if !status::is_generic_title(&raw) {
                     let clean = status::strip_leading_marker(&raw);
-                    if !clean.is_empty() {
+                    if !clean.is_empty() && !status::is_project_dir_title(&clean, &self.live.cwd) {
                         *self.live.title.lock() = clean.clone();
                         self.emit(AppEvent::ThreadTitle {
                             thread_id: self.live.thread_id.clone(),
