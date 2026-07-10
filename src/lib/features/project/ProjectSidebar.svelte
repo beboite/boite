@@ -689,6 +689,7 @@
                 alt=""
                 class="size-full object-contain"
                 loading="lazy"
+                decoding="async"
                 draggable="false"
               />
             {:else}

@@ -3,6 +3,13 @@
   import SettingsCard from "$lib/shared/components/SettingsCard.svelte";
   import ToggleSetting from "$lib/shared/components/ToggleSetting.svelte";
   import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
+  import type { MotionMode } from "$lib/types";
+
+  const MOTION_MODES: { id: MotionMode; label: string }[] = [
+    { id: "system", label: "System" },
+    { id: "on", label: "On" },
+    { id: "off", label: "Off" },
+  ];
 
   function onSlider(e: Event) {
     const value = Number((e.currentTarget as HTMLInputElement).value);
@@ -56,6 +63,28 @@
   offLabel="PC"
   onToggle={() => settings.setMobileLayout(!settings.state.mobileLayout)}
 />
+
+<SettingsCard
+  title="Animations"
+  description="System follows the OS reduced-motion setting; On and Off override it."
+>
+  <div class="flex gap-1.5" role="radiogroup" aria-label="Animations">
+    {#each MOTION_MODES as mode (mode.id)}
+      <button
+        type="button"
+        role="radio"
+        aria-checked={settings.state.motionMode === mode.id}
+        class="rounded-md border px-3 py-1 text-[11px] transition
+          {settings.state.motionMode === mode.id
+            ? 'border-foreground/40 bg-[var(--color-surface-3)] text-foreground'
+            : 'border-border bg-[var(--color-surface-2)] text-muted-foreground hover:border-foreground/30 hover:text-foreground'}"
+        onclick={() => settings.setMotionMode(mode.id)}
+      >
+        {mode.label}
+      </button>
+    {/each}
+  </div>
+</SettingsCard>
 
 <style>
   .ui-slider {

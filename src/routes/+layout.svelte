@@ -7,6 +7,7 @@
   import { hasTauri } from "$lib/backend/env";
   import { bootRemoteWorkspace } from "$lib/app/workspace";
   import { settings } from "$lib/features/settings/store.svelte";
+  import { applyMotionPreference } from "$lib/theme/motion";
   import {
     closeThreadWithConfirm,
     launchBlankTerminal,
@@ -15,12 +16,19 @@
   import { addProjectByPath } from "$lib/features/project/api";
   import { editorStore } from "$lib/features/editor/store.svelte";
   import { paneStore, leavesOf } from "$lib/features/panes/store.svelte";
+  import { palette } from "$lib/features/palette/store.svelte";
+  import CommandPalette from "$lib/features/palette/CommandPalette.svelte";
 
   let { children } = $props();
 
   $effect(() => {
     if (typeof document === "undefined") return;
     document.documentElement.style.fontSize = `${settings.state.uiScalePercent}%`;
+  });
+
+  $effect(() => {
+    if (typeof document === "undefined") return;
+    return applyMotionPreference(settings.state.motionMode);
   });
 
   function handleWheel(e: WheelEvent) {
@@ -92,6 +100,16 @@
     if (e.key === "0") {
       e.preventDefault();
       settings.setUiScalePercent(100);
+      return;
+    }
+
+    // Command palette (Ctrl+K, or VS Code-style Ctrl+Shift+P)
+    if (
+      ((e.key === "k" || e.key === "K") && !e.shiftKey && !e.altKey) ||
+      ((e.key === "p" || e.key === "P") && e.shiftKey && !e.altKey)
+    ) {
+      e.preventDefault();
+      palette.toggle();
       return;
     }
 
@@ -238,3 +256,5 @@
 <svelte:window onwheel={handleWheel} onkeydown={handleKeydown} />
 
 {@render children()}
+
+<CommandPalette />

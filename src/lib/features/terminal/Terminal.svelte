@@ -5,6 +5,7 @@
   import { WebglAddon } from "@xterm/addon-webgl";
   import { WebLinksAddon } from "@xterm/addon-web-links";
   import { Unicode11Addon } from "@xterm/addon-unicode11";
+  import { xtermTheme } from "./theme";
   import { openUrl } from "$lib/platform/opener";
   import { readText, writeText } from "$lib/platform/clipboard";
   import {
@@ -76,6 +77,7 @@
   let lastDetectOutputAt = 0;
   let detectBuffer = "";
   const decoder = new TextDecoder("utf-8", { fatal: false });
+  const encoder = new TextEncoder();
   const LF = new Uint8Array([0x0a]);
   const DETECT_BUFFER_MAX = 4000;
 
@@ -139,7 +141,7 @@
   function rawWrite(s: string) {
     if (!shouldUsePty(ptyId)) return;
     lastInputAt = Date.now();
-    void ptyWrite(ptyId, new TextEncoder().encode(s));
+    void ptyWrite(ptyId, encoder.encode(s));
   }
 
   function applyCtrl(ch: string): string {
@@ -996,7 +998,7 @@
     if (!reattaching && plan.pendingInput && ptyId) {
       const targetPtyId = ptyId;
       const text = plan.pendingInput;
-      const encoded = new TextEncoder().encode(text);
+      const encoded = encoder.encode(text);
       lastOutputAt = Date.now();
       let injected = false;
 
@@ -1064,29 +1066,7 @@
       allowProposedApi: true,
       macOptionIsMeta: true,
       rightClickSelectsWord: false,
-      theme: {
-        background: "#0a0a0a",
-        foreground: "#e4e4e7",
-        cursor: "#d4d4d8",
-        cursorAccent: "#0a0a0a",
-        selectionBackground: "rgba(228, 228, 231, 0.18)",
-        black: "#18181b",
-        red: "#f07178",
-        green: "#c3e88d",
-        yellow: "#ffcb6b",
-        blue: "#82aaff",
-        magenta: "#c792ea",
-        cyan: "#89ddff",
-        white: "#e4e4e7",
-        brightBlack: "#52525b",
-        brightRed: "#ff8b92",
-        brightGreen: "#ddffa7",
-        brightYellow: "#ffe585",
-        brightBlue: "#9cc4ff",
-        brightMagenta: "#e1acff",
-        brightCyan: "#a3f7ff",
-        brightWhite: "#fafafa",
-      },
+      theme: xtermTheme(),
     });
 
     fit = new FitAddon();
@@ -1130,6 +1110,16 @@
         void restoreLastClosedThread();
         return false;
       }
+      // Command palette combos never reach the shell; the layout handler
+      // (window keydown, still bubbling) opens it.
+      if (e.ctrlKey && !e.shiftKey && !e.altKey && code === "KeyK") {
+        e.preventDefault();
+        return false;
+      }
+      if (e.ctrlKey && e.shiftKey && !e.altKey && code === "KeyP") {
+        e.preventDefault();
+        return false;
+      }
 
       if (shouldSendLineFeed(e, code)) {
         return sendLineFeed(e);
@@ -1151,7 +1141,7 @@
         emitChar(data);
         return;
       }
-      const bytes = new TextEncoder().encode(data);
+      const bytes = encoder.encode(data);
       void ptyWrite(ptyId, bytes);
     });
 

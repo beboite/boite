@@ -14,6 +14,13 @@ export default defineConfig(async () => ({
     __APP_VERSION__: JSON.stringify(pkg.version),
   },
   clearScreen: false,
+  build: {
+    // Single known webview target (Tauri WebView2 / server-mode Chromium);
+    // no need to transpile down or polyfill module preload.
+    target: "esnext",
+    modulePreload: { polyfill: false },
+    reportCompressedSize: false,
+  },
   server: {
     port: 1420,
     strictPort: true,

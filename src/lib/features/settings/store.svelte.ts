@@ -92,6 +92,7 @@ const DEFAULTS: Settings = {
   gitAutoFetch: true,
   gitAutoFetchSeconds: 180,
   mobileLayout: false,
+  motionMode: "system",
 };
 
 // First-run guess: touch-primary, narrow screens (a phone TWA/PWA) default to
@@ -161,6 +162,7 @@ const DEVICE_FIELDS = [
   "rightPanelWidth",
   "gitSplitFraction",
   "mobileLayout",
+  "motionMode",
 ] as const;
 type DeviceField = (typeof DEVICE_FIELDS)[number];
 
@@ -253,6 +255,8 @@ class SettingsStore {
           typeof stored.mobileLayout === "boolean"
             ? stored.mobileLayout
             : DEFAULTS.mobileLayout,
+        // Device-scoped; the localStorage override below is the real source.
+        motionMode: DEFAULTS.motionMode,
       };
       // Device fields come from localStorage, overriding the backend blob. If
       // there is none yet, seed it from what the blob carried (one-shot
@@ -370,6 +374,12 @@ class SettingsStore {
   setMobileLayout(value: boolean) {
     if (this.state.mobileLayout === value) return;
     this.state.mobileLayout = value;
+    this.persistDeviceNow();
+  }
+
+  setMotionMode(value: Settings["motionMode"]) {
+    if (this.state.motionMode === value) return;
+    this.state.motionMode = value;
     this.persistDeviceNow();
   }
 

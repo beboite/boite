@@ -23,6 +23,27 @@
   --color-surface-3: #232323;
 
   --font-mono: "JetBrains Mono", "SF Mono", "Cascadia Code", Consolas, "Liberation Mono", Menlo, monospace;
+
+  /* Terminal (xterm) palette — single source of truth, read at runtime by
+     features/terminal/theme.ts. */
+  --color-term-foreground: #e4e4e7;
+  --color-term-cursor: #d4d4d8;
+  --color-term-black: #18181b;
+  --color-term-red: #f07178;
+  --color-term-green: #c3e88d;
+  --color-term-yellow: #ffcb6b;
+  --color-term-blue: #82aaff;
+  --color-term-magenta: #c792ea;
+  --color-term-cyan: #89ddff;
+  --color-term-white: #e4e4e7;
+  --color-term-bright-black: #52525b;
+  --color-term-bright-red: #ff8b92;
+  --color-term-bright-green: #ddffa7;
+  --color-term-bright-yellow: #ffe585;
+  --color-term-bright-blue: #9cc4ff;
+  --color-term-bright-magenta: #e1acff;
+  --color-term-bright-cyan: #a3f7ff;
+  --color-term-bright-white: #fafafa;
 }
 
 html,
@@ -41,6 +62,20 @@ body,
 
 * {
   border-color: var(--color-border);
+}
+
+/* Animation preference gate (set by lib/theme/motion.ts). Targets the data
+   attribute, not the media query, so the in-app choice wins over the OS.
+   Near-zero (not zero) durations keep transitionend/animationend firing for
+   code that waits on them. The spinner glyph swap is text, not animation, so
+   status feedback survives reduced motion. */
+html[data-motion="reduced"] *,
+html[data-motion="reduced"] *::before,
+html[data-motion="reduced"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-delay: 0ms !important;
+  transition-duration: 0.01ms !important;
+  transition-delay: 0ms !important;
 }
 
 ::selection {

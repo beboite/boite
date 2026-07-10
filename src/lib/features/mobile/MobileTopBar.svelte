@@ -42,7 +42,7 @@
         style:background={project.icon ? "transparent" : "var(--color-surface-3)"}
       >
         {#if project.icon}
-          <img src={project.icon} alt="" class="size-full object-contain" draggable="false" />
+          <img src={project.icon} alt="" class="size-full object-contain" decoding="async" draggable="false" />
         {:else}
           <span class="text-xs font-semibold text-muted-foreground">
             {project.name.charAt(0).toUpperCase()}

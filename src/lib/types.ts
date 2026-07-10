@@ -68,7 +68,12 @@ export interface Settings {
   gitAutoFetch: boolean;
   gitAutoFetchSeconds: number;
   mobileLayout: boolean;
+  motionMode: MotionMode;
 }
+
+// Animation preference: "system" follows prefers-reduced-motion, "on"/"off"
+// override the OS either way.
+export type MotionMode = "system" | "on" | "off";
 
 export type RightPanelTab = "git" | "explorer" | null;
 
