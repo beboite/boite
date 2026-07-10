@@ -13,7 +13,7 @@ use boite_core::git::{ChangeEntry, Commit, FileVersions, PathStatus, RepoInfo};
 use boite_core::project::ProjectInspection;
 use boite_core::pty::{EventSink, PtyEvent, PtyManager, PtySpawnArgs};
 use boite_core::scope::ProjectRoots;
-use boite_core::session::ClaudeSessionHit;
+use boite_core::session::{ClaudeSessionHit, CodexSessionHit};
 use boite_core::shell::ShellOption;
 use boite_core::{editor, explorer, git, project, session, shell};
 
@@ -247,9 +247,14 @@ pub async fn find_codex_session(
     cwd: String,
     after_unix_ms: i64,
     exclude_ids: Option<Vec<String>>,
-) -> Option<String> {
+) -> Option<CodexSessionHit> {
     let exclude = session::build_exclude(exclude_ids);
-    run_lookup(move || session::find_codex_session_blocking(cwd, after_unix_ms, &exclude)).await
+    tauri::async_runtime::spawn_blocking(move || {
+        session::find_codex_session_blocking(cwd, after_unix_ms, &exclude)
+    })
+    .await
+    .ok()
+    .flatten()
 }
 
 #[tauri::command]

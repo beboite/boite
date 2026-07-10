@@ -57,11 +57,21 @@ function normalizeShellPath(title: string): string | null {
   return base.toLowerCase();
 }
 
-export function isGenericTitle(title: string | null | undefined): boolean {
+export function isGenericTitle(
+  title: string | null | undefined,
+  cwd?: string | null,
+): boolean {
   if (!title) return false;
   const direct = title.trim().toLowerCase();
   if (GENERIC_TITLES.has(direct)) return true;
   const base = normalizeShellPath(title);
   if (base && GENERIC_TITLES.has(base)) return true;
+  // Codex's default terminal_title is spinner + project dir name, which would
+  // rename every thread in a project after its folder.
+  if (cwd) {
+    const dir = cwd.replace(/\\/g, "/").replace(/\/+$/, "");
+    const name = dir.slice(dir.lastIndexOf("/") + 1).toLowerCase();
+    if (name && direct === name) return true;
+  }
   return false;
 }

@@ -21,7 +21,7 @@
   import ArrowUpFromLine from "@lucide/svelte/icons/arrow-up-from-line";
   import ArrowDownToLine from "@lucide/svelte/icons/arrow-down-to-line";
 
-  const AUTO_REFRESH_MS = 3000;
+  const AUTO_REFRESH_MS = 10_000;
 
   type SectionMode = "staged" | "unstaged" | "conflict";
   interface SectionArgs {
@@ -62,8 +62,9 @@
       void gitStore.refresh(id);
       void gitStore.autoFetch(id);
     };
-    // Phones on 4G poll lazily; the desktop keeps the snappy 3s cadence.
-    const periodMs = settings.state.mobileLayout ? 9000 : AUTO_REFRESH_MS;
+    // The interval is a slow safety net; focus/visibility pokes below give the
+    // instant refresh when the user comes back to the app.
+    const periodMs = settings.state.mobileLayout ? 20_000 : AUTO_REFRESH_MS;
     const interval = window.setInterval(poke, periodMs);
     window.addEventListener("focus", poke);
     document.addEventListener("visibilitychange", poke);

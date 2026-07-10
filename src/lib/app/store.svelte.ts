@@ -434,6 +434,16 @@ class AppState {
     }
   }
 
+  async updateProject(project: Project) {
+    const idx = this.projects.findIndex((p) => p.id === project.id);
+    if (idx !== -1) this.projects[idx] = project;
+    try {
+      await saveProject(project);
+    } catch (err) {
+      console.error("saveProject failed:", err);
+    }
+  }
+
   async addProject(project: Project) {
     this.projects.push(project);
     await this.syncRoots();

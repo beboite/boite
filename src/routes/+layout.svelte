@@ -6,6 +6,7 @@
   import { app } from "$lib/app/store.svelte";
   import { hasTauri } from "$lib/backend/env";
   import { bootRemoteWorkspace } from "$lib/app/workspace";
+  import { reinspectMissingIcons } from "$lib/features/project/api";
   import { settings } from "$lib/features/settings/store.svelte";
   import { applyMotionPreference } from "$lib/theme/motion";
   import {
@@ -209,7 +210,7 @@
     // that served the page; connect to it (or raise the login gate) instead of
     // initializing a dead local workspace.
     if (!hasTauri()) {
-      void bootRemoteWorkspace();
+      void bootRemoteWorkspace().then(() => reinspectMissingIcons().catch(() => {}));
       // Register the PWA service worker (installability + offline shell). Only
       // works in a secure context (HTTPS or localhost); a no-op otherwise.
       if (typeof navigator !== "undefined" && "serviceWorker" in navigator) {
@@ -218,7 +219,7 @@
       return;
     }
 
-    void app.init();
+    void app.init().then(() => reinspectMissingIcons().catch(() => {}));
 
     // Wait one rAF after mount so the first paint hits the GPU before the
     // window becomes visible. Avoids the white flash on launch.

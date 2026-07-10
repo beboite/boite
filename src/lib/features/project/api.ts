@@ -4,6 +4,7 @@ import { app } from "$lib/app/store.svelte";
 import { notifications } from "$lib/features/notifications/store.svelte";
 import { logger } from "$lib/shared/services/logger.svelte";
 import { basename } from "$lib/shared/utils/path";
+import { techIconDataUrl } from "$lib/shared/icons/tech";
 import { uuid } from "$lib/shared/utils/uuid";
 import { folderBrowser } from "./folderBrowserStore.svelte";
 import type { Project } from "$lib/types";
@@ -37,7 +38,7 @@ export async function addProjectByPath(path: string): Promise<Project | null> {
     return existing;
   }
 
-  let inspection: { name: string; icon: string | null };
+  let inspection: { name: string; icon: string | null; tech?: string | null };
   try {
     inspection = await backend().project.inspect(path);
   } catch (err) {
@@ -49,7 +50,7 @@ export async function addProjectByPath(path: string): Promise<Project | null> {
     id: uuid(),
     name: inspection.name,
     cwd: path,
-    icon: inspection.icon,
+    icon: iconFromInspection(inspection),
     archived: false,
   };
   try {
@@ -63,4 +64,40 @@ export async function addProjectByPath(path: string): Promise<Project | null> {
   notifications.success(`Added ${project.name}`);
   logger.info("project", `added project ${project.name}`, { cwd: project.cwd });
   return project;
+}
+
+function iconFromInspection(inspection: {
+  icon: string | null;
+  tech?: string | null;
+}): string | null {
+  if (inspection.icon) return inspection.icon;
+  if (inspection.tech) return techIconDataUrl(inspection.tech);
+  return null;
+}
+
+export async function refreshProjectIcon(project: Project): Promise<boolean> {
+  let inspection: { name: string; icon: string | null; tech?: string | null };
+  try {
+    inspection = await backend().project.inspect(project.cwd);
+  } catch (err) {
+    logger.warn("project", `re-inspect failed for ${project.cwd}`, String(err));
+    return false;
+  }
+  const icon = iconFromInspection(inspection);
+  if (!icon || icon === project.icon) return false;
+  await app.updateProject({ ...project, icon });
+  return true;
+}
+
+// Projects added before icon detection improved (or before their logo
+// existed) are stuck with the initial; retry them quietly on startup.
+export async function reinspectMissingIcons(): Promise<void> {
+  const missing = app.projects.filter((p) => !p.icon);
+  for (const project of missing) {
+    try {
+      await refreshProjectIcon(project);
+    } catch {
+      // best effort
+    }
+  }
 }

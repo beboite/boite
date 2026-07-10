@@ -23,6 +23,7 @@ import { Socket, type ConnState } from "./socket";
 interface RawSession {
   id: string;
   modifiedMs?: number;
+  title?: string | null;
 }
 
 function normalizeSession(raw: unknown): SessionHit | null {
@@ -30,7 +31,11 @@ function normalizeSession(raw: unknown): SessionHit | null {
   if (typeof raw === "string") return { id: raw, mtimeMs: null };
   const r = raw as RawSession;
   if (!r.id) return null;
-  return { id: r.id, mtimeMs: typeof r.modifiedMs === "number" ? r.modifiedMs : null };
+  return {
+    id: r.id,
+    mtimeMs: typeof r.modifiedMs === "number" ? r.modifiedMs : null,
+    title: typeof r.title === "string" && r.title ? r.title : null,
+  };
 }
 
 // Drives a boite-server over one WebSocket. Every Backend method maps to an RPC
