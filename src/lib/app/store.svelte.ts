@@ -105,7 +105,9 @@ class AppState {
     return this.threads.filter((t) => t.projectId === projectId);
   }
 
-  get sortedProjects(): Project[] {
+  // $derived (not getters): several components read these per render pass;
+  // getters would rebuild the Map + sort on every access.
+  sortedProjects: Project[] = $derived.by(() => {
     const order = settings.state.projectOrder ?? [];
     const idx = new Map(order.map((id, i) => [id, i]));
     return this.projects
@@ -116,13 +118,13 @@ class AppState {
         if (ai !== bi) return ai - bi;
         return a.name.localeCompare(b.name);
       });
-  }
+  });
 
-  get archivedProjects(): Project[] {
+  archivedProjects: Project[] = $derived.by(() => {
     return this.projects
       .filter((p) => p.archived)
       .sort((a, b) => a.name.localeCompare(b.name));
-  }
+  });
 
   threadsByProjectSorted(projectId: string): Thread[] {
     const list = this.threadsByProject(projectId);
@@ -151,19 +153,20 @@ class AppState {
       if (pick) await settings.setDefaultShellIdQuiet(pick.id);
     }
 
-    try {
-      this.projects = await loadProjects();
-    } catch (err) {
+    // Projects and threads are independent tables; load both concurrently.
+    const projectsPromise = loadProjects().catch((err) => {
       console.error("loadProjects failed:", err);
-    }
+      return [] as Project[];
+    });
+    const threadsPromise = loadThreads().catch((err) => {
+      console.error("loadThreads failed:", err);
+      return [] as Thread[];
+    });
+    this.projects = await projectsPromise;
     // Before ready: panels start polling fs/git commands as soon as they
     // mount, and those commands reject paths outside registered roots.
     await this.syncRoots();
-    try {
-      this.threads = await loadThreads();
-    } catch (err) {
-      console.error("loadThreads failed:", err);
-    }
+    this.threads = await threadsPromise;
     this.deduplicateSessionIds();
 
     // Remote: the server is authoritative for thread runtime state and pushes

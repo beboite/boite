@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy } from "svelte";
+  import { spinnerTicker, TICKER_BASE_MS } from "$lib/shared/utils/ticker.svelte";
 
   type Props = {
     frames?: string[];
@@ -12,18 +12,10 @@
     size = 12,
   }: Props = $props();
 
-  let index = $state(0);
-  let timer: ReturnType<typeof setInterval> | null = null;
+  $effect(() => spinnerTicker.subscribe());
 
-  onMount(() => {
-    timer = setInterval(() => {
-      index = (index + 1) % frames.length;
-    }, intervalMs);
-  });
-
-  onDestroy(() => {
-    if (timer) clearInterval(timer);
-  });
+  const step = $derived(Math.max(1, Math.round(intervalMs / TICKER_BASE_MS)));
+  const index = $derived(Math.floor(spinnerTicker.tick / step) % frames.length);
 </script>
 
 <span

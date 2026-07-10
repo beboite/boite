@@ -24,6 +24,7 @@
   <img
     src={asset}
     alt=""
+    decoding="async"
     width={size}
     height={size}
     class="shrink-0"

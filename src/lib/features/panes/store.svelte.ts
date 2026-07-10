@@ -151,11 +151,19 @@ class PaneStore {
     this.rects[threadId] = rect;
   }
 
-  groupOf(threadId: string): PaneGroup | null {
+  // groupOf is called per thread row per render pass; a full tree walk per
+  // call made it O(threads × groups × depth). The index recomputes once per
+  // structural change instead.
+  private groupByThread: Map<string, PaneGroup> = $derived.by(() => {
+    const map = new Map<string, PaneGroup>();
     for (const g of this.groups) {
-      if (leavesOf(g.root).includes(threadId)) return g;
+      for (const id of leavesOf(g.root)) map.set(id, g);
     }
-    return null;
+    return map;
+  });
+
+  groupOf(threadId: string): PaneGroup | null {
+    return this.groupByThread.get(threadId) ?? null;
   }
 
   visibleLeaves(activeGroupId: string | null): Set<string> {
