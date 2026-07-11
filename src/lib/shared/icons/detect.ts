@@ -12,6 +12,8 @@ const RULES: DetectionRule[] = [
   { key: "cursor", patterns: [/\bcursor\b/i, /cursor-agent/i] },
   { key: "antigravity", patterns: [/\bantigravity\b/i, /\bagy\b/i] },
   { key: "copilot", patterns: [/\bcopilot\b/i, /\bgh\s+copilot\b/i] },
+  { key: "grok", patterns: [/\bgrok\b/i, /\bxai\b/i] },
+  { key: "hermes", patterns: [/\bhermes\b/i, /\bnous[- ]?research\b/i] },
   {
     key: "terminal",
     patterns: [

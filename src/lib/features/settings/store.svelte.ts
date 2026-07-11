@@ -16,6 +16,8 @@ export const PRESET_SHORTCUTS: Shortcut[] = [
   { id: "cursor", label: "Cursor Agent", command: "cursor-agent", iconKey: "cursor" },
   { id: "antigravity", label: "Antigravity", command: "agy", iconKey: "antigravity" },
   { id: "copilot", label: "Copilot", command: "gh copilot", iconKey: "copilot" },
+  { id: "grok", label: "Grok", command: "grok", iconKey: "grok" },
+  { id: "hermes", label: "Hermes", command: "hermes", iconKey: "hermes" },
 ];
 
 function migrateShortcuts(raw: unknown): { shortcuts: Shortcut[]; changed: boolean } {
@@ -57,10 +59,12 @@ function migrateShortcuts(raw: unknown): { shortcuts: Shortcut[]; changed: boole
     return shortcut;
   });
 
-  const antigravityPreset = PRESET_SHORTCUTS.find((s) => s.id === "antigravity");
-  if (antigravityPreset && !shortcuts.some((s) => s.id === "antigravity")) {
-    shortcuts.push(structuredClone(antigravityPreset));
-    changed = true;
+  for (const presetId of ["antigravity", "grok", "hermes"]) {
+    const preset = PRESET_SHORTCUTS.find((s) => s.id === presetId);
+    if (preset && !shortcuts.some((s) => s.id === presetId)) {
+      shortcuts.push(structuredClone(preset));
+      changed = true;
+    }
   }
 
   return { shortcuts, changed };
@@ -84,6 +88,8 @@ const DEFAULTS: Settings = {
     cursor: true,
     antigravity: true,
     copilot: true,
+    grok: true,
+    hermes: true,
   },
   confirmCloseThread: true,
   rightPanel: null,

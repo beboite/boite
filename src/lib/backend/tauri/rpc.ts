@@ -90,6 +90,8 @@ const SESSION_COMMANDS: Record<SessionKind, string> = {
   cursor: "find_cursor_session",
   antigravity: "find_antigravity_session",
   copilot: "find_copilot_session",
+  grok: "find_grok_session",
+  hermes: "find_hermes_session",
 };
 
 export const tauriSession: SessionApi = {

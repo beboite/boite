@@ -299,6 +299,26 @@ pub async fn find_copilot_session(
 }
 
 #[tauri::command]
+pub async fn find_grok_session(
+    cwd: String,
+    after_unix_ms: i64,
+    exclude_ids: Option<Vec<String>>,
+) -> Option<String> {
+    let exclude = session::build_exclude(exclude_ids);
+    run_lookup(move || session::find_grok_session_blocking(cwd, after_unix_ms, &exclude)).await
+}
+
+#[tauri::command]
+pub async fn find_hermes_session(
+    cwd: String,
+    after_unix_ms: i64,
+    exclude_ids: Option<Vec<String>>,
+) -> Option<String> {
+    let exclude = session::build_exclude(exclude_ids);
+    run_lookup(move || session::find_hermes_session_blocking(cwd, after_unix_ms, &exclude)).await
+}
+
+#[tauri::command]
 pub async fn git_repo_info(
     scope: State<'_, ProjectRoots>,
     path: String,

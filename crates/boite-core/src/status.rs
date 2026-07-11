@@ -9,22 +9,31 @@
 // Leading marker glyphs the AI CLIs cycle through while working, plus the
 // braille/circle spinner frames some emit in the title.
 const WORKING_GLYPHS: &[char] = &[
-    '✱', '✻', '✦', '✺', '✧', '✨', '✳', '❖', '✷', '✴', '✵', '⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦',
-    '⠧', '⠇', '⠏', '◐', '◓', '◑', '◒',
+    '✱', '✻', '✦', '✺', '✧', '✨', '✳', '❖', '✷', '✴', '✵', '◐', '◓', '◑', '◒', '⏳',
 ];
+
+/// Working marker: the explicit glyph set plus any non-blank braille spinner
+/// frame (grok cycles frames well beyond the common ⠋…⠏ subset). ⚠ and ✓
+/// (hermes: action required / idle) are deliberately not working markers,
+/// but strip_leading_marker still drops them from the label.
+fn is_working_glyph(c: char) -> bool {
+    WORKING_GLYPHS.contains(&c) || ('\u{2801}'..='\u{28FF}').contains(&c)
+}
 
 /// True when the OSC title signals the agent is actively working.
 pub fn title_signals_working(title: &str) -> bool {
-    title.chars().any(|c| WORKING_GLYPHS.contains(&c))
+    title.chars().any(is_working_glyph)
 }
 
-/// Drop a leading working glyph (and the whitespace after it) so the sidebar
+/// Drop a leading marker glyph (and the whitespace after it) so the sidebar
 /// label stays readable.
 pub fn strip_leading_marker(title: &str) -> String {
     let trimmed = title.trim_start();
     let mut chars = trimmed.chars();
     match chars.next() {
-        Some(first) if WORKING_GLYPHS.contains(&first) => chars.as_str().trim_start().to_string(),
+        Some(first) if is_working_glyph(first) || first == '✓' || first == '⚠' => {
+            chars.as_str().trim_start().to_string()
+        }
         _ => trimmed.to_string(),
     }
 }
@@ -51,6 +60,11 @@ const GENERIC_TITLES: &[&str] = &[
     "copilot",
     "github copilot",
     "gh copilot",
+    "grok",
+    "xai",
+    "hermes",
+    "hermes agent",
+    "nous research",
     "powershell",
     "powershell 7",
     "pwsh",

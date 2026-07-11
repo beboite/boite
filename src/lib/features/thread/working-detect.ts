@@ -35,9 +35,30 @@ const WORKING_BY_KEY: Partial<Record<NonNullable<IconKey>, RegExp[]>> = {
     /\bworking\b/i,
     /✨\s*generating/i,
   ],
+  // Grok's OSC title cycles a braille spinner plus an activity word
+  // (Waiting / Running: <tool> / Compacting / Retrying).
+  grok: [
+    /esc\s+to\s+(?:interrupt|cancel|stop)/i,
+    /\brunning:/i,
+    /\bcompacting\b/i,
+    /\bretrying\b/i,
+    /\(\d+s\s*[·•]/,
+  ],
+  // Hermes marks busy with a leading ⏳ in the title (✓ idle, ⚠ waiting for
+  // approval). On Windows it uses SetConsoleTitle instead of OSC, so text
+  // patterns carry local detection there.
+  hermes: [
+    /esc\s+to\s+(?:interrupt|cancel|stop)/i,
+    /\bthinking\b/i,
+    /\bworking\b/i,
+    /\bgenerating\b/i,
+  ],
 };
 
-const TITLE_GLYPHS = /[✱✻✦✺✧✨✳❖✷✴✵⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏◐◓◑◒]/;
+// Includes the full braille spinner block (grok cycles frames beyond the
+// common ⠋…⠏ set) and hermes's ⏳ busy marker. ⚠ is deliberately absent:
+// it means "action required", which should read as ready, not running.
+const TITLE_GLYPHS = /[✱✻✦✺✧✨✳❖✷✴✵◐◓◑◒⏳⠁-⣿]/;
 const HAS_LETTER = /[a-zA-Z]/;
 
 export function detectWorking(text: string, iconKey: IconKey): boolean {

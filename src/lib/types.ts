@@ -39,6 +39,8 @@ export type IconKey =
   | "cursor"
   | "copilot"
   | "opencode"
+  | "grok"
+  | "hermes"
   | "terminal"
   | null;
 

@@ -16,6 +16,8 @@
     codex: "/icons/chatgpt.svg",
     antigravity: "/icons/antigravity.svg",
     opencode: "/icons/opencode.svg",
+    grok: "/icons/grok.svg",
+    hermes: "/icons/hermes.svg",
   };
   const asset = $derived(iconKey ? ASSET_BY_KEY[iconKey] : null);
 </script>

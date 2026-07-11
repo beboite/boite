@@ -34,6 +34,8 @@ const detectors: Partial<Record<NonNullable<IconKey>, SessionDetector>> = {
   cursor: makeDetector("cursor", "cursor"),
   antigravity: makeDetector("antigravity", "antigravity"),
   copilot: makeDetector("copilot", "copilot"),
+  grok: makeDetector("grok", "grok"),
+  hermes: makeDetector("hermes", "hermes"),
 };
 
 function resolveKey(thread: Thread): IconKey {
@@ -74,6 +76,18 @@ function stripFlag(args: string[], flags: string[], takesValue: boolean): string
 function withCodexNoAltScreen(args: string[]): string[] {
   if (args.includes(CODEX_NO_ALT_SCREEN)) return args;
   return [CODEX_NO_ALT_SCREEN, ...args];
+}
+
+function withGrokContinue(args: string[]): string[] {
+  if (
+    args.includes("--continue") ||
+    args.includes("-c") ||
+    args.includes("--resume") ||
+    args.includes("-r")
+  ) {
+    return args;
+  }
+  return [...args, "--continue"];
 }
 
 function withOpencodeContinue(args: string[]): string[] {
@@ -139,6 +153,19 @@ const builders: Partial<Record<NonNullable<IconKey>, ResumeBuilder>> = {
     const filtered = stripFlag(args, ["--resume"], true);
     return [...filtered, "--resume", sessionId];
   },
+  // grok --resume <id> picks a specific session; -c continues the latest
+  // session of the current directory.
+  grok: (args, sessionId) => {
+    const withoutContinue = stripFlag(args, ["--continue", "-c"], false);
+    const filtered = stripFlag(withoutContinue, ["--resume", "-r"], true);
+    return [...filtered, "--resume", sessionId];
+  },
+  // hermes --resume <id|title> picks a specific session.
+  hermes: (args, sessionId) => {
+    const withoutContinue = stripFlag(args, ["--continue", "-c"], false);
+    const filtered = stripFlag(withoutContinue, ["--resume", "-r"], true);
+    return [...filtered, "--resume", sessionId];
+  },
 };
 
 export function buildResumeArgs(thread: Thread): string[] {
@@ -169,6 +196,19 @@ export function buildResumeArgs(thread: Thread): string[] {
   if (!thread.sessionId) {
     if (key === "opencode") {
       const out = withOpencodeContinue(args);
+      logger.info(
+        "resume",
+        `${thread.id} (${key}): no captured session, continue latest`,
+        { cmd: thread.cmd, args: out },
+      );
+      return out;
+    }
+    // grok -c is scoped to the current directory, so continuing the latest
+    // session is safe even without a captured id. hermes -c is global (last
+    // session of any project), so it gets no fallback: wrong-project resumes
+    // are worse than a fresh session.
+    if (key === "grok") {
+      const out = withGrokContinue(args);
       logger.info(
         "resume",
         `${thread.id} (${key}): no captured session, continue latest`,
