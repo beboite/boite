@@ -378,6 +378,12 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
                     "copilot" => {
                         id_or_null(session::find_copilot_session_blocking(cwd, after, &exclude))
                     }
+                    "grok" => {
+                        id_or_null(session::find_grok_session_blocking(cwd, after, &exclude))
+                    }
+                    "hermes" => {
+                        id_or_null(session::find_hermes_session_blocking(cwd, after, &exclude))
+                    }
                     _ => Value::Null,
                 }
             })

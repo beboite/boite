@@ -123,7 +123,9 @@ export type SessionKind =
   | "opencode"
   | "cursor"
   | "antigravity"
-  | "copilot";
+  | "copilot"
+  | "grok"
+  | "hermes";
 
 export interface SessionHit {
   id: string;

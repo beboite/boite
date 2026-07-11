@@ -187,6 +187,8 @@ pub fn run() {
             commands::find_cursor_session,
             commands::find_antigravity_session,
             commands::find_copilot_session,
+            commands::find_grok_session,
+            commands::find_hermes_session,
             commands::git_repo_info,
             commands::git_status,
             commands::git_changed_paths,

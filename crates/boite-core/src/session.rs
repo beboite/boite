@@ -700,6 +700,196 @@ pub fn find_antigravity_session_blocking(
     None
 }
 
+fn hex_val(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        b'A'..=b'F' => Some(b - b'A' + 10),
+        _ => None,
+    }
+}
+
+fn percent_decode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let (Some(h), Some(l)) = (hex_val(bytes[i + 1]), hex_val(bytes[i + 2])) {
+                out.push(h * 16 + l);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+fn grok_sessions_dir() -> Option<PathBuf> {
+    if let Ok(home) = env::var("GROK_HOME") {
+        if !home.trim().is_empty() {
+            return Some(PathBuf::from(home).join("sessions"));
+        }
+    }
+    Some(dirs::home_dir()?.join(".grok").join("sessions"))
+}
+
+/// Grok stores sessions under ~/.grok/sessions/<url-encoded-cwd>/<uuid7>/
+/// (summary.json + updates.jsonl per session). Long cwds get a slug+hash dir
+/// name with the real path in a `.cwd` file inside.
+pub fn find_grok_session_blocking(
+    cwd: String,
+    after_unix_ms: i64,
+    exclude: &HashSet<String>,
+) -> Option<String> {
+    let sessions_dir = grok_sessions_dir()?;
+    if !sessions_dir.is_dir() {
+        return None;
+    }
+
+    let target = normalize(&cwd);
+    let mut best: Option<(String, i64)> = None;
+
+    for cwd_entry in fs::read_dir(&sessions_dir).ok()?.flatten() {
+        let Ok(t) = cwd_entry.file_type() else { continue };
+        if !t.is_dir() {
+            continue;
+        }
+        let dir_name = cwd_entry.file_name().to_string_lossy().into_owned();
+        let decoded_matches = normalize(&percent_decode(&dir_name)) == target;
+        let cwd_file_matches = || {
+            fs::read_to_string(cwd_entry.path().join(".cwd"))
+                .map(|c| normalize(c.trim()) == target)
+                .unwrap_or(false)
+        };
+        if !decoded_matches && !cwd_file_matches() {
+            continue;
+        }
+
+        let Ok(sessions) = fs::read_dir(cwd_entry.path()) else {
+            continue;
+        };
+        for session in sessions.flatten() {
+            let Ok(t) = session.file_type() else { continue };
+            if !t.is_dir() {
+                continue;
+            }
+            let id = session.file_name().to_string_lossy().into_owned();
+            if exclude.contains(&id) {
+                continue;
+            }
+            let summary = session.path().join("summary.json");
+            let mtime = fs::metadata(&summary)
+                .or_else(|_| session.path().metadata())
+                .and_then(|m| m.modified())
+                .map(ms_since_epoch)
+                .unwrap_or(0);
+            if mtime < after_unix_ms {
+                continue;
+            }
+            if best.as_ref().is_none_or(|(_, t)| mtime > *t) {
+                best = Some((id, mtime));
+            }
+        }
+    }
+    best.map(|(id, _)| id)
+}
+
+fn hermes_db_path() -> Option<PathBuf> {
+    if let Ok(home) = env::var("HERMES_HOME") {
+        if !home.trim().is_empty() {
+            return Some(PathBuf::from(home).join("state.db"));
+        }
+    }
+    Some(dirs::home_dir()?.join(".hermes").join("state.db"))
+}
+
+fn hermes_ts_to_ms(v: rusqlite::types::Value) -> Option<i64> {
+    use rusqlite::types::Value;
+    // The sessions table's timestamp column type is not pinned upstream;
+    // accept epoch seconds, epoch millis, or ISO text.
+    let from_num = |n: i64| {
+        if n < 100_000_000_000 {
+            n * 1000
+        } else {
+            n
+        }
+    };
+    match v {
+        Value::Integer(i) => Some(from_num(i)),
+        Value::Real(f) => Some(from_num(f as i64)),
+        Value::Text(s) => parse_iso_ms(&s)
+            .or_else(|| s.parse::<f64>().ok().map(|f| from_num(f as i64))),
+        _ => None,
+    }
+}
+
+/// Hermes keeps every session in a single SQLite db (~/.hermes/state.db);
+/// the sessions table carries the cwd, so matching is a direct query.
+pub fn find_hermes_session_blocking(
+    cwd: String,
+    after_unix_ms: i64,
+    exclude: &HashSet<String>,
+) -> Option<String> {
+    let db_path = hermes_db_path()?;
+    if !db_path.is_file() {
+        return None;
+    }
+
+    let conn = open_readonly(&db_path).ok()?;
+    let _ = conn.busy_timeout(Duration::from_millis(250));
+    let target = normalize(&cwd);
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, cwd, started_at, ended_at \
+             FROM sessions \
+             ORDER BY started_at DESC \
+             LIMIT 100",
+        )
+        .ok()?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, rusqlite::types::Value>(0)?,
+                row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                row.get::<_, rusqlite::types::Value>(2)?,
+                row.get::<_, rusqlite::types::Value>(3)?,
+            ))
+        })
+        .ok()?;
+
+    for row in rows.flatten() {
+        let (id_val, scwd, started, ended) = row;
+        if normalize(&scwd) != target {
+            continue;
+        }
+        let id = match id_val {
+            rusqlite::types::Value::Text(s) => s,
+            rusqlite::types::Value::Integer(i) => i.to_string(),
+            _ => continue,
+        };
+        if exclude.contains(&id) {
+            continue;
+        }
+        // Last activity: a resumed session keeps its old started_at, so take
+        // the later of start/end. Unparseable timestamps skip the filter.
+        let activity = hermes_ts_to_ms(started)
+            .into_iter()
+            .chain(hermes_ts_to_ms(ended))
+            .max();
+        if let Some(ts) = activity {
+            if ts < after_unix_ms {
+                continue;
+            }
+        }
+        return Some(id);
+    }
+    None
+}
+
 pub fn build_exclude(ids: Option<Vec<String>>) -> HashSet<String> {
     ids.unwrap_or_default().into_iter().collect()
 }
