@@ -105,7 +105,14 @@ pub fn run() {
         },
     ];
 
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default();
+
+    #[cfg(debug_assertions)]
+    {
+        builder = builder.plugin(tauri_plugin_mcp_bridge::init());
+    }
+
+    builder
         // Must be the first plugin so a second launch is intercepted before
         // anything else initializes. Two instances would share one SQLite
         // file and race kill_all on exit.
