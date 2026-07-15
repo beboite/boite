@@ -858,7 +858,7 @@
 
   <button
     type="button"
-    class="absolute right-0 top-0 z-10 h-full w-1 cursor-col-resize transition hover:bg-foreground/10 {resizing ? 'bg-foreground/20' : 'bg-transparent'}"
+    class="absolute -right-px top-0 z-10 h-full w-1 cursor-col-resize transition hover:bg-foreground/10 after:absolute after:inset-y-0 after:-inset-x-1.5 after:content-[''] {resizing ? 'bg-foreground/20' : 'bg-transparent'}"
     use:resizeHandle={{
       onResize,
       onStateChange: (r) => (resizing = r),
