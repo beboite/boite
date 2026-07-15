@@ -10,6 +10,7 @@
   import GitGraph from "./GitGraph.svelte";
   import BranchChangesDialog from "./BranchChangesDialog.svelte";
   import type { ChangeEntry } from "./api";
+  import { i18n } from "$lib/i18n/index.svelte";
   import CloudDownload from "@lucide/svelte/icons/cloud-download";
   import GitBranch from "@lucide/svelte/icons/git-branch";
   import Plus from "@lucide/svelte/icons/plus";
@@ -199,11 +200,11 @@
     if (!project) return;
     const untracked = entry.status === "?";
     const ok = await confirmDialog.ask({
-      title: untracked ? "Delete untracked file?" : "Discard changes?",
+      title: untracked ? i18n.t("git.confirm_delete_title") : i18n.t("git.confirm_discard_title"),
       message: untracked
-        ? `${entry.path} is not tracked by git. Deleting it cannot be undone.`
-        : `Working-tree changes to ${entry.path} will be lost. Staged changes are kept.`,
-      confirmLabel: untracked ? "Delete" : "Discard",
+        ? i18n.t("git.confirm_delete_msg", { path: entry.path })
+        : i18n.t("git.confirm_discard_msg", { path: entry.path }),
+      confirmLabel: untracked ? i18n.t("git.confirm_delete_label") : i18n.t("git.confirm_discard_label"),
       danger: true,
     });
     if (ok) void gitStore.discard(project.id, [entry]);
@@ -247,7 +248,7 @@
           disabled={gs.switchingBranch}
           aria-haspopup="menu"
           aria-expanded={branchMenuOpen}
-          title="Change branch"
+          title={i18n.t("git.change_branch")}
         >
           <GitBranch class="size-3.5 shrink-0 text-muted-foreground" />
           <span class="truncate">{gs.branch ?? "(detached)"}</span>
@@ -262,8 +263,8 @@
             <form class="flex gap-1.5 border-b border-border p-2" onsubmit={createBranch}>
               <input
                 class="min-w-0 flex-1 rounded border border-border bg-[var(--color-background)] px-2 py-1 text-xs text-foreground placeholder:text-muted-foreground/60 focus:border-foreground/30 focus:outline-none"
-                placeholder="New branch name"
-                aria-label="New branch name"
+                placeholder={i18n.t("git.new_branch_placeholder")}
+                aria-label={i18n.t("git.new_branch_placeholder")}
                 bind:value={newBranchName}
                 disabled={gs.switchingBranch}
               />
@@ -271,8 +272,8 @@
                 type="submit"
                 class="rounded border border-border bg-[var(--color-surface-2)] p-1.5 text-muted-foreground transition hover:bg-[var(--color-surface-3)] hover:text-foreground disabled:opacity-40"
                 disabled={!newBranchName.trim() || gs.switchingBranch}
-                title="Create branch"
-                aria-label="Create branch"
+                title={i18n.t("git.create_branch")}
+                aria-label={i18n.t("git.create_branch")}
               >
                 <Plus class="size-3.5" />
               </button>
@@ -281,11 +282,11 @@
             <div class="max-h-64 overflow-y-auto py-1">
               {#if gs.branchesLoading && !gs.branchesLoaded}
                 <div class="px-3 py-3 text-center text-[11px] text-muted-foreground">
-                  Loading branches...
+                  {i18n.t("git.loading_branches")}
                 </div>
               {:else if gs.branches.length === 0}
                 <div class="px-3 py-3 text-center text-[11px] text-muted-foreground">
-                  No local branches yet.
+                  {i18n.t("git.no_local_branches")}
                 </div>
               {:else}
                 {#each gs.branches as branch (branch.name)}
@@ -323,7 +324,7 @@
         </span>
       {/if}
     {:else}
-      <span class="truncate text-xs text-muted-foreground">Not a git repo</span>
+      <span class="truncate text-xs text-muted-foreground">{i18n.t("git.not_a_git_repo")}</span>
     {/if}
     <div class="ml-auto flex items-center gap-0.5">
       <button
@@ -331,8 +332,8 @@
         class="rounded p-1 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:opacity-40"
         onclick={pull}
         disabled={!gs?.isRepo || !gs.upstream || gs.pulling}
-        title="Pull (fast-forward only)"
-        aria-label="Pull"
+        title={i18n.t("git.pull_ff")}
+        aria-label={i18n.t("git.pull")}
       >
         <ArrowDownToLine class="size-3.5 {gs?.pulling ? 'animate-pulse' : ''}" />
       </button>
@@ -341,8 +342,8 @@
         class="rounded p-1 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:opacity-40"
         onclick={push}
         disabled={!gs?.isRepo || gs.pushing || (gs.upstream !== null && gs.ahead === 0)}
-        title={gs?.upstream ? "Push" : "Publish branch"}
-        aria-label="Push"
+        title={gs?.upstream ? i18n.t("git.push") : i18n.t("git.publish_branch")}
+        aria-label={i18n.t("git.push")}
       >
         <ArrowUpFromLine class="size-3.5 {gs?.pushing ? 'animate-pulse' : ''}" />
       </button>
@@ -351,8 +352,8 @@
         class="rounded p-1 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:opacity-40"
         onclick={fetch}
         disabled={!gs?.isRepo || gs.fetching}
-        title="Fetch from remote"
-        aria-label="Fetch from remote"
+        title={i18n.t("git.fetch_remote")}
+        aria-label={i18n.t("git.fetch_remote")}
       >
         <CloudDownload class="size-3.5 {gs?.fetching ? 'animate-pulse' : ''}" />
       </button>
@@ -363,25 +364,25 @@
     <div
       class="flex flex-1 items-center justify-center px-3 text-center text-xs text-muted-foreground"
     >
-      Pick a project.
+      {i18n.t("git.pick_project")}
     </div>
   {:else if !gs || !gs.loaded}
     <div
       class="flex flex-1 items-center justify-center px-3 text-center text-xs text-muted-foreground/70"
     >
-      Loading…
+      {i18n.t("git.loading")}
     </div>
   {:else if !gs.isRepo}
     <div
       class="flex flex-1 flex-col items-center justify-center gap-3 px-3 text-center text-xs text-muted-foreground"
     >
-      <span>This folder is not a git repository.</span>
+      <span>{i18n.t("git.not_repo_desc")}</span>
       <button
         type="button"
         class="rounded-md border border-border bg-[var(--color-surface-2)] px-3 py-1.5 text-xs text-foreground/85 transition hover:bg-[var(--color-surface-3)] hover:text-foreground"
         onclick={initRepo}
       >
-        Initialize repository
+        {i18n.t("git.init_repo")}
       </button>
     </div>
   {:else}
@@ -400,7 +401,7 @@
           <span
             class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
           >
-            Changes
+            {i18n.t("git.changes")}
           </span>
           {#if totalChanges > 0}
             <span
@@ -415,7 +416,7 @@
           <textarea
             class="w-full resize-none rounded-md border border-border bg-[var(--color-background)] px-2 py-1.5 text-xs text-foreground placeholder:text-muted-foreground/60 focus:border-foreground/30 focus:outline-none"
             rows="2"
-            placeholder="Commit message  (Ctrl+Enter)"
+            placeholder={i18n.t("git.commit_placeholder")}
             bind:value={gs.message}
             onkeydown={commitKey}
             disabled={gs.committing}
@@ -429,7 +430,7 @@
                 gs.staged.length === 0 ||
                 !gs.message.trim()}
             >
-              Commit ({gs.staged.length})
+              {i18n.t("git.commit_btn", { count: gs.staged.length })}
             </button>
           {:else}
             {@const canPush = gs.upstream === null || gs.ahead > 0}
@@ -441,13 +442,13 @@
             >
               {#if gs.upstream === null}
                 <ArrowUpFromLine class="size-3.5" />
-                Publish Branch
+                {i18n.t("git.publish_btn")}
               {:else if gs.ahead > 0}
                 <ArrowUpFromLine class="size-3.5 {gs.pushing ? 'animate-pulse' : ''}" />
-                Push ({gs.ahead} commit{gs.ahead > 1 ? 's' : ''})
+                {i18n.t("git.push_btn", { count: gs.ahead, plural: gs.ahead > 1 ? 's' : '' })}
               {:else}
                 <Check class="size-3.5 text-[var(--color-success)]" />
-                Up to date
+                {i18n.t("git.up_to_date")}
               {/if}
             </button>
           {/if}
@@ -456,7 +457,7 @@
         <div class="min-h-0 flex-1 overflow-y-auto">
           {#if gs.conflicts.length > 0}
             {@render section({
-              label: "Merge changes",
+              label: i18n.t("git.merge_changes"),
               entries: gs.conflicts,
               mode: "conflict",
               open: conflictsOpen,
@@ -465,7 +466,7 @@
           {/if}
           {#if gs.staged.length > 0}
             {@render section({
-              label: "Staged",
+              label: i18n.t("git.staged"),
               entries: gs.staged,
               mode: "staged",
               open: stagedOpen,
@@ -474,7 +475,7 @@
           {/if}
           {#if gs.unstaged.length > 0}
             {@render section({
-              label: "Changes",
+              label: i18n.t("git.changes"),
               entries: gs.unstaged,
               mode: "unstaged",
               open: changesOpen,
@@ -485,7 +486,7 @@
             <div
               class="px-3 py-4 text-center text-[11px] text-muted-foreground/70"
             >
-              Working tree clean.
+              {i18n.t("git.working_tree_clean")}
             </div>
           {/if}
         </div>
@@ -500,7 +501,7 @@
             onStateChange: (r) => (resizingY = r),
           }}
           class="relative z-10 h-1 translate-y-[2px] cursor-row-resize transition hover:bg-foreground/10 after:absolute after:-inset-y-1.5 after:inset-x-0 after:content-[''] {resizingY ? 'bg-foreground/20' : 'bg-transparent'}"
-          aria-label="Resize sections"
+          aria-label={i18n.t("git.resize_sections")}
           tabindex="-1"
         ></button>
       {/if}
@@ -517,7 +518,7 @@
           <span
             class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
           >
-            Commits
+            {i18n.t("git.commits")}
           </span>
           {#if gs.log.length > 0}
             <span
@@ -537,7 +538,7 @@
               <div
                 class="px-3 py-4 text-center text-[11px] text-muted-foreground/70"
               >
-                No commits.
+                {i18n.t("git.no_commits")}
               </div>
             {:else}
               <GitGraph commits={gs.log} />
@@ -549,7 +550,7 @@
                     onclick={loadMoreCommits}
                     disabled={gs.logLoadingMore}
                   >
-                    {gs.logLoadingMore ? "Loading..." : "Load more commits"}
+                    {gs.logLoadingMore ? i18n.t("git.loading_more") : i18n.t("git.load_more_commits")}
                   </button>
                 </div>
               {/if}
@@ -589,18 +590,18 @@
         <button
           type="button"
           class="rounded p-0.5 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground"
-          title="Unstage all"
-          aria-label="Unstage all"
+          title={i18n.t("git.unstage_all")}
+          aria-label={i18n.t("git.unstage_all")}
           onclick={() => unstagePaths(entries.map((x) => x.path))}
         >
           <Minus class="size-3" />
         </button>
-      {:else if mode === "unstaged"}
+      {:else}
         <button
           type="button"
           class="rounded p-0.5 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground"
-          title="Stage all"
-          aria-label="Stage all"
+          title={i18n.t("git.stage_all")}
+          aria-label={i18n.t("git.stage_all")}
           onclick={() => stagePaths(entries.map((x) => x.path))}
         >
           <Plus class="size-3" />
@@ -632,8 +633,8 @@
               <button
                 type="button"
                 class="rounded p-0.5 text-muted-foreground hover:bg-[var(--color-surface-3)] hover:text-foreground"
-                title="Unstage"
-                aria-label="Unstage file"
+                title={i18n.t("git.unstage")}
+                aria-label={i18n.t("git.unstage_file")}
                 onclick={() => unstagePaths([entry.path])}
               >
                 <Minus class="size-3" />
@@ -642,8 +643,8 @@
               <button
                 type="button"
                 class="rounded p-0.5 text-muted-foreground hover:bg-[var(--color-surface-3)] hover:text-foreground"
-                title={entry.status === "?" ? "Delete file" : "Discard changes"}
-                aria-label={entry.status === "?" ? "Delete file" : "Discard changes"}
+                title={entry.status === "?" ? i18n.t("git.delete_file") : i18n.t("git.discard")}
+                aria-label={entry.status === "?" ? i18n.t("git.delete_file") : i18n.t("git.discard")}
                 onclick={() => discardEntry(entry)}
               >
                 <Trash2 class="size-3" />
@@ -651,8 +652,8 @@
               <button
                 type="button"
                 class="rounded p-0.5 text-muted-foreground hover:bg-[var(--color-surface-3)] hover:text-foreground"
-                title="Stage"
-                aria-label="Stage file"
+                title={i18n.t("git.stage")}
+                aria-label={i18n.t("git.stage_file")}
                 onclick={() => stagePaths([entry.path])}
               >
                 <Plus class="size-3" />
@@ -661,8 +662,8 @@
               <button
                 type="button"
                 class="rounded p-0.5 text-muted-foreground hover:bg-[var(--color-surface-3)] hover:text-foreground"
-                title="Mark resolved (stage)"
-                aria-label="Mark resolved"
+                title={i18n.t("git.mark_resolved")}
+                aria-label={i18n.t("git.mark_resolved")}
                 onclick={() => markResolved(entry.path)}
               >
                 <Check class="size-3" />
