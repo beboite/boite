@@ -3,6 +3,7 @@
   import { fade, scale } from "svelte/transition";
   import Archive from "@lucide/svelte/icons/archive";
   import ArrowRight from "@lucide/svelte/icons/arrow-right";
+  import { i18n } from "$lib/i18n/index.svelte";
 
   type Props = {
     branch: string;
@@ -77,12 +78,12 @@
   >
     <div class="px-5 py-4">
       <h2 id="branch-changes-title" class="text-sm font-semibold text-foreground">
-        You have uncommitted changes
+        {i18n.t("branch_dialog.uncommitted_changes")}
       </h2>
       <p class="mt-1.5 text-xs leading-relaxed text-muted-foreground">
-        {creating ? "Creating" : "Switching to"}
-        <span class="font-mono text-foreground/90">{branch}</span> can either carry
-        your current changes with you or stash them before switching.
+        {creating ? i18n.t("branch_dialog.description_part1_creating") : i18n.t("branch_dialog.description_part1_switching")}
+        <span class="font-mono text-foreground/90">{branch}</span>
+        {i18n.t("branch_dialog.description_part2")}
       </p>
 
       <div class="mt-4 grid gap-2">
@@ -95,9 +96,9 @@
         >
           <ArrowRight class="size-4 shrink-0 text-foreground/80" />
           <span class="min-w-0">
-            <span class="block text-xs font-medium text-foreground">Bring changes</span>
+            <span class="block text-xs font-medium text-foreground">{i18n.t("branch_dialog.bring_changes")}</span>
             <span class="mt-0.5 block text-[11px] leading-snug text-muted-foreground">
-              Modified and staged files follow you to {branch}.
+              {i18n.t("branch_dialog.bring_changes_desc", { branch })}
             </span>
           </span>
         </button>
@@ -109,10 +110,9 @@
         >
           <Archive class="size-4 shrink-0 text-muted-foreground" />
           <span class="min-w-0">
-            <span class="block text-xs font-medium text-foreground">Leave changes here</span>
+            <span class="block text-xs font-medium text-foreground">{i18n.t("branch_dialog.leave_changes")}</span>
             <span class="mt-0.5 block text-[11px] leading-snug text-muted-foreground">
-              Git stashes tracked, staged, and untracked files. Restore them later with
-              <span class="font-mono">git stash pop</span>.
+              {@html i18n.t("branch_dialog.leave_changes_desc", { command: '<span class="font-mono">git stash pop</span>' })}
             </span>
           </span>
         </button>
@@ -125,7 +125,7 @@
         onclick={onCancel}
         disabled={busy}
       >
-        Cancel
+        {i18n.t("branch_dialog.cancel")}
       </button>
     </footer>
   </div>
