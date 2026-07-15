@@ -14,6 +14,7 @@ const RULES: DetectionRule[] = [
   { key: "copilot", patterns: [/\bcopilot\b/i, /\bgh\s+copilot\b/i] },
   { key: "grok", patterns: [/\bgrok\b/i, /\bxai\b/i] },
   { key: "hermes", patterns: [/\bhermes\b/i, /\bnous[- ]?research\b/i] },
+  { key: "bun", patterns: [/\bbun\b/i] },
   {
     key: "terminal",
     patterns: [
