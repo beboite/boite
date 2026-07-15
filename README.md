@@ -81,7 +81,21 @@ keeps one connection active at a time (switching reconnects to the new boite).
 bun install
 bun run tauri dev    # full app with hot reload
 bun run tauri build  # release bundles (per-platform default targets)
+```
 
+### Dev mode side-by-side (Isolated)
+
+If you are already running a production/release instance of Boite (for instance, if you are pair-programming with Claude Code or Antigravity inside it) and want to dev on the app without closing your current session, the standard `tauri dev` command will conflict with the single-instance lock.
+
+To run a development window side-by-side:
+
+```bash
+bun run tauri dev --config src-tauri/tauri.dev-isolated.conf.json
+```
+
+This launches a distinct **"Boite Dev"** window using port `1430` and the bundle identifier `dev.boite.dev`.
+
+```bash
 # checks before committing
 bun run check
 cargo check --manifest-path src-tauri/Cargo.toml
