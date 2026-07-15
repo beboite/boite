@@ -103,6 +103,22 @@ cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
 cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
+### Internationalization (i18n)
+
+Boite includes a custom Svelte 5 Rune-based reactive translation system. To ensure localization integrity, **all new or modified user-facing strings must be localized** in both English and French at a minimum.
+
+- English dictionary: [`en.json`](src/lib/i18n/locales/en.json)
+- French dictionary: [`fr.json`](src/lib/i18n/locales/fr.json)
+
+To use it in Svelte files, import `i18n` and call `i18n.t("key")`:
+```svelte
+<script lang="ts">
+  import { i18n } from "$lib/i18n/index.svelte";
+</script>
+
+<p>{i18n.t("my_key")}</p>
+```
+
 ### Linux
 
 Tested on Ubuntu 22.04+ / Fedora 39+ with GNOME (Wayland) and KDE. Other DEs
