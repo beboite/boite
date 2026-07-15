@@ -6,6 +6,7 @@
     "devUrl": "http://localhost:1430"
   },
   "app": {
+    "withGlobalTauri": true,
     "windows": [
       {
         "title": "Boite Dev",
