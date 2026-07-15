@@ -95,6 +95,19 @@ export function gitSwitchBranch(
   return backendForPath(path).git.switchBranch(path, name, create, stash);
 }
 
+export function gitBranches(path: string): Promise<BranchInfo[]> {
+  return backend().git.branches(path);
+}
+
+export function gitSwitchBranch(
+  path: string,
+  name: string,
+  create: boolean,
+  stash: boolean,
+): Promise<BranchChangeResult> {
+  return backend().git.switchBranch(path, name, create, stash);
+}
+
 export function gitFetch(path: string): Promise<void> {
   return backendForPath(path).git.fetch(path);
 }
