@@ -209,11 +209,12 @@
     </span>
   </div>
 
-  <div
-    class="pointer-events-none absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center"
-  >
-    <WorkspaceToggle />
-  </div>
+    <div
+      class="pointer-events-none absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center"
+    >
+      <WorkspaceToggle />
+    </div>
+  {/if}
 
   <div data-tauri-drag-region class="flex-1"></div>
 
