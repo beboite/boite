@@ -1,4 +1,5 @@
 import {
+  gitBranches,
   gitCommit,
   gitDiscard,
   gitFetch,
@@ -9,7 +10,9 @@ import {
   gitRepoInfo,
   gitStage,
   gitStatus,
+  gitSwitchBranch,
   gitUnstage,
+  type BranchInfo,
   type ChangeEntry,
   type Commit,
 } from "./api";
@@ -35,6 +38,10 @@ export interface GitState {
   behind: number;
   refsVersion: string | null;
   commitCount: number;
+  branches: BranchInfo[];
+  branchesLoaded: boolean;
+  branchesLoading: boolean;
+  switchingBranch: boolean;
   staged: ChangeEntry[];
   unstaged: ChangeEntry[];
   conflicts: ChangeEntry[];
@@ -60,6 +67,10 @@ function emptyState(): GitState {
     behind: 0,
     refsVersion: null,
     commitCount: 0,
+    branches: [],
+    branchesLoaded: false,
+    branchesLoading: false,
+    switchingBranch: false,
     staged: [],
     unstaged: [],
     conflicts: [],
@@ -163,6 +174,9 @@ class GitStore {
         state.behind = info.behind;
         state.refsVersion = info.refsVersion;
         state.commitCount = info.commitCount;
+        if (previous.branch !== info.branch && state.branchesLoaded) {
+          void this.loadBranches(projectId, false);
+        }
         const staged: ChangeEntry[] = [];
         const unstaged: ChangeEntry[] = [];
         const conflicts: ChangeEntry[] = [];
@@ -208,6 +222,56 @@ class GitStore {
       notifications.error(`Load commits failed: ${err}`);
     } finally {
       state.logLoadingMore = false;
+    }
+  }
+
+  async loadBranches(projectId: string, notifyErrors = true): Promise<void> {
+    const cwd = this.cwds.get(projectId);
+    const state = this.states[projectId];
+    if (!cwd || !state || state.branchesLoading) return;
+    state.branchesLoading = true;
+    try {
+      state.branches = await gitBranches(cwd);
+      state.branchesLoaded = true;
+    } catch (err) {
+      if (notifyErrors) {
+        notifications.error(`Could not load branches: ${branchError(err)}`);
+      }
+    } finally {
+      state.branchesLoading = false;
+    }
+  }
+
+  async changeBranch(
+    projectId: string,
+    name: string,
+    create: boolean,
+    stash: boolean,
+  ): Promise<boolean> {
+    const cwd = this.cwds.get(projectId);
+    const state = this.states[projectId];
+    if (!cwd || !state || state.switchingBranch) return false;
+    state.switchingBranch = true;
+    try {
+      const result = await gitSwitchBranch(cwd, name, create, stash);
+      notifications.success(
+        result.stashed
+          ? `Switched to ${name}; local changes were stashed`
+          : create
+            ? `Created and switched to ${name}`
+            : `Switched to ${name}`,
+      );
+      await Promise.all([
+        this.refresh(projectId, { reloadLog: true, notifyErrors: true }),
+        this.loadBranches(projectId, false),
+      ]);
+      return true;
+    } catch (err) {
+      notifications.error(branchError(err));
+      await this.refresh(projectId);
+      return false;
+    } finally {
+      state.switchingBranch = false;
     }
   }
 
@@ -366,3 +430,37 @@ class GitStore {
 }
 
 export const gitStore = new GitStore();
+
+function branchError(error: unknown): string {
+  const message = String(error).replace(/^Error:\s*/i, "").trim();
+  const lower = message.toLowerCase();
+  if (
+    lower.includes("would be overwritten by checkout") ||
+    lower.includes("would be overwritten by switch") ||
+    lower.includes("local changes to the following files")
+  ) {
+    return "Git cannot carry these changes to the selected branch because files would be overwritten. Commit them or choose 'Leave changes here'.";
+  }
+  if (
+    lower.includes("resolve your current index first") ||
+    lower.includes("cannot switch branch while") ||
+    lower.includes("you are in the middle of") ||
+    lower.includes("needs merge") ||
+    lower.includes("unmerged files")
+  ) {
+    return "Finish or abort the current merge, rebase, or cherry-pick before changing branches.";
+  }
+  if (
+    lower.includes("already checked out at") ||
+    lower.includes("already used by worktree")
+  ) {
+    return "That branch is already checked out in another worktree.";
+  }
+  if (lower.includes("index.lock")) {
+    return "Git is busy or left an index lock behind. Close other Git operations and try again.";
+  }
+  if (lower.includes("not a git repository")) {
+    return "This folder is no longer a Git repository.";
+  }
+  return message || "Could not change branch.";
+}
