@@ -54,6 +54,7 @@ export type IconKey =
   | "opencode"
   | "grok"
   | "hermes"
+  | "bun"
   | "terminal"
   | null;
 
@@ -65,6 +66,8 @@ export interface Shortcut {
   /** Hex color (`#rrggbb`) overriding the brand glyph's own color. */
   iconColor?: string | null;
 }
+
+export type LocaleSetting = "system" | "en" | "fr";
 
 export interface Settings {
   shortcuts: Shortcut[];
@@ -90,6 +93,7 @@ export interface Settings {
   mobileLayout: boolean;
   motionMode: MotionMode;
   locale: LocaleSetting;
+  setupCompleted?: boolean;
 }
 
 // Animation preference: "system" follows prefers-reduced-motion, "on"/"off"

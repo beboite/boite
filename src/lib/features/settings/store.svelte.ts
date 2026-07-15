@@ -126,6 +126,7 @@ const DEFAULTS: Settings = {
   mobileLayout: false,
   motionMode: "system",
   locale: "system",
+  setupCompleted: false,
 };
 
 // First-run guess: touch-primary, narrow screens (a phone TWA/PWA) default to
@@ -196,6 +197,7 @@ const DEVICE_FIELDS = [
   "gitSplitFraction",
   "mobileLayout",
   "motionMode",
+  "locale",
 ] as const;
 
 function loadDeviceOverrides(): Partial<Settings> | null {
@@ -288,6 +290,10 @@ class SettingsStore {
           typeof stored.mobileLayout === "boolean"
             ? stored.mobileLayout
             : DEFAULTS.mobileLayout,
+        setupCompleted:
+          typeof stored.setupCompleted === "boolean"
+            ? stored.setupCompleted
+            : DEFAULTS.setupCompleted,
         // Device-scoped; the localStorage override below is the real source.
         motionMode: DEFAULTS.motionMode,
         locale: isLocaleSetting(stored.locale) ? stored.locale : DEFAULTS.locale,
@@ -315,6 +321,8 @@ class SettingsStore {
         this.state.mobileLayout = detectMobileDefault();
         this.persistDeviceNow();
       }
+      // Initialize translation store with the resolved setting
+      i18n.init(this.state.locale);
       if (migratedShortcuts.changed) {
         await this.persist();
       }
@@ -478,6 +486,11 @@ class SettingsStore {
     notifications.success(`Removed ${s?.label ?? "shortcut"}`);
   }
 
+  async setSetupCompleted(val: boolean) {
+    this.state.setupCompleted = val;
+    await this.persist();
+  }
+
   async reorderShortcuts(orderedIds: string[]) {
     const map = new Map(this.state.shortcuts.map((s) => [s.id, s]));
     const reordered: Shortcut[] = [];
@@ -560,6 +573,20 @@ class SettingsStore {
     if (this.state.gitAutoFetchSeconds === clamped) return;
     this.state.gitAutoFetchSeconds = clamped;
     this.persistSoon();
+  }
+
+  setLocale(value: LocaleSetting) {
+    if (this.state.locale === value) return;
+    this.state.locale = value;
+    i18n.setting = value;
+    this.persistDeviceNow();
+    notifications.success(
+      value === "system"
+        ? "Language set to System default"
+        : value === "fr"
+          ? "Langue changée en Français"
+          : "Language set to English"
+    );
   }
 }
 

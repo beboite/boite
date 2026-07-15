@@ -2,6 +2,7 @@ import {
   siClaude,
   siGithubcopilot,
   siCursor,
+  siBun,
 } from "simple-icons";
 import type { IconKey } from "$lib/types";
 
@@ -28,6 +29,7 @@ const REGISTRY: Partial<Record<NonNullable<IconKey>, BrandGlyph>> = {
     hex: HEX_OVERRIDES.cursor ?? siCursor.hex,
     title: siCursor.title,
   },
+  bun: { path: siBun.path, hex: siBun.hex, title: siBun.title },
 };
 
 export function getBrandGlyph(key: NonNullable<IconKey>): BrandGlyph | null {
