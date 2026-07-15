@@ -1289,6 +1289,13 @@
     }
   });
 
+  // Nothing is listening: a finished thread has no PTY left and an idle one has
+  // not opened its yet (status flips to ready in the same breath as ptyOpen), so
+  // keystrokes would land nowhere while the caret kept implying otherwise.
+  $effect(() => {
+    if (term) term.options.disableStdin = finished || thread.status === "idle";
+  });
+
   $effect(() => {
     if (focused && term) {
       queueMicrotask(() => term?.focus());
