@@ -22,6 +22,7 @@
   import type { ContextMenuItem } from "$lib/shared/components/ContextMenu.svelte";
   import type { DropSide } from "$lib/features/panes/types";
   import type { Thread, ThreadStatus } from "$lib/types";
+  import { i18n } from "$lib/i18n/index.svelte";
   import Plus from "@lucide/svelte/icons/plus";
   import X from "@lucide/svelte/icons/x";
   import FolderOpen from "@lucide/svelte/icons/folder-open";
@@ -29,6 +30,13 @@
   import Archive from "@lucide/svelte/icons/archive";
   import ArchiveRestore from "@lucide/svelte/icons/archive-restore";
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
+  import Pause from "@lucide/svelte/icons/pause";
+  import Play from "@lucide/svelte/icons/play";
+  import RotateCw from "@lucide/svelte/icons/rotate-cw";
+  import Zap from "@lucide/svelte/icons/zap";
+  import ZapOff from "@lucide/svelte/icons/zap-off";
+  import Trash2 from "@lucide/svelte/icons/trash-2";
+  import Unlink from "@lucide/svelte/icons/unlink";
 
   type Props = {
     onActivateThread: (threadId: string) => void;
@@ -448,6 +456,7 @@
     if (inMultiPane) {
       items.push({
         label: "Detach from group",
+        icon: Unlink,
         action: () => {
           paneStore.unsplit(thread.id);
         },
@@ -456,13 +465,33 @@
     }
     items.push({
       label: thread.keepAwake ? "Allow auto-sleep" : "Keep awake",
+      icon: thread.keepAwake ? ZapOff : Zap,
       action: () => {
         app.toggleThreadKeepAwake(thread.id);
       },
     });
     items.push({ separator: true });
+    if (thread.status !== "stopped") {
+      items.push({
+        label: "Pause thread",
+        icon: Pause,
+        action: () => {
+          void stopThread(thread.id);
+        },
+      });
+    } else {
+      items.push({
+        label: "Resume thread",
+        icon: Play,
+        action: () => {
+          void reloadThread(thread.id);
+        },
+      });
+    }
+    items.push({ separator: true });
     items.push({
       label: "Reload thread",
+      icon: RotateCw,
       action: () => {
         void reloadThread(thread.id);
       },
@@ -470,6 +499,7 @@
     items.push({ separator: true });
     items.push({
       label: "Close thread",
+      icon: Trash2,
       action: () => requestRemoveThread(thread.id),
       danger: true,
     });
@@ -514,6 +544,7 @@
     if (project.archived) {
       items.push({
         label: "Unarchive",
+        icon: ArchiveRestore,
         action: () => {
           void app.unarchiveProject(project.id);
         },
@@ -521,6 +552,7 @@
     } else {
       items.push({
         label: "Archive",
+        icon: Archive,
         action: () => {
           void app.archiveProject(project.id);
         },
@@ -528,6 +560,7 @@
     }
     items.push({
       label: "Refresh icon",
+      icon: RotateCw,
       action: () => {
         const p = app.projects.find((x) => x.id === project.id);
         if (p) void refreshProjectIcon(p);
@@ -536,6 +569,7 @@
     items.push({ separator: true });
     items.push({
       label: "Remove project",
+      icon: Trash2,
       action: () => void requestRemoveProject(project.id),
       danger: true,
     });
@@ -600,17 +634,17 @@
         type="button"
         class="flex items-center gap-1.5 rounded text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground transition hover:text-foreground"
         onclick={() => (showArchived = false)}
-        aria-label="Back to projects"
-        title="Back to projects"
+        aria-label={i18n.t("sidebar.back_to_projects")}
+        title={i18n.t("sidebar.back_to_projects")}
       >
         <ArrowLeft class="size-3.5" />
-        Archives
+        {i18n.t("sidebar.archives")}
       </button>
     {:else}
       <span
         class="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground"
       >
-        Projects
+        {i18n.t("sidebar.projects")}
       </span>
     {/if}
     <div class="flex items-center gap-0.5">
@@ -620,8 +654,8 @@
           ? 'bg-accent text-foreground'
           : ''}"
         onclick={() => (showArchived = !showArchived)}
-        aria-label="Show archived projects"
-        title="Archived projects"
+        aria-label={i18n.t("sidebar.show_archived")}
+        title={i18n.t("sidebar.archived_projects")}
       >
         <Archive class="size-4" />
       </button>
@@ -630,8 +664,8 @@
           type="button"
           class="rounded-md p-1 text-muted-foreground transition hover:bg-accent hover:text-foreground"
           onclick={onNewProject}
-          aria-label="Add project"
-          title="Add project from folder"
+          aria-label={i18n.t("sidebar.add_project")}
+          title={i18n.t("sidebar.add_project_from_folder")}
         >
           <Plus class="size-4" />
         </button>
@@ -645,7 +679,7 @@
         class="mx-1 mt-2 flex w-[calc(100%-0.5rem)] flex-col items-center gap-2 rounded-lg border border-dashed border-border bg-transparent px-3 py-7 text-xs text-muted-foreground"
       >
         <Archive class="size-5 opacity-70" />
-        <span>No archived projects</span>
+        <span>{i18n.t("sidebar.no_archived")}</span>
       </div>
     {:else if !showArchived && app.projects.length === 0}
       <button
@@ -654,7 +688,7 @@
         onclick={onNewProject}
       >
         <FolderOpen class="size-5 opacity-70" />
-        <span>Pick a folder</span>
+        <span>{i18n.t("sidebar.pick_folder")}</span>
       </button>
     {/if}
 
@@ -728,8 +762,8 @@
                 void app.unarchiveProject(project.id);
               }}
               data-drag-block
-              aria-label="Unarchive project"
-              title="Unarchive"
+              aria-label={i18n.t("sidebar.unarchive_project")}
+              title={i18n.t("sidebar.unarchive")}
             >
               <ArchiveRestore class="size-3.5" />
             </button>
@@ -739,8 +773,8 @@
               class="rounded p-1 text-muted-foreground/0 transition hover:bg-accent hover:text-foreground group-hover/project:text-muted-foreground"
               onclick={(e) => openProjectContextMenu(project, e)}
               data-drag-block
-              aria-label="Project options"
-              title="More"
+              aria-label={i18n.t("sidebar.project_options")}
+              title={i18n.t("sidebar.more")}
             >
               <MoreHorizontal class="size-3.5" />
             </button>
@@ -809,9 +843,9 @@
                       app.toggleThreadKeepAwake(thread.id);
                     }}
                     title={thread.keepAwake
-                      ? "Keep-awake on — click to allow auto-sleep"
-                      : "Click to keep awake"}
-                    aria-label="Toggle keep awake"
+                      ? i18n.t("sidebar.keep_awake_on")
+                      : i18n.t("sidebar.keep_awake_off")}
+                    aria-label={i18n.t("sidebar.toggle_keep_awake")}
                   >
                     <StatusDot
                       status={displayThreadStatus(thread)}
@@ -842,7 +876,7 @@
                         requestRemoveThread(thread.id);
                       }}
                       aria-label="Close {thread.label}"
-                      title="Close thread"
+                      title={i18n.t("sidebar.close_thread")}
                     >
                       <X class="size-3.5" />
                     </button>
@@ -863,8 +897,8 @@
       onResize,
       onStateChange: (r) => (resizing = r),
     }}
-    aria-label="Resize sidebar"
-    title="Resize sidebar"
+    aria-label={i18n.t("sidebar.resize_sidebar")}
+    title={i18n.t("sidebar.resize_sidebar")}
     tabindex="-1"
   ></button>
 </aside>

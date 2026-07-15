@@ -5,6 +5,7 @@
     separator?: boolean;
     danger?: boolean;
     disabled?: boolean;
+    icon?: any;
   }
 </script>
 
@@ -26,6 +27,8 @@
   // an unpositioned corner.
   let positioned = $state(false);
   const EDGE_GAP = 4;
+
+  let hasIcons = $derived(items.some((item) => item.icon));
 
   async function positionMenu() {
     await tick();
@@ -117,7 +120,15 @@
           onClose();
         }}
       >
-        {item.label}
+        {#if hasIcons}
+          <span class="icon-wrapper">
+            {#if item.icon}
+              {@const Icon = item.icon}
+              <Icon size={14} />
+            {/if}
+          </span>
+        {/if}
+        <span class="label">{item.label}</span>
       </button>
     {/if}
   {/each}
@@ -168,6 +179,26 @@
   }
   .item.danger:hover:not(:disabled) {
     background: rgba(239, 68, 68, 0.15);
+  }
+  .icon-wrapper {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    margin-right: 8px;
+    flex-shrink: 0;
+    opacity: 0.7;
+    transition: opacity 80ms;
+  }
+  .item:hover:not(:disabled) .icon-wrapper {
+    opacity: 1;
+  }
+  .item.danger .icon-wrapper {
+    color: var(--color-danger, #f87171);
+  }
+  .label {
+    flex: 1;
   }
   .separator {
     height: 1px;
