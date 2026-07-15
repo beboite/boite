@@ -5,6 +5,7 @@
   import { backend, workspace } from "$lib/backend";
   import { app } from "$lib/app/store.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
+  import { i18n } from "$lib/i18n/index.svelte";
   import { addProjectByPath } from "$lib/features/project/api";
   import { launchBlankTerminal } from "$lib/features/thread/api";
   import WorkspaceToggle from "$lib/features/workspace/WorkspaceToggle.svelte";
@@ -81,73 +82,81 @@
   data-tauri-drag-region
   class="relative flex h-9 shrink-0 select-none items-center border-b border-border bg-[var(--color-titlebar)]"
 >
-  <div class="flex items-center gap-0.5 pl-1.5">
-    <button
-      type="button"
-      class="flex h-7 items-center justify-center rounded-md px-2 transition {app.view ===
-      'terminal'
-        ? 'bg-accent text-foreground'
-        : 'text-muted-foreground hover:bg-accent hover:text-foreground'}"
-      onclick={goHome}
-      title="Boite — workspace"
-      aria-label="Boite — go to workspace"
-    >
-      <BoiteLogo size={17} />
-    </button>
-    <button
-      type="button"
-      class="flex h-7 items-center justify-center rounded-md px-2 transition {app.view ===
-      'settings'
-        ? 'bg-accent text-foreground'
-        : 'text-muted-foreground hover:bg-accent hover:text-foreground'}"
-      onclick={showSettings}
-      title="Settings (Ctrl+,)"
-      aria-label="Settings"
-    >
-      <Settings class="size-[15px]" />
-    </button>
-    <button
-      type="button"
-      class="flex h-7 items-center justify-center rounded-md px-2 transition {!settings.state
-        .sidebarCollapsed
-        ? 'bg-accent text-foreground'
-        : 'text-muted-foreground hover:bg-accent hover:text-foreground'}"
-      onclick={() => settings.toggleSidebar()}
-      title={settings.state.sidebarCollapsed ? "Show sidebar (Ctrl+B)" : "Hide sidebar (Ctrl+B)"}
-      aria-label="Toggle sidebar"
-      aria-pressed={!settings.state.sidebarCollapsed}
-    >
-      <PanelLeft class="size-[15px]" />
-    </button>
-    <span class="ml-1.5 hidden text-[11px] text-muted-foreground/70 md:inline">
-      {app.threads.length} thread{app.threads.length === 1 ? "" : "s"} in
-      {app.projects.length} project{app.projects.length === 1 ? "" : "s"}
-    </span>
-  </div>
+  {#if settings.state.setupCompleted}
+    <div class="flex items-center gap-0.5 pl-1.5">
+      <button
+        type="button"
+        class="flex h-7 items-center justify-center rounded-md px-2 transition {app.view ===
+        'terminal'
+          ? 'bg-accent text-foreground'
+          : 'text-muted-foreground hover:bg-accent hover:text-foreground'}"
+        onclick={goHome}
+        title={i18n.t("titlebar.workspace_tooltip")}
+        aria-label={i18n.t("titlebar.workspace_label")}
+      >
+        <BoiteLogo size={17} />
+      </button>
+      <button
+        type="button"
+        class="flex h-7 items-center justify-center rounded-md px-2 transition {app.view ===
+        'settings'
+          ? 'bg-accent text-foreground'
+          : 'text-muted-foreground hover:bg-accent hover:text-foreground'}"
+        onclick={showSettings}
+        title={i18n.t("titlebar.settings_tooltip")}
+        aria-label={i18n.t("common.settings")}
+      >
+        <Settings class="size-[15px]" />
+      </button>
+      <button
+        type="button"
+        class="flex h-7 items-center justify-center rounded-md px-2 transition {!settings.state
+          .sidebarCollapsed
+          ? 'bg-accent text-foreground'
+          : 'text-muted-foreground hover:bg-accent hover:text-foreground'}"
+        onclick={() => settings.toggleSidebar()}
+        title={settings.state.sidebarCollapsed ? i18n.t("titlebar.show_sidebar") : i18n.t("titlebar.hide_sidebar")}
+        aria-label={i18n.t("sidebar.toggle_sidebar")}
+        aria-pressed={!settings.state.sidebarCollapsed}
+      >
+        <PanelLeft class="size-[15px]" />
+      </button>
+      <span class="ml-1.5 hidden text-[11px] text-muted-foreground/70 md:inline">
+        {i18n.t("titlebar.status", {
+          threadsCount: app.threads.length,
+          threadsLabel: i18n.t(app.threads.length === 1 ? "titlebar.thread_single" : "titlebar.thread_plural"),
+          projectsCount: app.projects.length,
+          projectsLabel: i18n.t(app.projects.length === 1 ? "titlebar.project_single" : "titlebar.project_plural")
+        })}
+      </span>
+    </div>
 
-  <div
-    class="pointer-events-none absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center"
-  >
-    <WorkspaceToggle />
-  </div>
+    <div
+      class="pointer-events-none absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center"
+    >
+      <WorkspaceToggle />
+    </div>
+  {/if}
 
   <div data-tauri-drag-region class="flex-1"></div>
 
-  <div class="flex items-center gap-0.5 pr-1.5">
-    <button
-      type="button"
-      class="flex h-7 items-center justify-center rounded-md px-2 transition {settings.state
-        .rightPanel !== null
-        ? 'bg-accent text-foreground'
-        : 'text-muted-foreground hover:bg-accent hover:text-foreground'}"
-      onclick={() => settings.togglePanelRight()}
-      title={settings.state.rightPanel !== null ? "Hide side panel" : "Show side panel"}
-      aria-label="Toggle side panel"
-      aria-pressed={settings.state.rightPanel !== null}
-    >
-      <PanelRight class="size-[15px]" />
-    </button>
-  </div>
+  {#if settings.state.setupCompleted}
+    <div class="flex items-center gap-0.5 pr-1.5">
+      <button
+        type="button"
+        class="flex h-7 items-center justify-center rounded-md px-2 transition {settings.state
+          .rightPanel !== null
+          ? 'bg-accent text-foreground'
+          : 'text-muted-foreground hover:bg-accent hover:text-foreground'}"
+        onclick={() => settings.togglePanelRight()}
+        title={settings.state.rightPanel !== null ? i18n.t("titlebar.hide_side_panel") : i18n.t("titlebar.show_side_panel")}
+        aria-label={i18n.t("titlebar.show_side_panel")}
+        aria-pressed={settings.state.rightPanel !== null}
+      >
+        <PanelRight class="size-[15px]" />
+      </button>
+    </div>
+  {/if}
 
   {#if isTauri}
     <div class="flex h-full items-stretch">

@@ -3,6 +3,8 @@
   import { app } from "$lib/app/store.svelte";
   import { workspace } from "$lib/backend";
   import { settings } from "$lib/features/settings/store.svelte";
+  import { i18n } from "$lib/i18n/index.svelte";
+  import SetupWizard from "$lib/features/setup/SetupWizard.svelte";
   import { pickAndAddProject } from "$lib/features/project/api";
   import { ptyKill } from "$lib/storage/pty";
   import { reloadThread } from "$lib/features/thread/api";
@@ -159,12 +161,14 @@
   <FolderBrowser />
 
   {#key workspace.epoch}
-  {#if workspace.needsLogin}
-  <div class="flex min-h-0 flex-1">
-    <RemoteLogin />
-  </div>
+  {#if !settings.state.setupCompleted}
+    <SetupWizard />
+  {:else if workspace.needsLogin}
+    <div class="flex min-h-0 flex-1">
+      <RemoteLogin />
+    </div>
   {:else}
-  <div class="flex min-h-0 flex-1">
+    <div class="flex min-h-0 flex-1">
     {#if !mobile && !settings.state.sidebarCollapsed}
       <ProjectSidebar
         onActivateThread={activateThread}
@@ -176,7 +180,7 @@
     <main class="relative flex min-w-0 flex-1 flex-col">
       {#if !app.ready}
         <div class="flex h-full items-center justify-center">
-          <p class="font-mono text-xs text-muted-foreground/60">Loading…</p>
+          <p class="font-mono text-xs text-muted-foreground/60">{i18n.t("common.loading")}</p>
         </div>
       {:else}
         <div
@@ -195,10 +199,10 @@
                 </span>
                 <p class="text-sm text-muted-foreground">
                   {app.projects.length === 0
-                    ? "Pick a folder to create your first project."
+                    ? i18n.t("welcome.pick_folder")
                     : mobile
-                      ? "Tap + to open a terminal."
-                      : "Click a shortcut above to launch a terminal."}
+                      ? i18n.t("welcome.tap_to_open")
+                      : i18n.t("welcome.click_shortcut")}
                 </p>
                 {#if app.projects.length === 0}
                   <button
@@ -206,7 +210,7 @@
                     class="rounded-md border border-border bg-[var(--color-surface)] px-3 py-1.5 text-sm text-foreground transition hover:bg-[var(--color-surface-2)]"
                     onclick={addProject}
                   >
-                    Choose folder…
+                    {i18n.t("common.choose_folder")}
                   </button>
                 {/if}
               </div>
@@ -214,26 +218,26 @@
           {:else if app.activeThreadId === null && mobile}
             <div class="flex h-full items-center justify-center px-8 text-center">
               <p class="text-sm text-muted-foreground">
-                Tap + to open a terminal, or pick one from Projects.
+                {i18n.t("welcome.tap_or_pick")}
               </p>
             </div>
           {:else if app.activeThreadId === null}
             <div class="flex h-full items-center justify-center">
               <div class="flex flex-col items-center gap-5">
                 <p class="text-sm text-muted-foreground">
-                  Pick a thread on the left to bring it to life.
+                  {i18n.t("welcome.pick_thread")}
                 </p>
                 <div class="grid grid-cols-[auto_auto] gap-x-6 gap-y-1.5 text-xs text-muted-foreground/70">
                   <span class="text-right"><kbd class="kbd">Ctrl</kbd> <kbd class="kbd">T</kbd></span>
-                  <span>New terminal</span>
+                  <span>{i18n.t("welcome.new_terminal")}</span>
                   <span class="text-right"><kbd class="kbd">Ctrl</kbd> <kbd class="kbd">Tab</kbd></span>
-                  <span>Cycle threads</span>
+                  <span>{i18n.t("welcome.cycle_threads")}</span>
                   <span class="text-right"><kbd class="kbd">Ctrl</kbd> <kbd class="kbd">1–9</kbd></span>
-                  <span>Jump to thread</span>
+                  <span>{i18n.t("welcome.jump_to_thread")}</span>
                   <span class="text-right"><kbd class="kbd">Ctrl</kbd> <kbd class="kbd">B</kbd></span>
-                  <span>Toggle sidebar</span>
+                  <span>{i18n.t("welcome.toggle_sidebar")}</span>
                   <span class="text-right"><kbd class="kbd">Ctrl</kbd> <kbd class="kbd">W</kbd></span>
-                  <span>Close thread</span>
+                  <span>{i18n.t("welcome.close_thread")}</span>
                 </div>
               </div>
             </div>
