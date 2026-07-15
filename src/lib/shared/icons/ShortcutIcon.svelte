@@ -14,7 +14,7 @@
 
   const ASSET_BY_KEY: Partial<Record<NonNullable<IconKey>, string>> = {
     codex: "/icons/chatgpt.svg",
-    antigravity: "/icons/antigravity.svg",
+    antigravity: "/icons/antigravity.png",
     opencode: "/icons/opencode.svg",
     grok: "/icons/grok.svg",
     hermes: "/icons/hermes.svg",
@@ -29,7 +29,7 @@
     decoding="async"
     width={size}
     height={size}
-    class="shrink-0"
+    class="shrink-0 brightness-0 invert"
     style:width="{size}px"
     style:height="{size}px"
     aria-hidden="true"
@@ -41,17 +41,17 @@
     viewBox="0 0 24 24"
     width={size}
     height={size}
-    fill={`#${brand.hex}`}
+    fill="#ffffff"
     aria-hidden="true"
   >
     <path d={brand.path} />
   </svg>
 {:else if iconKey === "terminal"}
-  <span class="inline-flex text-muted-foreground">
+  <span class="inline-flex text-foreground">
     <TerminalIcon {size} />
   </span>
 {:else}
-  <span class="inline-flex text-muted-foreground">
+  <span class="inline-flex text-foreground">
     <Zap {size} />
   </span>
 {/if}

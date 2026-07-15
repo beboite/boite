@@ -2,7 +2,8 @@ import { loadSettings, saveSettings } from "$lib/storage/db";
 import { notifications } from "$lib/features/notifications/store.svelte";
 import { debounce } from "$lib/shared/utils/debounce";
 import { uuid } from "$lib/shared/utils/uuid";
-import type { RightPanelTab, Settings, Shortcut } from "$lib/types";
+import type { RightPanelTab, Settings, Shortcut, LocaleSetting } from "$lib/types";
+import { i18n } from "$lib/i18n/index.svelte";
 
 export const PRESET_SHORTCUTS: Shortcut[] = [
   { id: "claude", label: "Claude", command: "claude", iconKey: "claude" },
@@ -99,6 +100,8 @@ const DEFAULTS: Settings = {
   gitAutoFetchSeconds: 180,
   mobileLayout: false,
   motionMode: "system",
+  locale: "system",
+  setupCompleted: false,
 };
 
 // First-run guess: touch-primary, narrow screens (a phone TWA/PWA) default to
@@ -169,6 +172,7 @@ const DEVICE_FIELDS = [
   "gitSplitFraction",
   "mobileLayout",
   "motionMode",
+  "locale",
 ] as const;
 type DeviceField = (typeof DEVICE_FIELDS)[number];
 
@@ -261,8 +265,13 @@ class SettingsStore {
           typeof stored.mobileLayout === "boolean"
             ? stored.mobileLayout
             : DEFAULTS.mobileLayout,
+        setupCompleted:
+          typeof stored.setupCompleted === "boolean"
+            ? stored.setupCompleted
+            : DEFAULTS.setupCompleted,
         // Device-scoped; the localStorage override below is the real source.
         motionMode: DEFAULTS.motionMode,
+        locale: DEFAULTS.locale,
       };
       // Device fields come from localStorage, overriding the backend blob. If
       // there is none yet, seed it from what the blob carried (one-shot
@@ -287,6 +296,8 @@ class SettingsStore {
         this.state.mobileLayout = detectMobileDefault();
         this.persistDeviceNow();
       }
+      // Initialize translation store with the resolved setting
+      i18n.init(this.state.locale);
       if (migratedShortcuts.changed) {
         await this.persist();
       }
@@ -439,6 +450,11 @@ class SettingsStore {
     notifications.success(`Removed ${s?.label ?? "shortcut"}`);
   }
 
+  async setSetupCompleted(val: boolean) {
+    this.state.setupCompleted = val;
+    await this.persist();
+  }
+
   async reorderShortcuts(orderedIds: string[]) {
     const map = new Map(this.state.shortcuts.map((s) => [s.id, s]));
     const reordered: Shortcut[] = [];
@@ -520,6 +536,20 @@ class SettingsStore {
     if (this.state.gitAutoFetchSeconds === clamped) return;
     this.state.gitAutoFetchSeconds = clamped;
     this.persistSoon();
+  }
+
+  setLocale(value: LocaleSetting) {
+    if (this.state.locale === value) return;
+    this.state.locale = value;
+    i18n.setting = value;
+    this.persistDeviceNow();
+    notifications.success(
+      value === "system"
+        ? "Language set to System default"
+        : value === "fr"
+          ? "Langue changée en Français"
+          : "Language set to English"
+    );
   }
 }
 
