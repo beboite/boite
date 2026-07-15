@@ -32,6 +32,7 @@
     "notification:allow-is-permission-granted",
     "notification:allow-request-permission",
     "clipboard-manager:allow-read-text",
-    "clipboard-manager:allow-write-text"
+    "clipboard-manager:allow-write-text",
+    "mcp-bridge:default"
   ]
 }
