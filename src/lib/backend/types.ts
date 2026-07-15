@@ -5,7 +5,13 @@
 // never touches a component or store.
 
 import type { Project, Settings, Thread } from "$lib/types";
-import type { ChangeEntry, Commit, RepoInfo } from "$lib/features/git/api";
+import type {
+  BranchChangeResult,
+  BranchInfo,
+  ChangeEntry,
+  Commit,
+  RepoInfo,
+} from "$lib/features/git/api";
 import type {
   ChangedPath,
   DirEntry,
@@ -70,6 +76,13 @@ export interface DbApi {
 
 export interface GitApi {
   repoInfo(path: string): Promise<RepoInfo>;
+  branches(path: string): Promise<BranchInfo[]>;
+  switchBranch(
+    path: string,
+    name: string,
+    create: boolean,
+    stash: boolean,
+  ): Promise<BranchChangeResult>;
   status(path: string): Promise<ChangeEntry[]>;
   log(path: string, limit: number, skip: number): Promise<Commit[]>;
   stage(path: string, files: string[]): Promise<void>;

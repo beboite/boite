@@ -33,6 +33,15 @@ export interface Commit {
   remoteOnly: boolean;
 }
 
+export interface BranchInfo {
+  name: string;
+  current: boolean;
+}
+
+export interface BranchChangeResult {
+  stashed: boolean;
+}
+
 export function gitRepoInfo(path: string): Promise<RepoInfo> {
   return backend().git.repoInfo(path);
 }
@@ -67,6 +76,19 @@ export function gitDiscard(
 
 export function gitCommit(path: string, message: string): Promise<string> {
   return backend().git.commit(path, message);
+}
+
+export function gitBranches(path: string): Promise<BranchInfo[]> {
+  return backend().git.branches(path);
+}
+
+export function gitSwitchBranch(
+  path: string,
+  name: string,
+  create: boolean,
+  stash: boolean,
+): Promise<BranchChangeResult> {
+  return backend().git.switchBranch(path, name, create, stash);
 }
 
 export function gitFetch(path: string): Promise<void> {

@@ -8,6 +8,7 @@
   import { basename, dirname } from "$lib/shared/utils/path";
   import { resizeHandle } from "$lib/shared/actions/resizeHandle";
   import GitGraph from "./GitGraph.svelte";
+  import BranchChangesDialog from "./BranchChangesDialog.svelte";
   import type { ChangeEntry } from "./api";
   import CloudDownload from "@lucide/svelte/icons/cloud-download";
   import GitBranch from "@lucide/svelte/icons/git-branch";
@@ -40,6 +41,10 @@
 
   let bodyEl: HTMLElement | null = $state(null);
   let resizingY = $state(false);
+  let branchMenuEl: HTMLDivElement | null = $state(null);
+  let branchMenuOpen = $state(false);
+  let newBranchName = $state("");
+  let branchAction = $state<{ name: string; create: boolean } | null>(null);
 
   $effect(() => {
     if (!project) return;
@@ -80,6 +85,7 @@
   let stagedOpen = $state(true);
   let changesOpen = $state(true);
   let conflictsOpen = $state(true);
+  let commitsOpen = $state(true);
 
   const totalChanges = $derived(
     gs ? gs.staged.length + gs.unstaged.length + gs.conflicts.length : 0,
@@ -100,6 +106,51 @@
 
   function initRepo() {
     if (project) void gitStore.init(project.id);
+  }
+
+  function toggleBranchMenu() {
+    if (!project || !gs?.isRepo || gs.switchingBranch) return;
+    branchMenuOpen = !branchMenuOpen;
+    if (branchMenuOpen) void gitStore.loadBranches(project.id);
+  }
+
+  function closeBranchMenuOnOutsideClick(event: PointerEvent) {
+    if (
+      branchMenuOpen &&
+      event.target instanceof Node &&
+      !branchMenuEl?.contains(event.target)
+    ) {
+      branchMenuOpen = false;
+    }
+  }
+
+  function requestBranchChange(name: string, create: boolean) {
+    const trimmed = name.trim();
+    if (!project || !trimmed || (!create && trimmed === gs?.branch)) return;
+    branchMenuOpen = false;
+    const action = { name: trimmed, create };
+    if (totalChanges > 0) branchAction = action;
+    else void performBranchChange(action, false);
+  }
+
+  function createBranch(event: SubmitEvent) {
+    event.preventDefault();
+    requestBranchChange(newBranchName, true);
+  }
+
+  async function performBranchChange(
+    action: { name: string; create: boolean },
+    stash: boolean,
+  ) {
+    if (!project) return;
+    const changed = await gitStore.changeBranch(
+      project.id,
+      action.name,
+      action.create,
+      stash,
+    );
+    if (changed && action.create) newBranchName = "";
+    branchAction = null;
   }
 
   function commitKey(e: KeyboardEvent) {
@@ -179,17 +230,84 @@
   }
 </script>
 
+<svelte:window onpointerdown={closeBranchMenuOnOutsideClick} />
+
 <div
-  class="flex h-full min-h-0 flex-col {resizingY ? 'select-none' : ''}"
+  class="flex h-full min-h-0 min-w-0 w-full flex-col {resizingY ? 'select-none' : ''}"
 >
   <header
     class="flex h-9 shrink-0 items-center gap-2 border-b border-border px-3"
   >
-    <GitBranch class="size-4 text-muted-foreground" />
     {#if gs?.isRepo}
-      <span class="truncate text-xs font-medium text-foreground/90">
-        {gs.branch ?? "(detached)"}
-      </span>
+      <div bind:this={branchMenuEl} class="relative min-w-0">
+        <button
+          type="button"
+          class="flex max-w-44 items-center gap-1.5 rounded px-1.5 py-1 text-xs font-medium text-foreground/90 transition hover:bg-[var(--color-surface-2)] disabled:opacity-50"
+          onclick={toggleBranchMenu}
+          disabled={gs.switchingBranch}
+          aria-haspopup="menu"
+          aria-expanded={branchMenuOpen}
+          title="Change branch"
+        >
+          <GitBranch class="size-3.5 shrink-0 text-muted-foreground" />
+          <span class="truncate">{gs.branch ?? "(detached)"}</span>
+          <ChevronDown class="size-3 shrink-0 text-muted-foreground transition {branchMenuOpen ? 'rotate-180' : ''}" />
+        </button>
+
+        {#if branchMenuOpen}
+          <div
+            class="absolute left-0 top-full z-40 mt-1 w-64 overflow-hidden rounded-md border border-border bg-[var(--color-surface)] shadow-2xl"
+            role="menu"
+          >
+            <form class="flex gap-1.5 border-b border-border p-2" onsubmit={createBranch}>
+              <input
+                class="min-w-0 flex-1 rounded border border-border bg-[var(--color-background)] px-2 py-1 text-xs text-foreground placeholder:text-muted-foreground/60 focus:border-foreground/30 focus:outline-none"
+                placeholder="New branch name"
+                aria-label="New branch name"
+                bind:value={newBranchName}
+                disabled={gs.switchingBranch}
+              />
+              <button
+                type="submit"
+                class="rounded border border-border bg-[var(--color-surface-2)] p-1.5 text-muted-foreground transition hover:bg-[var(--color-surface-3)] hover:text-foreground disabled:opacity-40"
+                disabled={!newBranchName.trim() || gs.switchingBranch}
+                title="Create branch"
+                aria-label="Create branch"
+              >
+                <Plus class="size-3.5" />
+              </button>
+            </form>
+
+            <div class="max-h-64 overflow-y-auto py-1">
+              {#if gs.branchesLoading && !gs.branchesLoaded}
+                <div class="px-3 py-3 text-center text-[11px] text-muted-foreground">
+                  Loading branches...
+                </div>
+              {:else if gs.branches.length === 0}
+                <div class="px-3 py-3 text-center text-[11px] text-muted-foreground">
+                  No local branches yet.
+                </div>
+              {:else}
+                {#each gs.branches as branch (branch.name)}
+                  <button
+                    type="button"
+                    class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition hover:bg-[var(--color-surface-2)] disabled:opacity-60"
+                    class:text-foreground={branch.current}
+                    class:text-muted-foreground={!branch.current}
+                    onclick={() => requestBranchChange(branch.name, false)}
+                    disabled={branch.current || gs.switchingBranch}
+                    role="menuitem"
+                    title={branch.name}
+                  >
+                    <Check class="size-3.5 shrink-0 {branch.current ? 'opacity-100' : 'opacity-0'}" />
+                    <span class="min-w-0 flex-1 truncate font-mono text-[11px]">{branch.name}</span>
+                  </button>
+                {/each}
+              {/if}
+            </div>
+          </div>
+        {/if}
+      </div>
       {#if gs.ahead > 0}
         <span
           class="flex items-center gap-0.5 text-[10.5px] text-muted-foreground"
@@ -267,12 +385,15 @@
       </button>
     </div>
   {:else}
-    <div bind:this={bodyEl} class="flex min-h-0 flex-1 flex-col">
+    <div
+      bind:this={bodyEl}
+      class="grid min-h-0 min-w-0 w-full flex-1 {resizingY ? '' : 'transition-[grid-template-rows] duration-150'}"
+      style:grid-template-rows={commitsOpen
+        ? `${topPercent}% 4px minmax(0, 1fr)`
+        : "minmax(0, 1fr) 28px"}
+    >
       <!-- Changes (top) -->
-      <section
-        class="flex min-h-0 flex-col"
-        style:flex="0 0 {topPercent}%"
-      >
+      <section class="flex min-h-0 min-w-0 w-full flex-col">
         <div
           class="flex h-7 shrink-0 items-center gap-1.5 border-b border-border px-3"
         >
@@ -299,16 +420,37 @@
             onkeydown={commitKey}
             disabled={gs.committing}
           ></textarea>
-          <button
-            type="button"
-            class="mt-1.5 flex w-full items-center justify-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2 py-1 text-xs font-medium text-foreground/85 transition hover:bg-[var(--color-surface-3)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-            onclick={doCommit}
-            disabled={gs.committing ||
-              gs.staged.length === 0 ||
-              !gs.message.trim()}
-          >
-            Commit ({gs.staged.length})
-          </button>
+          {#if totalChanges > 0}
+            <button
+              type="button"
+              class="mt-1.5 flex w-full items-center justify-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2 py-1 text-xs font-medium text-foreground/85 transition hover:bg-[var(--color-surface-3)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+              onclick={doCommit}
+              disabled={gs.committing ||
+                gs.staged.length === 0 ||
+                !gs.message.trim()}
+            >
+              Commit ({gs.staged.length})
+            </button>
+          {:else}
+            {@const canPush = gs.upstream === null || gs.ahead > 0}
+            <button
+              type="button"
+              class="mt-1.5 flex w-full items-center justify-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2 py-1 text-xs font-medium text-foreground/85 transition hover:bg-[var(--color-surface-3)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+              onclick={push}
+              disabled={gs.pushing || !canPush}
+            >
+              {#if gs.upstream === null}
+                <ArrowUpFromLine class="size-3.5" />
+                Publish Branch
+              {:else if gs.ahead > 0}
+                <ArrowUpFromLine class="size-3.5 {gs.pushing ? 'animate-pulse' : ''}" />
+                Push ({gs.ahead} commit{gs.ahead > 1 ? 's' : ''})
+              {:else}
+                <Check class="size-3.5 text-[var(--color-success)]" />
+                Up to date
+              {/if}
+            </button>
+          {/if}
         </div>
 
         <div class="min-h-0 flex-1 overflow-y-auto">
@@ -349,23 +491,29 @@
         </div>
       </section>
 
-      <!-- Splitter -->
-      <button
-        type="button"
-        use:resizeHandle={{
-          onResize: onResizeY,
-          onStateChange: (r) => (resizingY = r),
-        }}
-        class="relative h-1 shrink-0 cursor-row-resize transition hover:bg-foreground/10 {resizingY ? 'bg-foreground/20' : 'bg-transparent'}"
-        aria-label="Resize sections"
-        tabindex="-1"
-      ></button>
+      {#if commitsOpen}
+        <!-- Splitter -->
+        <button
+          type="button"
+          use:resizeHandle={{
+            onResize: onResizeY,
+            onStateChange: (r) => (resizingY = r),
+          }}
+          class="relative z-10 h-1 translate-y-[2px] cursor-row-resize transition hover:bg-foreground/10 after:absolute after:-inset-y-1.5 after:inset-x-0 after:content-[''] {resizingY ? 'bg-foreground/20' : 'bg-transparent'}"
+          aria-label="Resize sections"
+          tabindex="-1"
+        ></button>
+      {/if}
 
       <!-- Commits (bottom) -->
-      <section class="flex min-h-0 flex-1 flex-col border-t border-border">
-        <div
-          class="flex h-7 shrink-0 items-center gap-1.5 border-b border-border px-3"
+      <section class="flex min-h-0 min-w-0 w-full flex-col border-t border-border">
+        <button
+          type="button"
+          class="flex h-7 shrink-0 items-center gap-1.5 px-3 text-left transition hover:bg-[var(--color-surface-2)] {commitsOpen ? 'border-b border-border' : ''}"
+          onclick={() => (commitsOpen = !commitsOpen)}
+          aria-expanded={commitsOpen}
         >
+          <ChevronDown class="size-3 text-muted-foreground transition {commitsOpen ? '' : '-rotate-90'}" />
           <span
             class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
           >
@@ -382,35 +530,48 @@
                   : ""}
             </span>
           {/if}
-        </div>
-        <div class="min-h-0 flex-1 overflow-auto">
-          {#if gs.log.length === 0}
-            <div
-              class="px-3 py-4 text-center text-[11px] text-muted-foreground/70"
-            >
-              No commits.
-            </div>
-          {:else}
-            <GitGraph commits={gs.log} />
-            {#if gs.logHasMore}
-              <div class="border-t border-border p-2">
-                <button
-                  type="button"
-                  class="w-full rounded-md border border-border bg-[var(--color-surface-2)] px-2 py-1 text-[11px] text-muted-foreground transition hover:bg-[var(--color-surface-3)] hover:text-foreground disabled:opacity-50"
-                  onclick={loadMoreCommits}
-                  disabled={gs.logLoadingMore}
-                >
-                  {gs.logLoadingMore ? "Loading..." : "Load more commits"}
-                </button>
+        </button>
+        {#if commitsOpen}
+          <div class="flex min-h-0 min-w-0 w-full flex-1 flex-col overflow-y-auto overflow-x-hidden">
+            {#if gs.log.length === 0}
+              <div
+                class="px-3 py-4 text-center text-[11px] text-muted-foreground/70"
+              >
+                No commits.
               </div>
+            {:else}
+              <GitGraph commits={gs.log} />
+              {#if gs.logHasMore}
+                <div class="border-t border-border p-2 shrink-0">
+                  <button
+                    type="button"
+                    class="w-full rounded-md border border-border bg-[var(--color-surface-2)] px-2 py-1 text-[11px] text-muted-foreground transition hover:bg-[var(--color-surface-3)] hover:text-foreground disabled:opacity-50"
+                    onclick={loadMoreCommits}
+                    disabled={gs.logLoadingMore}
+                  >
+                    {gs.logLoadingMore ? "Loading..." : "Load more commits"}
+                  </button>
+                </div>
+              {/if}
             {/if}
-          {/if}
-        </div>
+          </div>
+        {/if}
       </section>
     </div>
   {/if}
 
 </div>
+
+{#if branchAction}
+  <BranchChangesDialog
+    branch={branchAction.name}
+    creating={branchAction.create}
+    busy={gs?.switchingBranch ?? false}
+    onCarry={() => void performBranchChange(branchAction!, false)}
+    onStash={() => void performBranchChange(branchAction!, true)}
+    onCancel={() => (branchAction = null)}
+  />
+{/if}
 
 {#snippet section({ label, entries, mode, open, toggle }: SectionArgs)}
   <div class="flex flex-col">

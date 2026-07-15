@@ -154,6 +154,9 @@ export class RemoteBackend implements Backend {
 
     this.git = {
       repoInfo: (path) => rpc("git.repoInfo", { path }),
+      branches: (path) => rpc("git.branches", { path }).then((r) => r.branches),
+      switchBranch: (path, name, create, stash) =>
+        rpc("git.switchBranch", { path, name, create, stash }),
       status: (path) => rpc("git.status", { path }).then((r) => r.entries),
       log: (path, limit, skip) =>
         rpc("git.log", { path, limit, skip }).then((r) => r.commits),

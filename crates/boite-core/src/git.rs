@@ -49,6 +49,19 @@ pub struct Commit {
     pub remote_only: bool,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchInfo {
+    pub name: String,
+    pub current: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchChangeResult {
+    pub stashed: bool,
+}
+
 fn git(path: &Path) -> Command {
     let mut cmd = Command::new("git");
     cmd.current_dir(path);
@@ -734,6 +747,156 @@ fn current_branch(path: &Path) -> Option<String> {
     if s.is_empty() || s == "HEAD" { None } else { Some(s) }
 }
 
+fn symbolic_branch(path: &Path) -> Option<String> {
+    current_branch(path).or_else(|| {
+        let mut cmd = git(path);
+        cmd.args(["symbolic-ref", "--quiet", "--short", "HEAD"]);
+        run(cmd)
+            .ok()
+            .map(|out| String::from_utf8_lossy(&out).trim().to_string())
+            .filter(|name| !name.is_empty())
+    })
+}
+
+pub fn branches_blocking(path: &str) -> Result<Vec<BranchInfo>, String> {
+    let p = Path::new(path);
+    if !p.is_dir() {
+        return Err("Not a directory".into());
+    }
+
+    let current = symbolic_branch(p);
+    let mut cmd = git(p);
+    cmd.args([
+        "for-each-ref",
+        "--format=%(refname:short)",
+        "refs/heads",
+    ]);
+    let stdout = run(cmd)?;
+    let mut names: Vec<String> = String::from_utf8_lossy(&stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+        .collect();
+    if let Some(ref name) = current {
+        if !names.contains(name) {
+            names.push(name.clone());
+        }
+    }
+    names.sort_by_key(|name| name.to_lowercase());
+
+    Ok(names
+        .into_iter()
+        .map(|name| BranchInfo {
+            current: current.as_deref() == Some(name.as_str()),
+            name,
+        })
+        .collect())
+}
+
+fn validate_branch_name(path: &Path, name: &str) -> Result<(), String> {
+    if name.trim() != name || name.is_empty() {
+        return Err("Invalid branch name. Remove leading or trailing spaces.".into());
+    }
+    let mut cmd = git(path);
+    cmd.args(["check-ref-format", "--branch", name]);
+    if run(cmd).is_err() {
+        return Err(format!(
+            "Invalid branch name '{name}'. Use a valid Git branch name without spaces or reserved characters."
+        ));
+    }
+    Ok(())
+}
+
+fn local_branch_exists(path: &Path, name: &str) -> bool {
+    let mut cmd = git(path);
+    cmd.args([
+        "show-ref",
+        "--verify",
+        "--quiet",
+        &format!("refs/heads/{name}"),
+    ]);
+    cmd.status().map(|status| status.success()).unwrap_or(false)
+}
+
+fn ref_oid(path: &Path, reference: &str) -> Option<String> {
+    let mut cmd = git(path);
+    cmd.args(["rev-parse", "--verify", "--quiet", reference]);
+    run(cmd)
+        .ok()
+        .map(|out| String::from_utf8_lossy(&out).trim().to_string())
+        .filter(|oid| !oid.is_empty())
+}
+
+pub fn switch_branch_blocking(
+    path: &str,
+    name: &str,
+    create: bool,
+    stash_changes: bool,
+) -> Result<BranchChangeResult, String> {
+    let p = Path::new(path);
+    if !p.is_dir() {
+        return Err("Not a directory".into());
+    }
+    validate_branch_name(p, name)?;
+
+    if !create && symbolic_branch(p).as_deref() == Some(name) {
+        return Ok(BranchChangeResult { stashed: false });
+    }
+    if create && local_branch_exists(p, name) {
+        return Err(format!("A branch named '{name}' already exists."));
+    }
+    if !create && !local_branch_exists(p, name) {
+        return Err(format!(
+            "The branch '{name}' no longer exists. Refresh the branch list."
+        ));
+    }
+
+    let before_stash = ref_oid(p, "refs/stash");
+    if stash_changes {
+        if ref_oid(p, "HEAD").is_none() {
+            return Err(
+                "Git cannot stash changes before the first commit. Bring the changes to the new branch or create the initial commit first."
+                    .into(),
+            );
+        }
+        let from = symbolic_branch(p).unwrap_or_else(|| "detached HEAD".into());
+        let mut cmd = git(p);
+        cmd.args([
+            "stash",
+            "push",
+            "--include-untracked",
+            "--message",
+            &format!("boite: changes before switching from {from} to {name}"),
+        ]);
+        run(cmd)?;
+    }
+    let after_stash = ref_oid(p, "refs/stash");
+    let stashed = stash_changes && after_stash.is_some() && after_stash != before_stash;
+
+    let mut cmd = git(p);
+    cmd.arg("switch");
+    if create {
+        cmd.arg("-c");
+    }
+    cmd.arg(name);
+    if let Err(switch_error) = run(cmd) {
+        if stashed {
+            let mut restore = git(p);
+            restore.args(["stash", "pop", "--index"]);
+            return match run(restore) {
+                Ok(_) => Err(format!("{switch_error}\nYour local changes were restored.")),
+                Err(restore_error) => Err(format!(
+                    "{switch_error}\nThe switch was cancelled, but Git could not restore the stash automatically: {restore_error}"
+                )),
+            };
+        }
+        return Err(switch_error);
+    }
+
+    Ok(BranchChangeResult { stashed })
+}
+
 pub fn init_blocking(path: &str) -> Result<(), String> {
     let p = Path::new(path);
     if !p.is_dir() {
@@ -825,4 +988,98 @@ pub fn commit_blocking(path: &str, message: &str) -> Result<String, String> {
     cmd.args(["commit", "-m", trimmed]);
     let stdout = run(cmd)?;
     Ok(String::from_utf8_lossy(&stdout).trim().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    struct TestRepo {
+        path: PathBuf,
+    }
+
+    impl TestRepo {
+        fn new() -> Self {
+            let nonce = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!(
+                "boite-git-branch-test-{}-{nonce}",
+                std::process::id()
+            ));
+            fs::create_dir_all(&path).unwrap();
+            run_git(&path, &["init", "--quiet"]);
+            run_git(&path, &["config", "user.name", "Boite Test"]);
+            run_git(&path, &["config", "user.email", "boite@example.test"]);
+            run_git(&path, &["branch", "-M", "master"]);
+            fs::write(path.join("tracked.txt"), "initial\n").unwrap();
+            run_git(&path, &["add", "tracked.txt"]);
+            run_git(&path, &["commit", "--quiet", "-m", "initial"]);
+            Self { path }
+        }
+
+        fn path(&self) -> &str {
+            self.path.to_str().unwrap()
+        }
+    }
+
+    impl Drop for TestRepo {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    fn run_git(path: &Path, args: &[&str]) -> String {
+        let output = Command::new("git")
+            .current_dir(path)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    #[test]
+    fn creates_lists_and_carries_changes_between_branches() {
+        let repo = TestRepo::new();
+        switch_branch_blocking(repo.path(), "feature/test", true, false).unwrap();
+        fs::write(repo.path.join("tracked.txt"), "modified\n").unwrap();
+
+        let result = switch_branch_blocking(repo.path(), "master", false, false).unwrap();
+        assert!(!result.stashed);
+        assert_eq!(symbolic_branch(&repo.path).as_deref(), Some("master"));
+        assert_eq!(fs::read_to_string(repo.path.join("tracked.txt")).unwrap(), "modified\n");
+
+        let branches = branches_blocking(repo.path()).unwrap();
+        assert!(branches.iter().any(|b| b.name == "feature/test"));
+        assert!(branches.iter().any(|b| b.name == "master" && b.current));
+    }
+
+    #[test]
+    fn stashes_tracked_and_untracked_changes_before_switching() {
+        let repo = TestRepo::new();
+        switch_branch_blocking(repo.path(), "feature/test", true, false).unwrap();
+        fs::write(repo.path.join("tracked.txt"), "modified\n").unwrap();
+        fs::write(repo.path.join("untracked.txt"), "new\n").unwrap();
+
+        let result = switch_branch_blocking(repo.path(), "master", false, true).unwrap();
+        assert!(result.stashed);
+        assert_eq!(symbolic_branch(&repo.path).as_deref(), Some("master"));
+        assert_eq!(run_git(&repo.path, &["status", "--porcelain"]), "");
+        assert!(!run_git(&repo.path, &["stash", "list"]).is_empty());
+    }
+
+    #[test]
+    fn rejects_invalid_and_duplicate_branch_names() {
+        let repo = TestRepo::new();
+        assert!(switch_branch_blocking(repo.path(), "bad:name", true, false).is_err());
+        assert!(switch_branch_blocking(repo.path(), "master", true, false).is_err());
+    }
 }
