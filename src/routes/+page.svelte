@@ -3,6 +3,7 @@
   import { app } from "$lib/app/store.svelte";
   import { workspace } from "$lib/backend";
   import { settings } from "$lib/features/settings/store.svelte";
+  import SetupWizard from "$lib/features/setup/SetupWizard.svelte";
   import { pickAndAddProject } from "$lib/features/project/api";
   import { ptyKill } from "$lib/storage/pty";
   import { reloadThread } from "$lib/features/thread/api";
@@ -211,12 +212,14 @@
   <FolderBrowser />
 
   {#key workspace.epoch}
-  {#if workspace.needsLogin}
-  <div class="flex min-h-0 flex-1">
-    <RemoteLogin />
-  </div>
+  {#if !settings.state.setupCompleted}
+    <SetupWizard />
+  {:else if workspace.needsLogin}
+    <div class="flex min-h-0 flex-1">
+      <RemoteLogin />
+    </div>
   {:else}
-  <div class="flex min-h-0 flex-1">
+    <div class="flex min-h-0 flex-1">
     {#if !mobile && !settings.state.sidebarCollapsed}
       <ProjectSidebar
         onActivateThread={activateThread}
@@ -228,7 +231,7 @@
     <main class="relative flex min-w-0 flex-1 flex-col">
       {#if !app.ready}
         <div class="flex h-full items-center justify-center">
-          <p class="font-mono text-xs text-muted-foreground/60">Loading…</p>
+          <p class="font-mono text-xs text-muted-foreground/60">{i18n.t("common.loading")}</p>
         </div>
       {:else}
         <div
