@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { settings, PRESET_SHORTCUTS } from "$lib/features/settings/store.svelte";
+  import { settings } from "$lib/features/settings/store.svelte";
+  import { CLI_PRESETS } from "$lib/features/settings/cliPresets";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
   import SettingsCard from "$lib/shared/components/SettingsCard.svelte";
   import { resolveIconKey } from "$lib/shared/icons/detect";
@@ -7,6 +8,8 @@
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
   import GripVertical from "@lucide/svelte/icons/grip-vertical";
+  import ExternalLink from "@lucide/svelte/icons/external-link";
+  import type { IconKey } from "$lib/types";
 
   let draggedId = $state<string | null>(null);
   let overId = $state<string | null>(null);
@@ -24,17 +27,17 @@
   }
 
   function addPreset(presetId: string) {
-    const preset = PRESET_SHORTCUTS.find((p) => p.id === presetId);
+    const preset = CLI_PRESETS.find((p) => p.id === presetId);
     if (!preset) return;
     void settings.addShortcut({
       label: preset.label,
       command: preset.command,
-      iconKey: preset.iconKey,
+      iconKey: preset.iconKey as IconKey,
     });
   }
 
   function presetAlreadyAdded(presetId: string): boolean {
-    const preset = PRESET_SHORTCUTS.find((p) => p.id === presetId);
+    const preset = CLI_PRESETS.find((p) => p.id === presetId);
     if (!preset) return false;
     return settings.state.shortcuts.some(
       (s) => s.label === preset.label && s.command === preset.command,
@@ -181,27 +184,55 @@
     {/each}
   </div>
 
-  <div>
+  <div class="mt-4 border-t border-border/40 pt-4">
     <p
-      class="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground"
+      class="mb-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground"
     >
       Add from preset
     </p>
-    <div class="flex flex-wrap gap-1.5">
-      {#each PRESET_SHORTCUTS as preset (preset.id)}
+    <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+      {#each CLI_PRESETS as preset (preset.id)}
         {@const added = presetAlreadyAdded(preset.id)}
-        <button
-          type="button"
-          disabled={added}
-          class="flex items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-1 text-[11px] transition hover:border-foreground/30 hover:bg-[var(--color-surface-3)] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border disabled:hover:bg-[var(--color-surface-2)]"
-          onclick={() => addPreset(preset.id)}
+        <div
+          class="flex items-center justify-between rounded-lg border border-border/80 bg-[var(--color-surface-2)] p-2.5 transition hover:border-foreground/20 {added ? 'opacity-50' : ''}"
         >
-          <ShortcutIcon iconKey={preset.iconKey ?? null} size={13} />
-          <span>{preset.label}</span>
-          <span class="font-mono text-[10px] text-muted-foreground/70">
-            {preset.command}
-          </span>
-        </button>
+          <div class="flex items-center gap-2.5 min-w-0">
+            <div class="flex size-7 items-center justify-center shrink-0 rounded bg-[var(--color-surface)] border border-border/40">
+              <ShortcutIcon iconKey={preset.iconKey as IconKey ?? null} size={14} />
+            </div>
+            <div class="flex flex-col min-w-0">
+              <span class="text-xs font-semibold text-foreground truncate">
+                {preset.label}
+              </span>
+              <span class="font-mono text-[9.5px] text-muted-foreground/70 truncate mt-0.5">
+                {preset.command}
+              </span>
+            </div>
+          </div>
+          <div class="flex items-center gap-1.5 shrink-0">
+            {#if preset.docUrl}
+              <a
+                href={preset.docUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                class="flex size-7 items-center justify-center rounded-md border border-border/60 bg-[var(--color-surface-3)] text-muted-foreground transition hover:bg-[var(--color-surface)] hover:text-foreground cursor-pointer"
+                title="Documentation"
+              >
+                <ExternalLink class="size-3.5" />
+              </a>
+            {/if}
+            <button
+              type="button"
+              disabled={added}
+              onclick={() => addPreset(preset.id)}
+              class="flex h-7 items-center gap-1 rounded-md bg-foreground px-2.5 text-[11px] font-semibold text-background transition hover:bg-neutral-200 disabled:cursor-not-allowed disabled:bg-transparent disabled:text-muted-foreground/60 disabled:border disabled:border-border/60 cursor-pointer"
+              title={added ? "Already added" : "Add to shortcuts"}
+            >
+              <Plus class="size-3" />
+              <span>{added ? "Ajouté" : "Ajouter"}</span>
+            </button>
+          </div>
+        </div>
       {/each}
     </div>
   </div>

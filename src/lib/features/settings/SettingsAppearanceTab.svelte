@@ -3,12 +3,19 @@
   import SettingsCard from "$lib/shared/components/SettingsCard.svelte";
   import ToggleSetting from "$lib/shared/components/ToggleSetting.svelte";
   import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
+  import { i18n } from "$lib/i18n/index.svelte";
   import type { MotionMode } from "$lib/types";
 
-  const MOTION_MODES: { id: MotionMode; label: string }[] = [
-    { id: "system", label: "System" },
-    { id: "on", label: "On" },
-    { id: "off", label: "Off" },
+  const MOTION_MODES = $derived([
+    { id: "system" as const, label: i18n.t("appearance.motion_system") },
+    { id: "on" as const, label: i18n.t("appearance.motion_on") },
+    { id: "off" as const, label: i18n.t("appearance.motion_off") },
+  ]);
+
+  const LANGUAGE_OPTIONS = [
+    { id: "system" as const, labelKey: "appearance.lang_system" },
+    { id: "fr" as const, labelKey: "appearance.lang_fr" },
+    { id: "en" as const, labelKey: "appearance.lang_en" },
   ];
 
   function onSlider(e: Event) {
@@ -22,18 +29,40 @@
 </script>
 
 <SettingsCard
-  title="UI scale"
-  description="Drag, or use Ctrl + scroll wheel / Ctrl + + / Ctrl + − / Ctrl + 0."
+  title={i18n.t("appearance.language")}
+  description={i18n.t("appearance.language_desc")}
+>
+  <div class="flex gap-1.5" role="radiogroup" aria-label={i18n.t("appearance.language")}>
+    {#each LANGUAGE_OPTIONS as lang (lang.id)}
+      <button
+        type="button"
+        role="radio"
+        aria-checked={settings.state.locale === lang.id}
+        class="rounded-md border px-3 py-1 text-[11px] transition
+          {settings.state.locale === lang.id
+            ? 'border-foreground/40 bg-[var(--color-surface-3)] text-foreground'
+            : 'border-border bg-[var(--color-surface-2)] text-muted-foreground hover:border-foreground/30 hover:text-foreground'}"
+        onclick={() => settings.setLocale(lang.id)}
+      >
+        {i18n.t(lang.labelKey)}
+      </button>
+    {/each}
+  </div>
+</SettingsCard>
+
+<SettingsCard
+  title={i18n.t("appearance.ui_scale")}
+  description={i18n.t("appearance.ui_scale_desc")}
 >
   {#snippet actions()}
     <button
       type="button"
       class="flex items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-1 text-[11px] text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
       onclick={reset}
-      title="Reset to 100%"
+      title={i18n.t("common.reset")}
     >
       <RotateCcw class="size-3" />
-      Reset
+      {i18n.t("common.reset")}
     </button>
   {/snippet}
 
@@ -47,7 +76,7 @@
       value={settings.state.uiScalePercent}
       oninput={onSlider}
       class="ui-slider min-w-0 flex-1"
-      aria-label="UI scale"
+      aria-label={i18n.t("appearance.ui_scale")}
     />
     <span class="w-12 text-right font-mono text-xs font-semibold text-foreground">
       {settings.state.uiScalePercent}%
@@ -56,19 +85,19 @@
 </SettingsCard>
 
 <ToggleSetting
-  label="Layout"
-  description="Mobile stacks everything into full-width pages with a bottom bar and bigger touch targets. PC keeps the sidebar and side panels."
+  label={i18n.t("appearance.layout")}
+  description={i18n.t("appearance.layout_desc")}
   enabled={settings.state.mobileLayout}
-  onLabel="Mobile"
-  offLabel="PC"
+  onLabel={i18n.t("appearance.mobile")}
+  offLabel={i18n.t("appearance.pc")}
   onToggle={() => settings.setMobileLayout(!settings.state.mobileLayout)}
 />
 
 <SettingsCard
-  title="Animations"
-  description="System follows the OS reduced-motion setting; On and Off override it."
+  title={i18n.t("appearance.animations")}
+  description={i18n.t("appearance.animations_desc")}
 >
-  <div class="flex gap-1.5" role="radiogroup" aria-label="Animations">
+  <div class="flex gap-1.5" role="radiogroup" aria-label={i18n.t("appearance.animations")}>
     {#each MOTION_MODES as mode (mode.id)}
       <button
         type="button"
