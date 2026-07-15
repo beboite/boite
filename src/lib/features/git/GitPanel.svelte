@@ -420,16 +420,37 @@
             onkeydown={commitKey}
             disabled={gs.committing}
           ></textarea>
-          <button
-            type="button"
-            class="mt-1.5 flex w-full items-center justify-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2 py-1 text-xs font-medium text-foreground/85 transition hover:bg-[var(--color-surface-3)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-            onclick={doCommit}
-            disabled={gs.committing ||
-              gs.staged.length === 0 ||
-              !gs.message.trim()}
-          >
-            Commit ({gs.staged.length})
-          </button>
+          {#if totalChanges > 0}
+            <button
+              type="button"
+              class="mt-1.5 flex w-full items-center justify-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2 py-1 text-xs font-medium text-foreground/85 transition hover:bg-[var(--color-surface-3)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+              onclick={doCommit}
+              disabled={gs.committing ||
+                gs.staged.length === 0 ||
+                !gs.message.trim()}
+            >
+              Commit ({gs.staged.length})
+            </button>
+          {:else}
+            {@const canPush = gs.upstream === null || gs.ahead > 0}
+            <button
+              type="button"
+              class="mt-1.5 flex w-full items-center justify-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2 py-1 text-xs font-medium text-foreground/85 transition hover:bg-[var(--color-surface-3)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+              onclick={push}
+              disabled={gs.pushing || !canPush}
+            >
+              {#if gs.upstream === null}
+                <ArrowUpFromLine class="size-3.5" />
+                Publish Branch
+              {:else if gs.ahead > 0}
+                <ArrowUpFromLine class="size-3.5 {gs.pushing ? 'animate-pulse' : ''}" />
+                Push ({gs.ahead} commit{gs.ahead > 1 ? 's' : ''})
+              {:else}
+                <Check class="size-3.5 text-[var(--color-success)]" />
+                Up to date
+              {/if}
+            </button>
+          {/if}
         </div>
 
         <div class="min-h-0 flex-1 overflow-y-auto">
