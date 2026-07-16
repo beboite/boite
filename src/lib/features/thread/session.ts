@@ -1,4 +1,4 @@
-import { backend } from "$lib/backend";
+import { backendForPath } from "$lib/backend";
 import type { SessionHit, SessionKind } from "$lib/backend/types";
 import { app } from "$lib/app/store.svelte";
 import { detectIconKey } from "$lib/shared/icons/detect";
@@ -19,7 +19,8 @@ export type SessionDetector = (
 function makeDetector(kind: SessionKind, scope: string): SessionDetector {
   return async (cwd, afterUnixMs, excludeIds) => {
     try {
-      return await backend().session.find(kind, cwd, afterUnixMs, excludeIds);
+      // Session files live where the PTY runs; route by the thread's cwd.
+      return await backendForPath(cwd).session.find(kind, cwd, afterUnixMs, excludeIds);
     } catch (err) {
       logger.error("session", `${scope}: detect failed`, String(err));
       return null;

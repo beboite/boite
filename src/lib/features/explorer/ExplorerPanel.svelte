@@ -45,7 +45,10 @@
     const poke = () => {
       if (document.hidden) return;
       // Don't queue directory reads against a dropped remote socket.
-      if (workspace.mode === "remote" && workspace.connection !== "connected") return;
+      const remoteScoped =
+        workspace.mode === "remote" ||
+        (workspace.isDynamic && project?.origin === "remote");
+      if (remoteScoped && workspace.connection !== "connected") return;
       void explorerStore.refresh(r);
     };
     const periodMs = settings.state.mobileLayout ? 20_000 : AUTO_REFRESH_MS;

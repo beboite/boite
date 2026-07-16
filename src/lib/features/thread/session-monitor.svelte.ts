@@ -1,5 +1,5 @@
 import { app } from "$lib/app/store.svelte";
-import { backend } from "$lib/backend";
+import { backendFor } from "$lib/backend";
 import { saveThread, updateThreadTitle } from "$lib/storage/db";
 import { notifications } from "$lib/features/notifications/store.svelte";
 import { logger } from "$lib/shared/services/logger.svelte";
@@ -64,8 +64,8 @@ function applySessionTitle(t: Thread, title: string | null | undefined) {
   app.setThreadTitle(t.id, title);
   // Remote: setThreadTitle skips persistence (the server owns OSC titles),
   // but this title only exists client-side, so persist it explicitly.
-  if (!backend().caps.clientStatus) {
-    void updateThreadTitle(t.id, title).catch(() => {});
+  if (!backendFor(t.origin).caps.clientStatus) {
+    void updateThreadTitle(t.id, title, t.origin).catch(() => {});
   }
 }
 
@@ -208,8 +208,8 @@ export function startSessionMonitor(opts: {
   let livenessInFlight = false;
   const probeLiveness = async () => {
     if (livenessInFlight) return;
-    if (!backend().caps.clientStatus) return;
     const t = app.threads.find((x) => x.id === threadId);
+    if (t && !backendFor(t.origin).caps.clientStatus) return;
     if (
       !t ||
       !t.sessionId ||

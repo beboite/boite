@@ -16,7 +16,7 @@
     ptyRelease,
   } from "$lib/storage/pty";
   import type { PtyEvent } from "$lib/storage/pty";
-  import { backend } from "$lib/backend";
+  import { backendFor, workspace } from "$lib/backend";
   import { parkedLocal } from "$lib/backend/tauri/parked";
   import { app } from "$lib/app/store.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
@@ -49,6 +49,10 @@
   let { thread, visible, focused }: Props = $props();
 
   const mobile = $derived(settings.state.mobileLayout);
+  // Whether THIS thread's status is derived client-side. Per-thread, not
+  // per-workspace: in dynamic mode local threads sniff while the boite's
+  // threads take server-pushed status.
+  const clientStatus = () => backendFor(thread.origin).caps.clientStatus;
 
   let container: HTMLDivElement;
   let term: Terminal | null = null;
@@ -62,6 +66,10 @@
   // stream is dropped while hidden to save 4G; set so the pane reattaches when
   // shown again.
   let released = false;
+  // Balances statusEngine.acquire(): only local-sniffing terminals acquire, so
+  // only those may release (a remote pane releasing would kill the shared
+  // ticker while local panes still run).
+  let statusEngineAcquired = false;
   let spawnRetryTimer: ReturnType<typeof setTimeout> | null = null;
   let spawnRetryCount = 0;
   const SPAWN_RETRY_MAX = 30;
@@ -325,7 +333,7 @@
   // pty_detach. Remember local detaches so the return to this workspace
   // reattaches instead of spawning fresh. Explicit close uses stopLocalPty/kill.
   function releasePty() {
-    if (ptyId && backend().caps.clientStatus) {
+    if (ptyId && clientStatus()) {
       // Remember the dot colour so the return to this workspace shows the
       // thread connected (ready/running) instead of a reset idle grey.
       parkedLocal.set(thread.id, currentThread()?.status ?? "ready");
@@ -389,7 +397,7 @@
   function markRunning(ttlMs?: number) {
     // Remote derives status server-side and pushes it; client-side sniffing
     // would fight those events.
-    if (!backend().caps.clientStatus) return;
+    if (!clientStatus()) return;
     syncAliveThread("running");
     statusEngine.markWorking(thread.id, ttlMs);
     app.setThreadStatus(thread.id, "running");
@@ -442,7 +450,7 @@
       // skip the decode entirely there. A non-stream decode on the tail-only
       // path flushes decoder state — at worst one replacement char in the
       // detection text, invisible to the regex.
-      if (backend().caps.clientStatus) {
+      if (clientStatus()) {
         statusEngine.markOutput(thread.id);
         const text =
           bytes.length > DETECT_DECODE_MAX
@@ -880,12 +888,12 @@
     // server too — attach to replay its ring rather than skip it (the old guard
     // left it a black screen on first click) and never re-inject launch input.
     // Remote idle still spawns fresh so wrap-shell launch input is typed.
-    const remote = !backend().caps.clientStatus;
+    const remote = !clientStatus();
     const liveRemote = remote && !finished && current?.status !== "idle";
     const reattaching =
       reattach ||
       liveRemote ||
-      (backend().caps.clientStatus && parkedLocal.has(thread.id));
+      (clientStatus() && parkedLocal.has(thread.id));
     const attachable = reattaching && current?.status !== "idle";
     if (!current || finished || (current.status !== "idle" && !attachable)) {
       logger.debug(
@@ -928,9 +936,14 @@
     const rows = Math.max(1, term.rows || 24);
 
     const userArgs = buildResumeArgs(thread);
-    const wrapShell = settings.state.defaultShellId
-      ? platform.shells.find((s) => s.id === settings.state.defaultShellId) ?? null
-      : null;
+    // Dynamic mode: a boite thread runs on the server, where the locally
+    // configured wrap shell doesn't exist — spawn direct and let the server
+    // resolve the command.
+    const crossRemote = workspace.isDynamic && thread.origin === "remote";
+    const wrapShell =
+      !crossRemote && settings.state.defaultShellId
+        ? platform.shells.find((s) => s.id === settings.state.defaultShellId) ?? null
+        : null;
     const isBlankTerminal = thread.iconKey === "terminal";
     const plan =
       wrapShell && !isBlankTerminal
@@ -974,6 +987,7 @@
           },
         },
         onEvent,
+        thread.origin,
       );
       const current = currentThread();
       if (destroyed || !term || !current || current.status === "stopped") {
@@ -1206,7 +1220,10 @@
     // The status engine (TTL demotion, idle auto-close) is local only: remote
     // status comes from the server, and a local idle timer must not kill PTYs
     // shared with other attached devices.
-    if (backend().caps.clientStatus) statusEngine.acquire();
+    if (clientStatus()) {
+      statusEngine.acquire();
+      statusEngineAcquired = true;
+    }
   });
 
   $effect(() => {
@@ -1225,7 +1242,7 @@
   $effect(() => {
     const shown = visible;
     if (!term) return;
-    const remote = !backend().caps.clientStatus;
+    const remote = !clientStatus();
     if (!remote || !mobile) return;
     const cur = currentThread();
     const finished =
@@ -1276,7 +1293,7 @@
 
   onDestroy(() => {
     destroyed = true;
-    statusEngine.release(thread.id);
+    if (statusEngineAcquired) statusEngine.release(thread.id);
     stopSessionMonitor();
     disposeMobileInput?.();
     disposeMobileInput = null;

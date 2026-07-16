@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
   import { app } from "$lib/app/store.svelte";
+  import { workspace } from "$lib/backend";
   import { settings } from "$lib/features/settings/store.svelte";
   import {
     paneStore,
@@ -32,10 +33,31 @@
 
   type Props = {
     onActivateThread: (threadId: string) => void;
-    onNewProject: () => void;
+    onNewProject: (target?: "local" | "remote") => void;
     onRemoveProject: (projectId: string) => void;
   };
   let { onActivateThread, onNewProject, onRemoveProject }: Props = $props();
+
+  // Dynamic mode has two places a project can live; ask instead of guessing.
+  function addProjectClick(e: MouseEvent) {
+    if (!workspace.isDynamic) {
+      onNewProject();
+      return;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+    ctxMenu = {
+      x: e.clientX,
+      y: e.clientY,
+      items: [
+        { label: "Local folder…", action: () => onNewProject("local") },
+        {
+          label: `On ${workspace.info.name || "boite"}…`,
+          action: () => onNewProject("remote"),
+        },
+      ],
+    };
+  }
 
   let showArchived = $state(false);
 
@@ -629,7 +651,7 @@
         <button
           type="button"
           class="rounded-md p-1 text-muted-foreground transition hover:bg-accent hover:text-foreground"
-          onclick={onNewProject}
+          onclick={addProjectClick}
           aria-label="Add project"
           title="Add project from folder"
         >
@@ -651,7 +673,7 @@
       <button
         type="button"
         class="mx-1 mt-2 flex w-[calc(100%-0.5rem)] flex-col items-center gap-2 rounded-lg border border-dashed border-border bg-transparent px-3 py-7 text-xs text-muted-foreground transition hover:border-foreground/30 hover:bg-accent/30 hover:text-foreground"
-        onclick={onNewProject}
+        onclick={addProjectClick}
       >
         <FolderOpen class="size-5 opacity-70" />
         <span>Pick a folder</span>
@@ -660,6 +682,8 @@
 
     {#each visibleProjects as project, projectIdx (project.id)}
       {@const isSelected = app.currentProjectId === project.id}
+      {@const isRemoteOrigin = workspace.isDynamic && project.origin === "remote"}
+      {@const boiteOffline = isRemoteOrigin && workspace.connection !== "connected"}
       {@const isProjectSource = liveDrag?.kind === "project" && liveDrag.id === project.id}
       {@const projectShiftY =
         liveDrag && liveDrag.kind === "project" && liveDrag.slotIndex !== null && projectSourceIdx >= 0
@@ -670,6 +694,7 @@
         class="project-block mb-1.5"
         class:dragging={isProjectSource}
         class:source={isProjectSource}
+        class:opacity-50={boiteOffline}
         data-project-row={project.id}
         style:transform={isProjectSource
           ? `translate(0px, ${dragOffset}px) scale(1.015)`
@@ -684,6 +709,12 @@
           class="project-row group/project relative flex items-center gap-2 rounded-md px-2 py-1.5 transition hover:bg-accent/40 hover:text-foreground {showArchived
             ? ''
             : 'cursor-pointer'} {isSelected ? 'bg-accent/40' : ''}"
+          style:box-shadow={isRemoteOrigin
+            ? `inset 2px 0 0 0 ${workspace.info.color || "var(--color-success)"}`
+            : undefined}
+          title={isRemoteOrigin
+            ? `On ${workspace.info.name || "boite"}${boiteOffline ? " (disconnected)" : ""}`
+            : undefined}
           oncontextmenu={(e) => openProjectContextMenu(project, e)}
         >
           <div

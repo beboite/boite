@@ -11,6 +11,7 @@
     switchToBoite,
     connectAndInit,
     setActiveBoiteInfo,
+    setDynamicMode,
     defaultRemoteWsUrl,
   } from "$lib/app/workspace";
   import MobileSheet from "$lib/features/mobile/MobileSheet.svelte";
@@ -20,6 +21,7 @@
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
   import Monitor from "@lucide/svelte/icons/monitor";
+  import Layers from "@lucide/svelte/icons/layers";
 
   // No local backend in a browser/PWA: only saved boites stand.
   const isTauri = hasTauri();
@@ -62,19 +64,24 @@
     return b.name || hostOf(b.url) || "boite";
   }
   function isActiveBoite(id: string): boolean {
-    return workspace.mode === "remote" && workspace.activeBoiteId === id;
+    return workspace.mode !== "local" && workspace.activeBoiteId === id;
   }
 
   const activeColor = $derived(workspace.info.color || "var(--color-success)");
   const activeEntry = $derived(
     workspace.activeBoiteId ? device.getBoite(workspace.activeBoiteId) : null,
   );
+  const boiteLabel = $derived(
+    workspace.info.name ||
+      hostOf(activeEntry?.url ?? workspace.remoteUrl ?? "") ||
+      "Remote",
+  );
   const triggerLabel = $derived(
     workspace.mode === "local"
       ? "Local"
-      : workspace.info.name ||
-          hostOf(activeEntry?.url ?? workspace.remoteUrl ?? "") ||
-          "Remote",
+      : workspace.mode === "dynamic"
+        ? `Local + ${boiteLabel}`
+        : boiteLabel,
   );
   const triggerDot = $derived(
     workspace.mode === "local"
@@ -170,6 +177,15 @@
     if ((workspace.info.color ?? "") === c) return;
     await setActiveBoiteInfo({ color: c });
   }
+  async function toggleDynamic() {
+    if (busy) return;
+    busy = true;
+    try {
+      await setDynamicMode(!device.dynamicMode);
+    } finally {
+      busy = false;
+    }
+  }
 
   function onDocPointer(e: MouseEvent) {
     if (!open) return;
@@ -223,6 +239,34 @@
         {#if workspace.mode === "local"}
           <Check class="size-4 text-foreground" />
         {/if}
+      </button>
+
+      <!-- Dynamic mode: connecting to a boite merges its projects into the
+           local list instead of replacing the workspace. Off = classic
+           exclusive remote mode. -->
+      <button
+        type="button"
+        role="switch"
+        aria-checked={device.dynamicMode}
+        class={`flex items-center gap-2.5 rounded-lg text-left transition hover:bg-accent disabled:opacity-50 ${mobile ? "px-3 py-3 text-sm" : "px-2.5 py-2 text-[13px]"}`}
+        onclick={toggleDynamic}
+        disabled={busy}
+        title="Show local and boite projects together"
+      >
+        <Layers class="size-4 shrink-0 text-muted-foreground" />
+        <span class="flex min-w-0 flex-1 flex-col leading-tight">
+          <span class="font-medium text-foreground">Dynamic mode</span>
+          <span class="truncate text-[11px] text-muted-foreground">
+            Merge local + boite projects
+          </span>
+        </span>
+        <span
+          class={`relative h-4 w-7 shrink-0 rounded-full transition ${device.dynamicMode ? "bg-foreground" : "bg-[var(--color-surface-3)]"}`}
+        >
+          <span
+            class={`absolute top-0.5 size-3 rounded-full bg-background transition-all ${device.dynamicMode ? "left-3.5" : "left-0.5"}`}
+          ></span>
+        </span>
       </button>
     {/if}
 

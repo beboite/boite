@@ -1,4 +1,5 @@
 import { app } from "$lib/app/store.svelte";
+import { workspace } from "$lib/backend";
 import { ptyKill } from "$lib/storage/pty";
 import { getDefaultShell } from "$lib/storage/shell";
 import { saveThread } from "$lib/storage/db";
@@ -43,7 +44,7 @@ function nextLabelSuffix(projectId: string, prefix: string): number {
 }
 
 function buildThread(
-  projectId: string,
+  project: Project,
   cmd: string,
   args: string[],
   label: string,
@@ -51,7 +52,7 @@ function buildThread(
 ): Thread {
   return {
     id: uuid(),
-    projectId,
+    projectId: project.id,
     ptyId: null,
     label,
     title: null,
@@ -62,6 +63,8 @@ function buildThread(
     status: "idle",
     exitCode: null,
     createdAt: Date.now(),
+    // A thread lives where its project lives (dynamic mode routing).
+    origin: project.origin,
   };
 }
 
@@ -83,7 +86,7 @@ async function createThread(
 ): Promise<Thread | null> {
   const count = nextLabelSuffix(project.id, labelPrefix);
   const thread = buildThread(
-    project.id,
+    project,
     cmd,
     args,
     `${labelPrefix} #${count}`,
@@ -138,15 +141,19 @@ export async function launchBlankTerminal(
   let args: string[] = [];
   let label = "Terminal";
 
-  const preferred = settings.state.defaultShellId
-    ? platform.shells.find((s) => s.id === settings.state.defaultShellId)
-    : null;
+  // A remote project in dynamic mode runs on the boite: the locally-configured
+  // shell doesn't exist there, so always take the server's default.
+  const crossRemote = workspace.isDynamic && project.origin === "remote";
+  const preferred =
+    !crossRemote && settings.state.defaultShellId
+      ? platform.shells.find((s) => s.id === settings.state.defaultShellId)
+      : null;
   if (preferred) {
     cmd = preferred.cmd;
     args = [...preferred.args];
     label = preferred.label;
   } else {
-    cmd = await getDefaultShell();
+    cmd = await getDefaultShell(project.origin);
   }
 
   return createThread(project, cmd, args, label, "terminal");

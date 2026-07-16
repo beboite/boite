@@ -1,5 +1,6 @@
-import { backend, workspace } from "$lib/backend";
+import { backendFor, workspace } from "$lib/backend";
 import { hasTauri } from "$lib/backend/env";
+import type { WorkspaceOrigin } from "$lib/types";
 import { app } from "$lib/app/store.svelte";
 import { notifications } from "$lib/features/notifications/store.svelte";
 import { logger } from "$lib/shared/services/logger.svelte";
@@ -9,12 +10,19 @@ import { uuid } from "$lib/shared/utils/uuid";
 import { folderBrowser } from "./folderBrowserStore.svelte";
 import type { Project } from "$lib/types";
 
-export async function pickAndAddProject(): Promise<Project | null> {
+export async function pickAndAddProject(
+  target?: WorkspaceOrigin,
+): Promise<Project | null> {
   // The native dialog only browses THIS machine. In a remote workspace (and in
   // any browser/PWA, which has no native dialog) open the server-side folder
   // browser instead, so it lists the boite-server's filesystem and adds the
-  // project on confirm.
-  if (workspace.isRemote || !hasTauri()) {
+  // project on confirm. In dynamic mode the caller picks the target; "remote"
+  // routes to the server-side browser too.
+  const remoteTarget =
+    workspace.isRemote ||
+    !hasTauri() ||
+    (workspace.isDynamic && target === "remote");
+  if (remoteTarget) {
     folderBrowser.open = true;
     return null;
   }
@@ -28,11 +36,16 @@ export async function pickAndAddProject(): Promise<Project | null> {
     return null;
   }
   if (!selected || Array.isArray(selected)) return null;
-  return addProjectByPath(selected);
+  return addProjectByPath(selected, workspace.isDynamic ? "local" : undefined);
 }
 
-export async function addProjectByPath(path: string): Promise<Project | null> {
-  const existing = app.projects.find((p) => p.cwd === path);
+export async function addProjectByPath(
+  path: string,
+  origin?: WorkspaceOrigin,
+): Promise<Project | null> {
+  const existing = app.projects.find(
+    (p) => p.cwd === path && (!origin || (p.origin ?? "local") === origin),
+  );
   if (existing) {
     app.selectedProjectId = existing.id;
     return existing;
@@ -40,7 +53,7 @@ export async function addProjectByPath(path: string): Promise<Project | null> {
 
   let inspection: { name: string; icon: string | null; tech?: string | null };
   try {
-    inspection = await backend().project.inspect(path);
+    inspection = await backendFor(origin).project.inspect(path);
   } catch (err) {
     logger.warn("project", `inspect_project failed for ${path}, using fallback`, String(err));
     inspection = { name: basename(path) || "project", icon: null };
@@ -52,6 +65,7 @@ export async function addProjectByPath(path: string): Promise<Project | null> {
     cwd: path,
     icon: iconFromInspection(inspection),
     archived: false,
+    origin: workspace.isDynamic ? origin ?? "local" : undefined,
   };
   try {
     await app.addProject(project);
@@ -78,7 +92,7 @@ function iconFromInspection(inspection: {
 export async function refreshProjectIcon(project: Project): Promise<boolean> {
   let inspection: { name: string; icon: string | null; tech?: string | null };
   try {
-    inspection = await backend().project.inspect(project.cwd);
+    inspection = await backendFor(project.origin).project.inspect(project.cwd);
   } catch (err) {
     logger.warn("project", `re-inspect failed for ${project.cwd}`, String(err));
     return false;

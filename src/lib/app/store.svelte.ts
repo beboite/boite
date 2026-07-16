@@ -1,4 +1,11 @@
-import type { MobileTab, Project, Thread, ThreadStatus, View } from "$lib/types";
+import type {
+  MobileTab,
+  Project,
+  Thread,
+  ThreadStatus,
+  View,
+  WorkspaceOrigin,
+} from "$lib/types";
 import {
   loadProjects,
   saveProject,
@@ -16,7 +23,7 @@ import {
 import { registerProjectRoots } from "$lib/storage/scope";
 import { gitStore } from "$lib/features/git/store.svelte";
 import { notifications } from "$lib/features/notifications/store.svelte";
-import { backend, workspace } from "$lib/backend";
+import { backend, workspace, type Backend } from "$lib/backend";
 import { device } from "$lib/features/settings/device.svelte";
 import type { ControlEvent } from "$lib/backend/types";
 
@@ -39,6 +46,27 @@ class AppState {
   // Unsubscribe from the remote control plane; set while a remote workspace is
   // active so a switch can tear the subscription down.
   #unsubscribeControl: (() => void) | null = null;
+
+  constructor() {
+    // Path-scoped façades (git/explorer/editor/session) route through this in
+    // dynamic mode: a path under a remote project's cwd goes to the boite.
+    workspace.pathOriginResolver = (path) => this.originForPath(path);
+  }
+
+  // Longest-prefix match against project cwds. Local Windows paths and remote
+  // Linux paths never collide; equal-length ties are irrelevant in practice.
+  originForPath(path: string): WorkspaceOrigin {
+    const norm = (p: string) => p.replace(/\\/g, "/").toLowerCase();
+    const target = norm(path);
+    let best: Project | null = null;
+    for (const p of this.projects) {
+      const cwd = norm(p.cwd);
+      if (target === cwd || target.startsWith(cwd.endsWith("/") ? cwd : cwd + "/")) {
+        if (!best || cwd.length > norm(best.cwd).length) best = p;
+      }
+    }
+    return best?.origin ?? "local";
+  }
 
   markUnbound(id: string) {
     if (!this.unboundByDedup.includes(id)) {
@@ -65,7 +93,8 @@ class AppState {
       const batch = [...this.pendingTitleSaves];
       this.pendingTitleSaves.clear();
       for (const [id, title] of batch) {
-        void updateThreadTitle(id, title).catch((err) => {
+        const origin = this.threads.find((x) => x.id === id)?.origin;
+        void updateThreadTitle(id, title, origin).catch((err) => {
           console.error("updateThreadTitle failed:", err);
         });
       }
@@ -154,29 +183,65 @@ class AppState {
     }
 
     // Projects and threads are independent tables; load both concurrently.
-    const projectsPromise = loadProjects().catch((err) => {
-      console.error("loadProjects failed:", err);
-      return [] as Project[];
-    });
-    const threadsPromise = loadThreads().catch((err) => {
-      console.error("loadThreads failed:", err);
-      return [] as Thread[];
-    });
-    this.projects = await projectsPromise;
-    // Before ready: panels start polling fs/git commands as soon as they
-    // mount, and those commands reject paths outside registered roots.
-    await this.syncRoots();
-    this.threads = await threadsPromise;
+    // Dynamic mode loads local + boite side by side and tags each row with its
+    // origin; a remote failure degrades to local-only instead of blocking boot.
+    if (workspace.isDynamic) {
+      const [projects, threads] = await Promise.all([
+        this.loadDynamic((be) => be.db.loadProjects(), "loadProjects"),
+        this.loadDynamic((be) => be.db.loadThreads(), "loadThreads"),
+      ]);
+      this.projects = projects;
+      // Before ready: panels start polling fs/git commands as soon as they
+      // mount, and those commands reject paths outside registered roots.
+      await this.syncRoots();
+      this.threads = threads;
+    } else {
+      const projectsPromise = loadProjects().catch((err) => {
+        console.error("loadProjects failed:", err);
+        return [] as Project[];
+      });
+      const threadsPromise = loadThreads().catch((err) => {
+        console.error("loadThreads failed:", err);
+        return [] as Thread[];
+      });
+      this.projects = await projectsPromise;
+      await this.syncRoots();
+      this.threads = await threadsPromise;
+    }
     this.deduplicateSessionIds();
 
     // Remote: the server is authoritative for thread runtime state and pushes
     // it as control events. Local has no subscribe and derives status itself.
-    const be = backend();
-    if (be.subscribe) {
+    // Dynamic subscribes on the boite connection (current() is local there).
+    const be = workspace.isDynamic ? workspace.remoteBackend : backend();
+    if (be?.subscribe) {
       this.#unsubscribeControl = be.subscribe((ev) => this.applyControlEvent(ev));
     }
 
     this.ready = true;
+  }
+
+  // Load one table from both live backends and tag each row's origin.
+  private async loadDynamic<T extends { origin?: WorkspaceOrigin }>(
+    load: (be: Backend) => Promise<T[]>,
+    label: string,
+  ): Promise<T[]> {
+    const localP = load(workspace.backendFor("local")).catch((err) => {
+      console.error(`${label} (local) failed:`, err);
+      return [] as T[];
+    });
+    const remote = workspace.remoteBackend;
+    const remoteP = remote
+      ? load(remote).catch((err) => {
+          console.error(`${label} (remote) failed:`, err);
+          return [] as T[];
+        })
+      : Promise.resolve([] as T[]);
+    const [localRows, remoteRows] = await Promise.all([localP, remoteP]);
+    return [
+      ...localRows.map((r) => ({ ...r, origin: "local" as const })),
+      ...remoteRows.map((r) => ({ ...r, origin: "remote" as const })),
+    ];
   }
 
   // Clear reactive state so a workspace switch re-hydrates from the new
@@ -227,6 +292,7 @@ class AppState {
         // Server emits data = { thread: {...} }.
         const incoming = (ev.data as { thread?: Thread })?.thread;
         if (incoming?.id && !this.threads.some((x) => x.id === incoming.id)) {
+          if (workspace.isDynamic) incoming.origin = "remote";
           this.threads.push(incoming);
         }
         break;
@@ -243,6 +309,7 @@ class AppState {
           delete userFields.status;
           delete userFields.ptyId;
           delete userFields.exitCode;
+          delete userFields.origin;
           Object.assign(t, userFields);
         }
         break;
@@ -253,11 +320,7 @@ class AppState {
         break;
       }
       case "project.changed": {
-        void loadProjects()
-          .then((p) => {
-            this.projects = p;
-          })
-          .catch(() => {});
+        void this.refreshRemoteProjects().catch(() => {});
         break;
       }
       // Another device renamed/recolored this boite. Cosmetic; update the
@@ -283,11 +346,44 @@ class AppState {
     }
   }
 
+  // Control events only concern the boite: in dynamic mode refresh the remote
+  // subset and leave local rows (and their live runtime state) untouched.
+  private async refreshRemoteProjects() {
+    if (workspace.isDynamic) {
+      const remote = workspace.remoteBackend;
+      if (!remote) return;
+      const p = await remote.db.loadProjects();
+      this.projects = [
+        ...this.projects.filter((x) => x.origin !== "remote"),
+        ...p.map((x) => ({ ...x, origin: "remote" as const })),
+      ];
+    } else {
+      this.projects = await loadProjects();
+    }
+  }
+
   private async resyncFromServer() {
     try {
-      const [projects, threads] = await Promise.all([loadProjects(), loadThreads()]);
-      this.projects = projects;
-      this.threads = threads;
+      if (workspace.isDynamic) {
+        const remote = workspace.remoteBackend;
+        if (!remote) return;
+        const [projects, threads] = await Promise.all([
+          remote.db.loadProjects(),
+          remote.db.loadThreads(),
+        ]);
+        this.projects = [
+          ...this.projects.filter((x) => x.origin !== "remote"),
+          ...projects.map((x) => ({ ...x, origin: "remote" as const })),
+        ];
+        this.threads = [
+          ...this.threads.filter((x) => x.origin !== "remote"),
+          ...threads.map((x) => ({ ...x, origin: "remote" as const })),
+        ];
+      } else {
+        const [projects, threads] = await Promise.all([loadProjects(), loadThreads()]);
+        this.projects = projects;
+        this.threads = threads;
+      }
     } catch (err) {
       console.error("resync failed:", err);
     }
@@ -300,12 +396,16 @@ class AppState {
   private deduplicateSessionIds() {
     // Remote owns session bindings: this legacy local fix would write back via
     // thread.create (clobbering server-owned state) and toast about /resume,
-    // which is meaningless remotely. Skip entirely when the server is
-    // authoritative.
-    if (!backend().caps.clientStatus) return;
-    const withSession = this.threads.filter((t) => t.sessionId);
+    // which is meaningless remotely. Only threads whose backend derives status
+    // client-side (local) are considered — in dynamic mode the boite's threads
+    // are excluded, in pure remote mode that's every thread.
+    const sniffable = this.threads.filter(
+      (t) => workspace.backendFor(t.origin).caps.clientStatus,
+    );
+    if (sniffable.length === 0) return;
+    const withSession = sniffable.filter((t) => t.sessionId);
     console.info(
-      `[boite] session dedup: ${this.threads.length} threads loaded, ${withSession.length} with sessionId`,
+      `[boite] session dedup: ${sniffable.length} threads loaded, ${withSession.length} with sessionId`,
     );
     const bySession = new Map<string, Thread[]>();
     for (const t of withSession) {
@@ -356,7 +456,7 @@ class AppState {
       this.activeThreadId = null;
     }
     try {
-      await dbDeleteThread(id);
+      await dbDeleteThread(id, removed?.origin);
     } catch (err) {
       console.error("deleteThread failed:", err);
     }
@@ -376,7 +476,7 @@ class AppState {
     }
     // Remote: the server persists runtime state and pushes it back; a client
     // write would clobber it. Only the local backend persists status here.
-    if (!backend().caps.clientStatus) return;
+    if (!workspace.backendFor(t.origin).caps.clientStatus) return;
     if (
       status === "done" ||
       status === "exited" ||
@@ -415,7 +515,7 @@ class AppState {
     if (!t || t.title === title) return;
     t.title = title;
     // Remote owns the title (parsed server-side, pushed as a control event).
-    if (!backend().caps.clientStatus) return;
+    if (!workspace.backendFor(t.origin).caps.clientStatus) return;
     this.pendingTitleSaves.set(id, title);
     this.scheduleTitleFlush();
   }
@@ -428,7 +528,13 @@ class AppState {
 
   private async syncRoots() {
     try {
-      await registerProjectRoots(this.projects.map((p) => p.cwd));
+      // Tauri's fs trust boundary only concerns local paths; the server derives
+      // its own from persisted projects. In dynamic mode remote cwds are Linux
+      // paths that must not pollute the local scope.
+      const roots = this.projects
+        .filter((p) => (p.origin ?? "local") === "local")
+        .map((p) => p.cwd);
+      await registerProjectRoots(roots);
     } catch (err) {
       console.error("registerProjectRoots failed:", err);
     }
@@ -465,7 +571,7 @@ class AppState {
       this.activeThreadId = null;
     }
     try {
-      await setProjectArchived(id, true);
+      await setProjectArchived(id, true, p.origin);
     } catch (err) {
       console.error("archiveProject failed:", err);
     }
@@ -476,13 +582,14 @@ class AppState {
     if (!p || !p.archived) return;
     p.archived = false;
     try {
-      await setProjectArchived(id, false);
+      await setProjectArchived(id, false, p.origin);
     } catch (err) {
       console.error("unarchiveProject failed:", err);
     }
   }
 
   async removeProject(id: string) {
+    const removed = this.projects.find((p) => p.id === id);
     const orphanThreads = this.threads.filter((t) => t.projectId === id);
     this.projects = this.projects.filter((p) => p.id !== id);
     this.threads = this.threads.filter((t) => t.projectId !== id);
@@ -490,13 +597,13 @@ class AppState {
     void this.syncRoots();
     for (const t of orphanThreads) {
       try {
-        await dbDeleteThread(t.id);
+        await dbDeleteThread(t.id, t.origin);
       } catch {
         // ignore
       }
     }
     try {
-      await deleteProject(id);
+      await deleteProject(id, removed?.origin);
     } catch (err) {
       console.error("deleteProject failed:", err);
     }

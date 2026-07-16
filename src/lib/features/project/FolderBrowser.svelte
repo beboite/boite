@@ -1,8 +1,12 @@
 <script lang="ts">
   import { folderBrowser } from "./folderBrowserStore.svelte";
-  import { backend } from "$lib/backend";
+  import { workspace } from "$lib/backend";
   import { addProjectByPath } from "./api";
   import type { DirEntry } from "$lib/features/explorer/api";
+
+  // This modal always browses the boite's filesystem: in pure remote mode
+  // that's the active backend, in dynamic mode it's explicitly the remote one.
+  const be = () => workspace.backendFor("remote");
 
   let root = $state<string | null>(null);
   let path = $state<string>("");
@@ -23,7 +27,7 @@
 
   async function start() {
     err = null;
-    root = await backend().scope.workspaceRoot().catch(() => null);
+    root = await be().scope.workspaceRoot().catch(() => null);
     if (!root) {
       entries = [];
       path = "";
@@ -36,7 +40,7 @@
     loading = true;
     err = null;
     try {
-      const list = await backend().explorer.readDir(p);
+      const list = await be().explorer.readDir(p);
       entries = list
         .filter((e) => e.isDir && !e.isHidden)
         .sort((a, b) => a.name.localeCompare(b.name));
@@ -57,7 +61,7 @@
   async function addHere() {
     if (busy || !path) return;
     busy = true;
-    const p = await addProjectByPath(path);
+    const p = await addProjectByPath(path, "remote");
     busy = false;
     if (p) folderBrowser.open = false;
   }

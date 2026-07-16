@@ -100,8 +100,8 @@
     activateThread(threadId);
   }
 
-  async function addProject() {
-    await pickAndAddProject();
+  async function addProject(target?: "local" | "remote") {
+    await pickAndAddProject(target);
   }
 
   async function removeProject(projectId: string) {
@@ -204,7 +204,7 @@
                   <button
                     type="button"
                     class="rounded-md border border-border bg-[var(--color-surface)] px-3 py-1.5 text-sm text-foreground transition hover:bg-[var(--color-surface-2)]"
-                    onclick={addProject}
+                    onclick={() => addProject()}
                   >
                     Choose folder…
                   </button>

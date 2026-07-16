@@ -1,4 +1,5 @@
 import { app } from "$lib/app/store.svelte";
+import { workspace } from "$lib/backend";
 import { settings } from "$lib/features/settings/store.svelte";
 import { paneStore, leavesOf } from "$lib/features/panes/store.svelte";
 import { parkedLocal } from "$lib/backend/tauri/parked";
@@ -99,6 +100,9 @@ function tick() {
   const visible = visibleThreadIds();
 
   for (const t of app.threads) {
+    // Server-owned threads (remote origin in dynamic mode) get their status
+    // pushed as control events; ticking them would clobber it.
+    if (!workspace.backendFor(t.origin).caps.clientStatus) continue;
     if (!t.ptyId) {
       // A parked local PTY is detached but still alive (workspace switch). Keep
       // its status + dot colour until the pane reattaches; demoting it to idle
