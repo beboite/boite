@@ -33,7 +33,7 @@
 
 <SettingsCard
   title="Default shell"
-  description="Used by + Terminal and to wrap shortcut commands so aliases (e.g. cc → claude) resolve through your shell profile."
+  description="Used by + Terminal. Shortcut commands launch their CLI directly."
 >
   <div class="overflow-hidden rounded-lg border border-border bg-[var(--color-surface-2)]">
     <button
@@ -44,7 +44,7 @@
       <div class="min-w-0">
         <div class="text-xs font-medium text-foreground">No wrapping</div>
         <div class="text-[10.5px] text-muted-foreground">
-          Run shortcut commands directly. + Terminal launches the platform default.
+          + Terminal launches the platform default.
         </div>
       </div>
       {#if settings.state.defaultShellId === null}
