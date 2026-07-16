@@ -38,25 +38,10 @@
   };
   let { onActivateThread, onNewProject, onRemoveProject }: Props = $props();
 
-  // Dynamic mode has two places a project can live; ask instead of guessing.
-  function addProjectClick(e: MouseEvent) {
-    if (!workspace.isDynamic) {
-      onNewProject();
-      return;
-    }
-    e.preventDefault();
-    e.stopPropagation();
-    ctxMenu = {
-      x: e.clientX,
-      y: e.clientY,
-      items: [
-        { label: "Local folder…", action: () => onNewProject("local") },
-        {
-          label: `On ${workspace.info.name || "boite"}…`,
-          action: () => onNewProject("remote"),
-        },
-      ],
-    };
+  // Dynamic mode: the plain + adds locally, the boite-colored + adds on the
+  // boite (server-side folder browser).
+  function addProjectClick() {
+    onNewProject(workspace.isDynamic ? "local" : undefined);
   }
 
   let showArchived = $state(false);
@@ -657,6 +642,20 @@
         >
           <Plus class="size-4" />
         </button>
+        {#if workspace.isDynamic}
+          <!-- Boite-colored twin of the + button: adds a project on the
+               connected boite via the server-side folder browser. -->
+          <button
+            type="button"
+            class="rounded-md border p-1 text-muted-foreground transition hover:bg-accent hover:text-foreground"
+            style:border-color={workspace.info.color || "var(--color-success)"}
+            onclick={() => onNewProject("remote")}
+            aria-label="Add project on boite"
+            title={`Add project on ${workspace.info.name || "boite"}`}
+          >
+            <Plus class="size-4" />
+          </button>
+        {/if}
       {/if}
     </div>
   </header>
