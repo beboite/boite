@@ -338,7 +338,7 @@ fn manifest_declared_icons(p: &Path) -> Vec<PathBuf> {
                 Some((size, src))
             })
             .collect();
-        entries.sort_by(|a, b| b.0.cmp(&a.0));
+        entries.sort_by_key(|b| std::cmp::Reverse(b.0));
         for (_, src) in entries {
             out.extend(resolve_asset_ref(p, &base, &src));
         }
