@@ -42,10 +42,12 @@
     mobile ? app.mobileTab === "settings" : app.view === "settings",
   );
 
-  // Colored inset outline marks the remote workspace: green connected, amber
-  // (pulsing) while connecting or dropped.
+  // Colored inset outline marks the PURE remote workspace: green connected,
+  // amber (pulsing) while connecting or dropped. Dynamic mode presents as
+  // Local, so it gets no outline — the boite shows through the sidebar
+  // accents instead.
   const outlineClass = $derived(
-    workspace.mode === "local"
+    workspace.mode !== "remote"
       ? ""
       : workspace.connection === "connected"
         ? "ws-remote-ok"
@@ -333,7 +335,7 @@
     <MobileBottomBar />
   {/if}
 
-  {#if workspace.mode !== "local"}
+  {#if workspace.mode === "remote"}
     <div
       class="ws-outline {outlineClass}"
       style:--ws-color={workspace.info.color || "var(--color-success)"}

@@ -64,8 +64,10 @@
     return b.name || hostOf(b.url) || "boite";
   }
   function isActiveBoite(id: string): boolean {
-    return workspace.mode !== "local" && workspace.activeBoiteId === id;
+    return workspace.mode === "remote" && workspace.activeBoiteId === id;
   }
+  // Dynamic mode presents as the local side: the boite is grafted, not active.
+  const onLocalSide = $derived(workspace.mode !== "remote");
 
   const activeColor = $derived(workspace.info.color || "var(--color-success)");
   const activeEntry = $derived(
@@ -76,13 +78,9 @@
       hostOf(activeEntry?.url ?? workspace.remoteUrl ?? "") ||
       "Remote",
   );
-  const triggerLabel = $derived(
-    workspace.mode === "local"
-      ? "Local"
-      : workspace.mode === "dynamic"
-        ? `Local + ${boiteLabel}`
-        : boiteLabel,
-  );
+  const triggerLabel = $derived(workspace.mode === "remote" ? boiteLabel : "Local");
+  // The pill dot shows any live boite link: the active remote workspace, or
+  // the boite grafted into Local by dynamic mode.
   const triggerDot = $derived(
     workspace.mode === "local"
       ? null
@@ -127,7 +125,7 @@
   }
 
   async function pickLocal() {
-    if (busy || workspace.mode === "local") {
+    if (busy || workspace.mode !== "remote") {
       close();
       return;
     }
@@ -236,7 +234,7 @@
       >
         <Monitor class="size-4 shrink-0 text-muted-foreground" />
         <span class="flex-1 font-medium text-foreground">Local</span>
-        {#if workspace.mode === "local"}
+        {#if onLocalSide}
           <Check class="size-4 text-foreground" />
         {/if}
       </button>
@@ -251,13 +249,13 @@
         class={`flex items-center gap-2.5 rounded-lg text-left transition hover:bg-accent disabled:opacity-50 ${mobile ? "px-3 py-3 text-sm" : "px-2.5 py-2 text-[13px]"}`}
         onclick={toggleDynamic}
         disabled={busy}
-        title="Show local and boite projects together"
+        title="Show the boite's projects inside the Local workspace"
       >
         <Layers class="size-4 shrink-0 text-muted-foreground" />
         <span class="flex min-w-0 flex-1 flex-col leading-tight">
           <span class="font-medium text-foreground">Dynamic mode</span>
           <span class="truncate text-[11px] text-muted-foreground">
-            Merge local + boite projects
+            Boite projects inside Local
           </span>
         </span>
         <span
