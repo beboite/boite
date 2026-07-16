@@ -58,7 +58,10 @@
       if (document.hidden) return;
       // A remote workspace mid-reconnect would just pile up RPCs that time out
       // 20s later; skip until the socket is back. Local is always "connected".
-      if (workspace.mode === "remote" && workspace.connection !== "connected") return;
+      const remoteScoped =
+        workspace.mode === "remote" ||
+        (workspace.isDynamic && project?.origin === "remote");
+      if (remoteScoped && workspace.connection !== "connected") return;
       void gitStore.refresh(id);
       void gitStore.autoFetch(id);
     };

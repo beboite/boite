@@ -1,4 +1,4 @@
-import { backend } from "$lib/backend";
+import { backendForPath } from "$lib/backend";
 
 export interface RepoInfo {
   isRepo: boolean;
@@ -34,11 +34,11 @@ export interface Commit {
 }
 
 export function gitRepoInfo(path: string): Promise<RepoInfo> {
-  return backend().git.repoInfo(path);
+  return backendForPath(path).git.repoInfo(path);
 }
 
 export function gitStatus(path: string): Promise<ChangeEntry[]> {
-  return backend().git.status(path);
+  return backendForPath(path).git.status(path);
 }
 
 export function gitLog(
@@ -46,15 +46,15 @@ export function gitLog(
   limit: number,
   skip: number,
 ): Promise<Commit[]> {
-  return backend().git.log(path, limit, skip);
+  return backendForPath(path).git.log(path, limit, skip);
 }
 
 export function gitStage(path: string, files: string[]): Promise<void> {
-  return backend().git.stage(path, files);
+  return backendForPath(path).git.stage(path, files);
 }
 
 export function gitUnstage(path: string, files: string[]): Promise<void> {
-  return backend().git.unstage(path, files);
+  return backendForPath(path).git.unstage(path, files);
 }
 
 export function gitDiscard(
@@ -62,25 +62,25 @@ export function gitDiscard(
   files: string[],
   untracked: string[],
 ): Promise<void> {
-  return backend().git.discard(path, files, untracked);
+  return backendForPath(path).git.discard(path, files, untracked);
 }
 
 export function gitCommit(path: string, message: string): Promise<string> {
-  return backend().git.commit(path, message);
+  return backendForPath(path).git.commit(path, message);
 }
 
 export function gitFetch(path: string): Promise<void> {
-  return backend().git.fetch(path);
+  return backendForPath(path).git.fetch(path);
 }
 
 export function gitPush(path: string): Promise<void> {
-  return backend().git.push(path);
+  return backendForPath(path).git.push(path);
 }
 
 export function gitPull(path: string): Promise<void> {
-  return backend().git.pull(path);
+  return backendForPath(path).git.pull(path);
 }
 
 export function gitInit(path: string): Promise<void> {
-  return backend().git.init(path);
+  return backendForPath(path).git.init(path);
 }

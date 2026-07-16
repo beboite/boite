@@ -40,7 +40,9 @@ async function tearDownTerminals() {
 // it on the device registry so the picker can label it later without a
 // connection. Fire-and-forget: a failure just leaves the cached label.
 async function fetchAndApplyMeta() {
-  const meta = backend().meta;
+  // The boite owns its identity; in dynamic mode backend() is local, so ask
+  // the remote connection directly.
+  const meta = workspace.remoteBackend?.meta ?? backend().meta;
   if (!meta) return;
   try {
     const info = await meta.get();
@@ -63,6 +65,13 @@ async function confirmLeaveLocal(): Promise<boolean> {
   return true;
 }
 
+// The mode a boite connection should land in: dynamic merges the boite with
+// the local workspace (desktop only — a PWA has no local side), remote
+// replaces it.
+function desiredRemoteMode(): "remote" | "dynamic" {
+  return device.dynamicMode && hasTauri() ? "dynamic" : "remote";
+}
+
 // Connect to a saved boite and initialize the app against it. `reset` tears the
 // current workspace down first (store reset + terminal remount); it is skipped
 // at boot, where nothing is initialized yet.
@@ -78,7 +87,8 @@ async function connectBoite(entry: BoiteEntry, reset: boolean): Promise<boolean>
     await tearDownTerminals();
     resetStores();
   }
-  workspace.activateRemote();
+  if (desiredRemoteMode() === "dynamic") workspace.activateDynamic();
+  else workspace.activateRemote();
   workspace.setActiveBoite(entry.id);
   // Seed the label/color from the device cache so the pill shows this boite's
   // identity immediately; fetchAndApplyMeta refreshes it from the server.
@@ -86,10 +96,39 @@ async function connectBoite(entry: BoiteEntry, reset: boolean): Promise<boolean>
   workspace.needsLogin = false;
   device.setActive(entry.id);
   await app.init();
+  // Dynamic keeps the local side alive: repaint the parked local dots.
+  if (workspace.isDynamic) restoreParkedStatuses();
   void fetchAndApplyMeta();
   // Fire-and-forget: a denied/unsupported push permission must not block boot.
   void registerPush();
   return true;
+}
+
+// Flip the dynamic-mode preference. When a boite is already connected, re-init
+// in place (same socket, remounted terminals) so the merge applies or unwinds
+// immediately.
+export async function setDynamicMode(on: boolean): Promise<void> {
+  if (device.dynamicMode === on) return;
+  device.setDynamicMode(on);
+  if (!hasTauri()) return;
+  if (workspace.mode === "local" || !workspace.remoteBackend) return;
+  await tearDownTerminals();
+  resetStores();
+  if (on) workspace.activateDynamic();
+  else workspace.activateRemote();
+  await app.init();
+  if (workspace.isDynamic) restoreParkedStatuses();
+}
+
+// Desktop boot: dynamic mode restores its boite connection automatically; a
+// failed connect degrades to the plain local workspace.
+export async function bootDesktopWorkspace(): Promise<void> {
+  if (device.dynamicMode && device.active) {
+    const ok = await connectBoite(device.active, false).catch(() => false);
+    if (ok) return;
+    notifications.error("Dynamic mode: boite unreachable, local only");
+  }
+  await app.init();
 }
 
 export async function switchToLocal(): Promise<boolean> {
@@ -116,12 +155,12 @@ function restoreParkedStatuses() {
 }
 
 // Switch to an already-saved boite. No-op when it is already the active,
-// connected workspace.
+// connected workspace in the desired mode.
 export async function switchToBoite(id: string): Promise<boolean> {
   const entry = device.getBoite(id);
   if (!entry) return false;
   if (
-    workspace.mode === "remote" &&
+    workspace.mode === desiredRemoteMode() &&
     workspace.activeBoiteId === id &&
     workspace.connection === "connected"
   ) {
@@ -158,7 +197,7 @@ export async function setActiveBoiteInfo(patch: {
   name?: string | null;
   color?: string | null;
 }): Promise<void> {
-  const meta = backend().meta;
+  const meta = workspace.remoteBackend?.meta ?? backend().meta;
   if (!meta) return;
   try {
     const res = await meta.set(patch);

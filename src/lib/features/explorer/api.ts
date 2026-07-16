@@ -1,4 +1,4 @@
-import { backend } from "$lib/backend";
+import { backendForPath } from "$lib/backend";
 
 export interface DirEntry {
   name: string;
@@ -15,7 +15,7 @@ function toUnix(p: string): string {
 }
 
 export async function readDir(path: string): Promise<DirEntry[]> {
-  const raw = await backend().explorer.readDir(path);
+  const raw = await backendForPath(path).explorer.readDir(path);
   return raw.map((e) => ({ ...e, path: toUnix(e.path) }));
 }
 
@@ -25,7 +25,7 @@ export interface ChangedPath {
 }
 
 export function gitChangedPaths(path: string): Promise<ChangedPath[]> {
-  return backend().explorer.changedPaths(path);
+  return backendForPath(path).explorer.changedPaths(path);
 }
 
 export interface SearchHit {
@@ -38,6 +38,6 @@ export async function explorerSearch(
   query: string,
   limit = 500,
 ): Promise<SearchHit[]> {
-  const raw = await backend().explorer.search(path, query, limit);
+  const raw = await backendForPath(path).explorer.search(path, query, limit);
   return raw.map((h) => ({ ...h, path: toUnix(h.path) }));
 }

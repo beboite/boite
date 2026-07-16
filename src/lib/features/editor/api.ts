@@ -1,4 +1,4 @@
-import { backend } from "$lib/backend";
+import { backendForPath } from "$lib/backend";
 
 export interface TextFile {
   content: string;
@@ -9,11 +9,11 @@ export interface TextFile {
 }
 
 export function readTextFile(path: string): Promise<TextFile> {
-  return backend().editor.readTextFile(path);
+  return backendForPath(path).editor.readTextFile(path);
 }
 
 export function writeTextFile(path: string, content: string): Promise<number> {
-  return backend().editor.writeTextFile(path, content);
+  return backendForPath(path).editor.writeTextFile(path, content);
 }
 
 export interface FileVersions {
@@ -28,5 +28,5 @@ export function gitFileVersions(
   file: string,
   headFile?: string,
 ): Promise<FileVersions> {
-  return backend().editor.fileVersions(repoPath, file, headFile ?? null);
+  return backendForPath(repoPath).editor.fileVersions(repoPath, file, headFile ?? null);
 }

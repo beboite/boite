@@ -5,7 +5,7 @@
   import { getCurrentWebview } from "@tauri-apps/api/webview";
   import { app } from "$lib/app/store.svelte";
   import { hasTauri } from "$lib/backend/env";
-  import { bootRemoteWorkspace } from "$lib/app/workspace";
+  import { bootDesktopWorkspace, bootRemoteWorkspace } from "$lib/app/workspace";
   import { reinspectMissingIcons } from "$lib/features/project/api";
   import { settings } from "$lib/features/settings/store.svelte";
   import { applyMotionPreference } from "$lib/theme/motion";
@@ -219,7 +219,7 @@
       return;
     }
 
-    void app.init().then(() => reinspectMissingIcons().catch(() => {}));
+    void bootDesktopWorkspace().then(() => reinspectMissingIcons().catch(() => {}));
 
     // Wait one rAF after mount so the first paint hits the GPU before the
     // window becomes visible. Avoids the white flash on launch.

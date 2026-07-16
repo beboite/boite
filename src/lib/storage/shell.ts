@@ -1,7 +1,11 @@
 import { platform as detectPlatform } from "@tauri-apps/plugin-os";
-import { backend } from "$lib/backend";
+import { backendFor } from "$lib/backend";
+import type { WorkspaceOrigin } from "$lib/types";
 
-let cached: string | null = null;
+// Keyed by origin ("default" covers the classic single-backend modes): in
+// dynamic mode the boite's default shell (Linux) and the local one (Windows)
+// coexist.
+const cached = new Map<string, string>();
 
 function fallback(): string {
   try {
@@ -16,16 +20,20 @@ function fallback(): string {
 // The default shell differs per workspace (a Linux server vs the local OS), so
 // a workspace switch must drop the cache.
 export function resetShellCache(): void {
-  cached = null;
+  cached.clear();
 }
 
-export async function getDefaultShell(): Promise<string> {
-  if (cached) return cached;
+export async function getDefaultShell(origin?: WorkspaceOrigin): Promise<string> {
+  const key = origin ?? "default";
+  const hit = cached.get(key);
+  if (hit) return hit;
+  let shell: string;
   try {
-    cached = await backend().shell.defaultShell();
+    shell = await backendFor(origin).shell.defaultShell();
   } catch (err) {
     console.error("default_shell failed:", err);
-    cached = fallback();
+    shell = fallback();
   }
-  return cached;
+  cached.set(key, shell);
+  return shell;
 }

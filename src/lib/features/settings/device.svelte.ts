@@ -20,9 +20,12 @@ export interface BoiteEntry {
 interface DeviceState {
   boites: BoiteEntry[];
   activeBoiteId: string | null;
+  // Dynamic mode preference: when on, connecting to a boite merges its
+  // projects with the local ones instead of replacing the workspace.
+  dynamicMode: boolean;
 }
 
-const DEFAULTS: DeviceState = { boites: [], activeBoiteId: null };
+const DEFAULTS: DeviceState = { boites: [], activeBoiteId: null, dynamicMode: false };
 
 function hasStorage(): boolean {
   return typeof localStorage !== "undefined";
@@ -56,7 +59,7 @@ function load(): DeviceState {
         boites.some((b) => b.id === p.activeBoiteId)
           ? p.activeBoiteId
           : (boites[0]?.id ?? null);
-      return { boites, activeBoiteId };
+      return { boites, activeBoiteId, dynamicMode: p.dynamicMode === true };
     }
     // Migrate the pre-multi-boite shape ({ remoteUrl, remoteToken }) into a
     // single entry so an existing PWA/desktop keeps its saved connection.
@@ -68,7 +71,7 @@ function load(): DeviceState {
         name: "",
         color: "",
       };
-      return { boites: [entry], activeBoiteId: entry.id };
+      return { boites: [entry], activeBoiteId: entry.id, dynamicMode: false };
     }
     return { ...DEFAULTS };
   } catch {
@@ -129,6 +132,15 @@ class DeviceSettings {
 
   setActive(id: string | null): void {
     this.state.activeBoiteId = id;
+    this.#persist();
+  }
+
+  get dynamicMode(): boolean {
+    return this.state.dynamicMode;
+  }
+
+  setDynamicMode(value: boolean): void {
+    this.state.dynamicMode = value;
     this.#persist();
   }
 

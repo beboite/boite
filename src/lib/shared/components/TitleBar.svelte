@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { hasTauri } from "$lib/backend/env";
-  import { backend, workspace } from "$lib/backend";
+  import { workspace } from "$lib/backend";
   import { app } from "$lib/app/store.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
   import { addProjectByPath } from "$lib/features/project/api";
@@ -70,9 +70,15 @@
       return;
     }
     if (workspace.mode === "local") return;
-    const root = await backend().scope.workspaceRoot().catch(() => null);
+    const root = await workspace
+      .backendFor("remote")
+      .scope.workspaceRoot()
+      .catch(() => null);
     if (!root) return;
-    const project = await addProjectByPath(root);
+    const project = await addProjectByPath(
+      root,
+      workspace.isDynamic ? "remote" : undefined,
+    );
     if (project) await launchBlankTerminal(project.id);
   }
 </script>

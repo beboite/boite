@@ -1,9 +1,16 @@
+// Which transport owns an entity in dynamic mode: the local desktop backend or
+// the connected boite. Runtime-only tag — never persisted (each store only
+// holds its own rows) and stripped before any RPC. Undefined outside dynamic
+// mode, where a single backend owns everything.
+export type WorkspaceOrigin = "local" | "remote";
+
 export interface Project {
   id: string;
   name: string;
   cwd: string;
   icon: string | null;
   archived: boolean;
+  origin?: WorkspaceOrigin;
 }
 
 export type ThreadStatus =
@@ -30,6 +37,7 @@ export interface Thread {
   createdAt: number;
   autoSlept?: boolean;
   keepAwake?: boolean;
+  origin?: WorkspaceOrigin;
 }
 
 export type IconKey =

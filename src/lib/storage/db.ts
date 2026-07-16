@@ -1,21 +1,37 @@
-import { backend } from "$lib/backend";
-import type { Project, Settings, Thread } from "$lib/types";
+import { backend, backendFor } from "$lib/backend";
+import type { Project, Settings, Thread, WorkspaceOrigin } from "$lib/types";
 import { redactArgs } from "$lib/shared/utils/redact";
+
+// The origin tag is a client-side routing concern: strip it before a row hits
+// a store (each backend only ever persists its own rows).
+function untagProject(project: Project): Project {
+  const { origin: _origin, ...rest } = project;
+  return rest;
+}
+
+function untagThread(thread: Thread): Thread {
+  const { origin: _origin, ...rest } = thread;
+  return rest;
+}
 
 export function loadProjects(): Promise<Project[]> {
   return backend().db.loadProjects();
 }
 
 export function saveProject(project: Project): Promise<void> {
-  return backend().db.saveProject(project);
+  return backendFor(project.origin).db.saveProject(untagProject(project));
 }
 
-export function setProjectArchived(id: string, archived: boolean): Promise<void> {
-  return backend().db.setProjectArchived(id, archived);
+export function setProjectArchived(
+  id: string,
+  archived: boolean,
+  origin?: WorkspaceOrigin,
+): Promise<void> {
+  return backendFor(origin).db.setProjectArchived(id, archived);
 }
 
-export function deleteProject(id: string): Promise<void> {
-  return backend().db.deleteProject(id);
+export function deleteProject(id: string, origin?: WorkspaceOrigin): Promise<void> {
+  return backendFor(origin).db.deleteProject(id);
 }
 
 export function loadThreads(): Promise<Thread[]> {
@@ -26,22 +42,27 @@ export function loadThreads(): Promise<Thread[]> {
 // leave the client, whether they land in local SQLite or get shipped to a
 // remote server.
 export function saveThread(thread: Thread): Promise<void> {
+  const db = backendFor(thread.origin).db;
   const { args, redacted } = redactArgs(thread.args);
   if (redacted) {
     console.warn(
       `[boite] redacted secret-looking args for thread ${thread.id} (${thread.label}) before persisting`,
     );
-    return backend().db.saveThread({ ...thread, args });
+    return db.saveThread(untagThread({ ...thread, args }));
   }
-  return backend().db.saveThread(thread);
+  return db.saveThread(untagThread(thread));
 }
 
-export function updateThreadTitle(id: string, title: string | null): Promise<void> {
-  return backend().db.updateThreadTitle(id, title);
+export function updateThreadTitle(
+  id: string,
+  title: string | null,
+  origin?: WorkspaceOrigin,
+): Promise<void> {
+  return backendFor(origin).db.updateThreadTitle(id, title);
 }
 
-export function deleteThread(id: string): Promise<void> {
-  return backend().db.deleteThread(id);
+export function deleteThread(id: string, origin?: WorkspaceOrigin): Promise<void> {
+  return backendFor(origin).db.deleteThread(id);
 }
 
 export function loadSettings(): Promise<Partial<Settings>> {
