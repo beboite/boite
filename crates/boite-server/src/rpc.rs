@@ -498,6 +498,10 @@ async fn dispatch_git(state: &AppState, method: &str, params: Value) -> Result<V
             let r = blocking(move || git::repo_info_blocking(&p)).await??;
             Ok(serde_json::to_value(r).unwrap())
         }
+        "git.findRepos" => {
+            let r = blocking(move || git::find_repos_blocking(&p, 3)).await??;
+            Ok(json!({ "repos": r }))
+        }
         "git.status" => {
             let r = blocking(move || git::status_blocking(&p)).await??;
             Ok(json!({ "entries": r }))

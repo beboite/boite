@@ -103,6 +103,12 @@ pub fn run() {
             sql: "ALTER TABLE threads ADD COLUMN keep_awake INTEGER NOT NULL DEFAULT 0;",
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 9,
+            description: "add_project_git_root",
+            sql: "ALTER TABLE projects ADD COLUMN git_root TEXT;",
+            kind: MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()
@@ -190,6 +196,7 @@ pub fn run() {
             commands::find_grok_session,
             commands::find_hermes_session,
             commands::git_repo_info,
+            commands::git_find_repos,
             commands::git_status,
             commands::git_changed_paths,
             commands::git_log,

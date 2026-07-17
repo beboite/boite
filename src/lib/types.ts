@@ -10,6 +10,9 @@ export interface Project {
   cwd: string;
   icon: string | null;
   archived: boolean;
+  // Nested repo the git panel operates on when cwd itself is not a repo
+  // (parent folder opened, actual repos live one level down). Null = cwd.
+  gitRoot?: string | null;
   origin?: WorkspaceOrigin;
 }
 

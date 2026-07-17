@@ -37,6 +37,10 @@ export function gitRepoInfo(path: string): Promise<RepoInfo> {
   return backendForPath(path).git.repoInfo(path);
 }
 
+export function gitFindRepos(path: string): Promise<string[]> {
+  return backendForPath(path).git.findRepos(path);
+}
+
 export function gitStatus(path: string): Promise<ChangeEntry[]> {
   return backendForPath(path).git.status(path);
 }

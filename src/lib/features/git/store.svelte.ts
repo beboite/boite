@@ -2,6 +2,7 @@ import {
   gitCommit,
   gitDiscard,
   gitFetch,
+  gitFindRepos,
   gitInit,
   gitLog,
   gitPull,
@@ -41,6 +42,9 @@ export interface GitState {
   log: Commit[];
   logHasMore: boolean;
   logLoadingMore: boolean;
+  /** Nested repos discovered under the project folder when it isn't one. */
+  repos: string[];
+  scanning: boolean;
   /** True once the first refresh has completed; gates the initial spinner. */
   loaded: boolean;
   loading: boolean;
@@ -66,6 +70,8 @@ function emptyState(): GitState {
     log: [],
     logHasMore: false,
     logLoadingMore: false,
+    repos: [],
+    scanning: false,
     loaded: false,
     loading: false,
     committing: false,
@@ -83,6 +89,9 @@ class GitStore {
   private pendingReloadLog = new Set<string>();
   private lastFetchAt = new Map<string, number>();
   private fetchFails = new Map<string, number>();
+  // Base path last scanned per project, so the effect that triggers the scan
+  // doesn't loop; a changed base (project switch, root cleared) rescans.
+  private scannedBase = new Map<string, string>();
 
   ensure(projectId: string, cwd: string): GitState {
     this.cwds.set(projectId, cwd);
@@ -102,6 +111,7 @@ class GitStore {
     this.cwds.delete(projectId);
     this.lastFetchAt.delete(projectId);
     this.fetchFails.delete(projectId);
+    this.scannedBase.delete(projectId);
   }
 
   // Drop every cached repo so a workspace switch starts clean.
@@ -112,6 +122,25 @@ class GitStore {
     this.pendingReloadLog.clear();
     this.lastFetchAt.clear();
     this.fetchFails.clear();
+    this.scannedBase.clear();
+  }
+
+  // Scan the project folder for nested git repos so the panel can offer them
+  // when the folder itself isn't a repo. Idempotent per (project, base).
+  async scanRepos(projectId: string, basePath: string) {
+    const state = this.states[projectId];
+    if (!state || state.scanning) return;
+    if (this.scannedBase.get(projectId) === basePath) return;
+    this.scannedBase.set(projectId, basePath);
+    state.scanning = true;
+    try {
+      state.repos = await gitFindRepos(basePath);
+    } catch (err) {
+      console.error("git repo scan failed:", err);
+      state.repos = [];
+    } finally {
+      state.scanning = false;
+    }
   }
 
   async refresh(

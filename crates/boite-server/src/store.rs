@@ -50,6 +50,7 @@ const MIGRATIONS: &[&str] = &[
         auth TEXT NOT NULL,
         created_at INTEGER NOT NULL
     );",
+    "ALTER TABLE projects ADD COLUMN git_root TEXT;",
 ];
 
 impl Store {
@@ -83,7 +84,7 @@ impl Store {
     pub fn load_projects(&self) -> Result<Vec<Project>, String> {
         let conn = self.conn.lock();
         let mut stmt = conn
-            .prepare("SELECT id, name, cwd, icon, archived FROM projects ORDER BY created_at ASC")
+            .prepare("SELECT id, name, cwd, icon, archived, git_root FROM projects ORDER BY created_at ASC")
             .map_err(|e| e.to_string())?;
         let rows = stmt
             .query_map([], |r| {
@@ -93,6 +94,7 @@ impl Store {
                     cwd: r.get(2)?,
                     icon: r.get(3)?,
                     archived: r.get::<_, i64>(4)? == 1,
+                    git_root: r.get(5)?,
                 })
             })
             .map_err(|e| e.to_string())?;
@@ -102,9 +104,9 @@ impl Store {
     pub fn save_project(&self, p: &Project, created_at: i64) -> Result<(), String> {
         let conn = self.conn.lock();
         conn.execute(
-            "INSERT OR REPLACE INTO projects (id, name, cwd, default_cmd, default_args, icon, archived, created_at)
-             VALUES (?1, ?2, ?3, '', '[]', ?4, ?5, ?6)",
-            rusqlite::params![p.id, p.name, p.cwd, p.icon, p.archived as i64, created_at],
+            "INSERT OR REPLACE INTO projects (id, name, cwd, default_cmd, default_args, icon, archived, git_root, created_at)
+             VALUES (?1, ?2, ?3, '', '[]', ?4, ?5, ?6, ?7)",
+            rusqlite::params![p.id, p.name, p.cwd, p.icon, p.archived as i64, p.git_root, created_at],
         )
         .map_err(|e| e.to_string())?;
         Ok(())

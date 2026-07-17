@@ -20,6 +20,8 @@
   import ArrowDown from "@lucide/svelte/icons/arrow-down";
   import ArrowUpFromLine from "@lucide/svelte/icons/arrow-up-from-line";
   import ArrowDownToLine from "@lucide/svelte/icons/arrow-down-to-line";
+  import X from "@lucide/svelte/icons/x";
+  import FolderGit2 from "@lucide/svelte/icons/folder-git-2";
 
   const AUTO_REFRESH_MS = 10_000;
 
@@ -38,15 +40,29 @@
       : null,
   );
 
+  // The repo the panel operates on: a persisted nested repo when the project
+  // folder itself isn't one, otherwise the folder.
+  const gitRoot = $derived(project ? project.gitRoot ?? project.cwd : null);
+
   let bodyEl: HTMLElement | null = $state(null);
   let resizingY = $state(false);
 
   $effect(() => {
-    if (!project) return;
+    if (!project || !gitRoot) return;
     const id = project.id;
-    gitStore.ensure(id, project.cwd);
+    gitStore.ensure(id, gitRoot);
     // Local refresh first, then a background fetch once we know it's a repo.
     void gitStore.refresh(id).then(() => gitStore.autoFetch(id));
+  });
+
+  // Not a repo → look for nested repos to offer. Idempotent in the store, so
+  // re-runs of this effect are free.
+  $effect(() => {
+    if (!project) return;
+    const state = gitStore.get(project.id);
+    if (state?.loaded && !state.isRepo && !project.gitRoot) {
+      void gitStore.scanRepos(project.id, project.cwd);
+    }
   });
 
   $effect(() => {
@@ -103,6 +119,25 @@
 
   function initRepo() {
     if (project) void gitStore.init(project.id);
+  }
+
+  function repoLabel(repo: string): string {
+    if (!project) return repo;
+    const norm = (s: string) => s.replace(/\\/g, "/").replace(/\/+$/, "");
+    const base = norm(project.cwd);
+    const r = norm(repo);
+    if (r.toLowerCase().startsWith(base.toLowerCase() + "/")) {
+      return r.slice(base.length + 1);
+    }
+    return basename(r) || r;
+  }
+
+  function selectRepo(repo: string) {
+    if (project) void app.updateProject({ ...project, gitRoot: repo });
+  }
+
+  function clearGitRoot() {
+    if (project) void app.updateProject({ ...project, gitRoot: null });
   }
 
   function commitKey(e: KeyboardEvent) {
@@ -163,9 +198,10 @@
 
   async function openDiff(entry: ChangeEntry) {
     if (!project) return;
+    const repo = gitRoot ?? project.cwd;
     if (entry.status === "?" || entry.conflicted) {
-      const sep = project.cwd.includes("\\") ? "\\" : "/";
-      const root = project.cwd.endsWith(sep) ? project.cwd : project.cwd + sep;
+      const sep = repo.includes("\\") ? "\\" : "/";
+      const root = repo.endsWith(sep) ? repo : repo + sep;
       await editorStore.openFile(root + entry.path.replace(/[\\/]/g, sep));
       app.view = "editor";
       return;
@@ -173,7 +209,7 @@
     const mode = entry.staged ? "staged" : "unstaged";
     await editorStore.openDiff({
       projectId: project.id,
-      repoPath: project.cwd,
+      repoPath: repo,
       file: entry.path,
       mode,
       headFile: entry.origPath ?? undefined,
@@ -209,6 +245,18 @@
       {/if}
     {:else}
       <span class="truncate text-xs text-muted-foreground">Not a git repo</span>
+    {/if}
+    {#if project?.gitRoot}
+      <button
+        type="button"
+        class="group/root flex min-w-0 shrink items-center gap-1 rounded-full border border-border bg-[var(--color-surface-2)] px-1.5 py-0.5 text-[10px] text-muted-foreground transition hover:text-foreground"
+        title="Nested repo: {project.gitRoot} — click to switch back to the project folder"
+        onclick={clearGitRoot}
+      >
+        <FolderGit2 class="size-3 shrink-0" />
+        <span class="truncate">{repoLabel(project.gitRoot)}</span>
+        <X class="size-3 shrink-0 opacity-50 group-hover/root:opacity-100" />
+      </button>
     {/if}
     <div class="ml-auto flex items-center gap-0.5">
       <button
@@ -257,17 +305,51 @@
       Loading…
     </div>
   {:else if !gs.isRepo}
-    <div
-      class="flex flex-1 flex-col items-center justify-center gap-3 px-3 text-center text-xs text-muted-foreground"
-    >
-      <span>This folder is not a git repository.</span>
-      <button
-        type="button"
-        class="rounded-md border border-border bg-[var(--color-surface-2)] px-3 py-1.5 text-xs text-foreground/85 transition hover:bg-[var(--color-surface-3)] hover:text-foreground"
-        onclick={initRepo}
+    <div class="flex flex-1 flex-col overflow-y-auto">
+      <div
+        class="flex flex-col items-center gap-3 px-3 py-6 text-center text-xs text-muted-foreground"
       >
-        Initialize repository
-      </button>
+        <span>This folder is not a git repository.</span>
+        {#if gs.scanning}
+          <span class="text-[11px] text-muted-foreground/70">
+            Scanning for nested repositories…
+          </span>
+        {/if}
+        <button
+          type="button"
+          class="rounded-md border border-border bg-[var(--color-surface-2)] px-3 py-1.5 text-xs text-foreground/85 transition hover:bg-[var(--color-surface-3)] hover:text-foreground"
+          onclick={initRepo}
+        >
+          Initialize repository
+        </button>
+      </div>
+      {#if !gs.scanning && gs.repos.length > 0}
+        <div
+          class="flex h-7 shrink-0 items-center gap-1.5 border-y border-border px-3"
+        >
+          <span
+            class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
+          >
+            Repositories found
+          </span>
+          <span
+            class="rounded-full bg-[var(--color-surface-2)] px-1.5 text-[10px] text-foreground/75"
+          >
+            {gs.repos.length}
+          </span>
+        </div>
+        {#each gs.repos as repo (repo)}
+          <button
+            type="button"
+            class="flex items-center gap-2 px-3 py-1.5 text-left text-[11px] text-foreground/85 transition hover:bg-[var(--color-surface-2)] hover:text-foreground"
+            title={repo}
+            onclick={() => selectRepo(repo)}
+          >
+            <FolderGit2 class="size-3.5 shrink-0 text-muted-foreground" />
+            <span class="truncate">{repoLabel(repo)}</span>
+          </button>
+        {/each}
+      {/if}
     </div>
   {:else}
     <div bind:this={bodyEl} class="flex min-h-0 flex-1 flex-col">

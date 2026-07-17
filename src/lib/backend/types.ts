@@ -70,6 +70,7 @@ export interface DbApi {
 
 export interface GitApi {
   repoInfo(path: string): Promise<RepoInfo>;
+  findRepos(path: string): Promise<string[]>;
   status(path: string): Promise<ChangeEntry[]>;
   log(path: string, limit: number, skip: number): Promise<Commit[]>;
   stage(path: string, files: string[]): Promise<void>;
