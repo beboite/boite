@@ -9,6 +9,8 @@ pub struct Project {
     pub icon: Option<String>,
     #[serde(default)]
     pub archived: bool,
+    #[serde(default)]
+    pub git_root: Option<String>,
 }
 
 // Mirrors the frontend Thread type. `pty_id` and `status` reflect live server

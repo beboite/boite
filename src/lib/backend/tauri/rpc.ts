@@ -19,6 +19,7 @@ import type { LogEntry, LogLevel } from "$lib/shared/services/logger.svelte";
 
 export const tauriGit: GitApi = {
   repoInfo: (path) => invoke<RepoInfo>("git_repo_info", { path }),
+  findRepos: (path) => invoke<string[]>("git_find_repos", { path }),
   status: (path) => invoke<ChangeEntry[]>("git_status", { path }),
   log: (path, limit, skip) => invoke<Commit[]>("git_log", { path, limit, skip }),
   stage: (path, files) => invoke("git_stage", { path, files }),

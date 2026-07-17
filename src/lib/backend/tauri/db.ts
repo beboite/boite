@@ -20,6 +20,7 @@ interface ProjectRow {
   cwd: string;
   icon: string | null;
   archived: number;
+  git_root: string | null;
   created_at: number;
 }
 
@@ -62,7 +63,7 @@ function normalizeStatus(raw: string | null): Thread["status"] {
 export const tauriDb: DbApi = {
   async loadProjects(): Promise<Project[]> {
     const rows = await getDb().select<ProjectRow[]>(
-      "SELECT id, name, cwd, icon, archived, created_at FROM projects ORDER BY created_at ASC",
+      "SELECT id, name, cwd, icon, archived, git_root, created_at FROM projects ORDER BY created_at ASC",
     );
     return rows.map((r) => ({
       id: r.id,
@@ -70,12 +71,13 @@ export const tauriDb: DbApi = {
       cwd: r.cwd,
       icon: r.icon,
       archived: r.archived === 1,
+      gitRoot: r.git_root,
     }));
   },
 
   async saveProject(project: Project): Promise<void> {
     await getDb().execute(
-      "INSERT OR REPLACE INTO projects (id, name, cwd, default_cmd, default_args, icon, archived, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT OR REPLACE INTO projects (id, name, cwd, default_cmd, default_args, icon, archived, git_root, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
       [
         project.id,
         project.name,
@@ -84,6 +86,7 @@ export const tauriDb: DbApi = {
         "[]",
         project.icon,
         project.archived ? 1 : 0,
+        project.gitRoot ?? null,
         Date.now(),
       ],
     );

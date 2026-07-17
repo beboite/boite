@@ -330,6 +330,17 @@ pub async fn git_repo_info(
 }
 
 #[tauri::command]
+pub async fn git_find_repos(
+    scope: State<'_, ProjectRoots>,
+    path: String,
+) -> Result<Vec<String>, String> {
+    scope.ensure_allowed(&path)?;
+    tauri::async_runtime::spawn_blocking(move || git::find_repos_blocking(&path, 3))
+        .await
+        .map_err(|e| format!("git_find_repos task failed: {e}"))?
+}
+
+#[tauri::command]
 pub async fn git_status(
     scope: State<'_, ProjectRoots>,
     path: String,

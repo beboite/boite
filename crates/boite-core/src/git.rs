@@ -1,5 +1,5 @@
-use std::collections::HashSet;
 use std::collections::hash_map::DefaultHasher;
+use std::collections::{HashSet, VecDeque};
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::io::Read;
@@ -127,6 +127,58 @@ pub fn repo_info_blocking(path: &str) -> Result<RepoInfo, String> {
         }
     }
     Ok(info)
+}
+
+// Directories that never hold a user's nested repo but can be huge.
+const SCAN_SKIP: &[&str] = &[
+    "node_modules",
+    "target",
+    "dist",
+    "build",
+    "out",
+    "vendor",
+    "__pycache__",
+];
+
+// Breadth-first scan for git repos nested under `root`, for projects opened
+// on a parent folder. Pure fs checks (`.git` dir, or file for worktrees) —
+// no git subprocess per candidate. Found repos are not descended into, so
+// submodules of a nested repo don't flood the list.
+pub fn find_repos_blocking(root: &str, max_depth: u32) -> Result<Vec<String>, String> {
+    const MAX_RESULTS: usize = 50;
+    let base = Path::new(root);
+    if !base.is_dir() {
+        return Ok(Vec::new());
+    }
+    let mut found: Vec<String> = Vec::new();
+    let mut queue: VecDeque<(PathBuf, u32)> = VecDeque::new();
+    queue.push_back((base.to_path_buf(), 0));
+    while let Some((dir, depth)) = queue.pop_front() {
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            if found.len() >= MAX_RESULTS {
+                return Ok(found);
+            }
+            let Ok(ft) = entry.file_type() else { continue };
+            if !ft.is_dir() {
+                continue;
+            }
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with('.') || SCAN_SKIP.contains(&name.as_ref()) {
+                continue;
+            }
+            let path = entry.path();
+            if fs::symlink_metadata(path.join(".git")).is_ok() {
+                found.push(path.to_string_lossy().to_string());
+            } else if depth + 1 < max_depth {
+                queue.push_back((path, depth + 1));
+            }
+        }
+    }
+    Ok(found)
 }
 
 fn empty_repo() -> RepoInfo {
@@ -825,4 +877,43 @@ pub fn commit_blocking(path: &str, message: &str) -> Result<String, String> {
     cmd.args(["commit", "-m", trimmed]);
     let stdout = run(cmd)?;
     Ok(String::from_utf8_lossy(&stdout).trim().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::find_repos_blocking;
+    use std::fs;
+    use std::path::Path;
+
+    fn mk(base: &Path, rel: &str) {
+        fs::create_dir_all(base.join(rel)).unwrap();
+    }
+
+    #[test]
+    fn finds_nested_repos_and_respects_skips() {
+        let base = std::env::temp_dir().join(format!("boite-scan-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        mk(&base, "app/.git");
+        mk(&base, "app/sub/.git"); // inside a found repo: not descended into
+        mk(&base, "group/lib/.git");
+        mk(&base, "node_modules/dep/.git"); // skip list
+        mk(&base, ".hidden/repo/.git"); // hidden dir
+        mk(&base, "a/b/c/deep/.git"); // level 4, beyond max_depth 3
+        mk(&base, "worktree");
+        fs::write(base.join("worktree/.git"), "gitdir: ../app/.git/worktrees/x").unwrap();
+
+        let found = find_repos_blocking(base.to_str().unwrap(), 3).unwrap();
+        let mut rels: Vec<String> = found
+            .iter()
+            .map(|p| {
+                p.trim_start_matches(base.to_str().unwrap())
+                    .trim_start_matches(['/', '\\'])
+                    .replace('\\', "/")
+            })
+            .collect();
+        rels.sort();
+        assert_eq!(rels, vec!["app", "group/lib", "worktree"]);
+
+        let _ = fs::remove_dir_all(&base);
+    }
 }

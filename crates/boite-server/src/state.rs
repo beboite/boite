@@ -110,6 +110,7 @@ mod tests {
                     cwd: active.to_string_lossy().to_string(),
                     icon: None,
                     archived: false,
+                    git_root: None,
                 },
                 1,
             )
@@ -122,6 +123,7 @@ mod tests {
                     cwd: archived.to_string_lossy().to_string(),
                     icon: None,
                     archived: true,
+                    git_root: None,
                 },
                 2,
             )
