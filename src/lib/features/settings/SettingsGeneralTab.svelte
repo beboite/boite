@@ -12,11 +12,17 @@
   let overId = $state<string | null>(null);
   let dragArmed = $state(false);
 
+  const orderedIds = $derived(settings.state.shortcuts.map((s) => s.id));
+  const draggedIdx = $derived(draggedId ? orderedIds.indexOf(draggedId) : -1);
+  const overIdx = $derived(overId ? orderedIds.indexOf(overId) : -1);
+
   function armDrag() {
     dragArmed = true;
+    window.addEventListener("pointerup", disarmDrag);
   }
   function disarmDrag() {
     dragArmed = false;
+    window.removeEventListener("pointerup", disarmDrag);
   }
 
   function addCustom() {
@@ -66,10 +72,11 @@
 
   function onDrop(targetId: string, e: DragEvent) {
     e.preventDefault();
+    e.stopPropagation();
     const from = draggedId;
     draggedId = null;
     overId = null;
-    dragArmed = false;
+    disarmDrag();
     if (!from || from === targetId) return;
     const ids = settings.state.shortcuts.map((s) => s.id);
     const fromIdx = ids.indexOf(from);
@@ -83,7 +90,7 @@
   function onDragEnd() {
     draggedId = null;
     overId = null;
-    dragArmed = false;
+    disarmDrag();
   }
 </script>
 
@@ -119,7 +126,8 @@
     {/if}
     {#each settings.state.shortcuts as shortcut (shortcut.id)}
       {@const isDragged = draggedId === shortcut.id}
-      {@const isOver = overId === shortcut.id && draggedId !== shortcut.id}
+      {@const isOver = overId === shortcut.id && draggedIdx >= 0 && draggedId !== shortcut.id}
+      {@const dropsBelow = isOver && draggedIdx < overIdx}
       {@const iconKey = resolveIconKey(shortcut.iconKey, shortcut.label, shortcut.command)}
       <div
         draggable={dragArmed}
@@ -131,13 +139,13 @@
         role="listitem"
         class="grid grid-cols-[16px_24px_120px_1fr_28px] items-center gap-2 border-b border-border/60 px-3 py-2 transition last:border-b-0 {isDragged
           ? 'opacity-40'
-          : ''} {isOver ? 'border-t-2 border-t-foreground/40' : ''}"
+          : ''} {isOver && !dropsBelow
+          ? 'shadow-[inset_0_2px_0_0_var(--color-foreground)]'
+          : ''} {dropsBelow ? 'shadow-[inset_0_-2px_0_0_var(--color-foreground)]' : ''}"
       >
         <span
           class="flex size-4 cursor-grab items-center justify-center text-muted-foreground/40 transition hover:text-muted-foreground active:cursor-grabbing"
-          onmousedown={armDrag}
-          onmouseup={disarmDrag}
-          onmouseleave={disarmDrag}
+          onpointerdown={armDrag}
           role="button"
           tabindex="-1"
           aria-label="Drag to reorder"
