@@ -32,6 +32,8 @@ pub struct Thread {
     #[serde(default)]
     pub icon_key: Option<String>,
     #[serde(default)]
+    pub icon_color: Option<String>,
+    #[serde(default)]
     pub session_id: Option<String>,
     #[serde(default = "default_status")]
     pub status: String,

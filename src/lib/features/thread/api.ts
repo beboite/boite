@@ -49,6 +49,7 @@ function buildThread(
   args: string[],
   label: string,
   iconKey: IconKey,
+  iconColor: string | null = null,
 ): Thread {
   return {
     id: uuid(),
@@ -59,6 +60,7 @@ function buildThread(
     cmd,
     args,
     iconKey,
+    iconColor,
     sessionId: null,
     status: "idle",
     exitCode: null,
@@ -82,7 +84,7 @@ async function createThread(
   args: string[],
   labelPrefix: string,
   iconKey: IconKey,
-  opts: { fresh?: boolean } = {},
+  opts: { fresh?: boolean; iconColor?: string | null } = {},
 ): Promise<Thread | null> {
   const count = nextLabelSuffix(project.id, labelPrefix);
   const thread = buildThread(
@@ -91,6 +93,7 @@ async function createThread(
     args,
     `${labelPrefix} #${count}`,
     iconKey,
+    opts.iconColor ?? null,
   );
   if (opts.fresh) app.markFresh(thread.id);
   try {
@@ -119,6 +122,7 @@ export async function launchShortcut(
   const iconKey = resolveIconKey(shortcut.iconKey, shortcut.label, shortcut.command);
   return createThread(project, parsed.cmd, parsed.args, shortcut.label, iconKey, {
     fresh: true,
+    iconColor: shortcut.iconColor ?? null,
   });
 }
 

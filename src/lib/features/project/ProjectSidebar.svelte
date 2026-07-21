@@ -862,7 +862,7 @@
                     <span
                       class="absolute inset-0 flex items-center justify-center transition-opacity group-hover/thread:opacity-0"
                     >
-                      <ShortcutIcon iconKey={thread.iconKey} size={14} />
+                      <ShortcutIcon iconKey={thread.iconKey} size={14} color={thread.iconColor ?? null} />
                     </span>
                     <button
                       type="button"
@@ -919,7 +919,11 @@
       {threadDragGhost.thread.title ?? threadDragGhost.thread.label}
     </span>
     <span class="flex size-4 shrink-0 items-center justify-center">
-      <ShortcutIcon iconKey={threadDragGhost.thread.iconKey} size={14} />
+      <ShortcutIcon
+              iconKey={threadDragGhost.thread.iconKey}
+              size={14}
+              color={threadDragGhost.thread.iconColor ?? null}
+            />
     </span>
   </div>
 {/if}

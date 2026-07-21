@@ -8,6 +8,30 @@
   import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
   import GripVertical from "@lucide/svelte/icons/grip-vertical";
 
+  // Distinguishable at 14–16px on the dark surfaces, which rules out anything
+  // too dark or too desaturated.
+  const ICON_COLORS = [
+    "#d97757",
+    "#e5484d",
+    "#f5a524",
+    "#f2e14c",
+    "#46a758",
+    "#2ec4b6",
+    "#3b9eff",
+    "#6e56cf",
+    "#c04ad8",
+    "#ff8fab",
+    "#a1a1aa",
+    "#fafafa",
+  ];
+
+  let colorPickerFor = $state<string | null>(null);
+
+  function setIconColor(id: string, color: string | null) {
+    colorPickerFor = null;
+    void settings.updateShortcut(id, { iconColor: color });
+  }
+
   // Pointer-driven reorder, same mechanism as the thread sidebar: drag starts
   // anywhere on the row, activates only after a 5px move (so plain clicks on the
   // inputs still work), and the pointer is captured on the row itself.
@@ -189,8 +213,44 @@
         >
           <GripVertical class="size-3" />
         </span>
-        <div class="flex size-6 items-center justify-center">
-          <ShortcutIcon {iconKey} size={16} />
+        <div class="relative flex size-6 items-center justify-center">
+          <button
+            type="button"
+            class="flex size-6 items-center justify-center rounded-md border border-transparent transition hover:border-border hover:bg-[var(--color-surface-3)]"
+            onclick={() => (colorPickerFor = colorPickerFor === shortcut.id ? null : shortcut.id)}
+            aria-label="Change icon color"
+            title="Change icon color"
+          >
+            <ShortcutIcon {iconKey} size={16} color={shortcut.iconColor ?? null} />
+          </button>
+          {#if colorPickerFor === shortcut.id}
+            <div
+              class="absolute left-0 top-7 z-50 w-max rounded-lg border border-border bg-[var(--color-surface-3)] p-2 shadow-lg"
+            >
+              <div class="grid grid-cols-6 gap-1">
+                {#each ICON_COLORS as c (c)}
+                  <button
+                    type="button"
+                    class="size-5 rounded-md border transition hover:scale-110 {shortcut.iconColor ===
+                    c
+                      ? 'border-foreground'
+                      : 'border-border/60'}"
+                    style:background-color={c}
+                    onclick={() => setIconColor(shortcut.id, c)}
+                    aria-label="Set color {c}"
+                    title={c}
+                  ></button>
+                {/each}
+              </div>
+              <button
+                type="button"
+                class="mt-2 w-full rounded-md border border-border px-2 py-1 text-[10px] text-muted-foreground transition hover:text-foreground"
+                onclick={() => setIconColor(shortcut.id, null)}
+              >
+                Default color
+              </button>
+            </div>
+          {/if}
         </div>
         <input
           type="text"
