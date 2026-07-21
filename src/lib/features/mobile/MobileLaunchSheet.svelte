@@ -55,7 +55,7 @@
           disabled={!projectId || !shortcut.command.trim()}
           onclick={() => runShortcut(shortcut.id)}
         >
-          <ShortcutIcon {iconKey} size={20} />
+          <ShortcutIcon {iconKey} size={20} color={shortcut.iconColor ?? null} />
           <span class="min-w-0 flex-1 truncate font-medium">{shortcut.label}</span>
         </button>
       {/each}

@@ -34,6 +34,8 @@ export interface Thread {
   cmd: string;
   args: string[];
   iconKey: IconKey;
+  /** Hex color (`#rrggbb`) inherited from the shortcut that launched it. */
+  iconColor?: string | null;
   sessionId: string | null;
   status: ThreadStatus;
   exitCode: number | null;
@@ -60,6 +62,8 @@ export interface Shortcut {
   label: string;
   command: string;
   iconKey?: IconKey;
+  /** Hex color (`#rrggbb`) overriding the brand glyph's own color. */
+  iconColor?: string | null;
 }
 
 export interface Settings {

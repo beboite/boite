@@ -7,8 +7,10 @@
   type Props = {
     iconKey?: IconKey;
     size?: number;
+    /** Hex color (`#rrggbb`) replacing the glyph's own color. */
+    color?: string | null;
   };
-  let { iconKey = null, size = 14 }: Props = $props();
+  let { iconKey = null, size = 14, color = null }: Props = $props();
 
   const brand = $derived(iconKey ? getBrandGlyph(iconKey) : null);
 
@@ -23,35 +25,49 @@
 </script>
 
 {#if asset}
-  <img
-    src={asset}
-    alt=""
-    decoding="async"
-    width={size}
-    height={size}
-    class="shrink-0"
-    style:width="{size}px"
-    style:height="{size}px"
-    aria-hidden="true"
-    draggable="false"
-  />
+  {#if color}
+    <!-- The asset is an opaque file, so recolor it by masking a solid fill
+         with the artwork's own alpha instead of drawing the image. -->
+    <span
+      class="shrink-0"
+      style:width="{size}px"
+      style:height="{size}px"
+      style:background-color={color}
+      style:-webkit-mask="url({asset}) center / contain no-repeat"
+      style:mask="url({asset}) center / contain no-repeat"
+      aria-hidden="true"
+    ></span>
+  {:else}
+    <img
+      src={asset}
+      alt=""
+      decoding="async"
+      width={size}
+      height={size}
+      class="shrink-0"
+      style:width="{size}px"
+      style:height="{size}px"
+      aria-hidden="true"
+      draggable="false"
+    />
+  {/if}
 {:else if brand}
   <svg
     xmlns="http://www.w3.org/2000/svg"
     viewBox="0 0 24 24"
     width={size}
     height={size}
-    fill={`#${brand.hex}`}
+    fill={color ?? `#${brand.hex}`}
     aria-hidden="true"
   >
     <path d={brand.path} />
   </svg>
 {:else if iconKey === "terminal"}
-  <span class="inline-flex text-muted-foreground">
-    <TerminalIcon {size} />
+  <span class="inline-flex" style:color={color ?? undefined}>
+    <TerminalIcon {size} class={color ? undefined : "text-muted-foreground"} />
   </span>
 {:else}
-  <span class="inline-flex text-muted-foreground">
-    <Zap {size} />
+  <span class="inline-flex" style:color={color ?? undefined}>
+    <Zap {size} class={color ? undefined : "text-muted-foreground"} />
   </span>
 {/if}

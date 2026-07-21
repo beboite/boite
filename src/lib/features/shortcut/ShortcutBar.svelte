@@ -32,7 +32,7 @@
         onclick={() => launch(shortcut.id)}
         title={shortcut.command || "Empty command"}
       >
-        <ShortcutIcon {iconKey} size={15} />
+        <ShortcutIcon {iconKey} size={15} color={shortcut.iconColor ?? null} />
         <span class="font-medium">{shortcut.label}</span>
       </button>
     {/each}

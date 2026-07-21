@@ -51,6 +51,7 @@ const MIGRATIONS: &[&str] = &[
         created_at INTEGER NOT NULL
     );",
     "ALTER TABLE projects ADD COLUMN git_root TEXT;",
+    "ALTER TABLE threads ADD COLUMN icon_color TEXT;",
 ];
 
 impl Store {
@@ -133,7 +134,7 @@ impl Store {
         let conn = self.conn.lock();
         let mut stmt = conn
             .prepare(
-                "SELECT id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, status, keep_awake, created_at
+                "SELECT id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, status, keep_awake, created_at, icon_color
                  FROM threads ORDER BY created_at ASC",
             )
             .map_err(|e| e.to_string())?;
@@ -150,6 +151,7 @@ impl Store {
                     cmd: r.get(4)?,
                     args,
                     icon_key: r.get(8)?,
+                    icon_color: r.get(12)?,
                     session_id: r.get(7)?,
                     status: normalize_status(r.get::<_, Option<String>>(9)?),
                     exit_code: r.get(6)?,
@@ -165,7 +167,7 @@ impl Store {
     pub fn load_thread(&self, id: &str) -> Result<Option<Thread>, String> {
         let conn = self.conn.lock();
         conn.query_row(
-            "SELECT id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, status, keep_awake, created_at
+            "SELECT id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, status, keep_awake, created_at, icon_color
              FROM threads WHERE id = ?1",
             [id],
             |r| {
@@ -180,6 +182,7 @@ impl Store {
                     cmd: r.get(4)?,
                     args,
                     icon_key: r.get(8)?,
+                    icon_color: r.get(12)?,
                     session_id: r.get(7)?,
                     status: normalize_status(r.get::<_, Option<String>>(9)?),
                     exit_code: r.get(6)?,
@@ -213,11 +216,12 @@ impl Store {
         let args = serde_json::to_string(&t.args).unwrap_or_else(|_| "[]".to_string());
         conn.execute(
             "INSERT OR REPLACE INTO threads
-             (id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, status, keep_awake, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+             (id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, status, keep_awake, created_at, icon_color)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             rusqlite::params![
                 t.id, t.project_id, t.label, t.title, t.cmd, args, t.exit_code,
                 t.session_id, t.icon_key, t.status, t.keep_awake as i64, t.created_at,
+                t.icon_color,
             ],
         )
         .map_err(|e| e.to_string())?;

@@ -1,6 +1,6 @@
 [package]
 name = "boite-core"
-version = "0.10.4"
+version = "0.10.5"
 description = "Portable core for boite: PTY orchestration, git, fs, session detection"
 edition = "2021"
 

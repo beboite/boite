@@ -428,6 +428,7 @@ class SettingsStore {
     if (patch.label !== undefined) s.label = patch.label;
     if (patch.command !== undefined) s.command = patch.command;
     if (patch.iconKey !== undefined) s.iconKey = patch.iconKey;
+    if (patch.iconColor !== undefined) s.iconColor = patch.iconColor;
     await this.persist();
     notifications.success("Shortcut saved");
   }

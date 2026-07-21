@@ -109,6 +109,12 @@ pub fn run() {
             sql: "ALTER TABLE projects ADD COLUMN git_root TEXT;",
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 10,
+            description: "add_thread_icon_color",
+            sql: "ALTER TABLE threads ADD COLUMN icon_color TEXT;",
+            kind: MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()
