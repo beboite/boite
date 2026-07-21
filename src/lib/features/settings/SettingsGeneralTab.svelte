@@ -8,21 +8,105 @@
   import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
   import GripVertical from "@lucide/svelte/icons/grip-vertical";
 
-  let draggedId = $state<string | null>(null);
-  let overId = $state<string | null>(null);
-  let dragArmed = $state(false);
+  // Pointer-driven reorder, same mechanism as the thread sidebar: drag starts
+  // anywhere on the row, activates only after a 5px move (so plain clicks on the
+  // inputs still work), and the pointer is captured on the row itself.
+  let listEl = $state<HTMLDivElement | null>(null);
+  let dragCaptureEl: HTMLElement | null = null;
 
-  const orderedIds = $derived(settings.state.shortcuts.map((s) => s.id));
-  const draggedIdx = $derived(draggedId ? orderedIds.indexOf(draggedId) : -1);
-  const overIdx = $derived(overId ? orderedIds.indexOf(overId) : -1);
+  type DragState = {
+    id: string;
+    pointerId: number;
+    startX: number;
+    startY: number;
+    y: number;
+    active: boolean;
+    slotIndex: number | null;
+  };
+  let drag = $state<DragState | null>(null);
 
-  function armDrag() {
-    dragArmed = true;
-    window.addEventListener("pointerup", disarmDrag);
+  // where to draw the drop line: before a given row id, or after the last row
+  const dropTarget = $derived.by<{ beforeId?: string; atEnd?: boolean } | null>(() => {
+    const d = drag;
+    if (!d || !d.active || d.slotIndex === null) return null;
+    const reduced = settings.state.shortcuts.filter((s) => s.id !== d.id);
+    if (d.slotIndex >= reduced.length) return { atEnd: true };
+    return { beforeId: reduced[d.slotIndex].id };
+  });
+
+  // don't start a drag from an interactive control inside the row
+  function isDragBlocked(el: HTMLElement | null): boolean {
+    return !!el?.closest("input, button, textarea, select, a");
   }
-  function disarmDrag() {
-    dragArmed = false;
-    window.removeEventListener("pointerup", disarmDrag);
+
+  function rowElements(): HTMLElement[] {
+    if (!listEl) return [];
+    return Array.from(listEl.querySelectorAll<HTMLElement>("[data-row]"));
+  }
+
+  // reduced-list slot index in [0, n-1] the pointer targets (source excluded)
+  function computeSlotIndex(d: DragState): number | null {
+    const rows = rowElements().filter((el) => el.dataset.row !== d.id);
+    if (rows.length === 0) return 0;
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i].getBoundingClientRect();
+      if (d.y < r.top + r.height / 2) return i;
+    }
+    return rows.length;
+  }
+
+  function rowPointerDown(id: string, e: PointerEvent) {
+    if (e.button !== 0 || isDragBlocked(e.target as HTMLElement)) return;
+    dragCaptureEl = e.currentTarget as HTMLElement;
+    drag = {
+      id,
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      y: e.clientY,
+      active: false,
+      slotIndex: null,
+    };
+    window.addEventListener("pointermove", onDragMove);
+    window.addEventListener("pointerup", onDragEnd);
+    window.addEventListener("pointercancel", onDragEnd);
+  }
+
+  function onDragMove(e: PointerEvent) {
+    const d = drag;
+    if (!d || e.pointerId !== d.pointerId) return;
+    d.y = e.clientY;
+    if (!d.active) {
+      const moved = Math.hypot(e.clientX - d.startX, e.clientY - d.startY);
+      if (moved < 5) return;
+      d.active = true;
+      try {
+        dragCaptureEl?.setPointerCapture(d.pointerId);
+      } catch {
+        // pointer already released
+      }
+    }
+    e.preventDefault();
+    d.slotIndex = computeSlotIndex(d);
+    drag = { ...d };
+  }
+
+  function onDragEnd() {
+    window.removeEventListener("pointermove", onDragMove);
+    window.removeEventListener("pointerup", onDragEnd);
+    window.removeEventListener("pointercancel", onDragEnd);
+    const d = drag;
+    dragCaptureEl = null;
+    drag = null;
+    if (!d || !d.active || d.slotIndex === null) return;
+    const ids = settings.state.shortcuts.map((s) => s.id);
+    const fromIdx = ids.indexOf(d.id);
+    if (fromIdx < 0) return;
+    ids.splice(fromIdx, 1);
+    const insertAt = Math.min(d.slotIndex, ids.length);
+    if (insertAt === fromIdx) return;
+    ids.splice(insertAt, 0, d.id);
+    void settings.reorderShortcuts(ids);
   }
 
   function addCustom() {
@@ -47,51 +131,6 @@
     );
   }
 
-  function onDragStart(id: string, e: DragEvent) {
-    if (!dragArmed) {
-      e.preventDefault();
-      return;
-    }
-    draggedId = id;
-    if (e.dataTransfer) {
-      e.dataTransfer.effectAllowed = "move";
-      e.dataTransfer.setData("text/plain", id);
-    }
-  }
-
-  function onDragOver(id: string, e: DragEvent) {
-    if (!draggedId) return;
-    e.preventDefault();
-    if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
-    overId = id;
-  }
-
-  function onDragLeave(id: string) {
-    if (overId === id) overId = null;
-  }
-
-  function onDrop(targetId: string, e: DragEvent) {
-    e.preventDefault();
-    e.stopPropagation();
-    const from = draggedId;
-    draggedId = null;
-    overId = null;
-    disarmDrag();
-    if (!from || from === targetId) return;
-    const ids = settings.state.shortcuts.map((s) => s.id);
-    const fromIdx = ids.indexOf(from);
-    const toIdx = ids.indexOf(targetId);
-    if (fromIdx < 0 || toIdx < 0) return;
-    ids.splice(fromIdx, 1);
-    ids.splice(toIdx, 0, from);
-    void settings.reorderShortcuts(ids);
-  }
-
-  function onDragEnd() {
-    draggedId = null;
-    overId = null;
-    disarmDrag();
-  }
 </script>
 
 <SettingsCard
@@ -118,36 +157,33 @@
     </button>
   {/snippet}
 
-  <div class="overflow-hidden rounded-lg border border-border bg-[var(--color-surface-2)]">
+  <div
+    bind:this={listEl}
+    class="overflow-hidden rounded-lg border border-border bg-[var(--color-surface-2)]"
+  >
     {#if settings.state.shortcuts.length === 0}
       <p class="px-4 py-6 text-center text-xs text-muted-foreground">
         No shortcuts. Add one or pick a preset below.
       </p>
     {/if}
-    {#each settings.state.shortcuts as shortcut (shortcut.id)}
-      {@const isDragged = draggedId === shortcut.id}
-      {@const isOver = overId === shortcut.id && draggedIdx >= 0 && draggedId !== shortcut.id}
-      {@const dropsBelow = isOver && draggedIdx < overIdx}
+    {#each settings.state.shortcuts as shortcut, i (shortcut.id)}
+      {@const isDragged = drag?.active && drag.id === shortcut.id}
+      {@const showTop = dropTarget?.beforeId === shortcut.id}
+      {@const showBottom = dropTarget?.atEnd && i === settings.state.shortcuts.length - 1}
       {@const iconKey = resolveIconKey(shortcut.iconKey, shortcut.label, shortcut.command)}
       <div
-        draggable={dragArmed}
-        ondragstart={(e) => onDragStart(shortcut.id, e)}
-        ondragover={(e) => onDragOver(shortcut.id, e)}
-        ondragleave={() => onDragLeave(shortcut.id)}
-        ondrop={(e) => onDrop(shortcut.id, e)}
-        ondragend={onDragEnd}
+        data-row={shortcut.id}
         role="listitem"
-        class="grid grid-cols-[16px_24px_120px_1fr_28px] items-center gap-2 border-b border-border/60 px-3 py-2 transition last:border-b-0 {isDragged
+        onpointerdown={(e) => rowPointerDown(shortcut.id, e)}
+        class="grid grid-cols-[16px_24px_120px_1fr_28px] touch-none items-center gap-2 border-b border-border/60 px-3 py-2 transition last:border-b-0 {isDragged
           ? 'opacity-40'
-          : ''} {isOver && !dropsBelow
+          : ''} {showTop
           ? 'shadow-[inset_0_2px_0_0_var(--color-foreground)]'
-          : ''} {dropsBelow ? 'shadow-[inset_0_-2px_0_0_var(--color-foreground)]' : ''}"
+          : ''} {showBottom ? 'shadow-[inset_0_-2px_0_0_var(--color-foreground)]' : ''}"
       >
         <span
           class="flex size-4 cursor-grab items-center justify-center text-muted-foreground/40 transition hover:text-muted-foreground active:cursor-grabbing"
-          onpointerdown={armDrag}
-          role="button"
-          tabindex="-1"
+          role="presentation"
           aria-label="Drag to reorder"
           title="Drag to reorder"
         >
