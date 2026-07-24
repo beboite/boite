@@ -8,7 +8,7 @@ use boite_core::{editor, explorer, git, project, session, shell};
 use crate::events::AppEvent;
 use crate::models::{Project, Thread};
 use crate::state::AppState;
-use crate::store::ColVal;
+use crate::store::{ColVal, ThreadCol};
 
 fn now_ms() -> i64 {
     SystemTime::now()
@@ -180,33 +180,33 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
             if let Some(label) = params.get("label").and_then(|v| v.as_str()) {
                 state
                     .store
-                    .update_thread_field(&id, "label", ColVal::Text(label.to_string()))?;
+                    .update_thread_field(&id, ThreadCol::Label, ColVal::Text(label.to_string()))?;
             }
             if let Some(icon) = params.get("iconKey") {
                 let v = icon
                     .as_str()
                     .map(|s| ColVal::Text(s.to_string()))
                     .unwrap_or(ColVal::Null);
-                state.store.update_thread_field(&id, "icon_key", v)?;
+                state.store.update_thread_field(&id, ThreadCol::IconKey, v)?;
             }
             if let Some(session) = params.get("sessionId") {
                 let v = session
                     .as_str()
                     .map(|s| ColVal::Text(s.to_string()))
                     .unwrap_or(ColVal::Null);
-                state.store.update_thread_field(&id, "session_id", v)?;
+                state.store.update_thread_field(&id, ThreadCol::SessionId, v)?;
             }
             if let Some(keep) = params.get("keepAwake").and_then(|v| v.as_bool()) {
                 state
                     .store
-                    .update_thread_field(&id, "keep_awake", ColVal::Int(keep as i64))?;
+                    .update_thread_field(&id, ThreadCol::KeepAwake, ColVal::Int(keep as i64))?;
             }
             if let Some(title) = params.get("title") {
                 let v = title
                     .as_str()
                     .map(|s| ColVal::Text(s.to_string()))
                     .unwrap_or(ColVal::Null);
-                state.store.update_thread_field(&id, "title", v)?;
+                state.store.update_thread_field(&id, ThreadCol::Title, v)?;
             }
             // Emit the full persisted row so clients merge user-owned fields
             // (label/title/iconKey/sessionId/keepAwake). Clients ignore the

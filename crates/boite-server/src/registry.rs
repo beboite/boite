@@ -277,11 +277,28 @@ impl EventSink for ThreadSink {
                 if !status::is_generic_title(&raw) {
                     let clean = status::strip_leading_marker(&raw);
                     if !clean.is_empty() && !status::is_project_dir_title(&clean, &self.live.cwd) {
-                        *self.live.title.lock() = clean.clone();
-                        self.emit(AppEvent::ThreadTitle {
-                            thread_id: self.live.thread_id.clone(),
-                            title: clean,
-                        });
+                        // Only on a real change. The agents re-emit their OSC
+                        // title every spinner frame with just the leading glyph
+                        // rotating, and strip_leading_marker collapses those to
+                        // the same string — so emitting unconditionally meant an
+                        // UPDATE (and a broadcast to every client) per frame per
+                        // thread. The desktop path already coalesces this; see
+                        // app/store.svelte.ts scheduleTitleFlush.
+                        let changed = {
+                            let mut current = self.live.title.lock();
+                            if *current != clean {
+                                *current = clean.clone();
+                                true
+                            } else {
+                                false
+                            }
+                        };
+                        if changed {
+                            self.emit(AppEvent::ThreadTitle {
+                                thread_id: self.live.thread_id.clone(),
+                                title: clean,
+                            });
+                        }
                     }
                 }
             }

@@ -3,7 +3,7 @@ use std::collections::{HashSet, VecDeque};
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant, UNIX_EPOCH};
@@ -804,6 +804,34 @@ pub struct FileVersions {
     pub binary: bool,
 }
 
+// `file` / `headFile` arrive straight from a client. The caller only scopes
+// `path` (the repo) through ProjectRoots, and both of these end up in a
+// `Path::join` — where an absolute path DISCARDS the repo prefix entirely and
+// `..` walks out of it. Either one turns "read a file in this repo" into an
+// arbitrary filesystem read, so repo-relative is the only accepted shape.
+fn repo_relative(rel: &str) -> Result<(), String> {
+    let p = Path::new(rel);
+    if p.is_absolute() {
+        return Err("file must be repo-relative".into());
+    }
+    for component in p.components() {
+        match component {
+            Component::Normal(_) | Component::CurDir => {}
+            _ => return Err("file must be repo-relative".into()),
+        }
+    }
+    Ok(())
+}
+
+// Second gate for the working-tree read: a symlink *inside* the repo can still
+// point outside it, and component checks cannot see that.
+fn contained(repo: &Path, target: &Path) -> bool {
+    match (fs::canonicalize(repo), fs::canonicalize(target)) {
+        (Ok(root), Ok(abs)) => abs.starts_with(root),
+        _ => false,
+    }
+}
+
 pub fn file_versions_blocking(
     path: &str,
     file: &str,
@@ -816,6 +844,8 @@ pub fn file_versions_blocking(
     let rel = file.replace('\\', "/");
     // Renamed files live under their old name in HEAD.
     let head_rel = head_file.map(|f| f.replace('\\', "/")).unwrap_or_else(|| rel.clone());
+    repo_relative(&rel)?;
+    repo_relative(&head_rel)?;
 
     let (head, head_binary) = git_show(p, &format!("HEAD:{}", head_rel));
     let (index, index_binary) = git_show(p, &format!(":{}", rel));
@@ -823,7 +853,7 @@ pub fn file_versions_blocking(
     let abs = p.join(&rel);
     let mut work_binary = false;
     let work = match fs::metadata(&abs) {
-        Ok(meta) if meta.is_file() => match fs::read(&abs) {
+        Ok(meta) if meta.is_file() && contained(p, &abs) => match fs::read(&abs) {
             Ok(bytes) => {
                 if bytes_binary(&bytes) {
                     work_binary = true;
@@ -881,9 +911,23 @@ pub fn commit_blocking(path: &str, message: &str) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::find_repos_blocking;
+    use super::{find_repos_blocking, repo_relative};
     use std::fs;
     use std::path::Path;
+
+    #[test]
+    fn repo_relative_rejects_escapes() {
+        assert!(repo_relative("src/lib.rs").is_ok());
+        assert!(repo_relative("./src/lib.rs").is_ok());
+        assert!(repo_relative("../../etc/passwd").is_err());
+        assert!(repo_relative("src/../../etc/passwd").is_err());
+        assert!(repo_relative("/etc/passwd").is_err());
+        #[cfg(windows)]
+        {
+            assert!(repo_relative("C:/Windows/win.ini").is_err());
+            assert!(repo_relative("//server/share/x").is_err());
+        }
+    }
 
     fn mk(base: &Path, rel: &str) {
         fs::create_dir_all(base.join(rel)).unwrap();

@@ -37,7 +37,10 @@ impl ProjectRoots {
         Err("path is outside registered project roots".into())
     }
 
-    // For write targets that may not exist yet: validate the parent dir.
+    // For write targets that may not exist yet: validate the parent dir. When
+    // the target DOES exist it is canonicalized too — a symlink sitting in an
+    // allowed directory can point anywhere, and the write follows it, so the
+    // parent check alone is not a boundary.
     pub fn ensure_allowed_for_write(&self, path: &str) -> Result<(), String> {
         let p = Path::new(path);
         let parent = p
@@ -45,9 +48,16 @@ impl ProjectRoots {
             .ok_or_else(|| "invalid path: no parent".to_string())?;
         let canonical = std::fs::canonicalize(parent)
             .map_err(|e| format!("invalid path: {e}"))?;
-        if self.is_allowed(&canonical) {
-            return Ok(());
+        if !self.is_allowed(&canonical) {
+            return Err("path is outside registered project roots".into());
         }
-        Err("path is outside registered project roots".into())
+        if std::fs::symlink_metadata(p).is_ok() {
+            let target = std::fs::canonicalize(p)
+                .map_err(|e| format!("invalid path: {e}"))?;
+            if !self.is_allowed(&target) {
+                return Err("path is outside registered project roots".into());
+            }
+        }
+        Ok(())
     }
 }
