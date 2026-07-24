@@ -1,5 +1,6 @@
 <script lang="ts">
   import { getCurrentWindow } from "@tauri-apps/api/window";
+  import { platform as detectPlatform } from "@tauri-apps/plugin-os";
   import { app } from "$lib/app/store.svelte";
   import { hasTauri } from "$lib/backend/env";
   import WorkspaceToggle from "$lib/features/workspace/WorkspaceToggle.svelte";
@@ -12,6 +13,17 @@
 
   const isTauri = hasTauri();
   const win = isTauri ? getCurrentWindow() : null;
+  // Same deal as the desktop titlebar: macOS draws its own traffic lights over
+  // this bar, so no controls of ours and a free corner for them.
+  const isMacOS = isTauri && safePlatform() === "macos";
+
+  function safePlatform(): string | null {
+    try {
+      return detectPlatform();
+    } catch {
+      return null;
+    }
+  }
 
   const project = $derived(
     app.currentProjectId
@@ -27,7 +39,9 @@
 
 <header
   data-tauri-drag-region
-  class="flex h-12 shrink-0 select-none items-center gap-2 border-b border-border bg-[var(--color-titlebar)] px-2"
+  class="flex h-12 shrink-0 select-none items-center gap-2 border-b border-border bg-[var(--color-titlebar)] px-2 {isMacOS
+    ? 'pl-[78px]'
+    : ''}"
   style="padding-top: env(safe-area-inset-top, 0px);"
 >
   <button
@@ -87,7 +101,7 @@
     <WorkspaceToggle />
   </div>
 
-  {#if isTauri}
+  {#if isTauri && !isMacOS}
     <button
       type="button"
       class="flex size-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-muted/50 hover:text-foreground"
