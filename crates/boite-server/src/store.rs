@@ -57,6 +57,19 @@ const MIGRATIONS: &[&str] = &[
 impl Store {
     pub fn open(path: &Path) -> Result<Store, String> {
         let conn = Connection::open(path).map_err(|e| format!("open db failed: {e}"))?;
+        // WAL + NORMAL: thread status/title updates fire on agent activity, and
+        // the default rollback journal with synchronous=FULL costs an fsync per
+        // UPDATE. On the SD card of a small ARM box that dominates both latency
+        // and flash wear. WAL still survives a process crash; only a host power
+        // loss can lose the last commits, which for cosmetic thread metadata is
+        // the right trade. busy_timeout keeps a concurrent reader from erroring
+        // out instantly on a write lock.
+        conn.execute_batch(
+            "PRAGMA journal_mode = WAL;
+             PRAGMA synchronous = NORMAL;
+             PRAGMA busy_timeout = 5000;",
+        )
+        .map_err(|e| format!("pragma setup failed: {e}"))?;
         let store = Store {
             conn: Mutex::new(conn),
         };
@@ -65,20 +78,31 @@ impl Store {
     }
 
     fn migrate(&self) -> Result<(), String> {
-        let conn = self.conn.lock();
+        let mut conn = self.conn.lock();
         let version: i64 = conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .map_err(|e| format!("read user_version failed: {e}"))?;
         let mut applied = version as usize;
+        if applied >= MIGRATIONS.len() {
+            return Ok(());
+        }
+        // One transaction over every pending migration AND the user_version
+        // bump. Several entries are multi-statement ALTERs: committing half of
+        // one and losing the version bump means the next boot replays it and
+        // dies on "duplicate column name" forever, which under
+        // `restart: unless-stopped` is an unbootable server, not a bad startup.
+        let tx = conn
+            .transaction()
+            .map_err(|e| format!("migration transaction failed: {e}"))?;
         while applied < MIGRATIONS.len() {
-            conn.execute_batch(MIGRATIONS[applied])
+            tx.execute_batch(MIGRATIONS[applied])
                 .map_err(|e| format!("migration {} failed: {e}", applied + 1))?;
             applied += 1;
         }
-        if applied as i64 != version {
-            conn.execute_batch(&format!("PRAGMA user_version = {applied};"))
-                .map_err(|e| format!("set user_version failed: {e}"))?;
-        }
+        tx.execute_batch(&format!("PRAGMA user_version = {applied};"))
+            .map_err(|e| format!("set user_version failed: {e}"))?;
+        tx.commit()
+            .map_err(|e| format!("migration commit failed: {e}"))?;
         Ok(())
     }
 
@@ -228,8 +252,14 @@ impl Store {
         Ok(())
     }
 
-    pub fn update_thread_field(&self, id: &str, column: &str, value: ColVal) -> Result<(), String> {
+    pub fn update_thread_field(
+        &self,
+        id: &str,
+        column: ThreadCol,
+        value: ColVal,
+    ) -> Result<(), String> {
         let conn = self.conn.lock();
+        let column = column.as_str();
         let sql = format!("UPDATE threads SET {column} = ?1 WHERE id = ?2");
         match value {
             ColVal::Text(v) => conn.execute(&sql, rusqlite::params![v, id]),
@@ -367,11 +397,75 @@ pub enum ColVal {
     Null,
 }
 
+/// Updatable `threads` columns. An enum rather than a `&str`, because
+/// update_thread_field interpolates the column into the SQL (it cannot be
+/// bound) — a caller-supplied string there is an injection one refactor away.
+#[derive(Clone, Copy)]
+pub enum ThreadCol {
+    Label,
+    Title,
+    Status,
+    ExitCode,
+    IconKey,
+    SessionId,
+    KeepAwake,
+}
+
+impl ThreadCol {
+    fn as_str(self) -> &'static str {
+        match self {
+            ThreadCol::Label => "label",
+            ThreadCol::Title => "title",
+            ThreadCol::Status => "status",
+            ThreadCol::ExitCode => "exit_code",
+            ThreadCol::IconKey => "icon_key",
+            ThreadCol::SessionId => "session_id",
+            ThreadCol::KeepAwake => "keep_awake",
+        }
+    }
+}
+
 const TERMINAL_STATUSES: &[&str] = &["done", "exited", "error", "stopped"];
 
 fn normalize_status(raw: Option<String>) -> String {
     match raw {
         Some(s) if TERMINAL_STATUSES.contains(&s.as_str()) => s,
         _ => "idle".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Guards the migration transaction: user_version must be committed with the
+    // statements it gates, or a reopen replays applied ALTERs and dies on
+    // "duplicate column name" — permanently, since the server restarts on exit.
+    #[test]
+    fn migrations_are_idempotent_across_reopen() {
+        let dir = std::env::temp_dir().join(format!(
+            "boite-migrate-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = dir.join("boite.db");
+
+        let first = Store::open(&db).expect("first open");
+        drop(first);
+        let second = Store::open(&db).expect("reopen must not replay migrations");
+
+        let version: i64 = second
+            .conn
+            .lock()
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(version as usize, MIGRATIONS.len());
+
+        // Third open, to catch a version bump that only sticks in-memory.
+        drop(second);
+        Store::open(&db).expect("third open");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

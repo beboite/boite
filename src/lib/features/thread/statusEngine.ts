@@ -52,26 +52,32 @@ function maybeAutoClose(threadId: string, iconKey: string | null | undefined) {
   // any raw PTY output, or a freshly written session transcript. This is what
   // keeps a long quiet tool call or an output-streaming subagent from getting
   // its PTY killed mid-work while the dot reads "ready".
+  const timeoutMs = minutes * 60_000;
   const lastActivity = Math.max(
     lastWorkingAt.get(threadId) ?? 0,
     lastOutputAt.get(threadId) ?? 0,
     lastTranscriptAt.get(threadId) ?? 0,
   );
-  if (lastActivity > 0 && now - lastActivity < minutes * 60_000) {
+  if (lastActivity > 0 && now - lastActivity < timeoutMs) {
     idleSince.delete(threadId);
     return;
   }
-  const armed = idleSince.get(threadId);
-  if (!armed) {
-    idleSince.set(threadId, now);
+  // Anchor the countdown to the last real activity, not to the moment we
+  // noticed it had gone stale. Arming at `now` re-ran the full timeout on top
+  // of the one already elapsed, so a 10-minute setting slept the thread after
+  // ~20. A thread with no activity at all anchors at now (nothing to measure
+  // from), which is the only case where the wait is a full timeout.
+  const armed = idleSince.get(threadId) ?? (lastActivity || now);
+  if (!idleSince.has(threadId)) {
+    idleSince.set(threadId, armed);
     logger.debug("idle", `armed auto-sleep for ${t.label}`, {
       iconKey,
       timeoutMinutes: minutes,
+      sinceMs: now - armed,
     });
-    return;
   }
   const idleMs = now - armed;
-  if (idleMs < minutes * 60_000) return;
+  if (idleMs < timeoutMs) return;
   const pid = t.ptyId;
   app.setThreadPtyId(t.id, null);
   // setThreadStatus persists terminal statuses; no second hand-built save.
@@ -111,6 +117,7 @@ function tick() {
       lastWorkingAt.delete(t.id);
       lastOutputAt.delete(t.id);
       lastTranscriptAt.delete(t.id);
+      workingTtlMs.delete(t.id);
       prevStatus.delete(t.id);
       idleSince.delete(t.id);
       if (t.status === "ready" || t.status === "running") {

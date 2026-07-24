@@ -29,7 +29,7 @@ use config::Config;
 use events::AppEvent;
 use registry::Registry;
 use state::AppState;
-use store::{ColVal, Store};
+use store::{ColVal, Store, ThreadCol};
 
 const EVENT_CHANNEL_CAP: usize = 1024;
 
@@ -219,13 +219,13 @@ fn make_event_emitter(
                 exit_code,
             } => {
                 if let Err(e) =
-                    store.update_thread_field(thread_id, "status", ColVal::Text(status.clone()))
+                    store.update_thread_field(thread_id, ThreadCol::Status, ColVal::Text(status.clone()))
                 {
                     tracing::warn!("failed to persist thread status: {e}");
                 }
                 if let Some(c) = exit_code {
                     if let Err(e) =
-                        store.update_thread_field(thread_id, "exit_code", ColVal::Int(*c as i64))
+                        store.update_thread_field(thread_id, ThreadCol::ExitCode, ColVal::Int(*c as i64))
                     {
                         tracing::warn!("failed to persist thread exit code: {e}");
                     }
@@ -233,7 +233,7 @@ fn make_event_emitter(
             }
             AppEvent::ThreadTitle { thread_id, title } => {
                 if let Err(e) =
-                    store.update_thread_field(thread_id, "title", ColVal::Text(title.clone()))
+                    store.update_thread_field(thread_id, ThreadCol::Title, ColVal::Text(title.clone()))
                 {
                     tracing::warn!("failed to persist thread title: {e}");
                 }

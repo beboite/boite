@@ -108,6 +108,7 @@ export class Socket {
     this.#attached.clear();
     this.#offsets.clear();
     this.#pendingReplay.clear();
+    this.#binChain = Promise.resolve();
     const ws = this.#ws;
     this.#ws = null;
     ws?.close();
@@ -286,9 +287,14 @@ export class Socket {
       }
       if (typeof msg.event === "string") {
         // Consumed here, not forwarded: the replay marker pairs with the binary
-        // frame that follows it, not the app-level control plane.
+        // frame that follows it, not the app-level control plane. It goes
+        // through #binChain like the frames do — handling it synchronously let
+        // it overtake a binary frame still queued behind a gzip inflate, and
+        // that stale live frame was then consumed as the replay body: terminal
+        // cleared at the wrong point, offset left pointing at the wrong byte.
         if (msg.event === "replay") {
-          this.#onReplayMarker(msg.data);
+          const data = msg.data;
+          this.#chain(() => this.#onReplayMarker(data));
           return;
         }
         const ce: ControlEvent = { event: msg.event, data: msg.data };
@@ -301,7 +307,14 @@ export class Socket {
     const op = buf[0];
     if (op !== FRAME_OUTPUT && op !== FRAME_OUTPUT_GZIP) return;
     // Chain so a gzip replay's async inflate keeps frame order intact.
-    this.#binChain = this.#binChain.then(() => this.#handleBinary(op, buf));
+    this.#chain(() => this.#handleBinary(op, buf));
+  }
+
+  // Serializes output-plane work (replay markers and binary frames) in arrival
+  // order. The catch matters: one rejection would leave #binChain permanently
+  // rejected and silently swallow every later frame on the socket.
+  #chain(step: () => void | Promise<void>): void {
+    this.#binChain = this.#binChain.then(step).catch(() => {});
   }
 
   #onReplayMarker(data: unknown): void {

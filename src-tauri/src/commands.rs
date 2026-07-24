@@ -152,6 +152,14 @@ pub fn register_project_roots(state: State<'_, ProjectRoots>, roots: Vec<String>
     state.replace(roots);
 }
 
+// Deliberately NOT scoped through ProjectRoots, unlike every other path-taking
+// command here: inspection is what produces the name/icon a project is created
+// WITH, so it necessarily runs before that project is a registered root. The
+// server twin (rpc.rs "project.inspect") can gate on BOITE_WORKSPACE_DIR; the
+// desktop has no equivalent outer boundary, the user's own folder dialog is it.
+// What the command can reveal is therefore capped in boite-core::project:
+// `.git/config` remotes, plus an image from a fixed list of subdirectories,
+// image extensions only, 2 MB max. Keep it that way.
 #[tauri::command]
 pub async fn inspect_project(path: String) -> Result<ProjectInspection, String> {
     tauri::async_runtime::spawn_blocking(move || project::inspect_project_blocking(path))
