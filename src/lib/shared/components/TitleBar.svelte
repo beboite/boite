@@ -1,6 +1,9 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { getCurrentWindow } from "@tauri-apps/api/window";
+  import { listen } from "@tauri-apps/api/event";
+  import { invoke } from "@tauri-apps/api/core";
+  import { platform as detectPlatform } from "@tauri-apps/plugin-os";
   import { hasTauri } from "$lib/backend/env";
   import { workspace } from "$lib/backend";
   import { app } from "$lib/app/store.svelte";
@@ -24,6 +27,27 @@
   const win = isTauri ? getCurrentWindow() : null;
   let isMaximized = $state(false);
 
+  // macOS keeps its decorations and draws the real traffic lights over our bar
+  // (titleBarStyle: Overlay, see tauri.macos.conf.json), so we draw no controls
+  // of our own there and just leave the top-left corner free for them.
+  // Read straight from the OS plugin rather than the platform store: that one
+  // is filled during workspace boot, and the titlebar renders before it.
+  const isMacOS = isTauri && safePlatform() === "macos";
+
+  function safePlatform(): string | null {
+    try {
+      return detectPlatform();
+    } catch {
+      return null;
+    }
+  }
+
+  // Fullscreen hides the traffic lights, so the row reclaims their 78px. The
+  // backend posts the transition as it starts and hides them for the way out,
+  // which is what lets the gap be back on screen before they are.
+  let isFullscreen = $state(false);
+  const macLightsGap = $derived(isMacOS && !isFullscreen);
+
   async function syncMaximized() {
     if (!win) return;
     try {
@@ -33,14 +57,54 @@
     }
   }
 
+  // Startup and recovery only: isFullscreen() answers once AppKit has finished
+  // animating, far too late to lay out against.
+  async function syncFullscreen() {
+    if (!win) return;
+    try {
+      isFullscreen = await win.isFullscreen();
+    } catch {
+      isFullscreen = false;
+    }
+    // Whatever a missed transition may have left behind: macOS owns them except
+    // on the way out of fullscreen, so anywhere else they belong visible.
+    setLights(false);
+  }
+
+  function setLights(hidden: boolean) {
+    if (!isMacOS) return;
+    void invoke("set_traffic_lights_hidden", { hidden }).catch(() => {});
+  }
+
+  // Two frames: one for Svelte to apply the padding, one for the compositor to
+  // paint it. Only then may the lights come back.
+  async function showLightsOncePainted() {
+    await new Promise<void>((r) => requestAnimationFrame(() => r()));
+    await new Promise<void>((r) => requestAnimationFrame(() => r()));
+    setLights(false);
+  }
+
   onMount(() => {
     if (!win) return;
     void syncMaximized();
     const unlisten = win.onResized(() => {
       void syncMaximized();
     });
+    // macOS only, and gated rather than merely inert: nothing about the gap or
+    // the traffic lights exists on a platform that draws neither.
+    if (!isMacOS) {
+      return () => {
+        void unlisten.then((fn) => fn());
+      };
+    }
+    void syncFullscreen();
+    const unlistenFs = listen<boolean>("boite://fullscreen", (e) => {
+      isFullscreen = e.payload;
+      if (!e.payload) void showLightsOncePainted();
+    });
     return () => {
       void unlisten.then((fn) => fn());
+      void unlistenFs.then((fn) => fn());
     };
   });
 
@@ -87,7 +151,9 @@
   data-tauri-drag-region
   class="relative flex h-9 shrink-0 select-none items-center border-b border-border bg-[var(--color-titlebar)]"
 >
-  <div class="flex items-center gap-0.5 pl-1.5">
+  <!-- 78px clears the traffic lights; they sit outside the DOM, so nothing but
+       padding can keep the logo from landing under them. -->
+  <div class="flex items-center gap-0.5 {macLightsGap ? 'pl-[78px]' : 'pl-1.5'}">
     <button
       type="button"
       class="flex h-7 items-center justify-center rounded-md px-2 transition {app.view ===
@@ -155,7 +221,7 @@
     </button>
   </div>
 
-  {#if isTauri}
+  {#if isTauri && !isMacOS}
     <div class="flex h-full items-stretch">
       <button
         type="button"
