@@ -1,4 +1,5 @@
 pub mod editor;
+pub mod env;
 pub mod explorer;
 pub mod git;
 pub mod project;

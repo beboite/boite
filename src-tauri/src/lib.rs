@@ -33,6 +33,10 @@ fn show_main_window(handle: &tauri::AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Before the first which() or PTY: launched from Finder we start with
+    // launchd's bare PATH, which hides Homebrew and every agent CLI.
+    boite_core::env::hydrate_login_path();
+
     let migrations = vec![
         Migration {
             version: 1,
