@@ -287,24 +287,48 @@ async fn authenticate(
         return false;
     }
     let first = tokio::time::timeout(AUTH_TIMEOUT, stream.next()).await;
-    if let Ok(Some(Ok(Message::Text(text)))) = first {
-        if let Ok(req) = serde_json::from_str::<Request>(&text) {
-            if req.method == "auth" {
-                let token = req
-                    .params
-                    .get("token")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                if state.auth.verify(ip, token) {
-                    let _ = tx
-                        .send(WsOut::Text(json_str(&Response::ok(
-                            req.id.unwrap_or(0),
-                            json!({ "ok": true }),
-                        ))))
-                        .await;
-                    return true;
-                }
-            }
+    // A frame that is not a well-formed auth request still has to reach
+    // auth.verify: routing malformed or wrong-method first frames around it
+    // left the per-IP lockout untrippable by exactly the traffic a prober
+    // sends. Timeouts and closes are NOT counted — a client that hangs up
+    // before authenticating (tab closed, network blip) is not an attempt, and
+    // counting it would lock out a legitimate device after five reconnects.
+    let attempt: Option<(u64, String)> = match &first {
+        Ok(Some(Ok(Message::Text(text)))) => Some(
+            serde_json::from_str::<Request>(text)
+                .ok()
+                .filter(|req| req.method == "auth")
+                .map(|req| {
+                    (
+                        req.id.unwrap_or(0),
+                        req.params
+                            .get("token")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string(),
+                    )
+                })
+                // A text frame that is not a usable auth request is still an
+                // attempt: that is what a prober sends.
+                .unwrap_or((0, String::new())),
+        ),
+        Ok(Some(Ok(Message::Binary(_)))) => Some((0, String::new())),
+        // Close/Ping/Pong and the timeout are NOT attempts. A client that hangs
+        // up before authenticating (tab closed, network blip, connectivity
+        // probe) sends a Close frame, and counting it locked the IP out after
+        // five reconnects — a PWA banning its own device.
+        _ => None,
+    };
+
+    if let Some((id, token)) = attempt {
+        if state.auth.verify(ip, &token) {
+            let _ = tx
+                .send(WsOut::Text(json_str(&Response::ok(
+                    id,
+                    json!({ "ok": true }),
+                ))))
+                .await;
+            return true;
         }
     }
     let _ = tx

@@ -2,7 +2,12 @@ use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::{SyncSender, TrySendError};
+
+// Chunks of pending input per PTY. Deep enough to swallow a large paste split
+// across IPC messages, shallow enough that a stalled child cannot be used to
+// grow the process indefinitely.
+const WRITE_QUEUE_DEPTH: usize = 1024;
 
 use parking_lot::Mutex;
 use portable_pty::{ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_system};
@@ -136,7 +141,7 @@ struct PtyHandle {
     // Writes go through a dedicated thread per PTY. A blocking write_all on
     // the IPC thread froze the whole UI whenever the child stopped draining
     // (big paste, suspended process, full ConPTY buffer).
-    writer_tx: Sender<Vec<u8>>,
+    writer_tx: SyncSender<Vec<u8>>,
     killer: Arc<Mutex<Box<dyn ChildKiller + Send + Sync>>>,
     pid: Option<u32>,
     #[cfg(target_os = "windows")]
@@ -230,7 +235,11 @@ impl PtyManager {
             .try_clone_reader()
             .map_err(|e| format!("clone_reader failed: {e}"))?;
 
-        let (writer_tx, writer_rx) = std::sync::mpsc::channel::<Vec<u8>>();
+        // Bounded: an unbounded queue here means a child that stopped draining
+        // (suspended, full ConPTY buffer) lets a client grow it without limit.
+        // The depth only has to absorb a paste burst; write() reports back
+        // pressure instead of buffering the world.
+        let (writer_tx, writer_rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(WRITE_QUEUE_DEPTH);
         std::thread::spawn(move || {
             while let Ok(data) = writer_rx.recv() {
                 if writer.write_all(&data).is_err() {
@@ -281,8 +290,13 @@ impl PtyManager {
             let handle = map.get(id).ok_or_else(|| "pty not found".to_string())?;
             handle.writer_tx.clone()
         };
-        tx.send(data.to_vec())
-            .map_err(|_| "pty writer closed".to_string())
+        // try_send, never send: blocking here would re-introduce the UI freeze
+        // the writer thread exists to prevent. A full queue means the child is
+        // not reading, so the caller is told rather than parked.
+        tx.try_send(data.to_vec()).map_err(|e| match e {
+            TrySendError::Full(_) => "pty write queue full: process not reading".to_string(),
+            TrySendError::Disconnected(_) => "pty writer closed".to_string(),
+        })
     }
 
     pub fn resize(&self, id: &str, cols: u16, rows: u16) -> Result<(), String> {

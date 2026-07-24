@@ -54,17 +54,32 @@ fn looks_binary(bytes: &[u8]) -> bool {
 
 pub fn write_blocking(path: &str, content: &str) -> Result<u64, String> {
     let p = Path::new(path);
-    let parent = p
+    if p.parent().is_none() {
+        return Err("invalid path: no parent".to_string());
+    }
+
+    // Resolve symlinks: rename() replaces the link itself otherwise, turning a
+    // symlinked config into a regular file on first save. canonicalize fails for
+    // a file that does not exist yet, which is the create case — keep the path.
+    let target = fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    let parent = target
         .parent()
         .ok_or_else(|| "invalid path: no parent".to_string())?;
     if !parent.is_dir() {
         return Err(format!("parent not a directory: {}", parent.display()));
     }
-    let file_name = p
+    let file_name = target
         .file_name()
         .and_then(|s| s.to_str())
         .ok_or_else(|| "invalid path: no file name".to_string())?;
 
+    // Write-then-rename is atomic, but the replacement is a NEW inode: without
+    // carrying the mode over, the saved file gets the umask default and silently
+    // loses the original's permissions (an executable script lost its +x bit).
+    let original_perms = fs::metadata(&target).ok().map(|m| m.permissions());
+
+    // The temp file must sit beside the RESOLVED target, not beside the link:
+    // rename across filesystems fails with EXDEV.
     let mut tmp_path: PathBuf = parent.to_path_buf();
     tmp_path.push(format!(".{}.boite.tmp", file_name));
 
@@ -76,7 +91,11 @@ pub fn write_blocking(path: &str, content: &str) -> Result<u64, String> {
         f.sync_all().map_err(|e| format!("fsync failed: {e}"))?;
     }
 
-    if let Err(e) = fs::rename(&tmp_path, p) {
+    if let Some(perms) = original_perms {
+        let _ = fs::set_permissions(&tmp_path, perms);
+    }
+
+    if let Err(e) = fs::rename(&tmp_path, &target) {
         let _ = fs::remove_file(&tmp_path);
         return Err(format!("rename failed: {e}"));
     }

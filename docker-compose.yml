@@ -5,7 +5,11 @@ services:
     container_name: boite
     restart: unless-stopped
     ports:
-      - "7337:7337"
+      # Loopback by default, matching the server's own bind default: the token
+      # is a static bearer for host-level RCE and travels over plain ws://.
+      # Publish wider only behind TLS or a tunnel (e.g. "100.64.0.4:7337:7337"
+      # for a Tailscale-only interface).
+      - "127.0.0.1:7337:7337"
     environment:
       # Required: the bearer token clients send as the first WS frame.
       - BOITE_TOKEN=${BOITE_TOKEN:?set BOITE_TOKEN in .env}
