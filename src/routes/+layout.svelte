@@ -18,6 +18,7 @@
   import { editorStore } from "$lib/features/editor/store.svelte";
   import { paneStore, leavesOf } from "$lib/features/panes/store.svelte";
   import { palette } from "$lib/features/palette/store.svelte";
+  import { platform } from "$lib/storage/platform.svelte";
   import CommandPalette from "$lib/features/palette/CommandPalette.svelte";
 
   let { children } = $props();
@@ -104,10 +105,13 @@
       return;
     }
 
-    // Command palette (Ctrl+K, or VS Code-style Ctrl+Shift+P)
+    // Command palette (Ctrl/Cmd+K, or VS Code-style Ctrl+Shift+P).
+    // On macOS only Cmd+K opens it: Ctrl+K is a readline binding (kill line)
+    // the shell needs.
+    const paletteMod = platform.isMacOS ? e.metaKey : mod;
     if (
-      ((e.key === "k" || e.key === "K") && !e.shiftKey && !e.altKey) ||
-      ((e.key === "p" || e.key === "P") && e.shiftKey && !e.altKey)
+      (paletteMod && (e.key === "k" || e.key === "K") && !e.shiftKey && !e.altKey) ||
+      (mod && (e.key === "p" || e.key === "P") && e.shiftKey && !e.altKey)
     ) {
       e.preventDefault();
       palette.toggle();

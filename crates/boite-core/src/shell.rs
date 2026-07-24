@@ -9,6 +9,25 @@ pub struct ShellOption {
     pub icon_key: Option<String>,
 }
 
+/// Args that make `cmd` behave like the shell Terminal.app hands you.
+///
+/// A bare interactive shell skips the login files (`/etc/zprofile`,
+/// `~/.zprofile`, `~/.bash_profile`) where Homebrew and friends export PATH, so
+/// the first rc line that calls `brew` fails with "command not found". Returns
+/// an empty vec for anything that is not a shell we know how to log into.
+pub fn login_args_for(cmd: &str) -> Vec<String> {
+    let name = std::path::Path::new(cmd)
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+    match name.as_str() {
+        "zsh" | "bash" | "sh" | "dash" | "ksh" | "fish" => vec!["-l".to_string()],
+        // nushell spells it out and rejects the short form.
+        "nu" => vec!["--login".to_string()],
+        _ => vec![],
+    }
+}
+
 pub fn fallback_shell() -> String {
     #[cfg(target_os = "windows")]
     {
@@ -139,7 +158,7 @@ pub fn available_shells_blocking() -> Vec<ShellOption> {
                     id: (*bin).to_string(),
                     label: (*label).to_string(),
                     cmd: path.to_string_lossy().into_owned(),
-                    args: vec![],
+                    args: login_args_for(bin),
                     icon_key: Some("terminal".into()),
                 });
             }
@@ -147,4 +166,29 @@ pub fn available_shells_blocking() -> Vec<ShellOption> {
     }
 
     shells
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn known_shells_get_login_flag() {
+        assert_eq!(login_args_for("/bin/zsh"), vec!["-l".to_string()]);
+        assert_eq!(login_args_for("bash"), vec!["-l".to_string()]);
+        assert_eq!(login_args_for("/opt/homebrew/bin/fish"), vec!["-l".to_string()]);
+        assert_eq!(login_args_for("nu"), vec!["--login".to_string()]);
+    }
+
+    #[test]
+    fn agent_clis_are_left_alone() {
+        assert!(login_args_for("claude").is_empty());
+        assert!(login_args_for("/usr/local/bin/codex").is_empty());
+    }
+
+    #[test]
+    fn shells_without_a_login_mode_get_nothing() {
+        assert!(login_args_for("pwsh").is_empty());
+        assert!(login_args_for("cmd").is_empty());
+    }
 }

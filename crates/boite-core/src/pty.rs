@@ -173,7 +173,15 @@ impl PtyManager {
         let resolved_cmd = self.resolve_cmd(&spec.cmd);
         let mut command = CommandBuilder::new(&resolved_cmd);
         command.cwd(&spec.cwd);
-        for arg in &spec.args {
+        // The shell picker carries login args of its own; the "default shell"
+        // path only knows a binary, so log it in here rather than leaving that
+        // thread with a half-initialized PATH.
+        let login_args = if spec.args.is_empty() {
+            crate::shell::login_args_for(&resolved_cmd)
+        } else {
+            Vec::new()
+        };
+        for arg in spec.args.iter().chain(login_args.iter()) {
             command.arg(arg);
         }
         if let Some(env) = &spec.env {

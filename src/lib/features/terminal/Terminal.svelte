@@ -1138,8 +1138,13 @@
         return false;
       }
       // Command palette combos never reach the shell; the layout handler
-      // (window keydown, still bubbling) opens it.
-      if (e.ctrlKey && !e.shiftKey && !e.altKey && code === "KeyK") {
+      // (window keydown, still bubbling) opens it. On macOS the palette is
+      // Cmd+K, so Ctrl+K stays with the shell (readline kill-line).
+      if (e.ctrlKey && !e.shiftKey && !e.altKey && code === "KeyK" && !platform.isMacOS) {
+        e.preventDefault();
+        return false;
+      }
+      if (e.metaKey && !e.shiftKey && !e.altKey && code === "KeyK" && platform.isMacOS) {
         e.preventDefault();
         return false;
       }
