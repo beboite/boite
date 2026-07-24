@@ -1,4 +1,5 @@
 mod commands;
+mod fullscreen;
 mod local_pty;
 mod logging;
 
@@ -22,6 +23,13 @@ impl BootState {
     pub fn is_completed(&self) -> bool {
         self.completed.load(Ordering::SeqCst)
     }
+}
+
+/// Called by the titlebar once it has painted the layout for the state it is
+/// in, so the lights never come back over a row that has not made room yet.
+#[tauri::command]
+fn set_traffic_lights_hidden(window: tauri::WebviewWindow, hidden: bool) {
+    fullscreen::set_lights_hidden(&window, hidden);
 }
 
 fn show_main_window(handle: &tauri::AppHandle) {
@@ -132,7 +140,19 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_window_state::Builder::default().build())
+        // Everything but DECORATIONS: that flag replays whatever the window had
+        // last run, so a state file written while the window was frameless keeps
+        // calling set_decorations(false) at every launch — which on macOS strips
+        // the traffic lights the config just asked for. Decorations belong to the
+        // config, not to the restored session.
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(
+                    tauri_plugin_window_state::StateFlags::all()
+                        & !tauri_plugin_window_state::StateFlags::DECORATIONS,
+                )
+                .build(),
+        )
         .plugin(tauri_plugin_notification::init())
         .plugin(
             tauri_plugin_sql::Builder::default()
@@ -149,6 +169,7 @@ pub fn run() {
                 eprintln!("[boite/logging] begin_log_session failed: {e}");
             }
             logging::install_panic_hook(setup_handle.clone());
+            fullscreen::watch(&setup_handle);
             let _ = logging::append_app_log(
                 &setup_handle,
                 "info",
@@ -178,6 +199,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            set_traffic_lights_hidden,
             commands::pty_spawn,
             commands::pty_open,
             commands::pty_detach,

@@ -27,3 +27,12 @@ tauri-plugin-single-instance = "2"
 base64 = "0.22"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+# AppKit posts the only fullscreen signal that arrives when the transition
+# *starts*; everything Tauri exposes reports it once the animation is over. All
+# four crates are already in the tree through tauri/wry, so this pulls nothing new.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSNotification", "NSString", "NSDictionary", "NSOperation"] }
+objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSResponder", "NSApplication"] }
+block2 = "0.6"
