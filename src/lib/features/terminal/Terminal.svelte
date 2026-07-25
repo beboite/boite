@@ -334,9 +334,19 @@
   // reattaches instead of spawning fresh. Explicit close uses stopLocalPty/kill.
   function releasePty() {
     if (ptyId && clientStatus()) {
-      // Remember the dot colour so the return to this workspace shows the
-      // thread connected (ready/running) instead of a reset idle grey.
-      parkedLocal.set(thread.id, currentThread()?.status ?? "ready");
+      // Park only a PTY the store still owns. reloadThread/stopThread/close
+      // null the thread's ptyId before killing it; when the exit event lost the
+      // race against the unmount, the dead id got parked anyway and the next
+      // spawn believed it was reattaching — so the wrap shell never received
+      // its launch input and the pane sat at a bare prompt.
+      const current = currentThread();
+      if (current?.ptyId === ptyId) {
+        // Remember the dot colour so the return to this workspace shows the
+        // thread connected (ready/running) instead of a reset idle grey.
+        parkedLocal.set(thread.id, current.status ?? "ready");
+      } else {
+        parkedLocal.delete(thread.id);
+      }
     }
     teardownPty((key) => void ptyRelease(key).catch(() => {}));
   }
@@ -1006,8 +1016,14 @@
       app.setThreadStatus(thread.id, "ready");
       logger.info(
         "spawn",
-        `${thread.label} (${thread.iconKey ?? "?"}): spawned`,
-        { cmd: plan.cmd, args: plan.args, cwd: project.cwd },
+        `${thread.label} (${thread.iconKey ?? "?"}): ${reattaching ? "reattached" : "spawned"}`,
+        {
+          cmd: plan.cmd,
+          args: plan.args,
+          cwd: project.cwd,
+          reattaching,
+          pendingInput: !!plan.pendingInput,
+        },
       );
     } catch (err) {
       term?.write(`\r\n[boite] spawn failed: ${err}\r\n`);

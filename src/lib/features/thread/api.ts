@@ -9,6 +9,7 @@ import { platform } from "$lib/storage/platform.svelte";
 import { notifications } from "$lib/features/notifications/store.svelte";
 import { confirmDialog } from "$lib/shared/components/confirm.svelte";
 import { uuid } from "$lib/shared/utils/uuid";
+import { parkedLocal } from "$lib/backend/tauri/parked";
 import type { IconKey, Project, Shortcut, Thread } from "$lib/types";
 import type { ShellOption } from "$lib/storage/platform.svelte";
 
@@ -195,6 +196,7 @@ export async function stopThread(threadId: string) {
 
   const previousPtyId = t.ptyId;
   app.setThreadPtyId(t.id, null);
+  parkedLocal.delete(t.id);
   // setThreadStatus persists terminal statuses itself.
   app.setThreadStatus(t.id, "stopped", null);
 
@@ -239,6 +241,9 @@ export async function reloadThread(threadId: string) {
   if (!t) return;
 
   const previousPtyId = t.ptyId;
+  // An explicit relaunch is never a reattach: drop any park marker so the fresh
+  // PTY gets its launch input typed.
+  parkedLocal.delete(t.id);
   if (previousPtyId) {
     // wait=true: respawning before the old process is dead reopens the
     // two-`claude --resume`-on-one-session-file race the backend kill
