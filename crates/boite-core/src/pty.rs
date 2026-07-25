@@ -10,6 +10,22 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use vte::{Params, Parser, Perform};
 
+/// What the emulator on the other end is, stated rather than inherited.
+///
+/// A desktop app started from Finder or the Dock gets launchd's environment,
+/// which carries no TERM at all, and nothing downstream supplies one: neither
+/// this crate nor portable-pty. A shell whose terminfo is unknown loses line
+/// editing — zsh answers a backspace with a bare space instead of the
+/// backspace/space/backspace dance, so the deleted character stays on screen
+/// while the buffer behind it is correct. Agent CLIs escape it by driving the
+/// terminal in raw mode, which is why plain shells were the only ones bitten.
+///
+/// Inherited values are overridden on purpose: whatever launched the app says
+/// nothing about the terminal we actually render into, which is xterm.js.
+pub fn terminal_env_defaults() -> [(&'static str, &'static str); 2] {
+    [("TERM", "xterm-256color"), ("COLORTERM", "truecolor")]
+}
+
 // Raw, transport-agnostic PTY event. The host adapter decides how to encode
 // it on the wire: the Tauri desktop adapter base64-encodes Output into its
 // IPC Channel; the server pushes raw bytes into a ring buffer + WS frame.
@@ -183,6 +199,10 @@ impl PtyManager {
         };
         for arg in spec.args.iter().chain(login_args.iter()) {
             command.arg(arg);
+        }
+        // Before the caller's own env, so a spec that sets TERM still wins.
+        for (k, v) in terminal_env_defaults() {
+            command.env(k, v);
         }
         if let Some(env) = &spec.env {
             for (k, v) in env {
@@ -440,4 +460,18 @@ impl Perform for OscPerform {
     fn unhook(&mut self) {}
     fn csi_dispatch(&mut self, _: &Params, _: &[u8], _: bool, _: char) {}
     fn esc_dispatch(&mut self, _: &[u8], _: bool, _: u8) {}
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn terminal_defaults_describe_xterm_js() {
+        let env: HashMap<_, _> = terminal_env_defaults().into_iter().collect();
+        // xterm.js speaks xterm-256color; anything else and the shell redraws
+        // line edits with capabilities the emulator does not implement.
+        assert_eq!(env.get("TERM"), Some(&"xterm-256color"));
+        assert_eq!(env.get("COLORTERM"), Some(&"truecolor"));
+    }
 }
