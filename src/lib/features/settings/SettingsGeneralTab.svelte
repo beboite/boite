@@ -9,6 +9,7 @@
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
   import GripVertical from "@lucide/svelte/icons/grip-vertical";
+  import { t } from "$lib/i18n/index.svelte";
 
   // Distinguishable at 14–16px on the dark surfaces, which rules out anything
   // too dark or too desaturated.
@@ -166,19 +167,16 @@
   <UpdatesCard />
 {/if}
 
-<SettingsCard
-  title="Shortcuts"
-  description="Drag the grip to reorder. Edit the command to pass arguments or use an alias."
->
+<SettingsCard title={t("shortcuts.title")} description={t("shortcuts.description")}>
   {#snippet actions()}
     <button
       type="button"
       class="flex items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-1.5 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
       onclick={() => settings.resetShortcutsToPresets()}
-      title="Reset to default presets"
+      title={t("shortcuts.resetTitle")}
     >
       <RotateCcw class="size-3" />
-      Reset
+      {t("common.reset")}
     </button>
     <button
       type="button"
@@ -186,7 +184,7 @@
       onclick={addCustom}
     >
       <Plus class="size-3" />
-      New
+      {t("shortcuts.new")}
     </button>
   {/snippet}
 
@@ -196,7 +194,7 @@
   >
     {#if settings.state.shortcuts.length === 0}
       <p class="px-4 py-6 text-center text-xs text-muted-foreground">
-        No shortcuts. Add one or pick a preset below.
+        {t("shortcuts.noShortcuts")}
       </p>
     {/if}
     {#each settings.state.shortcuts as shortcut, i (shortcut.id)}
@@ -217,8 +215,8 @@
         <span
           class="flex size-4 cursor-grab items-center justify-center text-muted-foreground/40 transition hover:text-muted-foreground active:cursor-grabbing"
           role="presentation"
-          aria-label="Drag to reorder"
-          title="Drag to reorder"
+          aria-label={t("shortcuts.dragToReorder")}
+          title={t("shortcuts.dragToReorder")}
         >
           <GripVertical class="size-3" />
         </span>
@@ -227,8 +225,8 @@
             type="button"
             class="flex size-6 items-center justify-center rounded-md border border-transparent transition hover:border-border hover:bg-[var(--color-surface-3)]"
             onclick={() => (colorPickerFor = colorPickerFor === shortcut.id ? null : shortcut.id)}
-            aria-label="Change icon color"
-            title="Change icon color"
+            aria-label={t("shortcuts.changeIconColor")}
+            title={t("shortcuts.changeIconColor")}
           >
             <ShortcutIcon {iconKey} size={16} color={shortcut.iconColor ?? null} />
           </button>
@@ -246,7 +244,7 @@
                       : 'border-border/60'}"
                     style:background-color={c}
                     onclick={() => setIconColor(shortcut.id, c)}
-                    aria-label="Set color {c}"
+                    aria-label={t("shortcuts.setColor", { color: c })}
                     title={c}
                   ></button>
                 {/each}
@@ -256,7 +254,7 @@
                 class="mt-2 w-full rounded-md border border-border px-2 py-1 text-[10px] text-muted-foreground transition hover:text-foreground"
                 onclick={() => setIconColor(shortcut.id, null)}
               >
-                Default color
+                {t("shortcuts.defaultColor")}
               </button>
             </div>
           {/if}
@@ -264,7 +262,7 @@
         <input
           type="text"
           value={shortcut.label}
-          placeholder="Label"
+          placeholder={t("shortcuts.labelPlaceholder")}
           onchange={(e) =>
             settings.updateShortcut(shortcut.id, {
               label: (e.currentTarget as HTMLInputElement).value,
@@ -274,7 +272,7 @@
         <input
           type="text"
           value={shortcut.command}
-          placeholder="claude --resume"
+          placeholder={t("shortcuts.commandPlaceholder")}
           onchange={(e) =>
             settings.updateShortcut(shortcut.id, {
               command: (e.currentTarget as HTMLInputElement).value,
@@ -285,8 +283,8 @@
           type="button"
           class="flex size-7 items-center justify-center rounded-md text-muted-foreground/60 transition hover:bg-danger/15 hover:text-danger"
           onclick={() => settings.removeShortcut(shortcut.id)}
-          aria-label="Remove shortcut"
-          title="Remove"
+          aria-label={t("shortcuts.removeShortcut")}
+          title={t("shortcuts.remove")}
         >
           <Trash2 class="size-3" />
         </button>
@@ -298,7 +296,7 @@
     <p
       class="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground"
     >
-      Add from preset
+      {t("shortcuts.addFromPreset")}
     </p>
     <div class="flex flex-wrap gap-1.5">
       {#each PRESET_SHORTCUTS as preset (preset.id)}

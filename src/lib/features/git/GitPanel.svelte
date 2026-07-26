@@ -22,6 +22,7 @@
   import ArrowDownToLine from "@lucide/svelte/icons/arrow-down-to-line";
   import X from "@lucide/svelte/icons/x";
   import FolderGit2 from "@lucide/svelte/icons/folder-git-2";
+  import { t } from "$lib/i18n/index.svelte";
 
   const AUTO_REFRESH_MS = 10_000;
 
@@ -186,11 +187,11 @@
     if (!project) return;
     const untracked = entry.status === "?";
     const ok = await confirmDialog.ask({
-      title: untracked ? "Delete untracked file?" : "Discard changes?",
+      title: untracked ? t("git.confirmDeleteTitle") : t("git.confirmDiscardTitle"),
       message: untracked
-        ? `${entry.path} is not tracked by git. Deleting it cannot be undone.`
-        : `Working-tree changes to ${entry.path} will be lost. Staged changes are kept.`,
-      confirmLabel: untracked ? "Delete" : "Discard",
+        ? t("git.confirmDeleteMsg", { path: entry.path })
+        : t("git.confirmDiscardMsg", { path: entry.path }),
+      confirmLabel: untracked ? t("git.confirmDeleteLabel") : t("git.confirmDiscardLabel"),
       danger: true,
     });
     if (ok) void gitStore.discard(project.id, [entry]);
@@ -244,13 +245,13 @@
         </span>
       {/if}
     {:else}
-      <span class="truncate text-xs text-muted-foreground">Not a git repo</span>
+      <span class="truncate text-xs text-muted-foreground">{t("git.notAGitRepo")}</span>
     {/if}
     {#if project?.gitRoot}
       <button
         type="button"
         class="group/root flex min-w-0 shrink items-center gap-1 rounded-full border border-border bg-[var(--color-surface-2)] px-1.5 py-0.5 text-[10px] text-muted-foreground transition hover:text-foreground"
-        title="Nested repo: {project.gitRoot} — click to switch back to the project folder"
+        title={t("git.nestedRepo", { path: project.gitRoot })}
         onclick={clearGitRoot}
       >
         <FolderGit2 class="size-3 shrink-0" />
@@ -264,8 +265,8 @@
         class="rounded p-1 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:opacity-40"
         onclick={pull}
         disabled={!gs?.isRepo || !gs.upstream || gs.pulling}
-        title="Pull (fast-forward only)"
-        aria-label="Pull"
+        title={t("git.pullFf")}
+        aria-label={t("git.pull")}
       >
         <ArrowDownToLine class="size-3.5 {gs?.pulling ? 'animate-pulse' : ''}" />
       </button>
@@ -274,8 +275,8 @@
         class="rounded p-1 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:opacity-40"
         onclick={push}
         disabled={!gs?.isRepo || gs.pushing || (gs.upstream !== null && gs.ahead === 0)}
-        title={gs?.upstream ? "Push" : "Publish branch"}
-        aria-label="Push"
+        title={gs?.upstream ? t("git.push") : t("git.publishBranch")}
+        aria-label={t("git.push")}
       >
         <ArrowUpFromLine class="size-3.5 {gs?.pushing ? 'animate-pulse' : ''}" />
       </button>
@@ -284,8 +285,8 @@
         class="rounded p-1 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:opacity-40"
         onclick={fetch}
         disabled={!gs?.isRepo || gs.fetching}
-        title="Fetch from remote"
-        aria-label="Fetch from remote"
+        title={t("git.fetchRemote")}
+        aria-label={t("git.fetchRemote")}
       >
         <CloudDownload class="size-3.5 {gs?.fetching ? 'animate-pulse' : ''}" />
       </button>
@@ -296,23 +297,23 @@
     <div
       class="flex flex-1 items-center justify-center px-3 text-center text-xs text-muted-foreground"
     >
-      Pick a project.
+      {t("git.pickProject")}
     </div>
   {:else if !gs || !gs.loaded}
     <div
       class="flex flex-1 items-center justify-center px-3 text-center text-xs text-muted-foreground/70"
     >
-      Loading…
+      {t("git.loading")}
     </div>
   {:else if !gs.isRepo}
     <div class="flex flex-1 flex-col overflow-y-auto">
       <div
         class="flex flex-col items-center gap-3 px-3 py-6 text-center text-xs text-muted-foreground"
       >
-        <span>This folder is not a git repository.</span>
+        <span>{t("git.notRepoDesc")}</span>
         {#if gs.scanning}
           <span class="text-[11px] text-muted-foreground/70">
-            Scanning for nested repositories…
+            {t("git.scanningNested")}
           </span>
         {/if}
         <button
@@ -320,7 +321,7 @@
           class="rounded-md border border-border bg-[var(--color-surface-2)] px-3 py-1.5 text-xs text-foreground/85 transition hover:bg-[var(--color-surface-3)] hover:text-foreground"
           onclick={initRepo}
         >
-          Initialize repository
+          {t("git.initRepo")}
         </button>
       </div>
       {#if !gs.scanning && gs.repos.length > 0}
@@ -330,7 +331,7 @@
           <span
             class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
           >
-            Repositories found
+            {t("git.repositoriesFound")}
           </span>
           <span
             class="rounded-full bg-[var(--color-surface-2)] px-1.5 text-[10px] text-foreground/75"
@@ -364,7 +365,7 @@
           <span
             class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
           >
-            Changes
+            {t("git.changes")}
           </span>
           {#if totalChanges > 0}
             <span
@@ -379,7 +380,7 @@
           <textarea
             class="w-full resize-none rounded-md border border-border bg-[var(--color-background)] px-2 py-1.5 text-xs text-foreground placeholder:text-muted-foreground/60 focus:border-foreground/30 focus:outline-none"
             rows="2"
-            placeholder="Commit message  (Ctrl+Enter)"
+            placeholder={t("git.commitPlaceholder")}
             bind:value={gs.message}
             onkeydown={commitKey}
             disabled={gs.committing}
@@ -392,14 +393,14 @@
               gs.staged.length === 0 ||
               !gs.message.trim()}
           >
-            Commit ({gs.staged.length})
+            {t("git.commitBtn", { count: gs.staged.length })}
           </button>
         </div>
 
         <div class="min-h-0 flex-1 overflow-y-auto">
           {#if gs.conflicts.length > 0}
             {@render section({
-              label: "Merge changes",
+              label: t("git.mergeChanges"),
               entries: gs.conflicts,
               mode: "conflict",
               open: conflictsOpen,
@@ -408,7 +409,7 @@
           {/if}
           {#if gs.staged.length > 0}
             {@render section({
-              label: "Staged",
+              label: t("git.staged"),
               entries: gs.staged,
               mode: "staged",
               open: stagedOpen,
@@ -428,7 +429,7 @@
             <div
               class="px-3 py-4 text-center text-[11px] text-muted-foreground/70"
             >
-              Working tree clean.
+              {t("git.workingTreeClean")}
             </div>
           {/if}
         </div>
@@ -442,7 +443,7 @@
           onStateChange: (r) => (resizingY = r),
         }}
         class="relative h-1 shrink-0 cursor-row-resize transition hover:bg-foreground/10 {resizingY ? 'bg-foreground/20' : 'bg-transparent'}"
-        aria-label="Resize sections"
+        aria-label={t("git.resizeSections")}
         tabindex="-1"
       ></button>
 
@@ -454,7 +455,7 @@
           <span
             class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
           >
-            Commits
+            {t("git.commits")}
           </span>
           {#if gs.log.length > 0}
             <span
@@ -473,7 +474,7 @@
             <div
               class="px-3 py-4 text-center text-[11px] text-muted-foreground/70"
             >
-              No commits.
+              {t("git.noCommits")}
             </div>
           {:else}
             <GitGraph commits={gs.log} />
@@ -485,7 +486,7 @@
                   onclick={loadMoreCommits}
                   disabled={gs.logLoadingMore}
                 >
-                  {gs.logLoadingMore ? "Loading..." : "Load more commits"}
+                  {gs.logLoadingMore ? t("git.loadingMore") : t("git.loadMoreCommits")}
                 </button>
               </div>
             {/if}
@@ -513,8 +514,8 @@
         <button
           type="button"
           class="rounded p-0.5 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground"
-          title="Unstage all"
-          aria-label="Unstage all"
+          title={t("git.unstageAll")}
+          aria-label={t("git.unstageAll")}
           onclick={() => unstagePaths(entries.map((x) => x.path))}
         >
           <Minus class="size-3" />
@@ -523,8 +524,8 @@
         <button
           type="button"
           class="rounded p-0.5 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground"
-          title="Stage all"
-          aria-label="Stage all"
+          title={t("git.stageAll")}
+          aria-label={t("git.stageAll")}
           onclick={() => stagePaths(entries.map((x) => x.path))}
         >
           <Plus class="size-3" />
@@ -556,8 +557,8 @@
               <button
                 type="button"
                 class="rounded p-0.5 text-muted-foreground hover:bg-[var(--color-surface-3)] hover:text-foreground"
-                title="Unstage"
-                aria-label="Unstage file"
+                title={t("git.unstage")}
+                aria-label={t("git.unstageFile")}
                 onclick={() => unstagePaths([entry.path])}
               >
                 <Minus class="size-3" />
@@ -566,8 +567,8 @@
               <button
                 type="button"
                 class="rounded p-0.5 text-muted-foreground hover:bg-[var(--color-surface-3)] hover:text-foreground"
-                title={entry.status === "?" ? "Delete file" : "Discard changes"}
-                aria-label={entry.status === "?" ? "Delete file" : "Discard changes"}
+                title={entry.status === "?" ? t("git.deleteFile") : t("git.discard")}
+                aria-label={entry.status === "?" ? t("git.deleteFile") : t("git.discard")}
                 onclick={() => discardEntry(entry)}
               >
                 <Trash2 class="size-3" />
@@ -575,8 +576,8 @@
               <button
                 type="button"
                 class="rounded p-0.5 text-muted-foreground hover:bg-[var(--color-surface-3)] hover:text-foreground"
-                title="Stage"
-                aria-label="Stage file"
+                title={t("git.stage")}
+                aria-label={t("git.stageFile")}
                 onclick={() => stagePaths([entry.path])}
               >
                 <Plus class="size-3" />
@@ -585,8 +586,8 @@
               <button
                 type="button"
                 class="rounded p-0.5 text-muted-foreground hover:bg-[var(--color-surface-3)] hover:text-foreground"
-                title="Mark resolved (stage)"
-                aria-label="Mark resolved"
+                title={t("git.markResolvedTitle")}
+                aria-label={t("git.markResolved")}
                 onclick={() => markResolved(entry.path)}
               >
                 <Check class="size-3" />

@@ -10,6 +10,7 @@
   import { settings } from "$lib/features/settings/store.svelte";
   import { addProjectByPath } from "$lib/features/project/api";
   import { launchBlankTerminal } from "$lib/features/thread/api";
+  import { t } from "$lib/i18n/index.svelte";
   import WorkspaceToggle from "$lib/features/workspace/WorkspaceToggle.svelte";
   import Minus from "@lucide/svelte/icons/minus";
   import Square from "@lucide/svelte/icons/square";
@@ -162,8 +163,8 @@
         ? 'bg-accent text-foreground'
         : 'text-muted-foreground hover:bg-accent hover:text-foreground'}"
       onclick={goHome}
-      title="Boite — workspace"
-      aria-label="Boite — go to workspace"
+      title={t("titlebar.workspaceTooltip")}
+      aria-label={t("titlebar.workspaceLabel")}
     >
       <BoiteLogo size={17} />
     </button>
@@ -174,8 +175,8 @@
         ? 'bg-accent text-foreground'
         : 'text-muted-foreground hover:bg-accent hover:text-foreground'}"
       onclick={showSettings}
-      title="Settings (Ctrl+,)"
-      aria-label="Settings"
+      title={t("titlebar.settingsTooltip")}
+      aria-label={t("common.settings")}
     >
       <Settings class="size-[15px]" />
     </button>
@@ -186,15 +187,25 @@
         ? 'bg-accent text-foreground'
         : 'text-muted-foreground hover:bg-accent hover:text-foreground'}"
       onclick={() => settings.toggleSidebar()}
-      title={settings.state.sidebarCollapsed ? "Show sidebar (Ctrl+B)" : "Hide sidebar (Ctrl+B)"}
-      aria-label="Toggle sidebar"
+      title={settings.state.sidebarCollapsed
+        ? t("titlebar.showSidebar")
+        : t("titlebar.hideSidebar")}
+      aria-label={t("titlebar.toggleSidebar")}
       aria-pressed={!settings.state.sidebarCollapsed}
     >
       <PanelLeft class="size-[15px]" />
     </button>
     <span class="ml-1.5 hidden text-[11px] text-muted-foreground/70 md:inline">
-      {app.threads.length} thread{app.threads.length === 1 ? "" : "s"} in
-      {app.projects.length} project{app.projects.length === 1 ? "" : "s"}
+      {t("titlebar.status", {
+        threadsCount: app.threads.length,
+        threadsLabel: t(
+          app.threads.length === 1 ? "titlebar.threadSingle" : "titlebar.threadPlural",
+        ),
+        projectsCount: app.projects.length,
+        projectsLabel: t(
+          app.projects.length === 1 ? "titlebar.projectSingle" : "titlebar.projectPlural",
+        ),
+      })}
     </span>
   </div>
 
@@ -215,8 +226,10 @@
         ? 'bg-accent text-foreground'
         : 'text-muted-foreground hover:bg-accent hover:text-foreground'}"
       onclick={() => settings.togglePanelRight()}
-      title={settings.state.rightPanel !== null ? "Hide side panel" : "Show side panel"}
-      aria-label="Toggle side panel"
+      title={settings.state.rightPanel !== null
+        ? t("titlebar.hideSidePanel")
+        : t("titlebar.showSidePanel")}
+      aria-label={t("titlebar.toggleSidePanel")}
       aria-pressed={settings.state.rightPanel !== null}
     >
       <PanelRight class="size-[15px]" />
@@ -229,8 +242,8 @@
         type="button"
         class="flex h-full w-11 items-center justify-center text-muted-foreground transition hover:bg-muted/50 hover:text-foreground"
         onclick={minimize}
-        aria-label="Minimize"
-        title="Minimize"
+        aria-label={t("titlebar.minimize")}
+        title={t("titlebar.minimize")}
       >
         <Minus class="size-3.5" />
       </button>
@@ -238,8 +251,8 @@
         type="button"
         class="flex h-full w-11 items-center justify-center text-muted-foreground transition hover:bg-muted/50 hover:text-foreground"
         onclick={toggleMax}
-        aria-label={isMaximized ? "Restore" : "Maximize"}
-        title={isMaximized ? "Restore" : "Maximize"}
+        aria-label={isMaximized ? t("titlebar.restore") : t("titlebar.maximize")}
+        title={isMaximized ? t("titlebar.restore") : t("titlebar.maximize")}
       >
         {#if isMaximized}
           <Copy class="size-3" />
@@ -251,8 +264,8 @@
         type="button"
         class="flex h-full w-11 items-center justify-center text-muted-foreground transition hover:bg-danger hover:text-white"
         onclick={close}
-        aria-label="Close"
-        title="Close"
+        aria-label={t("titlebar.close")}
+        title={t("titlebar.close")}
       >
         <X class="size-3.5" />
       </button>

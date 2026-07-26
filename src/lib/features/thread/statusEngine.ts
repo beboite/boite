@@ -4,6 +4,8 @@ import { settings } from "$lib/features/settings/store.svelte";
 import { paneStore, leavesOf } from "$lib/features/panes/store.svelte";
 import { parkedLocal } from "$lib/backend/tauri/parked";
 import { notifyWhenUnfocused } from "$lib/storage/notify";
+// Aliased: `t` is the loop variable for a thread all through this file.
+import { t as translate } from "$lib/i18n/index.svelte";
 import { ptyKill } from "$lib/storage/pty";
 import { logger } from "$lib/shared/services/logger.svelte";
 
@@ -139,7 +141,7 @@ function tick() {
     }
     if (prevStatus.get(t.id) === "running" && next === "ready") {
       const label = t.title ?? t.label;
-      void notifyWhenUnfocused(label, "Ready for input");
+      void notifyWhenUnfocused(label, translate("notification.readyForInput"));
     }
     prevStatus.set(t.id, next);
 
