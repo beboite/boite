@@ -195,7 +195,7 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "todo.terminalUnreachable": "Terminal injoignable : {error}",
 
   "todo.agentAccess": "Accès agent",
-  "todo.agentActive": "actif",
+  "todo.agentActive": "câblé au lancement",
   "todo.agentManual": "Copier la commande",
   "todo.agentCopied": "Commande copiée — lance-la dans un terminal",
   "todo.agentOff": "L'accès agent est désactivé dans les réglages.",

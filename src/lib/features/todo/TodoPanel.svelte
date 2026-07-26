@@ -38,9 +38,11 @@
   let draft = $state("");
   let shimPath = $state<string | null>(null);
 
-  // Agents in play on this project, read from its threads: what is installed
-  // says nothing about what you actually use here, and probing seven binaries
-  // on every open would cost more than it tells.
+  // Agents in play on this project, read from its threads. Deliberately not a
+  // PATH probe: this says what Boite would do at launch, not whether the binary
+  // is there. A thread whose command is missing still appears, because the
+  // wiring is still what it would get — the label says "wired at launch" rather
+  // than "active" for exactly that reason.
   const agentsHere = $derived.by(() => {
     if (!projectId) return [] as { key: string; label: string; auto: boolean; cli: string | null }[];
     const seen = new Map<
