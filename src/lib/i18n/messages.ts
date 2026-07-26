@@ -182,7 +182,7 @@ export const EN_MESSAGES = {
   "todo.removeFailed": "Could not remove the todo",
   "todo.terminalUnreachable": "Could not reach the terminal: {error}",
 
-  "todo.agentAccess": "Agent access",
+  "todo.agentAccess": "Agent access (MCP)",
   "todo.agentActive": "ready",
   "todo.agentManual": "Copy setup command",
   "todo.agentCopied": "Command copied — run it in a terminal",
@@ -190,8 +190,8 @@ export const EN_MESSAGES = {
   "todo.agentUnavailable": "The bundled shim is missing from this build.",
 
   "todo.agentNone": "No known agent runs in this project yet. Point yours at the bundled server:",
-  "todo.agentCopyPath": "Copy the server path",
-  "todo.agentPathCopied": "Path copied",
+  "todo.agentCopyPath": "Copy the MCP server path",
+  "todo.agentPathCopied": "MCP server path copied",
 
   "todo.agentAdd": "Add",
   "todo.agentAdded": "{agent} can now reach this list",

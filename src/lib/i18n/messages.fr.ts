@@ -194,7 +194,7 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "todo.removeFailed": "Impossible de supprimer la note",
   "todo.terminalUnreachable": "Terminal injoignable : {error}",
 
-  "todo.agentAccess": "Accès agent",
+  "todo.agentAccess": "Accès agent (MCP)",
   "todo.agentActive": "prêt",
   "todo.agentManual": "Copier la commande",
   "todo.agentCopied": "Commande copiée — lance-la dans un terminal",
@@ -202,8 +202,8 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "todo.agentUnavailable": "Le shim embarqué est absent de cette build.",
 
   "todo.agentNone": "Aucun agent connu ne tourne encore sur ce projet. Pointe le tien sur le serveur embarqué :",
-  "todo.agentCopyPath": "Copier le chemin du serveur",
-  "todo.agentPathCopied": "Chemin copié",
+  "todo.agentCopyPath": "Copier le chemin du serveur MCP",
+  "todo.agentPathCopied": "Chemin du serveur MCP copié",
 
   "todo.agentAdd": "Ajouter",
   "todo.agentAdded": "{agent} peut désormais accéder à cette liste",

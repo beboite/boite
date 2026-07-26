@@ -52,7 +52,6 @@ export function agentRegisterCli(key: IconKey): string | null {
   return (key && REGISTER_CLI[key]) ?? null;
 }
 
-/** Agents Boite can point at the endpoint with no setup from the user. */
 /**
  * Whether the agent's binary resolves on PATH. The panel asks before claiming
  * Boite would wire an agent: a thread can outlive the tool that made it — click
@@ -67,6 +66,7 @@ export async function agentIsInstalled(cmd: string): Promise<boolean> {
   }
 }
 
+/** Agents Boite can point at the endpoint with no setup from the user. */
 export function agentAcceptsInjection(key: IconKey): boolean {
   return !!key && key in INJECTORS;
 }
@@ -92,11 +92,6 @@ export async function mcpPaths(): Promise<McpPaths | null> {
   }
 }
 
-/**
- * Extra launch arguments giving this agent access to its project's todo list,
- * or nothing when the agent cannot take them, access is switched off, or the
- * shim is missing.
- */
 /** Runs the agent's own `mcp add`. Returns what it said, or throws its error. */
 export async function registerAgentMcp(cli: string): Promise<string> {
   const paths = await mcpPaths();
@@ -107,6 +102,11 @@ export async function registerAgentMcp(cli: string): Promise<string> {
   });
 }
 
+/**
+ * Extra launch arguments giving this agent access to its project's todo list,
+ * or nothing when the agent cannot take them, access is switched off, or the
+ * shim is missing.
+ */
 export async function mcpArgsFor(key: IconKey, enabled: boolean): Promise<string[]> {
   if (!enabled) return [];
   const injector = key ? INJECTORS[key] : undefined;
