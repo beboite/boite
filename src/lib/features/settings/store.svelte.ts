@@ -1,3 +1,4 @@
+import { backend } from "$lib/backend";
 import { loadSettings, saveSettings } from "$lib/storage/db";
 import { notifications } from "$lib/features/notifications/store.svelte";
 import { isLocaleSetting, setLocale as applyLocale } from "$lib/i18n/index.svelte";
@@ -403,6 +404,10 @@ class SettingsStore {
   async setDefaultShellId(id: string | null) {
     this.state.defaultShellId = id;
     await this.persist();
+    // Probe the new shell now rather than leaving the next shortcut to decide
+    // from the PATH alone, which is what a shell picked mid-session would
+    // otherwise do until the app restarts.
+    if (id) void backend().shell.warmShell(id).catch(() => {});
     notifications.success(id ? `Default shell: ${id}` : "Default shell: none");
   }
 
