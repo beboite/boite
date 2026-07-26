@@ -82,6 +82,8 @@ export interface Settings {
   uiScalePercent: number;
   projectOrder: string[];
   threadOrderByProject: Record<string, string[]>;
+  /** Notepad contents, keyed by project id. Workspace-scoped, not per device. */
+  todosByProject: Record<string, TodoItem[]>;
   idleTimeoutMinutes: number;
   idleAutocloseByIcon: Record<string, boolean>;
   confirmCloseThread: boolean;
@@ -101,7 +103,15 @@ export interface Settings {
 export type MotionMode = "system" | "on" | "off";
 
 
-export type RightPanelTab = "git" | "explorer" | null;
+export type RightPanelTab = "git" | "explorer" | "todo" | null;
+
+/** One line of the per-project notepad. */
+export interface TodoItem {
+  id: string;
+  text: string;
+  done: boolean;
+  createdAt: number;
+}
 
 export type View = "terminal" | "settings" | "editor";
 

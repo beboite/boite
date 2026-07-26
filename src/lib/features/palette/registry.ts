@@ -108,6 +108,12 @@ export function buildPaletteCommands(): PaletteCommand[] {
       run: () => settings.toggleRightPanel("explorer"),
     },
     {
+      id: "action:toggle-todo",
+      section: "actions",
+      label: "Toggle todo notepad",
+      run: () => settings.toggleRightPanel("todo"),
+    },
+    {
       id: "action:settings",
       section: "actions",
       label: "Open settings",
