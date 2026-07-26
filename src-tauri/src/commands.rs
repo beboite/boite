@@ -254,6 +254,68 @@ where
     tauri::async_runtime::spawn_blocking(f).await.ok().flatten()
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentMcpConfig {
+    /// Absolute path to the bundled shim.
+    pub sidecar_path: String,
+    /// Generated file to hand an agent that takes one at launch.
+    pub config_path: String,
+}
+
+/// Prepares the MCP server definition agents are pointed at, and returns where
+/// it lives.
+///
+/// A file rather than an inline JSON argument: Boite often launches through a
+/// wrap shell, where arguments are re-quoted into a command line. That quoting
+/// escapes `"` as `\"`, which POSIX shells accept and PowerShell does not — so
+/// a JSON string would break on the platform this app targets first. A path
+/// carries neither quotes nor braces and survives every shell.
+///
+/// Rewritten on every call rather than cached: the sidecar sits next to the
+/// running binary, so its path moves with an update or a reinstall, and a stale
+/// file would point an agent at a binary that is no longer there.
+#[tauri::command]
+pub async fn agent_mcp_config(app: AppHandle) -> Result<AgentMcpConfig, String> {
+    let exe = std::env::current_exe().map_err(|e| format!("current_exe: {e}"))?;
+    let dir = exe
+        .parent()
+        .ok_or_else(|| "executable has no parent directory".to_string())?;
+    let sidecar = dir.join(if cfg!(windows) {
+        "boite-mcp.exe"
+    } else {
+        "boite-mcp"
+    });
+    if !sidecar.is_file() {
+        // A dev build that never ran `bun run build:sidecar`. Say so plainly:
+        // pointing an agent at a missing binary fails later and less clearly.
+        return Err(format!("shim not found at {}", sidecar.display()));
+    }
+
+    let config_dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|e| format!("app_config_dir: {e}"))?;
+    std::fs::create_dir_all(&config_dir).map_err(|e| format!("create config dir: {e}"))?;
+    let config_path = config_dir.join("mcp-boite.json");
+
+    let body = serde_json::json!({
+        "mcpServers": {
+            "boite": { "command": sidecar.to_string_lossy() }
+        }
+    });
+    std::fs::write(
+        &config_path,
+        serde_json::to_vec_pretty(&body).map_err(|e| format!("serialize: {e}"))?,
+    )
+    .map_err(|e| format!("write mcp config: {e}"))?;
+
+    Ok(AgentMcpConfig {
+        sidecar_path: sidecar.to_string_lossy().into_owned(),
+        config_path: config_path.to_string_lossy().into_owned(),
+    })
+}
+
 /// Session ids claude currently has open. `--resume` refuses every one of
 /// them, so a thread holding a captured id has to ask before replaying it.
 #[tauri::command]

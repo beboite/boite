@@ -117,6 +117,7 @@ const DEFAULTS: Settings = {
   projectOrder: [],
   threadOrderByProject: {},
   todoPromptTemplate: DEFAULT_TODO_PROMPT,
+  agentTodoAccess: true,
   idleTimeoutMinutes: 10,
   idleAutocloseByIcon: {
     claude: true,
@@ -269,6 +270,10 @@ class SettingsStore {
           stored.threadOrderByProject && typeof stored.threadOrderByProject === "object"
             ? stored.threadOrderByProject
             : structuredClone(DEFAULTS.threadOrderByProject),
+        agentTodoAccess:
+          typeof stored.agentTodoAccess === "boolean"
+            ? stored.agentTodoAccess
+            : DEFAULTS.agentTodoAccess,
         todoPromptTemplate:
           typeof stored.todoPromptTemplate === "string" && stored.todoPromptTemplate.trim()
             ? stored.todoPromptTemplate
@@ -568,6 +573,12 @@ class SettingsStore {
   toggleRightPanel(tab: Exclude<RightPanelTab, null>) {
     this.state.rightPanel = this.state.rightPanel === tab ? null : tab;
     this.persistDeviceNow();
+  }
+
+  async setAgentTodoAccess(value: boolean) {
+    if (this.state.agentTodoAccess === value) return;
+    this.state.agentTodoAccess = value;
+    await this.persist();
   }
 
   async setTodoPromptTemplate(value: string) {

@@ -6,6 +6,8 @@
   import { todos } from "./store.svelte";
   import { t } from "$lib/i18n/index.svelte";
   import { ptyWrite } from "$lib/storage/pty";
+  import { agentAcceptsInjection, mcpConfigPath } from "$lib/features/thread/agentMcp";
+  import { writeText } from "$lib/platform/clipboard";
   import ListTodo from "@lucide/svelte/icons/list-todo";
   import CornerDownRight from "@lucide/svelte/icons/corner-down-right";
   import Trash2 from "@lucide/svelte/icons/trash-2";
@@ -29,9 +31,39 @@
   const canSend = $derived(!!target?.ptyId);
 
   let draft = $state("");
+  let shimPath = $state<string | null>(null);
+
+  // Agents in play on this project, read from its threads: what is installed
+  // says nothing about what you actually use here, and probing seven binaries
+  // on every open would cost more than it tells.
+  const agentsHere = $derived.by(() => {
+    if (!projectId) return [] as { key: string; label: string; auto: boolean }[];
+    const seen = new Map<string, { key: string; label: string; auto: boolean }>();
+    for (const th of app.threadsByProject(projectId)) {
+      const key = th.iconKey;
+      if (!key || seen.has(key)) continue;
+      seen.set(key, {
+        key,
+        label: key.charAt(0).toUpperCase() + key.slice(1),
+        auto: agentAcceptsInjection(key),
+      });
+    }
+    return [...seen.values()];
+  });
+
+  async function copySetup(label: string) {
+    if (!shimPath) return;
+    await writeText(`${label.toLowerCase()} mcp add boite -- ${shimPath}`);
+    notifications.success(t("todo.agentCopied"));
+  }
 
   onMount(() => {
     void todos.ensureLoaded();
+    void mcpConfigPath().then(() => {});
+    void import("@tauri-apps/api/core")
+      .then((m) => m.invoke<{ sidecarPath: string }>("agent_mcp_config"))
+      .then((r) => (shimPath = r.sidecarPath))
+      .catch(() => (shimPath = null));
   });
 
   function submitDraft(e: Event) {
@@ -184,6 +216,40 @@
         </div>
       {/each}
     </div>
+
+    {#if agentsHere.length > 0}
+      <div class="shrink-0 border-t border-border px-3 py-2">
+        <p class="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/70">
+          {t("todo.agentAccess")}
+        </p>
+        {#if !settings.state.agentTodoAccess}
+          <p class="text-[11px] text-muted-foreground">{t("todo.agentOff")}</p>
+        {:else if shimPath === null}
+          <p class="text-[11px] text-muted-foreground">{t("todo.agentUnavailable")}</p>
+        {:else}
+          {#each agentsHere as agent (agent.key)}
+            <div class="flex items-center gap-2 py-0.5">
+              <span class="min-w-0 flex-1 truncate text-[11.5px] text-foreground/85">
+                {agent.label}
+              </span>
+              {#if agent.auto}
+                <span class="shrink-0 text-[10.5px] text-muted-foreground">
+                  {t("todo.agentActive")}
+                </span>
+              {:else}
+                <button
+                  type="button"
+                  class="shrink-0 rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
+                  onclick={() => copySetup(agent.key)}
+                >
+                  {t("todo.agentManual")}
+                </button>
+              {/if}
+            </div>
+          {/each}
+        {/if}
+      </div>
+    {/if}
 
     <form class="shrink-0 border-t border-border p-2" onsubmit={submitDraft}>
       <input

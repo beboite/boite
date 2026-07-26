@@ -182,6 +182,13 @@ export const EN_MESSAGES = {
   "todo.removeFailed": "Could not remove the todo",
   "todo.terminalUnreachable": "Could not reach the terminal: {error}",
 
+  "todo.agentAccess": "Agent access",
+  "todo.agentActive": "active",
+  "todo.agentManual": "Copy setup command",
+  "todo.agentCopied": "Command copied — run it in a terminal",
+  "todo.agentOff": "Agent access is off in settings.",
+  "todo.agentUnavailable": "The bundled shim is missing from this build.",
+
   "notification.readyForInput": "Ready for input",
   "branchDialog.uncommittedChanges": "You have uncommitted changes",
   "branchDialog.descriptionCreating": "Creating",
