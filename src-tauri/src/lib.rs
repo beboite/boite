@@ -140,16 +140,21 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_opener::init())
-        // Everything but DECORATIONS: that flag replays whatever the window had
-        // last run, so a state file written while the window was frameless keeps
-        // calling set_decorations(false) at every launch — which on macOS strips
-        // the traffic lights the config just asked for. Decorations belong to the
-        // config, not to the restored session.
+        // Everything but DECORATIONS and VISIBLE: both replay whatever the window
+        // had last run, and both belong to the config, not to the restored
+        // session. DECORATIONS: a state file written while the window was
+        // frameless keeps calling set_decorations(false) at every launch — which
+        // on macOS strips the traffic lights the config just asked for. VISIBLE:
+        // the plugin calls show() as it restores, at window creation, which
+        // defeats `"visible": false` and the whole finish_boot gate below — the
+        // window came up before the frontend had painted, so every launch after
+        // the first flashed the webview's blank backdrop.
         .plugin(
             tauri_plugin_window_state::Builder::default()
                 .with_state_flags(
                     tauri_plugin_window_state::StateFlags::all()
-                        & !tauri_plugin_window_state::StateFlags::DECORATIONS,
+                        & !tauri_plugin_window_state::StateFlags::DECORATIONS
+                        & !tauri_plugin_window_state::StateFlags::VISIBLE,
                 )
                 .build(),
         )
