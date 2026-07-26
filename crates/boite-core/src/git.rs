@@ -1177,12 +1177,20 @@ mod branch_tests {
 
     impl TestRepo {
         fn new() -> Self {
+            // A clock alone is not enough to make this unique. macOS reports
+            // microseconds through the nanosecond API, so two of these threads
+            // starting in the same microsecond built the same path, ran
+            // `git init` into it at once, and one of them died copying a
+            // template hook that the other had just written. The counter makes
+            // the name unique whatever the clock's resolution.
+            static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
             let nonce = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_nanos();
+            let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let path = std::env::temp_dir().join(format!(
-                "boite-git-branch-test-{}-{nonce}",
+                "boite-git-branch-test-{}-{nonce}-{seq}",
                 std::process::id()
             ));
             fs::create_dir_all(&path).unwrap();
