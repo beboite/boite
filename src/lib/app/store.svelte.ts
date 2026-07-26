@@ -479,9 +479,9 @@ class AppState {
     t.status = status;
     t.exitCode = exitCode;
     if (status !== "stopped" && t.autoSlept) {
-      // Route through setThreadAutoSlept so the flag clear is persisted;
-      // otherwise auto-slept threads keep their zZ animation in DB even
-      // after the user wakes them, and reappear asleep on next launch.
+      // Drop the sleep badge as soon as the thread leaves "stopped". The flag
+      // is in-memory only (see setThreadAutoSlept), so this clear — not any
+      // write — is the whole reason a woken thread stops animating.
       this.setThreadAutoSlept(id, false);
     }
     // Remote: the server persists runtime state and pushes it back; a client
