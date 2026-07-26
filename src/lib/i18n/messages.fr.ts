@@ -201,6 +201,10 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "todo.agentOff": "L'accès agent est désactivé dans les réglages.",
   "todo.agentUnavailable": "Le shim embarqué est absent de cette build.",
 
+  "todo.agentNone": "Aucun agent connu ne tourne encore sur ce projet. Pointe le tien sur le serveur embarqué :",
+  "todo.agentCopyPath": "Copier le chemin du serveur",
+  "todo.agentPathCopied": "Chemin copié",
+
   "notification.readyForInput": "Prêt pour saisie",
 
   "setup.title": "Bienvenue dans Boite",

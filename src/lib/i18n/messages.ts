@@ -189,6 +189,10 @@ export const EN_MESSAGES = {
   "todo.agentOff": "Agent access is off in settings.",
   "todo.agentUnavailable": "The bundled shim is missing from this build.",
 
+  "todo.agentNone": "No known agent runs in this project yet. Point yours at the bundled server:",
+  "todo.agentCopyPath": "Copy the server path",
+  "todo.agentPathCopied": "Path copied",
+
   "notification.readyForInput": "Ready for input",
   "branchDialog.uncommittedChanges": "You have uncommitted changes",
   "branchDialog.descriptionCreating": "Creating",
