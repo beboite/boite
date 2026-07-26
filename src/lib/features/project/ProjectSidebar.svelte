@@ -822,7 +822,7 @@
           {:else}
             <button
               type="button"
-              class="min-w-0 flex-1 truncate text-left text-[13px] font-medium text-foreground/90 transition group-hover/project:text-foreground"
+              class="min-w-0 flex-1 truncate text-left text-[13px] font-medium leading-[19px] text-foreground/90 transition group-hover/project:text-foreground"
               title={project.cwd}
               onclick={() => {
                 if (consumeDragClick(project.id)) return;
@@ -948,8 +948,13 @@
                       aria-label="Thread name"
                     />
                   {:else}
+                    <!-- Same line box the rename input uses. Left to the font,
+                         this height is SF Pro on macOS and Segoe UI on Windows,
+                         and the row would resize on edit wherever the two
+                         disagree — Inter is only a preference here, nothing
+                         ships it. -->
                     <span
-                      class="min-w-0 flex-1 truncate text-left text-[13px]"
+                      class="min-w-0 flex-1 truncate text-left text-[13px] leading-[19px]"
                       title={thread.title ?? thread.label}
                     >
                       {thread.title ?? thread.label}
@@ -1013,7 +1018,7 @@
       keepAwake={(threadDragGhost.thread.keepAwake ?? false) && !!threadDragGhost.thread.ptyId}
     />
     <span
-      class="min-w-0 flex-1 truncate text-left text-[13px]"
+      class="min-w-0 flex-1 truncate text-left text-[13px] leading-[19px]"
       title={threadDragGhost.thread.title ?? threadDragGhost.thread.label}
     >
       {threadDragGhost.thread.title ?? threadDragGhost.thread.label}
