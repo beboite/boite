@@ -100,7 +100,6 @@ export interface Settings {
 // override the OS either way.
 export type MotionMode = "system" | "on" | "off";
 
-export type LocaleSetting = "system" | "en" | "fr";
 
 export type RightPanelTab = "git" | "explorer" | null;
 
