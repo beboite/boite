@@ -3,8 +3,10 @@
   import { resizeHandle } from "$lib/shared/actions/resizeHandle";
   import GitPanel from "$lib/features/git/GitPanel.svelte";
   import ExplorerPanel from "$lib/features/explorer/ExplorerPanel.svelte";
+  import TodoPanel from "$lib/features/todo/TodoPanel.svelte";
   import GitBranch from "@lucide/svelte/icons/git-branch";
   import FolderTree from "@lucide/svelte/icons/folder-tree";
+  import ListTodo from "@lucide/svelte/icons/list-todo";
   import X from "@lucide/svelte/icons/x";
 
   let panelEl: HTMLElement | null = $state(null);
@@ -16,7 +18,7 @@
     settings.setRightPanelWidth(rect.right - e.clientX);
   }
 
-  function selectTab(tab: "git" | "explorer") {
+  function selectTab(tab: "git" | "explorer" | "todo") {
     void settings.setRightPanel(tab);
   }
 
@@ -51,6 +53,15 @@
     </button>
     <button
       type="button"
+      class="flex items-center gap-1.5 rounded px-2 py-1 text-[11px] font-medium transition {settings.state.rightPanel === 'todo' ? 'bg-[var(--color-surface-2)] text-foreground' : 'text-muted-foreground hover:text-foreground'}"
+      onclick={() => selectTab("todo")}
+      aria-pressed={settings.state.rightPanel === "todo"}
+    >
+      <ListTodo class="size-3.5" />
+      <span>Todo</span>
+    </button>
+    <button
+      type="button"
       class="ml-auto rounded p-1 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground"
       onclick={close}
       title="Close panel"
@@ -65,6 +76,8 @@
       <GitPanel />
     {:else if settings.state.rightPanel === "explorer"}
       <ExplorerPanel />
+    {:else if settings.state.rightPanel === "todo"}
+      <TodoPanel />
     {/if}
   </div>
 
