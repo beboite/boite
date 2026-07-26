@@ -1,5 +1,5 @@
 import Database from "@tauri-apps/plugin-sql";
-import type { Project, Settings, Thread } from "$lib/types";
+import type { Project, Settings, Thread, TodoItem, TodoState } from "$lib/types";
 import type { DbApi } from "../types";
 
 let db: Database | null = null;
@@ -12,6 +12,34 @@ function getDb(): Database {
     db = Database.get("sqlite:boite.db");
   }
   return db;
+}
+
+interface TodoRow {
+  id: string;
+  project_id: string;
+  text: string;
+  state: string;
+  note: string | null;
+  position: number;
+  created_at: number;
+  updated_at: number;
+}
+
+// The MCP endpoint writes this table too, so a row can carry a state this build
+// does not know. Anything unrecognised reads as open rather than vanishing.
+function rowToTodo(r: TodoRow): TodoItem {
+  const state: TodoState =
+    r.state === "done" || r.state === "claimed" ? r.state : "open";
+  return {
+    id: r.id,
+    projectId: r.project_id,
+    text: r.text,
+    state,
+    note: r.note,
+    position: r.position,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
 }
 
 interface ProjectRow {
@@ -177,5 +205,35 @@ export const tauriDb: DbApi = {
       "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
       ["main", JSON.stringify(settings)],
     );
+  },
+
+  async loadTodos(): Promise<TodoItem[]> {
+    const rows = await getDb().select<TodoRow[]>(
+      "SELECT id, project_id, text, state, note, position, created_at, updated_at \
+       FROM todos ORDER BY position ASC, created_at ASC",
+    );
+    return rows.map(rowToTodo);
+  },
+
+  async saveTodo(todo: TodoItem): Promise<void> {
+    await getDb().execute(
+      "INSERT OR REPLACE INTO todos \
+       (id, project_id, text, state, note, position, created_at, updated_at) \
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      [
+        todo.id,
+        todo.projectId,
+        todo.text,
+        todo.state,
+        todo.note,
+        todo.position,
+        todo.createdAt,
+        todo.updatedAt,
+      ],
+    );
+  },
+
+  async deleteTodo(id: string): Promise<void> {
+    await getDb().execute("DELETE FROM todos WHERE id = ?", [id]);
   },
 };

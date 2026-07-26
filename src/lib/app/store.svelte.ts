@@ -28,6 +28,7 @@ import {
   pruneRenamed,
 } from "$lib/features/thread/renamed";
 import { gitStore } from "$lib/features/git/store.svelte";
+import { todos } from "$lib/features/todo/store.svelte";
 import { notifications } from "$lib/features/notifications/store.svelte";
 import { backend, workspace, type Backend } from "$lib/backend";
 import { device } from "$lib/features/settings/device.svelte";
@@ -432,6 +433,12 @@ class AppState {
       }
       case "project.changed": {
         void this.refreshRemoteProjects().catch(() => {});
+        break;
+      }
+      // The writer may be an agent on the server rather than a client, so the
+      // event carries no row — reload instead of patching one in.
+      case "todos.changed": {
+        void todos.reload().catch(() => {});
         break;
       }
       // Another device renamed/recolored this boite. Cosmetic; update the

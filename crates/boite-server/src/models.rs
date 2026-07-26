@@ -1,5 +1,23 @@
 use serde::{Deserialize, Serialize};
 
+/// Mirrors the frontend TodoItem. `state` is `open`, `claimed` or `done`:
+/// an agent may only reach `claimed`, so the list records what a human
+/// confirmed rather than what a model asserted.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct Todo {
+    pub id: String,
+    pub project_id: String,
+    pub text: String,
+    pub state: String,
+    #[serde(default)]
+    pub note: Option<String>,
+    #[serde(default)]
+    pub position: i64,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct Project {

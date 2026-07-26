@@ -17,7 +17,7 @@ import type {
   ShellApi,
   WorkspaceMetaApi,
 } from "../types";
-import type { Project, Settings, Thread } from "$lib/types";
+import type { Project, Settings, Thread, TodoItem } from "$lib/types";
 import type { ShellOption } from "$lib/storage/platform.svelte";
 import { Socket, type ConnState } from "./socket";
 
@@ -152,6 +152,9 @@ export class RemoteBackend implements Backend {
       loadSettings: () =>
         rpc("settings.get").then((r) => (r.settings ?? {}) as Partial<Settings>),
       saveSettings: (s) => rpc("settings.set", { settings: s }).then(() => {}),
+      loadTodos: () => rpc("todo.list").then((r) => (r.todos ?? []) as TodoItem[]),
+      saveTodo: (todo) => rpc("todo.save", { todo }).then(() => {}),
+      deleteTodo: (id) => rpc("todo.delete", { todoId: id }).then(() => {}),
     };
 
     this.git = {

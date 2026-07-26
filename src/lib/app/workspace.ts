@@ -6,6 +6,7 @@ import { settings } from "$lib/features/settings/store.svelte";
 import { platform } from "$lib/storage/platform.svelte";
 import { resetShellCache } from "$lib/storage/shell";
 import { gitStore } from "$lib/features/git/store.svelte";
+import { todos } from "$lib/features/todo/store.svelte";
 import { notifications } from "$lib/features/notifications/store.svelte";
 import { device, type BoiteEntry } from "$lib/features/settings/device.svelte";
 import { registerPush } from "$lib/features/push/api";
@@ -22,6 +23,7 @@ export function defaultRemoteWsUrl(): string {
 // instead of mixing two workspaces.
 function resetStores() {
   settings.reset();
+  todos.reset();
   platform.reset();
   resetShellCache();
   gitStore.reset();

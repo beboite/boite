@@ -82,8 +82,12 @@ export interface Settings {
   uiScalePercent: number;
   projectOrder: string[];
   threadOrderByProject: Record<string, string[]>;
-  /** Notepad contents, keyed by project id. Workspace-scoped, not per device. */
-  todosByProject: Record<string, TodoItem[]>;
+  /**
+   * Scaffold wrapped around a todo before it reaches an agent. `{{task}}` and
+   * `{{id}}` are substituted; the id is what lets the agent report back through
+   * the MCP endpoint.
+   */
+  todoPromptTemplate: string;
   idleTimeoutMinutes: number;
   idleAutocloseByIcon: Record<string, boolean>;
   confirmCloseThread: boolean;
@@ -105,12 +109,25 @@ export type MotionMode = "system" | "on" | "off";
 
 export type RightPanelTab = "git" | "explorer" | "todo" | null;
 
+/**
+ * Where a todo stands. `claimed` exists because an agent that can tick its own
+ * boxes will tick them: when one reports a task finished it lands here with its
+ * summary, and only a human moves it to `done`. Without that split the list
+ * would record what the model asserted rather than what was verified.
+ */
+export type TodoState = "open" | "claimed" | "done";
+
 /** One line of the per-project notepad. */
 export interface TodoItem {
   id: string;
+  projectId: string;
   text: string;
-  done: boolean;
+  state: TodoState;
+  /** What the agent said it did, set when it moves the item to `claimed`. */
+  note: string | null;
+  position: number;
   createdAt: number;
+  updatedAt: number;
 }
 
 export type View = "terminal" | "settings" | "editor";
