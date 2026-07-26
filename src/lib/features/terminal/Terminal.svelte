@@ -16,7 +16,7 @@
     ptyRelease,
   } from "$lib/storage/pty";
   import type { PtyEvent } from "$lib/storage/pty";
-  import { backendFor, workspace } from "$lib/backend";
+  import { backendFor } from "$lib/backend";
   import { parkedLocal } from "$lib/backend/tauri/parked";
   import { app } from "$lib/app/store.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
