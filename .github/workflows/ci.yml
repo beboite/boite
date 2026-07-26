@@ -16,8 +16,10 @@ jobs:
           bun-version: latest
       - name: Install
         run: bun install --frozen-lockfile
-      - name: Sync + svelte-check
+      - name: Sync + svelte-check + oxlint
         run: bun run check
+      - name: Unit tests
+        run: bun run test
       - name: Build (vite only)
         run: bun run build
 
@@ -38,20 +40,21 @@ jobs:
             librsvg2-dev \
             libsoup-3.0-dev \
             libjavascriptcoregtk-4.1-dev
+      # Cargo workspace: the build dir is the repo-root target/, and the only
+      # lockfile is the root one. Keying on src-tauri/Cargo.lock cached nothing
+      # and left crates/ out of every job below.
       - name: Cache cargo
         uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            src-tauri/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
       - name: cargo check
-        working-directory: src-tauri
-        run: cargo check
+        run: cargo check --workspace --all-targets
       - name: cargo clippy
-        working-directory: src-tauri
-        run: cargo clippy --no-deps -- -D warnings
+        run: cargo clippy --workspace --all-targets --no-deps -- -D warnings
       - name: cargo test
-        working-directory: src-tauri
-        run: cargo test
+        run: cargo test --workspace
