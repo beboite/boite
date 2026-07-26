@@ -68,6 +68,9 @@ export interface Shortcut {
 
 export interface Settings {
   shortcuts: Shortcut[];
+  // Preset shortcut ids already backfilled once. Without this, deleting a
+  // late-added preset would see it re-seeded on every launch.
+  seededPresets: string[];
   powershellNewline: boolean;
   powershellNoProfile: boolean;
   defaultShellId: string | null;
