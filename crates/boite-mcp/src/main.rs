@@ -145,13 +145,12 @@ fn reply_tool_error(out: &mut impl Write, id: &Value, message: &str) {
 }
 
 fn main() {
-    let host = match Host::from_env() {
-        Ok(h) => h,
-        Err(e) => {
-            eprintln!("[boite-mcp] {e}");
-            std::process::exit(1);
-        }
-    };
+    // Resolved but not required. Exiting here would kill the connection during
+    // the handshake, and a client can only report that as "connection closed" —
+    // hiding a cause that is one sentence long. Answering initialize and failing
+    // at the call instead puts that sentence in front of the agent, which is the
+    // only place anyone will read it.
+    let host = Host::from_env();
 
     let stdin = std::io::stdin();
     let mut stdout = std::io::stdout();
@@ -189,7 +188,11 @@ fn main() {
                     .get("arguments")
                     .cloned()
                     .unwrap_or_else(|| json!({}));
-                match call_tool(&host, name, &args) {
+                let called = match &host {
+                    Ok(h) => call_tool(h, name, &args),
+                    Err(e) => Err(e.clone()),
+                };
+                match called {
                     Ok(text) => reply(
                         &mut stdout,
                         &id,
