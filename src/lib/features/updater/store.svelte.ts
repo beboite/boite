@@ -50,9 +50,16 @@ class UpdaterStore {
     return Math.min(1, received / total);
   }
 
+  // A dev build has no bundle to swap: the binary sits in target/debug and the
+  // release the endpoint advertises would be installed over nothing sensible.
+  // Nothing about the updater should run outside a packaged app.
+  get enabled(): boolean {
+    return hasTauri() && !import.meta.env.DEV;
+  }
+
   /** Desktop boot hook. Idempotent; returns a teardown for the caller's onMount. */
   start(): () => void {
-    if (!hasTauri()) return () => {};
+    if (!this.enabled) return () => {};
     const first = setTimeout(() => void this.run(false), FIRST_CHECK_DELAY_MS);
     return () => {
       clearTimeout(first);
@@ -72,7 +79,7 @@ class UpdaterStore {
   }
 
   private async run(manual: boolean): Promise<void> {
-    if (!hasTauri() || this.inFlight) return;
+    if (!this.enabled || this.inFlight) return;
     // Something is already downloaded and waiting: re-checking would only
     // discard it for the same release.
     if (this.status.kind === "ready" || this.status.kind === "installing") {
