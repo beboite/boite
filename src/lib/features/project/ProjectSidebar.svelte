@@ -801,7 +801,7 @@
           </div>
           {#if renaming && renaming.kind === "project" && renaming.id === project.id}
             <input
-              class="min-w-0 flex-1 rounded-sm border border-foreground/25 bg-[var(--color-surface-2)] px-1 text-[13px] font-medium text-foreground outline-none"
+              class="min-w-0 flex-1 rounded-sm bg-[var(--color-surface-2)] px-1 py-0 text-[13px] font-medium leading-[19px] text-foreground outline-none ring-1 ring-foreground/25"
               bind:value={renaming.value}
               use:selectOnMount
               onclick={(e) => e.stopPropagation()}
@@ -925,8 +925,11 @@
                     />
                   </button>
                   {#if renaming && renaming.kind === "thread" && renaming.id === thread.id}
+                    <!-- Ring, not border, and the row's own line-height: an
+                         input that brings its own box metrics makes the row
+                         taller than the label it replaced, and the list jumps. -->
                     <input
-                      class="min-w-0 flex-1 rounded-sm border border-foreground/25 bg-[var(--color-surface-2)] px-1 text-[13px] text-foreground outline-none"
+                      class="min-w-0 flex-1 rounded-sm bg-[var(--color-surface-2)] px-1 py-0 text-[13px] leading-[19px] text-foreground outline-none ring-1 ring-foreground/25"
                       bind:value={renaming.value}
                       use:selectOnMount
                       onclick={(e) => e.stopPropagation()}
