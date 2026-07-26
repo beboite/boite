@@ -349,6 +349,33 @@ pub async fn git_find_repos(
 }
 
 #[tauri::command]
+pub async fn git_branches(
+    scope: State<'_, ProjectRoots>,
+    path: String,
+) -> Result<Vec<git::BranchInfo>, String> {
+    scope.ensure_allowed(&path)?;
+    tauri::async_runtime::spawn_blocking(move || git::branches_blocking(&path))
+        .await
+        .map_err(|e| format!("git_branches task failed: {e}"))?
+}
+
+#[tauri::command]
+pub async fn git_switch_branch(
+    scope: State<'_, ProjectRoots>,
+    path: String,
+    name: String,
+    create: bool,
+    stash: bool,
+) -> Result<git::BranchChangeResult, String> {
+    scope.ensure_allowed(&path)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        git::switch_branch_blocking(&path, &name, create, stash)
+    })
+    .await
+    .map_err(|e| format!("git_switch_branch task failed: {e}"))?
+}
+
+#[tauri::command]
 pub async fn git_status(
     scope: State<'_, ProjectRoots>,
     path: String,

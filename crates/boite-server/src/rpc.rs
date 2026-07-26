@@ -502,6 +502,24 @@ async fn dispatch_git(state: &AppState, method: &str, params: Value) -> Result<V
             let r = blocking(move || git::find_repos_blocking(&p, 3)).await??;
             Ok(json!({ "repos": r }))
         }
+        "git.branches" => {
+            let r = blocking(move || git::branches_blocking(&p)).await??;
+            Ok(json!({ "branches": r }))
+        }
+        "git.switchBranch" => {
+            let name = str_param(&params, "name")?;
+            let create = params
+                .get("create")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let stash = params
+                .get("stash")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let r =
+                blocking(move || git::switch_branch_blocking(&p, &name, create, stash)).await??;
+            Ok(serde_json::to_value(r).unwrap())
+        }
         "git.status" => {
             let r = blocking(move || git::status_blocking(&p)).await??;
             Ok(json!({ "entries": r }))
