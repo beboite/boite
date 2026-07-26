@@ -65,6 +65,14 @@ pub async fn pty_spawn(
         .map_err(|e| format!("pty spawn task failed: {e}"))?
 }
 
+// Starts the shell's function/alias probe ahead of the first spawn, so the
+// decision "does this shortcut need a shell" is already answerable by the time
+// the user clicks one. Returns immediately; the probe runs on its own thread.
+#[tauri::command]
+pub fn pty_warm_shell(manager: State<'_, PtyManager>, shell_id: String) {
+    manager.warm_shell_names(&shell_id);
+}
+
 // Attach-or-spawn keyed by thread id. Reattaches to a still-alive detached PTY
 // (replaying its scrollback ring and resizing to repaint) so local processes
 // survive a workspace switch; otherwise spawns a fresh process.

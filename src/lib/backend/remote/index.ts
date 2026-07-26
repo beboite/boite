@@ -94,6 +94,7 @@ export class RemoteBackend implements Backend {
             cwd: spec.cwd,
             cols: spec.cols,
             rows: spec.rows,
+            wrap: spec.wrap,
           });
           res = await socket.attach(threadId, spec.cols, spec.rows, onOutput, onReset);
         }
@@ -194,6 +195,7 @@ export class RemoteBackend implements Backend {
 
     this.shell = {
       defaultShell: () => rpc("shell.default").then((r) => r.shell as string),
+      warmShell: (shellId) => rpc("shell.warm", { shellId }).then(() => undefined),
       availableShells: () =>
         rpc("shell.available").then((r) =>
           (r.shells as Array<{ id: string; label: string; cmd: string; args: string[]; icon_key: string | null }>).map(

@@ -133,6 +133,10 @@ impl Registry {
             .collect()
     }
 
+    pub fn warm_shell_names(&self, shell_id: &str) {
+        self.pty.warm_shell_names(shell_id);
+    }
+
     pub fn spawn(&self, thread_id: String, spec: PtySpawnArgs) -> Result<String, String> {
         // Attach-or-spawn is decided by the caller; if a stale live PTY exists
         // for this thread, replace it.
