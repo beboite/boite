@@ -28,8 +28,13 @@
   let dialogEl: HTMLDivElement | null = $state(null);
   let carryButton: HTMLButtonElement | null = $state(null);
 
+  // Same reason ConfirmDialog does this: without the restore, closing leaves
+  // focus on a removed button, it lands on <body>, and the terminal you were
+  // typing in silently stops receiving keys until you click it again.
   $effect(() => {
+    const previous = document.activeElement as HTMLElement | null;
     void tick().then(() => carryButton?.focus());
+    return () => previous?.focus?.();
   });
 
   function backdropClick(event: MouseEvent) {
