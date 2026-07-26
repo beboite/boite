@@ -13,7 +13,7 @@
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import GripVertical from "@lucide/svelte/icons/grip-vertical";
   import Star from "@lucide/svelte/icons/star";
-  import { i18n } from "$lib/i18n/index.svelte";
+  import { t } from "$lib/i18n/index.svelte";
 
   interface SetupItem { id: string; label: string; command: string; iconKey: string | null; executable: string; docUrl: string; installed: boolean; enabled: boolean; runtime?: boolean; description?: string; linkLabel?: string; }
 
@@ -64,14 +64,14 @@
         <div class="mb-6 flex size-24 items-center justify-center rounded-lg border border-border bg-[var(--color-surface-2)]">
           <BoiteLogo size={64} />
         </div>
-        <h1 class="text-3xl font-bold text-foreground">{i18n.t("setup.title")}</h1>
-        <p class="mt-3 max-w-md text-sm leading-relaxed text-muted-foreground">{i18n.t("setup.desc")}</p>
+        <h1 class="text-3xl font-bold text-foreground">{t("setup.title")}</h1>
+        <p class="mt-3 max-w-md text-sm leading-relaxed text-muted-foreground">{t("setup.desc")}</p>
         
         <!-- Language Selector -->
         <div class="mt-6 flex items-center justify-center gap-2">
-          <span class="text-xs text-muted-foreground">{i18n.t("setup.language")} :</span>
+          <span class="text-xs text-muted-foreground">{t("setup.language")} :</span>
           <div class="flex gap-1.5">
-            {#each [{ id: "system" as const, labelKey: "appearance.lang_system" }, { id: "fr" as const, labelKey: "appearance.lang_fr" }, { id: "en" as const, labelKey: "appearance.lang_en" }] as lang}
+            {#each [{ id: "system" as const, labelKey: "appearance.langSystem" }, { id: "fr" as const, labelKey: "appearance.langFr" }, { id: "en" as const, labelKey: "appearance.langEn" }] as lang}
               <button
                 type="button"
                 class="rounded-md border px-2.5 py-1 text-xs transition
@@ -80,7 +80,7 @@
                     : 'border-border bg-[var(--color-surface-2)] text-muted-foreground hover:border-foreground/30 hover:text-foreground'}"
                 onclick={() => settings.setLocale(lang.id)}
               >
-                {i18n.t(lang.labelKey)}
+                {t(lang.labelKey)}
               </button>
             {/each}
           </div>
@@ -88,19 +88,19 @@
 
         <div class="mt-8 flex w-full max-w-sm flex-col gap-3 sm:flex-row">
           <button type="button" onclick={() => step = 2} class="flex flex-1 items-center justify-center gap-2 rounded-md bg-foreground px-5 py-3 text-sm font-semibold text-background transition hover:bg-neutral-200">
-            {i18n.t("setup.start")} <ArrowRight class="size-4" />
+            {t("setup.start")} <ArrowRight class="size-4" />
           </button>
           <button type="button" onclick={() => void settings.setSetupCompleted(true)} class="flex flex-1 items-center justify-center rounded-md border border-border bg-[var(--color-surface-2)] px-5 py-3 text-sm font-medium text-muted-foreground transition hover:text-foreground">
-            {i18n.t("setup.skip")}
+            {t("setup.skip")}
           </button>
         </div>
       </div>
     {:else if step === 2}
       <div class="flex h-full min-h-0 flex-col">
         <div class="border-b border-border/50 pb-4">
-          <p class="text-[11px] font-semibold uppercase text-muted-foreground">{i18n.t("setup.step_count", { current: 1, total: 3 })}</p>
-          <h2 class="mt-1 text-xl font-bold text-foreground">{i18n.t("setup.recommendations_title")}</h2>
-          <p class="mt-1 text-xs text-muted-foreground">{i18n.t("setup.recommendations_desc")}</p>
+          <p class="text-[11px] font-semibold uppercase text-muted-foreground">{t("setup.step_count", { current: 1, total: 3 })}</p>
+          <h2 class="mt-1 text-xl font-bold text-foreground">{t("setup.recommendations_title")}</h2>
+          <p class="mt-1 text-xs text-muted-foreground">{t("setup.recommendations_desc")}</p>
         </div>
         <div class="mt-5 grid grid-cols-1 gap-3 md:grid-cols-3">
           {#each recommendations as item (item.id)}
@@ -112,12 +112,12 @@
                     <h3 class="text-sm font-semibold text-foreground">{item.label}</h3>
                     <Star class="size-3.5 fill-yellow-400 text-yellow-400" />
                   </div>
-                  <p class="text-[10px] font-medium uppercase text-[var(--color-awake)]">{i18n.t("setup.recommended")}</p>
+                  <p class="text-[10px] font-medium uppercase text-[var(--color-awake)]">{t("setup.recommended")}</p>
                 </div>
               </div>
-              <p class="mt-4 text-xs leading-relaxed text-muted-foreground">{i18n.t(`setup.recommendation_${item.id}_desc`)}</p>
+              <p class="mt-4 text-xs leading-relaxed text-muted-foreground">{t(`setup.recommendation_${item.id}_desc`)}</p>
               <a href={item.docUrl} target="_blank" rel="noopener noreferrer" class="mt-auto flex items-center justify-center gap-1 pt-4 rounded-md border border-border bg-[var(--color-surface-2)] px-2 py-1.5 text-xs text-muted-foreground transition hover:text-foreground">
-                <ExternalLink class="size-3" /> {i18n.t(`setup.recommendation_${item.id}_link`)}
+                <ExternalLink class="size-3" /> {t(`setup.recommendation_${item.id}_link`)}
               </a>
             </article>
           {/each}
@@ -127,12 +127,12 @@
               <ShortcutIcon iconKey="codex" size={26} />
               <div>
                 <h3 class="text-sm font-semibold text-foreground">ChatGPT</h3>
-                <p class="mt-1 text-xs text-muted-foreground">{i18n.t("setup.openai")}</p>
+                <p class="mt-1 text-xs text-muted-foreground">{t("setup.openai")}</p>
               </div>
             </div>
-            <p class="mt-4 text-xs leading-relaxed text-muted-foreground">{i18n.t("setup.chatgpt_desc")}</p>
+            <p class="mt-4 text-xs leading-relaxed text-muted-foreground">{t("setup.chatgpt_desc")}</p>
             <a href="https://chatgpt.com" target="_blank" rel="noopener noreferrer" class="mt-auto flex items-center justify-center gap-1 rounded-md border border-border bg-[var(--color-surface-3)] px-2 py-1.5 text-xs text-muted-foreground transition hover:text-foreground">
-              <ExternalLink class="size-3" /> {i18n.t("setup.chatgpt_open")}
+              <ExternalLink class="size-3" /> {t("setup.chatgpt_open")}
             </a>
           </article>
           
@@ -141,21 +141,21 @@
               <ShortcutIcon iconKey="claude" size={26} />
               <div>
                 <h3 class="text-sm font-semibold text-foreground">Claude</h3>
-                <p class="mt-1 text-xs text-muted-foreground">{i18n.t("setup.anthropic")}</p>
+                <p class="mt-1 text-xs text-muted-foreground">{t("setup.anthropic")}</p>
               </div>
             </div>
-            <p class="mt-4 text-xs leading-relaxed text-muted-foreground">{i18n.t("setup.claude_desc")}</p>
+            <p class="mt-4 text-xs leading-relaxed text-muted-foreground">{t("setup.claude_desc")}</p>
             <a href="https://claude.ai" target="_blank" rel="noopener noreferrer" class="mt-auto flex items-center justify-center gap-1 rounded-md border border-border bg-[var(--color-surface-3)] px-2 py-1.5 text-xs text-muted-foreground transition hover:text-foreground">
-              <ExternalLink class="size-3" /> {i18n.t("setup.claude_open")}
+              <ExternalLink class="size-3" /> {t("setup.claude_open")}
             </a>
           </article>
         </div>
         <div class="mt-auto flex items-center justify-between border-t border-border/50 pt-5">
           <button type="button" onclick={() => step = 1} class="flex items-center gap-1.5 px-2 py-2 text-sm text-muted-foreground transition hover:text-foreground">
-            <ArrowLeft class="size-4" /> {i18n.t("setup.back")}
+            <ArrowLeft class="size-4" /> {t("setup.back")}
           </button>
           <button type="button" onclick={() => step = 3} class="flex items-center gap-1.5 rounded-md bg-foreground px-5 py-2.5 text-sm font-semibold text-background transition hover:bg-neutral-200">
-            {i18n.t("setup.config_agents")} <ArrowRight class="size-4" />
+            {t("setup.config_agents")} <ArrowRight class="size-4" />
           </button>
         </div>
       </div>
@@ -163,18 +163,18 @@
       <div class="flex h-full min-h-0 flex-col">
         <div class="flex flex-wrap items-start justify-between gap-4 border-b border-border/50 pb-4">
           <div>
-            <p class="text-[11px] font-semibold uppercase text-muted-foreground">{i18n.t("setup.step_count", { current: 2, total: 3 })}</p>
-            <h2 class="mt-1 text-xl font-bold text-foreground">{i18n.t("setup.agents_title")}</h2>
-            <p class="mt-1 text-xs text-muted-foreground">{i18n.t("setup.agents_desc")}</p>
+            <p class="text-[11px] font-semibold uppercase text-muted-foreground">{t("setup.step_count", { current: 2, total: 3 })}</p>
+            <h2 class="mt-1 text-xl font-bold text-foreground">{t("setup.agents_title")}</h2>
+            <p class="mt-1 text-xs text-muted-foreground">{t("setup.agents_desc")}</p>
           </div>
           <button type="button" onclick={() => void refreshAll()} disabled={loading} class="flex items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-3 py-2 text-xs font-medium text-muted-foreground transition hover:text-foreground disabled:cursor-wait disabled:opacity-50">
-            <RefreshCw class="size-3.5 {loading ? 'animate-spin' : ''}" /> {i18n.t("setup.refresh")}
+            <RefreshCw class="size-3.5 {loading ? 'animate-spin' : ''}" /> {t("setup.refresh")}
           </button>
         </div>
         {#if loading}
           <div class="flex flex-1 flex-col items-center justify-center gap-3">
             <div class="size-7 animate-spin rounded-full border-2 border-border border-t-foreground"></div>
-            <p class="text-xs text-muted-foreground">{i18n.t("setup.checking_tools")}</p>
+            <p class="text-xs text-muted-foreground">{t("setup.checking_tools")}</p>
           </div>
         {:else}
           <div class="mt-5 min-h-0 flex-1 overflow-y-auto px-1 py-1 pb-4">
@@ -186,7 +186,7 @@
                       <ShortcutIcon iconKey={item.iconKey as any} size={25} />
                       <div class="min-w-0">
                         <p class="truncate text-sm font-semibold text-foreground">{item.label}</p>
-                        <p class="mt-1 text-[11px] text-muted-foreground">{item.installed ? i18n.t("setup.detected") : i18n.t("setup.not_detected")}</p>
+                        <p class="mt-1 text-[11px] text-muted-foreground">{item.installed ? t("setup.detected") : t("setup.not_detected")}</p>
                       </div>
                     </div>
                     <button type="button" role="switch" aria-checked={item.enabled} aria-label="Ajouter {item.label} aux raccourcis" onclick={() => item.enabled = !item.enabled} class="relative inline-flex h-5 w-9 shrink-0 rounded-full transition {item.enabled ? 'bg-[var(--color-success)]' : 'bg-neutral-700'}">
@@ -197,10 +197,10 @@
                   <div class="mt-auto flex gap-2 pt-4">
                     {#if item.docUrl}
                       <a href={item.docUrl} target="_blank" rel="noopener noreferrer" class="flex flex-1 items-center justify-center gap-1 rounded-md border border-border bg-[var(--color-surface-3)] px-2 py-1.5 text-xs text-muted-foreground transition hover:text-foreground">
-                        <ExternalLink class="size-3" /> {i18n.t("setup.documentation")}
+                        <ExternalLink class="size-3" /> {t("setup.documentation")}
                       </a>
                     {/if}
-                    <button type="button" onclick={() => void refreshItem(item)} disabled={refreshingId === item.id} class="flex size-8 items-center justify-center rounded-md border border-border text-muted-foreground transition hover:bg-[var(--color-surface-3)] hover:text-foreground disabled:opacity-50" title={i18n.t("setup.refresh_item_tooltip")}>
+                    <button type="button" onclick={() => void refreshItem(item)} disabled={refreshingId === item.id} class="flex size-8 items-center justify-center rounded-md border border-border text-muted-foreground transition hover:bg-[var(--color-surface-3)] hover:text-foreground disabled:opacity-50" title={t("setup.refresh_item_tooltip")}>
                       <RefreshCw class="size-3.5 {refreshingId === item.id ? 'animate-spin' : ''}" />
                     </button>
                   </div>
@@ -211,23 +211,23 @@
                 <span class="mb-3 flex size-9 items-center justify-center rounded-md border border-dashed border-muted-foreground/60 text-muted-foreground">
                   <Plus class="size-4" />
                 </span>
-                <span class="text-sm font-semibold text-foreground">{i18n.t("setup.add_agent")}</span>
-                <span class="mt-1 text-xs leading-relaxed text-muted-foreground">{i18n.t("setup.add_agent_desc")}</span>
+                <span class="text-sm font-semibold text-foreground">{t("setup.add_agent")}</span>
+                <span class="mt-1 text-xs leading-relaxed text-muted-foreground">{t("setup.add_agent_desc")}</span>
               </button>
             </div>
             
             {#if showCustomAgent}
               <form class="mt-4 grid grid-cols-1 items-end gap-3 rounded-lg border border-border bg-[var(--color-surface-2)] p-4 sm:grid-cols-[1fr_1fr_auto]" onsubmit={(event) => { event.preventDefault(); addCustomAgent(); }}>
                 <label class="flex flex-col gap-1.5 text-xs text-muted-foreground">
-                  {i18n.t("setup.agent_name")}
-                  <input bind:value={customLabel} required placeholder={i18n.t("setup.custom_agent_placeholder")} class="rounded-md border border-border bg-[var(--color-surface)] px-3 py-2 text-sm text-foreground outline-none focus:border-foreground/50" />
+                  {t("setup.agent_name")}
+                  <input bind:value={customLabel} required placeholder={t("setup.custom_agent_placeholder")} class="rounded-md border border-border bg-[var(--color-surface)] px-3 py-2 text-sm text-foreground outline-none focus:border-foreground/50" />
                 </label>
                 <label class="flex flex-col gap-1.5 text-xs text-muted-foreground">
-                  {i18n.t("setup.command")}
-                  <input bind:value={customCommand} required placeholder={i18n.t("setup.command_placeholder")} class="rounded-md border border-border bg-[var(--color-surface)] px-3 py-2 font-mono text-sm text-foreground outline-none focus:border-foreground/50" />
+                  {t("setup.command")}
+                  <input bind:value={customCommand} required placeholder={t("setup.command_placeholder")} class="rounded-md border border-border bg-[var(--color-surface)] px-3 py-2 font-mono text-sm text-foreground outline-none focus:border-foreground/50" />
                 </label>
                 <button type="submit" class="flex items-center justify-center gap-1.5 rounded-md bg-foreground px-3 py-2 text-sm font-medium text-background transition hover:bg-neutral-200">
-                  <Plus class="size-3.5" /> {i18n.t("setup.add")}
+                  <Plus class="size-3.5" /> {t("setup.add")}
                 </button>
               </form>
             {/if}
@@ -235,24 +235,24 @@
         {/if}
         <div class="mt-auto flex items-center justify-between border-t border-border/50 pt-5">
           <button type="button" onclick={() => step = 2} class="flex items-center gap-1.5 px-2 py-2 text-sm text-muted-foreground transition hover:text-foreground">
-            <ArrowLeft class="size-4" /> {i18n.t("setup.back")}
+            <ArrowLeft class="size-4" /> {t("setup.back")}
           </button>
           <button type="button" onclick={goToOrder} class="flex items-center gap-1.5 rounded-md bg-foreground px-5 py-2.5 text-sm font-semibold text-background transition hover:bg-neutral-200">
-            {i18n.t("setup.continue")} <ArrowRight class="size-4" />
+            {t("setup.continue")} <ArrowRight class="size-4" />
           </button>
         </div>
       </div>
     {:else}
       <div class="flex h-full min-h-0 flex-col">
         <div class="border-b border-border/50 pb-4">
-          <p class="text-[11px] font-semibold uppercase text-muted-foreground">{i18n.t("setup.step_count", { current: 3, total: 3 })}</p>
-          <h2 class="mt-1 text-xl font-bold text-foreground">{i18n.t("setup.order_title")}</h2>
-          <p class="mt-1 text-xs text-muted-foreground">{i18n.t("setup.order_desc")}</p>
+          <p class="text-[11px] font-semibold uppercase text-muted-foreground">{t("setup.step_count", { current: 3, total: 3 })}</p>
+          <h2 class="mt-1 text-xl font-bold text-foreground">{t("setup.order_title")}</h2>
+          <p class="mt-1 text-xs text-muted-foreground">{t("setup.order_desc")}</p>
         </div>
         <div class="mt-5 min-h-0 flex-1 overflow-y-auto px-1 py-1 pb-4 flex flex-col gap-2">
           {#each enabledAgents as item (item.id)}
             <div role="listitem" draggable={dragArmed} ondragstart={(event) => onDragStart(item.id, event)} ondragover={(event) => { event.preventDefault(); overId = item.id; }} ondragleave={() => overId = null} ondrop={(event) => onDrop(item.id, event)} ondragend={() => { draggedId = null; overId = null; dragArmed = false; }} class="flex items-center gap-3 rounded-lg border border-border bg-[var(--color-surface-2)] p-3 {draggedId === item.id ? 'opacity-40' : ''} {overId === item.id && draggedId !== item.id ? 'border-t-2 border-t-foreground/60' : ''}">
-              <span class="flex size-7 cursor-grab items-center justify-center rounded-md border border-border text-muted-foreground active:cursor-grabbing" role="button" tabindex="-1" onmousedown={armDrag} onmouseup={disarmDrag} onmouseleave={disarmDrag} title={i18n.t("setup.drag_tooltip")}>
+              <span class="flex size-7 cursor-grab items-center justify-center rounded-md border border-border text-muted-foreground active:cursor-grabbing" role="button" tabindex="-1" onmousedown={armDrag} onmouseup={disarmDrag} onmouseleave={disarmDrag} title={t("setup.drag_tooltip")}>
                 <GripVertical class="size-4" />
               </span>
               <ShortcutIcon iconKey={item.iconKey as any} size={21} />
@@ -265,10 +265,10 @@
         </div>
         <div class="mt-auto flex items-center justify-between border-t border-border/50 pt-5">
           <button type="button" onclick={() => step = 3} class="flex items-center gap-1.5 px-2 py-2 text-sm text-muted-foreground transition hover:text-foreground">
-            <ArrowLeft class="size-4" /> {i18n.t("setup.back")}
+            <ArrowLeft class="size-4" /> {t("setup.back")}
           </button>
           <button type="button" onclick={finishSetup} class="flex items-center gap-1.5 rounded-md bg-foreground px-5 py-2.5 text-sm font-semibold text-background transition hover:bg-neutral-200">
-            {i18n.t("setup.finish")} <Check class="size-4" />
+            {t("setup.finish")} <Check class="size-4" />
           </button>
         </div>
       </div>
