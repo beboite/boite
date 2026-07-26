@@ -1,3 +1,4 @@
+mod agent_api;
 mod app_data;
 mod commands;
 mod fullscreen;
@@ -253,6 +254,7 @@ pub fn run() {
             }
             logging::install_panic_hook(setup_handle.clone());
             fullscreen::watch(&setup_handle);
+            agent_api::start(&setup_handle);
             let _ = logging::append_app_log(
                 &setup_handle,
                 "info",

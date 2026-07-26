@@ -21,6 +21,7 @@
   import { platform } from "$lib/storage/platform.svelte";
   import { updater } from "$lib/features/updater/store.svelte";
   import { resumeAfterUpdate } from "$lib/features/updater/restart";
+  import { todos } from "$lib/features/todo/store.svelte";
   import CommandPalette from "$lib/features/palette/CommandPalette.svelte";
   import { createKeyboardController } from "$lib/shared/keyboard/controller";
   import type { KeyScope, ShortcutBinding } from "$lib/shared/keyboard/types";
@@ -296,10 +297,12 @@
     // Polls quietly and pre-downloads; the titlebar only speaks up once a
     // release is on disk and a restart is all that is left.
     const stopUpdater = updater.start();
+    const stopTodoWatch = todos.watch();
 
     return () => {
       unlisten?.();
       stopUpdater();
+      stopTodoWatch();
     };
   });
 </script>

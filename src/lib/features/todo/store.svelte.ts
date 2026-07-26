@@ -45,6 +45,29 @@ class TodoStore {
     return this.inFlight;
   }
 
+  /**
+   * Desktop only. An agent writes the table straight through the loopback
+   * endpoint, so the change arrives as a Rust event rather than through any
+   * call this store made. Lives above the panel because the write can land
+   * while the panel is closed — `ensureLoaded` would then short-circuit and
+   * reopening would show a stale list.
+   */
+  watch(): () => void {
+    let stop: (() => void) | null = null;
+    let cancelled = false;
+    void import("@tauri-apps/api/event")
+      .then(({ listen }) => listen("boite://todos-changed", () => void this.reload()))
+      .then((un) => {
+        if (cancelled) un();
+        else stop = un;
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+      stop?.();
+    };
+  }
+
   /** A workspace switch invalidates everything: the rows live in that DB. */
   reset() {
     this.items = [];
