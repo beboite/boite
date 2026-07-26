@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "bun run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "bun run build",
+    "beforeBuildCommand": "bun run build && bun run build:sidecar",
     "frontendDist": "../build"
   },
   "app": {
@@ -43,6 +43,7 @@
     "active": true,
     "targets": "all",
     "createUpdaterArtifacts": true,
+    "externalBin": ["binaries/boite-mcp"],
     "windows": {
       "nsis": {
         "installMode": "currentUser"

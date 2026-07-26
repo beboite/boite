@@ -10,3 +10,7 @@ node_modules
 !.env.example
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+
+# Built by scripts/build-sidecar.mjs before each bundle; carries the target
+# triple in its name and is never a source artifact.
+/src-tauri/binaries/
