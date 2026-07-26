@@ -244,6 +244,16 @@ pub async fn live_claude_sessions() -> Vec<session::LiveClaudeSession> {
         .unwrap_or_default()
 }
 
+/// Releases a background agent so `--resume` works on that session again.
+/// Refuses anything that is not a background agent: an interactive entry is
+/// another terminal's open session.
+#[tauri::command]
+pub async fn stop_claude_session(session_id: String) -> bool {
+    tauri::async_runtime::spawn_blocking(move || session::stop_claude_session(&session_id))
+        .await
+        .unwrap_or(false)
+}
+
 #[tauri::command]
 pub async fn find_claude_session(
     cwd: String,

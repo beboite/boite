@@ -157,6 +157,13 @@ export interface SessionApi {
    * "nothing is live" and preserves the old behaviour.
    */
   liveClaude(): Promise<LiveClaudeSession[]>;
+  /**
+   * Releases a background agent holding a session, so `--resume` works on it
+   * again. Only ever stops a background agent — an interactive session is
+   * another terminal's, and taking it down is not ours to do. Returns whether
+   * anything was stopped.
+   */
+  stopClaude(sessionId: string): Promise<boolean>;
 }
 
 export interface LogApi {

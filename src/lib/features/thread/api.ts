@@ -1,5 +1,5 @@
 import { app } from "$lib/app/store.svelte";
-import { workspace } from "$lib/backend";
+import { backendForPath, workspace } from "$lib/backend";
 import { ptyKill } from "$lib/storage/pty";
 import { getDefaultShell } from "$lib/storage/shell";
 import { saveThread } from "$lib/storage/db";
@@ -244,6 +244,21 @@ export async function reloadThread(threadId: string) {
   // An explicit relaunch is never a reattach: drop any park marker so the fresh
   // PTY gets its launch input typed.
   parkedLocal.delete(t.id);
+
+  // Reload means "give me this conversation here, now". If a background agent
+  // is still holding the session, claude would refuse to resume it and the
+  // thread would land in the agent picker instead — so release it first and let
+  // the relaunch below be an ordinary resume. Stopping is scoped to background
+  // agents backend-side; an interactive session belongs to another terminal.
+  // Best-effort: a failure just means the picker path is taken, as before.
+  if (t.sessionId) {
+    const project = app.projects.find((p) => p.id === t.projectId);
+    if (project) {
+      await backendForPath(project.cwd)
+        .session.stopClaude(t.sessionId)
+        .catch(() => false);
+    }
+  }
   if (previousPtyId) {
     // wait=true: respawning before the old process is dead reopens the
     // two-`claude --resume`-on-one-session-file race the backend kill
