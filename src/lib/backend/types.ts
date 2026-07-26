@@ -141,6 +141,8 @@ export interface LiveClaudeSession {
   id: string;
   /** `bg` is reachable through the agent view; `interactive` belongs to another terminal. */
   kind: string;
+  /** `busy` while a turn is in flight, `idle` otherwise. */
+  status: string;
 }
 
 export interface SessionApi {

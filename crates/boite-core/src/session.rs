@@ -39,6 +39,7 @@ struct LiveSessionEntry {
     #[serde(rename = "sessionId")]
     session_id: Option<String>,
     kind: Option<String>,
+    status: Option<String>,
 }
 
 /// A session claude has open. The kind decides what can be done about it: a
@@ -52,6 +53,9 @@ pub struct LiveClaudeSession {
     pub pid: u32,
     /// `bg` or `interactive`, straight from the registry.
     pub kind: String,
+    /// `busy` while a turn is in flight, `idle` otherwise. An idle agent can be
+    /// released without losing anything; a busy one is mid-answer.
+    pub status: String,
 }
 
 #[cfg(unix)]
@@ -179,6 +183,7 @@ pub fn live_claude_sessions() -> Vec<LiveClaudeSession> {
                 id,
                 pid,
                 kind: parsed.kind.unwrap_or_else(|| "interactive".into()),
+                status: parsed.status.unwrap_or_else(|| "busy".into()),
             });
         }
     }
