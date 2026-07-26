@@ -1,3 +1,4 @@
+mod agent_api;
 mod auth;
 mod config;
 mod events;
@@ -67,8 +68,14 @@ async fn main() {
     let notifier = notify::Notifier::from_env();
     let push = push::PushManager::load(&config.data_dir);
 
+    // Loopback only, and a secret of its own: the main server may be bound to a
+    // routable interface, and an agent appending to a checklist is not the same
+    // principal as a device driving the workspace.
+    let agent_api = agent_api::start(store.clone(), events.clone()).await;
+
     let state = Arc::new(AppState {
         store,
+        agent_api,
         registry,
         auth: Auth::new(config.token.clone()),
         roots,

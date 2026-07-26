@@ -15,6 +15,9 @@ use crate::store::Store;
 
 pub struct AppState {
     pub store: Arc<Store>,
+    /// None when its listener could not bind: the workspace still runs, agents
+    /// simply get no todo access.
+    pub agent_api: Option<crate::agent_api::AgentApi>,
     pub registry: Arc<Registry>,
     pub auth: Auth,
     pub roots: ProjectRoots,
@@ -132,6 +135,7 @@ mod tests {
         let (events, _) = broadcast::channel::<AppEvent>(1);
         let state = AppState {
             store,
+            agent_api: None,
             registry: Registry::new_without_ticker(1024, Arc::new(|_| {})),
             auth: Auth::new("test".into()),
             roots: ProjectRoots::default(),
@@ -166,6 +170,9 @@ mod tests {
         let (events, _) = broadcast::channel::<AppEvent>(1);
         let state = AppState {
             store: Arc::new(Store::open(&dir.join("boite.db")).unwrap()),
+            // The path-scope tests spawn nothing, so no agent listener is
+            // needed; the None branch is also what a failed bind produces.
+            agent_api: None,
             registry: Registry::new_without_ticker(1024, Arc::new(|_| {})),
             auth: Auth::new("test".into()),
             roots: ProjectRoots::default(),

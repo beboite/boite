@@ -166,21 +166,80 @@ impl Store {
         Ok(())
     }
 
+    pub fn todos_for_project(&self, project_id: &str) -> Result<Vec<Todo>, String> {
+        let conn = self.conn.lock();
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, project_id, text, state, note, position, created_at, updated_at
+                 FROM todos WHERE project_id = ?1 ORDER BY position ASC, created_at ASC",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([project_id], |r| {
+                Ok(Todo {
+                    id: r.get(0)?,
+                    project_id: r.get(1)?,
+                    text: r.get(2)?,
+                    state: r.get(3)?,
+                    note: r.get(4)?,
+                    position: r.get(5)?,
+                    created_at: r.get(6)?,
+                    updated_at: r.get(7)?,
+                })
+            })
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    }
+
+    /// What scopes an agent: it presents the thread Boite spawned it for, never
+    /// a project of its choosing.
+    pub fn project_of_thread(&self, thread_id: &str) -> Result<String, String> {
+        let conn = self.conn.lock();
+        conn.query_row(
+            "SELECT project_id FROM threads WHERE id = ?1",
+            [thread_id],
+            |r| r.get::<_, String>(0),
+        )
+        .map_err(|_| "unknown thread".to_string())
+    }
+
+    pub fn add_todo(&self, project_id: &str, text: &str, now: i64) -> Result<String, String> {
+        let conn = self.conn.lock();
+        let position: i64 = conn
+            .query_row(
+                "SELECT COALESCE(MAX(position), -1) + 1 FROM todos WHERE project_id = ?1",
+                [project_id],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        let id = format!("{:032x}", rand::random::<u128>());
+        conn.execute(
+            "INSERT INTO todos (id, project_id, text, state, note, position, created_at, updated_at)
+             VALUES (?1, ?2, ?3, 'open', NULL, ?4, ?5, ?5)",
+            rusqlite::params![id, project_id, text, position, now],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(id)
+    }
+
     /// Moves an item to `claimed` with the agent's summary, and only from
-    /// `open`: an agent must not be able to walk back a box a human ticked, nor
-    /// re-claim what it already claimed. Returns the row it touched, if any.
-    ///
-    /// Unused until the MCP endpoint lands. It lives here rather than in that
-    /// patch because the guard belongs to the store — expressing it in SQL is
-    /// what makes it hold no matter which caller writes.
-    #[allow(dead_code)]
-    pub fn claim_todo(&self, id: &str, note: Option<&str>, now: i64) -> Result<bool, String> {
+    /// `open`, and only within the caller's own project: an agent must not be
+    /// able to walk back a box a human ticked, re-claim what it already
+    /// claimed, or reach another project's list. The condition is in the SQL
+    /// rather than above it so it holds for whichever caller reaches the row.
+    pub fn claim_todo(
+        &self,
+        id: &str,
+        project_id: &str,
+        note: Option<&str>,
+        now: i64,
+    ) -> Result<bool, String> {
         let conn = self.conn.lock();
         let changed = conn
             .execute(
                 "UPDATE todos SET state = 'claimed', note = ?1, updated_at = ?2
-                 WHERE id = ?3 AND state = 'open'",
-                rusqlite::params![note, now, id],
+                 WHERE id = ?3 AND project_id = ?4 AND state = 'open'",
+                rusqlite::params![note, now, id, project_id],
             )
             .map_err(|e| e.to_string())?;
         Ok(changed > 0)

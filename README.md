@@ -254,6 +254,46 @@ IPC that spawns PTYs. Keep it on loopback and never enable the feature for a
 build you hand to anyone. Plain `bun run tauri dev` leaves it out of the binary
 entirely.
 
+## Agent todo access (MCP)
+
+The right-hand **Todo** tab keeps a checklist per project. An agent running in a
+Boite terminal can read and append to that list, and report an item finished —
+but never tick one off.
+
+Boite spawns the terminal, so it stamps `BOITE_MCP_URL`, `BOITE_TOKEN` and
+`BOITE_THREAD_ID` into the child's environment. The agent presents that thread
+id; the project is resolved from it. So an agent reaches its own project's list
+and no other, with nothing to configure, and an agent started outside Boite has
+no token at all.
+
+Build the shim and point your agent at it:
+
+```bash
+cargo build --release -p boite-mcp
+```
+
+```json
+{ "mcpServers": { "boite": { "command": "target/release/boite-mcp" } } }
+```
+
+No `env` block: the shim inherits the terminal's. Launched anywhere else it
+exits rather than starting unauthenticated.
+
+Three tools: `todo_list`, `todo_add`, `todo_claim`. Claiming moves an item to
+*awaiting confirmation*, with a one-line summary; only you can confirm it. That
+split is enforced in SQL — the update fires only on a row still open, in the
+caller's own project — because a model that can close its own tickets will, and
+the list would stop recording verified work.
+
+The endpoint lives on `127.0.0.1` with an ephemeral port, in both the desktop
+app and `boite-server`. It is not the dev `mcp-bridge` and never reuses it: that
+one answers `execute_js`, this one answers three verbs on one table.
+
+> **Not yet bundled.** `boite-mcp` is not shipped inside the app — declaring it
+> as `externalBin` needs a per-target build step, and the release matrix
+> cross-compiles, so the file name must carry the *target* triple rather than
+> the host's. Until that is wired, build it yourself as above.
+
 ## Releasing
 
 Releases are built by `.github/workflows/release.yml` on a pushed `v*` tag, one
