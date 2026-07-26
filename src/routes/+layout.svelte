@@ -9,7 +9,6 @@
   import { reinspectMissingIcons } from "$lib/features/project/api";
   import { settings } from "$lib/features/settings/store.svelte";
   import { applyMotionPreference } from "$lib/theme/motion";
-  import { i18n } from "$lib/i18n/index.svelte";
   import {
     closeThreadWithConfirm,
     launchBlankTerminal,
@@ -38,10 +37,6 @@
     return applyMotionPreference(settings.state.motionMode);
   });
 
-
-  $effect(() => {
-    if (settings.ready) i18n.init(settings.state.locale);
-  });
   function handleWheel(e: WheelEvent) {
     if (!e.ctrlKey) return;
     e.preventDefault();

@@ -1,5 +1,6 @@
 import { loadSettings, saveSettings } from "$lib/storage/db";
 import { notifications } from "$lib/features/notifications/store.svelte";
+import { isLocaleSetting, setLocale as applyLocale } from "$lib/i18n/index.svelte";
 import { debounce } from "$lib/shared/utils/debounce";
 import { uuid } from "$lib/shared/utils/uuid";
 import type { LocaleSetting, RightPanelTab, Settings, Shortcut } from "$lib/types";
@@ -289,10 +290,7 @@ class SettingsStore {
             : DEFAULTS.mobileLayout,
         // Device-scoped; the localStorage override below is the real source.
         motionMode: DEFAULTS.motionMode,
-        locale:
-          stored.locale === "en" || stored.locale === "fr" || stored.locale === "system"
-            ? stored.locale
-            : DEFAULTS.locale,
+        locale: isLocaleSetting(stored.locale) ? stored.locale : DEFAULTS.locale,
       };
       // Device fields come from localStorage, overriding the backend blob. If
       // there is none yet, seed it from what the blob carried (one-shot
@@ -323,6 +321,9 @@ class SettingsStore {
     } catch (err) {
       console.error("loadSettings failed:", err);
     }
+    // Push the hydrated locale before the first paint that follows: waiting on
+    // an $effect would render one frame in the browser locale first.
+    applyLocale(this.state.locale);
     this.ready = true;
   }
 
@@ -334,6 +335,7 @@ class SettingsStore {
     this.persistSoon.cancel();
     this.persistDeviceSoon.cancel();
     this.state = structuredClone(DEFAULTS);
+    applyLocale(DEFAULTS.locale);
     this.ready = false;
   }
 
@@ -421,9 +423,9 @@ class SettingsStore {
   async setLocale(value: LocaleSetting) {
     if (this.state.locale === value) return;
     this.state.locale = value;
+    applyLocale(value);
     await this.persist();
   }
-
 
   setUiScalePercent(percent: number) {
     const clamped = Math.max(75, Math.min(150, Math.round(percent)));
