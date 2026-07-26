@@ -259,6 +259,8 @@ pub fn run() {
             commands::find_hermes_session,
             commands::git_repo_info,
             commands::git_find_repos,
+            commands::git_branches,
+            commands::git_switch_branch,
             commands::git_status,
             commands::git_changed_paths,
             commands::git_log,

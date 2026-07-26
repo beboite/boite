@@ -8,6 +8,8 @@
   import { basename, dirname } from "$lib/shared/utils/path";
   import { resizeHandle } from "$lib/shared/actions/resizeHandle";
   import GitGraph from "./GitGraph.svelte";
+  import BranchChangesDialog from "./BranchChangesDialog.svelte";
+  import { t } from "$lib/i18n/index.svelte";
   import type { ChangeEntry } from "./api";
   import CloudDownload from "@lucide/svelte/icons/cloud-download";
   import GitBranch from "@lucide/svelte/icons/git-branch";
@@ -22,7 +24,6 @@
   import ArrowDownToLine from "@lucide/svelte/icons/arrow-down-to-line";
   import X from "@lucide/svelte/icons/x";
   import FolderGit2 from "@lucide/svelte/icons/folder-git-2";
-  import { t } from "$lib/i18n/index.svelte";
 
   const AUTO_REFRESH_MS = 10_000;
 
@@ -47,6 +48,10 @@
 
   let bodyEl: HTMLElement | null = $state(null);
   let resizingY = $state(false);
+  let branchMenuEl: HTMLDivElement | null = $state(null);
+  let branchMenuOpen = $state(false);
+  let newBranchName = $state("");
+  let branchAction = $state<{ name: string; create: boolean } | null>(null);
 
   $effect(() => {
     if (!project || !gitRoot) return;
@@ -141,6 +146,51 @@
     if (project) void app.updateProject({ ...project, gitRoot: null });
   }
 
+  function toggleBranchMenu() {
+    if (!project || !gs?.isRepo || gs.switchingBranch) return;
+    branchMenuOpen = !branchMenuOpen;
+    if (branchMenuOpen) void gitStore.loadBranches(project.id);
+  }
+
+  function closeBranchMenuOnOutsideClick(event: PointerEvent) {
+    if (
+      branchMenuOpen &&
+      event.target instanceof Node &&
+      !branchMenuEl?.contains(event.target)
+    ) {
+      branchMenuOpen = false;
+    }
+  }
+
+  function requestBranchChange(name: string, create: boolean) {
+    const trimmed = name.trim();
+    if (!project || !trimmed || (!create && trimmed === gs?.branch)) return;
+    branchMenuOpen = false;
+    const action = { name: trimmed, create };
+    if (totalChanges > 0) branchAction = action;
+    else void performBranchChange(action, false);
+  }
+
+  function createBranch(event: SubmitEvent) {
+    event.preventDefault();
+    requestBranchChange(newBranchName, true);
+  }
+
+  async function performBranchChange(
+    action: { name: string; create: boolean },
+    stash: boolean,
+  ) {
+    if (!project) return;
+    const changed = await gitStore.changeBranch(
+      project.id,
+      action.name,
+      action.create,
+      stash,
+    );
+    if (changed && action.create) newBranchName = "";
+    branchAction = null;
+  }
+
   function commitKey(e: KeyboardEvent) {
     if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
       e.preventDefault();
@@ -219,6 +269,8 @@
   }
 </script>
 
+<svelte:window onpointerdown={closeBranchMenuOnOutsideClick} />
+
 <div
   class="flex h-full min-h-0 flex-col {resizingY ? 'select-none' : ''}"
 >
@@ -227,9 +279,75 @@
   >
     <GitBranch class="size-4 text-muted-foreground" />
     {#if gs?.isRepo}
-      <span class="truncate text-xs font-medium text-foreground/90">
-        {gs.branch ?? "(detached)"}
-      </span>
+      <div bind:this={branchMenuEl} class="relative min-w-0">
+        <button
+          type="button"
+          class="flex max-w-44 items-center gap-1.5 rounded px-1.5 py-1 text-xs font-medium text-foreground/90 transition hover:bg-[var(--color-surface-2)] disabled:opacity-50"
+          onclick={toggleBranchMenu}
+          disabled={gs.switchingBranch}
+          aria-haspopup="menu"
+          aria-expanded={branchMenuOpen}
+          title={t("git.changeBranch")}
+        >
+          <GitBranch class="size-3.5 shrink-0 text-muted-foreground" />
+          <span class="truncate">{gs.branch ?? "(detached)"}</span>
+          <ChevronDown class="size-3 shrink-0 text-muted-foreground transition {branchMenuOpen ? 'rotate-180' : ''}" />
+        </button>
+
+        {#if branchMenuOpen}
+          <div
+            class="absolute left-0 top-full z-40 mt-1 w-64 overflow-hidden rounded-md border border-border bg-[var(--color-surface)] shadow-2xl"
+            role="menu"
+          >
+            <form class="flex gap-1.5 border-b border-border p-2" onsubmit={createBranch}>
+              <input
+                class="min-w-0 flex-1 rounded border border-border bg-[var(--color-background)] px-2 py-1 text-xs text-foreground placeholder:text-muted-foreground/60 focus:border-foreground/30 focus:outline-none"
+                placeholder={t("git.newBranchPlaceholder")}
+                aria-label={t("git.newBranchPlaceholder")}
+                bind:value={newBranchName}
+                disabled={gs.switchingBranch}
+              />
+              <button
+                type="submit"
+                class="rounded border border-border bg-[var(--color-surface-2)] p-1.5 text-muted-foreground transition hover:bg-[var(--color-surface-3)] hover:text-foreground disabled:opacity-40"
+                disabled={!newBranchName.trim() || gs.switchingBranch}
+                title={t("git.createBranch")}
+                aria-label={t("git.createBranch")}
+              >
+                <Plus class="size-3.5" />
+              </button>
+            </form>
+
+            <div class="max-h-64 overflow-y-auto py-1">
+              {#if gs.branchesLoading && !gs.branchesLoaded}
+                <div class="px-3 py-3 text-center text-[11px] text-muted-foreground">
+                  {t("git.loadingBranches")}
+                </div>
+              {:else if gs.branches.length === 0}
+                <div class="px-3 py-3 text-center text-[11px] text-muted-foreground">
+                  {t("git.noLocalBranches")}
+                </div>
+              {:else}
+                {#each gs.branches as branch (branch.name)}
+                  <button
+                    type="button"
+                    class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition hover:bg-[var(--color-surface-2)] disabled:opacity-60"
+                    class:text-foreground={branch.current}
+                    class:text-muted-foreground={!branch.current}
+                    onclick={() => requestBranchChange(branch.name, false)}
+                    disabled={branch.current || gs.switchingBranch}
+                    role="menuitem"
+                    title={branch.name}
+                  >
+                    <Check class="size-3.5 shrink-0 {branch.current ? 'opacity-100' : 'opacity-0'}" />
+                    <span class="min-w-0 flex-1 truncate font-mono text-[11px]">{branch.name}</span>
+                  </button>
+                {/each}
+              {/if}
+            </div>
+          </div>
+        {/if}
+      </div>
       {#if gs.ahead > 0}
         <span
           class="flex items-center gap-0.5 text-[10.5px] text-muted-foreground"
@@ -497,6 +615,18 @@
   {/if}
 
 </div>
+
+{#if branchAction}
+  <BranchChangesDialog
+    branch={branchAction.name}
+    creating={branchAction.create}
+    busy={gs?.switchingBranch ?? false}
+    canStash={(gs?.commitCount ?? 0) > 0}
+    onCarry={() => void performBranchChange(branchAction!, false)}
+    onStash={() => void performBranchChange(branchAction!, true)}
+    onCancel={() => (branchAction = null)}
+  />
+{/if}
 
 {#snippet section({ label, entries, mode, open, toggle }: SectionArgs)}
   <div class="flex flex-col">

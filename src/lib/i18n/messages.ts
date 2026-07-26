@@ -99,6 +99,11 @@ export const EN_MESSAGES = {
   "sidebar.closeThread": "Close thread",
   "sidebar.resizeSidebar": "Resize sidebar",
 
+  "git.changeBranch": "Change branch",
+  "git.newBranchPlaceholder": "New branch name",
+  "git.createBranch": "Create branch",
+  "git.loadingBranches": "Loading branches...",
+  "git.noLocalBranches": "No local branches yet.",
   "git.notAGitRepo": "Not a git repo",
   "git.pullFf": "Pull (fast-forward only)",
   "git.pull": "Pull",
@@ -141,6 +146,15 @@ export const EN_MESSAGES = {
   "git.confirmDiscardLabel": "Discard",
 
   "notification.readyForInput": "Ready for input",
+  "branchDialog.uncommittedChanges": "You have uncommitted changes",
+  "branchDialog.descriptionCreating": "Creating",
+  "branchDialog.descriptionSwitching": "Switching to",
+  "branchDialog.descriptionSuffix": "can either carry your current changes with you or stash them before switching.",
+  "branchDialog.bringChanges": "Bring changes",
+  "branchDialog.bringChangesDesc": "Modified and staged files follow you to {branch}.",
+  "branchDialog.leaveChanges": "Leave changes here",
+  "branchDialog.leaveChangesDesc": "Git stashes tracked, staged, and untracked files. Restore them later with {command}.",
+  "branchDialog.cancel": "Cancel",
 } as const;
 
 export type MessageKey = keyof typeof EN_MESSAGES;
