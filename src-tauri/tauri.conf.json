@@ -23,6 +23,7 @@
       }
     ],
     "security": {
+      "capabilities": ["default"],
       "csp": "default-src 'self' ipc: http://ipc.localhost; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost ws: wss:; worker-src 'self' blob:; base-uri 'self'; object-src 'none'; frame-src 'none'"
     }
   },

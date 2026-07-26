@@ -7,6 +7,17 @@
   },
   "app": {
     "withGlobalTauri": true,
+    "security": {
+      "capabilities": [
+        "default",
+        {
+          "identifier": "mcp-bridge",
+          "description": "Agent bridge. Inlined here rather than dropped in capabilities/, which the build script scans whole — a file in there would demand the plugin from every release build too.",
+          "windows": ["main"],
+          "permissions": ["mcp-bridge:default"]
+        }
+      ]
+    },
     "windows": [
       {
         "title": "Boite Dev",
