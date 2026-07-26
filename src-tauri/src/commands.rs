@@ -316,6 +316,42 @@ pub async fn agent_mcp_config(app: AppHandle) -> Result<AgentMcpConfig, String> 
     })
 }
 
+/// Registers the shim with an agent that keeps its MCP servers in a config
+/// file, by running that agent's own documented command.
+///
+/// Running their CLI rather than editing their files: `~/.codex/config.toml`,
+/// `opencode.json` and `.cursor/mcp.json` are formats we would have to parse
+/// and merge without breaking what is already there, and one of them lives in
+/// the user's repository. The agent knows how to write its own config.
+#[tauri::command]
+pub async fn register_agent_mcp(cli: String, sidecar_path: String) -> Result<String, String> {
+    // Allow-listed rather than free-form: this runs a process, and the caller
+    // is a webview. Only these three expose an `mcp add` subcommand.
+    let cli = match cli.as_str() {
+        "codex" | "opencode" | "cursor-agent" => cli,
+        other => return Err(format!("no known mcp command for {other}")),
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        let out = std::process::Command::new(&cli)
+            .args(["mcp", "add", "boite", "--", &sidecar_path])
+            .output()
+            .map_err(|e| format!("could not run {cli}: {e}"))?;
+        if out.status.success() {
+            return Ok(String::from_utf8_lossy(&out.stdout).trim().to_string());
+        }
+        // The agent's own words are more useful than ours: it knows whether the
+        // name is taken, the config is unreadable, or the flag has moved on.
+        let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        Err(if err.is_empty() {
+            format!("{cli} exited with {}", out.status)
+        } else {
+            err
+        })
+    })
+    .await
+    .map_err(|e| format!("register task failed: {e}"))?
+}
+
 /// Session ids claude currently has open. `--resume` refuses every one of
 /// them, so a thread holding a captured id has to ask before replaying it.
 #[tauri::command]

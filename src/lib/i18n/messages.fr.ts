@@ -205,6 +205,10 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "todo.agentCopyPath": "Copier le chemin du serveur",
   "todo.agentPathCopied": "Chemin copié",
 
+  "todo.agentAdd": "Ajouter",
+  "todo.agentAdded": "{agent} peut désormais accéder à cette liste",
+  "todo.agentAddFailed": "{agent} : {error}",
+
   "notification.readyForInput": "Prêt pour saisie",
 
   "setup.title": "Bienvenue dans Boite",

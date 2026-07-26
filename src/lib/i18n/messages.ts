@@ -193,6 +193,10 @@ export const EN_MESSAGES = {
   "todo.agentCopyPath": "Copy the server path",
   "todo.agentPathCopied": "Path copied",
 
+  "todo.agentAdd": "Add",
+  "todo.agentAdded": "{agent} can now reach this list",
+  "todo.agentAddFailed": "{agent}: {error}",
+
   "notification.readyForInput": "Ready for input",
   "branchDialog.uncommittedChanges": "You have uncommitted changes",
   "branchDialog.descriptionCreating": "Creating",

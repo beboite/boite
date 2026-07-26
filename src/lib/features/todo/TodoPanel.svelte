@@ -6,7 +6,12 @@
   import { todos } from "./store.svelte";
   import { t } from "$lib/i18n/index.svelte";
   import { ptyWrite } from "$lib/storage/pty";
-  import { agentAcceptsInjection, mcpConfigPath } from "$lib/features/thread/agentMcp";
+  import {
+    agentAcceptsInjection,
+    agentRegisterCli,
+    mcpPaths,
+    registerAgentMcp,
+  } from "$lib/features/thread/agentMcp";
   import { writeText } from "$lib/platform/clipboard";
   import ListTodo from "@lucide/svelte/icons/list-todo";
   import CornerDownRight from "@lucide/svelte/icons/corner-down-right";
@@ -37,8 +42,11 @@
   // says nothing about what you actually use here, and probing seven binaries
   // on every open would cost more than it tells.
   const agentsHere = $derived.by(() => {
-    if (!projectId) return [] as { key: string; label: string; auto: boolean }[];
-    const seen = new Map<string, { key: string; label: string; auto: boolean }>();
+    if (!projectId) return [] as { key: string; label: string; auto: boolean; cli: string | null }[];
+    const seen = new Map<
+      string,
+      { key: string; label: string; auto: boolean; cli: string | null }
+    >();
     for (const th of app.threadsByProject(projectId)) {
       const key = th.iconKey;
       if (!key || seen.has(key)) continue;
@@ -46,6 +54,7 @@
         key,
         label: key.charAt(0).toUpperCase() + key.slice(1),
         auto: agentAcceptsInjection(key),
+        cli: agentRegisterCli(key),
       });
     }
     return [...seen.values()];
@@ -57,6 +66,20 @@
     notifications.success(t("todo.agentPathCopied"));
   }
 
+  let adding = $state<string | null>(null);
+
+  async function addToAgent(label: string, cli: string) {
+    adding = cli;
+    try {
+      await registerAgentMcp(cli);
+      notifications.success(t("todo.agentAdded", { agent: label }));
+    } catch (err) {
+      notifications.error(t("todo.agentAddFailed", { agent: label, error: String(err) }));
+    } finally {
+      adding = null;
+    }
+  }
+
   async function copySetup(label: string) {
     if (!shimPath) return;
     await writeText(`${label.toLowerCase()} mcp add boite -- ${shimPath}`);
@@ -65,11 +88,7 @@
 
   onMount(() => {
     void todos.ensureLoaded();
-    void mcpConfigPath().then(() => {});
-    void import("@tauri-apps/api/core")
-      .then((m) => m.invoke<{ sidecarPath: string }>("agent_mcp_config"))
-      .then((r) => (shimPath = r.sidecarPath))
-      .catch(() => (shimPath = null));
+    void mcpPaths().then((p) => (shimPath = p?.sidecarPath ?? null));
   });
 
   function submitDraft(e: Event) {
@@ -241,6 +260,15 @@
                 <span class="shrink-0 text-[10.5px] text-muted-foreground">
                   {t("todo.agentActive")}
                 </span>
+              {:else if agent.cli}
+                <button
+                  type="button"
+                  class="shrink-0 rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground transition hover:border-foreground/30 hover:text-foreground disabled:opacity-40"
+                  onclick={() => addToAgent(agent.label, agent.cli!)}
+                  disabled={adding !== null}
+                >
+                  {t("todo.agentAdd")}
+                </button>
               {:else}
                 <button
                   type="button"

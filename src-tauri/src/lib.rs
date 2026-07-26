@@ -308,6 +308,7 @@ pub fn run() {
             commands::find_claude_session,
             commands::live_claude_sessions,
             commands::agent_mcp_config,
+            commands::register_agent_mcp,
             commands::stop_claude_session,
             commands::find_codex_session,
             commands::find_opencode_session,
