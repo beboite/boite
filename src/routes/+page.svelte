@@ -135,6 +135,19 @@
     }
   });
 
+  // Mounting a Terminal is what spawns its PTY, so the post-update resume asks
+  // for its threads here rather than reaching into this component's state.
+  $effect(() => {
+    const requested = app.requestedActivations;
+    if (requested.length === 0) return;
+    for (const id of requested) {
+      if (!activated[id] && app.threads.some((t) => t.id === id)) {
+        activated[id] = true;
+      }
+    }
+    untrack(() => app.clearRequestedActivations());
+  });
+
   $effect(() => {
     const valid = new Set(app.threads.map((t) => t.id));
     let dirty = false;

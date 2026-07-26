@@ -54,7 +54,7 @@ wrapped, and a blank shell is one keystroke away.
   (HEAD vs index vs working tree) straight from the git panel.
 - **Command palette.** `Ctrl+K` (or `Ctrl+Shift+P`) over threads, projects,
   shortcuts and actions.
-- **Remote workspaces.** Point the desktop app — or a phone — at a headless
+- **Remote workspaces.** Point the desktop app (or a phone) at a headless
   `boite-server`. Threads live on the server and survive the client closing;
   reattaching replays the scrollback.
 - **Mobile layout.** A phone-shaped UI with a bottom tab bar, pinch-to-resize
@@ -68,7 +68,7 @@ wrapped, and a blank shell is one keystroke away.
 ## Supported agents
 
 Every agent ships as a shortcut with a brand icon. Boite runs whatever is on
-your `PATH`, so anything not listed still works from a blank shell — it just
+your `PATH`, so anything not listed still works from a blank shell; it just
 won't get status or resume detection.
 
 | Agent          | Command                | Live status | Session resume |
@@ -81,7 +81,7 @@ won't get status or resume detection.
 | GitHub Copilot | `gh copilot`           | ✅          | ✅             |
 | Grok           | `grok`                 | ✅          | ✅             |
 | Hermes         | `hermes`               | ✅          | ✅             |
-| Plain shell    | your default shell     | —           | —              |
+| Plain shell    | your default shell     | n/a         | n/a            |
 
 - **Live status**: the working/ready dot, read from the OSC title the agent
   emits.
@@ -120,9 +120,16 @@ Grab the build for your OS from
 Boite updates itself. It asks the releases endpoint for a manifest shortly after
 launch and every six hours after that; when a newer version exists it downloads
 in the background and the titlebar offers a **Restart to update** button. The
-click only swaps the files in and relaunches — the bytes are already on disk.
+click only swaps the files in and relaunches; the bytes are already on disk.
 Settings → General shows the current version, the download progress and a manual
 check.
+
+Applying an update ends the process, and a local PTY dies with it. Boite asks
+before it does that, notes which threads were running, stops them itself instead
+of letting the installer yank them, and starts them again on the other side. An
+agent that captured a session comes back on the same conversation (`--resume`);
+anything else re-runs its command. Threads on a remote `boite-server` are not
+affected at all: their PTYs live on the server, which the restart never touches.
 
 Every payload carries a minisign signature that is verified against a public key
 compiled into the binary. A payload that fails verification is discarded, so the
@@ -160,7 +167,7 @@ other connection is to a remote workspace you explicitly configured.
 | `Ctrl+Enter`           | Commit (git panel)                      |
 | `Ctrl++` / `Ctrl+-` / `Ctrl+0` | UI scale up / down / reset      |
 
-On macOS, `Cmd` replaces `Ctrl` and only `Cmd+K` opens the palette — `Ctrl+K`
+On macOS, `Cmd` replaces `Ctrl` and only `Cmd+K` opens the palette; `Ctrl+K`
 stays with the shell's readline kill-line.
 
 ## Remote & mobile
@@ -235,7 +242,7 @@ That launches a separate **"Boite Dev"** window on port `1430` under the
 
 It also enables the `mcp-bridge` feature so an agent can drive that window
 (screenshots, DOM reads, JS evaluation). **The bridge is a dev-only tool**: an
-unauthenticated WebSocket server, deliberately bound to `127.0.0.1` — the
+unauthenticated WebSocket server, deliberately bound to `127.0.0.1`. The
 plugin's own default is `0.0.0.0`, and JS evaluated in the webview reaches the
 IPC that spawns PTYs. Keep it on loopback and never enable the feature for a
 build you hand to anyone. Plain `bun run tauri dev` leaves it out of the binary
@@ -244,7 +251,7 @@ entirely.
 ## Releasing
 
 Releases are built by `.github/workflows/release.yml` on a pushed `v*` tag, one
-job per platform. It signs the update payloads and opens a **draft** release —
+job per platform. It signs the update payloads and opens a **draft** release:
 clients see nothing until you publish it.
 
 Cutting a release needs no key on your machine. The signing keypair already
@@ -254,7 +261,7 @@ only as the `TAURI_SIGNING_PRIVATE_KEY` repository secret (with
 signed release without ever seeing it.
 
 That keypair is permanent. There is one for the whole project, not one per
-maintainer — the public key is compiled into every binary in the wild, so a
+maintainer: the public key is compiled into every binary in the wild, so a
 second key would orphan every existing install. GitHub secrets cannot be read
 back, and there is no revocation: losing the private key ends updates forever,
 and leaking it cannot be undone. Keep an offline backup in a shared password
@@ -267,7 +274,7 @@ tag `vX.Y.Z` and push the tag.
 
 ## Stack
 
-- **Desktop shell**: Tauri 2 — frameless window, custom titlebar, strict CSP,
+- **Desktop shell**: Tauri 2 with a frameless window, custom titlebar, strict CSP,
   explicit capabilities (no `core:default` blanket, no `fs:default`).
 - **Frontend**: SvelteKit (`adapter-static`, SSR off), Svelte 5 runes,
   Tailwind 4, xterm 6 with the WebGL renderer, CodeMirror 6 for the editor.

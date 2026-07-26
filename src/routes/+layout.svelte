@@ -20,6 +20,7 @@
   import { palette } from "$lib/features/palette/store.svelte";
   import { platform } from "$lib/storage/platform.svelte";
   import { updater } from "$lib/features/updater/store.svelte";
+  import { resumeAfterUpdate } from "$lib/features/updater/restart";
   import CommandPalette from "$lib/features/palette/CommandPalette.svelte";
 
   let { children } = $props();
@@ -224,7 +225,12 @@
       return;
     }
 
-    void bootDesktopWorkspace().then(() => reinspectMissingIcons().catch(() => {}));
+    void bootDesktopWorkspace().then(() => {
+      // Threads are loaded now, so a resume plan left by an update can be
+      // matched against them and its threads brought back up.
+      resumeAfterUpdate();
+      reinspectMissingIcons().catch(() => {});
+    });
 
     // Wait one rAF after mount so the first paint hits the GPU before the
     // window becomes visible. Avoids the white flash on launch.
