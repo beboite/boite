@@ -51,6 +51,12 @@
     return [...seen.values()];
   });
 
+  async function copyPath() {
+    if (!shimPath) return;
+    await writeText(shimPath);
+    notifications.success(t("todo.agentPathCopied"));
+  }
+
   async function copySetup(label: string) {
     if (!shimPath) return;
     await writeText(`${label.toLowerCase()} mcp add boite -- ${shimPath}`);
@@ -217,8 +223,7 @@
       {/each}
     </div>
 
-    {#if agentsHere.length > 0}
-      <div class="shrink-0 border-t border-border px-3 py-2">
+    <div class="shrink-0 border-t border-border px-3 py-2">
         <p class="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/70">
           {t("todo.agentAccess")}
         </p>
@@ -247,9 +252,23 @@
               {/if}
             </div>
           {/each}
+          {#if agentsHere.length === 0}
+            <!-- Nothing to wire automatically: a project of plain shells, or one
+                 whose first agent has not been launched. The shim still exists,
+                 so say where it is rather than leave the panel silent. -->
+            <p class="text-[11px] leading-snug text-muted-foreground">
+              {t("todo.agentNone")}
+            </p>
+            <button
+              type="button"
+              class="mt-1 rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
+              onclick={copyPath}
+            >
+              {t("todo.agentCopyPath")}
+            </button>
+          {/if}
         {/if}
       </div>
-    {/if}
 
     <form class="shrink-0 border-t border-border p-2" onsubmit={submitDraft}>
       <input
