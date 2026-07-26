@@ -180,10 +180,10 @@ const builders: Partial<Record<NonNullable<IconKey>, ResumeBuilder>> = {
  * fallback is deliberately not `--fork-session`: forking abandons the running
  * conversation and starts a copy, which is the opposite of getting it back.
  */
-async function liveClaudeKind(sessionId: string, cwd: string): Promise<string | null> {
+async function liveClaudeSession(sessionId: string, cwd: string) {
   try {
     const live = await backendForPath(cwd).session.liveClaude();
-    return live.find((s) => s.id === sessionId)?.kind ?? null;
+    return live.find((s) => s.id === sessionId) ?? null;
   } catch (err) {
     // Never block a launch on this: an unanswered check just means the resume
     // is attempted as before.
@@ -203,27 +203,45 @@ export async function buildResumeArgsAsync(thread: Thread, cwd: string): Promise
   const id = at >= 0 ? args[at + 1] : null;
   if (!id) return args;
 
-  const kind = await liveClaudeKind(id, cwd);
-  if (kind === null) return args;
+  const live = await liveClaudeSession(id, cwd);
+  if (live === null) return args;
 
   // Only a background session is reachable this way: `claude agents --cwd`
   // lists background sessions, so sending an interactive one there would open
   // a view that cannot contain it. Nothing joins another terminal's
   // interactive session, so that case keeps the plain resume and lets claude
   // say so itself, which is more use than a view with the answer missing.
-  if (kind !== "bg") {
+  if (live.kind !== "bg") {
     logger.info(
       "resume",
       `${thread.id} (claude): session ${id} is live in another terminal, nothing to attach to`,
-      { cmd: thread.cmd, kind },
+      { cmd: thread.cmd, kind: live.kind },
     );
     return args;
   }
 
+  // An idle agent is holding the session without doing anything with it, and
+  // that hold is the only reason resume is refused. Release it and resume for
+  // real — opening a picker to reach a conversation nothing is working on is
+  // ceremony, not safety. A busy agent is mid-answer and is left alone.
+  if (live.status !== "busy") {
+    const stopped = await backendForPath(cwd)
+      .session.stopClaude(id)
+      .catch(() => false);
+    if (stopped) {
+      logger.info(
+        "resume",
+        `${thread.id} (claude): released idle agent ${id}, resuming in place`,
+        { cmd: thread.cmd },
+      );
+      return args;
+    }
+  }
+
   logger.info(
     "resume",
-    `${thread.id} (claude): session ${id} is a live agent, opening the agent view instead`,
-    { cmd: thread.cmd },
+    `${thread.id} (claude): agent ${id} is working, opening the agent view instead`,
+    { cmd: thread.cmd, status: live.status },
   );
   // Scoped to the project: the view has no way to preselect a session — no
   // positional argument, no attach flag — so the next best thing is to leave
