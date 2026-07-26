@@ -3,5 +3,12 @@ members = ["crates/boite-core", "crates/boite-server", "src-tauri"]
 resolver = "2"
 
 [profile.release]
-lto = "thin"
+# Fat LTO + a single codegen unit costs link time but is worth it here: the PTY
+# read loop and the OSC parser are the hot path of the whole app, and both live
+# behind a crate boundary that thin LTO will not inline across.
+lto = "fat"
+codegen-units = 1
 strip = true
+
+# `panic = "abort"` is deliberately NOT set: a panic in one PTY reader thread
+# must not take every other session down with it.
