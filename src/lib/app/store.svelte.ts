@@ -21,6 +21,12 @@ import {
   deleteThread as dbDeleteThread,
 } from "$lib/storage/db";
 import { registerProjectRoots } from "$lib/storage/scope";
+import {
+  clearRenamed,
+  isRenamed,
+  markRenamed,
+  pruneRenamed,
+} from "$lib/features/thread/renamed";
 import { gitStore } from "$lib/features/git/store.svelte";
 import { notifications } from "$lib/features/notifications/store.svelte";
 import { backend, workspace, type Backend } from "$lib/backend";
@@ -209,6 +215,7 @@ class AppState {
       this.threads = await threadsPromise;
     }
     this.deduplicateSessionIds();
+    pruneRenamed(this.threads.map((t) => t.id));
 
     // Remote: the server is authoritative for thread runtime state and pushes
     // it as control events. Local has no subscribe and derives status itself.
@@ -285,7 +292,8 @@ class AppState {
       case "thread.title": {
         const id = data?.threadId as string | undefined;
         const t = id ? this.threads.find((x) => x.id === id) : undefined;
-        if (t) t.title = (data?.title as string) ?? t.title;
+        // A user-typed name outranks whatever the server parsed out of the PTY.
+        if (t && !isRenamed(t.id)) t.title = (data?.title as string) ?? t.title;
         break;
       }
       case "thread.created": {
@@ -310,6 +318,7 @@ class AppState {
           delete userFields.ptyId;
           delete userFields.exitCode;
           delete userFields.origin;
+          if (isRenamed(t.id)) delete userFields.title;
           Object.assign(t, userFields);
         }
         break;
@@ -455,6 +464,7 @@ class AppState {
       this.selectedProjectId = projectId ?? this.selectedProjectId;
       this.activeThreadId = null;
     }
+    clearRenamed(id);
     try {
       await dbDeleteThread(id, removed?.origin);
     } catch (err) {
@@ -511,6 +521,8 @@ class AppState {
   }
 
   setThreadTitle(id: string, title: string) {
+    // Named by hand: the agent's own titles stop applying to this thread.
+    if (isRenamed(id)) return;
     const t = this.threads.find((x) => x.id === id);
     if (!t || t.title === title) return;
     t.title = title;
@@ -518,6 +530,27 @@ class AppState {
     if (!workspace.backendFor(t.origin).caps.clientStatus) return;
     this.pendingTitleSaves.set(id, title);
     this.scheduleTitleFlush();
+  }
+
+  // Manual rename. Unlike setThreadTitle this persists on every backend: the
+  // remote server only writes back titles it parsed itself, so a name typed
+  // here would never reach its row. Passing null drops the manual name — the
+  // thread falls back to its label and the agent gets to title it again.
+  async renameThread(id: string, name: string | null) {
+    const t = this.threads.find((x) => x.id === id);
+    if (!t) return;
+    const title = name?.trim() || null;
+    t.title = title;
+    // An OSC title queued just before the rename would land on top of it.
+    this.pendingTitleSaves.delete(id);
+    if (title) markRenamed(id);
+    else clearRenamed(id);
+    try {
+      await updateThreadTitle(id, title, t.origin);
+    } catch (err) {
+      console.error("renameThread failed:", err);
+      notifications.error("Failed to rename thread");
+    }
   }
 
   setThreadPtyId(id: string, ptyId: string | null) {
@@ -547,6 +580,22 @@ class AppState {
       await saveProject(project);
     } catch (err) {
       console.error("saveProject failed:", err);
+    }
+  }
+
+  // The name is only a label: it starts out as whatever inspect() guessed from
+  // the folder, and nothing downstream keys off it, so a rename is a plain
+  // column write. cwd stays put — the folder on disk is untouched.
+  async renameProject(id: string, name: string) {
+    const p = this.projects.find((x) => x.id === id);
+    const next = name.trim();
+    if (!p || !next || p.name === next) return;
+    p.name = next;
+    try {
+      await saveProject($state.snapshot(p) as Project);
+    } catch (err) {
+      console.error("renameProject failed:", err);
+      notifications.error("Failed to rename project");
     }
   }
 
