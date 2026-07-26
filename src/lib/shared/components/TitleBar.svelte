@@ -19,6 +19,7 @@
   import PanelLeft from "@lucide/svelte/icons/panel-left";
   import PanelRight from "@lucide/svelte/icons/panel-right";
   import BoiteLogo from "$lib/shared/components/BoiteLogo.svelte";
+  import UpdateBadge from "$lib/features/updater/UpdateBadge.svelte";
 
   // Window controls only exist in the desktop shell. In a browser/PWA there is
   // no Tauri window object (getCurrentWindow would throw), and the OS/browser
@@ -205,7 +206,8 @@
 
   <div data-tauri-drag-region class="flex-1"></div>
 
-  <div class="flex items-center gap-0.5 pr-1.5">
+  <div class="flex items-center gap-1.5 pr-1.5">
+    <UpdateBadge />
     <button
       type="button"
       class="flex h-7 items-center justify-center rounded-md px-2 transition {settings.state

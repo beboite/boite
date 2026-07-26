@@ -110,10 +110,26 @@ to the DOM renderer with no user action needed.
 Grab the build for your OS from
 [Releases](https://github.com/klNuno/boite/releases):
 
-- **Windows**: NSIS or MSI installer
-- **Linux**: deb or AppImage
+- **Windows**: NSIS installer (per-user, no admin prompt)
+- **Linux**: deb, rpm or AppImage
 - **macOS**: dmg (unsigned; run `xattr -cr /Applications/Boite.app` once if
   Gatekeeper complains)
+
+### Updates
+
+Boite updates itself. It asks the releases endpoint for a manifest shortly after
+launch and every six hours after that; when a newer version exists it downloads
+in the background and the titlebar offers a **Restart to update** button. The
+click only swaps the files in and relaunches — the bytes are already on disk.
+Settings → General shows the current version, the download progress and a manual
+check.
+
+Every payload carries a minisign signature that is verified against a public key
+compiled into the binary. A payload that fails verification is discarded, so the
+release host is not a trusted input.
+
+AppImage is the only self-updating Linux format; deb and rpm installs are
+updated by your package manager.
 
 Data lives next to the app config, never in the cloud:
 
@@ -123,8 +139,9 @@ Data lives next to the app config, never in the cloud:
 | Linux   | `~/.local/share/dev.boite.app/boite.db`         |
 | macOS   | `~/Library/Application Support/dev.boite.app/`  |
 
-Boite has no telemetry, no account, and makes no network call of its own beyond
-the remote workspace you explicitly connect to.
+Boite has no telemetry and no account. Its only unprompted network call is the
+update check described above, which sends nothing but the request itself; every
+other connection is to a remote workspace you explicitly configured.
 
 ## Keyboard
 
@@ -224,6 +241,34 @@ IPC that spawns PTYs. Keep it on loopback and never enable the feature for a
 build you hand to anyone. Plain `bun run tauri dev` leaves it out of the binary
 entirely.
 
+## Releasing
+
+Releases are built by `.github/workflows/release.yml` on a pushed `v*` tag, one
+job per platform. It signs the update payloads and opens a **draft** release —
+clients see nothing until you publish it.
+
+One-time setup, before the first signed release:
+
+```bash
+bun tauri signer generate -w ~/.tauri/boite.key
+```
+
+That writes a private key plus its `.pub`. Then:
+
+1. Paste the **public** key into `plugins.updater.pubkey` in
+   `src-tauri/tauri.conf.json`.
+2. Add two repository secrets: `TAURI_SIGNING_PRIVATE_KEY` (contents of the
+   private key file) and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
+
+Keep the private key out of the repo and back it up. Losing it means no
+installed copy of Boite can ever be updated again — the public key is compiled
+into every binary already in the wild, and nothing else will satisfy it.
+
+Cutting a release: bump the version in the five places that carry it
+(`package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`,
+`crates/boite-core/Cargo.toml`, `crates/boite-server/Cargo.toml`), commit, then
+tag `vX.Y.Z` and push the tag.
+
 ## Stack
 
 - **Desktop shell**: Tauri 2 — frameless window, custom titlebar, strict CSP,
@@ -245,7 +290,7 @@ src/lib/
   backend/                # transport abstraction: TauriBackend | RemoteBackend
   features/               # vertical slices, each owning components + store
     terminal git explorer editor panes palette
-    project thread shortcut settings workspace mobile push notifications
+    project thread shortcut settings workspace mobile push notifications updater
   shared/                 # reusable components, brand icons, utils
   storage/                # DB facade
 crates/
