@@ -60,7 +60,7 @@
     </button>
   </div>
 
-  <div class="min-h-0 flex-1">
+  <div class="min-h-0 min-w-0 flex-1">
     {#if settings.state.rightPanel === "git"}
       <GitPanel />
     {:else if settings.state.rightPanel === "explorer"}
@@ -70,7 +70,7 @@
 
   <button
     type="button"
-    class="absolute left-0 top-0 z-10 h-full w-1 cursor-col-resize transition hover:bg-foreground/10 {resizingX ? 'bg-foreground/20' : 'bg-transparent'}"
+    class="absolute -left-px top-0 z-10 h-full w-1 cursor-col-resize transition hover:bg-foreground/10 after:absolute after:inset-y-0 after:-inset-x-1.5 after:content-[''] {resizingX ? 'bg-foreground/20' : 'bg-transparent'}"
     use:resizeHandle={{
       onResize: onResizeX,
       onStateChange: (r) => (resizingX = r),
