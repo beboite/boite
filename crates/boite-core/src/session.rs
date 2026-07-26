@@ -1074,8 +1074,13 @@ mod tests {
     use super::*;
     use std::io::Write;
 
+    /// Unique per process: a fixed path made these tests race any other run of
+    /// the suite on the same machine — two `cargo test` invocations at once, or
+    /// a leftover directory from a previous one — and fail intermittently for a
+    /// reason that has nothing to do with what they check.
     fn write_session(name: &str, lines: &[&str]) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("boite-session-test-{name}"));
+        let dir = std::env::temp_dir()
+            .join(format!("boite-session-test-{}-{name}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         let path = dir.join(format!("{name}.jsonl"));
         let mut f = fs::File::create(&path).unwrap();
