@@ -56,7 +56,7 @@
     void gitStore.refresh(id).then(() => gitStore.autoFetch(id));
   });
 
-  // Not a repo â†’ look for nested repos to offer. Idempotent in the store, so
+  // Not a repo -> look for nested repos to offer. Idempotent in the store, so
   // re-runs of this effect are free.
   $effect(() => {
     if (!project) return;
@@ -100,6 +100,7 @@
   let stagedOpen = $state(true);
   let changesOpen = $state(true);
   let conflictsOpen = $state(true);
+  let commitsOpen = $state(true);
 
   const totalChanges = $derived(
     gs ? gs.staged.length + gs.unstaged.length + gs.conflicts.length : 0,
@@ -353,12 +354,15 @@
       {/if}
     </div>
   {:else}
-    <div bind:this={bodyEl} class="flex min-h-0 flex-1 flex-col">
+    <div
+      bind:this={bodyEl}
+      class="grid min-h-0 min-w-0 w-full flex-1 {resizingY ? '' : 'transition-[grid-template-rows] duration-150'}"
+      style:grid-template-rows={commitsOpen
+        ? `${topPercent}% 4px minmax(0, 1fr)`
+        : "minmax(0, 1fr) 28px"}
+    >
       <!-- Changes (top) -->
-      <section
-        class="flex min-h-0 flex-col"
-        style:flex="0 0 {topPercent}%"
-      >
+      <section class="flex min-h-0 min-w-0 w-full flex-col">
         <div
           class="flex h-7 shrink-0 items-center gap-1.5 border-b border-border px-3"
         >
@@ -456,23 +460,29 @@
         </div>
       </section>
 
-      <!-- Splitter -->
-      <button
-        type="button"
-        use:resizeHandle={{
-          onResize: onResizeY,
-          onStateChange: (r) => (resizingY = r),
-        }}
-        class="relative h-1 shrink-0 cursor-row-resize transition hover:bg-foreground/10 {resizingY ? 'bg-foreground/20' : 'bg-transparent'}"
-        aria-label={t("git.resizeSections")}
-        tabindex="-1"
-      ></button>
+      {#if commitsOpen}
+        <!-- Splitter -->
+        <button
+          type="button"
+          use:resizeHandle={{
+            onResize: onResizeY,
+            onStateChange: (r) => (resizingY = r),
+          }}
+          class="relative z-10 h-1 translate-y-[2px] cursor-row-resize transition hover:bg-foreground/10 after:absolute after:-inset-y-1.5 after:inset-x-0 after:content-[''] {resizingY ? 'bg-foreground/20' : 'bg-transparent'}"
+          aria-label={t("git.resizeSections")}
+          tabindex="-1"
+        ></button>
+      {/if}
 
       <!-- Commits (bottom) -->
-      <section class="flex min-h-0 flex-1 flex-col border-t border-border">
-        <div
-          class="flex h-7 shrink-0 items-center gap-1.5 border-b border-border px-3"
+      <section class="flex min-h-0 min-w-0 w-full flex-col border-t border-border">
+        <button
+          type="button"
+          class="flex h-7 shrink-0 items-center gap-1.5 px-3 text-left transition hover:bg-[var(--color-surface-2)] {commitsOpen ? 'border-b border-border' : ''}"
+          onclick={() => (commitsOpen = !commitsOpen)}
+          aria-expanded={commitsOpen}
         >
+          <ChevronDown class="size-3 text-muted-foreground transition {commitsOpen ? '' : '-rotate-90'}" />
           <span
             class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
           >
@@ -489,30 +499,32 @@
                   : ""}
             </span>
           {/if}
-        </div>
-        <div class="min-h-0 flex-1 overflow-auto">
-          {#if gs.log.length === 0}
-            <div
-              class="px-3 py-4 text-center text-[11px] text-muted-foreground/70"
-            >
-              {t("git.noCommits")}
-            </div>
-          {:else}
-            <GitGraph commits={gs.log} />
-            {#if gs.logHasMore}
-              <div class="border-t border-border p-2">
-                <button
-                  type="button"
-                  class="w-full rounded-md border border-border bg-[var(--color-surface-2)] px-2 py-1 text-[11px] text-muted-foreground transition hover:bg-[var(--color-surface-3)] hover:text-foreground disabled:opacity-50"
-                  onclick={loadMoreCommits}
-                  disabled={gs.logLoadingMore}
-                >
-                  {gs.logLoadingMore ? t("git.loadingMore") : t("git.loadMoreCommits")}
-                </button>
+        </button>
+        {#if commitsOpen}
+          <div class="flex min-h-0 min-w-0 w-full flex-1 flex-col overflow-y-auto overflow-x-hidden">
+            {#if gs.log.length === 0}
+              <div
+                class="px-3 py-4 text-center text-[11px] text-muted-foreground/70"
+              >
+                {t("git.noCommits")}
               </div>
+            {:else}
+              <GitGraph commits={gs.log} />
+              {#if gs.logHasMore}
+                <div class="border-t border-border p-2 shrink-0">
+                  <button
+                    type="button"
+                    class="w-full rounded-md border border-border bg-[var(--color-surface-2)] px-2 py-1 text-[11px] text-muted-foreground transition hover:bg-[var(--color-surface-3)] hover:text-foreground disabled:opacity-50"
+                    onclick={loadMoreCommits}
+                    disabled={gs.logLoadingMore}
+                  >
+                    {gs.logLoadingMore ? t("git.loadingMore") : t("git.loadMoreCommits")}
+                  </button>
+                </div>
+              {/if}
             {/if}
-          {/if}
-        </div>
+          </div>
+        {/if}
       </section>
     </div>
   {/if}
