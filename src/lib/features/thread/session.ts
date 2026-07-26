@@ -180,15 +180,15 @@ const builders: Partial<Record<NonNullable<IconKey>, ResumeBuilder>> = {
  * fallback is deliberately not `--fork-session`: forking abandons the running
  * conversation and starts a copy, which is the opposite of getting it back.
  */
-async function claudeSessionIsLive(sessionId: string, cwd: string): Promise<boolean> {
+async function liveClaudeKind(sessionId: string, cwd: string): Promise<string | null> {
   try {
     const live = await backendForPath(cwd).session.liveClaude();
-    return live.includes(sessionId);
+    return live.find((s) => s.id === sessionId)?.kind ?? null;
   } catch (err) {
     // Never block a launch on this: an unanswered check just means the resume
     // is attempted as before.
     logger.warn("resume", "liveClaude check failed", String(err));
-    return false;
+    return null;
   }
 }
 
@@ -203,14 +203,35 @@ export async function buildResumeArgsAsync(thread: Thread, cwd: string): Promise
   const id = at >= 0 ? args[at + 1] : null;
   if (!id) return args;
 
-  if (!(await claudeSessionIsLive(id, cwd))) return args;
+  const kind = await liveClaudeKind(id, cwd);
+  if (kind === null) return args;
+
+  // Only a background session is reachable this way: `claude agents --cwd`
+  // lists background sessions, so sending an interactive one there would open
+  // a view that cannot contain it. Nothing joins another terminal's
+  // interactive session, so that case keeps the plain resume and lets claude
+  // say so itself, which is more use than a view with the answer missing.
+  if (kind !== "bg") {
+    logger.info(
+      "resume",
+      `${thread.id} (claude): session ${id} is live in another terminal, nothing to attach to`,
+      { cmd: thread.cmd, kind },
+    );
+    return args;
+  }
 
   logger.info(
     "resume",
-    `${thread.id} (claude): session ${id} is live, opening the agent view instead`,
+    `${thread.id} (claude): session ${id} is a live agent, opening the agent view instead`,
     { cmd: thread.cmd },
   );
-  return ["agents"];
+  // Scoped to the project: the view has no way to preselect a session — no
+  // positional argument, no attach flag — so the next best thing is to leave
+  // only this project's agents in it, which is usually the one row wanted.
+  // Driving the picker with synthetic keystrokes was the alternative and is
+  // not worth it: row order is not contractual, and a mistimed Enter would
+  // dispatch something the user never asked for.
+  return ["agents", "--cwd", cwd];
 }
 
 export function buildResumeArgs(thread: Thread): string[] {

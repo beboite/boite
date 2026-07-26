@@ -354,10 +354,8 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
         // is. Clients ask before replaying a captured id: claude refuses
         // `--resume` for anything it still has open.
         "session.liveClaude" => {
-            let ids: Vec<String> = boite_core::session::live_claude_session_ids()
-                .into_iter()
-                .collect();
-            Ok(json!({ "sessionIds": ids }))
+            let sessions = boite_core::session::live_claude_sessions();
+            Ok(json!({ "sessions": sessions }))
         }
 
         "session.find" => {

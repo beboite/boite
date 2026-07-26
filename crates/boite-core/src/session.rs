@@ -38,6 +38,18 @@ struct LiveSessionEntry {
     pid: Option<u32>,
     #[serde(rename = "sessionId")]
     session_id: Option<String>,
+    kind: Option<String>,
+}
+
+/// A session claude has open. The kind decides what can be done about it: a
+/// background one is reachable through the agent view, an interactive one
+/// belongs to another terminal and cannot be joined at all.
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct LiveClaudeSession {
+    pub id: String,
+    /// `bg` or `interactive`, straight from the registry.
+    pub kind: String,
 }
 
 #[cfg(unix)]
@@ -77,7 +89,11 @@ fn pid_alive(pid: u32) -> bool {
 /// cleaning up would otherwise leave an entry that hides a conversation
 /// forever, which is the very failure this is meant to prevent.
 pub fn live_claude_session_ids() -> HashSet<String> {
-    let mut live = HashSet::new();
+    live_claude_sessions().into_iter().map(|s| s.id).collect()
+}
+
+pub fn live_claude_sessions() -> Vec<LiveClaudeSession> {
+    let mut live = Vec::new();
     let Some(home) = dirs::home_dir() else {
         return live;
     };
@@ -99,7 +115,10 @@ pub fn live_claude_session_ids() -> HashSet<String> {
             continue;
         };
         if pid_alive(pid) {
-            live.insert(id);
+            live.push(LiveClaudeSession {
+                id,
+                kind: parsed.kind.unwrap_or_else(|| "interactive".into()),
+            });
         }
     }
     live
