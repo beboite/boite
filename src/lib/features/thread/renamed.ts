@@ -59,7 +59,9 @@ export function pruneRenamed(existing: Iterable<string>) {
   if (set.size === 0) return;
   const alive = new Set(existing);
   let dropped = false;
-  for (const id of [...set]) {
+  // Deleting the entry the loop is standing on is defined behaviour for a Set —
+  // the iterator moves to the next live one — so this does not need a copy.
+  for (const id of set) {
     if (!alive.has(id)) {
       set.delete(id);
       dropped = true;
