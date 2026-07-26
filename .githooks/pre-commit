@@ -1,0 +1,9 @@
+#!/bin/sh
+# Correctness lint only — it runs in well under a second, so it can sit on
+# every commit. The full gate (svelte-check + cargo) stays in `bun run check`
+# and CI; putting a 10s typecheck here would just teach everyone --no-verify.
+if command -v bun >/dev/null 2>&1; then
+  bun run lint || exit 1
+elif command -v npx >/dev/null 2>&1; then
+  npx --no-install oxlint || exit 1
+fi

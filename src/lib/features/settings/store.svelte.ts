@@ -195,7 +195,6 @@ const DEVICE_FIELDS = [
   "mobileLayout",
   "motionMode",
 ] as const;
-type DeviceField = (typeof DEVICE_FIELDS)[number];
 
 function loadDeviceOverrides(): Partial<Settings> | null {
   if (typeof localStorage === "undefined") return null;
