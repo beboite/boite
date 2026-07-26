@@ -541,7 +541,7 @@ dependencies = [
 
 [[package]]
 name = "boite"
-version = "0.10.6"
+version = "1.0.0"
 dependencies = [
  "base64 0.22.1",
  "block2 0.6.2",
@@ -569,7 +569,7 @@ dependencies = [
 
 [[package]]
 name = "boite-core"
-version = "0.10.6"
+version = "1.0.0"
 dependencies = [
  "base64 0.22.1",
  "dirs",
@@ -587,7 +587,7 @@ dependencies = [
 
 [[package]]
 name = "boite-server"
-version = "0.10.6"
+version = "1.0.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
