@@ -175,10 +175,11 @@ const builders: Partial<Record<NonNullable<IconKey>, ResumeBuilder>> = {
  * stop it there first to resume here." Replaying the id anyway drops the user
  * at a bare prompt with the conversation out of reach.
  *
- * So when the captured session is live, the thread opens the agent view instead
- * — one pick away from the conversation, which is the only route to it. The
- * fallback is deliberately not `--fork-session`: forking abandons the running
- * conversation and starts a copy, which is the opposite of getting it back.
+ * The refusal is about the hold, not the session, so the caller takes the hint
+ * literally: release an idle agent and resume for real, and fall back to the
+ * agent view only for one that is mid-answer. `--fork-session` is never the
+ * answer — forking abandons the running conversation and starts a copy, which
+ * is the opposite of getting it back.
  */
 async function liveClaudeSession(sessionId: string, cwd: string) {
   try {
@@ -252,7 +253,7 @@ export async function buildResumeArgsAsync(thread: Thread, cwd: string): Promise
   return ["agents", "--cwd", cwd];
 }
 
-export function buildResumeArgs(thread: Thread): string[] {
+function buildResumeArgs(thread: Thread): string[] {
   const key = resolveKey(thread);
   if (!key) {
     logger.debug("resume", `${thread.id}: no iconKey, skip`, {
