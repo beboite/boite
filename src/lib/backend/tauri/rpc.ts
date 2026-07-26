@@ -96,6 +96,8 @@ const SESSION_COMMANDS: Record<SessionKind, string> = {
 };
 
 export const tauriSession: SessionApi = {
+  liveClaude: () => invoke<string[]>("live_claude_sessions"),
+
   async find(kind, cwd, afterUnixMs, excludeIds): Promise<SessionHit | null> {
     const command = SESSION_COMMANDS[kind];
     if (kind === "claude") {

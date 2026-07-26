@@ -169,6 +169,50 @@ const builders: Partial<Record<NonNullable<IconKey>, ResumeBuilder>> = {
   },
 };
 
+/**
+ * Claude refuses `--resume` for a session it still has open: "That session is
+ * still running as a background agent. Open `claude agents` to attach to it, or
+ * stop it there first to resume here." Replaying the id anyway drops the user
+ * at a bare prompt with the conversation out of reach.
+ *
+ * So when the captured session is live, the thread opens the agent view instead
+ * — one pick away from the conversation, which is the only route to it. The
+ * fallback is deliberately not `--fork-session`: forking abandons the running
+ * conversation and starts a copy, which is the opposite of getting it back.
+ */
+async function claudeSessionIsLive(sessionId: string, cwd: string): Promise<boolean> {
+  try {
+    const live = await backendForPath(cwd).session.liveClaude();
+    return live.includes(sessionId);
+  } catch (err) {
+    // Never block a launch on this: an unanswered check just means the resume
+    // is attempted as before.
+    logger.warn("resume", "liveClaude check failed", String(err));
+    return false;
+  }
+}
+
+export async function buildResumeArgsAsync(thread: Thread, cwd: string): Promise<string[]> {
+  // Let the existing logic decide first — it owns the first-spawn latch, which
+  // is consumed on read and must not be probed twice — then intervene only on
+  // what it actually produced.
+  const args = buildResumeArgs(thread);
+  if (resolveKey(thread) !== "claude") return args;
+
+  const at = args.indexOf("--resume");
+  const id = at >= 0 ? args[at + 1] : null;
+  if (!id) return args;
+
+  if (!(await claudeSessionIsLive(id, cwd))) return args;
+
+  logger.info(
+    "resume",
+    `${thread.id} (claude): session ${id} is live, opening the agent view instead`,
+    { cmd: thread.cmd },
+  );
+  return ["agents"];
+}
+
 export function buildResumeArgs(thread: Thread): string[] {
   const key = resolveKey(thread);
   if (!key) {

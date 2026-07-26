@@ -143,6 +143,13 @@ export interface SessionApi {
     afterUnixMs: number,
     excludeIds: string[],
   ): Promise<SessionHit | null>;
+  /**
+   * Session ids claude currently has open, of any kind. `--resume` refuses
+   * every one of them, so a captured id has to be checked before it is
+   * replayed. Backends that cannot answer return an empty list, which reads as
+   * "nothing is live" and preserves the old behaviour.
+   */
+  liveClaude(): Promise<string[]>;
 }
 
 export interface LogApi {

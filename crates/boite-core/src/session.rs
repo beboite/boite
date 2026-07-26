@@ -76,7 +76,7 @@ fn pid_alive(pid: u32) -> bool {
 /// The pid is verified rather than trusted: a claude that died without
 /// cleaning up would otherwise leave an entry that hides a conversation
 /// forever, which is the very failure this is meant to prevent.
-fn live_claude_session_ids() -> HashSet<String> {
+pub fn live_claude_session_ids() -> HashSet<String> {
     let mut live = HashSet::new();
     let Some(home) = dirs::home_dir() else {
         return live;
