@@ -8,6 +8,7 @@
   import { ptyWrite } from "$lib/storage/pty";
   import {
     agentAcceptsInjection,
+    agentIsInstalled,
     agentRegisterCli,
     mcpPaths,
     registerAgentMcp,
@@ -43,23 +44,46 @@
   // is there. A thread whose command is missing still appears, because the
   // wiring is still what it would get — the label says "wired at launch" rather
   // than "active" for exactly that reason.
-  const agentsHere = $derived.by(() => {
-    if (!projectId) return [] as { key: string; label: string; auto: boolean; cli: string | null }[];
-    const seen = new Map<
-      string,
-      { key: string; label: string; auto: boolean; cli: string | null }
-    >();
+  type AgentRow = {
+    key: string;
+    label: string;
+    cmd: string;
+    auto: boolean;
+    cli: string | null;
+  };
+
+  // Candidates from the project's threads. A thread outlives the tool that made
+  // it — clicking a shortcut once on a machine without that CLI leaves the
+  // thread behind for good — so the binary is probed before any of this is
+  // shown, and the probe uses the thread's own command rather than the icon.
+  const candidates = $derived.by(() => {
+    if (!projectId) return [] as AgentRow[];
+    const seen = new Map<string, AgentRow>();
     for (const th of app.threadsByProject(projectId)) {
       const key = th.iconKey;
-      if (!key || seen.has(key)) continue;
+      if (!key || key === "terminal" || seen.has(key)) continue;
       seen.set(key, {
         key,
         label: key.charAt(0).toUpperCase() + key.slice(1),
+        cmd: th.cmd,
         auto: agentAcceptsInjection(key),
         cli: agentRegisterCli(key),
       });
     }
     return [...seen.values()];
+  });
+
+  let agentsHere = $state<AgentRow[]>([]);
+
+  $effect(() => {
+    const rows = candidates;
+    let cancelled = false;
+    void Promise.all(rows.map((r) => agentIsInstalled(r.cmd))).then((present) => {
+      if (!cancelled) agentsHere = rows.filter((_, i) => present[i]);
+    });
+    return () => {
+      cancelled = true;
+    };
   });
 
   async function copyPath() {

@@ -53,6 +53,20 @@ export function agentRegisterCli(key: IconKey): string | null {
 }
 
 /** Agents Boite can point at the endpoint with no setup from the user. */
+/**
+ * Whether the agent's binary resolves on PATH. The panel asks before claiming
+ * Boite would wire an agent: a thread can outlive the tool that made it — click
+ * a shortcut once on a machine without that CLI and the thread stays for good.
+ */
+export async function agentIsInstalled(cmd: string): Promise<boolean> {
+  if (!hasTauri()) return false;
+  try {
+    return await invoke<boolean>("check_command_exists", { cmd });
+  } catch {
+    return false;
+  }
+}
+
 export function agentAcceptsInjection(key: IconKey): boolean {
   return !!key && key in INJECTORS;
 }

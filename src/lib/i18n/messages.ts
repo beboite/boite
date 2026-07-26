@@ -183,7 +183,7 @@ export const EN_MESSAGES = {
   "todo.terminalUnreachable": "Could not reach the terminal: {error}",
 
   "todo.agentAccess": "Agent access",
-  "todo.agentActive": "wired at launch",
+  "todo.agentActive": "ready",
   "todo.agentManual": "Copy setup command",
   "todo.agentCopied": "Command copied — run it in a terminal",
   "todo.agentOff": "Agent access is off in settings.",

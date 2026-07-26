@@ -33,10 +33,11 @@ jobs:
           app=$(grep -m1 '^version = ' src-tauri/Cargo.toml | cut -d'"' -f2)
           core=$(grep -m1 '^version = ' crates/boite-core/Cargo.toml | cut -d'"' -f2)
           server=$(grep -m1 '^version = ' crates/boite-server/Cargo.toml | cut -d'"' -f2)
+          mcp=$(grep -m1 '^version = ' crates/boite-mcp/Cargo.toml | cut -d'"' -f2)
 
-          echo "tauri.conf.json=$conf package.json=$pkg boite=$app core=$core server=$server"
+          echo "tauri.conf.json=$conf package.json=$pkg boite=$app core=$core server=$server mcp=$mcp"
 
-          for v in "$pkg" "$app" "$core" "$server"; do
+          for v in "$pkg" "$app" "$core" "$server" "$mcp"; do
             if [ "$v" != "$conf" ]; then
               echo "::error::version mismatch — tauri.conf.json says $conf, another manifest says $v" >&2
               exit 1

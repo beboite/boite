@@ -1,6 +1,6 @@
 [package]
 name = "boite-mcp"
-version = "0.10.6"
+version = "1.0.0"
 description = "MCP server exposing the Boite todo list of the terminal it runs in"
 edition = "2021"
 
