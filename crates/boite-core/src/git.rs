@@ -70,6 +70,11 @@ fn git(path: &Path) -> Command {
     // of hanging a background fetch forever.
     cmd.env("GIT_TERMINAL_PROMPT", "0");
     cmd.env("GCM_INTERACTIVE", "never");
+    // Git translates its own messages, and the frontend maps known failures
+    // (checkout would overwrite, unmerged index, worktree already checked out)
+    // by matching them. Under a French or German locale none of those match and
+    // the user gets raw git output instead of the guidance.
+    cmd.env("LC_ALL", "C");
     cmd.stdin(Stdio::null());
     #[cfg(target_os = "windows")]
     {
@@ -879,6 +884,12 @@ fn validate_branch_name(path: &Path, name: &str) -> Result<(), String> {
     if name.trim() != name || name.is_empty() {
         return Err("Invalid branch name. Remove leading or trailing spaces.".into());
     }
+    // A leading dash reaches git as an option, not a name: `--help` makes both
+    // check-ref-format and switch exit 0 without creating anything, so the call
+    // would report success on a branch that does not exist.
+    if name.starts_with('-') {
+        return Err(format!("Invalid branch name '{name}'. It cannot start with '-'."));
+    }
     let mut cmd = git(path);
     cmd.args(["check-ref-format", "--branch", name]);
     if run(cmd).is_err() {
@@ -1246,5 +1257,9 @@ mod branch_tests {
         let repo = TestRepo::new();
         assert!(switch_branch_blocking(repo.path(), "bad:name", true, false).is_err());
         assert!(switch_branch_blocking(repo.path(), "master", true, false).is_err());
+        // `--help` is the dangerous one: git would treat it as an option, print
+        // help, exit 0, and leave us reporting a success with no branch made.
+        assert!(switch_branch_blocking(repo.path(), "--help", true, false).is_err());
+        assert_eq!(symbolic_branch(&repo.path).as_deref(), Some("master"));
     }
 }
