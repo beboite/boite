@@ -247,22 +247,18 @@ Releases are built by `.github/workflows/release.yml` on a pushed `v*` tag, one
 job per platform. It signs the update payloads and opens a **draft** release —
 clients see nothing until you publish it.
 
-One-time setup, before the first signed release:
+Cutting a release needs no key on your machine. The signing keypair already
+exists: its public half is in `plugins.updater.pubkey`, its private half lives
+only as the `TAURI_SIGNING_PRIVATE_KEY` repository secret (with
+`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`). Anyone who can push a tag can ship a
+signed release without ever seeing it.
 
-```bash
-bun tauri signer generate -w ~/.tauri/boite.key
-```
-
-That writes a private key plus its `.pub`. Then:
-
-1. Paste the **public** key into `plugins.updater.pubkey` in
-   `src-tauri/tauri.conf.json`.
-2. Add two repository secrets: `TAURI_SIGNING_PRIVATE_KEY` (contents of the
-   private key file) and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
-
-Keep the private key out of the repo and back it up. Losing it means no
-installed copy of Boite can ever be updated again — the public key is compiled
-into every binary already in the wild, and nothing else will satisfy it.
+That keypair is permanent. There is one for the whole project, not one per
+maintainer — the public key is compiled into every binary in the wild, so a
+second key would orphan every existing install. GitHub secrets cannot be read
+back, and there is no revocation: losing the private key ends updates forever,
+and leaking it cannot be undone. Keep an offline backup in a shared password
+manager, and never sign locally.
 
 Cutting a release: bump the version in the five places that carry it
 (`package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`,
