@@ -265,6 +265,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             set_traffic_lights_hidden,
             commands::pty_spawn,
+            commands::pty_warm_shell,
             commands::pty_open,
             commands::pty_detach,
             commands::pty_write,
