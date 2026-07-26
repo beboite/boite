@@ -165,7 +165,7 @@ export async function launchBlankTerminal(
 }
 
 export async function closeThread(threadId: string) {
-  const t = app.threads.find((x) => x.id === threadId);
+  const t = app.threadById(threadId);
   if (t) rememberClosedThread(t);
   const kill = t?.ptyId ? ptyKill(t.ptyId, true).catch(() => {}) : Promise.resolve();
   await app.removeThread(threadId);
@@ -175,7 +175,7 @@ export async function closeThread(threadId: string) {
 // One close path for every entry point (sidebar X, context menu, Ctrl+W) so
 // the confirm-before-close setting is honored everywhere.
 export async function closeThreadWithConfirm(threadId: string): Promise<boolean> {
-  const t = app.threads.find((x) => x.id === threadId);
+  const t = app.threadById(threadId);
   if (!t) return false;
   if (settings.state.confirmCloseThread) {
     const ok = await confirmDialog.ask({
@@ -191,7 +191,7 @@ export async function closeThreadWithConfirm(threadId: string): Promise<boolean>
 }
 
 export async function stopThread(threadId: string) {
-  const t = app.threads.find((x) => x.id === threadId);
+  const t = app.threadById(threadId);
   if (!t) return;
 
   const previousPtyId = t.ptyId;
@@ -237,7 +237,7 @@ export async function restoreLastClosedThread(): Promise<Thread | null> {
 }
 
 export async function reloadThread(threadId: string) {
-  const t = app.threads.find((x) => x.id === threadId);
+  const t = app.threadById(threadId);
   if (!t) return;
 
   const previousPtyId = t.ptyId;

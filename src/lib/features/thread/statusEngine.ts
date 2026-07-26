@@ -38,7 +38,7 @@ function maybeAutoClose(threadId: string, iconKey: string | null | undefined) {
   if (!minutes || minutes <= 0) return;
   const enabled = settings.state.idleAutocloseByIcon[iconKey] === true;
   if (!enabled) return;
-  const t = app.threads.find((x) => x.id === threadId);
+  const t = app.threadById(threadId);
   if (!t || !t.ptyId) return;
   if (t.keepAwake) return;
   if (!t.sessionId) {

@@ -12,12 +12,16 @@
 >
   {#each notifications.toasts as toast (toast.id)}
     <div animate:flip={{ duration: 150 }} transition:fly={{ y: 8, duration: 150 }}>
-      <Toast
-        message={toast.message}
-        kind={toast.kind}
-        durationMs={toast.durationMs}
-        onDone={() => notifications.dismiss(toast.id)}
-      />
+      <!-- A repeat of the same message bumps resetKey rather than stacking a
+           second card; remounting here is what restarts its countdown. -->
+      {#key toast.resetKey}
+        <Toast
+          message={toast.message}
+          kind={toast.kind}
+          durationMs={toast.durationMs}
+          onDone={() => notifications.dismiss(toast.id)}
+        />
+      {/key}
     </div>
   {/each}
 </div>

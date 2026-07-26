@@ -307,7 +307,7 @@
       ) {
         continue;
       }
-      const target = app.threads.find((t) => t.id === targetThreadId);
+      const target = app.threadById(targetThreadId);
       const group = paneStore.groupOf(targetThreadId);
       if (!target || target.projectId !== drag.projectId || !group) {
         continue;
@@ -650,7 +650,7 @@
     if (!liveDrag || liveDrag.kind !== "thread" || !liveDrag.sourceRect) {
       return null;
     }
-    const thread = app.threads.find((t) => t.id === liveDrag.id);
+    const thread = app.threadById(liveDrag.id);
     if (!thread) return null;
     return {
       thread,

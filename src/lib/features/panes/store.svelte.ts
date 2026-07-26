@@ -233,7 +233,7 @@ class PaneStore {
   ): boolean {
     if (targetThreadId === draggedThreadId) return false;
     const targetGroup = this.groupOf(targetThreadId);
-    const dragged = app.threads.find((t) => t.id === draggedThreadId);
+    const dragged = app.threadById(draggedThreadId);
     if (!targetGroup || !dragged) return false;
     if (dragged.projectId !== targetGroup.projectId) return false;
 
@@ -279,7 +279,7 @@ class PaneStore {
   unsplit(threadId: string): boolean {
     const g = this.groupOf(threadId);
     if (!g || countLeaves(g.root) <= 1) return false;
-    const t = app.threads.find((x) => x.id === threadId);
+    const t = app.threadById(threadId);
     if (!t) return false;
     const next = pruneLeaf(g.root, threadId);
     if (!next) return false;

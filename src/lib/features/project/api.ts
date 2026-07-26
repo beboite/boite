@@ -103,15 +103,34 @@ export async function refreshProjectIcon(project: Project): Promise<boolean> {
   return true;
 }
 
+// Each inspection is several read_dir + read_to_string round trips, and this
+// runs right as the user starts interacting. A small sliding window keeps the
+// wall time at roughly the slowest project instead of the sum of all of them,
+// without letting N projects fan out into N concurrent directory walks.
+const ICON_REINSPECT_CONCURRENCY = 4;
+
 // Projects added before icon detection improved (or before their logo
 // existed) are stuck with the initial; retry them quietly on startup.
 export async function reinspectMissingIcons(): Promise<void> {
   const missing = app.projects.filter((p) => !p.icon);
-  for (const project of missing) {
-    try {
-      await refreshProjectIcon(project);
-    } catch {
-      // best effort
+  if (missing.length === 0) return;
+
+  let next = 0;
+  const worker = async () => {
+    while (next < missing.length) {
+      const project = missing[next++];
+      try {
+        await refreshProjectIcon(project);
+      } catch {
+        // best effort
+      }
     }
-  }
+  };
+
+  await Promise.all(
+    Array.from(
+      { length: Math.min(ICON_REINSPECT_CONCURRENCY, missing.length) },
+      worker,
+    ),
+  );
 }

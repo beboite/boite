@@ -83,7 +83,6 @@
   let lastInputAt = 0;
   let lastDetectAt = 0;
   let lastDetectOutputAt = 0;
-  let detectBuffer = "";
   const decoder = new TextDecoder("utf-8", { fatal: false });
   const encoder = new TextEncoder();
   const LF = new Uint8Array([0x0a]);
@@ -91,6 +90,69 @@
   // Detection only ever looks at the DETECT_BUFFER_MAX tail, so decoding more
   // than this per chunk is wasted main-thread work during big output bursts.
   const DETECT_DECODE_MAX = 8192;
+  // ~3 bytes per char covers the box-drawing and ANSI-heavy output agents
+  // emit, so this retains at least DETECT_BUFFER_MAX characters.
+  const DETECT_BYTES_MAX = DETECT_BUFFER_MAX * 3;
+
+  // The detection tail used to be decoded and re-sliced on every single output
+  // chunk, even though it is only ever read on the 120ms detection tick and on
+  // the prompt probe. Keep the raw bytes and materialize the string lazily:
+  // a burst of 100 chunks now costs 100 array pushes instead of 100 decodes
+  // plus 100 4000-char string copies.
+  let detectChunks: Uint8Array[] = [];
+  let detectBytes = 0;
+  let detectText = "";
+  let detectTextStale = false;
+
+  function pushDetectBytes(bytes: Uint8Array) {
+    if (bytes.length === 0) return;
+    const chunk =
+      bytes.length > DETECT_DECODE_MAX
+        ? bytes.subarray(bytes.length - DETECT_DECODE_MAX)
+        : bytes;
+    detectChunks.push(chunk);
+    detectBytes += chunk.length;
+    while (detectBytes > DETECT_BYTES_MAX && detectChunks.length > 1) {
+      detectBytes -= detectChunks[0].length;
+      detectChunks.shift();
+    }
+    detectTextStale = true;
+  }
+
+  function detectBufferText(): string {
+    if (!detectTextStale) return detectText;
+    detectTextStale = false;
+    if (detectChunks.length === 0) {
+      detectText = "";
+      return detectText;
+    }
+    let joined: Uint8Array;
+    if (detectChunks.length === 1) {
+      joined = detectChunks[0];
+    } else {
+      joined = new Uint8Array(detectBytes);
+      let at = 0;
+      for (const c of detectChunks) {
+        joined.set(c, at);
+        at += c.length;
+      }
+    }
+    // Non-streaming: the retained window is decoded whole every time, so there
+    // is no decoder state to carry. A multi-byte char clipped at the head costs
+    // one replacement char, which the detection regexes never look at.
+    detectText = decoder.decode(joined);
+    if (detectText.length > DETECT_BUFFER_MAX) {
+      detectText = detectText.slice(-DETECT_BUFFER_MAX);
+    }
+    return detectText;
+  }
+
+  function clearDetectBuffer() {
+    detectChunks = [];
+    detectBytes = 0;
+    detectText = "";
+    detectTextStale = false;
+  }
 
   // Soft keyboard is opt-in on phones: tapping a terminal should focus it for
   // scroll/select without summoning the Android keyboard. `inputmode=none`
@@ -305,7 +367,7 @@
   }
 
   function currentThread(): Thread | null {
-    return app.threads.find((x) => x.id === thread.id) ?? null;
+    return app.threadById(thread.id);
   }
 
   function shouldUsePty(targetPtyId: string | null): targetPtyId is string {
@@ -389,7 +451,7 @@
 
   function syncAliveThread(nextStatus: "ready" | "running" = "ready", known?: Thread | null) {
     if (!ptyId) return;
-    const current = known ?? app.threads.find((x) => x.id === thread.id);
+    const current = known ?? app.threadById(thread.id);
     if (!current) return;
     if (current.status === "stopped") return;
     if (current.ptyId !== ptyId) {
@@ -413,23 +475,16 @@
     app.setThreadStatus(thread.id, "running");
   }
 
-  function appendDetectBuffer(text: string) {
-    detectBuffer += text;
-    if (detectBuffer.length > DETECT_BUFFER_MAX) {
-      detectBuffer = detectBuffer.slice(-DETECT_BUFFER_MAX);
-    }
-  }
-
-  function detectWorkingFromOutput(text: string) {
+  function detectWorkingFromOutput(bytes: Uint8Array) {
     const now = Date.now();
     if (lastDetectOutputAt && now - lastDetectOutputAt > 1500) {
-      detectBuffer = "";
+      clearDetectBuffer();
     }
     lastDetectOutputAt = now;
-    appendDetectBuffer(text);
+    pushDetectBytes(bytes);
     if (now - lastDetectAt < 120) return;
     lastDetectAt = now;
-    if (detectWorking(detectBuffer, thread.iconKey)) {
+    if (detectWorking(detectBufferText(), thread.iconKey)) {
       markRunning();
     }
   }
@@ -445,7 +500,7 @@
       // ring): clear so it repaints cleanly instead of stacking onto stale
       // scrollback.
       term.reset();
-      detectBuffer = "";
+      clearDetectBuffer();
       return;
     }
 
@@ -457,16 +512,10 @@
       lastOutputAt = Date.now();
       term.write(bytes);
       // Status sniffing is local-only (remote pushes status server-side), so
-      // skip the decode entirely there. A non-stream decode on the tail-only
-      // path flushes decoder state — at worst one replacement char in the
-      // detection text, invisible to the regex.
+      // the bytes are not even retained there.
       if (clientStatus()) {
         statusEngine.markOutput(thread.id);
-        const text =
-          bytes.length > DETECT_DECODE_MAX
-            ? decoder.decode(bytes.subarray(bytes.length - DETECT_DECODE_MAX))
-            : decoder.decode(bytes, { stream: true });
-        detectWorkingFromOutput(text);
+        detectWorkingFromOutput(bytes);
       }
     } else if (event.type === "title") {
       const current = currentThread();
@@ -1065,7 +1114,7 @@
       const tryInject = () => {
         if (injected || !shouldUsePty(targetPtyId)) return;
         const idle = Date.now() - lastOutputAt;
-        if (idle > 250 && looksLikePrompt(detectBuffer)) {
+        if (idle > 250 && looksLikePrompt(detectBufferText())) {
           inject();
           return;
         }

@@ -99,14 +99,15 @@ pub fn repo_info_blocking(path: &str) -> Result<RepoInfo, String> {
     };
     let text = String::from_utf8_lossy(&stdout);
 
+    let version = refs_version(p);
     let mut info = RepoInfo {
         is_repo: true,
         branch: None,
         upstream: None,
         ahead: 0,
         behind: 0,
-        refs_version: refs_version(p),
-        commit_count: commit_count(p),
+        commit_count: commit_count_cached(p, version.as_deref()),
+        refs_version: version,
     };
     for line in text.lines() {
         if let Some(rest) = line.strip_prefix("# branch.head ") {
@@ -203,6 +204,34 @@ fn commit_count(p: &Path) -> u32 {
         Ok(b) => String::from_utf8_lossy(&b).trim().parse().unwrap_or(0),
         Err(_) => 0,
     }
+}
+
+// `rev-list --count HEAD` walks the entire history, and the panel asks for
+// repo info every 10s per open project. The count can only move when a ref
+// moves, and `refs_version` already fingerprints exactly that without a
+// subprocess — so key the count on it. One entry per repo the user opens;
+// nothing here grows over time.
+type CommitCountCache = std::sync::Mutex<std::collections::HashMap<PathBuf, (String, u32)>>;
+static COMMIT_COUNT_CACHE: std::sync::OnceLock<CommitCountCache> = std::sync::OnceLock::new();
+
+fn commit_count_cached(p: &Path, refs_version: Option<&str>) -> u32 {
+    // No fingerprint means no .git we can watch; fall back to asking git.
+    let Some(version) = refs_version else {
+        return commit_count(p);
+    };
+    let cache = COMMIT_COUNT_CACHE.get_or_init(Default::default);
+    if let Ok(map) = cache.lock() {
+        if let Some((cached_version, count)) = map.get(p) {
+            if cached_version == version {
+                return *count;
+            }
+        }
+    }
+    let count = commit_count(p);
+    if let Ok(mut map) = cache.lock() {
+        map.insert(p.to_path_buf(), (version.to_string(), count));
+    }
+    count
 }
 
 // Resolve the actual .git directory; worktrees and submodules use a `.git`

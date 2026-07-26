@@ -15,6 +15,10 @@
     onDone,
   }: Props = $props();
 
+  // onMount, deliberately not $effect: an effect re-runs whenever the store
+  // touches the toast list, so one card expiring re-armed the countdown of
+  // every other card. Restarting on a repeat message is handled by Toaster
+  // remounting this component on the resetKey instead.
   onMount(() => {
     if (durationMs == null || !Number.isFinite(durationMs) || durationMs <= 0) {
       return;

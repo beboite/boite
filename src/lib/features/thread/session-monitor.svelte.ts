@@ -124,7 +124,7 @@ export function startSessionMonitor(opts: {
 
   const scanOnce = async (): Promise<boolean> => {
     if (scanInFlight) return false;
-    const t = app.threads.find((x) => x.id === threadId);
+    const t = app.threadById(threadId);
     if (!t || t.ptyId !== targetPtyId || !opts.isPtyCurrent(targetPtyId)) {
       return true;
     }
@@ -208,7 +208,7 @@ export function startSessionMonitor(opts: {
   let livenessInFlight = false;
   const probeLiveness = async () => {
     if (livenessInFlight) return;
-    const t = app.threads.find((x) => x.id === threadId);
+    const t = app.threadById(threadId);
     if (t && !backendFor(t.origin).caps.clientStatus) return;
     if (
       !t ||
