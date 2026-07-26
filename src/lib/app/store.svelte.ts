@@ -48,6 +48,11 @@ class AppState {
   // sidebar can show a red status dot on each until the binding is restored
   // (via /resume in the AI CLI -> session monitor's steal logic).
   unboundByDedup = $state<string[]>([]);
+  // Terminals mount lazily (the page only mounts a thread the user has
+  // visited), and mounting is what spawns the PTY. Anything outside the page
+  // that needs a thread running again — the post-update resume — queues its id
+  // here instead of reaching into the page's local state.
+  requestedActivations = $state<string[]>([]);
 
   // Unsubscribe from the remote control plane; set while a remote workspace is
   // active so a switch can tear the subscription down.
@@ -105,6 +110,35 @@ class AppState {
         });
       }
     }, 500);
+  }
+
+  // Force the debounced title batch out now. Called before anything that ends
+  // the process on purpose (applying an update): the 500ms window is otherwise
+  // long enough to lose the last title of every thread.
+  async flushPendingWrites(): Promise<void> {
+    if (this.titleFlushTimer !== null) {
+      clearTimeout(this.titleFlushTimer);
+      this.titleFlushTimer = null;
+    }
+    const batch = [...this.pendingTitleSaves];
+    this.pendingTitleSaves.clear();
+    await Promise.all(
+      batch.map(([id, title]) => {
+        const origin = this.threads.find((x) => x.id === id)?.origin;
+        return updateThreadTitle(id, title, origin).catch((err) => {
+          console.error("updateThreadTitle failed:", err);
+        });
+      }),
+    );
+  }
+
+  requestActivation(threadId: string) {
+    if (this.requestedActivations.includes(threadId)) return;
+    this.requestedActivations = [...this.requestedActivations, threadId];
+  }
+
+  clearRequestedActivations() {
+    if (this.requestedActivations.length > 0) this.requestedActivations = [];
   }
 
   bumpRespawn(threadId: string) {
@@ -270,6 +304,7 @@ class AppState {
     this.mobileTab = "terminal";
     this.respawnNonce = {};
     this.unboundByDedup = [];
+    this.requestedActivations = [];
     this.ready = false;
   }
 
