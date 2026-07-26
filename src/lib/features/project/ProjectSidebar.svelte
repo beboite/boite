@@ -516,6 +516,16 @@
       });
       items.push({ separator: true });
     }
+    // Same call middle-click makes; the shortcut is undiscoverable, and on a
+    // trackpad there is no middle button to make it with. Already stopped
+    // means there is no PTY left to put down.
+    items.push({
+      label: "Put to sleep",
+      action: () => {
+        void stopThread(thread.id);
+      },
+      disabled: !thread.ptyId,
+    });
     items.push({
       label: thread.keepAwake ? "Allow auto-sleep" : "Keep awake",
       action: () => {
