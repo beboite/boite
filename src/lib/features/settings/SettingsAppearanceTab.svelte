@@ -4,11 +4,19 @@
   import ToggleSetting from "$lib/shared/components/ToggleSetting.svelte";
   import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
   import type { MotionMode } from "$lib/types";
+  import { i18n } from "$lib/i18n/index.svelte";
+  import type { LocaleSetting } from "$lib/types";
 
   const MOTION_MODES: { id: MotionMode; label: string }[] = [
     { id: "system", label: "System" },
     { id: "on", label: "On" },
     { id: "off", label: "Off" },
+  ];
+
+  const LOCALES: { id: LocaleSetting; label: string }[] = [
+    { id: "system", label: "appearance.lang_system" },
+    { id: "en", label: "appearance.lang_en" },
+    { id: "fr", label: "appearance.lang_fr" },
   ];
 
   function onSlider(e: Event) {
@@ -125,3 +133,18 @@
     border: 2px solid var(--color-surface);
   }
 </style>
+<SettingsCard
+  title={i18n.t("appearance.language")}
+  description={i18n.t("appearance.language_desc")}
+>
+  <select
+    class="rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-1.5 text-xs text-foreground"
+    value={settings.state.locale}
+    onchange={(event) => settings.setLocale((event.currentTarget as HTMLSelectElement).value as LocaleSetting)}
+    aria-label={i18n.t("appearance.language")}
+  >
+    {#each LOCALES as locale (locale.id)}
+      <option value={locale.id}>{i18n.t(locale.label)}</option>
+    {/each}
+  </select>
+</SettingsCard>

@@ -2,7 +2,7 @@ import { loadSettings, saveSettings } from "$lib/storage/db";
 import { notifications } from "$lib/features/notifications/store.svelte";
 import { debounce } from "$lib/shared/utils/debounce";
 import { uuid } from "$lib/shared/utils/uuid";
-import type { RightPanelTab, Settings, Shortcut } from "$lib/types";
+import type { LocaleSetting, RightPanelTab, Settings, Shortcut } from "$lib/types";
 
 export const PRESET_SHORTCUTS: Shortcut[] = [
   { id: "claude", label: "Claude", command: "claude", iconKey: "claude" },
@@ -124,6 +124,7 @@ const DEFAULTS: Settings = {
   gitAutoFetchSeconds: 180,
   mobileLayout: false,
   motionMode: "system",
+  locale: "system",
 };
 
 // First-run guess: touch-primary, narrow screens (a phone TWA/PWA) default to
@@ -288,6 +289,10 @@ class SettingsStore {
             : DEFAULTS.mobileLayout,
         // Device-scoped; the localStorage override below is the real source.
         motionMode: DEFAULTS.motionMode,
+        locale:
+          stored.locale === "en" || stored.locale === "fr" || stored.locale === "system"
+            ? stored.locale
+            : DEFAULTS.locale,
       };
       // Device fields come from localStorage, overriding the backend blob. If
       // there is none yet, seed it from what the blob carried (one-shot
@@ -413,6 +418,12 @@ class SettingsStore {
     this.state.motionMode = value;
     this.persistDeviceNow();
   }
+  async setLocale(value: LocaleSetting) {
+    if (this.state.locale === value) return;
+    this.state.locale = value;
+    await this.persist();
+  }
+
 
   setUiScalePercent(percent: number) {
     const clamped = Math.max(75, Math.min(150, Math.round(percent)));
