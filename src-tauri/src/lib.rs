@@ -129,14 +129,7 @@ pub fn run() {
         },
     ];
 
-    let mut builder = tauri::Builder::default();
-
-    #[cfg(debug_assertions)]
-    {
-        builder = builder.plugin(tauri_plugin_mcp_bridge::init());
-    }
-
-    builder
+    let builder = tauri::Builder::default()
         // Must be the first plugin so a second launch is intercepted before
         // anything else initializes. Two instances would share one SQLite
         // file and race kill_all on exit.
@@ -165,7 +158,20 @@ pub fn run() {
             tauri_plugin_sql::Builder::default()
                 .add_migrations("sqlite:boite.db", migrations)
                 .build(),
-        )
+        );
+
+    // Registered last so single_instance still wins the startup race, and bound
+    // to loopback: the plugin's own default is 0.0.0.0, which would put an
+    // unauthenticated WebSocket on the LAN and the tailnet. That socket answers
+    // execute_js, and JS in the webview reaches the IPC that spawns PTYs.
+    #[cfg(all(debug_assertions, feature = "mcp-bridge"))]
+    let builder = builder.plugin(
+        tauri_plugin_mcp_bridge::Builder::new()
+            .bind_address("127.0.0.1")
+            .build(),
+    );
+
+    builder
         .manage(PtyManager::new())
         .manage(local_pty::LocalSessions::new())
         .manage(BootState::default())

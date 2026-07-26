@@ -85,15 +85,27 @@ bun run tauri build  # release bundles (per-platform default targets)
 
 ### Dev mode side-by-side (Isolated)
 
-If you are already running a production/release instance of Boite (for instance, if you are pair-programming with Claude Code or Antigravity inside it) and want to dev on the app without closing your current session, the standard `tauri dev` command will conflict with the single-instance lock.
-
-To run a development window side-by-side:
+If you are already running a release instance of Boite — pair-programming with
+an agent inside it, say — `tauri dev` will not start: the single-instance lock
+refuses the second launch. To get a dev window side by side:
 
 ```bash
-bun run tauri dev --config src-tauri/tauri.dev-isolated.conf.json
+bun run dev:isolated
 ```
 
-This launches a distinct **"Boite Dev"** window using port `1430` and the bundle identifier `dev.boite.dev`.
+That launches a distinct **"Boite Dev"** window on port `1430` under the bundle
+identifier `dev.boite.dev`, so it gets its own SQLite file and starts with an
+empty project list.
+
+It also enables the `mcp-bridge` feature, which lets an agent drive that window:
+screenshots, DOM reads, JS evaluation. **The bridge is a dev-only tool.** It is
+an unauthenticated WebSocket server, bound to `127.0.0.1` on purpose — the
+plugin's own default is `0.0.0.0`, and JS evaluated in the webview reaches the
+IPC that spawns PTYs. Keep it on loopback, and never enable the feature for a
+build you hand to anyone.
+
+Plain `bun run tauri dev` leaves the feature off, so the bridge is absent from
+the binary entirely.
 
 ```bash
 # checks before committing
