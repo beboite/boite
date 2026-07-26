@@ -5,14 +5,15 @@
   import SettingsAppearanceTab from "./SettingsAppearanceTab.svelte";
   import SettingsLogsTab from "./SettingsLogsTab.svelte";
   import X from "@lucide/svelte/icons/x";
+  import { t, type MessageKey } from "$lib/i18n/index.svelte";
 
   type TabId = "general" | "terminal" | "appearance" | "logs";
 
-  const TABS: { id: TabId; label: string }[] = [
-    { id: "general", label: "General" },
-    { id: "terminal", label: "Terminal" },
-    { id: "appearance", label: "Appearance" },
-    { id: "logs", label: "Logs" },
+  const TABS: { id: TabId; labelKey: MessageKey }[] = [
+    { id: "general", labelKey: "tabs.general" },
+    { id: "terminal", labelKey: "tabs.terminal" },
+    { id: "appearance", labelKey: "tabs.appearance" },
+    { id: "logs", labelKey: "tabs.logs" },
   ];
 
   let activeTab = $state<TabId>("general");
@@ -27,13 +28,13 @@
   <header
     class="flex shrink-0 items-center justify-between border-b border-border bg-[var(--color-surface)] px-4 py-2"
   >
-    <h2 class="text-[13px] font-semibold tracking-tight">Settings</h2>
+    <h2 class="text-[13px] font-semibold tracking-tight">{t("common.settings")}</h2>
     <button
       type="button"
       class="rounded-md p-1 text-muted-foreground transition hover:bg-accent hover:text-foreground"
       onclick={close}
-      aria-label="Close settings"
-      title="Back to terminal"
+      aria-label={t("common.closeSettings")}
+      title={t("common.backToTerminal")}
     >
       <X class="size-4" />
     </button>
@@ -52,7 +53,7 @@
             : 'border-transparent text-muted-foreground hover:text-foreground'}"
           onclick={() => (activeTab = tab.id)}
         >
-          {tab.label}
+          {t(tab.labelKey)}
         </button>
       {/each}
     </div>

@@ -3,20 +3,14 @@
   import SettingsCard from "$lib/shared/components/SettingsCard.svelte";
   import ToggleSetting from "$lib/shared/components/ToggleSetting.svelte";
   import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
+  import type { MessageKey } from "$lib/i18n/index.svelte";
+  import { LOCALE_OPTIONS, t } from "$lib/i18n/index.svelte";
   import type { MotionMode } from "$lib/types";
-  import { i18n } from "$lib/i18n/index.svelte";
-  import type { LocaleSetting } from "$lib/types";
 
-  const MOTION_MODES: { id: MotionMode; label: string }[] = [
-    { id: "system", label: "System" },
-    { id: "on", label: "On" },
-    { id: "off", label: "Off" },
-  ];
-
-  const LOCALES: { id: LocaleSetting; label: string }[] = [
-    { id: "system", label: "appearance.lang_system" },
-    { id: "en", label: "appearance.lang_en" },
-    { id: "fr", label: "appearance.lang_fr" },
+  const MOTION_MODES: { id: MotionMode; labelKey: MessageKey }[] = [
+    { id: "system", labelKey: "appearance.motionSystem" },
+    { id: "on", labelKey: "appearance.motionOn" },
+    { id: "off", labelKey: "appearance.motionOff" },
   ];
 
   function onSlider(e: Event) {
@@ -29,19 +23,16 @@
   }
 </script>
 
-<SettingsCard
-  title="UI scale"
-  description="Drag, or use Ctrl + scroll wheel / Ctrl + + / Ctrl + − / Ctrl + 0."
->
+<SettingsCard title={t("appearance.uiScale")} description={t("appearance.uiScaleDesc")}>
   {#snippet actions()}
     <button
       type="button"
       class="flex items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-1 text-[11px] text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
       onclick={reset}
-      title="Reset to 100%"
+      title={t("appearance.resetScale")}
     >
       <RotateCcw class="size-3" />
-      Reset
+      {t("common.reset")}
     </button>
   {/snippet}
 
@@ -55,7 +46,7 @@
       value={settings.state.uiScalePercent}
       oninput={onSlider}
       class="ui-slider min-w-0 flex-1"
-      aria-label="UI scale"
+      aria-label={t("appearance.uiScale")}
     />
     <span class="w-12 text-right font-mono text-xs font-semibold text-foreground">
       {settings.state.uiScalePercent}%
@@ -64,19 +55,16 @@
 </SettingsCard>
 
 <ToggleSetting
-  label="Layout"
-  description="Mobile stacks everything into full-width pages with a bottom bar and bigger touch targets. PC keeps the sidebar and side panels."
+  label={t("appearance.layout")}
+  description={t("appearance.layoutDesc")}
   enabled={settings.state.mobileLayout}
-  onLabel="Mobile"
-  offLabel="PC"
+  onLabel={t("appearance.mobile")}
+  offLabel={t("appearance.pc")}
   onToggle={() => settings.setMobileLayout(!settings.state.mobileLayout)}
 />
 
-<SettingsCard
-  title="Animations"
-  description="System follows the OS reduced-motion setting; On and Off override it."
->
-  <div class="flex gap-1.5" role="radiogroup" aria-label="Animations">
+<SettingsCard title={t("appearance.animations")} description={t("appearance.animationsDesc")}>
+  <div class="flex gap-1.5" role="radiogroup" aria-label={t("appearance.animations")}>
     {#each MOTION_MODES as mode (mode.id)}
       <button
         type="button"
@@ -88,7 +76,26 @@
             : 'border-border bg-[var(--color-surface-2)] text-muted-foreground hover:border-foreground/30 hover:text-foreground'}"
         onclick={() => settings.setMotionMode(mode.id)}
       >
-        {mode.label}
+        {t(mode.labelKey)}
+      </button>
+    {/each}
+  </div>
+</SettingsCard>
+
+<SettingsCard title={t("appearance.language")} description={t("appearance.languageDesc")}>
+  <div class="flex gap-1.5" role="radiogroup" aria-label={t("appearance.language")}>
+    {#each LOCALE_OPTIONS as option (option.id)}
+      <button
+        type="button"
+        role="radio"
+        aria-checked={settings.state.locale === option.id}
+        class="rounded-md border px-3 py-1 text-[11px] transition
+          {settings.state.locale === option.id
+            ? 'border-foreground/40 bg-[var(--color-surface-3)] text-foreground'
+            : 'border-border bg-[var(--color-surface-2)] text-muted-foreground hover:border-foreground/30 hover:text-foreground'}"
+        onclick={() => settings.setLocale(option.id)}
+      >
+        {t(option.labelKey)}
       </button>
     {/each}
   </div>
@@ -133,18 +140,3 @@
     border: 2px solid var(--color-surface);
   }
 </style>
-<SettingsCard
-  title={i18n.t("appearance.language")}
-  description={i18n.t("appearance.language_desc")}
->
-  <select
-    class="rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-1.5 text-xs text-foreground"
-    value={settings.state.locale}
-    onchange={(event) => settings.setLocale((event.currentTarget as HTMLSelectElement).value as LocaleSetting)}
-    aria-label={i18n.t("appearance.language")}
-  >
-    {#each LOCALES as locale (locale.id)}
-      <option value={locale.id}>{i18n.t(locale.label)}</option>
-    {/each}
-  </select>
-</SettingsCard>

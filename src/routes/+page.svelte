@@ -26,6 +26,7 @@
   import MobileBottomBar from "$lib/features/mobile/MobileBottomBar.svelte";
   import MobileProjectsPage from "$lib/features/mobile/MobileProjectsPage.svelte";
   import { lazyComponent, prefetchWhenIdle } from "$lib/shared/lazy.svelte";
+  import { t } from "$lib/i18n/index.svelte";
 
   // xterm (~300 KB) and CodeMirror (~600 KB) dwarf the rest of the app. Held
   // behind import() they leave the entry graph entirely, so the window paints
@@ -246,10 +247,10 @@
                 </span>
                 <p class="text-sm text-muted-foreground">
                   {app.projects.length === 0
-                    ? "Pick a folder to create your first project."
+                    ? t("welcome.pickFolder")
                     : mobile
-                      ? "Tap + to open a terminal."
-                      : "Click a shortcut above to launch a terminal."}
+                      ? t("welcome.tapToOpen")
+                      : t("welcome.clickShortcut")}
                 </p>
                 {#if app.projects.length === 0}
                   <button
@@ -257,7 +258,7 @@
                     class="rounded-md border border-border bg-[var(--color-surface)] px-3 py-1.5 text-sm text-foreground transition hover:bg-[var(--color-surface-2)]"
                     onclick={() => addProject()}
                   >
-                    Choose folder…
+                    {t("common.chooseFolder")}
                   </button>
                 {/if}
               </div>
@@ -265,26 +266,26 @@
           {:else if app.activeThreadId === null && mobile}
             <div class="flex h-full items-center justify-center px-8 text-center">
               <p class="text-sm text-muted-foreground">
-                Tap + to open a terminal, or pick one from Projects.
+                {t("welcome.tapOrPick")}
               </p>
             </div>
           {:else if app.activeThreadId === null}
             <div class="flex h-full items-center justify-center">
               <div class="flex flex-col items-center gap-5">
                 <p class="text-sm text-muted-foreground">
-                  Pick a thread on the left to bring it to life.
+                  {t("welcome.pickThread")}
                 </p>
                 <div class="grid grid-cols-[auto_auto] gap-x-6 gap-y-1.5 text-xs text-muted-foreground/70">
                   <span class="text-right"><kbd class="kbd">Ctrl</kbd> <kbd class="kbd">T</kbd></span>
-                  <span>New terminal</span>
+                  <span>{t("welcome.newTerminal")}</span>
                   <span class="text-right"><kbd class="kbd">Ctrl</kbd> <kbd class="kbd">Tab</kbd></span>
-                  <span>Cycle threads</span>
+                  <span>{t("welcome.cycleThreads")}</span>
                   <span class="text-right"><kbd class="kbd">Ctrl</kbd> <kbd class="kbd">1–9</kbd></span>
-                  <span>Jump to thread</span>
+                  <span>{t("welcome.jumpToThread")}</span>
                   <span class="text-right"><kbd class="kbd">Ctrl</kbd> <kbd class="kbd">B</kbd></span>
-                  <span>Toggle sidebar</span>
+                  <span>{t("welcome.toggleSidebar")}</span>
                   <span class="text-right"><kbd class="kbd">Ctrl</kbd> <kbd class="kbd">W</kbd></span>
-                  <span>Close thread</span>
+                  <span>{t("welcome.closeThread")}</span>
                 </div>
               </div>
             </div>
