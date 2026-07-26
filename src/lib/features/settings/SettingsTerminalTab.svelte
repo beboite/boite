@@ -33,7 +33,7 @@
 
 <SettingsCard
   title="Default shell"
-  description="Used by + Terminal and to wrap shortcut commands so aliases (e.g. cc → claude) resolve through your shell profile."
+  description="Used by + Terminal, and as the fallback for a shortcut whose command is not a program: a shell function or alias (e.g. cc → claude) only exists once this shell's profile has been read. Shortcuts that name a real program still launch directly, and inherit what the profile exports."
 >
   <div class="overflow-hidden rounded-lg border border-border bg-[var(--color-surface-2)]">
     <button
@@ -42,9 +42,10 @@
       onclick={() => pickDefault(null)}
     >
       <div class="min-w-0">
-        <div class="text-xs font-medium text-foreground">No wrapping</div>
+        <div class="text-xs font-medium text-foreground">None</div>
         <div class="text-[10.5px] text-muted-foreground">
-          Run shortcut commands directly. + Terminal launches the platform default.
+          Every shortcut launches directly; functions and aliases will not
+          resolve. + Terminal launches the platform default.
         </div>
       </div>
       {#if settings.state.defaultShellId === null}

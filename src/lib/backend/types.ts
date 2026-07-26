@@ -27,12 +27,21 @@ export type PtyEvent =
   | { type: "exit"; code: number | null }
   | { type: "error"; message: string };
 
+export interface WrapSpec {
+  shellId: string;
+  noProfile: boolean;
+}
+
 export interface PtySpawnArgs {
   cwd: string;
   cmd: string;
   args: string[];
   cols: number;
   rows: number;
+  // Shell the command may need to go through for its functions and aliases to
+  // exist. Offered, not imposed: the runner keeps it only when the command is
+  // not something it can spawn on its own.
+  wrap?: WrapSpec;
 }
 
 export interface PtyOpenArgs {
@@ -114,6 +123,10 @@ export interface ShellApi {
   // setup wizard; for a remote boite the answer has to come from the server,
   // since that is where the agents live.
   commandExists(cmd: string): Promise<boolean>;
+  // Asks the runner to list what this shell defines itself, ahead of the first
+  // spawn that needs the answer. Fire and forget: it returns before the probe
+  // finishes, and a spawn that beats it just falls back to the PATH.
+  warmShell(shellId: string): Promise<void>;
 }
 
 export interface ScopeApi {

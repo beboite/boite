@@ -274,6 +274,16 @@ class AppState {
       if (pick) await settings.setDefaultShellIdQuiet(pick.id);
     }
 
+    // Kick the function/alias probe now, while the rest of boot is still
+    // running: by the time a shortcut is clicked the answer is already there,
+    // and a shortcut clicked sooner than that costs nothing, it just falls
+    // back to the PATH for that one spawn. A failure here is not worth a toast.
+    if (settings.state.defaultShellId) {
+      void backend()
+        .shell.warmShell(settings.state.defaultShellId)
+        .catch(() => {});
+    }
+
     const { projects, threads } = await rowsReady;
     this.projects = projects;
     // Before ready: panels start polling fs/git commands as soon as they
