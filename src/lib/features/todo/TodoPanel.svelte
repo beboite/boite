@@ -4,6 +4,7 @@
   import { settings } from "$lib/features/settings/store.svelte";
   import { notifications } from "$lib/features/notifications/store.svelte";
   import { todos } from "./store.svelte";
+  import { t } from "$lib/i18n/index.svelte";
   import { ptyWrite } from "$lib/storage/pty";
   import ListTodo from "@lucide/svelte/icons/list-todo";
   import CornerDownRight from "@lucide/svelte/icons/corner-down-right";
@@ -58,7 +59,7 @@
     const oneLine = prompt.replace(/\s*[\r\n]+\s*/g, " ").trim();
     if (!oneLine) return;
     void ptyWrite(ptyId, encoder.encode(oneLine)).catch((err) => {
-      notifications.error(`Could not reach the terminal: ${err}`);
+      notifications.error(t("todo.terminalUnreachable", { error: String(err) }));
     });
     app.view = "terminal";
   }
@@ -77,8 +78,10 @@
       class="ml-auto rounded p-1 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:opacity-40"
       onclick={() => projectId && todos.clearDone(projectId)}
       disabled={doneCount === 0}
-      title={doneCount === 0 ? "Nothing done yet" : `Clear ${doneCount} done`}
-      aria-label="Clear done items"
+      title={doneCount === 0
+        ? t("todo.nothingDone")
+        : t("todo.clearDone", { count: doneCount })}
+      aria-label={t("todo.clearDoneLabel")}
     >
       <Eraser class="size-3.5" />
     </button>
@@ -86,13 +89,13 @@
 
   {#if !projectId}
     <p class="px-3 py-6 text-center text-xs text-muted-foreground">
-      Pick a project to keep notes against it.
+      {t("todo.noProject")}
     </p>
   {:else}
     <div class="min-h-0 flex-1 overflow-y-auto">
       {#if items.length === 0 && !todos.loading}
         <p class="px-3 py-6 text-center text-xs text-muted-foreground">
-          Nothing noted for this project.
+          {t("todo.empty")}
         </p>
       {/if}
       {#each items as item (item.id)}
@@ -112,7 +115,7 @@
                   item.id,
                   (e.currentTarget as HTMLInputElement).checked ? "done" : "open",
                 )}
-              aria-label={item.state === "done" ? "Mark not done" : "Mark done"}
+              aria-label={item.state === "done" ? t("todo.markNotDone") : t("todo.markDone")}
             />
             <input
               type="text"
@@ -130,9 +133,11 @@
               onclick={() => handOff(item.id, item.text)}
               disabled={!canSend}
               title={canSend
-                ? `Type this into ${target?.title ?? target?.label ?? "the terminal"} (you press Enter)`
-                : "No running terminal to send it to"}
-              aria-label="Send to the active terminal"
+                ? t("todo.sendTo", {
+                    target: target?.title ?? target?.label ?? "the terminal",
+                  })
+                : t("todo.sendNoTerminal")}
+              aria-label={t("todo.sendLabel")}
             >
               <CornerDownRight class="size-3.5" />
             </button>
@@ -140,8 +145,8 @@
               type="button"
               class="mt-[1px] shrink-0 rounded p-0.5 text-muted-foreground/50 opacity-0 transition group-hover:opacity-100 hover:bg-danger/15 hover:text-danger"
               onclick={() => todos.remove(item.id)}
-              title="Remove"
-              aria-label="Remove item"
+              title={t("todo.remove")}
+              aria-label={t("todo.removeLabel")}
             >
               <Trash2 class="size-3" />
             </button>
@@ -154,7 +159,7 @@
             <div class="mt-1 flex items-start gap-1.5 pl-[22px]">
               <Bot class="mt-[2px] size-3 shrink-0 text-muted-foreground/70" />
               <p class="min-w-0 flex-1 text-[11px] leading-snug text-muted-foreground">
-                {item.note ?? "Reported done by the agent."}
+                {item.note ?? t("todo.agentReported")}
               </p>
             </div>
             <div class="mt-1 flex gap-1 pl-[22px]">
@@ -164,7 +169,7 @@
                 onclick={() => todos.setState(item.id, "done")}
               >
                 <Check class="size-3" />
-                Confirm
+                {t("todo.confirm")}
               </button>
               <button
                 type="button"
@@ -172,7 +177,7 @@
                 onclick={() => todos.setState(item.id, "open")}
               >
                 <Undo2 class="size-3" />
-                Reopen
+                {t("todo.reopen")}
               </button>
             </div>
           {/if}
@@ -184,7 +189,7 @@
       <input
         type="text"
         bind:value={draft}
-        placeholder="New item…"
+        placeholder={t("todo.newItem")}
         class="w-full rounded-md border border-border bg-[var(--color-surface-2)] px-2 py-1 text-[12px] text-foreground outline-none transition placeholder:text-muted-foreground/60 focus:border-foreground/30"
       />
     </form>

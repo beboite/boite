@@ -1,6 +1,7 @@
 import { backend } from "$lib/backend";
 import { notifications } from "$lib/features/notifications/store.svelte";
 import { uuid } from "$lib/shared/utils/uuid";
+import { t } from "$lib/i18n/index.svelte";
 import type { TodoItem, TodoState } from "$lib/types";
 
 /**
@@ -79,7 +80,7 @@ class TodoStore {
       await backend().db.saveTodo(item);
     } catch (err) {
       console.error("[todo] saveTodo failed:", err);
-      notifications.error("Could not save the todo");
+      notifications.error(t("todo.saveFailed"));
       await this.reload();
     }
   }
@@ -139,7 +140,7 @@ class TodoStore {
       await backend().db.deleteTodo(id);
     } catch (err) {
       console.error("[todo] deleteTodo failed:", err);
-      notifications.error("Could not remove the todo");
+      notifications.error(t("todo.removeFailed"));
       await this.reload();
     }
   }
@@ -156,7 +157,7 @@ class TodoStore {
         console.error("[todo] deleteTodo failed:", err);
       }
     }
-    notifications.success(`Cleared ${doomed.length} done item${doomed.length === 1 ? "" : "s"}`);
+    notifications.success(t("todo.cleared", { count: doomed.length }));
   }
 }
 
