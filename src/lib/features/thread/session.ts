@@ -3,6 +3,8 @@ import type { SessionHit, SessionKind } from "$lib/backend/types";
 import { app } from "$lib/app/store.svelte";
 import { detectIconKey } from "$lib/shared/icons/detect";
 import { logger } from "$lib/shared/services/logger.svelte";
+import { settings } from "$lib/features/settings/store.svelte";
+import { mcpArgsFor } from "./agentMcp";
 import type { IconKey, Thread } from "$lib/types";
 
 // mtimeMs is the session file's last-write time when the backend can provide
@@ -197,8 +199,13 @@ export async function buildResumeArgsAsync(thread: Thread, cwd: string): Promise
   // Let the existing logic decide first — it owns the first-spawn latch, which
   // is consumed on read and must not be probed twice — then intervene only on
   // what it actually produced.
-  const args = buildResumeArgs(thread);
-  if (resolveKey(thread) !== "claude") return args;
+  const base = buildResumeArgs(thread);
+  const key = resolveKey(thread);
+  // Every agent that can take it gets todo access, resume or not: the endpoint
+  // serves the project, and a fresh thread wants it as much as a resumed one.
+  const mcp = await mcpArgsFor(key, settings.state.agentTodoAccess);
+  const args = mcp.length > 0 ? [...base, ...mcp] : base;
+  if (key !== "claude") return args;
 
   const at = args.indexOf("--resume");
   const id = at >= 0 ? args[at + 1] : null;

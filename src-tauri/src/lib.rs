@@ -307,6 +307,7 @@ pub fn run() {
             commands::available_shells,
             commands::find_claude_session,
             commands::live_claude_sessions,
+            commands::agent_mcp_config,
             commands::stop_claude_session,
             commands::find_codex_session,
             commands::find_opencode_session,

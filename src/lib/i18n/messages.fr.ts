@@ -194,6 +194,13 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "todo.removeFailed": "Impossible de supprimer la note",
   "todo.terminalUnreachable": "Terminal injoignable : {error}",
 
+  "todo.agentAccess": "Accès agent",
+  "todo.agentActive": "actif",
+  "todo.agentManual": "Copier la commande",
+  "todo.agentCopied": "Commande copiée — lance-la dans un terminal",
+  "todo.agentOff": "L'accès agent est désactivé dans les réglages.",
+  "todo.agentUnavailable": "Le shim embarqué est absent de cette build.",
+
   "notification.readyForInput": "Prêt pour saisie",
 
   "setup.title": "Bienvenue dans Boite",

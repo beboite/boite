@@ -88,6 +88,12 @@ export interface Settings {
    * the MCP endpoint.
    */
   todoPromptTemplate: string;
+  /**
+   * Whether Boite points the agents it launches at the todo endpoint. On by
+   * default: the access is scoped to the launching thread's own project, and
+   * the point of the panel is that an agent can use it.
+   */
+  agentTodoAccess: boolean;
   idleTimeoutMinutes: number;
   idleAutocloseByIcon: Record<string, boolean>;
   confirmCloseThread: boolean;
