@@ -66,7 +66,7 @@
         </div>
         <h1 class="text-3xl font-bold text-foreground">{t("setup.title")}</h1>
         <p class="mt-3 max-w-md text-sm leading-relaxed text-muted-foreground">{t("setup.desc")}</p>
-        
+
         <!-- Language Selector -->
         <div class="mt-6 flex items-center justify-center gap-2">
           <span class="text-xs text-muted-foreground">{t("setup.language")} :</span>
@@ -121,7 +121,7 @@
               </a>
             </article>
           {/each}
-          
+
           <article class="flex min-h-56 flex-col rounded-lg border border-border bg-[var(--color-surface-2)] p-4">
             <div class="flex items-center gap-2.5">
               <ShortcutIcon iconKey="codex" size={26} />
@@ -135,7 +135,7 @@
               <ExternalLink class="size-3" /> {t("setup.chatgpt_open")}
             </a>
           </article>
-          
+
           <article class="flex min-h-56 flex-col rounded-lg border border-border bg-[var(--color-surface-2)] p-4">
             <div class="flex items-center gap-2.5">
               <ShortcutIcon iconKey="claude" size={26} />
@@ -206,7 +206,7 @@
                   </div>
                 </article>
               {/each}
-              
+
               <button type="button" onclick={() => showCustomAgent = !showCustomAgent} class="flex min-h-48 flex-col items-center justify-center rounded-lg border border-dashed border-muted-foreground/40 bg-transparent p-4 text-center transition hover:border-foreground/60 hover:bg-[var(--color-surface-2)]">
                 <span class="mb-3 flex size-9 items-center justify-center rounded-md border border-dashed border-muted-foreground/60 text-muted-foreground">
                   <Plus class="size-4" />
@@ -215,7 +215,7 @@
                 <span class="mt-1 text-xs leading-relaxed text-muted-foreground">{t("setup.add_agent_desc")}</span>
               </button>
             </div>
-            
+
             {#if showCustomAgent}
               <form class="mt-4 grid grid-cols-1 items-end gap-3 rounded-lg border border-border bg-[var(--color-surface-2)] p-4 sm:grid-cols-[1fr_1fr_auto]" onsubmit={(event) => { event.preventDefault(); addCustomAgent(); }}>
                 <label class="flex flex-col gap-1.5 text-xs text-muted-foreground">
