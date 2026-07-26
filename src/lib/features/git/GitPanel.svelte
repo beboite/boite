@@ -56,7 +56,7 @@
     void gitStore.refresh(id).then(() => gitStore.autoFetch(id));
   });
 
-  // Not a repo -> look for nested repos to offer. Idempotent in the store, so
+  // Not a repo → look for nested repos to offer. Idempotent in the store, so
   // re-runs of this effect are free.
   $effect(() => {
     if (!project) return;
@@ -413,10 +413,10 @@
                 {t("git.publishBranch")}
               {:else if gs.ahead > 0}
                 <ArrowUpFromLine class="size-3.5 {gs.pushing ? 'animate-pulse' : ''}" />
-                {t("git.push")} ({gs.ahead} commit{gs.ahead > 1 ? 's' : ''})
+                {t("git.pushCount", { count: gs.ahead })}
               {:else}
                 <Check class="size-3.5 text-[var(--color-success)]" />
-                Up to date
+                {t("git.upToDate")}
               {/if}
             </button>
           {/if}
