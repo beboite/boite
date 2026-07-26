@@ -89,8 +89,10 @@ html[data-motion="reduced"] *::after {
   outline-offset: -1px;
 }
 
-button {
-  cursor: default;
+@layer base {
+  button {
+    cursor: default;
+  }
 }
 
 *::-webkit-scrollbar {
