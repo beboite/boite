@@ -30,6 +30,7 @@
   import Archive from "@lucide/svelte/icons/archive";
   import ArchiveRestore from "@lucide/svelte/icons/archive-restore";
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
+  import { t } from "$lib/i18n/index.svelte";
 
   type Props = {
     onActivateThread: (threadId: string) => void;
@@ -680,17 +681,17 @@
         type="button"
         class="flex items-center gap-1.5 rounded text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground transition hover:text-foreground"
         onclick={() => (showArchived = false)}
-        aria-label="Back to projects"
-        title="Back to projects"
+        aria-label={t("sidebar.backToProjects")}
+        title={t("sidebar.backToProjects")}
       >
         <ArrowLeft class="size-3.5" />
-        Archives
+        {t("sidebar.archives")}
       </button>
     {:else}
       <span
         class="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground"
       >
-        Projects
+        {t("sidebar.projects")}
       </span>
     {/if}
     <div class="flex items-center gap-0.5">
@@ -700,8 +701,8 @@
           ? 'bg-accent text-foreground'
           : ''}"
         onclick={() => (showArchived = !showArchived)}
-        aria-label="Show archived projects"
-        title="Archived projects"
+        aria-label={t("sidebar.showArchived")}
+        title={t("sidebar.archivedProjects")}
       >
         <Archive class="size-4" />
       </button>
@@ -710,8 +711,8 @@
           type="button"
           class="rounded-md p-1 text-muted-foreground transition hover:bg-accent hover:text-foreground"
           onclick={addProjectClick}
-          aria-label="Add project"
-          title="Add project from folder"
+          aria-label={t("sidebar.addProject")}
+          title={t("sidebar.addProjectFromFolder")}
         >
           <Plus class="size-4" />
         </button>
@@ -723,8 +724,8 @@
             class="rounded-md border p-1 text-muted-foreground transition hover:bg-accent hover:text-foreground"
             style:border-color={workspace.info.color || "var(--color-success)"}
             onclick={() => onNewProject("remote")}
-            aria-label="Add project on boite"
-            title={`Add project on ${workspace.info.name || "boite"}`}
+            aria-label={t("sidebar.addProjectOnBoite")}
+            title={t("sidebar.addProjectOn", { name: workspace.info.name || "boite" })}
           >
             <Plus class="size-4" />
           </button>
@@ -739,7 +740,7 @@
         class="mx-1 mt-2 flex w-[calc(100%-0.5rem)] flex-col items-center gap-2 rounded-lg border border-dashed border-border bg-transparent px-3 py-7 text-xs text-muted-foreground"
       >
         <Archive class="size-5 opacity-70" />
-        <span>No archived projects</span>
+        <span>{t("sidebar.noArchived")}</span>
       </div>
     {:else if !showArchived && app.projects.length === 0}
       <button
@@ -748,7 +749,7 @@
         onclick={addProjectClick}
       >
         <FolderOpen class="size-5 opacity-70" />
-        <span>Pick a folder</span>
+        <span>{t("sidebar.pickFolder")}</span>
       </button>
     {/if}
 
@@ -817,7 +818,7 @@
               onclick={(e) => e.stopPropagation()}
               onkeydown={renameKeydown}
               onblur={commitRename}
-              aria-label="Project name"
+              aria-label={t("sidebar.projectName")}
             />
           {:else}
             <button
@@ -843,8 +844,8 @@
                 void app.unarchiveProject(project.id);
               }}
               data-drag-block
-              aria-label="Unarchive project"
-              title="Unarchive"
+              aria-label={t("sidebar.unarchiveProject")}
+              title={t("sidebar.unarchive")}
             >
               <ArchiveRestore class="size-3.5" />
             </button>
@@ -854,8 +855,8 @@
               class="rounded p-1 text-muted-foreground/0 transition hover:bg-accent hover:text-foreground group-hover/project:text-muted-foreground"
               onclick={(e) => openProjectContextMenu(project, e)}
               data-drag-block
-              aria-label="Project options"
-              title="More"
+              aria-label={t("sidebar.projectOptions")}
+              title={t("sidebar.more")}
             >
               <MoreHorizontal class="size-3.5" />
             </button>
@@ -924,9 +925,9 @@
                       app.toggleThreadKeepAwake(thread.id);
                     }}
                     title={thread.keepAwake
-                      ? "Keep-awake on — click to allow auto-sleep"
-                      : "Click to keep awake"}
-                    aria-label="Toggle keep awake"
+                      ? t("sidebar.keepAwakeOn")
+                      : t("sidebar.keepAwakeOff")}
+                    aria-label={t("sidebar.toggleKeepAwake")}
                   >
                     <StatusDot
                       status={displayThreadStatus(thread)}
@@ -945,7 +946,7 @@
                       onclick={(e) => e.stopPropagation()}
                       onkeydown={renameKeydown}
                       onblur={commitRename}
-                      aria-label="Thread name"
+                      aria-label={t("sidebar.threadName")}
                     />
                   {:else}
                     <!-- Same line box the rename input uses. Left to the font,
@@ -977,7 +978,7 @@
                         requestRemoveThread(thread.id);
                       }}
                       aria-label="Close {thread.label}"
-                      title="Close thread"
+                      title={t("sidebar.closeThread")}
                     >
                       <X class="size-3.5" />
                     </button>
@@ -998,8 +999,8 @@
       onResize,
       onStateChange: (r) => (resizing = r),
     }}
-    aria-label="Resize sidebar"
-    title="Resize sidebar"
+    aria-label={t("sidebar.resizeSidebar")}
+    title={t("sidebar.resizeSidebar")}
     tabindex="-1"
   ></button>
 </aside>
