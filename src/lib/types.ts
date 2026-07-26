@@ -89,11 +89,14 @@ export interface Settings {
   gitAutoFetchSeconds: number;
   mobileLayout: boolean;
   motionMode: MotionMode;
+  locale: LocaleSetting;
 }
 
 // Animation preference: "system" follows prefers-reduced-motion, "on"/"off"
 // override the OS either way.
 export type MotionMode = "system" | "on" | "off";
+
+export type LocaleSetting = "system" | "en" | "fr";
 
 export type RightPanelTab = "git" | "explorer" | null;
 
