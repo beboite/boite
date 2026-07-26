@@ -198,8 +198,6 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "todo.agentActive": "prêt",
   "todo.agentReadyHint": "Les nouveaux threads de cet agent reçoivent le serveur ; ceux déjà ouverts gardent ce qu'ils ont eu au lancement.",
   "todo.agentEndpointDown": "L'endpoint ne répond pas — les agents ne peuvent pas atteindre la liste.",
-  "todo.agentManual": "Copier la commande",
-  "todo.agentCopied": "Commande copiée — lance-la dans un terminal",
   "todo.agentOff": "L'accès agent est désactivé dans les réglages.",
   "todo.agentUnavailable": "Le shim embarqué est absent de cette build.",
 
