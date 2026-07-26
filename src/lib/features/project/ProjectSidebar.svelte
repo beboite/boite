@@ -446,12 +446,67 @@
 
   let ctxMenu = $state<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
 
+  // Inline rename: one row at a time swaps its label for an input. Kept here
+  // rather than per-row so opening a second rename closes the first.
+  let renaming = $state<{
+    kind: "thread" | "project";
+    id: string;
+    value: string;
+  } | null>(null);
+
+  function startRename(kind: "thread" | "project", id: string, current: string) {
+    renaming = { kind, id, value: current };
+  }
+
+  function commitRename() {
+    const r = renaming;
+    if (!r) return;
+    renaming = null;
+    const next = r.value.trim();
+    if (r.kind === "project") {
+      if (next) void app.renameProject(r.id, next);
+      return;
+    }
+    const thread = app.threads.find((t) => t.id === r.id);
+    if (!thread || next === (thread.title ?? "")) return;
+    // Emptied on purpose: drop the manual name instead of storing "".
+    void app.renameThread(r.id, next || null);
+  }
+
+  function cancelRename() {
+    renaming = null;
+  }
+
+  function renameKeydown(e: KeyboardEvent) {
+    // The row and the terminal both listen for keys; a rename in progress owns
+    // every one of them.
+    e.stopPropagation();
+    if (e.key === "Enter") {
+      e.preventDefault();
+      commitRename();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      cancelRename();
+    }
+  }
+
+  function selectOnMount(node: HTMLInputElement) {
+    node.focus();
+    node.select();
+  }
+
   function openThreadContextMenu(thread: Thread, e: MouseEvent) {
     e.preventDefault();
     e.stopPropagation();
     const group = paneStore.groupOf(thread.id);
     const inMultiPane = !!group && countLeaves(group.root) > 1;
     const items: ContextMenuItem[] = [];
+    items.push({
+      label: "Rename",
+      action: () =>
+        startRename("thread", thread.id, thread.title ?? thread.label),
+    });
+    items.push({ separator: true });
     if (inMultiPane) {
       items.push({
         label: "Detach from group",
@@ -514,10 +569,18 @@
     if (ok) onRemoveProject(id);
   }
 
-  function openProjectContextMenu(project: { id: string; archived: boolean }, e: MouseEvent) {
+  function openProjectContextMenu(
+    project: { id: string; name: string; archived: boolean },
+    e: MouseEvent,
+  ) {
     e.preventDefault();
     e.stopPropagation();
     const items: ContextMenuItem[] = [];
+    items.push({
+      label: "Rename",
+      action: () => startRename("project", project.id, project.name),
+    });
+    items.push({ separator: true });
     if (project.archived) {
       items.push({
         label: "Unarchive",
@@ -736,18 +799,30 @@
               </span>
             {/if}
           </div>
-          <button
-            type="button"
-            class="min-w-0 flex-1 truncate text-left text-[13px] font-medium text-foreground/90 transition group-hover/project:text-foreground"
-            title={project.cwd}
-            onclick={() => {
-              if (consumeDragClick(project.id)) return;
-              if (showArchived) return;
-              selectProject(project.id);
-            }}
-          >
-            {project.name}
-          </button>
+          {#if renaming && renaming.kind === "project" && renaming.id === project.id}
+            <input
+              class="min-w-0 flex-1 rounded-sm border border-foreground/25 bg-[var(--color-surface-2)] px-1 text-[13px] font-medium text-foreground outline-none"
+              bind:value={renaming.value}
+              use:selectOnMount
+              onclick={(e) => e.stopPropagation()}
+              onkeydown={renameKeydown}
+              onblur={commitRename}
+              aria-label="Project name"
+            />
+          {:else}
+            <button
+              type="button"
+              class="min-w-0 flex-1 truncate text-left text-[13px] font-medium text-foreground/90 transition group-hover/project:text-foreground"
+              title={project.cwd}
+              onclick={() => {
+                if (consumeDragClick(project.id)) return;
+                if (showArchived) return;
+                selectProject(project.id);
+              }}
+            >
+              {project.name}
+            </button>
+          {/if}
 
           {#if showArchived}
             <button
@@ -849,12 +924,24 @@
                       keepAwake={(thread.keepAwake ?? false) && !!thread.ptyId}
                     />
                   </button>
-                  <span
-                    class="min-w-0 flex-1 truncate text-left text-[13px]"
-                    title={thread.title ?? thread.label}
-                  >
-                    {thread.title ?? thread.label}
-                  </span>
+                  {#if renaming && renaming.kind === "thread" && renaming.id === thread.id}
+                    <input
+                      class="min-w-0 flex-1 rounded-sm border border-foreground/25 bg-[var(--color-surface-2)] px-1 text-[13px] text-foreground outline-none"
+                      bind:value={renaming.value}
+                      use:selectOnMount
+                      onclick={(e) => e.stopPropagation()}
+                      onkeydown={renameKeydown}
+                      onblur={commitRename}
+                      aria-label="Thread name"
+                    />
+                  {:else}
+                    <span
+                      class="min-w-0 flex-1 truncate text-left text-[13px]"
+                      title={thread.title ?? thread.label}
+                    >
+                      {thread.title ?? thread.label}
+                    </span>
+                  {/if}
                   <span
                     class="relative flex size-4 shrink-0 items-center justify-center"
                     data-no-drag
