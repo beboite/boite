@@ -167,3 +167,111 @@ impl ThreadStatus {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn explicit_glyphs_signal_working() {
+        for glyph in WORKING_GLYPHS {
+            let title = format!("{glyph} Refactoring the parser");
+            assert!(
+                title_signals_working(&title),
+                "{glyph} should signal working"
+            );
+        }
+    }
+
+    #[test]
+    fn any_braille_spinner_frame_signals_working() {
+        // grok cycles well past the common ⠋…⠏ subset, which is why the check
+        // is a range and not a list.
+        for frame in ['\u{2801}', '\u{280B}', '\u{28FF}', '\u{2847}'] {
+            assert!(title_signals_working(&format!("{frame} thinking")));
+        }
+        // U+2800 is blank braille: padding, not a spinner frame.
+        assert!(!title_signals_working("\u{2800} idle"));
+    }
+
+    #[test]
+    fn clean_title_does_not_signal_working() {
+        assert!(!title_signals_working("Refactoring the parser"));
+        assert!(!title_signals_working(""));
+    }
+
+    #[test]
+    fn hermes_markers_are_stripped_but_are_not_working() {
+        // Regression: ✓/⚠ mean "idle"/"action required". Treating them as
+        // working left a permanently pulsing dot on an idle thread.
+        assert!(!title_signals_working("✓ done"));
+        assert!(!title_signals_working("⚠ needs input"));
+        assert_eq!(strip_leading_marker("✓ done"), "done");
+        assert_eq!(strip_leading_marker("⚠ needs input"), "needs input");
+    }
+
+    #[test]
+    fn strip_leading_marker_only_touches_the_first_glyph() {
+        assert_eq!(strip_leading_marker("✱ Building"), "Building");
+        assert_eq!(strip_leading_marker("   ✻   Building"), "Building");
+        assert_eq!(strip_leading_marker("Building ✱"), "Building ✱");
+        assert_eq!(strip_leading_marker("Building"), "Building");
+        assert_eq!(strip_leading_marker(""), "");
+    }
+
+    #[test]
+    fn brand_titles_are_generic() {
+        for title in ["claude", "Claude Code", "  PWSH  ", "cmd.exe", "Terminal"] {
+            assert!(is_generic_title(title), "{title} should be generic");
+        }
+    }
+
+    #[test]
+    fn shell_paths_normalize_to_their_binary_name() {
+        assert!(is_generic_title("C:\\Program Files\\PowerShell\\7\\pwsh.exe"));
+        assert!(is_generic_title("/usr/bin/zsh"));
+        // cmd.exe prepends an elevation prefix.
+        assert!(is_generic_title("Administrator: C:\\Windows\\system32\\cmd.exe"));
+    }
+
+    #[test]
+    fn real_work_titles_are_not_generic() {
+        assert!(!is_generic_title("Fixing the PTY read loop"));
+        assert!(!is_generic_title(""));
+        assert!(!is_generic_title("   "));
+        // A path whose basename is not a known shell must survive.
+        assert!(!is_generic_title("/usr/local/bin/boite"));
+    }
+
+    #[test]
+    fn project_dir_titles_are_detected_across_separators() {
+        assert!(is_project_dir_title("boite", "D:\\Dev\\Collab\\boite"));
+        assert!(is_project_dir_title("BOITE", "/home/nuno/boite"));
+        assert!(is_project_dir_title("boite", "/home/nuno/boite/"));
+        assert!(!is_project_dir_title("boite", "/home/nuno/other"));
+        assert!(!is_project_dir_title("", "/home/nuno/boite"));
+        assert!(!is_project_dir_title("boite", "/"));
+    }
+
+    #[test]
+    fn exit_code_maps_to_terminal_status() {
+        assert_eq!(ThreadStatus::from_exit_code(Some(0)), ThreadStatus::Done);
+        assert_eq!(ThreadStatus::from_exit_code(Some(1)), ThreadStatus::Exited);
+        assert_eq!(ThreadStatus::from_exit_code(Some(-1)), ThreadStatus::Exited);
+        // Killed by a signal: no code, still not a clean exit.
+        assert_eq!(ThreadStatus::from_exit_code(None), ThreadStatus::Exited);
+    }
+
+    #[test]
+    fn status_strings_match_the_frontend_union() {
+        // These strings are persisted in SQLite and parsed by the client's
+        // ThreadStatus union; renaming one silently breaks restored threads.
+        assert_eq!(ThreadStatus::Idle.as_str(), "idle");
+        assert_eq!(ThreadStatus::Running.as_str(), "running");
+        assert_eq!(ThreadStatus::Ready.as_str(), "ready");
+        assert_eq!(ThreadStatus::Done.as_str(), "done");
+        assert_eq!(ThreadStatus::Exited.as_str(), "exited");
+        assert_eq!(ThreadStatus::Error.as_str(), "error");
+        assert_eq!(ThreadStatus::Stopped.as_str(), "stopped");
+    }
+}

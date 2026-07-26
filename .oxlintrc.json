@@ -1,0 +1,34 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "categories": {
+    "correctness": "error"
+  },
+  "ignorePatterns": [
+    "build/**",
+    ".svelte-kit/**",
+    "target/**",
+    "static/**",
+    "mobile/**",
+    "release-builds/**",
+    "src-tauri/gen/**"
+  ],
+  "rules": {
+    "no-empty": ["error", { "allowEmptyCatch": true }]
+  },
+  "overrides": [
+    {
+      "files": ["**/*.svelte"],
+      "rules": {
+        "no-unassigned-vars": "off",
+        "no-unused-expressions": "off",
+        "no-unused-vars": "off"
+      }
+    },
+    {
+      "files": ["**/*.svelte.ts"],
+      "rules": {
+        "no-unused-expressions": "off"
+      }
+    }
+  ]
+}

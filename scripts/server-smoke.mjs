@@ -10,7 +10,6 @@ const URL = process.env.SMOKE_URL || "ws://127.0.0.1:7337/ws";
 const TOKEN = process.env.BOITE_TOKEN || "test";
 const CWD = process.env.SMOKE_CWD || "/workspace";
 const dec = new TextDecoder();
-const enc = new TextEncoder();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 let fail = false;
@@ -19,12 +18,6 @@ function check(label, ok, extra = "") {
   if (!ok) fail = true;
 }
 
-function uuidToBytes(u) {
-  const hex = u.replace(/-/g, "");
-  const b = new Uint8Array(16);
-  for (let i = 0; i < 16; i++) b[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
-  return b;
-}
 function bytesToUuid(b) {
   let h = "";
   for (let i = 0; i < 16; i++) h += b[i].toString(16).padStart(2, "0");

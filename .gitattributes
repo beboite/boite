@@ -5,3 +5,6 @@
 *.sh        text eol=lf
 docker/*    text eol=lf
 gradlew     text eol=lf
+# git runs hooks through sh; a CRLF shebang breaks them on WSL and on any
+# Linux checkout of this repo for the same reason as above.
+.githooks/* text eol=lf

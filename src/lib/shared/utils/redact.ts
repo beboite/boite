@@ -17,8 +17,12 @@ const SECRET_FLAGS = new Set([
   "-k",
 ]);
 
+// Anchored on each provider's real separator, not on the bare prefix. `sk`
+// and `ghp` alone matched ordinary words ("skip", "ghost"), and because these
+// args are persisted and replayed when a thread respawns, a false positive
+// did not just hide a value — it relaunched the command with `***` in it.
 const SECRET_VALUE_RE =
-  /^(sk|pk|ghp|gho|ghu|ghs|ghr|xox[abposr]|AIza|ya29\.|AKIA[0-9A-Z]{16})/;
+  /^(?:(?:sk|pk)[-_]|(?:ghp|gho|ghu|ghs|ghr)_|xox[abposr]-|AIza[\w-]{10,}|ya29\.|AKIA[0-9A-Z]{16})/;
 
 export const REDACTED = "***";
 
