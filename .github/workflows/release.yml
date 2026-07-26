@@ -123,6 +123,10 @@ jobs:
       - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The sidecar file name must carry the triple being built for, and the
+          # macOS jobs cross-compile. Empty on Linux/Windows, where the script
+          # falls back to the host triple.
+          BOITE_TARGET: ${{ matrix.target }}
           # Without these the build still succeeds but emits no .sig, and
           # latest.json comes out unusable. They are the updater's whole trust
           # anchor — never echo them, never move them out of repo secrets.

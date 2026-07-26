@@ -266,15 +266,19 @@ id; the project is resolved from it. So an agent reaches its own project's list
 and no other, with nothing to configure, and an agent started outside Boite has
 no token at all.
 
-Build the shim and point your agent at it:
-
-```bash
-cargo build --release -p boite-mcp
-```
+The `boite-mcp` shim ships inside the app, next to the Boite binary. Point your
+agent at it — on macOS:
 
 ```json
-{ "mcpServers": { "boite": { "command": "target/release/boite-mcp" } } }
+{
+  "mcpServers": {
+    "boite": { "command": "/Applications/Boite.app/Contents/MacOS/boite-mcp" }
+  }
+}
 ```
+
+On Windows and Linux it sits beside the installed `boite` executable. Running
+from source, use `target/release/boite-mcp` after `bun run build:sidecar`.
 
 No `env` block: the shim inherits the terminal's. Launched anywhere else it
 exits rather than starting unauthenticated.
@@ -289,10 +293,9 @@ The endpoint lives on `127.0.0.1` with an ephemeral port, in both the desktop
 app and `boite-server`. It is not the dev `mcp-bridge` and never reuses it: that
 one answers `execute_js`, this one answers three verbs on one table.
 
-> **Not yet bundled.** `boite-mcp` is not shipped inside the app — declaring it
-> as `externalBin` needs a per-target build step, and the release matrix
-> cross-compiles, so the file name must carry the *target* triple rather than
-> the host's. Until that is wired, build it yourself as above.
+`scripts/build-sidecar.mjs` builds it before every bundle and names it for the
+triple being built *for* — the macOS release jobs cross-compile, so the host
+triple would be the wrong answer there and the bundle would fail outright.
 
 ## Releasing
 
