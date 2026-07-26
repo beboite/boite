@@ -25,6 +25,86 @@ struct ClaudeSessionLine {
     working_dir: Option<String>,
 }
 
+/// What the head of a session transcript tells us about it.
+struct ClaudeSessionMeta {
+    session_id: Option<String>,
+    cwd: Option<String>,
+}
+
+/// One entry of `~/.claude/sessions/<pid>.json`, the registry Claude keeps of
+/// the sessions it currently has open.
+#[derive(Deserialize)]
+struct LiveSessionEntry {
+    pid: Option<u32>,
+    #[serde(rename = "sessionId")]
+    session_id: Option<String>,
+}
+
+#[cfg(unix)]
+fn pid_alive(pid: u32) -> bool {
+    // Signal 0 checks for existence without delivering anything. EPERM means
+    // the process is there but owned by someone else, which is still alive.
+    let rc = unsafe { libc::kill(pid as libc::pid_t, 0) };
+    rc == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+#[cfg(windows)]
+fn pid_alive(pid: u32) -> bool {
+    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle.is_null() || handle == INVALID_HANDLE_VALUE {
+            return false;
+        }
+        CloseHandle(handle);
+        true
+    }
+}
+
+/// Sessions Claude has open right now, whatever kind they are.
+///
+/// `--resume` refuses any of these: "That session is still running as a
+/// background agent. Open `claude agents` to attach to it, or stop it there
+/// first to resume here." The same refusal applies to an interactive session
+/// already open in another terminal, so the rule is liveness rather than the
+/// kind of session — a background agent that has stopped is resumable again,
+/// and must not stay hidden.
+///
+/// The pid is verified rather than trusted: a claude that died without
+/// cleaning up would otherwise leave an entry that hides a conversation
+/// forever, which is the very failure this is meant to prevent.
+fn live_claude_session_ids() -> HashSet<String> {
+    let mut live = HashSet::new();
+    let Some(home) = dirs::home_dir() else {
+        return live;
+    };
+    let Ok(entries) = fs::read_dir(home.join(".claude").join("sessions")) else {
+        return live;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension() != Some(OsStr::new("json")) {
+            continue;
+        }
+        let Ok(text) = fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(parsed) = serde_json::from_str::<LiveSessionEntry>(&text) else {
+            continue;
+        };
+        let (Some(pid), Some(id)) = (parsed.pid, parsed.session_id) else {
+            continue;
+        };
+        if pid_alive(pid) {
+            live.insert(id);
+        }
+    }
+    live
+}
+
 fn normalize(p: &str) -> String {
     p.replace('\\', "/")
         .trim_end_matches('/')
@@ -65,7 +145,7 @@ fn collect_files(root: &Path, out: &mut Vec<(PathBuf, i64)>, depth: usize, max_d
     }
 }
 
-fn read_claude_session_meta(path: &Path) -> Option<(Option<String>, Option<String>)> {
+fn read_claude_session_meta(path: &Path) -> Option<ClaudeSessionMeta> {
     // Buffered: session jsonl files reach tens of MB; only the head matters.
     let reader = BufReader::new(fs::File::open(path).ok()?);
     let mut found_session: Option<String> = None;
@@ -88,7 +168,10 @@ fn read_claude_session_meta(path: &Path) -> Option<(Option<String>, Option<Strin
             break;
         }
     }
-    Some((found_session, found_cwd))
+    Some(ClaudeSessionMeta {
+        session_id: found_session,
+        cwd: found_cwd,
+    })
 }
 
 pub fn find_claude_session_blocking(
@@ -153,14 +236,21 @@ pub fn find_claude_session_blocking(
 
     candidates.sort_by_key(|c| std::cmp::Reverse(c.modified_ms));
 
+    // Read once, not per candidate: the registry is a handful of small files,
+    // but the candidate list is every transcript on the machine.
+    let live = live_claude_session_ids();
+
     for cand in candidates {
         // Exact match only. A substring test let short project dir names
         // match unrelated cwds, attaching the wrong session to a thread; the
         // cwd read from the jsonl below remains the robust fallback.
         let dir_matches = cand.dir_name_lower == target_encoded;
 
-        let (session_id, session_cwd) =
-            read_claude_session_meta(&cand.path).unwrap_or((None, None));
+        let meta = read_claude_session_meta(&cand.path);
+        let (session_id, session_cwd) = match meta {
+            Some(m) => (m.session_id, m.cwd),
+            None => (None, None),
+        };
 
         let cwd_matches = session_cwd
             .as_deref()
@@ -172,7 +262,7 @@ pub fn find_claude_session_blocking(
         }
 
         if let Some(id) = session_id {
-            if exclude.contains(&id) {
+            if exclude.contains(&id) || live.contains(&id) {
                 continue;
             }
             return Some(ClaudeSessionHit {
@@ -181,7 +271,7 @@ pub fn find_claude_session_blocking(
             });
         }
         if let Some(stem) = cand.path.file_stem().and_then(|s| s.to_str()) {
-            if exclude.contains(stem) {
+            if exclude.contains(stem) || live.contains(stem) {
                 continue;
             }
             return Some(ClaudeSessionHit {
@@ -892,4 +982,45 @@ pub fn find_hermes_session_blocking(
 
 pub fn build_exclude(ids: Option<Vec<String>>) -> HashSet<String> {
     ids.unwrap_or_default().into_iter().collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    fn write_session(name: &str, lines: &[&str]) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("boite-session-test-{name}"));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(format!("{name}.jsonl"));
+        let mut f = fs::File::create(&path).unwrap();
+        for l in lines {
+            writeln!(f, "{l}").unwrap();
+        }
+        path
+    }
+
+    #[test]
+    fn transcript_head_yields_the_id_and_the_cwd() {
+        let path = write_session(
+            "interactive",
+            &[
+                r#"{"type":"ai-title","aiTitle":"Some work","sessionId":"abc"}"#,
+                r#"{"type":"user","cwd":"/Users/x/proj","sessionId":"abc"}"#,
+            ],
+        );
+        let meta = read_claude_session_meta(&path).unwrap();
+        assert_eq!(meta.session_id.as_deref(), Some("abc"));
+        assert_eq!(meta.cwd.as_deref(), Some("/Users/x/proj"));
+    }
+
+    /// The liveness rule is only worth anything if a dead pid reads as dead:
+    /// a registry entry left behind by a claude that crashed would otherwise
+    /// hide that conversation from resume permanently.
+    #[test]
+    fn a_live_pid_is_told_from_a_dead_one() {
+        assert!(pid_alive(std::process::id()));
+        // Above any plausible live pid on the platforms we ship.
+        assert!(!pid_alive(4_000_000_000));
+    }
 }
