@@ -575,19 +575,6 @@ class SettingsStore {
     this.persistSoon();
   }
 
-  setLocale(value: LocaleSetting) {
-    if (this.state.locale === value) return;
-    this.state.locale = value;
-    i18n.setting = value;
-    this.persistDeviceNow();
-    notifications.success(
-      value === "system"
-        ? "Language set to System default"
-        : value === "fr"
-          ? "Langue changée en Français"
-          : "Language set to English"
-    );
-  }
 }
 
 export const settings = new SettingsStore();

@@ -214,7 +214,6 @@
     >
       <WorkspaceToggle />
     </div>
-  {/if}
 
   <div data-tauri-drag-region class="flex-1"></div>
 
