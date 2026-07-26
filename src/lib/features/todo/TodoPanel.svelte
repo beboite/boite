@@ -8,6 +8,7 @@
   import { ptyWrite } from "$lib/storage/pty";
   import {
     agentAcceptsInjection,
+    agentApiReady,
     agentIsInstalled,
     agentRegisterCli,
     mcpPaths,
@@ -38,6 +39,7 @@
 
   let draft = $state("");
   let shimPath = $state<string | null>(null);
+  let endpointUp = $state(true);
 
   type AgentRow = {
     key: string;
@@ -110,6 +112,7 @@
   onMount(() => {
     void todos.ensureLoaded();
     void mcpPaths().then((p) => (shimPath = p?.sidecarPath ?? null));
+    void agentApiReady().then((up) => (endpointUp = up));
   });
 
   function submitDraft(e: Event) {
@@ -271,6 +274,8 @@
           <p class="text-[11px] text-muted-foreground">{t("todo.agentOff")}</p>
         {:else if shimPath === null}
           <p class="text-[11px] text-muted-foreground">{t("todo.agentUnavailable")}</p>
+        {:else if !endpointUp}
+          <p class="text-[11px] text-muted-foreground">{t("todo.agentEndpointDown")}</p>
         {:else}
           {#each agentsHere as agent (agent.key)}
             <div class="flex items-center gap-2 py-0.5">
@@ -278,7 +283,10 @@
                 {agent.label}
               </span>
               {#if agent.auto}
-                <span class="shrink-0 text-[10.5px] text-muted-foreground">
+                <span
+                  class="shrink-0 text-[10.5px] text-muted-foreground"
+                  title={t("todo.agentReadyHint")}
+                >
                   {t("todo.agentActive")}
                 </span>
               {:else if agent.cli}

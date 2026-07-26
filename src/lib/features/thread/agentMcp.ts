@@ -66,6 +66,16 @@ export async function agentIsInstalled(cmd: string): Promise<boolean> {
   }
 }
 
+/** Whether the endpoint an injected agent would call is actually serving. */
+export async function agentApiReady(): Promise<boolean> {
+  if (!hasTauri()) return false;
+  try {
+    return await invoke<boolean>("agent_api_ready");
+  } catch {
+    return false;
+  }
+}
+
 /** Agents Boite can point at the endpoint with no setup from the user. */
 export function agentAcceptsInjection(key: IconKey): boolean {
   return !!key && key in INJECTORS;

@@ -352,6 +352,15 @@ pub async fn register_agent_mcp(cli: String, sidecar_path: String) -> Result<Str
     .map_err(|e| format!("register task failed: {e}"))?
 }
 
+/// Whether the agent endpoint is up. The panel asks before calling an agent
+/// ready: having the binary and knowing how to wire it says nothing about the
+/// door being open, and a thread launched before it was answered its agent with
+/// no credentials at all.
+#[tauri::command]
+pub fn agent_api_ready(app: AppHandle) -> bool {
+    app.try_state::<crate::agent_api::AgentApi>().is_some()
+}
+
 /// Session ids claude currently has open. `--resume` refuses every one of
 /// them, so a thread holding a captured id has to ask before replaying it.
 #[tauri::command]
