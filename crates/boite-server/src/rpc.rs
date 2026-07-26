@@ -350,6 +350,16 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
             Ok(json!({ "shells": shells }))
         }
 
+        // The agents run here, so this is where the registry of open sessions
+        // is. Clients ask before replaying a captured id: claude refuses
+        // `--resume` for anything it still has open.
+        "session.liveClaude" => {
+            let ids: Vec<String> = boite_core::session::live_claude_session_ids()
+                .into_iter()
+                .collect();
+            Ok(json!({ "sessionIds": ids }))
+        }
+
         "session.find" => {
             let kind = str_param(&params, "kind")?;
             let cwd = str_param(&params, "cwd")?;

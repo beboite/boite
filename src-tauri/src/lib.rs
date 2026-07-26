@@ -248,6 +248,7 @@ pub fn run() {
             commands::default_shell,
             commands::available_shells,
             commands::find_claude_session,
+            commands::live_claude_sessions,
             commands::find_codex_session,
             commands::find_opencode_session,
             commands::find_cursor_session,

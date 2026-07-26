@@ -21,7 +21,7 @@
   import { app } from "$lib/app/store.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
   import { reloadThread, restoreLastClosedThread } from "$lib/features/thread/api";
-  import { buildResumeArgs, getDetector } from "$lib/features/thread/session";
+  import { buildResumeArgsAsync, getDetector } from "$lib/features/thread/session";
   import {
     planDirectSpawn,
     planSpawnInShell,
@@ -994,7 +994,7 @@
     const cols = Math.max(2, term.cols || 80);
     const rows = Math.max(1, term.rows || 24);
 
-    const userArgs = buildResumeArgs(thread);
+    const userArgs = await buildResumeArgsAsync(thread, project.cwd);
     // Dynamic mode: a boite thread runs on the server, where the locally
     // configured wrap shell doesn't exist — spawn direct and let the server
     // resolve the command.

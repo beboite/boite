@@ -217,6 +217,13 @@ export class RemoteBackend implements Backend {
         rpc("session.find", { kind, cwd, afterUnixMs, excludeIds }).then((r) =>
           normalizeSession(r.session),
         ),
+      // The agents run on the server, so that is where the registry lives. An
+      // older server answers with an error; an empty list then reads as
+      // "nothing is live", which is exactly the behaviour from before.
+      liveClaude: () =>
+        rpc("session.liveClaude")
+          .then((r) => (r.sessionIds ?? []) as string[])
+          .catch(() => []),
     };
 
     // App-event logging is a device-local concern (the desktop writes a log
