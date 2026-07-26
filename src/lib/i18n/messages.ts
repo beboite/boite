@@ -186,8 +186,6 @@ export const EN_MESSAGES = {
   "todo.agentActive": "ready",
   "todo.agentReadyHint": "New threads for this agent get the server; already-open ones keep what they were launched with.",
   "todo.agentEndpointDown": "The endpoint is not serving — agents cannot reach the list.",
-  "todo.agentManual": "Copy setup command",
-  "todo.agentCopied": "Command copied — run it in a terminal",
   "todo.agentOff": "Agent access is off in settings.",
   "todo.agentUnavailable": "The bundled shim is missing from this build.",
 
