@@ -100,6 +100,9 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
             thread.status = "running".to_string();
             state.store.save_thread(&thread)?;
 
+            let wrap = params
+                .get("wrap")
+                .and_then(|v| serde_json::from_value(v.clone()).ok());
             let spec = PtySpawnArgs {
                 cwd,
                 cmd: thread.cmd.clone(),
@@ -107,6 +110,7 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
                 cols,
                 rows,
                 env,
+                wrap,
             };
             let pty_id = state.registry.spawn(thread.id.clone(), spec)?;
             thread.pty_id = Some(pty_id);
@@ -357,6 +361,14 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
             let cmd = str_param(&params, "cmd")?;
             let found = blocking(move || shell::command_exists(&cmd)).await?;
             Ok(json!({ "found": found }))
+        }
+
+        // Warms the server's own function/alias list. The client cannot answer
+        // this for a remote boite: the profile that matters is the server's.
+        "shell.warm" => {
+            let id = str_param(&params, "shellId")?;
+            state.registry.warm_shell_names(&id);
+            Ok(json!({ "ok": true }))
         }
 
         // The agents run here, so this is where the registry of open sessions

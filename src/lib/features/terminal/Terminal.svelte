@@ -22,11 +22,7 @@
   import { settings } from "$lib/features/settings/store.svelte";
   import { reloadThread, restoreLastClosedThread } from "$lib/features/thread/api";
   import { buildResumeArgsAsync, getDetector } from "$lib/features/thread/session";
-  import {
-    planDirectSpawn,
-    planSpawnInShell,
-    withPowershellFastFlags,
-  } from "$lib/features/thread/shell-wrap";
+  import { withPowershellFastFlags } from "$lib/features/thread/shell-wrap";
   import { platform } from "$lib/storage/platform.svelte";
   import {
     startSessionMonitor,
@@ -73,7 +69,6 @@
   let spawnRetryTimer: ReturnType<typeof setTimeout> | null = null;
   let spawnRetryCount = 0;
   const SPAWN_RETRY_MAX = 30;
-  let pendingInputTimers: ReturnType<typeof setTimeout>[] = [];
   let ctxMenu = $state<{ x: number; y: number; items: ContextMenuItem[] } | null>(
     null,
   );
@@ -353,19 +348,6 @@
     spawnRetryTimer = null;
   }
 
-  function clearPendingInputTimers() {
-    for (const timer of pendingInputTimers) clearTimeout(timer);
-    pendingInputTimers = [];
-  }
-
-  function schedulePendingInputTimer(callback: () => void, delay: number) {
-    const timer = setTimeout(() => {
-      pendingInputTimers = pendingInputTimers.filter((t) => t !== timer);
-      callback();
-    }, delay);
-    pendingInputTimers.push(timer);
-  }
-
   function currentThread(): Thread | null {
     return app.threadById(thread.id);
   }
@@ -378,7 +360,6 @@
 
   function teardownPty(action: (key: string) => void) {
     clearSpawnRetry();
-    clearPendingInputTimers();
     const targetPtyId = ptyId;
     ptyId = null;
     spawned = false;
@@ -532,8 +513,7 @@
     } else if (event.type === "exit") {
       ptyId = null;
       spawned = false;
-      clearPendingInputTimers();
-      stopSessionMonitor();
+        stopSessionMonitor();
       const current = currentThread();
       if (current?.ptyId !== eventPtyId) return;
       if (current.status === "stopped") {
@@ -995,24 +975,27 @@
     const rows = Math.max(1, term.rows || 24);
 
     const userArgs = await buildResumeArgsAsync(thread, project.cwd);
-    // Dynamic mode: a boite thread runs on the server, where the locally
-    // configured wrap shell doesn't exist — spawn direct and let the server
-    // resolve the command.
-    const crossRemote = workspace.isDynamic && thread.origin === "remote";
-    const wrapShell =
-      !crossRemote && settings.state.defaultShellId
-        ? platform.shells.find((s) => s.id === settings.state.defaultShellId) ?? null
-        : null;
+    // A blank terminal *is* the shell; anything else may be a shell function or
+    // alias, which only exists once a profile has been sourced. Whether it
+    // actually is one is decided by the machine that owns the PTY — for a
+    // remote thread the server's PATH and profile are the ones that count, and
+    // an id it does not have simply falls through to a direct spawn.
     const isBlankTerminal = thread.iconKey === "terminal";
-    const plan =
-      wrapShell && !isBlankTerminal
-        ? planSpawnInShell(wrapShell, thread.cmd, userArgs)
-        : planDirectSpawn(thread.cmd, userArgs);
-    plan.args = withPowershellFastFlags(
-      plan.cmd,
-      plan.args,
-      settings.state.powershellNoProfile,
-    );
+    const wrap =
+      !isBlankTerminal && settings.state.defaultShellId
+        ? {
+            shellId: settings.state.defaultShellId,
+            noProfile: settings.state.powershellNoProfile,
+          }
+        : undefined;
+    const plan = {
+      cmd: thread.cmd,
+      args: withPowershellFastFlags(
+        thread.cmd,
+        userArgs,
+        settings.state.powershellNoProfile,
+      ),
+    };
 
     const spawnedAt = Date.now();
 
@@ -1038,6 +1021,7 @@
             args: plan.args,
             cols,
             rows,
+            wrap,
           },
           meta: {
             projectId: thread.projectId,
@@ -1071,7 +1055,7 @@
           args: plan.args,
           cwd: project.cwd,
           reattaching,
-          pendingInput: !!plan.pendingInput,
+          wrapShell: wrap?.shellId ?? null,
         },
       );
     } catch (err) {
@@ -1083,50 +1067,6 @@
       return;
     } finally {
       spawning = false;
-    }
-
-    // Reattach only re-opens the output stream; the process is already running,
-    // so never re-inject the launch input.
-    if (!reattaching && plan.pendingInput && ptyId) {
-      const targetPtyId = ptyId;
-      const text = plan.pendingInput;
-      const encoded = encoder.encode(text);
-      lastOutputAt = Date.now();
-      let injected = false;
-
-      const inject = () => {
-        if (injected || !shouldUsePty(targetPtyId)) return;
-        injected = true;
-        void ptyWrite(targetPtyId, encoded).catch(() => {});
-      };
-
-      // pwsh / cmd / bash all settle into a recognisable prompt before they
-      // are ready to accept stdin. Injecting before that point makes the
-      // shell eat random chars (pwsh banner + first letters of `claude`).
-      const looksLikePrompt = (buffer: string): boolean => {
-        const tail = buffer.slice(-256);
-        return /(?:PS\s+[^\r\n]+>\s*$)|(?:[>$#❯➜]\s*$)/m.test(tail);
-      };
-
-      // Once the prompt is on screen the shell is reading stdin; a short
-      // idle window is enough (-NoLogo is forced, so there is no banner to
-      // race against). The longer idle path covers prompts the regex misses.
-      const tryInject = () => {
-        if (injected || !shouldUsePty(targetPtyId)) return;
-        const idle = Date.now() - lastOutputAt;
-        if (idle > 250 && looksLikePrompt(detectBufferText())) {
-          inject();
-          return;
-        }
-        if (idle > 1500) {
-          inject();
-          return;
-        }
-        schedulePendingInputTimer(tryInject, 100);
-      };
-      schedulePendingInputTimer(tryInject, 150);
-
-      schedulePendingInputTimer(inject, 8000);
     }
 
     const detector = getDetector(thread);

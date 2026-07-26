@@ -70,6 +70,7 @@ interface RawShellOption {
 
 export const tauriShell: ShellApi = {
   defaultShell: () => invoke<string>("default_shell"),
+  warmShell: (shellId) => invoke<void>("pty_warm_shell", { shellId }),
   async availableShells(): Promise<ShellOption[]> {
     const list = await invoke<RawShellOption[]>("available_shells");
     return list.map((s) => ({

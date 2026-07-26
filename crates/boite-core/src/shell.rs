@@ -209,6 +209,130 @@ pub fn available_shells_blocking() -> Vec<ShellOption> {
     shells
 }
 
+/// The shell family a binary path belongs to, which is all the wrapping logic
+/// below needs to know.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShellFamily {
+    PowerShell,
+    Cmd,
+    Posix,
+    Nushell,
+    Unknown,
+}
+
+pub fn family_of(cmd: &str) -> ShellFamily {
+    let name = std::path::Path::new(cmd)
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+    match name.as_str() {
+        "pwsh" | "powershell" => ShellFamily::PowerShell,
+        "cmd" => ShellFamily::Cmd,
+        "bash" | "zsh" | "sh" | "dash" | "ksh" | "fish" => ShellFamily::Posix,
+        "nu" => ShellFamily::Nushell,
+        _ => ShellFamily::Unknown,
+    }
+}
+
+fn quote_arg(arg: &str) -> String {
+    if !arg.is_empty() && !arg.contains([' ', '\t', '"', '\'']) {
+        return arg.to_string();
+    }
+    format!("\"{}\"", arg.replace('"', "\\\""))
+}
+
+/// Rebuilds the command line the user would have typed at the prompt.
+pub fn build_command_line(cmd: &str, args: &[String]) -> String {
+    std::iter::once(cmd)
+        .chain(args.iter().map(String::as_str))
+        .map(quote_arg)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Argv that runs `cmd args` *inside* `shell`, so the shell's own profile has
+/// been sourced and its functions and aliases resolve.
+///
+/// Passed as an argument, never typed into the PTY: injecting into stdin means
+/// guessing when the prompt is ready, and a wrong guess feeds the first
+/// characters of the command to a shell that is still starting up.
+///
+/// The shell is kept alive afterwards (`-NoExit`, `/k`, `exec $SHELL`) because
+/// that is what the user gets when they run the command themselves: the process
+/// ends, the prompt comes back, the terminal stays usable.
+pub fn wrap_argv(
+    shell_cmd: &str,
+    shell_args: &[String],
+    no_profile: bool,
+    cmd: &str,
+    args: &[String],
+) -> Option<Vec<String>> {
+    let line = build_command_line(cmd, args);
+    let mut out: Vec<String> = shell_args.to_vec();
+    match family_of(shell_cmd) {
+        ShellFamily::PowerShell => {
+            out.push("-NoLogo".into());
+            if no_profile {
+                // Contradictory on its face, but the caller owns that choice:
+                // it only ever reaches here for a command the profile does not
+                // define, and skipping the profile is the faster start.
+                out.push("-NoProfile".into());
+            }
+            out.push("-NoExit".into());
+            out.push("-Command".into());
+            out.push(line);
+        }
+        ShellFamily::Cmd => {
+            out.push("/k".into());
+            out.push(line);
+        }
+        ShellFamily::Posix => {
+            // -i sources the interactive rc file, which is where functions and
+            // aliases live; exec keeps the shell after the command returns.
+            out.push("-i".into());
+            out.push("-c".into());
+            out.push(format!("{line}; exec \"$0\" -i"));
+            // Sets $0 for the -c script, so the re-exec uses this very shell
+            // rather than whatever the name resolves to on PATH.
+            out.push(shell_cmd.to_string());
+        }
+        // nu resolves its own defs with -c but has no "stay open" flag, and an
+        // unknown shell has no contract at all. Better to spawn direct than to
+        // invent flags that turn into a spawn failure.
+        ShellFamily::Nushell | ShellFamily::Unknown => return None,
+    }
+    Some(out)
+}
+
+/// The command that lists every name the shell resolves *before* the PATH:
+/// functions and aliases. Used to decide whether a shortcut needs the shell at
+/// all, and to catch the case where a function shadows a binary of the same
+/// name.
+/// Separates the two halves of the probe's output.
+pub const PROBE_SEPARATOR: &str = "--boite-probe--";
+
+pub fn names_probe_argv(shell_cmd: &str) -> Option<Vec<String>> {
+    match family_of(shell_cmd) {
+        ShellFamily::PowerShell => Some(vec![
+            "-NoLogo".into(),
+            "-Command".into(),
+            format!(
+                "Get-Command -CommandType Function,Alias -ErrorAction SilentlyContinue | \
+                 ForEach-Object Name; '{PROBE_SEPARATOR}'; \
+                 Get-ChildItem Env: | ForEach-Object {{ \"$($_.Name)=$($_.Value)\" }}"
+            ),
+        ]),
+        ShellFamily::Posix => Some(vec![
+            "-i".into(),
+            "-c".into(),
+            format!("compgen -A function -A alias; echo '{PROBE_SEPARATOR}'; env"),
+        ]),
+        // cmd has doskey macros, which are per-console and cannot be listed
+        // from a child process; nushell and unknown shells are not wrapped.
+        ShellFamily::Cmd | ShellFamily::Nushell | ShellFamily::Unknown => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -248,5 +372,71 @@ mod tests {
     fn shells_without_a_login_mode_get_nothing() {
         assert!(login_args_for("pwsh").is_empty());
         assert!(login_args_for("cmd").is_empty());
+    }
+
+    fn v(items: &[&str]) -> Vec<String> {
+        items.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn command_line_quotes_only_what_needs_it() {
+        assert_eq!(build_command_line("cc", &v(&["--resume"])), "cc --resume");
+        assert_eq!(
+            build_command_line("ccCROF", &v(&["--md", "deepseek.md"])),
+            "ccCROF --md deepseek.md"
+        );
+        assert_eq!(
+            build_command_line("claude", &v(&["-p", "hello world"])),
+            "claude -p \"hello world\""
+        );
+        assert_eq!(
+            build_command_line("c:\\a b\\claude.exe", &v(&[])),
+            "\"c:\\a b\\claude.exe\""
+        );
+        assert_eq!(build_command_line("say", &v(&["a\"b"])), "say \"a\\\"b\"");
+    }
+
+    #[test]
+    fn powershell_wrap_passes_the_command_as_an_argument() {
+        let argv = wrap_argv("C:\\pwsh.exe", &[], false, "cc", &v(&["--resume"])).unwrap();
+        assert_eq!(argv, v(&["-NoLogo", "-NoExit", "-Command", "cc --resume"]));
+    }
+
+    #[test]
+    fn powershell_wrap_honours_no_profile() {
+        let argv = wrap_argv("pwsh", &[], true, "cc", &[]).unwrap();
+        assert!(argv.contains(&"-NoProfile".to_string()));
+    }
+
+    #[test]
+    fn cmd_and_posix_have_their_own_stay_open_form() {
+        assert_eq!(
+            wrap_argv("C:\\Windows\\system32\\cmd.exe", &[], false, "cc", &[]).unwrap(),
+            v(&["/k", "cc"])
+        );
+        assert_eq!(
+            wrap_argv("/bin/bash", &[], false, "cc", &v(&["-p", "x"])).unwrap(),
+            v(&["-i", "-c", "cc -p x; exec \"$0\" -i", "/bin/bash"])
+        );
+    }
+
+    #[test]
+    fn wrap_keeps_the_shells_own_args_in_front() {
+        let argv = wrap_argv("bash.exe", &v(&["--login"]), false, "cc", &[]).unwrap();
+        assert_eq!(argv[0], "--login");
+    }
+
+    #[test]
+    fn shells_we_cannot_wrap_return_none() {
+        assert!(wrap_argv("nu", &[], false, "cc", &[]).is_none());
+        assert!(wrap_argv("/usr/bin/claude", &[], false, "cc", &[]).is_none());
+    }
+
+    #[test]
+    fn only_shells_with_a_listable_namespace_get_probed() {
+        assert!(names_probe_argv("pwsh").is_some());
+        assert!(names_probe_argv("/bin/zsh").is_some());
+        assert!(names_probe_argv("cmd.exe").is_none());
+        assert!(names_probe_argv("nu").is_none());
     }
 }
