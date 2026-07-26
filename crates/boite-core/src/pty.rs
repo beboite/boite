@@ -797,6 +797,26 @@ mod tests {
         );
     }
 
+    // The frontend hands this object straight to invoke()/the socket, so the
+    // field names here are a contract with `PtySpawnArgs` in backend/types.ts.
+    #[test]
+    fn the_spawn_payload_the_frontend_sends_round_trips() {
+        let json = r#"{
+            "cwd": "D:/p", "cmd": "cc", "args": ["--resume"],
+            "cols": 80, "rows": 24,
+            "wrap": { "shellId": "pwsh", "noProfile": false }
+        }"#;
+        let spec: PtySpawnArgs = serde_json::from_str(json).expect("payload shape");
+        let wrap = spec.wrap.expect("wrap survived");
+        assert_eq!(wrap.shell_id, "pwsh");
+        assert!(!wrap.no_profile);
+
+        // And a payload from a client that predates the field still spawns.
+        let older = r#"{"cwd":"D:/p","cmd":"cc","args":[],"cols":80,"rows":24}"#;
+        let spec: PtySpawnArgs = serde_json::from_str(older).expect("older payload");
+        assert!(spec.wrap.is_none());
+    }
+
     #[test]
     fn probe_output_splits_into_names_and_profile_additions() {
         let text = format!(
