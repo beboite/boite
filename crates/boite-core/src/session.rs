@@ -108,6 +108,11 @@ fn terminate(pid: u32) -> bool {
 /// SIGTERM rather than SIGKILL — the process gets to release its claim and
 /// flush its transcript. The transcript is on disk continuously either way, so
 /// nothing said is lost; what ends is the turn in flight, if any.
+///
+/// Returns only once the process is actually gone. Signalling returns straight
+/// away while the exit takes a moment, and a caller that relaunched on that
+/// answer would ask about liveness while the registry still listed the session
+/// — deciding to open the agent picker for an agent it had just stopped.
 pub fn stop_claude_session(session_id: &str) -> bool {
     let Some(target) = live_claude_sessions()
         .into_iter()
@@ -115,7 +120,20 @@ pub fn stop_claude_session(session_id: &str) -> bool {
     else {
         return false;
     };
-    terminate(target.pid)
+    if !terminate(target.pid) {
+        return false;
+    }
+    // Bounded: a process that ignores the signal must not hold the caller. The
+    // false it then gets means "still held", which routes back to the picker —
+    // the behaviour from before, rather than a hang.
+    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    while std::time::Instant::now() < deadline {
+        if !pid_alive(target.pid) {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(40));
+    }
+    false
 }
 
 pub fn live_claude_session_ids() -> HashSet<String> {
