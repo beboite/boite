@@ -18,6 +18,10 @@ import { notifications } from "$lib/features/notifications/store.svelte";
 import { settings } from "$lib/features/settings/store.svelte";
 
 const LOG_PAGE = 80;
+// The graph renders every loaded commit as SVG lanes and edges, and nothing
+// ever drops rows again, so "load more" was a one-way ratchet on both memory
+// and per-frame layout cost. Stop paging well before that hurts.
+const LOG_MAX = 1000;
 // Cap the exponential backoff at 2^4 = 16x the configured period so a repo
 // that keeps failing (offline, bad creds) retries at most ~once per period*16
 // instead of hammering the network or popping credential prompts.
@@ -227,12 +231,17 @@ class GitStore {
     const cwd = this.cwds.get(projectId);
     const state = this.states[projectId];
     if (!cwd || !state || state.logLoadingMore || !state.logHasMore) return;
+    if (state.log.length >= LOG_MAX) {
+      state.logHasMore = false;
+      return;
+    }
     state.logLoadingMore = true;
     try {
       const rows = await gitLog(cwd, LOG_PAGE, state.log.length);
       const existing = new Set(state.log.map((c) => c.sha));
-      state.log = [...state.log, ...rows.filter((c) => !existing.has(c.sha))];
-      state.logHasMore = rows.length === LOG_PAGE;
+      const merged = [...state.log, ...rows.filter((c) => !existing.has(c.sha))];
+      state.log = merged.length > LOG_MAX ? merged.slice(0, LOG_MAX) : merged;
+      state.logHasMore = rows.length === LOG_PAGE && state.log.length < LOG_MAX;
     } catch (err) {
       notifications.error(`Load commits failed: ${err}`);
     } finally {
