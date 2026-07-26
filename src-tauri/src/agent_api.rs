@@ -1,0 +1,264 @@
+//! The door an agent running inside a Boite terminal uses to reach its own
+//! todo list.
+//!
+//! Three verbs on one table, bound to loopback, behind a per-session bearer
+//! token. That narrowness is the whole security argument: the dev-only
+//! `mcp-bridge` could already do this through `invoke_tauri`, which is exactly
+//! why it cannot ship — a door that does everything cannot be defended, one
+//! that lists, adds and claims todos can.
+//!
+//! The caller never names a project. It presents the thread id Boite stamped
+//! into its environment at spawn, and the project is resolved from that, so an
+//! agent cannot read or write another project's list.
+
+use std::sync::Mutex;
+
+use axum::{
+    extract::State,
+    http::{HeaderMap, StatusCode},
+    routing::{get, post},
+    Json, Router,
+};
+use rand::Rng;
+use rusqlite::Connection;
+use serde::{Deserialize, Serialize};
+use serde_json::json;
+use tauri::{Emitter, Manager};
+
+/// Handed to spawned children so they can find and authenticate to this
+/// endpoint without any configuration of their own.
+#[derive(Clone)]
+pub struct AgentApi {
+    pub url: String,
+    pub token: String,
+}
+
+struct Inner {
+    conn: Mutex<Connection>,
+    token: String,
+    app: tauri::AppHandle,
+}
+
+#[derive(Serialize)]
+struct TodoOut {
+    id: String,
+    #[serde(rename = "projectId")]
+    project_id: String,
+    text: String,
+    state: String,
+    note: Option<String>,
+    position: i64,
+}
+
+#[derive(Deserialize)]
+struct AddIn {
+    text: String,
+}
+
+#[derive(Deserialize)]
+struct ClaimIn {
+    id: String,
+    note: Option<String>,
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+/// Bearer token plus the thread this caller was spawned for. Both must be
+/// present: the token proves it came from us, the thread decides what it may
+/// see. A stolen token without a thread id reaches nothing.
+fn authorize(inner: &Inner, headers: &HeaderMap) -> Result<String, StatusCode> {
+    let bearer = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+    // Length check first so the comparison below cannot be short-circuited by a
+    // truncated guess.
+    if bearer.len() != inner.token.len() || bearer != inner.token {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+    headers
+        .get("x-boite-thread")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string())
+        .filter(|s| !s.is_empty())
+        .ok_or(StatusCode::BAD_REQUEST)
+}
+
+fn project_of_thread(conn: &Connection, thread_id: &str) -> Result<String, StatusCode> {
+    conn.query_row(
+        "SELECT project_id FROM threads WHERE id = ?1",
+        [thread_id],
+        |r| r.get::<_, String>(0),
+    )
+    .map_err(|_| StatusCode::NOT_FOUND)
+}
+
+async fn list(
+    State(inner): State<std::sync::Arc<Inner>>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let thread_id = authorize(&inner, &headers)?;
+    let conn = inner.conn.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let project_id = project_of_thread(&conn, &thread_id)?;
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, project_id, text, state, note, position FROM todos
+             WHERE project_id = ?1 ORDER BY position ASC, created_at ASC",
+        )
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let rows = stmt
+        .query_map([&project_id], |r| {
+            Ok(TodoOut {
+                id: r.get(0)?,
+                project_id: r.get(1)?,
+                text: r.get(2)?,
+                state: r.get(3)?,
+                note: r.get(4)?,
+                position: r.get(5)?,
+            })
+        })
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(json!({ "todos": rows })))
+}
+
+async fn add(
+    State(inner): State<std::sync::Arc<Inner>>,
+    headers: HeaderMap,
+    Json(body): Json<AddIn>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let thread_id = authorize(&inner, &headers)?;
+    let text = body.text.trim().to_string();
+    if text.is_empty() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    let id = {
+        let conn = inner.conn.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let project_id = project_of_thread(&conn, &thread_id)?;
+        let position: i64 = conn
+            .query_row(
+                "SELECT COALESCE(MAX(position), -1) + 1 FROM todos WHERE project_id = ?1",
+                [&project_id],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        let id = format!("{:032x}", rand::thread_rng().gen::<u128>());
+        let now = now_ms();
+        conn.execute(
+            "INSERT INTO todos (id, project_id, text, state, note, position, created_at, updated_at)
+             VALUES (?1, ?2, ?3, 'open', NULL, ?4, ?5, ?5)",
+            rusqlite::params![id, project_id, text, position, now],
+        )
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        id
+    };
+
+    let _ = inner.app.emit("boite://todos-changed", ());
+    Ok(Json(json!({ "id": id })))
+}
+
+/// An agent may only move an item to `claimed`, and only from `open`. The
+/// condition is in the SQL rather than in a check above it, so it holds for
+/// every caller that ever reaches this row: a model that could tick its own
+/// boxes would, and the list would stop recording verified work.
+async fn claim(
+    State(inner): State<std::sync::Arc<Inner>>,
+    headers: HeaderMap,
+    Json(body): Json<ClaimIn>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let thread_id = authorize(&inner, &headers)?;
+    let changed = {
+        let conn = inner.conn.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let project_id = project_of_thread(&conn, &thread_id)?;
+        conn.execute(
+            "UPDATE todos SET state = 'claimed', note = ?1, updated_at = ?2
+             WHERE id = ?3 AND project_id = ?4 AND state = 'open'",
+            rusqlite::params![body.note, now_ms(), body.id, project_id],
+        )
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    };
+
+    if changed == 0 {
+        // Either it is not this project's row, or it is no longer open. Both
+        // are refusals, and the agent does not get to learn which.
+        return Err(StatusCode::CONFLICT);
+    }
+    let _ = inner.app.emit("boite://todos-changed", ());
+    Ok(Json(json!({ "ok": true })))
+}
+
+/// Opens a second connection to the database the sql plugin owns. Safe because
+/// that plugin opens it in WAL — readers never block, and writers serialize —
+/// but only with a busy timeout: without one a write landing during the app's
+/// own returns SQLITE_BUSY instead of waiting its turn.
+fn open_db(app: &tauri::AppHandle) -> Result<Connection, String> {
+    let dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|e| format!("app_config_dir: {e}"))?;
+    let conn = Connection::open(dir.join("boite.db")).map_err(|e| format!("open db: {e}"))?;
+    conn.busy_timeout(std::time::Duration::from_secs(5))
+        .map_err(|e| format!("busy_timeout: {e}"))?;
+    Ok(conn)
+}
+
+/// Binds on an ephemeral loopback port and stores the address plus token in
+/// managed state, where the PTY spawn path picks them up. Never binds anything
+/// but 127.0.0.1: this endpoint mutates a workspace, and nothing about it
+/// belongs on a LAN or a tailnet.
+pub fn start(app: &tauri::AppHandle) {
+    let conn = match open_db(app) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[boite/agent-api] disabled: {e}");
+            return;
+        }
+    };
+
+    let token = format!("{:032x}", rand::thread_rng().gen::<u128>());
+    let inner = std::sync::Arc::new(Inner {
+        conn: Mutex::new(conn),
+        token: token.clone(),
+        app: app.clone(),
+    });
+
+    let router = Router::new()
+        .route("/v1/todos", get(list).post(add))
+        .route("/v1/todos/claim", post(claim))
+        .with_state(inner);
+
+    let handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let listener = match tokio::net::TcpListener::bind("127.0.0.1:0").await {
+            Ok(l) => l,
+            Err(e) => {
+                eprintln!("[boite/agent-api] bind failed: {e}");
+                return;
+            }
+        };
+        let port = match listener.local_addr() {
+            Ok(a) => a.port(),
+            Err(e) => {
+                eprintln!("[boite/agent-api] local_addr failed: {e}");
+                return;
+            }
+        };
+        handle.manage(AgentApi {
+            url: format!("http://127.0.0.1:{port}"),
+            token,
+        });
+        if let Err(e) = axum::serve(listener, router).await {
+            eprintln!("[boite/agent-api] serve ended: {e}");
+        }
+    });
+}

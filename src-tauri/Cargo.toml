@@ -27,6 +27,13 @@ tauri-plugin-single-instance = "2"
 base64 = "0.22"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Agent-facing todo endpoint. Loopback only, and deliberately not the dev
+# mcp-bridge: that one answers execute_js, this one answers three verbs on one
+# table.
+axum = "0.7"
+tokio = { version = "1", features = ["rt-multi-thread", "net"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+rand = "0.8"
 
 # Dev-only agent bridge. Optional so a release build links none of it: the
 # plugin exposes execute_js and a screenshot command, and nothing gated by

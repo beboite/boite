@@ -78,14 +78,25 @@ pub fn pty_warm_shell(manager: State<'_, PtyManager>, shell_id: String) {
 // survive a workspace switch; otherwise spawns a fresh process.
 #[tauri::command]
 pub async fn pty_open(
+    app: AppHandle,
     manager: State<'_, PtyManager>,
     sessions: State<'_, LocalSessions>,
     thread_id: String,
     on_event: Channel<WirePtyEvent>,
-    spec: PtySpawnArgs,
+    mut spec: PtySpawnArgs,
 ) -> Result<String, String> {
     let manager = manager.inner().clone();
     let sessions = sessions.inner().clone();
+    // Boite spawns the child, so it can hand it credentials no configuration
+    // could: the agent inside this terminal reaches its own todo list and
+    // nothing else, because the thread id it presents is the one stamped here.
+    // An agent started outside Boite simply has no token.
+    if let Some(api) = app.try_state::<crate::agent_api::AgentApi>() {
+        let env = spec.env.get_or_insert_with(Default::default);
+        env.insert("BOITE_MCP_URL".into(), api.url.clone());
+        env.insert("BOITE_TOKEN".into(), api.token.clone());
+        env.insert("BOITE_THREAD_ID".into(), thread_id.clone());
+    }
     tauri::async_runtime::spawn_blocking(move || {
         if let Some((pty_id, sink)) = sessions.get(&thread_id) {
             if manager.is_alive(&pty_id) {
