@@ -1,0 +1,17 @@
+[package]
+name = "boite-mcp"
+version = "0.10.6"
+description = "MCP server exposing the Boite todo list of the terminal it runs in"
+edition = "2021"
+
+[[bin]]
+name = "boite-mcp"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Blocking on purpose: the loop reads one stdin line, answers it, and reads the
+# next. An async client would buy nothing and drag a runtime into a binary whose
+# whole job is to relay three verbs over loopback.
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json"] }

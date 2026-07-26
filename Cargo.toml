@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/boite-core", "crates/boite-server", "src-tauri"]
+members = ["crates/boite-core", "crates/boite-mcp", "crates/boite-server", "src-tauri"]
 resolver = "2"
 
 [profile.release]
