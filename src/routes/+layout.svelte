@@ -22,6 +22,8 @@
   import { updater } from "$lib/features/updater/store.svelte";
   import { resumeAfterUpdate } from "$lib/features/updater/restart";
   import CommandPalette from "$lib/features/palette/CommandPalette.svelte";
+  import { createKeyboardController } from "$lib/shared/keyboard/controller";
+  import type { KeyScope, ShortcutBinding } from "$lib/shared/keyboard/types";
 
   let { children } = $props();
 
@@ -40,14 +42,6 @@
     e.preventDefault();
     const delta = e.deltaY > 0 ? -5 : 5;
     settings.setUiScalePercent(settings.state.uiScalePercent + delta);
-  }
-
-  function isTextInput(target: EventTarget | null): boolean {
-    if (!(target instanceof HTMLElement)) return false;
-    if (target.isContentEditable) return true;
-    const tag = target.tagName;
-    if (tag === "INPUT" || tag === "TEXTAREA") return true;
-    return false;
   }
 
   function cycleThread(direction: 1 | -1) {
@@ -77,139 +71,179 @@
     return document.querySelector('[role="dialog"][aria-modal="true"]') !== null;
   }
 
-  function handleKeydown(e: KeyboardEvent) {
-    if (e.key === "Escape") {
-      if (isModalOpen()) return;
-      if (app.view === "settings" || app.view === "editor") {
-        e.preventDefault();
-        app.view = "terminal";
-      }
-      return;
-    }
-
-    const mod = e.ctrlKey || e.metaKey;
-    if (!mod) return;
-
-    // UI zoom
-    if (e.key === "+" || e.key === "=") {
-      e.preventDefault();
-      settings.setUiScalePercent(settings.state.uiScalePercent + 5);
-      return;
-    }
-    if (e.key === "-" || e.key === "_") {
-      e.preventDefault();
-      settings.setUiScalePercent(settings.state.uiScalePercent - 5);
-      return;
-    }
-    if (e.key === "0") {
-      e.preventDefault();
-      settings.setUiScalePercent(100);
-      return;
-    }
-
-    // Command palette (Ctrl/Cmd+K, or VS Code-style Ctrl+Shift+P).
-    // On macOS only Cmd+K opens it: Ctrl+K is a readline binding (kill line)
-    // the shell needs.
-    const paletteMod = platform.isMacOS ? e.metaKey : mod;
-    if (
-      (paletteMod && (e.key === "k" || e.key === "K") && !e.shiftKey && !e.altKey) ||
-      (mod && (e.key === "p" || e.key === "P") && e.shiftKey && !e.altKey)
-    ) {
-      e.preventDefault();
-      palette.toggle();
-      return;
-    }
-
-    // Sidebar toggle
-    if ((e.key === "b" || e.key === "B") && !e.altKey) {
-      e.preventDefault();
-      settings.toggleSidebar();
-      return;
-    }
-
-    // Settings
-    if (e.key === ",") {
-      e.preventDefault();
-      app.view = app.view === "settings" ? "terminal" : "settings";
-      return;
-    }
-
-    // Cycle threads. Never override Tab inside text inputs.
-    if (e.key === "Tab" && !isTextInput(e.target)) {
-      e.preventDefault();
-      cycleThread(e.shiftKey ? -1 : 1);
-      return;
-    }
-
-    // Cycle pane within active group (Ctrl+Alt+Arrow)
-    if (
-      e.altKey &&
-      (e.key === "ArrowLeft" || e.key === "ArrowRight" ||
-        e.key === "ArrowUp" || e.key === "ArrowDown")
-    ) {
-      const id = app.activeThreadId;
-      if (!id) return;
-      const g = paneStore.groupOf(id);
-      if (!g) return;
-      const leaves = leavesOf(g.root);
-      if (leaves.length < 2) return;
-      e.preventDefault();
-      const idx = leaves.indexOf(id);
-      const dir = e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : -1;
-      const next = leaves[(idx + dir + leaves.length) % leaves.length];
-      app.activeThreadId = next;
-      return;
-    }
-
-    // Restore last closed thread
-    if ((e.key === "t" || e.key === "T") && e.shiftKey && !e.altKey) {
-      e.preventDefault();
-      void restoreLastClosedThread();
-      return;
-    }
-
-    // New blank terminal in current project
-    if ((e.key === "t" || e.key === "T") && !e.shiftKey && !e.altKey) {
-      e.preventDefault();
-      void launchBlankTerminal(app.currentProjectId);
-      return;
-    }
-
-    // Close what's in front: editor tab in editor view, settings view, or
-    // the active thread (honoring the confirm-before-close setting).
-    if ((e.key === "w" || e.key === "W") && !e.shiftKey && !e.altKey) {
-      if (app.view === "editor") {
-        e.preventDefault();
-        const active = editorStore.activeId;
-        if (active) {
-          void editorStore.close(active).then((closed) => {
-            if (closed && editorStore.buffers.length === 0) {
-              app.view = "terminal";
-            }
-          });
-        } else {
-          app.view = "terminal";
-        }
-        return;
-      }
-      if (app.view === "settings") {
-        e.preventDefault();
-        app.view = "terminal";
-        return;
-      }
-      if (!app.activeThreadId) return;
-      e.preventDefault();
-      void closeThreadWithConfirm(app.activeThreadId);
-      return;
-    }
-
-    // Jump to thread N (1-9) in current project
-    if (/^[1-9]$/.test(e.key)) {
-      e.preventDefault();
-      jumpToThreadN(Number(e.key));
-      return;
-    }
+  function cyclePaneInGroup(direction: 1 | -1): boolean {
+    const id = app.activeThreadId;
+    if (!id) return false;
+    const g = paneStore.groupOf(id);
+    if (!g) return false;
+    const leaves = leavesOf(g.root);
+    if (leaves.length < 2) return false;
+    const idx = leaves.indexOf(id);
+    app.activeThreadId = leaves[(idx + direction + leaves.length) % leaves.length];
+    return true;
   }
+
+  function closeFrontMost(): boolean {
+    if (app.view === "editor") {
+      const active = editorStore.activeId;
+      if (!active) {
+        app.view = "terminal";
+        return true;
+      }
+      void editorStore.close(active).then((closed) => {
+        if (closed && editorStore.buffers.length === 0) app.view = "terminal";
+      });
+      return true;
+    }
+    if (app.view === "settings") {
+      app.view = "terminal";
+      return true;
+    }
+    if (!app.activeThreadId) return false;
+    void closeThreadWithConfirm(app.activeThreadId);
+    return true;
+  }
+
+  // Resolved top-down: the front-most layer wins. `modal` owns the keyboard
+  // outright, which is what stops Escape from closing the dialog and the panel
+  // behind it in the same keystroke.
+  //
+  // The palette is checked first even though it is also a role="dialog": it is
+  // a layer we model, so it keeps its own bindings (Ctrl+K has to close what
+  // Ctrl+K opened). The DOM probe below is the fallback for the dialogs we do
+  // not model, like the confirm prompt.
+  function currentScope(): KeyScope {
+    if (palette.open) return "palette";
+    if (isModalOpen()) return "modal";
+    if (app.view === "settings") return "settings";
+    if (app.view === "editor") return "editor";
+    return "app";
+  }
+
+  const shortcuts: ShortcutBinding[] = [
+    {
+      combo: "escape",
+      scopes: ["settings", "editor"],
+      description: "Back to the terminal",
+      run: () => {
+        app.view = "terminal";
+      },
+    },
+    {
+      combo: "mod+plus",
+      scopes: ["*"],
+      description: "Zoom in",
+      run: () => settings.setUiScalePercent(settings.state.uiScalePercent + 5),
+    },
+    {
+      combo: "mod+minus",
+      scopes: ["*"],
+      description: "Zoom out",
+      run: () => settings.setUiScalePercent(settings.state.uiScalePercent - 5),
+    },
+    {
+      combo: "mod+digit0",
+      scopes: ["*"],
+      description: "Reset zoom",
+      run: () => settings.setUiScalePercent(100),
+    },
+    // On macOS this is Cmd+K only: Ctrl+K is readline's kill-line and the
+    // shell needs it. The dispatcher drops a match with a stray Ctrl there.
+    {
+      combo: "mod+k",
+      scopes: ["app", "settings", "editor", "palette"],
+      description: "Command palette",
+      run: () => palette.toggle(),
+    },
+    {
+      combo: "mod+shift+p",
+      scopes: ["app", "settings", "editor", "palette"],
+      description: "Command palette",
+      run: () => palette.toggle(),
+    },
+    {
+      combo: "mod+b",
+      scopes: ["*"],
+      description: "Toggle sidebar",
+      run: () => settings.toggleSidebar(),
+    },
+    {
+      combo: "mod+,",
+      scopes: ["app", "settings", "editor"],
+      description: "Settings",
+      run: () => {
+        app.view = app.view === "settings" ? "terminal" : "settings";
+      },
+    },
+    {
+      combo: "mod+tab",
+      scopes: ["app", "settings", "editor"],
+      description: "Next thread",
+      run: () => cycleThread(1),
+    },
+    {
+      combo: "mod+shift+tab",
+      scopes: ["app", "settings", "editor"],
+      description: "Previous thread",
+      run: () => cycleThread(-1),
+    },
+    {
+      combo: "mod+alt+arrowright",
+      scopes: ["app"],
+      description: "Next pane",
+      run: () => cyclePaneInGroup(1),
+    },
+    {
+      combo: "mod+alt+arrowdown",
+      scopes: ["app"],
+      run: () => cyclePaneInGroup(1),
+    },
+    {
+      combo: "mod+alt+arrowleft",
+      scopes: ["app"],
+      description: "Previous pane",
+      run: () => cyclePaneInGroup(-1),
+    },
+    {
+      combo: "mod+alt+arrowup",
+      scopes: ["app"],
+      run: () => cyclePaneInGroup(-1),
+    },
+    {
+      combo: "mod+shift+t",
+      scopes: ["app", "settings", "editor"],
+      description: "Reopen the last closed thread",
+      run: () => void restoreLastClosedThread(),
+    },
+    {
+      combo: "mod+t",
+      scopes: ["app", "settings", "editor"],
+      description: "New terminal",
+      run: () => void launchBlankTerminal(app.currentProjectId),
+    },
+    {
+      combo: "mod+w",
+      scopes: ["app", "settings", "editor"],
+      description: "Close the front-most tab, panel or thread",
+      run: () => closeFrontMost(),
+    },
+    ...([1, 2, 3, 4, 5, 6, 7, 8, 9] as const).map((n) => ({
+      combo: `mod+digit${n}`,
+      scopes: ["app", "settings", "editor"] as KeyScope[],
+      description: n === 1 ? "Jump to thread 1-9 in this project" : undefined,
+      run: () => jumpToThreadN(n),
+    })),
+  ];
+
+  const keyboard = createKeyboardController({
+    bindings: shortcuts,
+    getScope: currentScope,
+    isMac: () => platform.isMacOS,
+  });
+
+  // Its own onMount: the boot one below returns early on the PWA path, and
+  // shortcuts have to work there too.
+  onMount(() => keyboard.attach());
 
   onMount(() => {
     // No Tauri runtime: this is a browser/PWA. The only backend is the server
@@ -270,7 +304,7 @@
   });
 </script>
 
-<svelte:window onwheel={handleWheel} onkeydown={handleKeydown} />
+<svelte:window onwheel={handleWheel} />
 
 {@render children()}
 
