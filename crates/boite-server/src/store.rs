@@ -169,6 +169,11 @@ impl Store {
     /// Moves an item to `claimed` with the agent's summary, and only from
     /// `open`: an agent must not be able to walk back a box a human ticked, nor
     /// re-claim what it already claimed. Returns the row it touched, if any.
+    ///
+    /// Unused until the MCP endpoint lands. It lives here rather than in that
+    /// patch because the guard belongs to the store — expressing it in SQL is
+    /// what makes it hold no matter which caller writes.
+    #[allow(dead_code)]
     pub fn claim_todo(&self, id: &str, note: Option<&str>, now: i64) -> Result<bool, String> {
         let conn = self.conn.lock();
         let changed = conn
