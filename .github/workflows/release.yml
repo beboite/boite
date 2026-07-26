@@ -4,6 +4,10 @@ name: release
 # every platform, signs the updater payloads and opens a draft release. The
 # release stays a draft until you publish it: `releases/latest` only starts
 # answering — and clients only start updating — once you do.
+#
+# Actions are pinned by commit SHA rather than by tag. This workflow is the only
+# place the signing key is ever decrypted, and a movable tag would let an
+# upstream repo change what runs next to it.
 on:
   push:
     tags: ["v*"]
@@ -13,7 +17,52 @@ permissions:
   contents: write
 
 jobs:
+  # Runs first and alone: the version lives in five files, and a release built
+  # from a mismatched set is worse than no release at all. Catching it here also
+  # avoids paying for four platform runners before the mistake surfaces.
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Versions agree with each other, and with the tag
+        run: |
+          set -euo pipefail
+          conf=$(jq -r .version src-tauri/tauri.conf.json)
+          pkg=$(jq -r .version package.json)
+          app=$(grep -m1 '^version = ' src-tauri/Cargo.toml | cut -d'"' -f2)
+          core=$(grep -m1 '^version = ' crates/boite-core/Cargo.toml | cut -d'"' -f2)
+          server=$(grep -m1 '^version = ' crates/boite-server/Cargo.toml | cut -d'"' -f2)
+
+          echo "tauri.conf.json=$conf package.json=$pkg boite=$app core=$core server=$server"
+
+          for v in "$pkg" "$app" "$core" "$server"; do
+            if [ "$v" != "$conf" ]; then
+              echo "::error::version mismatch — tauri.conf.json says $conf, another manifest says $v" >&2
+              exit 1
+            fi
+          done
+
+          # workflow_dispatch has no tag to check against; tauri-action will
+          # derive one from the config either way.
+          if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
+            if [ "$GITHUB_REF_NAME" != "v$conf" ]; then
+              echo "::error::tag $GITHUB_REF_NAME does not match version $conf" >&2
+              exit 1
+            fi
+          fi
+
+      - name: Signing key is present
+        env:
+          KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -z "${KEY:-}" ]; then
+            echo "::error::TAURI_SIGNING_PRIVATE_KEY is unset — the bundles would ship without signatures and no client could apply them" >&2
+            exit 1
+          fi
+
   bundle:
+    needs: verify
     strategy:
       fail-fast: false
       matrix:
@@ -37,18 +86,18 @@ jobs:
 
     runs-on: ${{ matrix.platform }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: latest
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
           targets: ${{ matrix.target }}
 
       - name: Cache cargo
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.cargo/registry
@@ -71,7 +120,7 @@ jobs:
       - name: Install frontend deps
         run: bun install --frozen-lockfile
 
-      - uses: tauri-apps/tauri-action@v0
+      - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Without these the build still succeeds but emits no .sig, and

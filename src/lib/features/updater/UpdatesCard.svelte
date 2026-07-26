@@ -31,7 +31,7 @@
         type="button"
         class="flex items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-1.5 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
         onclick={() => updater.checkNow()}
-        disabled={updater.busy}
+        disabled={updater.busy || !updater.enabled}
       >
         <RefreshCw class="size-3 {updater.busy ? 'animate-spin' : ''}" />
         Check now
@@ -46,7 +46,9 @@
     </div>
 
     <p class="mt-1 text-[11.5px] leading-snug text-muted-foreground/80">
-      {#if status.kind === "checking"}
+      {#if !updater.enabled}
+        Updates are disabled in a development build.
+      {:else if status.kind === "checking"}
         Checking for updates…
       {:else if status.kind === "current"}
         You are on the latest release.
