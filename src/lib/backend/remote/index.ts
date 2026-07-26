@@ -6,6 +6,7 @@ import type {
   EditorApi,
   ExplorerApi,
   GitApi,
+  LiveClaudeSession,
   LogApi,
   ProjectApi,
   PtyApi,
@@ -222,7 +223,7 @@ export class RemoteBackend implements Backend {
       // "nothing is live", which is exactly the behaviour from before.
       liveClaude: () =>
         rpc("session.liveClaude")
-          .then((r) => (r.sessionIds ?? []) as string[])
+          .then((r) => (r.sessions ?? []) as LiveClaudeSession[])
           .catch(() => []),
     };
 

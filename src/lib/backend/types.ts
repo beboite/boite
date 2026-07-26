@@ -136,6 +136,13 @@ export interface SessionHit {
   title?: string | null;
 }
 
+/** A session claude has open, and what can be done about it. */
+export interface LiveClaudeSession {
+  id: string;
+  /** `bg` is reachable through the agent view; `interactive` belongs to another terminal. */
+  kind: string;
+}
+
 export interface SessionApi {
   find(
     kind: SessionKind,
@@ -149,7 +156,7 @@ export interface SessionApi {
    * replayed. Backends that cannot answer return an empty list, which reads as
    * "nothing is live" and preserves the old behaviour.
    */
-  liveClaude(): Promise<string[]>;
+  liveClaude(): Promise<LiveClaudeSession[]>;
 }
 
 export interface LogApi {
