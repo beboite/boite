@@ -33,6 +33,11 @@ import { backend, workspace, type Backend } from "$lib/backend";
 import { device } from "$lib/features/settings/device.svelte";
 import type { ControlEvent } from "$lib/backend/types";
 
+// Shared so a project with no threads always yields the same reference, and
+// frozen so a caller that tries to mutate an index array fails loudly here
+// instead of silently corrupting the index.
+const EMPTY_THREADS = Object.freeze([]) as unknown as Thread[];
+
 class AppState {
   projects = $state<Project[]>([]);
   threads = $state<Thread[]>([]);
@@ -104,7 +109,7 @@ class AppState {
       const batch = [...this.pendingTitleSaves];
       this.pendingTitleSaves.clear();
       for (const [id, title] of batch) {
-        const origin = this.threads.find((x) => x.id === id)?.origin;
+        const origin = this.threadById(id)?.origin;
         void updateThreadTitle(id, title, origin).catch((err) => {
           console.error("updateThreadTitle failed:", err);
         });
@@ -124,7 +129,7 @@ class AppState {
     this.pendingTitleSaves.clear();
     await Promise.all(
       batch.map(([id, title]) => {
-        const origin = this.threads.find((x) => x.id === id)?.origin;
+        const origin = this.threadById(id)?.origin;
         return updateThreadTitle(id, title, origin).catch((err) => {
           console.error("updateThreadTitle failed:", err);
         });
@@ -160,8 +165,55 @@ class AppState {
     return false;
   }
 
+  // Rebuilt only when the thread set changes, never on a status or title
+  // mutation: the callback reads id/projectId/createdAt and nothing else, so
+  // the twice-a-second status sweep does not invalidate any of it.
+  #threadById: Map<string, Thread> = $derived.by(
+    () => new Map(this.threads.map((t) => [t.id, t])),
+  );
+
+  #threadsByProject: Map<string, Thread[]> = $derived.by(() => {
+    const grouped = new Map<string, Thread[]>();
+    for (const t of this.threads) {
+      const list = grouped.get(t.projectId);
+      if (list) list.push(t);
+      else grouped.set(t.projectId, [t]);
+    }
+    return grouped;
+  });
+
+  #threadsByProjectSortedIndex: Map<string, Thread[]> = $derived.by(() => {
+    const orderByProject = settings.state.threadOrderByProject ?? {};
+    const sorted = new Map<string, Thread[]>();
+    for (const [projectId, list] of this.#threadsByProject) {
+      const order = orderByProject[projectId] ?? [];
+      const idx = new Map(order.map((id, i) => [id, i]));
+      sorted.set(
+        projectId,
+        [...list].sort((a, b) => {
+          const ai = idx.get(a.id) ?? Number.MAX_SAFE_INTEGER;
+          const bi = idx.get(b.id) ?? Number.MAX_SAFE_INTEGER;
+          if (ai !== bi) return ai - bi;
+          return a.createdAt - b.createdAt;
+        }),
+      );
+    }
+    return sorted;
+  });
+
+  // Every lookup used to be a linear scan, and the status engine does one per
+  // thread twice a second — quadratic in the number of open threads.
+  threadById(id: string | null | undefined): Thread | null {
+    if (!id) return null;
+    return this.#threadById.get(id) ?? null;
+  }
+
+  hasThread(id: string): boolean {
+    return this.#threadById.has(id);
+  }
+
   get activeThread(): Thread | null {
-    return this.threads.find((t) => t.id === this.activeThreadId) ?? null;
+    return this.threadById(this.activeThreadId);
   }
 
   get currentProjectId(): string | null {
@@ -170,8 +222,15 @@ class AppState {
     return this.projects[0]?.id ?? null;
   }
 
+  // Both of these return the index's own arrays. Callers iterate and map, they
+  // never mutate — a fresh copy per call would defeat the reference equality
+  // consumers rely on to skip work.
   threadsByProject(projectId: string): Thread[] {
-    return this.threads.filter((t) => t.projectId === projectId);
+    return this.#threadsByProject.get(projectId) ?? EMPTY_THREADS;
+  }
+
+  threadsByProjectSorted(projectId: string): Thread[] {
+    return this.#threadsByProjectSortedIndex.get(projectId) ?? EMPTY_THREADS;
   }
 
   // $derived (not getters): several components read these per render pass;
@@ -195,20 +254,13 @@ class AppState {
       .sort((a, b) => a.name.localeCompare(b.name));
   });
 
-  threadsByProjectSorted(projectId: string): Thread[] {
-    const list = this.threadsByProject(projectId);
-    const order = settings.state.threadOrderByProject?.[projectId] ?? [];
-    const idx = new Map(order.map((id, i) => [id, i]));
-    return [...list].sort((a, b) => {
-      const ai = idx.get(a.id) ?? Number.MAX_SAFE_INTEGER;
-      const bi = idx.get(b.id) ?? Number.MAX_SAFE_INTEGER;
-      if (ai !== bi) return ai - bi;
-      return a.createdAt - b.createdAt;
-    });
-  }
-
   async init() {
     if (this.ready) return;
+
+    // Rows depend on neither the settings blob nor the shell list, so all of
+    // it goes out at once: boot is then two round trips deep (loads, then
+    // syncRoots) instead of three.
+    const rowsReady = this.loadRows();
     await Promise.all([settings.init(), platform.init()]);
 
     if (settings.state.defaultShellId === null && platform.shells.length > 0) {
@@ -222,32 +274,13 @@ class AppState {
       if (pick) await settings.setDefaultShellIdQuiet(pick.id);
     }
 
-    // Projects and threads are independent tables; load both concurrently.
-    // Dynamic mode loads local + boite side by side and tags each row with its
-    // origin; a remote failure degrades to local-only instead of blocking boot.
-    if (workspace.isDynamic) {
-      const [projects, threads] = await Promise.all([
-        this.loadDynamic((be) => be.db.loadProjects(), "loadProjects"),
-        this.loadDynamic((be) => be.db.loadThreads(), "loadThreads"),
-      ]);
-      this.projects = projects;
-      // Before ready: panels start polling fs/git commands as soon as they
-      // mount, and those commands reject paths outside registered roots.
-      await this.syncRoots();
-      this.threads = threads;
-    } else {
-      const projectsPromise = loadProjects().catch((err) => {
-        console.error("loadProjects failed:", err);
-        return [] as Project[];
-      });
-      const threadsPromise = loadThreads().catch((err) => {
-        console.error("loadThreads failed:", err);
-        return [] as Thread[];
-      });
-      this.projects = await projectsPromise;
-      await this.syncRoots();
-      this.threads = await threadsPromise;
-    }
+    const { projects, threads } = await rowsReady;
+    this.projects = projects;
+    // Before ready: panels start polling fs/git commands as soon as they
+    // mount, and those commands reject paths outside registered roots.
+    await this.syncRoots();
+    this.threads = threads;
+
     this.deduplicateSessionIds();
     pruneRenamed(this.threads.map((t) => t.id));
 
@@ -260,6 +293,30 @@ class AppState {
     }
 
     this.ready = true;
+  }
+
+  // Projects and threads are independent tables; load both concurrently.
+  // Dynamic mode loads local + boite side by side and tags each row with its
+  // origin; a remote failure degrades to local-only instead of blocking boot.
+  private async loadRows(): Promise<{ projects: Project[]; threads: Thread[] }> {
+    if (workspace.isDynamic) {
+      const [projects, threads] = await Promise.all([
+        this.loadDynamic((be) => be.db.loadProjects(), "loadProjects"),
+        this.loadDynamic((be) => be.db.loadThreads(), "loadThreads"),
+      ]);
+      return { projects, threads };
+    }
+    const [projects, threads] = await Promise.all([
+      loadProjects().catch((err) => {
+        console.error("loadProjects failed:", err);
+        return [] as Project[];
+      }),
+      loadThreads().catch((err) => {
+        console.error("loadThreads failed:", err);
+        return [] as Thread[];
+      }),
+    ]);
+    return { projects, threads };
   }
 
   // Load one table from both live backends and tag each row's origin.
@@ -315,7 +372,7 @@ class AppState {
     switch (ev.event) {
       case "thread.status": {
         const id = data?.threadId as string | undefined;
-        const t = id ? this.threads.find((x) => x.id === id) : undefined;
+        const t = this.threadById(id);
         if (!t) return;
         t.status = (data?.status as Thread["status"]) ?? t.status;
         t.exitCode = (data?.exitCode as number | null) ?? null;
@@ -326,7 +383,7 @@ class AppState {
       }
       case "thread.title": {
         const id = data?.threadId as string | undefined;
-        const t = id ? this.threads.find((x) => x.id === id) : undefined;
+        const t = this.threadById(id);
         // A user-typed name outranks whatever the server parsed out of the PTY.
         if (t && !isRenamed(t.id)) t.title = (data?.title as string) ?? t.title;
         break;
@@ -334,7 +391,7 @@ class AppState {
       case "thread.created": {
         // Server emits data = { thread: {...} }.
         const incoming = (ev.data as { thread?: Thread })?.thread;
-        if (incoming?.id && !this.threads.some((x) => x.id === incoming.id)) {
+        if (incoming?.id && !this.hasThread(incoming.id)) {
           if (workspace.isDynamic) incoming.origin = "remote";
           this.threads.push(incoming);
         }
@@ -346,7 +403,7 @@ class AppState {
         // live overlay, never clobbered by an update.
         const incoming = (ev.data as { thread?: Partial<Thread> & { id?: string } })?.thread;
         const id = incoming?.id;
-        const t = id ? this.threads.find((x) => x.id === id) : undefined;
+        const t = this.threadById(id);
         if (t && incoming) {
           const userFields: Record<string, unknown> = { ...incoming };
           delete userFields.status;
@@ -492,7 +549,7 @@ class AppState {
   }
 
   async removeThread(id: string) {
-    const removed = this.threads.find((t) => t.id === id);
+    const removed = this.threadById(id);
     this.threads = this.threads.filter((t) => t.id !== id);
     if (this.activeThreadId === id) {
       const projectId = removed?.projectId ?? this.selectedProjectId;
@@ -508,7 +565,7 @@ class AppState {
   }
 
   setThreadStatus(id: string, status: ThreadStatus, exitCode: number | null = null) {
-    const t = this.threads.find((x) => x.id === id);
+    const t = this.threadById(id);
     if (!t) return;
     if (t.status === status && t.exitCode === exitCode) return;
     t.status = status;
@@ -534,7 +591,7 @@ class AppState {
   }
 
   setThreadAutoSlept(id: string, value: boolean) {
-    const t = this.threads.find((x) => x.id === id);
+    const t = this.threadById(id);
     if (!t || (t.autoSlept ?? false) === value) return;
     t.autoSlept = value;
     // Visual-only flag, never persisted. After a restart all threads come
@@ -543,14 +600,14 @@ class AppState {
   }
 
   setThreadKeepAwake(id: string, value: boolean) {
-    const t = this.threads.find((x) => x.id === id);
+    const t = this.threadById(id);
     if (!t || (t.keepAwake ?? false) === value) return;
     t.keepAwake = value;
     void saveThread($state.snapshot(t) as Thread);
   }
 
   toggleThreadKeepAwake(id: string) {
-    const t = this.threads.find((x) => x.id === id);
+    const t = this.threadById(id);
     if (!t) return;
     this.setThreadKeepAwake(id, !(t.keepAwake ?? false));
   }
@@ -558,7 +615,7 @@ class AppState {
   setThreadTitle(id: string, title: string) {
     // Named by hand: the agent's own titles stop applying to this thread.
     if (isRenamed(id)) return;
-    const t = this.threads.find((x) => x.id === id);
+    const t = this.threadById(id);
     if (!t || t.title === title) return;
     t.title = title;
     // Remote owns the title (parsed server-side, pushed as a control event).
@@ -572,7 +629,7 @@ class AppState {
   // here would never reach its row. Passing null drops the manual name — the
   // thread falls back to its label and the agent gets to title it again.
   async renameThread(id: string, name: string | null) {
-    const t = this.threads.find((x) => x.id === id);
+    const t = this.threadById(id);
     if (!t) return;
     const title = name?.trim() || null;
     t.title = title;
@@ -589,7 +646,7 @@ class AppState {
   }
 
   setThreadPtyId(id: string, ptyId: string | null) {
-    const t = this.threads.find((x) => x.id === id);
+    const t = this.threadById(id);
     if (!t || t.ptyId === ptyId) return;
     t.ptyId = ptyId;
   }

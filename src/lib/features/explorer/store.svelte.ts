@@ -19,6 +19,42 @@ function joinPath(cwd: string, rel: string): string {
 
 export const SEARCH_LIMIT = 500;
 
+// Every directory ever visited stayed cached for the whole session, across
+// every project. Bound it, and evict what is not under the tree currently on
+// screen first — that is the only part the user can still see.
+const MAX_CACHED_DIRS = 400;
+
+function sameStringMap(
+  a: Record<string, string>,
+  b: Record<string, string>,
+): boolean {
+  const ak = Object.keys(a);
+  if (ak.length !== Object.keys(b).length) return false;
+  for (const k of ak) {
+    if (a[k] !== b[k]) return false;
+  }
+  return true;
+}
+
+// Same directory listing arriving again on the 10s poll must not look like a
+// change: assigning a fresh array invalidates every consumer of that path.
+function sameEntries(a: DirEntry[] | undefined, b: DirEntry[]): boolean {
+  if (!a || a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i];
+    const y = b[i];
+    if (
+      x.path !== y.path ||
+      x.name !== y.name ||
+      x.isDir !== y.isDir ||
+      x.isHidden !== y.isHidden
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
 const STATUS_RANK: Record<string, number> = {
   U: 6,
   D: 5,
@@ -53,39 +89,37 @@ class ExplorerStore {
   private searchToken = 0;
   private debounceHandle: ReturnType<typeof setTimeout> | null = null;
 
+  // These records are $state proxies, so writing and deleting a single key is
+  // already reactive. The old spread-clone per write replaced the whole record
+  // — every open directory re-read on any one directory's refresh, and the
+  // 10s poll did that three times per expanded folder.
   async load(path: string, force = false): Promise<void> {
     const key = normalizePath(path);
     if (!force && this.entriesByPath[key]) return;
     if (this.loading[key]) return;
-    this.loading = { ...this.loading, [key]: true };
+    this.loading[key] = true;
     try {
       const entries = (await readDir(key)).filter((e) => e.name !== ".git");
-      this.entriesByPath = { ...this.entriesByPath, [key]: entries };
-      if (this.errorByPath[key]) {
-        const next = { ...this.errorByPath };
-        delete next[key];
-        this.errorByPath = next;
+      if (!sameEntries(this.entriesByPath[key], entries)) {
+        this.entriesByPath[key] = entries;
       }
+      if (this.errorByPath[key]) delete this.errorByPath[key];
     } catch (err) {
       const msg = String(err);
       logger.warn("explorer", `read_dir failed for ${key}`, msg);
-      this.errorByPath = { ...this.errorByPath, [key]: msg };
+      this.errorByPath[key] = msg;
     } finally {
-      const next = { ...this.loading };
-      delete next[key];
-      this.loading = next;
+      delete this.loading[key];
     }
   }
 
   async toggle(path: string): Promise<void> {
     const key = normalizePath(path);
     if (this.expanded[key]) {
-      const next = { ...this.expanded };
-      delete next[key];
-      this.expanded = next;
+      delete this.expanded[key];
       return;
     }
-    this.expanded = { ...this.expanded, [key]: true };
+    this.expanded[key] = true;
     await this.load(key);
   }
 
@@ -94,11 +128,28 @@ class ExplorerStore {
     const expandedKeys = Object.keys(this.expanded).filter(
       (k) => k === root || k.startsWith(root + "/"),
     );
+    this.evictOutside(root);
     await Promise.all([
       this.load(root, true),
       ...expandedKeys.map((k) => this.load(k, true)),
       this.loadGitStatus(root),
     ]);
+  }
+
+  // Only runs once the cache is actually large; until then listings from other
+  // projects are worth keeping so switching back is instant.
+  private evictOutside(root: string): void {
+    const keys = Object.keys(this.entriesByPath);
+    if (keys.length <= MAX_CACHED_DIRS) return;
+    const prefix = root + "/";
+    for (const k of keys) {
+      if (k === root || k.startsWith(prefix)) continue;
+      delete this.entriesByPath[k];
+      delete this.errorByPath[k];
+      delete this.expanded[k];
+      delete this.statusByPath[k];
+      delete this.folderStatusByPath[k];
+    }
   }
 
   collapseAll(): void {
@@ -226,8 +277,12 @@ class ExplorerStore {
           folderStatus[parent] = worse(folderStatus[parent], row.status);
         }
       }
-      this.statusByPath = byPath;
-      this.folderStatusByPath = folderStatus;
+      // Assigning identical maps every 10s repainted a badge on every node in
+      // the tree for nothing.
+      if (!sameStringMap(this.statusByPath, byPath)) this.statusByPath = byPath;
+      if (!sameStringMap(this.folderStatusByPath, folderStatus)) {
+        this.folderStatusByPath = folderStatus;
+      }
     } catch (err) {
       // Keep the previous badges: a transient failure (index.lock during a
       // commit) should not blank the whole tree.

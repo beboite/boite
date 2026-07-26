@@ -156,7 +156,7 @@ export async function prepareForInstall(version: string): Promise<string[] | nul
 export function restoreThreads(ids: string[]): number {
   let restored = 0;
   for (const id of ids) {
-    const t = app.threads.find((x) => x.id === id);
+    const t = app.threadById(id);
     if (!t || t.ptyId) continue;
     t.status = "idle";
     t.exitCode = null;

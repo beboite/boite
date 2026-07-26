@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { untrack } from "svelte";
+  import { onMount, untrack } from "svelte";
   import { app } from "$lib/app/store.svelte";
   import { workspace } from "$lib/backend";
   import { settings } from "$lib/features/settings/store.svelte";
@@ -10,8 +10,6 @@
   import CloseGuard from "$lib/app/CloseGuard.svelte";
   import ProjectSidebar from "$lib/features/project/ProjectSidebar.svelte";
   import ShortcutBar from "$lib/features/shortcut/ShortcutBar.svelte";
-  import SettingsPanel from "$lib/features/settings/SettingsPanel.svelte";
-  import Terminal from "$lib/features/terminal/Terminal.svelte";
   import Toaster from "$lib/features/notifications/Toaster.svelte";
   import ConfirmHost from "$lib/shared/components/ConfirmHost.svelte";
   import BoiteLogo from "$lib/shared/components/BoiteLogo.svelte";
@@ -22,12 +20,27 @@
   import PaneShell from "$lib/features/panes/PaneShell.svelte";
   import PaneOverlay from "$lib/features/panes/PaneOverlay.svelte";
   import PaneDropOverlay from "$lib/features/panes/PaneDropOverlay.svelte";
-  import EditorPanel from "$lib/features/editor/EditorPanel.svelte";
   import GitPanel from "$lib/features/git/GitPanel.svelte";
   import ExplorerPanel from "$lib/features/explorer/ExplorerPanel.svelte";
   import MobileTopBar from "$lib/features/mobile/MobileTopBar.svelte";
   import MobileBottomBar from "$lib/features/mobile/MobileBottomBar.svelte";
   import MobileProjectsPage from "$lib/features/mobile/MobileProjectsPage.svelte";
+  import { lazyComponent, prefetchWhenIdle } from "$lib/shared/lazy.svelte";
+
+  // xterm (~300 KB) and CodeMirror (~600 KB) dwarf the rest of the app. Held
+  // behind import() they leave the entry graph entirely, so the window paints
+  // without parsing either. The terminal chunk is warmed on idle because it is
+  // the one almost every session ends up needing.
+  const TerminalView = lazyComponent(
+    () => import("$lib/features/terminal/Terminal.svelte"),
+  );
+  const EditorView = lazyComponent(
+    () => import("$lib/features/editor/EditorPanel.svelte"),
+  );
+  // Four tabs of form controls that most sessions never open.
+  const SettingsView = lazyComponent(
+    () => import("$lib/features/settings/SettingsPanel.svelte"),
+  );
 
   let activated = $state<Record<string, true>>({});
 
@@ -75,7 +88,7 @@
   });
 
   function activateThread(id: string) {
-    const t = app.threads.find((x) => x.id === id);
+    const t = app.threadById(id);
     const isFinished =
       t &&
       (t.status === "done" ||
@@ -120,7 +133,7 @@
 
   $effect(() => {
     const id = app.activeThreadId;
-    if (id && app.threads.some((t) => t.id === id) && !activated[id]) {
+    if (id && app.hasThread(id) && !activated[id]) {
       activated[id] = true;
     }
   });
@@ -129,7 +142,7 @@
     const g = paneStore.groups.find((x) => x.id === activeGroupId);
     if (!g) return;
     for (const leafId of paneStore.visibleLeaves(activeGroupId)) {
-      if (!activated[leafId] && app.threads.some((t) => t.id === leafId)) {
+      if (!activated[leafId] && app.hasThread(leafId)) {
         activated[leafId] = true;
       }
     }
@@ -141,7 +154,7 @@
     const requested = app.requestedActivations;
     if (requested.length === 0) return;
     for (const id of requested) {
-      if (!activated[id] && app.threads.some((t) => t.id === id)) {
+      if (!activated[id] && app.hasThread(id)) {
         activated[id] = true;
       }
     }
@@ -158,6 +171,29 @@
       }
     }
     if (dirty) activated = { ...activated };
+  });
+
+  onMount(() => prefetchWhenIdle(TerminalView));
+
+  $effect(() => {
+    for (const _id in activated) {
+      void TerminalView.ensure();
+      break;
+    }
+  });
+
+  $effect(() => {
+    if (app.view === "editor") void EditorView.ensure();
+  });
+
+  $effect(() => {
+    if (settingsActive) void SettingsView.ensure();
+  });
+
+  // Opening the Files or Git panel is the strongest signal that a file or a
+  // diff is about to be opened; warm the editor before the click lands.
+  $effect(() => {
+    if (settings.state.rightPanel) prefetchWhenIdle(EditorView);
   });
 </script>
 
@@ -288,7 +324,10 @@
                   onpointerdowncapture={() => focusPane(thread.id)}
                 >
                   {#key app.respawnNonce[thread.id] ?? 0}
-                    <Terminal {thread} {visible} {focused} />
+                    {#if TerminalView.current}
+                      {@const TerminalComp = TerminalView.current}
+                      <TerminalComp {thread} {visible} {focused} />
+                    {/if}
                   {/key}
                   <PaneOverlay {thread} {group} {focused} />
                 </div>
@@ -301,13 +340,23 @@
 
         {#if settingsActive}
           <div class="absolute inset-0 z-10 bg-[var(--color-background)]">
-            <SettingsPanel />
+            {#if SettingsView.current}
+              {@const SettingsComp = SettingsView.current}
+              <SettingsComp />
+            {/if}
           </div>
         {/if}
 
         {#if app.view === "editor"}
           <div class="absolute inset-0 z-10 bg-[var(--color-background)]">
-            <EditorPanel />
+            {#if EditorView.current}
+              {@const EditorComp = EditorView.current}
+              <EditorComp />
+            {:else}
+              <div class="flex h-full items-center justify-center text-xs text-muted-foreground/70">
+                Loading…
+              </div>
+            {/if}
           </div>
         {/if}
 

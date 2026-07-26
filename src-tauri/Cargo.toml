@@ -41,6 +41,10 @@ mcp-bridge = ["dep:tauri-plugin-mcp-bridge"]
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+# The PTY read loop allocates a buffer per chunk on every terminal, all day.
+# The Windows system allocator is the weakest of the three we ship on, and that
+# path is exactly the small-short-lived-allocation pattern mimalloc is best at.
+mimalloc = { version = "0.1", default-features = false }
 
 # AppKit posts the only fullscreen signal that arrives when the transition
 # *starts*; everything Tauri exposes reports it once the animation is over. All
