@@ -106,6 +106,8 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "git.pullFf": "Pull (avance rapide uniquement)",
   "git.pull": "Pull",
   "git.push": "Push",
+  "git.pushCount": "Push ({count})",
+  "git.upToDate": "À jour",
   "git.publishBranch": "Publier la branche",
   "git.fetchRemote": "Fetch depuis le serveur distant",
   "git.pickProject": "Choisissez un projet.",

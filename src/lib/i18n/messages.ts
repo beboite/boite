@@ -103,6 +103,8 @@ export const EN_MESSAGES = {
   "git.pullFf": "Pull (fast-forward only)",
   "git.pull": "Pull",
   "git.push": "Push",
+  "git.pushCount": "Push ({count})",
+  "git.upToDate": "Up to date",
   "git.publishBranch": "Publish branch",
   "git.fetchRemote": "Fetch from remote",
   "git.pickProject": "Pick a project.",
