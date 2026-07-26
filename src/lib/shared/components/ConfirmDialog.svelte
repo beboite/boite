@@ -26,9 +26,14 @@
   let confirmBtn: HTMLButtonElement | null = $state(null);
 
   $effect(() => {
-    if (open && confirmBtn) {
-      confirmBtn.focus();
-    }
+    if (!open || !confirmBtn) return;
+    // Captured before we steal focus and restored on close: otherwise
+    // confirming leaves the keyboard on a removed button, which lands on
+    // <body>, and the terminal you were typing in silently stops receiving
+    // keys until you click it again.
+    const previous = document.activeElement as HTMLElement | null;
+    confirmBtn.focus();
+    return () => previous?.focus?.();
   });
 
   function backdropClick(e: MouseEvent) {
