@@ -19,6 +19,7 @@
   import { paneStore, leavesOf } from "$lib/features/panes/store.svelte";
   import { palette } from "$lib/features/palette/store.svelte";
   import { platform } from "$lib/storage/platform.svelte";
+  import { updater } from "$lib/features/updater/store.svelte";
   import CommandPalette from "$lib/features/palette/CommandPalette.svelte";
 
   let { children } = $props();
@@ -252,8 +253,13 @@
       })
       .then((u) => (unlisten = u));
 
+    // Polls quietly and pre-downloads; the titlebar only speaks up once a
+    // release is on disk and a restart is all that is left.
+    const stopUpdater = updater.start();
+
     return () => {
       unlisten?.();
+      stopUpdater();
     };
   });
 </script>

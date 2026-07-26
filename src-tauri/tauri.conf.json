@@ -30,11 +30,24 @@
   "plugins": {
     "sql": {
       "preload": ["sqlite:boite.db"]
+    },
+    "updater": {
+      "pubkey": "",
+      "endpoints": ["https://github.com/klNuno/boite/releases/latest/download/latest.json"],
+      "windows": {
+        "installMode": "passive"
+      }
     }
   },
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    },
     "category": "DeveloperTool",
     "shortDescription": "Lightweight multi-agent terminal multiplexer",
     "longDescription": "Run Claude Code, Codex, Opencode, Cursor, Antigravity and Copilot side-by-side in one frameless window, grouped per project.",

@@ -160,6 +160,16 @@ pub fn run() {
                 .build(),
         );
 
+    // Self-update, desktop only. The updater refuses any payload whose minisign
+    // signature does not match the public key baked into the config, so the
+    // endpoint is not a trusted input — losing the domain does not hand anyone
+    // code execution. `process` is here purely for the relaunch that follows an
+    // install on macOS and Linux.
+    #[cfg(desktop)]
+    let builder = builder
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init());
+
     // Registered last so single_instance still wins the startup race, and bound
     // to loopback: the plugin's own default is 0.0.0.0, which would put an
     // unauthenticated WebSocket on the LAN and the tailnet. That socket answers

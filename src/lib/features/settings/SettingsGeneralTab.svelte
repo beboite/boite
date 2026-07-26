@@ -2,6 +2,8 @@
   import { settings, PRESET_SHORTCUTS } from "$lib/features/settings/store.svelte";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
   import SettingsCard from "$lib/shared/components/SettingsCard.svelte";
+  import UpdatesCard from "$lib/features/updater/UpdatesCard.svelte";
+  import { hasTauri } from "$lib/backend/env";
   import { resolveIconKey } from "$lib/shared/icons/detect";
   import Plus from "@lucide/svelte/icons/plus";
   import Trash2 from "@lucide/svelte/icons/trash-2";
@@ -155,7 +157,14 @@
     );
   }
 
+  // Nothing to update in a browser tab: the page is whatever the server last
+  // served.
+  const canUpdate = hasTauri();
 </script>
+
+{#if canUpdate}
+  <UpdatesCard />
+{/if}
 
 <SettingsCard
   title="Shortcuts"
