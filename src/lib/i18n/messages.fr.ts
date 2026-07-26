@@ -102,6 +102,11 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "sidebar.closeThread": "Fermer le terminal",
   "sidebar.resizeSidebar": "Redimensionner la barre latérale",
 
+  "git.changeBranch": "Changer de branche",
+  "git.newBranchPlaceholder": "Nom de la nouvelle branche",
+  "git.createBranch": "Créer la branche",
+  "git.loadingBranches": "Chargement des branches...",
+  "git.noLocalBranches": "Aucune branche locale.",
   "git.notAGitRepo": "Pas un dépôt git",
   "git.pullFf": "Pull (avance rapide uniquement)",
   "git.pull": "Pull",
@@ -144,6 +149,16 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "git.confirmDiscardMsg": "Les modifications de votre espace de travail sur {path} seront perdues. Les modifications indexées sont conservées.",
   "git.confirmDeleteLabel": "Supprimer",
   "git.confirmDiscardLabel": "Annuler",
+
+  "branchDialog.uncommittedChanges": "Vous avez des modifications non validées",
+  "branchDialog.descriptionCreating": "Créer",
+  "branchDialog.descriptionSwitching": "Basculer vers",
+  "branchDialog.descriptionSuffix": "permet soit d'emporter vos modifications actuelles, soit de les remiser avant de changer.",
+  "branchDialog.bringChanges": "Emporter les modifications",
+  "branchDialog.bringChangesDesc": "Les fichiers modifiés et indexés vous suivront sur {branch}.",
+  "branchDialog.leaveChanges": "Laisser les modifications ici",
+  "branchDialog.leaveChangesDesc": "Git remisera les fichiers suivis, indexés et non suivis. Restaurez-les plus tard avec {command}.",
+  "branchDialog.cancel": "Annuler",
 
   "notification.readyForInput": "Prêt pour saisie",
 };
