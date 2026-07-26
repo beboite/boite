@@ -235,6 +235,17 @@ where
     tauri::async_runtime::spawn_blocking(f).await.ok().flatten()
 }
 
+/// Session ids claude currently has open. `--resume` refuses every one of
+/// them, so a thread holding a captured id has to ask before replaying it.
+#[tauri::command]
+pub async fn live_claude_sessions() -> Vec<String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        session::live_claude_session_ids().into_iter().collect()
+    })
+    .await
+    .unwrap_or_default()
+}
+
 #[tauri::command]
 pub async fn find_claude_session(
     cwd: String,
