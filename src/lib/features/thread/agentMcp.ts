@@ -39,14 +39,23 @@ const INJECTORS: Partial<Record<NonNullable<IconKey>, McpInjection>> = {
 };
 
 /**
- * Agents that keep their servers in a config file but expose an `mcp add`
- * subcommand, so the registration can still be one click. The value is the
- * binary to run, which is not always the icon key.
+ * Agents a button could register in one click. Empty, and checked against each
+ * agent's own documentation rather than assumed:
+ *
+ * - opencode has no `mcp add` at all — only auth/list/logout/debug. Servers go
+ *   in `opencode.jsonc` by hand.
+ * - cursor exposes MCP only through interactive slash commands (`/mcp list`,
+ *   `/mcp enable`); there is no non-interactive add.
+ * - copilot does document `copilot mcp add NAME -- COMMAND`, but it states that
+ *   only PATH is inherited by a server process and every other variable must be
+ *   declared in the config. Our credentials arrive by environment and change
+ *   every launch — the port is ephemeral and the token regenerated — so a
+ *   registration there would be stale before it was used.
+ *
+ * Registering an agent that cannot then reach the endpoint is worse than not
+ * offering it: the button would report success and nothing would work.
  */
-const REGISTER_CLI: Partial<Record<NonNullable<IconKey>, string>> = {
-  opencode: "opencode",
-  cursor: "cursor-agent",
-};
+const REGISTER_CLI: Partial<Record<NonNullable<IconKey>, string>> = {};
 
 export function agentRegisterCli(key: IconKey): string | null {
   return (key && REGISTER_CLI[key]) ?? null;
