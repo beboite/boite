@@ -20,12 +20,34 @@ export const PRESET_SHORTCUTS: Shortcut[] = [
   { id: "hermes", label: "Hermes", command: "hermes", iconKey: "hermes" },
 ];
 
-function migrateShortcuts(raw: unknown): { shortcuts: Shortcut[]; changed: boolean } {
+// Presets introduced after the initial release: backfilled into existing
+// installs exactly once, then recorded in `seededPresets` so a user deleting
+// one doesn't get it back on the next launch.
+const BACKFILL_PRESET_IDS = ["antigravity", "grok", "hermes"];
+
+function migrateShortcuts(
+  raw: unknown,
+  seededRaw: unknown,
+): { shortcuts: Shortcut[]; seededPresets: string[]; changed: boolean } {
   if (!Array.isArray(raw)) {
-    return { shortcuts: structuredClone(DEFAULTS.shortcuts), changed: false };
+    return {
+      shortcuts: structuredClone(DEFAULTS.shortcuts),
+      seededPresets: [...BACKFILL_PRESET_IDS],
+      changed: false,
+    };
   }
 
-  let changed = false;
+  // A blob predating this key comes from a build that already backfilled on
+  // every load, so any missing preset was deleted on purpose: mark them seeded
+  // instead of re-adding them one last time.
+  const legacyBlob = !Array.isArray(seededRaw);
+  const seeded = new Set(
+    legacyBlob
+      ? BACKFILL_PRESET_IDS
+      : (seededRaw as unknown[]).filter((id): id is string => typeof id === "string"),
+  );
+
+  let changed = legacyBlob;
   const filtered = raw.filter((shortcut): shortcut is Shortcut => {
     return (
       shortcut &&
@@ -59,19 +81,22 @@ function migrateShortcuts(raw: unknown): { shortcuts: Shortcut[]; changed: boole
     return shortcut;
   });
 
-  for (const presetId of ["antigravity", "grok", "hermes"]) {
+  for (const presetId of BACKFILL_PRESET_IDS) {
+    if (seeded.has(presetId)) continue;
+    seeded.add(presetId);
+    changed = true;
     const preset = PRESET_SHORTCUTS.find((s) => s.id === presetId);
     if (preset && !shortcuts.some((s) => s.id === presetId)) {
       shortcuts.push(structuredClone(preset));
-      changed = true;
     }
   }
 
-  return { shortcuts, changed };
+  return { shortcuts, seededPresets: [...seeded], changed };
 }
 
 const DEFAULTS: Settings = {
   shortcuts: PRESET_SHORTCUTS,
+  seededPresets: BACKFILL_PRESET_IDS,
   powershellNewline: true,
   powershellNoProfile: false,
   defaultShellId: null,
@@ -191,9 +216,10 @@ class SettingsStore {
     try {
       const stored = await loadSettings();
       const raw = stored as unknown as Record<string, unknown>;
-      const migratedShortcuts = migrateShortcuts(stored.shortcuts);
+      const migratedShortcuts = migrateShortcuts(stored.shortcuts, raw.seededPresets);
       this.state = {
         shortcuts: migratedShortcuts.shortcuts,
+        seededPresets: migratedShortcuts.seededPresets,
         powershellNewline:
           typeof stored.powershellNewline === "boolean"
             ? stored.powershellNewline
@@ -454,6 +480,7 @@ class SettingsStore {
 
   async resetShortcutsToPresets() {
     this.state.shortcuts = structuredClone(PRESET_SHORTCUTS);
+    this.state.seededPresets = [...BACKFILL_PRESET_IDS];
     await this.persist();
     notifications.success("Shortcuts reset to defaults");
   }
