@@ -91,9 +91,23 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
             state.ensure_registered_path(&cwd)?;
             let cols = u16_param(&params, "cols").unwrap_or(80);
             let rows = u16_param(&params, "rows").unwrap_or(24);
-            let env = params.get("env").and_then(|v| {
-                serde_json::from_value::<std::collections::HashMap<String, String>>(v.clone()).ok()
-            });
+            let mut env = params
+                .get("env")
+                .and_then(|v| {
+                    serde_json::from_value::<std::collections::HashMap<String, String>>(v.clone())
+                        .ok()
+                })
+                .unwrap_or_default();
+            // The server spawns the child, so it hands it credentials no client
+            // could forge: the thread id stamped here is what scopes the agent
+            // to this project's list. Stamped last so a client-supplied env
+            // cannot override them.
+            if let Some(api) = &state.agent_api {
+                env.insert("BOITE_MCP_URL".into(), api.url.clone());
+                env.insert("BOITE_TOKEN".into(), api.token.clone());
+                env.insert("BOITE_THREAD_ID".into(), thread.id.clone());
+            }
+            let env = Some(env);
             if thread.created_at == 0 {
                 thread.created_at = now_ms();
             }
