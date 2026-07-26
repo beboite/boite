@@ -237,26 +237,43 @@ pub fn start(app: &tauri::AppHandle) {
         .route("/v1/todos/claim", post(claim))
         .with_state(inner);
 
-    let handle = app.clone();
+    // Bound here, not inside the task: the address has to be known before the
+    // first thread can spawn. Registering it from the task left a window where
+    // pty_open found no state and launched an agent with no credentials — the
+    // shim then exits, and the agent reports only that its MCP server closed
+    // the connection. Small window, but it is exactly the moment someone starts
+    // a terminal: right after the app opens.
+    let listener = match std::net::TcpListener::bind("127.0.0.1:0") {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("[boite/agent-api] bind failed: {e}");
+            return;
+        }
+    };
+    let port = match listener.local_addr() {
+        Ok(a) => a.port(),
+        Err(e) => {
+            eprintln!("[boite/agent-api] local_addr failed: {e}");
+            return;
+        }
+    };
+    if let Err(e) = listener.set_nonblocking(true) {
+        eprintln!("[boite/agent-api] set_nonblocking failed: {e}");
+        return;
+    }
+    app.manage(AgentApi {
+        url: format!("http://127.0.0.1:{port}"),
+        token,
+    });
+
     tauri::async_runtime::spawn(async move {
-        let listener = match tokio::net::TcpListener::bind("127.0.0.1:0").await {
+        let listener = match tokio::net::TcpListener::from_std(listener) {
             Ok(l) => l,
             Err(e) => {
-                eprintln!("[boite/agent-api] bind failed: {e}");
+                eprintln!("[boite/agent-api] listener adoption failed: {e}");
                 return;
             }
         };
-        let port = match listener.local_addr() {
-            Ok(a) => a.port(),
-            Err(e) => {
-                eprintln!("[boite/agent-api] local_addr failed: {e}");
-                return;
-            }
-        };
-        handle.manage(AgentApi {
-            url: format!("http://127.0.0.1:{port}"),
-            token,
-        });
         if let Err(e) = axum::serve(listener, router).await {
             eprintln!("[boite/agent-api] serve ended: {e}");
         }
