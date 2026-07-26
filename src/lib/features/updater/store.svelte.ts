@@ -2,6 +2,7 @@ import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { hasTauri } from "$lib/backend/env";
 import { notifications } from "$lib/features/notifications/store.svelte";
+import { dropResumePlan, prepareForInstall, restoreThreads } from "./restart";
 
 // The download runs on its own, in silence, the moment a release is found. By
 // the time the user sees "restart to update" the bytes are already on disk, so
@@ -135,19 +136,46 @@ class UpdaterStore {
    * Swap the files in and come back up. On Windows the NSIS installer is what
    * relaunches us — the process is gone before `relaunch()` is reached, so the
    * line below only ever runs on macOS and Linux.
+   *
+   * Nothing here is silent: the restart kills every local PTY, so the user gets
+   * a say first and the threads that were alive are noted for the boot on the
+   * other side.
    */
   async install(): Promise<void> {
     const update = this.pending;
     if (!update || this.status.kind !== "ready") return;
+    const version = this.status.version;
+
+    // The confirm dialog is a real await: re-check that nothing changed the
+    // status while it was open before committing to the swap.
+    const stopped = await prepareForInstall(version);
+    if (stopped === null) return;
+    if (this.status.kind !== "ready") {
+      restoreThreads(stopped);
+      dropResumePlan();
+      return;
+    }
+
     this.status = { kind: "installing" };
     try {
       await update.install();
       await relaunch();
     } catch (err) {
       const message = messageOf(err);
-      this.status = { kind: "error", message };
       console.error("[updater] install failed:", message);
-      notifications.error(`Update failed: ${message}`);
+      // The payload handle is spent once install() has thrown; a retry has to
+      // start from a fresh check, and the threads we stopped for an update that
+      // never happened come straight back.
+      this.pending = null;
+      dropResumePlan();
+      const restored = restoreThreads(stopped);
+      this.status = { kind: "error", message };
+      notifications.error(
+        restored > 0
+          ? `Update failed: ${message}. Your threads were restarted.`
+          : `Update failed: ${message}`,
+      );
+      this.schedule();
     }
   }
 }
