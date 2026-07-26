@@ -3,7 +3,7 @@ use std::path::Path;
 use parking_lot::Mutex;
 use rusqlite::Connection;
 
-use crate::models::{Project, Thread};
+use crate::models::{Project, Thread, Todo};
 
 pub struct Store {
     conn: Mutex<Connection>,
@@ -52,6 +52,20 @@ const MIGRATIONS: &[&str] = &[
     );",
     "ALTER TABLE projects ADD COLUMN git_root TEXT;",
     "ALTER TABLE threads ADD COLUMN icon_color TEXT;",
+    // A table rather than a key in the settings blob: an agent writes here
+    // through the MCP endpoint while a client is connected, and a whole-blob
+    // rewrite from either side would drop the other's edits.
+    "CREATE TABLE IF NOT EXISTS todos (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        text TEXT NOT NULL,
+        state TEXT NOT NULL,
+        note TEXT,
+        position INTEGER NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_todos_project ON todos (project_id);",
 ];
 
 impl Store {
@@ -103,6 +117,74 @@ impl Store {
             .map_err(|e| format!("set user_version failed: {e}"))?;
         tx.commit()
             .map_err(|e| format!("migration commit failed: {e}"))?;
+        Ok(())
+    }
+
+    pub fn load_todos(&self) -> Result<Vec<Todo>, String> {
+        let conn = self.conn.lock();
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, project_id, text, state, note, position, created_at, updated_at
+                 FROM todos ORDER BY position ASC, created_at ASC",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(Todo {
+                    id: r.get(0)?,
+                    project_id: r.get(1)?,
+                    text: r.get(2)?,
+                    state: r.get(3)?,
+                    note: r.get(4)?,
+                    position: r.get(5)?,
+                    created_at: r.get(6)?,
+                    updated_at: r.get(7)?,
+                })
+            })
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    }
+
+    pub fn save_todo(&self, t: &Todo) -> Result<(), String> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "INSERT OR REPLACE INTO todos
+             (id, project_id, text, state, note, position, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            rusqlite::params![
+                t.id,
+                t.project_id,
+                t.text,
+                t.state,
+                t.note,
+                t.position,
+                t.created_at,
+                t.updated_at
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    /// Moves an item to `claimed` with the agent's summary, and only from
+    /// `open`: an agent must not be able to walk back a box a human ticked, nor
+    /// re-claim what it already claimed. Returns the row it touched, if any.
+    pub fn claim_todo(&self, id: &str, note: Option<&str>, now: i64) -> Result<bool, String> {
+        let conn = self.conn.lock();
+        let changed = conn
+            .execute(
+                "UPDATE todos SET state = 'claimed', note = ?1, updated_at = ?2
+                 WHERE id = ?3 AND state = 'open'",
+                rusqlite::params![note, now, id],
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(changed > 0)
+    }
+
+    pub fn delete_todo(&self, id: &str) -> Result<(), String> {
+        let conn = self.conn.lock();
+        conn.execute("DELETE FROM todos WHERE id = ?1", rusqlite::params![id])
+            .map_err(|e| e.to_string())?;
         Ok(())
     }
 

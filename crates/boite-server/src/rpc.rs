@@ -295,6 +295,30 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
             Ok(json!({ "ok": true }))
         }
 
+        "todo.list" => {
+            let todos = state.store.load_todos()?;
+            Ok(json!({ "todos": todos }))
+        }
+
+        "todo.save" => {
+            let raw = params.get("todo").cloned().ok_or("missing todo")?;
+            let todo: crate::models::Todo =
+                serde_json::from_value(raw).map_err(|e| format!("bad todo: {e}"))?;
+            state.store.save_todo(&todo)?;
+            let _ = state.events.send(AppEvent::TodosChanged);
+            Ok(json!({ "ok": true }))
+        }
+
+        "todo.delete" => {
+            let id = params
+                .get("todoId")
+                .and_then(|v| v.as_str())
+                .ok_or("missing todoId")?;
+            state.store.delete_todo(id)?;
+            let _ = state.events.send(AppEvent::TodosChanged);
+            Ok(json!({ "ok": true }))
+        }
+
         // Cosmetic workspace identity, server-synced so any connected device can
         // rename/recolor a boite and the rest see it live.
         "workspace.info" => {

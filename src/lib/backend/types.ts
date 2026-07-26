@@ -4,7 +4,7 @@
 // keep their public signatures and delegate here, so swapping the transport
 // never touches a component or store.
 
-import type { Project, Settings, Thread } from "$lib/types";
+import type { Project, Settings, Thread, TodoItem } from "$lib/types";
 import type { BranchChangeResult, BranchInfo, ChangeEntry, Commit, RepoInfo } from "$lib/features/git/api";
 import type {
   ChangedPath,
@@ -75,6 +75,14 @@ export interface DbApi {
   deleteThread(id: string): Promise<void>;
   loadSettings(): Promise<Partial<Settings>>;
   saveSettings(settings: Settings): Promise<void>;
+  loadTodos(): Promise<TodoItem[]>;
+  /**
+   * Writes one row. Todos are the only table an outside process also writes
+   * (the MCP endpoint), so they are never persisted as a whole-list blob: two
+   * writers against one blob lose each other's edits.
+   */
+  saveTodo(todo: TodoItem): Promise<void>;
+  deleteTodo(id: string): Promise<void>;
 }
 
 export interface GitApi {

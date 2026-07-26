@@ -4,7 +4,7 @@ import { notifications } from "$lib/features/notifications/store.svelte";
 import { isLocaleSetting, setLocale as applyLocale } from "$lib/i18n/index.svelte";
 import { debounce } from "$lib/shared/utils/debounce";
 import { uuid } from "$lib/shared/utils/uuid";
-import type { LocaleSetting, RightPanelTab, Settings, Shortcut, TodoItem } from "$lib/types";
+import type { LocaleSetting, RightPanelTab, Settings, Shortcut } from "$lib/types";
 
 export const PRESET_SHORTCUTS: Shortcut[] = [
   { id: "claude", label: "Claude", command: "claude", iconKey: "claude" },
@@ -96,6 +96,15 @@ function migrateShortcuts(
   return { shortcuts, seededPresets: [...seeded], changed };
 }
 
+// Handing a terse note straight to an agent wastes the first turn on it asking
+// what you meant. The scaffold spends that turn up front, and carries the id so
+// the agent can report back through the MCP endpoint instead of you relaying it.
+export const DEFAULT_TODO_PROMPT = `Task from my Boite todo list (id {{id}}):
+
+{{task}}
+
+Before changing anything: restate what you understand, name the files involved, and propose a plan. When it is done, call the boite MCP tool todo_claim with that id and a one-line summary of what changed.`;
+
 const DEFAULTS: Settings = {
   shortcuts: PRESET_SHORTCUTS,
   seededPresets: BACKFILL_PRESET_IDS,
@@ -107,7 +116,7 @@ const DEFAULTS: Settings = {
   uiScalePercent: 100,
   projectOrder: [],
   threadOrderByProject: {},
-  todosByProject: {},
+  todoPromptTemplate: DEFAULT_TODO_PROMPT,
   idleTimeoutMinutes: 10,
   idleAutocloseByIcon: {
     claude: true,
@@ -145,31 +154,6 @@ function detectMobileDefault(): boolean {
 
 export const GIT_AUTOFETCH_MIN_SECONDS = 30;
 export const GIT_AUTOFETCH_MAX_SECONDS = 3600;
-
-// Persisted blobs are not trusted input: a hand-edited settings row, or one
-// written by a build that stored something else under this key, must not put
-// non-items in the list the panel iterates.
-function sanitizeTodos(raw: unknown): Record<string, TodoItem[]> {
-  if (!raw || typeof raw !== "object") return {};
-  const out: Record<string, TodoItem[]> = {};
-  for (const [projectId, list] of Object.entries(raw as Record<string, unknown>)) {
-    if (!Array.isArray(list)) continue;
-    const items: TodoItem[] = [];
-    for (const entry of list) {
-      if (!entry || typeof entry !== "object") continue;
-      const e = entry as Record<string, unknown>;
-      if (typeof e.id !== "string" || typeof e.text !== "string") continue;
-      items.push({
-        id: e.id,
-        text: e.text,
-        done: e.done === true,
-        createdAt: typeof e.createdAt === "number" ? e.createdAt : Date.now(),
-      });
-    }
-    if (items.length > 0) out[projectId] = items;
-  }
-  return out;
-}
 
 function migrateRightPanel(stored: Record<string, unknown>): RightPanelTab {
   const raw = stored.rightPanel;
@@ -285,7 +269,10 @@ class SettingsStore {
           stored.threadOrderByProject && typeof stored.threadOrderByProject === "object"
             ? stored.threadOrderByProject
             : structuredClone(DEFAULTS.threadOrderByProject),
-        todosByProject: sanitizeTodos(stored.todosByProject),
+        todoPromptTemplate:
+          typeof stored.todoPromptTemplate === "string" && stored.todoPromptTemplate.trim()
+            ? stored.todoPromptTemplate
+            : DEFAULTS.todoPromptTemplate,
         idleTimeoutMinutes:
           typeof stored.idleTimeoutMinutes === "number" && stored.idleTimeoutMinutes >= 0
             ? stored.idleTimeoutMinutes
@@ -583,64 +570,11 @@ class SettingsStore {
     this.persistDeviceNow();
   }
 
-  // Notepad. Unlike the shortcut mutators these stay silent: ticking a box is
-  // not news, and a toast per keystroke or per checkbox would bury the ones
-  // that matter. Only clearing raises one, because it destroys rows.
-  todosFor(projectId: string | null): TodoItem[] {
-    if (!projectId) return [];
-    return this.state.todosByProject[projectId] ?? [];
-  }
-
-  async addTodo(projectId: string, text: string): Promise<TodoItem | null> {
-    const trimmed = text.trim();
-    if (!trimmed) return null;
-    const item: TodoItem = { id: uuid(), text: trimmed, done: false, createdAt: Date.now() };
-    const list = this.state.todosByProject[projectId];
-    if (list) list.push(item);
-    else this.state.todosByProject[projectId] = [item];
+  async setTodoPromptTemplate(value: string) {
+    const next = value.trim() || DEFAULT_TODO_PROMPT;
+    if (this.state.todoPromptTemplate === next) return;
+    this.state.todoPromptTemplate = next;
     await this.persist();
-    return item;
-  }
-
-  async setTodoDone(projectId: string, id: string, done: boolean) {
-    const item = this.state.todosByProject[projectId]?.find((t) => t.id === id);
-    if (!item || item.done === done) return;
-    item.done = done;
-    await this.persist();
-  }
-
-  async updateTodoText(projectId: string, id: string, text: string) {
-    const list = this.state.todosByProject[projectId];
-    const item = list?.find((t) => t.id === id);
-    if (!item) return;
-    const trimmed = text.trim();
-    // Emptying a line is how you delete it — an item with no text is a row the
-    // panel could never label or hand to an agent.
-    if (!trimmed) {
-      await this.removeTodo(projectId, id);
-      return;
-    }
-    if (item.text === trimmed) return;
-    item.text = trimmed;
-    await this.persist();
-  }
-
-  async removeTodo(projectId: string, id: string) {
-    const list = this.state.todosByProject[projectId];
-    if (!list) return;
-    this.state.todosByProject[projectId] = list.filter((t) => t.id !== id);
-    await this.persist();
-  }
-
-  async clearDoneTodos(projectId: string) {
-    const list = this.state.todosByProject[projectId];
-    if (!list) return;
-    const kept = list.filter((t) => !t.done);
-    const removed = list.length - kept.length;
-    if (removed === 0) return;
-    this.state.todosByProject[projectId] = kept;
-    await this.persist();
-    notifications.success(`Cleared ${removed} done item${removed === 1 ? "" : "s"}`);
   }
 
   togglePanelRight() {

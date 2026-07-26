@@ -128,6 +128,25 @@ pub fn run() {
             sql: "ALTER TABLE threads ADD COLUMN icon_color TEXT;",
             kind: MigrationKind::Up,
         },
+        // A table rather than a key in the settings blob: an agent writes here
+        // through the MCP endpoint while the app is running, and a whole-blob
+        // rewrite from either side would drop the other's edits.
+        Migration {
+            version: 11,
+            description: "create_todos",
+            sql: "CREATE TABLE IF NOT EXISTS todos (\
+                id TEXT PRIMARY KEY,\
+                project_id TEXT NOT NULL,\
+                text TEXT NOT NULL,\
+                state TEXT NOT NULL,\
+                note TEXT,\
+                position INTEGER NOT NULL,\
+                created_at INTEGER NOT NULL,\
+                updated_at INTEGER NOT NULL\
+            );\
+            CREATE INDEX IF NOT EXISTS idx_todos_project ON todos (project_id);",
+            kind: MigrationKind::Up,
+        },
     ];
 
     let builder = tauri::Builder::default()
