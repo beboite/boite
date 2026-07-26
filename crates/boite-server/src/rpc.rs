@@ -358,6 +358,12 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
             Ok(json!({ "sessions": sessions }))
         }
 
+        "session.stopClaude" => {
+            let id = str_param(&params, "sessionId")?;
+            let stopped = blocking(move || boite_core::session::stop_claude_session(&id)).await?;
+            Ok(json!({ "stopped": stopped }))
+        }
+
         "session.find" => {
             let kind = str_param(&params, "kind")?;
             let cwd = str_param(&params, "cwd")?;

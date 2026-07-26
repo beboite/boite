@@ -225,6 +225,10 @@ export class RemoteBackend implements Backend {
         rpc("session.liveClaude")
           .then((r) => (r.sessions ?? []) as LiveClaudeSession[])
           .catch(() => []),
+      stopClaude: (sessionId) =>
+        rpc("session.stopClaude", { sessionId })
+          .then((r) => Boolean(r.stopped))
+          .catch(() => false),
     };
 
     // App-event logging is a device-local concern (the desktop writes a log

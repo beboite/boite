@@ -48,6 +48,8 @@ struct LiveSessionEntry {
 #[serde(rename_all = "camelCase")]
 pub struct LiveClaudeSession {
     pub id: String,
+    #[serde(skip)]
+    pub pid: u32,
     /// `bg` or `interactive`, straight from the registry.
     pub kind: String,
 }
@@ -76,6 +78,50 @@ fn pid_alive(pid: u32) -> bool {
     }
 }
 
+#[cfg(unix)]
+fn terminate(pid: u32) -> bool {
+    unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) == 0 }
+}
+
+#[cfg(windows)]
+fn terminate(pid: u32) -> bool {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
+    unsafe {
+        let handle = OpenProcess(PROCESS_TERMINATE, 0, pid);
+        if handle.is_null() {
+            return false;
+        }
+        let ok = TerminateProcess(handle, 0) != 0;
+        CloseHandle(handle);
+        ok
+    }
+}
+
+/// Releases a session claude is holding as a background agent, so `--resume`
+/// works on it again.
+///
+/// Only ever a background agent: an interactive entry is someone's open
+/// terminal, and killing it would take their session with it. Refusing that is
+/// not a policy this should leave to the caller.
+///
+/// SIGTERM rather than SIGKILL — the process gets to release its claim and
+/// flush its transcript. The transcript is on disk continuously either way, so
+/// nothing said is lost; what ends is the turn in flight, if any.
+pub fn stop_claude_session(session_id: &str) -> bool {
+    let Some(target) = live_claude_sessions()
+        .into_iter()
+        .find(|s| s.id == session_id && s.kind == "bg")
+    else {
+        return false;
+    };
+    terminate(target.pid)
+}
+
+pub fn live_claude_session_ids() -> HashSet<String> {
+    live_claude_sessions().into_iter().map(|s| s.id).collect()
+}
+
 /// Sessions Claude has open right now, whatever kind they are.
 ///
 /// `--resume` refuses any of these: "That session is still running as a
@@ -88,10 +134,6 @@ fn pid_alive(pid: u32) -> bool {
 /// The pid is verified rather than trusted: a claude that died without
 /// cleaning up would otherwise leave an entry that hides a conversation
 /// forever, which is the very failure this is meant to prevent.
-pub fn live_claude_session_ids() -> HashSet<String> {
-    live_claude_sessions().into_iter().map(|s| s.id).collect()
-}
-
 pub fn live_claude_sessions() -> Vec<LiveClaudeSession> {
     let mut live = Vec::new();
     let Some(home) = dirs::home_dir() else {
@@ -117,6 +159,7 @@ pub fn live_claude_sessions() -> Vec<LiveClaudeSession> {
         if pid_alive(pid) {
             live.push(LiveClaudeSession {
                 id,
+                pid,
                 kind: parsed.kind.unwrap_or_else(|| "interactive".into()),
             });
         }
