@@ -116,6 +116,29 @@ fn authorize(inner: &Inner, headers: &HeaderMap) -> Result<String, StatusCode> {
     .map_err(|_| StatusCode::NOT_FOUND)
 }
 
+/// Which agent is speaking, when Boite launched the terminal it speaks from.
+///
+/// The thread carries the icon key already — it is what the sidebar and the
+/// shortcut bar draw — so a claim can be shown under the badge of the agent
+/// that made it rather than a generic robot. Credentials that came from a file
+/// name a project and no thread, and that claim stays anonymous: an agent Boite
+/// did not start is not one it can name.
+fn agent_of_request(inner: &Inner, headers: &HeaderMap) -> Option<String> {
+    let thread_id = headers
+        .get("x-boite-thread")
+        .and_then(|v| v.to_str().ok())
+        .filter(|s| !s.is_empty())?;
+    let conn = inner.conn.lock().ok()?;
+    conn.query_row(
+        "SELECT icon_key FROM threads WHERE id = ?1",
+        [thread_id],
+        |r| r.get::<_, Option<String>>(0),
+    )
+    .ok()
+    .flatten()
+    .filter(|k| !k.is_empty())
+}
+
 fn project_of_thread(conn: &Connection, thread_id: &str) -> Result<String, StatusCode> {
     conn.query_row(
         "SELECT project_id FROM threads WHERE id = ?1",
@@ -201,12 +224,14 @@ async fn claim(
     Json(body): Json<ClaimIn>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let project_id = authorize(&inner, &headers)?;
+    // Read before the write lock is taken: both want the same mutex.
+    let agent = agent_of_request(&inner, &headers);
     let changed = {
         let conn = inner.conn.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
         conn.execute(
-            "UPDATE todos SET state = 'claimed', note = ?1, commit_sha = ?2, updated_at = ?3
-             WHERE id = ?4 AND project_id = ?5 AND state = 'open'",
-            rusqlite::params![body.note, body.commit, now_ms(), body.id, project_id],
+            "UPDATE todos SET state = 'claimed', note = ?1, commit_sha = ?2, claimed_by = ?3,
+             updated_at = ?4 WHERE id = ?5 AND project_id = ?6 AND state = 'open'",
+            rusqlite::params![body.note, body.commit, agent, now_ms(), body.id, project_id],
         )
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
     };
