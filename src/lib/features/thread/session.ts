@@ -151,10 +151,13 @@ const builders: Partial<Record<NonNullable<IconKey>, ResumeBuilder>> = {
     const filtered = stripFlag(withoutContinue, ["--conversation"], true);
     return [...filtered, "--conversation", sessionId];
   },
-  // copilot --resume <UUID> picks specific session.
+  // `-r, --resume[=value]`: the value is optional, so it only attaches with an
+  // `=`. Space-separated, the flag opens the picker and the id falls through as
+  // a positional — which copilot then looks up as a session *name* and rejects:
+  // "No session, task, or name matched '<uuid>'". The id was never the problem.
   copilot: (args, sessionId) => {
-    const filtered = stripFlag(args, ["--resume"], true);
-    return [...filtered, "--resume", sessionId];
+    const filtered = stripFlag(args, ["--resume", "-r"], true);
+    return [...filtered, `--resume=${sessionId}`];
   },
   // grok --resume <id> picks a specific session; -c continues the latest
   // session of the current directory.
