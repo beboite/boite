@@ -563,20 +563,29 @@ pub fn commit_state_blocking(path: &str, sha: &str) -> CommitState {
 
     // On a remote-tracking branch is the only evidence that it left: a local
     // branch being ahead says nothing about where the commit is.
-    let pushed = {
+    let remote_refs: Vec<String> = {
         let mut cmd = git(p);
         cmd.args(["branch", "-r", "--contains", &full, "--format=%(refname:short)"]);
         run(cmd)
-            .map(|o| !String::from_utf8_lossy(&o).trim().is_empty())
-            .unwrap_or(false)
+            .map(|o| {
+                String::from_utf8_lossy(&o)
+                    .lines()
+                    .map(|l| l.trim().to_string())
+                    // origin/HEAD is a pointer at the default branch, not a
+                    // branch anyone opened a pull request from.
+                    .filter(|l| !l.is_empty() && !l.ends_with("/HEAD"))
+                    .collect()
+            })
+            .unwrap_or_default()
     };
+    let pushed = !remote_refs.is_empty();
 
-    let branch = {
+    let local_branch = {
         let mut cmd = git(p);
         cmd.args(["branch", "--contains", &full, "--format=%(HEAD)%(refname:short)"]);
         run(cmd).ok().and_then(|o| {
             let text = String::from_utf8_lossy(&o);
-            let mut names: Vec<&str> = Vec::new();
+            let mut names: Vec<String> = Vec::new();
             for line in text.lines() {
                 let line = line.trim();
                 // `%(HEAD)` marks the checked-out branch with `*`; it is the one
@@ -585,12 +594,21 @@ pub fn commit_state_blocking(path: &str, sha: &str) -> CommitState {
                     return Some(rest.trim().to_string());
                 }
                 if !line.is_empty() {
-                    names.push(line);
+                    names.push(line.to_string());
                 }
             }
-            names.first().map(|s| s.to_string())
+            names.into_iter().next()
         })
     };
+
+    // Falling back to the remote ref, minus its remote name: work pushed from a
+    // branch this clone never had, or has since deleted, still has a pull
+    // request — and without a name for it nothing would ever go looking.
+    let branch = local_branch.or_else(|| {
+        remote_refs
+            .first()
+            .and_then(|r| r.split_once('/').map(|(_, name)| name.to_string()))
+    });
 
     CommitState {
         known: true,
@@ -1558,6 +1576,36 @@ mod branch_tests {
         let state = commit_state_blocking(repo.path(), &local);
         assert!(state.known);
         assert!(!state.pushed, "a commit that never left must not read as pushed");
+
+        let _ = fs::remove_dir_all(&bare);
+    }
+
+    /// Work pushed from a branch this clone no longer has still belongs to that
+    /// branch, and its name is the only way to ask about a pull request.
+    #[test]
+    fn a_branch_name_survives_the_local_branch_going_away() {
+        let repo = TestRepo::new();
+        let bare = repo.path.with_extension("remote2.git");
+        run_git(&repo.path, &["init", "--bare", "--quiet", bare.to_str().unwrap()]);
+        run_git(&repo.path, &["remote", "add", "origin", bare.to_str().unwrap()]);
+        run_git(&repo.path, &["checkout", "--quiet", "-b", "feature/gone"]);
+        fs::write(repo.path.join("tracked.txt"), "work\n").unwrap();
+        run_git(&repo.path, &["commit", "--quiet", "-am", "the work"]);
+        run_git(&repo.path, &["push", "--quiet", "origin", "feature/gone"]);
+        let sha = run_git(&repo.path, &["rev-parse", "HEAD"]);
+
+        // Back to master and the local branch is deleted, exactly as it is after
+        // a merged pull request is cleaned up.
+        run_git(&repo.path, &["checkout", "--quiet", "master"]);
+        run_git(&repo.path, &["branch", "-D", "feature/gone"]);
+
+        let state = commit_state_blocking(repo.path(), &sha);
+        assert!(state.pushed);
+        assert_eq!(
+            state.branch.as_deref(),
+            Some("feature/gone"),
+            "the remote ref carries the name, minus its remote"
+        );
 
         let _ = fs::remove_dir_all(&bare);
     }
