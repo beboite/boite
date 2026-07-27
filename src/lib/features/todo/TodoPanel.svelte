@@ -12,6 +12,7 @@
     agentCredentialsPath,
     agentIsInstalled,
     agentSetupSnippet,
+    agentSetupTarget,
     agentRegisterCli,
     mcpPaths,
     registerAgentMcp,
@@ -108,7 +109,13 @@
     const snippet = agentSetupSnippet(agent.key as never, shimPath, credsPath);
     if (!snippet) return copyPath();
     await writeText(snippet);
-    notifications.success(t("todo.agentSetupCopied", { agent: agent.label }));
+    // A command says where it goes; a JSON fragment does not, so name the file.
+    const file = agentSetupTarget(agent.key as never);
+    notifications.success(
+      file
+        ? t("todo.agentSetupCopiedFile", { file })
+        : t("todo.agentSetupCopied", { agent: agent.label }),
+    );
   }
 
   async function copyPath() {
