@@ -76,6 +76,7 @@ interface ThreadRow {
   icon_color: string | null;
   status: string | null;
   keep_awake: number;
+  worktree_path: string | null;
   created_at: number;
 }
 
@@ -145,7 +146,7 @@ export const tauriDb: DbApi = {
 
   async loadThreads(): Promise<Thread[]> {
     const rows = await getDb().select<ThreadRow[]>(
-      "SELECT id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, icon_color, status, keep_awake, created_at FROM threads ORDER BY created_at ASC",
+      "SELECT id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, icon_color, status, keep_awake, worktree_path, created_at FROM threads ORDER BY created_at ASC",
     );
     return rows.map((r) => ({
       id: r.id,
@@ -163,12 +164,13 @@ export const tauriDb: DbApi = {
       createdAt: r.created_at,
       autoSlept: false,
       keepAwake: r.keep_awake === 1,
+      worktreePath: r.worktree_path ?? null,
     }));
   },
 
   async saveThread(thread: Thread): Promise<void> {
     await getDb().execute(
-      "INSERT OR REPLACE INTO threads (id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, icon_color, status, keep_awake, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT OR REPLACE INTO threads (id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, icon_color, status, keep_awake, worktree_path, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       [
         thread.id,
         thread.projectId,
@@ -182,6 +184,7 @@ export const tauriDb: DbApi = {
         thread.iconColor ?? null,
         thread.status,
         thread.keepAwake ? 1 : 0,
+        thread.worktreePath ?? null,
         thread.createdAt,
       ],
     );

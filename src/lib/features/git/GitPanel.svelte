@@ -1,6 +1,7 @@
 <script lang="ts">
   import { app } from "$lib/app/store.svelte";
   import { workspace } from "$lib/backend";
+  import { threadGitRoot } from "$lib/features/thread/cwd";
   import { settings } from "$lib/features/settings/store.svelte";
   import { gitStore } from "./store.svelte";
   import { editorStore } from "$lib/features/editor/store.svelte";
@@ -42,9 +43,17 @@
       : null,
   );
 
-  // The repo the panel operates on: a persisted nested repo when the project
-  // folder itself isn't one, otherwise the folder.
-  const gitRoot = $derived(project ? project.gitRoot ?? project.cwd : null);
+  // The thread whose checkout the panel should describe. Only when it belongs
+  // to the project on screen: the active thread can live in another project
+  // while this panel shows the one the user selected.
+  const threadHere = $derived(
+    app.activeThread && app.activeThread.projectId === project?.id ? app.activeThread : null,
+  );
+
+  // The repo the panel operates on: the active thread's worktree when it has
+  // one, then a persisted nested repo when the project folder itself isn't a
+  // repo, otherwise the folder.
+  const gitRoot = $derived(project ? threadGitRoot(threadHere, project) : null);
 
   let bodyEl: HTMLElement | null = $state(null);
   let resizingY = $state(false);
