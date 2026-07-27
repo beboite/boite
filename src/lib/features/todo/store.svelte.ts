@@ -98,6 +98,7 @@ class TodoStore {
       text: trimmed,
       state: "open",
       note: null,
+      commitSha: null,
       position,
       createdAt: now,
       updatedAt: now,
@@ -111,9 +112,13 @@ class TodoStore {
     const item = this.items.find((t) => t.id === id);
     if (!item || item.state === state) return;
     item.state = state;
-    // Confirming or reopening drops the agent's claim note: it described the
-    // claim, and the claim is over.
-    if (state !== "claimed") item.note = null;
+    // Confirming or reopening drops what the agent reported — the note and the
+    // commit both described the claim, and the claim is over. Reopening in
+    // particular must not keep a commit strip pointing at superseded work.
+    if (state !== "claimed") {
+      item.note = null;
+      item.commitSha = null;
+    }
     item.updatedAt = Date.now();
     await this.write($state.snapshot(item));
   }

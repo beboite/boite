@@ -131,6 +131,12 @@ export interface TodoItem {
   state: TodoState;
   /** What the agent said it did, set when it moves the item to `claimed`. */
   note: string | null;
+  /**
+   * The commit the agent says the work landed in. Stored as reported and never
+   * trusted on its own: the panel resolves it against the repository, so a sha
+   * git cannot find is shown as unknown rather than as done.
+   */
+  commitSha: string | null;
   position: number;
   createdAt: number;
   updatedAt: number;

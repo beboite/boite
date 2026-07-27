@@ -59,6 +59,10 @@ struct AddIn {
 struct ClaimIn {
     id: String,
     note: Option<String>,
+    /// The commit the work landed in, if it landed in one. Stored as given and
+    /// resolved against the repository before it is ever shown, so a sha
+    /// nothing backs reads as unknown rather than as done.
+    commit: Option<String>,
 }
 
 fn now_ms() -> i64 {
@@ -200,9 +204,9 @@ async fn claim(
     let changed = {
         let conn = inner.conn.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
         conn.execute(
-            "UPDATE todos SET state = 'claimed', note = ?1, updated_at = ?2
-             WHERE id = ?3 AND project_id = ?4 AND state = 'open'",
-            rusqlite::params![body.note, now_ms(), body.id, project_id],
+            "UPDATE todos SET state = 'claimed', note = ?1, commit_sha = ?2, updated_at = ?3
+             WHERE id = ?4 AND project_id = ?5 AND state = 'open'",
+            rusqlite::params![body.note, body.commit, now_ms(), body.id, project_id],
         )
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
     };

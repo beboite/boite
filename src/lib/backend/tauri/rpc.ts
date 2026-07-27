@@ -12,7 +12,15 @@ import type {
   SessionKind,
   ShellApi,
 } from "../types";
-import type { BranchChangeResult, BranchInfo, ChangeEntry, Commit, RepoInfo } from "$lib/features/git/api";
+import type {
+  BranchChangeResult,
+  BranchInfo,
+  ChangeEntry,
+  Commit,
+  CommitState,
+  PullRequest,
+  RepoInfo,
+} from "$lib/features/git/api";
 import type { ChangedPath, DirEntry, SearchHit } from "$lib/features/explorer/api";
 import type { FileVersions, TextFile } from "$lib/features/editor/api";
 import type { ShellOption } from "$lib/storage/platform.svelte";
@@ -26,6 +34,9 @@ export const tauriGit: GitApi = {
     invoke<BranchChangeResult>("git_switch_branch", { path, name, create, stash }),
   status: (path) => invoke<ChangeEntry[]>("git_status", { path }),
   log: (path, limit, skip) => invoke<Commit[]>("git_log", { path, limit, skip }),
+  commitState: (path, sha) => invoke<CommitState>("git_commit_state", { path, sha }),
+  pullRequest: (path, branch) =>
+    invoke<PullRequest | null>("git_pull_request", { path, branch }),
   stage: (path, files) => invoke("git_stage", { path, files }),
   unstage: (path, files) => invoke("git_unstage", { path, files }),
   discard: (path, files, untracked) =>

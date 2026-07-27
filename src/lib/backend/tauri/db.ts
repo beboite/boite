@@ -20,6 +20,7 @@ interface TodoRow {
   text: string;
   state: string;
   note: string | null;
+  commit_sha: string | null;
   position: number;
   created_at: number;
   updated_at: number;
@@ -36,6 +37,7 @@ function rowToTodo(r: TodoRow): TodoItem {
     text: r.text,
     state,
     note: r.note,
+    commitSha: r.commit_sha,
     position: r.position,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
@@ -209,7 +211,7 @@ export const tauriDb: DbApi = {
 
   async loadTodos(): Promise<TodoItem[]> {
     const rows = await getDb().select<TodoRow[]>(
-      "SELECT id, project_id, text, state, note, position, created_at, updated_at \
+      "SELECT id, project_id, text, state, note, commit_sha, position, created_at, updated_at \
        FROM todos ORDER BY position ASC, created_at ASC",
     );
     return rows.map(rowToTodo);
@@ -218,14 +220,15 @@ export const tauriDb: DbApi = {
   async saveTodo(todo: TodoItem): Promise<void> {
     await getDb().execute(
       "INSERT OR REPLACE INTO todos \
-       (id, project_id, text, state, note, position, created_at, updated_at) \
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+       (id, project_id, text, state, note, commit_sha, position, created_at, updated_at) \
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
       [
         todo.id,
         todo.projectId,
         todo.text,
         todo.state,
         todo.note,
+        todo.commitSha,
         todo.position,
         todo.createdAt,
         todo.updatedAt,

@@ -713,6 +713,37 @@ pub async fn git_changed_paths(
         .map_err(|e| format!("git_changed_paths task failed: {e}"))?
 }
 
+/// What the repository says about a commit an agent claimed. Scoped like every
+/// other git command: a sha is not a path, but the repository it is read in is.
+#[tauri::command]
+pub async fn git_commit_state(
+    scope: State<'_, ProjectRoots>,
+    path: String,
+    sha: String,
+) -> Result<git::CommitState, String> {
+    scope.ensure_allowed(&path)?;
+    tauri::async_runtime::spawn_blocking(move || git::commit_state_blocking(&path, &sha))
+        .await
+        .map_err(|e| format!("git_commit_state task failed: {e}"))
+}
+
+/// The pull request `gh` finds for a branch, if there is one and if `gh` is
+/// there to be asked. Absent for every uninteresting reason, so the panel shows
+/// the chip only on a real answer.
+#[tauri::command]
+pub async fn git_pull_request(
+    scope: State<'_, ProjectRoots>,
+    path: String,
+    branch: String,
+) -> Result<Option<git::PullRequest>, String> {
+    scope.ensure_allowed(&path)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        git::pull_request_for_branch_blocking(&path, &branch)
+    })
+    .await
+    .map_err(|e| format!("git_pull_request task failed: {e}"))
+}
+
 #[tauri::command]
 pub async fn git_log(
     scope: State<'_, ProjectRoots>,

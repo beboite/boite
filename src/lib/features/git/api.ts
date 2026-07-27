@@ -38,12 +38,38 @@ export interface BranchInfo {
   current: boolean;
 }
 
+/** What the repository can say about a sha someone else named. */
+export interface CommitState {
+  known: boolean;
+  pushed: boolean;
+  short: string;
+  subject: string | null;
+  branch: string | null;
+}
+
+export interface PullRequest {
+  number: number;
+  state: string;
+  url: string;
+}
+
 export interface BranchChangeResult {
   stashed: boolean;
 }
 
 export function gitRepoInfo(path: string): Promise<RepoInfo> {
   return backendForPath(path).git.repoInfo(path);
+}
+
+export function gitCommitState(path: string, sha: string): Promise<CommitState> {
+  return backendForPath(path).git.commitState(path, sha);
+}
+
+export function gitPullRequest(
+  path: string,
+  branch: string,
+): Promise<PullRequest | null> {
+  return backendForPath(path).git.pullRequest(path, branch);
 }
 
 export function gitFindRepos(path: string): Promise<string[]> {

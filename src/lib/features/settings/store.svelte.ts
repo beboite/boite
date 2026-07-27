@@ -103,7 +103,7 @@ export const DEFAULT_TODO_PROMPT = `Task from my Boite todo list (id {{id}}):
 
 {{task}}
 
-Before changing anything: restate what you understand, name the files involved, and propose a plan. When it is done, call the boite MCP tool todo_claim with that id and a one-line summary of what changed.`;
+Before changing anything: restate what you understand, name the files involved, and propose a plan. When it is done, call the boite MCP tool todo_claim with that id, a one-line summary of what changed, and the commit sha if you committed — leave it out rather than guessing, Boite reads it back from the repository.`;
 
 const DEFAULTS: Settings = {
   shortcuts: PRESET_SHORTCUTS,
