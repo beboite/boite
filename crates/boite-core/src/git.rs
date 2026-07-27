@@ -508,6 +508,181 @@ fn push_xy(out: &mut Vec<ChangeEntry>, xy: &str, path: &str, orig: Option<&str>)
     }
 }
 
+/// What a repository can say about a commit an agent claims to have made.
+/// `known` false means git has never heard of it — the sha was mistyped, or
+/// invented, or belongs to another clone.
+#[derive(Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitState {
+    pub known: bool,
+    pub pushed: bool,
+    pub short: String,
+    pub subject: Option<String>,
+    /// A local branch holding the commit, preferring the one checked out, for
+    /// looking a pull request up by head.
+    pub branch: Option<String>,
+}
+
+/// A sha is untrusted input reaching a command line. It is passed as an
+/// argument and never through a shell, so this is not the thing standing
+/// between us and injection — but a value that cannot be a sha has no business
+/// being tried, and `--flag`-shaped input is exactly what argument parsers
+/// mistake for their own.
+fn looks_like_sha(sha: &str) -> bool {
+    (7..=40).contains(&sha.len()) && sha.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+/// Reads a claimed commit back out of the repository: does it exist, and has it
+/// left this machine. Both answers come from git, so a sha nothing backs shows
+/// up as unknown rather than as a tick.
+pub fn commit_state_blocking(path: &str, sha: &str) -> CommitState {
+    let p = Path::new(path);
+    if !p.is_dir() || !looks_like_sha(sha) {
+        return CommitState::default();
+    }
+
+    // `^{commit}` so a tag or a tree with that name is not mistaken for one.
+    let mut cmd = git(p);
+    cmd.args(["rev-parse", "--verify", "--quiet", &format!("{sha}^{{commit}}")]);
+    let Ok(out) = run(cmd) else {
+        return CommitState::default();
+    };
+    let full = String::from_utf8_lossy(&out).trim().to_string();
+    if full.is_empty() {
+        return CommitState::default();
+    }
+
+    let subject = {
+        let mut cmd = git(p);
+        cmd.args(["log", "-1", "--format=%s", &full]);
+        run(cmd)
+            .ok()
+            .map(|o| String::from_utf8_lossy(&o).trim().to_string())
+            .filter(|s| !s.is_empty())
+    };
+
+    // On a remote-tracking branch is the only evidence that it left: a local
+    // branch being ahead says nothing about where the commit is.
+    let pushed = {
+        let mut cmd = git(p);
+        cmd.args(["branch", "-r", "--contains", &full, "--format=%(refname:short)"]);
+        run(cmd)
+            .map(|o| !String::from_utf8_lossy(&o).trim().is_empty())
+            .unwrap_or(false)
+    };
+
+    let branch = {
+        let mut cmd = git(p);
+        cmd.args(["branch", "--contains", &full, "--format=%(HEAD)%(refname:short)"]);
+        run(cmd).ok().and_then(|o| {
+            let text = String::from_utf8_lossy(&o);
+            let mut names: Vec<&str> = Vec::new();
+            for line in text.lines() {
+                let line = line.trim();
+                // `%(HEAD)` marks the checked-out branch with `*`; it is the one
+                // a pull request would have been opened from.
+                if let Some(rest) = line.strip_prefix('*') {
+                    return Some(rest.trim().to_string());
+                }
+                if !line.is_empty() {
+                    names.push(line);
+                }
+            }
+            names.first().map(|s| s.to_string())
+        })
+    };
+
+    CommitState {
+        known: true,
+        pushed,
+        short: full.chars().take(7).collect(),
+        subject,
+        branch,
+    }
+}
+
+/// A pull request as `gh` reports it. Not a git concept: git knows the commit
+/// left the machine, nothing more, and the rest lives on the forge.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequest {
+    pub number: u64,
+    pub state: String,
+    pub url: String,
+}
+
+/// The pull request opened from this branch, or nothing.
+///
+/// Nothing covers every uninteresting case on purpose — `gh` absent, not logged
+/// in, no network, a forge that is not GitHub, no PR — because the alternative
+/// is a row claiming a state it cannot back. This is the only part of the strip
+/// that reaches the network, so it is also the only part with a deadline.
+pub fn pull_request_for_branch_blocking(path: &str, branch: &str) -> Option<PullRequest> {
+    let p = Path::new(path);
+    if !p.is_dir() || branch.is_empty() || branch.starts_with('-') {
+        return None;
+    }
+
+    let mut cmd = Command::new("gh");
+    cmd.current_dir(p);
+    cmd.args([
+        "pr", "list", "--head", branch, "--state", "all", "--limit", "1", "--json",
+        "number,state,url",
+    ]);
+    // gh asks interactively when it is not authenticated, and a prompt waiting
+    // on a terminal nobody is looking at is exactly the hang this must not have.
+    cmd.env("GH_PROMPT_DISABLED", "1");
+    cmd.env("GH_NO_UPDATE_NOTIFIER", "1");
+    cmd.stdin(Stdio::null());
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::null());
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+
+    let mut child = cmd.spawn().ok()?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(6);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                if !status.success() {
+                    return None;
+                }
+                break;
+            }
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            // Past the deadline, or waiting failed: leave nothing running behind
+            // a panel that has already given up on the answer.
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    }
+
+    let out = child.wait_with_output().ok()?;
+    let parsed: Vec<serde_json::Value> = serde_json::from_slice(&out.stdout).ok()?;
+    let pr = parsed.into_iter().next()?;
+    Some(PullRequest {
+        number: pr.get("number")?.as_u64()?,
+        state: pr
+            .get("state")
+            .and_then(|v| v.as_str())
+            .unwrap_or("UNKNOWN")
+            .to_string(),
+        url: pr
+            .get("url")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string(),
+    })
+}
+
 pub fn log_blocking(path: &str, limit: u32, skip: u32) -> Result<Vec<Commit>, String> {
     let p = Path::new(path);
     if !p.is_dir() {
@@ -1228,6 +1403,58 @@ mod branch_tests {
             String::from_utf8_lossy(&output.stderr)
         );
         String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    /// The whole point of resolving the sha rather than displaying it: an agent
+    /// that reports a commit nobody made must not read as one that made it.
+    #[test]
+    fn a_sha_the_repository_never_saw_is_unknown() {
+        let repo = TestRepo::new();
+        let state = commit_state_blocking(repo.path(), "0123456789abcdef0123456789abcdef01234567");
+        assert!(!state.known);
+        assert!(!state.pushed);
+
+        // Not a sha at all, and the `--`-shaped case an argument parser would
+        // take for its own flag.
+        for bogus in ["", "HEAD", "--all", "zzzzzzz"] {
+            assert!(!commit_state_blocking(repo.path(), bogus).known, "{bogus}");
+        }
+    }
+
+    #[test]
+    fn a_real_commit_carries_its_subject_and_branch() {
+        let repo = TestRepo::new();
+        let sha = run_git(&repo.path, &["rev-parse", "HEAD"]);
+        let state = commit_state_blocking(repo.path(), &sha);
+        assert!(state.known);
+        assert_eq!(state.short, sha[..7]);
+        assert_eq!(state.subject.as_deref(), Some("initial"));
+        assert_eq!(state.branch.as_deref(), Some("master"));
+        // Nothing has been pushed anywhere: no remote exists.
+        assert!(!state.pushed);
+    }
+
+    /// "Pushed" has to mean the commit is on a remote-tracking branch. A local
+    /// branch being ahead says nothing about where its commits are.
+    #[test]
+    fn pushed_follows_the_remote_not_the_local_branch() {
+        let repo = TestRepo::new();
+        let bare = repo.path.with_extension("remote.git");
+        run_git(&repo.path, &["init", "--bare", "--quiet", bare.to_str().unwrap()]);
+        run_git(&repo.path, &["remote", "add", "origin", bare.to_str().unwrap()]);
+        run_git(&repo.path, &["push", "--quiet", "-u", "origin", "master"]);
+
+        let pushed = run_git(&repo.path, &["rev-parse", "HEAD"]);
+        assert!(commit_state_blocking(repo.path(), &pushed).pushed);
+
+        fs::write(repo.path.join("tracked.txt"), "more\n").unwrap();
+        run_git(&repo.path, &["commit", "--quiet", "-am", "local only"]);
+        let local = run_git(&repo.path, &["rev-parse", "HEAD"]);
+        let state = commit_state_blocking(repo.path(), &local);
+        assert!(state.known);
+        assert!(!state.pushed, "a commit that never left must not read as pushed");
+
+        let _ = fs::remove_dir_all(&bare);
     }
 
     #[test]

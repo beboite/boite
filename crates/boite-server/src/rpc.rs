@@ -616,6 +616,18 @@ async fn dispatch_git(state: &AppState, method: &str, params: Value) -> Result<V
             let r = blocking(move || git::log_blocking(&p, limit, skip)).await??;
             Ok(json!({ "commits": r }))
         }
+        // The repository is here, so this is where a claimed sha can be read
+        // back and where `gh` would be reachable.
+        "git.commitState" => {
+            let sha = str_param(&params, "sha")?;
+            let r = blocking(move || git::commit_state_blocking(&p, &sha)).await?;
+            Ok(json!({ "state": r }))
+        }
+        "git.pullRequest" => {
+            let branch = str_param(&params, "branch")?;
+            let r = blocking(move || git::pull_request_for_branch_blocking(&p, &branch)).await?;
+            Ok(json!({ "pr": r }))
+        }
         "git.stage" => {
             let files = str_list(&params, "files");
             blocking(move || git::run_files(&p, "add", &files, true)).await??;

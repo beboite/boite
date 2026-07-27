@@ -20,13 +20,16 @@
     registerAgentMcp,
   } from "$lib/features/thread/agentMcp";
   import { writeText } from "$lib/platform/clipboard";
+  import { openUrl } from "$lib/platform/opener";
+  import { gitCommitState, gitPullRequest } from "$lib/features/git/api";
+  import type { CommitState, PullRequest } from "$lib/features/git/api";
+  import type { TodoItem } from "$lib/types";
   import ListTodo from "@lucide/svelte/icons/list-todo";
   import CornerDownRight from "@lucide/svelte/icons/corner-down-right";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import Eraser from "@lucide/svelte/icons/eraser";
   import Check from "@lucide/svelte/icons/check";
   import Undo2 from "@lucide/svelte/icons/undo-2";
-  import Bot from "@lucide/svelte/icons/bot";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
 
   const encoder = new TextEncoder();
@@ -179,6 +182,50 @@
     agentsOpen = null;
   });
 
+  type ClaimGit = { commit: CommitState; pr: PullRequest | null };
+
+  // Keyed by the sha as well as the row: the answer is about that commit, and a
+  // re-claim with a different one has to be looked up again. Memoised because
+  // the template awaits this on every render, and one of the two calls goes to
+  // the network.
+  const gitCache = new Map<string, Promise<ClaimGit | null>>();
+
+  function gitState(item: TodoItem): Promise<ClaimGit | null> {
+    const sha = item.commitSha;
+    // The repository the project sits in, which is where the sha has to exist.
+    // gitRoot is only filled in once the project has been inspected, so the cwd
+    // stands in — git resolves a sha from anywhere inside the work tree.
+    const root = project?.gitRoot ?? project?.cwd ?? null;
+    if (!sha || !root) return Promise.resolve(null);
+    const key = `${root}:${sha}`;
+    const cached = gitCache.get(key);
+    if (cached) return cached;
+
+    const pending = (async (): Promise<ClaimGit> => {
+      const commit = await gitCommitState(root, sha).catch(() => null);
+      if (!commit || !commit.known) {
+        return {
+          commit: commit ?? { known: false, pushed: false, short: sha.slice(0, 7), subject: null, branch: null },
+          pr: null,
+        };
+      }
+      // Only ask the forge about work that reached it. An unpushed commit has
+      // no pull request by definition, and asking would spend a network call to
+      // be told so.
+      const pr =
+        commit.pushed && commit.branch
+          ? await gitPullRequest(root, commit.branch).catch(() => null)
+          : null;
+      return { commit, pr };
+    })();
+    gitCache.set(key, pending);
+    return pending;
+  }
+
+  function openPr(url: string) {
+    if (url) void openUrl(url);
+  }
+
   let adding = $state<string | null>(null);
 
   async function addToAgent(label: string, cli: string) {
@@ -328,11 +375,52 @@
             <!-- An agent said it finished. It stops here on purpose: a model
                  that can tick its own boxes will, and the list would then record
                  assertions instead of verified work. -->
-            <div class="mt-1 flex items-start gap-1.5 pl-[23px]">
-              <Bot class="mt-[2px] size-3 shrink-0 text-muted-foreground/70" />
-              <p class="min-w-0 flex-1 text-[11px] leading-snug text-muted-foreground">
-                {item.note ?? t("todo.agentReported")}
-              </p>
+            <!-- What the agent said, reduced to what can be checked. The
+                 sentence it wrote stays as the strip's tooltip: it costs
+                 nothing folded away, and when a task went sideways it is the
+                 only thing that says why. -->
+            <div
+              class="mt-1 flex items-center gap-1.5 pl-[23px] text-[10.5px] text-muted-foreground"
+              title={item.note ?? t("todo.agentReported")}
+            >
+              <span aria-hidden="true">🤖</span>
+              {#await gitState(item) then g}
+                {#if !item.commitSha}
+                  <span class="text-muted-foreground/70">{t("todo.gitNoCommit")}</span>
+                {:else if !g}
+                  <!-- Nowhere to look it up: no project folder to run git in.
+                       Shown bare rather than judged — not finding a repository
+                       is not the same as not finding the commit. -->
+                  <code class="font-mono text-muted-foreground/70">
+                    {item.commitSha.slice(0, 7)}
+                  </code>
+                {:else if !g.commit.known}
+                  <!-- Reported a sha the repository has never heard of. Said
+                       plainly: this is the one claim git can flatly contradict. -->
+                  <span class="text-warning" title={item.commitSha}>
+                    {t("todo.gitUnknownCommit")}
+                  </span>
+                {:else}
+                  <code class="font-mono text-foreground/80" title={g.commit.subject ?? ""}>
+                    {g.commit.short}
+                  </code>
+                  <span class="text-muted-foreground/40">·</span>
+                  <span class={g.commit.pushed ? "" : "text-muted-foreground/70"}>
+                    {g.commit.pushed ? t("todo.gitPushed") : t("todo.gitLocal")}
+                  </span>
+                  {#if g.pr}
+                    <span class="text-muted-foreground/40">·</span>
+                    <button
+                      type="button"
+                      class="underline decoration-dotted underline-offset-2 transition hover:text-foreground"
+                      onclick={() => openPr(g.pr!.url)}
+                      title={g.pr.url}
+                    >
+                      {t("todo.gitPr", { number: String(g.pr.number) })}
+                    </button>
+                  {/if}
+                {/if}
+              {/await}
             </div>
             <div class="mt-1 flex gap-1 pl-[23px]">
               <button

@@ -148,6 +148,16 @@ pub fn run() {
             CREATE INDEX IF NOT EXISTS idx_todos_project ON todos (project_id);",
             kind: MigrationKind::Up,
         },
+        // The sha an agent reports with its claim. A column rather than a line
+        // in the note: it is read back against the repository, and something
+        // that gets parsed out of prose would be wrong the first time an agent
+        // phrased it differently.
+        Migration {
+            version: 12,
+            description: "add_todo_commit",
+            sql: "ALTER TABLE todos ADD COLUMN commit_sha TEXT;",
+            kind: MigrationKind::Up,
+        },
     ];
 
     let builder = tauri::Builder::default()
@@ -328,6 +338,8 @@ pub fn run() {
             commands::git_status,
             commands::git_changed_paths,
             commands::git_log,
+            commands::git_commit_state,
+            commands::git_pull_request,
             commands::git_stage,
             commands::git_unstage,
             commands::git_discard,

@@ -5,7 +5,15 @@
 // never touches a component or store.
 
 import type { Project, Settings, Thread, TodoItem } from "$lib/types";
-import type { BranchChangeResult, BranchInfo, ChangeEntry, Commit, RepoInfo } from "$lib/features/git/api";
+import type {
+  BranchChangeResult,
+  BranchInfo,
+  ChangeEntry,
+  Commit,
+  CommitState,
+  PullRequest,
+  RepoInfo,
+} from "$lib/features/git/api";
 import type {
   ChangedPath,
   DirEntry,
@@ -92,6 +100,19 @@ export interface GitApi {
   switchBranch(path: string, name: string, create: boolean, stash: boolean): Promise<BranchChangeResult>;
   status(path: string): Promise<ChangeEntry[]>;
   log(path: string, limit: number, skip: number): Promise<Commit[]>;
+  /**
+   * What the repository says about a sha an agent reported: whether it exists
+   * at all, and whether it has left this machine. An unknown sha comes back
+   * with `known: false` rather than as an error — being unable to find it is
+   * the answer, not a failure to get one.
+   */
+  commitState(path: string, sha: string): Promise<CommitState>;
+  /**
+   * The pull request `gh` finds for a branch. Null covers every uninteresting
+   * case — no `gh`, not logged in, no network, not GitHub, no PR — because a
+   * chip that cannot be backed should not be drawn.
+   */
+  pullRequest(path: string, branch: string): Promise<PullRequest | null>;
   stage(path: string, files: string[]): Promise<void>;
   unstage(path: string, files: string[]): Promise<void>;
   discard(path: string, files: string[], untracked: string[]): Promise<void>;

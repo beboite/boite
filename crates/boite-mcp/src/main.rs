@@ -132,7 +132,14 @@ fn tools() -> Value {
                 "type": "object",
                 "properties": {
                     "id": { "type": "string", "description": "The id given in the task prompt." },
-                    "note": { "type": "string", "description": "One line on what was done." }
+                    "note": { "type": "string", "description": "One line on what was done." },
+                    "commit": {
+                        "type": "string",
+                        "description": "The sha of the commit the work landed in, if it was committed. \
+                                        Reported as-is: Boite resolves it against the repository, so a \
+                                        sha it cannot find is shown as unknown. Leave it out rather \
+                                        than guessing."
+                    }
                 },
                 "required": ["id"],
                 "additionalProperties": false
@@ -162,10 +169,11 @@ fn call_tool(host: &Host, name: &str, args: &Value) -> Result<String, String> {
                 .and_then(|v| v.as_str())
                 .ok_or("todo_claim needs an id")?;
             let note = args.get("note").and_then(|v| v.as_str());
+            let commit = args.get("commit").and_then(|v| v.as_str());
             host.send(
                 reqwest::Method::POST,
                 "/v1/todos/claim",
-                Some(json!({ "id": id, "note": note })),
+                Some(json!({ "id": id, "note": note, "commit": commit })),
             )?;
             Ok("Reported. The user still has to confirm it.".into())
         }

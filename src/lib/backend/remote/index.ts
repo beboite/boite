@@ -18,6 +18,7 @@ import type {
   WorkspaceMetaApi,
 } from "../types";
 import type { Project, Settings, Thread, TodoItem } from "$lib/types";
+import type { CommitState, PullRequest } from "$lib/features/git/api";
 import type { ShellOption } from "$lib/storage/platform.svelte";
 import { Socket, type ConnState } from "./socket";
 
@@ -166,6 +167,23 @@ export class RemoteBackend implements Backend {
       status: (path) => rpc("git.status", { path }).then((r) => r.entries),
       log: (path, limit, skip) =>
         rpc("git.log", { path, limit, skip }).then((r) => r.commits),
+      // An older server answers with an error for either of these. Unknown and
+      // no-pull-request are what the panel would draw anyway, so a failure
+      // costs a chip rather than a row.
+      commitState: (path, sha) =>
+        rpc("git.commitState", { path, sha })
+          .then((r) => r.state as CommitState)
+          .catch(() => ({
+            known: false,
+            pushed: false,
+            short: sha.slice(0, 7),
+            subject: null,
+            branch: null,
+          })),
+      pullRequest: (path, branch) =>
+        rpc("git.pullRequest", { path, branch })
+          .then((r) => (r.pr ?? null) as PullRequest | null)
+          .catch(() => null),
       stage: (path, files) => rpc("git.stage", { path, files }).then(() => {}),
       unstage: (path, files) => rpc("git.unstage", { path, files }).then(() => {}),
       discard: (path, files, untracked) =>
