@@ -142,6 +142,12 @@ export interface WorktreeApi {
    * keeping. Rejects a name that is already taken.
    */
   claim(path: string, name: string): Promise<void>;
+  /**
+   * Moves the worktree onto a branch that already exists — continuing
+   * something started earlier rather than naming something new. Rejects a
+   * branch another worktree holds, naming which one.
+   */
+  reserve(path: string, name: string): Promise<void>;
   hold(path: string): Promise<WorktreeHold>;
   /**
    * Removes a worktree. Without `force` this refuses while it still holds

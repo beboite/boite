@@ -52,6 +52,7 @@ export const tauriGit: GitApi = {
 export const tauriWorktree: WorktreeApi = {
   open: (repo, threadId) => invoke<string>("worktree_open", { repo, threadId }),
   claim: (path, name) => invoke("worktree_claim", { path, name }),
+  reserve: (path, name) => invoke("worktree_reserve", { path, name }),
   hold: (path) => invoke<WorktreeHold>("worktree_hold", { path }),
   remove: (repo, path, force) => invoke("worktree_remove", { repo, path, force }),
 };

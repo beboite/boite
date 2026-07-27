@@ -103,14 +103,16 @@ export const DEFAULT_TODO_PROMPT = `Task from my Boite todo list (id {{id}}):
 
 {{task}}
 
-Before changing anything: restate what you understand, name the files involved, and propose a plan. When it is done, call the boite MCP tool todo_claim with that id, a one-line summary of what changed, and the commit sha if you committed — leave it out rather than guessing, Boite reads it back from the repository.`;
+Before changing anything: restate what you understand, name the files involved, and propose a plan. When it is done, call the boite MCP tool todo_claim with that id, a one-line summary of what changed, and the commit sha if you committed — leave it out rather than guessing, Boite reads it back from the repository.
+
+You are working in your own detached worktree of this project, so nothing you do disturbs the other terminals. It is on no branch: if this turns into work worth keeping, call worktree_branch with a name that matches the repository's existing convention, or worktree_reserve to continue a branch that already exists. Do it once you know, not up front — a worktree nobody claimed is discarded when the thread closes, which is the right ending for a question you only answered.`;
 
 const DEFAULTS: Settings = {
   shortcuts: PRESET_SHORTCUTS,
   seededPresets: BACKFILL_PRESET_IDS,
   powershellNewline: true,
   powershellNoProfile: false,
-  threadWorktrees: false,
+  threadWorktrees: true,
   defaultShellId: null,
   sidebarWidth: 240,
   sidebarCollapsed: false,

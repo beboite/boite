@@ -124,6 +124,97 @@ fn authorize(inner: &Inner, headers: &HeaderMap) -> Result<String, StatusCode> {
     .map_err(|_| StatusCode::NOT_FOUND)
 }
 
+/// The repository and the worktree this caller is running in.
+///
+/// Requires the thread header rather than accepting a project: a worktree
+/// belongs to one terminal, and an agent that registered through a credentials
+/// file names a project and could not say which of its threads it is.
+fn worktree_of_request(
+    inner: &Inner,
+    headers: &HeaderMap,
+) -> Result<(String, String), StatusCode> {
+    let thread_id = headers
+        .get("x-boite-thread")
+        .and_then(|v| v.to_str().ok())
+        .filter(|s| !s.is_empty())
+        .ok_or(StatusCode::BAD_REQUEST)?;
+    let conn = inner.conn.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let (worktree, cwd, git_root): (Option<String>, String, Option<String>) = conn
+        .query_row(
+            "SELECT t.worktree_path, p.cwd, p.git_root
+             FROM threads t JOIN projects p ON p.id = t.project_id
+             WHERE t.id = ?1",
+            [thread_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .map_err(|_| StatusCode::NOT_FOUND)?;
+    // CONFLICT rather than NOT_FOUND: the thread exists and simply runs in the
+    // project folder, which is a state the agent should be told about plainly.
+    let worktree = worktree.ok_or(StatusCode::CONFLICT)?;
+    Ok((git_root.unwrap_or(cwd), worktree))
+}
+
+/// Where this terminal is working, and what it may still do about it.
+async fn worktree_status(
+    State(inner): State<std::sync::Arc<Inner>>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let (repo, worktree) = worktree_of_request(&inner, &headers)?;
+    let hold = boite_core::git::worktree_hold_blocking(&worktree)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let branches = boite_core::git::branches_blocking(&repo).unwrap_or_default();
+    let current = boite_core::git::repo_info_blocking(&worktree)
+        .ok()
+        .and_then(|i| i.branch);
+    Ok(Json(json!({
+        "path": worktree,
+        "repo": repo,
+        "branch": current,
+        "detached": current.is_none(),
+        "uncommittedChanges": hold.dirty,
+        "branches": branches.iter().map(|b| &b.name).collect::<Vec<_>>(),
+    })))
+}
+
+#[derive(Deserialize)]
+struct BranchIn {
+    name: String,
+}
+
+/// Names a new branch for the work done here.
+async fn worktree_branch(
+    State(inner): State<std::sync::Arc<Inner>>,
+    headers: HeaderMap,
+    Json(body): Json<BranchIn>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let (_, worktree) = worktree_of_request(&inner, &headers)?;
+    match boite_core::git::claim_worktree_branch_blocking(&worktree, &body.name) {
+        Ok(()) => {
+            let _ = inner.app.emit("boite://worktrees-changed", ());
+            Ok(Json(json!({ "branch": body.name })))
+        }
+        // The reason matters to the caller and none of it is secret: it is the
+        // agent's own working copy being described back to it.
+        Err(e) => Ok(Json(json!({ "error": e }))),
+    }
+}
+
+/// Takes over a branch that already exists, to continue it.
+async fn worktree_reserve(
+    State(inner): State<std::sync::Arc<Inner>>,
+    headers: HeaderMap,
+    Json(body): Json<BranchIn>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let (_, worktree) = worktree_of_request(&inner, &headers)?;
+    match boite_core::git::reserve_worktree_branch_blocking(&worktree, &body.name) {
+        Ok(()) => {
+            let _ = inner.app.emit("boite://worktrees-changed", ());
+            Ok(Json(json!({ "branch": body.name })))
+        }
+        Err(e) => Ok(Json(json!({ "error": e }))),
+    }
+}
+
 /// Which agent is speaking, when Boite launched the terminal it speaks from.
 ///
 /// The thread carries the icon key already — it is what the sidebar and the
@@ -381,6 +472,9 @@ pub fn start(app: &tauri::AppHandle) {
     let router = Router::new()
         .route("/v1/todos", get(list).post(add))
         .route("/v1/todos/claim", post(claim))
+        .route("/v1/worktree", get(worktree_status))
+        .route("/v1/worktree/branch", post(worktree_branch))
+        .route("/v1/worktree/reserve", post(worktree_reserve))
         .with_state(inner);
 
     // Bound here, not inside the task: the address has to be known before the

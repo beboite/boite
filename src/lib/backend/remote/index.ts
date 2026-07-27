@@ -204,6 +204,7 @@ export class RemoteBackend implements Backend {
       open: (repo, threadId) =>
         rpc("worktree.open", { repo, threadId }).then((r) => r.path as string),
       claim: (path, name) => rpc("worktree.claim", { path, name }).then(() => {}),
+      reserve: (path, name) => rpc("worktree.reserve", { path, name }).then(() => {}),
       hold: (path) => rpc("worktree.hold", { path }).then((r) => r as WorktreeHold),
       remove: (repo, path, force) =>
         rpc("worktree.remove", { repo, path, force }).then(() => {}),

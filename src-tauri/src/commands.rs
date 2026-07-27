@@ -748,6 +748,20 @@ pub async fn worktree_claim(
 }
 
 #[tauri::command]
+pub async fn worktree_reserve(
+    scope: State<'_, ProjectRoots>,
+    path: String,
+    name: String,
+) -> Result<(), String> {
+    scope.ensure_allowed(&path)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        git::reserve_worktree_branch_blocking(&path, &name)
+    })
+    .await
+    .map_err(|e| format!("worktree_reserve task failed: {e}"))?
+}
+
+#[tauri::command]
 pub async fn worktree_hold(
     scope: State<'_, ProjectRoots>,
     path: String,
