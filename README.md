@@ -6,10 +6,10 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/klNuno/boite/releases"><img src="https://img.shields.io/github/v/release/klNuno/boite?display_name=tag" alt="Release" /></a>
-  <a href="./LICENSE"><img src="https://img.shields.io/github/license/klNuno/boite" alt="License" /></a>
-  <a href="https://github.com/klNuno/boite/stargazers"><img src="https://img.shields.io/github/stars/klNuno/boite" alt="Stars" /></a>
-  <a href="https://github.com/klNuno/boite/issues"><img src="https://img.shields.io/github/issues/klNuno/boite" alt="Issues" /></a>
+  <a href="https://github.com/beboite/boite/releases"><img src="https://img.shields.io/github/v/release/beboite/boite?display_name=tag" alt="Release" /></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/github/license/beboite/boite" alt="License" /></a>
+  <a href="https://github.com/beboite/boite/stargazers"><img src="https://img.shields.io/github/stars/beboite/boite" alt="Stars" /></a>
+  <a href="https://github.com/beboite/boite/issues"><img src="https://img.shields.io/github/issues/beboite/boite" alt="Issues" /></a>
   <a href="#platform-support"><img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20Android-0078D6" alt="Platform" /></a>
   <a href="https://tauri.app/"><img src="https://img.shields.io/badge/Tauri-2.x-24C8DB?logo=tauri" alt="Tauri" /></a>
   <a href="https://svelte.dev/"><img src="https://img.shields.io/badge/Svelte-5-FF3E00?logo=svelte" alt="Svelte" /></a>
@@ -18,7 +18,7 @@
 > [!NOTE]
 > Pre-1.0, used daily by the author. The feature surface is small and focused on
 > purpose. Bug reports and platform feedback are welcome in
-> [Issues](https://github.com/klNuno/boite/issues).
+> [Issues](https://github.com/beboite/boite/issues).
 
 ## Why
 
@@ -108,7 +108,7 @@ to the DOM renderer with no user action needed.
 ## Install
 
 Grab the build for your OS from
-[Releases](https://github.com/klNuno/boite/releases):
+[Releases](https://github.com/beboite/boite/releases):
 
 - **Windows**: NSIS installer (per-user, no admin prompt)
 - **Linux**: deb, rpm or AppImage
