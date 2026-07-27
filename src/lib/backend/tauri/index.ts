@@ -10,6 +10,7 @@ import {
   tauriScope,
   tauriSession,
   tauriShell,
+  tauriWorktree,
 } from "./rpc";
 
 export class TauriBackend implements Backend {
@@ -18,6 +19,7 @@ export class TauriBackend implements Backend {
   readonly pty = tauriPty;
   readonly db = tauriDb;
   readonly git = tauriGit;
+  readonly worktree = tauriWorktree;
   readonly explorer = tauriExplorer;
   readonly editor = tauriEditor;
   readonly project = tauriProject;

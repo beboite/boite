@@ -1373,6 +1373,24 @@ pub fn commit_blocking(path: &str, message: &str) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&stdout).trim().to_string())
 }
 
+/// Where the worktree for a thread goes, under Boite's own worktree base.
+///
+/// Outside the project on purpose: a worktree nested in the repository shows up
+/// as untracked, which makes the main checkout permanently dirty and hides real
+/// changes in `git status`. One base directory also means the filesystem trust
+/// boundary gains exactly one root — the base — rather than one per worktree
+/// fed from a stored path.
+pub fn worktree_path_for(base: &Path, thread_id: &str) -> PathBuf {
+    // Thread ids are generated, but this path reaches `git worktree add`, so it
+    // is treated as untrusted input: anything that is not plainly a name is
+    // replaced rather than escaped.
+    let safe: String = thread_id
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+        .collect();
+    base.join(if safe.is_empty() { "thread".into() } else { safe })
+}
+
 /// What a worktree is still holding that removing it would destroy.
 ///
 /// Nothing here is stored: both answers are read back off the repository, so
@@ -1665,6 +1683,24 @@ mod worktree_tests {
         assert!(symbolic_branch(&w).is_none(), "still detached");
 
         let _ = remove_worktree_blocking(f.path(), w.to_str().unwrap(), true);
+    }
+
+    #[test]
+    fn a_thread_id_cannot_climb_out_of_the_worktree_base() {
+        let base = Path::new("/data/worktrees");
+        assert_eq!(
+            worktree_path_for(base, "../../etc"),
+            base.join("------etc"),
+        );
+        assert_eq!(
+            worktree_path_for(base, "th_1-2"),
+            base.join("th_1-2"),
+        );
+        // Whatever it is given, the result stays one level under the base.
+        for id in ["", "..", "/abs", "C:\\win", "a/b"] {
+            let p = worktree_path_for(base, id);
+            assert_eq!(p.parent(), Some(base), "{id} escaped to {p:?}");
+        }
     }
 
     #[test]
