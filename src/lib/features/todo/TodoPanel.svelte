@@ -27,6 +27,7 @@
   import Check from "@lucide/svelte/icons/check";
   import Undo2 from "@lucide/svelte/icons/undo-2";
   import Bot from "@lucide/svelte/icons/bot";
+  import ChevronDown from "@lucide/svelte/icons/chevron-down";
 
   const encoder = new TextEncoder();
 
@@ -156,6 +157,28 @@
     notifications.success(t("todo.agentPathCopied"));
   }
 
+  // Agents still waiting on the user. An unreachable endpoint or a missing shim
+  // counts too: nothing works in either case, and the row saying so is the only
+  // place that says it.
+  const agentsPending = $derived.by(() => {
+    if (!settings.state.agentTodoAccess) return 0;
+    if (shimPath === null || !endpointUp) return 1;
+    return agentsHere.filter((a) => a.reg !== "this").length;
+  });
+
+  // null until the user has an opinion, and then theirs holds. Folding the
+  // section away the moment the last agent goes green would take the panel out
+  // from under someone who had just opened it to read something.
+  let agentsOpen = $state<boolean | null>(null);
+  const agentsShown = $derived(agentsOpen ?? agentsPending > 0);
+
+  // A different project has different agents wired, so the automatic answer
+  // applies again.
+  $effect(() => {
+    projectId;
+    agentsOpen = null;
+  });
+
   let adding = $state<string | null>(null);
 
   async function addToAgent(label: string, cli: string) {
@@ -247,18 +270,25 @@
             ? 'bg-[var(--color-surface-2)]/60'
             : ''}"
         >
-          <div class="flex items-start gap-2">
-            <input
-              type="checkbox"
-              class="mt-[3px] size-3.5 shrink-0 accent-[var(--color-foreground)]"
-              checked={item.state === "done"}
-              onchange={(e) =>
-                todos.setState(
-                  item.id,
-                  (e.currentTarget as HTMLInputElement).checked ? "done" : "open",
-                )}
+          <div class="flex items-center gap-2">
+            <!-- The native control was the one white rectangle in the app: it
+                 draws itself, ignores the border and surface tokens, and sits on
+                 its own baseline rather than the row's. This is the same box the
+                 rest of Boite draws. -->
+            <button
+              type="button"
+              role="checkbox"
+              aria-checked={item.state === "done"}
               aria-label={item.state === "done" ? t("todo.markNotDone") : t("todo.markDone")}
-            />
+              class="grid size-[15px] shrink-0 place-items-center rounded-[4px] border transition {item.state ===
+              'done'
+                ? 'border-foreground/30 bg-foreground/80 text-[var(--color-surface)]'
+                : 'border-border text-transparent hover:border-foreground/40'}"
+              onclick={() =>
+                todos.setState(item.id, item.state === "done" ? "open" : "done")}
+            >
+              <Check class="size-2.5" strokeWidth={3.5} />
+            </button>
             <input
               type="text"
               value={item.text}
@@ -271,7 +301,7 @@
             />
             <button
               type="button"
-              class="mt-[1px] shrink-0 rounded p-0.5 text-muted-foreground/50 opacity-0 transition group-hover:opacity-100 hover:bg-[var(--color-surface-3)] hover:text-foreground disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-muted-foreground/50"
+              class="grid size-[22px] shrink-0 place-items-center rounded text-muted-foreground/50 opacity-0 transition group-hover:opacity-100 hover:bg-[var(--color-surface-3)] hover:text-foreground disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-muted-foreground/50"
               onclick={() => handOff(item.id, item.text)}
               disabled={!canSend}
               title={canSend
@@ -285,12 +315,12 @@
             </button>
             <button
               type="button"
-              class="mt-[1px] shrink-0 rounded p-0.5 text-muted-foreground/50 opacity-0 transition group-hover:opacity-100 hover:bg-danger/15 hover:text-danger"
+              class="grid size-[22px] shrink-0 place-items-center rounded text-muted-foreground/50 opacity-0 transition group-hover:opacity-100 hover:bg-danger/15 hover:text-danger"
               onclick={() => todos.remove(item.id)}
               title={t("todo.remove")}
               aria-label={t("todo.removeLabel")}
             >
-              <Trash2 class="size-3" />
+              <Trash2 class="size-3.5" />
             </button>
           </div>
 
@@ -298,13 +328,13 @@
             <!-- An agent said it finished. It stops here on purpose: a model
                  that can tick its own boxes will, and the list would then record
                  assertions instead of verified work. -->
-            <div class="mt-1 flex items-start gap-1.5 pl-[22px]">
+            <div class="mt-1 flex items-start gap-1.5 pl-[23px]">
               <Bot class="mt-[2px] size-3 shrink-0 text-muted-foreground/70" />
               <p class="min-w-0 flex-1 text-[11px] leading-snug text-muted-foreground">
                 {item.note ?? t("todo.agentReported")}
               </p>
             </div>
-            <div class="mt-1 flex gap-1 pl-[22px]">
+            <div class="mt-1 flex gap-1 pl-[23px]">
               <button
                 type="button"
                 class="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10.5px] text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
@@ -327,10 +357,34 @@
       {/each}
     </div>
 
-    <div class="shrink-0 border-t border-border px-3 py-2">
-        <p class="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/70">
+    <section class="shrink-0 border-t border-border">
+      <button
+        type="button"
+        class="flex h-7 w-full items-center gap-1.5 px-3 text-left transition hover:bg-[var(--color-surface-2)]"
+        onclick={() => (agentsOpen = !agentsShown)}
+        aria-expanded={agentsShown}
+      >
+        <ChevronDown
+          class="size-3 shrink-0 text-muted-foreground transition {agentsShown ? '' : '-rotate-90'}"
+        />
+        <span
+          class="min-w-0 flex-1 truncate text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
+        >
           {t("todo.agentAccess")}
-        </p>
+        </span>
+        <!-- Only ever counts what is waiting on the user. A section that is
+             folded away because everything is wired should not also be wearing
+             a number. -->
+        {#if agentsPending > 0}
+          <span
+            class="shrink-0 rounded-full bg-[var(--color-surface-2)] px-1.5 text-[10px] text-foreground/75"
+          >
+            {agentsPending}
+          </span>
+        {/if}
+      </button>
+      {#if agentsShown}
+        <div class="border-t border-border px-3 py-2">
         {#if !settings.state.agentTodoAccess}
           <p class="text-[11px] text-muted-foreground">{t("todo.agentOff")}</p>
         {:else if shimPath === null}
@@ -406,7 +460,9 @@
             </button>
           {/if}
         {/if}
-      </div>
+        </div>
+      {/if}
+    </section>
 
     <form class="shrink-0 border-t border-border p-2" onsubmit={submitDraft}>
       <input
