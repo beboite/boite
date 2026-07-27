@@ -99,6 +99,7 @@ class TodoStore {
       state: "open",
       note: null,
       commitSha: null,
+      claimedBy: null,
       position,
       createdAt: now,
       updatedAt: now,
@@ -118,6 +119,7 @@ class TodoStore {
     if (state !== "claimed") {
       item.note = null;
       item.commitSha = null;
+      item.claimedBy = null;
     }
     item.updatedAt = Date.now();
     await this.write($state.snapshot(item));

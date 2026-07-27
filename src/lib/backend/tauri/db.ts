@@ -1,5 +1,12 @@
 import Database from "@tauri-apps/plugin-sql";
-import type { Project, Settings, Thread, TodoItem, TodoState } from "$lib/types";
+import type {
+  IconKey,
+  Project,
+  Settings,
+  Thread,
+  TodoItem,
+  TodoState,
+} from "$lib/types";
 import type { DbApi } from "../types";
 
 let db: Database | null = null;
@@ -21,6 +28,7 @@ interface TodoRow {
   state: string;
   note: string | null;
   commit_sha: string | null;
+  claimed_by: string | null;
   position: number;
   created_at: number;
   updated_at: number;
@@ -38,6 +46,7 @@ function rowToTodo(r: TodoRow): TodoItem {
     state,
     note: r.note,
     commitSha: r.commit_sha,
+    claimedBy: (r.claimed_by as IconKey) ?? null,
     position: r.position,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
@@ -211,7 +220,7 @@ export const tauriDb: DbApi = {
 
   async loadTodos(): Promise<TodoItem[]> {
     const rows = await getDb().select<TodoRow[]>(
-      "SELECT id, project_id, text, state, note, commit_sha, position, created_at, updated_at \
+      "SELECT id, project_id, text, state, note, commit_sha, claimed_by, position, created_at, updated_at \
        FROM todos ORDER BY position ASC, created_at ASC",
     );
     return rows.map(rowToTodo);
@@ -220,8 +229,8 @@ export const tauriDb: DbApi = {
   async saveTodo(todo: TodoItem): Promise<void> {
     await getDb().execute(
       "INSERT OR REPLACE INTO todos \
-       (id, project_id, text, state, note, commit_sha, position, created_at, updated_at) \
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+       (id, project_id, text, state, note, commit_sha, claimed_by, position, created_at, updated_at) \
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       [
         todo.id,
         todo.projectId,
@@ -229,6 +238,7 @@ export const tauriDb: DbApi = {
         todo.state,
         todo.note,
         todo.commitSha,
+        todo.claimedBy,
         todo.position,
         todo.createdAt,
         todo.updatedAt,

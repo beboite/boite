@@ -47,6 +47,8 @@
   import Check from "@lucide/svelte/icons/check";
   import Undo2 from "@lucide/svelte/icons/undo-2";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import Bot from "@lucide/svelte/icons/bot";
+  import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
 
   const encoder = new TextEncoder();
 
@@ -373,7 +375,14 @@
               class="mt-1 flex items-center gap-1.5 pl-[23px] text-[10.5px] text-muted-foreground"
               title={item.note ?? t("todo.agentReported")}
             >
-              <span aria-hidden="true">🤖</span>
+              {#if item.claimedBy}
+                <ShortcutIcon iconKey={item.claimedBy} size={12} />
+              {:else}
+                <!-- Claimed through a credentials file, which names a project
+                     and no thread: Boite did not launch this one and cannot say
+                     which agent it was. -->
+                <Bot class="size-3 shrink-0 text-muted-foreground/70" />
+              {/if}
               {#await gitState(item) then g}
                 {#if !item.commitSha}
                   <span class="text-muted-foreground/70">{t("todo.gitNoCommit")}</span>

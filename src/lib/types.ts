@@ -137,6 +137,12 @@ export interface TodoItem {
    * git cannot find is shown as unknown rather than as done.
    */
   commitSha: string | null;
+  /**
+   * The agent that claimed it, as an icon key. Set only when Boite launched the
+   * terminal it was claimed from — an agent wired through a credentials file
+   * names a project and no thread, so it stays anonymous.
+   */
+  claimedBy: IconKey;
   position: number;
   createdAt: number;
   updatedAt: number;

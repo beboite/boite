@@ -158,6 +158,16 @@ pub fn run() {
             sql: "ALTER TABLE todos ADD COLUMN commit_sha TEXT;",
             kind: MigrationKind::Up,
         },
+        // Which agent claimed it, as the icon key the rest of the app already
+        // draws by. Filled in only when Boite launched the terminal: that is
+        // where the thread id comes from, and an agent Boite did not start is
+        // one it cannot name.
+        Migration {
+            version: 13,
+            description: "add_todo_claimed_by",
+            sql: "ALTER TABLE todos ADD COLUMN claimed_by TEXT;",
+            kind: MigrationKind::Up,
+        },
     ];
 
     let builder = tauri::Builder::default()
