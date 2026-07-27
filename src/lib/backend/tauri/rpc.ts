@@ -80,6 +80,7 @@ export const tauriShell: ShellApi = {
       iconKey: s.icon_key,
     }));
   },
+  commandExists: (cmd) => invoke<boolean>("command_exists", { cmd }),
 };
 
 export const tauriScope: ScopeApi = {

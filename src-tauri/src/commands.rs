@@ -567,69 +567,13 @@ pub fn log_file_path(app: AppHandle) -> Result<String, String> {
     Ok(path.to_string_lossy().to_string())
 }
 
+// Spawning `where.exe` to answer this popped a console window on Windows, and
+// the hand-rolled PATH walk behind it had its own PATHEXT list. `which` is
+// already a dependency and already correct on both.
 #[tauri::command]
-pub fn check_command_exists(cmd: String) -> bool {
-    #[cfg(windows)]
-    {
-        if let Ok(output) = std::process::Command::new("where")
-            .arg(&cmd)
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-        {
-            if output.success() {
-                return true;
-            }
-        }
-        if let Ok(path_var) = std::env::var("PATH") {
-            let extensions = vec!["", ".exe", ".cmd", ".bat", ".ps1"];
-            for path_dir in std::env::split_paths(&path_var) {
-                for ext in &extensions {
-                    let file_path = path_dir.join(format!("{}{}", cmd, ext));
-                    if file_path.is_file() {
-                        return true;
-                    }
-                }
-            }
-        }
-        if cmd == "bun" {
-            if let Ok(user_profile) = std::env::var("USERPROFILE") {
-                let bun_path = std::path::PathBuf::from(user_profile).join(".bun").join("bin").join("bun.exe");
-                if bun_path.is_file() {
-                    return true;
-                }
-            }
-        }
-        false
-    }
-    #[cfg(not(windows))]
-    {
-        if let Ok(output) = std::process::Command::new("which")
-            .arg(&cmd)
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-        {
-            output.success()
-        } else {
-            if let Ok(path_var) = std::env::var("PATH") {
-                for path_dir in std::env::split_paths(&path_var) {
-                    let file_path = path_dir.join(&cmd);
-                    if file_path.is_file() {
-                        return true;
-                    }
-                }
-            }
-            if cmd == "bun" {
-                if let Ok(home) = std::env::var("HOME") {
-                    let bun_path = std::path::PathBuf::from(home).join(".bun").join("bin").join("bun");
-                    if bun_path.is_file() {
-                        return true;
-                    }
-                }
-            }
-            false
-        }
-    }
+pub async fn command_exists(cmd: String) -> bool {
+    tauri::async_runtime::spawn_blocking(move || shell::command_exists(&cmd))
+        .await
+        .unwrap_or(false)
 }
 

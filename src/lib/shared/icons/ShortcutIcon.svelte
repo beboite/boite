@@ -16,7 +16,7 @@
 
   const ASSET_BY_KEY: Partial<Record<NonNullable<IconKey>, string>> = {
     codex: "/icons/chatgpt.svg",
-    antigravity: "/icons/antigravity.svg",
+    antigravity: "/icons/antigravity.png",
     opencode: "/icons/opencode.svg",
     grok: "/icons/grok.svg",
     hermes: "/icons/hermes.svg",
