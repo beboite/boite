@@ -109,9 +109,17 @@ class GitStore {
   private scannedBase = new Map<string, string>();
 
   ensure(projectId: string, cwd: string): GitState {
+    // A project's directory used to be fixed, so a stale state was always a
+    // state of the same repo. It is not anymore: switching to a thread that
+    // lives in a worktree re-targets the same project id at another checkout,
+    // and keeping the old branch, status and log would describe the wrong one
+    // until the next refresh landed.
+    const previous = this.cwds.get(projectId);
     this.cwds.set(projectId, cwd);
-    if (!this.states[projectId]) {
+    if (!this.states[projectId] || (previous !== undefined && previous !== cwd)) {
       this.states[projectId] = emptyState();
+      this.lastFetchAt.delete(projectId);
+      this.fetchFails.delete(projectId);
     }
     return this.states[projectId];
   }

@@ -73,6 +73,9 @@ pub struct Thread {
     pub auto_slept: bool,
     #[serde(default)]
     pub keep_awake: bool,
+    /// Directory the thread runs in when it is not the project's own.
+    #[serde(default)]
+    pub worktree_path: Option<String>,
 }
 
 fn default_status() -> String {

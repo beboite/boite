@@ -20,6 +20,7 @@
   import { parkedLocal } from "$lib/backend/tauri/parked";
   import { app } from "$lib/app/store.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
+  import { threadCwd } from "$lib/features/thread/cwd";
   import { reloadThread, restoreLastClosedThread } from "$lib/features/thread/api";
   import { buildResumeArgsAsync, getDetector } from "$lib/features/thread/session";
   import { withPowershellFastFlags } from "$lib/features/thread/shell-wrap";
@@ -503,7 +504,8 @@
       if (!current || current.status === "stopped") return;
       syncAliveThread("ready", current);
       const cleaned = cleanTitle(event.value);
-      const cwd = app.projects.find((p) => p.id === thread.projectId)?.cwd;
+      const cwd =
+        threadCwd(current, app.projects.find((p) => p.id === thread.projectId)) ?? undefined;
       if (cleaned && !isGenericTitle(cleaned, cwd)) {
         app.setThreadTitle(thread.id, cleaned);
       }
@@ -974,7 +976,12 @@
     const cols = Math.max(2, term.cols || 80);
     const rows = Math.max(1, term.rows || 24);
 
-    const userArgs = await buildResumeArgsAsync(thread, project.cwd);
+    // Resolved once: the session lookup below matches on an exact cwd, so a
+    // thread whose PTY starts in a worktree and whose transcripts are searched
+    // under the project folder finds nothing and silently loses `--resume`.
+    const cwd = threadCwd(thread, project) ?? project.cwd;
+
+    const userArgs = await buildResumeArgsAsync(thread, cwd);
     // A blank terminal *is* the shell; anything else may be a shell function or
     // alias, which only exists once a profile has been sourced. Whether it
     // actually is one is decided by the machine that owns the PTY — for a
@@ -1016,7 +1023,7 @@
         {
           threadId: thread.id,
           spec: {
-            cwd: project.cwd,
+            cwd,
             cmd: plan.cmd,
             args: plan.args,
             cols,
@@ -1053,7 +1060,7 @@
         {
           cmd: plan.cmd,
           args: plan.args,
-          cwd: project.cwd,
+          cwd,
           reattaching,
           wrapShell: wrap?.shellId ?? null,
         },
@@ -1075,7 +1082,7 @@
       stopSessionMonitor();
       sessionMonitor = startSessionMonitor({
         threadId: thread.id,
-        cwd: project.cwd,
+        cwd,
         detector,
         since,
         targetPtyId: ptyId,

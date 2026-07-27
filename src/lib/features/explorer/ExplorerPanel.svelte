@@ -2,6 +2,7 @@
   import { app } from "$lib/app/store.svelte";
   import { workspace } from "$lib/backend";
   import { settings } from "$lib/features/settings/store.svelte";
+  import { threadCwd } from "$lib/features/thread/cwd";
   import { explorerStore, normalizePath } from "./store.svelte";
   import { treeMenu } from "./treeMenu.svelte";
   import TreeNode from "./TreeNode.svelte";
@@ -20,7 +21,16 @@
       : null,
   );
 
-  const root = $derived(project ? normalizePath(project.cwd) : null);
+  // Follows the active thread into its worktree: the point of the tree is to
+  // show what the agent on screen is actually looking at. Entries are cached
+  // by path, so switching roots costs nothing and switching back is instant.
+  const threadHere = $derived(
+    app.activeThread && app.activeThread.projectId === project?.id ? app.activeThread : null,
+  );
+  const root = $derived.by(() => {
+    const dir = threadCwd(threadHere, project);
+    return dir ? normalizePath(dir) : null;
+  });
   const entries = $derived(root ? explorerStore.entriesByPath[root] ?? null : null);
   const err = $derived(root ? explorerStore.errorByPath[root] ?? null : null);
   const filterActive = $derived(explorerStore.filterText.trim().length > 0);

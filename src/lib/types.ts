@@ -42,6 +42,11 @@ export interface Thread {
   createdAt: number;
   autoSlept?: boolean;
   keepAwake?: boolean;
+  // Directory this thread actually lives in, when it is not the project's own.
+  // A process lives in a folder, a project does not, so the git panel, the
+  // explorer, the PTY and the Claude session lookup all resolve through
+  // `threadCwd()` rather than reading `project.cwd` directly.
+  worktreePath?: string | null;
   origin?: WorkspaceOrigin;
 }
 

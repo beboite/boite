@@ -168,6 +168,15 @@ pub fn run() {
             sql: "ALTER TABLE todos ADD COLUMN claimed_by TEXT;",
             kind: MigrationKind::Up,
         },
+        // The directory the thread runs in, when it is not the project's. Null
+        // for every thread that lives in the project folder itself, which is
+        // every thread that exists before this column does.
+        Migration {
+            version: 14,
+            description: "add_thread_worktree_path",
+            sql: "ALTER TABLE threads ADD COLUMN worktree_path TEXT;",
+            kind: MigrationKind::Up,
+        },
     ];
 
     let builder = tauri::Builder::default()

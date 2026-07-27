@@ -1,5 +1,6 @@
 <script lang="ts">
   import { explorerStore } from "./store.svelte";
+  import { threadCwd } from "$lib/features/thread/cwd";
   import { treeMenu } from "./treeMenu.svelte";
   import { revealItemInDir } from "$lib/platform/opener";
   import { writeText } from "$lib/platform/clipboard";
@@ -76,7 +77,9 @@
       ? app.projects.find((p) => p.id === app.currentProjectId)
       : null;
     if (!project) return entry.path;
-    const root = project.cwd.replace(/\\/g, "/").replace(/\/+$/, "") + "/";
+    const active = app.activeThread?.projectId === project.id ? app.activeThread : null;
+    const base = threadCwd(active, project) ?? project.cwd;
+    const root = base.replace(/\\/g, "/").replace(/\/+$/, "") + "/";
     return entry.path.startsWith(root)
       ? entry.path.slice(root.length)
       : entry.path;
