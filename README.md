@@ -304,8 +304,8 @@ job per platform. It signs the update payloads and opens a **draft** release:
 clients see nothing until you publish it.
 
 Cutting a release needs no key on your machine. The signing keypair already
-exists: its public half is in `plugins.updater.pubkey`, its private half lives
-only as the `TAURI_SIGNING_PRIVATE_KEY` repository secret (with
+exists: its public half is in `plugins.updater.pubkey`, its private half is the
+`TAURI_SIGNING_PRIVATE_KEY` repository secret (with
 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`). Anyone who can push a tag can ship a
 signed release without ever seeing it.
 
@@ -313,8 +313,8 @@ That keypair is permanent. There is one for the whole project, not one per
 maintainer: the public key is compiled into every binary in the wild, so a
 second key would orphan every existing install. GitHub secrets cannot be read
 back, and there is no revocation: losing the private key ends updates forever,
-and leaking it cannot be undone. Keep an offline backup in a shared password
-manager, and never sign locally.
+and leaking it cannot be undone. An offline copy is held outside GitHub, so the
+secret is no longer the only one. Never sign locally.
 
 Cutting a release: bump the version in the five places that carry it
 (`package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`,
