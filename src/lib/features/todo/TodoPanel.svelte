@@ -1,3 +1,21 @@
+<script module lang="ts">
+  import type { McpRegistration } from "$lib/features/thread/agentMcp";
+
+  type AgentRow = {
+    key: string;
+    label: string;
+    cmd: string;
+    auto: boolean;
+    cli: string | null;
+    reg: McpRegistration;
+  };
+
+  // Survives the component, keyed by project. Filled in by the resolve effect
+  // below; read on mount so a rebuilt panel starts from the last answer instead
+  // of from nothing.
+  const lastAgentRows = new Map<string, AgentRow[]>();
+</script>
+
 <script lang="ts">
   import { onMount } from "svelte";
   import { app } from "$lib/app/store.svelte";
@@ -15,14 +33,12 @@
     agentSetupTarget,
     agentRegisterCli,
     agentRegistration,
-    type McpRegistration,
     mcpPaths,
     registerAgentMcp,
   } from "$lib/features/thread/agentMcp";
   import { writeText } from "$lib/platform/clipboard";
   import { openUrl } from "$lib/platform/opener";
-  import { gitCommitState, gitPullRequest } from "$lib/features/git/api";
-  import type { CommitState, PrLookup } from "$lib/features/git/api";
+  import { claimGitState, type ClaimGit } from "./claimGit";
   import type { TodoItem } from "$lib/types";
   import ListTodo from "@lucide/svelte/icons/list-todo";
   import CornerDownRight from "@lucide/svelte/icons/corner-down-right";
@@ -51,15 +67,6 @@
   let endpointUp = $state(true);
   let credsPath = $state<string | null>(null);
 
-  type AgentRow = {
-    key: string;
-    label: string;
-    cmd: string;
-    auto: boolean;
-    cli: string | null;
-    reg: McpRegistration;
-  };
-
   // Candidates from the project's threads. A thread outlives the tool that made
   // it — clicking a shortcut once on a machine without that CLI leaves the
   // thread behind for good — so the binary is probed before any of this is
@@ -82,6 +89,15 @@
     return [...seen.values()];
   });
 
+  // Outside the component for the same reason the commit lookups are: the panel
+  // is destroyed on a switch to Files and rebuilt on the way back, and starting
+  // from nothing made the section blink through "empty" before re-answering
+  // questions whose answers had not changed. The probe still runs on mount; it
+  // just no longer has to finish before anything can be shown.
+  // Seeded by the resolve effect below rather than here: it sets the cached
+  // rows synchronously before its first await, so nothing paints empty, and
+  // reading the project id at initialiser time would capture only its first
+  // value anyway.
   let agentsHere = $state<AgentRow[]>([]);
 
   // The credentials file is per project, so it is re-read whenever the project
@@ -120,9 +136,11 @@
       agentsHere = [];
       return;
     }
+    agentsHere = lastAgentRows.get(id) ?? [];
     let cancelled = false;
     const run = () =>
       void resolveAgents(rows, id, cwd).then((next) => {
+        lastAgentRows.set(id, next);
         if (!cancelled) agentsHere = next;
       });
     run();
@@ -182,46 +200,16 @@
     agentsOpen = null;
   });
 
-  type ClaimGit = { commit: CommitState; pr: PrLookup };
-
-  // Keyed by the sha as well as the row: the answer is about that commit, and a
-  // re-claim with a different one has to be looked up again. Memoised because
-  // the template awaits this on every render, and one of the two calls goes to
-  // the network.
-  const gitCache = new Map<string, Promise<ClaimGit | null>>();
+  // The repository the sha has to exist in. gitRoot is only filled in once the
+  // project has been inspected, so the cwd stands in — git resolves a sha from
+  // anywhere inside the work tree.
+  const gitRoot = $derived(project?.gitRoot ?? project?.cwd ?? null);
 
   function gitState(item: TodoItem): Promise<ClaimGit | null> {
     const sha = item.commitSha;
-    // The repository the project sits in, which is where the sha has to exist.
-    // gitRoot is only filled in once the project has been inspected, so the cwd
-    // stands in — git resolves a sha from anywhere inside the work tree.
-    const root = project?.gitRoot ?? project?.cwd ?? null;
+    const root = gitRoot;
     if (!sha || !root) return Promise.resolve(null);
-    const key = `${root}:${sha}`;
-    const cached = gitCache.get(key);
-    if (cached) return cached;
-
-    const pending = (async (): Promise<ClaimGit> => {
-      const commit = await gitCommitState(root, sha).catch(() => null);
-      if (!commit || !commit.known) {
-        return {
-          commit: commit ?? { known: false, pushed: false, short: sha.slice(0, 7), subject: null, branch: null },
-          pr: { kind: "unavailable" },
-        };
-      }
-      // Only ask the forge about work that reached it. An unpushed commit has
-      // no pull request by definition, and asking would spend a network call to
-      // be told so.
-      const pr: PrLookup =
-        commit.pushed && commit.branch
-          ? await gitPullRequest(root, commit.branch).catch(
-              (err): PrLookup => ({ kind: "failed", auth: false, detail: String(err) }),
-            )
-          : { kind: "unavailable" };
-      return { commit, pr };
-    })();
-    gitCache.set(key, pending);
-    return pending;
+    return claimGitState(root, sha);
   }
 
   function openPr(url: string) {
@@ -403,9 +391,15 @@
                     {t("todo.gitUnknownCommit")}
                   </span>
                 {:else}
-                  <code class="font-mono text-foreground/80" title={g.commit.subject ?? ""}>
-                    {g.commit.short}
-                  </code>
+                  <!-- The branch first: it says where the work is, which is the
+                       question being asked. The sha is what was verified, so it
+                       stays reachable rather than on show. -->
+                  <span
+                    class="max-w-[45%] truncate text-foreground/80"
+                    title={`${g.commit.short}${g.commit.subject ? ` — ${g.commit.subject}` : ""}`}
+                  >
+                    {g.commit.branch ?? g.commit.short}
+                  </span>
                   <span class="text-muted-foreground/40">·</span>
                   <span class={g.commit.pushed ? "" : "text-muted-foreground/70"}>
                     {g.commit.pushed ? t("todo.gitPushed") : t("todo.gitLocal")}
