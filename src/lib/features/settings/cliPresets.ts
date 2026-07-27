@@ -1,4 +1,3 @@
-import type { MessageKey } from "$lib/i18n/messages";
 import type { IconKey } from "$lib/types";
 
 export interface CliPreset {
@@ -9,40 +8,6 @@ export interface CliPreset {
   executable: string;
   docUrl: string;
 }
-
-// Carries message keys rather than strings: the copy is long enough to need
-// translating, and a key checked against MessageKey cannot drift out of the
-// dictionaries the way a literal can.
-export interface SetupRecommendation {
-  id: string;
-  label: string;
-  iconKey: IconKey;
-  executable: string;
-  docUrl: string;
-  descKey: MessageKey;
-  linkKey: MessageKey;
-}
-
-export const SETUP_RECOMMENDATIONS: SetupRecommendation[] = [
-  {
-    id: "bun",
-    label: "Bun",
-    iconKey: "bun",
-    executable: "bun",
-    docUrl: "https://bun.sh",
-    descKey: "setup.recBunDesc",
-    linkKey: "setup.recBunLink",
-  },
-  {
-    id: "codex-everywhere",
-    label: "Codex Everywhere",
-    iconKey: "codex",
-    executable: "codex",
-    docUrl: "https://docs.codex-everywhere.com/quickstart/",
-    descKey: "setup.recCodexEverywhereDesc",
-    linkKey: "setup.recCodexEverywhereLink",
-  },
-];
 
 export const CLI_PRESETS: CliPreset[] = [
   {

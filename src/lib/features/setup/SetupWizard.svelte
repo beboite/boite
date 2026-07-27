@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { backend, workspace } from "$lib/backend";
   import { settings } from "$lib/features/settings/store.svelte";
-  import { CLI_PRESETS, SETUP_RECOMMENDATIONS } from "$lib/features/settings/cliPresets";
+  import { CLI_PRESETS } from "$lib/features/settings/cliPresets";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
   import BoiteLogo from "$lib/shared/components/BoiteLogo.svelte";
   import ArrowRight from "@lucide/svelte/icons/arrow-right";
@@ -12,9 +12,7 @@
   import Plus from "@lucide/svelte/icons/plus";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import GripVertical from "@lucide/svelte/icons/grip-vertical";
-  import Star from "@lucide/svelte/icons/star";
   import { t, LOCALE_OPTIONS } from "$lib/i18n/index.svelte";
-  import type { MessageKey } from "$lib/i18n/messages";
   import type { IconKey } from "$lib/types";
 
   interface SetupItem {
@@ -26,11 +24,6 @@
     docUrl: string;
     installed: boolean;
     enabled: boolean;
-    // Recommendations are shown for information only and never become
-    // shortcuts, which is what separates them from the agent list.
-    runtime?: boolean;
-    descKey?: MessageKey;
-    linkKey?: MessageKey;
   }
 
   let step = $state(1);
@@ -47,15 +40,6 @@
   const items = $state<SetupItem[]>(
     CLI_PRESETS.map((cli) => ({ ...cli, installed: false, enabled: false })),
   );
-  const recommendations = $state<SetupItem[]>(
-    SETUP_RECOMMENDATIONS.map((item) => ({
-      ...item,
-      command: item.executable,
-      installed: false,
-      enabled: false,
-      runtime: true,
-    })),
-  );
 
   // Detection runs where the agents will run. On a remote boite that is the
   // server, so naming it beats claiming "this computer".
@@ -69,7 +53,7 @@
     refreshingId = item.id;
     try {
       item.installed = await backend().shell.commandExists(item.executable);
-      if (item.installed && !item.runtime) item.enabled = true;
+      if (item.installed) item.enabled = true;
     } catch (err) {
       console.error("Unable to check command", item.executable, err);
       item.installed = false;
@@ -80,7 +64,7 @@
 
   async function refreshAll() {
     loading = true;
-    await Promise.all([...items, ...recommendations].map(refreshItem));
+    await Promise.all(items.map(refreshItem));
     loading = false;
   }
 
@@ -108,7 +92,7 @@
   }
 
   function selectedAgents(): SetupItem[] {
-    return items.filter((item) => !item.runtime && item.enabled);
+    return items.filter((item) => item.enabled);
   }
 
   function goToOrder() {
@@ -117,11 +101,11 @@
       void finishSetup();
       return;
     }
-    step = 4;
+    step = 3;
   }
 
   function finishSetup() {
-    const source = step === 4 ? enabledAgents : selectedAgents();
+    const source = step === 3 ? enabledAgents : selectedAgents();
     return settings.completeSetup(
       source.map((item) => ({
         id: item.id,
@@ -200,75 +184,9 @@
       </div>
     {:else if step === 2}
       <div class="flex h-full min-h-0 flex-col">
-        <div class="border-b border-border/50 pb-4">
-          <p class="text-[11px] font-semibold uppercase text-muted-foreground">{t("setup.stepCount", { current: 1, total: 3 })}</p>
-          <h2 class="mt-1 text-xl font-bold text-foreground">{t("setup.recommendationsTitle")}</h2>
-          <p class="mt-1 text-xs text-muted-foreground">{t("setup.recommendationsDesc")}</p>
-        </div>
-        <div class="mt-5 grid grid-cols-1 gap-3 md:grid-cols-3">
-          {#each recommendations as item (item.id)}
-            <article class="flex min-h-56 flex-col rounded-lg border border-[var(--color-awake)]/50 bg-[var(--color-awake)]/5 p-4">
-              <div class="flex items-center gap-2.5">
-                <ShortcutIcon iconKey={item.iconKey} size={26} />
-                <div>
-                  <div class="flex items-center gap-1.5">
-                    <h3 class="text-sm font-semibold text-foreground">{item.label}</h3>
-                    <Star class="size-3.5 fill-[var(--color-warning)] text-[var(--color-warning)]" />
-                  </div>
-                  <p class="text-[10px] font-medium uppercase text-[var(--color-awake)]">{t("setup.recommended")}</p>
-                </div>
-              </div>
-              {#if item.descKey}
-                <p class="mt-4 text-xs leading-relaxed text-muted-foreground">{t(item.descKey)}</p>
-              {/if}
-              <a href={item.docUrl} target="_blank" rel="noopener noreferrer" class="mt-auto flex items-center justify-center gap-1 pt-4 rounded-md border border-border bg-[var(--color-surface-2)] px-2 py-1.5 text-xs text-muted-foreground transition hover:text-foreground">
-                <ExternalLink class="size-3" /> {item.linkKey ? t(item.linkKey) : t("setup.documentation")}
-              </a>
-            </article>
-          {/each}
-
-          <article class="flex min-h-56 flex-col rounded-lg border border-border bg-[var(--color-surface-2)] p-4">
-            <div class="flex items-center gap-2.5">
-              <ShortcutIcon iconKey="codex" size={26} />
-              <div>
-                <h3 class="text-sm font-semibold text-foreground">ChatGPT</h3>
-                <p class="mt-1 text-xs text-muted-foreground">{t("setup.openai")}</p>
-              </div>
-            </div>
-            <p class="mt-4 text-xs leading-relaxed text-muted-foreground">{t("setup.chatgptDesc")}</p>
-            <a href="https://chatgpt.com" target="_blank" rel="noopener noreferrer" class="mt-auto flex items-center justify-center gap-1 rounded-md border border-border bg-[var(--color-surface-3)] px-2 py-1.5 text-xs text-muted-foreground transition hover:text-foreground">
-              <ExternalLink class="size-3" /> {t("setup.chatgptOpen")}
-            </a>
-          </article>
-
-          <article class="flex min-h-56 flex-col rounded-lg border border-border bg-[var(--color-surface-2)] p-4">
-            <div class="flex items-center gap-2.5">
-              <ShortcutIcon iconKey="claude" size={26} />
-              <div>
-                <h3 class="text-sm font-semibold text-foreground">Claude</h3>
-                <p class="mt-1 text-xs text-muted-foreground">{t("setup.anthropic")}</p>
-              </div>
-            </div>
-            <p class="mt-4 text-xs leading-relaxed text-muted-foreground">{t("setup.claudeDesc")}</p>
-            <a href="https://claude.ai" target="_blank" rel="noopener noreferrer" class="mt-auto flex items-center justify-center gap-1 rounded-md border border-border bg-[var(--color-surface-3)] px-2 py-1.5 text-xs text-muted-foreground transition hover:text-foreground">
-              <ExternalLink class="size-3" /> {t("setup.claudeOpen")}
-            </a>
-          </article>
-        </div>
-        <div class="mt-auto flex items-center justify-between border-t border-border/50 pt-5">
-          <button type="button" onclick={() => step = 1} class="flex items-center gap-1.5 px-2 py-2 text-sm text-muted-foreground transition hover:text-foreground">
-            <ArrowLeft class="size-4" /> {t("setup.back")}
-          </button>
-          <button type="button" onclick={() => step = 3} class="flex items-center gap-1.5 rounded-md bg-foreground px-5 py-2.5 text-sm font-semibold text-background transition hover:bg-foreground/90">
-            {t("setup.configAgents")} <ArrowRight class="size-4" />
-          </button>
-        </div>
-      </div>
-    {:else if step === 3}
-      <div class="flex h-full min-h-0 flex-col">
         <div class="flex flex-wrap items-start justify-between gap-4 border-b border-border/50 pb-4">
           <div>
-            <p class="text-[11px] font-semibold uppercase text-muted-foreground">{t("setup.stepCount", { current: 2, total: 3 })}</p>
+            <p class="text-[11px] font-semibold uppercase text-muted-foreground">{t("setup.stepCount", { current: 1, total: 2 })}</p>
             <h2 class="mt-1 text-xl font-bold text-foreground">{t("setup.agentsTitle")}</h2>
             <p class="mt-1 text-xs text-muted-foreground">{t("setup.agentsDesc")}</p>
           </div>
@@ -284,7 +202,7 @@
         {:else}
           <div class="mt-5 min-h-0 flex-1 overflow-y-auto px-1 py-1 pb-4">
             <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {#each items.filter((item) => !item.runtime) as item (item.id)}
+              {#each items as item (item.id)}
                 <article class="flex min-h-48 flex-col rounded-lg border border-border bg-[var(--color-surface-2)] p-4">
                   <div class="flex items-start justify-between gap-3">
                     <div class="flex min-w-0 items-center gap-2.5">
@@ -343,7 +261,7 @@
           </div>
         {/if}
         <div class="mt-auto flex items-center justify-between border-t border-border/50 pt-5">
-          <button type="button" onclick={() => step = 2} class="flex items-center gap-1.5 px-2 py-2 text-sm text-muted-foreground transition hover:text-foreground">
+          <button type="button" onclick={() => step = 1} class="flex items-center gap-1.5 px-2 py-2 text-sm text-muted-foreground transition hover:text-foreground">
             <ArrowLeft class="size-4" /> {t("setup.back")}
           </button>
           <button type="button" onclick={goToOrder} class="flex items-center gap-1.5 rounded-md bg-foreground px-5 py-2.5 text-sm font-semibold text-background transition hover:bg-foreground/90">
@@ -354,7 +272,7 @@
     {:else}
       <div class="flex h-full min-h-0 flex-col">
         <div class="border-b border-border/50 pb-4">
-          <p class="text-[11px] font-semibold uppercase text-muted-foreground">{t("setup.stepCount", { current: 3, total: 3 })}</p>
+          <p class="text-[11px] font-semibold uppercase text-muted-foreground">{t("setup.stepCount", { current: 2, total: 2 })}</p>
           <h2 class="mt-1 text-xl font-bold text-foreground">{t("setup.orderTitle")}</h2>
           <p class="mt-1 text-xs text-muted-foreground">{t("setup.orderDesc")}</p>
         </div>
@@ -373,7 +291,7 @@
           {/each}
         </ul>
         <div class="mt-auto flex items-center justify-between border-t border-border/50 pt-5">
-          <button type="button" onclick={() => step = 3} class="flex items-center gap-1.5 px-2 py-2 text-sm text-muted-foreground transition hover:text-foreground">
+          <button type="button" onclick={() => step = 2} class="flex items-center gap-1.5 px-2 py-2 text-sm text-muted-foreground transition hover:text-foreground">
             <ArrowLeft class="size-4" /> {t("setup.back")}
           </button>
           <button type="button" onclick={() => void finishSetup()} class="flex items-center gap-1.5 rounded-md bg-foreground px-5 py-2.5 text-sm font-semibold text-background transition hover:bg-foreground/90">
