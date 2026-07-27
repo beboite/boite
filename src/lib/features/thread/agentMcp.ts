@@ -57,6 +57,42 @@ const INJECTORS: Partial<Record<NonNullable<IconKey>, McpInjection>> = {
  */
 const REGISTER_CLI: Partial<Record<NonNullable<IconKey>, string>> = {};
 
+/**
+ * What to run, or paste, to give an agent access when Boite cannot hand it
+ * anything at launch. One entry per format actually read in that agent's own
+ * documentation — an invented line is worse than none, because it is tried.
+ */
+export function agentSetupSnippet(
+  key: IconKey,
+  shimPath: string,
+  credentialsPath: string,
+): string {
+  const cmd = JSON.stringify(shimPath);
+  const creds = JSON.stringify(credentialsPath);
+  switch (key) {
+    // Documented as non-interactive: `copilot mcp add NAME -- COMMAND [ARGS…]`.
+    case "copilot":
+      return `copilot mcp add boite -- ${shimPath} ${credentialsPath}`;
+    // opencode.jsonc, `mcp.<name>` with a command array. No CLI to add one.
+    case "opencode":
+      return `"boite": { "type": "local", "command": [${cmd}, ${creds}] }`;
+    // .cursor/mcp.json, same shape as the editor's. Slash commands only in CLI.
+    case "cursor":
+      return `"boite": { "command": ${cmd}, "args": [${creds}] }`;
+    default:
+      return "";
+  }
+}
+
+export async function agentCredentialsPath(projectId: string): Promise<string | null> {
+  if (!hasTauri()) return null;
+  try {
+    return await invoke<string>("agent_mcp_project_path", { projectId });
+  } catch {
+    return null;
+  }
+}
+
 export function agentRegisterCli(key: IconKey): string | null {
   return (key && REGISTER_CLI[key]) ?? null;
 }

@@ -197,6 +197,9 @@ export const EN_MESSAGES = {
   "todo.agentAdded": "{agent} can now reach this list",
   "todo.agentAddFailed": "{agent}: {error}",
 
+  "todo.agentSetup": "Copy setup",
+  "todo.agentSetupCopied": "Setup copied — paste it into {agent}",
+
   "notification.readyForInput": "Ready for input",
   "branchDialog.uncommittedChanges": "You have uncommitted changes",
   "branchDialog.descriptionCreating": "Creating",

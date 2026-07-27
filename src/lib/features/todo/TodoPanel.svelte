@@ -9,7 +9,9 @@
   import {
     agentAcceptsInjection,
     agentApiReady,
+    agentCredentialsPath,
     agentIsInstalled,
+    agentSetupSnippet,
     agentRegisterCli,
     mcpPaths,
     registerAgentMcp,
@@ -40,6 +42,7 @@
   let draft = $state("");
   let shimPath = $state<string | null>(null);
   let endpointUp = $state(true);
+  let credsPath = $state<string | null>(null);
 
   type AgentRow = {
     key: string;
@@ -72,6 +75,23 @@
 
   let agentsHere = $state<AgentRow[]>([]);
 
+  // The credentials file is per project, so it is re-read whenever the project
+  // changes rather than once on mount.
+  $effect(() => {
+    const id = projectId;
+    if (!id) {
+      credsPath = null;
+      return;
+    }
+    let cancelled = false;
+    void agentCredentialsPath(id).then((p) => {
+      if (!cancelled) credsPath = p;
+    });
+    return () => {
+      cancelled = true;
+    };
+  });
+
   $effect(() => {
     const rows = candidates;
     let cancelled = false;
@@ -82,6 +102,14 @@
       cancelled = true;
     };
   });
+
+  async function copySetup(agent: AgentRow) {
+    if (!shimPath || !credsPath) return;
+    const snippet = agentSetupSnippet(agent.key as never, shimPath, credsPath);
+    if (!snippet) return copyPath();
+    await writeText(snippet);
+    notifications.success(t("todo.agentSetupCopied", { agent: agent.label }));
+  }
 
   async function copyPath() {
     if (!shimPath) return;
@@ -302,9 +330,11 @@
                 <button
                   type="button"
                   class="shrink-0 rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
-                  onclick={copyPath}
+                  onclick={() => copySetup(agent)}
                 >
-                  {t("todo.agentCopyPath")}
+                  {agentSetupSnippet(agent.key as never, "x", "y")
+                    ? t("todo.agentSetup")
+                    : t("todo.agentCopyPath")}
                 </button>
               {/if}
             </div>

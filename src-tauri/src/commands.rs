@@ -352,6 +352,21 @@ pub async fn register_agent_mcp(cli: String, sidecar_path: String) -> Result<Str
     .map_err(|e| format!("register task failed: {e}"))?
 }
 
+/// Where a project's credentials file lives, for an agent that cannot be handed
+/// anything at launch. Written at startup; this only reports the path.
+#[tauri::command]
+pub fn agent_mcp_project_path(app: AppHandle, project_id: String) -> Result<String, String> {
+    let dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|e| format!("app_config_dir: {e}"))?;
+    let path = dir.join("mcp").join(format!("{project_id}.json"));
+    if !path.is_file() {
+        return Err("no credentials for this project yet".into());
+    }
+    Ok(path.to_string_lossy().into_owned())
+}
+
 /// Whether the agent endpoint is up. The panel asks before calling an agent
 /// ready: having the binary and knowing how to wire it says nothing about the
 /// door being open, and a thread launched before it was answered its agent with

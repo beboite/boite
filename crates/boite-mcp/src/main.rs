@@ -18,22 +18,63 @@ const PROTOCOL_VERSION: &str = "2024-11-05";
 struct Host {
     url: String,
     token: String,
-    thread_id: String,
+    /// The thread this shim was spawned for, when Boite launched the agent.
+    thread_id: Option<String>,
+    /// The project, when credentials came from a file instead. Agents that do
+    /// not pass their environment to a server process can only be reached this
+    /// way — the endpoint takes either, and resolves both to one project.
+    project_id: Option<String>,
     http: reqwest::blocking::Client,
 }
 
+#[derive(serde::Deserialize)]
+struct Credentials {
+    url: String,
+    token: String,
+    #[serde(rename = "projectId")]
+    project_id: String,
+}
+
 impl Host {
-    fn from_env() -> Result<Host, String> {
-        let url = std::env::var("BOITE_MCP_URL")
-            .map_err(|_| "BOITE_MCP_URL is unset — run this from a Boite terminal".to_string())?;
-        let token = std::env::var("BOITE_TOKEN").map_err(|_| "BOITE_TOKEN is unset".to_string())?;
-        let thread_id =
-            std::env::var("BOITE_THREAD_ID").map_err(|_| "BOITE_THREAD_ID is unset".to_string())?;
+    /// Environment first, then the credentials file named on the command line.
+    ///
+    /// The environment is what Boite stamps into a terminal it launched, and it
+    /// carries the thread — the most precise answer. The file exists for agents
+    /// that hand a server process nothing but PATH, where the environment can
+    /// never arrive; it names a project instead, which is the unit the list
+    /// belongs to anyway.
+    fn resolve() -> Result<Host, String> {
+        let http = reqwest::blocking::Client::new();
+
+        if let (Ok(url), Ok(token), Ok(thread_id)) = (
+            std::env::var("BOITE_MCP_URL"),
+            std::env::var("BOITE_TOKEN"),
+            std::env::var("BOITE_THREAD_ID"),
+        ) {
+            return Ok(Host {
+                url,
+                token,
+                thread_id: Some(thread_id),
+                project_id: None,
+                http,
+            });
+        }
+
+        let path = std::env::args().nth(1).ok_or_else(|| {
+            "no Boite credentials: run this from a Boite terminal, or pass the \
+             credentials file the Todo panel offers"
+                .to_string()
+        })?;
+        let text = std::fs::read_to_string(&path)
+            .map_err(|e| format!("cannot read credentials at {path}: {e}"))?;
+        let creds: Credentials =
+            serde_json::from_str(&text).map_err(|e| format!("bad credentials file: {e}"))?;
         Ok(Host {
-            url,
-            token,
-            thread_id,
-            http: reqwest::blocking::Client::new(),
+            url: creds.url,
+            token: creds.token,
+            thread_id: None,
+            project_id: Some(creds.project_id),
+            http,
         })
     }
 
@@ -41,8 +82,13 @@ impl Host {
         let mut req = self
             .http
             .request(method, format!("{}{path}", self.url))
-            .bearer_auth(&self.token)
-            .header("x-boite-thread", &self.thread_id);
+            .bearer_auth(&self.token);
+        if let Some(thread) = &self.thread_id {
+            req = req.header("x-boite-thread", thread);
+        }
+        if let Some(project) = &self.project_id {
+            req = req.header("x-boite-project", project);
+        }
         if let Some(b) = body {
             req = req.json(&b);
         }
@@ -150,7 +196,7 @@ fn main() {
     // hiding a cause that is one sentence long. Answering initialize and failing
     // at the call instead puts that sentence in front of the agent, which is the
     // only place anyone will read it.
-    let host = Host::from_env();
+    let host = Host::resolve();
 
     let stdin = std::io::stdin();
     let mut stdout = std::io::stdout();
