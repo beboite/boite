@@ -7,9 +7,17 @@
 //! why it cannot ship — a door that does everything cannot be defended, one
 //! that lists, adds and claims todos can.
 //!
-//! The caller never names a project. It presents the thread id Boite stamped
-//! into its environment at spawn, and the project is resolved from that, so an
-//! agent cannot read or write another project's list.
+//! An agent Boite launched never names a project: it presents the thread id
+//! stamped into its environment at spawn, and the project is resolved from
+//! that, so it cannot reach another project's list.
+//!
+//! An agent registered from a credentials file does name one, and the check on
+//! it is that the project exists — not that it is the agent's own. Every file
+//! carries the same session token, so an agent wired for one project can read
+//! and write the lists of the others by editing the id in its own config. That
+//! is the price of reaching agents that hand a server process nothing but PATH;
+//! it is a scope within one workspace, not across workspaces, and the token
+//! dies with the process.
 
 use std::sync::Mutex;
 
@@ -299,15 +307,6 @@ fn open_db(app: &tauri::AppHandle) -> Result<Connection, String> {
 /// which is modest but not nothing, and there is no reason for it to be
 /// readable by anyone else on the machine.
 fn write_project_credentials(app: &tauri::AppHandle, url: &str, token: &str) {
-    let Ok(base) = app.path().app_config_dir() else {
-        return;
-    };
-    let dir = base.join("mcp");
-    if let Err(e) = std::fs::create_dir_all(&dir) {
-        eprintln!("[boite/agent-api] credentials dir: {e}");
-        return;
-    }
-
     let conn = match open_db(app) {
         Ok(c) => c,
         Err(e) => {
@@ -322,18 +321,41 @@ fn write_project_credentials(app: &tauri::AppHandle, url: &str, token: &str) {
         return;
     };
     for project_id in rows.flatten() {
-        let body = json!({ "url": url, "token": token, "projectId": project_id });
-        let path = dir.join(format!("{project_id}.json"));
-        if let Err(e) = std::fs::write(&path, body.to_string()) {
-            eprintln!("[boite/agent-api] write {}: {e}", path.display());
-            continue;
-        }
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+        if let Err(e) = write_one(app, url, token, &project_id) {
+            eprintln!("[boite/agent-api] credentials for {project_id}: {e}");
         }
     }
+}
+
+/// One project's file, written wherever the caller found the project.
+///
+/// Public because the loop above only covers what existed at startup. A project
+/// added since has no file, and the panel offering to wire an agent for it is
+/// exactly when that becomes visible — so the command behind that panel writes
+/// it then. Late or early is the same act: the file names a port that lives and
+/// dies with this process.
+pub fn write_one(
+    app: &tauri::AppHandle,
+    url: &str,
+    token: &str,
+    project_id: &str,
+) -> Result<std::path::PathBuf, String> {
+    let base = app
+        .path()
+        .app_config_dir()
+        .map_err(|e| format!("app_config_dir: {e}"))?;
+    let dir = base.join("mcp");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("credentials dir: {e}"))?;
+
+    let body = json!({ "url": url, "token": token, "projectId": project_id });
+    let path = dir.join(format!("{project_id}.json"));
+    std::fs::write(&path, body.to_string()).map_err(|e| format!("write: {e}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+    }
+    Ok(path)
 }
 
 /// Binds on an ephemeral loopback port and stores the address plus token in
