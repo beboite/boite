@@ -209,6 +209,9 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "todo.agentAdded": "{agent} peut désormais accéder à cette liste",
   "todo.agentAddFailed": "{agent} : {error}",
 
+  "todo.agentSetup": "Copier la config",
+  "todo.agentSetupCopied": "Config copiée — colle-la dans {agent}",
+
   "notification.readyForInput": "Prêt pour saisie",
 
   "setup.title": "Bienvenue dans Boite",

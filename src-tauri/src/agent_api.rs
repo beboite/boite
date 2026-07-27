@@ -82,12 +82,34 @@ fn authorize(inner: &Inner, headers: &HeaderMap) -> Result<String, StatusCode> {
     if bearer.len() != inner.token.len() || bearer != inner.token {
         return Err(StatusCode::UNAUTHORIZED);
     }
-    headers
-        .get("x-boite-thread")
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string())
-        .filter(|s| !s.is_empty())
-        .ok_or(StatusCode::BAD_REQUEST)
+    let header = |name: &str| {
+        headers
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string())
+            .filter(|s| !s.is_empty())
+    };
+
+    // A thread is the precise answer and stays preferred: Boite stamped it into
+    // the terminal it launched. A project is what an agent presents when its
+    // credentials came from a file — the only route for the ones that hand a
+    // server process nothing but PATH. Either way the answer is a project, which
+    // is the unit the list belongs to.
+    if let Some(thread_id) = header("x-boite-thread") {
+        let conn = inner.conn.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        return project_of_thread(&conn, &thread_id);
+    }
+    let project_id = header("x-boite-project").ok_or(StatusCode::BAD_REQUEST)?;
+    // Existence is checked rather than trusted: the id arrives from a file the
+    // caller could have edited, and an unknown project must not read as an empty
+    // list — that would be a silent wrong answer instead of a refusal.
+    let conn = inner.conn.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    conn.query_row(
+        "SELECT id FROM projects WHERE id = ?1",
+        [&project_id],
+        |r| r.get::<_, String>(0),
+    )
+    .map_err(|_| StatusCode::NOT_FOUND)
 }
 
 fn project_of_thread(conn: &Connection, thread_id: &str) -> Result<String, StatusCode> {
@@ -103,9 +125,8 @@ async fn list(
     State(inner): State<std::sync::Arc<Inner>>,
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    let thread_id = authorize(&inner, &headers)?;
+    let project_id = authorize(&inner, &headers)?;
     let conn = inner.conn.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let project_id = project_of_thread(&conn, &thread_id)?;
 
     let mut stmt = conn
         .prepare(
@@ -136,7 +157,7 @@ async fn add(
     headers: HeaderMap,
     Json(body): Json<AddIn>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    let thread_id = authorize(&inner, &headers)?;
+    let project_id = authorize(&inner, &headers)?;
     let text = body.text.trim().to_string();
     if text.is_empty() {
         return Err(StatusCode::BAD_REQUEST);
@@ -144,7 +165,6 @@ async fn add(
 
     let id = {
         let conn = inner.conn.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        let project_id = project_of_thread(&conn, &thread_id)?;
         let position: i64 = conn
             .query_row(
                 "SELECT COALESCE(MAX(position), -1) + 1 FROM todos WHERE project_id = ?1",
@@ -176,10 +196,9 @@ async fn claim(
     headers: HeaderMap,
     Json(body): Json<ClaimIn>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    let thread_id = authorize(&inner, &headers)?;
+    let project_id = authorize(&inner, &headers)?;
     let changed = {
         let conn = inner.conn.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        let project_id = project_of_thread(&conn, &thread_id)?;
         conn.execute(
             "UPDATE todos SET state = 'claimed', note = ?1, updated_at = ?2
              WHERE id = ?3 AND project_id = ?4 AND state = 'open'",
@@ -210,6 +229,55 @@ fn open_db(app: &tauri::AppHandle) -> Result<Connection, String> {
     conn.busy_timeout(std::time::Duration::from_secs(5))
         .map_err(|e| format!("busy_timeout: {e}"))?;
     Ok(conn)
+}
+
+/// One credentials file per project, for agents Boite cannot hand anything at
+/// launch.
+///
+/// Rewritten on every start, because the port is ephemeral: a file kept from a
+/// previous run would name an address nothing answers on. That is also why the
+/// token inside is the session's own — there is no second secret to manage, and
+/// nothing here outlives the app by more than one launch.
+///
+/// Mode 0600 on unix: it grants write access to this workspace's todo lists,
+/// which is modest but not nothing, and there is no reason for it to be
+/// readable by anyone else on the machine.
+fn write_project_credentials(app: &tauri::AppHandle, url: &str, token: &str) {
+    let Ok(base) = app.path().app_config_dir() else {
+        return;
+    };
+    let dir = base.join("mcp");
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        eprintln!("[boite/agent-api] credentials dir: {e}");
+        return;
+    }
+
+    let conn = match open_db(app) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[boite/agent-api] credentials: {e}");
+            return;
+        }
+    };
+    let Ok(mut stmt) = conn.prepare("SELECT id FROM projects") else {
+        return;
+    };
+    let Ok(rows) = stmt.query_map([], |r| r.get::<_, String>(0)) else {
+        return;
+    };
+    for project_id in rows.flatten() {
+        let body = json!({ "url": url, "token": token, "projectId": project_id });
+        let path = dir.join(format!("{project_id}.json"));
+        if let Err(e) = std::fs::write(&path, body.to_string()) {
+            eprintln!("[boite/agent-api] write {}: {e}", path.display());
+            continue;
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+        }
+    }
 }
 
 /// Binds on an ephemeral loopback port and stores the address plus token in
@@ -261,8 +329,10 @@ pub fn start(app: &tauri::AppHandle) {
         eprintln!("[boite/agent-api] set_nonblocking failed: {e}");
         return;
     }
+    let url = format!("http://127.0.0.1:{port}");
+    write_project_credentials(app, &url, &token);
     app.manage(AgentApi {
-        url: format!("http://127.0.0.1:{port}"),
+        url,
         token,
     });
 
