@@ -1,3 +1,4 @@
+mod app_data;
 mod commands;
 mod fullscreen;
 mod local_pty;
@@ -193,8 +194,43 @@ pub fn run() {
         .manage(ProjectRoots::default())
         .setup(|app| {
             let setup_handle = app.handle().clone();
+            // Before the log session, and well before the sql plugin is asked
+            // for a connection: both would create the new directory and, in the
+            // database's case, a fresh empty file that then looks like a real
+            // install to the migration.
+            let data_move = app_data::migrate_from_legacy_identifier(&setup_handle);
             if let Err(e) = logging::begin_log_session(&setup_handle) {
                 eprintln!("[boite/logging] begin_log_session failed: {e}");
+            }
+            match data_move {
+                Ok(app_data::Outcome::Nothing) => {}
+                Ok(app_data::Outcome::Moved { entries, from }) => {
+                    let _ = logging::append_app_log(
+                        &setup_handle,
+                        "info",
+                        "backend.appdata",
+                        "Moved app data from the pre-1.1.0 identifier",
+                        Some(&format!("{entries} entries from {}", from.display())),
+                    );
+                }
+                Ok(app_data::Outcome::KeptBoth { legacy }) => {
+                    let _ = logging::append_app_log(
+                        &setup_handle,
+                        "warn",
+                        "backend.appdata",
+                        "Found a database under the old identifier too; kept both",
+                        Some(&legacy.display().to_string()),
+                    );
+                }
+                Err(e) => {
+                    let _ = logging::append_app_log(
+                        &setup_handle,
+                        "error",
+                        "backend.appdata",
+                        "Could not move app data from the old identifier",
+                        Some(&e),
+                    );
+                }
             }
             logging::install_panic_hook(setup_handle.clone());
             fullscreen::watch(&setup_handle);
