@@ -168,7 +168,20 @@ pub async fn pty_kill(
 }
 
 #[tauri::command]
-pub fn register_project_roots(state: State<'_, ProjectRoots>, roots: Vec<String>) {
+pub fn register_project_roots(
+    app: tauri::AppHandle,
+    state: State<'_, ProjectRoots>,
+    mut roots: Vec<String>,
+) {
+    // Always in scope, and the only worktree path that ever is. Every thread
+    // worktree lives under it, so nothing read back from the database can widen
+    // the boundary by naming a directory of its own. Created here because
+    // `replace` canonicalizes and silently drops what does not exist yet.
+    if let Ok(base) = crate::app_data::worktree_base(&app) {
+        if std::fs::create_dir_all(&base).is_ok() {
+            roots.push(base.to_string_lossy().to_string());
+        }
+    }
     state.replace(roots);
 }
 
@@ -698,6 +711,67 @@ pub async fn git_switch_branch(
     })
     .await
     .map_err(|e| format!("git_switch_branch task failed: {e}"))?
+}
+
+/// Opens a detached worktree for a thread and hands back its directory.
+///
+/// The base lives beside the database, not inside the project: it is one
+/// registered root for every worktree, so a stored path can never widen the
+/// filesystem boundary on its own.
+#[tauri::command]
+pub async fn worktree_open(
+    app: tauri::AppHandle,
+    scope: State<'_, ProjectRoots>,
+    repo: String,
+    thread_id: String,
+) -> Result<String, String> {
+    scope.ensure_allowed(&repo)?;
+    let base = crate::app_data::worktree_base(&app)?;
+    std::fs::create_dir_all(&base).map_err(|e| format!("worktree base: {e}"))?;
+    let path = git::worktree_path_for(&base, &thread_id);
+    let path = path.to_string_lossy().to_string();
+    tauri::async_runtime::spawn_blocking(move || git::add_detached_worktree_blocking(&repo, &path))
+        .await
+        .map_err(|e| format!("worktree_open task failed: {e}"))?
+}
+
+#[tauri::command]
+pub async fn worktree_claim(
+    scope: State<'_, ProjectRoots>,
+    path: String,
+    name: String,
+) -> Result<(), String> {
+    scope.ensure_allowed(&path)?;
+    tauri::async_runtime::spawn_blocking(move || git::claim_worktree_branch_blocking(&path, &name))
+        .await
+        .map_err(|e| format!("worktree_claim task failed: {e}"))?
+}
+
+#[tauri::command]
+pub async fn worktree_hold(
+    scope: State<'_, ProjectRoots>,
+    path: String,
+) -> Result<git::WorktreeHold, String> {
+    scope.ensure_allowed(&path)?;
+    tauri::async_runtime::spawn_blocking(move || git::worktree_hold_blocking(&path))
+        .await
+        .map_err(|e| format!("worktree_hold task failed: {e}"))?
+}
+
+#[tauri::command]
+pub async fn worktree_remove(
+    scope: State<'_, ProjectRoots>,
+    repo: String,
+    path: String,
+    force: bool,
+) -> Result<(), String> {
+    scope.ensure_allowed(&repo)?;
+    scope.ensure_allowed(&path)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        git::remove_worktree_blocking(&repo, &path, force)
+    })
+    .await
+    .map_err(|e| format!("worktree_remove task failed: {e}"))?
 }
 
 #[tauri::command]

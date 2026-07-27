@@ -47,8 +47,21 @@ impl AppState {
         if let Some(dir) = &self.workspace_dir {
             roots.push(dir.to_string_lossy().to_string());
         }
+        // One root for every thread worktree. They live under the data dir, so
+        // no path read back from the database can widen the boundary by naming
+        // a directory of its own. Created here because `replace` canonicalizes
+        // and drops what does not exist yet.
+        let worktrees = self.worktree_base();
+        if std::fs::create_dir_all(&worktrees).is_ok() {
+            roots.push(worktrees.to_string_lossy().to_string());
+        }
         self.roots.replace(roots);
         Ok(())
+    }
+
+    /// Where thread worktrees live, beside the database and never in a project.
+    pub fn worktree_base(&self) -> PathBuf {
+        self.data_dir.join("worktrees")
     }
 
     /// Boundary for adding/browsing projects. When BOITE_WORKSPACE_DIR is set,

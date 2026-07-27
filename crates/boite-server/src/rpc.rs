@@ -556,6 +556,58 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
 
         m if m.starts_with("git.") => dispatch_git(state, m, params).await,
 
+        m if m.starts_with("worktree.") => dispatch_worktree(state, m, params).await,
+
+        other => Err(format!("unknown method: {other}")),
+    }
+}
+
+/// Worktree lifecycle. Every path here is checked against the trust boundary
+/// the same way the git methods are; `worktree.open` builds its own path under
+/// the server's worktree base rather than accepting one from the client.
+async fn dispatch_worktree(
+    state: &AppState,
+    method: &str,
+    params: Value,
+) -> Result<Value, String> {
+    match method {
+        "worktree.open" => {
+            let repo = str_param(&params, "repo")?;
+            state.roots.ensure_allowed(&repo)?;
+            let thread_id = str_param(&params, "threadId")?;
+            let base = state.worktree_base();
+            std::fs::create_dir_all(&base).map_err(|e| format!("worktree base: {e}"))?;
+            let path = git::worktree_path_for(&base, &thread_id)
+                .to_string_lossy()
+                .to_string();
+            let r = blocking(move || git::add_detached_worktree_blocking(&repo, &path)).await??;
+            Ok(json!({ "path": r }))
+        }
+        "worktree.claim" => {
+            let path = str_param(&params, "path")?;
+            state.roots.ensure_allowed(&path)?;
+            let name = str_param(&params, "name")?;
+            blocking(move || git::claim_worktree_branch_blocking(&path, &name)).await??;
+            Ok(json!({ "ok": true }))
+        }
+        "worktree.hold" => {
+            let path = str_param(&params, "path")?;
+            state.roots.ensure_allowed(&path)?;
+            let r = blocking(move || git::worktree_hold_blocking(&path)).await??;
+            Ok(serde_json::to_value(r).unwrap())
+        }
+        "worktree.remove" => {
+            let repo = str_param(&params, "repo")?;
+            let path = str_param(&params, "path")?;
+            state.roots.ensure_allowed(&repo)?;
+            state.roots.ensure_allowed(&path)?;
+            let force = params
+                .get("force")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            blocking(move || git::remove_worktree_blocking(&repo, &path, force)).await??;
+            Ok(json!({ "ok": true }))
+        }
         other => Err(format!("unknown method: {other}")),
     }
 }

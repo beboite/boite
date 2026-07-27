@@ -122,6 +122,34 @@ export interface GitApi {
   init(path: string): Promise<void>;
 }
 
+/** What a worktree still holds that removing it would destroy. */
+export interface WorktreeHold {
+  /** Modified, staged or untracked files. */
+  dirty: boolean;
+  /** HEAD is on no local branch, so these commits exist nowhere else. */
+  orphanCommits: boolean;
+}
+
+export interface WorktreeApi {
+  /**
+   * Opens a detached worktree for a thread and returns its directory. The
+   * caller does not choose the path: it is derived from the thread id under
+   * the machine's own worktree base, which is the only one in scope.
+   */
+  open(repo: string, threadId: string): Promise<string>;
+  /**
+   * Puts a branch on a detached worktree, once its work has proved worth
+   * keeping. Rejects a name that is already taken.
+   */
+  claim(path: string, name: string): Promise<void>;
+  hold(path: string): Promise<WorktreeHold>;
+  /**
+   * Removes a worktree. Without `force` this refuses while it still holds
+   * work, which is what makes automatic cleanup safe.
+   */
+  remove(repo: string, path: string, force: boolean): Promise<void>;
+}
+
 export interface ExplorerApi {
   readDir(path: string): Promise<DirEntry[]>;
   changedPaths(path: string): Promise<ChangedPath[]>;
@@ -284,6 +312,7 @@ export interface Backend {
   readonly pty: PtyApi;
   readonly db: DbApi;
   readonly git: GitApi;
+  readonly worktree: WorktreeApi;
   readonly explorer: ExplorerApi;
   readonly editor: EditorApi;
   readonly project: ProjectApi;

@@ -11,6 +11,8 @@ import type {
   SessionHit,
   SessionKind,
   ShellApi,
+  WorktreeApi,
+  WorktreeHold,
 } from "../types";
 import type {
   BranchChangeResult,
@@ -45,6 +47,13 @@ export const tauriGit: GitApi = {
   push: (path) => invoke("git_push", { path }),
   pull: (path) => invoke("git_pull", { path }),
   init: (path) => invoke("git_init", { path }),
+};
+
+export const tauriWorktree: WorktreeApi = {
+  open: (repo, threadId) => invoke<string>("worktree_open", { repo, threadId }),
+  claim: (path, name) => invoke("worktree_claim", { path, name }),
+  hold: (path) => invoke<WorktreeHold>("worktree_hold", { path }),
+  remove: (repo, path, force) => invoke("worktree_remove", { repo, path, force }),
 };
 
 export const tauriExplorer: ExplorerApi = {

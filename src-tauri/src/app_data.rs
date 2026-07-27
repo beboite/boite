@@ -131,6 +131,19 @@ pub fn migrate_from_legacy_identifier(app: &tauri::AppHandle) -> Result<Outcome,
     migrate(&parent.join(LEGACY_IDENTIFIER), &current)
 }
 
+/// Where thread worktrees live: beside the database, never inside a project.
+///
+/// One directory for all of them, so the filesystem trust boundary gains a
+/// single registered root instead of one per worktree read back from storage.
+pub fn worktree_base(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    use tauri::Manager;
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("no app data dir: {e}"))?
+        .join("worktrees"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

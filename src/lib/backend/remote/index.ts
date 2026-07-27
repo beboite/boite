@@ -16,6 +16,8 @@ import type {
   SessionHit,
   ShellApi,
   WorkspaceMetaApi,
+  WorktreeApi,
+  WorktreeHold,
 } from "../types";
 import type { Project, Settings, Thread, TodoItem } from "$lib/types";
 import type { CommitState, PrLookup } from "$lib/features/git/api";
@@ -50,6 +52,7 @@ export class RemoteBackend implements Backend {
   readonly pty: PtyApi;
   readonly db: DbApi;
   readonly git: GitApi;
+  readonly worktree: WorktreeApi;
   readonly explorer: ExplorerApi;
   readonly editor: EditorApi;
   readonly project: ProjectApi;
@@ -195,6 +198,15 @@ export class RemoteBackend implements Backend {
       push: (path) => rpc("git.push", { path }).then(() => {}),
       pull: (path) => rpc("git.pull", { path }).then(() => {}),
       init: (path) => rpc("git.init", { path }).then(() => {}),
+    };
+
+    this.worktree = {
+      open: (repo, threadId) =>
+        rpc("worktree.open", { repo, threadId }).then((r) => r.path as string),
+      claim: (path, name) => rpc("worktree.claim", { path, name }).then(() => {}),
+      hold: (path) => rpc("worktree.hold", { path }).then((r) => r as WorktreeHold),
+      remove: (repo, path, force) =>
+        rpc("worktree.remove", { repo, path, force }).then(() => {}),
     };
 
     this.explorer = {
