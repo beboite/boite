@@ -590,6 +590,13 @@ async fn dispatch_worktree(
             blocking(move || git::claim_worktree_branch_blocking(&path, &name)).await??;
             Ok(json!({ "ok": true }))
         }
+        "worktree.reserve" => {
+            let path = str_param(&params, "path")?;
+            state.roots.ensure_allowed(&path)?;
+            let name = str_param(&params, "name")?;
+            blocking(move || git::reserve_worktree_branch_blocking(&path, &name)).await??;
+            Ok(json!({ "ok": true }))
+        }
         "worktree.hold" => {
             let path = str_param(&params, "path")?;
             state.roots.ensure_allowed(&path)?;

@@ -1434,6 +1434,10 @@ pub fn add_detached_worktree_blocking(repo: &str, path: &str) -> Result<String, 
     let mut cmd = git(r);
     cmd.args(["worktree", "add", "--detach", path]);
     run(cmd)?;
+    // Borrowed, not rebuilt. Without this a worktree costs a full install and
+    // a full recompile before anything can run in it, which is the difference
+    // between an isolated thread and an unusable one.
+    link_shared_artifacts(r, Path::new(path));
     Ok(path.to_string())
 }
 
@@ -1453,6 +1457,132 @@ pub fn claim_worktree_branch_blocking(worktree: &str, name: &str) -> Result<(), 
     cmd.args(["switch", "-c", name]);
     run(cmd)?;
     Ok(())
+}
+
+/// Directories a worktree borrows from the main checkout instead of building
+/// its own copy of.
+///
+/// These are the ones that make a worktree expensive rather than cheap: a
+/// second `node_modules` and a second `target` turn a few megabytes of source
+/// into gigabytes, and an agent that has to install and recompile before it can
+/// run anything is an agent that cannot work. All of them are build output or
+/// fetched dependencies — reproducible, never the user's own files.
+pub const SHARED_ARTIFACTS: [&str; 4] = ["node_modules", "target", ".venv", "vendor"];
+
+/// Points the worktree's heavy directories at the main checkout's. Returns the
+/// names actually linked.
+///
+/// Best-effort by design: a link that cannot be made costs disk and time, not
+/// correctness, so a failure is skipped rather than raised.
+pub fn link_shared_artifacts(repo: &Path, worktree: &Path) -> Vec<String> {
+    let mut linked = Vec::new();
+    for name in SHARED_ARTIFACTS {
+        let src = repo.join(name);
+        if !src.is_dir() {
+            continue;
+        }
+        let dst = worktree.join(name);
+        // A real directory of that name in the worktree is tracked content, and
+        // replacing it would delete work. Only an absent path is linkable.
+        if fs::symlink_metadata(&dst).is_ok() {
+            continue;
+        }
+        if link_dir(&src, &dst).is_ok() {
+            linked.push(name.to_string());
+        }
+    }
+    linked
+}
+
+#[cfg(windows)]
+fn link_dir(src: &Path, dst: &Path) -> std::io::Result<()> {
+    // A junction rather than a symlink: symlink creation needs either developer
+    // mode or elevation on Windows, junctions need neither.
+    let status = Command::new("cmd")
+        .args(["/c", "mklink", "/J"])
+        .arg(dst)
+        .arg(src)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(std::io::Error::other("mklink failed"))
+    }
+}
+
+#[cfg(not(windows))]
+fn link_dir(src: &Path, dst: &Path) -> std::io::Result<()> {
+    std::os::unix::fs::symlink(src, dst)
+}
+
+/// Removes the links, never what they point at.
+///
+/// This has to run before `git worktree remove`. Git deletes the directory
+/// tree, and on Windows it descends into a junction and empties the *target* —
+/// which is the main checkout's `node_modules`. That is not theoretical: it is
+/// how one was destroyed during this feature's own development.
+pub fn unlink_shared_artifacts(worktree: &Path) {
+    for name in SHARED_ARTIFACTS {
+        let dst = worktree.join(name);
+        let Ok(meta) = fs::symlink_metadata(&dst) else {
+            continue;
+        };
+        if !meta.file_type().is_symlink() {
+            // A real directory: whatever it is, it is not ours to delete.
+            continue;
+        }
+        // `remove_dir` unlinks the junction or directory symlink itself and
+        // never follows it. `remove_dir_all` would be the bug this exists to
+        // prevent.
+        let _ = fs::remove_dir(&dst).or_else(|_| fs::remove_file(&dst));
+    }
+}
+
+/// Moves a detached worktree onto a branch that already exists.
+///
+/// The other half of claiming: continuing something already started, rather
+/// than naming something new. Git refuses a branch that is checked out in
+/// another worktree — including the main one — and that refusal is worth
+/// passing on plainly, because it is the whole reason a second checkout of the
+/// same branch cannot exist.
+pub fn reserve_worktree_branch_blocking(worktree: &str, name: &str) -> Result<(), String> {
+    let w = Path::new(worktree);
+    if !w.is_dir() {
+        return Err("Not a directory".into());
+    }
+    validate_branch_name(w, name)?;
+    if !local_branch_exists(w, name) {
+        return Err(format!("There is no local branch named '{name}'."));
+    }
+    if let Some(holder) = worktree_holding_branch(w, name) {
+        return Err(format!(
+            "'{name}' is already checked out at {holder}. Only one worktree can hold a branch."
+        ));
+    }
+    let mut cmd = git(w);
+    cmd.args(["switch", name]);
+    run(cmd)?;
+    Ok(())
+}
+
+/// Which worktree, if any, currently has this branch checked out.
+fn worktree_holding_branch(path: &Path, name: &str) -> Option<String> {
+    let mut cmd = git(path);
+    cmd.args(["worktree", "list", "--porcelain"]);
+    let out = run(cmd).ok()?;
+    let text = String::from_utf8_lossy(&out);
+    let target = format!("refs/heads/{name}");
+    let mut current: Option<String> = None;
+    for line in text.lines() {
+        if let Some(rest) = line.strip_prefix("worktree ") {
+            current = Some(rest.to_string());
+        } else if line.strip_prefix("branch ") == Some(target.as_str()) {
+            return current;
+        }
+    }
+    None
 }
 
 /// What removing this worktree would cost. Read before every removal.
@@ -1511,6 +1641,10 @@ pub fn remove_worktree_blocking(
             .into());
         }
     }
+    // Before git touches the directory, and not optional: git deletes the tree
+    // and on Windows follows a junction into the main checkout's own
+    // `node_modules`, emptying it.
+    unlink_shared_artifacts(Path::new(worktree));
     let mut cmd = git(r);
     cmd.args(["worktree", "remove", "--force", worktree]);
     run(cmd)?;
@@ -1682,6 +1816,94 @@ mod worktree_tests {
         assert!(claim_worktree_branch_blocking(w.to_str().unwrap(), "--help").is_err());
         assert!(symbolic_branch(&w).is_none(), "still detached");
 
+        let _ = remove_worktree_blocking(f.path(), w.to_str().unwrap(), true);
+    }
+
+    /// The one that matters: removing a worktree must not reach through a link
+    /// into the main checkout. A real `node_modules` was destroyed this way
+    /// while this feature was being written.
+    #[test]
+    fn removing_a_worktree_leaves_the_shared_directories_alone() {
+        let f = Fixture::new();
+        let deps = f.repo.join("node_modules");
+        fs::create_dir_all(deps.join("some-package")).unwrap();
+        fs::write(deps.join("some-package/index.js"), "module.exports = 1\n").unwrap();
+
+        let w = scratch("shared");
+        add_detached_worktree_blocking(f.path(), w.to_str().unwrap()).unwrap();
+
+        let linked = w.join("node_modules");
+        // Linking can legitimately fail (no permission, no junction support);
+        // the removal below is the assertion either way.
+        let was_linked = fs::symlink_metadata(&linked).is_ok();
+        if was_linked {
+            assert!(linked.join("some-package/index.js").is_file(), "link resolves");
+        }
+
+        remove_worktree_blocking(f.path(), w.to_str().unwrap(), true).unwrap();
+
+        assert!(
+            deps.join("some-package/index.js").is_file(),
+            "the main checkout's node_modules was emptied through the link"
+        );
+    }
+
+    #[test]
+    fn unlinking_never_touches_a_real_directory() {
+        let dir = scratch("real");
+        fs::create_dir_all(dir.join("node_modules")).unwrap();
+        fs::write(dir.join("node_modules/keep.txt"), "mine\n").unwrap();
+
+        unlink_shared_artifacts(&dir);
+
+        assert!(dir.join("node_modules/keep.txt").is_file());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn reserving_moves_a_worktree_onto_an_existing_branch() {
+        let f = Fixture::new();
+        git_in(&f.repo, &["branch", "feat/started-earlier"]);
+        let w = scratch("reserve");
+        add_detached_worktree_blocking(f.path(), w.to_str().unwrap()).unwrap();
+
+        reserve_worktree_branch_blocking(w.to_str().unwrap(), "feat/started-earlier").unwrap();
+        assert_eq!(symbolic_branch(&w).as_deref(), Some("feat/started-earlier"));
+
+        let _ = remove_worktree_blocking(f.path(), w.to_str().unwrap(), true);
+    }
+
+    /// The message has to name the holder: "already checked out" with no
+    /// location is the least actionable git error there is.
+    #[test]
+    fn reserving_a_branch_another_worktree_holds_says_where_it_is() {
+        let f = Fixture::new();
+        let a = scratch("holder");
+        let b = scratch("wants-it");
+        add_detached_worktree_blocking(f.path(), a.to_str().unwrap()).unwrap();
+        add_detached_worktree_blocking(f.path(), b.to_str().unwrap()).unwrap();
+        claim_worktree_branch_blocking(a.to_str().unwrap(), "feat/taken").unwrap();
+
+        let err = reserve_worktree_branch_blocking(b.to_str().unwrap(), "feat/taken").unwrap_err();
+        assert!(err.contains("feat/taken"), "{err}");
+        assert!(err.contains("already checked out"), "{err}");
+        assert!(symbolic_branch(&b).is_none(), "b stayed detached");
+
+        // The branch the main checkout is on is held too, and by the same rule.
+        let err = reserve_worktree_branch_blocking(b.to_str().unwrap(), "master").unwrap_err();
+        assert!(err.contains("already checked out"), "{err}");
+
+        let _ = remove_worktree_blocking(f.path(), a.to_str().unwrap(), true);
+        let _ = remove_worktree_blocking(f.path(), b.to_str().unwrap(), true);
+    }
+
+    #[test]
+    fn reserving_refuses_a_branch_that_does_not_exist() {
+        let f = Fixture::new();
+        let w = scratch("missing");
+        add_detached_worktree_blocking(f.path(), w.to_str().unwrap()).unwrap();
+        let err = reserve_worktree_branch_blocking(w.to_str().unwrap(), "feat/never").unwrap_err();
+        assert!(err.contains("no local branch"), "{err}");
         let _ = remove_worktree_blocking(f.path(), w.to_str().unwrap(), true);
     }
 

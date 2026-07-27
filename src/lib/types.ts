@@ -83,9 +83,9 @@ export interface Settings {
   powershellNoProfile: boolean;
   /**
    * Give every agent thread its own detached worktree instead of running them
-   * all in the project folder. Off by default: a fresh worktree has no
-   * `node_modules` and no build cache, so it needs a setup step before an
-   * agent can run the project's own tests in it.
+   * all in the project folder. On by default: the heavy directories
+   * (`node_modules`, `target`, …) are linked to the main checkout rather than
+   * rebuilt, so a worktree costs its source tree and nothing else.
    */
   threadWorktrees: boolean;
   defaultShellId: string | null;

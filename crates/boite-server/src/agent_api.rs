@@ -81,6 +81,82 @@ fn authorize(inner: &Inner, headers: &HeaderMap) -> Result<String, StatusCode> {
         .map_err(|_| StatusCode::NOT_FOUND)
 }
 
+/// The repository and worktree behind this caller's thread. CONFLICT when the
+/// thread runs in the project folder: it exists, it simply has no worktree, and
+/// the agent should be told that rather than given a not-found.
+fn worktree_of_request(
+    inner: &Inner,
+    headers: &HeaderMap,
+) -> Result<(String, String), StatusCode> {
+    // Goes through authorize first: the token still has to be right, and the
+    // thread still has to belong to a project this server knows.
+    authorize(inner, headers)?;
+    let thread_id = headers
+        .get("x-boite-thread")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    inner
+        .store
+        .worktree_of_thread(thread_id)
+        .ok_or(StatusCode::CONFLICT)
+}
+
+async fn worktree_status(
+    State(inner): State<Arc<Inner>>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let (repo, worktree) = worktree_of_request(&inner, &headers)?;
+    let hold = boite_core::git::worktree_hold_blocking(&worktree)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let branches = boite_core::git::branches_blocking(&repo).unwrap_or_default();
+    let current = boite_core::git::repo_info_blocking(&worktree)
+        .ok()
+        .and_then(|i| i.branch);
+    Ok(Json(json!({
+        "path": worktree,
+        "repo": repo,
+        "branch": current,
+        "detached": current.is_none(),
+        "uncommittedChanges": hold.dirty,
+        "branches": branches.iter().map(|b| &b.name).collect::<Vec<_>>(),
+    })))
+}
+
+#[derive(Deserialize)]
+struct BranchIn {
+    name: String,
+}
+
+async fn worktree_branch(
+    State(inner): State<Arc<Inner>>,
+    headers: HeaderMap,
+    Json(body): Json<BranchIn>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let (_, worktree) = worktree_of_request(&inner, &headers)?;
+    match boite_core::git::claim_worktree_branch_blocking(&worktree, &body.name) {
+        Ok(()) => {
+            let _ = inner.events.send(AppEvent::TodosChanged);
+            Ok(Json(json!({ "branch": body.name })))
+        }
+        Err(e) => Ok(Json(json!({ "error": e }))),
+    }
+}
+
+async fn worktree_reserve(
+    State(inner): State<Arc<Inner>>,
+    headers: HeaderMap,
+    Json(body): Json<BranchIn>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let (_, worktree) = worktree_of_request(&inner, &headers)?;
+    match boite_core::git::reserve_worktree_branch_blocking(&worktree, &body.name) {
+        Ok(()) => {
+            let _ = inner.events.send(AppEvent::TodosChanged);
+            Ok(Json(json!({ "branch": body.name })))
+        }
+        Err(e) => Ok(Json(json!({ "error": e }))),
+    }
+}
+
 async fn list(
     State(inner): State<Arc<Inner>>,
     headers: HeaderMap,
@@ -157,6 +233,9 @@ pub async fn start(store: Arc<Store>, events: broadcast::Sender<AppEvent>) -> Op
     let router = Router::new()
         .route("/v1/todos", get(list).post(add))
         .route("/v1/todos/claim", post(claim))
+        .route("/v1/worktree", get(worktree_status))
+        .route("/v1/worktree/branch", post(worktree_branch))
+        .route("/v1/worktree/reserve", post(worktree_reserve))
         .with_state(inner);
 
     let listener = match tokio::net::TcpListener::bind("127.0.0.1:0").await {

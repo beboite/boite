@@ -356,6 +356,7 @@ pub fn run() {
             commands::git_switch_branch,
             commands::worktree_open,
             commands::worktree_claim,
+            commands::worktree_reserve,
             commands::worktree_hold,
             commands::worktree_remove,
             commands::git_status,

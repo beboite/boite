@@ -110,8 +110,17 @@ impl Host {
         let status = res.status();
         if status == reqwest::StatusCode::CONFLICT {
             // The endpoint refuses without saying which reason applied; say the
-            // same here rather than inventing a diagnosis.
-            return Err("that item is not open, or does not belong to this project".into());
+            // same here rather than inventing a diagnosis. The two routes mean
+            // different things by it, and telling an agent its todo is closed
+            // when the real answer is "you have no worktree" sends it looking
+            // in the wrong place entirely.
+            return Err(if path.starts_with("/v1/worktree") {
+                "this terminal has no worktree: it runs directly in the project folder, \
+                 so branches here are the user's to make"
+                    .into()
+            } else {
+                "that item is not open, or does not belong to this project".to_string()
+            });
         }
         if !status.is_success() {
             return Err(format!("boite refused the call ({status})"));
@@ -158,6 +167,53 @@ fn tools() -> Value {
                 "required": ["id"],
                 "additionalProperties": false
             }
+        },
+        {
+            "name": "worktree_status",
+            "description": "Where this terminal is working. Boite gives each agent terminal its own \
+                            detached worktree of the project: a real checkout, isolated from the \
+                            user's and from the other terminals, sharing one history. Detached means \
+                            no branch is attached yet, so nothing you do here shows up in anyone's \
+                            branch list. Reports the directory, the branch if one has been taken, \
+                            whether there are uncommitted changes, and the branches that exist.",
+            "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false }
+        },
+        {
+            "name": "worktree_branch",
+            "description": "Name a NEW branch for the work in this terminal. Call it once the work \
+                            turns out to be worth keeping — that is the only moment a branch is \
+                            needed, and until then staying detached costs nothing and leaves no \
+                            trace. Without it the worktree is discarded when the thread closes, \
+                            which is the right outcome for a question you merely answered. Boite \
+                            shows the branch on the thread once it exists. Fails if the name is \
+                            already taken; use worktree_reserve for a branch that exists.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Branch name, in whatever convention the repository already \
+                                        uses (look at the existing branches before inventing one)."
+                    }
+                },
+                "required": ["name"],
+                "additionalProperties": false
+            }
+        },
+        {
+            "name": "worktree_reserve",
+            "description": "Move this terminal onto a branch that ALREADY exists, to continue it. \
+                            Git allows a branch in only one worktree at a time, so this fails if \
+                            another terminal — or the user's own checkout — currently holds it; the \
+                            error says which. Use worktree_branch to start something new.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string", "description": "An existing local branch." }
+                },
+                "required": ["name"],
+                "additionalProperties": false
+            }
         }
     ])
 }
@@ -191,8 +247,31 @@ fn call_tool(host: &Host, name: &str, args: &Value) -> Result<String, String> {
             )?;
             Ok("Reported. The user still has to confirm it.".into())
         }
+        "worktree_status" => {
+            let out = host.send(reqwest::Method::GET, "/v1/worktree", None)?;
+            Ok(serde_json::to_string_pretty(&out).unwrap_or_else(|_| out.to_string()))
+        }
+        "worktree_branch" => branch_call(host, args, "/v1/worktree/branch", "worktree_branch"),
+        "worktree_reserve" => branch_call(host, args, "/v1/worktree/reserve", "worktree_reserve"),
         other => Err(format!("unknown tool: {other}")),
     }
+}
+
+/// Both branch tools take one name and answer the same three ways: it worked,
+/// git would not, or this terminal has no worktree to put a branch on.
+fn branch_call(host: &Host, args: &Value, path: &str, tool: &str) -> Result<String, String> {
+    let name = args
+        .get("name")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| format!("{tool} needs a name"))?;
+    let out = host.send(reqwest::Method::POST, path, Some(json!({ "name": name })))?;
+    // The endpoint answers 200 with an `error` field for a refusal git made, so
+    // the agent reads the reason and picks another name instead of seeing a
+    // transport failure it cannot act on.
+    if let Some(err) = out.get("error").and_then(|v| v.as_str()) {
+        return Err(err.to_string());
+    }
+    Ok(format!("This terminal is now on '{name}'."))
 }
 
 fn reply(out: &mut impl Write, id: &Value, result: Value) {

@@ -287,6 +287,26 @@ impl Store {
         Ok(())
     }
 
+    /// The repository and worktree a thread runs in, when it has a worktree of
+    /// its own. `None` means it runs in the project folder itself.
+    pub fn worktree_of_thread(&self, thread_id: &str) -> Option<(String, String)> {
+        let conn = self.conn.lock();
+        conn.query_row(
+            "SELECT t.worktree_path, p.cwd, p.git_root
+             FROM threads t JOIN projects p ON p.id = t.project_id
+             WHERE t.id = ?1",
+            [thread_id],
+            |r| {
+                let worktree: Option<String> = r.get(0)?;
+                let cwd: String = r.get(1)?;
+                let git_root: Option<String> = r.get(2)?;
+                Ok(worktree.map(|w| (git_root.unwrap_or(cwd), w)))
+            },
+        )
+        .ok()
+        .flatten()
+    }
+
     pub fn load_projects(&self) -> Result<Vec<Project>, String> {
         let conn = self.conn.lock();
         let mut stmt = conn
