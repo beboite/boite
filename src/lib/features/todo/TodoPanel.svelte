@@ -363,12 +363,12 @@
             </button>
           </div>
 
-          <!-- Shown for a claim and for a confirmed one alike: once a task is
-               done, where it landed is the part worth keeping in front of you.
-               Hidden while the row is open — nothing is being reported then —
-               but the data is kept, so unticking a box and ticking it again
-               brings the same strip back rather than an empty one. -->
-          {#if item.state !== "open" && (item.claimedBy || item.commitSha || item.note)}
+          <!-- Shown while the task is still live — claimed, or reopened after a
+               claim — because that is when where the work landed is something
+               you act on. A ticked box is a closed matter and collapses back to
+               one line. Nothing is cleared either way: unticking brings the same
+               strip back rather than an empty one. -->
+          {#if item.state !== "done" && (item.claimedBy || item.commitSha || item.note)}
             <!-- What the agent said, reduced to what can be checked. The
                  sentence it wrote stays as the strip's tooltip: it costs
                  nothing folded away, and when a task went sideways it is the
