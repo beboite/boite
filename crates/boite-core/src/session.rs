@@ -673,13 +673,53 @@ pub fn find_copilot_session_blocking(
     }
 
     let conn = open_readonly(&db_path).ok()?;
-    let target = normalize(&cwd);
+    find_copilot_session_in(&conn, &normalize(&cwd), after_unix_ms, exclude)
+}
 
+/// Whether copilot would take this id back. False only when the store is
+/// readable and says the session holds nothing: every other answer is "yes",
+/// because a launch must not be held back by a question we could not put.
+///
+/// This exists for ids captured before the store was asked for turns. They are
+/// already saved on threads, and each relaunch replays one and gets refused.
+pub fn copilot_session_resumable(session_id: &str) -> bool {
+    let Some(db_path) = copilot_db_path() else {
+        return true;
+    };
+    if !db_path.is_file() {
+        return true;
+    }
+    let Ok(conn) = open_readonly(&db_path) else {
+        return true;
+    };
+    conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM turns WHERE session_id = ?1)",
+        [session_id],
+        |row| row.get::<_, i64>(0),
+    )
+    .map(|found| found == 1)
+    .unwrap_or(true)
+}
+
+/// The query itself, over an open connection, so a fixture can exercise it.
+fn find_copilot_session_in(
+    conn: &Connection,
+    target: &str,
+    after_unix_ms: i64,
+    exclude: &HashSet<String>,
+) -> Option<String> {
+    // A row appears the moment copilot starts, before a word is exchanged, and
+    // it refuses to resume one of those: "No session, task, or name matched
+    // '<uuid>'". Capturing it anyway is worse than capturing nothing — the id
+    // is replayed at every relaunch and fails every time, while the real
+    // conversation sits one row away. A turn is the first thing there is to
+    // come back to, so it is what makes a session worth remembering.
     let mut stmt = conn
         .prepare(
-            "SELECT id, cwd, created_at \
-             FROM sessions \
-             ORDER BY datetime(created_at) DESC \
+            "SELECT s.id, s.cwd, s.created_at \
+             FROM sessions s \
+             WHERE EXISTS (SELECT 1 FROM turns t WHERE t.session_id = s.id) \
+             ORDER BY datetime(s.created_at) DESC \
              LIMIT 50",
         )
         .ok()?;
@@ -1102,6 +1142,68 @@ mod tests {
         let meta = read_claude_session_meta(&path).unwrap();
         assert_eq!(meta.session_id.as_deref(), Some("abc"));
         assert_eq!(meta.cwd.as_deref(), Some("/Users/x/proj"));
+    }
+
+    /// Copilot's store, cut down to what the query touches.
+    fn copilot_fixture(rows: &[(&str, &str, &str, usize)]) -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE sessions (id TEXT PRIMARY KEY, cwd TEXT, created_at TEXT);\
+             CREATE TABLE turns (id INTEGER PRIMARY KEY, session_id TEXT NOT NULL);",
+        )
+        .unwrap();
+        for (id, cwd, created_at, turns) in rows {
+            conn.execute(
+                "INSERT INTO sessions (id, cwd, created_at) VALUES (?1, ?2, ?3)",
+                [id, cwd, created_at],
+            )
+            .unwrap();
+            for _ in 0..*turns {
+                conn.execute("INSERT INTO turns (session_id) VALUES (?1)", [id])
+                    .unwrap();
+            }
+        }
+        conn
+    }
+
+    /// The shell copilot opens at launch is the newest row in the store and has
+    /// nothing in it. Captured, it was replayed at every relaunch and refused
+    /// every time — "No session, task, or name matched" — while the real
+    /// conversation sat one row below it.
+    #[test]
+    fn an_empty_copilot_session_is_not_captured() {
+        let conn = copilot_fixture(&[
+            ("shell", "/proj", "2026-07-27T10:13:00.000Z", 0),
+            ("real", "/proj", "2026-07-27T10:12:00.000Z", 2),
+        ]);
+        let hit = find_copilot_session_in(&conn, "/proj", 0, &HashSet::new());
+        assert_eq!(hit.as_deref(), Some("real"));
+    }
+
+    /// Nothing to come back to yet is a reason to capture nothing, not a reason
+    /// to fall back on somebody else's conversation.
+    #[test]
+    fn nothing_spoken_yet_captures_nothing() {
+        let conn = copilot_fixture(&[("shell", "/proj", "2026-07-27T10:13:00.000Z", 0)]);
+        assert_eq!(
+            find_copilot_session_in(&conn, "/proj", 0, &HashSet::new()),
+            None
+        );
+    }
+
+    /// The rest of the filtering has to keep working over the new query.
+    #[test]
+    fn cwd_and_exclusions_still_apply() {
+        let conn = copilot_fixture(&[
+            ("elsewhere", "/other", "2026-07-27T10:14:00.000Z", 3),
+            ("ours", "/proj", "2026-07-27T10:13:00.000Z", 1),
+        ]);
+        assert_eq!(
+            find_copilot_session_in(&conn, "/proj", 0, &HashSet::new()).as_deref(),
+            Some("ours")
+        );
+        let taken: HashSet<String> = ["ours".to_string()].into_iter().collect();
+        assert_eq!(find_copilot_session_in(&conn, "/proj", 0, &taken), None);
     }
 
     /// The liveness rule is only worth anything if a dead pid reads as dead:

@@ -423,6 +423,15 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
             Ok(json!({ "stopped": stopped }))
         }
 
+        // Same reason, different refusal: copilot turns down an id whose
+        // session was opened and never used.
+        "session.copilotResumable" => {
+            let id = str_param(&params, "sessionId")?;
+            let resumable =
+                blocking(move || boite_core::session::copilot_session_resumable(&id)).await?;
+            Ok(json!({ "resumable": resumable }))
+        }
+
         "session.find" => {
             let kind = str_param(&params, "kind")?;
             let cwd = str_param(&params, "cwd")?;
