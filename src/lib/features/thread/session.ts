@@ -208,6 +208,27 @@ export async function buildResumeArgsAsync(thread: Thread, cwd: string): Promise
   // serves the project, and a fresh thread wants it as much as a resumed one.
   const mcp = await mcpArgsFor(key, settings.state.agentTodoAccess);
   const args = mcp.length > 0 ? [...base, ...mcp] : base;
+
+  // A session copilot opened and never used is refused by id, and threads that
+  // captured one before that was known still carry it. Replaying it costs the
+  // launch and gains nothing; dropping the flag starts a session that can be
+  // captured properly on the next scan.
+  if (key === "copilot") {
+    const flag = args.find((a) => a.startsWith("--resume="));
+    if (!flag) return args;
+    const id = flag.slice("--resume=".length);
+    const ok = await backendForPath(cwd)
+      .session.copilotResumable(id)
+      .catch(() => true);
+    if (ok) return args;
+    logger.info(
+      "resume",
+      `${thread.id} (copilot): ${id} holds nothing to resume, starting fresh`,
+      { cmd: thread.cmd },
+    );
+    return args.filter((a) => a !== flag);
+  }
+
   if (key !== "claude") return args;
 
   const at = args.indexOf("--resume");

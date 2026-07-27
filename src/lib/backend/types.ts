@@ -193,6 +193,13 @@ export interface SessionApi {
    * anything was stopped.
    */
   stopClaude(sessionId: string): Promise<boolean>;
+  /**
+   * Whether copilot would take this session back. Sessions it opened but never
+   * used are refused by id, and threads captured before that was known still
+   * carry one. Backends that cannot answer say `true`, which replays the id as
+   * before rather than dropping a conversation on a guess.
+   */
+  copilotResumable(sessionId: string): Promise<boolean>;
 }
 
 export interface LogApi {

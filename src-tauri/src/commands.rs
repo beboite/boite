@@ -523,6 +523,15 @@ pub fn agent_api_ready(app: AppHandle) -> bool {
     app.try_state::<crate::agent_api::AgentApi>().is_some()
 }
 
+/// Whether copilot still has something to come back to under this id. Threads
+/// captured before empty sessions were filtered out carry ids copilot refuses.
+#[tauri::command]
+pub async fn copilot_session_resumable(session_id: String) -> bool {
+    tauri::async_runtime::spawn_blocking(move || session::copilot_session_resumable(&session_id))
+        .await
+        .unwrap_or(true)
+}
+
 /// Session ids claude currently has open. `--resume` refuses every one of
 /// them, so a thread holding a captured id has to ask before replaying it.
 #[tauri::command]

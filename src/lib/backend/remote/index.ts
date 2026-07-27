@@ -239,6 +239,12 @@ export class RemoteBackend implements Backend {
         rpc("session.stopClaude", { sessionId })
           .then((r) => Boolean(r.stopped))
           .catch(() => false),
+      // An older server has no answer for this; `true` replays the id exactly
+      // as before rather than dropping a resume on a guess.
+      copilotResumable: (sessionId) =>
+        rpc("session.copilotResumable", { sessionId })
+          .then((r) => r.resumable !== false)
+          .catch(() => true),
     };
 
     // App-event logging is a device-local concern (the desktop writes a log

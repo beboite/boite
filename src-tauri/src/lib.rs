@@ -313,6 +313,7 @@ pub fn run() {
             commands::agent_mcp_registration,
             commands::register_agent_mcp,
             commands::stop_claude_session,
+            commands::copilot_session_resumable,
             commands::find_codex_session,
             commands::find_opencode_session,
             commands::find_cursor_session,
