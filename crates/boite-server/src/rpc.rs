@@ -350,6 +350,15 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
             Ok(json!({ "shells": shells }))
         }
 
+        // The setup wizard asks whether an agent is installed. The agents run
+        // here, so this server's PATH is the one that decides, not the PATH of
+        // whatever device is driving the UI.
+        "shell.commandExists" => {
+            let cmd = str_param(&params, "cmd")?;
+            let found = blocking(move || shell::command_exists(&cmd)).await?;
+            Ok(json!({ "found": found }))
+        }
+
         // The agents run here, so this is where the registry of open sessions
         // is. Clients ask before replaying a captured id: claude refuses
         // `--resume` for anything it still has open.

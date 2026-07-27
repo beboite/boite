@@ -1,20 +1,26 @@
+import type { MessageKey } from "$lib/i18n/messages";
+import type { IconKey } from "$lib/types";
+
 export interface CliPreset {
   id: string;
   label: string;
   command: string;
-  iconKey: string;
+  iconKey: IconKey;
   executable: string;
   docUrl: string;
 }
 
+// Carries message keys rather than strings: the copy is long enough to need
+// translating, and a key checked against MessageKey cannot drift out of the
+// dictionaries the way a literal can.
 export interface SetupRecommendation {
   id: string;
   label: string;
-  iconKey: string;
+  iconKey: IconKey;
   executable: string;
   docUrl: string;
-  description: string;
-  linkLabel: string;
+  descKey: MessageKey;
+  linkKey: MessageKey;
 }
 
 export const SETUP_RECOMMENDATIONS: SetupRecommendation[] = [
@@ -24,8 +30,8 @@ export const SETUP_RECOMMENDATIONS: SetupRecommendation[] = [
     iconKey: "bun",
     executable: "bun",
     docUrl: "https://bun.sh",
-    description: "Bun accelere l'installation des dependances et l'execution des projets qui utilisent JavaScript ou TypeScript.",
-    linkLabel: "Site de Bun",
+    descKey: "setup.recBunDesc",
+    linkKey: "setup.recBunLink",
   },
   {
     id: "codex-everywhere",
@@ -33,73 +39,74 @@ export const SETUP_RECOMMENDATIONS: SetupRecommendation[] = [
     iconKey: "codex",
     executable: "codex",
     docUrl: "https://docs.codex-everywhere.com/quickstart/",
-    description: "Passerelle API compatible pour connecter Codex avec une cle API Codex Everywhere. Le service annonce GPT-5.4/5.5 a 3 % du tarif OpenAI.",
-    linkLabel: "Guide Codex Everywhere",
+    descKey: "setup.recCodexEverywhereDesc",
+    linkKey: "setup.recCodexEverywhereLink",
   },
 ];
+
 export const CLI_PRESETS: CliPreset[] = [
-	{
-		id: "claude",
-		label: "Claude",
-		command: "claude",
-		iconKey: "claude",
-		executable: "claude",
-		docUrl: "https://code.claude.com/docs/en/overview",
-	},
-	{
-		id: "codex",
-		label: "Codex",
-		command: "codex --no-alt-screen",
-		iconKey: "codex",
-		executable: "codex",
-		docUrl: "https://github.com/openai/codex",
-	},
-	{
-		id: "opencode",
-		label: "Opencode",
-		command: "opencode",
-		iconKey: "opencode",
-		executable: "opencode",
-		docUrl: "https://opencode.ai/docs",
-	},
-	{
-		id: "cursor",
-		label: "Cursor Agent",
-		command: "cursor-agent",
-		iconKey: "cursor",
-		executable: "cursor-agent",
-		docUrl: "https://cursor.com/fr/cli",
-	},
-	{
-		id: "antigravity",
-		label: "Antigravity",
-		command: "agy",
-		iconKey: "antigravity",
-		executable: "agy",
-		docUrl: "https://antigravity.google/docs/cli",
-	},
-	{
-		id: "copilot",
-		label: "Copilot",
-		command: "gh copilot",
-		iconKey: "copilot",
-		executable: "gh",
-		docUrl: "https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli",
-	},
-	{
-		id: "grok",
-		label: "Grok",
-		command: "grok",
-		iconKey: "grok",
-		executable: "grok",
-		docUrl: "https://x.ai/blog/grok-2",
-	},
-	{
-		id: "hermes",
-		label: "Hermes",
-		command: "hermes",
-		iconKey: "hermes",
-		executable: "hermes",
-		docUrl: "https://github.com/NousResearch/hermes-agent#installation",
-	},
+  {
+    id: "claude",
+    label: "Claude",
+    command: "claude",
+    iconKey: "claude",
+    executable: "claude",
+    docUrl: "https://code.claude.com/docs/en/overview",
+  },
+  {
+    id: "codex",
+    label: "Codex",
+    command: "codex --no-alt-screen",
+    iconKey: "codex",
+    executable: "codex",
+    docUrl: "https://github.com/openai/codex",
+  },
+  {
+    id: "opencode",
+    label: "Opencode",
+    command: "opencode",
+    iconKey: "opencode",
+    executable: "opencode",
+    docUrl: "https://opencode.ai/docs",
+  },
+  {
+    id: "cursor",
+    label: "Cursor Agent",
+    command: "cursor-agent",
+    iconKey: "cursor",
+    executable: "cursor-agent",
+    docUrl: "https://cursor.com/fr/cli",
+  },
+  {
+    id: "antigravity",
+    label: "Antigravity",
+    command: "agy",
+    iconKey: "antigravity",
+    executable: "agy",
+    docUrl: "https://antigravity.google/docs/cli",
+  },
+  {
+    id: "copilot",
+    label: "Copilot",
+    command: "gh copilot",
+    iconKey: "copilot",
+    executable: "gh",
+    docUrl: "https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli",
+  },
+  {
+    id: "grok",
+    label: "Grok",
+    command: "grok",
+    iconKey: "grok",
+    executable: "grok",
+    docUrl: "https://x.ai/blog/grok-2",
+  },
+  {
+    id: "hermes",
+    label: "Hermes",
+    command: "hermes",
+    iconKey: "hermes",
+    executable: "hermes",
+    docUrl: "https://github.com/NousResearch/hermes-agent#installation",
+  },
 ];

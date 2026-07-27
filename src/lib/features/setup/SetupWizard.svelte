@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { invoke } from "@tauri-apps/api/core";
+  import { backend, workspace } from "$lib/backend";
   import { settings } from "$lib/features/settings/store.svelte";
   import { CLI_PRESETS, SETUP_RECOMMENDATIONS } from "$lib/features/settings/cliPresets";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
@@ -13,9 +13,25 @@
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import GripVertical from "@lucide/svelte/icons/grip-vertical";
   import Star from "@lucide/svelte/icons/star";
-  import { t } from "$lib/i18n/index.svelte";
+  import { t, LOCALE_OPTIONS } from "$lib/i18n/index.svelte";
+  import type { MessageKey } from "$lib/i18n/messages";
+  import type { IconKey } from "$lib/types";
 
-  interface SetupItem { id: string; label: string; command: string; iconKey: string | null; executable: string; docUrl: string; installed: boolean; enabled: boolean; runtime?: boolean; description?: string; linkLabel?: string; }
+  interface SetupItem {
+    id: string;
+    label: string;
+    command: string;
+    iconKey: IconKey;
+    executable: string;
+    docUrl: string;
+    installed: boolean;
+    enabled: boolean;
+    // Recommendations are shown for information only and never become
+    // shortcuts, which is what separates them from the agent list.
+    runtime?: boolean;
+    descKey?: MessageKey;
+    linkKey?: MessageKey;
+  }
 
   let step = $state(1);
   let loading = $state(true);
@@ -28,36 +44,124 @@
   let overId = $state<string | null>(null);
   let dragArmed = $state(false);
 
-  const items = $state<SetupItem[]>(CLI_PRESETS.map((cli) => ({ id: cli.id, label: cli.label, command: cli.command, iconKey: cli.iconKey, executable: cli.executable, docUrl: cli.docUrl, installed: false, enabled: false })));
-  const recommendations = $state<SetupItem[]>(SETUP_RECOMMENDATIONS.map((item) => ({ ...item, command: item.executable, installed: false, enabled: false, runtime: true })));
+  const items = $state<SetupItem[]>(
+    CLI_PRESETS.map((cli) => ({ ...cli, installed: false, enabled: false })),
+  );
+  const recommendations = $state<SetupItem[]>(
+    SETUP_RECOMMENDATIONS.map((item) => ({
+      ...item,
+      command: item.executable,
+      installed: false,
+      enabled: false,
+      runtime: true,
+    })),
+  );
+
+  // Detection runs where the agents will run. On a remote boite that is the
+  // server, so naming it beats claiming "this computer".
+  const detectionTarget = $derived(
+    workspace.mode === "remote"
+      ? (workspace.info.name ?? "boite")
+      : t("setup.detectionTargetLocal"),
+  );
 
   async function refreshItem(item: SetupItem) {
     refreshingId = item.id;
-    try { item.installed = await invoke<boolean>("check_command_exists", { cmd: item.executable }); if (item.installed && !item.runtime) item.enabled = true; }
-    catch (err) { console.error("Unable to check command", item.executable, err); item.installed = false; }
-    finally { refreshingId = null; }
+    try {
+      item.installed = await backend().shell.commandExists(item.executable);
+      if (item.installed && !item.runtime) item.enabled = true;
+    } catch (err) {
+      console.error("Unable to check command", item.executable, err);
+      item.installed = false;
+    } finally {
+      refreshingId = null;
+    }
   }
-  async function refreshAll() { loading = true; await Promise.all(items.map(refreshItem)); loading = false; }
-  onMount(() => { void refreshAll(); });
+
+  async function refreshAll() {
+    loading = true;
+    await Promise.all([...items, ...recommendations].map(refreshItem));
+    loading = false;
+  }
+
+  onMount(() => {
+    void refreshAll();
+  });
+
   function addCustomAgent() {
-    const label = customLabel.trim(); const command = customCommand.trim();
+    const label = customLabel.trim();
+    const command = customCommand.trim();
     if (!label || !command) return;
-    items.push({ id: `custom-${crypto.randomUUID()}`, label, command, iconKey: null, executable: command.split(/\s+/)[0], docUrl: "", installed: true, enabled: true });
-    customLabel = ""; customCommand = ""; showCustomAgent = false;
+    items.push({
+      id: `custom-${crypto.randomUUID()}`,
+      label,
+      command,
+      iconKey: null,
+      executable: command.split(/\s+/)[0],
+      docUrl: "",
+      installed: true,
+      enabled: true,
+    });
+    customLabel = "";
+    customCommand = "";
+    showCustomAgent = false;
   }
-  function goToOrder() { enabledAgents = items.filter((item) => !item.runtime && item.enabled); if (enabledAgents.length === 0) { finishSetup(); return; } step = 4; }
+
+  function selectedAgents(): SetupItem[] {
+    return items.filter((item) => !item.runtime && item.enabled);
+  }
+
+  function goToOrder() {
+    enabledAgents = selectedAgents();
+    if (enabledAgents.length === 0) {
+      void finishSetup();
+      return;
+    }
+    step = 4;
+  }
+
   function finishSetup() {
-    const source = step === 4 ? enabledAgents : items.filter((item) => !item.runtime && item.enabled);
-    settings.state.shortcuts = source.map((item) => ({ id: item.id, label: item.label, command: item.command, iconKey: item.iconKey as any }));
-    void settings.setSetupCompleted(true);
+    const source = step === 4 ? enabledAgents : selectedAgents();
+    return settings.completeSetup(
+      source.map((item) => ({
+        id: item.id,
+        label: item.label,
+        command: item.command,
+        iconKey: item.iconKey,
+      })),
+    );
   }
-  function armDrag() { dragArmed = true; }
-  function disarmDrag() { dragArmed = false; }
-  function onDragStart(id: string, event: DragEvent) { if (!dragArmed) { event.preventDefault(); return; } draggedId = id; event.dataTransfer?.setData("text/plain", id); }
-  function onDrop(targetId: string, event: DragEvent) { event.preventDefault(); const fromId = draggedId; draggedId = null; overId = null; dragArmed = false; if (!fromId || fromId === targetId) return; const from = enabledAgents.findIndex((item) => item.id === fromId); const to = enabledAgents.findIndex((item) => item.id === targetId); if (from < 0 || to < 0) return; const [item] = enabledAgents.splice(from, 1); enabledAgents.splice(to, 0, item); }
+
+  function armDrag() {
+    dragArmed = true;
+  }
+  function disarmDrag() {
+    dragArmed = false;
+  }
+  function onDragStart(id: string, event: DragEvent) {
+    if (!dragArmed) {
+      event.preventDefault();
+      return;
+    }
+    draggedId = id;
+    event.dataTransfer?.setData("text/plain", id);
+  }
+  function onDrop(targetId: string, event: DragEvent) {
+    event.preventDefault();
+    const fromId = draggedId;
+    draggedId = null;
+    overId = null;
+    dragArmed = false;
+    if (!fromId || fromId === targetId) return;
+    const from = enabledAgents.findIndex((item) => item.id === fromId);
+    const to = enabledAgents.findIndex((item) => item.id === targetId);
+    if (from < 0 || to < 0) return;
+    const [item] = enabledAgents.splice(from, 1);
+    enabledAgents.splice(to, 0, item);
+  }
 </script>
 
-<div class="setup-container flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-[#050505] p-4 md:p-6">
+<div class="setup-container flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-[var(--color-background)] p-4 md:p-6">
   <div class="h-[720px] w-full max-w-4xl max-h-full overflow-hidden rounded-lg border border-border/60 bg-[var(--color-surface)] p-6 shadow-2xl md:p-8">
     {#if step === 1}
       <div class="mx-auto flex h-full min-h-0 max-w-xl flex-col items-center justify-center py-10 text-center">
@@ -67,11 +171,10 @@
         <h1 class="text-3xl font-bold text-foreground">{t("setup.title")}</h1>
         <p class="mt-3 max-w-md text-sm leading-relaxed text-muted-foreground">{t("setup.desc")}</p>
 
-        <!-- Language Selector -->
         <div class="mt-6 flex items-center justify-center gap-2">
           <span class="text-xs text-muted-foreground">{t("setup.language")} :</span>
           <div class="flex gap-1.5">
-            {#each [{ id: "system" as const, labelKey: "appearance.langSystem" }, { id: "fr" as const, labelKey: "appearance.langFr" }, { id: "en" as const, labelKey: "appearance.langEn" }] as lang}
+            {#each LOCALE_OPTIONS as lang (lang.id)}
               <button
                 type="button"
                 class="rounded-md border px-2.5 py-1 text-xs transition
@@ -87,7 +190,7 @@
         </div>
 
         <div class="mt-8 flex w-full max-w-sm flex-col gap-3 sm:flex-row">
-          <button type="button" onclick={() => step = 2} class="flex flex-1 items-center justify-center gap-2 rounded-md bg-foreground px-5 py-3 text-sm font-semibold text-background transition hover:bg-neutral-200">
+          <button type="button" onclick={() => step = 2} class="flex flex-1 items-center justify-center gap-2 rounded-md bg-foreground px-5 py-3 text-sm font-semibold text-background transition hover:bg-foreground/90">
             {t("setup.start")} <ArrowRight class="size-4" />
           </button>
           <button type="button" onclick={() => void settings.setSetupCompleted(true)} class="flex flex-1 items-center justify-center rounded-md border border-border bg-[var(--color-surface-2)] px-5 py-3 text-sm font-medium text-muted-foreground transition hover:text-foreground">
@@ -98,26 +201,28 @@
     {:else if step === 2}
       <div class="flex h-full min-h-0 flex-col">
         <div class="border-b border-border/50 pb-4">
-          <p class="text-[11px] font-semibold uppercase text-muted-foreground">{t("setup.step_count", { current: 1, total: 3 })}</p>
-          <h2 class="mt-1 text-xl font-bold text-foreground">{t("setup.recommendations_title")}</h2>
-          <p class="mt-1 text-xs text-muted-foreground">{t("setup.recommendations_desc")}</p>
+          <p class="text-[11px] font-semibold uppercase text-muted-foreground">{t("setup.stepCount", { current: 1, total: 3 })}</p>
+          <h2 class="mt-1 text-xl font-bold text-foreground">{t("setup.recommendationsTitle")}</h2>
+          <p class="mt-1 text-xs text-muted-foreground">{t("setup.recommendationsDesc")}</p>
         </div>
         <div class="mt-5 grid grid-cols-1 gap-3 md:grid-cols-3">
           {#each recommendations as item (item.id)}
             <article class="flex min-h-56 flex-col rounded-lg border border-[var(--color-awake)]/50 bg-[var(--color-awake)]/5 p-4">
               <div class="flex items-center gap-2.5">
-                <ShortcutIcon iconKey={item.iconKey as any} size={26} />
+                <ShortcutIcon iconKey={item.iconKey} size={26} />
                 <div>
                   <div class="flex items-center gap-1.5">
                     <h3 class="text-sm font-semibold text-foreground">{item.label}</h3>
-                    <Star class="size-3.5 fill-yellow-400 text-yellow-400" />
+                    <Star class="size-3.5 fill-[var(--color-warning)] text-[var(--color-warning)]" />
                   </div>
                   <p class="text-[10px] font-medium uppercase text-[var(--color-awake)]">{t("setup.recommended")}</p>
                 </div>
               </div>
-              <p class="mt-4 text-xs leading-relaxed text-muted-foreground">{t(`setup.recommendation_${item.id}_desc`)}</p>
+              {#if item.descKey}
+                <p class="mt-4 text-xs leading-relaxed text-muted-foreground">{t(item.descKey)}</p>
+              {/if}
               <a href={item.docUrl} target="_blank" rel="noopener noreferrer" class="mt-auto flex items-center justify-center gap-1 pt-4 rounded-md border border-border bg-[var(--color-surface-2)] px-2 py-1.5 text-xs text-muted-foreground transition hover:text-foreground">
-                <ExternalLink class="size-3" /> {t(`setup.recommendation_${item.id}_link`)}
+                <ExternalLink class="size-3" /> {item.linkKey ? t(item.linkKey) : t("setup.documentation")}
               </a>
             </article>
           {/each}
@@ -130,9 +235,9 @@
                 <p class="mt-1 text-xs text-muted-foreground">{t("setup.openai")}</p>
               </div>
             </div>
-            <p class="mt-4 text-xs leading-relaxed text-muted-foreground">{t("setup.chatgpt_desc")}</p>
+            <p class="mt-4 text-xs leading-relaxed text-muted-foreground">{t("setup.chatgptDesc")}</p>
             <a href="https://chatgpt.com" target="_blank" rel="noopener noreferrer" class="mt-auto flex items-center justify-center gap-1 rounded-md border border-border bg-[var(--color-surface-3)] px-2 py-1.5 text-xs text-muted-foreground transition hover:text-foreground">
-              <ExternalLink class="size-3" /> {t("setup.chatgpt_open")}
+              <ExternalLink class="size-3" /> {t("setup.chatgptOpen")}
             </a>
           </article>
 
@@ -144,9 +249,9 @@
                 <p class="mt-1 text-xs text-muted-foreground">{t("setup.anthropic")}</p>
               </div>
             </div>
-            <p class="mt-4 text-xs leading-relaxed text-muted-foreground">{t("setup.claude_desc")}</p>
+            <p class="mt-4 text-xs leading-relaxed text-muted-foreground">{t("setup.claudeDesc")}</p>
             <a href="https://claude.ai" target="_blank" rel="noopener noreferrer" class="mt-auto flex items-center justify-center gap-1 rounded-md border border-border bg-[var(--color-surface-3)] px-2 py-1.5 text-xs text-muted-foreground transition hover:text-foreground">
-              <ExternalLink class="size-3" /> {t("setup.claude_open")}
+              <ExternalLink class="size-3" /> {t("setup.claudeOpen")}
             </a>
           </article>
         </div>
@@ -154,8 +259,8 @@
           <button type="button" onclick={() => step = 1} class="flex items-center gap-1.5 px-2 py-2 text-sm text-muted-foreground transition hover:text-foreground">
             <ArrowLeft class="size-4" /> {t("setup.back")}
           </button>
-          <button type="button" onclick={() => step = 3} class="flex items-center gap-1.5 rounded-md bg-foreground px-5 py-2.5 text-sm font-semibold text-background transition hover:bg-neutral-200">
-            {t("setup.config_agents")} <ArrowRight class="size-4" />
+          <button type="button" onclick={() => step = 3} class="flex items-center gap-1.5 rounded-md bg-foreground px-5 py-2.5 text-sm font-semibold text-background transition hover:bg-foreground/90">
+            {t("setup.configAgents")} <ArrowRight class="size-4" />
           </button>
         </div>
       </div>
@@ -163,9 +268,9 @@
       <div class="flex h-full min-h-0 flex-col">
         <div class="flex flex-wrap items-start justify-between gap-4 border-b border-border/50 pb-4">
           <div>
-            <p class="text-[11px] font-semibold uppercase text-muted-foreground">{t("setup.step_count", { current: 2, total: 3 })}</p>
-            <h2 class="mt-1 text-xl font-bold text-foreground">{t("setup.agents_title")}</h2>
-            <p class="mt-1 text-xs text-muted-foreground">{t("setup.agents_desc")}</p>
+            <p class="text-[11px] font-semibold uppercase text-muted-foreground">{t("setup.stepCount", { current: 2, total: 3 })}</p>
+            <h2 class="mt-1 text-xl font-bold text-foreground">{t("setup.agentsTitle")}</h2>
+            <p class="mt-1 text-xs text-muted-foreground">{t("setup.agentsDesc")}</p>
           </div>
           <button type="button" onclick={() => void refreshAll()} disabled={loading} class="flex items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-3 py-2 text-xs font-medium text-muted-foreground transition hover:text-foreground disabled:cursor-wait disabled:opacity-50">
             <RefreshCw class="size-3.5 {loading ? 'animate-spin' : ''}" /> {t("setup.refresh")}
@@ -174,7 +279,7 @@
         {#if loading}
           <div class="flex flex-1 flex-col items-center justify-center gap-3">
             <div class="size-7 animate-spin rounded-full border-2 border-border border-t-foreground"></div>
-            <p class="text-xs text-muted-foreground">{t("setup.checking_tools")}</p>
+            <p class="text-xs text-muted-foreground">{t("setup.checkingTools")}</p>
           </div>
         {:else}
           <div class="mt-5 min-h-0 flex-1 overflow-y-auto px-1 py-1 pb-4">
@@ -183,14 +288,18 @@
                 <article class="flex min-h-48 flex-col rounded-lg border border-border bg-[var(--color-surface-2)] p-4">
                   <div class="flex items-start justify-between gap-3">
                     <div class="flex min-w-0 items-center gap-2.5">
-                      <ShortcutIcon iconKey={item.iconKey as any} size={25} />
+                      <ShortcutIcon iconKey={item.iconKey} size={25} />
                       <div class="min-w-0">
                         <p class="truncate text-sm font-semibold text-foreground">{item.label}</p>
-                        <p class="mt-1 text-[11px] text-muted-foreground">{item.installed ? t("setup.detected") : t("setup.not_detected")}</p>
+                        <p class="mt-1 text-[11px] text-muted-foreground">
+                          {item.installed
+                            ? t("setup.detected", { target: detectionTarget })
+                            : t("setup.notDetected")}
+                        </p>
                       </div>
                     </div>
-                    <button type="button" role="switch" aria-checked={item.enabled} aria-label="Ajouter {item.label} aux raccourcis" onclick={() => item.enabled = !item.enabled} class="relative inline-flex h-5 w-9 shrink-0 rounded-full transition {item.enabled ? 'bg-[var(--color-success)]' : 'bg-neutral-700'}">
-                      <span class="mt-0.5 size-4 rounded-full bg-white shadow transition {item.enabled ? 'translate-x-4' : 'translate-x-0.5'}"></span>
+                    <button type="button" role="switch" aria-checked={item.enabled} aria-label={t("setup.addToShortcuts", { label: item.label })} onclick={() => item.enabled = !item.enabled} class="relative inline-flex h-5 w-9 shrink-0 rounded-full transition {item.enabled ? 'bg-[var(--color-success)]' : 'bg-[var(--color-surface-3)]'}">
+                      <span class="mt-0.5 size-4 rounded-full bg-foreground shadow transition {item.enabled ? 'translate-x-4' : 'translate-x-0.5'}"></span>
                     </button>
                   </div>
                   <p class="mt-3 truncate font-mono text-[11px] text-muted-foreground/70">{item.command}</p>
@@ -200,7 +309,7 @@
                         <ExternalLink class="size-3" /> {t("setup.documentation")}
                       </a>
                     {/if}
-                    <button type="button" onclick={() => void refreshItem(item)} disabled={refreshingId === item.id} class="flex size-8 items-center justify-center rounded-md border border-border text-muted-foreground transition hover:bg-[var(--color-surface-3)] hover:text-foreground disabled:opacity-50" title={t("setup.refresh_item_tooltip")}>
+                    <button type="button" onclick={() => void refreshItem(item)} disabled={refreshingId === item.id} class="flex size-8 items-center justify-center rounded-md border border-border text-muted-foreground transition hover:bg-[var(--color-surface-3)] hover:text-foreground disabled:opacity-50" title={t("setup.refreshItemTooltip")}>
                       <RefreshCw class="size-3.5 {refreshingId === item.id ? 'animate-spin' : ''}" />
                     </button>
                   </div>
@@ -211,22 +320,22 @@
                 <span class="mb-3 flex size-9 items-center justify-center rounded-md border border-dashed border-muted-foreground/60 text-muted-foreground">
                   <Plus class="size-4" />
                 </span>
-                <span class="text-sm font-semibold text-foreground">{t("setup.add_agent")}</span>
-                <span class="mt-1 text-xs leading-relaxed text-muted-foreground">{t("setup.add_agent_desc")}</span>
+                <span class="text-sm font-semibold text-foreground">{t("setup.addAgent")}</span>
+                <span class="mt-1 text-xs leading-relaxed text-muted-foreground">{t("setup.addAgentDesc")}</span>
               </button>
             </div>
 
             {#if showCustomAgent}
               <form class="mt-4 grid grid-cols-1 items-end gap-3 rounded-lg border border-border bg-[var(--color-surface-2)] p-4 sm:grid-cols-[1fr_1fr_auto]" onsubmit={(event) => { event.preventDefault(); addCustomAgent(); }}>
                 <label class="flex flex-col gap-1.5 text-xs text-muted-foreground">
-                  {t("setup.agent_name")}
-                  <input bind:value={customLabel} required placeholder={t("setup.custom_agent_placeholder")} class="rounded-md border border-border bg-[var(--color-surface)] px-3 py-2 text-sm text-foreground outline-none focus:border-foreground/50" />
+                  {t("setup.agentName")}
+                  <input bind:value={customLabel} required placeholder={t("setup.customAgentPlaceholder")} class="rounded-md border border-border bg-[var(--color-surface)] px-3 py-2 text-sm text-foreground outline-none focus:border-foreground/50" />
                 </label>
                 <label class="flex flex-col gap-1.5 text-xs text-muted-foreground">
                   {t("setup.command")}
-                  <input bind:value={customCommand} required placeholder={t("setup.command_placeholder")} class="rounded-md border border-border bg-[var(--color-surface)] px-3 py-2 font-mono text-sm text-foreground outline-none focus:border-foreground/50" />
+                  <input bind:value={customCommand} required placeholder={t("setup.commandPlaceholder")} class="rounded-md border border-border bg-[var(--color-surface)] px-3 py-2 font-mono text-sm text-foreground outline-none focus:border-foreground/50" />
                 </label>
-                <button type="submit" class="flex items-center justify-center gap-1.5 rounded-md bg-foreground px-3 py-2 text-sm font-medium text-background transition hover:bg-neutral-200">
+                <button type="submit" class="flex items-center justify-center gap-1.5 rounded-md bg-foreground px-3 py-2 text-sm font-medium text-background transition hover:bg-foreground/90">
                   <Plus class="size-3.5" /> {t("setup.add")}
                 </button>
               </form>
@@ -237,7 +346,7 @@
           <button type="button" onclick={() => step = 2} class="flex items-center gap-1.5 px-2 py-2 text-sm text-muted-foreground transition hover:text-foreground">
             <ArrowLeft class="size-4" /> {t("setup.back")}
           </button>
-          <button type="button" onclick={goToOrder} class="flex items-center gap-1.5 rounded-md bg-foreground px-5 py-2.5 text-sm font-semibold text-background transition hover:bg-neutral-200">
+          <button type="button" onclick={goToOrder} class="flex items-center gap-1.5 rounded-md bg-foreground px-5 py-2.5 text-sm font-semibold text-background transition hover:bg-foreground/90">
             {t("setup.continue")} <ArrowRight class="size-4" />
           </button>
         </div>
@@ -245,29 +354,29 @@
     {:else}
       <div class="flex h-full min-h-0 flex-col">
         <div class="border-b border-border/50 pb-4">
-          <p class="text-[11px] font-semibold uppercase text-muted-foreground">{t("setup.step_count", { current: 3, total: 3 })}</p>
-          <h2 class="mt-1 text-xl font-bold text-foreground">{t("setup.order_title")}</h2>
-          <p class="mt-1 text-xs text-muted-foreground">{t("setup.order_desc")}</p>
+          <p class="text-[11px] font-semibold uppercase text-muted-foreground">{t("setup.stepCount", { current: 3, total: 3 })}</p>
+          <h2 class="mt-1 text-xl font-bold text-foreground">{t("setup.orderTitle")}</h2>
+          <p class="mt-1 text-xs text-muted-foreground">{t("setup.orderDesc")}</p>
         </div>
-        <div class="mt-5 min-h-0 flex-1 overflow-y-auto px-1 py-1 pb-4 flex flex-col gap-2">
+        <ul class="mt-5 min-h-0 flex-1 overflow-y-auto px-1 py-1 pb-4 flex flex-col gap-2">
           {#each enabledAgents as item (item.id)}
-            <div role="listitem" draggable={dragArmed} ondragstart={(event) => onDragStart(item.id, event)} ondragover={(event) => { event.preventDefault(); overId = item.id; }} ondragleave={() => overId = null} ondrop={(event) => onDrop(item.id, event)} ondragend={() => { draggedId = null; overId = null; dragArmed = false; }} class="flex items-center gap-3 rounded-lg border border-border bg-[var(--color-surface-2)] p-3 {draggedId === item.id ? 'opacity-40' : ''} {overId === item.id && draggedId !== item.id ? 'border-t-2 border-t-foreground/60' : ''}">
-              <span class="flex size-7 cursor-grab items-center justify-center rounded-md border border-border text-muted-foreground active:cursor-grabbing" role="button" tabindex="-1" onmousedown={armDrag} onmouseup={disarmDrag} onmouseleave={disarmDrag} title={t("setup.drag_tooltip")}>
+            <li draggable={dragArmed} ondragstart={(event) => onDragStart(item.id, event)} ondragover={(event) => { event.preventDefault(); overId = item.id; }} ondragleave={() => overId = null} ondrop={(event) => onDrop(item.id, event)} ondragend={() => { draggedId = null; overId = null; dragArmed = false; }} class="flex items-center gap-3 rounded-lg border border-border bg-[var(--color-surface-2)] p-3 {draggedId === item.id ? 'opacity-40' : ''} {overId === item.id && draggedId !== item.id ? 'border-t-2 border-t-foreground/60' : ''}">
+              <span class="flex size-7 cursor-grab items-center justify-center rounded-md border border-border text-muted-foreground active:cursor-grabbing" role="button" tabindex="-1" onmousedown={armDrag} onmouseup={disarmDrag} onmouseleave={disarmDrag} title={t("setup.dragTooltip")}>
                 <GripVertical class="size-4" />
               </span>
-              <ShortcutIcon iconKey={item.iconKey as any} size={21} />
+              <ShortcutIcon iconKey={item.iconKey} size={21} />
               <div class="min-w-0">
                 <p class="truncate text-sm font-medium text-foreground">{item.label}</p>
                 <p class="truncate font-mono text-[11px] text-muted-foreground">{item.command}</p>
               </div>
-            </div>
+            </li>
           {/each}
-        </div>
+        </ul>
         <div class="mt-auto flex items-center justify-between border-t border-border/50 pt-5">
           <button type="button" onclick={() => step = 3} class="flex items-center gap-1.5 px-2 py-2 text-sm text-muted-foreground transition hover:text-foreground">
             <ArrowLeft class="size-4" /> {t("setup.back")}
           </button>
-          <button type="button" onclick={finishSetup} class="flex items-center gap-1.5 rounded-md bg-foreground px-5 py-2.5 text-sm font-semibold text-background transition hover:bg-neutral-200">
+          <button type="button" onclick={() => void finishSetup()} class="flex items-center gap-1.5 rounded-md bg-foreground px-5 py-2.5 text-sm font-semibold text-background transition hover:bg-foreground/90">
             {t("setup.finish")} <Check class="size-4" />
           </button>
         </div>
