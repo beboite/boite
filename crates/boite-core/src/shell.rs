@@ -249,18 +249,28 @@ pub fn family_of(cmd: &str) -> ShellFamily {
     }
 }
 
-fn quote_arg(arg: &str) -> String {
+fn quote_arg(arg: &str, family: ShellFamily) -> String {
     if !arg.is_empty() && !arg.contains([' ', '\t', '"', '\'']) {
         return arg.to_string();
     }
-    format!("\"{}\"", arg.replace('"', "\\\""))
+    // Backslash-escaping a quote is a POSIX convention. PowerShell does not
+    // read `\"` as an escape at all — inside double quotes it doubles the quote
+    // instead — so an argument carrying `"` came out mangled there and nowhere
+    // else. Anything with an embedded quote (a JSON value, a `-c` TOML
+    // override) was therefore Windows-only broken, silently.
+    let escaped = match family {
+        ShellFamily::PowerShell => arg.replace('"', "\"\""),
+        _ => arg.replace('"', "\\\""),
+    };
+    format!("\"{escaped}\"")
 }
 
-/// Rebuilds the command line the user would have typed at the prompt.
-pub fn build_command_line(cmd: &str, args: &[String]) -> String {
+/// Rebuilds the command line the user would have typed at the prompt of that
+/// shell. The family decides how a quote is escaped, and nothing else.
+pub fn build_command_line(cmd: &str, args: &[String], family: ShellFamily) -> String {
     std::iter::once(cmd)
         .chain(args.iter().map(String::as_str))
-        .map(quote_arg)
+        .map(|a| quote_arg(a, family))
         .collect::<Vec<_>>()
         .join(" ")
 }
@@ -282,9 +292,10 @@ pub fn wrap_argv(
     cmd: &str,
     args: &[String],
 ) -> Option<Vec<String>> {
-    let line = build_command_line(cmd, args);
+    let family = family_of(shell_cmd);
+    let line = build_command_line(cmd, args, family);
     let mut out: Vec<String> = shell_args.to_vec();
-    match family_of(shell_cmd) {
+    match family {
         ShellFamily::PowerShell => {
             out.push("-NoLogo".into());
             if no_profile {
@@ -419,20 +430,37 @@ mod tests {
 
     #[test]
     fn command_line_quotes_only_what_needs_it() {
-        assert_eq!(build_command_line("cc", &v(&["--resume"])), "cc --resume");
+        let posix = ShellFamily::Bash;
+        assert_eq!(build_command_line("cc", &v(&["--resume"]), posix), "cc --resume");
         assert_eq!(
-            build_command_line("ccCROF", &v(&["--md", "deepseek.md"])),
+            build_command_line("ccCROF", &v(&["--md", "deepseek.md"]), posix),
             "ccCROF --md deepseek.md"
         );
         assert_eq!(
-            build_command_line("claude", &v(&["-p", "hello world"])),
+            build_command_line("claude", &v(&["-p", "hello world"]), posix),
             "claude -p \"hello world\""
         );
         assert_eq!(
-            build_command_line("c:\\a b\\claude.exe", &v(&[])),
+            build_command_line("c:\\a b\\claude.exe", &v(&[]), posix),
             "\"c:\\a b\\claude.exe\""
         );
-        assert_eq!(build_command_line("say", &v(&["a\"b"])), "say \"a\\\"b\"");
+        assert_eq!(build_command_line("say", &v(&["a\"b"]), posix), "say \"a\\\"b\"");
+    }
+
+    /// PowerShell doubles a quote instead of backslash-escaping it. The `-c`
+    /// override that points codex at the MCP shim is a JSON value, so it
+    /// carries quotes, so it is exactly the argument this decides.
+    #[test]
+    fn powershell_doubles_a_quote_instead_of_escaping_it() {
+        let arg = "mcp_servers.boite.command=\"C:\\bin\\boite-mcp.exe\"";
+        assert_eq!(
+            build_command_line("codex", &v(&["-c", arg]), ShellFamily::PowerShell),
+            "codex -c \"mcp_servers.boite.command=\"\"C:\\bin\\boite-mcp.exe\"\"\""
+        );
+        assert_eq!(
+            build_command_line("codex", &v(&["-c", arg]), ShellFamily::Bash),
+            "codex -c \"mcp_servers.boite.command=\\\"C:\\bin\\boite-mcp.exe\\\"\""
+        );
     }
 
     #[test]
