@@ -60,8 +60,17 @@ body,
   overflow: hidden;
 }
 
-* {
-  border-color: var(--color-border);
+/* Tailwind v4 defaults every border to currentColor; this is the palette's
+   border instead, as the whole app assumes.
+   Inside `@layer base` on purpose: unlayered rules beat layered ones whatever
+   their specificity, so at the top level this `*` was winning over every
+   border-color utility in the app. `border-transparent` set nothing, which is
+   why controls meant to show their edge only on hover or focus — the todo
+   rows, the settings fields, the shortcut chips — were drawn boxed at rest. */
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
 }
 
 /* Animation preference gate (set by lib/theme/motion.ts). Targets the data
