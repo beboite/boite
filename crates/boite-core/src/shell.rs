@@ -215,7 +215,13 @@ pub fn available_shells_blocking() -> Vec<ShellOption> {
 pub enum ShellFamily {
     PowerShell,
     Cmd,
+    /// Every shell that takes `-i -c` and knows `$0`. They share a wrapping
+    /// form but not a way to list their own names, hence the split below.
+    Bash,
+    Zsh,
+    /// `sh`, `dash`, `ksh`: POSIX, so aliases but no portable function listing.
     Posix,
+    Fish,
     Nushell,
     Unknown,
 }
@@ -228,7 +234,10 @@ pub fn family_of(cmd: &str) -> ShellFamily {
     match name.as_str() {
         "pwsh" | "powershell" => ShellFamily::PowerShell,
         "cmd" => ShellFamily::Cmd,
-        "bash" | "zsh" | "sh" | "dash" | "ksh" | "fish" => ShellFamily::Posix,
+        "bash" => ShellFamily::Bash,
+        "zsh" => ShellFamily::Zsh,
+        "sh" | "dash" | "ksh" => ShellFamily::Posix,
+        "fish" => ShellFamily::Fish,
         "nu" => ShellFamily::Nushell,
         _ => ShellFamily::Unknown,
     }
@@ -286,7 +295,7 @@ pub fn wrap_argv(
             out.push("/k".into());
             out.push(line);
         }
-        ShellFamily::Posix => {
+        ShellFamily::Bash | ShellFamily::Zsh | ShellFamily::Posix => {
             // -i sources the interactive rc file, which is where functions and
             // aliases live; exec keeps the shell after the command returns.
             out.push("-i".into());
@@ -295,6 +304,16 @@ pub fn wrap_argv(
             // Sets $0 for the -c script, so the re-exec uses this very shell
             // rather than whatever the name resolves to on PATH.
             out.push(shell_cmd.to_string());
+        }
+        ShellFamily::Fish => {
+            // fish has no $0, so the re-exec form above dies with "The expanded
+            // command was empty" and takes the session with it. -C runs the
+            // line after config.fish and then hands over to the interactive
+            // session fish was going to start anyway, which is the same
+            // contract without the re-exec.
+            out.push("-i".into());
+            out.push("-C".into());
+            out.push(line);
         }
         // nu resolves its own defs with -c but has no "stay open" flag, and an
         // unknown shell has no contract at all. Better to spawn direct than to
@@ -312,8 +331,9 @@ pub fn wrap_argv(
 pub const PROBE_SEPARATOR: &str = "--boite-probe--";
 
 pub fn names_probe_argv(shell_cmd: &str) -> Option<Vec<String>> {
-    match family_of(shell_cmd) {
-        ShellFamily::PowerShell => Some(vec![
+    let family = family_of(shell_cmd);
+    if family == ShellFamily::PowerShell {
+        return Some(vec![
             "-NoLogo".into(),
             "-Command".into(),
             format!(
@@ -321,16 +341,29 @@ pub fn names_probe_argv(shell_cmd: &str) -> Option<Vec<String>> {
                  ForEach-Object Name; '{PROBE_SEPARATOR}'; \
                  Get-ChildItem Env: | ForEach-Object {{ \"$($_.Name)=$($_.Value)\" }}"
             ),
-        ]),
-        ShellFamily::Posix => Some(vec![
-            "-i".into(),
-            "-c".into(),
-            format!("compgen -A function -A alias; echo '{PROBE_SEPARATOR}'; env"),
-        ]),
+        ]);
+    }
+
+    // One line per shell, because there is no portable way to ask. `compgen` is
+    // a bash builtin: zsh and fish answer "command not found" and the probe
+    // quietly degrades to its env half, which loses exactly the shadowing case
+    // it exists to catch.
+    let list = match family {
+        ShellFamily::Bash => "compgen -A function -A alias",
+        ShellFamily::Zsh => "print -l ${(k)functions} ${(k)aliases}",
+        // fish implements alias as a function, so one listing covers both.
+        ShellFamily::Fish => "functions -n",
+        // POSIX has no portable function listing; aliases are what is left.
+        ShellFamily::Posix => "alias | sed -e 's/^alias //' -e 's/=.*$//'",
         // cmd has doskey macros, which are per-console and cannot be listed
         // from a child process; nushell and unknown shells are not wrapped.
-        ShellFamily::Cmd | ShellFamily::Nushell | ShellFamily::Unknown => None,
-    }
+        _ => return None,
+    };
+    Some(vec![
+        "-i".into(),
+        "-c".into(),
+        format!("{list}; echo '{PROBE_SEPARATOR}'; env"),
+    ])
 }
 
 #[cfg(test)]
@@ -438,5 +471,32 @@ mod tests {
         assert!(names_probe_argv("/bin/zsh").is_some());
         assert!(names_probe_argv("cmd.exe").is_none());
         assert!(names_probe_argv("nu").is_none());
+    }
+
+    #[test]
+    fn each_shell_lists_names_the_way_it_can() {
+        // compgen is a bash builtin. Handing it to zsh or fish costs the whole
+        // names half of the probe, silently.
+        let probe = |cmd: &str| names_probe_argv(cmd).unwrap().join(" ");
+        assert!(probe("/bin/bash").contains("compgen -A function -A alias"));
+        assert!(probe("/bin/zsh").contains("${(k)functions}"));
+        assert!(!probe("/bin/zsh").contains("compgen"));
+        assert!(probe("/usr/bin/fish").contains("functions -n"));
+        assert!(!probe("/usr/bin/fish").contains("compgen"));
+        assert!(probe("/bin/dash").contains("alias |"));
+        // Every one of them still has to emit both halves.
+        for shell in ["/bin/bash", "/bin/zsh", "/usr/bin/fish", "/bin/dash"] {
+            assert!(probe(shell).contains(PROBE_SEPARATOR), "{shell}");
+            assert!(probe(shell).ends_with("env"), "{shell}");
+        }
+    }
+
+    #[test]
+    fn fish_stays_open_without_the_re_exec_form() {
+        // "$0" is not a variable in fish: the re-exec expands to nothing and
+        // fish exits with "The expanded command was empty".
+        let argv = wrap_argv("/usr/bin/fish", &[], false, "cc", &v(&["--resume"])).unwrap();
+        assert_eq!(argv, v(&["-i", "-C", "cc --resume"]));
+        assert!(!argv.iter().any(|a| a.contains("$0")));
     }
 }
