@@ -24,6 +24,9 @@ struct Host {
     /// not pass their environment to a server process can only be reached this
     /// way — the endpoint takes either, and resolves both to one project.
     project_id: Option<String>,
+    /// Which agent this is, when the registration said so. Only ever used to
+    /// put the right badge on a claim; it grants nothing.
+    agent: Option<String>,
     http: reqwest::blocking::Client,
 }
 
@@ -56,6 +59,9 @@ impl Host {
                 token,
                 thread_id: Some(thread_id),
                 project_id: None,
+                // The thread names the agent better than any argument could:
+                // Boite launched it and knows what it is.
+                agent: None,
                 http,
             });
         }
@@ -69,11 +75,16 @@ impl Host {
             .map_err(|e| format!("cannot read credentials at {path}: {e}"))?;
         let creds: Credentials =
             serde_json::from_str(&text).map_err(|e| format!("bad credentials file: {e}"))?;
+        // The Todo panel writes the agent's own name into the line it offers,
+        // because it knows which row the button was under. Without it a claim
+        // arrives from "some agent" and the list can only show a generic mark.
+        let agent = std::env::args().nth(2).filter(|s| !s.is_empty());
         Ok(Host {
             url: creds.url,
             token: creds.token,
             thread_id: None,
             project_id: Some(creds.project_id),
+            agent,
             http,
         })
     }
@@ -88,6 +99,9 @@ impl Host {
         }
         if let Some(project) = &self.project_id {
             req = req.header("x-boite-project", project);
+        }
+        if let Some(agent) = &self.agent {
+            req = req.header("x-boite-agent", agent);
         }
         if let Some(b) = body {
             req = req.json(&b);
