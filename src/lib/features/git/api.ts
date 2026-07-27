@@ -53,6 +53,18 @@ export interface PullRequest {
   url: string;
 }
 
+/**
+ * What asking `gh` about a branch came to. "No pull request" and "could not
+ * ask" are not the same thing to whoever reads the row, so they are not the
+ * same value here: `unavailable` is no gh and no GitHub remote — nothing to
+ * report and nothing to fix — while `failed` is a gh that answered and refused.
+ */
+export type PrLookup =
+  | { kind: "unavailable" }
+  | { kind: "notFound" }
+  | { kind: "found"; pr: PullRequest }
+  | { kind: "failed"; auth: boolean; detail: string };
+
 export interface BranchChangeResult {
   stashed: boolean;
 }
@@ -65,10 +77,7 @@ export function gitCommitState(path: string, sha: string): Promise<CommitState> 
   return backendForPath(path).git.commitState(path, sha);
 }
 
-export function gitPullRequest(
-  path: string,
-  branch: string,
-): Promise<PullRequest | null> {
+export function gitPullRequest(path: string, branch: string): Promise<PrLookup> {
   return backendForPath(path).git.pullRequest(path, branch);
 }
 

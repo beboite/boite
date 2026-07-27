@@ -727,15 +727,14 @@ pub async fn git_commit_state(
         .map_err(|e| format!("git_commit_state task failed: {e}"))
 }
 
-/// The pull request `gh` finds for a branch, if there is one and if `gh` is
-/// there to be asked. Absent for every uninteresting reason, so the panel shows
-/// the chip only on a real answer.
+/// What `gh` says about a branch: a pull request, none, nothing it can answer,
+/// or a refusal worth passing on.
 #[tauri::command]
 pub async fn git_pull_request(
     scope: State<'_, ProjectRoots>,
     path: String,
     branch: String,
-) -> Result<Option<git::PullRequest>, String> {
+) -> Result<git::PrLookup, String> {
     scope.ensure_allowed(&path)?;
     tauri::async_runtime::spawn_blocking(move || {
         git::pull_request_for_branch_blocking(&path, &branch)

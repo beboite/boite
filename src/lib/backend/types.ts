@@ -11,7 +11,7 @@ import type {
   ChangeEntry,
   Commit,
   CommitState,
-  PullRequest,
+  PrLookup,
   RepoInfo,
 } from "$lib/features/git/api";
 import type {
@@ -108,11 +108,10 @@ export interface GitApi {
    */
   commitState(path: string, sha: string): Promise<CommitState>;
   /**
-   * The pull request `gh` finds for a branch. Null covers every uninteresting
-   * case — no `gh`, not logged in, no network, not GitHub, no PR — because a
-   * chip that cannot be backed should not be drawn.
+   * What `gh` says about a branch. Not an option: a `gh` that is there and
+   * refusing is worth telling the user about, and a missing one is not.
    */
-  pullRequest(path: string, branch: string): Promise<PullRequest | null>;
+  pullRequest(path: string, branch: string): Promise<PrLookup>;
   stage(path: string, files: string[]): Promise<void>;
   unstage(path: string, files: string[]): Promise<void>;
   discard(path: string, files: string[], untracked: string[]): Promise<void>;
