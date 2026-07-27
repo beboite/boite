@@ -200,6 +200,9 @@ export const EN_MESSAGES = {
   "todo.agentSetup": "Copy setup",
   "todo.agentSetupCopied": "Setup copied — paste it into {agent}",
   "todo.agentSetupCopiedFile": "Setup copied — paste it into {file}",
+  "todo.agentRepoint": "Point at this project",
+  "todo.agentOtherProject":
+    "Registered, but against another project's list — one entry per agent, one list per project",
 
   "notification.readyForInput": "Ready for input",
   "branchDialog.uncommittedChanges": "You have uncommitted changes",
