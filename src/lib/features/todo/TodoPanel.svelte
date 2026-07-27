@@ -221,7 +221,7 @@
   // The same box the Confirm/Reopen buttons draw, minus its resting border, so
   // the strip stays a line of text until a pointer is on it.
   const CHIP =
-    "rounded border border-transparent px-1 transition hover:border-border hover:bg-[var(--color-surface-2)] hover:text-foreground";
+    "rounded border border-transparent px-1 py-0.5 transition hover:border-border hover:bg-[var(--color-surface-2)] hover:text-foreground";
 
   let adding = $state<string | null>(null);
 
@@ -375,15 +375,19 @@
                strip back rather than an empty one. -->
           {#if item.state !== "done" && (item.claimedBy || item.commitSha || item.note)}
             <!-- What the agent said, reduced to what can be checked. The
-                 sentence it wrote lives on the badge, and the sha on the branch:
-                 both are one hover away rather than on show. -->
-            <!-- Not selectable: it is a readout, and every chip is a hover
-                 target, so dragging across one only ever produced a highlight
-                 nobody asked for. The tooltips carry the text worth copying. -->
+                 sentence it wrote is not shown at all: it is the one part of a
+                 claim nothing can back, and the badge next to it says who by.
+                 It is still stored, and still what a reopened task is judged on.
+
+                 Not selectable: this is a readout, and every chip on it is a
+                 hover target, so dragging across one only produced a highlight
+                 nobody asked for. -->
             <div
               class="mt-1 flex select-none items-center gap-1 pl-[23px] text-[10.5px] text-muted-foreground"
             >
-              <span class="group/tip relative flex shrink-0 items-center {CHIP}">
+              <!-- A label, not a control: nothing hides behind it, so it gets
+                   no box and no hover of its own. -->
+              <span class="flex shrink-0 items-center px-0.5">
                 {#if item.claimedBy}
                   <ShortcutIcon iconKey={item.claimedBy} size={12} />
                 {:else}
@@ -392,7 +396,6 @@
                        say which agent it was. -->
                   <Bot class="size-3 shrink-0 text-muted-foreground/70" />
                 {/if}
-                {@render tip(item.note ?? t("todo.agentReported"))}
               </span>
               {#await gitState(item) then g}
                 {#if !item.commitSha}
