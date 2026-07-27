@@ -218,6 +218,11 @@
     if (url) void openUrl(url);
   }
 
+  // The same box the Confirm/Reopen buttons draw, minus its resting border, so
+  // the strip stays a line of text until a pointer is on it.
+  const CHIP =
+    "rounded border border-transparent px-1 transition hover:border-border hover:bg-[var(--color-surface-2)] hover:text-foreground";
+
   let adding = $state<string | null>(null);
 
   async function addToAgent(label: string, cli: string) {
@@ -370,71 +375,73 @@
                strip back rather than an empty one. -->
           {#if item.state !== "done" && (item.claimedBy || item.commitSha || item.note)}
             <!-- What the agent said, reduced to what can be checked. The
-                 sentence it wrote stays as the strip's tooltip: it costs
-                 nothing folded away, and when a task went sideways it is the
-                 only thing that says why. -->
-            <div
-              class="mt-1 flex items-center gap-1.5 pl-[23px] text-[10.5px] text-muted-foreground"
-              title={item.note ?? t("todo.agentReported")}
-            >
-              {#if item.claimedBy}
-                <ShortcutIcon iconKey={item.claimedBy} size={12} />
-              {:else}
-                <!-- Claimed through a credentials file, which names a project
-                     and no thread: Boite did not launch this one and cannot say
-                     which agent it was. -->
-                <Bot class="size-3 shrink-0 text-muted-foreground/70" />
-              {/if}
+                 sentence it wrote lives on the badge, and the sha on the branch:
+                 both are one hover away rather than on show. -->
+            <div class="mt-1 flex items-center gap-1 pl-[23px] text-[10.5px] text-muted-foreground">
+              <span class="group/tip relative flex shrink-0 items-center {CHIP}">
+                {#if item.claimedBy}
+                  <ShortcutIcon iconKey={item.claimedBy} size={12} />
+                {:else}
+                  <!-- Claimed through a credentials file, which names a project
+                       and no thread: Boite did not launch this one and cannot
+                       say which agent it was. -->
+                  <Bot class="size-3 shrink-0 text-muted-foreground/70" />
+                {/if}
+                {@render tip(item.note ?? t("todo.agentReported"))}
+              </span>
               {#await gitState(item) then g}
                 {#if !item.commitSha}
-                  <span class="text-muted-foreground/70">{t("todo.gitNoCommit")}</span>
+                  <span class="px-1 text-muted-foreground/70">{t("todo.gitNoCommit")}</span>
                 {:else if !g}
                   <!-- Nowhere to look it up: no project folder to run git in.
                        Shown bare rather than judged — not finding a repository
                        is not the same as not finding the commit. -->
-                  <code class="font-mono text-muted-foreground/70">
+                  <code class="px-1 font-mono text-muted-foreground/70">
                     {item.commitSha.slice(0, 7)}
                   </code>
                 {:else if !g.commit.known}
                   <!-- Reported a sha the repository has never heard of. Said
                        plainly: this is the one claim git can flatly contradict. -->
-                  <span class="text-warning" title={item.commitSha}>
+                  <span class="group/tip relative text-warning {CHIP}">
                     {t("todo.gitUnknownCommit")}
+                    {@render tip(item.commitSha)}
                   </span>
                 {:else}
                   <!-- The branch first: it says where the work is, which is the
                        question being asked. The sha is what was verified, so it
                        stays reachable rather than on show. -->
-                  <span
-                    class="max-w-[45%] truncate text-foreground/80"
-                    title={`${g.commit.short}${g.commit.subject ? ` — ${g.commit.subject}` : ""}`}
-                  >
-                    {g.commit.branch ?? g.commit.short}
+                  <span class="group/tip relative min-w-0 {CHIP}">
+                    <span class="block truncate text-foreground/80">
+                      {g.commit.branch ?? g.commit.short}
+                    </span>
+                    {@render tip(
+                      `${g.commit.short}${g.commit.subject ? ` — ${g.commit.subject}` : ""}`,
+                    )}
                   </span>
-                  <span class="text-muted-foreground/40">·</span>
-                  <span class={g.commit.pushed ? "" : "text-muted-foreground/70"}>
+                  <span class="shrink-0 text-muted-foreground/40">·</span>
+                  <span
+                    class="shrink-0 px-1 {g.commit.pushed ? '' : 'text-muted-foreground/70'}"
+                  >
                     {g.commit.pushed ? t("todo.gitPushed") : t("todo.gitLocal")}
                   </span>
                   {#if g.pr.kind === "found"}
-                    <span class="text-muted-foreground/40">·</span>
+                    <span class="shrink-0 text-muted-foreground/40">·</span>
                     <button
                       type="button"
-                      class="underline decoration-dotted underline-offset-2 transition hover:text-foreground"
+                      class="group/tip relative shrink-0 {CHIP}"
                       onclick={() => openPr(g.pr.kind === "found" ? g.pr.pr.url : "")}
-                      title={g.pr.pr.url}
                     >
                       {t("todo.gitPr", { number: String(g.pr.pr.number) })}
+                      {@render tip(g.pr.pr.url)}
                     </button>
                   {:else if g.pr.kind === "failed"}
                     <!-- gh was there and refused. Said, because unlike a missing
                          gh this is a state the user can be in without knowing —
                          and the signed-out case they can fix in one command. -->
-                    <span class="text-muted-foreground/40">·</span>
-                    <span
-                      class="text-warning/80"
-                      title={g.pr.auth ? t("todo.gitPrNoAuthHint") : g.pr.detail}
-                    >
+                    <span class="shrink-0 text-muted-foreground/40">·</span>
+                    <span class="group/tip relative shrink-0 text-warning/80 {CHIP}">
                       {g.pr.auth ? t("todo.gitPrNoAuth") : t("todo.gitPrFailed")}
+                      {@render tip(g.pr.auth ? t("todo.gitPrNoAuthHint") : g.pr.detail)}
                     </span>
                   {/if}
                 {/if}
@@ -586,3 +593,18 @@
     </form>
   {/if}
 </div>
+
+{#snippet tip(text: string)}
+  <!-- Replaces the native `title`, whose ~1s delay is the browser's and cannot
+       be configured. Appears on hover with nothing in between.
+       Below the chip, not above: the list scrolls, and anything absolute is
+       clipped by that container at whichever edge it crosses. Measured — above
+       the chip it lost 4.5px off the top row, which is the row that is always on
+       screen, while below it there is nearly always list left. Left-aligned to
+       the chip so a long one grows into the panel rather than off it. -->
+  <span
+    class="pointer-events-none absolute left-0 top-full z-30 mt-1 hidden w-max max-w-[240px] rounded border border-border bg-[var(--color-surface-2)] px-1.5 py-0.5 text-left text-[10.5px] leading-snug text-foreground shadow-md group-hover/tip:block"
+  >
+    {text}
+  </span>
+{/snippet}
