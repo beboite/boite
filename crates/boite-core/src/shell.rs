@@ -9,6 +9,20 @@ pub struct ShellOption {
     pub icon_key: Option<String>,
 }
 
+/// The lowercased binary name behind a shell path, extension dropped.
+///
+/// `Path::file_stem` only splits on `\` when the crate is compiled for Windows,
+/// so a Windows path handed to a Linux build comes back whole and every family
+/// match below falls through to `Unknown`. Both separators are cut here so the
+/// answer depends on the string, not on the host that asks.
+fn binary_stem(cmd: &str) -> String {
+    let last = cmd.rsplit(['/', '\\']).next().unwrap_or(cmd);
+    std::path::Path::new(last)
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default()
+}
+
 /// Args that make `cmd` behave like the shell Terminal.app hands you.
 ///
 /// A bare interactive shell skips the login files (`/etc/zprofile`,
@@ -16,11 +30,7 @@ pub struct ShellOption {
 /// the first rc line that calls `brew` fails with "command not found". Returns
 /// an empty vec for anything that is not a shell we know how to log into.
 pub fn login_args_for(cmd: &str) -> Vec<String> {
-    let name = std::path::Path::new(cmd)
-        .file_stem()
-        .map(|s| s.to_string_lossy().to_ascii_lowercase())
-        .unwrap_or_default();
-    match name.as_str() {
+    match binary_stem(cmd).as_str() {
         "zsh" | "bash" | "sh" | "dash" | "ksh" | "fish" => vec!["-l".to_string()],
         // nushell spells it out and rejects the short form.
         "nu" => vec!["--login".to_string()],
@@ -227,11 +237,7 @@ pub enum ShellFamily {
 }
 
 pub fn family_of(cmd: &str) -> ShellFamily {
-    let name = std::path::Path::new(cmd)
-        .file_stem()
-        .map(|s| s.to_string_lossy().to_ascii_lowercase())
-        .unwrap_or_default();
-    match name.as_str() {
+    match binary_stem(cmd).as_str() {
         "pwsh" | "powershell" => ShellFamily::PowerShell,
         "cmd" => ShellFamily::Cmd,
         "bash" => ShellFamily::Bash,
@@ -457,6 +463,16 @@ mod tests {
     fn wrap_keeps_the_shells_own_args_in_front() {
         let argv = wrap_argv("bash.exe", &v(&["--login"]), false, "cc", &[]).unwrap();
         assert_eq!(argv[0], "--login");
+    }
+
+    #[test]
+    fn a_path_names_the_same_shell_on_every_host() {
+        assert_eq!(
+            family_of("C:\\Program Files\\PowerShell\\7\\pwsh.exe"),
+            ShellFamily::PowerShell
+        );
+        assert_eq!(family_of("/usr/bin/zsh"), ShellFamily::Zsh);
+        assert_eq!(login_args_for("C:\\Git\\bin\\bash.exe"), v(&["-l"]));
     }
 
     #[test]
