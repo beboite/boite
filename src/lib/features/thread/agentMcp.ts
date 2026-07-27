@@ -46,11 +46,11 @@ const INJECTORS: Partial<Record<NonNullable<IconKey>, McpInjection>> = {
  *   in `opencode.jsonc` by hand.
  * - cursor exposes MCP only through interactive slash commands (`/mcp list`,
  *   `/mcp enable`); there is no non-interactive add.
- * - copilot does document `copilot mcp add NAME -- COMMAND`, but it states that
- *   only PATH is inherited by a server process and every other variable must be
- *   declared in the config. Our credentials arrive by environment and change
- *   every launch — the port is ephemeral and the token regenerated — so a
- *   registration there would be stale before it was used.
+ * - copilot, grok and hermes do each document a non-interactive `mcp add`, but
+ *   the three take the command differently (`-- CMD ARGS`, `-- CMD ARGS`,
+ *   `--command CMD --args ARGS`) and none has been run from here. Copilot
+ *   already proved once that a documented subcommand can open a form instead,
+ *   so they get the exact line to paste and their own output to read.
  *
  * Registering an agent that cannot then reach the endpoint is worse than not
  * offering it: the button would report success and nothing would work.
@@ -71,16 +71,54 @@ export function agentSetupSnippet(
   const creds = JSON.stringify(credentialsPath);
   switch (key) {
     // Documented as non-interactive: `copilot mcp add NAME -- COMMAND [ARGS…]`.
+    // Both paths are quoted: the credentials file lives under "Application
+    // Support" on macOS, and a bare space there silently registers two
+    // arguments instead of one — which fails nowhere visible, because
+    // initialize and tools/list answer without credentials and only tools/call
+    // needs them.
     case "copilot":
-      return `copilot mcp add boite -- ${shimPath} ${credentialsPath}`;
+      return `copilot mcp add boite -- ${cmd} ${creds}`;
+    // Everything after `--` is the server command. `--scope project` would
+    // write .grok/config.toml into the user's repository instead; user scope is
+    // the one that matches a per-project credentials file living outside it.
+    case "grok":
+      return `grok mcp add boite -- ${cmd} ${creds}`;
+    // Flag-based rather than `--`: --args takes the rest of argv and must come
+    // last. Lands in the active profile's config.yaml.
+    case "hermes":
+      return `hermes mcp add boite --command ${cmd} --args ${creds}`;
     // opencode.jsonc, `mcp.<name>` with a command array. No CLI to add one.
     case "opencode":
       return `"boite": { "type": "local", "command": [${cmd}, ${creds}] }`;
     // .cursor/mcp.json, same shape as the editor's. Slash commands only in CLI.
     case "cursor":
       return `"boite": { "command": ${cmd}, "args": [${creds}] }`;
+    // ~/.gemini/config/mcp_config.json, shared by the CLI and the IDE. The
+    // workspace file is not offered: the project-local one has a standing bug
+    // where it is read and then ignored, so a snippet pointing there would look
+    // installed and do nothing.
+    case "antigravity":
+      return `"boite": { "command": ${cmd}, "args": [${creds}] }`;
     default:
       return "";
+  }
+}
+
+/**
+ * The file a pasted snippet belongs in, or null when the snippet is a command
+ * to run. A JSON fragment with no destination is a puzzle, and the three that
+ * need one all keep it somewhere different.
+ */
+export function agentSetupTarget(key: IconKey): string | null {
+  switch (key) {
+    case "opencode":
+      return "opencode.jsonc → mcp";
+    case "cursor":
+      return ".cursor/mcp.json → mcpServers";
+    case "antigravity":
+      return "~/.gemini/config/mcp_config.json → mcpServers";
+    default:
+      return null;
   }
 }
 
