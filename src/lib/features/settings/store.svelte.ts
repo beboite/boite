@@ -126,6 +126,7 @@ const DEFAULTS: Settings = {
   mobileLayout: false,
   motionMode: "system",
   locale: "system",
+  setupCompleted: false,
 };
 
 // First-run guess: touch-primary, narrow screens (a phone TWA/PWA) default to
@@ -196,6 +197,7 @@ const DEVICE_FIELDS = [
   "gitSplitFraction",
   "mobileLayout",
   "motionMode",
+  "locale",
 ] as const;
 
 function loadDeviceOverrides(): Partial<Settings> | null {
@@ -218,6 +220,10 @@ class SettingsStore {
       const stored = await loadSettings();
       const raw = stored as unknown as Record<string, unknown>;
       const migratedShortcuts = migrateShortcuts(stored.shortcuts, raw.seededPresets);
+      const inheritedSetup =
+        Array.isArray(stored.shortcuts) && stored.shortcuts.length > 0;
+      const backfilledSetup =
+        typeof stored.setupCompleted !== "boolean" && inheritedSetup;
       this.state = {
         shortcuts: migratedShortcuts.shortcuts,
         seededPresets: migratedShortcuts.seededPresets,
@@ -288,6 +294,14 @@ class SettingsStore {
           typeof stored.mobileLayout === "boolean"
             ? stored.mobileLayout
             : DEFAULTS.mobileLayout,
+        // A settings row written before the wizard existed carries no flag.
+        // Its owner already has a shortcut list, and finishing the wizard
+        // replaces that list wholesale, so an existing install counts as
+        // already set up. Only a genuinely empty install sees the wizard.
+        setupCompleted:
+          typeof stored.setupCompleted === "boolean"
+            ? stored.setupCompleted
+            : inheritedSetup,
         // Device-scoped; the localStorage override below is the real source.
         motionMode: DEFAULTS.motionMode,
         locale: isLocaleSetting(stored.locale) ? stored.locale : DEFAULTS.locale,
@@ -315,7 +329,7 @@ class SettingsStore {
         this.state.mobileLayout = detectMobileDefault();
         this.persistDeviceNow();
       }
-      if (migratedShortcuts.changed) {
+      if (migratedShortcuts.changed || backfilledSetup) {
         await this.persist();
       }
     } catch (err) {
@@ -478,6 +492,21 @@ class SettingsStore {
     notifications.success(`Removed ${s?.label ?? "shortcut"}`);
   }
 
+  async setSetupCompleted(val: boolean) {
+    this.state.setupCompleted = val;
+    await this.persist();
+  }
+
+  /// Closes the wizard on the shortcut list it produced. Replacing the list is
+  /// only ever right for an install that had none: init() backfills
+  /// setupCompleted for anyone who already had shortcuts, so they never reach
+  /// this.
+  async completeSetup(shortcuts: Shortcut[]) {
+    this.state.shortcuts = shortcuts;
+    this.state.setupCompleted = true;
+    await this.persist();
+  }
+
   async reorderShortcuts(orderedIds: string[]) {
     const map = new Map(this.state.shortcuts.map((s) => [s.id, s]));
     const reordered: Shortcut[] = [];
@@ -561,6 +590,7 @@ class SettingsStore {
     this.state.gitAutoFetchSeconds = clamped;
     this.persistSoon();
   }
+
 }
 
 export const settings = new SettingsStore();

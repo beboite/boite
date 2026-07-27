@@ -140,11 +140,17 @@ updated by your package manager.
 
 Data lives next to the app config, never in the cloud:
 
-| OS      | Path                                            |
-| ------- | ----------------------------------------------- |
-| Windows | `%APPDATA%\dev.boite.app\boite.db`              |
-| Linux   | `~/.local/share/dev.boite.app/boite.db`         |
-| macOS   | `~/Library/Application Support/dev.boite.app/`  |
+| OS      | Path                                              |
+| ------- | ------------------------------------------------- |
+| Windows | `%APPDATA%\com.boite.desktop\boite.db`            |
+| Linux   | `~/.local/share/com.boite.desktop/boite.db`       |
+| macOS   | `~/Library/Application Support/com.boite.desktop/` |
+
+Installs from 1.0.0 and earlier used `dev.boite.app`, the scaffolding
+placeholder. The first start after upgrading moves the whole directory across
+and logs what it did under `backend.appdata`. If both directories somehow hold
+a database, the new one wins and the old is left untouched rather than guessed
+at; nothing is ever deleted that was not first moved.
 
 Boite has no telemetry and no account. Its only unprompted network call is the
 update check described above, which sends nothing but the request itself; every

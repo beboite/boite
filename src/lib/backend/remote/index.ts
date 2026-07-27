@@ -206,6 +206,8 @@ export class RemoteBackend implements Backend {
             }),
           ),
         ),
+      commandExists: (cmd) =>
+        rpc("shell.commandExists", { cmd }).then((r) => r.found as boolean),
     };
 
     // The server derives its filesystem trust boundary from persisted projects;

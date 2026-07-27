@@ -28,6 +28,47 @@ pub fn login_args_for(cmd: &str) -> Vec<String> {
     }
 }
 
+/// Per-user bin directories that CLI installers add to the *shell profile*
+/// rather than to the machine PATH. A GUI process never sources that profile,
+/// so on macOS and Linux every tool installed this way looks absent even though
+/// it runs fine in the user's terminal.
+fn user_bin_dirs() -> Vec<std::path::PathBuf> {
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(std::path::PathBuf::from);
+    let Some(home) = home else {
+        return Vec::new();
+    };
+    [".bun/bin", ".local/bin", ".cargo/bin", ".deno/bin", "go/bin", "bin"]
+        .iter()
+        .map(|suffix| home.join(suffix))
+        .filter(|p| p.is_dir())
+        .collect()
+}
+
+/// Whether `name` resolves to something runnable on this machine.
+///
+/// Takes an executable name or path, never a command line: splitting a line on
+/// whitespace here would cut `C:\Program Files\...\pwsh.exe` in half. Callers
+/// that hold a full line pass its first token themselves.
+///
+/// `which` already knows PATHEXT on Windows and the executable bit elsewhere,
+/// so a hand-rolled PATH walk only gets to be wrong in new ways.
+pub fn command_exists(name: &str) -> bool {
+    if name.trim().is_empty() {
+        return false;
+    }
+    if which::which(name).is_ok() {
+        return true;
+    }
+    let extra = user_bin_dirs();
+    if extra.is_empty() {
+        return false;
+    }
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    which::which_in(name, Some(std::env::join_paths(extra).unwrap_or_default()), cwd).is_ok()
+}
+
 pub fn fallback_shell() -> String {
     #[cfg(target_os = "windows")]
     {
@@ -184,6 +225,23 @@ mod tests {
     fn agent_clis_are_left_alone() {
         assert!(login_args_for("claude").is_empty());
         assert!(login_args_for("/usr/local/bin/codex").is_empty());
+    }
+
+    #[test]
+    fn command_exists_agrees_with_the_shell_this_machine_reports() {
+        assert!(command_exists(&default_shell_blocking()));
+        assert!(!command_exists("definitely-not-a-real-binary-xyz"));
+        assert!(!command_exists(""));
+        assert!(!command_exists("   "));
+    }
+
+    #[test]
+    fn command_exists_takes_a_name_not_a_command_line() {
+        // A shell path holds spaces on Windows ("C:\Program Files\..."), so a
+        // whitespace split here would look up "C:\Program" and answer no.
+        let shell = default_shell_blocking();
+        assert!(command_exists(&shell));
+        assert!(!command_exists(&format!("{shell} --version")));
     }
 
     #[test]
