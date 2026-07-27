@@ -174,7 +174,6 @@ export const EN_MESSAGES = {
   "todo.sendTo": "Type this into {target} (you press Enter)",
   "todo.sendNoTerminal": "No running terminal to send it to",
   "todo.sendLabel": "Send to the active terminal",
-  "todo.agentReported": "Reported done by the agent.",
   "todo.gitNoCommit": "no commit reported",
   "todo.gitUnknownCommit": "commit not found",
   "todo.gitPushed": "pushed",

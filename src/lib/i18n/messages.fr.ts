@@ -186,7 +186,6 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "todo.sendTo": "Écrire ceci dans {target} (à toi d'appuyer sur Entrée)",
   "todo.sendNoTerminal": "Aucun terminal actif pour l'envoyer",
   "todo.sendLabel": "Envoyer au terminal actif",
-  "todo.agentReported": "Annoncé terminé par l'agent.",
   "todo.gitNoCommit": "aucun commit signalé",
   "todo.gitUnknownCommit": "commit introuvable",
   "todo.gitPushed": "poussé",
