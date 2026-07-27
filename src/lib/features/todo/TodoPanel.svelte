@@ -377,7 +377,12 @@
             <!-- What the agent said, reduced to what can be checked. The
                  sentence it wrote lives on the badge, and the sha on the branch:
                  both are one hover away rather than on show. -->
-            <div class="mt-1 flex items-center gap-1 pl-[23px] text-[10.5px] text-muted-foreground">
+            <!-- Not selectable: it is a readout, and every chip is a hover
+                 target, so dragging across one only ever produced a highlight
+                 nobody asked for. The tooltips carry the text worth copying. -->
+            <div
+              class="mt-1 flex select-none items-center gap-1 pl-[23px] text-[10.5px] text-muted-foreground"
+            >
               <span class="group/tip relative flex shrink-0 items-center {CHIP}">
                 {#if item.claimedBy}
                   <ShortcutIcon iconKey={item.claimedBy} size={12} />
