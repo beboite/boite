@@ -363,10 +363,12 @@
             </button>
           </div>
 
-          {#if item.state === "claimed"}
-            <!-- An agent said it finished. It stops here on purpose: a model
-                 that can tick its own boxes will, and the list would then record
-                 assertions instead of verified work. -->
+          <!-- Shown for a claim and for a confirmed one alike: once a task is
+               done, where it landed is the part worth keeping in front of you.
+               Hidden while the row is open — nothing is being reported then —
+               but the data is kept, so unticking a box and ticking it again
+               brings the same strip back rather than an empty one. -->
+          {#if item.state !== "open" && (item.claimedBy || item.commitSha || item.note)}
             <!-- What the agent said, reduced to what can be checked. The
                  sentence it wrote stays as the strip's tooltip: it costs
                  nothing folded away, and when a task went sideways it is the
@@ -438,6 +440,12 @@
                 {/if}
               {/await}
             </div>
+          {/if}
+
+          {#if item.state === "claimed"}
+            <!-- An agent said it finished, and it stops here on purpose: a model
+                 that can tick its own boxes will, and the list would then record
+                 assertions instead of verified work. -->
             <div class="mt-1 flex gap-1 pl-[23px]">
               <button
                 type="button"

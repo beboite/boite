@@ -113,14 +113,14 @@ class TodoStore {
     const item = this.items.find((t) => t.id === id);
     if (!item || item.state === state) return;
     item.state = state;
-    // Confirming or reopening drops what the agent reported — the note and the
-    // commit both described the claim, and the claim is over. Reopening in
-    // particular must not keep a commit strip pointing at superseded work.
-    if (state !== "claimed") {
-      item.note = null;
-      item.commitSha = null;
-      item.claimedBy = null;
-    }
+    // What the agent reported survives every state change. It used to be
+    // cleared on anything but `claimed`, which meant ticking a box and
+    // unticking it destroyed the commit, the note and the badge for good — a
+    // mis-click costing the only record of where the work went. The row is
+    // free to stop showing it; it is not free to throw it away.
+    //
+    // A later claim overwrites all three, so a reopened item that gets worked
+    // on again ends up describing the new work rather than the old.
     item.updatedAt = Date.now();
     await this.write($state.snapshot(item));
   }
