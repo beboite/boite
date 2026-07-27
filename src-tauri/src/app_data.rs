@@ -30,32 +30,27 @@ pub enum Outcome {
 /// already exist (the log session opens before this on a cold start), and a
 /// directory rename onto an existing path fails on every platform.
 ///
-/// A rename that crosses a volume falls back to copy-then-remove. The source is
-/// only removed once the copy succeeded, so a failure anywhere leaves the
-/// original where it was.
+/// Rename only, never copy. Both directories are siblings under one parent, so
+/// a rename can never cross a volume here, which leaves exactly one reason for
+/// it to fail: something else holds the file open. Copying in that case is the
+/// wrong answer — see `move_database_first`.
 fn move_entries(legacy: &Path, current: &Path) -> Result<usize, String> {
     std::fs::create_dir_all(current)
         .map_err(|e| format!("could not create {}: {e}", current.display()))?;
 
-    let mut moved = 0usize;
+    let mut moved = move_database_first(legacy, current)?;
     for entry in std::fs::read_dir(legacy)
         .map_err(|e| format!("could not read {}: {e}", legacy.display()))?
     {
         let entry = entry.map_err(|e| format!("could not read an entry: {e}"))?;
-        let from = entry.path();
         let to = current.join(entry.file_name());
         // Never clobber: whatever the new directory already has is newer than
         // anything the old one carries.
         if to.exists() {
             continue;
         }
-        match std::fs::rename(&from, &to) {
-            Ok(()) => moved += 1,
-            Err(_) => {
-                copy_recursive(&from, &to)?;
-                remove_recursive(&from)?;
-                moved += 1;
-            }
+        if std::fs::rename(entry.path(), &to).is_ok() {
+            moved += 1;
         }
     }
     // Only ever succeeds when every entry moved, which makes it a check rather
@@ -64,30 +59,35 @@ fn move_entries(legacy: &Path, current: &Path) -> Result<usize, String> {
     Ok(moved)
 }
 
-fn copy_recursive(from: &Path, to: &Path) -> Result<(), String> {
-    if from.is_dir() {
-        std::fs::create_dir_all(to)
-            .map_err(|e| format!("could not create {}: {e}", to.display()))?;
-        for entry in std::fs::read_dir(from)
-            .map_err(|e| format!("could not read {}: {e}", from.display()))?
-        {
-            let entry = entry.map_err(|e| format!("could not read an entry: {e}"))?;
-            copy_recursive(&entry.path(), &to.join(entry.file_name()))?;
-        }
-        return Ok(());
+/// Moves the three files that make up the database, before anything else and as
+/// a unit.
+///
+/// The rename is also the lock check. Renaming the old identifier changed the
+/// single-instance mutex name too, so a 1.0.0 build and this one can run at the
+/// same time, and that older build holds `boite.db` open. Windows refuses to
+/// rename an open file; copying it instead would duplicate a database being
+/// written to and produce a torn snapshot. Failing here and leaving everything
+/// where it is costs the user one restart. The alternative costs them data.
+fn move_database_first(legacy: &Path, current: &Path) -> Result<usize, String> {
+    let db = legacy.join(DB_FILE);
+    if !db.exists() {
+        return Ok(0);
     }
-    std::fs::copy(from, to)
-        .map(|_| ())
-        .map_err(|e| format!("could not copy {}: {e}", from.display()))
-}
-
-fn remove_recursive(path: &Path) -> Result<(), String> {
-    let result = if path.is_dir() {
-        std::fs::remove_dir_all(path)
-    } else {
-        std::fs::remove_file(path)
-    };
-    result.map_err(|e| format!("could not remove {}: {e}", path.display()))
+    std::fs::rename(&db, current.join(DB_FILE)).map_err(|e| {
+        format!("could not move {DB_FILE} (is an older Boite still running?): {e}")
+    })?;
+    let mut moved = 1;
+    // The -wal holds committed transactions the .db does not have yet, so it
+    // travels with it or the move loses them. The -shm is a rebuildable index;
+    // it comes along for tidiness and is not worth failing over.
+    for suffix in ["-wal", "-shm"] {
+        let name = format!("{DB_FILE}{suffix}");
+        let from = legacy.join(&name);
+        if from.exists() && std::fs::rename(&from, current.join(&name)).is_ok() {
+            moved += 1;
+        }
+    }
+    Ok(moved)
 }
 
 /// The database file whose presence marks a directory as a real install.
@@ -197,6 +197,30 @@ mod tests {
             "old",
             "the legacy database must survive for the user to recover"
         );
+    }
+
+    #[test]
+    fn a_database_that_will_not_move_aborts_before_anything_else_does() {
+        // An older build still running holds boite.db open and Windows refuses
+        // the rename. Whatever the reason, the rest of the directory must stay
+        // put: a scrollback moved away from a database that did not follow is
+        // worse than not having started.
+        let root = scratch("locked");
+        let legacy = root.join("dev.boite.app");
+        let current = root.join("com.boite.desktop");
+        write(&legacy.join("boite.db"), "main");
+        write(&legacy.join("boite.db-wal"), "pending");
+        write(&legacy.join("scrollback/thread-1.log"), "hello");
+        // A directory where the file must land makes the rename fail on every
+        // platform, which is the portable stand-in for a locked file.
+        std::fs::create_dir_all(current.join("boite.db")).unwrap();
+
+        let err = move_entries(&legacy, &current).unwrap_err();
+        assert!(err.contains("boite.db"), "{err}");
+        assert!(legacy.join("boite.db").is_file());
+        assert!(legacy.join("boite.db-wal").is_file());
+        assert!(legacy.join("scrollback/thread-1.log").is_file());
+        assert!(!current.join("scrollback").exists());
     }
 
     #[test]
