@@ -52,6 +52,17 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
+      # The tauri build script resolves externalBin before compiling anything,
+      # and a missing sidecar fails the whole crate rather than degrading. The
+      # release bundle builds it through scripts/build-sidecar.mjs; a check job
+      # only needs the file to exist under the right name, so the debug build
+      # is enough and costs a fraction of the release one.
+      - name: Sidecar placeholder
+        run: |
+          cargo build -p boite-mcp
+          mkdir -p src-tauri/binaries
+          cp target/debug/boite-mcp \
+            "src-tauri/binaries/boite-mcp-$(rustc -vV | sed -n 's/^host: //p')"
       - name: cargo check
         run: cargo check --workspace --all-targets
       - name: cargo clippy
