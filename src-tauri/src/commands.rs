@@ -1,3 +1,4 @@
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use base64::Engine as _;
@@ -350,6 +351,152 @@ pub async fn register_agent_mcp(cli: String, sidecar_path: String) -> Result<Str
     })
     .await
     .map_err(|e| format!("register task failed: {e}"))?
+}
+
+/// Config files where each agent keeps its MCP servers, home-relative first and
+/// then project-relative. Only agents Boite cannot wire at launch are listed:
+/// claude and codex are handed everything on the command line and keep nothing.
+fn agent_config_files(key: &str, home: &Path, cwd: Option<&Path>) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    match key {
+        "copilot" => out.push(home.join(".copilot").join("mcp-config.json")),
+        "cursor" => {
+            out.push(home.join(".cursor").join("mcp.json"));
+            if let Some(cwd) = cwd {
+                out.push(cwd.join(".cursor").join("mcp.json"));
+            }
+        }
+        // Shared by the CLI and the IDE. The workspace file is not read here for
+        // the same reason it is not offered: upstream reads it and ignores it.
+        "antigravity" => out.push(home.join(".gemini").join("config").join("mcp_config.json")),
+        "opencode" => {
+            let dir = home.join(".config").join("opencode");
+            out.push(dir.join("opencode.json"));
+            out.push(dir.join("opencode.jsonc"));
+            if let Some(cwd) = cwd {
+                out.push(cwd.join("opencode.json"));
+                out.push(cwd.join("opencode.jsonc"));
+            }
+        }
+        "grok" => {
+            out.push(home.join(".grok").join("config.toml"));
+            if let Some(cwd) = cwd {
+                out.push(cwd.join(".grok").join("config.toml"));
+            }
+        }
+        "hermes" => out.push(home.join(".hermes").join("config.yaml")),
+        _ => {}
+    }
+    out
+}
+
+/// Whether an agent already points at this project's list.
+///
+/// `"this"` — registered, for this project. `"other"` — registered, but against
+/// another project's credentials file: the entry is global while the file is per
+/// project, so a registration made from project A keeps writing into A's list
+/// from anywhere. `"none"` — nothing.
+///
+/// Matched by searching for the path rather than by parsing: the six formats
+/// here are JSON, JSONC, TOML and YAML, and the question asked — does this file
+/// name that file — does not need a parser for any of them. Windows paths are
+/// searched for in their JSON-escaped form too, which is the one difference a
+/// JSON document actually makes.
+#[tauri::command]
+pub fn agent_mcp_registration(
+    app: AppHandle,
+    key: String,
+    project_id: String,
+    cwd: Option<String>,
+) -> String {
+    let Ok(home) = app.path().home_dir() else {
+        return "none".into();
+    };
+    let Ok(creds) = agent_mcp_project_path(app.clone(), project_id) else {
+        return "none".into();
+    };
+    let cwd = cwd.map(PathBuf::from);
+    let texts: Vec<String> = agent_config_files(&key, &home, cwd.as_deref())
+        .into_iter()
+        .filter_map(|p| std::fs::read_to_string(p).ok())
+        .collect();
+    registration_in(&texts, &creds).into()
+}
+
+/// The reading itself, kept apart from the file system so it can be tested.
+fn registration_in(texts: &[String], creds: &str) -> &'static str {
+    // Serialized as a JSON string, then unwrapped: this is `\\` for a Windows
+    // separator and the untouched path everywhere else.
+    let escaped = serde_json::to_string(creds).unwrap_or_default();
+    let escaped = escaped.trim_matches('"');
+
+    let mut seen_shim = false;
+    for text in texts {
+        if text.contains(creds) || (!escaped.is_empty() && text.contains(escaped)) {
+            return "this";
+        }
+        // Matched on the binary, not on the server name: an entry the user
+        // called something else still counts as registered.
+        if text.contains("boite-mcp") {
+            seen_shim = true;
+        }
+    }
+    if seen_shim { "other" } else { "none" }
+}
+
+#[cfg(test)]
+mod registration_tests {
+    use super::registration_in;
+
+    const CREDS: &str = "/Users/x/Library/Application Support/dev.boite.app/mcp/abc.json";
+
+    #[test]
+    fn absent_config_is_none() {
+        assert_eq!(registration_in(&[], CREDS), "none");
+        assert_eq!(
+            registration_in(&[r#"{"mcpServers":{"supabase":{}}}"#.to_string()], CREDS),
+            "none"
+        );
+    }
+
+    #[test]
+    fn this_projects_credentials_are_recognized() {
+        let text = format!(r#"{{"command":"/x/boite-mcp","args":["{CREDS}"]}}"#);
+        assert_eq!(registration_in(&[text], CREDS), "this");
+    }
+
+    /// The whole reason the state exists: one entry per agent, one credentials
+    /// file per project, so a registration made elsewhere writes elsewhere.
+    #[test]
+    fn another_projects_credentials_are_not_this_one() {
+        let text = r#"{"command":"/x/boite-mcp","args":["/Users/x/.../mcp/other.json"]}"#;
+        assert_eq!(registration_in(&[text.to_string()], CREDS), "other");
+    }
+
+    /// A Windows path is stored with escaped separators in a JSON config; the
+    /// raw form would never match it.
+    #[test]
+    fn windows_separators_survive_json_escaping() {
+        let creds = r"C:\Users\x\AppData\Roaming\dev.boite.app\mcp\abc.json";
+        let text = r#"{"args":["C:\\Users\\x\\AppData\\Roaming\\dev.boite.app\\mcp\\abc.json"]}"#;
+        assert_eq!(registration_in(&[text.to_string()], creds), "this");
+    }
+
+    /// TOML and YAML keep the path verbatim, which the raw match already covers.
+    #[test]
+    fn unquoted_formats_match_too() {
+        let toml = format!("[mcp_servers.boite]\ncommand = \"/x/boite-mcp\"\nargs = [\"{CREDS}\"]");
+        assert_eq!(registration_in(&[toml], CREDS), "this");
+    }
+
+    /// One agent, several candidate files: the answer is the best of them, not
+    /// the first one read.
+    #[test]
+    fn a_later_file_can_still_be_this_project() {
+        let stale = r#"{"args":["/Users/x/.../mcp/other.json"],"command":"/x/boite-mcp"}"#;
+        let good = format!(r#"{{"args":["{CREDS}"]}}"#);
+        assert_eq!(registration_in(&[stale.to_string(), good], CREDS), "this");
+    }
 }
 
 /// Where a project's credentials file lives, for an agent that cannot be handed

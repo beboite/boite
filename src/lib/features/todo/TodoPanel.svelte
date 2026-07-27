@@ -14,6 +14,8 @@
     agentSetupSnippet,
     agentSetupTarget,
     agentRegisterCli,
+    agentRegistration,
+    type McpRegistration,
     mcpPaths,
     registerAgentMcp,
   } from "$lib/features/thread/agentMcp";
@@ -51,6 +53,7 @@
     cmd: string;
     auto: boolean;
     cli: string | null;
+    reg: McpRegistration;
   };
 
   // Candidates from the project's threads. A thread outlives the tool that made
@@ -69,6 +72,7 @@
         cmd: th.cmd,
         auto: agentAcceptsInjection(key),
         cli: agentRegisterCli(key),
+        reg: "none",
       });
     }
     return [...seen.values()];
@@ -93,14 +97,42 @@
     };
   });
 
+  async function resolveAgents(rows: AgentRow[], id: string, cwd: string | null) {
+    const present = await Promise.all(rows.map((r) => agentIsInstalled(r.cmd)));
+    const here = rows.filter((_, i) => present[i]);
+    // Only the ones Boite cannot wire at launch have a config to look into;
+    // claude and codex are handed everything and keep nothing on disk.
+    const regs = await Promise.all(
+      here.map((r) => (r.auto ? Promise.resolve("this" as const) : agentRegistration(r.key as never, id, cwd))),
+    );
+    return here.map((r, i) => ({ ...r, reg: regs[i] }));
+  }
+
   $effect(() => {
     const rows = candidates;
+    const id = projectId;
+    const cwd = project?.cwd ?? null;
+    if (!id) {
+      agentsHere = [];
+      return;
+    }
     let cancelled = false;
-    void Promise.all(rows.map((r) => agentIsInstalled(r.cmd))).then((present) => {
-      if (!cancelled) agentsHere = rows.filter((_, i) => present[i]);
-    });
+    const run = () =>
+      void resolveAgents(rows, id, cwd).then((next) => {
+        if (!cancelled) agentsHere = next;
+      });
+    run();
+    // The registration happens outside Boite — the user pastes a line into
+    // their agent — so nothing here would ever hear about it. Re-reading a
+    // handful of small config files is the cheapest way to notice, and it stops
+    // as soon as every agent is wired.
+    const timer = setInterval(() => {
+      if (agentsHere.length > 0 && agentsHere.every((a) => a.reg === "this")) return;
+      run();
+    }, 5000);
     return () => {
       cancelled = true;
+      clearInterval(timer);
     };
   });
 
@@ -311,13 +343,25 @@
               <span class="min-w-0 flex-1 truncate text-[11.5px] text-foreground/85">
                 {agent.label}
               </span>
-              {#if agent.auto}
+              {#if agent.auto || agent.reg === "this"}
                 <span
                   class="shrink-0 text-[10.5px] text-muted-foreground"
                   title={t("todo.agentReadyHint")}
                 >
                   {t("todo.agentActive")}
                 </span>
+              {:else if agent.reg === "other"}
+                <!-- Registered, but against another project's credentials file.
+                     The entry is one per agent and the file one per project, so
+                     it would keep writing into the other project's list. -->
+                <button
+                  type="button"
+                  class="shrink-0 rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
+                  onclick={() => copySetup(agent)}
+                  title={t("todo.agentOtherProject")}
+                >
+                  {t("todo.agentRepoint")}
+                </button>
               {:else if agent.cli}
                 <button
                   type="button"

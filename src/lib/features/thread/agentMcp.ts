@@ -131,6 +131,31 @@ export async function agentCredentialsPath(projectId: string): Promise<string | 
   }
 }
 
+/**
+ * `"this"` — the agent already points at this project's list. `"other"` — it is
+ * registered against another project: the entry is one per agent while the
+ * credentials file is one per project, so a registration made from project A
+ * keeps writing into A's list from anywhere. `"none"` — nothing yet.
+ */
+export type McpRegistration = "none" | "other" | "this";
+
+export async function agentRegistration(
+  key: IconKey,
+  projectId: string,
+  cwd: string | null,
+): Promise<McpRegistration> {
+  if (!key || !hasTauri()) return "none";
+  try {
+    return await invoke<McpRegistration>("agent_mcp_registration", {
+      key,
+      projectId,
+      cwd,
+    });
+  } catch {
+    return "none";
+  }
+}
+
 export function agentRegisterCli(key: IconKey): string | null {
   return (key && REGISTER_CLI[key]) ?? null;
 }
