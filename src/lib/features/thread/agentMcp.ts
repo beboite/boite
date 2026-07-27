@@ -69,6 +69,11 @@ export function agentSetupSnippet(
 ): string {
   const cmd = JSON.stringify(shimPath);
   const creds = JSON.stringify(credentialsPath);
+  // Third argument: which agent this registration is for. The panel knows —
+  // the button was under that agent's row — and nothing else ever will, since
+  // a server process reached this way is handed no environment and therefore
+  // no thread. It only decides which badge a claim is shown under.
+  const who = JSON.stringify(key ?? "");
   switch (key) {
     // Documented as non-interactive: `copilot mcp add NAME -- COMMAND [ARGS…]`.
     // Both paths are quoted: the credentials file lives under "Application
@@ -77,28 +82,28 @@ export function agentSetupSnippet(
     // initialize and tools/list answer without credentials and only tools/call
     // needs them.
     case "copilot":
-      return `copilot mcp add boite -- ${cmd} ${creds}`;
+      return `copilot mcp add boite -- ${cmd} ${creds} ${who}`;
     // Everything after `--` is the server command. `--scope project` would
     // write .grok/config.toml into the user's repository instead; user scope is
     // the one that matches a per-project credentials file living outside it.
     case "grok":
-      return `grok mcp add boite -- ${cmd} ${creds}`;
+      return `grok mcp add boite -- ${cmd} ${creds} ${who}`;
     // Flag-based rather than `--`: --args takes the rest of argv and must come
     // last. Lands in the active profile's config.yaml.
     case "hermes":
-      return `hermes mcp add boite --command ${cmd} --args ${creds}`;
+      return `hermes mcp add boite --command ${cmd} --args ${creds} ${who}`;
     // opencode.jsonc, `mcp.<name>` with a command array. No CLI to add one.
     case "opencode":
-      return `"boite": { "type": "local", "command": [${cmd}, ${creds}] }`;
+      return `"boite": { "type": "local", "command": [${cmd}, ${creds}, ${who}] }`;
     // .cursor/mcp.json, same shape as the editor's. Slash commands only in CLI.
     case "cursor":
-      return `"boite": { "command": ${cmd}, "args": [${creds}] }`;
+      return `"boite": { "command": ${cmd}, "args": [${creds}, ${who}] }`;
     // ~/.gemini/config/mcp_config.json, shared by the CLI and the IDE. The
     // workspace file is not offered: the project-local one has a standing bug
     // where it is read and then ignored, so a snippet pointing there would look
     // installed and do nothing.
     case "antigravity":
-      return `"boite": { "command": ${cmd}, "args": [${creds}] }`;
+      return `"boite": { "command": ${cmd}, "args": [${creds}, ${who}] }`;
     default:
       return "";
   }

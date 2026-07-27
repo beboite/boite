@@ -124,28 +124,55 @@ fn authorize(inner: &Inner, headers: &HeaderMap) -> Result<String, StatusCode> {
 /// name a project and no thread, and that claim stays anonymous: an agent Boite
 /// did not start is not one it can name.
 fn agent_of_request(inner: &Inner, headers: &HeaderMap) -> Option<String> {
-    let thread_id = headers
+    if let Some(thread_id) = headers
         .get("x-boite-thread")
         .and_then(|v| v.to_str().ok())
-        .filter(|s| !s.is_empty())?;
-    let conn = inner.conn.lock().ok()?;
-    conn.query_row(
-        "SELECT icon_key FROM threads WHERE id = ?1",
-        [thread_id],
-        |r| r.get::<_, Option<String>>(0),
-    )
-    .ok()
-    .flatten()
-    .filter(|k| !k.is_empty())
+        .filter(|s| !s.is_empty())
+    {
+        if let Ok(conn) = inner.conn.lock() {
+            let from_thread = conn
+                .query_row(
+                    "SELECT icon_key FROM threads WHERE id = ?1",
+                    [thread_id],
+                    |r| r.get::<_, Option<String>>(0),
+                )
+                .ok()
+                .flatten()
+                .filter(|k| !k.is_empty());
+            if from_thread.is_some() {
+                return from_thread;
+            }
+        }
+    }
+
+    // Otherwise the registration says so: the Todo panel writes the agent's own
+    // name into the line it hands over, because it knows which row the button
+    // was under.
+    headers
+        .get("x-boite-agent")
+        .and_then(|v| v.to_str().ok())
+        .and_then(known_agent)
 }
 
-fn project_of_thread(conn: &Connection, thread_id: &str) -> Result<String, StatusCode> {
-    conn.query_row(
-        "SELECT project_id FROM threads WHERE id = ?1",
-        [thread_id],
-        |r| r.get::<_, String>(0),
-    )
-    .map_err(|_| StatusCode::NOT_FOUND)
+/// The header, if it names an agent this app can draw.
+///
+/// Checked rather than taken: the value comes from a config file the user (or
+/// anything with write access to it) can edit, it ends up stored on a row and
+/// then in an `<img>` path, and an unrecognised one would at best be a badge
+/// nobody knows.
+fn known_agent(value: &str) -> Option<String> {
+    const KNOWN: [&str; 8] = [
+        "claude",
+        "codex",
+        "antigravity",
+        "cursor",
+        "copilot",
+        "opencode",
+        "grok",
+        "hermes",
+    ];
+    let value = value.trim().to_ascii_lowercase();
+    KNOWN.contains(&value.as_str()).then_some(value)
 }
 
 async fn list(
@@ -377,4 +404,34 @@ pub fn start(app: &tauri::AppHandle) {
             eprintln!("[boite/agent-api] serve ended: {e}");
         }
     });
+}
+
+fn project_of_thread(conn: &Connection, thread_id: &str) -> Result<String, StatusCode> {
+    conn.query_row(
+        "SELECT project_id FROM threads WHERE id = ?1",
+        [thread_id],
+        |r| r.get::<_, String>(0),
+    )
+    .map_err(|_| StatusCode::NOT_FOUND)
+}
+
+#[cfg(test)]
+mod agent_header_tests {
+    use super::known_agent;
+
+    #[test]
+    fn only_agents_the_app_can_draw_get_through() {
+        assert_eq!(known_agent("copilot").as_deref(), Some("copilot"));
+        assert_eq!(known_agent("  Copilot \n").as_deref(), Some("copilot"));
+
+        for junk in [
+            "",
+            "terminal",
+            "../../etc/passwd",
+            "<img src=x>",
+            "copilot; rm -rf /",
+        ] {
+            assert_eq!(known_agent(junk), None, "{junk}");
+        }
+    }
 }
