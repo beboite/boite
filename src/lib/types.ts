@@ -81,6 +81,13 @@ export interface Settings {
   seededPresets: string[];
   powershellNewline: boolean;
   powershellNoProfile: boolean;
+  /**
+   * Give every agent thread its own detached worktree instead of running them
+   * all in the project folder. Off by default: a fresh worktree has no
+   * `node_modules` and no build cache, so it needs a setup step before an
+   * agent can run the project's own tests in it.
+   */
+  threadWorktrees: boolean;
   defaultShellId: string | null;
   sidebarWidth: number;
   sidebarCollapsed: boolean;
