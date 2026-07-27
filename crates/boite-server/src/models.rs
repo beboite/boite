@@ -12,6 +12,16 @@ pub struct Todo {
     pub state: String,
     #[serde(default)]
     pub note: Option<String>,
+    /// The commit an agent reported with its claim, stored as given. The client
+    /// resolves it against the repository — which lives here — before showing
+    /// it, so a sha nothing backs reads as unknown rather than as done.
+    #[serde(default)]
+    pub commit_sha: Option<String>,
+    /// The icon key of the agent that claimed it, filled in only when this
+    /// server spawned the terminal. An agent it did not start is one it cannot
+    /// name.
+    #[serde(default)]
+    pub claimed_by: Option<String>,
     #[serde(default)]
     pub position: i64,
     pub created_at: i64,
