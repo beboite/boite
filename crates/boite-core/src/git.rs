@@ -1373,6 +1373,310 @@ pub fn commit_blocking(path: &str, message: &str) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&stdout).trim().to_string())
 }
 
+/// What a worktree is still holding that removing it would destroy.
+///
+/// Nothing here is stored: both answers are read back off the repository, so
+/// they stay true across a restart, a crash, and a worktree Boite did not make.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorktreeHold {
+    /// Modified, staged or untracked files. An agent's work in progress.
+    pub dirty: bool,
+    /// HEAD is on no local branch, so the commits here are reachable from
+    /// nowhere else and go away with the directory. False once a branch has
+    /// been claimed: removing the worktree then leaves the branch behind.
+    pub orphan_commits: bool,
+}
+
+impl WorktreeHold {
+    pub fn holds_work(&self) -> bool {
+        self.dirty || self.orphan_commits
+    }
+}
+
+/// Opens a worktree on the repository's current HEAD, detached.
+///
+/// Detached on purpose: a named branch would have to be invented before anyone
+/// knows what the work is, it would sit in the branch list whether or not the
+/// work was worth keeping, and Git refuses to check the same branch out twice —
+/// which would make two threads on `master` an error instead of the default.
+pub fn add_detached_worktree_blocking(repo: &str, path: &str) -> Result<String, String> {
+    let r = Path::new(repo);
+    if !r.is_dir() {
+        return Err("Not a directory".into());
+    }
+    // `worktree add` on a repository with no commits fails with a message about
+    // an invalid reference, which reads as a bug rather than as "commit first".
+    if ref_oid(r, "HEAD").is_none() {
+        return Err("This repository has no commits yet.".into());
+    }
+    if Path::new(path).exists() {
+        return Err(format!("'{path}' already exists."));
+    }
+    let mut cmd = git(r);
+    cmd.args(["worktree", "add", "--detach", path]);
+    run(cmd)?;
+    Ok(path.to_string())
+}
+
+/// Turns a detached worktree into a branch, once its work has proved worth
+/// keeping. Fails if the name is taken, so a claim never quietly hijacks an
+/// existing branch.
+pub fn claim_worktree_branch_blocking(worktree: &str, name: &str) -> Result<(), String> {
+    let w = Path::new(worktree);
+    if !w.is_dir() {
+        return Err("Not a directory".into());
+    }
+    validate_branch_name(w, name)?;
+    if local_branch_exists(w, name) {
+        return Err(format!("A branch named '{name}' already exists."));
+    }
+    let mut cmd = git(w);
+    cmd.args(["switch", "-c", name]);
+    run(cmd)?;
+    Ok(())
+}
+
+/// What removing this worktree would cost. Read before every removal.
+pub fn worktree_hold_blocking(worktree: &str) -> Result<WorktreeHold, String> {
+    let w = Path::new(worktree);
+    if !w.is_dir() {
+        return Err("Not a directory".into());
+    }
+
+    let mut status = git(w);
+    // Untracked files count: a file the agent created and never staged is
+    // exactly the work a cleanup must not throw away.
+    status.args(["status", "--porcelain", "--untracked-files=normal"]);
+    let dirty = !run(status)?.is_empty();
+
+    // No local branch contains HEAD, so these commits live in this directory
+    // and nowhere else. A claimed branch shows up here and clears the flag.
+    //
+    // `for-each-ref` rather than `branch --contains`: the latter also prints
+    // the detached head itself as `* (HEAD detached at abc1234)`, so its output
+    // is never empty in exactly the case this has to detect.
+    let mut contains = git(w);
+    contains.args(["for-each-ref", "--contains", "HEAD", "refs/heads/"]);
+    let orphan_commits = run(contains)
+        .map(|out| String::from_utf8_lossy(&out).trim().is_empty())
+        .unwrap_or(true);
+
+    Ok(WorktreeHold {
+        dirty,
+        orphan_commits,
+    })
+}
+
+/// Removes a worktree, refusing while it still holds work.
+///
+/// `force` is the user answering for themselves after being told what is in
+/// there. Automatic cleanup never passes it: it deletes empty worktrees only,
+/// which is what makes an agent that forgets to claim a branch harmless.
+pub fn remove_worktree_blocking(
+    repo: &str,
+    worktree: &str,
+    force: bool,
+) -> Result<(), String> {
+    let r = Path::new(repo);
+    if !r.is_dir() {
+        return Err("Not a directory".into());
+    }
+    if !force {
+        let hold = worktree_hold_blocking(worktree)?;
+        if hold.holds_work() {
+            return Err(match (hold.dirty, hold.orphan_commits) {
+                (true, true) => "This worktree has uncommitted changes and commits on no branch.",
+                (true, false) => "This worktree has uncommitted changes.",
+                _ => "This worktree has commits that are on no branch.",
+            }
+            .into());
+        }
+    }
+    let mut cmd = git(r);
+    cmd.args(["worktree", "remove", "--force", worktree]);
+    run(cmd)?;
+    // A worktree whose directory was deleted by hand leaves an administrative
+    // file behind, and the path stays "already registered" until it is pruned.
+    let mut prune = git(r);
+    prune.args(["worktree", "prune"]);
+    let _ = run(prune);
+    Ok(())
+}
+
+#[cfg(test)]
+mod worktree_tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn scratch(tag: &str) -> PathBuf {
+        static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "boite-worktree-{tag}-{}-{nonce}-{seq}",
+            std::process::id()
+        ))
+    }
+
+    fn git_in(path: &Path, args: &[&str]) {
+        let out = Command::new("git")
+            .current_dir(path)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}: {:?}", out);
+    }
+
+    struct Fixture {
+        repo: PathBuf,
+    }
+
+    impl Fixture {
+        fn new() -> Self {
+            let repo = scratch("repo");
+            fs::create_dir_all(&repo).unwrap();
+            git_in(&repo, &["init", "--quiet"]);
+            git_in(&repo, &["config", "user.name", "Boite Test"]);
+            git_in(&repo, &["config", "user.email", "boite@example.test"]);
+            git_in(&repo, &["branch", "-M", "master"]);
+            fs::write(repo.join("a.txt"), "one\n").unwrap();
+            git_in(&repo, &["add", "a.txt"]);
+            git_in(&repo, &["commit", "--quiet", "-m", "initial"]);
+            Self { repo }
+        }
+
+        fn path(&self) -> &str {
+            self.repo.to_str().unwrap()
+        }
+    }
+
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.repo);
+        }
+    }
+
+    /// The whole reason for detaching: two of them on the same commit, which
+    /// `worktree add <branch>` would reject as already checked out.
+    #[test]
+    fn two_detached_worktrees_can_sit_on_the_same_commit() {
+        let f = Fixture::new();
+        let a = scratch("a");
+        let b = scratch("b");
+        add_detached_worktree_blocking(f.path(), a.to_str().unwrap()).unwrap();
+        add_detached_worktree_blocking(f.path(), b.to_str().unwrap()).unwrap();
+        assert!(a.join("a.txt").is_file());
+        assert!(b.join("a.txt").is_file());
+        // And neither invented a branch to do it.
+        assert!(symbolic_branch(&a).is_none());
+        assert!(symbolic_branch(&b).is_none());
+        let _ = remove_worktree_blocking(f.path(), a.to_str().unwrap(), true);
+        let _ = remove_worktree_blocking(f.path(), b.to_str().unwrap(), true);
+    }
+
+    #[test]
+    fn a_fresh_worktree_holds_nothing_and_is_removable() {
+        let f = Fixture::new();
+        let w = scratch("fresh");
+        add_detached_worktree_blocking(f.path(), w.to_str().unwrap()).unwrap();
+
+        let hold = worktree_hold_blocking(w.to_str().unwrap()).unwrap();
+        assert!(!hold.holds_work(), "{hold:?}");
+
+        remove_worktree_blocking(f.path(), w.to_str().unwrap(), false).unwrap();
+        assert!(!w.exists());
+    }
+
+    #[test]
+    fn an_untracked_file_is_enough_to_refuse_removal() {
+        let f = Fixture::new();
+        let w = scratch("untracked");
+        add_detached_worktree_blocking(f.path(), w.to_str().unwrap()).unwrap();
+        fs::write(w.join("scratch.md"), "notes\n").unwrap();
+
+        let hold = worktree_hold_blocking(w.to_str().unwrap()).unwrap();
+        assert!(hold.dirty);
+        assert!(remove_worktree_blocking(f.path(), w.to_str().unwrap(), false).is_err());
+        assert!(w.exists(), "the refusal must not have deleted anything");
+
+        remove_worktree_blocking(f.path(), w.to_str().unwrap(), true).unwrap();
+    }
+
+    /// An agent that commits without ever claiming a branch. Losing this is
+    /// exactly what the guard exists to prevent.
+    #[test]
+    fn commits_on_no_branch_refuse_removal() {
+        let f = Fixture::new();
+        let w = scratch("orphan");
+        add_detached_worktree_blocking(f.path(), w.to_str().unwrap()).unwrap();
+        fs::write(w.join("b.txt"), "work\n").unwrap();
+        git_in(&w, &["add", "b.txt"]);
+        git_in(&w, &["commit", "--quiet", "-m", "agent work"]);
+
+        let hold = worktree_hold_blocking(w.to_str().unwrap()).unwrap();
+        assert!(!hold.dirty, "committed, so the tree is clean");
+        assert!(hold.orphan_commits);
+        assert!(remove_worktree_blocking(f.path(), w.to_str().unwrap(), false).is_err());
+
+        remove_worktree_blocking(f.path(), w.to_str().unwrap(), true).unwrap();
+    }
+
+    /// Claiming is what makes the work safe: the branch keeps the commits, so
+    /// the directory is free to go.
+    #[test]
+    fn claiming_a_branch_makes_the_worktree_removable_again() {
+        let f = Fixture::new();
+        let w = scratch("claimed");
+        add_detached_worktree_blocking(f.path(), w.to_str().unwrap()).unwrap();
+        fs::write(w.join("b.txt"), "work\n").unwrap();
+        git_in(&w, &["add", "b.txt"]);
+        git_in(&w, &["commit", "--quiet", "-m", "agent work"]);
+
+        claim_worktree_branch_blocking(w.to_str().unwrap(), "feat/agent-work").unwrap();
+        assert_eq!(symbolic_branch(&w).as_deref(), Some("feat/agent-work"));
+
+        let hold = worktree_hold_blocking(w.to_str().unwrap()).unwrap();
+        assert!(!hold.holds_work(), "the branch holds the commits now: {hold:?}");
+        remove_worktree_blocking(f.path(), w.to_str().unwrap(), false).unwrap();
+
+        // The branch outlived the directory, which is the point.
+        let out = Command::new("git")
+            .current_dir(&f.repo)
+            .args(["branch", "--list", "feat/agent-work"])
+            .output()
+            .unwrap();
+        assert!(!String::from_utf8_lossy(&out.stdout).trim().is_empty());
+    }
+
+    #[test]
+    fn a_claim_refuses_a_name_that_is_taken_or_malformed() {
+        let f = Fixture::new();
+        let w = scratch("names");
+        add_detached_worktree_blocking(f.path(), w.to_str().unwrap()).unwrap();
+
+        assert!(claim_worktree_branch_blocking(w.to_str().unwrap(), "master").is_err());
+        assert!(claim_worktree_branch_blocking(w.to_str().unwrap(), "bad name").is_err());
+        // `--help` exits 0 and creates nothing, so it must be caught by name.
+        assert!(claim_worktree_branch_blocking(w.to_str().unwrap(), "--help").is_err());
+        assert!(symbolic_branch(&w).is_none(), "still detached");
+
+        let _ = remove_worktree_blocking(f.path(), w.to_str().unwrap(), true);
+    }
+
+    #[test]
+    fn adding_refuses_a_path_that_is_already_there() {
+        let f = Fixture::new();
+        let w = scratch("taken");
+        fs::create_dir_all(&w).unwrap();
+        assert!(add_detached_worktree_blocking(f.path(), w.to_str().unwrap()).is_err());
+        let _ = fs::remove_dir_all(&w);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{find_repos_blocking, repo_relative};
