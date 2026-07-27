@@ -95,7 +95,6 @@ export function gitSwitchBranch(
   return backendForPath(path).git.switchBranch(path, name, create, stash);
 }
 
-
 export function gitFetch(path: string): Promise<void> {
   return backendForPath(path).git.fetch(path);
 }

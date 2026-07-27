@@ -273,7 +273,7 @@ pub fn run() {
             commands::git_pull,
             commands::git_init,
             commands::git_file_versions,
-            commands::check_command_exists,
+            commands::command_exists,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

@@ -110,6 +110,10 @@ export interface ProjectApi {
 export interface ShellApi {
   defaultShell(): Promise<string>;
   availableShells(): Promise<ShellOption[]>;
+  // Whether a command resolves on the machine that would run it. Asked by the
+  // setup wizard; for a remote boite the answer has to come from the server,
+  // since that is where the agents live.
+  commandExists(cmd: string): Promise<boolean>;
 }
 
 export interface ScopeApi {

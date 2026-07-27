@@ -3,7 +3,6 @@
   import { app } from "$lib/app/store.svelte";
   import { workspace } from "$lib/backend";
   import { settings } from "$lib/features/settings/store.svelte";
-  import SetupWizard from "$lib/features/setup/SetupWizard.svelte";
   import { pickAndAddProject } from "$lib/features/project/api";
   import { ptyKill } from "$lib/storage/pty";
   import { reloadThread } from "$lib/features/thread/api";
@@ -42,6 +41,11 @@
   // Four tabs of form controls that most sessions never open.
   const SettingsView = lazyComponent(
     () => import("$lib/features/settings/SettingsPanel.svelte"),
+  );
+  // Seen once in the lifetime of an install. A static import would keep its
+  // four screens and their icons in the entry chunk forever.
+  const SetupView = lazyComponent(
+    () => import("$lib/features/setup/SetupWizard.svelte"),
   );
 
   let activated = $state<Record<string, true>>({});
@@ -192,6 +196,12 @@
     if (settingsActive) void SettingsView.ensure();
   });
 
+  $effect(() => {
+    if (!workspace.needsLogin && !settings.state.setupCompleted) {
+      void SetupView.ensure();
+    }
+  });
+
   // Opening the Files or Git panel is the strongest signal that a file or a
   // diff is about to be opened; warm the editor before the click lands.
   $effect(() => {
@@ -212,12 +222,18 @@
   <FolderBrowser />
 
   {#key workspace.epoch}
-  {#if !settings.state.setupCompleted}
-    <SetupWizard />
-  {:else if workspace.needsLogin}
+  {#if workspace.needsLogin}
     <div class="flex min-h-0 flex-1">
       <RemoteLogin />
     </div>
+  {:else if !settings.state.setupCompleted}
+    <!-- After login, never before: the wizard asks the backend which agents
+         are installed, and on a remote boite that answer only exists once the
+         connection is up. -->
+    {#if SetupView.current}
+      {@const SetupComp = SetupView.current}
+      <SetupComp />
+    {/if}
   {:else}
     <div class="flex min-h-0 flex-1">
     {#if !mobile && !settings.state.sidebarCollapsed}
@@ -231,7 +247,7 @@
     <main class="relative flex min-w-0 flex-1 flex-col">
       {#if !app.ready}
         <div class="flex h-full items-center justify-center">
-          <p class="font-mono text-xs text-muted-foreground/60">{i18n.t("common.loading")}</p>
+          <p class="font-mono text-xs text-muted-foreground/60">{t("common.loading")}</p>
         </div>
       {:else}
         <div

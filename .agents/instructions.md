@@ -1,27 +1,65 @@
-# Agent Guidelines & Developer Instructions
+# Agent and contributor guidelines
 
-As an AI agent or developer working on **Boite**, you must follow these guidelines:
+Read this before changing UI code. `README.md` covers the stack and the build
+commands; this file covers the rules that are easy to break without noticing.
 
-## Internationalization (i18n) Requirement
+## Internationalization
 
-Boite uses a custom Svelte 5 Rune-based reactive translation system.
+Every user-facing string goes through the translation layer. No literal text in
+a `.svelte` file, including `title`, `placeholder` and `aria-label`.
 
-When creating or modifying UI elements, **NEVER** hardcode user-facing text strings directly in `.svelte` files. Instead:
+The dictionaries are TypeScript, not JSON, and the keys are flat:
 
-1. **Add translations to local files**:
-   Every new or modified string **MUST** be translated in both English and French at a minimum.
-   - English dictionary: [`en.json`](file:///C:/Users/User/Documents/GitHub/boite/src/lib/i18n/locales/en.json)
-   - French dictionary: [`fr.json`](file:///C:/Users/User/Documents/GitHub/boite/src/lib/i18n/locales/fr.json)
+- `src/lib/i18n/messages.ts` holds `EN_MESSAGES` and derives
+  `MessageKey = keyof typeof EN_MESSAGES`.
+- `src/lib/i18n/messages.fr.ts` is annotated `Record<MessageKey, string>`, which
+  is the completeness check: adding an English key without a French one fails
+  `bun run check`.
 
-2. **Use nested keys** to keep the localization files clean (e.g. `common.loading` or `settings.language.title`).
+Both properties depend on the key being a literal at the call site:
 
-3. **Import and use `i18n` in Svelte components**:
-   ```svelte
-   <script lang="ts">
-     import { i18n } from "$lib/i18n/index.svelte";
-   </script>
+```svelte
+<script lang="ts">
+  import { t } from "$lib/i18n/index.svelte";
+</script>
 
-   <p>{i18n.t("my_feature.title")}</p>
-   ```
+<p>{t("setup.title")}</p>
+<p>{t("setup.stepCount", { current: 1, total: 3 })}</p>
+```
 
-4. **Do not use third-party i18n libraries** unless specifically requested, as Boite values speed, lightweight footprints, and native integration with Svelte 5 runes.
+A template literal (`` t(`setup.${id}Desc`) ``) defeats both, and the typecheck
+rejects it. When a key has to vary, put a `MessageKey` on the data instead:
+
+```ts
+export interface SetupRecommendation {
+  descKey: MessageKey;
+}
+```
+
+Key names are camelCase after the dot, matching what is already there
+(`common.chooseFolder`, `setup.stepCount`). English doubles as the runtime
+fallback for any key a locale is missing.
+
+No third-party i18n library. The runes layer is a few dozen lines and the French
+dictionary is loaded on demand, so it costs nothing on the boot path.
+
+## Talking to the machine
+
+Components never call `invoke` directly. Everything goes through `backend()`
+(`src/lib/backend/`), which is `TauriBackend` locally and `RemoteBackend` over a
+WebSocket when the boite is a server. A direct `invoke` silently does the wrong
+thing on remote: it answers about the device holding the UI rather than the
+machine actually running the agents, and in the browser PWA it just throws.
+
+Adding a capability means four edits: the method on the interface in
+`backend/types.ts`, the Tauri implementation, the remote implementation, and the
+matching arm in `crates/boite-server/src/rpc.rs`.
+
+## Before pushing
+
+```bash
+bun run check     # svelte-check + oxlint, must be clean
+bun run test      # vitest
+cargo test --workspace
+cargo clippy --workspace --all-targets -- -D warnings
+```
