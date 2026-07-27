@@ -32,7 +32,7 @@
       "preload": ["sqlite:boite.db"]
     },
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDlDQkVBNkU3QzUxOTA4RDYKUldUV0NCbkY1NmErbkZRU3dxTmNkMVRCeGVKYmp1Y3VPRFVrNkVUazdKa0RxTzZmSmJueiswSUUK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQwQzI3OTIzOUY4MzU4OEEKUldTS1dJT2ZJM25DUURwSVNwSC82YStaUEhyQnUzR0h1TEZFbmlVbS9PbTVPYVlOb1JyRVhoQnAK",
       "endpoints": ["https://github.com/beboite/boite/releases/latest/download/latest.json"],
       "windows": {
         "installMode": "passive"
