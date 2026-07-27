@@ -500,7 +500,12 @@ mod registration_tests {
 }
 
 /// Where a project's credentials file lives, for an agent that cannot be handed
-/// anything at launch. Written at startup; this only reports the path.
+/// anything at launch.
+///
+/// Startup writes one per project it finds, which leaves out every project
+/// created since — and those are the ones someone is most likely to be wiring
+/// an agent for right now. So a missing file is written rather than reported:
+/// the endpoint is already up, and its address is the only thing the file says.
 #[tauri::command]
 pub fn agent_mcp_project_path(app: AppHandle, project_id: String) -> Result<String, String> {
     let dir = app
@@ -508,10 +513,14 @@ pub fn agent_mcp_project_path(app: AppHandle, project_id: String) -> Result<Stri
         .app_config_dir()
         .map_err(|e| format!("app_config_dir: {e}"))?;
     let path = dir.join("mcp").join(format!("{project_id}.json"));
-    if !path.is_file() {
-        return Err("no credentials for this project yet".into());
+    if path.is_file() {
+        return Ok(path.to_string_lossy().into_owned());
     }
-    Ok(path.to_string_lossy().into_owned())
+    let api = app
+        .try_state::<crate::agent_api::AgentApi>()
+        .ok_or("the agent endpoint is not running")?;
+    let written = crate::agent_api::write_one(&app, &api.url, &api.token, &project_id)?;
+    Ok(written.to_string_lossy().into_owned())
 }
 
 /// Whether the agent endpoint is up. The panel asks before calling an agent
