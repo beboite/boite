@@ -66,6 +66,11 @@ const MIGRATIONS: &[&str] = &[
         updated_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_todos_project ON todos (project_id);",
+    // Both mirror a desktop migration: the same client reads either store, and
+    // a column missing on one side means a claim made against a remote boite
+    // silently loses its commit and its badge.
+    "ALTER TABLE todos ADD COLUMN commit_sha TEXT;",
+    "ALTER TABLE todos ADD COLUMN claimed_by TEXT;",
 ];
 
 impl Store {
@@ -124,7 +129,8 @@ impl Store {
         let conn = self.conn.lock();
         let mut stmt = conn
             .prepare(
-                "SELECT id, project_id, text, state, note, position, created_at, updated_at
+                "SELECT id, project_id, text, state, note, commit_sha, claimed_by,
+                        position, created_at, updated_at
                  FROM todos ORDER BY position ASC, created_at ASC",
             )
             .map_err(|e| e.to_string())?;
@@ -136,9 +142,11 @@ impl Store {
                     text: r.get(2)?,
                     state: r.get(3)?,
                     note: r.get(4)?,
-                    position: r.get(5)?,
-                    created_at: r.get(6)?,
-                    updated_at: r.get(7)?,
+                    commit_sha: r.get(5)?,
+                    claimed_by: r.get(6)?,
+                    position: r.get(7)?,
+                    created_at: r.get(8)?,
+                    updated_at: r.get(9)?,
                 })
             })
             .map_err(|e| e.to_string())?;
@@ -149,14 +157,17 @@ impl Store {
         let conn = self.conn.lock();
         conn.execute(
             "INSERT OR REPLACE INTO todos
-             (id, project_id, text, state, note, position, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+             (id, project_id, text, state, note, commit_sha, claimed_by,
+              position, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             rusqlite::params![
                 t.id,
                 t.project_id,
                 t.text,
                 t.state,
                 t.note,
+                t.commit_sha,
+                t.claimed_by,
                 t.position,
                 t.created_at,
                 t.updated_at
@@ -170,7 +181,8 @@ impl Store {
         let conn = self.conn.lock();
         let mut stmt = conn
             .prepare(
-                "SELECT id, project_id, text, state, note, position, created_at, updated_at
+                "SELECT id, project_id, text, state, note, commit_sha, claimed_by,
+                        position, created_at, updated_at
                  FROM todos WHERE project_id = ?1 ORDER BY position ASC, created_at ASC",
             )
             .map_err(|e| e.to_string())?;
@@ -182,13 +194,30 @@ impl Store {
                     text: r.get(2)?,
                     state: r.get(3)?,
                     note: r.get(4)?,
-                    position: r.get(5)?,
-                    created_at: r.get(6)?,
-                    updated_at: r.get(7)?,
+                    commit_sha: r.get(5)?,
+                    claimed_by: r.get(6)?,
+                    position: r.get(7)?,
+                    created_at: r.get(8)?,
+                    updated_at: r.get(9)?,
                 })
             })
             .map_err(|e| e.to_string())?;
         rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    }
+
+    /// Which agent a thread is running, as the icon key the rest of the app
+    /// already draws by. Only ever used to put a badge on a claim; it grants
+    /// nothing.
+    pub fn agent_of_thread(&self, thread_id: &str) -> Option<String> {
+        let conn = self.conn.lock();
+        conn.query_row(
+            "SELECT icon_key FROM threads WHERE id = ?1",
+            [thread_id],
+            |r| r.get::<_, Option<String>>(0),
+        )
+        .ok()
+        .flatten()
+        .filter(|k| !k.is_empty() && k != "terminal")
     }
 
     /// What scopes an agent: it presents the thread Boite spawned it for, never
@@ -232,14 +261,17 @@ impl Store {
         id: &str,
         project_id: &str,
         note: Option<&str>,
+        commit: Option<&str>,
+        agent: Option<&str>,
         now: i64,
     ) -> Result<bool, String> {
         let conn = self.conn.lock();
         let changed = conn
             .execute(
-                "UPDATE todos SET state = 'claimed', note = ?1, updated_at = ?2
-                 WHERE id = ?3 AND project_id = ?4 AND state = 'open'",
-                rusqlite::params![note, now, id, project_id],
+                "UPDATE todos SET state = 'claimed', note = ?1, commit_sha = ?2,
+                 claimed_by = ?3, updated_at = ?4
+                 WHERE id = ?5 AND project_id = ?6 AND state = 'open'",
+                rusqlite::params![note, commit, agent, now, id, project_id],
             )
             .map_err(|e| e.to_string())?;
         Ok(changed > 0)

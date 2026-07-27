@@ -44,6 +44,10 @@ struct AddIn {
 struct ClaimIn {
     id: String,
     note: Option<String>,
+    /// The commit the work landed in, if it landed in one. Stored as given: the
+    /// client resolves it against this machine's repository before showing it,
+    /// so a sha nothing backs reads as unknown rather than as done.
+    commit: Option<String>,
 }
 
 fn now_ms() -> i64 {
@@ -113,9 +117,22 @@ async fn claim(
     Json(body): Json<ClaimIn>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let project_id = authorize(&inner, &headers)?;
+    // The thread names the agent: this server spawned it, so it knows what it
+    // is. Nothing the caller sends decides this.
+    let agent = headers
+        .get("x-boite-thread")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|id| inner.store.agent_of_thread(id));
     let changed = inner
         .store
-        .claim_todo(&body.id, &project_id, body.note.as_deref(), now_ms())
+        .claim_todo(
+            &body.id,
+            &project_id,
+            body.note.as_deref(),
+            body.commit.as_deref(),
+            agent.as_deref(),
+            now_ms(),
+        )
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     if !changed {
         // Not this project's row, or no longer open. Both are refusals, and the
