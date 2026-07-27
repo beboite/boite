@@ -7,6 +7,7 @@ import { parseCommand, settings } from "$lib/features/settings/store.svelte";
 import { resolveIconKey } from "$lib/shared/icons/detect";
 import { platform } from "$lib/storage/platform.svelte";
 import { notifications } from "$lib/features/notifications/store.svelte";
+import { logger } from "$lib/shared/services/logger.svelte";
 import { confirmDialog } from "$lib/shared/components/confirm.svelte";
 import { uuid } from "$lib/shared/utils/uuid";
 import { parkedLocal } from "$lib/backend/tauri/parked";
@@ -79,6 +80,44 @@ function requireProject(projectId: string | null): Project | null {
   return project;
 }
 
+/**
+ * The worktree a new thread starts in, or null to run in the project folder.
+ *
+ * Decided once, when the thread is born, never at spawn time: a thread that
+ * already exists has a directory the user has been working in, and moving it
+ * out from under them on a relaunch would lose that.
+ *
+ * Detached, so nothing is named and no branch appears until the agent claims
+ * one. Every refusal below falls back to the project folder — a thread that
+ * cannot be isolated still has to start.
+ */
+async function openWorktreeFor(
+  project: Project,
+  threadId: string,
+  iconKey: IconKey,
+): Promise<string | null> {
+  if (!settings.state.threadWorktrees) return null;
+  // A blank terminal is the user's own shell: dev servers, logs and manual
+  // git all have to run where the user is looking, not in a clean checkout.
+  if (iconKey === "terminal") return null;
+
+  const repo = project.gitRoot ?? project.cwd;
+  const backend = backendForPath(project.cwd);
+  try {
+    const info = await backend.git.repoInfo(repo);
+    if (!info.isRepo) return null;
+    // "Look at what I just changed" cannot be answered from a clean worktree.
+    // A dirty main checkout means the work under discussion is there, so the
+    // thread starts there too.
+    const dirty = await backend.git.status(repo);
+    if (dirty.length > 0) return null;
+    return await backend.worktree.open(repo, threadId);
+  } catch (err) {
+    logger.warn("worktree", `no worktree for ${threadId}`, String(err));
+    return null;
+  }
+}
+
 async function createThread(
   project: Project,
   cmd: string,
@@ -97,6 +136,7 @@ async function createThread(
     opts.iconColor ?? null,
   );
   if (opts.fresh) app.markFresh(thread.id);
+  thread.worktreePath = await openWorktreeFor(project, thread.id, iconKey);
   try {
     await app.upsertThread(thread);
   } catch (err) {
@@ -164,12 +204,37 @@ export async function launchBlankTerminal(
   return createThread(project, cmd, args, label, "terminal");
 }
 
+/**
+ * Gives back the thread's worktree, unless it is still holding something.
+ *
+ * Never forces. The backend refuses while there are uncommitted files or
+ * commits on no branch, and that refusal is the whole safety net: an agent
+ * that produced something real and never claimed a branch keeps its directory
+ * instead of having it swept. Only empty worktrees are collected.
+ */
+async function releaseWorktree(t: Thread) {
+  if (!t.worktreePath) return;
+  const project = app.projects.find((p) => p.id === t.projectId);
+  if (!project) return;
+  const repo = project.gitRoot ?? project.cwd;
+  try {
+    await backendForPath(project.cwd).worktree.remove(repo, t.worktreePath, false);
+  } catch (err) {
+    logger.info("worktree", `kept ${t.worktreePath}`, String(err));
+    notifications.success(`Kept the worktree for ${t.title ?? t.label}: it still has work in it.`);
+  }
+}
+
 export async function closeThread(threadId: string) {
   const t = app.threadById(threadId);
   if (t) rememberClosedThread(t);
   const kill = t?.ptyId ? ptyKill(t.ptyId, true).catch(() => {}) : Promise.resolve();
   await app.removeThread(threadId);
   await kill;
+  // After the PTY is gone: git reads a worktree whose process still holds
+  // files open as busy on Windows, and the removal would fail for a reason
+  // that has nothing to do with whether there is work in it.
+  if (t) await releaseWorktree(t);
 }
 
 // One close path for every entry point (sidebar X, context menu, Ctrl+W) so

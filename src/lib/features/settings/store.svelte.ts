@@ -110,6 +110,7 @@ const DEFAULTS: Settings = {
   seededPresets: BACKFILL_PRESET_IDS,
   powershellNewline: true,
   powershellNoProfile: false,
+  threadWorktrees: false,
   defaultShellId: null,
   sidebarWidth: 240,
   sidebarCollapsed: false,
@@ -247,6 +248,10 @@ class SettingsStore {
           typeof stored.powershellNoProfile === "boolean"
             ? stored.powershellNoProfile
             : DEFAULTS.powershellNoProfile,
+        threadWorktrees:
+          typeof stored.threadWorktrees === "boolean"
+            ? stored.threadWorktrees
+            : DEFAULTS.threadWorktrees,
         defaultShellId:
           typeof stored.defaultShellId === "string"
             ? stored.defaultShellId
