@@ -12,6 +12,13 @@ use std::path::{Path, PathBuf};
 /// application bundles, which is a poor last component for a bundle id.
 pub const LEGACY_IDENTIFIER: &str = "dev.boite.app";
 
+/// The identifier that replaced it, and the only one allowed to inherit its
+/// data. Without this check the migration keys on "is there a sibling called
+/// `dev.boite.app`", which is true for every build sharing that parent
+/// directory — including `dev.boite.dev`, the isolated dev build, whose entire
+/// purpose is to not touch the real install.
+pub const CURRENT_IDENTIFIER: &str = "com.boite.desktop";
+
 /// What a migration attempt did, so the caller can log it without re-deriving.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Outcome {
@@ -115,14 +122,13 @@ pub fn migrate_from_legacy_identifier(app: &tauri::AppHandle) -> Result<Outcome,
         .path()
         .app_data_dir()
         .map_err(|e| format!("no app data dir: {e}"))?;
+    if current.file_name().and_then(|n| n.to_str()) != Some(CURRENT_IDENTIFIER) {
+        return Ok(Outcome::Nothing);
+    }
     let Some(parent) = current.parent() else {
         return Ok(Outcome::Nothing);
     };
-    let legacy = parent.join(LEGACY_IDENTIFIER);
-    if legacy == current {
-        return Ok(Outcome::Nothing);
-    }
-    migrate(&legacy, &current)
+    migrate(&parent.join(LEGACY_IDENTIFIER), &current)
 }
 
 #[cfg(test)]
@@ -196,6 +202,22 @@ mod tests {
             std::fs::read_to_string(legacy.join("boite.db")).unwrap(),
             "old",
             "the legacy database must survive for the user to recover"
+        );
+    }
+
+    #[test]
+    fn the_identifier_that_inherits_is_named_not_inferred() {
+        // `dev.boite.dev` is the isolated dev build. It sits in the same parent
+        // as the real install, so "the sibling called dev.boite.app" describes
+        // the production data directory from its point of view too. Only the
+        // identifier that actually replaced the old one may claim it.
+        assert_ne!(CURRENT_IDENTIFIER, "dev.boite.dev");
+        assert_ne!(CURRENT_IDENTIFIER, LEGACY_IDENTIFIER);
+        let conf = include_str!("../tauri.conf.json");
+        assert!(
+            conf.contains(&format!("\"identifier\": \"{CURRENT_IDENTIFIER}\"")),
+            "CURRENT_IDENTIFIER drifted from tauri.conf.json, so the migration \
+             would silently stop running"
         );
     }
 
