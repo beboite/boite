@@ -626,7 +626,7 @@ async fn dispatch_git(state: &AppState, method: &str, params: Value) -> Result<V
         "git.pullRequest" => {
             let branch = str_param(&params, "branch")?;
             let r = blocking(move || git::pull_request_for_branch_blocking(&p, &branch)).await?;
-            Ok(json!({ "pr": r }))
+            Ok(json!({ "lookup": r }))
         }
         "git.stage" => {
             let files = str_list(&params, "files");

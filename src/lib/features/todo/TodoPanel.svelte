@@ -22,7 +22,7 @@
   import { writeText } from "$lib/platform/clipboard";
   import { openUrl } from "$lib/platform/opener";
   import { gitCommitState, gitPullRequest } from "$lib/features/git/api";
-  import type { CommitState, PullRequest } from "$lib/features/git/api";
+  import type { CommitState, PrLookup } from "$lib/features/git/api";
   import type { TodoItem } from "$lib/types";
   import ListTodo from "@lucide/svelte/icons/list-todo";
   import CornerDownRight from "@lucide/svelte/icons/corner-down-right";
@@ -182,7 +182,7 @@
     agentsOpen = null;
   });
 
-  type ClaimGit = { commit: CommitState; pr: PullRequest | null };
+  type ClaimGit = { commit: CommitState; pr: PrLookup };
 
   // Keyed by the sha as well as the row: the answer is about that commit, and a
   // re-claim with a different one has to be looked up again. Memoised because
@@ -206,16 +206,18 @@
       if (!commit || !commit.known) {
         return {
           commit: commit ?? { known: false, pushed: false, short: sha.slice(0, 7), subject: null, branch: null },
-          pr: null,
+          pr: { kind: "unavailable" },
         };
       }
       // Only ask the forge about work that reached it. An unpushed commit has
       // no pull request by definition, and asking would spend a network call to
       // be told so.
-      const pr =
+      const pr: PrLookup =
         commit.pushed && commit.branch
-          ? await gitPullRequest(root, commit.branch).catch(() => null)
-          : null;
+          ? await gitPullRequest(root, commit.branch).catch(
+              (err): PrLookup => ({ kind: "failed", auth: false, detail: String(err) }),
+            )
+          : { kind: "unavailable" };
       return { commit, pr };
     })();
     gitCache.set(key, pending);
@@ -408,16 +410,27 @@
                   <span class={g.commit.pushed ? "" : "text-muted-foreground/70"}>
                     {g.commit.pushed ? t("todo.gitPushed") : t("todo.gitLocal")}
                   </span>
-                  {#if g.pr}
+                  {#if g.pr.kind === "found"}
                     <span class="text-muted-foreground/40">·</span>
                     <button
                       type="button"
                       class="underline decoration-dotted underline-offset-2 transition hover:text-foreground"
-                      onclick={() => openPr(g.pr!.url)}
-                      title={g.pr.url}
+                      onclick={() => openPr(g.pr.kind === "found" ? g.pr.pr.url : "")}
+                      title={g.pr.pr.url}
                     >
-                      {t("todo.gitPr", { number: String(g.pr.number) })}
+                      {t("todo.gitPr", { number: String(g.pr.pr.number) })}
                     </button>
+                  {:else if g.pr.kind === "failed"}
+                    <!-- gh was there and refused. Said, because unlike a missing
+                         gh this is a state the user can be in without knowing —
+                         and the signed-out case they can fix in one command. -->
+                    <span class="text-muted-foreground/40">·</span>
+                    <span
+                      class="text-warning/80"
+                      title={g.pr.auth ? t("todo.gitPrNoAuthHint") : g.pr.detail}
+                    >
+                      {g.pr.auth ? t("todo.gitPrNoAuth") : t("todo.gitPrFailed")}
+                    </span>
                   {/if}
                 {/if}
               {/await}

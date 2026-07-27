@@ -611,16 +611,60 @@ pub struct PullRequest {
     pub url: String,
 }
 
-/// The pull request opened from this branch, or nothing.
+/// The outcome of asking `gh` about a branch.
 ///
-/// Nothing covers every uninteresting case on purpose — `gh` absent, not logged
-/// in, no network, a forge that is not GitHub, no PR — because the alternative
-/// is a row claiming a state it cannot back. This is the only part of the strip
-/// that reaches the network, so it is also the only part with a deadline.
-pub fn pull_request_for_branch_blocking(path: &str, branch: &str) -> Option<PullRequest> {
+/// Four answers rather than an option, because "no pull request" and "could not
+/// ask" are not the same thing to the person reading the row. Two of them are
+/// worth saying out loud — `gh` is there but signed out, or it failed — and two
+/// are not: no `gh` at all, and a repository that is not on GitHub are both
+/// simply outside what this can answer.
+#[derive(Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum PrLookup {
+    /// No `gh`, or no GitHub remote. Nothing to report and nothing to fix.
+    Unavailable,
+    /// `gh` answered, and there is no pull request for this branch.
+    NotFound,
+    Found { pr: PullRequest },
+    /// `gh` was reachable and refused. `auth` marks the one case the user can
+    /// act on directly, which `gh` reports with exit code 4.
+    Failed { auth: bool, detail: String },
+}
+
+/// Turns a refusal from `gh` into something the panel can say, kept apart from
+/// the process handling so both branches can be tested against the real
+/// messages rather than against a guess at them.
+fn classify_gh_failure(code: Option<i32>, stderr: &str) -> PrLookup {
+    let detail = stderr.lines().next().unwrap_or("").trim().to_string();
+    // Not a GitHub repository at all. gh is right to refuse and there is
+    // nothing for the user to do about it, so this is silence like a missing
+    // gh rather than a failure.
+    if detail.contains("known GitHub host") {
+        return PrLookup::Unavailable;
+    }
+    PrLookup::Failed {
+        // gh exits 4 when it wants `gh auth login`: the one outcome here the
+        // user can act on, and so the one worth naming.
+        auth: code == Some(4),
+        detail: if detail.is_empty() {
+            match code {
+                Some(c) => format!("gh exited with {c}"),
+                None => "gh was killed".into(),
+            }
+        } else {
+            detail
+        },
+    }
+}
+
+/// The pull request opened from this branch.
+///
+/// This is the only part of the strip that reaches the network, so it is also
+/// the only part with a deadline and a kill behind it.
+pub fn pull_request_for_branch_blocking(path: &str, branch: &str) -> PrLookup {
     let p = Path::new(path);
     if !p.is_dir() || branch.is_empty() || branch.starts_with('-') {
-        return None;
+        return PrLookup::Unavailable;
     }
 
     let mut cmd = Command::new("gh");
@@ -635,23 +679,24 @@ pub fn pull_request_for_branch_blocking(path: &str, branch: &str) -> Option<Pull
     cmd.env("GH_NO_UPDATE_NOTIFIER", "1");
     cmd.stdin(Stdio::null());
     cmd.stdout(Stdio::piped());
-    cmd.stderr(Stdio::null());
+    // Kept rather than dropped: it carries the difference between a signed-out
+    // gh and a repository gh has no business answering about.
+    cmd.stderr(Stdio::piped());
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     }
 
-    let mut child = cmd.spawn().ok()?;
+    // Failing to spawn is `gh` not being installed, which is not a problem to
+    // report — most machines do not have it, and nothing here needs it.
+    let Ok(mut child) = cmd.spawn() else {
+        return PrLookup::Unavailable;
+    };
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(6);
     loop {
         match child.try_wait() {
-            Ok(Some(status)) => {
-                if !status.success() {
-                    return None;
-                }
-                break;
-            }
+            Ok(Some(_)) => break,
             Ok(None) if std::time::Instant::now() < deadline => {
                 std::thread::sleep(std::time::Duration::from_millis(50));
             }
@@ -660,27 +705,49 @@ pub fn pull_request_for_branch_blocking(path: &str, branch: &str) -> Option<Pull
             _ => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return None;
+                return PrLookup::Failed {
+                    auth: false,
+                    detail: "gh did not answer in time".into(),
+                };
             }
         }
     }
 
-    let out = child.wait_with_output().ok()?;
-    let parsed: Vec<serde_json::Value> = serde_json::from_slice(&out.stdout).ok()?;
-    let pr = parsed.into_iter().next()?;
-    Some(PullRequest {
-        number: pr.get("number")?.as_u64()?,
-        state: pr
-            .get("state")
-            .and_then(|v| v.as_str())
-            .unwrap_or("UNKNOWN")
-            .to_string(),
-        url: pr
-            .get("url")
-            .and_then(|v| v.as_str())
-            .unwrap_or_default()
-            .to_string(),
-    })
+    let Ok(out) = child.wait_with_output() else {
+        return PrLookup::Unavailable;
+    };
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        return classify_gh_failure(out.status.code(), &stderr);
+    }
+
+    let Ok(parsed) = serde_json::from_slice::<Vec<serde_json::Value>>(&out.stdout) else {
+        return PrLookup::Failed {
+            auth: false,
+            detail: "gh returned something that is not a pull request list".into(),
+        };
+    };
+    let Some(pr) = parsed.into_iter().next() else {
+        return PrLookup::NotFound;
+    };
+    let Some(number) = pr.get("number").and_then(|v| v.as_u64()) else {
+        return PrLookup::NotFound;
+    };
+    PrLookup::Found {
+        pr: PullRequest {
+            number,
+            state: pr
+                .get("state")
+                .and_then(|v| v.as_str())
+                .unwrap_or("UNKNOWN")
+                .to_string(),
+            url: pr
+                .get("url")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string(),
+        },
+    }
 }
 
 pub fn log_blocking(path: &str, limit: u32, skip: u32) -> Result<Vec<Commit>, String> {
@@ -1403,6 +1470,44 @@ mod branch_tests {
             String::from_utf8_lossy(&output.stderr)
         );
         String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    /// Both messages are what `gh` 2.x actually prints, captured from it rather
+    /// than written from memory.
+    #[test]
+    fn gh_refusals_are_told_apart() {
+        let signed_out = classify_gh_failure(
+            Some(4),
+            "To get started with GitHub CLI, please run:  gh auth login\n\
+             Alternatively, populate the GH_TOKEN environment variable…",
+        );
+        match signed_out {
+            PrLookup::Failed { auth, ref detail } => {
+                assert!(auth, "exit 4 is the case the user can act on");
+                assert!(detail.contains("gh auth login"));
+            }
+            _ => panic!("a signed-out gh has something to say"),
+        }
+
+        // Not GitHub at all: nothing to report and nothing to fix, so it reads
+        // like a machine with no gh on it.
+        let elsewhere = classify_gh_failure(
+            Some(1),
+            "none of the git remotes configured for this repository point to a \
+             known GitHub host. To tell gh about a new GitHub host, please use \
+             `gh auth login`",
+        );
+        assert!(matches!(elsewhere, PrLookup::Unavailable));
+
+        // Anything else is passed on as-is rather than guessed at.
+        let other = classify_gh_failure(Some(1), "");
+        match other {
+            PrLookup::Failed { auth, ref detail } => {
+                assert!(!auth);
+                assert_eq!(detail, "gh exited with 1");
+            }
+            _ => panic!("an unexplained failure is still a failure"),
+        }
     }
 
     /// The whole point of resolving the sha rather than displaying it: an agent

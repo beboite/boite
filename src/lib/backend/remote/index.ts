@@ -18,7 +18,7 @@ import type {
   WorkspaceMetaApi,
 } from "../types";
 import type { Project, Settings, Thread, TodoItem } from "$lib/types";
-import type { CommitState, PullRequest } from "$lib/features/git/api";
+import type { CommitState, PrLookup } from "$lib/features/git/api";
 import type { ShellOption } from "$lib/storage/platform.svelte";
 import { Socket, type ConnState } from "./socket";
 
@@ -182,8 +182,10 @@ export class RemoteBackend implements Backend {
           })),
       pullRequest: (path, branch) =>
         rpc("git.pullRequest", { path, branch })
-          .then((r) => (r.pr ?? null) as PullRequest | null)
-          .catch(() => null),
+          .then((r) => (r.lookup ?? { kind: "unavailable" }) as PrLookup)
+          // An older server has no answer at all, which is exactly what
+          // "nothing to report" means here.
+          .catch(() => ({ kind: "unavailable" }) as PrLookup),
       stage: (path, files) => rpc("git.stage", { path, files }).then(() => {}),
       unstage: (path, files) => rpc("git.unstage", { path, files }).then(() => {}),
       discard: (path, files, untracked) =>

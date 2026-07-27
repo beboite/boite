@@ -18,7 +18,7 @@ import type {
   ChangeEntry,
   Commit,
   CommitState,
-  PullRequest,
+  PrLookup,
   RepoInfo,
 } from "$lib/features/git/api";
 import type { ChangedPath, DirEntry, SearchHit } from "$lib/features/explorer/api";
@@ -35,8 +35,7 @@ export const tauriGit: GitApi = {
   status: (path) => invoke<ChangeEntry[]>("git_status", { path }),
   log: (path, limit, skip) => invoke<Commit[]>("git_log", { path, limit, skip }),
   commitState: (path, sha) => invoke<CommitState>("git_commit_state", { path, sha }),
-  pullRequest: (path, branch) =>
-    invoke<PullRequest | null>("git_pull_request", { path, branch }),
+  pullRequest: (path, branch) => invoke<PrLookup>("git_pull_request", { path, branch }),
   stage: (path, files) => invoke("git_stage", { path, files }),
   unstage: (path, files) => invoke("git_unstage", { path, files }),
   discard: (path, files, untracked) =>
