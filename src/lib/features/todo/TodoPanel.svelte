@@ -119,6 +119,22 @@
     };
   });
 
+  function sameRows(a: AgentRow[], b: AgentRow[]): boolean {
+    return (
+      a.length === b.length &&
+      a.every((row, i) => {
+        const other = b[i];
+        return (
+          row.key === other.key &&
+          row.reg === other.reg &&
+          row.cmd === other.cmd &&
+          row.auto === other.auto &&
+          row.cli === other.cli
+        );
+      })
+    );
+  }
+
   async function resolveAgents(rows: AgentRow[], id: string, cwd: string | null) {
     const present = await Promise.all(rows.map((r) => agentIsInstalled(r.cmd)));
     const here = rows.filter((_, i) => present[i]);
@@ -143,7 +159,10 @@
     const run = () =>
       void resolveAgents(rows, id, cwd).then((next) => {
         lastAgentRows.set(id, next);
-        if (!cancelled) agentsHere = next;
+        // The poll below re-answers the same question every five seconds and
+        // the answer almost never changes. Assigning anyway would rebuild this
+        // section on a timer, so the array is only swapped when a row moved.
+        if (!cancelled && !sameRows(agentsHere, next)) agentsHere = next;
       });
     run();
     // The registration happens outside Boite — the user pastes a line into

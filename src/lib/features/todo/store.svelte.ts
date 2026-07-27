@@ -15,6 +15,8 @@ class TodoStore {
   loading = $state(false);
   private loaded = false;
   private inFlight: Promise<void> | null = null;
+  /** A change landed while a query was already out; that query's answer is old. */
+  private stale = false;
 
   forProject(projectId: string | null): TodoItem[] {
     if (!projectId) return [];
@@ -29,12 +31,21 @@ class TodoStore {
 
   async reload(): Promise<void> {
     // Collapse concurrent reloads: a burst of agent writes would otherwise
-    // start one query per event and land them out of order.
-    if (this.inFlight) return this.inFlight;
+    // start one query per event and land them out of order. The join is not
+    // free though — the running query may have read the table before the write
+    // that triggered this call — so a second asker leaves a mark, and the
+    // in-flight one runs again rather than answering with what it already has.
+    if (this.inFlight) {
+      this.stale = true;
+      return this.inFlight;
+    }
     this.loading = true;
     this.inFlight = (async () => {
       try {
-        this.items = await backend().db.loadTodos();
+        do {
+          this.stale = false;
+          this.items = await backend().db.loadTodos();
+        } while (this.stale);
         this.loaded = true;
       } catch (err) {
         console.error("[todo] loadTodos failed:", err);
