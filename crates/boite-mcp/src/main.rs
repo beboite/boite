@@ -34,7 +34,8 @@ use toon::{clip, Toon};
 const LATEST_PROTOCOL: &str = "2025-06-18";
 const SUPPORTED_PROTOCOLS: [&str; 3] = ["2025-06-18", "2025-03-26", "2024-11-05"];
 
-/// A todo's text is one line by convention and a pasted paragraph in practice.
+/// A todo's title is one line by convention and a pasted paragraph in practice,
+/// and its description is a paragraph on purpose.
 const MAX_CELL: usize = 200;
 /// Branch lists grow without bound in a long-lived repository; the agent needs
 /// the naming convention and the few most recent, not all of them.
@@ -222,17 +223,32 @@ fn tools() -> Value {
     json!([
         {
             "name": "todo_list",
-            "description": "List this project's todos: short id, state, text, note.",
+            "description": "List this project's todos: short id, state, title, description.",
             "inputSchema": { "type": "object" },
             "annotations": { "title": "Todos", "readOnlyHint": true, "idempotentHint": true, "openWorldHint": false }
         },
         {
             "name": "todo_add",
-            "description": "Add one todo to this project's list.",
+            "description": "Add one card to this project's list: a one-line title, and a \
+                            description for whatever does not fit in it.",
             "inputSchema": {
                 "type": "object",
-                "properties": { "text": { "type": "string", "description": "One line describing the task." } },
-                "required": ["text"],
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "The task in one short line, around 60 characters. This is \
+                                        all the list shows; a longer one is cut off there. Write \
+                                        the outcome, not the reasoning."
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Everything that does not belong in the title: context, the \
+                                        files involved, constraints, how to tell it is done. As \
+                                        long as it needs to be, and left out entirely when the \
+                                        title already says it all."
+                    }
+                },
+                "required": ["title"],
                 "additionalProperties": false
             },
             "annotations": { "title": "Add todo", "destructiveHint": false, "openWorldHint": false }
@@ -360,7 +376,8 @@ fn format_todos(host: &Host, out: &Value) -> String {
             vec![
                 prefix(id, width).to_string(),
                 str_at(t, "state"),
-                str_at(t, "text"),
+                str_at(t, "title"),
+                str_at(t, "description"),
                 str_at(t, "note"),
             ]
         })
@@ -373,24 +390,31 @@ fn format_todos(host: &Host, out: &Value) -> String {
         .first()
         .map(|r| r[1].clone())
         .filter(|first| rows.iter().all(|r| &r[1] == first));
-    let any_note = rows.iter().any(|r| !r[3].is_empty());
+    let any_description = rows.iter().any(|r| !r[3].is_empty());
+    let any_note = rows.iter().any(|r| !r[4].is_empty());
     let mut cols: Vec<&str> = vec!["id"];
     if uniform_state.is_none() {
         cols.push("state");
     }
-    cols.push("text");
+    cols.push("title");
+    if any_description {
+        cols.push("description");
+    }
     if any_note {
         cols.push("note");
     }
     let rows: Vec<Vec<String>> = rows
         .into_iter()
         .map(|r| {
-            let [id, state, text, note] = r.try_into().expect("four columns");
+            let [id, state, title, description, note] = r.try_into().expect("five columns");
             let mut kept = vec![id];
             if uniform_state.is_none() {
                 kept.push(state);
             }
-            kept.push(text);
+            kept.push(title);
+            if any_description {
+                kept.push(description);
+            }
             if any_note {
                 kept.push(note);
             }
@@ -404,7 +428,7 @@ fn format_todos(host: &Host, out: &Value) -> String {
     }
     w.table("todos", &cols, &rows);
     if rows.is_empty() {
-        w.hint("nothing on this project's list: todo_add text=<one line>");
+        w.hint("nothing on this project's list: todo_add title=<one line>");
     } else {
         w.hint("todo_claim id=<id> note=<what changed> — the user confirms, not you");
     }
@@ -452,11 +476,20 @@ fn call_tool(host: &Host, name: &str, args: &Value) -> Result<String, String> {
             Ok(format_todos(host, &out))
         }
         "todo_add" => {
-            let text = args
-                .get("text")
+            // `text` is still read: a model that learnt the old single-field
+            // shape from a cached tool list would otherwise get a refusal it
+            // cannot act on, and the title is the same string either way.
+            let title = args
+                .get("title")
+                .or_else(|| args.get("text"))
                 .and_then(|v| v.as_str())
-                .ok_or("todo_add needs a text")?;
-            let out = host.send("POST", "/v1/todos", Some(json!({ "text": text })))?;
+                .ok_or("todo_add needs a title")?;
+            let description = args.get("description").and_then(|v| v.as_str());
+            let out = host.send(
+                "POST",
+                "/v1/todos",
+                Some(json!({ "title": title, "description": description })),
+            )?;
             let id = out.get("id").and_then(|v| v.as_str()).unwrap_or("?");
             let short = prefix(id, 8);
             host.remember(short, id);
@@ -638,13 +671,13 @@ mod tests {
         let h = host();
         let out = json!({ "todos": [
             { "id": "1a5f3698-27dc-4f9d-90e5-d732c50e839c", "projectId": "e7c778e0-6a14-4cfe-a7df-b9a2f5b04fc5",
-              "text": "opti mcp axi", "state": "open", "note": null, "position": 0 },
+              "title": "opti mcp axi", "state": "open", "note": null, "position": 0 },
             { "id": "596ce966-971c-4702-9040-1b1393ed8447", "projectId": "e7c778e0-6a14-4cfe-a7df-b9a2f5b04fc5",
-              "text": "readme", "state": "claimed", "note": "done", "position": 1 }
+              "title": "readme", "state": "claimed", "note": "done", "position": 1 }
         ]});
         assert_eq!(
             format_todos(&h, &out),
-            "todos(2):\n  id state text note\n  1a5f3698 open \"opti mcp axi\" -\n  \
+            "todos(2):\n  id state title note\n  1a5f3698 open \"opti mcp axi\" -\n  \
              596ce966 claimed readme done\nhint: todo_claim id=<id> note=<what changed> — the user confirms, not you\n"
         );
     }
@@ -655,17 +688,40 @@ mod tests {
         // Every item open, no note: two columns carry no information, and the
         // state they all share is worth one line rather than one cell per row.
         let out = json!({ "todos": [
-            { "id": "1a5f3698-27dc-4f9d-90e5-d732c50e839c", "text": "opti mcp axi", "state": "open", "note": null },
-            { "id": "596ce966-971c-4702-9040-1b1393ed8447", "text": "readme", "state": "open", "note": null }
+            { "id": "1a5f3698-27dc-4f9d-90e5-d732c50e839c", "title": "opti mcp axi", "state": "open", "note": null },
+            { "id": "596ce966-971c-4702-9040-1b1393ed8447", "title": "readme", "state": "open", "note": null }
         ]});
         assert_eq!(
             format_todos(&h, &out),
             concat!(
                 "state: \"open (every item)\"\n",
                 "todos(2):\n",
-                "  id text\n",
+                "  id title\n",
                 "  1a5f3698 \"opti mcp axi\"\n",
                 "  596ce966 readme\n",
+                "hint: todo_claim id=<id> note=<what changed> — the user confirms, not you\n",
+            )
+        );
+    }
+
+    #[test]
+    fn a_description_earns_a_column_only_when_one_card_carries_it() {
+        let h = host();
+        // The panel keeps the description behind the card, but the agent that
+        // has to act on it reads the list and nothing else.
+        let out = json!({ "todos": [
+            { "id": "1a5f3698-27dc-4f9d-90e5-d732c50e839c", "title": "opti mcp axi",
+              "description": "drop reqwest", "state": "open", "note": null },
+            { "id": "596ce966-971c-4702-9040-1b1393ed8447", "title": "readme", "state": "open", "note": null }
+        ]});
+        assert_eq!(
+            format_todos(&h, &out),
+            concat!(
+                "state: \"open (every item)\"\n",
+                "todos(2):\n",
+                "  id title description\n",
+                "  1a5f3698 \"opti mcp axi\" \"drop reqwest\"\n",
+                "  596ce966 readme -\n",
                 "hint: todo_claim id=<id> note=<what changed> — the user confirms, not you\n",
             )
         );

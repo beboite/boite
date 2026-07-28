@@ -37,7 +37,13 @@ struct Inner {
 
 #[derive(Deserialize)]
 struct AddIn {
-    text: String,
+    /// `text` stays accepted: it is what every shim built before the title and
+    /// the body were split sends, and refusing it would read to the agent as a
+    /// broken endpoint rather than as an old binary.
+    #[serde(alias = "text")]
+    title: String,
+    #[serde(default)]
+    description: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -175,13 +181,21 @@ async fn add(
     Json(body): Json<AddIn>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let project_id = authorize(&inner, &headers)?;
-    let text = body.text.trim();
-    if text.is_empty() {
+    let title = body.title.trim();
+    if title.is_empty() {
         return Err(StatusCode::BAD_REQUEST);
     }
+    // An empty body and no body are the same thing, and only one of them
+    // should reach the column: the panel marks every row that has a
+    // description, and `Some("")` would mark a card with nothing in it.
+    let description = body
+        .description
+        .as_deref()
+        .map(str::trim)
+        .filter(|d| !d.is_empty());
     let id = inner
         .store
-        .add_todo(&project_id, text, now_ms())
+        .add_todo(&project_id, title, description, now_ms())
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let _ = inner.events.send(AppEvent::TodosChanged);
     Ok(Json(json!({ "id": id })))
