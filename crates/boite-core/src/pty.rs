@@ -504,6 +504,14 @@ impl PtyManager {
         self.inner.lock().contains_key(id)
     }
 
+    // The process this PTY spawned. Used to tell a thread's own agent apart
+    // from one running elsewhere: claude registers every session it holds
+    // open, and the two are otherwise indistinguishable from the registry.
+    // None when the PTY is gone, and when the platform never reported a pid.
+    pub fn child_pid(&self, id: &str) -> Option<u32> {
+        self.inner.lock().get(id).and_then(|h| h.pid)
+    }
+
     pub fn kill_all(&self) {
         // Parallel; each kill is one TerminateJobObject syscall, the join
         // only matters for the rare taskkill fallback.

@@ -575,17 +575,24 @@ pub async fn stop_claude_session(session_id: String) -> bool {
 
 #[tauri::command]
 pub async fn find_claude_session(
+    manager: State<'_, PtyManager>,
     cwd: String,
     after_unix_ms: i64,
     exclude_ids: Option<Vec<String>>,
-) -> Option<ClaudeSessionHit> {
+    pty_id: Option<String>,
+) -> Result<Option<ClaudeSessionHit>, String> {
     let exclude = session::build_exclude(exclude_ids);
-    tauri::async_runtime::spawn_blocking(move || {
-        session::find_claude_session_blocking(cwd, after_unix_ms, &exclude)
+    // Resolved here rather than passed in: the pid is the manager's to know,
+    // and it changes on every respawn while the pty id does not.
+    let own_pid = pty_id.and_then(|id| manager.child_pid(&id));
+    // A Result only because borrowing State from an async command demands one;
+    // a detector failure is still "no hit", never an error the caller handles.
+    Ok(tauri::async_runtime::spawn_blocking(move || {
+        session::find_claude_session_blocking(cwd, after_unix_ms, &exclude, own_pid)
     })
     .await
     .ok()
-    .flatten()
+    .flatten())
 }
 
 #[tauri::command]

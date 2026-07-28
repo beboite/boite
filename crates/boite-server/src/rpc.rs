@@ -440,9 +440,15 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
                 .and_then(|v| v.as_i64())
                 .unwrap_or(0);
             let exclude = session::build_exclude(Some(str_list(&params, "excludeIds")));
+            // Which process the caller's PTY is running, so the session it
+            // holds open is not mistaken for someone else's live one.
+            let own_pid = params
+                .get("ptyId")
+                .and_then(|v| v.as_str())
+                .and_then(|id| state.registry.pty_manager().child_pid(id));
             let result = blocking(move || -> Value {
                 match kind.as_str() {
-                    "claude" => session::find_claude_session_blocking(cwd, after, &exclude)
+                    "claude" => session::find_claude_session_blocking(cwd, after, &exclude, own_pid)
                         .map(|h| json!({ "id": h.id, "modifiedMs": h.modified_ms }))
                         .unwrap_or(Value::Null),
                     "codex" => session::find_codex_session_blocking(cwd, after, &exclude)

@@ -257,9 +257,12 @@ export class RemoteBackend implements Backend {
     };
 
     this.session = {
-      find: (kind, cwd, afterUnixMs, excludeIds) =>
-        rpc("session.find", { kind, cwd, afterUnixMs, excludeIds }).then((r) =>
-          normalizeSession(r.session),
+      // ptyId names a PTY the server owns, so it resolves the pid on its side.
+      // An older server ignores the extra param and keeps skipping every live
+      // session, which is the behaviour it had before.
+      find: (kind, cwd, afterUnixMs, excludeIds, ptyId) =>
+        rpc("session.find", { kind, cwd, afterUnixMs, excludeIds, ptyId: ptyId ?? null }).then(
+          (r) => normalizeSession(r.session),
         ),
       // The agents run on the server, so that is where the registry lives. An
       // older server answers with an error; an empty list then reads as

@@ -233,11 +233,18 @@ export interface LiveClaudeSession {
 }
 
 export interface SessionApi {
+  /**
+   * `ptyId` names the PTY asking. Its process holds the session the caller is
+   * trying to bind, and that one alone is exempt from the liveness filter —
+   * without it, an agent is unbindable for exactly as long as it runs.
+   * Omitted (a caller with no PTY of its own), every live session is skipped.
+   */
   find(
     kind: SessionKind,
     cwd: string,
     afterUnixMs: number,
     excludeIds: string[],
+    ptyId?: string | null,
   ): Promise<SessionHit | null>;
   /**
    * Session ids claude currently has open, of any kind. `--resume` refuses
