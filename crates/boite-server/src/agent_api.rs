@@ -101,6 +101,208 @@ fn worktree_of_request(
         .ok_or(StatusCode::CONFLICT)
 }
 
+/// The thread this caller runs in, once it is known to belong to a project
+/// here. Everything that acts on the terminal itself needs it.
+fn thread_of_request(inner: &Inner, headers: &HeaderMap) -> Result<String, StatusCode> {
+    authorize(inner, headers)?;
+    Ok(headers
+        .get("x-boite-thread")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string())
+}
+
+/// Every project in the workspace, archived ones marked rather than hidden: a
+/// project the user put away is still the right place to go back to, and
+/// leaving it off the list is how an agent ends up creating a second one on top
+/// of the first.
+async fn projects(
+    State(inner): State<Arc<Inner>>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let current = authorize(&inner, &headers)?;
+    let projects = inner
+        .store
+        .load_projects()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let rows: Vec<serde_json::Value> = projects
+        .into_iter()
+        .map(|p| {
+            json!({
+                "id": p.id,
+                "name": p.name,
+                "path": p.cwd,
+                "archived": p.archived,
+                "current": p.id == current,
+            })
+        })
+        .collect();
+    Ok(Json(json!({ "projects": rows })))
+}
+
+/// Which project the caller means, from an id, a name or a path. A name that
+/// matches two projects is refused rather than guessed: picking one would move
+/// a conversation into the wrong repository, and the folder it then works in is
+/// not something an undo covers.
+fn resolve_project(inner: &Inner, needle: &str) -> Result<(String, String), String> {
+    let needle = needle.trim();
+    if needle.is_empty() {
+        return Err("name the project to move into".into());
+    }
+    let projects = inner.store.load_projects().map_err(|e| e.to_string())?;
+    if let Some(p) = projects.iter().find(|p| p.id == needle) {
+        return Ok((p.id.clone(), p.name.clone()));
+    }
+    let norm = |s: &str| s.replace('\\', "/").trim_end_matches('/').to_lowercase();
+    let target = norm(needle);
+    if let Some(p) = projects.iter().find(|p| norm(&p.cwd) == target) {
+        return Ok((p.id.clone(), p.name.clone()));
+    }
+    let by_name: Vec<&crate::models::Project> = projects
+        .iter()
+        .filter(|p| p.name.to_lowercase() == target)
+        .collect();
+    if by_name.len() == 1 {
+        return Ok((by_name[0].id.clone(), by_name[0].name.clone()));
+    }
+    if by_name.len() > 1 {
+        return Err(format!(
+            "more than one project is called '{needle}'; give the id or the path instead"
+        ));
+    }
+    Err(format!(
+        "no project called '{needle}'. Call projects_list to see what there is."
+    ))
+}
+
+/// Hands a request to the connected devices, tagged so exactly one acts on it.
+///
+/// The server cannot carry any of these out: moving a thread means killing a
+/// PTY and opening a worktree, and the client is what drives both. It also
+/// cannot know which device is looking, so the request goes to all of them and
+/// `agent.claimRequest` settles who takes it.
+fn dispatch(inner: &Inner, mut request: serde_json::Value) {
+    request["requestId"] = json!(uuid::Uuid::new_v4().to_string());
+    let _ = inner.events.send(AppEvent::AgentRequest(request));
+}
+
+#[derive(Deserialize)]
+struct MoveIn {
+    project: String,
+    note: Option<String>,
+}
+
+/// Moves the calling thread into another project.
+///
+/// Answered as soon as the request is understood, not when it is done: this
+/// call kills the process that made it. A thread cannot change project while
+/// its PTY is alive, so the reply is written, the terminal goes down, and the
+/// agent comes back up in the new folder with its conversation resumed. What
+/// the endpoint does own is the refusal — an unknown or ambiguous project is
+/// settled here, while the agent is still running to read it.
+async fn thread_move(
+    State(inner): State<Arc<Inner>>,
+    headers: HeaderMap,
+    Json(body): Json<MoveIn>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let thread_id = thread_of_request(&inner, &headers)?;
+    let (project_id, name) = match resolve_project(&inner, &body.project) {
+        Ok(found) => found,
+        Err(reason) => return Ok(Json(json!({ "error": reason }))),
+    };
+    dispatch(
+        &inner,
+        json!({
+            "kind": "thread.move",
+            "threadId": thread_id,
+            "projectId": project_id,
+            "note": body.note,
+        }),
+    );
+    Ok(Json(json!({ "project": name })))
+}
+
+#[derive(Deserialize)]
+struct CreateProjectIn {
+    name: String,
+    path: Option<String>,
+    parent: Option<String>,
+    adopt: Option<bool>,
+    git: Option<bool>,
+    r#move: Option<bool>,
+    note: Option<String>,
+}
+
+/// Gives a conversation somewhere to live: a folder, a repository, a project,
+/// and by default this terminal moved into it. Same fire-and-forget shape as
+/// the move, for the same reason.
+async fn project_create(
+    State(inner): State<Arc<Inner>>,
+    headers: HeaderMap,
+    Json(body): Json<CreateProjectIn>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let thread_id = thread_of_request(&inner, &headers)?;
+    let name = body.name.trim().to_string();
+    if name.is_empty() {
+        return Ok(Json(json!({ "error": "a project needs a name" })));
+    }
+    dispatch(
+        &inner,
+        json!({
+            "kind": "project.create",
+            "threadId": thread_id,
+            "name": name,
+            "path": body.path,
+            "parent": body.parent,
+            "adopt": body.adopt.unwrap_or(false),
+            "git": body.git.unwrap_or(true),
+            "move": body.r#move.unwrap_or(true),
+            "note": body.note,
+        }),
+    );
+    Ok(Json(json!({ "name": name })))
+}
+
+#[derive(Deserialize)]
+struct SpawnIn {
+    agent: Option<String>,
+    project: Option<String>,
+    prompt: Option<String>,
+}
+
+/// Opens a second agent terminal. The caller survives this one, so the answer
+/// is real: the request was understood and a terminal is being opened. The new
+/// thread's id is not in it — that is minted by the side that spawns it, and an
+/// agent has nothing to do with one.
+async fn thread_spawn(
+    State(inner): State<Arc<Inner>>,
+    headers: HeaderMap,
+    Json(body): Json<SpawnIn>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let own_project = authorize(&inner, &headers)?;
+    let project_id = match &body.project {
+        Some(needle) => match resolve_project(&inner, needle) {
+            Ok((id, _)) => id,
+            Err(reason) => return Ok(Json(json!({ "error": reason }))),
+        },
+        None => own_project,
+    };
+    dispatch(
+        &inner,
+        json!({
+            "kind": "thread.spawn",
+            "projectId": project_id,
+            // Who asked, so an unnamed agent defaults to another of the caller
+            // rather than to whatever terminal the user happens to be looking
+            // at.
+            "callerThreadId": thread_of_request(&inner, &headers).ok(),
+            "agent": body.agent,
+            "prompt": body.prompt,
+        }),
+    );
+    Ok(Json(json!({ "ok": true })))
+}
+
 async fn worktree_status(
     State(inner): State<Arc<Inner>>,
     headers: HeaderMap,
@@ -236,6 +438,9 @@ pub async fn start(store: Arc<Store>, events: broadcast::Sender<AppEvent>) -> Op
         .route("/v1/worktree", get(worktree_status))
         .route("/v1/worktree/branch", post(worktree_branch))
         .route("/v1/worktree/reserve", post(worktree_reserve))
+        .route("/v1/projects", get(projects).post(project_create))
+        .route("/v1/thread/move", post(thread_move))
+        .route("/v1/threads", post(thread_spawn))
         .with_state(inner);
 
     let listener = match tokio::net::TcpListener::bind("127.0.0.1:0").await {

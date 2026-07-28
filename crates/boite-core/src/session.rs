@@ -271,6 +271,112 @@ fn read_claude_session_meta(path: &Path) -> Option<ClaudeSessionMeta> {
     })
 }
 
+/// Whether this CLI files its transcripts under the directory it ran in.
+///
+/// Only claude does. The others key their store by time (codex), by an internal
+/// database (cursor, antigravity) or by a flat session list (opencode, copilot,
+/// grok, hermes), so a session of theirs resumes from anywhere and a move has
+/// nothing to carry.
+pub fn session_store_is_cwd_scoped(kind: &str) -> bool {
+    kind == "claude"
+}
+
+/// Carries a transcript to the directory the thread is moving to, and answers
+/// whether the conversation can be resumed from there.
+///
+/// Claude looks a session up in `~/.claude/projects/<encoded cwd>/`, so a thread
+/// that changes project changes the directory claude searches and `--resume`
+/// stops finding anything. Copying the file into the destination is what keeps
+/// the conversation reachable from the new folder.
+///
+/// The answer is reachability rather than "did I copy something", because that
+/// is the question the caller has: `false` means replaying the id over there
+/// would fail, and the thread should start a fresh conversation instead of
+/// launching with a `--resume` nothing backs. A CLI that does not file by
+/// directory therefore answers `true` without touching anything — its sessions
+/// were always reachable from anywhere.
+///
+/// Copied, never moved. A move that half-succeeded would leave the conversation
+/// nowhere, and the original costs a file: the session monitor already excludes
+/// ids a thread holds, so the leftover is not picked up as a second session.
+///
+/// The `cwd` recorded inside the transcript is left alone. It is history — what
+/// the earlier turns actually ran against — and claude writes the new directory
+/// on the lines it appends from here on.
+pub fn migrate_session_blocking(
+    kind: &str,
+    session_id: &str,
+    from_cwd: &str,
+    to_cwd: &str,
+) -> Result<bool, String> {
+    if !session_store_is_cwd_scoped(kind) {
+        return Ok(true);
+    }
+    // A session id ends up as a file name; nothing else may.
+    if session_id.is_empty()
+        || !session_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err("not a session id".into());
+    }
+    let home = dirs::home_dir().ok_or("no home directory")?;
+    migrate_claude_transcript(
+        &home.join(".claude").join("projects"),
+        session_id,
+        from_cwd,
+        to_cwd,
+    )
+}
+
+/// Whether the transcript is already sitting in the destination.
+///
+/// Asked when the source has nothing: a thread moved out and back finds its own
+/// copy waiting, and reporting that as unreachable would throw away a
+/// conversation that is right there.
+fn source_already_at_target(projects: &Path, session_id: &str, to_cwd: &str) -> bool {
+    projects
+        .join(encode_claude_project_dir(&normalize(to_cwd)))
+        .join(format!("{session_id}.jsonl"))
+        .is_file()
+}
+
+/// The copy itself, over a `projects` directory the caller names — which is what
+/// makes it testable without a `~/.claude` on the machine running the suite.
+/// Answers whether the session is reachable from `to_cwd` once this returns.
+fn migrate_claude_transcript(
+    projects: &Path,
+    session_id: &str,
+    from_cwd: &str,
+    to_cwd: &str,
+) -> Result<bool, String> {
+    // Same folder: nothing to carry, and the session was already reachable.
+    if normalize(from_cwd) == normalize(to_cwd) {
+        return Ok(true);
+    }
+    let source = projects
+        .join(encode_claude_project_dir(&normalize(from_cwd)))
+        .join(format!("{session_id}.jsonl"));
+    if !source.is_file() {
+        // The thread may never have had a transcript here — a session captured
+        // in a worktree, a claude that wrote nowhere. Not an error, but the
+        // caller has to know: replaying this id over there would fail, so the
+        // thread starts a fresh conversation instead.
+        return Ok(source_already_at_target(projects, session_id, to_cwd));
+    }
+
+    let target_dir = projects.join(encode_claude_project_dir(&normalize(to_cwd)));
+    fs::create_dir_all(&target_dir).map_err(|e| format!("cannot open the target folder: {e}"))?;
+    let target = target_dir.join(format!("{session_id}.jsonl"));
+    // Already there — the same thread moved back, or two threads share a cwd.
+    // Overwriting would replace a transcript with an older copy of itself.
+    if target.is_file() {
+        return Ok(true);
+    }
+    fs::copy(&source, &target).map_err(|e| format!("cannot copy the transcript: {e}"))?;
+    Ok(true)
+}
+
 /// `own_pid` is the process the calling thread's PTY spawned, when it has one.
 /// The session that process holds open is the one the thread is meant to bind
 /// to, so it survives the liveness filter below; every other live session is
@@ -1272,6 +1378,95 @@ mod tests {
         );
         let taken: HashSet<String> = ["ours".to_string()].into_iter().collect();
         assert_eq!(find_copilot_session_in(&conn, "/proj", 0, &taken), None);
+    }
+
+    /// A `~/.claude/projects` of our own, so the suite never reads the machine's.
+    fn projects_fixture(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir()
+            .join(format!("boite-migrate-test-{}-{name}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn seed_transcript(projects: &Path, cwd: &str, session_id: &str, body: &str) -> PathBuf {
+        let dir = projects.join(encode_claude_project_dir(&normalize(cwd)));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(format!("{session_id}.jsonl"));
+        fs::write(&path, body).unwrap();
+        path
+    }
+
+    /// The whole point of the move: claude searches by directory, so a thread
+    /// that changed project finds nothing under the new one until the file is
+    /// there. The original stays put — a conversation is never left in flight.
+    #[test]
+    fn a_transcript_follows_the_thread_to_the_new_folder() {
+        let projects = projects_fixture("moves");
+        let source = seed_transcript(&projects, "/w/from", "sess-1", "{\"a\":1}\n");
+
+        let moved = migrate_claude_transcript(&projects, "sess-1", "/w/from", "/w/to").unwrap();
+
+        assert!(moved);
+        assert!(source.is_file(), "the original is kept");
+        let landed = projects
+            .join(encode_claude_project_dir("/w/to"))
+            .join("sess-1.jsonl");
+        assert_eq!(fs::read_to_string(landed).unwrap(), "{\"a\":1}\n");
+    }
+
+    /// A transcript already at the destination is the newer one — the thread
+    /// came back, or two threads share a folder. Copying over it would replace a
+    /// live conversation with an older copy of itself.
+    #[test]
+    fn an_existing_transcript_is_never_overwritten() {
+        let projects = projects_fixture("existing");
+        seed_transcript(&projects, "/w/from", "sess-2", "old\n");
+        let target = seed_transcript(&projects, "/w/to", "sess-2", "newer\n");
+
+        assert!(migrate_claude_transcript(&projects, "sess-2", "/w/from", "/w/to").unwrap());
+        assert_eq!(fs::read_to_string(target).unwrap(), "newer\n");
+    }
+
+    /// The answer is "can this be resumed over there", not "did I copy
+    /// something". A thread whose claude never wrote a transcript still moves —
+    /// it just has to start a fresh conversation, and the caller only knows to
+    /// drop the session id because this says false.
+    #[test]
+    fn nothing_to_carry_reads_as_nothing_to_resume() {
+        let projects = projects_fixture("empty");
+        assert!(!migrate_claude_transcript(&projects, "ghost", "/w/from", "/w/to").unwrap());
+    }
+
+    /// A CLI that files by time or by database was always reachable from
+    /// anywhere, and so is a move that does not change folder. Both keep their
+    /// session id.
+    #[test]
+    fn a_session_that_never_moved_stays_resumable() {
+        assert!(migrate_session_blocking("codex", "sess-3", "/w/from", "/w/to").unwrap());
+        assert!(migrate_session_blocking("claude", "sess-3", "/w/same", "/w/same").unwrap());
+    }
+
+    /// A thread that moved out and came back finds its own copy waiting. The
+    /// source is empty by then, and calling that unreachable would throw away a
+    /// conversation sitting in the destination.
+    #[test]
+    fn a_transcript_already_waiting_at_the_destination_counts() {
+        let projects = projects_fixture("returned");
+        seed_transcript(&projects, "/w/to", "sess-4", "here\n");
+        assert!(migrate_claude_transcript(&projects, "sess-4", "/w/from", "/w/to").unwrap());
+    }
+
+    /// The id becomes a file name. A traversal in it would write a `.jsonl`
+    /// anywhere the app can reach.
+    #[test]
+    fn an_id_that_is_not_an_id_is_refused() {
+        for junk in ["", "../../evil", "a/b", "a\\b", "a.jsonl"] {
+            assert!(
+                migrate_session_blocking("claude", junk, "/w/from", "/w/to").is_err(),
+                "{junk}"
+            );
+        }
     }
 
     /// The liveness rule is only worth anything if a dead pid reads as dead:

@@ -25,6 +25,83 @@ pub fn inspect_project_blocking(path: String) -> Result<ProjectInspection, Strin
     Ok(ProjectInspection { name, icon, tech })
 }
 
+/// What is already sitting where a new project wants to go.
+#[derive(Serialize, PartialEq, Eq, Debug)]
+#[serde(rename_all = "lowercase")]
+pub enum FolderState {
+    /// Nothing there. The ordinary case: the folder gets made.
+    Missing,
+    /// There, and holding nothing that matters. Safe to take over.
+    Empty,
+    /// There, with files in it. Somebody's work — never taken without saying so.
+    Occupied,
+}
+
+/// Whether a project can be started here without stepping on anything.
+///
+/// A folder holding only the leftovers of tooling — `.git`, `.DS_Store`,
+/// `Thumbs.db` — reads as empty. They are not work, and treating them as work
+/// would refuse the most ordinary case there is: `git init` was run first and
+/// the project set up second.
+pub fn folder_state_blocking(path: &str) -> FolderState {
+    let p = Path::new(path);
+    if !p.exists() {
+        return FolderState::Missing;
+    }
+    if !p.is_dir() {
+        return FolderState::Occupied;
+    }
+    let Ok(entries) = std::fs::read_dir(p) else {
+        return FolderState::Occupied;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !matches!(name.as_str(), ".git" | ".DS_Store" | "Thumbs.db" | "desktop.ini") {
+            return FolderState::Occupied;
+        }
+    }
+    FolderState::Empty
+}
+
+/// Whether a new project folder may be created at this path.
+///
+/// The check exists because an agent can ask for one through the MCP endpoint,
+/// and `create_dir_all` with an arbitrary path is a wide capability to hand a
+/// model. Two places are allowed and no others: under the user's home, and
+/// under a folder that already holds one of their projects. That covers where
+/// projects actually live — a `Dev` folder on another drive is reached through
+/// its siblings — while a path pointing at a system directory is refused
+/// without needing a list of the ones that matter.
+///
+/// `roots` is the parent folder of every project the workspace knows, plus the
+/// home directory. Comparison is textual and case-insensitive, on separators
+/// normalized to `/`: these are paths the app itself stored, not links to
+/// resolve, and a symlink that escapes them is a machine the user set up that
+/// way.
+pub fn may_create_project_at(path: &str, roots: &[String]) -> bool {
+    fn normalize(p: &str) -> String {
+        p.replace('\\', "/")
+            .trim_end_matches('/')
+            .to_lowercase()
+    }
+    // `..` never survives a prefix test honestly: "c:/users/me/../../windows"
+    // starts with the home and lands nowhere near it.
+    if path.split(['/', '\\']).any(|seg| seg == "..") {
+        return false;
+    }
+    let target = normalize(path);
+    if target.is_empty() {
+        return false;
+    }
+    roots.iter().any(|root| {
+        let root = normalize(root);
+        // Equal is refused on purpose: a project rooted at the home directory
+        // itself, or on top of an existing project's parent, is never what was
+        // meant.
+        !root.is_empty() && target.len() > root.len() && target.starts_with(&format!("{root}/"))
+    })
+}
+
 fn basename(p: &Path) -> Option<String> {
     p.file_name()
         .and_then(|s| s.to_str())
@@ -549,4 +626,76 @@ fn package_json_deps(p: &Path) -> Option<HashSet<String>> {
         }
     }
     Some(deps)
+}
+
+#[cfg(test)]
+mod new_project_tests {
+    use super::*;
+
+    /// The rule an agent's `project_create` runs into. Roots are the home
+    /// directory plus the parent folder of every project already known.
+    fn roots() -> Vec<String> {
+        vec!["C:/Users/me".into(), "D:/Dev/Collab".into()]
+    }
+
+    #[test]
+    fn a_folder_under_a_known_root_is_allowed() {
+        assert!(may_create_project_at("C:/Users/me/ideas/thing", &roots()));
+        assert!(may_create_project_at("D:/Dev/Collab/newrepo", &roots()));
+        // The separator and the case are the machine's business, not the rule's.
+        assert!(may_create_project_at(r"d:\dev\collab\newrepo", &roots()));
+    }
+
+    #[test]
+    fn anywhere_else_is_refused() {
+        for path in [
+            "C:/Windows/System32/evil",
+            "D:/Dev/Other/thing",
+            "/etc/cron.d/thing",
+            "",
+        ] {
+            assert!(!may_create_project_at(path, &roots()), "{path}");
+        }
+    }
+
+    /// A prefix test is the whole check, so anything that walks back out of the
+    /// root has to be refused before it runs — "C:/Users/me/../../Windows/x"
+    /// passes `starts_with` and points at the system directory.
+    #[test]
+    fn a_path_that_climbs_out_is_refused() {
+        assert!(!may_create_project_at("C:/Users/me/../../Windows/x", &roots()));
+        assert!(!may_create_project_at(r"D:\Dev\Collab\..\..\x", &roots()));
+    }
+
+    /// A root itself is not a place to put a project: it is where the others
+    /// already are.
+    #[test]
+    fn a_root_itself_is_not_a_project_folder() {
+        assert!(!may_create_project_at("C:/Users/me", &roots()));
+        assert!(!may_create_project_at("D:/Dev/Collab/", &roots()));
+    }
+
+    #[test]
+    fn a_folder_holding_only_tooling_leftovers_reads_as_empty() {
+        let dir = std::env::temp_dir()
+            .join(format!("boite-folder-state-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(
+            folder_state_blocking(dir.to_str().unwrap()),
+            FolderState::Missing
+        );
+
+        std::fs::create_dir_all(dir.join(".git")).unwrap();
+        assert_eq!(
+            folder_state_blocking(dir.to_str().unwrap()),
+            FolderState::Empty
+        );
+
+        std::fs::write(dir.join("README.md"), "mine").unwrap();
+        assert_eq!(
+            folder_state_blocking(dir.to_str().unwrap()),
+            FolderState::Occupied
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

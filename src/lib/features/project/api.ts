@@ -1,10 +1,12 @@
 import { backendFor, workspace } from "$lib/backend";
 import { hasTauri } from "$lib/backend/env";
+import type { FolderState } from "$lib/backend/types";
 import type { WorkspaceOrigin } from "$lib/types";
 import { app } from "$lib/app/store.svelte";
 import { notifications } from "$lib/features/notifications/store.svelte";
 import { logger } from "$lib/shared/services/logger.svelte";
-import { basename } from "$lib/shared/utils/path";
+import { basename, dirname } from "$lib/shared/utils/path";
+import { folderNameFor, joinPath, samePath } from "./path";
 import { techIconDataUrl } from "$lib/shared/icons/tech";
 import { uuid } from "$lib/shared/utils/uuid";
 import { folderBrowser } from "./folderBrowserStore.svelte";
@@ -78,6 +80,164 @@ export async function addProjectByPath(
   notifications.success(`Added ${project.name}`);
   logger.info("project", `added project ${project.name}`, { cwd: project.cwd });
   return project;
+}
+
+/**
+ * Where a project with no path of its own goes.
+ *
+ * The folder that already holds the most projects, because that is the answer
+ * the user gave by putting them there. Home only when there is nothing to learn
+ * from — a first project, or projects scattered one per folder.
+ */
+async function defaultParentFolder(origin?: WorkspaceOrigin): Promise<string> {
+  const counts = new Map<string, number>();
+  for (const p of app.projects) {
+    if ((p.origin ?? "local") !== (origin ?? "local")) continue;
+    const parent = dirname(p.cwd);
+    if (!parent) continue;
+    counts.set(parent, (counts.get(parent) ?? 0) + 1);
+  }
+  let best: string | null = null;
+  let bestCount = 1;
+  for (const [parent, count] of counts) {
+    if (count > bestCount) {
+      best = parent;
+      bestCount = count;
+    }
+  }
+  if (best) return best;
+  return backendFor(origin).project.homeDir();
+}
+
+export interface CreateProjectRequest {
+  name: string;
+  /** The exact folder. Takes precedence over `parent`. */
+  path?: string;
+  /** The folder to put it in; the project's own is named after it. */
+  parent?: string;
+  /** Accept a folder that already has files in it. */
+  adopt?: boolean;
+  /** Run `git init` unless the folder is already a repository. Default true. */
+  git?: boolean;
+  origin?: WorkspaceOrigin;
+}
+
+export interface CreateProjectResult {
+  ok: boolean;
+  /** Why not, in a sentence the caller can act on. */
+  reason?: string;
+  project?: Project;
+  /** How it came about, when it was not made from nothing. */
+  reused?: "existing" | "unarchived";
+}
+
+/**
+ * Turns an idea into a project: a folder, a repository, and a row in the
+ * sidebar.
+ *
+ * Written for two callers with the same needs — the user, and an agent calling
+ * `project_create` on a conversation it wants to give a home. Both can name a
+ * project that is already there, and both mean the same thing by it: use that
+ * one. An archived project is a project the user put away, and asking for it
+ * again is an unambiguous statement that it is back in use.
+ *
+ * A folder that already has files in it is the one case that refuses. Adding a
+ * project on top of somebody's work is not reversible in the way the others
+ * are, and `adopt` exists so the answer is given deliberately rather than
+ * assumed.
+ */
+export async function createProject(
+  req: CreateProjectRequest,
+): Promise<CreateProjectResult> {
+  const name = req.name.trim();
+  if (!name) return { ok: false, reason: "a project needs a name" };
+  const origin = req.origin ?? (workspace.isDynamic ? "local" : undefined);
+
+  const path =
+    req.path?.trim() ||
+    joinPath(
+      req.parent?.trim() || (await defaultParentFolder(origin)),
+      folderNameFor(name),
+    );
+
+  const existing = app.projects.find(
+    (p) => samePath(p.cwd, path) && (p.origin ?? "local") === (origin ?? "local"),
+  );
+  if (existing) {
+    const wasArchived = existing.archived;
+    if (wasArchived) await app.unarchiveProject(existing.id);
+    app.selectedProjectId = existing.id;
+    logger.info("project", `reused ${existing.name}`, { cwd: existing.cwd, wasArchived });
+    return {
+      ok: true,
+      project: existing,
+      reused: wasArchived ? "unarchived" : "existing",
+    };
+  }
+
+  const backend = backendFor(origin);
+  let state: FolderState;
+  try {
+    state = await backend.project.folderState(path);
+  } catch (err) {
+    return { ok: false, reason: `cannot look at ${path}: ${String(err)}` };
+  }
+  if (state === "occupied" && !req.adopt) {
+    return {
+      ok: false,
+      reason: `${path} already has files in it. Pass adopt to take it over, or pick another path.`,
+    };
+  }
+  if (state === "missing") {
+    try {
+      await backend.project.createFolder(path);
+    } catch (err) {
+      return { ok: false, reason: String(err) };
+    }
+  }
+
+  let inspection: { name: string; icon: string | null; tech?: string | null };
+  try {
+    inspection = await backend.project.inspect(path);
+  } catch (err) {
+    logger.warn("project", `inspect failed for ${path}`, String(err));
+    inspection = { name, icon: null };
+  }
+
+  const project: Project = {
+    id: uuid(),
+    // The name that was asked for wins over the one the folder suggests: the
+    // caller just chose it, and inspect() is guessing from a folder that is
+    // usually empty at this point anyway.
+    name,
+    cwd: path,
+    icon: iconFromInspection(inspection),
+    archived: false,
+    origin,
+  };
+  try {
+    await app.addProject(project);
+  } catch (err) {
+    return { ok: false, reason: `could not add the project: ${String(err)}` };
+  }
+
+  // After addProject: the folder only becomes a registered root once the
+  // project exists, and git commands refuse paths outside those roots.
+  if (req.git !== false) {
+    try {
+      const info = await backend.git.repoInfo(path);
+      if (!info.isRepo) await backend.git.init(path);
+    } catch (err) {
+      // A project without a repository is still a project. Say so and move on
+      // rather than unwinding a folder the user can see.
+      logger.warn("project", `git init skipped for ${path}`, String(err));
+      notifications.error(`Created ${name}, but git init failed: ${String(err)}`);
+    }
+  }
+
+  app.selectedProjectId = project.id;
+  logger.info("project", `created ${project.name}`, { cwd: project.cwd });
+  return { ok: true, project };
 }
 
 function iconFromInspection(inspection: {

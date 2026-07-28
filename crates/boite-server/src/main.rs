@@ -87,6 +87,7 @@ async fn main() {
         conns: std::sync::atomic::AtomicUsize::new(0),
         workspace_dir: config.workspace_dir,
         data_dir: config.data_dir,
+        claimed_requests: Default::default(),
     });
 
     if let Err(e) = state.refresh_roots() {

@@ -31,9 +31,37 @@ pub struct AppState {
     /// Persisted data dir, used to serve `/.well-known/assetlinks.json` (the
     /// Android TWA Digital Asset Links file, dropped here after the APK build).
     pub data_dir: PathBuf,
+    /// Agent requests already spoken for. An `AgentRequest` reaches every
+    /// connected device and exactly one of them may act on it — two clients
+    /// running the same move would kill one PTY twice and leave a second
+    /// worktree behind.
+    pub claimed_requests: parking_lot::Mutex<std::collections::VecDeque<String>>,
 }
 
+/// How many claims are remembered. Each is a uuid a client either took or lost
+/// seconds ago; a request older than the last few hundred cannot still be in
+/// flight, and the queue exists so a long-lived server does not grow a set that
+/// only ever gets bigger.
+const CLAIM_MEMORY: usize = 256;
+
 impl AppState {
+    /// Whether this caller is the one that carries the request out.
+    ///
+    /// True exactly once per id. Every other device asking gets false and drops
+    /// it, which is the whole point: the event is broadcast because the server
+    /// cannot tell which device is watching, not because they should all act.
+    pub fn claim_agent_request(&self, request_id: &str) -> bool {
+        let mut claimed = self.claimed_requests.lock();
+        if claimed.iter().any(|id| id == request_id) {
+            return false;
+        }
+        claimed.push_back(request_id.to_string());
+        while claimed.len() > CLAIM_MEMORY {
+            claimed.pop_front();
+        }
+        true
+    }
+
     /// Rebuild the filesystem trust boundary from the persisted project cwds,
     /// plus the workspace base dir so the web folder picker can browse it
     /// before any project exists. Clients never set roots directly.
@@ -160,6 +188,7 @@ mod tests {
             conns: AtomicUsize::new(0),
             workspace_dir: None,
             data_dir: dir.clone(),
+            claimed_requests: Default::default(),
         };
 
         state.refresh_roots().unwrap();
@@ -197,6 +226,7 @@ mod tests {
             conns: AtomicUsize::new(0),
             workspace_dir: Some(dir.clone()),
             data_dir: dir.clone(),
+            claimed_requests: Default::default(),
         };
 
         assert!(state.ensure_project_path(inside.to_str().unwrap()).is_ok());
