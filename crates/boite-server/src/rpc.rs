@@ -297,6 +297,68 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
             Ok(serde_json::to_value(inspection).unwrap())
         }
 
+        // Where a thread with no project of its own runs. This machine's home,
+        // not the connecting device's: the threads live here.
+        "project.homeDir" => {
+            let home = dirs::home_dir().ok_or("no home directory")?;
+            Ok(json!({ "path": home.to_string_lossy() }))
+        }
+
+        "project.folderState" => {
+            let path = str_param(&params, "path")?;
+            state.ensure_project_path(&path)?;
+            let folder_state = blocking(move || project::folder_state_blocking(&path)).await?;
+            Ok(serde_json::to_value(folder_state).unwrap())
+        }
+
+        // The one call that makes a directory outside every registered root,
+        // because a project's folder is not a root until the project exists.
+        // `ensure_project_path` is the outer boundary a server has and the
+        // desktop does not; the same beside-an-existing-project rule is applied
+        // on top of it, so an agent reaching this through the MCP endpoint
+        // cannot point it at the filesystem at large.
+        "project.createFolder" => {
+            let path = str_param(&params, "path")?;
+            state.ensure_project_path(&path)?;
+            let mut allowed: Vec<String> = state
+                .roots
+                .snapshot()
+                .iter()
+                .filter_map(|root| {
+                    std::path::Path::new(root)
+                        .parent()
+                        .map(|p| p.to_string_lossy().to_string())
+                })
+                .collect();
+            if let Some(home) = dirs::home_dir() {
+                allowed.push(home.to_string_lossy().to_string());
+            }
+            if let Some(workspace) = &state.workspace_dir {
+                allowed.push(workspace.to_string_lossy().to_string());
+            }
+            if !project::may_create_project_at(&path, &allowed) {
+                return Err(
+                    "a new project has to go under the home folder or beside a project that \
+                     already exists"
+                        .into(),
+                );
+            }
+            if project::folder_state_blocking(&path) == project::FolderState::Occupied {
+                return Err("there is already something in that folder".into());
+            }
+            std::fs::create_dir_all(&path).map_err(|e| format!("cannot create the folder: {e}"))?;
+            Ok(json!({ "ok": true }))
+        }
+
+        // An agent request reaches every connected device; this decides which
+        // one carries it out. True for exactly one caller per id — two devices
+        // running the same move would kill one PTY twice and leave a second
+        // worktree behind.
+        "agent.claimRequest" => {
+            let id = str_param(&params, "requestId")?;
+            Ok(json!({ "claimed": state.claim_agent_request(&id) }))
+        }
+
         "settings.get" => {
             let value = state.store.load_settings()?;
             Ok(json!({ "settings": value }))
@@ -430,6 +492,21 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
             let resumable =
                 blocking(move || boite_core::session::copilot_session_resumable(&id)).await?;
             Ok(json!({ "resumable": resumable }))
+        }
+
+        // A thread that changed project changed the folder claude searches for
+        // its transcripts, so the file has to follow it here — the agents and
+        // their session stores both live on this machine.
+        "session.migrate" => {
+            let kind = str_param(&params, "kind")?;
+            let id = str_param(&params, "sessionId")?;
+            let from = str_param(&params, "fromCwd")?;
+            let to = str_param(&params, "toCwd")?;
+            let migrated = blocking(move || {
+                boite_core::session::migrate_session_blocking(&kind, &id, &from, &to)
+            })
+            .await??;
+            Ok(json!({ "migrated": migrated }))
         }
 
         "session.find" => {

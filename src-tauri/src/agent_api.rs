@@ -33,6 +33,15 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tauri::{Emitter, Manager};
 
+/// Everything an agent asks for that only the app can carry out.
+///
+/// Moving a thread, creating a project and opening a second terminal all mean
+/// killing or spawning a PTY, opening or releasing a worktree, and writing rows
+/// the front end owns. None of that belongs behind an HTTP handler holding a
+/// second connection to the database — so the endpoint checks what it can see,
+/// emits, and lets the app do the work.
+const AGENT_REQUEST: &str = "boite://agent-request";
+
 /// Handed to spawned children so they can find and authenticate to this
 /// endpoint without any configuration of their own.
 #[derive(Clone)]
@@ -226,6 +235,270 @@ async fn worktree_reserve(
         }
         Err(e) => Ok(Json(json!({ "error": e }))),
     }
+}
+
+/// The thread this caller is running in.
+///
+/// Required by everything that acts on the terminal itself. An agent registered
+/// through a credentials file names a project and could not say which of its
+/// threads it is — there is no answer to give it.
+fn thread_of_request(inner: &Inner, headers: &HeaderMap) -> Result<String, StatusCode> {
+    let thread_id = headers
+        .get("x-boite-thread")
+        .and_then(|v| v.to_str().ok())
+        .filter(|s| !s.is_empty())
+        .ok_or(StatusCode::BAD_REQUEST)?
+        .to_string();
+    let conn = inner.conn.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    conn.query_row("SELECT id FROM threads WHERE id = ?1", [&thread_id], |r| {
+        r.get::<_, String>(0)
+    })
+    .map_err(|_| StatusCode::NOT_FOUND)
+}
+
+#[derive(Serialize)]
+struct ProjectOut {
+    id: String,
+    name: String,
+    path: String,
+    archived: bool,
+    /// Whether this is the project the calling thread is in right now.
+    current: bool,
+}
+
+/// Every project in the workspace, archived ones included.
+///
+/// The list an agent reads before asking to be moved, so it has to show the put
+/// away ones too: "move me back into the thing we shelved last month" is a
+/// sentence people say, and hiding those rows would have the agent create a
+/// second project on top of the first.
+async fn projects(
+    State(inner): State<std::sync::Arc<Inner>>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let current = authorize(&inner, &headers)?;
+    let conn = inner.conn.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut stmt = conn
+        .prepare("SELECT id, name, cwd, archived FROM projects ORDER BY name COLLATE NOCASE")
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let rows = stmt
+        .query_map([], |r| {
+            let id: String = r.get(0)?;
+            Ok(ProjectOut {
+                current: id == current,
+                id,
+                name: r.get(1)?,
+                path: r.get(2)?,
+                archived: r.get::<_, i64>(3)? != 0,
+            })
+        })
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(json!({ "projects": rows })))
+}
+
+/// Which project the caller means, from an id, a name or a path.
+///
+/// An agent has a list with all three on it and no reason to prefer one, so all
+/// three are accepted. A name that matches more than one project is refused
+/// rather than guessed: picking the first would move a conversation into the
+/// wrong repository, and there is no undo for the folder it then works in.
+fn resolve_project(conn: &Connection, needle: &str) -> Result<String, String> {
+    let needle = needle.trim();
+    if needle.is_empty() {
+        return Err("name the project to move into".into());
+    }
+    if let Ok(id) = conn.query_row(
+        "SELECT id FROM projects WHERE id = ?1",
+        [needle],
+        |r| r.get::<_, String>(0),
+    ) {
+        return Ok(id);
+    }
+
+    let mut stmt = conn
+        .prepare("SELECT id, name, cwd FROM projects")
+        .map_err(|e| e.to_string())?;
+    let rows: Vec<(String, String, String)> = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .map_err(|e| e.to_string())?
+        .filter_map(Result::ok)
+        .collect();
+
+    let norm = |s: &str| s.replace('\\', "/").trim_end_matches('/').to_lowercase();
+    let target = norm(needle);
+    if let Some((id, _, _)) = rows.iter().find(|(_, _, cwd)| norm(cwd) == target) {
+        return Ok(id.clone());
+    }
+    let by_name: Vec<&(String, String, String)> = rows
+        .iter()
+        .filter(|(_, name, _)| name.to_lowercase() == target)
+        .collect();
+    if by_name.len() == 1 {
+        return Ok(by_name[0].0.clone());
+    }
+    if by_name.len() > 1 {
+        return Err(format!(
+            "more than one project is called '{needle}'; give the id or the path instead"
+        ));
+    }
+    Err(format!(
+        "no project called '{needle}'. Call projects_list to see what there is."
+    ))
+}
+
+#[derive(Deserialize)]
+struct MoveIn {
+    /// An id, a name or a path — whichever the agent has to hand.
+    project: String,
+    /// What to say to the agent when it comes back up in the new folder.
+    note: Option<String>,
+}
+
+/// Asks Boite to move the calling thread into another project.
+///
+/// Answered the moment the request is understood, not when the move is done,
+/// and that is not a shortcut: this call kills the process that made it. The
+/// PTY runs in a directory, so a thread cannot change project while it is
+/// alive — the reply is written, the terminal goes down, and the agent comes
+/// back up in the new folder with its conversation resumed. Nothing would ever
+/// read a result posted later.
+///
+/// What the endpoint does own is the refusal. An unknown or ambiguous project
+/// is settled here, in front of the agent, while it is still running.
+async fn thread_move(
+    State(inner): State<std::sync::Arc<Inner>>,
+    headers: HeaderMap,
+    Json(body): Json<MoveIn>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let thread_id = thread_of_request(&inner, &headers)?;
+    let (project_id, name) = {
+        let conn = inner.conn.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let id = match resolve_project(&conn, &body.project) {
+            Ok(id) => id,
+            Err(reason) => return Ok(Json(json!({ "error": reason }))),
+        };
+        let name: String = conn
+            .query_row("SELECT name FROM projects WHERE id = ?1", [&id], |r| r.get(0))
+            .unwrap_or_else(|_| id.clone());
+        (id, name)
+    };
+
+    let _ = inner.app.emit(
+        AGENT_REQUEST,
+        json!({
+            "kind": "thread.move",
+            "threadId": thread_id,
+            "projectId": project_id,
+            "note": body.note,
+        }),
+    );
+    Ok(Json(json!({ "project": name })))
+}
+
+#[derive(Deserialize)]
+struct CreateProjectIn {
+    name: String,
+    path: Option<String>,
+    parent: Option<String>,
+    /// Take over a folder that already has files in it.
+    adopt: Option<bool>,
+    /// Run `git init`. On unless said otherwise.
+    git: Option<bool>,
+    /// Move the calling thread into it once it exists. On unless said
+    /// otherwise: an agent that just gave an idea a home is the one working on
+    /// it.
+    r#move: Option<bool>,
+    note: Option<String>,
+}
+
+/// Gives a conversation somewhere to live: a folder, a repository, a project.
+///
+/// Same fire-and-forget shape as the move, and for the same reason — the
+/// default is to move the calling thread in, which kills it. Boite settles what
+/// the endpoint cannot see from here: whether the folder is free, whether a
+/// project is already there, whether an archived one should come back.
+async fn project_create(
+    State(inner): State<std::sync::Arc<Inner>>,
+    headers: HeaderMap,
+    Json(body): Json<CreateProjectIn>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    // A thread is only needed for the move. An agent wired through a
+    // credentials file can still create a project; it just stays where it is.
+    let thread_id = thread_of_request(&inner, &headers).ok();
+    authorize(&inner, &headers)?;
+    let name = body.name.trim().to_string();
+    if name.is_empty() {
+        return Ok(Json(json!({ "error": "a project needs a name" })));
+    }
+
+    let _ = inner.app.emit(
+        AGENT_REQUEST,
+        json!({
+            "kind": "project.create",
+            "threadId": thread_id,
+            "name": name,
+            "path": body.path,
+            "parent": body.parent,
+            "adopt": body.adopt.unwrap_or(false),
+            "git": body.git.unwrap_or(true),
+            "move": body.r#move.unwrap_or(true) && thread_id.is_some(),
+            "note": body.note,
+        }),
+    );
+    Ok(Json(json!({ "name": name })))
+}
+
+#[derive(Deserialize)]
+struct SpawnIn {
+    /// Which agent to start, as an icon key (`claude`, `codex`, …) or the label
+    /// of one of the user's shortcuts.
+    agent: Option<String>,
+    /// Where. The caller's own project when left out.
+    project: Option<String>,
+    /// The first thing the new thread is asked to do.
+    prompt: Option<String>,
+}
+
+/// Starts a second agent, in this project or another.
+///
+/// The caller survives this one, so the answer is real: the request was
+/// understood and the terminal is being opened. What it still cannot report is
+/// the new thread's id, because the id is minted by the side that spawns it —
+/// and an agent has nothing to do with one anyway. It sees its colleague in the
+/// sidebar like everyone else.
+async fn thread_spawn(
+    State(inner): State<std::sync::Arc<Inner>>,
+    headers: HeaderMap,
+    Json(body): Json<SpawnIn>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let own_project = authorize(&inner, &headers)?;
+    let project_id = match &body.project {
+        Some(needle) => {
+            let conn = inner.conn.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            match resolve_project(&conn, needle) {
+                Ok(id) => id,
+                Err(reason) => return Ok(Json(json!({ "error": reason }))),
+            }
+        }
+        None => own_project,
+    };
+
+    let _ = inner.app.emit(
+        AGENT_REQUEST,
+        json!({
+            "kind": "thread.spawn",
+            "projectId": project_id,
+            // Who asked, so an unnamed agent defaults to another of the caller
+            // rather than to whatever terminal the user happens to be looking
+            // at. Absent for an agent wired through a credentials file.
+            "callerThreadId": thread_of_request(&inner, &headers).ok(),
+            "agent": body.agent,
+            "prompt": body.prompt,
+        }),
+    );
+    Ok(Json(json!({ "ok": true })))
 }
 
 /// Which agent is speaking, when Boite launched the terminal it speaks from.
@@ -488,6 +761,9 @@ pub fn start(app: &tauri::AppHandle) {
         .route("/v1/worktree", get(worktree_status))
         .route("/v1/worktree/branch", post(worktree_branch))
         .route("/v1/worktree/reserve", post(worktree_reserve))
+        .route("/v1/projects", get(projects).post(project_create))
+        .route("/v1/thread/move", post(thread_move))
+        .route("/v1/threads", post(thread_spawn))
         .with_state(inner);
 
     // Bound here, not inside the task: the address has to be known before the

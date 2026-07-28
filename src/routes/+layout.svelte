@@ -15,6 +15,7 @@
     restoreLastClosedThread,
   } from "$lib/features/thread/api";
   import { addProjectByPath } from "$lib/features/project/api";
+  import { watchAgentRequests } from "$lib/features/thread/agentRequests";
   import { editorStore } from "$lib/features/editor/store.svelte";
   import { paneStore, leavesOf } from "$lib/features/panes/store.svelte";
   import { palette } from "$lib/features/palette/store.svelte";
@@ -245,6 +246,10 @@
   // Its own onMount: the boot one below returns early on the PWA path, and
   // shortcuts have to work there too.
   onMount(() => keyboard.attach());
+
+  // Also its own: an agent can ask to be moved before boot has finished, and
+  // the request would land on nobody.
+  onMount(() => watchAgentRequests());
 
   onMount(() => {
     // No Tauri runtime: this is a browser/PWA. The only backend is the server

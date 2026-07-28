@@ -5,6 +5,7 @@ import type {
   DbApi,
   EditorApi,
   ExplorerApi,
+  FolderState,
   GitApi,
   LiveClaudeSession,
   LogApi,
@@ -227,6 +228,10 @@ export class RemoteBackend implements Backend {
 
     this.project = {
       inspect: (path) => rpc("project.inspect", { path }),
+      homeDir: () => rpc("project.homeDir").then((r) => r.path as string),
+      folderState: (path) =>
+        rpc("project.folderState", { path }).then((r) => r as unknown as FolderState),
+      createFolder: (path) => rpc("project.createFolder", { path }).then(() => undefined),
     };
 
     this.shell = {
@@ -281,6 +286,13 @@ export class RemoteBackend implements Backend {
         rpc("session.copilotResumable", { sessionId })
           .then((r) => r.resumable !== false)
           .catch(() => true),
+      // The transcripts live next to the agents, so the server does the copy.
+      // An older one has no answer, and `false` reads as "nothing was carried"
+      // — the move still happens, the conversation just starts fresh there.
+      migrate: (kind, sessionId, fromCwd, toCwd) =>
+        rpc("session.migrate", { kind, sessionId, fromCwd, toCwd })
+          .then((r) => Boolean(r.migrated))
+          .catch(() => false),
     };
 
     // App-event logging is a device-local concern (the desktop writes a log
@@ -324,5 +336,14 @@ export class RemoteBackend implements Backend {
 
   subscribe(cb: (event: ControlEvent) => void): () => void {
     return this.#socket.onControl(cb);
+  }
+
+  // An older server has no answer for this, and the caller treats a failure as
+  // "not mine" — which drops the request rather than running a move that a
+  // second device may be running at the same time.
+  claimAgentRequest(requestId: string): Promise<boolean> {
+    return this.#socket
+      .rpc("agent.claimRequest", { requestId })
+      .then((r) => Boolean((r as { claimed?: boolean }).claimed));
   }
 }

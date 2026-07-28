@@ -88,6 +88,20 @@ stays where you left it. Closing a thread removes its worktree but never forces:
 it refuses on uncommitted files, untracked ones included, and on commits that no
 local branch contains.
 
+## Threads with no project
+
+You do not have to open a project to open a terminal. **Scratch** sits at the
+bottom of the sidebar, runs in your home folder and gets no worktree — it is
+where an idea gets talked through before it has earned a repository. When it
+has, the agent calls `project_create` and the conversation moves into it. Remove
+Scratch and it stays removed.
+
+A thread moves by hand too: drag its card onto another project, or use *Move to*
+in its context menu. Same machinery either way — the PTY goes down, the
+transcript follows so `--resume` still finds the conversation, and the thread
+comes back up over there. A worktree still holding uncommitted work is left
+behind rather than deleted, and the agent is told where it went.
+
 ## Platform support
 
 | Platform | Desktop app                | Notes                                            |
@@ -180,7 +194,7 @@ TWA wrapper that packages the PWA as an `.aab`/`.apk`.
 
 ## Agent access (MCP)
 
-Six tools, in two halves.
+Ten tools, in three halves.
 
 `todo_list`, `todo_add` and `todo_claim` reach the right-hand **Todo** tab,
 which keeps a checklist per project. An agent can read that list, append to it
@@ -190,6 +204,23 @@ and report an item finished, but never tick one off: claiming moves an item to
 `worktree_status`, `worktree_branch` and `worktree_reserve` cover the worktree
 the thread runs in. An agent that has produced something worth keeping names a
 branch for it; until then the worktree stays detached and leaves no trace.
+
+`projects_list`, `thread_move`, `project_create` and `thread_spawn` cover where
+the work happens. `thread_move` takes the terminal into another project: Boite
+kills the process, carries the transcript to the new folder so `--resume` still
+finds it, opens a worktree there and brings the agent back up with the
+conversation intact. `project_create` does the same for a conversation that has
+no project yet, making the folder and running `git init` first. `thread_spawn`
+opens a second agent terminal, here or elsewhere, for work that should run in
+parallel in its own worktree.
+
+Those three answer before they finish, and that is not a shortcut: two of them
+kill the process that called them. A thread cannot change project while its PTY
+is alive, so the reply is written while the agent is still there to read a
+refusal — an unknown project, an ambiguous name — and the work happens after it
+has gone. A new project folder is the one thing the endpoint creates outside the
+registered roots, so it is fenced: under your home folder or beside a project
+you already have, and never on top of files that are already there.
 
 Answers come back in TOON rather than JSON, because every one of them is read in
 a context window:

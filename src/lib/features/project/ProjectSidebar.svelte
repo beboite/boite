@@ -13,6 +13,7 @@
     reloadThread,
     stopThread,
   } from "$lib/features/thread/api";
+  import { moveThreadToProject } from "$lib/features/thread/move";
   import { notifications } from "$lib/features/notifications/store.svelte";
   import { refreshProjectIcon } from "$lib/features/project/api";
   import StatusDot from "$lib/shared/components/StatusDot.svelte";
@@ -65,6 +66,10 @@
     grabY: number;
     siblings: RowSnapshot[];
     slotIndex: number | null;
+    // Another project the card is currently over. Set only while it is over one
+    // that is not its own — hovering the source project is a reorder, and the
+    // two are mutually exclusive with `slotIndex`.
+    dropProjectId: string | null;
   };
   let dragState = $state<DragState | null>(null);
   let dragCaptureEl: HTMLElement | null = null;
@@ -79,6 +84,10 @@
   const dragOffset = $derived(
     liveDrag ? liveDrag.y - liveDrag.startY : 0,
   );
+  // The project about to receive the dragged card. Read by the markup to light
+  // its row up, which is the only thing telling the user that letting go here
+  // moves the thread rather than doing nothing.
+  const dropProjectId = $derived(liveDrag?.dropProjectId ?? null);
 
   $effect(() => {
     if (!liveDrag) {
@@ -114,6 +123,7 @@
       grabY: 0,
       siblings: [],
       slotIndex: null,
+      dropProjectId: null,
     });
   }
 
@@ -154,6 +164,7 @@
       grabY: 0,
       siblings: [],
       slotIndex: null,
+      dropProjectId: null,
     });
   }
 
@@ -260,6 +271,7 @@
     const previewPicked = updatePaneDropPreview(drag, e.clientX, e.clientY);
     if (previewPicked) {
       drag.slotIndex = null;
+      drag.dropProjectId = null;
       return;
     }
     const overEl = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
@@ -272,9 +284,25 @@
     );
     if (inAside && (sameProjectList || overSourceProjectHeader)) {
       drag.slotIndex = computeSlotIndex(drag);
-    } else {
-      drag.slotIndex = null;
+      drag.dropProjectId = null;
+      return;
     }
+    drag.slotIndex = null;
+    // Over a different project — its header or the space its threads occupy —
+    // the card is being given to it. Archived rows are excluded: they are only
+    // on screen while the archive list is open, and dropping onto one would
+    // move a live thread into a project the user has put away.
+    const overProject =
+      overEl?.closest<HTMLElement>("[data-project-row]")?.dataset.projectRow ??
+      overEl?.closest<HTMLElement>("[data-thread-list]")?.dataset.projectId ??
+      null;
+    drag.dropProjectId =
+      inAside &&
+      overProject &&
+      overProject !== drag.projectId &&
+      app.sortedProjects.some((p) => p.id === overProject)
+        ? overProject
+        : null;
   }
 
   function updatePaneDropPreview(
@@ -383,6 +411,14 @@
   }
 
   function commitThreadDrag(drag: DragState, e: PointerEvent) {
+    // Checked before the pane preview: the two are already exclusive in
+    // updateThreadDrag, and reading the drop project first keeps the intent
+    // ("give this to that project") ahead of the layout question.
+    if (drag.dropProjectId) {
+      void moveThreadToProject(drag.id, drag.dropProjectId);
+      return;
+    }
+
     const preview = paneStore.dropPreview;
     if (preview) {
       if (preview.refused) {
@@ -540,6 +576,22 @@
         void reloadThread(thread.id);
       },
     });
+    // The same move the drag makes, for the times the target is scrolled off
+    // screen — and for a project that has no threads yet, which has no list to
+    // aim at. Flat rather than a submenu: the menu has no nesting, and a
+    // sidebar holds a handful of projects.
+    const elsewhere = app.sortedProjects.filter((p) => p.id !== thread.projectId);
+    if (elsewhere.length > 0) {
+      items.push({ separator: true });
+      for (const project of elsewhere) {
+        items.push({
+          label: t("sidebar.moveThreadTo", { project: project.name }),
+          action: () => {
+            void moveThreadToProject(thread.id, project.id);
+          },
+        });
+      }
+    }
     items.push({ separator: true });
     items.push({
       label: "Close thread",
@@ -768,6 +820,7 @@
         class:dragging={isProjectSource}
         class:source={isProjectSource}
         class:opacity-50={boiteOffline}
+        class:drop-target={dropProjectId === project.id}
         data-project-row={project.id}
         style:transform={isProjectSource
           ? `translate(0px, ${dragOffset}px) scale(1.015)`
@@ -1085,5 +1138,14 @@
   }
   .project-block.source {
     pointer-events: none;
+  }
+
+  /* Where letting go would put the thread. A ring rather than a fill: the row
+     underneath already uses background to mean "selected", and two meanings on
+     one property read as one. */
+  .project-block.drop-target {
+    outline: 2px dashed var(--color-primary, #6366f1);
+    outline-offset: 2px;
+    border-radius: 0.5rem;
   }
 </style>

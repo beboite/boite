@@ -297,6 +297,81 @@ fn tools() -> Value {
                 "additionalProperties": false
             },
             "annotations": { "title": "Take branch", "destructiveHint": false, "openWorldHint": false }
+        },
+        {
+            "name": "projects_list",
+            "description": "Every project in this Boite: id, name, folder, and whether it is \
+                            archived. Archived ones are listed because a project the user put away \
+                            is still the right place to go back to. Read before thread_move or \
+                            project_create.",
+            "inputSchema": { "type": "object" },
+            "annotations": { "title": "Projects", "readOnlyHint": true, "idempotentHint": true, "openWorldHint": false }
+        },
+        {
+            "name": "thread_move",
+            "description": "Move THIS terminal into another project. Boite kills the process, \
+                            carries the conversation to the new folder, opens a worktree there and \
+                            brings you back up resumed. You will not read this result: the terminal \
+                            that called it goes down first, and your next turn happens over there. \
+                            A worktree still holding uncommitted work is left behind, not deleted.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "project": { "type": "string", "description": "Id, name or folder, from projects_list." },
+                    "note": { "type": "string", "description": "What to tell you on arrival. Omitted, Boite writes it." }
+                },
+                "required": ["project"],
+                "additionalProperties": false
+            },
+            "annotations": { "title": "Move thread", "destructiveHint": false, "openWorldHint": false }
+        },
+        {
+            "name": "project_create",
+            "description": "Give this conversation a home: folder, git init, a project, and by \
+                            default this terminal moved into it. For a thread that started outside \
+                            any project (Scratch, the user's home folder) on an idea worth \
+                            building. A project already there is reused, an archived one is brought \
+                            back, a folder with files in it is refused unless you pass adopt. You \
+                            will not read this result when it moves you.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string", "description": "What the project is called." },
+                    "path": { "type": "string", "description": "Exact folder. Omitted, Boite puts it beside the user's other projects." },
+                    "parent": { "type": "string", "description": "Folder to create it in, when you know where but not what to call it." },
+                    "adopt": { "type": "boolean", "description": "Take over a folder that already has files. Off by default." },
+                    "git": { "type": "boolean", "description": "Run git init. On by default; an existing repository is left alone." },
+                    "move": { "type": "boolean", "description": "Move this terminal into it. On by default." },
+                    "note": { "type": "string", "description": "What to tell you on arrival." }
+                },
+                "required": ["name"],
+                "additionalProperties": false
+            },
+            "annotations": { "title": "New project", "destructiveHint": false, "openWorldHint": false }
+        },
+        {
+            "name": "thread_spawn",
+            "description": "Open another agent terminal, here or in another project, for work that \
+                            should run in parallel in its own worktree — not for a sub-task you \
+                            could do this turn. It is independent: it does not report back and you \
+                            cannot read its output, so the prompt is all it will know.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "agent": { "type": "string", "description": "claude, codex, opencode, cursor, copilot, grok, hermes, antigravity, or one of the user's shortcut labels. Defaults to yours." },
+                    "project": { "type": "string", "description": "Id, name or folder. Defaults to this project." },
+                    "prompt": {
+                        "type": "string",
+                        "description": "Its opening instruction, written for someone who was not in \
+                                        this conversation. Only claude and codex take one on the \
+                                        command line; ask for one of those if it must start knowing \
+                                        something. The rest open bare and Boite shows the user what \
+                                        was meant to be said."
+                    }
+                },
+                "additionalProperties": false
+            },
+            "annotations": { "title": "New thread", "destructiveHint": false, "openWorldHint": false }
         }
     ])
 }
@@ -488,8 +563,131 @@ fn call_tool(host: &Host, name: &str, args: &Value) -> Result<String, String> {
         }
         "worktree_branch" => branch_call(host, args, "/v1/worktree/branch", "worktree_branch"),
         "worktree_reserve" => branch_call(host, args, "/v1/worktree/reserve", "worktree_reserve"),
+        "projects_list" => {
+            let out = host.send("GET", "/v1/projects", None)?;
+            Ok(format_projects(&out))
+        }
+        "thread_move" => {
+            let project = args
+                .get("project")
+                .and_then(|v| v.as_str())
+                .ok_or("thread_move needs a project")?;
+            let out = refusable(
+                host,
+                "/v1/thread/move",
+                json!({ "project": project, "note": args.get("note").and_then(|v| v.as_str()) }),
+            )?;
+            let name = out.get("project").and_then(|v| v.as_str()).unwrap_or(project);
+            // Written for a reader that will almost certainly never exist: the
+            // terminal goes down before an agent gets to read it. Worth the
+            // three fields anyway, for a move that fails late enough that this
+            // stays on screen.
+            let mut w = Toon::new();
+            w.field("moving-to", name)
+                .field("terminal", "restarting there")
+                .hint("your next turn happens in the new folder, with this conversation resumed");
+            Ok(w.into_string())
+        }
+        "project_create" => {
+            let name = args
+                .get("name")
+                .and_then(|v| v.as_str())
+                .ok_or("project_create needs a name")?;
+            let mut body = json!({ "name": name });
+            // Forwarded only when given, so the endpoint's own defaults apply
+            // rather than being overwritten with nulls.
+            for key in ["path", "parent", "note"] {
+                if let Some(v) = args.get(key).and_then(|v| v.as_str()) {
+                    body[key] = json!(v);
+                }
+            }
+            for key in ["adopt", "git", "move"] {
+                if let Some(v) = args.get(key).and_then(|v| v.as_bool()) {
+                    body[key] = json!(v);
+                }
+            }
+            let moving = args.get("move").and_then(|v| v.as_bool()).unwrap_or(true);
+            refusable(host, "/v1/projects", body)?;
+            let mut w = Toon::new();
+            w.field("creating", name).flag("moves-this-terminal", moving);
+            if moving {
+                w.hint("your next turn happens in the new folder, with this conversation resumed");
+            }
+            Ok(w.into_string())
+        }
+        "thread_spawn" => {
+            let mut body = json!({});
+            for key in ["agent", "project", "prompt"] {
+                if let Some(v) = args.get(key).and_then(|v| v.as_str()) {
+                    body[key] = json!(v);
+                }
+            }
+            refusable(host, "/v1/threads", body)?;
+            let mut w = Toon::new();
+            w.field("opened", args.get("agent").and_then(|v| v.as_str()).unwrap_or("agent"))
+                .hint("it runs on its own: no report back, and you cannot read its output");
+            Ok(w.into_string())
+        }
         other => Err(format!("unknown tool: {other}")),
     }
+}
+
+/// The project list, one row each. The path is what an agent matches against
+/// its own cwd, so it is never clipped away; the name is what a user says out
+/// loud, and both are accepted by `thread_move`.
+fn format_projects(out: &Value) -> String {
+    let empty = Vec::new();
+    let projects = out
+        .get("projects")
+        .and_then(|v| v.as_array())
+        .unwrap_or(&empty);
+    let mut any_archived = false;
+    let rows: Vec<Vec<String>> = projects
+        .iter()
+        .map(|p| {
+            let string_at = |key: &str| {
+                p.get(key)
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string()
+            };
+            let flag_at = |key: &str| p.get(key).and_then(|v| v.as_bool()).unwrap_or(false);
+            let archived = flag_at("archived");
+            any_archived |= archived;
+            vec![
+                string_at("id"),
+                clip(&string_at("name"), MAX_CELL),
+                clip(&string_at("path"), MAX_CELL),
+                match (flag_at("current"), archived) {
+                    (true, _) => "here".into(),
+                    (_, true) => "archived".into(),
+                    _ => "-".into(),
+                },
+            ]
+        })
+        .collect();
+
+    let mut w = Toon::new();
+    w.table("projects", &["id", "name", "path", "note"], &rows);
+    if any_archived {
+        w.hint("an archived project is unarchived by moving into it, never duplicated");
+    } else {
+        w.hint("thread_move project=<id|name|path>, or project_create name=<new>");
+    }
+    w.into_string()
+}
+
+/// A POST whose refusals arrive as a 200 carrying an `error`.
+///
+/// The endpoint answers that way whenever the reason is the agent's to act on —
+/// a project that does not exist, a name that matches two of them. A transport
+/// failure is something else and stays a transport failure.
+fn refusable(host: &Host, path: &str, body: Value) -> Result<Value, String> {
+    let out = host.send("POST", path, Some(body))?;
+    if let Some(err) = out.get("error").and_then(|v| v.as_str()) {
+        return Err(err.to_string());
+    }
+    Ok(out)
 }
 
 /// Both branch tools take one name and answer the same three ways: it worked,

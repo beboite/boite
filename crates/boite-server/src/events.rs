@@ -29,6 +29,18 @@ pub enum AppEvent {
         name: Option<String>,
         color: Option<String>,
     },
+    /// An agent asked for something only a client can carry out: moving its
+    /// thread into another project, creating a project, opening a second
+    /// terminal. All three mean killing or spawning a PTY and rearranging rows
+    /// the client owns, so the endpoint decides whether the request makes sense
+    /// and the client does the work.
+    ///
+    /// Fanned out to every connected device, because the server has no way to
+    /// know which of them is looking — but carried out by exactly one: each
+    /// request carries an id, and a client claims it through
+    /// `agent.claimRequest` before acting. Two devices running the same move
+    /// would kill one PTY twice and open two worktrees for one thread.
+    AgentRequest(serde_json::Value),
 }
 
 impl AppEvent {
@@ -62,6 +74,7 @@ impl AppEvent {
                 "workspace.info",
                 serde_json::json!({ "name": name, "color": color }),
             ),
+            AppEvent::AgentRequest(request) => Event::new("agent.request", request.clone()),
         }
     }
 }

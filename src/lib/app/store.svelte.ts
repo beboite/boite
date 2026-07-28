@@ -27,6 +27,7 @@ import {
   markRenamed,
   pruneRenamed,
 } from "$lib/features/thread/renamed";
+import { ensureScratchProject, SCRATCH_PROJECT_ID } from "$lib/features/project/scratch";
 import { gitStore } from "$lib/features/git/store.svelte";
 import { todos } from "$lib/features/todo/store.svelte";
 import { notifications } from "$lib/features/notifications/store.svelte";
@@ -166,6 +167,24 @@ class AppState {
     return false;
   }
 
+  // One line to hand the agent the moment its next PTY starts, as the CLI's own
+  // initial prompt. A moved thread uses it to say where it landed and what was
+  // left behind; a spawned one to say what it is for. In-memory and consumed on
+  // read: it describes one launch, and replaying it on a later relaunch would
+  // re-brief an agent about a move it already knows about.
+  #pendingPrompts = new Map<string, string>();
+
+  setPendingPrompt(threadId: string, prompt: string) {
+    const text = prompt.trim();
+    if (text) this.#pendingPrompts.set(threadId, text);
+  }
+
+  consumePendingPrompt(threadId: string): string | null {
+    const prompt = this.#pendingPrompts.get(threadId) ?? null;
+    this.#pendingPrompts.delete(threadId);
+    return prompt;
+  }
+
   // Rebuilt only when the thread set changes, never on a status or title
   // mutation: the callback reads id/projectId/createdAt and nothing else, so
   // the twice-a-second status sweep does not invalidate any of it.
@@ -242,6 +261,12 @@ class AppState {
     return this.projects
       .filter((p) => !p.archived)
       .sort((a, b) => {
+        // Scratch sits last whatever the manual order says. It is where work
+        // starts, not one of the things being worked on, and drifting into the
+        // middle of the real projects is the one place it does not belong.
+        const as = a.id === SCRATCH_PROJECT_ID ? 1 : 0;
+        const bs = b.id === SCRATCH_PROJECT_ID ? 1 : 0;
+        if (as !== bs) return as - bs;
         const ai = idx.get(a.id) ?? Number.MAX_SAFE_INTEGER;
         const bi = idx.get(b.id) ?? Number.MAX_SAFE_INTEGER;
         if (ai !== bi) return ai - bi;
@@ -287,6 +312,25 @@ class AppState {
 
     const { projects, threads } = await rowsReady;
     this.projects = projects;
+    // Before syncRoots, so the home folder is a registered root by the time any
+    // panel reads it. A workspace with no project at all is exactly when a
+    // scratch terminal is wanted, and it cannot be the thing that has to be set
+    // up first.
+    // Once, ever. A user who removed it meant to remove it, and handing it back
+    // every launch would be the app arguing with them.
+    if (!settings.state.seededScratch) {
+      const scratch = await ensureScratchProject(
+        this.projects,
+        workspace.isDynamic ? "local" : undefined,
+      );
+      if (scratch && !this.projects.some((p) => p.id === scratch.id)) {
+        this.projects.push(scratch);
+        void saveProject(scratch).catch((err) => {
+          console.error("saveProject (scratch) failed:", err);
+        });
+      }
+      if (scratch) void settings.markScratchSeeded();
+    }
     // Before ready: panels start polling fs/git commands as soon as they
     // mount, and those commands reject paths outside registered roots.
     await this.syncRoots();
@@ -453,6 +497,17 @@ class AppState {
             color: color ?? "",
           });
         }
+        break;
+      }
+      // An agent on the boite asked to be moved, or for a project, or for a
+      // second terminal. It reaches every connected device because the server
+      // cannot tell which one is watching; the handler claims it first so only
+      // one device acts. Imported late: the handler pulls in the thread and
+      // project APIs, which import this store.
+      case "agent.request": {
+        void import("$lib/features/thread/agentRequests")
+          .then((m) => m.handleRemoteAgentRequest(ev.data))
+          .catch((err) => console.error("agent.request failed:", err));
         break;
       }
       // The server lost track of which control events we missed (broadcast

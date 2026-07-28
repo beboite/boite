@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   EditorApi,
   ExplorerApi,
+  FolderState,
   GitApi,
   LiveClaudeSession,
   LogApi,
@@ -78,6 +79,9 @@ export const tauriProject: ProjectApi = {
       "inspect_project",
       { path },
     ),
+  homeDir: () => invoke<string>("home_dir"),
+  folderState: (path) => invoke<FolderState>("folder_state", { path }),
+  createFolder: (path) => invoke<void>("create_project_folder", { path }),
 };
 
 interface RawShellOption {
@@ -126,6 +130,8 @@ export const tauriSession: SessionApi = {
   stopClaude: (sessionId) => invoke<boolean>("stop_claude_session", { sessionId }),
   copilotResumable: (sessionId) =>
     invoke<boolean>("copilot_session_resumable", { sessionId }),
+  migrate: (kind, sessionId, fromCwd, toCwd) =>
+    invoke<boolean>("migrate_session", { kind, sessionId, fromCwd, toCwd }),
 
   async find(kind, cwd, afterUnixMs, excludeIds, ptyId): Promise<SessionHit | null> {
     const command = SESSION_COMMANDS[kind];

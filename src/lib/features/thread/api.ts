@@ -11,6 +11,7 @@ import { logger } from "$lib/shared/services/logger.svelte";
 import { confirmDialog } from "$lib/shared/components/confirm.svelte";
 import { uuid } from "$lib/shared/utils/uuid";
 import { parkedLocal } from "$lib/backend/tauri/parked";
+import { isScratch } from "$lib/features/project/scratch";
 import type { IconKey, Project, Shortcut, Thread } from "$lib/types";
 import type { ShellOption } from "$lib/storage/platform.svelte";
 
@@ -91,7 +92,7 @@ function requireProject(projectId: string | null): Project | null {
  * one. Every refusal below falls back to the project folder — a thread that
  * cannot be isolated still has to start.
  */
-async function openWorktreeFor(
+export async function openWorktreeFor(
   project: Project,
   threadId: string,
   iconKey: IconKey,
@@ -100,6 +101,10 @@ async function openWorktreeFor(
   // A blank terminal is the user's own shell: dev servers, logs and manual
   // git all have to run where the user is looking, not in a clean checkout.
   if (iconKey === "terminal") return null;
+  // Scratch is the home folder, not a project. A home directory that happens to
+  // be a repository is somebody's dotfiles, and a thread that started there did
+  // not start there to work on them.
+  if (isScratch(project)) return null;
 
   const repo = project.gitRoot ?? project.cwd;
   try {
@@ -210,6 +215,36 @@ export async function launchShortcut(
     fresh: true,
     iconColor: shortcut.iconColor ?? null,
   });
+}
+
+/**
+ * Starts an agent from an already-resolved command, in a project the caller has
+ * in hand.
+ *
+ * The door `thread_spawn` comes through. `launchShortcut` cannot serve it: what
+ * an agent names is a CLI or one of the user's shortcuts, resolved before we
+ * get here, and a project it may not be sitting in — while `launchShortcut`
+ * looks a project up by id and complains to the user when it finds none, which
+ * is the wrong conversation to have about a request nobody clicked.
+ */
+export async function launchAgent(
+  project: Project,
+  launch: {
+    cmd: string;
+    args: string[];
+    label: string;
+    iconKey: IconKey;
+    iconColor?: string | null;
+  },
+): Promise<Thread | null> {
+  return createThread(
+    project,
+    launch.cmd,
+    [...launch.args],
+    launch.label,
+    launch.iconKey,
+    { fresh: true, iconColor: launch.iconColor ?? null },
+  );
 }
 
 export async function launchShell(

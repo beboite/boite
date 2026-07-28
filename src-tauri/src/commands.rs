@@ -200,6 +200,61 @@ pub async fn inspect_project(path: String) -> Result<ProjectInspection, String> 
         .map_err(|e| format!("inspect_project task failed: {e}"))?
 }
 
+/// Where a thread with no project of its own runs, and the default parent for
+/// a project that has no path yet.
+#[tauri::command]
+pub fn home_dir(app: AppHandle) -> Result<String, String> {
+    app.path()
+        .home_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .map_err(|e| format!("no home directory: {e}"))
+}
+
+/// What is already sitting at a path a new project wants. Unscoped like
+/// `inspect_project` and for the same reason — it runs before the folder is
+/// anyone's root — and it reveals strictly less: three words, no listing.
+#[tauri::command]
+pub fn folder_state(path: String) -> project::FolderState {
+    project::folder_state_blocking(&path)
+}
+
+/// Makes the folder a new project will live in.
+///
+/// The one command here that creates a directory outside every registered root,
+/// which it has to: a project's folder is not a root until the project exists.
+/// The boundary instead is *where*: under the user's home, or beside a project
+/// they already have. An agent can reach this through the MCP endpoint, so a
+/// free-form `create_dir_all` was never an option.
+#[tauri::command]
+pub fn create_project_folder(
+    app: AppHandle,
+    scope: State<'_, ProjectRoots>,
+    path: String,
+) -> Result<(), String> {
+    let mut allowed: Vec<String> = scope
+        .snapshot()
+        .iter()
+        .filter_map(|root| {
+            std::path::Path::new(root)
+                .parent()
+                .map(|p| p.to_string_lossy().to_string())
+        })
+        .collect();
+    if let Ok(home) = app.path().home_dir() {
+        allowed.push(home.to_string_lossy().to_string());
+    }
+    if !project::may_create_project_at(&path, &allowed) {
+        return Err(
+            "a new project has to go under your home folder or beside a project you already have"
+                .into(),
+        );
+    }
+    if project::folder_state_blocking(&path) == project::FolderState::Occupied {
+        return Err("there is already something in that folder".into());
+    }
+    std::fs::create_dir_all(&path).map_err(|e| format!("cannot create the folder: {e}"))
+}
+
 #[tauri::command]
 pub async fn read_dir(
     scope: State<'_, ProjectRoots>,
@@ -578,6 +633,27 @@ pub async fn stop_claude_session(session_id: String) -> bool {
     tauri::async_runtime::spawn_blocking(move || session::stop_claude_session(&session_id))
         .await
         .unwrap_or(false)
+}
+
+/// Carries a thread's transcript to the folder it is moving to.
+///
+/// Claude files its sessions under the directory they ran in, so a thread that
+/// changes project changes where `--resume` looks. Answers `false` when there
+/// was nothing to carry — a CLI that does not file by directory, or a thread
+/// that never wrote a transcript here — which is not a failure and must not
+/// stop the move.
+#[tauri::command]
+pub async fn migrate_session(
+    kind: String,
+    session_id: String,
+    from_cwd: String,
+    to_cwd: String,
+) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        session::migrate_session_blocking(&kind, &session_id, &from_cwd, &to_cwd)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]

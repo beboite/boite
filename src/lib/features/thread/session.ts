@@ -50,6 +50,16 @@ export function resolveKey(thread: Thread): IconKey {
   return thread.iconKey ?? detectIconKey(thread.cmd, thread.label);
 }
 
+/**
+ * Which session store this thread's conversation lives in, or null when it is
+ * not an agent at all (a blank terminal, an unrecognised command). Exported for
+ * the move machinery, which has to know whose transcript to carry.
+ */
+export function sessionKindOf(thread: Thread): SessionKind | null {
+  const key = resolveKey(thread);
+  return key && key in detectors ? (key as SessionKind) : null;
+}
+
 export function getDetector(thread: Thread): SessionDetector | null {
   const key = resolveKey(thread);
   if (!key) return null;
@@ -203,6 +213,64 @@ async function liveClaudeSession(sessionId: string, cwd: string) {
   }
 }
 
+/**
+ * How this CLI takes an opening prompt, or null when it takes none.
+ *
+ * `claude [options] [prompt]` always does, resume included — but only behind a
+ * `--`. Its `--mcp-config <configs...>` is variadic, so a bare positional after
+ * it is read as a second config file and the launch dies on
+ * "MCP config file not found: <the first word of the sentence>".
+ *
+ * `codex [options] [prompt]` takes one plainly (nothing in its argument list is
+ * variadic), but only for a fresh session: its resume is the subcommand `codex
+ * resume <id>`, which occupies the same position.
+ *
+ * Nothing else is listed. A guess here does not misfire quietly — it costs the
+ * thread its whole launch — and the cost of being wrong the other way is one
+ * agent that comes back up without being told why its folder changed.
+ */
+function promptSeparator(key: IconKey, args: string[]): string[] | null {
+  if (key === "claude") return ["--"];
+  if (key === "codex") return args.includes("resume") ? null : [];
+  return null;
+}
+
+/**
+ * Whether a thread started on this CLI would be handed an opening instruction.
+ *
+ * Asked before the launch, by `thread_spawn`: a new terminal that silently
+ * drops the prompt it was opened for is a half-success dressed as a success —
+ * the calling agent is told the work was handed off, and the thread it opened
+ * sits at a bare prompt knowing nothing.
+ */
+export function takesOpeningPrompt(key: IconKey): boolean {
+  // A fresh thread never carries a resume, which is the only thing that makes
+  // the positional ambiguous.
+  return promptSeparator(key, []) !== null;
+}
+
+/**
+ * A line queued for this launch, appended last so it is what the agent opens
+ * on. Consumed here rather than at the call site: `buildResumeArgs` owns the
+ * first-spawn latch and both have to be read exactly once per spawn.
+ */
+function withPendingPrompt(thread: Thread, key: IconKey, args: string[]): string[] {
+  const prompt = app.consumePendingPrompt(thread.id);
+  if (!prompt) return args;
+  const separator = promptSeparator(key, args);
+  if (separator === null) {
+    logger.info(
+      "resume",
+      `${thread.id} (${key ?? "?"}): dropped the landing prompt, this CLI takes no positional one`,
+      { cmd: thread.cmd },
+    );
+    return args;
+  }
+  // Any newline would end the prompt and start typing the rest as a second
+  // one, so the whole briefing arrives as a single line.
+  return [...args, ...separator, prompt.replace(/\s*[\r\n]+\s*/g, " ").trim()];
+}
+
 export async function buildResumeArgsAsync(thread: Thread, cwd: string): Promise<string[]> {
   // Let the existing logic decide first — it owns the first-spawn latch, which
   // is consumed on read and must not be probed twice — then intervene only on
@@ -212,7 +280,9 @@ export async function buildResumeArgsAsync(thread: Thread, cwd: string): Promise
   // Every agent that can take it gets todo access, resume or not: the endpoint
   // serves the project, and a fresh thread wants it as much as a resumed one.
   const mcp = await mcpArgsFor(key, settings.state.agentTodoAccess);
-  const args = mcp.length > 0 ? [...base, ...mcp] : base;
+  // Last, so the prompt stays a positional: an mcp flag appended after it would
+  // be read as part of the sentence.
+  const args = withPendingPrompt(thread, key, mcp.length > 0 ? [...base, ...mcp] : base);
 
   // A session copilot opened and never used is refused by id, and threads that
   // captured one before that was known still carry it. Replaying it costs the

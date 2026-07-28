@@ -178,10 +178,27 @@ export interface EditorApi {
   ): Promise<FileVersions>;
 }
 
+/** What is already sitting where a new project wants to go. */
+export type FolderState = "missing" | "empty" | "occupied";
+
 export interface ProjectApi {
   inspect(
     path: string,
   ): Promise<{ name: string; icon: string | null; tech?: string | null }>;
+  /**
+   * The user's home folder on the machine that runs the threads. Where a thread
+   * with no project of its own runs, and the fallback parent for a project
+   * created without a path.
+   */
+  homeDir(): Promise<string>;
+  folderState(path: string): Promise<FolderState>;
+  /**
+   * Makes the folder a new project will live in, and refuses anywhere it has no
+   * business being: a project goes under the home folder or beside one that
+   * already exists. An agent can ask for this through the MCP endpoint, so the
+   * limit is enforced where the folder is made, not where it is requested.
+   */
+  createFolder(path: string): Promise<void>;
 }
 
 export interface ShellApi {
@@ -267,6 +284,25 @@ export interface SessionApi {
    * before rather than dropping a conversation on a guess.
    */
   copilotResumable(sessionId: string): Promise<boolean>;
+  /**
+   * Carries a transcript to the folder a thread is moving to, and answers
+   * whether the conversation can be resumed from there.
+   *
+   * Claude files its sessions under the directory they ran in, so a thread that
+   * changes project changes where `--resume` looks and the conversation drops
+   * out of reach. The other CLIs key their stores by time or by an internal
+   * database, and answer `true` without anything being carried.
+   *
+   * `false` means replaying the id over there would fail — the caller drops the
+   * session and lets the thread start a fresh conversation, rather than
+   * launching with a `--resume` nothing backs.
+   */
+  migrate(
+    kind: SessionKind,
+    sessionId: string,
+    fromCwd: string,
+    toCwd: string,
+  ): Promise<boolean>;
 }
 
 export interface LogApi {
@@ -345,4 +381,16 @@ export interface Backend {
   // Cosmetic workspace identity (name/color). Remote only; the local desktop
   // workspace is always labeled "Local".
   readonly meta?: WorkspaceMetaApi;
+  /**
+   * Whether this device is the one to carry out an agent request.
+   *
+   * True exactly once per id, across every device connected to the boite. The
+   * request itself is broadcast because the server cannot tell which device is
+   * watching — but a move run twice kills one PTY twice and leaves a second
+   * worktree behind, so acting on one is a claim, not a notification.
+   *
+   * Remote only: the desktop delivers these as a Tauri event to the one app
+   * that could have received them.
+   */
+  claimAgentRequest?(requestId: string): Promise<boolean>;
 }
