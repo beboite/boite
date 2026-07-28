@@ -16,13 +16,14 @@ export type SessionDetector = (
   cwd: string,
   afterUnixMs: number,
   excludeIds: string[],
+  ptyId?: string | null,
 ) => Promise<SessionHit | null>;
 
 function makeDetector(kind: SessionKind, scope: string): SessionDetector {
-  return async (cwd, afterUnixMs, excludeIds) => {
+  return async (cwd, afterUnixMs, excludeIds, ptyId) => {
     try {
       // Session files live where the PTY runs; route by the thread's cwd.
-      return await backendForPath(cwd).session.find(kind, cwd, afterUnixMs, excludeIds);
+      return await backendForPath(cwd).session.find(kind, cwd, afterUnixMs, excludeIds, ptyId);
     } catch (err) {
       logger.error("session", `${scope}: detect failed`, String(err));
       return null;

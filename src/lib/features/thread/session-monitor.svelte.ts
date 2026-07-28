@@ -144,7 +144,9 @@ export function startSessionMonitor(opts: {
 
     scanInFlight = true;
     try {
-      const hit = await detector(cwd, sinceMs, excludeIds);
+      // Our own pty, so the session it is running is not filtered out as
+      // "live" — it is the one being claimed.
+      const hit = await detector(cwd, sinceMs, excludeIds, targetPtyId);
       if (!hit) {
         if (t.sessionId) {
           logger.debug(
@@ -228,6 +230,7 @@ export function startSessionMonitor(opts: {
         cwd,
         Date.now() - TRANSCRIPT_LIVENESS_WINDOW_MS,
         excludeOthers,
+        targetPtyId,
       );
       if (hit?.id === ownId) statusEngine.markTranscriptActive(threadId);
     } catch {

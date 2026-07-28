@@ -140,10 +140,6 @@ pub fn stop_claude_session(session_id: &str) -> bool {
     false
 }
 
-pub fn live_claude_session_ids() -> HashSet<String> {
-    live_claude_sessions().into_iter().map(|s| s.id).collect()
-}
-
 /// Sessions Claude has open right now, whatever kind they are.
 ///
 /// `--resume` refuses any of these: "That session is still running as a
@@ -259,10 +255,15 @@ fn read_claude_session_meta(path: &Path) -> Option<ClaudeSessionMeta> {
     })
 }
 
+/// `own_pid` is the process the calling thread's PTY spawned, when it has one.
+/// The session that process holds open is the one the thread is meant to bind
+/// to, so it survives the liveness filter below; every other live session is
+/// still skipped.
 pub fn find_claude_session_blocking(
     cwd: String,
     after_unix_ms: i64,
     exclude: &HashSet<String>,
+    own_pid: Option<u32>,
 ) -> Option<ClaudeSessionHit> {
     let home = dirs::home_dir()?;
     let projects_dir = home.join(".claude").join("projects");
@@ -323,7 +324,18 @@ pub fn find_claude_session_blocking(
 
     // Read once, not per candidate: the registry is a handful of small files,
     // but the candidate list is every transcript on the machine.
-    let live = live_claude_session_ids();
+    //
+    // A session held by our own PTY's process is not a reason to skip: it is
+    // the thread's session, and the whole point of the scan is to bind it.
+    // Skipping it left an interactive claude unbindable for as long as it ran,
+    // which is its entire life — and the resume that needed the binding then
+    // had nothing to replay. Liveness at *replay* time is a separate question,
+    // re-asked at launch by buildResumeArgsAsync.
+    let live: HashSet<String> = live_claude_sessions()
+        .into_iter()
+        .filter(|s| own_pid.is_none_or(|p| s.pid != p))
+        .map(|s| s.id)
+        .collect();
 
     for cand in candidates {
         // Exact match only. A substring test let short project dir names

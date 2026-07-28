@@ -127,13 +127,16 @@ export const tauriSession: SessionApi = {
   copilotResumable: (sessionId) =>
     invoke<boolean>("copilot_session_resumable", { sessionId }),
 
-  async find(kind, cwd, afterUnixMs, excludeIds): Promise<SessionHit | null> {
+  async find(kind, cwd, afterUnixMs, excludeIds, ptyId): Promise<SessionHit | null> {
     const command = SESSION_COMMANDS[kind];
     if (kind === "claude") {
+      // Only claude keeps a registry of what it holds open, so only its
+      // detector has a liveness filter to exempt the caller from.
       const hit = await invoke<{ id: string; modifiedMs: number } | null>(command, {
         cwd,
         afterUnixMs,
         excludeIds,
+        ptyId: ptyId ?? null,
       });
       return hit ? { id: hit.id, mtimeMs: hit.modifiedMs } : null;
     }
