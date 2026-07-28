@@ -24,6 +24,7 @@
   import { updater } from "$lib/features/updater/store.svelte";
   import { resumeAfterUpdate } from "$lib/features/updater/restart";
   import { todos } from "$lib/features/todo/store.svelte";
+  import { chats } from "$lib/features/chat/store.svelte";
   import CommandPalette from "$lib/features/palette/CommandPalette.svelte";
   import { createKeyboardController } from "$lib/shared/keyboard/controller";
   import type { KeyScope, ShortcutBinding } from "$lib/shared/keyboard/types";
@@ -309,11 +310,17 @@
     // release is on disk and a restart is all that is left.
     const stopUpdater = updater.start();
     const stopTodoWatch = todos.watch();
+    // Loaded here rather than by the chat page: the sidebar lists chats from
+    // the moment the window opens, and a page that has never been visited is
+    // exactly the case where that list has to be right.
+    void chats.init();
+    const stopChatWatch = chats.watch();
 
     return () => {
       unlisten?.();
       stopUpdater();
       stopTodoWatch();
+      stopChatWatch();
     };
   });
 </script>

@@ -660,7 +660,7 @@ async fn dispatch_worktree(
             let thread_id = str_param(&params, "threadId")?;
             let base = state.worktree_base();
             std::fs::create_dir_all(&base).map_err(|e| format!("worktree base: {e}"))?;
-            let path = git::worktree_path_for(&base, &thread_id)
+            let path = git::scoped_dir_for(&base, &thread_id)
                 .to_string_lossy()
                 .to_string();
             // `path` is null when the repository is not one to open a worktree

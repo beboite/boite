@@ -53,13 +53,31 @@ impl EventSink for ChannelSink {
     }
 }
 
+/// A PTY that belongs to no thread: one chat turn, spawned and reaped.
+///
+/// `chat_id` is what the agent presents to the todo endpoint, exactly as a
+/// thread id is in `pty_open`. It is stamped here rather than accepted in
+/// `spec.env` for the same reason the thread id is: the token comes out of
+/// managed state, and a caller that could put it in the environment itself
+/// would not need to ask.
 #[tauri::command]
 pub async fn pty_spawn(
+    app: AppHandle,
     manager: State<'_, PtyManager>,
     on_event: Channel<WirePtyEvent>,
-    spec: PtySpawnArgs,
+    mut spec: PtySpawnArgs,
+    chat_id: Option<String>,
 ) -> Result<String, String> {
     let manager = manager.inner().clone();
+    if let (Some(chat_id), Some(api)) = (
+        chat_id.filter(|s| !s.is_empty()),
+        app.try_state::<crate::agent_api::AgentApi>(),
+    ) {
+        let env = spec.env.get_or_insert_with(Default::default);
+        env.insert("BOITE_MCP_URL".into(), api.url.clone());
+        env.insert("BOITE_TOKEN".into(), api.token.clone());
+        env.insert("BOITE_CHAT_ID".into(), chat_id);
+    }
     let sink: Arc<dyn EventSink> = Arc::new(ChannelSink { channel: on_event });
     tauri::async_runtime::spawn_blocking(move || manager.spawn(sink, spec))
         .await
@@ -178,6 +196,13 @@ pub fn register_project_roots(
     // the boundary by naming a directory of its own. Created here because
     // `replace` canonicalizes and silently drops what does not exist yet.
     if let Ok(base) = crate::app_data::worktree_base(&app) {
+        if std::fs::create_dir_all(&base).is_ok() {
+            roots.push(base.to_string_lossy().to_string());
+        }
+    }
+    // Same deal for chats: every chat that has no project runs under this one
+    // directory, so the boundary gains one root rather than one per chat.
+    if let Ok(base) = crate::app_data::chat_base(&app) {
         if std::fs::create_dir_all(&base).is_ok() {
             roots.push(base.to_string_lossy().to_string());
         }
@@ -819,13 +844,73 @@ pub async fn worktree_open(
     scope.ensure_allowed(&repo)?;
     let base = crate::app_data::worktree_base(&app)?;
     std::fs::create_dir_all(&base).map_err(|e| format!("worktree base: {e}"))?;
-    let path = git::worktree_path_for(&base, &thread_id);
+    let path = git::scoped_dir_for(&base, &thread_id);
     let path = path.to_string_lossy().to_string();
     tauri::async_runtime::spawn_blocking(move || {
         git::open_worktree_if_eligible_blocking(&repo, &path)
     })
     .await
     .map_err(|e| format!("worktree_open task failed: {e}"))?
+}
+
+/// The directory a project-less chat runs its turns in, created if needed.
+///
+/// The frontend never composes this path: the id goes through
+/// `git::scoped_dir_for`, which pins the result to one level under the chat
+/// base, and the base is one of the roots `register_project_roots` registers.
+/// A chat that has a project runs in the project folder instead and never asks.
+#[tauri::command]
+pub async fn chat_dir(app: tauri::AppHandle, chat_id: String) -> Result<String, String> {
+    let base = crate::app_data::chat_base(&app)?;
+    let dir = git::scoped_dir_for(&base, &chat_id);
+    std::fs::create_dir_all(&dir).map_err(|e| format!("chat dir: {e}"))?;
+    Ok(dir.to_string_lossy().to_string())
+}
+
+/// Creates the folder a chat's handover was accepted for.
+///
+/// Deliberately outside `ProjectRoots`: a project's folder is by definition not
+/// a registered root until the project exists, which is the same reason
+/// `inspect_project` is unscoped. What stands in for the scope check is that
+/// nothing reaches here without a click — an agent's proposal is recorded and
+/// shown, never acted on.
+///
+/// The parent has to exist already. `create_dir_all` on a path nobody checked
+/// turns a typo into a tree of empty directories somewhere the user will never
+/// look; one level down from somewhere real is what "put the project here"
+/// means.
+#[tauri::command]
+pub async fn create_project_dir(path: String) -> Result<(), String> {
+    let dir = std::path::PathBuf::from(&path);
+    if !dir.is_absolute() {
+        return Err(format!("{path} is not an absolute path"));
+    }
+    if dir.is_dir() {
+        return Ok(());
+    }
+    if dir.exists() {
+        return Err(format!("{path} exists and is not a directory"));
+    }
+    let parent = dir.parent().ok_or_else(|| format!("{path} has no parent"))?;
+    if !parent.is_dir() {
+        return Err(format!("{} does not exist", parent.display()));
+    }
+    std::fs::create_dir(&dir).map_err(|e| format!("create {path}: {e}"))
+}
+
+/// Drops a chat's scratch directory, transcript included.
+///
+/// Unconditional, unlike a worktree: nothing here is tracked by anything, so
+/// there is no equivalent of "it still holds work" to refuse on. The transcript
+/// a handover already wrote into a project is a copy and stays where it is.
+#[tauri::command]
+pub async fn chat_dir_remove(app: tauri::AppHandle, chat_id: String) -> Result<(), String> {
+    let base = crate::app_data::chat_base(&app)?;
+    let dir = git::scoped_dir_for(&base, &chat_id);
+    if !dir.is_dir() {
+        return Ok(());
+    }
+    std::fs::remove_dir_all(&dir).map_err(|e| format!("chat dir: {e}"))
 }
 
 #[tauri::command]

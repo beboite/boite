@@ -1,5 +1,5 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
-import type { PtyApi, PtyEvent, PtyOpenArgs } from "../types";
+import type { PtyApi, PtyEvent, PtyOpenArgs, PtySpawnArgs } from "../types";
 
 // The Rust side base64-encodes output: a byte array would arrive as a JSON
 // number array, ~4x the payload and an expensive parse for every chunk. We
@@ -35,6 +35,22 @@ export const tauriPty: PtyApi = {
       onEvent: channel,
       spec: args.spec,
     });
+  },
+
+  spawn(
+    spec: PtySpawnArgs,
+    chatId: string,
+    onEvent: (event: PtyEvent) => void,
+  ): Promise<string> {
+    const channel = new Channel<WirePtyEvent>();
+    channel.onmessage = (event) => {
+      if (event.type === "output") {
+        onEvent({ type: "output", bytes: decodeBase64(event.data) });
+      } else {
+        onEvent(event);
+      }
+    };
+    return invoke<string>("pty_spawn", { onEvent: channel, spec, chatId });
   },
 
   async write(key: string, data: Uint8Array): Promise<void> {
