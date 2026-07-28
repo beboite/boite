@@ -987,7 +987,20 @@
     // directory is settled off the click path, and only the PTY blocks on it.
     // Held after `spawning` is set so a retry cannot slip past and open a
     // second PTY in the meantime.
-    await threadDirectoryReady(thread.id);
+    //
+    // It used to be a symlink and finished before anyone could see it. It now
+    // copies the build output, which is seconds on a large repository, and an
+    // unexplained black screen for that long reads as a terminal that failed to
+    // open. Announced on a delay rather than always, so the ordinary case is
+    // still a clean screen.
+    const ready = threadDirectoryReady(thread.id);
+    const screen = term;
+    let notice: ReturnType<typeof setTimeout> | null = setTimeout(() => {
+      notice = null;
+      if (!destroyed) screen.write("\r\n[boite] preparing an isolated worktree…\r\n");
+    }, 400);
+    await ready;
+    if (notice) clearTimeout(notice);
     if (destroyed) {
       spawning = false;
       return;
