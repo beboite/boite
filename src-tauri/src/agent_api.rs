@@ -130,6 +130,21 @@ fn authorize(inner: &Inner, headers: &HeaderMap) -> Result<String, StatusCode> {
         let conn = inner.conn.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
         return project_of_thread(&conn, &thread_id);
     }
+    // A chat can answer for a project once it has one — the project page's chat
+    // runs in a folder. A free chat has none, and PRECONDITION_FAILED is how the
+    // shim knows to say "this conversation has no project yet" instead of
+    // reporting a refusal the agent would read as a permission problem.
+    if let Some(chat_id) = header("x-boite-chat") {
+        let conn = inner.conn.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        return conn
+            .query_row(
+                "SELECT project_id FROM chats WHERE id = ?1",
+                [&chat_id],
+                |r| r.get::<_, Option<String>>(0),
+            )
+            .map_err(|_| StatusCode::NOT_FOUND)?
+            .ok_or(StatusCode::PRECONDITION_FAILED);
+    }
     // Where the agent is running, which beats the project its file names: the
     // entry is one per agent while the file is one per project, so a
     // registration made from project A used to keep answering for A everywhere.
@@ -677,6 +692,115 @@ async fn claim(
     Ok(Json(json!({ "ok": true })))
 }
 
+#[derive(Deserialize)]
+struct HandoverIn {
+    /// Where the work should live, for a project that does not exist yet.
+    path: Option<String>,
+    /// What to call it. Ignored when `project_id` names one that already exists.
+    name: Option<String>,
+    #[serde(rename = "projectId")]
+    project_id: Option<String>,
+    /// The first thing the thread should be asked, on top of the transcript.
+    prompt: Option<String>,
+}
+
+/// The chat this caller is answering in.
+///
+/// Only the header is accepted. A chat is the one context where the handover
+/// tools mean anything — they turn *this conversation* into a project — so an
+/// agent running in a terminal is refused here rather than quietly handed the
+/// power to register directories.
+fn chat_of_request(inner: &Inner, headers: &HeaderMap) -> Result<String, StatusCode> {
+    let chat_id = headers
+        .get("x-boite-chat")
+        .and_then(|v| v.to_str().ok())
+        .filter(|s| !s.is_empty())
+        .ok_or(StatusCode::FORBIDDEN)?;
+    let conn = inner.conn.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    conn.query_row("SELECT id FROM chats WHERE id = ?1", [chat_id], |r| {
+        r.get::<_, String>(0)
+    })
+    .map_err(|_| StatusCode::NOT_FOUND)
+}
+
+/// Records what the agent proposes, and nothing else.
+///
+/// This route creates no project, no directory and no thread. Registering a
+/// project widens `ProjectRoots` — the filesystem boundary the explorer and the
+/// editor are checked against — so an agent that could do it on its own could
+/// name `/` and open the whole machine to the rest of the app. What it can do
+/// is put the proposal in front of the user, who acts on it with one click.
+///
+/// The proposal is a row in the conversation rather than an event, for the same
+/// reason a todo is a row: an event heard by nobody is gone, and the user was
+/// very possibly looking at another chat when it arrived.
+async fn chat_handover(
+    State(inner): State<std::sync::Arc<Inner>>,
+    headers: HeaderMap,
+    Json(body): Json<HandoverIn>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let chat_id = chat_of_request(&inner, &headers)?;
+    let path = body.path.map(|p| p.trim().to_string()).filter(|p| !p.is_empty());
+    let prompt = body.prompt.map(|p| p.trim().to_string()).filter(|p| !p.is_empty());
+
+    // Absolute only. A relative path would be resolved against whatever
+    // directory happened to be current when the user clicked, which is not a
+    // place either of them chose.
+    if let Some(p) = &path {
+        if !std::path::Path::new(p).is_absolute() {
+            return Err(StatusCode::BAD_REQUEST);
+        }
+    }
+
+    let (project_id, path) = {
+        let conn = inner.conn.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        match (body.project_id, path) {
+            // Named a project: it has to be one.
+            (Some(id), _) => {
+                let cwd: String = conn
+                    .query_row("SELECT cwd FROM projects WHERE id = ?1", [&id], |r| r.get(0))
+                    .map_err(|_| StatusCode::NOT_FOUND)?;
+                (Some(id), Some(cwd))
+            }
+            // Named a directory some project already claims: that is a thread
+            // proposal, not a second project on the same folder.
+            (None, Some(p)) => {
+                let existing: Option<String> = conn
+                    .query_row("SELECT id FROM projects WHERE cwd = ?1", [&p], |r| r.get(0))
+                    .ok();
+                (existing, Some(p))
+            }
+            (None, None) => return Err(StatusCode::BAD_REQUEST),
+        }
+    };
+
+    let payload = json!({
+        "kind": "handover",
+        "path": path,
+        "name": body.name.map(|n| n.trim().to_string()).filter(|n| !n.is_empty()),
+        "projectId": project_id,
+        "prompt": prompt,
+    });
+
+    {
+        let conn = inner.conn.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        conn.execute(
+            "INSERT INTO chat_messages (id, chat_id, role, text, raw, state, created_at)
+             VALUES (?1, ?2, 'system', ?3, NULL, 'done', ?4)",
+            rusqlite::params![
+                format!("{:032x}", rand::thread_rng().gen::<u128>()),
+                chat_id,
+                payload.to_string(),
+                now_ms(),
+            ],
+        )
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    }
+
+    let _ = inner.app.emit("boite://chats-changed", &chat_id);
+    Ok(Json(json!({ "proposed": true })))
+}
+
 /// Opens a second connection to the database the sql plugin owns. Safe because
 /// that plugin opens it in WAL — readers never block, and writers serialize —
 /// but only with a busy timeout: without one a write landing during the app's
@@ -781,6 +905,7 @@ pub fn start(app: &tauri::AppHandle) {
         .route("/v1/worktree", get(worktree_status))
         .route("/v1/worktree/branch", post(worktree_branch))
         .route("/v1/worktree/reserve", post(worktree_reserve))
+        .route("/v1/chat/handover", post(chat_handover))
         .route("/v1/projects", get(projects).post(project_create))
         .route("/v1/thread/move", post(thread_move))
         .route("/v1/threads", post(thread_spawn))

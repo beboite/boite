@@ -43,12 +43,18 @@ function normalizeSession(raw: unknown): SessionHit | null {
   };
 }
 
+// A write that reaches here is a bug in the caller, not a workspace the user
+// should have to reason about — say which feature is missing and where.
+async function chatUnsupported(): Promise<never> {
+  throw new Error("chats are a local-workspace feature (caps.chat is false here)");
+}
+
 // Drives a boite-server over one WebSocket. Every Backend method maps to an RPC
 // or binary frame; thread status/title flow back as control events (the server
 // is authoritative). pty.open attaches to a live thread or spawns then attaches.
 export class RemoteBackend implements Backend {
   readonly kind = "remote" as const;
-  readonly caps: BackendCaps = { clientStatus: false };
+  readonly caps: BackendCaps = { clientStatus: false, chat: false };
 
   readonly pty: PtyApi;
   readonly db: DbApi;
@@ -107,6 +113,11 @@ export class RemoteBackend implements Backend {
         keyToThread.set(key, threadId);
         return key;
       },
+      // Every PTY this protocol knows is keyed by a thread the server owns, and
+      // a chat turn is deliberately not one. `caps.chat` is false here so the
+      // UI never offers it; this exists to say why rather than to fail on a
+      // missing method.
+      spawn: chatUnsupported,
       write: (key, data) => {
         socket.sendInput(threadIdOf(key), data);
         return Promise.resolve();
@@ -160,6 +171,15 @@ export class RemoteBackend implements Backend {
       loadTodos: () => rpc("todo.list").then((r) => (r.todos ?? []) as TodoItem[]),
       saveTodo: (todo) => rpc("todo.save", { todo }).then(() => {}),
       deleteTodo: (id) => rpc("todo.delete", { todoId: id }).then(() => {}),
+      // `caps.chat` is false here, so the UI never offers a chat on a remote
+      // workspace and nothing calls these. Empty rather than throwing: an
+      // unconditional load on startup must not fail the whole workspace over a
+      // feature it was never going to show.
+      loadChats: async () => [],
+      saveChat: chatUnsupported,
+      deleteChat: chatUnsupported,
+      loadChatMessages: async () => [],
+      saveChatMessage: chatUnsupported,
     };
 
     this.git = {

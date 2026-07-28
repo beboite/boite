@@ -47,6 +47,11 @@
   const SetupView = lazyComponent(
     () => import("$lib/features/setup/SetupWizard.svelte"),
   );
+  // Pulls xterm in through the fallback bubble, so it stays behind the same
+  // kind of import() the terminal does.
+  const ChatView = lazyComponent(
+    () => import("$lib/features/chat/ChatPage.svelte"),
+  );
 
   let activated = $state<Record<string, true>>({});
 
@@ -190,6 +195,10 @@
 
   $effect(() => {
     if (app.view === "editor") void EditorView.ensure();
+  });
+
+  $effect(() => {
+    if (app.view === "chat") void ChatView.ensure();
   });
 
   $effect(() => {
@@ -363,6 +372,17 @@
             {#if SettingsView.current}
               {@const SettingsComp = SettingsView.current}
               <SettingsComp />
+            {/if}
+          </div>
+        {/if}
+
+        <!-- Under the editor and the settings, like every other page: a diff
+             opened from a chat sets view=editor and has to win. -->
+        {#if app.view === "chat"}
+          <div class="absolute inset-0 z-10 bg-[var(--color-background)]">
+            {#if ChatView.current}
+              {@const ChatComp = ChatView.current}
+              <ChatComp />
             {/if}
           </div>
         {/if}

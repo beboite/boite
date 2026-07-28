@@ -45,6 +45,11 @@ class AppState {
   threads = $state<Thread[]>([]);
   activeThreadId = $state<string | null>(null);
   selectedProjectId = $state<string | null>(null);
+  // Which conversation the chat view shows. Separate from `activeThreadId`
+  // rather than folded into it: a chat is not a thread, it holds no PTY between
+  // turns, and switching to a chat must not disturb which terminal comes back
+  // when the user switches away.
+  activeChatId = $state<string | null>(null);
   view = $state<View>("terminal");
   // Phone layout only: which bottom-bar page is showing. Desktop ignores it.
   mobileTab = $state<MobileTab>("terminal");

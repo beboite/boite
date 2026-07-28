@@ -435,6 +435,17 @@ async fn claim(
     Ok(Json(json!({ "ok": true })))
 }
 
+/// Says no, in one place, rather than letting the router answer 404.
+///
+/// Chats are a local-workspace feature: `caps.chat` is false on the remote
+/// backend, there is no `chats` table here, and the shim that reaches this is
+/// the same binary the desktop uses. Without this route the agent would be told
+/// the call was refused and left to guess whether it lacked permission or
+/// spelled the tool wrong. The refusal is the answer, so it is worth stating.
+async fn chat_handover() -> Result<Json<serde_json::Value>, StatusCode> {
+    Err(StatusCode::NOT_IMPLEMENTED)
+}
+
 /// Binds an ephemeral loopback port and returns what the PTY spawn path stamps
 /// into each child. Returns None if the listener cannot start: the workspace
 /// still works, agents just have no todo access.
@@ -452,6 +463,7 @@ pub async fn start(store: Arc<Store>, events: broadcast::Sender<AppEvent>) -> Op
         .route("/v1/worktree", get(worktree_status))
         .route("/v1/worktree/branch", post(worktree_branch))
         .route("/v1/worktree/reserve", post(worktree_reserve))
+        .route("/v1/chat/handover", post(chat_handover))
         .route("/v1/projects", get(projects).post(project_create))
         .route("/v1/thread/move", post(thread_move))
         .route("/v1/threads", post(thread_spawn))

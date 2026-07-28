@@ -256,6 +256,46 @@ pub fn run() {
             sql: "ALTER TABLE todos ADD COLUMN description TEXT;",
             kind: MigrationKind::Up,
         },
+        // A conversation with an agent that has no project yet, and the turns
+        // in it. `project_id` is nullable because that is the whole point: a
+        // chat exists before the folder does, and only becomes a project if
+        // the conversation gets that far.
+        //
+        // Two tables rather than one blob of messages, for the reason the todos
+        // are two: a turn is appended while the previous ones are being read,
+        // and a whole-list rewrite loses whichever side wrote last.
+        //
+        // 16 rather than 15: `add_todo_description` landed on master under 15
+        // while this branch was open. The plugin keys applied migrations by
+        // version, so reusing the number would mean this one silently never
+        // runs on any machine that already opened master.
+        Migration {
+            version: 16,
+            description: "create_chats",
+            sql: "CREATE TABLE IF NOT EXISTS chats (\
+                id TEXT PRIMARY KEY,\
+                title TEXT,\
+                agent_key TEXT,\
+                cmd TEXT NOT NULL,\
+                args TEXT NOT NULL,\
+                cwd TEXT NOT NULL,\
+                project_id TEXT,\
+                session_id TEXT,\
+                created_at INTEGER NOT NULL,\
+                updated_at INTEGER NOT NULL\
+            );\
+            CREATE TABLE IF NOT EXISTS chat_messages (\
+                id TEXT PRIMARY KEY,\
+                chat_id TEXT NOT NULL,\
+                role TEXT NOT NULL,\
+                text TEXT NOT NULL,\
+                raw TEXT,\
+                state TEXT NOT NULL,\
+                created_at INTEGER NOT NULL\
+            );\
+            CREATE INDEX IF NOT EXISTS idx_chat_messages_chat ON chat_messages (chat_id);",
+            kind: MigrationKind::Up,
+        },
     ];
 
     // Before the builder, not inside `setup`: plugin setup hooks run first, and
@@ -455,6 +495,9 @@ pub fn run() {
             commands::git_branches,
             commands::git_switch_branch,
             commands::worktree_open,
+            commands::chat_dir,
+            commands::chat_dir_remove,
+            commands::create_project_dir,
             commands::worktree_claim,
             commands::worktree_reserve,
             commands::worktree_hold,

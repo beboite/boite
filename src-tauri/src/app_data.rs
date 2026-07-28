@@ -152,6 +152,22 @@ pub fn worktree_base(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         .join("worktrees"))
 }
 
+/// Where a chat that has no project does its work.
+///
+/// A chat is a conversation about something that does not exist yet, so its
+/// agent still needs somewhere to be: a directory to run in, and somewhere to
+/// leave the transcript the handover hands to a real thread. Same shape as
+/// `worktree_base` and for the same reason — one registered root, never a
+/// directory named by anything read back from storage.
+pub fn chat_base(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    use tauri::Manager;
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("no app data dir: {e}"))?
+        .join("chats"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

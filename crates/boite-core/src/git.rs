@@ -1373,22 +1373,24 @@ pub fn commit_blocking(path: &str, message: &str) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&stdout).trim().to_string())
 }
 
-/// Where the worktree for a thread goes, under Boite's own worktree base.
+/// One directory named after an id, directly under `base` and never elsewhere.
 ///
-/// Outside the project on purpose: a worktree nested in the repository shows up
-/// as untracked, which makes the main checkout permanently dirty and hides real
-/// changes in `git status`. One base directory also means the filesystem trust
-/// boundary gains exactly one root — the base — rather than one per worktree
-/// fed from a stored path.
-pub fn worktree_path_for(base: &Path, thread_id: &str) -> PathBuf {
-    // Thread ids are generated, but this path reaches `git worktree add`, so it
-    // is treated as untrusted input: anything that is not plainly a name is
-    // replaced rather than escaped.
-    let safe: String = thread_id
+/// Used for thread worktrees and for the scratch directory a project-less chat
+/// runs in. Both want the same guarantee, which is why they share this: the
+/// result is always exactly one level down, so the filesystem trust boundary
+/// gains one root — the base — rather than one per directory fed from a stored
+/// id. A worktree also has to live outside the project for a second reason: one
+/// nested in the repository shows up as untracked, which makes the main
+/// checkout permanently dirty and hides real changes in `git status`.
+pub fn scoped_dir_for(base: &Path, id: &str) -> PathBuf {
+    // Ids are generated, but this path reaches `git worktree add` and
+    // `create_dir_all`, so it is treated as untrusted input: anything that is
+    // not plainly a name is replaced rather than escaped.
+    let safe: String = id
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
         .collect();
-    base.join(if safe.is_empty() { "thread".into() } else { safe })
+    base.join(if safe.is_empty() { "unnamed".into() } else { safe })
 }
 
 /// What a worktree is still holding that removing it would destroy.
@@ -2104,19 +2106,13 @@ mod worktree_tests {
     }
 
     #[test]
-    fn a_thread_id_cannot_climb_out_of_the_worktree_base() {
+    fn an_id_cannot_climb_out_of_its_base() {
         let base = Path::new("/data/worktrees");
-        assert_eq!(
-            worktree_path_for(base, "../../etc"),
-            base.join("------etc"),
-        );
-        assert_eq!(
-            worktree_path_for(base, "th_1-2"),
-            base.join("th_1-2"),
-        );
+        assert_eq!(scoped_dir_for(base, "../../etc"), base.join("------etc"));
+        assert_eq!(scoped_dir_for(base, "th_1-2"), base.join("th_1-2"));
         // Whatever it is given, the result stays one level under the base.
         for id in ["", "..", "/abs", "C:\\win", "a/b"] {
-            let p = worktree_path_for(base, id);
+            let p = scoped_dir_for(base, id);
             assert_eq!(p.parent(), Some(base), "{id} escaped to {p:?}");
         }
     }
