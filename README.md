@@ -254,6 +254,22 @@ IPC that spawns PTYs. Keep it on loopback and never enable the feature for a
 build you hand to anyone. Plain `bun run tauri dev` leaves it out of the binary
 entirely.
 
+The agent side of that bridge is `@hypothesi/tauri-mcp-server`, pinned to the
+same version as the crate — the npm package and the plugin ship as one pair, and
+its binary is named `mcp-server-tauri`, which is not a package name and resolves
+to nothing when handed to `npx`:
+
+```json
+{
+  "mcpServers": {
+    "boite-dev": { "command": "npx", "args": ["-y", "@hypothesi/tauri-mcp-server@0.12.0"] }
+  }
+}
+```
+
+It declares twenty tools, around 26 KB of schema in every session that loads it,
+so it is worth registering only while actually driving the dev window.
+
 ## Agent todo access (MCP)
 
 The right-hand **Todo** tab keeps a checklist per project. An agent running in a
@@ -283,11 +299,26 @@ from source, use `target/release/boite-mcp` after `bun run build:sidecar`.
 No `env` block: the shim inherits the terminal's. Launched anywhere else it
 exits rather than starting unauthenticated.
 
-Three tools: `todo_list`, `todo_add`, `todo_claim`. Claiming moves an item to
-*awaiting confirmation*, with a one-line summary; only you can confirm it. That
-split is enforced in SQL — the update fires only on a row still open, in the
-caller's own project — because a model that can close its own tickets will, and
-the list would stop recording verified work.
+Six tools: `todo_list`, `todo_add`, `todo_claim`, and `worktree_status`,
+`worktree_branch`, `worktree_reserve` for the checkout the terminal runs in.
+Claiming moves an item to *awaiting confirmation*, with a one-line summary; only
+you can confirm it. That split is enforced in SQL — the update fires only on a
+row still open, in the caller's own project — because a model that can close its
+own tickets will, and the list would stop recording verified work.
+
+Answers come back in TOON rather than JSON, because every one of them is read in
+a context window:
+
+```
+todos(2):
+  id state text note
+  1a5f3698 open "opti mcp axi" -
+  596ce966 claimed readme done
+hint: todo_claim id=<id> note=<what changed> — the user confirms, not you
+```
+
+Ids are shortened to the prefix that still tells the list apart, and `todo_claim`
+takes either that or the full one.
 
 The endpoint lives on `127.0.0.1` with an ephemeral port, in both the desktop
 app and `boite-server`. It is not the dev `mcp-bridge` and never reuses it: that
