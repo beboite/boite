@@ -15,14 +15,16 @@
 //! one line per tool, one row per todo, and ids shortened to the prefix that
 //! still distinguishes them.
 
+mod http;
 mod toon;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::{BufRead, Write};
-use std::time::Duration;
 
 use serde_json::{json, Value};
+
+use http::Endpoint;
 
 use toon::{clip, Toon};
 
@@ -39,7 +41,7 @@ const MAX_CELL: usize = 200;
 const MAX_BRANCHES: usize = 40;
 
 struct Host {
-    url: String,
+    endpoint: Endpoint,
     token: String,
     /// The thread this shim was spawned for, when Boite launched the agent.
     thread_id: Option<String>,
@@ -54,7 +56,6 @@ struct Host {
     /// as the agent does, so a claim can quote the eight characters it was
     /// shown instead of a full uuid. Single-threaded loop, hence `RefCell`.
     ids: RefCell<HashMap<String, String>>,
-    http: reqwest::blocking::Client,
 }
 
 #[derive(serde::Deserialize)]
@@ -74,26 +75,13 @@ impl Host {
     /// never arrive; it names a project instead, which is the unit the list
     /// belongs to anyway.
     fn resolve() -> Result<Host, String> {
-        // Loopback only, so no proxy applies: a machine with `ALL_PROXY` set
-        // for scraping would otherwise route this through it and time out on an
-        // address the proxy cannot reach. The timeouts matter for the same
-        // reason a shim has none of its own state — an agent blocked on a dead
-        // endpoint has no way to notice, and reqwest's default is to wait
-        // forever.
-        let http = reqwest::blocking::Client::builder()
-            .no_proxy()
-            .connect_timeout(Duration::from_secs(2))
-            .timeout(Duration::from_secs(20))
-            .build()
-            .map_err(|e| format!("cannot build http client: {e}"))?;
-
         if let (Ok(url), Ok(token), Ok(thread_id)) = (
             std::env::var("BOITE_MCP_URL"),
             std::env::var("BOITE_TOKEN"),
             std::env::var("BOITE_THREAD_ID"),
         ) {
             return Ok(Host {
-                url,
+                endpoint: Endpoint::parse(&url)?,
                 token,
                 thread_id: Some(thread_id),
                 project_id: None,
@@ -101,7 +89,6 @@ impl Host {
                 // Boite launched it and knows what it is.
                 agent: None,
                 ids: RefCell::new(HashMap::new()),
-                http,
             });
         }
 
@@ -119,36 +106,31 @@ impl Host {
         // arrives from "some agent" and the list can only show a generic mark.
         let agent = std::env::args().nth(2).filter(|s| !s.is_empty());
         Ok(Host {
-            url: creds.url,
+            endpoint: Endpoint::parse(&creds.url)?,
             token: creds.token,
             thread_id: None,
             project_id: Some(creds.project_id),
             agent,
             ids: RefCell::new(HashMap::new()),
-            http,
         })
     }
 
-    fn send(&self, method: reqwest::Method, path: &str, body: Option<Value>) -> Result<Value, String> {
-        let mut req = self
-            .http
-            .request(method, format!("{}{path}", self.url))
-            .bearer_auth(&self.token);
+    fn send(&self, method: &str, path: &str, body: Option<Value>) -> Result<Value, String> {
+        let auth = format!("Bearer {}", self.token);
+        let mut headers: Vec<(&str, &str)> = vec![("Authorization", &auth)];
         if let Some(thread) = &self.thread_id {
-            req = req.header("x-boite-thread", thread);
+            headers.push(("x-boite-thread", thread));
         }
         if let Some(project) = &self.project_id {
-            req = req.header("x-boite-project", project);
+            headers.push(("x-boite-project", project));
         }
         if let Some(agent) = &self.agent {
-            req = req.header("x-boite-agent", agent);
+            headers.push(("x-boite-agent", agent));
         }
-        if let Some(b) = body {
-            req = req.json(&b);
-        }
-        let res = req.send().map_err(|e| format!("boite unreachable: {e}"))?;
-        let status = res.status();
-        if status == reqwest::StatusCode::CONFLICT {
+        let body = body.map(|b| b.to_string().into_bytes());
+        let res = self.endpoint.send(method, path, &headers, body)?;
+        let status = res.status;
+        if status == 409 {
             // The endpoint refuses without saying which reason applied; say the
             // same here rather than inventing a diagnosis. The two routes mean
             // different things by it, and telling an agent its todo is closed
@@ -162,10 +144,10 @@ impl Host {
                 "that item is not open, or does not belong to this project".to_string()
             });
         }
-        if !status.is_success() {
+        if !(200..300).contains(&status) {
             return Err(format!("boite refused the call ({status})"));
         }
-        res.json::<Value>().map_err(|e| format!("bad response: {e}"))
+        serde_json::from_slice(&res.body).map_err(|e| format!("bad response: {e}"))
     }
 
     fn remember(&self, short: &str, full: &str) {
@@ -188,7 +170,7 @@ impl Host {
         if given.len() >= 32 {
             return given.to_string();
         }
-        if let Ok(out) = self.send(reqwest::Method::GET, "/v1/todos", None) {
+        if let Ok(out) = self.send("GET", "/v1/todos", None) {
             index_todos(self, &out);
         }
         self.ids
@@ -209,7 +191,7 @@ fn tools() -> Value {
         {
             "name": "todo_list",
             "description": "List this project's todos: short id, state, text, note.",
-            "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false },
+            "inputSchema": { "type": "object" },
             "annotations": { "title": "Todos", "readOnlyHint": true, "idempotentHint": true, "openWorldHint": false }
         },
         {
@@ -250,7 +232,7 @@ fn tools() -> Value {
                             isolated from the user's checkout and from other terminals, sharing one \
                             history. Reports path, repo, branch if one was taken, uncommitted \
                             changes, and the existing branches.",
-            "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false },
+            "inputSchema": { "type": "object" },
             "annotations": { "title": "Worktree", "readOnlyHint": true, "idempotentHint": true, "openWorldHint": false }
         },
         {
@@ -352,8 +334,43 @@ fn format_todos(host: &Host, out: &Value) -> String {
         })
         .collect();
 
+    // A column that says the same thing on every row, or nothing on any of
+    // them, is paid for once per row and answers nothing. A list where every
+    // item is still open — which is most lists — says so on one line instead.
+    let uniform_state = rows
+        .first()
+        .map(|r| r[1].clone())
+        .filter(|first| rows.iter().all(|r| &r[1] == first));
+    let any_note = rows.iter().any(|r| !r[3].is_empty());
+    let mut cols: Vec<&str> = vec!["id"];
+    if uniform_state.is_none() {
+        cols.push("state");
+    }
+    cols.push("text");
+    if any_note {
+        cols.push("note");
+    }
+    let rows: Vec<Vec<String>> = rows
+        .into_iter()
+        .map(|r| {
+            let [id, state, text, note] = r.try_into().expect("four columns");
+            let mut kept = vec![id];
+            if uniform_state.is_none() {
+                kept.push(state);
+            }
+            kept.push(text);
+            if any_note {
+                kept.push(note);
+            }
+            kept
+        })
+        .collect();
+
     let mut w = Toon::new();
-    w.table("todos", &["id", "state", "text", "note"], &rows);
+    if let Some(state) = &uniform_state {
+        w.field("state", &format!("{state} (every item)"));
+    }
+    w.table("todos", &cols, &rows);
     if rows.is_empty() {
         w.hint("nothing on this project's list: todo_add text=<one line>");
     } else {
@@ -399,7 +416,7 @@ fn format_worktree(out: &Value) -> String {
 fn call_tool(host: &Host, name: &str, args: &Value) -> Result<String, String> {
     match name {
         "todo_list" => {
-            let out = host.send(reqwest::Method::GET, "/v1/todos", None)?;
+            let out = host.send("GET", "/v1/todos", None)?;
             Ok(format_todos(host, &out))
         }
         "todo_add" => {
@@ -407,7 +424,7 @@ fn call_tool(host: &Host, name: &str, args: &Value) -> Result<String, String> {
                 .get("text")
                 .and_then(|v| v.as_str())
                 .ok_or("todo_add needs a text")?;
-            let out = host.send(reqwest::Method::POST, "/v1/todos", Some(json!({ "text": text })))?;
+            let out = host.send("POST", "/v1/todos", Some(json!({ "text": text })))?;
             let id = out.get("id").and_then(|v| v.as_str()).unwrap_or("?");
             let short = prefix(id, 8);
             host.remember(short, id);
@@ -424,7 +441,7 @@ fn call_tool(host: &Host, name: &str, args: &Value) -> Result<String, String> {
             let note = args.get("note").and_then(|v| v.as_str());
             let commit = args.get("commit").and_then(|v| v.as_str());
             host.send(
-                reqwest::Method::POST,
+                "POST",
                 "/v1/todos/claim",
                 Some(json!({ "id": full, "note": note, "commit": commit })),
             )?;
@@ -434,7 +451,7 @@ fn call_tool(host: &Host, name: &str, args: &Value) -> Result<String, String> {
             Ok(w.into_string())
         }
         "worktree_status" => {
-            let out = host.send(reqwest::Method::GET, "/v1/worktree", None)?;
+            let out = host.send("GET", "/v1/worktree", None)?;
             Ok(format_worktree(&out))
         }
         "worktree_branch" => branch_call(host, args, "/v1/worktree/branch", "worktree_branch"),
@@ -450,7 +467,7 @@ fn branch_call(host: &Host, args: &Value, path: &str, tool: &str) -> Result<Stri
         .get("name")
         .and_then(|v| v.as_str())
         .ok_or_else(|| format!("{tool} needs a name"))?;
-    let out = host.send(reqwest::Method::POST, path, Some(json!({ "name": name })))?;
+    let out = host.send("POST", path, Some(json!({ "name": name })))?;
     // The endpoint answers 200 with an `error` field for a refusal git made, so
     // the agent reads the reason and picks another name instead of seeing a
     // transport failure it cannot act on.
@@ -575,13 +592,12 @@ mod tests {
 
     fn host() -> Host {
         Host {
-            url: "http://127.0.0.1:0".into(),
+            endpoint: Endpoint::parse("http://127.0.0.1:1").unwrap(),
             token: "t".into(),
             thread_id: Some("thread".into()),
             project_id: None,
             agent: None,
             ids: RefCell::new(HashMap::new()),
-            http: reqwest::blocking::Client::new(),
         }
     }
 
@@ -598,6 +614,28 @@ mod tests {
             format_todos(&h, &out),
             "todos(2):\n  id state text note\n  1a5f3698 open \"opti mcp axi\" -\n  \
              596ce966 claimed readme done\nhint: todo_claim id=<id> note=<what changed> — the user confirms, not you\n"
+        );
+    }
+
+    #[test]
+    fn a_column_that_says_nothing_is_dropped() {
+        let h = host();
+        // Every item open, no note: two columns carry no information, and the
+        // state they all share is worth one line rather than one cell per row.
+        let out = json!({ "todos": [
+            { "id": "1a5f3698-27dc-4f9d-90e5-d732c50e839c", "text": "opti mcp axi", "state": "open", "note": null },
+            { "id": "596ce966-971c-4702-9040-1b1393ed8447", "text": "readme", "state": "open", "note": null }
+        ]});
+        assert_eq!(
+            format_todos(&h, &out),
+            concat!(
+                "state: \"open (every item)\"\n",
+                "todos(2):\n",
+                "  id text\n",
+                "  1a5f3698 \"opti mcp axi\"\n",
+                "  596ce966 readme\n",
+                "hint: todo_claim id=<id> note=<what changed> — the user confirms, not you\n",
+            )
         );
     }
 
