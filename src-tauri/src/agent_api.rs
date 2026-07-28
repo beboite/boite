@@ -61,7 +61,11 @@ struct TodoOut {
     id: String,
     #[serde(rename = "projectId")]
     project_id: String,
-    text: String,
+    /// The one-line label of the card. Named `text` in the table since before
+    /// there was anything else on a row; `title` is what it is called on the
+    /// way out, because that is what an agent has to keep short.
+    title: String,
+    description: Option<String>,
     state: String,
     note: Option<String>,
     position: i64,
@@ -69,7 +73,13 @@ struct TodoOut {
 
 #[derive(Deserialize)]
 struct AddIn {
-    text: String,
+    /// `text` stays accepted: it is what every shim built before the split
+    /// sends, and a rejected add would read to the agent as a broken endpoint
+    /// rather than as an old binary.
+    #[serde(alias = "text")]
+    title: String,
+    #[serde(default)]
+    description: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -569,7 +579,7 @@ async fn list(
 
     let mut stmt = conn
         .prepare(
-            "SELECT id, project_id, text, state, note, position FROM todos
+            "SELECT id, project_id, text, description, state, note, position FROM todos
              WHERE project_id = ?1 ORDER BY position ASC, created_at ASC",
         )
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -578,10 +588,11 @@ async fn list(
             Ok(TodoOut {
                 id: r.get(0)?,
                 project_id: r.get(1)?,
-                text: r.get(2)?,
-                state: r.get(3)?,
-                note: r.get(4)?,
-                position: r.get(5)?,
+                title: r.get(2)?,
+                description: r.get(3)?,
+                state: r.get(4)?,
+                note: r.get(5)?,
+                position: r.get(6)?,
             })
         })
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
@@ -597,10 +608,18 @@ async fn add(
     Json(body): Json<AddIn>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let project_id = authorize(&inner, &headers)?;
-    let text = body.text.trim().to_string();
-    if text.is_empty() {
+    let title = body.title.trim().to_string();
+    if title.is_empty() {
         return Err(StatusCode::BAD_REQUEST);
     }
+    // An empty string and a missing description are the same thing, and only
+    // one of them should reach the column: the panel shows a marker on any row
+    // that has a body, and `Some("")` would put one on a card with nothing in
+    // it.
+    let description = body
+        .description
+        .map(|d| d.trim().to_string())
+        .filter(|d| !d.is_empty());
 
     let id = {
         let conn = inner.conn.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -614,9 +633,10 @@ async fn add(
         let id = format!("{:032x}", rand::thread_rng().gen::<u128>());
         let now = now_ms();
         conn.execute(
-            "INSERT INTO todos (id, project_id, text, state, note, position, created_at, updated_at)
-             VALUES (?1, ?2, ?3, 'open', NULL, ?4, ?5, ?5)",
-            rusqlite::params![id, project_id, text, position, now],
+            "INSERT INTO todos
+             (id, project_id, text, description, state, note, position, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, 'open', NULL, ?5, ?6, ?6)",
+            rusqlite::params![id, project_id, title, description, position, now],
         )
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
         id

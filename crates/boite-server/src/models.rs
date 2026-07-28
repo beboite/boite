@@ -8,7 +8,15 @@ use serde::{Deserialize, Serialize};
 pub struct Todo {
     pub id: String,
     pub project_id: String,
-    pub text: String,
+    /// The one-line label. Stored in the `text` column, which is what it was
+    /// called when it was the only thing on a row; `text` stays accepted on the
+    /// wire so a client built before the split still saves.
+    #[serde(alias = "text")]
+    pub title: String,
+    /// The body of the card, when the title was not the whole story. Kept apart
+    /// so the label stays one line whatever an agent writes into the detail.
+    #[serde(default)]
+    pub description: Option<String>,
     pub state: String,
     #[serde(default)]
     pub note: Option<String>,

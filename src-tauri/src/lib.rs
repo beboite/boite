@@ -177,6 +177,16 @@ pub fn run() {
             sql: "ALTER TABLE threads ADD COLUMN worktree_path TEXT;",
             kind: MigrationKind::Up,
         },
+        // The body of the card. `text` was carrying both the label and whatever
+        // detail came with it, so an agent writing a paragraph got a row that
+        // truncated at the panel's width and lost the rest to a tooltip nobody
+        // could read. The title stays one line; everything else lives here.
+        Migration {
+            version: 15,
+            description: "add_todo_description",
+            sql: "ALTER TABLE todos ADD COLUMN description TEXT;",
+            kind: MigrationKind::Up,
+        },
     ];
 
     // Before the builder, not inside `setup`: plugin setup hooks run first, and

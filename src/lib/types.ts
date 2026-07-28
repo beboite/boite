@@ -95,9 +95,11 @@ export interface Settings {
   projectOrder: string[];
   threadOrderByProject: Record<string, string[]>;
   /**
-   * Scaffold wrapped around a todo before it reaches an agent. `{{task}}` and
-   * `{{id}}` are substituted; the id is what lets the agent report back through
-   * the MCP endpoint.
+   * Scaffold wrapped around a todo before it reaches an agent. `{{id}}`,
+   * `{{title}}`, `{{description}}` and `{{task}}` are substituted; the id is
+   * what lets the agent report back through the MCP endpoint. `{{task}}`
+   * predates the split and carries the title and the description together, so
+   * a template written before there were two fields still hands over both.
    */
   todoPromptTemplate: string;
   /**
@@ -141,11 +143,22 @@ export type RightPanelTab = "git" | "explorer" | "todo" | null;
  */
 export type TodoState = "open" | "claimed" | "done";
 
-/** One line of the per-project notepad. */
+/** One card of the per-project notepad. */
 export interface TodoItem {
   id: string;
   projectId: string;
-  text: string;
+  /**
+   * The one line the list shows. Stored in the `text` column, which is what it
+   * was called back when a row held nothing else.
+   */
+  title: string;
+  /**
+   * Everything the title could not hold, read by opening the card. Null rather
+   * than an empty string when there is none: the collapsed row wears a marker
+   * for any card that has a body, and `""` would put one on a card with
+   * nothing behind it.
+   */
+  description: string | null;
   state: TodoState;
   /** What the agent said it did, set when it moves the item to `claimed`. */
   note: string | null;

@@ -197,9 +197,14 @@ TWA wrapper that packages the PWA as an `.aab`/`.apk`.
 Ten tools, in three halves.
 
 `todo_list`, `todo_add` and `todo_claim` reach the right-hand **Todo** tab,
-which keeps a checklist per project. An agent can read that list, append to it
-and report an item finished, but never tick one off: claiming moves an item to
-*awaiting confirmation* and only you confirm it.
+which keeps a list of cards per project. An agent can read that list, append to
+it and report an item finished, but never tick one off: claiming moves an item
+to *awaiting confirmation* and only you confirm it.
+
+A card is a one-line title and an optional description. Click one to open it and
+read or edit the description; drag one to move it in the list. The split exists
+because an agent handed a single text field writes a paragraph into it, and the
+panel is one column wide.
 
 `worktree_status`, `worktree_branch` and `worktree_reserve` cover the worktree
 the thread runs in. An agent that has produced something worth keeping names a
@@ -227,7 +232,7 @@ a context window:
 
 ```
 todos(2):
-  id state text note
+  id state title note
   1a5f3698 open "opti mcp axi" -
   596ce966 claimed readme done
 hint: todo_claim id=<id> note=<what changed>, the user confirms, not you
