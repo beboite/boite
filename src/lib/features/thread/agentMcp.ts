@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { hasTauri } from "$lib/backend/env";
+import { backend } from "$lib/backend";
 import { logger } from "$lib/shared/services/logger.svelte";
 import type { IconKey } from "$lib/types";
 
@@ -169,11 +170,15 @@ export function agentRegisterCli(key: IconKey): string | null {
  * Whether the agent's binary resolves on PATH. The panel asks before claiming
  * Boite would wire an agent: a thread can outlive the tool that made it — click
  * a shortcut once on a machine without that CLI and the thread stays for good.
+ *
+ * Asked through the backend rather than by name: the probe was calling a
+ * command that had been renamed, every answer was the thrown error caught as
+ * `false`, and the panel listed no agent at all on any platform.
  */
 export async function agentIsInstalled(cmd: string): Promise<boolean> {
   if (!hasTauri()) return false;
   try {
-    return await invoke<boolean>("check_command_exists", { cmd });
+    return await backend().shell.commandExists(cmd);
   } catch {
     return false;
   }
