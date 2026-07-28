@@ -191,6 +191,20 @@ and report an item finished, but never tick one off: claiming moves an item to
 the thread runs in. An agent that has produced something worth keeping names a
 branch for it; until then the worktree stays detached and leaves no trace.
 
+Answers come back in TOON rather than JSON, because every one of them is read in
+a context window:
+
+```
+todos(2):
+  id state text note
+  1a5f3698 open "opti mcp axi" -
+  596ce966 claimed readme done
+hint: todo_claim id=<id> note=<what changed>, the user confirms, not you
+```
+
+Ids are shortened to the prefix that still tells the list apart, and
+`todo_claim` takes either that or the full one.
+
 Boite spawns the terminal, so it stamps `BOITE_MCP_URL`, `BOITE_TOKEN` and
 `BOITE_THREAD_ID` into the child's environment, and resolves the project from
 the thread id. An agent reaches its own project and no other with nothing to
@@ -213,6 +227,11 @@ On Windows and Linux it sits beside the installed `boite` executable; running
 from source, use `target/release/boite-mcp` after `bun run build:sidecar`. No
 `env` block is needed, the shim inherits the terminal's. Launched anywhere else
 it exits rather than starting unauthenticated.
+
+It is spawned once per agent terminal, so it carries nothing it does not need:
+`serde_json` and a hundred lines of HTTP/1.1 over a loopback socket, 380 KB
+altogether. No async runtime, and no proxy handling to send `127.0.0.1` through
+an `ALL_PROXY` that happens to be set.
 
 ## Build from source
 

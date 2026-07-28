@@ -26,6 +26,22 @@ JS evaluated in the webview reaches the IPC that spawns PTYs. Keep it on
 loopback and never enable the feature for a build you hand to anyone. Plain
 `bun run tauri dev` leaves it out of the binary entirely.
 
-It is unrelated to the todo MCP endpoint described in the README, and never
-reuses it: the bridge answers `execute_js`, the todo endpoint answers three
-verbs on one table.
+The agent side of that bridge is `@hypothesi/tauri-mcp-server`, pinned to the
+same version as the crate: the npm package and the plugin ship as one pair, and
+its binary is named `mcp-server-tauri`, which is not a package name and resolves
+to nothing when handed to `npx`.
+
+```json
+{
+  "mcpServers": {
+    "boite-dev": { "command": "npx", "args": ["-y", "@hypothesi/tauri-mcp-server@0.12.0"] }
+  }
+}
+```
+
+It declares twenty tools, around 26 KB of schema in every session that loads it,
+so it is worth registering only while actually driving the dev window.
+
+The bridge is unrelated to the agent MCP endpoint described in the README, and
+never reuses it: the bridge answers `execute_js`, that one answers six verbs
+scoped to the calling thread.
