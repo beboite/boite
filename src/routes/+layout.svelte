@@ -16,6 +16,7 @@
   } from "$lib/features/thread/api";
   import { addProjectByPath } from "$lib/features/project/api";
   import { watchAgentRequests } from "$lib/features/thread/agentRequests";
+  import { installInspector } from "$lib/features/devtools/inspect";
   import { editorStore } from "$lib/features/editor/store.svelte";
   import { paneStore, leavesOf } from "$lib/features/panes/store.svelte";
   import { palette } from "$lib/features/palette/store.svelte";
@@ -250,6 +251,11 @@
   // Also its own: an agent can ask to be moved before boot has finished, and
   // the request would land on nobody.
   onMount(() => watchAgentRequests());
+
+  // Development builds only, and the one thing that makes this app inspectable
+  // from the MCP bridge: the terminals render to a canvas, so their output is
+  // invisible to anything that reads the DOM.
+  onMount(() => installInspector());
 
   onMount(() => {
     // No Tauri runtime: this is a browser/PWA. The only backend is the server

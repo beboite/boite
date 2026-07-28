@@ -43,5 +43,38 @@ It declares twenty tools, around 26 KB of schema in every session that loads it,
 so it is worth registering only while actually driving the dev window.
 
 The bridge is unrelated to the agent MCP endpoint described in the README, and
-never reuses it: the bridge answers `execute_js`, that one answers six verbs
+never reuses it: the bridge answers `execute_js`, that one answers ten verbs
 scoped to the calling thread.
+
+## window.\_\_boite
+
+A screenshot, a DOM read and a way to run JavaScript reach almost nothing that
+matters here. **The terminals render to a WebGL canvas**: to `querySelector`
+they are a blank element, so the entire output of every agent Boite runs is
+invisible to the one tool that could confirm a change worked, and text in a
+picture cannot be grepped. Toasts carry the failure messages and dismiss
+themselves before a screenshot is taken. Thread state — which project, which
+folder, which session, which worktree — is a label and a coloured dot on screen.
+
+So a dev build puts a read-only inspector on `window.__boite`, returning plain
+JSON that `webview_execute_js` hands straight back:
+
+| Call | Answers |
+|---|---|
+| `overview()` | view, workspace, counts, what is active |
+| `threads(project?)`, `thread(idOrName)` | project, cwd, worktree, session id, command, running |
+| `projects()` | id, path, git root, archived, thread count |
+| `read(idOrName, tail?)` | **what a terminal is showing, as text** |
+| `mounted()` | which terminals can be read right now |
+| `toasts(tail?)` | every toast raised this session, dismissed ones included |
+| `panes()`, `settings()` | how the panes are split; the settings blob |
+
+Threads are addressable by label (`read("Claude #1")`) because ids are uuids
+nobody reads off a screen; a name matching two threads is refused rather than
+resolved to the first. A terminal only exists once its pane has been opened, so
+`read` on a thread nobody clicked says so instead of returning nothing.
+
+`import.meta.env.DEV` gates the installer and the toast history, so a release
+build never sets the global and never appends to the ring. Keep it read-only: a
+debugging aid that can change state is a second way to drive the app, and
+nothing tests that one.

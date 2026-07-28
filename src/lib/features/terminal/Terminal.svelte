@@ -6,6 +6,7 @@
   import { WebLinksAddon } from "@xterm/addon-web-links";
   import { Unicode11Addon } from "@xterm/addon-unicode11";
   import { xtermTheme } from "./theme";
+  import { registerTerminal, unregisterTerminal } from "./live";
   import { openUrl } from "$lib/platform/opener";
   import { readText, writeText } from "$lib/platform/clipboard";
   import {
@@ -1231,6 +1232,9 @@
     });
 
     term.open(container);
+    // The terminal renders to a canvas, so nothing that reads the DOM can see
+    // its output. This is the only handle on it.
+    registerTerminal(thread.id, term);
     // Set inputmode before the focus below so the phone keyboard never flashes.
     syncMobileInput();
     installMobileInput();
@@ -1366,6 +1370,7 @@
     container?.removeEventListener("touchend", onTouchEnd);
     container?.removeEventListener("touchcancel", onTouchEnd);
     window.visualViewport?.removeEventListener("resize", onViewportResize);
+    unregisterTerminal(thread.id);
     term?.dispose();
     term = null;
     fit = null;
