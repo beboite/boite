@@ -16,54 +16,32 @@
 </p>
 
 > [!NOTE]
-> Pre-1.0, used daily by the author. The feature surface is small and focused on
-> purpose. Bug reports and platform feedback are welcome in
-> [Issues](https://github.com/beboite/boite/issues).
+> Pre-1.0, used daily by the author. Bug reports and platform feedback are
+> welcome in [Issues](https://github.com/beboite/boite/issues).
 
 ## Why
 
 Talking to half a dozen coding agents on the same repo means half a dozen
 terminals, and no way to tell at a glance which one is waiting for you. Boite
 gives every agent a persistent thread inside a project, reads its working/ready
-state from the OSC title, and remembers the command plus the last session id so
-you can hop back into a conversation with one click.
+state from the OSC title, and remembers the command and the last session id.
 
 It is a terminal multiplexer first: everything is a real PTY, nothing is
 wrapped, and a blank shell is one keystroke away.
 
 ## Features
 
-- **Projects and threads.** A sidebar of projects (drag to reorder, custom
-  logo, git remote detection) each holding a tree of threads. Terminals stay
-  mounted across tab switches; a PTY dies when the thread is closed, not when a
-  component unmounts.
-- **Status at a glance.** A per-thread dot driven by the agent's own OSC title:
-  amber pulsing while it works, green when it is ready for you, red on error or
-  a non-zero exit.
-- **Session resume.** Boite reads each tool's own session store (read-only) to
-  find the conversation that belongs to the current working directory, so
-  `claude --resume`, `codex resume` and friends land on the right one.
-- **Split panes.** Split any thread horizontally or vertically, drag threads
-  between panes, resize with the mouse, cycle with `Ctrl+Alt+Arrow`.
-- **Git panel.** Status with staged/unstaged/conflict sections, stage,
-  unstage, discard, commit, fetch/pull/push, auto-fetch on a timer, and a
-  commit graph. A folder that isn't a repo is scanned up to three levels deep,
-  so a monorepo's nested repos are one click away.
-- **File explorer and editor.** Browse the project tree and open files in a
-  CodeMirror 6 editor with syntax highlighting, tabs and a side-by-side diff
-  (HEAD vs index vs working tree) straight from the git panel.
-- **Command palette.** `Ctrl+K` (or `Ctrl+Shift+P`) over threads, projects,
-  shortcuts and actions.
-- **Remote workspaces.** Point the desktop app (or a phone) at a headless
-  `boite-server`. Threads live on the server and survive the client closing;
-  reattaching replays the scrollback.
-- **Mobile layout.** A phone-shaped UI with a bottom tab bar, pinch-to-resize
-  terminal font, drag-to-scroll, and an on-demand keyboard button so tapping the
-  terminal doesn't pop the soft keyboard.
-- **Idle autoclose.** Per-agent rules close threads that have been idle past a
-  timeout, so a day of experiments doesn't leave twenty dead PTYs behind.
-- **Notifications.** OS notifications on the desktop, Web Push on the PWA, so a
-  finished agent reaches you when the window isn't focused.
+- **Projects and threads.** A sidebar of projects, each holding a tree of threads that stay mounted across tab switches.
+- **Status at a glance.** A per-thread dot read from the agent's own OSC title: working, ready, error.
+- **Session resume.** Boite reads each tool's session store to find the conversation that belongs to the thread's directory.
+- **Split panes.** Split horizontally or vertically, drag threads between panes, resize with the mouse.
+- **Git panel.** Staged/unstaged/conflict sections, commit, fetch/pull/push, auto-fetch and a commit graph. Nested repos are found three levels deep.
+- **File explorer and editor.** A CodeMirror 6 editor with syntax highlighting, tabs, and a side-by-side diff from the git panel.
+- **Command palette.** `Ctrl+K` over threads, projects, shortcuts and actions.
+- **Remote workspaces.** Point the desktop app or a phone at a headless `boite-server`; threads survive the client closing.
+- **Mobile layout.** Bottom tab bar, pinch-to-resize terminal font, drag-to-scroll, on-demand keyboard.
+- **Idle autoclose.** Per-agent rules close threads that have been idle past a timeout.
+- **Notifications.** OS notifications on the desktop, Web Push on the PWA.
 
 ## Supported agents
 
@@ -83,13 +61,10 @@ won't get status or resume detection.
 | Hermes         | `hermes`               | ✅          | ✅             |
 | Plain shell    | your default shell     | n/a         | n/a            |
 
-- **Live status**: the working/ready dot, read from the OSC title the agent
-  emits.
-- **Session resume**: Boite finds the conversation matching the thread's cwd in
-  the tool's own store and passes the right resume flag.
-
-Shortcuts are editable: label, command, icon and color, reorderable, and any
-custom command can be added.
+*Live status* is the working/ready dot, read from the OSC title the agent emits.
+*Session resume* finds the conversation matching the thread's cwd and passes the
+right resume flag. Shortcuts are editable (label, command, icon, color, order),
+and any custom command can be added.
 
 ## Platform support
 
@@ -100,10 +75,10 @@ custom command can be added.
 | macOS    | 🧪 builds, needs testing   | Compiles and runs; not exercised daily            |
 | Android  | ✅ via PWA / TWA           | Installs from `boite-server`, see [`mobile/`](mobile/README.md) |
 
-The window is frameless and transparent, so a tiling WM with no compositor will
-show an opaque rectangle without system shadows. If xterm's WebGL renderer
-can't initialize (older WebKitGTK, software rendering), the terminal falls back
-to the DOM renderer with no user action needed.
+Two Linux caveats: the window is frameless and transparent, so a tiling WM with
+no compositor shows an opaque rectangle without shadows, and if xterm's WebGL
+renderer can't initialize the terminal falls back to the DOM renderer on its
+own.
 
 ## Install
 
@@ -115,28 +90,27 @@ Grab the build for your OS from
 - **macOS**: dmg (unsigned; run `xattr -cr /Applications/Boite.app` once if
   Gatekeeper complains)
 
-### Updates
+## Updates
 
-Boite updates itself. It asks the releases endpoint for a manifest shortly after
-launch and every six hours after that; when a newer version exists it downloads
-in the background and the titlebar offers a **Restart to update** button. The
-click only swaps the files in and relaunches; the bytes are already on disk.
-Settings → General shows the current version, the download progress and a manual
-check.
+Boite checks for an update shortly after launch and every six hours after that,
+downloads in the background, and offers a **Restart to update** button in the
+titlebar. Settings → General has the version, the download progress and a manual
+check. Every payload carries a minisign signature verified against a public key
+compiled into the binary.
 
 Applying an update ends the process, and a local PTY dies with it. Boite asks
-before it does that, notes which threads were running, stops them itself instead
-of letting the installer yank them, and starts them again on the other side. An
-agent that captured a session comes back on the same conversation (`--resume`);
-anything else re-runs its command. Threads on a remote `boite-server` are not
-affected at all: their PTYs live on the server, which the restart never touches.
+first, stops the running threads itself, and starts them again on the other
+side; an agent that captured a session comes back on the same conversation.
+Threads on a remote `boite-server` are untouched.
 
-Every payload carries a minisign signature that is verified against a public key
-compiled into the binary. A payload that fails verification is discarded, so the
-release host is not a trusted input.
-
-AppImage is the only self-updating Linux format; deb and rpm installs are
+AppImage is the only self-updating Linux format. deb and rpm installs are
 updated by your package manager.
+
+## Privacy and data
+
+Boite has no telemetry and no account. Its only unprompted network call is the
+update check above, which sends nothing but the request itself; every other
+connection is to a remote workspace you configured.
 
 Data lives next to the app config, never in the cloud:
 
@@ -145,16 +119,6 @@ Data lives next to the app config, never in the cloud:
 | Windows | `%APPDATA%\com.boite.desktop\boite.db`            |
 | Linux   | `~/.local/share/com.boite.desktop/boite.db`       |
 | macOS   | `~/Library/Application Support/com.boite.desktop/` |
-
-Installs from 1.0.0 and earlier used `dev.boite.app`, the scaffolding
-placeholder. The first start after upgrading moves the whole directory across
-and logs what it did under `backend.appdata`. If both directories somehow hold
-a database, the new one wins and the old is left untouched rather than guessed
-at; nothing is ever deleted that was not first moved.
-
-Boite has no telemetry and no account. Its only unprompted network call is the
-update check described above, which sends nothing but the request itself; every
-other connection is to a remote workspace you explicitly configured.
 
 ## Keyboard
 
@@ -176,7 +140,7 @@ other connection is to a remote workspace you explicitly configured.
 On macOS, `Cmd` replaces `Ctrl` and only `Cmd+K` opens the palette; `Ctrl+K`
 stays with the shell's readline kill-line.
 
-## Remote & mobile
+## Remote and mobile
 
 `boite-server` ([`crates/boite-server`](crates/boite-server/README.md)) runs the
 PTY/git/fs core headless and serves the same SvelteKit SPA as an installable
@@ -184,15 +148,42 @@ PWA. The desktop app reaches it over a single multiplexed WebSocket; a phone
 installs it straight from the browser. That README covers Docker, tokens and
 TLS/Tailscale setup.
 
-Each saved boite carries a **name and a status color**, stored server-side and
-synced to every connected device: rename or recolor from one device and the
-others update live. The connection outline around the window takes that color,
-so it is obvious which boite you are driving. One connection is active at a
-time; switching reconnects.
+A saved server connection, *a boite*, carries a name and a status color, both
+stored server-side and synced live to every connected device. The connection
+outline around the window takes that color. One connection is active at a time.
 
 For a native Android install, [`mobile/`](mobile/README.md) holds a Bubblewrap
-TWA wrapper that packages the PWA as an `.aab`/`.apk` (signing secrets stay out
-of the repo).
+TWA wrapper that packages the PWA as an `.aab`/`.apk`.
+
+## Agent todo access (MCP)
+
+The right-hand **Todo** tab keeps a checklist per project. Three tools
+(`todo_list`, `todo_add`, `todo_claim`) let an agent read the list, append to it
+and report an item finished, but never tick one off: claiming moves an item to
+*awaiting confirmation* and only you confirm it.
+
+Boite spawns the terminal, so it stamps `BOITE_MCP_URL`, `BOITE_TOKEN` and
+`BOITE_THREAD_ID` into the child's environment, and resolves the project from
+the thread id. An agent reaches its own project's list and no other with nothing
+to configure; one started outside Boite has no token at all. The endpoint lives
+on `127.0.0.1` with an ephemeral port, in both the desktop app and
+`boite-server`.
+
+The `boite-mcp` shim ships inside the app, next to the Boite binary. Point your
+agent at it. On macOS:
+
+```json
+{
+  "mcpServers": {
+    "boite": { "command": "/Applications/Boite.app/Contents/MacOS/boite-mcp" }
+  }
+}
+```
+
+On Windows and Linux it sits beside the installed `boite` executable; running
+from source, use `target/release/boite-mcp` after `bun run build:sidecar`. No
+`env` block is needed, the shim inherits the terminal's. Launched anywhere else
+it exits rather than starting unauthenticated.
 
 ## Build from source
 
@@ -225,137 +216,9 @@ bun run tauri build --no-bundle             # raw executable, fastest
 This is a Cargo workspace, so bundles land in the repo-root
 `target/release/bundle/`, not `src-tauri/target/`.
 
-Checks that must pass before a commit:
-
-```bash
-bun run check
-cargo check --manifest-path src-tauri/Cargo.toml
-cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
-cargo test --manifest-path src-tauri/Cargo.toml
-```
-
-### Dev mode side by side
-
-A release instance already running holds the single-instance lock, so
-`tauri dev` refuses to start. For a dev window next to it:
-
-```bash
-bun run dev:isolated
-```
-
-That launches a separate **"Boite Dev"** window on port `1430` under the
-`dev.boite.dev` identifier, with its own SQLite file and an empty project list.
-
-It also enables the `mcp-bridge` feature so an agent can drive that window
-(screenshots, DOM reads, JS evaluation). **The bridge is a dev-only tool**: an
-unauthenticated WebSocket server, deliberately bound to `127.0.0.1`. The
-plugin's own default is `0.0.0.0`, and JS evaluated in the webview reaches the
-IPC that spawns PTYs. Keep it on loopback and never enable the feature for a
-build you hand to anyone. Plain `bun run tauri dev` leaves it out of the binary
-entirely.
-
-The agent side of that bridge is `@hypothesi/tauri-mcp-server`, pinned to the
-same version as the crate — the npm package and the plugin ship as one pair, and
-its binary is named `mcp-server-tauri`, which is not a package name and resolves
-to nothing when handed to `npx`:
-
-```json
-{
-  "mcpServers": {
-    "boite-dev": { "command": "npx", "args": ["-y", "@hypothesi/tauri-mcp-server@0.12.0"] }
-  }
-}
-```
-
-It declares twenty tools, around 26 KB of schema in every session that loads it,
-so it is worth registering only while actually driving the dev window.
-
-## Agent todo access (MCP)
-
-The right-hand **Todo** tab keeps a checklist per project. An agent running in a
-Boite terminal can read and append to that list, and report an item finished —
-but never tick one off.
-
-Boite spawns the terminal, so it stamps `BOITE_MCP_URL`, `BOITE_TOKEN` and
-`BOITE_THREAD_ID` into the child's environment. The agent presents that thread
-id; the project is resolved from it. So an agent reaches its own project's list
-and no other, with nothing to configure, and an agent started outside Boite has
-no token at all.
-
-The `boite-mcp` shim ships inside the app, next to the Boite binary. Point your
-agent at it — on macOS:
-
-```json
-{
-  "mcpServers": {
-    "boite": { "command": "/Applications/Boite.app/Contents/MacOS/boite-mcp" }
-  }
-}
-```
-
-On Windows and Linux it sits beside the installed `boite` executable. Running
-from source, use `target/release/boite-mcp` after `bun run build:sidecar`.
-
-No `env` block: the shim inherits the terminal's. Launched anywhere else it
-exits rather than starting unauthenticated.
-
-It is spawned once per agent terminal, so it carries nothing it does not need:
-`serde_json` and a hundred lines of HTTP/1.1 over a loopback socket, 380 KB
-altogether. No async runtime, and no proxy handling to send `127.0.0.1` through
-a `ALL_PROXY` that happens to be set.
-
-Six tools: `todo_list`, `todo_add`, `todo_claim`, and `worktree_status`,
-`worktree_branch`, `worktree_reserve` for the checkout the terminal runs in.
-Claiming moves an item to *awaiting confirmation*, with a one-line summary; only
-you can confirm it. That split is enforced in SQL — the update fires only on a
-row still open, in the caller's own project — because a model that can close its
-own tickets will, and the list would stop recording verified work.
-
-Answers come back in TOON rather than JSON, because every one of them is read in
-a context window:
-
-```
-todos(2):
-  id state text note
-  1a5f3698 open "opti mcp axi" -
-  596ce966 claimed readme done
-hint: todo_claim id=<id> note=<what changed> — the user confirms, not you
-```
-
-Ids are shortened to the prefix that still tells the list apart, and `todo_claim`
-takes either that or the full one.
-
-The endpoint lives on `127.0.0.1` with an ephemeral port, in both the desktop
-app and `boite-server`. It is not the dev `mcp-bridge` and never reuses it: that
-one answers `execute_js`, this one answers three verbs on one table.
-
-`scripts/build-sidecar.mjs` builds it before every bundle and names it for the
-triple being built *for* — the macOS release jobs cross-compile, so the host
-triple would be the wrong answer there and the bundle would fail outright.
-
-## Releasing
-
-Releases are built by `.github/workflows/release.yml` on a pushed `v*` tag, one
-job per platform. It signs the update payloads and opens a **draft** release:
-clients see nothing until you publish it.
-
-Cutting a release needs no key on your machine. The signing keypair already
-exists: its public half is in `plugins.updater.pubkey`, its private half is the
-`TAURI_SIGNING_PRIVATE_KEY` repository secret (with
-`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`). Anyone who can push a tag can ship a
-signed release without ever seeing it.
-
-That keypair is permanent. There is one for the whole project, not one per
-maintainer: the public key is compiled into every binary in the wild, so a
-second key would orphan every existing install. GitHub secrets cannot be read
-back, and there is no revocation: losing the private key ends updates forever,
-and leaking it cannot be undone. An offline copy is held outside GitHub, so the
-secret is no longer the only one. Never sign locally.
-
-Cutting a release: bump the version in the five places that carry it
-(`package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`,
-`crates/boite-core/Cargo.toml`, `crates/boite-server/Cargo.toml`), commit, then
-tag `vX.Y.Z` and push the tag.
+[`docs/development.md`](docs/development.md) covers running a dev window beside
+a release install, and [`docs/releasing.md`](docs/releasing.md) covers cutting a
+release.
 
 ## Stack
 
@@ -391,9 +254,9 @@ mobile/                   # Bubblewrap TWA wrapper for the Android build
 
 ## Contributing
 
-Issues and pull requests are welcome. Keep `bun run check` and
-`cargo clippy -- -D warnings` clean, follow the vertical-slice layout above,
-and add new persistence as an append-only migration (never edit a shipped one).
+Issues and pull requests are welcome. Follow the vertical-slice layout above,
+add new persistence as an append-only migration (never edit a shipped one), and
+run the checks in [`AGENTS.md`](AGENTS.md) before pushing.
 
 ## License
 
