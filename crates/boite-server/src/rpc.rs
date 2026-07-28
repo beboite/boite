@@ -580,7 +580,9 @@ async fn dispatch_worktree(
             let path = git::worktree_path_for(&base, &thread_id)
                 .to_string_lossy()
                 .to_string();
-            let r = blocking(move || git::add_detached_worktree_blocking(&repo, &path)).await??;
+            // `path` is null when the repository is not one to open a worktree
+            // in: no repo, or a dirty checkout the thread has to start in.
+            let r = blocking(move || git::open_worktree_if_eligible_blocking(&repo, &path)).await??;
             Ok(json!({ "path": r }))
         }
         "worktree.claim" => {

@@ -1441,6 +1441,37 @@ pub fn add_detached_worktree_blocking(repo: &str, path: &str) -> Result<String, 
     Ok(path.to_string())
 }
 
+/// Opens a worktree for a thread, or answers that this repository is not one
+/// to open a worktree in. `Ok(None)` means the thread runs in the project
+/// folder.
+///
+/// The eligibility checks live here rather than in the caller because each one
+/// used to cost an IPC round trip and a `git` process of its own: the frontend
+/// asked "is this a repo", then "is it clean", then "open one", paying three
+/// process spawns to reach a decision that is mostly filesystem state. On
+/// Windows a process spawn is the expensive part of this whole operation, not
+/// the checkout.
+pub fn open_worktree_if_eligible_blocking(
+    repo: &str,
+    path: &str,
+) -> Result<Option<String>, String> {
+    let r = Path::new(repo);
+    // No subprocess: a repository is a `.git` directory, or the `gitdir:` file
+    // a worktree and a submodule get, and both are one stat away.
+    if git_dir(r).is_none() {
+        return Ok(None);
+    }
+    // "Look at what I just changed" cannot be answered from a clean worktree.
+    // A dirty main checkout means the work under discussion is there, so the
+    // thread starts there too.
+    let mut status = git(r);
+    status.args(["status", "--porcelain", "--untracked-files=normal"]);
+    if !run(status)?.is_empty() {
+        return Ok(None);
+    }
+    add_detached_worktree_blocking(repo, path).map(Some)
+}
+
 /// Turns a detached worktree into a branch, once its work has proved worth
 /// keeping. Fails if the name is taken, so a claim never quietly hijacks an
 /// existing branch.
@@ -1498,13 +1529,17 @@ pub fn link_shared_artifacts(repo: &Path, worktree: &Path) -> Vec<String> {
 fn link_dir(src: &Path, dst: &Path) -> std::io::Result<()> {
     // A junction rather than a symlink: symlink creation needs either developer
     // mode or elevation on Windows, junctions need neither.
-    let status = Command::new("cmd")
-        .args(["/c", "mklink", "/J"])
+    use std::os::windows::process::CommandExt;
+    let mut cmd = Command::new("cmd");
+    cmd.args(["/c", "mklink", "/J"])
         .arg(dst)
         .arg(src)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
-        .status()?;
+        // Without this the console host paints a real window for every link,
+        // so opening a worktree flashes one per shared directory.
+        .creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    let status = cmd.status()?;
     if status.success() {
         Ok(())
     } else {
@@ -1710,6 +1745,40 @@ mod worktree_tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.repo);
         }
+    }
+
+    /// The three answers the eligibility check has to give, since it is now the
+    /// only thing standing between a thread and a worktree.
+    #[test]
+    fn eligibility_refuses_a_non_repo_and_a_dirty_checkout() {
+        let plain = scratch("plain");
+        fs::create_dir_all(&plain).unwrap();
+        let w = scratch("w");
+        assert_eq!(
+            open_worktree_if_eligible_blocking(plain.to_str().unwrap(), w.to_str().unwrap()),
+            Ok(None),
+        );
+        assert!(!w.exists(), "a non-repo must not get a worktree");
+        let _ = fs::remove_dir_all(&plain);
+
+        let f = Fixture::new();
+        // Clean: a worktree, at the path we asked for.
+        assert_eq!(
+            open_worktree_if_eligible_blocking(f.path(), w.to_str().unwrap()),
+            Ok(Some(w.to_str().unwrap().to_string())),
+        );
+        assert!(w.join("a.txt").is_file());
+        let _ = remove_worktree_blocking(f.path(), w.to_str().unwrap(), true);
+
+        // An untracked file counts: the work under discussion is in the main
+        // checkout, so the thread has to start there and see it.
+        let dirty = scratch("dirty");
+        fs::write(f.repo.join("scratch.txt"), "wip\n").unwrap();
+        assert_eq!(
+            open_worktree_if_eligible_blocking(f.path(), dirty.to_str().unwrap()),
+            Ok(None),
+        );
+        assert!(!dirty.exists());
     }
 
     /// The whole reason for detaching: two of them on the same commit, which

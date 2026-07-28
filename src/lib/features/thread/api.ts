@@ -102,20 +102,63 @@ async function openWorktreeFor(
   if (iconKey === "terminal") return null;
 
   const repo = project.gitRoot ?? project.cwd;
-  const backend = backendForPath(project.cwd);
   try {
-    const info = await backend.git.repoInfo(repo);
-    if (!info.isRepo) return null;
-    // "Look at what I just changed" cannot be answered from a clean worktree.
-    // A dirty main checkout means the work under discussion is there, so the
-    // thread starts there too.
-    const dirty = await backend.git.status(repo);
-    if (dirty.length > 0) return null;
-    return await backend.worktree.open(repo, threadId);
+    // One call, not three. Whether the repo qualifies at all is decided
+    // backend-side now: asking "is this a repo" and "is it clean" from here
+    // cost two more round trips and two more `git` processes, and on Windows
+    // the process spawns are what a new thread actually waits on.
+    return await backendForPath(project.cwd).worktree.open(repo, threadId);
   } catch (err) {
     logger.warn("worktree", `no worktree for ${threadId}`, String(err));
     return null;
   }
+}
+
+// Threads whose working directory is still being decided.
+//
+// A thread is created and shown before its worktree exists, so `git worktree
+// add` no longer sits between the click and the sidebar. The directory still
+// has to be final before anything runs in it: a PTY started in the project
+// folder cannot be moved once it is up, and its agent session would be looked
+// up under the wrong path for the rest of the thread's life.
+const preparing = new Map<string, Promise<void>>();
+
+/**
+ * Resolves once this thread's working directory is final.
+ *
+ * An unknown id resolves immediately: a thread that is not mid-creation
+ * already has the directory it keeps for the rest of its life.
+ */
+export function threadDirectoryReady(threadId: string): Promise<void> {
+  return preparing.get(threadId) ?? Promise.resolve();
+}
+
+function prepareWorktree(project: Project, thread: Thread, iconKey: IconKey) {
+  const work = (async () => {
+    const path = await openWorktreeFor(project, thread.id, iconKey);
+    if (!path) return;
+    // The store's thread, not the local one: that is the reactive object the
+    // terminal reads its cwd from. It is gone when the thread was closed while
+    // the worktree was being made — the close path waits for us before
+    // releasing, so there is nothing left to write to.
+    const live = app.threadById(thread.id);
+    if (!live) return;
+    live.worktreePath = path;
+    await saveThread({ ...live, args: [...live.args] });
+  })();
+
+  preparing.set(
+    thread.id,
+    work
+      .catch((err) => {
+        // A thread with no worktree runs in the project folder, which is the
+        // documented fallback — never a reason to fail the thread itself.
+        logger.warn("worktree", `prepare failed for ${thread.id}`, String(err));
+      })
+      .finally(() => {
+        preparing.delete(thread.id);
+      }),
+  );
 }
 
 async function createThread(
@@ -136,7 +179,6 @@ async function createThread(
     opts.iconColor ?? null,
   );
   if (opts.fresh) app.markFresh(thread.id);
-  thread.worktreePath = await openWorktreeFor(project, thread.id, iconKey);
   try {
     await app.upsertThread(thread);
   } catch (err) {
@@ -146,6 +188,9 @@ async function createThread(
   }
   app.activeThreadId = thread.id;
   app.view = "terminal";
+  // After the thread exists, never before it: the worktree is several `git`
+  // processes and the user was watching an empty sidebar for all of them.
+  prepareWorktree(project, thread, iconKey);
   return thread;
 }
 
@@ -226,6 +271,9 @@ async function releaseWorktree(t: Thread) {
 }
 
 export async function closeThread(threadId: string) {
+  // Closed before its worktree landed: the directory would be created a moment
+  // after the release below read a null path, and stay behind forever.
+  await threadDirectoryReady(threadId);
   const t = app.threadById(threadId);
   if (t) rememberClosedThread(t);
   const kill = t?.ptyId ? ptyKill(t.ptyId, true).catch(() => {}) : Promise.resolve();

@@ -132,11 +132,17 @@ export interface WorktreeHold {
 
 export interface WorktreeApi {
   /**
-   * Opens a detached worktree for a thread and returns its directory. The
-   * caller does not choose the path: it is derived from the thread id under
-   * the machine's own worktree base, which is the only one in scope.
+   * Opens a detached worktree for a thread and returns its directory, or null
+   * when this repository is not one to open a worktree in — not a repo, or a
+   * dirty checkout whose in-flight work the thread has to see. The caller does
+   * not choose the path: it is derived from the thread id under the machine's
+   * own worktree base, which is the only one in scope.
+   *
+   * The eligibility check belongs to this call rather than to the caller: on
+   * Windows every extra round trip costs a `git` process spawn, and those are
+   * what a new thread waits on.
    */
-  open(repo: string, threadId: string): Promise<string>;
+  open(repo: string, threadId: string): Promise<string | null>;
   /**
    * Puts a branch on a detached worktree, once its work has proved worth
    * keeping. Rejects a name that is already taken.
