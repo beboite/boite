@@ -16,6 +16,7 @@
   import { moveThreadToProject } from "$lib/features/thread/move";
   import { notifications } from "$lib/features/notifications/store.svelte";
   import { refreshProjectIcon } from "$lib/features/project/api";
+  import { isScratch } from "$lib/features/project/scratch";
   import StatusDot from "$lib/shared/components/StatusDot.svelte";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
   import { confirmDialog } from "$lib/shared/components/confirm.svelte";
@@ -576,22 +577,6 @@
         void reloadThread(thread.id);
       },
     });
-    // The same move the drag makes, for the times the target is scrolled off
-    // screen — and for a project that has no threads yet, which has no list to
-    // aim at. Flat rather than a submenu: the menu has no nesting, and a
-    // sidebar holds a handful of projects.
-    const elsewhere = app.sortedProjects.filter((p) => p.id !== thread.projectId);
-    if (elsewhere.length > 0) {
-      items.push({ separator: true });
-      for (const project of elsewhere) {
-        items.push({
-          label: t("sidebar.moveThreadTo", { project: project.name }),
-          action: () => {
-            void moveThreadToProject(thread.id, project.id);
-          },
-        });
-      }
-    }
     items.push({ separator: true });
     items.push({
       label: "Close thread",
@@ -810,6 +795,12 @@
       {@const isRemoteOrigin = workspace.isDynamic && project.origin === "remote"}
       {@const boiteOffline = isRemoteOrigin && workspace.connection !== "connected"}
       {@const isProjectSource = liveDrag?.kind === "project" && liveDrag.id === project.id}
+      <!-- Scratch is the home folder, not a repository: no worktree, nothing to
+           branch, nothing git has an opinion about. It sits in the list like a
+           project because everything a thread needs keys off one, so the row is
+           the only place left to say it is not one. A lighter surface, no
+           border and no badge — enough to read as apart, not as broken. -->
+      {@const isScratchRow = isScratch(project)}
       {@const projectShiftY =
         liveDrag && liveDrag.kind === "project" && liveDrag.slotIndex !== null && projectSourceIdx >= 0
           ? rowShift(projectIdx, projectSourceIdx, liveDrag.slotIndex, liveDrag.sourceHeight)
@@ -834,7 +825,11 @@
         <div
           class="project-row group/project relative flex items-center gap-2 rounded-md px-2 py-1.5 transition hover:bg-accent/40 hover:text-foreground {showArchived
             ? ''
-            : 'cursor-pointer'} {isSelected ? 'bg-accent/40' : ''}"
+            : 'cursor-pointer'} {isSelected
+            ? 'bg-accent/40'
+            : isScratchRow
+              ? 'bg-[var(--color-surface-2)]'
+              : ''}"
           style:box-shadow={isRemoteOrigin
             ? `inset 2px 0 0 0 ${workspace.info.color || "var(--color-success)"}`
             : undefined}
