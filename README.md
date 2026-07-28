@@ -256,9 +256,15 @@ entirely.
 
 ## Agent todo access (MCP)
 
-The right-hand **Todo** tab keeps a checklist per project. An agent running in a
-Boite terminal can read and append to that list, and report an item finished —
-but never tick one off.
+The right-hand **Todo** tab keeps a list of cards per project. An agent running
+in a Boite terminal can read and append to that list, and report an item
+finished — but never tick one off.
+
+A card is a one-line title and an optional description. Click one to open it and
+read or edit the description; drag one to move it in the list. The split exists
+because an agent handed a single text field writes a paragraph into it, and the
+panel is one column wide: the title is what the list shows, everything else is
+behind the card.
 
 Boite spawns the terminal, so it stamps `BOITE_MCP_URL`, `BOITE_TOKEN` and
 `BOITE_THREAD_ID` into the child's environment. The agent presents that thread
@@ -283,7 +289,8 @@ from source, use `target/release/boite-mcp` after `bun run build:sidecar`.
 No `env` block: the shim inherits the terminal's. Launched anywhere else it
 exits rather than starting unauthenticated.
 
-Three tools: `todo_list`, `todo_add`, `todo_claim`. Claiming moves an item to
+Three tools: `todo_list`, `todo_add` (a short `title`, plus a `description` for
+everything that does not fit in one line), `todo_claim`. Claiming moves an item to
 *awaiting confirmation*, with a one-line summary; only you can confirm it. That
 split is enforced in SQL — the update fires only on a row still open, in the
 caller's own project — because a model that can close its own tickets will, and

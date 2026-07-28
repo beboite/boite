@@ -96,8 +96,8 @@ class TodoStore {
     }
   }
 
-  async add(projectId: string, text: string): Promise<TodoItem | null> {
-    const trimmed = text.trim();
+  async add(projectId: string, title: string): Promise<TodoItem | null> {
+    const trimmed = title.trim();
     if (!trimmed) return null;
     const now = Date.now();
     // Append: the largest position in this project, plus one.
@@ -106,7 +106,8 @@ class TodoStore {
     const item: TodoItem = {
       id: uuid(),
       projectId,
-      text: trimmed,
+      title: trimmed,
+      description: null,
       state: "open",
       note: null,
       commitSha: null,
@@ -136,20 +137,63 @@ class TodoStore {
     await this.write($state.snapshot(item));
   }
 
-  async setText(id: string, text: string): Promise<void> {
+  async setTitle(id: string, title: string): Promise<void> {
     const item = this.items.find((t) => t.id === id);
     if (!item) return;
-    const trimmed = text.trim();
-    // Emptying a line is how you delete it — an item with no text is a row that
-    // can be neither labelled nor handed to an agent.
+    const trimmed = title.trim();
+    // Emptying the title is how you delete a card — one with no title is a row
+    // that can be neither labelled nor handed to an agent. Unless it has a
+    // description: that is a card someone wrote a paragraph into, and clearing
+    // one field is not a request to destroy the other.
     if (!trimmed) {
+      if (item.description) return;
       await this.remove(id);
       return;
     }
-    if (item.text === trimmed) return;
-    item.text = trimmed;
+    if (item.title === trimmed) return;
+    item.title = trimmed;
     item.updatedAt = Date.now();
     await this.write($state.snapshot(item));
+  }
+
+  /** Empty and absent are the same thing here, and only null is stored. */
+  async setDescription(id: string, description: string): Promise<void> {
+    const item = this.items.find((t) => t.id === id);
+    if (!item) return;
+    const next = description.trim() || null;
+    if (item.description === next) return;
+    item.description = next;
+    item.updatedAt = Date.now();
+    await this.write($state.snapshot(item));
+  }
+
+  /**
+   * Rewrites the order of one project's cards, `orderedIds` first to last.
+   *
+   * Positions are renumbered from zero rather than nudged around the moved row:
+   * the table is appended to by agents as well, `MAX(position) + 1` is computed
+   * without a lock on either side, and two rows sharing a position is a state
+   * this list has to be able to leave. Renumbering is also what makes the
+   * result survive the reload an agent's next write triggers.
+   */
+  async reorder(projectId: string, orderedIds: string[]): Promise<void> {
+    const now = Date.now();
+    const changed: TodoItem[] = [];
+    orderedIds.forEach((id, index) => {
+      const item = this.items.find((t) => t.id === id);
+      if (!item || item.projectId !== projectId || item.position === index) return;
+      item.position = index;
+      item.updatedAt = now;
+      changed.push($state.snapshot(item));
+    });
+    if (changed.length === 0) return;
+    // `forProject` filters and does not sort, so the panel shows whatever order
+    // this array is in. Same comparison the load query uses, applied to every
+    // project at once because that is how the rows come back.
+    this.items = [...this.items].sort(
+      (a, b) => a.position - b.position || a.createdAt - b.createdAt,
+    );
+    for (const item of changed) await this.write(item);
   }
 
   async remove(id: string): Promise<void> {

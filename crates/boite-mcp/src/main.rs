@@ -133,16 +133,33 @@ fn tools() -> Value {
     json!([
         {
             "name": "todo_list",
-            "description": "List the todo items of the project this terminal belongs to.",
+            "description": "List the todo items of the project this terminal belongs to. Each item \
+                            carries a one-line title and, when there is more to it, a description.",
             "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false }
         },
         {
             "name": "todo_add",
-            "description": "Add a todo item to this project's list.",
+            "description": "Add a todo item to this project's list. A card, not a paragraph: the \
+                            title is the line the user reads in the panel, and everything else \
+                            belongs in the description, which they open the card to read.",
             "inputSchema": {
                 "type": "object",
-                "properties": { "text": { "type": "string", "description": "One line describing the task." } },
-                "required": ["text"],
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "The task in one short line, around 60 characters. This is \
+                                        all the list shows; a longer one is cut off there. Write \
+                                        the outcome, not the reasoning."
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Everything that does not belong in the title: context, the \
+                                        files involved, constraints, how to tell it is done. As \
+                                        long as it needs to be, and left out entirely when the \
+                                        title already says it all."
+                    }
+                },
+                "required": ["title"],
                 "additionalProperties": false
             }
         },
@@ -225,11 +242,20 @@ fn call_tool(host: &Host, name: &str, args: &Value) -> Result<String, String> {
             Ok(serde_json::to_string_pretty(&out).unwrap_or_else(|_| out.to_string()))
         }
         "todo_add" => {
-            let text = args
-                .get("text")
+            // `text` is still read: a model that learnt the old single-field
+            // shape from a cached tool list would otherwise get a refusal it
+            // cannot act on, and the title is the same string either way.
+            let title = args
+                .get("title")
+                .or_else(|| args.get("text"))
                 .and_then(|v| v.as_str())
-                .ok_or("todo_add needs a text")?;
-            let out = host.send(reqwest::Method::POST, "/v1/todos", Some(json!({ "text": text })))?;
+                .ok_or("todo_add needs a title")?;
+            let description = args.get("description").and_then(|v| v.as_str());
+            let out = host.send(
+                reqwest::Method::POST,
+                "/v1/todos",
+                Some(json!({ "title": title, "description": description })),
+            )?;
             let id = out.get("id").and_then(|v| v.as_str()).unwrap_or("?");
             Ok(format!("Added. id {id}"))
         }

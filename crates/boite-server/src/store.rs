@@ -74,6 +74,10 @@ const MIGRATIONS: &[&str] = &[
     // Mirrors desktop migration 14. The directory a thread runs in when it is
     // not the project's own; null for every thread that predates the column.
     "ALTER TABLE threads ADD COLUMN worktree_path TEXT;",
+    // Mirrors desktop migration 15. The body of the card: `text` used to carry
+    // the label and the detail together, which made the label as long as
+    // whatever an agent felt like writing.
+    "ALTER TABLE todos ADD COLUMN description TEXT;",
 ];
 
 impl Store {
@@ -132,7 +136,7 @@ impl Store {
         let conn = self.conn.lock();
         let mut stmt = conn
             .prepare(
-                "SELECT id, project_id, text, state, note, commit_sha, claimed_by,
+                "SELECT id, project_id, text, description, state, note, commit_sha, claimed_by,
                         position, created_at, updated_at
                  FROM todos ORDER BY position ASC, created_at ASC",
             )
@@ -142,14 +146,15 @@ impl Store {
                 Ok(Todo {
                     id: r.get(0)?,
                     project_id: r.get(1)?,
-                    text: r.get(2)?,
-                    state: r.get(3)?,
-                    note: r.get(4)?,
-                    commit_sha: r.get(5)?,
-                    claimed_by: r.get(6)?,
-                    position: r.get(7)?,
-                    created_at: r.get(8)?,
-                    updated_at: r.get(9)?,
+                    title: r.get(2)?,
+                    description: r.get(3)?,
+                    state: r.get(4)?,
+                    note: r.get(5)?,
+                    commit_sha: r.get(6)?,
+                    claimed_by: r.get(7)?,
+                    position: r.get(8)?,
+                    created_at: r.get(9)?,
+                    updated_at: r.get(10)?,
                 })
             })
             .map_err(|e| e.to_string())?;
@@ -160,13 +165,14 @@ impl Store {
         let conn = self.conn.lock();
         conn.execute(
             "INSERT OR REPLACE INTO todos
-             (id, project_id, text, state, note, commit_sha, claimed_by,
+             (id, project_id, text, description, state, note, commit_sha, claimed_by,
               position, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             rusqlite::params![
                 t.id,
                 t.project_id,
-                t.text,
+                t.title,
+                t.description,
                 t.state,
                 t.note,
                 t.commit_sha,
@@ -184,7 +190,7 @@ impl Store {
         let conn = self.conn.lock();
         let mut stmt = conn
             .prepare(
-                "SELECT id, project_id, text, state, note, commit_sha, claimed_by,
+                "SELECT id, project_id, text, description, state, note, commit_sha, claimed_by,
                         position, created_at, updated_at
                  FROM todos WHERE project_id = ?1 ORDER BY position ASC, created_at ASC",
             )
@@ -194,14 +200,15 @@ impl Store {
                 Ok(Todo {
                     id: r.get(0)?,
                     project_id: r.get(1)?,
-                    text: r.get(2)?,
-                    state: r.get(3)?,
-                    note: r.get(4)?,
-                    commit_sha: r.get(5)?,
-                    claimed_by: r.get(6)?,
-                    position: r.get(7)?,
-                    created_at: r.get(8)?,
-                    updated_at: r.get(9)?,
+                    title: r.get(2)?,
+                    description: r.get(3)?,
+                    state: r.get(4)?,
+                    note: r.get(5)?,
+                    commit_sha: r.get(6)?,
+                    claimed_by: r.get(7)?,
+                    position: r.get(8)?,
+                    created_at: r.get(9)?,
+                    updated_at: r.get(10)?,
                 })
             })
             .map_err(|e| e.to_string())?;
@@ -235,7 +242,13 @@ impl Store {
         .map_err(|_| "unknown thread".to_string())
     }
 
-    pub fn add_todo(&self, project_id: &str, text: &str, now: i64) -> Result<String, String> {
+    pub fn add_todo(
+        &self,
+        project_id: &str,
+        title: &str,
+        description: Option<&str>,
+        now: i64,
+    ) -> Result<String, String> {
         let conn = self.conn.lock();
         let position: i64 = conn
             .query_row(
@@ -246,9 +259,10 @@ impl Store {
             .unwrap_or(0);
         let id = format!("{:032x}", rand::random::<u128>());
         conn.execute(
-            "INSERT INTO todos (id, project_id, text, state, note, position, created_at, updated_at)
-             VALUES (?1, ?2, ?3, 'open', NULL, ?4, ?5, ?5)",
-            rusqlite::params![id, project_id, text, position, now],
+            "INSERT INTO todos
+             (id, project_id, text, description, state, note, position, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, 'open', NULL, ?5, ?6, ?6)",
+            rusqlite::params![id, project_id, title, description, position, now],
         )
         .map_err(|e| e.to_string())?;
         Ok(id)
