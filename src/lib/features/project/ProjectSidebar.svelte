@@ -138,14 +138,20 @@
     void stopThread(id);
   }
 
-  // Clicking a project header always leaves the thread behind — including the
-  // one currently open, whose project is the one being clicked. Keeping the
-  // thread there made its own project the only row in the sidebar that did
-  // nothing when clicked.
+  // Clicking a project opens its page. It used to drop you on the terminal
+  // view, which showed whatever thread happened to be active — or a list of
+  // keyboard shortcuts when none was. The project's own page is the answer to
+  // the click that asked for it; a thread is one click further, from there or
+  // from this list.
+  //
+  // The thread is always left behind, including the one whose project is the
+  // one being clicked: keeping it made that project the only row in the
+  // sidebar that did nothing. With a page to land on rather than a thread's
+  // terminal, that is now also the only way the click has anything to show.
   function selectProject(projectId: string) {
     app.selectedProjectId = projectId;
     app.activeThreadId = null;
-    app.view = "terminal";
+    app.view = "project";
   }
 
   function projectPointerDown(projectId: string, e: PointerEvent) {

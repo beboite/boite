@@ -231,7 +231,7 @@ export interface ChatMessage {
   createdAt: number;
 }
 
-export type View = "terminal" | "settings" | "editor" | "chat";
+export type View = "terminal" | "settings" | "editor" | "chat" | "project";
 
 // Bottom-bar destinations in the phone layout. Independent of `View`: the
 // terminal/editor/settings desktop views still drive the shared viewport and
