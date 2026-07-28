@@ -713,7 +713,8 @@ pub async fn git_switch_branch(
     .map_err(|e| format!("git_switch_branch task failed: {e}"))?
 }
 
-/// Opens a detached worktree for a thread and hands back its directory.
+/// Opens a detached worktree for a thread and hands back its directory, or
+/// `None` when this repository is not one to open a worktree in.
 ///
 /// The base lives beside the database, not inside the project: it is one
 /// registered root for every worktree, so a stored path can never widen the
@@ -724,15 +725,17 @@ pub async fn worktree_open(
     scope: State<'_, ProjectRoots>,
     repo: String,
     thread_id: String,
-) -> Result<String, String> {
+) -> Result<Option<String>, String> {
     scope.ensure_allowed(&repo)?;
     let base = crate::app_data::worktree_base(&app)?;
     std::fs::create_dir_all(&base).map_err(|e| format!("worktree base: {e}"))?;
     let path = git::worktree_path_for(&base, &thread_id);
     let path = path.to_string_lossy().to_string();
-    tauri::async_runtime::spawn_blocking(move || git::add_detached_worktree_blocking(&repo, &path))
-        .await
-        .map_err(|e| format!("worktree_open task failed: {e}"))?
+    tauri::async_runtime::spawn_blocking(move || {
+        git::open_worktree_if_eligible_blocking(&repo, &path)
+    })
+    .await
+    .map_err(|e| format!("worktree_open task failed: {e}"))?
 }
 
 #[tauri::command]

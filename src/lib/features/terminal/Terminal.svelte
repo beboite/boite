@@ -21,7 +21,11 @@
   import { app } from "$lib/app/store.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
   import { threadCwd } from "$lib/features/thread/cwd";
-  import { reloadThread, restoreLastClosedThread } from "$lib/features/thread/api";
+  import {
+    reloadThread,
+    restoreLastClosedThread,
+    threadDirectoryReady,
+  } from "$lib/features/thread/api";
   import { buildResumeArgsAsync, getDetector } from "$lib/features/thread/session";
   import { withPowershellFastFlags } from "$lib/features/thread/shell-wrap";
   import { platform } from "$lib/storage/platform.svelte";
@@ -973,6 +977,18 @@
     }
 
     spawning = true;
+
+    // A just-created thread may still be having its worktree made. This wait is
+    // what lets it appear in the sidebar the moment it is clicked: the
+    // directory is settled off the click path, and only the PTY blocks on it.
+    // Held after `spawning` is set so a retry cannot slip past and open a
+    // second PTY in the meantime.
+    await threadDirectoryReady(thread.id);
+    if (destroyed) {
+      spawning = false;
+      return;
+    }
+
     const cols = Math.max(2, term.cols || 80);
     const rows = Math.max(1, term.rows || 24);
 
