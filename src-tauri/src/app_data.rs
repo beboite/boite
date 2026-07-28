@@ -4,6 +4,14 @@
 //! existing install's database, scrollback and window state in the old folder.
 //! This runs before anything opens the database, moves what is there, and never
 //! deletes anything it did not successfully move.
+//!
+//! "Before anything opens the database" is the load-bearing part, and it is why
+//! this runs ahead of `tauri::Builder` rather than from the app's `setup` hook.
+//! Plugin setup hooks run first, and `tauri.conf.json` preloads `sqlite:boite.db`
+//! for the frontend's `Database.get`: by the time an app-level hook is called,
+//! the sql plugin has already created an empty database at the new identifier.
+//! The migration then found a database there, refused to overwrite it, and left
+//! a real install stranded in the old directory. That shipped in 1.0.0.
 
 use std::path::{Path, PathBuf};
 
@@ -112,19 +120,19 @@ pub fn migrate(legacy: &Path, current: &Path) -> Result<Outcome, String> {
     Ok(Outcome::Moved { entries, from: legacy.to_path_buf() })
 }
 
-/// Resolves both directories from the running app and migrates between them.
+/// Resolves both directories and migrates between them, without an app.
+///
+/// Called before `tauri::Builder`, so `app_data_dir()` is not available yet and
+/// the path is derived the same way Tauri derives it: the platform data
+/// directory plus the bundle identifier. A test pins `CURRENT_IDENTIFIER`
+/// against `tauri.conf.json`, which is what keeps the two definitions honest.
 ///
 /// The legacy directory is the sibling of the current one, since the only thing
 /// that changed is the identifier that names it.
-pub fn migrate_from_legacy_identifier(app: &tauri::AppHandle) -> Result<Outcome, String> {
-    use tauri::Manager;
-    let current = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("no app data dir: {e}"))?;
-    if current.file_name().and_then(|n| n.to_str()) != Some(CURRENT_IDENTIFIER) {
+pub fn migrate_before_plugins() -> Result<Outcome, String> {
+    let Some(current) = dirs::data_dir().map(|d| d.join(CURRENT_IDENTIFIER)) else {
         return Ok(Outcome::Nothing);
-    }
+    };
     let Some(parent) = current.parent() else {
         return Ok(Outcome::Nothing);
     };
