@@ -1,10 +1,9 @@
 /**
  * Moving a running conversation from one project to another.
  *
- * One machinery, three doors: the `thread_move` MCP tool an agent calls on
- * itself, a thread card dragged onto another project, and the "Move to" entry
- * in its context menu. They all land here so a move means the same thing
- * however it was asked for.
+ * One machinery, two doors: the `thread_move` MCP tool an agent calls on
+ * itself, and a thread card dragged onto another project. They both land here
+ * so a move means the same thing however it was asked for.
  *
  * A thread is three things in three places — a row in the database, a live
  * process in a directory, and a transcript the CLI files somewhere of its own —
@@ -129,6 +128,7 @@ function landingPrompt(
   cwd: string,
   keptWorktree: string | null,
   resumed: boolean,
+  working: boolean,
 ): string {
   const lines = [
     `[boite] This thread has been moved to the project "${target.name}". You are now working in ${cwd}.`,
@@ -146,7 +146,15 @@ function landingPrompt(
       `Your previous worktree still held uncommitted work, so it was left behind at ${keptWorktree} rather than removed — nothing was lost, but it is no longer where you are.`,
     );
   }
-  lines.push("Carry on from where you left off.");
+  // Only a thread that was mid-answer is told to pick it back up. Every other
+  // one was sitting at a prompt waiting for its user, and a move is not an
+  // instruction: this line is the whole reason a thread that was doing nothing
+  // used to start doing something the moment it was dragged.
+  lines.push(
+    working
+      ? "Carry on from where you left off."
+      : "Nothing is being asked of you by this message; wait for your next instruction.",
+  );
   return lines.join(" ");
 }
 
@@ -157,7 +165,9 @@ function landingPrompt(
  * The relaunch is part of the move rather than a step after it: the PTY runs in
  * a directory, so a thread cannot change project while its process is alive.
  * It is killed, everything is rearranged around it, and it comes back with
- * `--resume` pointed at the transcript that travelled with it.
+ * `--resume` pointed at the transcript that travelled with it — unless it had
+ * no process to begin with, in which case it stays down and comes up over there
+ * the next time the user asks for it.
  */
 export async function moveThreadToProject(
   threadId: string,
@@ -189,6 +199,15 @@ export async function moveThreadToProject(
   if (target.archived) await app.unarchiveProject(target.id);
 
   const fromCwd = threadCwd(thread, source) ?? source.cwd;
+
+  // Both read before the kill below empties them, because what the thread was
+  // doing decides what comes back up on the other side. A live PTY has to be
+  // relaunched — a process cannot change directory under itself — but a thread
+  // the user put to sleep stays asleep: it moves on disk and comes up in the new
+  // folder whenever it is next woken. "running" is the only status that means
+  // the agent was mid-answer, and the only one that earns being told to carry on.
+  const wasAlive = !!thread.ptyId;
+  const wasWorking = thread.status === "running";
 
   // A pane split holds threads of one project side by side. This one is about
   // to belong to another, so it leaves the group before anything else moves.
@@ -262,12 +281,23 @@ export async function moveThreadToProject(
     // along is the one line that would have it answer as if it remembered
     // something it never read.
     opts.note?.trim() ||
-      landingPrompt(target, toCwd, keptWorktree, resumable && !!thread.sessionId),
+      landingPrompt(
+        target,
+        toCwd,
+        keptWorktree,
+        resumable && !!thread.sessionId,
+        wasWorking,
+      ),
   );
   app.selectedProjectId = target.id;
-  app.activeThreadId = thread.id;
-  app.view = "terminal";
-  app.bumpRespawn(thread.id);
+  // Mounting a terminal is what spawns its PTY, so activating a sleeping thread
+  // would launch it. The briefing stays queued instead and is handed over
+  // whenever the user does wake it, in the folder it woke up in.
+  if (wasAlive) {
+    app.activeThreadId = thread.id;
+    app.view = "terminal";
+    app.bumpRespawn(thread.id);
+  }
 
   logger.info("move", `${thread.id}: ${source.name} → ${target.name}`, {
     fromCwd,
