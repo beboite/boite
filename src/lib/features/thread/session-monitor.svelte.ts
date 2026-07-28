@@ -27,7 +27,7 @@ let scanInFlight = false;
 // file could belong to a sibling thread in the same cwd instead.
 const liveMonitors = new Map<
   string,
-  { cwd: string; lastActivityAt: () => number }
+  { cwd: string; kind: string; lastActivityAt: () => number }
 >();
 
 export interface SessionMonitor {
@@ -83,13 +83,15 @@ function probeSince(
 export function startSessionMonitor(opts: {
   threadId: string;
   cwd: string;
+  /** The agent whose store this monitor's detector reads. */
+  kind: string;
   detector: SessionDetector;
   since: number;
   targetPtyId: string;
   isPtyCurrent: (ptyId: string) => boolean;
   lastActivityAt: () => number;
 }): SessionMonitor {
-  const { threadId, cwd, detector, since, targetPtyId } = opts;
+  const { threadId, cwd, kind, detector, since, targetPtyId } = opts;
   let timer: ReturnType<typeof setInterval> | null = null;
   let timeouts: ReturnType<typeof setTimeout>[] = [];
   let stopped = false;
@@ -109,9 +111,15 @@ export function startSessionMonitor(opts: {
   // the wrong owner: a /clear or new conversation in thread A used to get
   // claimed by thread B's monitor, swapping their sessions. Only claim a file
   // whose mtime correlates with OUR pty activity and with no sibling's.
+  //
+  // Same agent only. Each detector reads one agent's store, so a codex thread
+  // is never a candidate owner of a claude transcript and has no business
+  // vetoing it. Counting it did: one busy agent in the cwd held its neighbours
+  // permanently unattributable, since a streaming sibling is "recently active"
+  // on every scan, and they never captured anything at all.
   const attributedToSelf = (mtimeMs: number): boolean => {
     const siblings = [...liveMonitors.entries()].filter(
-      ([id, m]) => id !== threadId && m.cwd === cwd,
+      ([id, m]) => id !== threadId && m.cwd === cwd && m.kind === kind,
     );
     if (siblings.length === 0) return true;
     const ownNear =
@@ -248,7 +256,7 @@ export function startSessionMonitor(opts: {
     });
   };
 
-  liveMonitors.set(threadId, { cwd, lastActivityAt: opts.lastActivityAt });
+  liveMonitors.set(threadId, { cwd, kind, lastActivityAt: opts.lastActivityAt });
   timeouts = [setTimeout(runScan, 3000), setTimeout(runScan, 8000)];
   timer = setInterval(runScan, SESSION_SCAN_INTERVAL_MS);
 

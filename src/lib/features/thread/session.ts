@@ -42,7 +42,11 @@ const detectors: Partial<Record<NonNullable<IconKey>, SessionDetector>> = {
   hermes: makeDetector("hermes", "hermes"),
 };
 
-function resolveKey(thread: Thread): IconKey {
+/**
+ * Which agent a thread's sessions belong to. The stored iconKey when there is
+ * one, the command otherwise — a thread can predate the key being recorded.
+ */
+export function resolveKey(thread: Thread): IconKey {
   return thread.iconKey ?? detectIconKey(thread.cmd, thread.label);
 }
 
