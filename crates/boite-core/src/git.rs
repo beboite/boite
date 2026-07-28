@@ -1434,10 +1434,10 @@ pub fn add_detached_worktree_blocking(repo: &str, path: &str) -> Result<String, 
     let mut cmd = git(r);
     cmd.args(["worktree", "add", "--detach", path]);
     run(cmd)?;
-    // Borrowed, not rebuilt. Without this a worktree costs a full install and
-    // a full recompile before anything can run in it, which is the difference
-    // between an isolated thread and an unusable one.
-    link_shared_artifacts(r, Path::new(path));
+    // Taken from the main checkout, not rebuilt. Without this a worktree costs
+    // a full install and a full recompile before anything can run in it, which
+    // is the difference between an isolated thread and an unusable one.
+    provision_shared_artifacts(r, Path::new(path));
     Ok(path.to_string())
 }
 
@@ -1490,8 +1490,8 @@ pub fn claim_worktree_branch_blocking(worktree: &str, name: &str) -> Result<(), 
     Ok(())
 }
 
-/// Directories a worktree borrows from the main checkout instead of building
-/// its own copy of.
+/// Directories a worktree takes from the main checkout instead of building its
+/// own copy of from scratch.
 ///
 /// These are the ones that make a worktree expensive rather than cheap: a
 /// second `node_modules` and a second `target` turn a few megabytes of source
@@ -1500,13 +1500,32 @@ pub fn claim_worktree_branch_blocking(worktree: &str, name: &str) -> Result<(), 
 /// fetched dependencies — reproducible, never the user's own files.
 pub const SHARED_ARTIFACTS: [&str; 4] = ["node_modules", "target", ".venv", "vendor"];
 
-/// Points the worktree's heavy directories at the main checkout's. Returns the
-/// names actually linked.
+/// The ones a build writes into on every single run, as opposed to only when
+/// the user installs something.
 ///
-/// Best-effort by design: a link that cannot be made costs disk and time, not
+/// The distinction decides what happens when the filesystem cannot clone. A
+/// link to `node_modules` is wrong only if someone runs an install; a link to
+/// `target` is wrong on the next `cargo build`, because two worktrees of the
+/// same package resolve to one artifact slot. Measured, not assumed: build A,
+/// edit and build B, then build A again — cargo reports A fresh in 0.00s and
+/// `target/debug/<name>` is B's binary. The agent then tests the other thread's
+/// code and is told it passed.
+const BUILD_OUTPUT: [&str; 1] = ["target"];
+
+/// Gives the worktree its own copy of the main checkout's heavy directories,
+/// cloned rather than duplicated where the filesystem can. Returns the names
+/// actually provisioned.
+///
+/// Copy-on-write is what makes this affordable: on APFS this repository's 32 GB
+/// `target` clones in 13 seconds and costs no disk at all until one of the two
+/// copies is written to. That is the whole reason the directories can be
+/// separate now — the previous symlink was not chosen for speed over
+/// correctness, it was chosen because a real copy of `target` was unthinkable.
+///
+/// Best-effort by design: what cannot be provisioned costs disk and time, not
 /// correctness, so a failure is skipped rather than raised.
-pub fn link_shared_artifacts(repo: &Path, worktree: &Path) -> Vec<String> {
-    let mut linked = Vec::new();
+pub fn provision_shared_artifacts(repo: &Path, worktree: &Path) -> Vec<String> {
+    let mut done = Vec::new();
     for name in SHARED_ARTIFACTS {
         let src = repo.join(name);
         if !src.is_dir() {
@@ -1514,15 +1533,73 @@ pub fn link_shared_artifacts(repo: &Path, worktree: &Path) -> Vec<String> {
         }
         let dst = worktree.join(name);
         // A real directory of that name in the worktree is tracked content, and
-        // replacing it would delete work. Only an absent path is linkable.
+        // replacing it would delete work. Only an absent path is ours to fill.
         if fs::symlink_metadata(&dst).is_ok() {
             continue;
         }
+        if clone_dir(&src, &dst).is_ok() {
+            done.push(name.to_string());
+            continue;
+        }
+        // No copy-on-write here: ext4, a network volume, Windows outside a dev
+        // drive. Sharing is still the right trade for the install-time ones —
+        // it is what makes a JavaScript worktree usable at all — but never for
+        // build output, which would hand this thread another's binaries. Cargo
+        // creates its own `target` on first build; it is slow, not wrong.
+        if BUILD_OUTPUT.contains(&name) {
+            continue;
+        }
         if link_dir(&src, &dst).is_ok() {
-            linked.push(name.to_string());
+            done.push(name.to_string());
         }
     }
-    linked
+    done
+}
+
+/// Clones a directory tree copy-on-write, or fails without writing anything.
+///
+/// Shelling out to `cp` rather than calling `clonefile`/`FICLONE` directly: the
+/// flag is one word per platform, and `cp` already walks the tree, recreates
+/// the directory structure and falls back per-file, which is most of what a
+/// hand-rolled recursive clone would have to reimplement.
+#[cfg(target_os = "macos")]
+fn clone_dir(src: &Path, dst: &Path) -> std::io::Result<()> {
+    // -c is clonefile(2), and it is refused rather than emulated when the
+    // volume is not APFS — which is what makes this a real capability probe.
+    run_copy(Command::new("/bin/cp").arg("-c").arg("-R").arg(src).arg(dst), dst)
+}
+
+#[cfg(target_os = "linux")]
+fn clone_dir(src: &Path, dst: &Path) -> std::io::Result<()> {
+    // `always`, never `auto`: `auto` silently degrades to a full byte copy on
+    // ext4, which for a 32 GB target is exactly the outcome this must not have.
+    let mut cmd = Command::new("cp");
+    cmd.arg("--reflink=always").arg("-r").arg(src).arg(dst);
+    run_copy(&mut cmd, dst)
+}
+
+/// Windows has no block cloning outside a ReFS dev drive, and no command-line
+/// verb for it. The install-time directories fall through to a junction as
+/// before; `target` is left for the build to create.
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn clone_dir(_src: &Path, _dst: &Path) -> std::io::Result<()> {
+    Err(std::io::Error::other("no copy-on-write on this platform"))
+}
+
+/// Runs a clone command, and removes the partial tree if it failed. Without
+/// this a refused clone can still leave a directory behind, and every later
+/// caller reads that as "already provisioned" and skips the fallback.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn run_copy(cmd: &mut Command, dst: &Path) -> std::io::Result<()> {
+    let status = cmd
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()?;
+    if status.success() {
+        return Ok(());
+    }
+    let _ = fs::remove_dir_all(dst);
+    Err(std::io::Error::other("clone failed"))
 }
 
 #[cfg(windows)]
@@ -1558,6 +1635,11 @@ fn link_dir(src: &Path, dst: &Path) -> std::io::Result<()> {
 /// tree, and on Windows it descends into a junction and empties the *target* —
 /// which is the main checkout's `node_modules`. That is not theoretical: it is
 /// how one was destroyed during this feature's own development.
+///
+/// A cloned directory is deliberately not touched here: it belongs to this
+/// worktree alone, nothing outside is reachable through it, and git deleting it
+/// with the rest of the tree is the correct outcome. Copy-on-write means that
+/// frees only the blocks the two copies stopped sharing.
 pub fn unlink_shared_artifacts(worktree: &Path) {
     for name in SHARED_ARTIFACTS {
         let dst = worktree.join(name);
@@ -1914,6 +1996,38 @@ mod worktree_tests {
         assert!(
             deps.join("some-package/index.js").is_file(),
             "the main checkout's node_modules was emptied through the link"
+        );
+    }
+
+    /// Build output must never be shared, whatever the filesystem can do. On a
+    /// volume with copy-on-write the worktree gets its own `target`; on one
+    /// without, it gets none and the build makes it. What it must never get is
+    /// a link, because two worktrees of one package share an artifact slot and
+    /// the second build silently replaces the first's binary.
+    #[test]
+    fn a_worktree_never_shares_build_output_with_the_main_checkout() {
+        let f = Fixture::new();
+        let out = f.repo.join("target/debug");
+        fs::create_dir_all(&out).unwrap();
+        fs::write(out.join("app"), "main checkout\n").unwrap();
+
+        let w = scratch("build-output");
+        add_detached_worktree_blocking(f.path(), w.to_str().unwrap()).unwrap();
+
+        let theirs = w.join("target");
+        if let Ok(meta) = fs::symlink_metadata(&theirs) {
+            assert!(!meta.file_type().is_symlink(), "target was shared by link");
+            // A clone starts identical and diverges. Writing to it is the whole
+            // point, so the main checkout has to be unaffected by that write.
+            fs::write(theirs.join("debug/app"), "worktree\n").unwrap();
+            assert_eq!(fs::read_to_string(out.join("app")).unwrap(), "main checkout\n");
+        }
+
+        let _ = remove_worktree_blocking(f.path(), w.to_str().unwrap(), true);
+        assert_eq!(
+            fs::read_to_string(out.join("app")).unwrap(),
+            "main checkout\n",
+            "removing the worktree reached into the main checkout's target"
         );
     }
 
@@ -2282,3 +2396,4 @@ mod branch_tests {
         assert_eq!(symbolic_branch(&repo.path).as_deref(), Some("master"));
     }
 }
+
