@@ -261,9 +261,10 @@ pub async fn available_shells() -> Vec<ShellOption> {
         .unwrap_or_default()
 }
 
-async fn run_lookup<F>(f: F) -> Option<String>
+async fn run_lookup<F, T>(f: F) -> Option<T>
 where
-    F: FnOnce() -> Option<String> + Send + 'static,
+    F: FnOnce() -> Option<T> + Send + 'static,
+    T: Send + 'static,
 {
     tauri::async_runtime::spawn_blocking(f).await.ok().flatten()
 }
@@ -615,7 +616,7 @@ pub async fn find_opencode_session(
     cwd: String,
     after_unix_ms: i64,
     exclude_ids: Option<Vec<String>>,
-) -> Option<String> {
+) -> Option<session::SessionHit> {
     let exclude = session::build_exclude(exclude_ids);
     run_lookup(move || session::find_opencode_session_blocking(cwd, after_unix_ms, &exclude)).await
 }
@@ -625,7 +626,7 @@ pub async fn find_cursor_session(
     cwd: String,
     after_unix_ms: i64,
     exclude_ids: Option<Vec<String>>,
-) -> Option<String> {
+) -> Option<session::SessionHit> {
     let exclude = session::build_exclude(exclude_ids);
     run_lookup(move || session::find_cursor_session_blocking(cwd, after_unix_ms, &exclude)).await
 }
@@ -635,7 +636,7 @@ pub async fn find_antigravity_session(
     cwd: String,
     after_unix_ms: i64,
     exclude_ids: Option<Vec<String>>,
-) -> Option<String> {
+) -> Option<session::SessionHit> {
     let exclude = session::build_exclude(exclude_ids);
     run_lookup(move || session::find_antigravity_session_blocking(cwd, after_unix_ms, &exclude))
         .await
@@ -646,7 +647,7 @@ pub async fn find_copilot_session(
     cwd: String,
     after_unix_ms: i64,
     exclude_ids: Option<Vec<String>>,
-) -> Option<String> {
+) -> Option<session::SessionHit> {
     let exclude = session::build_exclude(exclude_ids);
     run_lookup(move || session::find_copilot_session_blocking(cwd, after_unix_ms, &exclude)).await
 }
@@ -656,7 +657,7 @@ pub async fn find_grok_session(
     cwd: String,
     after_unix_ms: i64,
     exclude_ids: Option<Vec<String>>,
-) -> Option<String> {
+) -> Option<session::SessionHit> {
     let exclude = session::build_exclude(exclude_ids);
     run_lookup(move || session::find_grok_session_blocking(cwd, after_unix_ms, &exclude)).await
 }
@@ -666,7 +667,7 @@ pub async fn find_hermes_session(
     cwd: String,
     after_unix_ms: i64,
     exclude_ids: Option<Vec<String>>,
-) -> Option<String> {
+) -> Option<session::SessionHit> {
     let exclude = session::build_exclude(exclude_ids);
     run_lookup(move || session::find_hermes_session_blocking(cwd, after_unix_ms, &exclude)).await
 }

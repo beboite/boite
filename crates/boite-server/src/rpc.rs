@@ -455,22 +455,22 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
                         .map(|h| json!({ "id": h.id, "modifiedMs": h.modified_ms, "title": h.title }))
                         .unwrap_or(Value::Null),
                     "opencode" => {
-                        id_or_null(session::find_opencode_session_blocking(cwd, after, &exclude))
+                        hit_or_null(session::find_opencode_session_blocking(cwd, after, &exclude))
                     }
                     "cursor" => {
-                        id_or_null(session::find_cursor_session_blocking(cwd, after, &exclude))
+                        hit_or_null(session::find_cursor_session_blocking(cwd, after, &exclude))
                     }
-                    "antigravity" => id_or_null(session::find_antigravity_session_blocking(
+                    "antigravity" => hit_or_null(session::find_antigravity_session_blocking(
                         cwd, after, &exclude,
                     )),
                     "copilot" => {
-                        id_or_null(session::find_copilot_session_blocking(cwd, after, &exclude))
+                        hit_or_null(session::find_copilot_session_blocking(cwd, after, &exclude))
                     }
                     "grok" => {
-                        id_or_null(session::find_grok_session_blocking(cwd, after, &exclude))
+                        hit_or_null(session::find_grok_session_blocking(cwd, after, &exclude))
                     }
                     "hermes" => {
-                        id_or_null(session::find_hermes_session_blocking(cwd, after, &exclude))
+                        hit_or_null(session::find_hermes_session_blocking(cwd, after, &exclude))
                     }
                     _ => Value::Null,
                 }
@@ -627,8 +627,13 @@ async fn dispatch_worktree(
     }
 }
 
-fn id_or_null(opt: Option<String>) -> Value {
-    opt.map(Value::String).unwrap_or(Value::Null)
+/// A hit from one of the detectors that answer with an id and an activity
+/// timestamp. The timestamp is omitted rather than zeroed when the store had
+/// none to give: the client skips attribution on a missing one, and would have
+/// refused the session outright on a zero.
+fn hit_or_null(opt: Option<session::SessionHit>) -> Value {
+    opt.map(|h| json!({ "id": h.id, "modifiedMs": h.modified_ms }))
+        .unwrap_or(Value::Null)
 }
 
 fn valid_hex_color(s: &str) -> bool {
