@@ -1558,24 +1558,53 @@ pub fn provision_shared_artifacts(repo: &Path, worktree: &Path) -> Vec<String> {
 
 /// Clones a directory tree copy-on-write, or fails without writing anything.
 ///
-/// Shelling out to `cp` rather than calling `clonefile`/`FICLONE` directly: the
-/// flag is one word per platform, and `cp` already walks the tree, recreates
-/// the directory structure and falls back per-file, which is most of what a
-/// hand-rolled recursive clone would have to reimplement.
+/// Refusing is the contract, and it is the hard part. A clone that quietly
+/// degrades to a byte copy is worse than no clone at all: it writes a real
+/// 32 GB where the caller budgeted nothing, and it reports success, so nothing
+/// downstream ever learns the volume could not do this.
 #[cfg(target_os = "macos")]
 fn clone_dir(src: &Path, dst: &Path) -> std::io::Result<()> {
-    // -c is clonefile(2), and it is refused rather than emulated when the
-    // volume is not APFS — which is what makes this a real capability probe.
-    run_copy(Command::new("/bin/cp").arg("-c").arg("-R").arg(src).arg(dst), dst)
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+
+    let cstr = |p: &Path| {
+        CString::new(p.as_os_str().as_bytes())
+            .map_err(|_| std::io::Error::other("path contains a nul byte"))
+    };
+    let (s, d) = (cstr(src)?, cstr(dst)?);
+    // The syscall, not `cp -c`. `cp -c` was the obvious choice and it is the
+    // wrong one: measured, it exits 0 and copies every byte both when the two
+    // paths are on different volumes and when the volume is not APFS, so it
+    // can never be used to ask whether cloning is possible. `clonefile` clones
+    // a directory hierarchy in one call and reports EXDEV or ENOTSUP instead
+    // of pretending.
+    if unsafe { libc::clonefile(s.as_ptr(), d.as_ptr(), 0) } == 0 {
+        return Ok(());
+    }
+    let err = std::io::Error::last_os_error();
+    let _ = fs::remove_dir_all(dst);
+    Err(err)
 }
 
 #[cfg(target_os = "linux")]
 fn clone_dir(src: &Path, dst: &Path) -> std::io::Result<()> {
-    // `always`, never `auto`: `auto` silently degrades to a full byte copy on
-    // ext4, which for a 32 GB target is exactly the outcome this must not have.
+    // `always`, never `auto`: `auto` is the same trap as `cp -c`, degrading to
+    // a full byte copy on ext4 while reporting success. `always` is documented
+    // to fail instead, and that includes the cross-filesystem case, so this
+    // stays a real capability probe.
     let mut cmd = Command::new("cp");
     cmd.arg("--reflink=always").arg("-r").arg(src).arg(dst);
-    run_copy(&mut cmd, dst)
+    let status = cmd
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()?;
+    if status.success() {
+        return Ok(());
+    }
+    // A refusal partway through still leaves a tree behind, and every later
+    // caller would read that as "already provisioned" and skip the fallback.
+    let _ = fs::remove_dir_all(dst);
+    Err(std::io::Error::other("clone failed"))
 }
 
 /// Windows has no block cloning outside a ReFS dev drive, and no command-line
@@ -1584,22 +1613,6 @@ fn clone_dir(src: &Path, dst: &Path) -> std::io::Result<()> {
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
 fn clone_dir(_src: &Path, _dst: &Path) -> std::io::Result<()> {
     Err(std::io::Error::other("no copy-on-write on this platform"))
-}
-
-/// Runs a clone command, and removes the partial tree if it failed. Without
-/// this a refused clone can still leave a directory behind, and every later
-/// caller reads that as "already provisioned" and skips the fallback.
-#[cfg(any(target_os = "macos", target_os = "linux"))]
-fn run_copy(cmd: &mut Command, dst: &Path) -> std::io::Result<()> {
-    let status = cmd
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()?;
-    if status.success() {
-        return Ok(());
-    }
-    let _ = fs::remove_dir_all(dst);
-    Err(std::io::Error::other("clone failed"))
 }
 
 #[cfg(windows)]
@@ -2396,4 +2409,5 @@ mod branch_tests {
         assert_eq!(symbolic_branch(&repo.path).as_deref(), Some("master"));
     }
 }
+
 
