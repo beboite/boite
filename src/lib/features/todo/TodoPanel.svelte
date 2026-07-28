@@ -550,18 +550,6 @@
                 >
                   {t("todo.agentActive")}
                 </span>
-              {:else if agent.reg === "other"}
-                <!-- Registered, but against another project's credentials file.
-                     The entry is one per agent and the file one per project, so
-                     it would keep writing into the other project's list. -->
-                <button
-                  type="button"
-                  class="shrink-0 rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
-                  onclick={() => copySetup(agent)}
-                  title={t("todo.agentOtherProject")}
-                >
-                  {t("todo.agentRepoint")}
-                </button>
               {:else if agent.cli}
                 <button
                   type="button"

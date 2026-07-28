@@ -138,12 +138,14 @@ export async function agentCredentialsPath(projectId: string): Promise<string | 
 }
 
 /**
- * `"this"` — the agent already points at this project's list. `"other"` — it is
- * registered against another project: the entry is one per agent while the
- * credentials file is one per project, so a registration made from project A
- * keeps writing into A's list from anywhere. `"none"` — nothing yet.
+ * `"this"` — the agent can reach this project's list. `"none"` — nothing yet.
+ *
+ * Where the registration was made no longer matters: the shim sends the
+ * directory it runs in and the endpoint answers for whichever project owns it,
+ * so one entry serves them all. The old third state, for an entry pointing at
+ * another project's credentials file, described a limitation that is gone.
  */
-export type McpRegistration = "none" | "other" | "this";
+export type McpRegistration = "none" | "this";
 
 export async function agentRegistration(
   key: IconKey,

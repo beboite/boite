@@ -111,6 +111,19 @@ fn authorize(inner: &Inner, headers: &HeaderMap) -> Result<String, StatusCode> {
         let conn = inner.conn.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
         return project_of_thread(&conn, &thread_id);
     }
+    // Where the agent is running, which beats the project its file names: the
+    // entry is one per agent while the file is one per project, so a
+    // registration made from project A used to keep answering for A everywhere.
+    // The directory is the one thing that moves with the user.
+    if let Some(cwd) = header("x-boite-cwd") {
+        let conn = inner.conn.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        if let Some(id) = project_of_cwd(&conn, &cwd) {
+            return Ok(id);
+        }
+        // Fall through rather than refuse: a directory no project claims is not
+        // an error when the file still names one, and answering for that
+        // project is what this did before the header existed.
+    }
     let project_id = header("x-boite-project").ok_or(StatusCode::BAD_REQUEST)?;
     // Existence is checked rather than trusted: the id arrives from a file the
     // caller could have edited, and an unknown project must not read as an empty
@@ -529,6 +542,142 @@ fn project_of_thread(conn: &Connection, thread_id: &str) -> Result<String, Statu
         |r| r.get::<_, String>(0),
     )
     .map_err(|_| StatusCode::NOT_FOUND)
+}
+
+/// Undoes the shim's percent-encoding of the cwd header.
+///
+/// Lenient by design: a stray `%` that starts no valid pair is kept as itself
+/// rather than dropped, since the worst case here is a path that matches no
+/// project, and refusing to decode would turn that into no answer at all.
+fn decode_header_path(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            let hex = |b: u8| match b {
+                b'0'..=b'9' => Some(b - b'0'),
+                b'a'..=b'f' => Some(b - b'a' + 10),
+                b'A'..=b'F' => Some(b - b'A' + 10),
+                _ => None,
+            };
+            if let (Some(h), Some(l)) = (hex(bytes[i + 1]), hex(bytes[i + 2])) {
+                out.push(h * 16 + l);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// Normalized the same way both sides of a path comparison have to be: the
+/// separator agents report varies on Windows, a trailing slash is noise, and
+/// the two file systems this ships on are case-insensitive.
+fn normalize_path(p: &str) -> String {
+    p.replace('\\', "/")
+        .trim_end_matches('/')
+        .to_lowercase()
+}
+
+/// The project a directory belongs to, if any.
+///
+/// The deepest match wins, so a project nested inside another answers for its
+/// own subtree rather than losing it to the parent. A prefix only counts on a
+/// separator boundary — `/a/boite` must not swallow `/a/boite-mcp`.
+fn project_of_cwd(conn: &Connection, cwd: &str) -> Option<String> {
+    let target = normalize_path(&decode_header_path(cwd));
+    if target.is_empty() {
+        return None;
+    }
+    let mut stmt = conn.prepare("SELECT id, cwd FROM projects").ok()?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?))
+        })
+        .ok()?;
+
+    let mut best: Option<(String, usize)> = None;
+    for (id, project_cwd) in rows.flatten() {
+        let Some(root) = project_cwd.map(|c| normalize_path(&c)) else {
+            continue;
+        };
+        if root.is_empty() {
+            continue;
+        }
+        let inside = target == root
+            || (target.starts_with(&root) && target.as_bytes().get(root.len()) == Some(&b'/'));
+        if inside && best.as_ref().is_none_or(|(_, len)| root.len() > *len) {
+            best = Some((id, root.len()));
+        }
+    }
+    best.map(|(id, _)| id)
+}
+
+#[cfg(test)]
+mod cwd_resolution_tests {
+    use super::{decode_header_path, project_of_cwd};
+    use rusqlite::Connection;
+
+    fn projects(rows: &[(&str, &str)]) -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute("CREATE TABLE projects (id TEXT, cwd TEXT)", [])
+            .unwrap();
+        for (id, cwd) in rows {
+            conn.execute("INSERT INTO projects VALUES (?1, ?2)", [id, cwd])
+                .unwrap();
+        }
+        conn
+    }
+
+    #[test]
+    fn the_directory_itself_and_anything_under_it() {
+        let conn = projects(&[("p", "/w/boite")]);
+        assert_eq!(project_of_cwd(&conn, "/w/boite").as_deref(), Some("p"));
+        assert_eq!(project_of_cwd(&conn, "/w/boite/src").as_deref(), Some("p"));
+        assert_eq!(project_of_cwd(&conn, "/w").as_deref(), None);
+        assert_eq!(project_of_cwd(&conn, "").as_deref(), None);
+    }
+
+    /// A prefix is not a parent. `/w/boite` must not answer for `/w/boite-mcp`,
+    /// which is a sibling that merely starts the same way.
+    #[test]
+    fn a_prefix_only_counts_on_a_separator() {
+        let conn = projects(&[("p", "/w/boite")]);
+        assert_eq!(project_of_cwd(&conn, "/w/boite-mcp").as_deref(), None);
+    }
+
+    /// A project inside another answers for its own subtree: the deepest root
+    /// wins rather than the first row read.
+    #[test]
+    fn the_deepest_project_wins() {
+        let conn = projects(&[("outer", "/w"), ("inner", "/w/apps/api")]);
+        assert_eq!(project_of_cwd(&conn, "/w/apps/api/src").as_deref(), Some("inner"));
+        assert_eq!(project_of_cwd(&conn, "/w/apps/web").as_deref(), Some("outer"));
+    }
+
+    /// The header is percent-encoded, since a header value is visible ASCII and
+    /// a directory is not. Windows separators and case follow the same
+    /// normalisation both sides use.
+    #[test]
+    fn encoded_accents_and_windows_paths_resolve() {
+        let conn = projects(&[("p", "/w/réf onte"), ("q", r"C:\Users\x\Boite")]);
+        assert_eq!(
+            project_of_cwd(&conn, "/w/r%C3%A9f%20onte/src").as_deref(),
+            Some("p")
+        );
+        assert_eq!(project_of_cwd(&conn, r"c:\users\x\boite").as_deref(), Some("q"));
+    }
+
+    /// A `%` that starts no valid pair is kept rather than dropped: the worst
+    /// case is a path that matches nothing, and losing bytes would be worse.
+    #[test]
+    fn a_stray_percent_survives_decoding() {
+        assert_eq!(decode_header_path("/w/100%/x"), "/w/100%/x");
+        assert_eq!(decode_header_path("/w/a%zz"), "/w/a%zz");
+    }
 }
 
 #[cfg(test)]
