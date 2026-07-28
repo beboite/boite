@@ -219,9 +219,6 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "todo.agentSetup": "Copier la config",
   "todo.agentSetupCopied": "Config copiée — colle-la dans {agent}",
   "todo.agentSetupCopiedFile": "Config copiée — colle-la dans {file}",
-  "todo.agentRepoint": "Pointer sur ce projet",
-  "todo.agentOtherProject":
-    "Enregistré, mais sur la liste d'un autre projet — une entrée par agent, une liste par projet",
 
   "notification.readyForInput": "Prêt pour saisie",
 

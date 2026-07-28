@@ -404,12 +404,13 @@ fn agent_config_files(key: &str, home: &Path, cwd: Option<&Path>) -> Vec<PathBuf
     out
 }
 
-/// Whether an agent already points at this project's list.
+/// Whether an agent can already reach this project's list.
 ///
-/// `"this"` — registered, for this project. `"other"` — registered, but against
-/// another project's credentials file: the entry is global while the file is per
-/// project, so a registration made from project A keeps writing into A's list
-/// from anywhere. `"none"` — nothing.
+/// `"this"` — a boite server is registered. `"none"` — nothing. There is no
+/// third state any more: the shim sends the directory it runs in and the
+/// endpoint answers for the project that owns it, so an entry made from any
+/// project serves every project. What the file names is now only the fallback
+/// for a directory no project claims.
 ///
 /// Matched by searching for the path rather than by parsing: the six formats
 /// here are JSON, JSONC, TOML and YAML, and the question asked — does this file
@@ -444,18 +445,21 @@ fn registration_in(texts: &[String], creds: &str) -> &'static str {
     let escaped = serde_json::to_string(creds).unwrap_or_default();
     let escaped = escaped.trim_matches('"');
 
-    let mut seen_shim = false;
     for text in texts {
+        // The credentials path is still worth matching first: it is the one
+        // form that proves the entry is Boite's even if the binary was renamed
+        // or wrapped.
         if text.contains(creds) || (!escaped.is_empty() && text.contains(escaped)) {
             return "this";
         }
         // Matched on the binary, not on the server name: an entry the user
-        // called something else still counts as registered.
+        // called something else still counts as registered. Which project's
+        // file it names no longer decides anything — the directory does.
         if text.contains("boite-mcp") {
-            seen_shim = true;
+            return "this";
         }
     }
-    if seen_shim { "other" } else { "none" }
+    "none"
 }
 
 #[cfg(test)]
@@ -479,12 +483,14 @@ mod registration_tests {
         assert_eq!(registration_in(&[text], CREDS), "this");
     }
 
-    /// The whole reason the state exists: one entry per agent, one credentials
-    /// file per project, so a registration made elsewhere writes elsewhere.
+    /// An entry made from another project used to be a third state, because the
+    /// file it named was the only thing that decided which list was written.
+    /// The shim now sends its directory and the endpoint resolves the project
+    /// from that, so the same entry reaches this project too.
     #[test]
-    fn another_projects_credentials_are_not_this_one() {
+    fn an_entry_made_from_another_project_still_reaches_this_one() {
         let text = r#"{"command":"/x/boite-mcp","args":["/Users/x/.../mcp/other.json"]}"#;
-        assert_eq!(registration_in(&[text.to_string()], CREDS), "other");
+        assert_eq!(registration_in(&[text.to_string()], CREDS), "this");
     }
 
     /// A Windows path is stored with escaped separators in a JSON config; the
@@ -503,8 +509,8 @@ mod registration_tests {
         assert_eq!(registration_in(&[toml], CREDS), "this");
     }
 
-    /// One agent, several candidate files: the answer is the best of them, not
-    /// the first one read.
+    /// One agent, several candidate files: any of them naming the shim answers
+    /// for the agent, whichever one it is found in.
     #[test]
     fn a_later_file_can_still_be_this_project() {
         let stale = r#"{"args":["/Users/x/.../mcp/other.json"],"command":"/x/boite-mcp"}"#;

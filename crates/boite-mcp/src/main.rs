@@ -66,6 +66,25 @@ struct Credentials {
     project_id: String,
 }
 
+/// Percent-encodes a path so it survives as an HTTP header value.
+///
+/// A header value is visible ASCII, and a directory is not: an accented path
+/// would fail the whole request rather than just the lookup it feeds. Encoding
+/// beats skipping the header on those paths, which would have left exactly the
+/// users with non-ASCII directories on the old per-project behaviour.
+fn encode_header_path(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.as_bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' | b':' => {
+                out.push(*b as char)
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
 impl Host {
     /// Environment first, then the credentials file named on the command line.
     ///
@@ -117,12 +136,25 @@ impl Host {
 
     fn send(&self, method: &str, path: &str, body: Option<Value>) -> Result<Value, String> {
         let auth = format!("Bearer {}", self.token);
+        // Only ever alongside a project: a thread already names one exactly.
+        // Bound before the header list so it outlives the borrows in it.
+        let cwd = self.project_id.as_ref().and_then(|_| {
+            std::env::current_dir()
+                .ok()
+                .and_then(|p| p.to_str().map(encode_header_path))
+        });
         let mut headers: Vec<(&str, &str)> = vec![("Authorization", &auth)];
         if let Some(thread) = &self.thread_id {
             headers.push(("x-boite-thread", thread));
         }
         if let Some(project) = &self.project_id {
             headers.push(("x-boite-project", project));
+        }
+        // What lets one registration serve every project: the file names the
+        // project it was made from, this names the one the agent is actually
+        // in. The endpoint decides whether any project claims it.
+        if let Some(cwd) = &cwd {
+            headers.push(("x-boite-cwd", cwd));
         }
         if let Some(agent) = &self.agent {
             headers.push(("x-boite-agent", agent));
