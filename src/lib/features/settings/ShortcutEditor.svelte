@@ -79,6 +79,10 @@
   // of its way. Committing then swaps the DOM into the order already on screen,
   // with the transforms dropped in the same update — so there is nothing to
   // animate back and no flash.
+  //
+  // Outside a drag the rows carry no transform at all: a permanent
+  // translateY(0) makes every row its own stacking context, which traps the
+  // color popup below the rows that follow it.
   type DragState = {
     id: string;
     pointerId: number;
@@ -257,8 +261,8 @@
       data-row={shortcut.id}
       role="listitem"
       onpointerdown={(e) => rowPointerDown(shortcut.id, i, e)}
-      style:transform="translateY({rowOffset(i)}px)"
-      style:z-index={isDragged ? 10 : undefined}
+      style:transform={drag ? `translateY(${rowOffset(i)}px)` : undefined}
+      style:z-index={isDragged ? 10 : colorPickerFor === shortcut.id ? 20 : undefined}
       class="relative grid grid-cols-[16px_24px_120px_1fr_28px] touch-none items-center gap-2 border-b border-border/60 px-3 py-2 last:border-b-0 {drag?.active
         ? 'select-none'
         : ''} {drag && drag.fromIndex !== i
