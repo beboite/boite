@@ -299,6 +299,11 @@ from source, use `target/release/boite-mcp` after `bun run build:sidecar`.
 No `env` block: the shim inherits the terminal's. Launched anywhere else it
 exits rather than starting unauthenticated.
 
+It is spawned once per agent terminal, so it carries nothing it does not need:
+`serde_json` and a hundred lines of HTTP/1.1 over a loopback socket, 380 KB
+altogether. No async runtime, and no proxy handling to send `127.0.0.1` through
+a `ALL_PROXY` that happens to be set.
+
 Six tools: `todo_list`, `todo_add`, `todo_claim`, and `worktree_status`,
 `worktree_branch`, `worktree_reserve` for the checkout the terminal runs in.
 Claiming moves an item to *awaiting confirmation*, with a one-line summary; only
