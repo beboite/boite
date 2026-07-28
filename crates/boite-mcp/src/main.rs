@@ -8,12 +8,35 @@
 //!
 //! The same binary serves the desktop app and `boite-server`; only the URL in
 //! the environment differs, so a remote workspace needs no separate shim.
+//!
+//! Everything it says goes out in TOON (`toon.rs`) rather than JSON. The tool
+//! list is paid for in every session that connects, and each answer is paid for
+//! again in the context window that reads it, so both are written to be short:
+//! one line per tool, one row per todo, and ids shortened to the prefix that
+//! still distinguishes them.
 
+mod toon;
+
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::io::{BufRead, Write};
+use std::time::Duration;
 
 use serde_json::{json, Value};
 
-const PROTOCOL_VERSION: &str = "2024-11-05";
+use toon::{clip, Toon};
+
+/// Newest version this speaks. A client asking for an older one gets that one
+/// back — the shape of these five tools has not changed across any of them, and
+/// answering with a version the client did not offer ends the handshake.
+const LATEST_PROTOCOL: &str = "2025-06-18";
+const SUPPORTED_PROTOCOLS: [&str; 3] = ["2025-06-18", "2025-03-26", "2024-11-05"];
+
+/// A todo's text is one line by convention and a pasted paragraph in practice.
+const MAX_CELL: usize = 200;
+/// Branch lists grow without bound in a long-lived repository; the agent needs
+/// the naming convention and the few most recent, not all of them.
+const MAX_BRANCHES: usize = 40;
 
 struct Host {
     url: String,
@@ -27,6 +50,10 @@ struct Host {
     /// Which agent this is, when the registration said so. Only ever used to
     /// put the right badge on a claim; it grants nothing.
     agent: Option<String>,
+    /// Short id to full id, filled by every listing. The process lives as long
+    /// as the agent does, so a claim can quote the eight characters it was
+    /// shown instead of a full uuid. Single-threaded loop, hence `RefCell`.
+    ids: RefCell<HashMap<String, String>>,
     http: reqwest::blocking::Client,
 }
 
@@ -47,7 +74,18 @@ impl Host {
     /// never arrive; it names a project instead, which is the unit the list
     /// belongs to anyway.
     fn resolve() -> Result<Host, String> {
-        let http = reqwest::blocking::Client::new();
+        // Loopback only, so no proxy applies: a machine with `ALL_PROXY` set
+        // for scraping would otherwise route this through it and time out on an
+        // address the proxy cannot reach. The timeouts matter for the same
+        // reason a shim has none of its own state — an agent blocked on a dead
+        // endpoint has no way to notice, and reqwest's default is to wait
+        // forever.
+        let http = reqwest::blocking::Client::builder()
+            .no_proxy()
+            .connect_timeout(Duration::from_secs(2))
+            .timeout(Duration::from_secs(20))
+            .build()
+            .map_err(|e| format!("cannot build http client: {e}"))?;
 
         if let (Ok(url), Ok(token), Ok(thread_id)) = (
             std::env::var("BOITE_MCP_URL"),
@@ -62,6 +100,7 @@ impl Host {
                 // The thread names the agent better than any argument could:
                 // Boite launched it and knows what it is.
                 agent: None,
+                ids: RefCell::new(HashMap::new()),
                 http,
             });
         }
@@ -85,6 +124,7 @@ impl Host {
             thread_id: None,
             project_id: Some(creds.project_id),
             agent,
+            ids: RefCell::new(HashMap::new()),
             http,
         })
     }
@@ -127,85 +167,113 @@ impl Host {
         }
         res.json::<Value>().map_err(|e| format!("bad response: {e}"))
     }
+
+    fn remember(&self, short: &str, full: &str) {
+        self.ids
+            .borrow_mut()
+            .insert(short.to_string(), full.to_string());
+    }
+
+    /// The full id behind whatever the agent quoted.
+    ///
+    /// A short id it saw in a listing this process made resolves from memory. A
+    /// short id it saw before a restart does not, so the list is fetched once
+    /// and asked again — one extra round trip on a path that would otherwise
+    /// fail with a refusal the agent cannot act on. Anything else goes through
+    /// untouched: a full uuid out of a task prompt is already the answer.
+    fn full_id(&self, given: &str) -> String {
+        if let Some(full) = self.ids.borrow().get(given) {
+            return full.clone();
+        }
+        if given.len() >= 32 {
+            return given.to_string();
+        }
+        if let Ok(out) = self.send(reqwest::Method::GET, "/v1/todos", None) {
+            index_todos(self, &out);
+        }
+        self.ids
+            .borrow()
+            .get(given)
+            .cloned()
+            .unwrap_or_else(|| given.to_string())
+    }
 }
 
+/// The tool list, and the one place this shim spends tokens unconditionally:
+/// every session that connects reads all of it before doing anything. Each
+/// description says what the tool does and, where two tools are confusable,
+/// which one the other case belongs to. Everything a failed call would explain
+/// on its own is left to the failure.
 fn tools() -> Value {
     json!([
         {
             "name": "todo_list",
-            "description": "List the todo items of the project this terminal belongs to.",
-            "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false }
+            "description": "List this project's todos: short id, state, text, note.",
+            "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false },
+            "annotations": { "title": "Todos", "readOnlyHint": true, "idempotentHint": true, "openWorldHint": false }
         },
         {
             "name": "todo_add",
-            "description": "Add a todo item to this project's list.",
+            "description": "Add one todo to this project's list.",
             "inputSchema": {
                 "type": "object",
                 "properties": { "text": { "type": "string", "description": "One line describing the task." } },
                 "required": ["text"],
                 "additionalProperties": false
-            }
+            },
+            "annotations": { "title": "Add todo", "destructiveHint": false, "openWorldHint": false }
         },
         {
             "name": "todo_claim",
-            "description": "Report a todo item as finished, with a one-line summary of what changed. \
-                            This does NOT tick it off: it marks the item as awaiting the user's \
-                            confirmation, which only they can give.",
+            "description": "Report a todo as done. Does NOT tick it off: it moves to awaiting the \
+                            user's confirmation, which only they can give.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "id": { "type": "string", "description": "The id given in the task prompt." },
-                    "note": { "type": "string", "description": "One line on what was done." },
+                    "id": { "type": "string", "description": "Id from todo_list or from the task prompt; the short form works." },
+                    "note": { "type": "string", "description": "One line on what changed." },
                     "commit": {
                         "type": "string",
-                        "description": "The sha of the commit the work landed in, if it was committed. \
-                                        Reported as-is: Boite resolves it against the repository, so a \
-                                        sha it cannot find is shown as unknown. Leave it out rather \
-                                        than guessing."
+                        "description": "Sha the work landed in, if it was committed. Resolved against \
+                                        the repository, so one that does not exist reads as unknown — \
+                                        omit rather than guess."
                     }
                 },
                 "required": ["id"],
                 "additionalProperties": false
-            }
+            },
+            "annotations": { "title": "Claim todo", "destructiveHint": false, "openWorldHint": false }
         },
         {
             "name": "worktree_status",
-            "description": "Where this terminal is working. Boite gives each agent terminal its own \
-                            detached worktree of the project: a real checkout, isolated from the \
-                            user's and from the other terminals, sharing one history. Detached means \
-                            no branch is attached yet, so nothing you do here shows up in anyone's \
-                            branch list. Reports the directory, the branch if one has been taken, \
-                            whether there are uncommitted changes, and the branches that exist.",
-            "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false }
+            "description": "Where this terminal works: its own detached worktree of the project, \
+                            isolated from the user's checkout and from other terminals, sharing one \
+                            history. Reports path, repo, branch if one was taken, uncommitted \
+                            changes, and the existing branches.",
+            "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false },
+            "annotations": { "title": "Worktree", "readOnlyHint": true, "idempotentHint": true, "openWorldHint": false }
         },
         {
             "name": "worktree_branch",
-            "description": "Name a NEW branch for the work in this terminal. Call it once the work \
-                            turns out to be worth keeping — that is the only moment a branch is \
-                            needed, and until then staying detached costs nothing and leaves no \
-                            trace. Without it the worktree is discarded when the thread closes, \
-                            which is the right outcome for a question you merely answered. Boite \
-                            shows the branch on the thread once it exists. Fails if the name is \
-                            already taken; use worktree_reserve for a branch that exists.",
+            "description": "Create a NEW branch for the work in this terminal. Call it once the work \
+                            is worth keeping: until then detached leaves no trace, and the worktree \
+                            is discarded when the thread closes. Fails if the name is taken — use \
+                            worktree_reserve for a branch that exists.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "name": {
-                        "type": "string",
-                        "description": "Branch name, in whatever convention the repository already \
-                                        uses (look at the existing branches before inventing one)."
-                    }
+                    "name": { "type": "string", "description": "Branch name, in the convention the repository already uses (see worktree_status)." }
                 },
                 "required": ["name"],
                 "additionalProperties": false
-            }
+            },
+            "annotations": { "title": "New branch", "destructiveHint": false, "openWorldHint": false }
         },
         {
             "name": "worktree_reserve",
             "description": "Move this terminal onto a branch that ALREADY exists, to continue it. \
-                            Git allows a branch in only one worktree at a time, so this fails if \
-                            another terminal — or the user's own checkout — currently holds it; the \
-                            error says which. Use worktree_branch to start something new.",
+                            Git allows a branch in one worktree at a time, so this fails if another \
+                            terminal or the user's checkout holds it; the error says which.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -213,16 +281,126 @@ fn tools() -> Value {
                 },
                 "required": ["name"],
                 "additionalProperties": false
-            }
+            },
+            "annotations": { "title": "Take branch", "destructiveHint": false, "openWorldHint": false }
         }
     ])
+}
+
+/// The shortest prefix that still tells these ids apart. Uuids collide at eight
+/// characters about as often as they collide outright, but a list is small and
+/// checking costs nothing, so widen rather than hand out an ambiguous id.
+fn short_width(ids: &[&str]) -> usize {
+    for width in [8usize, 13, 18] {
+        let mut seen: Vec<&str> = ids.iter().map(|id| prefix(id, width)).collect();
+        let total = seen.len();
+        seen.sort_unstable();
+        seen.dedup();
+        if seen.len() == total {
+            return width;
+        }
+    }
+    usize::MAX
+}
+
+fn prefix(id: &str, width: usize) -> &str {
+    id.get(..width).unwrap_or(id)
+}
+
+/// Record every id in a listing under its short form, so a later claim can
+/// quote what it was shown. Returns the width that was handed out.
+fn index_todos(host: &Host, out: &Value) -> usize {
+    let empty = Vec::new();
+    let todos = out
+        .get("todos")
+        .and_then(|v| v.as_array())
+        .unwrap_or(&empty);
+    let ids: Vec<&str> = todos
+        .iter()
+        .filter_map(|t| t.get("id").and_then(|v| v.as_str()))
+        .collect();
+    let width = short_width(&ids);
+    for id in ids {
+        host.remember(prefix(id, width), id);
+    }
+    width
+}
+
+fn format_todos(host: &Host, out: &Value) -> String {
+    let empty = Vec::new();
+    let todos = out
+        .get("todos")
+        .and_then(|v| v.as_array())
+        .unwrap_or(&empty);
+    let width = index_todos(host, out);
+    let str_at = |t: &Value, key: &str| {
+        t.get(key)
+            .and_then(|v| v.as_str())
+            .map(|s| clip(s, MAX_CELL))
+            .unwrap_or_default()
+    };
+    let rows: Vec<Vec<String>> = todos
+        .iter()
+        .map(|t| {
+            let id = t.get("id").and_then(|v| v.as_str()).unwrap_or("?");
+            vec![
+                prefix(id, width).to_string(),
+                str_at(t, "state"),
+                str_at(t, "text"),
+                str_at(t, "note"),
+            ]
+        })
+        .collect();
+
+    let mut w = Toon::new();
+    w.table("todos", &["id", "state", "text", "note"], &rows);
+    if rows.is_empty() {
+        w.hint("nothing on this project's list: todo_add text=<one line>");
+    } else {
+        w.hint("todo_claim id=<id> note=<what changed> — the user confirms, not you");
+    }
+    w.into_string()
+}
+
+fn format_worktree(out: &Value) -> String {
+    let string_at = |key: &str| out.get(key).and_then(|v| v.as_str()).unwrap_or("");
+    let branches: Vec<String> = out
+        .get("branches")
+        .and_then(|v| v.as_array())
+        .map(|b| {
+            b.iter()
+                .filter_map(|v| v.as_str())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+    let detached = out
+        .get("detached")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let dirty = out
+        .get("uncommittedChanges")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let mut w = Toon::new();
+    w.field("path", string_at("path"))
+        .field("repo", string_at("repo"))
+        .field("branch", string_at("branch"))
+        .flag("detached", detached)
+        .flag("uncommitted", dirty)
+        .inline("branches", &branches, MAX_BRANCHES);
+    if detached {
+        w.hint("worktree_branch name=<new> once the work is worth keeping");
+    }
+    w.into_string()
 }
 
 fn call_tool(host: &Host, name: &str, args: &Value) -> Result<String, String> {
     match name {
         "todo_list" => {
             let out = host.send(reqwest::Method::GET, "/v1/todos", None)?;
-            Ok(serde_json::to_string_pretty(&out).unwrap_or_else(|_| out.to_string()))
+            Ok(format_todos(host, &out))
         }
         "todo_add" => {
             let text = args
@@ -231,25 +409,33 @@ fn call_tool(host: &Host, name: &str, args: &Value) -> Result<String, String> {
                 .ok_or("todo_add needs a text")?;
             let out = host.send(reqwest::Method::POST, "/v1/todos", Some(json!({ "text": text })))?;
             let id = out.get("id").and_then(|v| v.as_str()).unwrap_or("?");
-            Ok(format!("Added. id {id}"))
+            let short = prefix(id, 8);
+            host.remember(short, id);
+            let mut w = Toon::new();
+            w.field("added", short);
+            Ok(w.into_string())
         }
         "todo_claim" => {
             let id = args
                 .get("id")
                 .and_then(|v| v.as_str())
                 .ok_or("todo_claim needs an id")?;
+            let full = host.full_id(id);
             let note = args.get("note").and_then(|v| v.as_str());
             let commit = args.get("commit").and_then(|v| v.as_str());
             host.send(
                 reqwest::Method::POST,
                 "/v1/todos/claim",
-                Some(json!({ "id": id, "note": note, "commit": commit })),
+                Some(json!({ "id": full, "note": note, "commit": commit })),
             )?;
-            Ok("Reported. The user still has to confirm it.".into())
+            let mut w = Toon::new();
+            w.field("reported", prefix(&full, 8))
+                .field("state", "awaiting-user");
+            Ok(w.into_string())
         }
         "worktree_status" => {
             let out = host.send(reqwest::Method::GET, "/v1/worktree", None)?;
-            Ok(serde_json::to_string_pretty(&out).unwrap_or_else(|_| out.to_string()))
+            Ok(format_worktree(&out))
         }
         "worktree_branch" => branch_call(host, args, "/v1/worktree/branch", "worktree_branch"),
         "worktree_reserve" => branch_call(host, args, "/v1/worktree/reserve", "worktree_reserve"),
@@ -271,7 +457,9 @@ fn branch_call(host: &Host, args: &Value, path: &str, tool: &str) -> Result<Stri
     if let Some(err) = out.get("error").and_then(|v| v.as_str()) {
         return Err(err.to_string());
     }
-    Ok(format!("This terminal is now on '{name}'."))
+    let mut w = Toon::new();
+    w.field("branch", name).field("terminal", "attached");
+    Ok(w.into_string())
 }
 
 fn reply(out: &mut impl Write, id: &Value, result: Value) {
@@ -289,6 +477,16 @@ fn reply_tool_error(out: &mut impl Write, id: &Value, message: &str) {
         id,
         json!({ "content": [{ "type": "text", "text": message }], "isError": true }),
     );
+}
+
+/// Answer in the version the client asked for when it is one this speaks, and
+/// in the newest one otherwise. A client that offers nothing gets the newest —
+/// which is what the specification asks a server to do.
+fn negotiate(params: &Value) -> &'static str {
+    let asked = params.get("protocolVersion").and_then(|v| v.as_str());
+    asked
+        .and_then(|a| SUPPORTED_PROTOCOLS.into_iter().find(|s| *s == a))
+        .unwrap_or(LATEST_PROTOCOL)
 }
 
 fn main() {
@@ -318,15 +516,24 @@ fn main() {
         };
 
         match method {
-            "initialize" => reply(
-                &mut stdout,
-                &id,
-                json!({
-                    "protocolVersion": PROTOCOL_VERSION,
-                    "capabilities": { "tools": {} },
-                    "serverInfo": { "name": "boite", "version": env!("CARGO_PKG_VERSION") }
-                }),
-            ),
+            "initialize" => {
+                let params = msg.get("params").cloned().unwrap_or_else(|| json!({}));
+                reply(
+                    &mut stdout,
+                    &id,
+                    json!({
+                        "protocolVersion": negotiate(&params),
+                        "capabilities": { "tools": {} },
+                        "serverInfo": { "name": "boite", "version": env!("CARGO_PKG_VERSION") },
+                        // Read once per session, and it saves every tool from
+                        // repeating where it is running.
+                        "instructions": "This terminal belongs to a Boite project: it has a shared \
+                                         todo list and its own detached git worktree. Answers are \
+                                         TOON — `key: value`, and `name(N):` followed by a header \
+                                         row then one row per item."
+                    }),
+                )
+            }
             "tools/list" => reply(&mut stdout, &id, json!({ "tools": tools() })),
             "tools/call" => {
                 let params = msg.get("params").cloned().unwrap_or_else(|| json!({}));
@@ -359,5 +566,110 @@ fn main() {
                 let _ = stdout.flush();
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn host() -> Host {
+        Host {
+            url: "http://127.0.0.1:0".into(),
+            token: "t".into(),
+            thread_id: Some("thread".into()),
+            project_id: None,
+            agent: None,
+            ids: RefCell::new(HashMap::new()),
+            http: reqwest::blocking::Client::new(),
+        }
+    }
+
+    #[test]
+    fn a_listing_costs_a_row_per_todo() {
+        let h = host();
+        let out = json!({ "todos": [
+            { "id": "1a5f3698-27dc-4f9d-90e5-d732c50e839c", "projectId": "e7c778e0-6a14-4cfe-a7df-b9a2f5b04fc5",
+              "text": "opti mcp axi", "state": "open", "note": null, "position": 0 },
+            { "id": "596ce966-971c-4702-9040-1b1393ed8447", "projectId": "e7c778e0-6a14-4cfe-a7df-b9a2f5b04fc5",
+              "text": "readme", "state": "claimed", "note": "done", "position": 1 }
+        ]});
+        assert_eq!(
+            format_todos(&h, &out),
+            "todos(2):\n  id state text note\n  1a5f3698 open \"opti mcp axi\" -\n  \
+             596ce966 claimed readme done\nhint: todo_claim id=<id> note=<what changed> — the user confirms, not you\n"
+        );
+    }
+
+    #[test]
+    fn an_empty_list_says_so_and_offers_the_next_call() {
+        let h = host();
+        let out = format_todos(&h, &json!({ "todos": [] }));
+        assert!(out.starts_with("todos(0): empty\n"));
+        assert!(out.contains("todo_add"));
+    }
+
+    #[test]
+    fn short_ids_resolve_to_the_full_one() {
+        let h = host();
+        index_todos(
+            &h,
+            &json!({ "todos": [{ "id": "1a5f3698-27dc-4f9d-90e5-d732c50e839c" }] }),
+        );
+        assert_eq!(h.full_id("1a5f3698"), "1a5f3698-27dc-4f9d-90e5-d732c50e839c");
+    }
+
+    #[test]
+    fn a_full_id_goes_through_untouched() {
+        let h = host();
+        // Nothing indexed, and no endpoint to ask: a uuid is already the answer,
+        // so this must not depend on a round trip.
+        assert_eq!(
+            h.full_id("1a5f3698-27dc-4f9d-90e5-d732c50e839c"),
+            "1a5f3698-27dc-4f9d-90e5-d732c50e839c"
+        );
+    }
+
+    #[test]
+    fn ids_sharing_a_prefix_widen_instead_of_colliding() {
+        let ids = [
+            "1a5f3698-27dc-4f9d-90e5-d732c50e839c",
+            "1a5f3698-99dc-4f9d-90e5-000000000000",
+        ];
+        assert_eq!(short_width(&ids), 13);
+        assert_eq!(short_width(&["1a5f3698-a", "596ce966-b"]), 8);
+        // Ids that differ only in the last group: no prefix separates them, so
+        // the full id is handed out rather than an ambiguous one.
+        let twins = [
+            "1a5f3698-27dc-4f9d-90e5-d732c50e839c",
+            "1a5f3698-27dc-4f9d-90e5-000000000000",
+        ];
+        assert_eq!(short_width(&twins), usize::MAX);
+        assert_eq!(prefix(twins[0], usize::MAX), twins[0]);
+    }
+
+    #[test]
+    fn worktree_status_is_six_lines() {
+        let out = json!({
+            "path": "C:\\worktrees\\3506",
+            "repo": "D:\\Dev\\Collab\\boite",
+            "branch": null,
+            "detached": true,
+            "uncommittedChanges": false,
+            "branches": ["master", "feat/x"]
+        });
+        let text = format_worktree(&out);
+        assert!(text.contains("branch: -\n"), "{text}");
+        assert!(text.contains("detached: true\n"), "{text}");
+        assert!(text.contains("uncommitted: false\n"), "{text}");
+        assert!(text.contains("branches(2): master feat/x\n"), "{text}");
+        assert!(text.contains("hint: worktree_branch"), "{text}");
+    }
+
+    #[test]
+    fn the_protocol_answers_what_the_client_offered() {
+        assert_eq!(negotiate(&json!({ "protocolVersion": "2024-11-05" })), "2024-11-05");
+        assert_eq!(negotiate(&json!({ "protocolVersion": "1999-01-01" })), LATEST_PROTOCOL);
+        assert_eq!(negotiate(&json!({})), LATEST_PROTOCOL);
     }
 }
