@@ -23,6 +23,19 @@ four edits: `backend/types.ts`, the Tauri implementation, the remote one, and
 the matching arm in `crates/boite-server/src/rpc.rs`. Miss one and it works on
 this machine and fails on a remote boite, silently.
 
+## Checking your work in the running app
+
+A screenshot and a DOM read tell you almost nothing here: **the terminals render
+to a WebGL canvas**, so everything an agent Boite runs prints is absent from the
+DOM, and a toast has dismissed itself before you look. Reach for
+`window.__boite` instead — `read("Claude #1")` returns what that terminal is
+showing as text, `thread(...)` returns its project, folder, worktree and session
+id, `toasts()` returns what was raised even after it vanished. Dev builds only;
+[`docs/development.md`](docs/development.md) has the full list.
+
+A terminal only exists once its pane has been opened. A thread nobody clicked
+has no buffer to read, which is a different answer from an empty one.
+
 ## Before pushing
 
 ```bash
