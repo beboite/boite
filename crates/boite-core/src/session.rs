@@ -16,6 +16,22 @@ pub struct ClaudeSessionHit {
     pub modified_ms: i64,
 }
 
+/// A session matched by one of the detectors that answer with an id alone.
+///
+/// `modified_ms` is when the store last saw activity on it, and is what lets
+/// the caller decide whether the session belongs to the thread that asked
+/// rather than to a neighbour. It is optional because some stores keep a
+/// timestamp this code cannot always read — an unparseable column, a file whose
+/// metadata failed. None means "unknown", never "long ago": inventing a zero
+/// would read as activity in 1970 and lose the session to a check it can no
+/// longer pass.
+#[derive(Serialize, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionHit {
+    pub id: String,
+    pub modified_ms: Option<i64>,
+}
+
 #[derive(Deserialize)]
 struct ClaudeSessionLine {
     #[serde(rename = "sessionId", alias = "session_id")]
@@ -571,7 +587,7 @@ fn find_opencode_session_by_activity(
     target: &str,
     after_unix_ms: i64,
     exclude: &HashSet<String>,
-) -> Option<String> {
+) -> Option<SessionHit> {
     let mut stmt = conn
         .prepare(
             "SELECT s.id, s.directory, \
@@ -603,7 +619,12 @@ fn find_opencode_session_by_activity(
             && normalize(&directory) == target
             && !exclude.contains(&id)
         {
-            return Some(id);
+            // The query already folded every table's timestamp into one; a row
+            // whose columns were all null lands on 0, which is no timestamp.
+            return Some(SessionHit {
+                id,
+                modified_ms: (activity_ms > 0).then_some(activity_ms),
+            });
         }
     }
     None
@@ -614,7 +635,7 @@ fn find_opencode_session_by_created(
     target: &str,
     after_unix_ms: i64,
     exclude: &HashSet<String>,
-) -> Option<String> {
+) -> Option<SessionHit> {
     let mut stmt = conn
         .prepare(
             "SELECT id, directory, time_created \
@@ -629,14 +650,21 @@ fn find_opencode_session_by_created(
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                row.get::<_, Option<i64>>(2)?,
             ))
         })
         .ok()?;
 
     for row in rows.flatten() {
-        let (id, directory) = row;
+        let (id, directory, created_ms) = row;
         if normalize(&directory) == target && !exclude.contains(&id) {
-            return Some(id);
+            // Creation is the only time this fallback knows about. It is the
+            // right one here: it only runs for a session no activity row
+            // covers, which is one nothing has happened on since.
+            return Some(SessionHit {
+                id,
+                modified_ms: created_ms.filter(|ms| *ms > 0),
+            });
         }
     }
     None
@@ -646,7 +674,7 @@ pub fn find_opencode_session_blocking(
     cwd: String,
     after_unix_ms: i64,
     exclude: &HashSet<String>,
-) -> Option<String> {
+) -> Option<SessionHit> {
     let db_path = opencode_db_path()?;
     if !db_path.is_file() {
         return None;
@@ -678,7 +706,7 @@ pub fn find_copilot_session_blocking(
     cwd: String,
     after_unix_ms: i64,
     exclude: &HashSet<String>,
-) -> Option<String> {
+) -> Option<SessionHit> {
     let db_path = copilot_db_path()?;
     if !db_path.is_file() {
         return None;
@@ -719,7 +747,7 @@ fn find_copilot_session_in(
     target: &str,
     after_unix_ms: i64,
     exclude: &HashSet<String>,
-) -> Option<String> {
+) -> Option<SessionHit> {
     // A row appears the moment copilot starts, before a word is exchanged, and
     // it refuses to resume one of those: "No session, task, or name matched
     // '<uuid>'". Capturing it anyway is worse than capturing nothing — the id
@@ -750,7 +778,10 @@ fn find_copilot_session_in(
         if normalize(&scwd) != target {
             continue;
         }
-        if let Some(ts) = parse_iso_ms(&created_at) {
+        // Unparseable timestamps skip the filter rather than the row, as they
+        // always have, and travel out as "unknown".
+        let ts = parse_iso_ms(&created_at);
+        if let Some(ts) = ts {
             if ts < after_unix_ms {
                 continue;
             }
@@ -758,7 +789,10 @@ fn find_copilot_session_in(
         if exclude.contains(&id) {
             continue;
         }
-        return Some(id);
+        return Some(SessionHit {
+            id,
+            modified_ms: ts,
+        });
     }
     None
 }
@@ -844,7 +878,7 @@ pub fn find_cursor_session_blocking(
     _cwd: String,
     after_unix_ms: i64,
     exclude: &HashSet<String>,
-) -> Option<String> {
+) -> Option<SessionHit> {
     let home = dirs::home_dir()?;
     let chats_dir = home.join(".cursor").join("chats");
     if !chats_dir.is_dir() {
@@ -887,14 +921,19 @@ pub fn find_cursor_session_blocking(
             }
         }
     }
-    best.map(|(id, _)| id)
+    // The mtime is the store.db's own, so it is always known here: a chat whose
+    // metadata could not be read was skipped above.
+    best.map(|(id, modified_ms)| SessionHit {
+        id,
+        modified_ms: Some(modified_ms),
+    })
 }
 
 pub fn find_antigravity_session_blocking(
     cwd: String,
     after_unix_ms: i64,
     exclude: &HashSet<String>,
-) -> Option<String> {
+) -> Option<SessionHit> {
     let home = dirs::home_dir()?;
     let cli_dir = home.join(".gemini").join("antigravity-cli");
     let cache_file = cli_dir.join("cache").join("last_conversations.json");
@@ -918,11 +957,14 @@ pub fn find_antigravity_session_blocking(
             .metadata()
             .and_then(|m| m.modified())
             .map(ms_since_epoch)
-            .unwrap_or(0);
-        if mtime < after_unix_ms {
+            .ok();
+        if mtime.unwrap_or(0) < after_unix_ms {
             continue;
         }
-        return Some(id.to_string());
+        return Some(SessionHit {
+            id: id.to_string(),
+            modified_ms: mtime,
+        });
     }
     None
 }
@@ -970,14 +1012,14 @@ pub fn find_grok_session_blocking(
     cwd: String,
     after_unix_ms: i64,
     exclude: &HashSet<String>,
-) -> Option<String> {
+) -> Option<SessionHit> {
     let sessions_dir = grok_sessions_dir()?;
     if !sessions_dir.is_dir() {
         return None;
     }
 
     let target = normalize(&cwd);
-    let mut best: Option<(String, i64)> = None;
+    let mut best: Option<(String, Option<i64>)> = None;
 
     for cwd_entry in fs::read_dir(&sessions_dir).ok()?.flatten() {
         let Ok(t) = cwd_entry.file_type() else { continue };
@@ -1008,20 +1050,23 @@ pub fn find_grok_session_blocking(
                 continue;
             }
             let summary = session.path().join("summary.json");
+            // Kept as an Option so an unreadable one stays "unknown" all the
+            // way out; it still sorts and filters as 0, which is what it did
+            // when the value was flattened here.
             let mtime = fs::metadata(&summary)
                 .or_else(|_| session.path().metadata())
                 .and_then(|m| m.modified())
                 .map(ms_since_epoch)
-                .unwrap_or(0);
-            if mtime < after_unix_ms {
+                .ok();
+            if mtime.unwrap_or(0) < after_unix_ms {
                 continue;
             }
-            if best.as_ref().is_none_or(|(_, t)| mtime > *t) {
+            if best.as_ref().is_none_or(|(_, t)| mtime.unwrap_or(0) > t.unwrap_or(0)) {
                 best = Some((id, mtime));
             }
         }
     }
-    best.map(|(id, _)| id)
+    best.map(|(id, modified_ms)| SessionHit { id, modified_ms })
 }
 
 fn hermes_db_path() -> Option<PathBuf> {
@@ -1059,7 +1104,7 @@ pub fn find_hermes_session_blocking(
     cwd: String,
     after_unix_ms: i64,
     exclude: &HashSet<String>,
-) -> Option<String> {
+) -> Option<SessionHit> {
     let db_path = hermes_db_path()?;
     if !db_path.is_file() {
         return None;
@@ -1112,7 +1157,10 @@ pub fn find_hermes_session_blocking(
                 continue;
             }
         }
-        return Some(id);
+        return Some(SessionHit {
+            id,
+            modified_ms: activity,
+        });
     }
     None
 }
@@ -1189,7 +1237,13 @@ mod tests {
             ("real", "/proj", "2026-07-27T10:12:00.000Z", 2),
         ]);
         let hit = find_copilot_session_in(&conn, "/proj", 0, &HashSet::new());
-        assert_eq!(hit.as_deref(), Some("real"));
+        assert_eq!(hit.as_ref().map(|h| h.id.as_str()), Some("real"));
+        // And it carries when that row was created, so the caller can tell the
+        // session apart from a neighbour's.
+        assert_eq!(
+            hit.and_then(|h| h.modified_ms),
+            parse_iso_ms("2026-07-27T10:12:00.000Z"),
+        );
     }
 
     /// Nothing to come back to yet is a reason to capture nothing, not a reason
@@ -1211,7 +1265,9 @@ mod tests {
             ("ours", "/proj", "2026-07-27T10:13:00.000Z", 1),
         ]);
         assert_eq!(
-            find_copilot_session_in(&conn, "/proj", 0, &HashSet::new()).as_deref(),
+            find_copilot_session_in(&conn, "/proj", 0, &HashSet::new())
+                .as_ref()
+                .map(|h| h.id.as_str()),
             Some("ours")
         );
         let taken: HashSet<String> = ["ours".to_string()].into_iter().collect();

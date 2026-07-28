@@ -148,8 +148,15 @@ export const tauriSession: SessionApi = {
       } | null>(command, { cwd, afterUnixMs, excludeIds });
       return hit ? { id: hit.id, mtimeMs: hit.modifiedMs, title: hit.title } : null;
     }
-    const id = await invoke<string | null>(command, { cwd, afterUnixMs, excludeIds });
-    return id ? { id, mtimeMs: null } : null;
+    // The rest answer with an id and the activity timestamp their own store
+    // keeps, which is null when that store had none to give — never a zero,
+    // which attribution would read as 1970 and refuse.
+    const hit = await invoke<{ id: string; modifiedMs: number | null } | null>(command, {
+      cwd,
+      afterUnixMs,
+      excludeIds,
+    });
+    return hit ? { id: hit.id, mtimeMs: hit.modifiedMs } : null;
   },
 };
 
