@@ -26,7 +26,11 @@
     restoreLastClosedThread,
     threadDirectoryReady,
   } from "$lib/features/thread/api";
-  import { buildResumeArgsAsync, getDetector } from "$lib/features/thread/session";
+  import {
+    buildResumeArgsAsync,
+    getDetector,
+    resolveKey,
+  } from "$lib/features/thread/session";
   import { withPowershellFastFlags } from "$lib/features/thread/shell-wrap";
   import { platform } from "$lib/storage/platform.svelte";
   import {
@@ -1099,6 +1103,9 @@
       sessionMonitor = startSessionMonitor({
         threadId: thread.id,
         cwd,
+        // Same resolution the detector was picked with, so the two never
+        // disagree on which agent this thread is.
+        kind: resolveKey(thread) as string,
         detector,
         since,
         targetPtyId: ptyId,
