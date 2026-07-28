@@ -33,11 +33,13 @@ wrapped, and a blank shell is one keystroke away.
 
 - **Projects and threads.** A sidebar of projects, each holding a tree of threads that stay mounted across tab switches.
 - **Status at a glance.** A per-thread dot read from the agent's own OSC title: working, ready, error.
+- **A worktree per thread.** Every agent works in its own detached git worktree, so two of them on the same repo never write to the same files.
 - **Session resume.** Boite reads each tool's session store to find the conversation that belongs to the thread's directory.
 - **Split panes.** Split horizontally or vertically, drag threads between panes, resize with the mouse.
-- **Git panel.** Staged/unstaged/conflict sections, commit, fetch/pull/push, auto-fetch and a commit graph. Nested repos are found three levels deep.
+- **Git panel.** Staged/unstaged/conflict sections, commit, fetch/pull/push, branches, auto-fetch and a commit graph. Nested repos are found three levels deep.
 - **File explorer and editor.** A CodeMirror 6 editor with syntax highlighting, tabs, and a side-by-side diff from the git panel.
 - **Command palette.** `Ctrl+K` over threads, projects, shortcuts and actions.
+- **First run.** A two-screen wizard picks the interface language (English or French) and puts the agents it finds on the machine straight into the shortcut bar.
 - **Remote workspaces.** Point the desktop app or a phone at a headless `boite-server`; threads survive the client closing.
 - **Mobile layout.** Bottom tab bar, pinch-to-resize terminal font, drag-to-scroll, on-demand keyboard.
 - **Idle autoclose.** Per-agent rules close threads that have been idle past a timeout.
@@ -64,7 +66,27 @@ won't get status or resume detection.
 *Live status* is the working/ready dot, read from the OSC title the agent emits.
 *Session resume* finds the conversation matching the thread's cwd and passes the
 right resume flag. Shortcuts are editable (label, command, icon, color, order),
-and any custom command can be added.
+each preset says whether its binary was found on the machine, and any custom
+command can be added.
+
+## A worktree per thread
+
+Every agent thread opens in its own detached git worktree instead of sharing the
+project folder, so two agents on the same repo never write to the same working
+tree. Detached means nothing is named: no branch appears until the agent claims
+one through the MCP door below.
+
+`node_modules`, `target`, `.venv` and `vendor` are linked to the main checkout
+rather than copied, a junction on Windows and a symlink elsewhere, because a
+worktree would otherwise cost a full install and a full recompile. The price is
+that an agent running `bun install` writes into your own directory, and two
+concurrent `cargo build` runs serialize on one `target` lock.
+
+A blank terminal and a repo with uncommitted changes both stay in the project
+folder, and the choice is made when the thread is created, so a restored thread
+stays where you left it. Closing a thread removes its worktree but never forces:
+it refuses on uncommitted files, untracked ones included, and on commits that no
+local branch contains.
 
 ## Platform support
 
@@ -131,6 +153,7 @@ Data lives next to the app config, never in the cloud:
 | `Ctrl+1..9`            | Jump to thread N                        |
 | `Ctrl+K` / `Ctrl+Shift+P` | Command palette                      |
 | `Ctrl+Alt+Arrow`       | Cycle panes inside the active split     |
+| `Ctrl+Shift+C` / `Ctrl+Shift+V` | Copy / paste in the terminal   |
 | `Ctrl+B`               | Toggle sidebar                          |
 | `Ctrl+,`               | Settings                                |
 | `Ctrl+S`               | Save the open editor buffer             |
@@ -155,17 +178,23 @@ outline around the window takes that color. One connection is active at a time.
 For a native Android install, [`mobile/`](mobile/README.md) holds a Bubblewrap
 TWA wrapper that packages the PWA as an `.aab`/`.apk`.
 
-## Agent todo access (MCP)
+## Agent access (MCP)
 
-The right-hand **Todo** tab keeps a checklist per project. Three tools
-(`todo_list`, `todo_add`, `todo_claim`) let an agent read the list, append to it
+Six tools, in two halves.
+
+`todo_list`, `todo_add` and `todo_claim` reach the right-hand **Todo** tab,
+which keeps a checklist per project. An agent can read that list, append to it
 and report an item finished, but never tick one off: claiming moves an item to
 *awaiting confirmation* and only you confirm it.
 
+`worktree_status`, `worktree_branch` and `worktree_reserve` cover the worktree
+the thread runs in. An agent that has produced something worth keeping names a
+branch for it; until then the worktree stays detached and leaves no trace.
+
 Boite spawns the terminal, so it stamps `BOITE_MCP_URL`, `BOITE_TOKEN` and
 `BOITE_THREAD_ID` into the child's environment, and resolves the project from
-the thread id. An agent reaches its own project's list and no other with nothing
-to configure; one started outside Boite has no token at all. The endpoint lives
+the thread id. An agent reaches its own project and no other with nothing to
+configure; one started outside Boite has no token at all. The endpoint lives
 on `127.0.0.1` with an ephemeral port, in both the desktop app and
 `boite-server`.
 
