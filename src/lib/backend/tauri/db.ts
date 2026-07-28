@@ -25,6 +25,7 @@ interface TodoRow {
   id: string;
   project_id: string;
   text: string;
+  description: string | null;
   state: string;
   note: string | null;
   commit_sha: string | null;
@@ -42,7 +43,10 @@ function rowToTodo(r: TodoRow): TodoItem {
   return {
     id: r.id,
     projectId: r.project_id,
-    text: r.text,
+    // The column kept its old name; the field did not. Renaming it would have
+    // meant a table rebuild for a word.
+    title: r.text,
+    description: r.description,
     state,
     note: r.note,
     commitSha: r.commit_sha,
@@ -223,7 +227,7 @@ export const tauriDb: DbApi = {
 
   async loadTodos(): Promise<TodoItem[]> {
     const rows = await getDb().select<TodoRow[]>(
-      "SELECT id, project_id, text, state, note, commit_sha, claimed_by, position, created_at, updated_at \
+      "SELECT id, project_id, text, description, state, note, commit_sha, claimed_by, position, created_at, updated_at \
        FROM todos ORDER BY position ASC, created_at ASC",
     );
     return rows.map(rowToTodo);
@@ -232,12 +236,13 @@ export const tauriDb: DbApi = {
   async saveTodo(todo: TodoItem): Promise<void> {
     await getDb().execute(
       "INSERT OR REPLACE INTO todos \
-       (id, project_id, text, state, note, commit_sha, claimed_by, position, created_at, updated_at) \
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+       (id, project_id, text, description, state, note, commit_sha, claimed_by, position, created_at, updated_at) \
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       [
         todo.id,
         todo.projectId,
-        todo.text,
+        todo.title,
+        todo.description,
         todo.state,
         todo.note,
         todo.commitSha,

@@ -41,6 +41,7 @@
   import { claimGitState, type ClaimGit } from "./claimGit";
   import type { TodoItem } from "$lib/types";
   import ListTodo from "@lucide/svelte/icons/list-todo";
+  import AlignLeft from "@lucide/svelte/icons/align-left";
   import CornerDownRight from "@lucide/svelte/icons/corner-down-right";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import Eraser from "@lucide/svelte/icons/eraser";
@@ -65,6 +66,161 @@
   const canSend = $derived(!!target?.ptyId);
 
   let draft = $state("");
+
+  // Which card is open. One at a time: the panel is a column barely wider than
+  // a sentence, and two open descriptions push everything else off screen.
+  let openId = $state<string | null>(null);
+
+  // A card opened in one project says nothing about the next one.
+  $effect(() => {
+    projectId;
+    openId = null;
+  });
+
+  /**
+   * Opening a card is the only way to read its description — a tooltip cannot
+   * hold a paragraph, and one that could would cover the list to show it.
+   *
+   * Clicks that land on a control are that control's: the checkbox, the
+   * hand-off and the delete button all sit inside the same box, and every one
+   * of them would otherwise open the card on its way to doing its own job.
+   */
+  function cardClick(item: TodoItem, e: MouseEvent) {
+    if (suppressClick === item.id) return;
+    if ((e.target as HTMLElement | null)?.closest("button, input, textarea, a")) return;
+    openId = openId === item.id ? null : item.id;
+  }
+
+  // Grows the box to whatever was typed, up to a third of the panel. Past that
+  // it scrolls: a description long enough to fill the list has stopped being a
+  // description of one card.
+  function autosize(el: HTMLTextAreaElement) {
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 220)}px`;
+  }
+
+  function descriptionBox(el: HTMLTextAreaElement) {
+    autosize(el);
+  }
+
+  type RowSnapshot = { id: string; top: number; height: number };
+  type Drag = {
+    id: string;
+    pointerId: number;
+    startY: number;
+    y: number;
+    /** False until the pointer has travelled far enough to mean a drag. */
+    active: boolean;
+    rows: RowSnapshot[];
+    /** Where it would land, as an index into the list minus the dragged card. */
+    slot: number | null;
+  };
+
+  let drag = $state<Drag | null>(null);
+  let dragCaptureEl: HTMLElement | null = null;
+  // A drag that ends over the card it started on is still a pointerup on that
+  // card, and the browser follows it with a click. Without this the list would
+  // open a card every time you finished moving one.
+  let suppressClick = $state<string | null>(null);
+
+  const liveDrag = $derived(drag?.active ? drag : null);
+  const draggingId = $derived(liveDrag?.id ?? null);
+  const dropSlot = $derived(liveDrag?.slot ?? null);
+  const dragIndex = $derived(
+    draggingId ? items.findIndex((t) => t.id === draggingId) : -1,
+  );
+
+  function cardPointerDown(item: TodoItem, e: PointerEvent) {
+    // Left button only, and never from inside a field: the open card holds a
+    // title input and a textarea, and selecting text in either is a drag of its
+    // own that this must not steal.
+    if (e.button !== 0) return;
+    if ((e.target as HTMLElement | null)?.closest("input, textarea, button, a")) return;
+    dragCaptureEl = e.currentTarget as HTMLElement;
+    drag = {
+      id: item.id,
+      pointerId: e.pointerId,
+      startY: e.clientY,
+      y: e.clientY,
+      active: false,
+      rows: [],
+      slot: null,
+    };
+    document.addEventListener("pointermove", dragMove);
+    document.addEventListener("pointerup", dragEnd);
+    document.addEventListener("pointercancel", dragEnd);
+  }
+
+  function captureRows(d: Drag) {
+    d.rows = Array.from(
+      document.querySelectorAll<HTMLElement>("[data-todo-row]"),
+    ).map((el) => {
+      const r = el.getBoundingClientRect();
+      return { id: el.dataset.todoRow ?? "", top: r.top, height: r.height };
+    });
+  }
+
+  /** Index into the list without the dragged card, from the pointer's height. */
+  function computeSlot(d: Drag): number | null {
+    const reduced = d.rows.filter((r) => r.id !== d.id);
+    if (reduced.length === 0) return null;
+    for (let i = 0; i < reduced.length; i++) {
+      if (d.y < reduced[i].top + reduced[i].height / 2) return i;
+    }
+    return reduced.length;
+  }
+
+  function dragMove(e: PointerEvent) {
+    const d = drag;
+    if (!d || e.pointerId !== d.pointerId) return;
+    d.y = e.clientY;
+    if (!d.active) {
+      if (Math.abs(e.clientY - d.startY) < 5) {
+        drag = { ...d };
+        return;
+      }
+      d.active = true;
+      suppressClick = d.id;
+      // Deferred until the drag is real: capturing on pointerdown retargets the
+      // click to the row, and a plain click would then never reach the controls
+      // inside it.
+      try {
+        dragCaptureEl?.setPointerCapture(d.pointerId);
+      } catch {
+        // pointer already released
+      }
+      captureRows(d);
+    }
+    e.preventDefault();
+    d.slot = computeSlot(d);
+    drag = { ...d };
+  }
+
+  function dragEnd(e: PointerEvent) {
+    const d = drag;
+    if (!d || e.pointerId !== d.pointerId) return;
+    if (d.active) {
+      if (d.slot !== null && projectId) {
+        const order = items.filter((t) => t.id !== d.id).map((t) => t.id);
+        order.splice(d.slot, 0, d.id);
+        void todos.reorder(projectId, order);
+      }
+      // Cleared on the next tick, after the click this pointerup produces —
+      // including when the drag landed nowhere, where opening the card would be
+      // the one thing the user did not ask for.
+      setTimeout(() => {
+        if (suppressClick === d.id) suppressClick = null;
+      }, 0);
+    } else {
+      suppressClick = null;
+    }
+    drag = null;
+    dragCaptureEl = null;
+    document.removeEventListener("pointermove", dragMove);
+    document.removeEventListener("pointerup", dragEnd);
+    document.removeEventListener("pointercancel", dragEnd);
+  }
+
   let shimPath = $state<string | null>(null);
   let endpointUp = $state(true);
   let credsPath = $state<string | null>(null);
@@ -276,12 +432,18 @@
    * and an agent turn is expensive and hard to call back — the user presses
    * Enter. The prompt carries the todo id so the agent can claim it back.
    */
-  function handOff(id: string, text: string) {
+  function handOff(item: TodoItem) {
     const ptyId = target?.ptyId;
     if (!ptyId) return;
+    const description = item.description ?? "";
     const prompt = settings.state.todoPromptTemplate
-      .replaceAll("{{task}}", text)
-      .replaceAll("{{id}}", id);
+      // `{{task}}` predates the split and is what every saved template still
+      // holds, so it carries both halves — a card handed over without its
+      // description is the paragraph the user wrote being thrown away.
+      .replaceAll("{{task}}", description ? `${item.title}\n\n${description}` : item.title)
+      .replaceAll("{{title}}", item.title)
+      .replaceAll("{{description}}", description)
+      .replaceAll("{{id}}", item.id);
     // Any newline in the payload would submit on the agent's behalf, so the
     // whole scaffold collapses to one line before it is written.
     const oneLine = prompt.replace(/\s*[\r\n]+\s*/g, " ").trim();
@@ -320,18 +482,31 @@
       {t("todo.noProject")}
     </p>
   {:else}
-    <div class="min-h-0 flex-1 overflow-y-auto">
+    <div class="min-h-0 flex-1 overflow-y-auto {liveDrag ? 'select-none' : ''}">
       {#if items.length === 0 && !todos.loading}
         <p class="px-3 py-6 text-center text-xs text-muted-foreground">
           {t("todo.empty")}
         </p>
       {/if}
-      {#each items as item (item.id)}
+      {#each items as item, i (item.id)}
+        <!-- Index into the list as it reads without the card being carried,
+             which is the list the drop slot counts in. -->
+        {@const slotIndex = dragIndex >= 0 && i > dragIndex ? i - 1 : i}
+        {#if dropSlot === slotIndex && item.id !== draggingId}
+          {@render dropLine()}
+        {/if}
+        <!-- svelte-ignore a11y_click_events_have_key_events -->
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
-          class="group border-b border-border/50 px-3 py-1.5 transition hover:bg-[var(--color-surface-2)] {item.state ===
-          'claimed'
+          data-todo-row={item.id}
+          class="group cursor-pointer border-b border-border/50 px-3 py-1.5 transition {item.id ===
+          draggingId
+            ? 'opacity-40'
+            : 'hover:bg-[var(--color-surface-2)]'} {item.state === 'claimed'
             ? 'bg-[var(--color-surface-2)]/60'
-            : ''}"
+            : ''} {openId === item.id ? 'bg-[var(--color-surface-2)]/50' : ''}"
+          onpointerdown={(e) => cardPointerDown(item, e)}
+          onclick={(e) => cardClick(item, e)}
         >
           <div class="flex items-center gap-2">
             <!-- The native control was the one white rectangle in the app: it
@@ -352,20 +527,48 @@
             >
               <Check class="size-2.5" strokeWidth={3.5} />
             </button>
-            <input
-              type="text"
-              value={item.text}
-              onchange={(e) =>
-                todos.setText(item.id, (e.currentTarget as HTMLInputElement).value)}
-              class="min-w-0 flex-1 rounded border border-transparent bg-transparent px-1 py-0.5 text-[12px] leading-snug outline-none transition focus:border-border focus:bg-[var(--color-surface)] {item.state ===
-              'done'
-                ? 'text-muted-foreground/60 line-through'
-                : 'text-foreground'}"
-            />
+            <!-- Closed, the title is text and the whole row is the button that
+                 opens the card. Open, it becomes the field it always was.
+                 Keeping the input on show cost a click to read a description
+                 and gave the panel one editable line per row to tab through,
+                 which is not what a list of cards is for. -->
+            {#if openId === item.id}
+              <input
+                type="text"
+                value={item.title}
+                placeholder={t("todo.titlePlaceholder")}
+                onchange={(e) =>
+                  todos.setTitle(item.id, (e.currentTarget as HTMLInputElement).value)}
+                class="min-w-0 flex-1 rounded border border-transparent bg-transparent px-1 py-0.5 text-[12px] leading-snug outline-none transition focus:border-border focus:bg-[var(--color-surface)] {item.state ===
+                'done'
+                  ? 'text-muted-foreground/60 line-through'
+                  : 'text-foreground'}"
+              />
+            {:else}
+              <span
+                class="min-w-0 flex-1 truncate px-1 py-0.5 text-[12px] leading-snug {item.state ===
+                'done'
+                  ? 'text-muted-foreground/60 line-through'
+                  : 'text-foreground'}"
+              >
+                {item.title}
+              </span>
+              {#if item.description}
+                <!-- The only sign that there is more behind the line. Dropped
+                     when the card is open, where the description is right
+                     there. -->
+                <span
+                  class="shrink-0 text-muted-foreground/50"
+                  title={t("todo.hasDescription")}
+                >
+                  <AlignLeft class="size-3" />
+                </span>
+              {/if}
+            {/if}
             <button
               type="button"
               class="grid size-[22px] shrink-0 place-items-center rounded text-muted-foreground/50 opacity-0 transition group-hover:opacity-100 hover:bg-[var(--color-surface-3)] hover:text-foreground disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-muted-foreground/50"
-              onclick={() => handOff(item.id, item.text)}
+              onclick={() => handOff(item)}
               disabled={!canSend}
               title={canSend
                 ? t("todo.sendTo", {
@@ -386,6 +589,27 @@
               <Trash2 class="size-3.5" />
             </button>
           </div>
+
+          {#if openId === item.id}
+            <!-- Aligned under the title rather than the checkbox: the box is
+                 the same object as the line above it, and a description that
+                 started at the tick would read as a second column. -->
+            <div class="mt-1 pl-[23px]">
+              <textarea
+                value={item.description ?? ""}
+                rows="2"
+                placeholder={t("todo.descriptionPlaceholder")}
+                use:descriptionBox
+                oninput={(e) => autosize(e.currentTarget as HTMLTextAreaElement)}
+                onchange={(e) =>
+                  todos.setDescription(
+                    item.id,
+                    (e.currentTarget as HTMLTextAreaElement).value,
+                  )}
+                class="w-full resize-none rounded border border-border bg-[var(--color-surface)] px-1.5 py-1 text-[11.5px] leading-relaxed text-foreground/90 outline-none transition placeholder:text-muted-foreground/60 focus:border-foreground/30"
+              ></textarea>
+            </div>
+          {/if}
 
           <!-- Shown while the task is still live — claimed, or reopened after a
                claim — because that is when where the work landed is something
@@ -501,6 +725,10 @@
           {/if}
         </div>
       {/each}
+      <!-- The one slot no row can draw: past the last card. -->
+      {#if dropSlot !== null && dropSlot === items.length - 1}
+        {@render dropLine()}
+      {/if}
     </div>
 
     <section class="shrink-0 border-t border-border">
@@ -620,6 +848,13 @@
     </form>
   {/if}
 </div>
+
+{#snippet dropLine()}
+  <!-- Where the card would land. A line rather than a gap: opening a
+       row-height hole in a list this dense moves everything below it on every
+       pointer move, and the thing you are aiming at stops holding still. -->
+  <div class="pointer-events-none -my-px h-0.5 bg-foreground/50"></div>
+{/snippet}
 
 {#snippet tip(text: string)}
   <!-- Replaces the native `title`, whose ~1s delay is the browser's and cannot
