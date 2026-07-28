@@ -58,6 +58,16 @@ tauri-plugin-process = "2"
 # path is exactly the small-short-lived-allocation pattern mimalloc is best at.
 mimalloc = { version = "0.1", default-features = false }
 
+# Paints the one row of a maximized borderless window that the client area is
+# not given. Already in the tree through tauri, which takes it for the same HWND
+# this hands back.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Gdi",
+  "Win32_UI_WindowsAndMessaging",
+] }
+
 # AppKit posts the only fullscreen signal that arrives when the transition
 # *starts*; everything Tauri exposes reports it once the animation is over. All
 # four crates are already in the tree through tauri/wry, so this pulls nothing new.
