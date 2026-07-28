@@ -1050,6 +1050,9 @@ pub fn finish_boot(app: AppHandle, boot: State<'_, BootState>) {
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.show();
         let _ = win.set_focus();
+        // First paint of the row the client area does not reach; the window
+        // event hook keeps it painted from here on.
+        crate::paint_frame_gap(&win);
     }
 }
 

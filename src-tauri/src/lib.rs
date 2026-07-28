@@ -34,10 +34,79 @@ fn set_traffic_lights_hidden(window: tauri::WebviewWindow, hidden: bool) {
     fullscreen::set_lights_hidden(&window, hidden);
 }
 
+/// Fills the strip of window that the client area does not reach.
+///
+/// A maximized borderless window is not given the whole monitor: tao holds a
+/// pixel back on any edge that has an auto-hide taskbar, otherwise the bar has
+/// nothing left to notice the pointer with. That pixel is outside the client
+/// area, so the webview never covers it and nothing else paints it either —
+/// which is the white line along the bottom of the screen, on every launch that
+/// came up maximized. Painting it the app's own background is what makes it
+/// disappear rather than merely move: the row has to be drawn by somebody, and
+/// no window attribute reassigns it (`DWMWA_BORDER_COLOR`, frame recalculation
+/// through `SWP_FRAMECHANGED` and a full `RDW_FRAME` redraw all leave it white).
+///
+/// Colour comes from `--color-background` in `src/app.css`, as a `COLORREF`, so
+/// the row reads as more window rather than as a seam.
+#[cfg(windows)]
+pub(crate) fn paint_frame_gap(win: &tauri::WebviewWindow) {
+    use windows::Win32::Foundation::{COLORREF, POINT, RECT};
+    use windows::Win32::Graphics::Gdi::{
+        ClientToScreen, CreateSolidBrush, DeleteObject, FillRect, GetWindowDC, ReleaseDC,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{GetClientRect, GetWindowRect};
+
+    // Maximized only. A windowed frame is inset on every side too, but that gap
+    // is the undecorated shadow and the compositor owns it: filling it would
+    // replace a soft edge with an opaque bar.
+    if !win.is_maximized().unwrap_or(false) {
+        return;
+    }
+    let Ok(hwnd) = win.hwnd() else { return };
+    unsafe {
+        let mut window = RECT::default();
+        let mut client = RECT::default();
+        if GetWindowRect(hwnd, &mut window).is_err() || GetClientRect(hwnd, &mut client).is_err() {
+            return;
+        }
+        // Both rects in window coordinates: `GetWindowDC` hands back a device
+        // context whose origin is the window, not the client area, and on a
+        // maximized borderless window the two are eight pixels apart.
+        let mut origin = POINT { x: 0, y: 0 };
+        if !ClientToScreen(hwnd, &mut origin).as_bool() {
+            return;
+        }
+        let top = origin.y + client.bottom - window.top;
+        let bottom = window.bottom - window.top;
+        if top >= bottom {
+            return;
+        }
+
+        let dc = GetWindowDC(Some(hwnd));
+        if dc.is_invalid() {
+            return;
+        }
+        let brush = CreateSolidBrush(COLORREF(0x000a0a0a));
+        let strip = RECT {
+            left: 0,
+            top,
+            right: window.right - window.left,
+            bottom,
+        };
+        FillRect(dc, &strip, brush);
+        let _ = DeleteObject(brush.into());
+        ReleaseDC(Some(hwnd), dc);
+    }
+}
+
+#[cfg(not(windows))]
+pub(crate) fn paint_frame_gap(_win: &tauri::WebviewWindow) {}
+
 fn show_main_window(handle: &tauri::AppHandle) {
     if let Some(win) = handle.get_webview_window("main") {
         let _ = win.show();
         let _ = win.set_focus();
+        paint_frame_gap(&win);
     }
 }
 
@@ -295,6 +364,21 @@ pub fn run() {
             }
             logging::install_panic_hook(setup_handle.clone());
             fullscreen::watch(&setup_handle);
+
+            // The strip is a property of the frame, so it comes back white
+            // every time the frame is recomputed — maximizing, restoring,
+            // crossing to a monitor of another scale. Painted on each of those
+            // rather than once at startup.
+            #[cfg(windows)]
+            if let Some(win) = setup_handle.get_webview_window("main") {
+                let target = win.clone();
+                win.on_window_event(move |event| match event {
+                    tauri::WindowEvent::Resized(_)
+                    | tauri::WindowEvent::Moved(_)
+                    | tauri::WindowEvent::ScaleFactorChanged { .. } => paint_frame_gap(&target),
+                    _ => {}
+                });
+            }
             agent_api::start(&setup_handle);
             let _ = logging::append_app_log(
                 &setup_handle,
