@@ -35,6 +35,11 @@ tokio = { version = "1", features = ["rt-multi-thread", "net"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 rand = "0.8"
 
+# Resolves the app data directory before `tauri::Builder` exists, which is where
+# the identifier migration has to run. Same crate and same rules Tauri uses for
+# `app_data_dir()`, so the two agree on the path.
+dirs = "6"
+
 # Dev-only agent bridge. Optional so a release build links none of it: the
 # plugin exposes execute_js and a screenshot command, and nothing gated by
 # cfg(debug_assertions) alone keeps it out of the shipped binary.

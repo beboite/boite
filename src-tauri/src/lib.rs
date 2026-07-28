@@ -179,6 +179,13 @@ pub fn run() {
         },
     ];
 
+    // Before the builder, not inside `setup`: plugin setup hooks run first, and
+    // the sql plugin preloads `sqlite:boite.db`. Opening it creates it, so from
+    // an app-level hook this always found a database at the new identifier and
+    // refused to overwrite it — stranding the real one under the old name. The
+    // outcome is carried into `setup` because there is no log session yet.
+    let data_move = app_data::migrate_before_plugins();
+
     let builder = tauri::Builder::default()
         // Must be the first plugin so a second launch is intercepted before
         // anything else initializes. Two instances would share one SQLite
@@ -243,11 +250,6 @@ pub fn run() {
         .manage(ProjectRoots::default())
         .setup(|app| {
             let setup_handle = app.handle().clone();
-            // Before the log session, and well before the sql plugin is asked
-            // for a connection: both would create the new directory and, in the
-            // database's case, a fresh empty file that then looks like a real
-            // install to the migration.
-            let data_move = app_data::migrate_from_legacy_identifier(&setup_handle);
             if let Err(e) = logging::begin_log_session(&setup_handle) {
                 eprintln!("[boite/logging] begin_log_session failed: {e}");
             }
