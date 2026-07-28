@@ -249,6 +249,26 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "chat.handoverConfirm": "Créer et ouvrir un terminal",
   "chat.handoverWorking": "Mise en place…",
 
+  "project.pickOne": "Choisissez un projet à gauche.",
+  "project.threads": "Terminaux",
+  "project.noThreads": "Rien ne tourne encore ici.",
+  "project.git": "Git",
+  "project.notARepo": "Pas un dépôt git.",
+  "project.detached": "détaché",
+  "project.clean": "rien à committer",
+  "project.changedFiles": "{count} modifiés",
+  "project.aheadBehind": "{ahead} en avance, {behind} en retard",
+  "project.todos": "Todos",
+  "project.noTodos": "Rien sur la liste.",
+  "project.awaitingYou": "{count} en attente de votre confirmation",
+  "project.andMore": "et {count} de plus",
+  "project.workspace": "Espace de travail",
+  "project.repoAt": "dépôt dans {path}",
+  "project.noWorktrees": "Tous les terminaux tournent dans le dossier du projet.",
+  "project.worktreesOff":
+    "Les worktrees par terminal sont désactivés ; tout tourne dans le dossier du projet.",
+  "project.chatHint": "Posez une question sur ce projet — l'agent démarre dans le dossier.",
+
   "notification.readyForInput": "Prêt pour saisie",
 
   "setup.title": "Bienvenue dans Boite",

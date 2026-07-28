@@ -52,6 +52,10 @@
   const ChatView = lazyComponent(
     () => import("$lib/features/chat/ChatPage.svelte"),
   );
+  // Shares the chat's components, so it lands in the same chunk.
+  const ProjectView = lazyComponent(
+    () => import("$lib/features/project/ProjectPage.svelte"),
+  );
 
   let activated = $state<Record<string, true>>({});
 
@@ -199,6 +203,10 @@
 
   $effect(() => {
     if (app.view === "chat") void ChatView.ensure();
+  });
+
+  $effect(() => {
+    if (app.view === "project") void ProjectView.ensure();
   });
 
   $effect(() => {
@@ -372,6 +380,15 @@
             {#if SettingsView.current}
               {@const SettingsComp = SettingsView.current}
               <SettingsComp />
+            {/if}
+          </div>
+        {/if}
+
+        {#if app.view === "project"}
+          <div class="absolute inset-0 z-10 bg-[var(--color-background)]">
+            {#if ProjectView.current}
+              {@const ProjectComp = ProjectView.current}
+              <ProjectComp onOpenThread={activateThread} />
             {/if}
           </div>
         {/if}

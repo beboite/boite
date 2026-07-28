@@ -23,8 +23,18 @@
     return app.projects.find((p) => p.id === projectId)?.name ?? null;
   }
 
+  // A chat that belongs to a project lives on that project's page — the same
+  // conversation, with the project's state above it. Opening it in the bare
+  // chat view instead would show the user a second, emptier home for something
+  // that already has one.
   function open(id: string) {
     app.activeChatId = id;
+    const projectId = chats.byId(id)?.projectId ?? null;
+    if (projectId) {
+      app.selectedProjectId = projectId;
+      app.view = "project";
+      return;
+    }
     app.view = "chat";
   }
 

@@ -9,20 +9,36 @@
   import { t } from "$lib/i18n/index.svelte";
   import { chats } from "./store.svelte";
   import { sendTurn, stopTurn } from "./api";
+  import { defaultAgentKey, startChat } from "./start";
   import { chatModeFor } from "./recipes";
   import type { Chat, IconKey } from "$lib/types";
 
-  type Props = { chat: Chat };
-  let { chat }: Props = $props();
+  /**
+   * `chat` is null on a project page that has never been talked to.
+   *
+   * The alternative was to open a chat the moment a project is clicked, which
+   * would leave an empty conversation behind every time someone looked at a
+   * project — the sidebar would fill with them. Nothing is created until there
+   * is something to say, and `projectId` is what the chat gets scoped to when
+   * that happens.
+   */
+  type Props = { chat: Chat | null; projectId?: string | null };
+  let { chat, projectId = null }: Props = $props();
 
   let draft = $state("");
   let picking = $state(false);
   let box = $state<HTMLTextAreaElement | null>(null);
+  /** The agent chosen before there is a chat to record it on. */
+  let pendingAgent = $state<IconKey>(null);
+  let creating = $state(false);
 
-  const running = $derived(chats.running[chat.id] === true);
   const installed = $derived(CLI_PRESETS.filter((p) => cliDetection.found[p.executable]));
-  const preset = $derived(CLI_PRESETS.find((p) => p.iconKey === chat.agentKey) ?? null);
-  const fallback = $derived(chatModeFor(chat.agentKey) === "pty");
+  // The chat decides once it exists; before that, the local pick, and failing
+  // that whatever a new chat would open on anyway.
+  const agentKey = $derived(chat?.agentKey ?? pendingAgent ?? defaultAgentKey(installed));
+  const running = $derived(chat ? chats.running[chat.id] === true : creating);
+  const preset = $derived(CLI_PRESETS.find((p) => p.iconKey === agentKey) ?? null);
+  const fallback = $derived(chatModeFor(agentKey) === "pty");
 
   // Grows with the message instead of scrolling a two-line box, up to the point
   // where it would start eating the conversation.
@@ -34,11 +50,24 @@
     el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
   });
 
-  function submit() {
+  async function submit() {
     const text = draft.trim();
     if (!text || running) return;
     draft = "";
-    void sendTurn(chat.id, text);
+    if (chat) {
+      void sendTurn(chat.id, text);
+      return;
+    }
+    // First message on a project page: the chat is born here, already scoped to
+    // the project, so its agent starts in the folder and can see the code.
+    creating = true;
+    try {
+      const opened = await startChat(projectId, agentKey);
+      if (opened) void sendTurn(opened.id, text);
+      else draft = text;
+    } finally {
+      creating = false;
+    }
   }
 
   function onKey(event: KeyboardEvent) {
@@ -60,7 +89,11 @@
    */
   async function pick(key: IconKey, command: string) {
     picking = false;
-    if (key === chat.agentKey) return;
+    if (key === agentKey) return;
+    if (!chat) {
+      pendingAgent = key;
+      return;
+    }
     const parsed = parseCommand(command);
     if (!parsed.cmd) return;
     await chats.upsert({
@@ -92,7 +125,7 @@
           title={t("chat.pickAgent")}
           aria-label={t("chat.pickAgent")}
         >
-          <ShortcutIcon iconKey={chat.agentKey} size={16} />
+          <ShortcutIcon iconKey={agentKey} size={16} />
           <ChevronDown class="size-3" />
         </button>
         {#if picking}
@@ -133,7 +166,7 @@
         <button
           type="button"
           class="shrink-0 rounded-md p-1.5 text-muted-foreground transition hover:bg-accent hover:text-foreground"
-          onclick={() => void stopTurn(chat.id)}
+          onclick={() => chat && void stopTurn(chat.id)}
           title={t("chat.stop")}
           aria-label={t("chat.stop")}
         >
