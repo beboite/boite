@@ -135,11 +135,13 @@
     void stopThread(id);
   }
 
+  // Clicking a project header always leaves the thread behind — including the
+  // one currently open, whose project is the one being clicked. Keeping the
+  // thread there made its own project the only row in the sidebar that did
+  // nothing when clicked.
   function selectProject(projectId: string) {
     app.selectedProjectId = projectId;
-    if (app.activeThread && app.activeThread.projectId !== projectId) {
-      app.activeThreadId = null;
-    }
+    app.activeThreadId = null;
     app.view = "terminal";
   }
 
