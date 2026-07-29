@@ -1,16 +1,23 @@
 <script lang="ts">
-  import { paneStore } from "./store.svelte";
+  import { paneStore, countLeaves } from "./store.svelte";
   import type { LayoutNode, PaneGroup } from "./types";
   import { MIN_RATIO } from "./types";
+  import PaneHeader from "./PaneHeader.svelte";
+  import PaneContentView from "./PaneContentView.svelte";
   import { t } from "$lib/i18n/index.svelte";
 
   type Props = { group: PaneGroup };
   let { group }: Props = $props();
 
-  function measure(el: HTMLElement, threadId: string) {
+  const multi = $derived(countLeaves(group.root) > 1);
+
+  // The rect is the pane's BODY, not the pane: a thread's terminal is positioned
+  // over this rectangle from the page, and including the header would slide
+  // every terminal up under its own title bar.
+  function measure(el: HTMLElement, paneId: string) {
     let observer: ResizeObserver | null = null;
     let frame: number | null = null;
-    let currentId = threadId;
+    let currentId = paneId;
 
     const update = () => {
       frame = null;
@@ -115,10 +122,32 @@
 
 {#snippet renderNode(node: LayoutNode)}
   {#if node.kind === "leaf"}
-    <div class="pane-leaf" data-pane-leaf={node.threadId} use:measure={node.threadId}></div>
+    {@const isThread = node.content.kind === "thread"}
+    <!-- A terminal alone in its group grows no chrome: the sidebar already names
+         it. Anything else needs its header, if only for the close button. -->
+    {@const showHeader = multi || !isThread}
+    <div class="pane-leaf" data-pane-leaf={node.paneId}>
+      {#if showHeader}
+        <PaneHeader
+          paneId={node.paneId}
+          content={node.content}
+          groupId={group.id}
+          focused={group.focusedPaneId === node.paneId}
+          closable={!isThread || multi}
+        />
+      {/if}
+      <!-- Measured whether or not anything is drawn inside it: for a thread the
+           terminal arrives from the page as an absolutely positioned overlay,
+           and this rectangle is the only thing that tells it where to go. -->
+      <div class="pane-body" use:measure={node.paneId}>
+        {#if !isThread}
+          <PaneContentView content={node.content} projectId={group.projectId} />
+        {/if}
+      </div>
+    </div>
   {:else}
     <div class="pane-split" class:row={node.dir === "row"} class:column={node.dir === "column"}>
-      {#each node.children as child, i (i + ":" + (child.kind === "leaf" ? child.threadId : child.id))}
+      {#each node.children as child, i (child.kind === "leaf" ? child.paneId : child.id)}
         <div class="pane-cell" style:flex={node.ratios[i]}>
           {@render renderNode(child)}
         </div>
@@ -153,10 +182,19 @@
     min-height: 0;
   }
   .pane-leaf {
+    display: flex;
+    flex-direction: column;
     width: 100%;
     height: 100%;
     min-width: 0;
     min-height: 0;
+  }
+  .pane-body {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
   }
   .pane-split {
     display: flex;
@@ -189,13 +227,13 @@
     padding: 0;
     background: transparent;
     cursor: col-resize;
-    transition: background 100ms;
+    transition: background var(--dur-1) var(--ease-out-quint);
   }
   .splitter.column {
     cursor: row-resize;
   }
   .splitter:hover,
   .splitter:active {
-    background: var(--color-border, rgba(255, 255, 255, 0.1));
+    background: var(--color-border-strong);
   }
 </style>
