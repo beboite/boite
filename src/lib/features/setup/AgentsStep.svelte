@@ -65,7 +65,7 @@
       type="button"
       onclick={() => void cliDetection.refreshAll()}
       disabled={cliDetection.checking}
-      class="flex items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-1.5 text-[11px] text-muted-foreground transition hover:border-foreground/30 hover:text-foreground disabled:cursor-wait disabled:opacity-60"
+      class="flex items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-1.5 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground disabled:cursor-wait disabled:opacity-60"
     >
       <RefreshCw class="size-3 {cliDetection.checking ? 'animate-spin' : ''}" />
       {t("setup.agentsRecheck")}
@@ -74,7 +74,7 @@
 {/if}
 
 <p
-  class="flex items-start gap-2 rounded-lg border border-border/70 bg-[var(--color-surface-2)] p-3 text-[11.5px] leading-relaxed text-muted-foreground"
+  class="flex items-start gap-2 rounded-lg border border-border/70 bg-[var(--color-surface-2)] p-3 text-sm leading-relaxed text-muted-foreground"
 >
   <Settings2 class="mt-0.5 size-3.5 shrink-0" />
   <span>{t("setup.settingsHint")}</span>

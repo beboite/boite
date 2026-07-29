@@ -225,7 +225,7 @@
         transition:scale={{ duration: 90, start: 0.96 }}
       >
         <div
-          class="flex items-center gap-1.5 border-b border-border px-2 py-1.5 text-[11px] text-muted-foreground"
+          class="flex items-center gap-1.5 border-b border-border px-2 py-1.5 text-xs text-muted-foreground"
         >
           {#if pane !== "harness"}
             <button
@@ -259,12 +259,12 @@
 
         <div class="flex flex-col overflow-y-auto p-1">
           {#if fastpick.loading}
-            <div class="px-2 py-1.5 text-[11px] text-muted-foreground">{t("common.loading")}</div>
+            <div class="px-2 py-1.5 text-xs text-muted-foreground">{t("common.loading")}</div>
           {:else if fastpick.error}
-            <div class="px-2 py-1.5 text-[11px] text-destructive">{fastpick.error}</div>
+            <div class="px-2 py-1.5 text-xs text-destructive">{fastpick.error}</div>
           {:else if pane === "harness"}
             {#if fastpick.harnesses.length === 0}
-              <div class="px-2 py-1.5 text-[11px] text-muted-foreground">
+              <div class="px-2 py-1.5 text-xs text-muted-foreground">
                 {t("fastpick.noHarness")}
               </div>
             {/if}
@@ -272,7 +272,7 @@
               <button
                 type="button"
                 role="menuitem"
-                class="flex items-center gap-2 rounded px-2 py-1.5 text-left text-[11.5px] text-foreground/85 transition hover:bg-accent hover:text-foreground"
+                class="flex items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-foreground/85 transition hover:bg-accent hover:text-foreground"
                 onclick={() => pickHarness(h.id)}
               >
                 <ShortcutIcon iconKey={iconKeyForKind(h.kind)} size={14} color={null} />
@@ -285,7 +285,7 @@
               <button
                 type="button"
                 role="menuitem"
-                class="flex items-center gap-2 rounded px-2 py-1.5 text-left text-[11.5px] text-foreground/85 transition hover:bg-accent hover:text-foreground"
+                class="flex items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-foreground/85 transition hover:bg-accent hover:text-foreground"
                 onclick={() => pickProvider(p.id)}
               >
                 <span class="min-w-0 truncate font-medium">{p.name}</span>
@@ -298,13 +298,13 @@
             {/each}
           {:else if pane === "model"}
             {#if providerId && fastpick.loadingModels === providerId}
-              <div class="px-2 py-1.5 text-[11px] text-muted-foreground">{t("common.loading")}</div>
+              <div class="px-2 py-1.5 text-xs text-muted-foreground">{t("common.loading")}</div>
             {:else if providerId && fastpick.modelsError[providerId]}
-              <div class="px-2 py-1.5 text-[11px] text-destructive">
+              <div class="px-2 py-1.5 text-xs text-destructive">
                 {fastpick.modelsError[providerId]}
               </div>
             {:else if models}
-              <div class="px-2 pb-1 text-[10px] text-muted-foreground/70">
+              <div class="px-2 pb-1 text-2xs text-muted-foreground/70">
                 {sourceLabel(models.source)}
               </div>
               {#each models.items as m (m.id)}
@@ -314,12 +314,12 @@
                   <button
                     type="button"
                     role="menuitem"
-                    class="flex min-w-0 flex-1 items-baseline gap-2 px-2 py-1.5 text-left text-[11.5px] text-foreground/85 transition group-hover:text-foreground"
+                    class="flex min-w-0 flex-1 items-baseline gap-2 px-2 py-1.5 text-left text-sm text-foreground/85 transition group-hover:text-foreground"
                     onclick={(e) => pickModel(m, e.shiftKey)}
                   >
                     <span class="min-w-0 truncate font-medium">{nameOf(m)}</span>
                     {#if m.contextWindow}
-                      <span class="shrink-0 font-mono text-[10px] text-muted-foreground/70">
+                      <span class="shrink-0 font-mono text-2xs text-muted-foreground/70">
                         {Math.round(m.contextWindow / 1000)}K
                       </span>
                     {/if}
@@ -350,7 +350,7 @@
             {/if}
           {:else if pane === "options" && model}
             {#if harness?.supportsEffort && model.effort.length > 0}
-              <div class="px-2 pb-1 pt-1 text-[10px] uppercase tracking-wide text-muted-foreground/70">
+              <div class="px-2 pb-1 pt-1 text-2xs uppercase tracking-wide text-muted-foreground/70">
                 {t("fastpick.effort")}
               </div>
               {#each model.effort as level (level)}
@@ -358,7 +358,7 @@
                   type="button"
                   role="menuitemradio"
                   aria-checked={effort === level}
-                  class="flex items-center gap-2 rounded px-2 py-1.5 text-left text-[11.5px] text-foreground/85 transition hover:bg-accent hover:text-foreground"
+                  class="flex items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-foreground/85 transition hover:bg-accent hover:text-foreground"
                   onclick={() => (effort = level)}
                 >
                   <span
@@ -375,7 +375,7 @@
               {/each}
             {/if}
             {#if harness?.supportsSystemPrompts && model.prompts.length > 0}
-              <div class="px-2 pb-1 pt-2 text-[10px] uppercase tracking-wide text-muted-foreground/70">
+              <div class="px-2 pb-1 pt-2 text-2xs uppercase tracking-wide text-muted-foreground/70">
                 {t("fastpick.systemPrompt")}
               </div>
               {#each model.prompts as stem (stem)}
@@ -383,7 +383,7 @@
                   type="button"
                   role="menuitemcheckbox"
                   aria-checked={promptChecked(stem)}
-                  class="flex items-center gap-2 rounded px-2 py-1.5 text-left text-[11.5px] text-foreground/85 transition hover:bg-accent hover:text-foreground"
+                  class="flex items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-foreground/85 transition hover:bg-accent hover:text-foreground"
                   onclick={() => togglePrompt(stem)}
                 >
                   <span
@@ -396,13 +396,13 @@
                       <Check class="size-2.5 text-[var(--color-surface-2)]" strokeWidth={3} />
                     {/if}
                   </span>
-                  <span class="min-w-0 truncate font-mono text-[10.5px]">{stem}</span>
+                  <span class="min-w-0 truncate font-mono text-xs">{stem}</span>
                 </button>
               {/each}
             {/if}
             <button
               type="button"
-              class="mt-2 rounded bg-[var(--color-surface-3)] px-2 py-1.5 text-[11.5px] font-medium text-foreground transition hover:bg-accent"
+              class="mt-2 rounded bg-[var(--color-surface-3)] px-2 py-1.5 text-sm font-medium text-foreground transition hover:bg-accent"
               onclick={(e) => void launch(e.shiftKey)}
             >
               {t("fastpick.launch")}

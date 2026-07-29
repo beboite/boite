@@ -27,6 +27,7 @@ import {
   markRenamed,
   pruneRenamed,
 } from "$lib/features/thread/renamed";
+import { noteStatusChange, resetFinished } from "$lib/features/thread/finished.svelte";
 import {
   isScratch,
   makeScratchProject,
@@ -424,6 +425,7 @@ class AppState {
     }
     this.pendingTitleSaves.clear();
     this.freshThreadIds.clear();
+    resetFinished();
     this.projects = [];
     this.threads = [];
     this.activeThreadId = null;
@@ -445,7 +447,13 @@ class AppState {
         const id = data?.threadId as string | undefined;
         const t = this.threadById(id);
         if (!t) return;
-        t.status = (data?.status as Thread["status"]) ?? t.status;
+        const incomingStatus = (data?.status as Thread["status"]) ?? t.status;
+        // The remote path writes the row directly rather than going through
+        // setThreadStatus (the server owns runtime state, so none of that
+        // method's persistence applies), which means the finish mark has to be
+        // laid here too or a boite's threads would never glow.
+        noteStatusChange(t.id, t.status, incomingStatus);
+        t.status = incomingStatus;
         t.exitCode = (data?.exitCode as number | null) ?? null;
         if (t.status === "done" || t.status === "exited" || t.status === "error") {
           t.ptyId = null;
@@ -656,6 +664,7 @@ class AppState {
     const t = this.threadById(id);
     if (!t) return;
     if (t.status === status && t.exitCode === exitCode) return;
+    noteStatusChange(id, t.status, status);
     t.status = status;
     t.exitCode = exitCode;
     if (status !== "stopped" && t.autoSlept) {

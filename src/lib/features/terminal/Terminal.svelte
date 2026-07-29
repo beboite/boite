@@ -49,6 +49,7 @@
   import type { ContextMenuItem } from "$lib/shared/components/ContextMenu.svelte";
   import type { Thread } from "$lib/types";
   import Keyboard from "@lucide/svelte/icons/keyboard";
+  import { t } from "$lib/i18n/index.svelte";
 
   type Props = { thread: Thread; visible: boolean; focused: boolean };
   let { thread, visible, focused }: Props = $props();
@@ -1347,8 +1348,8 @@
         onpointerup={fabUp}
         onpointercancel={fabCancel}
         onpointerleave={fabCancel}
-        aria-label="Keyboard (long-press for key bar)"
-        title="Tap: keyboard · Long-press: key bar"
+        aria-label={t("terminal.keyboardLabel")}
+        title={t("terminal.keyboardHint")}
       >
         <Keyboard class="size-5" />
       </button>
@@ -1365,7 +1366,7 @@
             k.id === "ctrl" ? ctrlArmed : k.id === "alt" ? altArmed : false}
           <button
             type="button"
-            class="flex h-9 min-w-9 shrink-0 items-center justify-center rounded-md border border-border px-2 text-[13px] font-medium transition active:scale-95"
+            class="flex h-9 min-w-9 shrink-0 items-center justify-center rounded-md border border-border px-2 text-base font-medium transition active:scale-95"
             style:background-color={armed
               ? "var(--color-foreground)"
               : "var(--color-surface-2)"}

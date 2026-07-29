@@ -9,6 +9,8 @@ import {
   restoreLastClosedThread,
 } from "$lib/features/thread/api";
 import { resolveIconKey } from "$lib/shared/icons/detect";
+import { t } from "$lib/i18n/index.svelte";
+import type { MessageKey } from "$lib/i18n/messages";
 import type { IconKey } from "$lib/types";
 
 export type PaletteSection = "threads" | "actions" | "projects";
@@ -31,10 +33,12 @@ export const SECTION_BIAS: Record<PaletteSection, number> = {
   projects: 0,
 };
 
-export const SECTION_TITLES: Record<PaletteSection, string> = {
-  threads: "Threads",
-  actions: "Actions",
-  projects: "Projects",
+// Keys rather than strings: the section headers are drawn by a component that
+// only knows the section, so the literal has to live on the data.
+export const SECTION_TITLE_KEYS: Record<PaletteSection, MessageKey> = {
+  threads: "palette.threads",
+  actions: "palette.actions",
+  projects: "palette.projects",
 };
 
 function goToThread(threadId: string, projectId: string) {
@@ -69,7 +73,7 @@ export function buildPaletteCommands(): PaletteCommand[] {
   commands.push({
     id: "action:new-terminal",
     section: "actions",
-    label: "New terminal",
+    label: t("palette.newTerminal"),
     hint: "Ctrl+T",
     run: () => launchBlankTerminalHere(),
   });
@@ -77,7 +81,7 @@ export function buildPaletteCommands(): PaletteCommand[] {
     commands.push({
       id: `action:shortcut:${shortcut.id}`,
       section: "actions",
-      label: `Launch ${shortcut.label}`,
+      label: t("palette.launch", { label: shortcut.label }),
       hint: shortcut.command,
       icon: {
         key: resolveIconKey(shortcut.iconKey, shortcut.label, shortcut.command),
@@ -92,7 +96,7 @@ export function buildPaletteCommands(): PaletteCommand[] {
   commands.push({
     id: "action:restore-thread",
     section: "actions",
-    label: "Restore last closed thread",
+    label: t("palette.restoreThread"),
     hint: "Ctrl+Shift+T",
     run: () => restoreLastClosedThread(),
   });
@@ -101,7 +105,7 @@ export function buildPaletteCommands(): PaletteCommand[] {
     commands.push({
       id: "action:close-thread",
       section: "actions",
-      label: "Close active thread",
+      label: t("palette.closeThread"),
       hint: "Ctrl+W",
       run: () => closeThreadWithConfirm(id),
     });
@@ -110,32 +114,32 @@ export function buildPaletteCommands(): PaletteCommand[] {
     {
       id: "action:toggle-sidebar",
       section: "actions",
-      label: "Toggle sidebar",
+      label: t("palette.toggleSidebar"),
       hint: "Ctrl+B",
       run: () => settings.toggleSidebar(),
     },
     {
       id: "action:toggle-git",
       section: "actions",
-      label: "Toggle git panel",
+      label: t("palette.toggleGit"),
       run: () => settings.toggleRightPanel("git"),
     },
     {
       id: "action:toggle-explorer",
       section: "actions",
-      label: "Toggle file explorer",
+      label: t("palette.toggleExplorer"),
       run: () => settings.toggleRightPanel("explorer"),
     },
     {
       id: "action:toggle-todo",
       section: "actions",
-      label: "Toggle todo notepad",
+      label: t("palette.toggleTodo"),
       run: () => settings.toggleRightPanel("todo"),
     },
     {
       id: "action:settings",
       section: "actions",
-      label: "Open settings",
+      label: t("palette.openSettings"),
       hint: "Ctrl+,",
       run: () => {
         app.view = "settings";

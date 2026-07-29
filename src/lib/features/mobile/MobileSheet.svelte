@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
   import { fade, fly } from "svelte/transition";
+  import { t } from "$lib/i18n/index.svelte";
 
   type Props = {
     open: boolean;
@@ -20,7 +21,7 @@
     <button
       type="button"
       class="absolute inset-0 bg-black/55"
-      aria-label="Close"
+      aria-label={t("mobile.close")}
       onclick={onClose}
       transition:fade={{ duration: 140 }}
     ></button>

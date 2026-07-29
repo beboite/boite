@@ -103,7 +103,7 @@
           <ArrowRight class="size-4 shrink-0 text-foreground/80" />
           <span class="min-w-0">
             <span class="block text-xs font-medium text-foreground">{t("branchDialog.bringChanges")}</span>
-            <span class="mt-0.5 block text-[11px] leading-snug text-muted-foreground">
+            <span class="mt-0.5 block text-xs leading-snug text-muted-foreground">
               {t("branchDialog.bringChangesDesc", { branch })}
             </span>
           </span>
@@ -118,7 +118,7 @@
           <Archive class="size-4 shrink-0 text-muted-foreground" />
           <span class="min-w-0">
             <span class="block text-xs font-medium text-foreground">{t("branchDialog.leaveChanges")}</span>
-            <span class="mt-0.5 block text-[11px] leading-snug text-muted-foreground">
+            <span class="mt-0.5 block text-xs leading-snug text-muted-foreground">
               {t("branchDialog.leaveChangesDesc", { command: "git stash pop" })}
             </span>
           </span>

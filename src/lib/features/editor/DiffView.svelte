@@ -90,7 +90,7 @@
 
 <div class="flex h-full min-h-0 w-full flex-col">
   <div
-    class="flex h-7 shrink-0 items-center gap-2 border-b border-border bg-[var(--color-titlebar)] px-3 text-[10.5px] uppercase tracking-wider text-muted-foreground"
+    class="flex h-7 shrink-0 items-center gap-2 border-b border-border bg-[var(--color-titlebar)] px-3 text-xs uppercase tracking-wider text-muted-foreground"
   >
     <span class="flex-1 truncate">{leftLabel}</span>
     <span class="opacity-40">vs</span>

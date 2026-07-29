@@ -11,7 +11,7 @@
 {#if version}
   <button
     type="button"
-    class="flex h-7 items-center gap-1.5 rounded-md bg-foreground px-2 text-[11px] font-medium text-background transition hover:bg-foreground/90 disabled:opacity-60"
+    class="flex h-7 items-center gap-1.5 rounded-md bg-foreground px-2 text-xs font-medium text-background transition hover:bg-foreground/90 disabled:opacity-60"
     onclick={() => updater.install()}
     disabled={installing}
     title="Boite {version} is ready — restart to apply"

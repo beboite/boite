@@ -17,8 +17,11 @@
   import { notifications } from "$lib/features/notifications/store.svelte";
   import { refreshProjectIcon } from "$lib/features/project/api";
   import { isScratch, projectDisplayName } from "$lib/features/project/scratch";
-  import StatusDot from "$lib/shared/components/StatusDot.svelte";
-  import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
+  import ThreadGlyph from "$lib/features/thread/ThreadGlyph.svelte";
+  import {
+    clearFinished,
+    justFinished,
+  } from "$lib/features/thread/finished.svelte";
   import { threadIconColor } from "$lib/features/fastpick/threadAccent";
   import { confirmDialog } from "$lib/shared/components/confirm.svelte";
   import { resizeHandle } from "$lib/shared/actions/resizeHandle";
@@ -561,14 +564,14 @@
     const inMultiPane = !!group && countLeaves(group.root) > 1;
     const items: ContextMenuItem[] = [];
     items.push({
-      label: "Rename",
+      label: t("sidebar.rename"),
       action: () =>
         startRename("thread", thread.id, thread.title ?? thread.label),
     });
     items.push({ separator: true });
     if (inMultiPane) {
       items.push({
-        label: "Detach from group",
+        label: t("sidebar.detachFromGroup"),
         action: () => {
           paneStore.unsplit(thread.id);
         },
@@ -579,7 +582,7 @@
     // trackpad there is no middle button to make it with. Already stopped
     // means there is no PTY left to put down.
     items.push({
-      label: "Put to sleep",
+      label: t("sidebar.putToSleep"),
       action: () => {
         void stopThread(thread.id);
       },
@@ -593,14 +596,14 @@
     });
     items.push({ separator: true });
     items.push({
-      label: "Reload thread",
+      label: t("sidebar.reloadThread"),
       action: () => {
         void reloadThread(thread.id);
       },
     });
     items.push({ separator: true });
     items.push({
-      label: "Close thread",
+      label: t("sidebar.closeThread"),
       action: () => requestRemoveThread(thread.id),
       danger: true,
     });
@@ -657,28 +660,28 @@
     // no name on it for the user to change.
     if (!isScratch(project)) {
       items.push({
-        label: "Rename",
+        label: t("sidebar.rename"),
         action: () => startRename("project", project.id, project.name),
       });
       items.push({ separator: true });
     }
     if (project.archived) {
       items.push({
-        label: "Unarchive",
+        label: t("sidebar.unarchive"),
         action: () => {
           void app.unarchiveProject(project.id);
         },
       });
     } else {
       items.push({
-        label: "Archive",
+        label: t("sidebar.archive"),
         action: () => {
           void app.archiveProject(project.id);
         },
       });
     }
     items.push({
-      label: "Refresh icon",
+      label: t("sidebar.refreshIcon"),
       action: () => {
         const p = app.projects.find((x) => x.id === project.id);
         if (p) void refreshProjectIcon(p);
@@ -686,7 +689,7 @@
     });
     items.push({ separator: true });
     items.push({
-      label: "Remove project",
+      label: t("sidebar.removeProject"),
       action: () => void requestRemoveProject(project.id),
       danger: true,
     });
@@ -749,7 +752,7 @@
     {#if showArchived}
       <button
         type="button"
-        class="flex items-center gap-1.5 rounded text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground transition hover:text-foreground"
+        class="flex items-center gap-1.5 rounded text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground transition hover:text-foreground"
         onclick={() => (showArchived = false)}
         aria-label={t("sidebar.backToProjects")}
         title={t("sidebar.backToProjects")}
@@ -759,7 +762,7 @@
       </button>
     {:else}
       <span
-        class="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground"
+        class="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground"
       >
         {t("sidebar.projects")}
       </span>
@@ -852,8 +855,9 @@
           : 0}
       <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
       <div
-        class="project-block mb-1.5"
+        class="project-block mb-2"
         class:scratch-block={isScratchRow}
+        class:selected={isSelected}
         class:dragging={isProjectSource}
         class:source={isProjectSource}
         class:opacity-50={boiteOffline}
@@ -869,11 +873,9 @@
       >
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
-          class="project-row group/project relative flex items-center gap-2 rounded-md px-2 py-1.5 transition hover:bg-accent/40 hover:text-foreground {showArchived
+          class="project-row group/project relative flex items-center gap-2 px-2 py-1.5 transition hover:text-foreground {showArchived
             ? ''
-            : 'cursor-pointer'} {isSelected
-            ? 'bg-accent/40'
-            : ''}"
+            : 'cursor-pointer'}"
           style:box-shadow={isRemoteOrigin
             ? `inset 2px 0 0 0 ${workspace.info.color || "var(--color-success)"}`
             : undefined}
@@ -901,14 +903,14 @@
                 draggable="false"
               />
             {:else}
-              <span class="text-[11px] font-semibold text-muted-foreground">
+              <span class="text-xs font-semibold text-muted-foreground">
                 {projectDisplayName(project).charAt(0).toUpperCase()}
               </span>
             {/if}
           </div>
           {#if renaming && renaming.kind === "project" && renaming.id === project.id}
             <input
-              class="min-w-0 flex-1 rounded-sm bg-[var(--color-surface-2)] px-1 py-0 text-[13px] font-medium leading-[19px] text-foreground outline-none ring-1 ring-foreground/25"
+              class="min-w-0 flex-1 rounded-sm bg-[var(--color-surface-2)] px-1 py-0 text-base font-medium leading-[19px] text-foreground outline-none ring-1 ring-foreground/25"
               bind:value={renaming.value}
               use:selectOnMount
               onclick={(e) => e.stopPropagation()}
@@ -919,7 +921,7 @@
           {:else}
             <button
               type="button"
-              class="min-w-0 flex-1 truncate text-left text-[13px] font-medium leading-[19px] text-foreground/90 transition group-hover/project:text-foreground"
+              class="min-w-0 flex-1 truncate text-left text-base font-medium leading-[19px] text-foreground/90 transition group-hover/project:text-foreground"
               title={project.cwd}
               onclick={() => {
                 if (consumeDragClick(project.id)) return;
@@ -963,8 +965,11 @@
           {@const threads = threadsByProject.get(project.id) ?? []}
           {@const dragInThisProject =
             liveDrag?.kind === "thread" && liveDrag.projectId === project.id}
+          <!-- No rail down the left any more: the card's own outline is what
+               says these threads belong to this project, and a dashed line
+               inside a box is the same statement made twice. -->
           <ul
-            class="ml-3 space-y-0.5 border-l border-dashed border-border/60 pl-2"
+            class="space-y-px px-1 pb-1"
             data-thread-list
             data-project-id={project.id}
           >
@@ -999,48 +1004,46 @@
                 role="listitem"
               >
                 <div
-                  class="thread-card flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 transition {isActive
+                  class="thread-card flex cursor-pointer items-center gap-2 rounded-sm px-1.5 py-1 transition {isActive
                     ? 'bg-accent text-foreground'
                     : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground'}"
+                  class:just-finished={justFinished(thread.id)}
                   role="button"
                   tabindex="0"
                   onclick={() => {
                     if (consumeDragClick(thread.id)) return;
+                    // Opening it is reading it: the glow has said what it had to
+                    // say and must not still be going when the user comes back.
+                    clearFinished(thread.id);
                     onActivateThread(thread.id);
                   }}
                   onauxclick={(e) => threadAuxClick(thread.id, e)}
                   onkeydown={(e) => {
                     if (e.key === "Enter" || e.key === " ") {
                       e.preventDefault();
+                      clearFinished(thread.id);
                       onActivateThread(thread.id);
                     }
                   }}
                 >
-                  <button
-                    type="button"
-                    data-no-drag
-                    class="-m-1 inline-flex shrink-0 cursor-pointer items-center justify-center p-1"
-                    onclick={(e) => {
-                      e.stopPropagation();
-                      app.toggleThreadKeepAwake(thread.id);
-                    }}
+                  <ThreadGlyph
+                    status={displayThreadStatus(thread)}
+                    iconKey={thread.iconKey}
+                    color={threadIconColor(thread)}
+                    asleep={thread.autoSlept ?? false}
+                    keepAwake={(thread.keepAwake ?? false) && !!thread.ptyId}
+                    onToggleKeepAwake={() => app.toggleThreadKeepAwake(thread.id)}
                     title={thread.keepAwake
                       ? t("sidebar.keepAwakeOn")
                       : t("sidebar.keepAwakeOff")}
-                    aria-label={t("sidebar.toggleKeepAwake")}
-                  >
-                    <StatusDot
-                      status={displayThreadStatus(thread)}
-                      asleep={thread.autoSlept ?? false}
-                      keepAwake={(thread.keepAwake ?? false) && !!thread.ptyId}
-                    />
-                  </button>
+                    label={t("sidebar.toggleKeepAwake")}
+                  />
                   {#if renaming && renaming.kind === "thread" && renaming.id === thread.id}
                     <!-- Ring, not border, and the row's own line-height: an
                          input that brings its own box metrics makes the row
                          taller than the label it replaced, and the list jumps. -->
                     <input
-                      class="min-w-0 flex-1 rounded-sm bg-[var(--color-surface-2)] px-1 py-0 text-[13px] leading-[19px] text-foreground outline-none ring-1 ring-foreground/25"
+                      class="min-w-0 flex-1 rounded-sm bg-[var(--color-surface-2)] px-1 py-0 text-base leading-[19px] text-foreground outline-none ring-1 ring-foreground/25"
                       bind:value={renaming.value}
                       use:selectOnMount
                       onclick={(e) => e.stopPropagation()}
@@ -1055,34 +1058,31 @@
                          disagree — Inter is only a preference here, nothing
                          ships it. -->
                     <span
-                      class="min-w-0 flex-1 truncate text-left text-[13px] leading-[19px]"
+                      class="min-w-0 flex-1 truncate text-left text-base leading-[19px]"
                       title={thread.title ?? thread.label}
                     >
                       {thread.title ?? thread.label}
                     </span>
                   {/if}
-                  <span
-                    class="relative flex size-4 shrink-0 items-center justify-center"
+                  <!-- The logo used to live here, opposite the status dot, and
+                       swapped for the close button on hover. The glyph on the
+                       left carries both now, which leaves this end for the one
+                       thing that is a control rather than a description. -->
+                  <button
+                    type="button"
                     data-no-drag
+                    class="flex size-4 shrink-0 items-center justify-center rounded-xs text-muted-foreground/70 opacity-0 transition hover:bg-danger/20 hover:text-danger group-hover/thread:opacity-100 focus-visible:opacity-100"
+                    onclick={(e) => {
+                      e.stopPropagation();
+                      requestRemoveThread(thread.id);
+                    }}
+                    aria-label={t("sidebar.closeThreadNamed", {
+                      name: thread.title ?? thread.label,
+                    })}
+                    title={t("sidebar.closeThread")}
                   >
-                    <span
-                      class="absolute inset-0 flex items-center justify-center transition-opacity group-hover/thread:opacity-0"
-                    >
-                      <ShortcutIcon iconKey={thread.iconKey} size={14} color={threadIconColor(thread)} />
-                    </span>
-                    <button
-                      type="button"
-                      class="absolute inset-0 flex items-center justify-center rounded text-muted-foreground/70 opacity-0 transition hover:bg-danger/20 hover:text-danger group-hover/thread:opacity-100"
-                      onclick={(e) => {
-                        e.stopPropagation();
-                        requestRemoveThread(thread.id);
-                      }}
-                      aria-label="Close {thread.label}"
-                      title={t("sidebar.closeThread")}
-                    >
-                      <X class="size-3.5" />
-                    </button>
-                  </span>
+                    <X class="size-3.5" />
+                  </button>
                 </div>
               </li>
             {/each}
@@ -1113,23 +1113,19 @@
     style:width="{threadDragGhost.width}px"
     aria-hidden="true"
   >
-    <StatusDot
+    <ThreadGlyph
+      inert
       status={displayThreadStatus(threadDragGhost.thread)}
+      iconKey={threadDragGhost.thread.iconKey}
+      color={threadIconColor(threadDragGhost.thread)}
       asleep={threadDragGhost.thread.autoSlept ?? false}
       keepAwake={(threadDragGhost.thread.keepAwake ?? false) && !!threadDragGhost.thread.ptyId}
     />
     <span
-      class="min-w-0 flex-1 truncate text-left text-[13px] leading-[19px]"
+      class="min-w-0 flex-1 truncate text-left text-base"
       title={threadDragGhost.thread.title ?? threadDragGhost.thread.label}
     >
       {threadDragGhost.thread.title ?? threadDragGhost.thread.label}
-    </span>
-    <span class="flex size-4 shrink-0 items-center justify-center">
-      <ShortcutIcon
-              iconKey={threadDragGhost.thread.iconKey}
-              size={14}
-              color={threadIconColor(threadDragGhost.thread)}
-            />
     </span>
   </div>
 {/if}
@@ -1152,9 +1148,33 @@
     cursor: grabbing !important;
   }
 
+  /* A project is a container, and until now it was a heading with some rows
+     under it: at a dozen threads across three projects, nothing on screen said
+     where one project stopped and the next began. The outline is that
+     statement, and it is why the dashed rail down the thread list could go. */
   .project-block {
     transform-origin: left center;
     will-change: transform;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: color-mix(in srgb, var(--color-surface-2) 45%, transparent);
+    transition:
+      border-color var(--dur-2) var(--ease-out-quint),
+      background-color var(--dur-2) var(--ease-out-quint);
+  }
+  .project-block:hover {
+    border-color: color-mix(
+      in srgb,
+      var(--color-border-strong) 60%,
+      var(--color-border)
+    );
+  }
+  /* Selected is the card, not the header row. The row used to carry a
+     background for it, which put "this project is selected" and "this thread is
+     open" on the same property one indent apart. */
+  .project-block.selected {
+    border-color: var(--color-border-strong);
+    background: var(--color-surface-2);
   }
 
   /* Temporary, and it has to look it. Faded so it sits behind the real
@@ -1164,7 +1184,7 @@
      readable, and this is still the way into a scratch terminal. */
   .project-block.scratch-block {
     opacity: 0.6;
-    border-radius: 0.5rem;
+    border-style: dashed;
     background-image: repeating-linear-gradient(
       135deg,
       transparent 0 5px,
@@ -1184,11 +1204,12 @@
     user-select: none;
   }
 
-  .project-block.source > .project-row,
+  /* The lift is on the card now rather than on its header row: with an outline
+     around the whole block, shadowing only the top strip left the threads
+     underneath flat on the page while the project floated off it. */
+  .project-block.source,
   .drag-ghost {
-    box-shadow:
-      0 12px 28px rgba(0, 0, 0, 0.5),
-      0 0 0 1px rgba(255, 255, 255, 0.08);
+    box-shadow: var(--shadow-e3);
     background: color-mix(in srgb, var(--color-surface-2, #1a1a1a) 90%, transparent);
     backdrop-filter: blur(6px);
   }
@@ -1208,10 +1229,21 @@
 
   /* Where letting go would put the thread. A ring rather than a fill: the row
      underneath already uses background to mean "selected", and two meanings on
-     one property read as one. */
+     one property read as one.
+     The colour used to be `var(--color-primary, #6366f1)`, and there is no
+     --color-primary in this palette — so the one time the app drew a drop
+     target it drew it in an indigo that appears nowhere else. */
   .project-block.drop-target {
-    outline: 2px dashed var(--color-primary, #6366f1);
+    outline: 2px dashed var(--color-foreground);
     outline-offset: 2px;
-    border-radius: 0.5rem;
+  }
+
+  /* A thread that has just finished. Green drains out of the card over six
+     seconds, which is long enough to be caught by a glance that arrives late
+     and short enough that the row goes back to being a row. `forwards` matters:
+     without it the box-shadow snaps back to the 0% keyframe for one frame
+     before the class drops, and the card flashes green on its way out. */
+  .thread-card.just-finished {
+    animation: boite-finish-glow 6s var(--ease-out-quint) forwards;
   }
 </style>

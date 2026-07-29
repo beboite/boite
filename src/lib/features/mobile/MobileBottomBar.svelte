@@ -40,7 +40,7 @@
       aria-current={active ? "page" : undefined}
     >
       <Icon class="size-5" />
-      <span class="text-[10px] font-medium tracking-tight">{tab.label}</span>
+      <span class="text-2xs font-medium tracking-tight">{tab.label}</span>
     </button>
   {/each}
 </nav>

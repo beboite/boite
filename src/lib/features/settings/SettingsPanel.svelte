@@ -30,7 +30,7 @@
   <header
     class="flex shrink-0 items-center justify-between border-b border-border bg-[var(--color-surface)] px-4 py-2"
   >
-    <h2 class="text-[13px] font-semibold tracking-tight">{t("common.settings")}</h2>
+    <h2 class="text-base font-semibold tracking-tight">{t("common.settings")}</h2>
     <button
       type="button"
       class="rounded-md p-1 text-muted-foreground transition hover:bg-accent hover:text-foreground"
@@ -49,7 +49,7 @@
           type="button"
           role="tab"
           aria-selected={activeTab === tab.id}
-          class="relative -mb-px border-b-2 px-2.5 py-1.5 text-[12px] font-medium transition {activeTab ===
+          class="relative -mb-px border-b-2 px-2.5 py-1.5 text-sm font-medium transition {activeTab ===
           tab.id
             ? 'border-foreground text-foreground'
             : 'border-transparent text-muted-foreground hover:text-foreground'}"
@@ -80,6 +80,6 @@
   <footer
     class="flex shrink-0 items-center justify-end border-t border-border bg-[var(--color-surface)] px-4 py-1.5"
   >
-    <span class="font-mono text-[11px] text-muted-foreground/60">Boite v{__APP_VERSION__}</span>
+    <span class="font-mono text-xs text-muted-foreground/60">Boite v{__APP_VERSION__}</span>
   </footer>
 </div>

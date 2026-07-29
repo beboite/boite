@@ -73,7 +73,7 @@
         class="shrink-0 text-xs text-muted-foreground transition hover:text-foreground"
         onclick={openSettings}
       >
-        Add shortcuts
+        {t("shortcuts.addShortcuts")}
       </button>
     {/if}
 

@@ -3,6 +3,7 @@
   import X from "@lucide/svelte/icons/x";
   import FileIcon from "@lucide/svelte/icons/file";
   import GitCompareArrows from "@lucide/svelte/icons/git-compare-arrows";
+  import { t } from "$lib/i18n/index.svelte";
 
   const buffers = $derived(editorStore.buffers);
 
@@ -48,7 +49,7 @@
   class="tab-strip flex h-8 shrink-0 items-stretch gap-px overflow-x-auto bg-[var(--color-titlebar)]"
   onwheel={wheelScroll}
   role="tablist"
-  aria-label="Open files"
+  aria-label={t("editor.openFiles")}
 >
   {#each buffers as b (b.id)}
     {@const active = editorStore.activeId === b.id}
@@ -62,7 +63,7 @@
         type="button"
         role="tab"
         aria-selected={active}
-        class="flex h-full items-center gap-1.5 pl-2.5 text-[11.5px]"
+        class="flex h-full items-center gap-1.5 pl-2.5 text-sm"
         onclick={() => activate(b.id)}
         onauxclick={(e) => middleClickClose(e, b.id)}
         title={b.path}
@@ -76,7 +77,7 @@
         {#if isDirty(b)}
           <span
             class="size-1.5 shrink-0 rounded-full bg-foreground/70"
-            aria-label="unsaved"
+            aria-label={t("editor.unsaved")}
           ></span>
         {/if}
       </button>
@@ -84,7 +85,7 @@
         type="button"
         class="ml-1 mr-1.5 rounded p-0.5 opacity-0 transition hover:bg-[var(--color-surface-3)] hover:opacity-100 focus-visible:opacity-100 group-hover:opacity-80"
         onclick={(e) => close(e, b.id)}
-        aria-label="Close tab"
+        aria-label={t("editor.closeTab")}
       >
         <X class="size-3" />
       </button>

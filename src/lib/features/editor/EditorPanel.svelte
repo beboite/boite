@@ -8,6 +8,7 @@
   import FileText from "@lucide/svelte/icons/file-text";
   import TerminalSquare from "@lucide/svelte/icons/terminal-square";
   import RotateCw from "@lucide/svelte/icons/rotate-cw";
+  import { t } from "$lib/i18n/index.svelte";
 
   const active = $derived(editorStore.active);
 
@@ -45,13 +46,13 @@
   <div class="flex items-stretch border-b border-border bg-[var(--color-titlebar)]">
     <button
       type="button"
-      class="flex h-8 shrink-0 items-center gap-1.5 border-r border-border px-2.5 text-[11px] text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground"
+      class="flex h-8 shrink-0 items-center gap-1.5 border-r border-border px-2.5 text-xs text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground"
       onclick={backToTerminal}
-      title="Back to terminal"
-      aria-label="Back to terminal"
+      title={t("editor.backToTerminal")}
+      aria-label={t("editor.backToTerminal")}
     >
       <TerminalSquare class="size-3.5" />
-      <span>Terminal</span>
+      <span>{t("editor.terminal")}</span>
     </button>
     <div class="min-w-0 flex-1">
       <EditorTabStrip />
@@ -63,11 +64,11 @@
       class="flex flex-1 flex-col items-center justify-center gap-2 text-muted-foreground/70"
     >
       <FileText class="size-8 opacity-40" />
-      <p class="text-xs">Pick a file in the Files or Git panel.</p>
+      <p class="text-xs">{t("editor.pickAFile")}</p>
     </div>
   {:else if active.loading}
     <div class="flex flex-1 items-center justify-center text-xs text-muted-foreground/70">
-      Loading…
+      {t("common.loading")}
     </div>
   {:else if active.error}
     <div
@@ -76,24 +77,24 @@
       {active.error}
     </div>
   {:else if active.kind === "file"}
-    <div class="flex h-7 shrink-0 items-center gap-2 border-b border-border bg-[var(--color-titlebar)] px-3 text-[10.5px] text-muted-foreground">
+    <div class="flex h-7 shrink-0 items-center gap-2 border-b border-border bg-[var(--color-titlebar)] px-3 text-xs text-muted-foreground">
       <span class="truncate flex-1" title={active.path}>{active.path}</span>
       {#if active.isReadonly}
-        <span class="rounded bg-[var(--color-surface-2)] px-1.5 py-0.5 text-[9.5px] uppercase">read-only</span>
+        <span class="rounded bg-[var(--color-surface-2)] px-1.5 py-0.5 text-2xs uppercase">{t("editor.readonly")}</span>
       {/if}
       {#if active.externalChange}
         <span
-          class="rounded bg-[var(--color-warning)]/15 px-1.5 py-0.5 text-[9.5px] uppercase text-[var(--color-warning)]"
-          title="The file was modified outside the editor while you have unsaved changes"
+          class="rounded bg-[var(--color-warning)]/15 px-1.5 py-0.5 text-2xs uppercase text-[var(--color-warning)]"
+          title={t("editor.staleWarning")}
         >
-          changed on disk
+          {t("editor.changedOnDisk")}
         </span>
         <button
           type="button"
           class="rounded p-1 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground"
           onclick={() => active && void editorStore.reloadFromDisk(active.id)}
-          title="Reload from disk (discards your edits)"
-          aria-label="Reload from disk"
+          title={t("editor.reloadFromDisk")}
+          aria-label={t("editor.reload")}
         >
           <RotateCw class="size-3.5" />
         </button>
@@ -106,8 +107,8 @@
         class="rounded p-1 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:opacity-40"
         onclick={save}
         disabled={active.isReadonly || active.content === active.savedContent || active.saving}
-        title="Save (Ctrl+S)"
-        aria-label="Save"
+        title={t("editor.saveWithShortcut")}
+        aria-label={t("editor.save")}
       >
         <Save class="size-3.5 {active.saving ? 'animate-pulse' : ''}" />
       </button>

@@ -17,6 +17,7 @@
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
   import MobileSheet from "./MobileSheet.svelte";
   import TerminalIcon from "@lucide/svelte/icons/square-terminal";
+  import { t } from "$lib/i18n/index.svelte";
 
   type Props = { open: boolean; onClose: () => void };
   let { open, onClose }: Props = $props();
@@ -61,7 +62,7 @@
   }
 </script>
 
-<MobileSheet {open} {onClose} title="New terminal">
+<MobileSheet {open} {onClose} title={t("mobile.newTerminal")}>
   {#if settings.state.shortcuts.length > 0}
     <div class="grid grid-cols-2 gap-2">
       {#each settings.state.shortcuts as shortcut (shortcut.id)}
@@ -83,7 +84,7 @@
     </div>
   {/if}
 
-  <div class="mt-3 mb-1 px-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+  <div class="mt-3 mb-1 px-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
     Shells
   </div>
   <div class="flex flex-col gap-1.5">
@@ -109,7 +110,7 @@
         }}
       >
         <span class="min-w-0 flex-1 truncate font-medium">{shell.label}</span>
-        <span class="shrink-0 font-mono text-[11px] text-muted-foreground/70">{shell.id}</span>
+        <span class="shrink-0 font-mono text-xs text-muted-foreground/70">{shell.id}</span>
       </button>
     {/each}
   </div>

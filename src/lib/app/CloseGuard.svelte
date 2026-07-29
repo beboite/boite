@@ -5,6 +5,7 @@
   import { app } from "$lib/app/store.svelte";
   import { editorStore } from "$lib/features/editor/store.svelte";
   import ConfirmDialog from "$lib/shared/components/ConfirmDialog.svelte";
+  import { t } from "$lib/i18n/index.svelte";
 
   let pendingClose = $state(false);
   let allowClose = false;
@@ -67,7 +68,7 @@
 <ConfirmDialog
   open={pendingClose}
   danger
-  title="Close boite?"
+  title={t("closeGuard.title")}
   {message}
   confirmLabel="Close anyway"
   cancelLabel="Cancel"

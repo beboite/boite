@@ -124,7 +124,15 @@ export const EN_MESSAGES = {
   "sidebar.keepAwakeOff": "Click to keep awake",
   "sidebar.toggleKeepAwake": "Toggle keep awake",
   "sidebar.closeThread": "Close thread",
+  "sidebar.closeThreadNamed": "Close {name}",
   "sidebar.resizeSidebar": "Resize sidebar",
+  "sidebar.rename": "Rename",
+  "sidebar.detachFromGroup": "Detach from group",
+  "sidebar.putToSleep": "Put to sleep",
+  "sidebar.reloadThread": "Reload thread",
+  "sidebar.archive": "Archive",
+  "sidebar.refreshIcon": "Refresh icon",
+  "sidebar.removeProject": "Remove project",
 
   "git.changeBranch": "Change branch",
   "git.newBranchPlaceholder": "New branch name",
@@ -345,6 +353,98 @@ export const EN_MESSAGES = {
   "fastpick.enable": "Offer fastpick in the bar",
   "fastpick.enableDesc": "The menu is hidden anyway on a machine with no fastpick.",
   "fastpick.promoted": "{label} is now running on {model}",
+
+  "explorer.noProject": "No project",
+  "explorer.pickProject": "Pick a project.",
+  "explorer.collapseAll": "Collapse all",
+  "explorer.refresh": "Refresh",
+  "explorer.filterPlaceholder": "Filter files…",
+  "explorer.clearFilter": "Clear filter (Esc)",
+  "explorer.searching": "Searching…",
+  "explorer.noMatches": "No matches.",
+  "explorer.matchesTruncated":
+    "{count}+ matches, narrow the filter to see them all.",
+  "explorer.matchOne": "1 match.",
+  "explorer.matchMany": "{count} matches.",
+  "explorer.emptyFolder": "Empty folder.",
+
+  "editor.openFiles": "Open files",
+  "editor.closeTab": "Close tab",
+  "editor.backToTerminal": "Back to terminal",
+  "editor.staleWarning":
+    "The file was modified outside the editor while you have unsaved changes",
+  "editor.reloadFromDisk": "Reload from disk (discards your edits)",
+  "editor.reload": "Reload from disk",
+  "editor.saveWithShortcut": "Save (Ctrl+S)",
+  "editor.save": "Save",
+  "editor.pickAFile": "Pick a file in the Files or Git panel.",
+  "editor.readonly": "read-only",
+  "editor.changedOnDisk": "changed on disk",
+  "editor.unsaved": "unsaved",
+  "editor.terminal": "Terminal",
+
+  "palette.label": "Command palette",
+  "palette.placeholder": "Search threads, actions, projects…",
+  "palette.threads": "Threads",
+  "palette.actions": "Actions",
+  "palette.projects": "Projects",
+  "palette.newTerminal": "New terminal",
+  "palette.launch": "Launch {label}",
+  "palette.restoreThread": "Restore last closed thread",
+  "palette.closeThread": "Close active thread",
+  "palette.toggleSidebar": "Toggle sidebar",
+  "palette.toggleGit": "Toggle git panel",
+  "palette.toggleExplorer": "Toggle file explorer",
+  "palette.toggleTodo": "Toggle todo notepad",
+  "palette.openSettings": "Open settings",
+
+  "panes.resize": "Resize panes",
+  "panes.maxReached": "Max {count} panes",
+  "panes.closePanel": "Close panel",
+  "panes.resizePanel": "Resize panel",
+
+  "closeGuard.title": "Close boite?",
+
+  "mobile.switchProject": "Switch project",
+  "mobile.newTerminal": "New terminal",
+  "mobile.terminals": "Terminals",
+  "mobile.minimize": "Minimize",
+  "mobile.close": "Close",
+
+  "workspace.showBoiteProjects":
+    "Show the boite's projects inside the Local workspace",
+  "workspace.removeBoite": "Remove boite",
+  "workspace.remove": "Remove",
+  "workspace.setColor": "Set color",
+  "workspace.backToList": "Back to list",
+  "workspace.title": "Workspaces",
+
+  "updates.title": "Updates",
+
+  "terminal.keyboardLabel": "Keyboard (long-press for key bar)",
+  "terminal.keyboardHint": "Tap: keyboard · Long-press: key bar",
+
+  "shell.launchTerminal": "Launch terminal",
+  "shell.pickShell": "Pick a shell",
+
+  "logs.sourceFilter": "Source filter",
+  "logs.refresh": "Refresh",
+  "logs.copyFiltered": "Copy filtered entries",
+  "logs.truncate": "Truncate current log",
+  "logs.copyPath": "Copy log file path",
+
+  "terminalTab.defaultShell": "Default shell",
+  "terminalTab.windowsTweaks": "Windows tweaks",
+  "terminalTab.threadClose": "Thread close",
+  "terminalTab.gitAutoFetch": "Git auto-fetch",
+  "terminalTab.idleAutoClose": "Idle auto-close",
+
+  "shortcuts.addShortcuts": "Add shortcuts",
+
+  "status.keptAwake": "kept awake",
+  "status.keptAwakeHint": "kept awake (won't auto-sleep)",
+  "status.asleep": "asleep",
+  "status.asleepHint": "asleep (afk)",
 } as const;
 
 export type MessageKey = keyof typeof EN_MESSAGES;
