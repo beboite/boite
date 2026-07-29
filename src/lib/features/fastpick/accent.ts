@@ -26,6 +26,21 @@ export const ACCENT_COLOR: Record<ModelAccent, string | null> = {
   other: "var(--color-term-magenta)",
 };
 
+/**
+ * The same answer in Claude Code's own vocabulary, for its `/color` command.
+ *
+ * It paints the prompt bar and takes one of eight names, so this is a translation rather
+ * than the colour itself: `gpt` lands on cyan because that list has no white. `native` is
+ * null, which leaves whatever colour the user set for themselves alone.
+ */
+export const CLAUDE_BAR_COLOR: Record<ModelAccent, string | null> = {
+  native: null,
+  local: "green",
+  claude: "yellow",
+  gpt: "cyan",
+  other: "purple",
+};
+
 const CLAUDE = /\b(claude|sonnet|opus|haiku)\b/i;
 const GPT = /\b(gpt|chatgpt|codex|o[1-9])\b/i;
 

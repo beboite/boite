@@ -18,6 +18,7 @@ import {
   FASTPICK_CMD,
   type FastpickCombo,
 } from "$lib/features/fastpick/combo";
+import { barColorArgs } from "$lib/features/fastpick/threadAccent";
 import { samePromotion, type Promotion } from "./promote";
 import type { IconKey, Project, Shortcut, Thread } from "$lib/types";
 import type { ShellOption } from "$lib/storage/platform.svelte";
@@ -266,7 +267,7 @@ export async function launchFastpick(
   return createThread(
     project,
     FASTPICK_CMD,
-    comboArgs(combo),
+    [...comboArgs(combo), ...barColorArgs(combo, harness.kind)],
     harness.name,
     iconKeyForKind(harness.kind),
     { fresh: true },
