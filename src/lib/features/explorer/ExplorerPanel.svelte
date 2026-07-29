@@ -249,8 +249,13 @@
         {err}
       </div>
     {:else if !entries}
-      <div class="px-3 py-4 text-center text-xs text-muted-foreground/70">
-        {t("common.loading")}
+      <!-- Rows rather than the word "Loading": a tree that arrives in one frame
+           after a blank panel reads as a jump, and one that arrives over its own
+           outline reads as the tree it already looked like. -->
+      <div class="flex flex-col gap-1.5 px-3 py-2" aria-hidden="true">
+        {#each [70, 52, 61, 44, 66, 38] as width, i (i)}
+          <div class="skeleton h-3" style:width="{width}%"></div>
+        {/each}
       </div>
     {:else if entries.length === 0}
       <div class="px-3 py-4 text-center text-xs text-muted-foreground/70">
