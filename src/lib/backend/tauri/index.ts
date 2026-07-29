@@ -4,6 +4,7 @@ import { tauriDb } from "./db";
 import {
   tauriEditor,
   tauriExplorer,
+  tauriFastpick,
   tauriGit,
   tauriLog,
   tauriProject,
@@ -24,6 +25,7 @@ export class TauriBackend implements Backend {
   readonly editor = tauriEditor;
   readonly project = tauriProject;
   readonly shell = tauriShell;
+  readonly fastpick = tauriFastpick;
   readonly scope = tauriScope;
   readonly session = tauriSession;
   readonly log = tauriLog;

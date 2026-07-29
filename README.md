@@ -69,6 +69,28 @@ right resume flag. Shortcuts are editable (label, command, icon, color, order),
 each preset says whether its binary was found on the machine, and any custom
 command can be added.
 
+## Another provider, another model (fastpick)
+
+An agent does not have to run on its vendor's endpoint. If
+[fastpick](https://github.com/klNuno/fastpick) is on the machine that runs the
+threads, a menu appears next to the shortcut bar: pick an agent, an endpoint,
+a model, and the thread starts there. Effort level and system prompt files are
+offered where the agent takes them.
+
+Boite never touches a credential. It asks fastpick what the choices are and
+launches it with the three answers; the key files, the local proxy some
+endpoints need and the machine others have to wake all stay on fastpick's side,
+read at spawn time on the machine that spawns. On a remote boite that machine is
+the server, so a picker drawn on a phone describes the server's endpoints and
+the phone never sees a key.
+
+The thread that comes back is the agent's, not fastpick's: it carries the
+agent's icon, and live status, session resume and the todo endpoint all work as
+they do for a thread launched directly. Reopening the app replays the same
+combination rather than reopening a menu.
+
+The menu is hidden when fastpick is not installed, and nothing else changes.
+
 ## A worktree per thread
 
 Every agent thread opens in its own detached git worktree instead of sharing the
@@ -326,11 +348,12 @@ src/lib/
   features/               # vertical slices, each owning components + store
     terminal git explorer editor panes palette
     project thread shortcut settings workspace mobile push notifications updater
+    fastpick todo devtools setup
   shared/                 # reusable components, brand icons, utils
   storage/                # DB facade
 crates/
   boite-core/             # portable PTY / git / fs / session core
-    pty.rs status.rs session.rs git.rs explorer.rs editor.rs project.rs
+    pty.rs status.rs session.rs git.rs explorer.rs editor.rs project.rs fastpick.rs
   boite-server/           # headless axum server, serves the SPA as a PWA
 src-tauri/                # thin Tauri wrapper over boite-core
 mobile/                   # Bubblewrap TWA wrapper for the Android build

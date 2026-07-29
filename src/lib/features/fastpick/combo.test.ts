@@ -1,0 +1,85 @@
+import { describe, expect, it } from "vitest";
+import { comboArgs, iconKeyForKind, parseCombo } from "./combo";
+
+describe("comboArgs", () => {
+  it("names all three answers so fastpick opens no menu", () => {
+    expect(comboArgs({ harness: "claude-code", provider: "acme", model: "acme-large" })).toEqual([
+      "--harness",
+      "claude-code",
+      "--provider",
+      "acme",
+      "--model",
+      "acme-large",
+    ]);
+  });
+
+  it("leaves the prompt files out when the choice is fastpick's", () => {
+    const args = comboArgs({ harness: "h", provider: "p", model: "m" });
+    expect(args).not.toContain("--md");
+    expect(args).not.toContain("--no-md");
+  });
+
+  it("says none out loud, since silence means the matching file", () => {
+    expect(comboArgs({ harness: "h", provider: "p", model: "m", prompts: [] })).toContain("--no-md");
+  });
+
+  it("repeats --md once per file", () => {
+    expect(comboArgs({ harness: "h", provider: "p", model: "m", prompts: ["a", "b"] })).toEqual([
+      "--harness", "h", "--provider", "p", "--model", "m",
+      "--md", "a", "--md", "b",
+    ]);
+  });
+});
+
+describe("parseCombo", () => {
+  it("reads back what comboArgs wrote", () => {
+    const combo = {
+      harness: "claude-code",
+      provider: "acme",
+      model: "acme-large",
+      effort: "high",
+      prompts: ["acme-large"],
+    };
+    expect(parseCombo("fastpick", comboArgs(combo))).toEqual(combo);
+  });
+
+  it("ignores a command that is not fastpick", () => {
+    expect(parseCombo("claude", ["--harness", "h", "--provider", "p", "--model", "m"])).toBeNull();
+  });
+
+  it("refuses a partial combo, which still opens a menu", () => {
+    expect(parseCombo("fastpick", ["--harness", "claude-code"])).toBeNull();
+    expect(parseCombo("fastpick", [])).toBeNull();
+  });
+
+  it("survives a flag left dangling at the end", () => {
+    expect(parseCombo("fastpick", ["--harness", "h", "--provider", "p", "--model"])).toBeNull();
+  });
+
+  it("keeps arguments meant for the agent out of the combo", () => {
+    const combo = parseCombo("fastpick", [
+      "--harness", "h", "--provider", "p", "--model", "m",
+      "--", "-p", "hello",
+    ]);
+    expect(combo).toEqual({ harness: "h", provider: "p", model: "m", effort: null, prompts: undefined });
+  });
+
+  it("reads --no-md as an explicit none", () => {
+    const combo = parseCombo("fastpick", [
+      "--harness", "h", "--provider", "p", "--model", "m", "--no-md",
+    ]);
+    expect(combo?.prompts).toEqual([]);
+  });
+});
+
+describe("iconKeyForKind", () => {
+  it("maps a harness onto the agent boite already knows", () => {
+    expect(iconKeyForKind("claude-code")).toBe("claude");
+    expect(iconKeyForKind("opencode")).toBe("opencode");
+    expect(iconKeyForKind("codex")).toBe("codex");
+  });
+
+  it("has no icon for a kind it has never heard of", () => {
+    expect(iconKeyForKind("something-new")).toBeNull();
+  });
+});

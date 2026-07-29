@@ -273,6 +273,77 @@ export interface ShellApi {
   warmShell(shellId: string): Promise<void>;
 }
 
+/**
+ * What `fastpick --list --json` answers. Only the fields boite reads are typed: the
+ * document is fastpick's, it carries a `schema` number, and a field it grows is not a
+ * reason to touch this file.
+ */
+export interface FastpickListing {
+  schema: number;
+  harnesses: FastpickHarness[];
+  providers: FastpickProvider[];
+  /** Only present when a provider was asked for. */
+  models?: FastpickModels;
+}
+
+export interface FastpickHarness {
+  id: string;
+  name: string;
+  /**
+   * Which agent this is, whatever the config named it. `id` is the user's word and can be
+   * anything, so the icon and the session machinery key off this instead.
+   */
+  kind: "claude-code" | "opencode" | "codex";
+  /** Whether the agent's binary is on the machine that would run it. */
+  installed: boolean;
+  supportsEffort: boolean;
+  supportsSystemPrompts: boolean;
+  /** Providers wired to this harness. A pair absent here cannot be launched. */
+  providers: string[];
+}
+
+export interface FastpickProvider {
+  id: string;
+  name: string;
+  /** Heading several providers share, typically the site they belong to. */
+  group: string | null;
+  needsKey: boolean;
+  /**
+   * Whether that key file is there. fastpick never reports where it is or what is in it,
+   * and boite never asks: the credential is read at spawn time, on the machine that spawns.
+   */
+  keyPresent: boolean;
+}
+
+export interface FastpickModels {
+  provider: string;
+  /** Where the list came from, so a cached one is never shown as live. */
+  source: { kind: "live" | "cache" | "config" | "failed"; ageSecs?: number; error?: string };
+  items: FastpickModel[];
+}
+
+export interface FastpickModel {
+  id: string;
+  label: string | null;
+  contextWindow: number | null;
+  effort: string[];
+  effortDefault: string | null;
+  /** System prompt files matching this model, most specific first, as `--md` names. */
+  prompts: string[];
+}
+
+export interface FastpickApi {
+  /**
+   * The harnesses, providers and bindings fastpick declares. With `provider`, that
+   * provider's models too — a separate call because each one costs an HTTP request, and
+   * fastpick answers from its cache unless `refresh` is set.
+   *
+   * Rejects when fastpick is missing or its config is unusable, carrying fastpick's own
+   * message. Ask `shell.commandExists("fastpick")` first to tell the two apart.
+   */
+  list(provider?: string, refresh?: boolean): Promise<FastpickListing>;
+}
+
 export interface ScopeApi {
   registerProjectRoots(roots: string[]): Promise<void>;
   // The server's browsable base dir for adding projects via the web folder
@@ -439,6 +510,7 @@ export interface Backend {
   readonly editor: EditorApi;
   readonly project: ProjectApi;
   readonly shell: ShellApi;
+  readonly fastpick: FastpickApi;
   readonly scope: ScopeApi;
   readonly session: SessionApi;
   readonly log: LogApi;
