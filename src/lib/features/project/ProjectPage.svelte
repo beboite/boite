@@ -7,6 +7,7 @@
   import ChatBubble from "$lib/features/chat/ChatBubble.svelte";
   import ChatComposer from "$lib/features/chat/ChatComposer.svelte";
   import ProjectOverview from "./ProjectOverview.svelte";
+  import ProjectWorktrees from "./ProjectWorktrees.svelte";
   import BoiteLogo from "$lib/shared/components/BoiteLogo.svelte";
   import MessagesSquare from "@lucide/svelte/icons/messages-square";
   import { t } from "$lib/i18n/index.svelte";
@@ -46,6 +47,17 @@
   });
 
   const messages = $derived(chat ? chats.messages[chat.id] ?? [] : []);
+
+  /**
+   * Which half of the page is showing.
+   *
+   * Local rather than on `app`: it is where you were looking, not what the
+   * workspace is, and coming back to a project a week later on its overview is
+   * the right answer every time. The chat rides with the overview — the
+   * worktree tab is a thing you inspect, not a thing you discuss.
+   */
+  type Tab = "overview" | "worktrees";
+  let tab = $state<Tab>("overview");
 
   let scroller = $state<HTMLDivElement | null>(null);
   // Follow the conversation only while already at the bottom, so an answer
@@ -91,19 +103,37 @@
         <img src={project.icon} alt="" class="size-4 shrink-0 rounded-sm object-cover" />
       {/if}
       <span class="truncate text-xs font-medium text-foreground/90">{project.name}</span>
+      <nav class="ml-2 flex items-center gap-0.5">
+        {#each [["overview", t("project.tabOverview")], ["worktrees", t("project.tabWorktrees")]] as const as [id, label] (id)}
+          <button
+            type="button"
+            class="rounded px-2 py-0.5 text-[11.5px] transition"
+            class:bg-accent={tab === id}
+            class:text-foreground={tab === id}
+            class:text-muted-foreground={tab !== id}
+            onclick={() => (tab = id)}
+          >
+            {label}
+          </button>
+        {/each}
+      </nav>
     </header>
 
     <div bind:this={scroller} onscroll={onScroll} class="min-h-0 flex-1 overflow-y-auto">
       <div class="mx-auto w-full max-w-3xl px-4 py-4">
-        <ProjectOverview {project} {onOpenThread} />
+        {#if tab === "worktrees"}
+          <ProjectWorktrees {project} />
+        {:else}
+          <ProjectOverview {project} {onOpenThread} />
+        {/if}
 
-        {#if messages.length > 0}
+        {#if tab === "overview" && messages.length > 0}
           <div class="mt-5 flex flex-col gap-4">
             {#each messages as message (message.id)}
               <ChatBubble chat={chat!} {message} />
             {/each}
           </div>
-        {:else if canChat()}
+        {:else if tab === "overview" && canChat()}
           <p
             class="mt-6 flex items-center justify-center gap-2 text-center text-[12.5px] text-muted-foreground"
           >
@@ -114,7 +144,10 @@
       </div>
     </div>
 
-    {#if canChat()}
+    <!-- The composer belongs to the overview, where the conversation it writes
+         into is on screen. Pinned under the worktree list it would be typing
+         into something the user cannot see. -->
+    {#if tab === "overview" && canChat()}
       <ChatComposer {chat} projectId={project.id} />
     {/if}
   </div>

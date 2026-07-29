@@ -153,6 +153,27 @@ export interface GitApi {
   init(path: string): Promise<void>;
 }
 
+/**
+ * One worktree of a repository, as the repository itself describes it.
+ *
+ * Read from git rather than from Boite's threads on purpose: a worktree whose
+ * thread was deleted is still on disk, still holding whatever was in it, and is
+ * exactly the one no panel can show today.
+ */
+export interface WorktreeEntry {
+  path: string;
+  /** Null when HEAD is detached, which is how Boite opens every worktree. */
+  branch: string | null;
+  head: string;
+  /** The repository's own checkout. Never offered for removal. */
+  main: boolean;
+  locked: boolean;
+  /** Its directory is gone; only git's administrative file is left. */
+  prunable: boolean;
+  dirty: boolean;
+  orphanCommits: boolean;
+}
+
 /** What a worktree still holds that removing it would destroy. */
 export interface WorktreeHold {
   /** Modified, staged or untracked files. */
@@ -174,6 +195,13 @@ export interface WorktreeApi {
    * what a new thread waits on.
    */
   open(repo: string, threadId: string): Promise<string | null>;
+  /**
+   * Every worktree of a repository, the main checkout included, each with what
+   * removing it would destroy. One call rather than a list plus a `hold` per
+   * entry: each flag costs a git process, and on Windows those round trips are
+   * the whole cost of drawing the page.
+   */
+  list(repo: string): Promise<WorktreeEntry[]>;
   /**
    * Puts a branch on a detached worktree, once its work has proved worth
    * keeping. Rejects a name that is already taken.

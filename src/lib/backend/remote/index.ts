@@ -18,6 +18,7 @@ import type {
   ShellApi,
   WorkspaceMetaApi,
   WorktreeApi,
+  WorktreeEntry,
   WorktreeHold,
 } from "../types";
 import type { Project, Settings, Thread, TodoItem } from "$lib/types";
@@ -224,6 +225,8 @@ export class RemoteBackend implements Backend {
     this.worktree = {
       open: (repo, threadId) =>
         rpc("worktree.open", { repo, threadId }).then((r) => (r.path as string) ?? null),
+      list: (repo) =>
+        rpc("worktree.list", { repo }).then((r) => (r.worktrees ?? []) as WorktreeEntry[]),
       claim: (path, name) => rpc("worktree.claim", { path, name }).then(() => {}),
       reserve: (path, name) => rpc("worktree.reserve", { path, name }).then(() => {}),
       hold: (path) => rpc("worktree.hold", { path }).then((r) => r as WorktreeHold),

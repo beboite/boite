@@ -1788,6 +1788,107 @@ pub fn remove_worktree_blocking(
     Ok(())
 }
 
+/// One line of `git worktree list`, with what it would cost to remove it.
+///
+/// The repository is the authority, not Boite's thread rows: a worktree whose
+/// thread was deleted still exists on disk and still holds whatever was in it,
+/// and that is precisely the one nobody can see today.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorktreeEntry {
+    pub path: String,
+    /// The branch it is on, or none when HEAD is detached — which is how every
+    /// worktree Boite opens starts out.
+    pub branch: Option<String>,
+    pub head: String,
+    /// The first one git lists is the repository's own checkout. It is in the
+    /// list because leaving it out would make the numbers not add up, and it
+    /// is flagged because it is the one that must never be offered for removal.
+    pub main: bool,
+    pub locked: bool,
+    /// Git would drop this entry on the next `worktree prune`: its directory is
+    /// gone, only the administrative file is left.
+    pub prunable: bool,
+    /// Modified, staged or untracked files. False for a worktree whose
+    /// directory no longer exists, where there is nothing left to be dirty.
+    pub dirty: bool,
+    /// HEAD is on no local branch, so the commits here are reachable from
+    /// nowhere else.
+    pub orphan_commits: bool,
+}
+
+/// Every worktree of a repository, its own checkout included.
+///
+/// `--porcelain` because the human format elides and aligns; each record is a
+/// blank-line-separated block of `key value` lines, and the keys that carry no
+/// value (`bare`, `detached`, `prunable`) appear alone.
+///
+/// The dirty and orphan flags cost two git invocations per worktree, which is
+/// why this exists as one call rather than as a list the caller then walks: on
+/// Windows the round trips are the expensive part, and a page that has to draw
+/// the whole picture wants it in one answer.
+pub fn list_worktrees_blocking(repo: &str) -> Result<Vec<WorktreeEntry>, String> {
+    let r = Path::new(repo);
+    if !r.is_dir() {
+        return Err("Not a directory".into());
+    }
+    let mut cmd = git(r);
+    cmd.args(["worktree", "list", "--porcelain"]);
+    let out = run(cmd)?;
+    let text = String::from_utf8_lossy(&out);
+
+    let mut entries: Vec<WorktreeEntry> = Vec::new();
+    let mut path: Option<String> = None;
+    let mut head = String::new();
+    let mut branch: Option<String> = None;
+    let mut locked = false;
+    let mut prunable = false;
+
+    // A record ends at a blank line, and the last one ends at the end of the
+    // output — hence the sentinel rather than a flush after the loop.
+    for line in text.lines().chain(std::iter::once("")) {
+        if line.is_empty() {
+            if let Some(p) = path.take() {
+                let main = entries.is_empty();
+                // A pruned-away directory cannot be inspected, and reporting it
+                // as clean would invite exactly the removal that is already
+                // safe. The prunable flag is what that row is about.
+                let hold = worktree_hold_blocking(&p).unwrap_or(WorktreeHold {
+                    dirty: false,
+                    orphan_commits: false,
+                });
+                entries.push(WorktreeEntry {
+                    path: p,
+                    branch: branch.take(),
+                    head: std::mem::take(&mut head),
+                    main,
+                    locked,
+                    prunable,
+                    dirty: hold.dirty,
+                    orphan_commits: hold.orphan_commits,
+                });
+            }
+            locked = false;
+            prunable = false;
+            continue;
+        }
+        let (key, value) = match line.split_once(' ') {
+            Some((k, v)) => (k, v),
+            None => (line, ""),
+        };
+        match key {
+            "worktree" => path = Some(value.to_string()),
+            "HEAD" => head = value.to_string(),
+            // `refs/heads/x` is what git prints; the panel wants `x`.
+            "branch" => branch = Some(value.trim_start_matches("refs/heads/").to_string()),
+            "locked" => locked = true,
+            "prunable" => prunable = true,
+            _ => {}
+        }
+    }
+    Ok(entries)
+}
+
 #[cfg(test)]
 mod worktree_tests {
     use super::*;
@@ -1894,6 +1995,47 @@ mod worktree_tests {
         assert!(symbolic_branch(&b).is_none());
         let _ = remove_worktree_blocking(f.path(), a.to_str().unwrap(), true);
         let _ = remove_worktree_blocking(f.path(), b.to_str().unwrap(), true);
+    }
+
+    #[test]
+    fn listing_names_the_main_checkout_and_carries_each_worktree_state() {
+        let f = Fixture::new();
+
+        // Alone, the repository is its own only worktree.
+        let solo = list_worktrees_blocking(f.path()).unwrap();
+        assert_eq!(solo.len(), 1);
+        assert!(solo[0].main);
+        assert_eq!(solo[0].branch.as_deref(), Some("master"));
+        assert!(!solo[0].dirty && !solo[0].orphan_commits);
+
+        let dirty = scratch("list-dirty");
+        add_detached_worktree_blocking(f.path(), dirty.to_str().unwrap()).unwrap();
+        fs::write(dirty.join("scratch.txt"), "in flight\n").unwrap();
+
+        let clean = scratch("list-clean");
+        add_detached_worktree_blocking(f.path(), clean.to_str().unwrap()).unwrap();
+
+        let all = list_worktrees_blocking(f.path()).unwrap();
+        assert_eq!(all.len(), 3, "{all:?}");
+        assert_eq!(all.iter().filter(|w| w.main).count(), 1);
+
+        let found = |p: &Path| {
+            all.iter()
+                .find(|w| Path::new(&w.path) == p || w.path.contains(p.file_name().unwrap().to_str().unwrap()))
+                .unwrap_or_else(|| panic!("{p:?} missing from {all:?}"))
+        };
+
+        // The untracked file is the whole point: it is work, and the list has
+        // to say so without anyone opening the directory.
+        assert!(found(&dirty).dirty);
+        assert!(!found(&clean).dirty);
+        // Detached is how every worktree Boite opens starts, so both sit on no
+        // branch and their commits would go away with the directory.
+        assert!(found(&dirty).branch.is_none());
+        assert!(found(&clean).branch.is_none());
+
+        let _ = remove_worktree_blocking(f.path(), dirty.to_str().unwrap(), true);
+        let _ = remove_worktree_blocking(f.path(), clean.to_str().unwrap(), true);
     }
 
     #[test]

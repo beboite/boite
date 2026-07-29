@@ -495,6 +495,7 @@ pub fn run() {
             commands::git_branches,
             commands::git_switch_branch,
             commands::worktree_open,
+            commands::worktree_list,
             commands::chat_dir,
             commands::chat_dir_remove,
             commands::create_project_dir,
