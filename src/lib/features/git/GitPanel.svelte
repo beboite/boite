@@ -287,7 +287,9 @@
   <header
     class="flex h-9 shrink-0 items-center gap-2 border-b border-border px-3"
   >
-    <GitBranch class="size-4 text-muted-foreground" />
+    <!-- The icon belongs to whichever of the two things is drawn, never to
+         both: the branch button carries its own, and a second one sitting in
+         front of it read as two branch marks side by side. -->
     {#if gs?.isRepo}
       <div bind:this={branchMenuEl} class="relative min-w-0">
         <button
@@ -373,6 +375,7 @@
         </span>
       {/if}
     {:else}
+      <GitBranch class="size-4 text-muted-foreground" />
       <span class="truncate text-xs text-muted-foreground">{t("git.notAGitRepo")}</span>
     {/if}
     {#if project?.gitRoot}
