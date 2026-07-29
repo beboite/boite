@@ -268,6 +268,31 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "project.worktreesOff":
     "Les worktrees par terminal sont désactivés ; tout tourne dans le dossier du projet.",
   "project.chatHint": "Posez une question sur ce projet — l'agent démarre dans le dossier.",
+  "project.tabOverview": "Aperçu",
+  "project.tabWorktrees": "Worktrees",
+
+  "worktree.title": "Worktrees",
+  "worktree.refresh": "Relire le dépôt",
+  "worktree.loading": "Lecture du dépôt…",
+  "worktree.none": "Aucun worktree dans ce dépôt.",
+  "worktree.unreadable": "Ce dossier n'est pas un dépôt git.",
+  "worktree.main": "checkout",
+  "worktree.detachedAt": "détaché sur {head}",
+  "worktree.dirty": "modifications non commitées",
+  "worktree.orphan": "commits sur aucune branche",
+  "worktree.prunable": "dossier disparu",
+  "worktree.empty": "rien à perdre",
+  "worktree.dirtyCount": "{count} avec du travail dedans",
+  "worktree.heldBy": "{thread} tourne ici",
+  "worktree.remove": "Supprimer ce worktree",
+  "worktree.removeTitle": "Supprimer {name} ?",
+  "worktree.removeClean": "Il ne contient rien : le supprimer ne perd aucun travail.",
+  "worktree.removeConfirm": "Supprimer",
+  "worktree.holdsChanges": "Il contient des modifications non commitées, qui seront perdues.",
+  "worktree.holdsCommits": "Il contient des commits sur aucune branche, qui seront perdus.",
+  "worktree.holdsBoth":
+    "Il contient des modifications non commitées et des commits sur aucune branche. Les deux seront perdus.",
+  "worktree.inUseBy": "{thread} tourne encore dedans.",
 
   "notification.readyForInput": "Prêt pour saisie",
 

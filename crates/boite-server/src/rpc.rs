@@ -668,6 +668,12 @@ async fn dispatch_worktree(
             let r = blocking(move || git::open_worktree_if_eligible_blocking(&repo, &path)).await??;
             Ok(json!({ "path": r }))
         }
+        "worktree.list" => {
+            let repo = str_param(&params, "repo")?;
+            state.roots.ensure_allowed(&repo)?;
+            let r = blocking(move || git::list_worktrees_blocking(&repo)).await??;
+            Ok(json!({ "worktrees": r }))
+        }
         "worktree.claim" => {
             let path = str_param(&params, "path")?;
             state.roots.ensure_allowed(&path)?;

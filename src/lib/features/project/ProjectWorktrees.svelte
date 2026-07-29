@@ -1,0 +1,214 @@
+<script lang="ts">
+  import { app } from "$lib/app/store.svelte";
+  import { backendForPath } from "$lib/backend";
+  import { notifications } from "$lib/features/notifications/store.svelte";
+  import { logger } from "$lib/shared/services/logger.svelte";
+  import { confirmDialog } from "$lib/shared/components/confirm.svelte";
+  import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
+  import { basename } from "$lib/shared/utils/path";
+  import { t } from "$lib/i18n/index.svelte";
+  import FolderGit2 from "@lucide/svelte/icons/folder-git-2";
+  import RefreshCw from "@lucide/svelte/icons/refresh-cw";
+  import Trash2 from "@lucide/svelte/icons/trash-2";
+  import Lock from "@lucide/svelte/icons/lock";
+  import type { WorktreeEntry } from "$lib/backend/types";
+  import type { IconKey, Project } from "$lib/types";
+
+  /**
+   * Every worktree of the project's repository, read from the repository.
+   *
+   * Not from the thread rows: a thread that was deleted leaves its worktree on
+   * disk, holding whatever the agent had not committed, and nothing in Boite
+   * showed it. That straggler is the reason this panel exists — the ones a
+   * thread still owns were already visible on the overview.
+   */
+  type Props = { project: Project };
+  let { project }: Props = $props();
+
+  let entries = $state<WorktreeEntry[]>([]);
+  let loading = $state(false);
+  let failed = $state<string | null>(null);
+  let busy = $state<Record<string, true>>({});
+
+  const repo = $derived(project.gitRoot ?? project.cwd);
+  // Which thread is standing in which directory, so a row can say who is using
+  // it before anyone is asked whether it can go.
+  const holders = $derived.by(() => {
+    const map = new Map<string, { label: string; iconKey: IconKey }>();
+    for (const thread of app.threads) {
+      if (thread.worktreePath) {
+        map.set(thread.worktreePath, {
+          label: thread.title ?? thread.label,
+          iconKey: thread.iconKey,
+        });
+      }
+    }
+    return map;
+  });
+
+  const dirtyCount = $derived(entries.filter((w) => !w.main && holdsWork(w)).length);
+
+  function holdsWork(w: WorktreeEntry): boolean {
+    return w.dirty || w.orphanCommits;
+  }
+
+  async function load() {
+    if (loading) return;
+    loading = true;
+    failed = null;
+    try {
+      entries = await backendForPath(project.cwd).worktree.list(repo);
+    } catch (err) {
+      // A project that is not a repository has no worktrees rather than an
+      // error worth a toast, but the panel still has to say which it is.
+      failed = String(err);
+      entries = [];
+    } finally {
+      loading = false;
+    }
+  }
+
+  // Re-reads whenever the project changes, and once on mount. Every flag here
+  // costs a git process, so nothing polls: the button is the refresh.
+  $effect(() => {
+    void project.id;
+    void load();
+  });
+
+  /**
+   * Removes a worktree, after saying plainly what removing it destroys.
+   *
+   * `force` is only ever the user answering for themselves. The unforced call
+   * refuses while the directory holds work, which is what makes the automatic
+   * cleanup safe, so a panel that always forced would quietly undo that.
+   */
+  async function remove(w: WorktreeEntry) {
+    const holder = holders.get(w.path);
+    const detail = w.dirty && w.orphanCommits
+      ? t("worktree.holdsBoth")
+      : w.dirty
+        ? t("worktree.holdsChanges")
+        : w.orphanCommits
+          ? t("worktree.holdsCommits")
+          : null;
+    const ok = await confirmDialog.ask({
+      title: t("worktree.removeTitle", { name: basename(w.path) }),
+      message: [detail, holder ? t("worktree.inUseBy", { thread: holder.label }) : null]
+        .filter(Boolean)
+        .join(" ") || t("worktree.removeClean"),
+      confirmLabel: t("worktree.removeConfirm"),
+      danger: true,
+    });
+    if (!ok) return;
+    busy[w.path] = true;
+    try {
+      await backendForPath(project.cwd).worktree.remove(repo, w.path, holdsWork(w));
+      await load();
+    } catch (err) {
+      logger.warn("worktree", `could not remove ${w.path}`, String(err));
+      notifications.error(String(err));
+    } finally {
+      delete busy[w.path];
+    }
+  }
+</script>
+
+<section class="rounded-lg border border-border bg-[var(--color-surface)]">
+  <header class="flex items-center gap-2 border-b border-border px-3 py-2">
+    <FolderGit2 class="size-4 shrink-0 text-muted-foreground" />
+    <h2 class="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+      {t("worktree.title")}
+    </h2>
+    <span class="flex-1"></span>
+    {#if dirtyCount > 0}
+      <span class="text-[11px] text-[var(--color-warning)]">
+        {t("worktree.dirtyCount", { count: dirtyCount })}
+      </span>
+    {/if}
+    <button
+      type="button"
+      class="rounded p-1 text-muted-foreground transition hover:bg-accent hover:text-foreground disabled:opacity-40"
+      onclick={load}
+      disabled={loading}
+      title={t("worktree.refresh")}
+      aria-label={t("worktree.refresh")}
+    >
+      <RefreshCw class="size-3.5 {loading ? 'animate-spin' : ''}" />
+    </button>
+  </header>
+
+  {#if failed}
+    <p class="px-3 py-4 text-center text-[12px] text-muted-foreground">
+      {t("worktree.unreadable")}
+    </p>
+  {:else if entries.length === 0}
+    <p class="px-3 py-4 text-center text-[12px] text-muted-foreground">
+      {loading ? t("worktree.loading") : t("worktree.none")}
+    </p>
+  {:else}
+    <ul class="divide-y divide-border">
+      {#each entries as w (w.path)}
+        {@const holder = holders.get(w.path)}
+        <li class="flex items-start gap-2.5 px-3 py-2">
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-1.5">
+              <span class="truncate text-[12.5px] text-foreground/90" title={w.path}>
+                {basename(w.path)}
+              </span>
+              {#if w.main}
+                <span
+                  class="shrink-0 rounded-full border border-border px-1.5 py-px text-[9.5px] uppercase tracking-wide text-muted-foreground"
+                >
+                  {t("worktree.main")}
+                </span>
+              {/if}
+              {#if w.locked}
+                <Lock class="size-3 shrink-0 text-muted-foreground" />
+              {/if}
+            </div>
+
+            <div class="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px]">
+              <span class="font-mono text-muted-foreground">
+                {w.branch ?? t("worktree.detachedAt", { head: w.head.slice(0, 7) })}
+              </span>
+              {#if w.dirty}
+                <span class="text-[var(--color-warning)]">{t("worktree.dirty")}</span>
+              {/if}
+              {#if w.orphanCommits}
+                <span class="text-[var(--color-warning)]">{t("worktree.orphan")}</span>
+              {/if}
+              {#if w.prunable}
+                <span class="text-muted-foreground">{t("worktree.prunable")}</span>
+              {/if}
+              {#if !w.main && !holdsWork(w) && !w.prunable}
+                <span class="text-muted-foreground">{t("worktree.empty")}</span>
+              {/if}
+            </div>
+
+            {#if holder}
+              <p class="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                <ShortcutIcon iconKey={holder.iconKey} size={11} />
+                <span class="truncate">{t("worktree.heldBy", { thread: holder.label })}</span>
+              </p>
+            {/if}
+          </div>
+
+          <!-- The repository's own checkout is in the list so the count adds
+               up, and it is the one thing here that must never be removable. -->
+          {#if !w.main}
+            <button
+              type="button"
+              class="shrink-0 rounded p-1 text-muted-foreground transition hover:bg-accent hover:text-[var(--color-danger)] disabled:opacity-40"
+              onclick={() => remove(w)}
+              disabled={busy[w.path] === true}
+              title={t("worktree.remove")}
+              aria-label={t("worktree.remove")}
+            >
+              <Trash2 class="size-3.5" />
+            </button>
+          {/if}
+        </li>
+      {/each}
+    </ul>
+  {/if}
+</section>

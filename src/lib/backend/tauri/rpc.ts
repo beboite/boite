@@ -13,6 +13,7 @@ import type {
   SessionKind,
   ShellApi,
   WorktreeApi,
+  WorktreeEntry,
   WorktreeHold,
 } from "../types";
 import type {
@@ -52,6 +53,7 @@ export const tauriGit: GitApi = {
 
 export const tauriWorktree: WorktreeApi = {
   open: (repo, threadId) => invoke<string | null>("worktree_open", { repo, threadId }),
+  list: (repo) => invoke<WorktreeEntry[]>("worktree_list", { repo }),
   claim: (path, name) => invoke("worktree_claim", { path, name }),
   reserve: (path, name) => invoke("worktree_reserve", { path, name }),
   hold: (path) => invoke<WorktreeHold>("worktree_hold", { path }),

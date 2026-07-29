@@ -853,6 +853,21 @@ pub async fn worktree_open(
     .map_err(|e| format!("worktree_open task failed: {e}"))?
 }
 
+/// Every worktree of a repository, read from the repository itself.
+///
+/// Scoped on the repo alone: the paths come back from git rather than going in,
+/// so there is nothing here for a caller to point somewhere it should not.
+#[tauri::command]
+pub async fn worktree_list(
+    scope: State<'_, ProjectRoots>,
+    repo: String,
+) -> Result<Vec<git::WorktreeEntry>, String> {
+    scope.ensure_allowed(&repo)?;
+    tauri::async_runtime::spawn_blocking(move || git::list_worktrees_blocking(&repo))
+        .await
+        .map_err(|e| format!("worktree_list task failed: {e}"))?
+}
+
 /// The directory a project-less chat runs its turns in, created if needed.
 ///
 /// The frontend never composes this path: the id goes through
