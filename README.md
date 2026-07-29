@@ -35,13 +35,16 @@ wrapped, and a blank shell is one keystroke away.
 - **Status at a glance.** A per-thread dot read from the agent's own OSC title: working, ready, error.
 - **A worktree per thread.** Every agent works in its own detached git worktree, so two of them on the same repo never write to the same files.
 - **Session resume.** Boite reads each tool's session store to find the conversation that belongs to the thread's directory.
+- **A page per project.** Threads, branch and upstream distance, recent commits, open todos and which worktree sits where, with a chat below it standing in the project's folder.
+- **Chat, not only terminals.** Ask one question without opening a thread. Bubbles where the agent streams events, its plain output where it does not, a live terminal where neither.
+- **Another provider, another model.** With [fastpick](https://github.com/beboite/fastpick) installed, pick an endpoint and a model for the agent, and the icon is tinted with what is actually answering.
 - **Split panes.** Split horizontally or vertically, drag threads between panes, resize with the mouse.
 - **Git panel.** Staged/unstaged/conflict sections, commit, fetch/pull/push, branches, auto-fetch and a commit graph. Nested repos are found three levels deep.
 - **File explorer and editor.** A CodeMirror 6 editor with syntax highlighting, tabs, and a side-by-side diff from the git panel.
-- **Command palette.** `Ctrl+K` over threads, projects, shortcuts and actions.
+- **Command palette.** `Ctrl+K` over threads, projects, shortcuts and actions, each row wearing its own icon.
 - **First run.** A two-screen wizard picks the interface language (English or French) and puts the agents it finds on the machine straight into the shortcut bar.
 - **Remote workspaces.** Point the desktop app or a phone at a headless `boite-server`; threads survive the client closing.
-- **Mobile layout.** Bottom tab bar, pinch-to-resize terminal font, drag-to-scroll, on-demand keyboard.
+- **Mobile layout.** Bottom tab bar, pinch-to-resize terminal font, drag-to-scroll, on-demand keyboard, every context menu on a long press.
 - **Idle autoclose.** Per-agent rules close threads that have been idle past a timeout.
 - **Notifications.** OS notifications on the desktop, Web Push on the PWA.
 
@@ -51,31 +54,64 @@ Every agent ships as a shortcut with a brand icon. Boite runs whatever is on
 your `PATH`, so anything not listed still works from a blank shell; it just
 won't get status or resume detection.
 
-| Agent          | Command                | Live status | Session resume |
-| -------------- | ---------------------- | ----------- | -------------- |
-| Claude Code    | `claude`               | ✅          | ✅             |
-| Codex          | `codex --no-alt-screen`| ✅          | ✅             |
-| Opencode       | `opencode`             | ✅          | ✅             |
-| Cursor Agent   | `cursor-agent`         | ✅          | ✅             |
-| Antigravity    | `agy`                  | ✅          | ✅             |
-| GitHub Copilot | `gh copilot`           | ✅          | ✅             |
-| Grok           | `grok`                 | ✅          | ✅             |
-| Hermes         | `hermes`               | ✅          | ✅             |
-| Plain shell    | your default shell     | n/a         | n/a            |
+| Agent          | Command                 | Live status | Resume flag       | Chat        | Endpoint swap | Prompt bar |
+| -------------- | ----------------------- | ----------- | ----------------- | ----------- | ------------- | ---------- |
+| Claude Code    | `claude`                | ✅          | `--resume <id>`   | 💬 bubbles  | ✅            | ✅         |
+| Codex          | `codex --no-alt-screen` | ✅          | `resume <id>`     | 💬 bubbles  | ✅            | ❌         |
+| Opencode       | `opencode`              | ✅          | `--session <id>`  | 📄 output   | ✅            | ❌         |
+| Cursor Agent   | `cursor-agent`          | ✅          | `--resume <id>`   | 📄 output   | ❌            | ❌         |
+| Antigravity    | `agy`                   | ✅          | `--conversation`  | 📄 output   | ❌            | ❌         |
+| GitHub Copilot | `gh copilot`            | ✅          | `--resume=<id>`   | ⌨️ terminal | ❌            | ❌         |
+| Grok           | `grok`                  | ✅          | `--resume <id>`   | 📄 output   | ❌            | ❌         |
+| Hermes         | `hermes`                | ✅          | `--resume <id>`   | ⌨️ terminal | ❌            | ❌         |
+| Plain shell    | your default shell      | n/a         | n/a               | n/a         | n/a           | n/a        |
 
-*Live status* is the working/ready dot, read from the OSC title the agent emits.
-*Session resume* finds the conversation matching the thread's cwd and passes the
-right resume flag. Shortcuts are editable (label, command, icon, color, order),
-each preset says whether its binary was found on the machine, and any custom
-command can be added.
+- **Live status** is the working/ready dot, read from the OSC title the agent
+  emits.
+- **Resume flag** is what Boite appends once it has found the conversation
+  matching the thread's cwd. Only Claude files its transcript by directory, so
+  it is also the only one whose transcript has to travel when a thread moves.
+- **Chat** is how a single question is answered outside a thread: *bubbles*
+  where the CLI streams events Boite can read, *output* where it has a print
+  mode but no stream, *terminal* where it has neither and the bubble holds a
+  live PTY instead. Nothing is ever greyed out.
+- **Endpoint swap** is fastpick pointing the agent at another provider. The
+  three marked here keep their icon, status and resume through it; the others
+  still launch, without the agent-specific handling.
+- **Prompt bar** is the model colour painted inside the TUI, which only Claude
+  Code exposes a command for.
+
+Shortcuts are editable (label, command, icon, color, order), each preset says
+whether its binary was found on the machine, and any custom command can be
+added.
+
+## A page per project, and a chat under it
+
+Clicking a project opens its page rather than whatever thread happened to be
+active. Above: its threads and their status with the launcher beside them, the
+branch with how far it is from upstream and the last few commits, the open todos
+with the claimed ones called out, and which thread holds which worktree. None of
+it is new data: it is what the side panels already keep, in the shape you want
+when you have just arrived.
+
+Below: a chat with an agent already standing in the project's folder, so it can
+read the code rather than only know the project's name. A chat with no project
+is the same thing without the page, for an idea that has not earned a repository
+yet. Either way one process runs per turn and is reaped after it; the *Chat*
+column above says how each agent's answer is read back.
+
+Nothing is created by looking. The composer accepts a chat that does not exist
+and opens one on the first message.
 
 ## Another provider, another model (fastpick)
 
 An agent does not have to run on its vendor's endpoint. If
 [fastpick](https://github.com/beboite/fastpick) is on the machine that runs the
-threads, a menu appears next to the shortcut bar: pick an agent, an endpoint,
-a model, and the thread starts there. Effort level and system prompt files are
-offered where the agent takes them.
+threads, a menu appears next to the shortcut bar: pick an agent, an endpoint, a
+model, and the thread starts there, with effort level and system prompt files
+offered where the agent takes them. The thread that comes back is the agent's,
+not fastpick's: same icon, same live status, same session resume. Reopening the
+app replays the combination rather than the menu.
 
 Boite never touches a credential. It asks fastpick what the choices are and
 launches it with the three answers; the key files, the local proxy some
@@ -84,26 +120,33 @@ read at spawn time on the machine that spawns. On a remote boite that machine is
 the server, so a picker drawn on a phone describes the server's endpoints and
 the phone never sees a key.
 
-The thread that comes back is the agent's, not fastpick's: it carries the
-agent's icon, and live status, session resume and the todo endpoint all work as
-they do for a thread launched directly. Reopening the app replays the same
-combination rather than reopening a menu.
-
 Because the icon stays the agent's, it is tinted with what is actually
 answering: yellow for a Claude served by someone else, white for a GPT, green
-for a model running on that machine, and the stock endpoint left alone. The
-colours come from the terminal palette, and the whole behaviour is one toggle
-in Appearance.
+for a model on that machine, and the vendor's own endpoint left alone. Claude
+Code gets the same colour on the inside, passed as a `/color` launch prompt, so
+the TUI agrees with the sidebar. One toggle in Appearance covers both.
 
-Claude Code gets the same colour on the inside: it paints its prompt bar from
-`/color`, so boite passes that command as the launch prompt and the terminal
-agrees with the sidebar. It is decided when the thread starts, since a process
-already running cannot be repainted from outside.
+The Fastpick tab in the settings installs and removes it, as a thread you can
+watch rather than a spinner. Removing it leaves the config alone: that is where
+the providers and the paths to the key files are declared. The menu hides itself
+when fastpick is absent.
 
-The Fastpick tab in the settings installs and removes it, both as a thread you
-can watch, and removing it leaves the config where it is: that is where the
-providers and the paths to the key files are declared. The menu is hidden when
-fastpick is not installed, and nothing else changes.
+### A process can rewrite its own thread
+
+A launcher is not the thing it launched, so one can say what it became. Printing
+this on its own stdout replaces the thread's command, arguments and icon, and
+that is what a reload replays:
+
+```text
+ESC ] 1337 ; boite ; launch = {"cmd":"fastpick","args":["--harness","cc"],"iconKey":"claude"} BEL
+```
+
+The stream is the channel because it behaves the same locally and on a remote
+boite, where a sidecar file would be written on the server and read nowhere.
+OSC 1337 is a `key=value` channel several terminals share, so the `boite;` prefix
+leaves another program's payload alone. The payload is bounded and every field is
+checked, since terminal output is whatever the process printed. Boite answers
+`TERM_PROGRAM=boite`, so a tool can stay silent in every other terminal.
 
 ## A worktree per thread
 
@@ -138,11 +181,10 @@ shortcut and pick *Launch in Scratch*, or shift-click it. Scratch appears at the
 bottom of the sidebar while it holds threads, and goes away again when the last
 one leaves.
 
-A thread moves by hand too: drag its card onto another project, or use *Move to*
-in its context menu. Same machinery either way — the PTY goes down, the
-transcript follows so `--resume` still finds the conversation, and the thread
-comes back up over there. A worktree still holding uncommitted work is left
-behind rather than deleted, and the agent is told where it went.
+A thread moves by hand too: drag its card onto another project. The PTY goes
+down, the transcript follows so `--resume` still finds the conversation, and the
+thread comes back up over there. A worktree still holding uncommitted work is
+left behind rather than deleted, and the agent is told where it went.
 
 ## Platform support
 
@@ -202,7 +244,7 @@ Data lives next to the app config, never in the cloud:
 
 | Shortcut               | Action                                  |
 | ---------------------- | --------------------------------------- |
-| `Ctrl+T`               | New shell in the current project        |
+| `Ctrl+T`               | New shell here, or in Scratch on no project |
 | `Ctrl+Shift+T`         | Restore the last closed thread          |
 | `Ctrl+W`               | Close the active thread / editor tab    |
 | `Ctrl+Tab`             | Cycle threads (`Ctrl+Shift+Tab` back)   |
@@ -245,12 +287,10 @@ Ten tools, in three halves.
 `todo_list`, `todo_add` and `todo_claim` reach the right-hand **Todo** tab,
 which keeps a list of cards per project. An agent can read that list, append to
 it and report an item finished, but never tick one off: claiming moves an item
-to *awaiting confirmation* and only you confirm it.
-
-A card is a one-line title and an optional description. Click one to open it and
-read or edit the description; drag one to move it in the list. The split exists
-because an agent handed a single text field writes a paragraph into it, and the
-panel is one column wide.
+to *awaiting confirmation* and only you confirm it. A card is a one-line title
+and an optional description, opened by clicking it and reordered by dragging;
+the split exists because an agent handed one text field writes a paragraph into
+it, and the panel is one column wide.
 
 `worktree_status`, `worktree_branch` and `worktree_reserve` cover the worktree
 the thread runs in. An agent that has produced something worth keeping names a
@@ -265,13 +305,12 @@ no project yet, making the folder and running `git init` first. `thread_spawn`
 opens a second agent terminal, here or elsewhere, for work that should run in
 parallel in its own worktree.
 
-Those three answer before they finish, and that is not a shortcut: two of them
-kill the process that called them. A thread cannot change project while its PTY
-is alive, so the reply is written while the agent is still there to read a
-refusal — an unknown project, an ambiguous name — and the work happens after it
-has gone. A new project folder is the one thing the endpoint creates outside the
-registered roots, so it is fenced: under your home folder or beside a project
-you already have, and never on top of files that are already there.
+Those answer before they finish, which is not a shortcut: two of them kill the
+process that called them. A thread cannot change project while its PTY is alive,
+so the reply is written while the agent is still there to read a refusal, and the
+work happens after it has gone. A new project folder is the one thing the
+endpoint creates outside the registered roots, so it is fenced: under your home
+folder or beside a project you already have, and never on top of existing files.
 
 Answers come back in TOON rather than JSON, because every one of them is read in
 a context window:
@@ -312,8 +351,8 @@ it exits rather than starting unauthenticated.
 
 It is spawned once per agent terminal, so it carries nothing it does not need:
 `serde_json` and a hundred lines of HTTP/1.1 over a loopback socket, 380 KB
-altogether. No async runtime, and no proxy handling to send `127.0.0.1` through
-an `ALL_PROXY` that happens to be set.
+altogether. No async runtime, and no proxy handling that could send `127.0.0.1`
+through an `ALL_PROXY` someone happened to set.
 
 ## Build from source
 
