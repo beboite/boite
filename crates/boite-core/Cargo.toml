@@ -15,7 +15,7 @@ portable-pty = "0.9"
 vte = "0.13"
 which = "7"
 dirs = "6"
-base64 = "0.22"
+base64 = "0.23"
 uuid = { version = "1", features = ["v4"] }
 parking_lot = "0.12"
 rusqlite = { version = "0.32", features = ["bundled"] }
