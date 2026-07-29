@@ -3,7 +3,7 @@ import { workspace } from "$lib/backend";
 import type { Backend } from "$lib/backend";
 import type { AgentTurnQuery } from "$lib/backend/types";
 import { settings } from "$lib/features/settings/store.svelte";
-import { paneStore, leavesOf } from "$lib/features/panes/store.svelte";
+import { paneStore, threadLeavesOf } from "$lib/features/panes/store.svelte";
 import { parkedLocal } from "$lib/backend/tauri/parked";
 import { liveTerminal, terminalScreenRows } from "$lib/features/terminal/live";
 import { notifyWhenUnfocused } from "$lib/storage/notify";
@@ -160,7 +160,7 @@ function visibleThreadIds(): Set<string> {
   if (!id) return new Set();
   const g = paneStore.groupOf(id);
   if (!g) return new Set([id]);
-  return new Set(leavesOf(g.root));
+  return new Set(threadLeavesOf(g.root));
 }
 
 /**

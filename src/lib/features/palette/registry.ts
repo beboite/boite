@@ -10,10 +10,12 @@ import {
 } from "$lib/features/thread/api";
 import { resolveIconKey } from "$lib/shared/icons/detect";
 import { t } from "$lib/i18n/index.svelte";
+import { openPane } from "$lib/features/panes/open";
+import type { PaneContent } from "$lib/features/panes/types";
 import type { MessageKey } from "$lib/i18n/messages";
 import type { IconKey } from "$lib/types";
 
-export type PaletteSection = "threads" | "actions" | "projects";
+export type PaletteSection = "threads" | "actions" | "panes" | "projects";
 
 export interface PaletteCommand {
   id: string;
@@ -30,6 +32,7 @@ export interface PaletteCommand {
 export const SECTION_BIAS: Record<PaletteSection, number> = {
   threads: 6,
   actions: 3,
+  panes: 2,
   projects: 0,
 };
 
@@ -38,6 +41,7 @@ export const SECTION_BIAS: Record<PaletteSection, number> = {
 export const SECTION_TITLE_KEYS: Record<PaletteSection, MessageKey> = {
   threads: "palette.threads",
   actions: "palette.actions",
+  panes: "palette.panes",
   projects: "palette.projects",
 };
 
@@ -147,6 +151,40 @@ export function buildPaletteCommands(): PaletteCommand[] {
       },
     },
   );
+
+  // Panes. Until now the only way to make one was to drag a thread row onto a
+  // live terminal, which is a gesture nobody finds by accident and the reason
+  // the split went unused. These are the same call the pane header's button and
+  // the agent's MCP verb make.
+  const paneCommands: [string, MessageKey, PaneContent][] = [
+    ["git", "panes.openGit", { kind: "git" }],
+    ["explorer", "panes.openExplorer", { kind: "explorer" }],
+    ["todo", "panes.openTodo", { kind: "todo" }],
+    ["dashboard", "panes.openDashboard", { kind: "dashboard" }],
+    ["editor", "panes.openEditor", { kind: "editor" }],
+  ];
+  for (const [id, labelKey, content] of paneCommands) {
+    commands.push({
+      id: `pane:${id}`,
+      section: "panes",
+      label: t(labelKey),
+      run: () => {
+        openPane(content);
+      },
+    });
+  }
+  commands.push({
+    id: "pane:browser",
+    section: "panes",
+    label: t("panes.openBrowser"),
+    run: () => {
+      // A prompt rather than a form: the palette closes on run, and a second
+      // modal to type a URL into is a lot of machinery for the rare case. The
+      // common case is an agent calling this with the URL already known.
+      const url = window.prompt(t("panes.browserPrompt"), "http://localhost:");
+      if (url?.trim()) openPane({ kind: "browser", url: url.trim() });
+    },
+  });
 
   for (const project of app.sortedProjects) {
     commands.push({

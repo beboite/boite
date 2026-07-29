@@ -4,7 +4,7 @@
 
   const preview = $derived(paneStore.dropPreview);
   const rect = $derived(
-    preview ? paneStore.rects[preview.targetThreadId] ?? null : null,
+    preview ? paneStore.rects[preview.targetPaneId] ?? null : null,
   );
 
   const snap = $derived.by(() => {
