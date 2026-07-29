@@ -196,6 +196,10 @@ class AppState {
     () => new Map(this.threads.map((t) => [t.id, t])),
   );
 
+  #projectById: Map<string, Project> = $derived.by(
+    () => new Map(this.projects.map((p) => [p.id, p])),
+  );
+
   #threadsByProject: Map<string, Thread[]> = $derived.by(() => {
     const grouped = new Map<string, Thread[]>();
     for (const t of this.threads) {
@@ -234,6 +238,13 @@ class AppState {
 
   hasThread(id: string): boolean {
     return this.#threadById.has(id);
+  }
+
+  /** Indexed for the same reason as `threadById`: the status sweep resolves a
+   * thread's directory through its project, twice a second, for every thread. */
+  projectById(id: string | null | undefined): Project | null {
+    if (!id) return null;
+    return this.#projectById.get(id) ?? null;
   }
 
   get activeThread(): Thread | null {

@@ -47,6 +47,47 @@ The one thing decided at launch instead is the colour inside Claude Code: it
 comes from `/color`, passed as the launch prompt through fastpick's passthrough,
 and a process already running cannot be repainted from outside.
 
+## Status is measured, never latched
+
+Every pass of `thread/statusEngine.ts` decides running-or-ready from scratch, and
+the ticker belongs to the window rather than to a pane: it starts once in
+`+page.svelte`. Both of those are load-bearing. When a working signal set a
+timestamp and the thread stayed lit until it expired, "finished" was only ever
+the absence of evidence, and when the loop was refcounted off mounted
+`Terminal` components, closing the last local pane stopped the only thing that
+could notice.
+
+Two sources answer, in this order. Claude rewrites
+`~/.claude/sessions/<pid>.json` as each turn starts and ends, so `declaredTurn`
+(`thread/claude-registry.ts`) reads `busy`/`idle` from the agent itself and that
+settles it, and keeps settling it through a quiet tool call, a compaction or a
+hidden pane. Everything
+else is read off the emulator's bottom rows (`terminalScreenRows`), which is
+level: the footer is on screen or it is not, so `false` means finished rather
+than "nothing seen lately". Detection never touches the byte stream. A rolling
+window of printed bytes answers a question about the recent past, and an `esc to
+interrupt` that had scrolled by kept re-matching itself for as long as the agent
+printed anything at all.
+
+A subagent is only ever visible in the registry. The Task tool runs one inside
+claude's own process, so it gets no session entry of its own and its turns are
+appended to the parent transcript with `isSidechain`; the parent just stays
+`busy`. From outside that looks like a terminal which has printed nothing for ten
+minutes, which is what used to get the thread scored as finished and its PTY
+killed by auto-sleep. This is also why `declaredTurn` falls back to matching by
+directory while a thread's session id is still uncaptured: those seconds are part
+of the opening turn, the one most likely to spend a long time in a subagent. That
+fallback needs exactly one live session in the directory, and answers nothing
+otherwise.
+
+The server runs the same decision over the same registry
+(`boite-core::session::declared_turn`, called from `registry.rs`), reading each
+thread's icon key and session id back out of its own thread table. It has no
+emulator, so with no registry answer it falls back to the OSC title and a 2s TTL;
+that path is now only reached by non-claude agents. Both sides read the same
+files, so their rules are mirrored deliberately and tested in both languages
+(`claude-registry.test.ts`, `session.rs::turn_tests`).
+
 ## Checking your work in the running app
 
 A screenshot and a DOM read tell you almost nothing here: **the terminals render

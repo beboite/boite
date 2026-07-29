@@ -56,6 +56,7 @@ struct LiveSessionEntry {
     session_id: Option<String>,
     kind: Option<String>,
     status: Option<String>,
+    cwd: Option<String>,
 }
 
 /// A session claude has open. The kind decides what can be done about it: a
@@ -71,7 +72,16 @@ pub struct LiveClaudeSession {
     pub kind: String,
     /// `busy` while a turn is in flight, `idle` otherwise. An idle agent can be
     /// released without losing anything; a busy one is mid-answer.
+    ///
+    /// Subagents do not get an entry of their own: the Task tool runs them in
+    /// the parent process, and their turns are appended to the parent's
+    /// transcript with `isSidechain`. So the parent reads `busy` for as long as
+    /// a subagent is working, which is the only signal Boite has that survives a
+    /// terminal going quiet for minutes.
     pub status: String,
+    /// The directory the session runs in, as claude recorded it. Lets a caller
+    /// place a session it has no id for yet.
+    pub cwd: String,
 }
 
 #[cfg(unix)]
@@ -196,10 +206,68 @@ pub fn live_claude_sessions() -> Vec<LiveClaudeSession> {
                 pid,
                 kind: parsed.kind.unwrap_or_else(|| "interactive".into()),
                 status: parsed.status.unwrap_or_else(|| "busy".into()),
+                cwd: parsed.cwd.unwrap_or_default(),
             });
         }
     }
     live
+}
+
+/// What claude says about a thread's turn, or that it has nothing to say.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DeclaredTurn {
+    Busy,
+    Idle,
+    Unknown,
+}
+
+/// Places a thread in claude's session registry and reads its turn off it.
+///
+/// By id when the thread has captured one: that is the precise question, and a
+/// miss answers `Unknown` rather than falling back to the directory. An id that
+/// is not in the registry means claude is not holding that session (it exited, or
+/// it predates the registry), and a neighbour's state must not stand in for it.
+///
+/// By directory otherwise, and only when exactly one live session claims it. The
+/// window before a session id is captured is a few seconds of the agent's first
+/// turn, which is routinely its longest, so leaving it unanswerable is how a
+/// thread gets called idle while a subagent works. Two sessions in one directory
+/// answers `Unknown`: with per-thread worktrees that does not normally happen,
+/// and guessing between them would light or sleep the wrong thread.
+pub fn declared_turn(
+    sessions: &[LiveClaudeSession],
+    session_id: Option<&str>,
+    cwd: &str,
+) -> DeclaredTurn {
+    let read = |s: &LiveClaudeSession| {
+        if s.status == "idle" {
+            DeclaredTurn::Idle
+        } else {
+            // Anything that is not a clean idle counts as a turn in flight. An
+            // unset or unrecognised status comes from a claude whose registry
+            // format this does not know, and calling that finished is the one
+            // wrong answer that loses work to auto-sleep.
+            DeclaredTurn::Busy
+        }
+    };
+    if let Some(id) = session_id.filter(|id| !id.is_empty()) {
+        return match sessions.iter().find(|s| s.id == id) {
+            Some(s) => read(s),
+            None => DeclaredTurn::Unknown,
+        };
+    }
+    if cwd.is_empty() {
+        return DeclaredTurn::Unknown;
+    }
+    let want = normalize(cwd);
+    let mut found = None;
+    for s in sessions.iter().filter(|s| normalize(&s.cwd) == want) {
+        if found.is_some() {
+            return DeclaredTurn::Unknown;
+        }
+        found = Some(s);
+    }
+    found.map(read).unwrap_or(DeclaredTurn::Unknown)
 }
 
 fn normalize(p: &str) -> String {
@@ -1273,6 +1341,77 @@ pub fn find_hermes_session_blocking(
 
 pub fn build_exclude(ids: Option<Vec<String>>) -> HashSet<String> {
     ids.unwrap_or_default().into_iter().collect()
+}
+
+#[cfg(test)]
+mod turn_tests {
+    use super::*;
+
+    fn entry(id: &str, status: &str, cwd: &str) -> LiveClaudeSession {
+        LiveClaudeSession {
+            id: id.into(),
+            pid: 1,
+            kind: "interactive".into(),
+            status: status.into(),
+            cwd: cwd.into(),
+        }
+    }
+
+    #[test]
+    fn a_captured_id_is_read_off_its_own_entry() {
+        let live = [entry("a", "busy", "/w/one"), entry("b", "idle", "/w/two")];
+        assert_eq!(declared_turn(&live, Some("a"), "/w/one"), DeclaredTurn::Busy);
+        assert_eq!(declared_turn(&live, Some("b"), "/w/two"), DeclaredTurn::Idle);
+    }
+
+    #[test]
+    fn a_captured_id_that_is_not_live_never_borrows_a_neighbour() {
+        // The thread's claude has gone, or predates the registry. Answering from
+        // the directory here would hand it the state of whoever else is there.
+        let live = [entry("a", "busy", "/w/one")];
+        assert_eq!(
+            declared_turn(&live, Some("gone"), "/w/one"),
+            DeclaredTurn::Unknown
+        );
+    }
+
+    #[test]
+    fn an_uncaptured_thread_is_placed_by_its_directory() {
+        // The seconds before capture are part of the agent's first turn, which is
+        // where a long subagent run would otherwise read as idle.
+        let live = [entry("a", "busy", "/w/one")];
+        assert_eq!(declared_turn(&live, None, "/w/one"), DeclaredTurn::Busy);
+        assert_eq!(declared_turn(&live, Some(""), "/w/one"), DeclaredTurn::Busy);
+    }
+
+    #[test]
+    fn directory_matching_ignores_separator_and_case() {
+        let live = [entry("a", "busy", "C:\\Work\\One\\")];
+        assert_eq!(declared_turn(&live, None, "c:/work/one"), DeclaredTurn::Busy);
+    }
+
+    #[test]
+    fn two_sessions_in_one_directory_answer_nothing() {
+        let live = [entry("a", "busy", "/w/one"), entry("b", "idle", "/w/one")];
+        assert_eq!(declared_turn(&live, None, "/w/one"), DeclaredTurn::Unknown);
+    }
+
+    #[test]
+    fn an_unplaceable_thread_answers_nothing() {
+        let live = [entry("a", "busy", "/w/one")];
+        assert_eq!(declared_turn(&live, None, "/w/other"), DeclaredTurn::Unknown);
+        assert_eq!(declared_turn(&live, None, ""), DeclaredTurn::Unknown);
+        assert_eq!(declared_turn(&[], None, "/w/one"), DeclaredTurn::Unknown);
+    }
+
+    #[test]
+    fn an_unrecognised_status_is_treated_as_a_turn_in_flight() {
+        // Calling a status we cannot read "finished" is what would let auto-sleep
+        // kill a working PTY.
+        let live = [entry("a", "starting", "/w/one"), entry("b", "", "/w/two")];
+        assert_eq!(declared_turn(&live, Some("a"), "/w/one"), DeclaredTurn::Busy);
+        assert_eq!(declared_turn(&live, Some("b"), "/w/two"), DeclaredTurn::Busy);
+    }
 }
 
 #[cfg(test)]
