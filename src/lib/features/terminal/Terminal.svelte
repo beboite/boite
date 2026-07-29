@@ -43,10 +43,6 @@
   } from "$lib/features/thread/session-monitor.svelte";
   import { notifications } from "$lib/features/notifications/store.svelte";
   import { logger } from "$lib/shared/services/logger.svelte";
-  import {
-    detectWorking,
-    titleSignalsWorking,
-  } from "$lib/features/thread/working-detect";
   import { isGenericTitle } from "$lib/features/thread/title-filter";
   import { statusEngine } from "$lib/features/thread/statusEngine";
   import ContextMenu from "$lib/shared/components/ContextMenu.svelte";
@@ -75,10 +71,6 @@
   // stream is dropped while hidden to save 4G; set so the pane reattaches when
   // shown again.
   let released = false;
-  // Balances statusEngine.acquire(): only local-sniffing terminals acquire, so
-  // only those may release (a remote pane releasing would kill the shared
-  // ticker while local panes still run).
-  let statusEngineAcquired = false;
   let spawnRetryTimer: ReturnType<typeof setTimeout> | null = null;
   let spawnRetryCount = 0;
   const SPAWN_RETRY_MAX = 30;
@@ -89,78 +81,13 @@
   let sessionMonitor: SessionMonitor | null = null;
   let fitRafId: number | null = null;
   let lastInputAt = 0;
-  let lastDetectAt = 0;
-  let lastDetectOutputAt = 0;
-  const decoder = new TextDecoder("utf-8", { fatal: false });
   const encoder = new TextEncoder();
   const LF = new Uint8Array([0x0a]);
-  const DETECT_BUFFER_MAX = 4000;
-  // Detection only ever looks at the DETECT_BUFFER_MAX tail, so decoding more
-  // than this per chunk is wasted main-thread work during big output bursts.
-  const DETECT_DECODE_MAX = 8192;
-  // ~3 bytes per char covers the box-drawing and ANSI-heavy output agents
-  // emit, so this retains at least DETECT_BUFFER_MAX characters.
-  const DETECT_BYTES_MAX = DETECT_BUFFER_MAX * 3;
 
-  // The detection tail used to be decoded and re-sliced on every single output
-  // chunk, even though it is only ever read on the 120ms detection tick and on
-  // the prompt probe. Keep the raw bytes and materialize the string lazily:
-  // a burst of 100 chunks now costs 100 array pushes instead of 100 decodes
-  // plus 100 4000-char string copies.
-  let detectChunks: Uint8Array[] = [];
-  let detectBytes = 0;
-  let detectText = "";
-  let detectTextStale = false;
-
-  function pushDetectBytes(bytes: Uint8Array) {
-    if (bytes.length === 0) return;
-    const chunk =
-      bytes.length > DETECT_DECODE_MAX
-        ? bytes.subarray(bytes.length - DETECT_DECODE_MAX)
-        : bytes;
-    detectChunks.push(chunk);
-    detectBytes += chunk.length;
-    while (detectBytes > DETECT_BYTES_MAX && detectChunks.length > 1) {
-      detectBytes -= detectChunks[0].length;
-      detectChunks.shift();
-    }
-    detectTextStale = true;
-  }
-
-  function detectBufferText(): string {
-    if (!detectTextStale) return detectText;
-    detectTextStale = false;
-    if (detectChunks.length === 0) {
-      detectText = "";
-      return detectText;
-    }
-    let joined: Uint8Array;
-    if (detectChunks.length === 1) {
-      joined = detectChunks[0];
-    } else {
-      joined = new Uint8Array(detectBytes);
-      let at = 0;
-      for (const c of detectChunks) {
-        joined.set(c, at);
-        at += c.length;
-      }
-    }
-    // Non-streaming: the retained window is decoded whole every time, so there
-    // is no decoder state to carry. A multi-byte char clipped at the head costs
-    // one replacement char, which the detection regexes never look at.
-    detectText = decoder.decode(joined);
-    if (detectText.length > DETECT_BUFFER_MAX) {
-      detectText = detectText.slice(-DETECT_BUFFER_MAX);
-    }
-    return detectText;
-  }
-
-  function clearDetectBuffer() {
-    detectChunks = [];
-    detectBytes = 0;
-    detectText = "";
-    detectTextStale = false;
-  }
+  // Output goes to xterm and nowhere else. Working detection used to keep its
+  // own rolling window of these bytes; it reads the rows back off `term` now
+  // (`thread/statusEngine.ts`), which is the same information without a copy
+  // that can go stale.
 
   // Soft keyboard is opt-in on phones: tapping a terminal should focus it for
   // scroll/select without summoning the Android keyboard. `inputmode=none`
@@ -443,7 +370,12 @@
     return raw.slice(m.index).trim();
   }
 
-  function syncAliveThread(nextStatus: "ready" | "running" = "ready", known?: Thread | null) {
+  // A thread that has a PTY is connected, and this is where that becomes
+  // visible: it leaves `idle` on the first byte or title that arrives. Which of
+  // `ready` and `running` it then is belongs to the status engine, which reads
+  // it off the rows. Promoting from here as well only ever made the two fight,
+  // and a promotion per output chunk is what made the dot flap.
+  function syncAliveThread(known?: Thread | null) {
     if (!ptyId) return;
     const current = known ?? app.threadById(thread.id);
     if (!current) return;
@@ -456,30 +388,7 @@
       });
     }
     if (current.status === "idle") {
-      app.setThreadStatus(thread.id, nextStatus, null);
-    }
-  }
-
-  function markRunning(ttlMs?: number) {
-    // Remote derives status server-side and pushes it; client-side sniffing
-    // would fight those events.
-    if (!clientStatus()) return;
-    syncAliveThread("running");
-    statusEngine.markWorking(thread.id, ttlMs);
-    app.setThreadStatus(thread.id, "running");
-  }
-
-  function detectWorkingFromOutput(bytes: Uint8Array) {
-    const now = Date.now();
-    if (lastDetectOutputAt && now - lastDetectOutputAt > 1500) {
-      clearDetectBuffer();
-    }
-    lastDetectOutputAt = now;
-    pushDetectBytes(bytes);
-    if (now - lastDetectAt < 120) return;
-    lastDetectAt = now;
-    if (detectWorking(detectBufferText(), thread.iconKey)) {
-      markRunning();
+      app.setThreadStatus(thread.id, "ready", null);
     }
   }
 
@@ -494,35 +403,27 @@
       // ring): clear so it repaints cleanly instead of stacking onto stale
       // scrollback.
       term.reset();
-      clearDetectBuffer();
       return;
     }
 
     if (event.type === "output") {
       const current = currentThread();
       if (!current || current.status === "stopped") return;
-      syncAliveThread("ready", current);
-      const bytes = event.bytes;
+      syncAliveThread(current);
       lastOutputAt = Date.now();
-      term.write(bytes);
-      // Status sniffing is local-only (remote pushes status server-side), so
-      // the bytes are not even retained there.
-      if (clientStatus()) {
-        statusEngine.markOutput(thread.id);
-        detectWorkingFromOutput(bytes);
-      }
+      term.write(event.bytes);
+      // Only a hint that the PTY is alive, which is all auto-sleep needs from
+      // it. Remote threads take their status from the server, so not even that.
+      if (clientStatus()) statusEngine.markOutput(thread.id);
     } else if (event.type === "title") {
       const current = currentThread();
       if (!current || current.status === "stopped") return;
-      syncAliveThread("ready", current);
+      syncAliveThread(current);
       const cleaned = cleanTitle(event.value);
       const cwd =
         threadCwd(current, app.projects.find((p) => p.id === thread.projectId)) ?? undefined;
       if (cleaned && !isGenericTitle(cleaned, cwd)) {
         app.setThreadTitle(thread.id, cleaned);
-      }
-      if (titleSignalsWorking(event.value)) {
-        markRunning();
       }
     } else if (event.type === "exit") {
       ptyId = null;
@@ -1300,14 +1201,6 @@
     container.addEventListener("touchcancel", onTouchEnd);
 
     window.visualViewport?.addEventListener("resize", onViewportResize);
-
-    // The status engine (TTL demotion, idle auto-close) is local only: remote
-    // status comes from the server, and a local idle timer must not kill PTYs
-    // shared with other attached devices.
-    if (clientStatus()) {
-      statusEngine.acquire();
-      statusEngineAcquired = true;
-    }
   });
 
   $effect(() => {
@@ -1384,7 +1277,7 @@
 
   onDestroy(() => {
     destroyed = true;
-    if (statusEngineAcquired) statusEngine.release(thread.id);
+    statusEngine.forget(thread.id);
     stopSessionMonitor();
     disposeMobileInput?.();
     disposeMobileInput = null;

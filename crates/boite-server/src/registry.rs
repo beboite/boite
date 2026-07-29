@@ -6,13 +6,37 @@ use parking_lot::Mutex;
 use tokio::sync::broadcast;
 
 use boite_core::pty::{EventSink, PtyEvent, PtyManager, PtySpawnArgs};
+use boite_core::session::{self, DeclaredTurn, LiveClaudeSession};
 use boite_core::status::{self, ThreadStatus};
 
 use crate::events::AppEvent;
 
 const OUTPUT_CHANNEL_CAP: usize = 256;
+/// How long a thread stays Running on an OSC title alone.
+///
+/// Only the fallback now: a title is edge-triggered, so with nothing else to go
+/// on the loop can only wait for the next frame and give up when it stops
+/// coming. Claude threads are answered outright by `session::declared_turn` and
+/// never reach this.
 const WORKING_TTL: Duration = Duration::from_secs(2);
 const TICK: Duration = Duration::from_millis(500);
+/// The session registry is a directory of small files, re-read on every other
+/// tick rather than on each one. A turn boundary is not worth two stat storms a
+/// second on a box that may be hosting a dozen threads.
+const REGISTRY_TTL: Duration = Duration::from_secs(1);
+
+/// What the thread table knows about a live thread, looked up per tick.
+///
+/// The registry hosts PTYs; it does not own the threads table, and the two
+/// fields it needs to place a thread in claude's session registry live there.
+pub struct ThreadIdentity {
+    pub icon_key: Option<String>,
+    pub session_id: Option<String>,
+}
+
+/// Reads a thread's identity out of the store. Returns None for a thread the
+/// store has never heard of.
+pub type IdentityLookup = Arc<dyn Fn(&str) -> Option<ThreadIdentity> + Send + Sync>;
 
 struct StatusState {
     status: ThreadStatus,
@@ -50,6 +74,7 @@ impl LiveThread {
 struct Shared {
     threads: Mutex<HashMap<String, Arc<LiveThread>>>,
     events: Arc<dyn Fn(AppEvent) + Send + Sync>,
+    identity: IdentityLookup,
 }
 
 pub struct Registry {
@@ -75,10 +100,12 @@ impl Registry {
     pub fn new(
         scrollback_bytes: usize,
         events: Arc<dyn Fn(AppEvent) + Send + Sync>,
+        identity: IdentityLookup,
     ) -> Arc<Registry> {
         let shared = Arc::new(Shared {
             threads: Mutex::new(HashMap::new()),
             events,
+            identity,
         });
         let registry = Arc::new(Registry {
             pty: PtyManager::new(),
@@ -97,6 +124,7 @@ impl Registry {
         let shared = Arc::new(Shared {
             threads: Mutex::new(HashMap::new()),
             events,
+            identity: Arc::new(|_| None),
         });
         Arc::new(Registry {
             pty: PtyManager::new(),
@@ -326,46 +354,114 @@ impl EventSink for ThreadSink {
     }
 }
 
-// Demote Running threads to Ready once their last working signal ages out.
+/// What a thread's status should become, or None to leave it alone.
+///
+/// Claude answers for itself: `busy` holds the thread Running however quiet the
+/// terminal has gone, which is what a subagent looks like from out here: the
+/// Task tool runs in the parent process, so the parent stays `busy` for the whole
+/// run while emitting nothing. `idle` demotes at once, without waiting for a
+/// title that is never coming. Everything else falls back to the OSC title and
+/// its TTL.
+fn next_status(
+    status: ThreadStatus,
+    last_working: Option<Instant>,
+    declared: DeclaredTurn,
+    now: Instant,
+) -> Option<ThreadStatus> {
+    let settled = match declared {
+        DeclaredTurn::Busy => ThreadStatus::Running,
+        DeclaredTurn::Idle => ThreadStatus::Ready,
+        DeclaredTurn::Unknown => {
+            let stale = last_working
+                .map(|w| now.duration_since(w) >= WORKING_TTL)
+                .unwrap_or(true);
+            if status == ThreadStatus::Running && stale {
+                ThreadStatus::Ready
+            } else {
+                return None;
+            }
+        }
+    };
+    // Only Ready and Running are this loop's to decide. A thread that has exited
+    // or been stopped has a real status and must keep it.
+    if !matches!(status, ThreadStatus::Ready | ThreadStatus::Running) {
+        return None;
+    }
+    (settled != status).then_some(settled)
+}
+
+// Keeps Ready/Running honest: claude's own answer where there is one, the OSC
+// title's TTL otherwise.
 fn spawn_ticker(shared: Arc<Shared>) {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(TICK);
+        let mut live: Vec<LiveClaudeSession> = Vec::new();
+        let mut live_read_at: Option<Instant> = None;
+        // Identities alongside the registry read, on the same expiry. Without it
+        // this loop would query the thread table once per live thread twice a
+        // second, forever, to re-learn two columns that almost never change.
+        let mut identities: HashMap<String, Option<ThreadIdentity>> = HashMap::new();
         loop {
             interval.tick().await;
             let now = Instant::now();
-            let demote: Vec<String> = {
-                let threads = shared.threads.lock();
-                threads
-                    .iter()
-                    .filter_map(|(id, lt)| {
-                        let st = lt.status.lock();
-                        let stale = st
-                            .last_working
-                            .map(|w| now.duration_since(w) >= WORKING_TTL)
-                            .unwrap_or(true);
-                        if st.status == ThreadStatus::Running && stale {
-                            Some(id.clone())
-                        } else {
-                            None
+            // Skipped entirely while nothing is running: an empty boite has no
+            // reason to stat a directory twice a second.
+            let any_live = !shared.threads.lock().is_empty();
+            if any_live
+                && live_read_at
+                    .map(|at| now.duration_since(at) >= REGISTRY_TTL)
+                    .unwrap_or(true)
+            {
+                live = session::live_claude_sessions();
+                live_read_at = Some(now);
+                identities.clear();
+            }
+
+            // Snapshotted, so the identity lookup, which reads the thread table,
+            // never runs while the live-thread map is locked against spawns
+            // and attaches. Deciding and applying then happen under the one
+            // per-thread status lock, so a title or an exit landing in between
+            // cannot be overwritten by a decision taken before it.
+            let live_threads: Vec<Arc<LiveThread>> =
+                shared.threads.lock().values().cloned().collect();
+            let mut changed = Vec::new();
+            for lt in live_threads {
+                // Only claude keeps a registry, and only its threads may be
+                // placed in one. A codex thread sharing a directory with a claude
+                // session would otherwise be handed that session's answer.
+                let declared = if live.is_empty() {
+                    DeclaredTurn::Unknown
+                } else {
+                    let who = identities
+                        .entry(lt.thread_id.clone())
+                        .or_insert_with(|| (shared.identity)(&lt.thread_id));
+                    match who {
+                        Some(w) if w.icon_key.as_deref() == Some("claude") => {
+                            session::declared_turn(&live, w.session_id.as_deref(), &lt.cwd)
                         }
-                    })
-                    .collect()
-            };
-            for id in demote {
-                if let Some(lt) = shared.threads.lock().get(&id).cloned() {
-                    {
-                        let mut st = lt.status.lock();
-                        if st.status != ThreadStatus::Running {
-                            continue;
-                        }
-                        st.status = ThreadStatus::Ready;
+                        _ => DeclaredTurn::Unknown,
                     }
-                    (shared.events)(AppEvent::ThreadStatus {
-                        thread_id: id,
-                        status: "ready".to_string(),
-                        exit_code: None,
-                    });
+                };
+                let mut st = lt.status.lock();
+                let Some(next) = next_status(st.status, st.last_working, declared, now) else {
+                    continue;
+                };
+                st.status = next;
+                if next == ThreadStatus::Running {
+                    // So a later Unknown pass has something to age out from
+                    // instead of demoting on the very next tick.
+                    st.last_working = Some(now);
                 }
+                drop(st);
+                changed.push((lt.thread_id.clone(), next));
+            }
+
+            for (id, next) in changed {
+                (shared.events)(AppEvent::ThreadStatus {
+                    thread_id: id,
+                    status: next.as_str().to_string(),
+                    exit_code: None,
+                });
             }
         }
     });
@@ -418,5 +514,84 @@ impl Ring {
         }
         let skip = (since - self.start()) as usize;
         Some(self.buf.iter().skip(skip).copied().collect())
+    }
+}
+
+#[cfg(test)]
+mod status_tests {
+    use super::*;
+
+    fn ago(d: Duration) -> Option<Instant> {
+        Instant::now().checked_sub(d)
+    }
+
+    #[test]
+    fn a_busy_session_holds_a_quiet_thread_running() {
+        // The subagent case. The Task tool runs in claude's own process, so the
+        // terminal can print nothing for minutes while a turn is very much in
+        // flight, and the TTL alone would have demoted it on the fourth tick.
+        let stale = ago(Duration::from_secs(600));
+        assert_eq!(
+            next_status(ThreadStatus::Running, stale, DeclaredTurn::Busy, Instant::now()),
+            None,
+            "already Running: nothing to change"
+        );
+        assert_eq!(
+            next_status(ThreadStatus::Ready, stale, DeclaredTurn::Busy, Instant::now()),
+            Some(ThreadStatus::Running),
+            "a turn started without a title to announce it"
+        );
+    }
+
+    #[test]
+    fn an_idle_session_demotes_without_waiting_for_the_ttl() {
+        // The reported bug, from the other side: the agent has finished and said
+        // so, and there is no next title frame to fail to arrive.
+        let fresh = Some(Instant::now());
+        assert_eq!(
+            next_status(ThreadStatus::Running, fresh, DeclaredTurn::Idle, Instant::now()),
+            Some(ThreadStatus::Ready),
+        );
+        assert_eq!(
+            next_status(ThreadStatus::Ready, fresh, DeclaredTurn::Idle, Instant::now()),
+            None,
+        );
+    }
+
+    #[test]
+    fn without_an_answer_the_title_ttl_still_decides() {
+        let now = Instant::now();
+        assert_eq!(
+            next_status(ThreadStatus::Running, ago(Duration::from_secs(5)), DeclaredTurn::Unknown, now),
+            Some(ThreadStatus::Ready),
+        );
+        assert_eq!(
+            next_status(ThreadStatus::Running, Some(now), DeclaredTurn::Unknown, now),
+            None,
+            "signal still fresh",
+        );
+        assert_eq!(
+            next_status(ThreadStatus::Running, None, DeclaredTurn::Unknown, now),
+            Some(ThreadStatus::Ready),
+            "never signalled at all",
+        );
+    }
+
+    #[test]
+    fn a_finished_thread_keeps_its_real_status() {
+        // Exit codes and stops are not this loop's to overwrite, whatever a
+        // leftover registry entry says.
+        let now = Instant::now();
+        for status in [
+            ThreadStatus::Done,
+            ThreadStatus::Exited,
+            ThreadStatus::Error,
+            ThreadStatus::Stopped,
+            ThreadStatus::Idle,
+        ] {
+            for declared in [DeclaredTurn::Busy, DeclaredTurn::Idle, DeclaredTurn::Unknown] {
+                assert_eq!(next_status(status, None, declared, now), None, "{status:?}");
+            }
+        }
     }
 }
