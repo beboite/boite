@@ -13,7 +13,6 @@ import {
   setProjectArchived,
 } from "$lib/storage/db";
 import { settings } from "$lib/features/settings/store.svelte";
-import { chats } from "$lib/features/chat/store.svelte";
 import { platform } from "$lib/storage/platform.svelte";
 import {
   loadThreads,
@@ -50,11 +49,6 @@ class AppState {
   threads = $state<Thread[]>([]);
   activeThreadId = $state<string | null>(null);
   selectedProjectId = $state<string | null>(null);
-  // Which conversation the chat view shows. Separate from `activeThreadId`
-  // rather than folded into it: a chat is not a thread, it holds no PTY between
-  // turns, and switching to a chat must not disturb which terminal comes back
-  // when the user switches away.
-  activeChatId = $state<string | null>(null);
   view = $state<View>("terminal");
   // Phone layout only: which bottom-bar page is showing. Desktop ignores it.
   mobileTab = $state<MobileTab>("terminal");
@@ -347,13 +341,6 @@ class AppState {
     await this.syncRoots();
     this.threads = threads;
 
-    // Here rather than in the layout's mount: this runs at boot *and* after
-    // every workspace switch, and a switch is the case that matters — the
-    // stores are torn down and only the things `init` rehydrates come back.
-    // Fire and forget, like the rest: the sidebar draws its chats a tick later
-    // and nothing else waits on them.
-    void chats.init();
-
     this.deduplicateSessionIds();
     pruneRenamed(this.threads.map((t) => t.id));
 
@@ -430,7 +417,6 @@ class AppState {
     this.threads = [];
     this.activeThreadId = null;
     this.selectedProjectId = null;
-    this.activeChatId = null;
     this.view = "terminal";
     this.mobileTab = "terminal";
     this.respawnNonce = {};

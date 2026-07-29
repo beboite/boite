@@ -17,7 +17,7 @@
   import type { Project, Thread } from "$lib/types";
 
   /**
-   * What is true about a project right now, above its chat.
+   * What is true about a project right now.
    *
    * Every number here is read from a store the side panels already keep — the
    * git state, the todo list, the threads. Nothing is fetched twice and nothing

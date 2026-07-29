@@ -5,6 +5,7 @@ import { detectIconKey } from "$lib/shared/icons/detect";
 import { logger } from "$lib/shared/services/logger.svelte";
 import { settings } from "$lib/features/settings/store.svelte";
 import { mcpArgsFor } from "./agentMcp";
+import { stageTypedPrompt } from "./typedPrompt";
 import type { IconKey, Thread } from "$lib/types";
 
 // mtimeMs is the session file's last-write time when the backend can provide
@@ -259,11 +260,10 @@ function withPendingPrompt(thread: Thread, key: IconKey, args: string[]): string
   if (!prompt) return args;
   const separator = promptSeparator(key, args);
   if (separator === null) {
-    logger.info(
-      "resume",
-      `${thread.id} (${key ?? "?"}): dropped the landing prompt, this CLI takes no positional one`,
-      { cmd: thread.cmd },
-    );
+    // Typed into the PTY once the terminal is up instead. Worse than a
+    // positional — it races the CLI's own startup — but a thread that was
+    // opened for something specific and never told what is worse still.
+    stageTypedPrompt(thread.id, prompt);
     return args;
   }
   // Any newline would end the prompt and start typing the rest as a second

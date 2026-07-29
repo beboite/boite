@@ -24,7 +24,6 @@
   import { updater } from "$lib/features/updater/store.svelte";
   import { resumeAfterUpdate } from "$lib/features/updater/restart";
   import { todos } from "$lib/features/todo/store.svelte";
-  import { chats } from "$lib/features/chat/store.svelte";
   import CommandPalette from "$lib/features/palette/CommandPalette.svelte";
   import { createKeyboardController } from "$lib/shared/keyboard/controller";
   import type { KeyScope, ShortcutBinding } from "$lib/shared/keyboard/types";
@@ -310,16 +309,11 @@
     // release is on disk and a restart is all that is left.
     const stopUpdater = updater.start();
     const stopTodoWatch = todos.watch();
-    // The list itself is loaded by `app.init`, which also runs on a workspace
-    // switch. Only the watcher belongs here: it outlives every switch, since
-    // the event it listens for comes from the desktop's own endpoint.
-    const stopChatWatch = chats.watch();
 
     return () => {
       unlisten?.();
       stopUpdater();
       stopTodoWatch();
-      stopChatWatch();
     };
   });
 </script>

@@ -16,8 +16,6 @@
   import { moveThreadToProject } from "$lib/features/thread/move";
   import { notifications } from "$lib/features/notifications/store.svelte";
   import { refreshProjectIcon } from "$lib/features/project/api";
-  import ChatList from "$lib/features/chat/ChatList.svelte";
-  import { startChat, canChat } from "$lib/features/chat/start";
   import { isScratch, projectDisplayName } from "$lib/features/project/scratch";
   import StatusDot from "$lib/shared/components/StatusDot.svelte";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
@@ -30,7 +28,6 @@
   import type { DropSide } from "$lib/features/panes/types";
   import type { Thread, ThreadStatus } from "$lib/types";
   import Plus from "@lucide/svelte/icons/plus";
-  import MessageSquarePlus from "@lucide/svelte/icons/message-square-plus";
   import X from "@lucide/svelte/icons/x";
   import FolderOpen from "@lucide/svelte/icons/folder-open";
   import MoreHorizontal from "@lucide/svelte/icons/more-horizontal";
@@ -780,19 +777,6 @@
         <Archive class="size-4" />
       </button>
       {#if !showArchived}
-        {#if canChat()}
-          <!-- Before the +, because it is the one that needs nothing: a chat
-               opens with no folder to pick and no repository to have. -->
-          <button
-            type="button"
-            class="rounded-md p-1 text-muted-foreground transition hover:bg-accent hover:text-foreground"
-            onclick={() => void startChat()}
-            aria-label={t("chat.new")}
-            title={t("chat.newHint")}
-          >
-            <MessageSquarePlus class="size-4" />
-          </button>
-        {/if}
         <button
           type="button"
           class="rounded-md p-1 text-muted-foreground transition hover:bg-accent hover:text-foreground"
@@ -1106,12 +1090,6 @@
         {/if}
       </div>
     {/each}
-
-    <!-- Under the projects, not among them: a chat has no folder, so it is not
-         one of the things the drag-to-reorder above operates on. -->
-    {#if !showArchived}
-      <ChatList />
-    {/if}
   </div>
 
   <button

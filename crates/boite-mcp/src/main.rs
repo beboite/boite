@@ -1,16 +1,10 @@
 //! MCP server exposing the todo list of the Boite terminal it was launched in.
 //!
 //! It holds no configuration and no credentials of its own. Boite stamps
-//! `BOITE_MCP_URL`, `BOITE_TOKEN` and either `BOITE_THREAD_ID` or
-//! `BOITE_CHAT_ID` into every PTY it spawns, so this reads its whole identity
-//! from the environment. Launched anywhere else, those variables are absent and
-//! it refuses to start — which is the point: an agent outside Boite has nothing
-//! to present.
-//!
-//! Thread or chat decides what is reachable. A thread names a project, so it
-//! gets the todo list and its own worktree. A chat has no project yet — that is
-//! what a chat is for — so it gets the two handover tools and is told plainly
-//! that the rest needs one.
+//! `BOITE_MCP_URL`, `BOITE_TOKEN` and `BOITE_THREAD_ID` into every PTY it
+//! spawns, so this reads its whole identity from the environment. Launched
+//! anywhere else, those variables are absent and it refuses to start — which is
+//! the point: an agent outside Boite has nothing to present.
 //!
 //! The same binary serves the desktop app and `boite-server`; only the URL in
 //! the environment differs, so a remote workspace needs no separate shim.
@@ -59,10 +53,6 @@ struct Host {
     /// Which agent this is, when the registration said so. Only ever used to
     /// put the right badge on a claim; it grants nothing.
     agent: Option<String>,
-    /// The chat this shim was spawned for, when the agent is answering in one
-    /// rather than running in a terminal. A chat has no project — that is the
-    /// point of it — so it reaches the handover tools and nothing else.
-    chat_id: Option<String>,
     /// Short id to full id, filled by every listing. The process lives as long
     /// as the agent does, so a claim can quote the eight characters it was
     /// shown instead of a full uuid. Single-threaded loop, hence `RefCell`.
@@ -109,13 +99,8 @@ impl Host {
             std::env::var("BOITE_MCP_URL"),
             std::env::var("BOITE_TOKEN"),
         ) {
-            // A thread and a chat are both things Boite launched, and exactly
-            // one of them is stamped. Checked together so a chat turn is not
-            // mistaken for an agent with no credentials at all and sent looking
-            // for a file that was never written.
             let thread_id = std::env::var("BOITE_THREAD_ID").ok().filter(|s| !s.is_empty());
-            let chat_id = std::env::var("BOITE_CHAT_ID").ok().filter(|s| !s.is_empty());
-            if thread_id.is_some() || chat_id.is_some() {
+            if thread_id.is_some() {
                 return Ok(Host {
                     endpoint: Endpoint::parse(&url)?,
                     token,
@@ -124,7 +109,6 @@ impl Host {
                     // The thread names the agent better than any argument could:
                     // Boite launched it and knows what it is.
                     agent: None,
-                    chat_id,
                     ids: RefCell::new(HashMap::new()),
                 });
             }
@@ -149,8 +133,6 @@ impl Host {
             thread_id: None,
             project_id: Some(creds.project_id),
             agent,
-            // A credentials file is written per project and never for a chat.
-            chat_id: None,
             ids: RefCell::new(HashMap::new()),
         })
     }
@@ -180,9 +162,6 @@ impl Host {
         if let Some(agent) = &self.agent {
             headers.push(("x-boite-agent", agent));
         }
-        if let Some(chat) = &self.chat_id {
-            headers.push(("x-boite-chat", chat));
-        }
         let body = body.map(|b| b.to_string().into_bytes());
         let res = self.endpoint.send(method, path, &headers, body)?;
         let status = res.status;
@@ -199,23 +178,6 @@ impl Host {
             } else {
                 "that item is not open, or does not belong to this project".to_string()
             });
-        }
-        // A chat has no project until the user makes one, so the todo list has
-        // nothing to be a list of. Said plainly, because "refused" would send an
-        // agent looking for a permission problem that is not there.
-        if status == 412 {
-            return Err("this conversation has no project yet: propose one with \
-                        project_create, or use thread_start on an existing project"
-                .into());
-        }
-        if status == 403 {
-            return Err("the handover tools only work inside a Boite chat: a terminal \
-                        already belongs to a project"
-                .into());
-        }
-        if status == 501 {
-            return Err("chats are a local-workspace feature; this one runs on a boite-server"
-                .into());
         }
         if !(200..300).contains(&status) {
             return Err(format!("boite refused the call ({status})"));
@@ -260,31 +222,18 @@ impl Host {
 /// which one the other case belongs to. Everything a failed call would explain
 /// on its own is left to the failure.
 ///
-/// The tail of the list depends on where the agent is running, because
-/// `project_create` means two different things in the two places and an agent
-/// should not have to know which container it is in to ask for the only one
-/// that container can do. A thread already has a project, so its version
-/// creates a folder and moves the terminal into it. A chat is a conversation
-/// about a project that does not exist, so its version proposes one and stops.
-/// `None` when the environment gave this shim nothing to be: `tools/list`
-/// answers before any credential is needed, so it still has to say something.
-/// The terminal set is the answer there, because a shim with no host was
+/// `host` is unused now that every caller is a thread, and kept because
+/// `tools/list` answers before any credential is needed: a shim with no host was
 /// launched from a config file, and a config file is only ever written for a
-/// project.
-fn tools(host: Option<&Host>) -> Value {
-    let in_chat = host.is_some_and(|h| h.chat_id.is_some());
+/// project, so the answer is the same set either way.
+fn tools(_host: Option<&Host>) -> Value {
     let mut list = common_tools();
-    let extra = if in_chat { chat_tools() } else { thread_tools() };
-    if let (Some(all), Value::Array(tail)) = (list.as_array_mut(), extra) {
+    if let (Some(all), Value::Array(tail)) = (list.as_array_mut(), thread_tools()) {
         all.extend(tail);
     }
     list
 }
 
-/// Reachable from a thread and from a chat alike. A free chat has no project,
-/// so the todo calls answer 412 and say so — which is a better answer than a
-/// tool that was never listed, since the fix is to propose a project and the
-/// message names the tool that does it.
 fn common_tools() -> Value {
     json!([
         {
@@ -392,9 +341,7 @@ fn common_tools() -> Value {
     ])
 }
 
-/// Only from a terminal. All three act: they move this process, or start
-/// another one. None of them is reachable from a chat, which owns no terminal
-/// to move and no worktree to open.
+/// All three act: they move this process, or start another one.
 fn thread_tools() -> Value {
     json!([
         {
@@ -462,49 +409,6 @@ fn thread_tools() -> Value {
                 "additionalProperties": false
             },
             "annotations": { "title": "New thread", "destructiveHint": false, "openWorldHint": false }
-        }
-    ])
-}
-
-/// Only from a chat. Both propose and stop: registering a project widens the
-/// filesystem boundary the explorer and the editor are checked against, so an
-/// agent that could do it alone could name `/` and open the machine to the rest
-/// of the app. What lands is a row in the conversation and a button.
-fn chat_tools() -> Value {
-    json!([
-        {
-            "name": "project_create",
-            "description": "Offer to turn THIS conversation into a Boite project at a folder, and open \
-                            a terminal there carrying the transcript. Proposes only: the user gets a \
-                            button and decides. Call it once the conversation has settled on what is \
-                            being built and where.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "path": { "type": "string", "description": "Absolute path for the project folder. Boite creates it if it does not exist." },
-                    "name": { "type": "string", "description": "What to call it. Defaults to the folder name." },
-                    "prompt": { "type": "string", "description": "What the terminal should be asked first, beyond the transcript it already gets." }
-                },
-                "required": ["path"],
-                "additionalProperties": false
-            },
-            "annotations": { "title": "Propose project", "destructiveHint": false, "openWorldHint": false }
-        },
-        {
-            "name": "thread_start",
-            "description": "Offer to continue THIS conversation in a terminal on a project that already \
-                            exists, from projects_list. Proposes only, like project_create — use that \
-                            one when the folder is not a Boite project yet.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "projectId": { "type": "string", "description": "Id of an existing project." },
-                    "prompt": { "type": "string", "description": "What the terminal should be asked first, beyond the transcript." }
-                },
-                "required": ["projectId"],
-                "additionalProperties": false
-            },
-            "annotations": { "title": "Propose terminal", "destructiveHint": false, "openWorldHint": false }
         }
     ])
 }
@@ -713,37 +617,6 @@ fn call_tool(host: &Host, name: &str, args: &Value) -> Result<String, String> {
         }
         "worktree_branch" => branch_call(host, args, "/v1/worktree/branch", "worktree_branch"),
         "worktree_reserve" => branch_call(host, args, "/v1/worktree/reserve", "worktree_reserve"),
-        // A chat's `project_create` proposes; a thread's creates. Same name on
-        // purpose — each context is offered exactly one of them in `tools`, and
-        // an agent should not have to know which container it is in to ask for
-        // the only thing that container can do.
-        "project_create" if host.chat_id.is_some() => {
-            let path = args
-                .get("path")
-                .and_then(|v| v.as_str())
-                .ok_or("project_create needs a path")?;
-            handover_call(
-                host,
-                json!({
-                    "path": path,
-                    "name": args.get("name").and_then(|v| v.as_str()),
-                    "prompt": args.get("prompt").and_then(|v| v.as_str()),
-                }),
-            )
-        }
-        "thread_start" => {
-            let project_id = args
-                .get("projectId")
-                .and_then(|v| v.as_str())
-                .ok_or("thread_start needs a projectId")?;
-            handover_call(
-                host,
-                json!({
-                    "projectId": project_id,
-                    "prompt": args.get("prompt").and_then(|v| v.as_str()),
-                }),
-            )
-        }
         "projects_list" => {
             let out = host.send("GET", "/v1/projects", None)?;
             Ok(format_projects(&out))
@@ -811,21 +684,6 @@ fn call_tool(host: &Host, name: &str, args: &Value) -> Result<String, String> {
         }
         other => Err(format!("unknown tool: {other}")),
     }
-}
-
-/// Both handover tools post the same proposal and get the same answer back.
-///
-/// The answer says the user has to act, and says it in the tool result rather
-/// than leaving the agent to infer it from a bare `ok`. An agent told only that
-/// the call succeeded goes on as though the project exists — and then reports
-/// work it did in a directory nobody created.
-fn handover_call(host: &Host, body: Value) -> Result<String, String> {
-    host.send("POST", "/v1/chat/handover", Some(body))?;
-    let mut w = Toon::new();
-    w.field("proposed", "yes")
-        .field("state", "awaiting-user")
-        .hint("the user decides: a button is now in the chat. Do not act as if it exists yet");
-    Ok(w.into_string())
 }
 
 /// The project list, one row each. The path is what an agent matches against
@@ -969,21 +827,11 @@ fn main() {
                         "capabilities": { "tools": {} },
                         "serverInfo": { "name": "boite", "version": env!("CARGO_PKG_VERSION") },
                         // Read once per session, and it saves every tool from
-                        // repeating where it is running. A chat gets a
-                        // different one: told it belongs to a project, an agent
-                        // in a chat goes looking for the folder it is standing
-                        // in and reports on whatever it finds there.
-                        "instructions": if host.as_ref().is_ok_and(|h| h.chat_id.is_some()) {
-                            "This is a Boite chat: a conversation with no project yet, running in a \
-                             scratch directory. Nothing here is the user's code. When it has settled \
-                             on what is being built, project_create offers to make it real. Answers \
-                             are TOON — `key: value`, and `name(N):` followed by a header row then \
-                             one row per item."
-                        } else {
-                            "This terminal belongs to a Boite project: it has a shared todo list and \
-                             its own detached git worktree. Answers are TOON — `key: value`, and \
-                             `name(N):` followed by a header row then one row per item."
-                        }
+                        // repeating where it is running.
+                        "instructions": "This terminal belongs to a Boite project: it has a shared \
+                             todo list and its own detached git worktree. Answers are TOON — \
+                             `key: value`, and `name(N):` followed by a header row then one row \
+                             per item."
                     }),
                 )
             }

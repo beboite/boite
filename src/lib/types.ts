@@ -185,59 +185,7 @@ export interface TodoItem {
   updatedAt: number;
 }
 
-/**
- * A conversation with an agent that does not need a folder to exist.
- *
- * The point of the type is `projectId: null`: a chat is where an idea is talked
- * through before anyone has decided what it is, and the agent turns it into a
- * project through the MCP endpoint once it is worth structuring. A chat that
- * already has a project is the project page's chat, scoped to its directory.
- */
-export interface Chat {
-  id: string;
-  /** First line of the first message until the user renames it. */
-  title: string | null;
-  /** Which agent answers. Null when nothing is installed to answer with. */
-  agentKey: IconKey;
-  cmd: string;
-  args: string[];
-  /** Where turns run: a scratch directory, or the project folder. */
-  cwd: string;
-  projectId: string | null;
-  /**
-   * The id handed to the agent for its own session, when its CLI lets us choose
-   * one. Kept so a later turn continues the conversation on the agent's side
-   * rather than replaying the transcript into a fresh context.
-   */
-  sessionId: string | null;
-  createdAt: number;
-  updatedAt: number;
-}
-
-/**
- * `streaming` while the turn's process is alive, then `done` or `error`. A
- * message left `streaming` by a crash reads as `error` on reload — the process
- * that would have finished it is gone.
- */
-export type ChatMessageState = "streaming" | "done" | "error";
-
-export interface ChatMessage {
-  id: string;
-  chatId: string;
-  role: "user" | "agent" | "system";
-  /** What the bubble shows. Empty while a fallback turn has only raw bytes. */
-  text: string;
-  /**
-   * The agent's untouched output, kept only for the agents Boite has no
-   * headless recipe for: their answer is a terminal, and the bubble renders it
-   * as one rather than guessing at prose inside a redrawing TUI.
-   */
-  raw: string | null;
-  state: ChatMessageState;
-  createdAt: number;
-}
-
-export type View = "terminal" | "settings" | "editor" | "chat" | "project";
+export type View = "terminal" | "settings" | "editor" | "project";
 
 // Bottom-bar destinations in the phone layout. Independent of `View`: the
 // terminal/editor/settings desktop views still drive the shared viewport and

@@ -1,12 +1,5 @@
 import { backend, backendFor } from "$lib/backend";
-import type {
-  Chat,
-  ChatMessage,
-  Project,
-  Settings,
-  Thread,
-  WorkspaceOrigin,
-} from "$lib/types";
+import type { Project, Settings, Thread, WorkspaceOrigin } from "$lib/types";
 import { redactArgs } from "$lib/shared/utils/redact";
 
 // The origin tag is a client-side routing concern: strip it before a row hits
@@ -80,24 +73,3 @@ export function saveSettings(settings: Settings): Promise<void> {
   return backend().db.saveSettings(settings);
 }
 
-// Chats carry no origin tag: they only exist on a local workspace, which is the
-// one `backend()` returns when nothing routes them elsewhere.
-export function loadChats(): Promise<Chat[]> {
-  return backend().db.loadChats();
-}
-
-export function saveChat(chat: Chat): Promise<void> {
-  return backend().db.saveChat(chat);
-}
-
-export function deleteChat(id: string): Promise<void> {
-  return backend().db.deleteChat(id);
-}
-
-export function loadChatMessages(chatId: string): Promise<ChatMessage[]> {
-  return backend().db.loadChatMessages(chatId);
-}
-
-export function saveChatMessage(message: ChatMessage): Promise<void> {
-  return backend().db.saveChatMessage(message);
-}
