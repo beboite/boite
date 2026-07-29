@@ -5,8 +5,6 @@
 // never touches a component or store.
 
 import type {
-  Chat,
-  ChatMessage,
   Project,
   Settings,
   Thread,
@@ -71,19 +69,6 @@ export interface PtyApi {
   // take that key. Local always spawns (no detached PTYs yet); remote attaches
   // to a live thread or spawns then attaches.
   open(args: PtyOpenArgs, onEvent: (event: PtyEvent) => void): Promise<string>;
-  /**
-   * A PTY that belongs to no thread: one chat turn, which is spawned, read and
-   * reaped. Never reattaches — there is nothing to come back to.
-   *
-   * `chatId` is what the backend stamps into the child so the agent can reach
-   * the handover tools, the same way `open` stamps a thread id. Guarded by
-   * `caps.chat`; a transport without it refuses rather than pretending.
-   */
-  spawn(
-    spec: PtySpawnArgs,
-    chatId: string,
-    onEvent: (event: PtyEvent) => void,
-  ): Promise<string>;
   write(key: string, data: Uint8Array): Promise<void>;
   resize(key: string, cols: number, rows: number): Promise<void>;
   kill(key: string, wait?: boolean): Promise<void>;
@@ -111,17 +96,6 @@ export interface DbApi {
    */
   saveTodo(todo: TodoItem): Promise<void>;
   deleteTodo(id: string): Promise<void>;
-  loadChats(): Promise<Chat[]>;
-  saveChat(chat: Chat): Promise<void>;
-  deleteChat(id: string): Promise<void>;
-  /**
-   * One chat's turns, oldest first. Loaded per chat rather than all at once:
-   * every message carries an agent's full answer, and a workspace with a
-   * year of conversations has no reason to hold them all in memory to draw a
-   * list of titles.
-   */
-  loadChatMessages(chatId: string): Promise<ChatMessage[]>;
-  saveChatMessage(message: ChatMessage): Promise<void>;
 }
 
 export interface GitApi {
@@ -484,14 +458,6 @@ export interface PushApi {
 // title arrive as control events; the client only projects them.
 export interface BackendCaps {
   clientStatus: boolean;
-  /**
-   * Whether this transport can run a chat turn. A turn is a process spawned
-   * outside any thread, streamed back and then reaped, and the remote protocol
-   * has no frame for one — its PTYs are all keyed by a thread the server owns.
-   * False there until it does, so the chat button is simply absent rather than
-   * present and broken.
-   */
-  chat: boolean;
 }
 
 // Server-pushed control plane (remote only). Loosely typed so the store can

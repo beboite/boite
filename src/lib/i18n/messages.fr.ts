@@ -234,32 +234,6 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "todo.agentSetupCopied": "Config copiée — colle-la dans {agent}",
   "todo.agentSetupCopiedFile": "Config copiée — colle-la dans {file}",
 
-  "chat.section": "Chats",
-  "chat.new": "Nouveau chat",
-  "chat.newHint": "Parler à un agent sans choisir de dossier",
-  "chat.untitled": "Nouveau chat",
-  "chat.pickOne": "Choisissez un chat, ou lancez-en un.",
-  "chat.emptyHint":
-    "Demandez ce que vous voulez. Quand ça devient concret, l'agent peut en faire un projet.",
-  "chat.placeholder": "Écrire à l'agent…",
-  "chat.pickAgent": "Changer d'agent",
-  "chat.send": "Envoyer",
-  "chat.stop": "Arrêter",
-  "chat.noAgents": "Aucun agent installé",
-  "chat.modeTerminal": "terminal",
-  "chat.fallbackNotice":
-    "Boite ne connaît pas de mode texte fiable pour {agent} : ses réponses arrivent sous forme de terminal.",
-  "chat.turnFailed": "Ce tour n'est pas allé au bout.",
-  "chat.deleteTitle": "Supprimer le chat ?",
-  "chat.deleteMessage": "Supprimer {name} ? La conversation part avec.",
-  "chat.deleteConfirm": "Supprimer le chat",
-  "chat.handoverProjectTitle": "En faire un projet : {name}",
-  "chat.handoverThreadTitle": "Continuer dans un terminal",
-  "chat.handoverExplain":
-    "C'est l'agent qui le demande. Boite crée le dossier, ajoute le projet et ouvre un terminal avec le transcript — rien ne se passe tant que vous n'avez pas cliqué.",
-  "chat.handoverConfirm": "Créer et ouvrir un terminal",
-  "chat.handoverWorking": "Mise en place…",
-
   "project.pickOne": "Choisissez un projet à gauche.",
   "project.threads": "Terminaux",
   "project.noThreads": "Rien ne tourne encore ici.",
@@ -278,7 +252,6 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "project.noWorktrees": "Tous les terminaux tournent dans le dossier du projet.",
   "project.worktreesOff":
     "Les worktrees par terminal sont désactivés ; tout tourne dans le dossier du projet.",
-  "project.chatHint": "Posez une question sur ce projet — l'agent démarre dans le dossier.",
   "project.tabOverview": "Aperçu",
   "project.tabWorktrees": "Worktrees",
 

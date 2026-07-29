@@ -35,8 +35,8 @@ wrapped, and a blank shell is one keystroke away.
 - **Status at a glance.** A per-thread dot read from the agent's own OSC title: working, ready, error.
 - **A worktree per thread.** Every agent works in its own detached git worktree, so two of them on the same repo never write to the same files.
 - **Session resume.** Boite reads each tool's session store to find the conversation that belongs to the thread's directory.
-- **A page per project.** Threads, branch and upstream distance, recent commits, open todos and which worktree sits where, with a chat below it standing in the project's folder.
-- **Chat, not only terminals.** Ask one question without opening a thread. Bubbles where the agent streams events, its plain output where it does not, a live terminal where neither.
+- **A page per project.** Threads, branch and upstream distance, recent commits, open todos and which worktree sits where.
+- **Scratch.** A launcher that opens an agent in your home folder before there is a project to open it in, and disappears again once its last thread is gone.
 - **Another provider, another model.** With [fastpick](https://github.com/beboite/fastpick) installed, pick an endpoint and a model for the agent, and the icon is tinted with what is actually answering.
 - **Split panes.** Split horizontally or vertically, drag threads between panes, resize with the mouse.
 - **Git panel.** Staged/unstaged/conflict sections, commit, fetch/pull/push, branches, auto-fetch and a commit graph. Nested repos are found three levels deep.
@@ -54,27 +54,23 @@ Every agent ships as a shortcut with a brand icon. Boite runs whatever is on
 your `PATH`, so anything not listed still works from a blank shell; it just
 won't get status or resume detection.
 
-| Agent          | Command                 | Live status | Resume flag       | Chat        | Endpoint swap | Prompt bar |
-| -------------- | ----------------------- | ----------- | ----------------- | ----------- | ------------- | ---------- |
-| Claude Code    | `claude`                | ✅          | `--resume <id>`   | 💬 bubbles  | ✅            | ✅         |
-| Codex          | `codex --no-alt-screen` | ✅          | `resume <id>`     | 💬 bubbles  | ✅            | ❌         |
-| Opencode       | `opencode`              | ✅          | `--session <id>`  | 📄 output   | ✅            | ❌         |
-| Cursor Agent   | `cursor-agent`          | ✅          | `--resume <id>`   | 📄 output   | ❌            | ❌         |
-| Antigravity    | `agy`                   | ✅          | `--conversation`  | 📄 output   | ❌            | ❌         |
-| GitHub Copilot | `gh copilot`            | ✅          | `--resume=<id>`   | ⌨️ terminal | ❌            | ❌         |
-| Grok           | `grok`                  | ✅          | `--resume <id>`   | 📄 output   | ❌            | ❌         |
-| Hermes         | `hermes`                | ✅          | `--resume <id>`   | ⌨️ terminal | ❌            | ❌         |
-| Plain shell    | your default shell      | n/a         | n/a               | n/a         | n/a           | n/a        |
+| Agent          | Command                 | Live status | Resume flag       | Endpoint swap | Prompt bar |
+| -------------- | ----------------------- | ----------- | ----------------- | ------------- | ---------- |
+| Claude Code    | `claude`                | ✅          | `--resume <id>`   | ✅            | ✅         |
+| Codex          | `codex --no-alt-screen` | ✅          | `resume <id>`     | ✅            | ❌         |
+| Opencode       | `opencode`              | ✅          | `--session <id>`  | ✅            | ❌         |
+| Cursor Agent   | `cursor-agent`          | ✅          | `--resume <id>`   | ❌            | ❌         |
+| Antigravity    | `agy`                   | ✅          | `--conversation`  | ❌            | ❌         |
+| GitHub Copilot | `gh copilot`            | ✅          | `--resume=<id>`   | ❌            | ❌         |
+| Grok           | `grok`                  | ✅          | `--resume <id>`   | ❌            | ❌         |
+| Hermes         | `hermes`                | ✅          | `--resume <id>`   | ❌            | ❌         |
+| Plain shell    | your default shell      | n/a         | n/a               | n/a           | n/a        |
 
 - **Live status** is the working/ready dot, read from the OSC title the agent
   emits.
 - **Resume flag** is what Boite appends once it has found the conversation
   matching the thread's cwd. Only Claude files its transcript by directory, so
   it is also the only one whose transcript has to travel when a thread moves.
-- **Chat** is how a single question is answered outside a thread: *bubbles*
-  where the CLI streams events Boite can read, *output* where it has a print
-  mode but no stream, *terminal* where it has neither and the bubble holds a
-  live PTY instead. Nothing is ever greyed out.
 - **Endpoint swap** is fastpick pointing the agent at another provider. The
   three marked here keep their icon, status and resume through it; the others
   still launch, without the agent-specific handling.
@@ -85,23 +81,27 @@ Shortcuts are editable (label, command, icon, color, order), each preset says
 whether its binary was found on the machine, and any custom command can be
 added.
 
-## A page per project, and a chat under it
+## A page per project
 
 Clicking a project opens its page rather than whatever thread happened to be
-active. Above: its threads and their status with the launcher beside them, the
-branch with how far it is from upstream and the last few commits, the open todos
-with the claimed ones called out, and which thread holds which worktree. None of
-it is new data: it is what the side panels already keep, in the shape you want
-when you have just arrived.
+active: its threads and their status with the launcher beside them, the branch
+with how far it is from upstream and the last few commits, the open todos with
+the claimed ones called out, and which thread holds which worktree. None of it is
+new data: it is what the side panels already keep, in the shape you want when you
+have just arrived.
 
-Below: a chat with an agent already standing in the project's folder, so it can
-read the code rather than only know the project's name. A chat with no project
-is the same thing without the page, for an idea that has not earned a repository
-yet. Either way one process runs per turn and is reaped after it; the *Chat*
-column above says how each agent's answer is read back.
+## Scratch
 
-Nothing is created by looking. The composer accepts a chat that does not exist
-and opens one on the first message.
+Work does not always start at a repository. Scratch is a project row that is not
+one: it points at your home folder, holds no worktree, and exists only while
+something is running in it. Launch an agent with no project picked and it appears;
+close its last thread and it goes away again, ready to be made back under the
+same id next time.
+
+An agent that decides the work deserves a real home says so through the MCP:
+`project_create` makes the folder and moves the terminal into it, `thread_move`
+carries it to a project that already exists. The conversation survives the move,
+so nothing is retyped.
 
 ## Another provider, another model (fastpick)
 

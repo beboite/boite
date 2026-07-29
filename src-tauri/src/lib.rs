@@ -256,19 +256,9 @@ pub fn run() {
             sql: "ALTER TABLE todos ADD COLUMN description TEXT;",
             kind: MigrationKind::Up,
         },
-        // A conversation with an agent that has no project yet, and the turns
-        // in it. `project_id` is nullable because that is the whole point: a
-        // chat exists before the folder does, and only becomes a project if
-        // the conversation gets that far.
-        //
-        // Two tables rather than one blob of messages, for the reason the todos
-        // are two: a turn is appended while the previous ones are being read,
-        // and a whole-list rewrite loses whichever side wrote last.
-        //
-        // 16 rather than 15: `add_todo_description` landed on master under 15
-        // while this branch was open. The plugin keys applied migrations by
-        // version, so reusing the number would mean this one silently never
-        // runs on any machine that already opened master.
+        // Dead as of 17, which drops both tables. Kept because it shipped, and
+        // an edited migration never re-runs on a machine that already applied
+        // it: the undo has to be its own version.
         Migration {
             version: 16,
             description: "create_chats",
@@ -294,6 +284,17 @@ pub fn run() {
                 created_at INTEGER NOT NULL\
             );\
             CREATE INDEX IF NOT EXISTS idx_chat_messages_chat ON chat_messages (chat_id);",
+            kind: MigrationKind::Up,
+        },
+        // 16 is left in place rather than edited: it shipped, and a machine that
+        // never ran it would otherwise try to drop tables it never created. This
+        // one undoes it instead.
+        Migration {
+            version: 17,
+            description: "drop_chats",
+            sql: "DROP INDEX IF EXISTS idx_chat_messages_chat;\
+            DROP TABLE IF EXISTS chat_messages;\
+            DROP TABLE IF EXISTS chats;",
             kind: MigrationKind::Up,
         },
     ];
@@ -450,7 +451,6 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             set_traffic_lights_hidden,
-            commands::pty_spawn,
             commands::pty_warm_shell,
             commands::pty_open,
             commands::pty_detach,
@@ -496,9 +496,6 @@ pub fn run() {
             commands::git_switch_branch,
             commands::worktree_open,
             commands::worktree_list,
-            commands::chat_dir,
-            commands::chat_dir_remove,
-            commands::create_project_dir,
             commands::worktree_claim,
             commands::worktree_reserve,
             commands::worktree_hold,

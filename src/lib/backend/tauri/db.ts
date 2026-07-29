@@ -1,8 +1,5 @@
 import Database from "@tauri-apps/plugin-sql";
 import type {
-  Chat,
-  ChatMessage,
-  ChatMessageState,
   IconKey,
   Project,
   Settings,
@@ -89,29 +86,6 @@ interface ThreadRow {
 
 interface SettingsRow {
   value: string;
-}
-
-interface ChatRow {
-  id: string;
-  title: string | null;
-  agent_key: string | null;
-  cmd: string;
-  args: string;
-  cwd: string;
-  project_id: string | null;
-  session_id: string | null;
-  created_at: number;
-  updated_at: number;
-}
-
-interface ChatMessageRow {
-  id: string;
-  chat_id: string;
-  role: string;
-  text: string;
-  raw: string | null;
-  state: string;
-  created_at: number;
 }
 
 function safeParseArgs(raw: string): string[] {
@@ -284,92 +258,4 @@ export const tauriDb: DbApi = {
     await getDb().execute("DELETE FROM todos WHERE id = ?", [id]);
   },
 
-  async loadChats(): Promise<Chat[]> {
-    const rows = await getDb().select<ChatRow[]>(
-      "SELECT id, title, agent_key, cmd, args, cwd, project_id, session_id, created_at, updated_at \
-       FROM chats ORDER BY updated_at DESC",
-    );
-    return rows.map((r) => ({
-      id: r.id,
-      title: r.title,
-      agentKey: (r.agent_key ?? null) as IconKey,
-      cmd: r.cmd,
-      args: safeParseArgs(r.args),
-      cwd: r.cwd,
-      projectId: r.project_id,
-      sessionId: r.session_id,
-      createdAt: r.created_at,
-      updatedAt: r.updated_at,
-    }));
-  },
-
-  async saveChat(chat: Chat): Promise<void> {
-    await getDb().execute(
-      "INSERT OR REPLACE INTO chats \
-       (id, title, agent_key, cmd, args, cwd, project_id, session_id, created_at, updated_at) \
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      [
-        chat.id,
-        chat.title,
-        chat.agentKey,
-        chat.cmd,
-        JSON.stringify(chat.args),
-        chat.cwd,
-        chat.projectId,
-        chat.sessionId,
-        chat.createdAt,
-        chat.updatedAt,
-      ],
-    );
-  },
-
-  // The messages go with it: a turn whose chat is gone has nothing to be read
-  // in, and there is no foreign key to sweep it.
-  async deleteChat(id: string): Promise<void> {
-    await getDb().execute("DELETE FROM chat_messages WHERE chat_id = ?", [id]);
-    await getDb().execute("DELETE FROM chats WHERE id = ?", [id]);
-  },
-
-  async loadChatMessages(chatId: string): Promise<ChatMessage[]> {
-    const rows = await getDb().select<ChatMessageRow[]>(
-      "SELECT id, chat_id, role, text, raw, state, created_at \
-       FROM chat_messages WHERE chat_id = ? ORDER BY created_at ASC",
-      [chatId],
-    );
-    return rows.map(rowToChatMessage);
-  },
-
-  async saveChatMessage(message: ChatMessage): Promise<void> {
-    await getDb().execute(
-      "INSERT OR REPLACE INTO chat_messages (id, chat_id, role, text, raw, state, created_at) \
-       VALUES (?, ?, ?, ?, ?, ?, ?)",
-      [
-        message.id,
-        message.chatId,
-        message.role,
-        message.text,
-        message.raw,
-        message.state,
-        message.createdAt,
-      ],
-    );
-  },
 };
-
-/**
- * A message still marked `streaming` is one whose process died with the app:
- * nothing is left to finish it, so it is read back as the failure it is rather
- * than as a turn that will never arrive.
- */
-function rowToChatMessage(r: ChatMessageRow): ChatMessage {
-  const state: ChatMessageState = r.state === "done" ? "done" : "error";
-  return {
-    id: r.id,
-    chatId: r.chat_id,
-    role: r.role === "user" || r.role === "system" ? r.role : "agent",
-    text: r.text,
-    raw: r.raw,
-    state,
-    createdAt: r.created_at,
-  };
-}

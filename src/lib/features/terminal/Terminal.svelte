@@ -34,7 +34,7 @@
     resolveKey,
   } from "$lib/features/thread/session";
   import { withPowershellFastFlags } from "$lib/features/thread/shell-wrap";
-  import { claimPrompt } from "$lib/features/chat/pendingPrompt";
+  import { claimTypedPrompt } from "$lib/features/thread/typedPrompt";
   import { parsePromotion, PROMOTE_OSC } from "$lib/features/thread/promote";
   import { platform } from "$lib/storage/platform.svelte";
   import {
@@ -1091,18 +1091,18 @@
       spawnRetryCount = 0;
       app.setThreadPtyId(thread.id, ptyId);
       app.setThreadStatus(thread.id, "ready");
-      // A thread a chat handed over carries an opening line that had nowhere to
-      // go until now. Typed, never submitted — the same rule the Todo panel
+      // A thread whose CLI takes no positional prompt carries its opening line
+      // here instead. Typed, never submitted — the same rule the Todo panel
       // follows, and for the same reason: an agent turn is expensive and hard
       // to call back, so the Enter is the user's.
       //
       // Only on a real spawn. Reattaching means the agent is already mid-
       // conversation, and claiming is one-shot so a respawn cannot repeat it.
       if (!reattaching) {
-        const opening = claimPrompt(thread.id);
+        const opening = claimTypedPrompt(thread.id);
         if (opening && ptyId) {
           void ptyWrite(ptyId, encoder.encode(opening)).catch((err) => {
-            logger.warn("chat", `could not type the handover prompt`, String(err));
+            logger.warn("spawn", `could not type the opening prompt`, String(err));
           });
         }
       }

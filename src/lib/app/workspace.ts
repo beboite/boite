@@ -7,7 +7,6 @@ import { platform } from "$lib/storage/platform.svelte";
 import { resetShellCache } from "$lib/storage/shell";
 import { gitStore } from "$lib/features/git/store.svelte";
 import { todos } from "$lib/features/todo/store.svelte";
-import { chats } from "$lib/features/chat/store.svelte";
 import { notifications } from "$lib/features/notifications/store.svelte";
 import { device, type BoiteEntry } from "$lib/features/settings/device.svelte";
 import { registerPush } from "$lib/features/push/api";
@@ -25,11 +24,6 @@ export function defaultRemoteWsUrl(): string {
 function resetStores() {
   settings.reset();
   todos.reset();
-  // Chats live in the workspace's own database, and their `cwd` names a folder
-  // on the machine that holds it. Left behind, they stay in the sidebar of a
-  // boite that never had them, and opening one runs a turn in a directory that
-  // does not exist there.
-  chats.reset();
   platform.reset();
   resetShellCache();
   gitStore.reset();

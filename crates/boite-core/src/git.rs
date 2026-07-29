@@ -1375,13 +1375,12 @@ pub fn commit_blocking(path: &str, message: &str) -> Result<String, String> {
 
 /// One directory named after an id, directly under `base` and never elsewhere.
 ///
-/// Used for thread worktrees and for the scratch directory a project-less chat
-/// runs in. Both want the same guarantee, which is why they share this: the
-/// result is always exactly one level down, so the filesystem trust boundary
-/// gains one root — the base — rather than one per directory fed from a stored
-/// id. A worktree also has to live outside the project for a second reason: one
-/// nested in the repository shows up as untracked, which makes the main
-/// checkout permanently dirty and hides real changes in `git status`.
+/// Used for thread worktrees: the result is always exactly one level down, so
+/// the filesystem trust boundary gains one root — the base — rather than one per
+/// directory fed from a stored id. A worktree also has to live outside the
+/// project for a second reason: one nested in the repository shows up as
+/// untracked, which makes the main checkout permanently dirty and hides real
+/// changes in `git status`.
 pub fn scoped_dir_for(base: &Path, id: &str) -> PathBuf {
     // Ids are generated, but this path reaches `git worktree add` and
     // `create_dir_all`, so it is treated as untrusted input: anything that is
