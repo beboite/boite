@@ -38,7 +38,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # node base gives node + npm for the npm-distributed agents; tini reaps PTY
 # zombies (every spawned shell/agent is a child); git + ripgrep are what the
 # PTY and explorer shell out to; chromium + xvfb give axi a headful browser.
-FROM node:22-bookworm-slim
+FROM node:26-bookworm-slim
 
 # Base tools + gh (GitHub CLI, arm64 from official apt repo) + headful browser.
 RUN apt-get update \
