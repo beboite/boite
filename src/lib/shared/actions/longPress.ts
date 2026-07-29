@@ -32,9 +32,12 @@ export function longPress(node: HTMLElement, options: LongPressOptions) {
   }
 
   function down(e: PointerEvent) {
-    if (e.pointerType === "mouse") return;
+    // Cleared for a mouse too, on the way out: a long press leaves the flag up
+    // for the click that usually follows it, and on a laptop with a touch
+    // screen the next thing to happen may be a real right-click instead.
     clear();
     fired = false;
+    if (e.pointerType === "mouse") return;
     startX = e.clientX;
     startY = e.clientY;
     timer = setTimeout(() => {
@@ -67,9 +70,15 @@ export function longPress(node: HTMLElement, options: LongPressOptions) {
   // Android's WebView raises a real contextmenu on a long press, iOS does not.
   // Whichever gets there first owns the menu: ours drops the native one, the
   // native one cancels our timer. Both would open the same menu twice.
+  //
+  // Immediate, not just `stopPropagation`: the elements this is used on carry
+  // their own `oncontextmenu` opening that same menu, and a listener on the node
+  // the event targets runs whether or not propagation was stopped. A capturing
+  // listener does get there first, so this is the one place that can stop it.
   function swallowContextMenu(e: MouseEvent) {
     if (fired) {
       e.preventDefault();
+      e.stopImmediatePropagation();
       return;
     }
     clear();
