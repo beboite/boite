@@ -1,10 +1,13 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { scale } from "svelte/transition";
-  import { app } from "$lib/app/store.svelte";
   import { platform } from "$lib/storage/platform.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
-  import { launchShell, launchBlankTerminal } from "$lib/features/thread/api";
+  import {
+    launchShell,
+    launchBlankTerminal,
+    launchTargetProjectId,
+  } from "$lib/features/thread/api";
   import type { ShellOption } from "$lib/storage/platform.svelte";
   import Plus from "@lucide/svelte/icons/plus";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
@@ -31,9 +34,11 @@
     open = !open;
   }
 
-  async function launchDefault() {
+  // Shift-click opens in Scratch without leaving the current project, the same
+  // as on a shortcut. On no project the plain click already lands there.
+  async function launchDefault(forceScratch: boolean) {
     open = false;
-    const projectId = app.currentProjectId;
+    const projectId = await launchTargetProjectId(forceScratch);
     if (!projectId) return;
     if (defaultShell) {
       await launchShell(defaultShell, projectId);
@@ -42,9 +47,9 @@
     }
   }
 
-  async function pick(shell: ShellOption) {
+  async function pick(shell: ShellOption, forceScratch: boolean) {
     open = false;
-    const projectId = app.currentProjectId;
+    const projectId = await launchTargetProjectId(forceScratch);
     if (!projectId) return;
     await launchShell(shell, projectId);
   }
@@ -75,8 +80,11 @@
   <button
     type="button"
     class="flex shrink-0 items-center gap-1.5 rounded-l-md border border-r-0 border-dashed border-border px-2.5 py-1 text-xs text-muted-foreground transition hover:border-foreground/30 hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-    disabled={app.currentProjectId === null}
-    onclick={launchDefault}
+    onclick={(e) => void launchDefault(e.shiftKey)}
+    oncontextmenu={(e) => {
+      e.preventDefault();
+      void launchDefault(true);
+    }}
     title={defaultShell ? `Launch ${defaultShell.label}` : "New blank terminal"}
     aria-label="Launch terminal"
   >
@@ -86,7 +94,7 @@
   <button
     type="button"
     class="flex shrink-0 items-center justify-center rounded-r-md border border-dashed border-border px-1.5 py-1 text-muted-foreground transition hover:border-foreground/30 hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-    disabled={app.currentProjectId === null || platform.shells.length === 0}
+    disabled={platform.shells.length === 0}
     onclick={toggle}
     aria-haspopup="menu"
     aria-expanded={open}
@@ -116,7 +124,7 @@
           type="button"
           role="menuitem"
           class="flex items-center justify-between gap-3 rounded px-2 py-1.5 text-left text-[11.5px] text-foreground/85 transition hover:bg-accent hover:text-foreground"
-          onclick={() => pick(shell)}
+          onclick={(e) => void pick(shell, e.shiftKey)}
         >
           <span class="font-medium">{shell.label}</span>
           <span class="font-mono text-[10px] text-muted-foreground/70">{shell.id}</span>

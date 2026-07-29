@@ -1,5 +1,6 @@
 <script lang="ts">
   import { app } from "$lib/app/store.svelte";
+  import { projectDisplayName } from "$lib/features/project/scratch";
   import { pickAndAddProject } from "$lib/features/project/api";
   import { closeThreadWithConfirm } from "$lib/features/thread/api";
   import type { Thread, ThreadStatus } from "$lib/types";
@@ -90,12 +91,12 @@
                     <img src={project.icon} alt="" class="size-full object-contain" decoding="async" draggable="false" />
                   {:else}
                     <span class="text-sm font-semibold text-muted-foreground">
-                      {project.name.charAt(0).toUpperCase()}
+                      {projectDisplayName(project).charAt(0).toUpperCase()}
                     </span>
                   {/if}
                 </span>
                 <span class="min-w-0 flex-1">
-                  <span class="block truncate text-[14px] font-medium text-foreground">{project.name}</span>
+                  <span class="block truncate text-[14px] font-medium text-foreground">{projectDisplayName(project)}</span>
                   <span class="block truncate text-[11px] text-muted-foreground">
                     {threads.length} terminal{threads.length === 1 ? "" : "s"}
                   </span>
@@ -105,7 +106,7 @@
                 type="button"
                 class="flex size-9 shrink-0 items-center justify-center rounded-lg text-foreground/80 transition hover:bg-accent active:bg-accent/70"
                 onclick={() => launchInto(project.id)}
-                aria-label="New terminal in {project.name}"
+                aria-label="New terminal in {projectDisplayName(project)}"
               >
                 <Plus class="size-5" />
               </button>

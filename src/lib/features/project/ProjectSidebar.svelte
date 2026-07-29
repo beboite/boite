@@ -18,7 +18,7 @@
   import { refreshProjectIcon } from "$lib/features/project/api";
   import ChatList from "$lib/features/chat/ChatList.svelte";
   import { startChat, canChat } from "$lib/features/chat/start";
-  import { isScratch } from "$lib/features/project/scratch";
+  import { isScratch, projectDisplayName } from "$lib/features/project/scratch";
   import StatusDot from "$lib/shared/components/StatusDot.svelte";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
   import { threadIconColor } from "$lib/features/fastpick/threadAccent";
@@ -622,7 +622,7 @@
     if (!project) return;
     const ok = await confirmDialog.ask({
       title: "Remove project?",
-      message: `Remove ${project.name}? All its threads will be killed and dropped.`,
+      message: `Remove ${projectDisplayName(project)}? All its threads will be killed and dropped.`,
       confirmLabel: "Remove project",
       danger: true,
     });
@@ -636,11 +636,15 @@
     e.preventDefault();
     e.stopPropagation();
     const items: ContextMenuItem[] = [];
-    items.push({
-      label: "Rename",
-      action: () => startRename("project", project.id, project.name),
-    });
-    items.push({ separator: true });
+    // Scratch is the app's own row and reads in the app's language, so there is
+    // no name on it for the user to change.
+    if (!isScratch(project)) {
+      items.push({
+        label: "Rename",
+        action: () => startRename("project", project.id, project.name),
+      });
+      items.push({ separator: true });
+    }
     if (project.archived) {
       items.push({
         label: "Unarchive",
@@ -796,7 +800,18 @@
     </div>
   </header>
 
-  <div class="flex-1 overflow-y-auto px-2 pb-2" role="list">
+  <!-- The empty space below the rows is how the user gets onto no project at
+       all, which is what sends the next launch to Scratch. Only the container
+       itself: a click that reached a row is that row's. -->
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <div
+    class="flex-1 overflow-y-auto px-2 pb-2"
+    role="list"
+    onclick={(e) => {
+      if (e.target === e.currentTarget) app.clearSelection();
+    }}
+  >
     {#if showArchived && visibleProjects.length === 0}
       <div
         class="mx-1 mt-2 flex w-[calc(100%-0.5rem)] flex-col items-center gap-2 rounded-lg border border-dashed border-border bg-transparent px-3 py-7 text-xs text-muted-foreground"
@@ -879,7 +894,7 @@
               />
             {:else}
               <span class="text-[11px] font-semibold text-muted-foreground">
-                {project.name.charAt(0).toUpperCase()}
+                {projectDisplayName(project).charAt(0).toUpperCase()}
               </span>
             {/if}
           </div>
@@ -904,7 +919,7 @@
                 selectProject(project.id);
               }}
             >
-              {project.name}
+              {projectDisplayName(project)}
             </button>
           {/if}
 

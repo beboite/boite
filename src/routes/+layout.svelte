@@ -11,7 +11,7 @@
   import { applyMotionPreference } from "$lib/theme/motion";
   import {
     closeThreadWithConfirm,
-    launchBlankTerminal,
+    launchBlankTerminalHere,
     restoreLastClosedThread,
   } from "$lib/features/thread/api";
   import { addProjectByPath } from "$lib/features/project/api";
@@ -223,7 +223,7 @@
       combo: "mod+t",
       scopes: ["app", "settings", "editor"],
       description: "New terminal",
-      run: () => void launchBlankTerminal(app.currentProjectId),
+      run: () => void launchBlankTerminalHere(),
     },
     {
       combo: "mod+w",

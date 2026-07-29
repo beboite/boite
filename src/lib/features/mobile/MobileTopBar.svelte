@@ -2,6 +2,7 @@
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { platform as detectPlatform } from "@tauri-apps/plugin-os";
   import { app } from "$lib/app/store.svelte";
+  import { projectDisplayName } from "$lib/features/project/scratch";
   import { hasTauri } from "$lib/backend/env";
   import WorkspaceToggle from "$lib/features/workspace/WorkspaceToggle.svelte";
   import MobileLaunchSheet from "./MobileLaunchSheet.svelte";
@@ -59,12 +60,12 @@
           <img src={project.icon} alt="" class="size-full object-contain" decoding="async" draggable="false" />
         {:else}
           <span class="text-xs font-semibold text-muted-foreground">
-            {project.name.charAt(0).toUpperCase()}
+            {projectDisplayName(project).charAt(0).toUpperCase()}
           </span>
         {/if}
       </span>
       <span class="flex min-w-0 flex-col leading-tight">
-        <span class="truncate text-[13px] font-semibold text-foreground">{project.name}</span>
+        <span class="truncate text-[13px] font-semibold text-foreground">{projectDisplayName(project)}</span>
         {#if onTerminal && activeTitle}
           <span class="truncate text-[11px] text-muted-foreground">{activeTitle}</span>
         {/if}

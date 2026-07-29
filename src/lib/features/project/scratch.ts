@@ -12,16 +12,23 @@
  * thing a thread needs — a cwd, a todo list, the MCP endpoint's project lookup,
  * the sidebar's grouping — already keys off a project, and a nullable project
  * would have meant teaching each of them what "nowhere" means.
+ *
+ * Made the first time something is launched into it, not at boot, and hidden
+ * from the sidebar again once its last thread is gone: a row that is only ever
+ * a starting point should not sit there being one of the things being worked
+ * on. Nothing is lost by it disappearing, since the next launch makes it back
+ * under the same fixed id.
  */
 
 import { backendFor } from "$lib/backend";
+import { t } from "$lib/i18n/index.svelte";
 import { logger } from "$lib/shared/services/logger.svelte";
 import type { Project, WorkspaceOrigin } from "$lib/types";
 
 /**
- * Fixed rather than generated: the row is recreated from scratch on a machine
- * that has never had one, and a thread that moved out of it must not find a
- * second one waiting under a different id after a reinstall.
+ * Fixed rather than generated: the row is recreated on a machine that has never
+ * had one, and a thread that moved out of it must not find a second one waiting
+ * under a different id after a reinstall.
  */
 export const SCRATCH_PROJECT_ID = "boite-scratch";
 
@@ -30,20 +37,26 @@ export function isScratch(project: { id: string } | null | undefined): boolean {
 }
 
 /**
- * The Scratch row, made if this workspace has never had one.
+ * The name to put on screen for a project.
  *
- * Seeded at boot rather than on first use: an empty Boite with no way to open a
- * terminal is the state this exists to remove, so it has to be there before the
- * user looks. Returns null when the home folder cannot be resolved — there is
- * nowhere to run, and a project pointing at nothing is worse than none.
+ * Scratch is the app's own row, not something the user named, so it reads in
+ * the app's language. The stored `name` column stays English: it is what the
+ * MCP endpoint and the logs match on, and translating a database value would
+ * make a French install and an English one disagree about the same row.
  */
-export async function ensureScratchProject(
-  existing: Project[],
+export function projectDisplayName(project: { id: string; name: string }): string {
+  return isScratch(project) ? t("project.scratch") : project.name;
+}
+
+/**
+ * A fresh Scratch row, or null when the home folder cannot be resolved — there
+ * is nowhere to run, and a project pointing at nothing is worse than none.
+ *
+ * The caller persists it; this only decides what it looks like.
+ */
+export async function makeScratchProject(
   origin?: WorkspaceOrigin,
 ): Promise<Project | null> {
-  const already = existing.find((p) => p.id === SCRATCH_PROJECT_ID);
-  if (already) return already;
-
   let home: string;
   try {
     home = await backendFor(origin).project.homeDir();

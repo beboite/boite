@@ -19,6 +19,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { app } from "$lib/app/store.svelte";
+  import { projectDisplayName } from "$lib/features/project/scratch";
   import { settings } from "$lib/features/settings/store.svelte";
   import { notifications } from "$lib/features/notifications/store.svelte";
   import { todos } from "./store.svelte";
@@ -459,7 +460,7 @@
   <header class="flex h-9 shrink-0 items-center gap-2 border-b border-border px-3">
     <ListTodo class="size-4 text-muted-foreground" />
     {#if project}
-      <span class="truncate text-xs font-medium text-foreground/90">{project.name}</span>
+      <span class="truncate text-xs font-medium text-foreground/90">{projectDisplayName(project)}</span>
     {:else}
       <span class="truncate text-xs text-muted-foreground">No project</span>
     {/if}

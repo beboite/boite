@@ -15,10 +15,15 @@ export const EN_MESSAGES = {
   "tabs.fastpick": "Fastpick",
   "tabs.logs": "Logs",
 
+  // The app's own project row. Named in the app's language rather than the
+  // database's, since nobody chose the name.
+  "project.scratch": "Scratch",
+
   "shortcuts.title": "Shortcuts",
   "shortcuts.description": "Drag a row to reorder. Edit the command to pass arguments or use an alias.",
   "shortcuts.resetTitle": "Reset to default presets",
   "shortcuts.new": "New",
+  "shortcuts.openInScratch": "Shift-click or right-click: open in {project}",
   "shortcuts.newShortcut": "New shortcut",
   "shortcuts.changeIconColor": "Change icon color",
   "shortcuts.setColor": "Set color {color}",

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { app } from "$lib/app/store.svelte";
+  import { projectDisplayName } from "$lib/features/project/scratch";
   import { workspace } from "$lib/backend";
   import { settings } from "$lib/features/settings/store.svelte";
   import { threadCwd } from "$lib/features/thread/cwd";
@@ -158,7 +159,7 @@
     <FolderTree class="size-4 text-muted-foreground" />
     {#if project}
       <span class="truncate text-xs font-medium text-foreground/90">
-        {project.name}
+        {projectDisplayName(project)}
       </span>
     {:else}
       <span class="truncate text-xs text-muted-foreground">No project</span>
