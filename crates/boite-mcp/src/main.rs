@@ -409,6 +409,32 @@ fn thread_tools() -> Value {
                 "additionalProperties": false
             },
             "annotations": { "title": "New thread", "destructiveHint": false, "openWorldHint": false }
+        },
+        {
+            "name": "pane_open",
+            "description": "Put something on screen next to this terminal, in a split pane. Use it                             when you have just made something worth looking at: a dev server                             (browser), a diff you want reviewed (git), the file tree after a big                             move (explorer), the project's state (dashboard). The user keeps your                             terminal in view either way. Opening a pane that is already open just                             focuses it, so calling twice is safe and does nothing the second time.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "kind": {
+                        "type": "string",
+                        "enum": ["dashboard", "git", "explorer", "todo", "editor", "browser"],
+                        "description": "What to show."
+                    },
+                    "url": {
+                        "type": "string",
+                        "description": "For kind=browser. http:// or https:// only. A localhost dev                                         server is the case this exists for; a public site may refuse                                         to be framed, and the user gets a button to open it outside."
+                    },
+                    "side": {
+                        "type": "string",
+                        "enum": ["left", "right", "top", "bottom"],
+                        "description": "Which side of this terminal. Defaults to right."
+                    }
+                },
+                "required": ["kind"],
+                "additionalProperties": false
+            },
+            "annotations": { "title": "Open pane", "readOnlyHint": true, "destructiveHint": false, "openWorldHint": false }
         }
     ])
 }
@@ -680,6 +706,22 @@ fn call_tool(host: &Host, name: &str, args: &Value) -> Result<String, String> {
             let mut w = Toon::new();
             w.field("opened", args.get("agent").and_then(|v| v.as_str()).unwrap_or("agent"))
                 .hint("it runs on its own: no report back, and you cannot read its output");
+            Ok(w.into_string())
+        }
+        "pane_open" => {
+            let mut body = json!({});
+            for key in ["kind", "url", "side"] {
+                if let Some(v) = args.get(key).and_then(|v| v.as_str()) {
+                    body[key] = json!(v);
+                }
+            }
+            refusable(host, "/v1/pane/open", body)?;
+            let mut w = Toon::new();
+            w.field("opened", args.get("kind").and_then(|v| v.as_str()).unwrap_or("pane"));
+            if let Some(url) = args.get("url").and_then(|v| v.as_str()) {
+                w.field("url", url);
+            }
+            w.hint("the user sees it now; you cannot read what is in it");
             Ok(w.into_string())
         }
         other => Err(format!("unknown tool: {other}")),
