@@ -356,14 +356,14 @@
                 placeholder={t("todo.titlePlaceholder")}
                 onchange={(e) =>
                   todos.setTitle(item.id, (e.currentTarget as HTMLInputElement).value)}
-                class="min-w-0 flex-1 rounded border border-transparent bg-transparent px-1 py-0.5 text-[12px] leading-snug outline-none transition focus:border-border focus:bg-[var(--color-surface)] {item.state ===
+                class="min-w-0 flex-1 rounded border border-transparent bg-transparent px-1 py-0.5 text-sm leading-snug outline-none transition focus:border-border focus:bg-[var(--color-surface)] {item.state ===
                 'done'
                   ? 'text-muted-foreground/60 line-through'
                   : 'text-foreground'}"
               />
             {:else}
               <span
-                class="min-w-0 flex-1 truncate px-1 py-0.5 text-[12px] leading-snug {item.state ===
+                class="min-w-0 flex-1 truncate px-1 py-0.5 text-sm leading-snug {item.state ===
                 'done'
                   ? 'text-muted-foreground/60 line-through'
                   : 'text-foreground'}"
@@ -423,7 +423,7 @@
                     item.id,
                     (e.currentTarget as HTMLTextAreaElement).value,
                   )}
-                class="w-full resize-none rounded border border-border bg-[var(--color-surface)] px-1.5 py-1 text-[11.5px] leading-relaxed text-foreground/90 outline-none transition placeholder:text-muted-foreground/60 focus:border-foreground/30"
+                class="w-full resize-none rounded border border-border bg-[var(--color-surface)] px-1.5 py-1 text-sm leading-relaxed text-foreground/90 outline-none transition placeholder:text-muted-foreground/60 focus:border-foreground/30"
               ></textarea>
             </div>
           {/if}
@@ -443,7 +443,7 @@
                  hover target, so dragging across one only produced a highlight
                  nobody asked for. -->
             <div
-              class="mt-1 flex select-none items-center gap-1 pl-[23px] text-[10.5px] text-muted-foreground"
+              class="mt-1 flex select-none items-center gap-1 pl-[23px] text-xs text-muted-foreground"
             >
               <!-- A label, not a control: nothing hides behind it, so it gets
                    no box and no hover of its own. -->
@@ -524,7 +524,7 @@
             <div class="mt-1 flex gap-1 pl-[23px]">
               <button
                 type="button"
-                class="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10.5px] text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
+                class="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
                 onclick={() => todos.setState(item.id, "done")}
               >
                 <Check class="size-3" />
@@ -532,7 +532,7 @@
               </button>
               <button
                 type="button"
-                class="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10.5px] text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
+                class="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
                 onclick={() => todos.setState(item.id, "open")}
               >
                 <Undo2 class="size-3" />
@@ -559,7 +559,7 @@
           class="size-3 shrink-0 text-muted-foreground transition {agentsShown ? '' : '-rotate-90'}"
         />
         <span
-          class="min-w-0 flex-1 truncate text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
+          class="min-w-0 flex-1 truncate text-2xs font-semibold uppercase tracking-wider text-muted-foreground"
         >
           {t("todo.agentAccess")}
         </span>
@@ -568,7 +568,7 @@
              a number. -->
         {#if agentsPending > 0}
           <span
-            class="shrink-0 rounded-full bg-[var(--color-surface-2)] px-1.5 text-[10px] text-foreground/75"
+            class="shrink-0 rounded-full bg-[var(--color-surface-2)] px-1.5 text-2xs text-foreground/75"
           >
             {agentsPending}
           </span>
@@ -586,7 +586,7 @@
         type="text"
         bind:value={draft}
         placeholder={t("todo.newItem")}
-        class="w-full rounded-md border border-border bg-[var(--color-surface-2)] px-2 py-1 text-[12px] text-foreground outline-none transition placeholder:text-muted-foreground/60 focus:border-foreground/30"
+        class="w-full rounded-md border border-border bg-[var(--color-surface-2)] px-2 py-1 text-sm text-foreground outline-none transition placeholder:text-muted-foreground/60 focus:border-foreground/30"
       />
     </form>
   {/if}
@@ -608,7 +608,7 @@
        screen, while below it there is nearly always list left. Left-aligned to
        the chip so a long one grows into the panel rather than off it. -->
   <span
-    class="pointer-events-none absolute left-0 top-full z-30 mt-1 hidden w-max max-w-[240px] rounded border border-border bg-[var(--color-surface-2)] px-1.5 py-0.5 text-left text-[10.5px] leading-snug text-foreground shadow-md group-hover/tip:block"
+    class="pointer-events-none absolute left-0 top-full z-30 mt-1 hidden w-max max-w-[240px] rounded border border-border bg-[var(--color-surface-2)] px-1.5 py-0.5 text-left text-xs leading-snug text-foreground shadow-md group-hover/tip:block"
   >
     {text}
   </span>

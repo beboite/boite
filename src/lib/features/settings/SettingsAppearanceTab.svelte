@@ -37,7 +37,7 @@
   {#snippet actions()}
     <button
       type="button"
-      class="flex items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-1 text-[11px] text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
+      class="flex items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-1 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
       onclick={reset}
       title={t("appearance.resetScale")}
     >
@@ -47,7 +47,7 @@
   {/snippet}
 
   <div class="flex items-center gap-3">
-    <span class="w-9 font-mono text-[10px] text-muted-foreground/70">75%</span>
+    <span class="w-9 font-mono text-2xs text-muted-foreground/70">75%</span>
     <input
       type="range"
       min="75"
@@ -83,7 +83,7 @@
 {#if settings.state.colorByModel}
   <div class="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-3 pb-1">
     {#each ACCENTS as accent (accent.id)}
-      <span class="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+      <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
         <span
           class="size-2 shrink-0 rounded-full"
           style:background-color={ACCENT_COLOR[accent.id]}
@@ -101,7 +101,7 @@
         type="button"
         role="radio"
         aria-checked={settings.state.motionMode === mode.id}
-        class="rounded-md border px-3 py-1 text-[11px] transition
+        class="rounded-md border px-3 py-1 text-xs transition
           {settings.state.motionMode === mode.id
             ? 'border-foreground/40 bg-[var(--color-surface-3)] text-foreground'
             : 'border-border bg-[var(--color-surface-2)] text-muted-foreground hover:border-foreground/30 hover:text-foreground'}"
@@ -120,7 +120,7 @@
         type="button"
         role="radio"
         aria-checked={settings.state.locale === option.id}
-        class="rounded-md border px-3 py-1 text-[11px] transition
+        class="rounded-md border px-3 py-1 text-xs transition
           {settings.state.locale === option.id
             ? 'border-foreground/40 bg-[var(--color-surface-3)] text-foreground'
             : 'border-border bg-[var(--color-surface-2)] text-muted-foreground hover:border-foreground/30 hover:text-foreground'}"

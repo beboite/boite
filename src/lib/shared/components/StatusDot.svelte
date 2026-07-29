@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { ThreadStatus } from "$lib/types";
   import UnicodeSpinner from "./UnicodeSpinner.svelte";
+  import { t } from "$lib/i18n/index.svelte";
 
   type Props = { status: ThreadStatus; asleep?: boolean; keepAwake?: boolean };
   let { status, asleep = false, keepAwake = false }: Props = $props();
@@ -21,23 +22,23 @@
   {#if status === "running"}
     <span
       class="inline-flex size-2.5 shrink-0 items-center justify-center text-awake"
-      aria-label="kept awake"
-      title="kept awake (won't auto-sleep)"
+      aria-label={t("status.keptAwake")}
+      title={t("status.keptAwakeHint")}
     >
       <UnicodeSpinner size={12} />
     </span>
   {:else}
     <span
       class="inline-block size-2.5 shrink-0 rounded-full bg-awake"
-      aria-label="kept awake"
-      title="kept awake (won't auto-sleep)"
+      aria-label={t("status.keptAwake")}
+      title={t("status.keptAwakeHint")}
     ></span>
   {/if}
 {:else if asleep}
   <span
     class="inline-flex size-2.5 shrink-0 items-center justify-center text-success"
-    aria-label="asleep"
-    title="asleep (afk)"
+    aria-label={t("status.asleep")}
+    title={t("status.asleepHint")}
   >
     <UnicodeSpinner
       size={12}

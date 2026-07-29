@@ -7,6 +7,7 @@
   import { threadIconColor } from "$lib/features/fastpick/threadAccent";
   import MobileSheet from "./MobileSheet.svelte";
   import X from "@lucide/svelte/icons/x";
+  import { t } from "$lib/i18n/index.svelte";
 
   type Props = { open: boolean; onClose: () => void };
   let { open, onClose }: Props = $props();
@@ -37,7 +38,7 @@
   }
 </script>
 
-<MobileSheet {open} {onClose} title="Terminals">
+<MobileSheet {open} {onClose} title={t("mobile.terminals")}>
   {#if threads.length === 0}
     <div class="px-2 py-6 text-center text-sm text-muted-foreground">
       No terminals in this project yet.

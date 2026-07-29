@@ -137,18 +137,18 @@
 <section class="rounded-lg border border-border bg-[var(--color-surface)]">
   <header class="flex items-center gap-2 border-b border-border px-3 py-2">
     <FolderGit2 class="size-4 shrink-0 text-muted-foreground" />
-    <h2 class="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+    <h2 class="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
       {t("worktree.title")}
     </h2>
     <span class="flex-1"></span>
     {#if dirtyCount > 0}
-      <span class="text-[11px] text-[var(--color-warning)]">
+      <span class="text-xs text-[var(--color-warning)]">
         {t("worktree.dirtyCount", { count: dirtyCount })}
       </span>
     {/if}
     {#if canToggle}
       <label
-        class="flex cursor-pointer select-none items-center gap-1.5 text-[11px] text-muted-foreground transition hover:text-foreground"
+        class="flex cursor-pointer select-none items-center gap-1.5 text-xs text-muted-foreground transition hover:text-foreground"
         title={autoWorktrees ? t("worktree.autoOnHint") : t("worktree.autoOffHint")}
       >
         <input
@@ -179,11 +179,11 @@
        rather than as a disabled control. -->
   <div class:opacity-50={canToggle && !autoWorktrees}>
   {#if failed}
-    <p class="px-3 py-4 text-center text-[12px] text-muted-foreground">
+    <p class="px-3 py-4 text-center text-sm text-muted-foreground">
       {t("worktree.unreadable")}
     </p>
   {:else if entries.length === 0}
-    <p class="px-3 py-4 text-center text-[12px] text-muted-foreground">
+    <p class="px-3 py-4 text-center text-sm text-muted-foreground">
       {loading
         ? t("worktree.loading")
         : canToggle && !autoWorktrees
@@ -200,12 +200,12 @@
         <li class="flex items-start gap-2.5 px-3 py-1.5">
           <div class="min-w-0 flex-1">
             <div class="flex items-center gap-1.5">
-              <span class="truncate text-[12.5px] text-foreground/90" title={w.path}>
+              <span class="truncate text-base text-foreground/90" title={w.path}>
                 {basename(w.path)}
               </span>
               {#if w.main}
                 <span
-                  class="shrink-0 rounded-full border border-border px-1.5 py-px text-[9.5px] uppercase tracking-wide text-muted-foreground"
+                  class="shrink-0 rounded-full border border-border px-1.5 py-px text-2xs uppercase tracking-wide text-muted-foreground"
                 >
                   {t("worktree.main")}
                 </span>
@@ -215,7 +215,7 @@
               {/if}
             </div>
 
-            <div class="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px]">
+            <div class="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
               <span class="font-mono text-muted-foreground">
                 {w.branch ?? t("worktree.detachedAt", { head: w.head.slice(0, 7) })}
               </span>
@@ -234,7 +234,7 @@
             </div>
 
             {#if holder}
-              <p class="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+              <p class="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
                 <ShortcutIcon iconKey={holder.iconKey} size={11} />
                 <span class="truncate">{t("worktree.heldBy", { thread: holder.label })}</span>
               </p>

@@ -332,11 +332,11 @@
 
             <div class="max-h-64 overflow-y-auto py-1">
               {#if gs.branchesLoading && !gs.branchesLoaded}
-                <div class="px-3 py-3 text-center text-[11px] text-muted-foreground">
+                <div class="px-3 py-3 text-center text-xs text-muted-foreground">
                   {t("git.loadingBranches")}
                 </div>
               {:else if gs.branches.length === 0}
-                <div class="px-3 py-3 text-center text-[11px] text-muted-foreground">
+                <div class="px-3 py-3 text-center text-xs text-muted-foreground">
                   {t("git.noLocalBranches")}
                 </div>
               {:else}
@@ -352,7 +352,7 @@
                     title={branch.name}
                   >
                     <Check class="size-3.5 shrink-0 {branch.current ? 'opacity-100' : 'opacity-0'}" />
-                    <span class="min-w-0 flex-1 truncate font-mono text-[11px]">{branch.name}</span>
+                    <span class="min-w-0 flex-1 truncate font-mono text-xs">{branch.name}</span>
                   </button>
                 {/each}
               {/if}
@@ -362,14 +362,14 @@
       </div>
       {#if gs.ahead > 0}
         <span
-          class="flex items-center gap-0.5 text-[10.5px] text-muted-foreground"
+          class="flex items-center gap-0.5 text-xs text-muted-foreground"
         >
           <ArrowUp class="size-3" />{gs.ahead}
         </span>
       {/if}
       {#if gs.behind > 0}
         <span
-          class="flex items-center gap-0.5 text-[10.5px] text-muted-foreground"
+          class="flex items-center gap-0.5 text-xs text-muted-foreground"
         >
           <ArrowDown class="size-3" />{gs.behind}
         </span>
@@ -381,7 +381,7 @@
     {#if project?.gitRoot}
       <button
         type="button"
-        class="group/root flex min-w-0 shrink items-center gap-1 rounded-full border border-border bg-[var(--color-surface-2)] px-1.5 py-0.5 text-[10px] text-muted-foreground transition hover:text-foreground"
+        class="group/root flex min-w-0 shrink items-center gap-1 rounded-full border border-border bg-[var(--color-surface-2)] px-1.5 py-0.5 text-2xs text-muted-foreground transition hover:text-foreground"
         title={t("git.nestedRepo", { path: project.gitRoot })}
         onclick={clearGitRoot}
       >
@@ -443,7 +443,7 @@
       >
         <span>{t("git.notRepoDesc")}</span>
         {#if gs.scanning}
-          <span class="text-[11px] text-muted-foreground/70">
+          <span class="text-xs text-muted-foreground/70">
             {t("git.scanningNested")}
           </span>
         {/if}
@@ -460,12 +460,12 @@
           class="flex h-7 shrink-0 items-center gap-1.5 border-y border-border px-3"
         >
           <span
-            class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
+            class="text-2xs font-semibold uppercase tracking-wider text-muted-foreground"
           >
             {t("git.repositoriesFound")}
           </span>
           <span
-            class="rounded-full bg-[var(--color-surface-2)] px-1.5 text-[10px] text-foreground/75"
+            class="rounded-full bg-[var(--color-surface-2)] px-1.5 text-2xs text-foreground/75"
           >
             {gs.repos.length}
           </span>
@@ -473,7 +473,7 @@
         {#each gs.repos as repo (repo)}
           <button
             type="button"
-            class="flex items-center gap-2 px-3 py-1.5 text-left text-[11px] text-foreground/85 transition hover:bg-[var(--color-surface-2)] hover:text-foreground"
+            class="flex items-center gap-2 px-3 py-1.5 text-left text-xs text-foreground/85 transition hover:bg-[var(--color-surface-2)] hover:text-foreground"
             title={repo}
             onclick={() => selectRepo(repo)}
           >
@@ -497,13 +497,13 @@
           class="flex h-7 shrink-0 items-center gap-1.5 border-b border-border px-3"
         >
           <span
-            class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
+            class="text-2xs font-semibold uppercase tracking-wider text-muted-foreground"
           >
             {t("git.changes")}
           </span>
           {#if totalChanges > 0}
             <span
-              class="rounded-full bg-[var(--color-surface-2)] px-1.5 text-[10px] text-foreground/75"
+              class="rounded-full bg-[var(--color-surface-2)] px-1.5 text-2xs text-foreground/75"
             >
               {totalChanges}
             </span>
@@ -573,7 +573,7 @@
           {/if}
           {#if gs.unstaged.length > 0}
             {@render section({
-              label: "Changes",
+              label: t("git.changes"),
               entries: gs.unstaged,
               mode: "unstaged",
               open: changesOpen,
@@ -582,7 +582,7 @@
           {/if}
           {#if totalChanges === 0}
             <div
-              class="px-3 py-4 text-center text-[11px] text-muted-foreground/70"
+              class="px-3 py-4 text-center text-xs text-muted-foreground/70"
             >
               {t("git.workingTreeClean")}
             </div>
@@ -614,13 +614,13 @@
         >
           <ChevronDown class="size-3 text-muted-foreground transition {commitsOpen ? '' : '-rotate-90'}" />
           <span
-            class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
+            class="text-2xs font-semibold uppercase tracking-wider text-muted-foreground"
           >
             {t("git.commits")}
           </span>
           {#if gs.log.length > 0}
             <span
-              class="rounded-full bg-[var(--color-surface-2)] px-1.5 text-[10px] text-foreground/75"
+              class="rounded-full bg-[var(--color-surface-2)] px-1.5 text-2xs text-foreground/75"
             >
               {gs.commitCount || gs.log.length}{gs.commitCount
                 ? ""
@@ -634,7 +634,7 @@
           <div class="flex min-h-0 min-w-0 w-full flex-1 flex-col overflow-y-auto overflow-x-hidden">
             {#if gs.log.length === 0}
               <div
-                class="px-3 py-4 text-center text-[11px] text-muted-foreground/70"
+                class="px-3 py-4 text-center text-xs text-muted-foreground/70"
               >
                 {t("git.noCommits")}
               </div>
@@ -644,7 +644,7 @@
                 <div class="border-t border-border p-2 shrink-0">
                   <button
                     type="button"
-                    class="w-full rounded-md border border-border bg-[var(--color-surface-2)] px-2 py-1 text-[11px] text-muted-foreground transition hover:bg-[var(--color-surface-3)] hover:text-foreground disabled:opacity-50"
+                    class="w-full rounded-md border border-border bg-[var(--color-surface-2)] px-2 py-1 text-xs text-muted-foreground transition hover:bg-[var(--color-surface-3)] hover:text-foreground disabled:opacity-50"
                     onclick={loadMoreCommits}
                     disabled={gs.logLoadingMore}
                   >
@@ -678,7 +678,7 @@
     <div class="flex items-center gap-1 px-2 py-1">
       <button
         type="button"
-        class="flex flex-1 items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground transition hover:text-foreground"
+        class="flex flex-1 items-center gap-1 text-2xs font-semibold uppercase tracking-wider text-muted-foreground transition hover:text-foreground"
         onclick={toggle}
       >
         <ChevronDown class="size-3 transition {open ? '' : '-rotate-90'}" />
@@ -710,7 +710,7 @@
     {#if open}
       {#each entries as entry (entry.path + ":" + entry.staged + ":" + entry.conflicted)}
         <div
-          class="group/row flex items-center gap-1.5 px-2 py-1 text-[11px] hover:bg-[var(--color-surface-2)]"
+          class="group/row flex items-center gap-1.5 px-2 py-1 text-xs hover:bg-[var(--color-surface-2)]"
           title={entry.path}
         >
           <button
@@ -770,7 +770,7 @@
             {/if}
           </div>
           <span
-            class="w-3 shrink-0 text-center font-mono text-[10.5px] {statusColor(
+            class="w-3 shrink-0 text-center font-mono text-xs {statusColor(
               entry.status,
             )}"
           >

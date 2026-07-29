@@ -15,6 +15,7 @@
   import type { ShellOption } from "$lib/storage/platform.svelte";
   import Plus from "@lucide/svelte/icons/plus";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import { t } from "$lib/i18n/index.svelte";
 
   let open = $state(false);
   let triggerRoot: HTMLDivElement | null = $state(null);
@@ -104,7 +105,7 @@
     }}
     use:longPress={{ onLongPress: openMenu }}
     title={defaultShell ? `Launch ${defaultShell.label}` : "New blank terminal"}
-    aria-label="Launch terminal"
+    aria-label={t("shell.launchTerminal")}
   >
     <Plus class="size-3.5" />
     <span>Terminal</span>
@@ -116,8 +117,8 @@
     onclick={toggle}
     aria-haspopup="menu"
     aria-expanded={open}
-    title="Pick a shell"
-    aria-label="Pick a shell"
+    title={t("shell.pickShell")}
+    aria-label={t("shell.pickShell")}
   >
     <ChevronDown class="size-3.5" />
   </button>
@@ -133,7 +134,7 @@
       transition:scale={{ duration: 90, start: 0.96 }}
     >
       {#if platform.shells.length === 0}
-        <div class="px-2 py-1.5 text-[11px] text-muted-foreground">
+        <div class="px-2 py-1.5 text-xs text-muted-foreground">
           No shells detected
         </div>
       {/if}
@@ -141,11 +142,11 @@
         <button
           type="button"
           role="menuitem"
-          class="flex items-center justify-between gap-3 rounded px-2 py-1.5 text-left text-[11.5px] text-foreground/85 transition hover:bg-accent hover:text-foreground"
+          class="flex items-center justify-between gap-3 rounded px-2 py-1.5 text-left text-sm text-foreground/85 transition hover:bg-accent hover:text-foreground"
           onclick={(e) => void pick(shell, e.shiftKey)}
         >
           <span class="font-medium">{shell.label}</span>
-          <span class="font-mono text-[10px] text-muted-foreground/70">{shell.id}</span>
+          <span class="font-mono text-2xs text-muted-foreground/70">{shell.id}</span>
         </button>
       {/each}
     </div>

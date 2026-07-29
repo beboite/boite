@@ -3,6 +3,7 @@
   import { updater } from "./store.svelte";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import ArrowUpCircle from "@lucide/svelte/icons/arrow-up-circle";
+  import { t } from "$lib/i18n/index.svelte";
 
   const status = $derived(updater.status);
   const progress = $derived(updater.progress);
@@ -13,7 +14,7 @@
 </script>
 
 <SettingsCard
-  title="Updates"
+  title={t("updates.title")}
   description="New releases download in the background. Applying one only takes a restart."
 >
   {#snippet actions()}
@@ -42,10 +43,10 @@
   <div class="rounded-lg border border-border bg-[var(--color-surface-2)] px-3 py-2">
     <div class="flex items-baseline justify-between gap-3">
       <span class="text-xs text-foreground">Installed</span>
-      <span class="font-mono text-[11px] text-muted-foreground">v{__APP_VERSION__}</span>
+      <span class="font-mono text-xs text-muted-foreground">v{__APP_VERSION__}</span>
     </div>
 
-    <p class="mt-1 text-[11.5px] leading-snug text-muted-foreground/80">
+    <p class="mt-1 text-sm leading-snug text-muted-foreground/80">
       {#if !updater.enabled}
         Updates are disabled in a development build.
       {:else if status.kind === "checking"}
@@ -79,7 +80,7 @@
 
     {#if status.kind === "ready" && status.notes}
       <pre
-        class="mt-2 max-h-32 overflow-y-auto whitespace-pre-wrap rounded-md bg-[var(--color-surface-3)] p-2 font-mono text-[10.5px] leading-relaxed text-muted-foreground">{status.notes}</pre>
+        class="mt-2 max-h-32 overflow-y-auto whitespace-pre-wrap rounded-md bg-[var(--color-surface-3)] p-2 font-mono text-xs leading-relaxed text-muted-foreground">{status.notes}</pre>
     {/if}
   </div>
 </SettingsCard>

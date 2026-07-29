@@ -5,6 +5,7 @@
   import ToggleSetting from "$lib/shared/components/ToggleSetting.svelte";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
   import Check from "@lucide/svelte/icons/check";
+  import { t } from "$lib/i18n/index.svelte";
 
   function pickDefault(id: string | null) {
     void settings.setDefaultShellId(id);
@@ -32,7 +33,7 @@
 </script>
 
 <SettingsCard
-  title="Default shell"
+  title={t("terminalTab.defaultShell")}
   description="Used by + Terminal, and as the fallback for a shortcut whose command is not a program: a shell function or alias (e.g. cc → claude) only exists once this shell's profile has been read. Shortcuts that name a real program still launch directly, and inherit what the profile exports."
 >
   <div class="overflow-hidden rounded-lg border border-border bg-[var(--color-surface-2)]">
@@ -43,7 +44,7 @@
     >
       <div class="min-w-0">
         <div class="text-xs font-medium text-foreground">None</div>
-        <div class="text-[10.5px] text-muted-foreground">
+        <div class="text-xs text-muted-foreground">
           Every shortcut launches directly; functions and aliases will not
           resolve. + Terminal launches the platform default.
         </div>
@@ -61,7 +62,7 @@
       >
         <div class="min-w-0">
           <div class="text-xs font-medium text-foreground">{shell.label}</div>
-          <div class="truncate font-mono text-[10.5px] text-muted-foreground">
+          <div class="truncate font-mono text-xs text-muted-foreground">
             {shell.cmd}
             {#if shell.args.length > 0}
               <span class="text-muted-foreground/70">{" " + shell.args.join(" ")}</span>
@@ -78,7 +79,7 @@
 
 {#if platform.isWindows}
   <SettingsCard
-    title="Windows tweaks"
+    title={t("terminalTab.windowsTweaks")}
     description="Behaviours specific to PowerShell and the Windows console."
   >
     <ToggleSetting
@@ -103,7 +104,7 @@
 {/if}
 
 <SettingsCard
-  title="Thread close"
+  title={t("terminalTab.threadClose")}
   description="Behaviour when removing a thread from the sidebar."
 >
   <ToggleSetting
@@ -118,7 +119,7 @@
 </SettingsCard>
 
 <SettingsCard
-  title="Git auto-fetch"
+  title={t("terminalTab.gitAutoFetch")}
   description="Periodically run git fetch in the background so the Git panel's ahead/behind count and remote commits stay current. Fetch only — never pulls or merges."
 >
   <ToggleSetting
@@ -161,7 +162,7 @@
 </SettingsCard>
 
 <SettingsCard
-  title="Idle auto-close"
+  title={t("terminalTab.idleAutoClose")}
   description="Kill agent threads that finished and have not been viewed for a while. Threads stay restorable from the sidebar."
 >
   <div class="flex items-center gap-3">

@@ -34,7 +34,7 @@
   {#snippet actions()}
     <button
       type="button"
-      class="flex items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-1 text-[11px] text-muted-foreground transition hover:border-foreground/30 hover:text-foreground disabled:opacity-50"
+      class="flex items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-1 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground disabled:opacity-50"
       onclick={() => fastpick.probe()}
       disabled={fastpick.probing}
       title={t("fastpick.recheck")}
@@ -54,7 +54,7 @@
     {:else if installed}
       <span class="text-foreground">{t("fastpick.installed")}</span>
       {#if fastpick.version}
-        <span class="font-mono text-[10.5px] text-muted-foreground/70">v{fastpick.version}</span>
+        <span class="font-mono text-xs text-muted-foreground/70">v{fastpick.version}</span>
       {/if}
     {:else}
       <span class="text-muted-foreground">{t("fastpick.notInstalled")}</span>
@@ -64,7 +64,7 @@
   <div class="flex flex-wrap items-center gap-1.5 pt-1">
     <button
       type="button"
-      class="flex items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-1 text-[11px] text-foreground transition hover:border-foreground/30 disabled:cursor-not-allowed disabled:opacity-40"
+      class="flex items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-1 text-xs text-foreground transition hover:border-foreground/30 disabled:cursor-not-allowed disabled:opacity-40"
       onclick={() => installFastpick()}
       disabled={cargoMissing}
       title={line(install)}
@@ -75,7 +75,7 @@
     {#if installed}
       <button
         type="button"
-        class="flex items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-1 text-[11px] text-muted-foreground transition hover:border-[var(--color-danger)] hover:text-[var(--color-danger)] disabled:cursor-not-allowed disabled:opacity-40"
+        class="flex items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-1 text-xs text-muted-foreground transition hover:border-[var(--color-danger)] hover:text-[var(--color-danger)] disabled:cursor-not-allowed disabled:opacity-40"
         onclick={() => uninstallFastpick()}
         disabled={cargoMissing}
         title={line(uninstall)}
@@ -88,18 +88,18 @@
 
   <!-- Both run as a thread rather than behind a spinner: a cargo build is minutes of
        output, and its own error message is the one worth reading. -->
-  <p class="pt-1 text-[11px] leading-snug text-muted-foreground/80">
+  <p class="pt-1 text-xs leading-snug text-muted-foreground/80">
     {t("fastpick.runsInThread")}
   </p>
-  <p class="text-[11px] leading-snug text-muted-foreground/80">
+  <p class="text-xs leading-snug text-muted-foreground/80">
     {t("fastpick.keepsConfig")}
   </p>
   {#if cargoMissing}
-    <p class="text-[11px] leading-snug text-[var(--color-warning)]">
+    <p class="text-xs leading-snug text-[var(--color-warning)]">
       {t("fastpick.needsCargo")}
     </p>
   {/if}
-  <p class="pt-0.5 font-mono text-[10.5px] text-muted-foreground/60">{FASTPICK_REPO}</p>
+  <p class="pt-0.5 font-mono text-xs text-muted-foreground/60">{FASTPICK_REPO}</p>
 </SettingsCard>
 
 <ToggleSetting

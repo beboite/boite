@@ -312,7 +312,7 @@
             </div>
             <button
               type="button"
-              class="mt-2 w-full rounded-md border border-border px-2 py-1 text-[10px] text-muted-foreground transition hover:text-foreground"
+              class="mt-2 w-full rounded-md border border-border px-2 py-1 text-2xs text-muted-foreground transition hover:text-foreground"
               onclick={() => setIconColor(shortcut.id, null)}
             >
               {t("shortcuts.defaultColor")}
@@ -334,7 +334,7 @@
         placeholder={t("shortcuts.commandPlaceholder")}
         onchange={(e) =>
           onUpdate(shortcut.id, { command: (e.currentTarget as HTMLInputElement).value })}
-        class="rounded-md border border-transparent bg-transparent px-2 py-1 font-mono text-[11.5px] text-foreground outline-none transition focus:border-border focus:bg-[var(--color-surface)]"
+        class="rounded-md border border-transparent bg-transparent px-2 py-1 font-mono text-sm text-foreground outline-none transition focus:border-border focus:bg-[var(--color-surface)]"
       />
       <button
         type="button"
@@ -351,14 +351,14 @@
 
 <div class="mt-4 border-t border-border/40 pt-4">
   <div class="mb-3 flex items-end justify-between gap-3">
-    <p class="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+    <p class="text-2xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
       {t("shortcuts.addFromPreset")}
     </p>
     <button
       type="button"
       onclick={() => void cliDetection.refreshAll()}
       disabled={cliDetection.checking}
-      class="flex items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2 py-1 text-[10.5px] text-muted-foreground transition hover:border-foreground/30 hover:text-foreground disabled:cursor-wait disabled:opacity-60"
+      class="flex items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2 py-1 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground disabled:cursor-wait disabled:opacity-60"
     >
       <RefreshCw class="size-3 {cliDetection.checking ? 'animate-spin' : ''}" />
       {cliDetection.checking ? t("shortcuts.checking") : t("shortcuts.recheck")}
@@ -383,7 +383,7 @@
             <span class="truncate text-xs font-semibold text-foreground">{preset.label}</span>
             {#if cliDetection.probed}
               <span
-                class="mt-0.5 flex items-center gap-1 text-[9.5px] {installed
+                class="mt-0.5 flex items-center gap-1 text-2xs {installed
                   ? 'text-[var(--color-success)]'
                   : 'text-muted-foreground/70'}"
               >
@@ -399,7 +399,7 @@
                 </span>
               </span>
             {:else}
-              <span class="mt-0.5 truncate font-mono text-[9.5px] text-muted-foreground/70">
+              <span class="mt-0.5 truncate font-mono text-2xs text-muted-foreground/70">
                 {preset.command}
               </span>
             {/if}
@@ -422,7 +422,7 @@
             type="button"
             disabled={added}
             onclick={() => addPreset(preset.id)}
-            class="flex h-7 cursor-pointer items-center gap-1 rounded-md bg-foreground px-2.5 text-[11px] font-semibold text-background transition hover:bg-neutral-200 disabled:cursor-not-allowed disabled:border disabled:border-border/60 disabled:bg-transparent disabled:text-muted-foreground/60"
+            class="flex h-7 cursor-pointer items-center gap-1 rounded-md bg-foreground px-2.5 text-xs font-semibold text-background transition hover:bg-neutral-200 disabled:cursor-not-allowed disabled:border disabled:border-border/60 disabled:bg-transparent disabled:text-muted-foreground/60"
             title={added ? t("shortcuts.alreadyAdded") : t("shortcuts.addToShortcuts")}
           >
             {#if added}

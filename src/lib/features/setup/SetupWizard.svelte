@@ -60,12 +60,12 @@
           </div>
 
           <div class="flex items-center justify-center gap-2">
-            <span class="text-[11px] text-muted-foreground">{t("setup.language")}</span>
+            <span class="text-xs text-muted-foreground">{t("setup.language")}</span>
             <div class="flex gap-1.5">
               {#each LOCALE_OPTIONS as lang (lang.id)}
                 <button
                   type="button"
-                  class="rounded-md border px-2.5 py-1 text-[11px] transition {settings.state
+                  class="rounded-md border px-2.5 py-1 text-xs transition {settings.state
                     .locale === lang.id
                     ? 'border-foreground/40 bg-[var(--color-surface-3)] text-foreground'
                     : 'border-border bg-[var(--color-surface-2)] text-muted-foreground hover:border-foreground/30 hover:text-foreground'}"

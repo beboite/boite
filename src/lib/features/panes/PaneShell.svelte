@@ -2,6 +2,7 @@
   import { paneStore } from "./store.svelte";
   import type { LayoutNode, PaneGroup } from "./types";
   import { MIN_RATIO } from "./types";
+  import { t } from "$lib/i18n/index.svelte";
 
   type Props = { group: PaneGroup };
   let { group }: Props = $props();
@@ -127,7 +128,7 @@
             class="splitter"
             class:row={node.dir === "row"}
             class:column={node.dir === "column"}
-            aria-label="Resize panes"
+            aria-label={t("panes.resize")}
             onpointerdown={(e) => startDrag(node.id, i, node.dir, e.currentTarget, e)}
           ></button>
         {/if}

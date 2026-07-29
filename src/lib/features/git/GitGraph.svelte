@@ -415,14 +415,14 @@
       <div
         class="flex min-w-0 flex-1 items-center gap-1.5 pl-1 pr-2"
       >
-        <span class="min-w-0 flex-1 truncate text-[11.5px] text-foreground/85">
+        <span class="min-w-0 flex-1 truncate text-sm text-foreground/85">
           {row.commit.summary}
         </span>
         {#each visibleRefs as r (r)}
           {@const clean = cleanRef(r)}
           {@const isHead = r.startsWith("HEAD")}
           <span
-            class="shrink-0 rounded px-1 py-px font-mono text-[9px] {isHead
+            class="shrink-0 rounded px-1 py-px font-mono text-2xs {isHead
               ? 'bg-[var(--color-success)]/15 text-[var(--color-success)]'
               : 'bg-[var(--color-surface-3)] text-muted-foreground'}"
           >
@@ -430,12 +430,12 @@
           </span>
         {/each}
         {#if hiddenRefs > 0}
-          <span class="shrink-0 rounded bg-[var(--color-surface-3)] px-1 py-px font-mono text-[9px] text-muted-foreground/70">
+          <span class="shrink-0 rounded bg-[var(--color-surface-3)] px-1 py-px font-mono text-2xs text-muted-foreground/70">
             +{hiddenRefs}
           </span>
         {/if}
         <span
-          class="shrink-0 font-mono text-[9.5px] text-muted-foreground/55"
+          class="shrink-0 font-mono text-2xs text-muted-foreground/55"
         >
           {relTime(row.commit.time)}
         </span>
@@ -454,11 +454,11 @@
     style:width="{popupWidth()}px"
   >
     <div
-      class="whitespace-pre-wrap break-words text-[12px] font-medium leading-snug text-foreground"
+      class="whitespace-pre-wrap break-words text-sm font-medium leading-snug text-foreground"
     >
       {c.summary}
     </div>
-    <div class="mt-2 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10.5px]">
+    <div class="mt-2 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
       <span class="font-mono text-foreground/75">{c.shortSha}</span>
       <span class="text-muted-foreground/40">·</span>
       <span class="text-muted-foreground/85">{c.author}</span>
@@ -466,10 +466,10 @@
         <span class="font-mono text-muted-foreground/55">&lt;{c.email}&gt;</span>
       {/if}
     </div>
-    <div class="mt-1 text-[10.5px] text-muted-foreground/65">
+    <div class="mt-1 text-xs text-muted-foreground/65">
       {fmtTime(c.time)}
     </div>
-    <div class="mt-2 flex items-center gap-2 font-mono text-[10.5px]">
+    <div class="mt-2 flex items-center gap-2 font-mono text-xs">
       <span class={c.additions > 0 ? "text-[var(--color-success)]" : "text-muted-foreground/45"}>
         +{c.additions}
       </span>
@@ -478,7 +478,7 @@
       </span>
     </div>
     {#if c.localOnly}
-      <div class="mt-1.5 flex items-center gap-1 text-[10px] text-[var(--color-warning)]">
+      <div class="mt-1.5 flex items-center gap-1 text-2xs text-[var(--color-warning)]">
         <span class="inline-block size-1.5 rounded-full bg-[var(--color-warning)]"></span>
         Local — not pushed
       </div>
@@ -489,7 +489,7 @@
           {@const clean = r.replace(/^HEAD -> /, "")}
           {@const isHead = r.startsWith("HEAD")}
           <span
-            class="rounded px-1 py-px font-mono text-[9.5px] {isHead
+            class="rounded px-1 py-px font-mono text-2xs {isHead
               ? 'bg-[var(--color-success)]/15 text-[var(--color-success)]'
               : 'bg-[var(--color-surface-2)] text-muted-foreground'}"
           >

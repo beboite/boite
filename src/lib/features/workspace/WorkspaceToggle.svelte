@@ -22,6 +22,7 @@
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
   import Monitor from "@lucide/svelte/icons/monitor";
   import Layers from "@lucide/svelte/icons/layers";
+  import { t } from "$lib/i18n/index.svelte";
 
   // No local backend in a browser/PWA: only saved boites stand.
   const isTauri = hasTauri();
@@ -219,7 +220,7 @@
   <div class="flex flex-col gap-1">
     {#if !mobile}
       <div class="px-2 pb-1 pt-0.5">
-        <span class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        <span class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           Workspaces
         </span>
       </div>
@@ -228,7 +229,7 @@
     {#if isTauri}
       <button
         type="button"
-        class={`flex items-center gap-2.5 rounded-lg text-left transition hover:bg-accent disabled:opacity-50 ${mobile ? "px-3 py-3 text-sm" : "px-2.5 py-2 text-[13px]"}`}
+        class={`flex items-center gap-2.5 rounded-lg text-left transition hover:bg-accent disabled:opacity-50 ${mobile ? "px-3 py-3 text-sm" : "px-2.5 py-2 text-base"}`}
         onclick={pickLocal}
         disabled={busy}
       >
@@ -246,15 +247,15 @@
         type="button"
         role="switch"
         aria-checked={device.dynamicMode}
-        class={`flex items-center gap-2.5 rounded-lg text-left transition hover:bg-accent disabled:opacity-50 ${mobile ? "px-3 py-3 text-sm" : "px-2.5 py-2 text-[13px]"}`}
+        class={`flex items-center gap-2.5 rounded-lg text-left transition hover:bg-accent disabled:opacity-50 ${mobile ? "px-3 py-3 text-sm" : "px-2.5 py-2 text-base"}`}
         onclick={toggleDynamic}
         disabled={busy}
-        title="Show the boite's projects inside the Local workspace"
+        title={t("workspace.showBoiteProjects")}
       >
         <Layers class="size-4 shrink-0 text-muted-foreground" />
         <span class="flex min-w-0 flex-1 flex-col leading-tight">
           <span class="font-medium text-foreground">Dynamic mode</span>
-          <span class="truncate text-[11px] text-muted-foreground">
+          <span class="truncate text-xs text-muted-foreground">
             Boite projects inside Local
           </span>
         </span>
@@ -274,7 +275,7 @@
       <div class="flex items-stretch gap-1">
         <button
           type="button"
-          class={`flex min-w-0 flex-1 items-center gap-2.5 rounded-lg text-left transition hover:bg-accent disabled:opacity-50 ${mobile ? "px-3 py-3 text-sm" : "px-2.5 py-2 text-[13px]"}`}
+          class={`flex min-w-0 flex-1 items-center gap-2.5 rounded-lg text-left transition hover:bg-accent disabled:opacity-50 ${mobile ? "px-3 py-3 text-sm" : "px-2.5 py-2 text-base"}`}
           onclick={() => pickBoite(b.id)}
           disabled={busy}
         >
@@ -285,10 +286,10 @@
           )}
           <span class="flex min-w-0 flex-1 flex-col leading-tight">
             <span class="truncate font-medium text-foreground">{labelOf(b)}</span>
-            <span class="truncate text-[11px] text-muted-foreground">{hostOf(b.url)}</span>
+            <span class="truncate text-xs text-muted-foreground">{hostOf(b.url)}</span>
           </span>
           {#if active}
-            <span class="shrink-0 text-[10px] uppercase tracking-wide text-muted-foreground">
+            <span class="shrink-0 text-2xs uppercase tracking-wide text-muted-foreground">
               {connected ? "connected" : workspace.connection}
             </span>
           {/if}
@@ -298,8 +299,8 @@
             type="button"
             class={`flex shrink-0 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-danger/20 hover:text-danger ${mobile ? "w-11" : "w-9"}`}
             onclick={() => remove(b.id)}
-            aria-label="Remove boite"
-            title="Remove"
+            aria-label={t("workspace.removeBoite")}
+            title={t("workspace.remove")}
           >
             <Trash2 class="size-4" />
           </button>
@@ -308,7 +309,7 @@
 
       {#if active}
         <div class="mb-1 flex flex-col gap-2.5 rounded-lg bg-[var(--color-background)] px-2.5 py-2.5">
-          <label class="flex flex-col gap-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+          <label class="flex flex-col gap-1 text-2xs uppercase tracking-wide text-muted-foreground">
             Name
             <input
               bind:value={nameDraft}
@@ -317,11 +318,11 @@
               autocapitalize="off"
               onblur={commitName}
               onkeydown={(e) => e.key === "Enter" && commitName()}
-              class={`w-full rounded-md border border-border bg-[var(--color-surface)] normal-case tracking-normal text-foreground outline-none focus:border-foreground/40 ${mobile ? "px-3 py-2.5 text-sm" : "px-2.5 py-1.5 text-[13px]"}`}
+              class={`w-full rounded-md border border-border bg-[var(--color-surface)] normal-case tracking-normal text-foreground outline-none focus:border-foreground/40 ${mobile ? "px-3 py-2.5 text-sm" : "px-2.5 py-1.5 text-base"}`}
             />
           </label>
           <div class="flex flex-col gap-1.5">
-            <span class="text-[10px] uppercase tracking-wide text-muted-foreground">Color</span>
+            <span class="text-2xs uppercase tracking-wide text-muted-foreground">Color</span>
             <div class={`flex flex-wrap ${mobile ? "gap-2.5" : "gap-2"}`}>
               {#each PALETTE as c (c)}
                 <button
@@ -332,7 +333,7 @@
                     ? "var(--color-foreground)"
                     : "transparent"}
                   onclick={() => pickColor(c)}
-                  aria-label="Set color"
+                  aria-label={t("workspace.setColor")}
                 ></button>
               {/each}
             </div>
@@ -349,15 +350,15 @@
               type="button"
               class="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition hover:bg-accent hover:text-foreground"
               onclick={() => (showAdd = false)}
-              aria-label="Back to list"
+              aria-label={t("workspace.backToList")}
             >
               <ArrowLeft class="size-4" />
             </button>
           {/if}
-          <span class="text-[13px] font-semibold text-foreground">Add a boite server</span>
+          <span class="text-base font-semibold text-foreground">Add a boite server</span>
         </div>
 
-        <label class="flex flex-col gap-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+        <label class="flex flex-col gap-1 text-2xs uppercase tracking-wide text-muted-foreground">
           Server URL
           <input
             bind:value={addUrl}
@@ -368,7 +369,7 @@
             class="w-full rounded-md border border-border bg-[var(--color-background)] px-3 py-2.5 font-mono text-sm normal-case tracking-normal text-foreground outline-none focus:border-foreground/40"
           />
         </label>
-        <label class="flex flex-col gap-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+        <label class="flex flex-col gap-1 text-2xs uppercase tracking-wide text-muted-foreground">
           Token
           <input
             bind:value={addToken}
@@ -384,7 +385,7 @@
           {#if device.boites.length > 0}
             <button
               type="button"
-              class={`rounded-md text-muted-foreground transition hover:text-foreground ${mobile ? "px-3 py-2 text-sm" : "px-3 py-1.5 text-[13px]"}`}
+              class={`rounded-md text-muted-foreground transition hover:text-foreground ${mobile ? "px-3 py-2 text-sm" : "px-3 py-1.5 text-base"}`}
               onclick={() => (showAdd = false)}
               disabled={busy}
             >
@@ -393,7 +394,7 @@
           {/if}
           <button
             type="button"
-            class={`rounded-md bg-foreground font-medium text-background transition hover:bg-foreground/90 disabled:opacity-50 ${mobile ? "px-4 py-2 text-sm" : "px-4 py-1.5 text-[13px]"}`}
+            class={`rounded-md bg-foreground font-medium text-background transition hover:bg-foreground/90 disabled:opacity-50 ${mobile ? "px-4 py-2 text-sm" : "px-4 py-1.5 text-base"}`}
             onclick={submitAdd}
             disabled={busy || !addUrl.trim() || !addToken.trim()}
           >
@@ -403,13 +404,13 @@
       </div>
     {:else}
       {#if device.boites.length === 0 && !isTauri}
-        <p class={`text-muted-foreground/70 ${mobile ? "px-3 py-2 text-sm" : "px-2.5 py-2 text-[12px]"}`}>
+        <p class={`text-muted-foreground/70 ${mobile ? "px-3 py-2 text-sm" : "px-2.5 py-2 text-sm"}`}>
           No boite server yet.
         </p>
       {/if}
       <button
         type="button"
-        class={`mt-0.5 flex items-center gap-2.5 rounded-lg border border-dashed border-border text-left text-muted-foreground transition hover:border-foreground/30 hover:bg-accent hover:text-foreground ${mobile ? "px-3 py-3 text-sm" : "px-2.5 py-2 text-[13px]"}`}
+        class={`mt-0.5 flex items-center gap-2.5 rounded-lg border border-dashed border-border text-left text-muted-foreground transition hover:border-foreground/30 hover:bg-accent hover:text-foreground ${mobile ? "px-3 py-3 text-sm" : "px-2.5 py-2 text-base"}`}
         onclick={openAdd}
       >
         <Plus class="size-4 shrink-0" />
@@ -422,11 +423,11 @@
 <div bind:this={triggerRoot} class="pointer-events-auto relative flex items-center">
   <button
     type="button"
-    class="flex max-w-[40vw] items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface)] px-2 py-0.5 text-[11px] text-foreground transition hover:bg-[var(--color-surface-2)]"
+    class="flex max-w-[40vw] items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface)] px-2 py-0.5 text-xs text-foreground transition hover:bg-[var(--color-surface-2)]"
     onclick={toggle}
     aria-haspopup="menu"
     aria-expanded={open}
-    title="Workspaces"
+    title={t("workspace.title")}
   >
     {#if triggerDot}
       <span
@@ -440,7 +441,7 @@
   </button>
 
   {#if mobile}
-    <MobileSheet {open} title="Workspaces" onClose={close}>
+    <MobileSheet {open} title={t("workspace.title")} onClose={close}>
       {@render panel()}
     </MobileSheet>
   {:else if open}

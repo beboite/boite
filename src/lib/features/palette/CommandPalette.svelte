@@ -3,10 +3,11 @@
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
   import { palette } from "./store.svelte";
   import { fuzzyScore } from "./fuzzy";
+  import { t } from "$lib/i18n/index.svelte";
   import {
     buildPaletteCommands,
     SECTION_BIAS,
-    SECTION_TITLES,
+    SECTION_TITLE_KEYS,
     type PaletteCommand,
     type PaletteSection,
   } from "./registry";
@@ -69,7 +70,7 @@
     const item = visible[index];
     if (!item) return null;
     if (index === 0 || visible[index - 1].section !== item.section) {
-      return SECTION_TITLES[item.section];
+      return t(SECTION_TITLE_KEYS[item.section]);
     }
     return null;
   }
@@ -131,7 +132,7 @@
     class="fixed inset-0 z-50 flex justify-center bg-black/50 pt-[12vh] backdrop-blur-[2px]"
     role="dialog"
     aria-modal="true"
-    aria-label="Command palette"
+    aria-label={t("palette.label")}
     tabindex="-1"
     onclick={backdropClick}
     transition:fade={{ duration: 100 }}
@@ -146,7 +147,7 @@
         bind:this={inputEl}
         bind:value={query}
         type="text"
-        placeholder="Search threads, actions, projects…"
+        placeholder={t("palette.placeholder")}
         spellcheck="false"
         autocomplete="off"
         class="w-full border-b border-border bg-transparent px-4 py-3 text-sm text-foreground outline-none placeholder:text-muted-foreground/60"
@@ -169,7 +170,7 @@
         {#each visible as c, i (c.id)}
           {@const title = sectionTitleAt(i)}
           {#if title}
-            <p class="px-4 pt-2.5 pb-1 text-[10px] font-semibold tracking-wider text-muted-foreground/60 uppercase">
+            <p class="px-4 pt-2.5 pb-1 text-2xs font-semibold tracking-wider text-muted-foreground/60 uppercase">
               {title}
             </p>
           {/if}
@@ -178,7 +179,7 @@
             id="palette-item-{i}"
             role="option"
             aria-selected={i === activeIndex}
-            class="flex w-full items-center gap-2 px-4 py-1.5 text-left text-[13px]
+            class="flex w-full items-center gap-2 px-4 py-1.5 text-left text-base
               {i === activeIndex
                 ? 'bg-[var(--color-surface-3)] text-foreground'
                 : 'text-foreground/85 hover:bg-[var(--color-surface-2)]'}"
@@ -194,7 +195,7 @@
             </span>
             <span class="min-w-0 truncate">{c.label}</span>
             {#if c.hint}
-              <span class="min-w-0 flex-1 truncate text-[11px] text-muted-foreground/70">
+              <span class="min-w-0 flex-1 truncate text-xs text-muted-foreground/70">
                 {c.hint}
               </span>
             {/if}
