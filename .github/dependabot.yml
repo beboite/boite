@@ -1,0 +1,40 @@
+version: 2
+
+# Minor and patch bumps are grouped into one pull request per ecosystem, so a
+# quiet week costs four PRs at most rather than forty. A major is left on its
+# own: it is the one that needs reading before merging.
+updates:
+  # The Cargo workspace at the root covers boite-core, boite-mcp, boite-server
+  # and src-tauri, so one entry is the whole Rust side.
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      rust:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      frontend:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
