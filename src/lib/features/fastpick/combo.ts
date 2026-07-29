@@ -66,7 +66,7 @@ export function comboArgs(combo: FastpickCombo): string[] {
  * The combo a thread is running, or null when it is not a fastpick thread.
  *
  * Read back from the command rather than stored beside it: a thread the user typed
- * `fastpick --harness … ` into by hand, and one a process promoted through the OSC
+ * `fastpick --harness ...` into by hand, and one a process promoted through the OSC
  * sequence, are then described exactly like one the picker launched.
  */
 export function parseCombo(cmd: string, args: readonly string[]): FastpickCombo | null {

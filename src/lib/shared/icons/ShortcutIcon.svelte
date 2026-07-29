@@ -7,7 +7,10 @@
   type Props = {
     iconKey?: IconKey;
     size?: number;
-    /** Hex color (`#rrggbb`) replacing the glyph's own color. */
+    /**
+     * Colour replacing the glyph's own. Any CSS colour: the shortcut editor stores hex,
+     * while the model tint passes a `var(--color-term-…)` so it follows the theme.
+     */
     color?: string | null;
   };
   let { iconKey = null, size = 14, color = null }: Props = $props();

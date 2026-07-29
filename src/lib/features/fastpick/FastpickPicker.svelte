@@ -2,12 +2,14 @@
   import { onMount, onDestroy } from "svelte";
   import { scale } from "svelte/transition";
   import { app } from "$lib/app/store.svelte";
+  import { settings } from "$lib/features/settings/store.svelte";
   import { t } from "$lib/i18n/index.svelte";
   import { launchFastpick } from "$lib/features/thread/api";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
   import { fastpick } from "./store.svelte";
   import { iconKeyForKind, type FastpickCombo } from "./combo";
   import type { FastpickHarness, FastpickModel } from "$lib/backend/types";
+  import Plus from "@lucide/svelte/icons/plus";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import ChevronLeft from "@lucide/svelte/icons/chevron-left";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
@@ -148,8 +150,9 @@
     document.addEventListener("click", handleDocClick);
     document.addEventListener("keydown", handleKeydown);
     // Probed once so the button can hide itself on a machine with no fastpick, rather
-    // than offering a menu whose every entry fails.
-    void fastpick.ensure();
+    // than offering a menu whose every entry fails. Turned off in the settings, nothing
+    // is asked at all: the answer would only decide how to hide a button already hidden.
+    if (settings.state.fastpickEnabled) void fastpick.ensure();
   });
 
   onDestroy(() => {
@@ -158,8 +161,8 @@
   });
 </script>
 
-{#if fastpick.installed !== false}
-  <div bind:this={triggerRoot} class="relative flex items-stretch">
+{#if settings.state.fastpickEnabled && fastpick.installed !== false}
+  <div bind:this={triggerRoot} class="relative flex shrink-0 items-stretch">
     <button
       type="button"
       class="flex shrink-0 items-center gap-1.5 rounded-md border border-dashed border-border px-2.5 py-1 text-xs text-muted-foreground transition hover:border-foreground/30 hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
@@ -170,7 +173,10 @@
       title={t("fastpick.tooltip")}
       aria-label={t("fastpick.tooltip")}
     >
-      <span class="font-medium">{t("fastpick.label")}</span>
+      <!-- Same three parts as the Terminal button beside it: it launches a thread too, and
+           a button with no glyph reads as smaller than its neighbours whatever its box says. -->
+      <Plus class="size-3.5" />
+      <span>{t("fastpick.label")}</span>
       <ChevronDown class="size-3.5" />
     </button>
 

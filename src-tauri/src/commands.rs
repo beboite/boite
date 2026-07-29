@@ -1211,3 +1211,12 @@ pub async fn fastpick_list(
     .map_err(|e| e.to_string())?
 }
 
+// Null means fastpick is not on this machine, which the settings panel reads as "offer the
+// install" rather than as a failure.
+#[tauri::command]
+pub async fn fastpick_version() -> Option<String> {
+    tauri::async_runtime::spawn_blocking(boite_core::fastpick::version_blocking)
+        .await
+        .unwrap_or(None)
+}
+

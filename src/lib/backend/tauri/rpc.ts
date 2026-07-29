@@ -122,6 +122,7 @@ export const tauriFastpick: FastpickApi = {
     });
     return JSON.parse(raw) as FastpickListing;
   },
+  version: () => invoke<string | null>("fastpick_version"),
 };
 
 export const tauriScope: ScopeApi = {

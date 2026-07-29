@@ -143,6 +143,8 @@ const DEFAULTS: Settings = {
   motionMode: "system",
   locale: "system",
   setupCompleted: false,
+  fastpickEnabled: true,
+  colorByModel: true,
 };
 
 // First-run guess: touch-primary, narrow screens (a phone TWA/PWA) default to
@@ -323,6 +325,14 @@ class SettingsStore {
           typeof stored.mobileLayout === "boolean"
             ? stored.mobileLayout
             : DEFAULTS.mobileLayout,
+        fastpickEnabled:
+          typeof stored.fastpickEnabled === "boolean"
+            ? stored.fastpickEnabled
+            : DEFAULTS.fastpickEnabled,
+        colorByModel:
+          typeof stored.colorByModel === "boolean"
+            ? stored.colorByModel
+            : DEFAULTS.colorByModel,
         // A settings row written before the wizard existed carries no flag.
         // Its owner already has a shortcut list, and finishing the wizard
         // replaces that list wholesale, so an existing install counts as
@@ -467,6 +477,18 @@ class SettingsStore {
     this.state.motionMode = value;
     this.persistDeviceNow();
   }
+  async setFastpickEnabled(value: boolean) {
+    if (this.state.fastpickEnabled === value) return;
+    this.state.fastpickEnabled = value;
+    await this.persist();
+  }
+
+  async setColorByModel(value: boolean) {
+    if (this.state.colorByModel === value) return;
+    this.state.colorByModel = value;
+    await this.persist();
+  }
+
   async setLocale(value: LocaleSetting) {
     if (this.state.locale === value) return;
     this.state.locale = value;
