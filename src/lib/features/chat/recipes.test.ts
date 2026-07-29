@@ -20,8 +20,17 @@ describe("recipes", () => {
   it("never leaves an agent unreachable", () => {
     // The point of the fallback: an agent with no recipe still has a mode.
     expect(chatModeFor("hermes")).toBe("pty");
-    expect(chatModeFor("antigravity")).toBe("pty");
+    expect(chatModeFor("copilot")).toBe("pty");
     expect(chatModeFor(null)).toBe("pty");
+  });
+
+  it("reads antigravity's print mode rather than driving its TUI", () => {
+    expect(chatModeFor("antigravity")).toBe("text");
+    const agy = recipeFor("antigravity")!;
+    expect(agy.args({ prompt: "hi", sessionId: null, newSessionId: null })).toEqual([
+      "--print",
+      "hi",
+    ]);
   });
 
   it("names claude's first session and resumes it only after that", () => {

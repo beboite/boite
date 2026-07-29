@@ -19,7 +19,18 @@ import { stagePrompt } from "./pendingPrompt";
 import type { ChatEvent } from "./recipes";
 import type { Chat, ChatMessage, IconKey } from "$lib/types";
 
-const decoder = new TextDecoder();
+/**
+ * One decoder per turn, never a shared one.
+ *
+ * `{ stream: true }` keeps the bytes of a character split across two chunks in
+ * the decoder itself, and two chats answer at the same time as soon as the user
+ * opens a second one. A module-level decoder would hand chat A's half character
+ * to chat B's next chunk and put mojibake in both bubbles, rarely enough to
+ * look like the agent's own doing.
+ */
+function newDecoder(): TextDecoder {
+  return new TextDecoder();
+}
 
 function nowMessage(chatId: string, role: ChatMessage["role"], text: string): ChatMessage {
   return {
@@ -216,6 +227,7 @@ function runTurn(
     let settled = false;
     let pending = "";
     let streamed = "";
+    const decoder = newDecoder();
 
     const finish = (err?: unknown) => {
       if (settled) return;
