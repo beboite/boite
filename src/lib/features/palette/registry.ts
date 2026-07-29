@@ -8,6 +8,8 @@ import {
   launchTargetProjectId,
   restoreLastClosedThread,
 } from "$lib/features/thread/api";
+import { resolveIconKey } from "$lib/shared/icons/detect";
+import type { IconKey } from "$lib/types";
 
 export type PaletteSection = "threads" | "actions" | "projects";
 
@@ -16,6 +18,8 @@ export interface PaletteCommand {
   section: PaletteSection;
   label: string;
   hint?: string;
+  /** Same glyph the sidebar row wears, so a thread is recognised before it is read. */
+  icon?: { key: IconKey; color: string | null };
   run: () => void | Promise<unknown>;
 }
 
@@ -46,13 +50,17 @@ export function buildPaletteCommands(): PaletteCommand[] {
 
   for (const project of app.sortedProjects) {
     for (const thread of app.threadsByProjectSorted(project.id)) {
+      // What the sidebar row says, in the same order: a thread's title is its
+      // name, and "Claude #3" is the fallback for one that never got a title.
+      // The slot label stays in the hint so it is still searchable.
       commands.push({
         id: `thread:${thread.id}`,
         section: "threads",
-        label: thread.label,
+        label: thread.title ?? thread.label,
         hint: thread.title
-          ? `${projectDisplayName(project)} — ${thread.title}`
+          ? `${projectDisplayName(project)} — ${thread.label}`
           : projectDisplayName(project),
+        icon: { key: thread.iconKey, color: thread.iconColor ?? null },
         run: () => goToThread(thread.id, project.id),
       });
     }
@@ -71,6 +79,10 @@ export function buildPaletteCommands(): PaletteCommand[] {
       section: "actions",
       label: `Launch ${shortcut.label}`,
       hint: shortcut.command,
+      icon: {
+        key: resolveIconKey(shortcut.iconKey, shortcut.label, shortcut.command),
+        color: shortcut.iconColor ?? null,
+      },
       run: async () => {
         const projectId = await launchTargetProjectId();
         if (projectId) await launchShortcut(shortcut, projectId);
