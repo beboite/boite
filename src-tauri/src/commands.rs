@@ -14,7 +14,7 @@ use boite_core::pty::{PtyManager, PtySpawnArgs};
 use boite_core::scope::ProjectRoots;
 use boite_core::session::{ClaudeSessionHit, CodexSessionHit};
 use boite_core::shell::ShellOption;
-use boite_core::{editor, explorer, git, project, session, shell};
+use boite_core::{editor, explorer, git, project, session, shell, usage};
 
 use crate::BootState;
 use crate::local_pty::{LocalSessions, LocalSink};
@@ -599,6 +599,18 @@ pub async fn stop_claude_session(session_id: String) -> bool {
     tauri::async_runtime::spawn_blocking(move || session::stop_claude_session(&session_id))
         .await
         .unwrap_or(false)
+}
+
+/// What the agents spent in these folders, read out of their own transcripts.
+///
+/// The directories come from the caller because a project's threads no longer
+/// all run inside it: since worktree isolation most of them run in a detached
+/// checkout elsewhere, and every store keys on the directory the agent ran in.
+#[tauri::command]
+pub async fn agent_token_usage(cwds: Vec<String>, days: u32) -> usage::UsageReport {
+    tauri::async_runtime::spawn_blocking(move || usage::collect_usage_blocking(cwds, days))
+        .await
+        .unwrap_or_default()
 }
 
 /// Carries a thread's transcript to the folder it is moving to.

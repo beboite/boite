@@ -47,6 +47,10 @@ pub struct Project {
     pub archived: bool,
     #[serde(default)]
     pub git_root: Option<String>,
+    /// Whether new threads here open their own worktree. None follows the app
+    /// setting, which is what every project did before the column existed.
+    #[serde(default)]
+    pub worktrees: Option<bool>,
 }
 
 // Mirrors the frontend Thread type. `pty_id` and `status` reflect live server

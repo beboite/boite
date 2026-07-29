@@ -506,6 +506,30 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
             Ok(json!({ "sessions": sessions }))
         }
 
+        // The transcripts are here, not on the phone reading the dashboard.
+        //
+        // A directory outside the trust boundary is dropped rather than
+        // refused: the list carries the project's worktrees, which live under
+        // the server's own base and not under any project root, and one of
+        // those must not take the whole card down with it. Nothing here opens
+        // the paths — they are compared as strings against what the agents
+        // recorded — so a dropped one costs coverage, never safety.
+        "session.usage" => {
+            let cwds: Vec<String> = params
+                .get("cwds")
+                .and_then(|v| v.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let days = params.get("days").and_then(|v| v.as_u64()).unwrap_or(365) as u32;
+            let report =
+                blocking(move || boite_core::usage::collect_usage_blocking(cwds, days)).await?;
+            Ok(serde_json::to_value(report).unwrap())
+        }
+
         "session.stopClaude" => {
             let id = str_param(&params, "sessionId")?;
             let stopped = blocking(move || boite_core::session::stop_claude_session(&id)).await?;

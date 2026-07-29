@@ -10,6 +10,7 @@ import type {
   FolderState,
   GitApi,
   LiveClaudeSession,
+  UsageReport,
   LogApi,
   ProjectApi,
   PtyApi,
@@ -280,6 +281,13 @@ export class RemoteBackend implements Backend {
     };
 
     this.session = {
+      // The transcripts are on the boite, not on the phone reading them. An
+      // older server has no answer, and an empty report is the honest one: the
+      // card then says nothing was found rather than inventing a total.
+      usage: (cwds, days) =>
+        rpc("session.usage", { cwds, days })
+          .then((r) => r as unknown as UsageReport)
+          .catch(() => ({ models: [], days: [], sessions: 0, missing: [] })),
       // ptyId names a PTY the server owns, so it resolves the pid on its side.
       // An older server ignores the extra param and keeps skipping every live
       // session, which is the behaviour it had before.

@@ -252,8 +252,23 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "project.noWorktrees": "Tous les terminaux tournent dans le dossier du projet.",
   "project.worktreesOff":
     "Les worktrees par terminal sont désactivés ; tout tourne dans le dossier du projet.",
-  "project.tabOverview": "Aperçu",
-  "project.tabWorktrees": "Worktrees",
+  "project.scratchNotice": "Temporaire. Rien ici n'est encore un projet.",
+  "project.agents": "Accès agent (MCP)",
+  "project.tokens": "Tokens",
+  "project.tokensRange": "12 derniers mois",
+  "project.tokensNone": "Aucune transcription d'agent pour ce projet.",
+  "project.tokensOnly": "Seuls claude et codex notent ce qu'ils dépensent.",
+  "project.tokensMissing": "{agents} ne tient aucun registre sur cette machine.",
+  "project.tokensSessions": "{count} sessions",
+  "project.tokensIn": "entrée",
+  "project.tokensOut": "sortie",
+  "project.tokensCacheWrite": "cache écrit",
+  "project.tokensCacheRead": "cache lu",
+  "project.tokensRefresh": "Relire les transcriptions",
+  "project.tokensDay": "{total} le {day}",
+  "project.tokensNothingOn": "rien le {day}",
+  "project.tokensLess": "moins",
+  "project.tokensMore": "plus",
 
   "worktree.title": "Worktrees",
   "worktree.refresh": "Relire le dépôt",
@@ -277,6 +292,12 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "worktree.holdsBoth":
     "Il contient des modifications non commitées et des commits sur aucune branche. Les deux seront perdus.",
   "worktree.inUseBy": "{thread} tourne encore dedans.",
+  "worktree.autoLabel": "Un worktree par terminal d'agent",
+  "worktree.autoOnHint":
+    "Les prochains terminaux d'agent de ce projet démarrent dans leur propre worktree détaché.",
+  "worktree.autoOffHint":
+    "Les prochains terminaux d'agent de ce projet démarrent dans le dossier du projet.",
+  "worktree.offHere": "Les worktrees sont désactivés pour ce projet.",
 
   "notification.readyForInput": "Prêt pour saisie",
 

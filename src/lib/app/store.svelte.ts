@@ -769,6 +769,26 @@ class AppState {
   }
 
   /**
+   * Whether this project's agent threads get their own worktree.
+   *
+   * Writes an explicit boolean rather than clearing back to null: once the user
+   * has said, moving the app-wide default must not silently move this project
+   * with it. Only threads started after this see it — a thread's directory is
+   * decided when it is born and never again.
+   */
+  async setProjectWorktrees(id: string, enabled: boolean) {
+    const p = this.projects.find((x) => x.id === id);
+    if (!p || (p.worktrees ?? null) === enabled) return;
+    p.worktrees = enabled;
+    try {
+      await saveProject($state.snapshot(p) as Project);
+    } catch (err) {
+      console.error("setProjectWorktrees failed:", err);
+      notifications.error("Failed to save the worktree setting");
+    }
+  }
+
+  /**
    * The Scratch row, made and persisted if this workspace has none.
    *
    * Lazy on purpose: the sidebar hides it while it is empty, so seeding it at

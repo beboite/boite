@@ -841,9 +841,10 @@
       {@const isProjectSource = liveDrag?.kind === "project" && liveDrag.id === project.id}
       <!-- Scratch is the home folder, not a repository: no worktree, nothing to
            branch, nothing git has an opinion about. It sits in the list like a
-           project because everything a thread needs keys off one, so the row is
-           the only place left to say it is not one. A lighter surface, no
-           border and no badge — enough to read as apart, not as broken. -->
+           project because everything a thread needs keys off one, so the card
+           is the only place left to say it is not one. Faded and hatched,
+           threads included: a lighter surface alone read as a selected row, and
+           the whole card being temporary is the thing to say. -->
       {@const isScratchRow = isScratch(project)}
       {@const projectShiftY =
         liveDrag && liveDrag.kind === "project" && liveDrag.slotIndex !== null && projectSourceIdx >= 0
@@ -852,6 +853,7 @@
       <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
       <div
         class="project-block mb-1.5"
+        class:scratch-block={isScratchRow}
         class:dragging={isProjectSource}
         class:source={isProjectSource}
         class:opacity-50={boiteOffline}
@@ -871,9 +873,7 @@
             ? ''
             : 'cursor-pointer'} {isSelected
             ? 'bg-accent/40'
-            : isScratchRow
-              ? 'bg-[var(--color-surface-2)]'
-              : ''}"
+            : ''}"
           style:box-shadow={isRemoteOrigin
             ? `inset 2px 0 0 0 ${workspace.info.color || "var(--color-success)"}`
             : undefined}
@@ -1155,6 +1155,25 @@
   .project-block {
     transform-origin: left center;
     will-change: transform;
+  }
+
+  /* Temporary, and it has to look it. Faded so it sits behind the real
+     projects, hatched so a screenshot still says so, and on the block rather
+     than the row so the threads underneath are inside the same crossed-out
+     card. It lifts under the pointer: a row you are about to click has to be
+     readable, and this is still the way into a scratch terminal. */
+  .project-block.scratch-block {
+    opacity: 0.6;
+    border-radius: 0.5rem;
+    background-image: repeating-linear-gradient(
+      135deg,
+      transparent 0 5px,
+      color-mix(in srgb, var(--color-foreground) 7%, transparent) 5px 6px
+    );
+    transition: opacity 140ms ease;
+  }
+  .project-block.scratch-block:hover {
+    opacity: 0.9;
   }
   .thread-row {
     transform-origin: left center;
