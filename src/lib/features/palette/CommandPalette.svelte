@@ -1,5 +1,6 @@
 <script lang="ts">
   import { fade, scale } from "svelte/transition";
+  import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
   import { palette } from "./store.svelte";
   import { fuzzyScore } from "./fuzzy";
   import {
@@ -177,13 +178,20 @@
             id="palette-item-{i}"
             role="option"
             aria-selected={i === activeIndex}
-            class="flex w-full items-baseline gap-2 px-4 py-1.5 text-left text-[13px]
+            class="flex w-full items-center gap-2 px-4 py-1.5 text-left text-[13px]
               {i === activeIndex
                 ? 'bg-[var(--color-surface-3)] text-foreground'
                 : 'text-foreground/85 hover:bg-[var(--color-surface-2)]'}"
             onpointerenter={() => (activeIndex = i)}
             onclick={() => runCommand(c)}
           >
+            <!-- Held even when empty: an icon on some rows and none on others
+                 would step the labels in and out along the list. -->
+            <span class="flex size-4 shrink-0 items-center justify-center">
+              {#if c.icon}
+                <ShortcutIcon iconKey={c.icon.key} size={14} color={c.icon.color} />
+              {/if}
+            </span>
             <span class="min-w-0 truncate">{c.label}</span>
             {#if c.hint}
               <span class="min-w-0 flex-1 truncate text-[11px] text-muted-foreground/70">
