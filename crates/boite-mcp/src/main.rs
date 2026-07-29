@@ -881,7 +881,6 @@ mod tests {
             thread_id: Some("thread".into()),
             project_id: None,
             agent: None,
-            chat_id: None,
             ids: RefCell::new(HashMap::new()),
         }
     }
