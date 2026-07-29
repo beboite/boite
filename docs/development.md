@@ -46,6 +46,41 @@ The bridge is unrelated to the agent MCP endpoint described in the README, and
 never reuses it: the bridge answers `execute_js`, that one answers ten verbs
 scoped to the calling thread.
 
+## The browser pane, and the half of it that is not built
+
+`pane_open` lets an agent put a page beside its own terminal, which is the
+point: an agent that has just started a dev server knows what is worth looking
+at, and printing a URL and hoping was the only way to say so.
+
+What ships today is an `<iframe>`. That is a floor, not a ceiling, and the
+ceiling is worth naming because the shape of the fix is already decided:
+
+- **A site can refuse to be framed.** `X-Frame-Options: DENY` or a
+  `frame-ancestors` CSP and the pane stays blank; the component offers "open
+  outside" once enough time has passed to rule out slow. Localhost dev servers,
+  which is the case this exists for, send neither.
+- **An agent cannot drive it.** Cross-origin means no DOM access from the app's
+  own webview, so there is no snapshot, no click, no fill.
+
+The way out is a Tauri child webview positioned over the pane rect, exactly as
+the terminals already are — same measured rectangle, same absolute overlay, and
+`PaneShell` already publishes the rect for every pane whether or not anything
+is drawn in it. Two things fall out of that:
+
+- WebView2 takes `--remote-debugging-port` through
+  `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`, so a child webview can expose CDP.
+  The driver then already exists — `chrome-devtools-axi` attaches over CDP and
+  is the token-shaped verb surface an agent wants (`snapshot` returning `@uid`s,
+  `click @uid`, combined navigate-and-capture). Boite would be the viewport and
+  would not need a driver of its own.
+- Failing that, a child webview accepts an initialization script, which runs in
+  every frame on any origin and can post back over the Tauri IPC. That is full
+  DOM access without CDP, at the cost of writing the snapshot and uid protocol
+  by hand.
+
+The first is less code and reuses a tool that is already installed. Neither is
+started.
+
 ## window.\_\_boite
 
 A screenshot, a DOM read and a way to run JavaScript reach almost nothing that
