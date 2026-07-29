@@ -431,10 +431,12 @@
       {t("git.pickProject")}
     </div>
   {:else if !gs || !gs.loaded}
-    <div
-      class="flex flex-1 items-center justify-center px-3 text-center text-xs text-muted-foreground/70"
-    >
-      {t("git.loading")}
+    <div class="flex flex-1 flex-col gap-2 px-3 py-3" aria-hidden="true">
+      <div class="skeleton h-4 w-2/5"></div>
+      <div class="skeleton h-12 w-full"></div>
+      {#each [80, 64, 72, 56] as width, i (i)}
+        <div class="skeleton h-3" style:width="{width}%"></div>
+      {/each}
     </div>
   {:else if !gs.isRepo}
     <div class="flex flex-1 flex-col overflow-y-auto">

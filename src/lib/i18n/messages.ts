@@ -82,6 +82,7 @@ export const EN_MESSAGES = {
   "welcome.cycleThreads": "Cycle threads",
   "welcome.jumpToThread": "Jump to thread",
   "welcome.toggleSidebar": "Toggle sidebar",
+  "welcome.splitPane": "Split the pane",
   "welcome.closeThread": "Close thread",
 
   "titlebar.status": "{threadsCount} {threadsLabel} in {projectsCount} {projectsLabel}",
