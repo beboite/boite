@@ -166,6 +166,14 @@ export async function sendTurn(chatId: string, prompt: string): Promise<void> {
       ]
     : [...chat.args, ...mcp];
 
+  // Registered before the first await of the turn, so a Stop pressed at any
+  // point after this has something to wait on.
+  let turnOver!: () => void;
+  liveTurn.set(
+    chatId,
+    new Promise<void>((resolve) => (turnOver = resolve)),
+  );
+
   try {
     await runTurn(chat, args, answer.id, !recipe, text);
   } catch (err) {
@@ -185,27 +193,77 @@ export async function sendTurn(chatId: string, prompt: string): Promise<void> {
         text: finished.text || (empty ? "the agent produced no output" : ""),
       };
       chats.patch(chatId, answer.id, settled);
-      await chats.persist(settled);
+      await chats.persist(trimRaw(settled));
       // Recorded only once the turn actually produced something: an id kept
       // after a failed first turn would be resumed on the next one, and there
       // would be nothing under it to resume.
-      if (newSessionId && settled.state === "done") {
-        await chats.upsert({ ...chats.byId(chatId)!, sessionId: newSessionId });
+      const still = chats.byId(chatId);
+      if (newSessionId && settled.state === "done" && still) {
+        await chats.upsert({ ...still, sessionId: newSessionId });
       }
     }
     // The handover proposal is written by the agent endpoint, straight into the
     // table, so the only way to see it is to look again once the turn is over.
     await chats.refreshMessages(chatId);
+    liveTurn.delete(chatId);
+    cancelled.delete(chatId);
+    turnOver();
   }
+}
+
+/**
+ * How much of a fallback agent's raw output is worth keeping on disk.
+ *
+ * A TUI redraws itself, so `raw` is not an answer of this size — it is every
+ * frame the agent painted, and a long turn runs to megabytes in a TEXT column
+ * for a bubble whose terminal only scrolls back 2000 lines anyway. The tail is
+ * the part that survived the redraw and the part anyone reopening the chat
+ * wants; the head is frames that were already painted over.
+ */
+const RAW_KEPT = 256 * 1024;
+
+function trimRaw(message: ChatMessage): ChatMessage {
+  const raw = message.raw;
+  if (!raw || raw.length <= RAW_KEPT) return message;
+  return { ...message, raw: raw.slice(raw.length - RAW_KEPT) };
 }
 
 /** PTYs of turns still running, so a chat can be stopped. */
 const livePty = new Map<string, string>();
 
+/**
+ * The turn each chat is running, so stopping one can wait for it to finish.
+ *
+ * Killing the process is not the end of a turn: the exit event still has to
+ * arrive and the `finally` still has to write the settled message. A caller
+ * that deleted the chat in between put its rows back.
+ */
+const liveTurn = new Map<string, Promise<void>>();
+
+/**
+ * Chats asked to stop before their process existed.
+ *
+ * A turn spawns asynchronously, and Stop pressed in that window found nothing
+ * in `livePty` and did nothing at all — the composer then stayed locked until
+ * the agent finished on its own. The request is remembered instead, and the
+ * spawn honours it the moment it has something to kill.
+ */
+const cancelled = new Set<string>();
+
+/**
+ * Stops a chat's turn and waits for it to actually be over.
+ *
+ * Waiting is the point: `removeChat` deletes the rows next, and a turn still
+ * settling would write its message back into a table the chat no longer has.
+ */
 export async function stopTurn(chatId: string): Promise<void> {
+  const running = liveTurn.get(chatId);
+  if (!running) return;
+  cancelled.add(chatId);
   const key = livePty.get(chatId);
-  if (!key) return;
-  await ptyKill(key, true).catch(() => {});
+  if (key) await ptyKill(key, true).catch(() => {});
+  // Never rejects: the turn's own promise settles through its `finally`.
+  await running.catch(() => {});
 }
 
 /**
@@ -341,6 +399,13 @@ function runTurn(
       )
       .then((ptyKey) => {
         livePty.set(chat.id, ptyKey);
+        // Stop was pressed while this was still spawning, so there was nothing
+        // to kill at the time. Honoured now, and before the prompt is typed:
+        // a fallback agent would otherwise be handed a message on its way out.
+        if (cancelled.has(chat.id)) {
+          void ptyKill(ptyKey, true).catch(() => {});
+          return;
+        }
         if (rawMode) void typeIntoFallback(ptyKey, prompt);
       })
       .catch(finish);
