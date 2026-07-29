@@ -23,6 +23,7 @@
   import { settings } from "$lib/features/settings/store.svelte";
   import { threadCwd } from "$lib/features/thread/cwd";
   import {
+    promoteThread,
     reloadThread,
     restoreLastClosedThread,
     threadDirectoryReady,
@@ -34,6 +35,7 @@
   } from "$lib/features/thread/session";
   import { withPowershellFastFlags } from "$lib/features/thread/shell-wrap";
   import { claimPrompt } from "$lib/features/chat/pendingPrompt";
+  import { parsePromotion, PROMOTE_OSC } from "$lib/features/thread/promote";
   import { platform } from "$lib/storage/platform.svelte";
   import {
     startSessionMonitor,
@@ -1168,6 +1170,15 @@
     }));
     term.loadAddon(new Unicode11Addon());
     term.unicode.activeVersion = "11";
+
+    // A launcher telling us what it turned this thread into. Returning false for anything
+    // that is not ours leaves OSC 1337 to whoever else claims it.
+    term.parser.registerOscHandler(PROMOTE_OSC, (payload) => {
+      const promotion = parsePromotion(payload);
+      if (!promotion) return false;
+      void promoteThread(thread.id, promotion);
+      return true;
+    });
 
     term.attachCustomKeyEventHandler((e) => {
       if (e.type !== "keydown") return true;

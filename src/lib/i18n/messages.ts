@@ -306,6 +306,23 @@ export const EN_MESSAGES = {
   "setup.agentsNoneHint": "Install one — Claude Code, Codex, Opencode… — then come back and check again. You can also add any command by hand later.",
   "setup.agentsRecheck": "Check again",
   "setup.settingsHint": "Everything here can be changed in the settings: rename a shortcut, change its command, its icon color, or its place in the bar.",
+
+  "fastpick.label": "fastpick",
+  "fastpick.tooltip": "Launch an agent on another provider and model",
+  "fastpick.stepHarness": "Agent",
+  "fastpick.back": "Back",
+  "fastpick.refresh": "Ask the provider again",
+  "fastpick.options": "Effort and system prompt",
+  "fastpick.effort": "Effort",
+  "fastpick.systemPrompt": "System prompt",
+  "fastpick.launch": "Launch",
+  "fastpick.noKey": "Key file missing",
+  "fastpick.noHarness": "None of the agents in fastpick's config is installed here.",
+  "fastpick.sourceLive": "Fetched just now",
+  "fastpick.sourceCache": "From the cache",
+  "fastpick.sourceConfig": "From fastpick's config",
+  "fastpick.sourceFailed": "Provider unreachable, config list only",
+  "fastpick.promoted": "{label} is now running on {model}",
 } as const;
 
 export type MessageKey = keyof typeof EN_MESSAGES;

@@ -1,6 +1,7 @@
 pub mod editor;
 pub mod env;
 pub mod explorer;
+pub mod fastpick;
 pub mod git;
 pub mod project;
 pub mod pty;

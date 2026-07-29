@@ -23,6 +23,16 @@ four edits: `backend/types.ts`, the Tauri implementation, the remote one, and
 the matching arm in `crates/boite-server/src/rpc.rs`. Miss one and it works on
 this machine and fails on a remote boite, silently.
 
+## A process can rewrite its own thread
+
+A launcher is not the thing it launched, so one can say what it became:
+`ESC ] 1337 ; boite ; launch = {…} BEL` on its own stdout replaces the thread's
+command, arguments and icon, and that is what a reload replays.
+`thread/promote.ts` parses it, and everything there is checked rather than
+spread onto the thread — a terminal's output is whatever the process printed,
+including a file someone else wrote. Boite advertises itself as `TERM_PROGRAM=boite`
+so a tool can stay silent in every other terminal.
+
 ## Checking your work in the running app
 
 A screenshot and a DOM read tell you almost nothing here: **the terminals render

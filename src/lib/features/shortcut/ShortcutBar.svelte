@@ -4,6 +4,7 @@
   import { launchShortcut } from "$lib/features/thread/api";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
   import ShellPicker from "./ShellPicker.svelte";
+  import FastpickPicker from "$lib/features/fastpick/FastpickPicker.svelte";
   import { resolveIconKey } from "$lib/shared/icons/detect";
 
   function launch(shortcutId: string) {
@@ -48,5 +49,6 @@
     {/if}
 
     <ShellPicker />
+    <FastpickPicker />
   </div>
 </div>

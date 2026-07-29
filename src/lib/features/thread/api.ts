@@ -12,6 +12,13 @@ import { confirmDialog } from "$lib/shared/components/confirm.svelte";
 import { uuid } from "$lib/shared/utils/uuid";
 import { parkedLocal } from "$lib/backend/tauri/parked";
 import { isScratch } from "$lib/features/project/scratch";
+import {
+  comboArgs,
+  iconKeyForKind,
+  FASTPICK_CMD,
+  type FastpickCombo,
+} from "$lib/features/fastpick/combo";
+import { samePromotion, type Promotion } from "./promote";
 import type { IconKey, Project, Shortcut, Thread } from "$lib/types";
 import type { ShellOption } from "$lib/storage/platform.svelte";
 
@@ -215,6 +222,55 @@ export async function launchShortcut(
     fresh: true,
     iconColor: shortcut.iconColor ?? null,
   });
+}
+
+/**
+ * Applies what a process said its thread had become, and persists it.
+ *
+ * The label is left alone. It is the user's word for this terminal, numbered per project,
+ * and a thread they renamed does not want a launcher renaming it back. The command is not:
+ * rewriting it is the whole point, since that is what a reload replays.
+ */
+export async function promoteThread(
+  threadId: string,
+  promotion: Promotion,
+): Promise<void> {
+  const thread = app.threadById(threadId);
+  if (!thread || samePromotion(thread, promotion)) return;
+  thread.cmd = promotion.cmd;
+  thread.args = [...promotion.args];
+  thread.iconKey = promotion.iconKey;
+  try {
+    await saveThread({ ...thread, args: [...thread.args] });
+  } catch (err) {
+    logger.warn("thread", `promotion not persisted for ${threadId}`, String(err));
+  }
+}
+
+/**
+ * Starts an agent through fastpick, on a combination the user picked here.
+ *
+ * The thread's command carries all three answers, which is what makes fastpick resolve
+ * without opening its own menu — and what makes a reload come back on the same endpoint and
+ * the same model instead of asking again. The label and the icon are the agent's, not
+ * fastpick's: from here on it is a Claude thread that happens to run somewhere else, and
+ * the status, the session monitor and the todo endpoint all key off that.
+ */
+export async function launchFastpick(
+  combo: FastpickCombo,
+  harness: { name: string; kind: string },
+  projectId: string | null,
+): Promise<Thread | null> {
+  const project = requireProject(projectId);
+  if (!project) return null;
+  return createThread(
+    project,
+    FASTPICK_CMD,
+    comboArgs(combo),
+    harness.name,
+    iconKeyForKind(harness.kind),
+    { fresh: true },
+  );
 }
 
 /**

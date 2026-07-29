@@ -463,6 +463,26 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
             Ok(json!({ "found": found }))
         }
 
+        // fastpick lives on the machine that runs the agents, which is this one. That is
+        // what keeps its key files here: the device drawing the menu gets the choices, and
+        // the credential is read at spawn time on this side and never travels.
+        //
+        // The payload is fastpick's own JSON, passed through as a string rather than
+        // reparsed. Its schema is fastpick's to grow, and the client types what it reads.
+        "fastpick.list" => {
+            let provider = params
+                .get("provider")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            let refresh = params
+                .get("refresh")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let json =
+                blocking(move || boite_core::fastpick::list_blocking(provider, refresh)).await??;
+            Ok(json!({ "json": json }))
+        }
+
         // Warms the server's own function/alias list. The client cannot answer
         // this for a remote boite: the profile that matters is the server's.
         "shell.warm" => {

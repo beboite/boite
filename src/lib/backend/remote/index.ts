@@ -5,6 +5,8 @@ import type {
   DbApi,
   EditorApi,
   ExplorerApi,
+  FastpickApi,
+  FastpickListing,
   FolderState,
   GitApi,
   LiveClaudeSession,
@@ -65,6 +67,7 @@ export class RemoteBackend implements Backend {
   readonly editor: EditorApi;
   readonly project: ProjectApi;
   readonly shell: ShellApi;
+  readonly fastpick: FastpickApi;
   readonly scope: ScopeApi;
   readonly session: SessionApi;
   readonly log: LogApi;
@@ -274,6 +277,16 @@ export class RemoteBackend implements Backend {
         ),
       commandExists: (cmd) =>
         rpc("shell.commandExists", { cmd }).then((r) => r.found as boolean),
+    };
+
+    // Asked of the server, never of this device: fastpick's config and key files live
+    // where the agents run, and a picker drawn on a phone must still describe that
+    // machine's endpoints rather than the phone's.
+    this.fastpick = {
+      list: (provider, refresh) =>
+        rpc("fastpick.list", { provider: provider ?? null, refresh: refresh ?? false }).then(
+          (r) => JSON.parse(r.json as string) as FastpickListing,
+        ),
     };
 
     // The server derives its filesystem trust boundary from persisted projects;

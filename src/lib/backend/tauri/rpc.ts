@@ -2,6 +2,8 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   EditorApi,
   ExplorerApi,
+  FastpickApi,
+  FastpickListing,
   FolderState,
   GitApi,
   LiveClaudeSession,
@@ -108,6 +110,18 @@ export const tauriShell: ShellApi = {
     }));
   },
   commandExists: (cmd) => invoke<boolean>("command_exists", { cmd }),
+};
+
+export const tauriFastpick: FastpickApi = {
+  // The command hands back fastpick's document verbatim, so the parse happens here rather
+  // than in Rust: one place that knows the shape, and it is the one that reads it.
+  async list(provider, refresh) {
+    const raw = await invoke<string>("fastpick_list", {
+      provider: provider ?? null,
+      refresh: refresh ?? false,
+    });
+    return JSON.parse(raw) as FastpickListing;
+  },
 };
 
 export const tauriScope: ScopeApi = {

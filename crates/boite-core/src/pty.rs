@@ -27,8 +27,16 @@ use vte::{Params, Parser, Perform};
 ///
 /// Inherited values are overridden on purpose: whatever launched the app says
 /// nothing about the terminal we actually render into, which is xterm.js.
-pub fn terminal_env_defaults() -> [(&'static str, &'static str); 2] {
-    [("TERM", "xterm-256color"), ("COLORTERM", "truecolor")]
+/// `TERM_PROGRAM` is how a process asks who is rendering it, the way it does for iTerm2 or
+/// VS Code. Boite answers, so a tool that has something to say to its terminal can check
+/// first and stay silent everywhere else — the OSC promotion sequence is the one that
+/// matters today.
+pub fn terminal_env_defaults() -> [(&'static str, &'static str); 3] {
+    [
+        ("TERM", "xterm-256color"),
+        ("COLORTERM", "truecolor"),
+        ("TERM_PROGRAM", "boite"),
+    ]
 }
 
 // Raw, transport-agnostic PTY event. The host adapter decides how to encode

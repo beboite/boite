@@ -1197,3 +1197,17 @@ pub async fn command_exists(cmd: String) -> bool {
         .unwrap_or(false)
 }
 
+// Returns fastpick's JSON verbatim rather than a parsed shape: its schema is fastpick's to
+// grow, and the frontend types only the fields it reads.
+#[tauri::command]
+pub async fn fastpick_list(
+    provider: Option<String>,
+    refresh: Option<bool>,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        boite_core::fastpick::list_blocking(provider, refresh.unwrap_or(false))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
