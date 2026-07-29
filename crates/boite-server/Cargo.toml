@@ -28,7 +28,7 @@ rand = "0.8"
 # reqwest+rustls client. p256 generates/derives the VAPID keypair.
 web-push-native = "0.4"
 p256 = "0.13"
-base64 = "0.22"
+base64 = "0.23"
 http = "1"
 # Pure-Rust deflate (miniz_oxide backend, no C) so it cross-compiles to arm64.
 # Used to gzip the one-shot scrollback replay frame.
