@@ -421,6 +421,13 @@ export const EN_MESSAGES = {
   "panes.splitDown": "Split down",
   "panes.browserPrompt": "Address to open",
 
+  "todo.announceClaimed": "Waiting on you",
+  "todo.announceDone": "Done",
+  "todo.announceAdded": "New todo",
+  "todo.announceReopened": "Reopened",
+  "todo.announceRemoved": "Removed",
+  "todo.announceBy": "by {agent}",
+
   "browser.reload": "Reload",
   "browser.openExternal": "Open in the system browser",
   "browser.mayRefuse":

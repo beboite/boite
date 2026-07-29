@@ -45,6 +45,34 @@ use boite_core::scope::ProjectRoots;
 /// emits, and lets the app do the work.
 const AGENT_REQUEST: &str = "boite://agent-request";
 
+/// Says an agent just reached into Boite itself, and through which door.
+///
+/// Everything else an agent does happens inside its terminal, where it can be
+/// read. This endpoint is the one thing that does not: a todo appears, a
+/// worktree takes a branch, a thread moves, and the only trace is the result
+/// showing up somewhere with nothing to say who did it. The window is what
+/// tells the user, so the window has to be told.
+///
+/// Mutations only. `todo_list` and `worktree_status` run on most agent turns,
+/// and a pulse on every read would be a light that is always on, which is a
+/// light that says nothing.
+const AGENT_ACTIVITY: &str = "boite://agent-activity";
+
+fn note_activity(inner: &Inner, headers: &HeaderMap, surface: &str) {
+    // Attribution is best-effort: an agent registered from a credentials file
+    // presents a project rather than a thread, and there is no row to point at.
+    // The surface still pulses; only the "which of these agents" half is lost.
+    let thread_id = headers
+        .get("x-boite-thread")
+        .and_then(|v| v.to_str().ok())
+        .filter(|s| !s.is_empty())
+        .unwrap_or("");
+    let _ = inner.app.emit(
+        AGENT_ACTIVITY,
+        json!({ "surface": surface, "threadId": thread_id }),
+    );
+}
+
 /// Handed to spawned children so they can find and authenticate to this
 /// endpoint without any configuration of their own.
 #[derive(Clone)]
@@ -225,6 +253,7 @@ async fn worktree_branch(
     let (_, worktree) = worktree_of_request(&inner, &headers)?;
     match boite_core::git::claim_worktree_branch_blocking(&worktree, &body.name) {
         Ok(()) => {
+            note_activity(&inner, &headers, "worktree");
             let _ = inner.app.emit("boite://worktrees-changed", ());
             Ok(Json(json!({ "branch": body.name })))
         }
@@ -243,6 +272,7 @@ async fn worktree_reserve(
     let (_, worktree) = worktree_of_request(&inner, &headers)?;
     match boite_core::git::reserve_worktree_branch_blocking(&worktree, &body.name) {
         Ok(()) => {
+            note_activity(&inner, &headers, "worktree");
             let _ = inner.app.emit("boite://worktrees-changed", ());
             Ok(Json(json!({ "branch": body.name })))
         }
@@ -398,6 +428,7 @@ async fn thread_move(
         (id, name)
     };
 
+    note_activity(&inner, &headers, "thread");
     let _ = inner.app.emit(
         AGENT_REQUEST,
         json!({
@@ -455,6 +486,7 @@ async fn project_create(
         return Ok(Json(json!({ "error": reason })));
     }
 
+    note_activity(&inner, &headers, "project");
     let _ = inner.app.emit(
         AGENT_REQUEST,
         json!({
@@ -594,6 +626,7 @@ async fn thread_spawn(
         None => own_project,
     };
 
+    note_activity(&inner, &headers, "thread");
     let _ = inner.app.emit(
         AGENT_REQUEST,
         json!({
@@ -741,6 +774,7 @@ async fn add(
         id
     };
 
+    note_activity(&inner, &headers, "todo");
     let _ = inner.app.emit("boite://todos-changed", ());
     Ok(Json(json!({ "id": id })))
 }
@@ -772,6 +806,7 @@ async fn claim(
         // are refusals, and the agent does not get to learn which.
         return Err(StatusCode::CONFLICT);
     }
+    note_activity(&inner, &headers, "todo");
     let _ = inner.app.emit("boite://todos-changed", ());
     Ok(Json(json!({ "ok": true })))
 }

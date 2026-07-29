@@ -423,6 +423,13 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "panes.splitDown": "Scinder en bas",
   "panes.browserPrompt": "Adresse à ouvrir",
 
+  "todo.announceClaimed": "En attente de vous",
+  "todo.announceDone": "Terminé",
+  "todo.announceAdded": "Nouveau todo",
+  "todo.announceReopened": "Rouvert",
+  "todo.announceRemoved": "Supprimé",
+  "todo.announceBy": "par {agent}",
+
   "browser.reload": "Recharger",
   "browser.openExternal": "Ouvrir dans le navigateur du système",
   "browser.mayRefuse":
