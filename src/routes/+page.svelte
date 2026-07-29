@@ -28,6 +28,20 @@
   import MobileProjectsPage from "$lib/features/mobile/MobileProjectsPage.svelte";
   import { lazyComponent, prefetchWhenIdle } from "$lib/shared/lazy.svelte";
   import { t } from "$lib/i18n/index.svelte";
+  import type { MessageKey } from "$lib/i18n/messages";
+  import { fade, fly } from "svelte/transition";
+  import { DUR, easeOutQuint } from "$lib/theme/motion";
+
+  // Data rather than markup, so the stagger is an index and not five copies of
+  // the same transition written out by hand.
+  const WELCOME_KEYS: { keys: string[]; label: MessageKey }[] = [
+    { keys: ["Ctrl", "T"], label: "welcome.newTerminal" },
+    { keys: ["Ctrl", "Tab"], label: "welcome.cycleThreads" },
+    { keys: ["Ctrl", "1-9"], label: "welcome.jumpToThread" },
+    { keys: ["Ctrl", "\\"], label: "welcome.splitPane" },
+    { keys: ["Ctrl", "B"], label: "welcome.toggleSidebar" },
+    { keys: ["Ctrl", "W"], label: "welcome.closeThread" },
+  ];
 
   // xterm (~300 KB) and CodeMirror (~600 KB) dwarf the rest of the app. Held
   // behind import() they leave the entry graph entirely, so the window paints
@@ -307,22 +321,43 @@
               </p>
             </div>
           {:else if app.activeThreadId === null}
-            <div class="flex h-full items-center justify-center">
-              <div class="flex flex-col items-center gap-5">
-                <p class="text-sm text-muted-foreground">
+            <!-- The largest surface in the app, and it used to be a 200px
+                 cheat-sheet floating in a thousand pixels of nothing. Same
+                 information, given a container and a reason to be there, and
+                 the rows arrive one after another rather than all at once. -->
+            <div class="flex h-full items-center justify-center p-8">
+              <div
+                class="flex flex-col items-center gap-5 rounded-lg border border-border bg-[var(--color-surface)]/60 px-10 py-8 shadow-e2"
+                in:fade={{ duration: DUR.slow, easing: easeOutQuint }}
+              >
+                <span class="text-muted-foreground/30"><BoiteLogo size={40} /></span>
+                <p class="text-base text-muted-foreground">
                   {t("welcome.pickThread")}
                 </p>
-                <div class="grid grid-cols-[auto_auto] gap-x-6 gap-y-1.5 text-xs text-muted-foreground/70">
-                  <span class="text-right"><kbd class="kbd">Ctrl</kbd> <kbd class="kbd">T</kbd></span>
-                  <span>{t("welcome.newTerminal")}</span>
-                  <span class="text-right"><kbd class="kbd">Ctrl</kbd> <kbd class="kbd">Tab</kbd></span>
-                  <span>{t("welcome.cycleThreads")}</span>
-                  <span class="text-right"><kbd class="kbd">Ctrl</kbd> <kbd class="kbd">1–9</kbd></span>
-                  <span>{t("welcome.jumpToThread")}</span>
-                  <span class="text-right"><kbd class="kbd">Ctrl</kbd> <kbd class="kbd">B</kbd></span>
-                  <span>{t("welcome.toggleSidebar")}</span>
-                  <span class="text-right"><kbd class="kbd">Ctrl</kbd> <kbd class="kbd">W</kbd></span>
-                  <span>{t("welcome.closeThread")}</span>
+                <div class="grid grid-cols-[auto_auto] gap-x-6 gap-y-2 text-xs text-muted-foreground/70">
+                  {#each WELCOME_KEYS as row, i (row.label)}
+                    <span
+                      class="text-right"
+                      in:fly={{
+                        y: 4,
+                        duration: DUR.slow,
+                        delay: 60 + i * 35,
+                        easing: easeOutQuint,
+                      }}
+                    >
+                      {#each row.keys as k (k)}<kbd class="kbd">{k}</kbd>{" "}{/each}
+                    </span>
+                    <span
+                      in:fly={{
+                        y: 4,
+                        duration: DUR.slow,
+                        delay: 60 + i * 35,
+                        easing: easeOutQuint,
+                      }}
+                    >
+                      {t(row.label)}
+                    </span>
+                  {/each}
                 </div>
               </div>
             </div>

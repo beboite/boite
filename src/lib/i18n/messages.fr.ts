@@ -83,6 +83,7 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "welcome.cycleThreads": "Parcourir les terminaux",
   "welcome.jumpToThread": "Aller au terminal",
   "welcome.toggleSidebar": "Masquer/Afficher la barre latérale",
+  "welcome.splitPane": "Scinder le pane",
   "welcome.closeThread": "Fermer le terminal",
 
   "titlebar.status": "{threadsCount} {threadsLabel} dans {projectsCount} {projectsLabel}",
