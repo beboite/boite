@@ -1,10 +1,9 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { scale } from "svelte/transition";
-  import { app } from "$lib/app/store.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
   import { t } from "$lib/i18n/index.svelte";
-  import { launchFastpick } from "$lib/features/thread/api";
+  import { launchFastpick, launchTargetProjectId } from "$lib/features/thread/api";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
   import { fastpick } from "./store.svelte";
   import { iconKeyForKind, type FastpickCombo } from "./combo";
@@ -78,11 +77,11 @@
     void fastpick.loadModels(id);
   }
 
-  function pickModel(m: FastpickModel) {
+  function pickModel(m: FastpickModel, forceScratch: boolean) {
     model = m;
     effort = harness?.supportsEffort ? m.effortDefault : null;
     prompts = undefined;
-    launch();
+    void launch(forceScratch);
   }
 
   function openOptions(m: FastpickModel, e: MouseEvent) {
@@ -113,7 +112,11 @@
     else if (pane === "provider") pane = "harness";
   }
 
-  function launch() {
+  // Lands where every other launcher does: the project you are on, or Scratch
+  // when you are on none, with shift asking for Scratch outright. No right-click
+  // menu though, unlike a shortcut: this button opens a menu of its own, and the
+  // two would be fighting over the same gesture.
+  async function launch(forceScratch = false) {
     if (!harness || !providerId || !model) return;
     const combo: FastpickCombo = {
       harness: harness.id,
@@ -123,7 +126,9 @@
       prompts,
     };
     open = false;
-    void launchFastpick(combo, harness, app.currentProjectId);
+    const projectId = await launchTargetProjectId(forceScratch);
+    if (!projectId) return;
+    await launchFastpick(combo, harness, projectId);
   }
 
   function sourceLabel(source: { kind: string; ageSecs?: number }): string {
@@ -166,7 +171,6 @@
     <button
       type="button"
       class="flex shrink-0 items-center gap-1.5 rounded-md border border-dashed border-border px-2.5 py-1 text-xs text-muted-foreground transition hover:border-foreground/30 hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-      disabled={app.currentProjectId === null}
       onclick={toggle}
       aria-haspopup="menu"
       aria-expanded={open}
@@ -282,7 +286,7 @@
                     type="button"
                     role="menuitem"
                     class="flex min-w-0 flex-1 items-baseline gap-2 px-2 py-1.5 text-left text-[11.5px] text-foreground/85 transition group-hover:text-foreground"
-                    onclick={() => pickModel(m)}
+                    onclick={(e) => pickModel(m, e.shiftKey)}
                   >
                     <span class="min-w-0 truncate font-medium">{m.label ?? m.id}</span>
                     {#if m.contextWindow}
@@ -370,7 +374,7 @@
             <button
               type="button"
               class="mt-2 rounded bg-[var(--color-surface-3)] px-2 py-1.5 text-[11.5px] font-medium text-foreground transition hover:bg-accent"
-              onclick={launch}
+              onclick={(e) => void launch(e.shiftKey)}
             >
               {t("fastpick.launch")}
             </button>
