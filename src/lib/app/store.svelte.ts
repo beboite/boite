@@ -28,7 +28,11 @@ import {
   markRenamed,
   pruneRenamed,
 } from "$lib/features/thread/renamed";
-import { ensureScratchProject, SCRATCH_PROJECT_ID } from "$lib/features/project/scratch";
+import {
+  isScratch,
+  makeScratchProject,
+  SCRATCH_PROJECT_ID,
+} from "$lib/features/project/scratch";
 import { gitStore } from "$lib/features/git/store.svelte";
 import { todos } from "$lib/features/todo/store.svelte";
 import { notifications } from "$lib/features/notifications/store.svelte";
@@ -242,10 +246,23 @@ class AppState {
     return this.threadById(this.activeThreadId);
   }
 
+  /**
+   * The project a launch would land in, or null when the user is on none.
+   *
+   * No fallback to the first row: "on no project" has to be a state the user
+   * can actually be in, because that is what sends a shortcut to Scratch. Boot
+   * picks the first project once (see `init`), so the empty state is only ever
+   * reached by clicking the sidebar's empty space or by having no projects.
+   */
   get currentProjectId(): string | null {
     if (this.selectedProjectId) return this.selectedProjectId;
-    if (this.activeThread) return this.activeThread.projectId;
-    return this.projects[0]?.id ?? null;
+    return this.activeThread?.projectId ?? null;
+  }
+
+  /** Leaves the user on no project, which is what aims a launch at Scratch. */
+  clearSelection() {
+    this.selectedProjectId = null;
+    this.activeThreadId = null;
   }
 
   // Both of these return the index's own arrays. Callers iterate and map, they
@@ -266,6 +283,9 @@ class AppState {
     const idx = new Map(order.map((id, i) => [id, i]));
     return this.projects
       .filter((p) => !p.archived)
+      // An empty Scratch is not a project the user has, it is a door they have
+      // not walked through. It comes back the moment a thread lands in it.
+      .filter((p) => !isScratch(p) || this.threadsByProject(p.id).length > 0)
       .sort((a, b) => {
         // Scratch sits last whatever the manual order says. It is where work
         // starts, not one of the things being worked on, and drifting into the
@@ -318,25 +338,10 @@ class AppState {
 
     const { projects, threads } = await rowsReady;
     this.projects = projects;
-    // Before syncRoots, so the home folder is a registered root by the time any
-    // panel reads it. A workspace with no project at all is exactly when a
-    // scratch terminal is wanted, and it cannot be the thing that has to be set
-    // up first.
-    // Once, ever. A user who removed it meant to remove it, and handing it back
-    // every launch would be the app arguing with them.
-    if (!settings.state.seededScratch) {
-      const scratch = await ensureScratchProject(
-        this.projects,
-        workspace.isDynamic ? "local" : undefined,
-      );
-      if (scratch && !this.projects.some((p) => p.id === scratch.id)) {
-        this.projects.push(scratch);
-        void saveProject(scratch).catch((err) => {
-          console.error("saveProject (scratch) failed:", err);
-        });
-      }
-      if (scratch) void settings.markScratchSeeded();
-    }
+    // The one place the selection is decided for the user: landing on nothing
+    // with projects in the sidebar would send every shortcut to Scratch, which
+    // is not what a user with projects means by launching one.
+    this.selectedProjectId ??= this.sortedProjects[0]?.id ?? null;
     // Before ready: panels start polling fs/git commands as soon as they
     // mount, and those commands reject paths outside registered roots.
     await this.syncRoots();
@@ -777,6 +782,31 @@ class AppState {
     }
   }
 
+  /**
+   * The Scratch row, made and persisted if this workspace has none.
+   *
+   * Lazy on purpose: the sidebar hides it while it is empty, so seeding it at
+   * boot would only have written a row nobody could see. Unarchived on the way
+   * out — launching into a project the user has put away has to put it back,
+   * or the thread lands somewhere the sidebar refuses to show.
+   */
+  async ensureScratch(): Promise<Project | null> {
+    const already = this.projects.find((p) => p.id === SCRATCH_PROJECT_ID);
+    if (already) {
+      if (already.archived) await this.unarchiveProject(already.id);
+      return already;
+    }
+    const scratch = await makeScratchProject(
+      workspace.isDynamic ? "local" : undefined,
+    );
+    if (!scratch) {
+      notifications.error("No home folder to open a scratch terminal in");
+      return null;
+    }
+    await this.addProject(scratch);
+    return scratch;
+  }
+
   async addProject(project: Project) {
     this.projects.push(project);
     await this.syncRoots();
@@ -820,6 +850,11 @@ class AppState {
     const orphanThreads = this.threads.filter((t) => t.projectId === id);
     this.projects = this.projects.filter((p) => p.id !== id);
     this.threads = this.threads.filter((t) => t.projectId !== id);
+    // A selection pointing at a row that is gone is a project id nothing can
+    // resolve, and every launch would refuse until the user clicked elsewhere.
+    if (this.selectedProjectId === id) {
+      this.selectedProjectId = this.sortedProjects[0]?.id ?? null;
+    }
     gitStore.drop(id);
     void this.syncRoots();
     for (const t of orphanThreads) {

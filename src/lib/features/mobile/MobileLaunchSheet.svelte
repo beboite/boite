@@ -6,6 +6,7 @@
     launchShortcut,
     launchShell,
     launchBlankTerminal,
+    launchTargetProjectId,
   } from "$lib/features/thread/api";
   import { resolveIconKey } from "$lib/shared/icons/detect";
   import type { ShellOption } from "$lib/storage/platform.svelte";
@@ -16,9 +17,8 @@
   type Props = { open: boolean; onClose: () => void };
   let { open, onClose }: Props = $props();
 
-  // Launching always targets the project the top bar is showing.
-  const projectId = $derived(app.currentProjectId);
-
+  // Launching targets the project the top bar is showing, or Scratch when it
+  // is showing none — a phone has no shift-click to ask for Scratch with.
   function goTerminal() {
     onClose();
     app.mobileTab = "terminal";
@@ -26,18 +26,21 @@
 
   async function runShortcut(id: string) {
     const shortcut = settings.state.shortcuts.find((s) => s.id === id);
+    const projectId = await launchTargetProjectId();
     if (!shortcut || !projectId) return;
     goTerminal();
     await launchShortcut(shortcut, projectId);
   }
 
   async function runShell(shell: ShellOption) {
+    const projectId = await launchTargetProjectId();
     if (!projectId) return;
     goTerminal();
     await launchShell(shell, projectId);
   }
 
   async function runBlank() {
+    const projectId = await launchTargetProjectId();
     if (!projectId) return;
     goTerminal();
     await launchBlankTerminal(projectId);
@@ -52,7 +55,7 @@
         <button
           type="button"
           class="flex items-center gap-3 rounded-xl border border-border bg-[var(--color-surface-2)] px-3 py-3 text-left text-sm text-foreground/90 transition active:scale-[0.98] active:bg-[var(--color-surface-3)] disabled:opacity-40"
-          disabled={!projectId || !shortcut.command.trim()}
+          disabled={!shortcut.command.trim()}
           onclick={() => runShortcut(shortcut.id)}
         >
           <ShortcutIcon {iconKey} size={20} color={shortcut.iconColor ?? null} />
@@ -69,7 +72,6 @@
     <button
       type="button"
       class="flex items-center gap-3 rounded-xl border border-border bg-[var(--color-surface-2)] px-3 py-3 text-left text-sm text-foreground/90 transition active:scale-[0.98] active:bg-[var(--color-surface-3)] disabled:opacity-40"
-      disabled={!projectId}
       onclick={runBlank}
     >
       <TerminalIcon class="size-5 text-muted-foreground" />
@@ -79,7 +81,6 @@
       <button
         type="button"
         class="flex items-center justify-between gap-3 rounded-xl border border-border bg-[var(--color-surface-2)] px-3 py-3 text-left text-sm text-foreground/90 transition active:scale-[0.98] active:bg-[var(--color-surface-3)] disabled:opacity-40"
-        disabled={!projectId}
         onclick={() => runShell(shell)}
       >
         <span class="min-w-0 flex-1 truncate font-medium">{shell.label}</span>

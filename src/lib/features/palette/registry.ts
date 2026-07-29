@@ -1,9 +1,11 @@
 import { app } from "$lib/app/store.svelte";
 import { settings } from "$lib/features/settings/store.svelte";
+import { projectDisplayName } from "$lib/features/project/scratch";
 import {
   closeThreadWithConfirm,
-  launchBlankTerminal,
+  launchBlankTerminalHere,
   launchShortcut,
+  launchTargetProjectId,
   restoreLastClosedThread,
 } from "$lib/features/thread/api";
 
@@ -48,7 +50,9 @@ export function buildPaletteCommands(): PaletteCommand[] {
         id: `thread:${thread.id}`,
         section: "threads",
         label: thread.label,
-        hint: thread.title ? `${project.name} — ${thread.title}` : project.name,
+        hint: thread.title
+          ? `${projectDisplayName(project)} — ${thread.title}`
+          : projectDisplayName(project),
         run: () => goToThread(thread.id, project.id),
       });
     }
@@ -59,7 +63,7 @@ export function buildPaletteCommands(): PaletteCommand[] {
     section: "actions",
     label: "New terminal",
     hint: "Ctrl+T",
-    run: () => launchBlankTerminal(app.currentProjectId),
+    run: () => launchBlankTerminalHere(),
   });
   for (const shortcut of settings.state.shortcuts) {
     commands.push({
@@ -67,7 +71,10 @@ export function buildPaletteCommands(): PaletteCommand[] {
       section: "actions",
       label: `Launch ${shortcut.label}`,
       hint: shortcut.command,
-      run: () => launchShortcut(shortcut, app.currentProjectId),
+      run: async () => {
+        const projectId = await launchTargetProjectId();
+        if (projectId) await launchShortcut(shortcut, projectId);
+      },
     });
   }
   commands.push({
@@ -129,7 +136,7 @@ export function buildPaletteCommands(): PaletteCommand[] {
     commands.push({
       id: `project:${project.id}`,
       section: "projects",
-      label: project.name,
+      label: projectDisplayName(project),
       hint: project.cwd,
       run: () => {
         app.selectedProjectId = project.id;

@@ -90,6 +90,40 @@ function requireProject(projectId: string | null): Project | null {
 }
 
 /**
+ * The project a launch aims at: the one the user is on, or Scratch.
+ *
+ * Two ways to reach Scratch, because it is no longer a row to click: being on
+ * no project at all, which is what the sidebar's empty space leaves you with,
+ * or asking for it outright — shift-click or right-click on a shortcut, which
+ * works without giving up the project you are on.
+ *
+ * Async because Scratch is made on demand, so every launch path awaits it
+ * before it has a project id to pass on.
+ */
+export async function launchTargetProjectId(
+  forceScratch = false,
+): Promise<string | null> {
+  if (!forceScratch) {
+    const current = app.currentProjectId;
+    if (current) return current;
+  }
+  const scratch = await app.ensureScratch();
+  return scratch?.id ?? null;
+}
+
+/**
+ * A blank terminal wherever the user currently is, Scratch included. The form
+ * every keyboard and palette entry wants: they have no project in hand, only
+ * the rule for finding one.
+ */
+export async function launchBlankTerminalHere(
+  forceScratch = false,
+): Promise<Thread | null> {
+  const projectId = await launchTargetProjectId(forceScratch);
+  return projectId ? launchBlankTerminal(projectId) : null;
+}
+
+/**
  * The worktree a new thread starts in, or null to run in the project folder.
  *
  * Decided once, when the thread is born, never at spawn time: a thread that

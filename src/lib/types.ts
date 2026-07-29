@@ -108,12 +108,6 @@ export interface Settings {
    * the point of the panel is that an agent can use it.
    */
   agentTodoAccess: boolean;
-  /**
-   * Whether the Scratch project has been seeded on this workspace. Kept so a
-   * user who removed it is not given it back on the next launch: the row is
-   * created once, and after that it is theirs to keep or not.
-   */
-  seededScratch?: boolean;
   idleTimeoutMinutes: number;
   idleAutocloseByIcon: Record<string, boolean>;
   confirmCloseThread: boolean;

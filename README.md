@@ -126,11 +126,15 @@ local branch contains.
 
 ## Threads with no project
 
-You do not have to open a project to open a terminal. **Scratch** sits at the
-bottom of the sidebar, runs in your home folder and gets no worktree — it is
-where an idea gets talked through before it has earned a repository. When it
-has, the agent calls `project_create` and the conversation moves into it. Remove
-Scratch and it stays removed.
+You do not have to open a project to open a terminal. **Scratch** runs in your
+home folder and gets no worktree — it is where an idea gets talked through
+before it has earned a repository. When it has, the agent calls `project_create`
+and the conversation moves into it.
+
+It is not a row you keep. Launch a shortcut while you are on no project — click
+the empty space under the sidebar to get there — or shift-click, or right-click
+one, and the thread starts in Scratch. It appears at the bottom of the sidebar
+while it holds threads, and goes away again when the last one leaves.
 
 A thread moves by hand too: drag its card onto another project, or use *Move to*
 in its context menu. Same machinery either way — the PTY goes down, the

@@ -121,7 +121,6 @@ const DEFAULTS: Settings = {
   threadOrderByProject: {},
   todoPromptTemplate: DEFAULT_TODO_PROMPT,
   agentTodoAccess: true,
-  seededScratch: false,
   idleTimeoutMinutes: 10,
   idleAutocloseByIcon: {
     claude: true,
@@ -284,7 +283,6 @@ class SettingsStore {
           typeof stored.agentTodoAccess === "boolean"
             ? stored.agentTodoAccess
             : DEFAULTS.agentTodoAccess,
-        seededScratch: stored.seededScratch === true,
         todoPromptTemplate:
           typeof stored.todoPromptTemplate === "string" && stored.todoPromptTemplate.trim()
             ? stored.todoPromptTemplate
@@ -505,14 +503,6 @@ class SettingsStore {
 
   async setProjectOrder(ids: string[]) {
     this.state.projectOrder = ids;
-    await this.persist();
-  }
-
-  /// Records that Scratch has been made once. Remembered rather than inferred
-  /// from the row's absence, so removing it is a decision that sticks.
-  async markScratchSeeded() {
-    if (this.state.seededScratch) return;
-    this.state.seededScratch = true;
     await this.persist();
   }
 

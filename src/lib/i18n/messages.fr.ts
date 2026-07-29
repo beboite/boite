@@ -18,10 +18,13 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "tabs.fastpick": "Fastpick",
   "tabs.logs": "Journaux",
 
+  "project.scratch": "Brouillon",
+
   "shortcuts.title": "Raccourcis",
   "shortcuts.description": "Glissez une ligne pour réordonner. Modifiez la commande pour passer des arguments ou utiliser un alias.",
   "shortcuts.resetTitle": "Réinitialiser aux raccourcis par défaut",
   "shortcuts.new": "Nouveau",
+  "shortcuts.openInScratch": "Maj-clic ou clic droit : ouvrir dans {project}",
   "shortcuts.newShortcut": "Nouveau raccourci",
   "shortcuts.changeIconColor": "Changer la couleur de l'icône",
   "shortcuts.setColor": "Appliquer la couleur {color}",
