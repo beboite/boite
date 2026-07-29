@@ -4,6 +4,7 @@
   import { treeMenu } from "./treeMenu.svelte";
   import { revealItemInDir } from "$lib/platform/opener";
   import { writeText } from "$lib/platform/clipboard";
+  import { longPress } from "$lib/shared/actions/longPress";
   import { logger } from "$lib/shared/services/logger.svelte";
   import { notifications } from "$lib/features/notifications/store.svelte";
   import { editorStore } from "$lib/features/editor/store.svelte";
@@ -88,6 +89,10 @@
   function openMenu(e: MouseEvent) {
     e.preventDefault();
     e.stopPropagation();
+    openMenuAt(e.clientX, e.clientY);
+  }
+
+  function openMenuAt(x: number, y: number) {
     const items: ContextMenuItem[] = [];
     if (!entry.isDir) {
       items.push({
@@ -111,7 +116,7 @@
       label: "Copy relative path",
       action: () => void copyPath(relativePath()),
     });
-    treeMenu.open(e.clientX, e.clientY, items);
+    treeMenu.open(x, y, items);
   }
 </script>
 
@@ -130,6 +135,7 @@
     aria-selected="false"
     onclick={activate}
     oncontextmenu={openMenu}
+    use:longPress={{ onLongPress: openMenuAt }}
     title={entry.path}
   >
     {#if entry.isDir}

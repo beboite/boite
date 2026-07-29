@@ -24,6 +24,7 @@
   import { threadIconColor } from "$lib/features/fastpick/threadAccent";
   import { confirmDialog } from "$lib/shared/components/confirm.svelte";
   import { resizeHandle } from "$lib/shared/actions/resizeHandle";
+  import { longPress } from "$lib/shared/actions/longPress";
   import ContextMenu from "$lib/shared/components/ContextMenu.svelte";
   import type { ContextMenuItem } from "$lib/shared/components/ContextMenu.svelte";
   import type { DropSide } from "$lib/features/panes/types";
@@ -548,6 +549,17 @@
   function openThreadContextMenu(thread: Thread, e: MouseEvent) {
     e.preventDefault();
     e.stopPropagation();
+    openThreadMenuAt(thread, e.clientX, e.clientY);
+  }
+
+  // A finger held on the card, which is the only right-click a touch screen
+  // has. Refused mid-drag: the card is already on its way somewhere.
+  function longPressMenu(open: () => void) {
+    if (liveDrag) return;
+    open();
+  }
+
+  function openThreadMenuAt(thread: Thread, x: number, y: number) {
     const group = paneStore.groupOf(thread.id);
     const inMultiPane = !!group && countLeaves(group.root) > 1;
     const items: ContextMenuItem[] = [];
@@ -595,7 +607,7 @@
       action: () => requestRemoveThread(thread.id),
       danger: true,
     });
-    ctxMenu = { x: e.clientX, y: e.clientY, items };
+    ctxMenu = { x, y, items };
   }
   function closeContextMenu() {
     ctxMenu = null;
@@ -635,6 +647,14 @@
   ) {
     e.preventDefault();
     e.stopPropagation();
+    openProjectMenuAt(project, e.clientX, e.clientY);
+  }
+
+  function openProjectMenuAt(
+    project: { id: string; name: string; archived: boolean },
+    x: number,
+    y: number,
+  ) {
     const items: ContextMenuItem[] = [];
     // Scratch is the app's own row and reads in the app's language, so there is
     // no name on it for the user to change.
@@ -673,7 +693,7 @@
       action: () => void requestRemoveProject(project.id),
       danger: true,
     });
-    ctxMenu = { x: e.clientX, y: e.clientY, items };
+    ctxMenu = { x, y, items };
   }
 
   const visibleProjects = $derived(
@@ -877,6 +897,10 @@
             ? `On ${workspace.info.name || "boite"}${boiteOffline ? " (disconnected)" : ""}`
             : undefined}
           oncontextmenu={(e) => openProjectContextMenu(project, e)}
+          use:longPress={{
+            onLongPress: (x, y) =>
+              longPressMenu(() => openProjectMenuAt(project, x, y)),
+          }}
         >
           <div
             class="flex size-6 shrink-0 items-center justify-center overflow-hidden"
@@ -984,6 +1008,10 @@
                 onmouseenter={() => threadHoverEnter(thread.id)}
                 onmouseleave={() => threadHoverLeave(thread.id)}
                 oncontextmenu={(e) => openThreadContextMenu(thread, e)}
+                use:longPress={{
+                  onLongPress: (x, y) =>
+                    longPressMenu(() => openThreadMenuAt(thread, x, y)),
+                }}
                 role="listitem"
               >
                 <div

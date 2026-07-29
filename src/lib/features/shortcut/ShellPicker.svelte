@@ -8,6 +8,10 @@
     launchBlankTerminal,
     launchTargetProjectId,
   } from "$lib/features/thread/api";
+  import { launchTargetMenu } from "./launchMenu";
+  import ContextMenu from "$lib/shared/components/ContextMenu.svelte";
+  import type { ContextMenuItem } from "$lib/shared/components/ContextMenu.svelte";
+  import { longPress } from "$lib/shared/actions/longPress";
   import type { ShellOption } from "$lib/storage/platform.svelte";
   import Plus from "@lucide/svelte/icons/plus";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
@@ -34,8 +38,9 @@
     open = !open;
   }
 
-  // Shift-click opens in Scratch without leaving the current project, the same
-  // as on a shortcut. On no project the plain click already lands there.
+  // Right-click, long press or shift-click opens in Scratch without leaving
+  // the current project, the same as on a shortcut. On no project the plain
+  // click already lands there.
   async function launchDefault(forceScratch: boolean) {
     open = false;
     const projectId = await launchTargetProjectId(forceScratch);
@@ -52,6 +57,18 @@
     const projectId = await launchTargetProjectId(forceScratch);
     if (!projectId) return;
     await launchShell(shell, projectId);
+  }
+
+  let ctxMenu = $state<{ x: number; y: number; items: ContextMenuItem[] } | null>(
+    null,
+  );
+
+  function openMenu(x: number, y: number) {
+    ctxMenu = {
+      x,
+      y,
+      items: launchTargetMenu((forceScratch) => void launchDefault(forceScratch)),
+    };
   }
 
   function handleDocClick(e: MouseEvent) {
@@ -83,8 +100,9 @@
     onclick={(e) => void launchDefault(e.shiftKey)}
     oncontextmenu={(e) => {
       e.preventDefault();
-      void launchDefault(true);
+      openMenu(e.clientX, e.clientY);
     }}
+    use:longPress={{ onLongPress: openMenu }}
     title={defaultShell ? `Launch ${defaultShell.label}` : "New blank terminal"}
     aria-label="Launch terminal"
   >
@@ -133,3 +151,12 @@
     </div>
   {/if}
 </div>
+
+{#if ctxMenu}
+  <ContextMenu
+    items={ctxMenu.items}
+    x={ctxMenu.x}
+    y={ctxMenu.y}
+    onClose={() => (ctxMenu = null)}
+  />
+{/if}

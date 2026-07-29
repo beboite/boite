@@ -132,9 +132,11 @@ before it has earned a repository. When it has, the agent calls `project_create`
 and the conversation moves into it.
 
 It is not a row you keep. Launch a shortcut while you are on no project — click
-the empty space under the sidebar to get there — or shift-click, or right-click
-one, and the thread starts in Scratch. It appears at the bottom of the sidebar
-while it holds threads, and goes away again when the last one leaves.
+the empty space under the sidebar to get there — and the thread starts in
+Scratch. To get there without leaving the project you are on, right-click a
+shortcut and pick *Launch in Scratch*, or shift-click it. Scratch appears at the
+bottom of the sidebar while it holds threads, and goes away again when the last
+one leaves.
 
 A thread moves by hand too: drag its card onto another project, or use *Move to*
 in its context menu. Same machinery either way — the PTY goes down, the
@@ -228,6 +230,10 @@ TLS/Tailscale setup.
 A saved server connection, *a boite*, carries a name and a status color, both
 stored server-side and synced live to every connected device. The connection
 outline around the window takes that color. One connection is active at a time.
+
+Every context menu opens on a long press as well as a right-click, so a phone
+reaches the same actions the desktop does: shortcuts and shells in the launch
+sheet, projects and threads in the sidebar, files in the explorer.
 
 For a native Android install, [`mobile/`](mobile/README.md) holds a Bubblewrap
 TWA wrapper that packages the PWA as an `.aab`/`.apk`.

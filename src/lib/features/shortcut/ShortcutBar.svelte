@@ -2,15 +2,19 @@
   import { app } from "$lib/app/store.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
   import { launchShortcut, launchTargetProjectId } from "$lib/features/thread/api";
+  import { launchTargetMenu } from "./launchMenu";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
+  import ContextMenu from "$lib/shared/components/ContextMenu.svelte";
+  import type { ContextMenuItem } from "$lib/shared/components/ContextMenu.svelte";
   import ShellPicker from "./ShellPicker.svelte";
   import FastpickPicker from "$lib/features/fastpick/FastpickPicker.svelte";
+  import { longPress } from "$lib/shared/actions/longPress";
   import { resolveIconKey } from "$lib/shared/icons/detect";
   import { t } from "$lib/i18n/index.svelte";
 
-  // Shift or right-click sends the launch to Scratch without leaving the
-  // project the user is on. A plain click while on no project lands there too,
-  // which is the discoverable half of the same rule.
+  // A plain click on no project already lands in Scratch; the menu — and the
+  // shift-click behind it — is how you get there without giving up the project
+  // you are on.
   async function launch(shortcutId: string, forceScratch: boolean) {
     const shortcut = settings.state.shortcuts.find((s) => s.id === shortcutId);
     if (!shortcut) return;
@@ -19,9 +23,20 @@
     await launchShortcut(shortcut, projectId);
   }
 
+  let ctxMenu = $state<{ x: number; y: number; items: ContextMenuItem[] } | null>(
+    null,
+  );
+
+  function openMenu(shortcutId: string, x: number, y: number) {
+    ctxMenu = {
+      x,
+      y,
+      items: launchTargetMenu((forceScratch) => void launch(shortcutId, forceScratch)),
+    };
+  }
+
   function tooltip(command: string): string {
-    const hint = t("shortcuts.openInScratch", { project: t("project.scratch") });
-    return `${command || "Empty command"}\n${hint}`;
+    return `${command || "Empty command"}\n${t("shortcuts.rightClickHint")}`;
   }
 
   function openSettings() {
@@ -42,8 +57,9 @@
         onclick={(e) => void launch(shortcut.id, e.shiftKey)}
         oncontextmenu={(e) => {
           e.preventDefault();
-          void launch(shortcut.id, true);
+          openMenu(shortcut.id, e.clientX, e.clientY);
         }}
+        use:longPress={{ onLongPress: (x, y) => openMenu(shortcut.id, x, y) }}
         title={tooltip(shortcut.command)}
       >
         <ShortcutIcon {iconKey} size={15} color={shortcut.iconColor ?? null} />
@@ -65,3 +81,12 @@
     <FastpickPicker />
   </div>
 </div>
+
+{#if ctxMenu}
+  <ContextMenu
+    items={ctxMenu.items}
+    x={ctxMenu.x}
+    y={ctxMenu.y}
+    onClose={() => (ctxMenu = null)}
+  />
+{/if}
