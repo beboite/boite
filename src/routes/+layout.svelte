@@ -16,6 +16,7 @@
   } from "$lib/features/thread/api";
   import { addProjectByPath } from "$lib/features/project/api";
   import { watchAgentRequests } from "$lib/features/thread/agentRequests";
+  import { watchAgentActivity } from "$lib/features/thread/agentActivity.svelte";
   import { installInspector } from "$lib/features/devtools/inspect";
   import { editorStore } from "$lib/features/editor/store.svelte";
   import { paneStore, threadLeavesOf } from "$lib/features/panes/store.svelte";
@@ -274,6 +275,11 @@
   // Also its own: an agent can ask to be moved before boot has finished, and
   // the request would land on nobody.
   onMount(() => watchAgentRequests());
+
+  // The pulse that says an agent reached into Boite itself rather than into its
+  // own terminal. Mounted here for the same reason: the first call can land
+  // during boot, and a mark laid on nobody is a mark nothing shows.
+  onMount(() => watchAgentActivity());
 
   // Development builds only, and the one thing that makes this app inspectable
   // from the MCP bridge: the terminals render to a canvas, so their output is
