@@ -43,6 +43,10 @@ would miss a thread a process promoted itself. The same holds for the combo:
 them, which is why a hand-typed `fastpick --harness ...` is described like one the
 menu launched.
 
+The one thing decided at launch instead is the colour inside Claude Code: it
+comes from `/color`, passed as the launch prompt through fastpick's passthrough,
+and a process already running cannot be repainted from outside.
+
 ## Checking your work in the running app
 
 A screenshot and a DOM read tell you almost nothing here: **the terminals render

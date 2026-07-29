@@ -51,7 +51,7 @@ export const EN_MESSAGES = {
   "appearance.mobile": "Mobile",
   "appearance.pc": "PC",
   "appearance.colorByModel": "Colour by model",
-  "appearance.colorByModelDesc": "Tint an agent's icon with what is actually answering it. Only threads launched through fastpick are tinted: a stock agent keeps its own colours.",
+  "appearance.colorByModelDesc": "Tint an agent's icon with what is actually answering it, and ask Claude Code to paint its prompt bar the same colour. Only threads launched through fastpick are tinted: a stock agent keeps its own colours.",
   "appearance.accentClaude": "Claude, served elsewhere",
   "appearance.accentGpt": "GPT",
   "appearance.accentLocal": "Running on this machine",

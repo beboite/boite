@@ -95,6 +95,11 @@ for a model running on that machine, and the stock endpoint left alone. The
 colours come from the terminal palette, and the whole behaviour is one toggle
 in Appearance.
 
+Claude Code gets the same colour on the inside: it paints its prompt bar from
+`/color`, so boite passes that command as the launch prompt and the terminal
+agrees with the sidebar. It is decided when the thread starts, since a process
+already running cannot be repainted from outside.
+
 The Fastpick tab in the settings installs and removes it, both as a thread you
 can watch, and removing it leaves the config where it is: that is where the
 providers and the paths to the key files are declared. The menu is hidden when

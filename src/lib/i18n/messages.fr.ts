@@ -54,7 +54,7 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "appearance.mobile": "Mobile",
   "appearance.pc": "PC",
   "appearance.colorByModel": "Couleur selon le modèle",
-  "appearance.colorByModelDesc": "Teinte l'icône d'un agent selon ce qui lui répond vraiment. Seuls les threads lancés via fastpick sont teintés : un agent standard garde ses couleurs.",
+  "appearance.colorByModelDesc": "Teinte l'icône d'un agent selon ce qui lui répond vraiment, et demande à Claude Code de peindre sa barre de saisie de la même couleur. Seuls les threads lancés via fastpick sont teintés : un agent standard garde ses couleurs.",
   "appearance.accentClaude": "Claude, servi ailleurs",
   "appearance.accentGpt": "GPT",
   "appearance.accentLocal": "Tourne sur cette machine",

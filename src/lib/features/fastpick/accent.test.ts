@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ACCENT_COLOR, isLocalUrl, modelAccent, modelFamily } from "./accent";
+import { ACCENT_COLOR, CLAUDE_BAR_COLOR, isLocalUrl, modelAccent, modelFamily } from "./accent";
 import type { FastpickProvider } from "$lib/backend/types";
 
 function provider(patch: Partial<FastpickProvider> = {}): FastpickProvider {
@@ -76,5 +76,26 @@ describe("modelAccent", () => {
   it("falls back too when the provider is listed but not wired to this harness", () => {
     const p = provider({ harnesses: { other: { baseUrl: null } } });
     expect(modelAccent(combo, p)).toBe("claude");
+  });
+});
+
+describe("CLAUDE_BAR_COLOR", () => {
+  it("names a colour Claude Code's own /color accepts", () => {
+    const accepted = ["red", "blue", "green", "yellow", "purple", "orange", "pink", "cyan"];
+    for (const [accent, colour] of Object.entries(CLAUDE_BAR_COLOR)) {
+      if (colour !== null) expect(accepted, accent).toContain(colour);
+    }
+  });
+
+  it("says nothing for the stock endpoint, leaving the user's own colour alone", () => {
+    expect(CLAUDE_BAR_COLOR.native).toBeNull();
+  });
+
+  it("gives every tinted accent a colour, so the bar never disagrees with the icon", () => {
+    expect(CLAUDE_BAR_COLOR.claude).toBe("yellow");
+    expect(CLAUDE_BAR_COLOR.local).toBe("green");
+    // That list has no white, so the GPT tint is the nearest cold colour rather than none.
+    expect(CLAUDE_BAR_COLOR.gpt).toBe("cyan");
+    expect(CLAUDE_BAR_COLOR.other).toBe("purple");
   });
 });
