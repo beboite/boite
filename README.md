@@ -16,7 +16,7 @@
 </p>
 
 > [!NOTE]
-> Pre-1.0, used daily by the author. Bug reports and platform feedback are
+> Pre-1.0, used daily by its developers. Bug reports and platform feedback are
 > welcome in [Issues](https://github.com/beboite/boite/issues).
 
 ## Why
@@ -149,8 +149,8 @@ behind rather than deleted, and the agent is told where it went.
 | Platform | Desktop app                | Notes                                            |
 | -------- | -------------------------- | ------------------------------------------------ |
 | Windows  | ✅ NSIS + MSI              | Primary development target                        |
-| Linux    | ✅ deb + AppImage          | Tested on Ubuntu 22.04+ / Fedora 39+, GNOME & KDE |
-| macOS    | 🧪 builds, needs testing   | Compiles and runs; not exercised daily            |
+| Linux    | 🧪 deb + rpm + AppImage    | Builds and runs, needs testing on more distros    |
+| macOS    | ✅ dmg (Intel + Apple Si)  | Used daily by one of the developers               |
 | Android  | ✅ via PWA / TWA           | Installs from `boite-server`, see [`mobile/`](mobile/README.md) |
 
 Two Linux caveats: the window is frameless and transparent, so a tiling WM with
