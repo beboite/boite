@@ -340,9 +340,9 @@
     const activeGroupId = app.activeThreadId
       ? paneStore.groupOf(app.activeThreadId)?.id ?? null
       : null;
-    for (const [targetThreadId, rect] of Object.entries(paneStore.rects)) {
+    for (const [targetPaneId, rect] of Object.entries(paneStore.rects)) {
       if (
-        targetThreadId === drag.id ||
+        targetPaneId === drag.id ||
         x < rect.x ||
         y < rect.y ||
         x > rect.x + rect.w ||
@@ -350,9 +350,11 @@
       ) {
         continue;
       }
-      const target = app.threadById(targetThreadId);
-      const group = paneStore.groupOf(targetThreadId);
-      if (!target || target.projectId !== drag.projectId || !group) {
+      const group = paneStore.groupOf(targetPaneId);
+      // The group's project, not the target pane's thread: a pane holding a git
+      // panel or a browser has no thread to ask, and dropping a terminal beside
+      // one is exactly the arrangement the split is for.
+      if (!group || group.projectId !== drag.projectId) {
         continue;
       }
       if (activeGroupId && group.id !== activeGroupId) {
@@ -362,7 +364,7 @@
       const refused =
         countLeaves(group.root) >= MAX_LEAVES && sourceGroup?.id !== group.id;
       paneStore.dropPreview = {
-        targetThreadId,
+        targetPaneId,
         side: sideFromRect(rect, x, y),
         refused,
       };
@@ -439,7 +441,7 @@
         notifications.error(`Max ${MAX_LEAVES} panes per group`);
         return;
       }
-      const ok = paneStore.splitInto(preview.targetThreadId, drag.id, preview.side);
+      const ok = paneStore.splitInto(preview.targetPaneId, drag.id, preview.side);
       if (!ok) notifications.error("Couldn't split pane");
       return;
     }

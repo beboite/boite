@@ -15,7 +15,6 @@
   import BoiteLogo from "$lib/shared/components/BoiteLogo.svelte";
   import RemoteLogin from "$lib/features/workspace/RemoteLogin.svelte";
   import FolderBrowser from "$lib/features/project/FolderBrowser.svelte";
-  import RightPanel from "$lib/features/panes/RightPanel.svelte";
   import { paneStore } from "$lib/features/panes/store.svelte";
   import { statusEngine } from "$lib/features/thread/statusEngine";
   import PaneShell from "$lib/features/panes/PaneShell.svelte";
@@ -94,7 +93,7 @@
     const id = app.activeThreadId;
     if (!id) return;
     const g = paneStore.groupOf(id);
-    if (g && g.focusedThreadId !== id) g.focusedThreadId = id;
+    if (g && g.focusedPaneId !== id) g.focusedPaneId = id;
   });
 
   function activateThread(id: string) {
@@ -151,7 +150,7 @@
   $effect(() => {
     const g = paneStore.groups.find((x) => x.id === activeGroupId);
     if (!g) return;
-    for (const leafId of paneStore.visibleLeaves(activeGroupId)) {
+    for (const leafId of paneStore.visibleThreads(activeGroupId)) {
       if (!activated[leafId] && app.hasThread(leafId)) {
         activated[leafId] = true;
       }
@@ -348,7 +347,7 @@
               {@const visible =
                 group?.id === activeGroupId && terminalActive}
               {@const focused =
-                visible && group?.focusedThreadId === thread.id}
+                visible && group?.focusedPaneId === thread.id}
               {@const rect = paneStore.rects[thread.id]}
               {#if activated[thread.id] && rect && group}
                 <div
@@ -433,9 +432,6 @@
       <Toaster />
     </main>
 
-    {#if !mobile && app.ready && settings.state.rightPanel}
-      <RightPanel />
-    {/if}
   </div>
   {/if}
   {/key}

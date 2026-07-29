@@ -10,6 +10,15 @@
   import RotateCw from "@lucide/svelte/icons/rotate-cw";
   import { t } from "$lib/i18n/index.svelte";
 
+  /**
+   * `inPane` is the editor living inside a pane rather than covering the whole
+   * main area. It drops the "back to terminal" button, which in a pane points at
+   * a place the user has not left, and it stops the empty-buffer effect from
+   * changing the app view out from under a layout that never set it.
+   */
+  type Props = { inPane?: boolean };
+  let { inPane = false }: Props = $props();
+
   const active = $derived(editorStore.active);
 
   function backToTerminal() {
@@ -17,6 +26,7 @@
   }
 
   $effect(() => {
+    if (inPane) return;
     if (editorStore.buffers.length === 0 && app.view === "editor") {
       app.view = "terminal";
     }
@@ -44,16 +54,18 @@
 
 <div class="flex h-full min-h-0 flex-col">
   <div class="flex items-stretch border-b border-border bg-[var(--color-titlebar)]">
-    <button
-      type="button"
-      class="flex h-8 shrink-0 items-center gap-1.5 border-r border-border px-2.5 text-xs text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground"
-      onclick={backToTerminal}
-      title={t("editor.backToTerminal")}
-      aria-label={t("editor.backToTerminal")}
-    >
-      <TerminalSquare class="size-3.5" />
-      <span>{t("editor.terminal")}</span>
-    </button>
+    {#if !inPane}
+      <button
+        type="button"
+        class="flex h-8 shrink-0 items-center gap-1.5 border-r border-border px-2.5 text-xs text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground"
+        onclick={backToTerminal}
+        title={t("editor.backToTerminal")}
+        aria-label={t("editor.backToTerminal")}
+      >
+        <TerminalSquare class="size-3.5" />
+        <span>{t("editor.terminal")}</span>
+      </button>
+    {/if}
     <div class="min-w-0 flex-1">
       <EditorTabStrip />
     </div>

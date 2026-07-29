@@ -18,7 +18,8 @@
   import { watchAgentRequests } from "$lib/features/thread/agentRequests";
   import { installInspector } from "$lib/features/devtools/inspect";
   import { editorStore } from "$lib/features/editor/store.svelte";
-  import { paneStore, leavesOf } from "$lib/features/panes/store.svelte";
+  import { paneStore, threadLeavesOf } from "$lib/features/panes/store.svelte";
+  import { splitFocused } from "$lib/features/panes/open";
   import { palette } from "$lib/features/palette/store.svelte";
   import { platform } from "$lib/storage/platform.svelte";
   import { updater } from "$lib/features/updater/store.svelte";
@@ -79,7 +80,9 @@
     if (!id) return false;
     const g = paneStore.groupOf(id);
     if (!g) return false;
-    const leaves = leavesOf(g.root);
+    // Threads only: Ctrl+Tab moves the active THREAD, and a git or browser
+    // pane in the same group is not something activeThreadId can hold.
+    const leaves = threadLeavesOf(g.root);
     if (leaves.length < 2) return false;
     const idx = leaves.indexOf(id);
     app.activeThreadId = leaves[(idx + direction + leaves.length) % leaves.length];
@@ -189,6 +192,26 @@
       scopes: ["app", "settings", "editor"],
       description: "Previous thread",
       run: () => cycleThread(-1),
+    },
+    // Splitting had no shortcut at all: the only way to make a pane was a drag
+    // from the sidebar onto a live terminal. These land on the project overview
+    // because there is no obvious second thing to show; the palette's Panes
+    // section picks a specific one, and dragging still does the arbitrary case.
+    {
+      combo: "mod+backslash",
+      scopes: ["app"],
+      description: "Split right",
+      run: () => {
+        splitFocused("right");
+      },
+    },
+    {
+      combo: "mod+shift+backslash",
+      scopes: ["app"],
+      description: "Split down",
+      run: () => {
+        splitFocused("bottom");
+      },
     },
     {
       combo: "mod+alt+arrowright",

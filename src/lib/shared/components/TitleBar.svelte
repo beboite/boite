@@ -21,6 +21,15 @@
   import PanelRight from "@lucide/svelte/icons/panel-right";
   import BoiteLogo from "$lib/shared/components/BoiteLogo.svelte";
   import UpdateBadge from "$lib/features/updater/UpdateBadge.svelte";
+  import ContextMenu from "$lib/shared/components/ContextMenu.svelte";
+  import type { ContextMenuItem } from "$lib/shared/components/ContextMenu.svelte";
+  import {
+    openPane,
+    panePresence,
+    togglePanelPane,
+    type PanelKind,
+  } from "$lib/features/panes/open";
+  import type { MessageKey } from "$lib/i18n/messages";
 
   // Window controls only exist in the desktop shell. In a browser/PWA there is
   // no Tauri window object (getCurrentWindow would throw), and the OS/browser
@@ -124,6 +133,60 @@
     app.view = "settings";
   }
 
+  /**
+   * The side panel, which is a pane now rather than a fixed column.
+   *
+   * The rail held git, files and todo in one 320px slot outside the layout, so
+   * it cost its width whichever of the three was up and could never sit beside
+   * the thing it described. The button keeps its one click by remembering which
+   * of the three you last used — that is what `rightPanel` stores now — and the
+   * right-click menu is how you pick another.
+   */
+  const panelKind = $derived<PanelKind>(
+    (settings.state.rightPanel as PanelKind | null) ?? "git",
+  );
+  const panelOpen = $derived(panePresence(panelKind) !== null);
+
+  let panelMenu = $state<{ x: number; y: number; items: ContextMenuItem[] } | null>(
+    null,
+  );
+
+  const PANEL_CHOICES: { kind: PanelKind; key: MessageKey }[] = [
+    { kind: "git", key: "panes.kindGit" },
+    { kind: "explorer", key: "panes.kindExplorer" },
+    { kind: "todo", key: "panes.kindTodo" },
+  ];
+
+  function openPanelMenu(e: MouseEvent) {
+    e.preventDefault();
+    panelMenu = {
+      x: e.clientX,
+      y: e.clientY,
+      items: [
+        ...PANEL_CHOICES.map(({ kind, key }) => ({
+          label: t(key),
+          action: () => {
+            settings.setRightPanel(kind);
+            if (panePresence(kind) === null) openPane({ kind });
+          },
+        })),
+        { separator: true as const },
+        {
+          label: t("panes.openDashboard"),
+          action: () => {
+            openPane({ kind: "dashboard" });
+          },
+        },
+        {
+          label: t("panes.openEditor"),
+          action: () => {
+            openPane({ kind: "editor" });
+          },
+        },
+      ],
+    };
+  }
+
   // The boite logo doubles as a context-aware "home" button:
   //  - from the settings view it just returns to the terminal/threads view;
   //  - already in the terminal view it opens a fresh terminal at the workspace
@@ -221,16 +284,16 @@
     <UpdateBadge />
     <button
       type="button"
-      class="flex h-7 items-center justify-center rounded-md px-2 transition {settings.state
-        .rightPanel !== null
+      class="flex h-7 items-center justify-center rounded-md px-2 transition {panelOpen
         ? 'bg-accent text-foreground'
         : 'text-muted-foreground hover:bg-accent hover:text-foreground'}"
-      onclick={() => settings.togglePanelRight()}
-      title={settings.state.rightPanel !== null
+      onclick={() => togglePanelPane(panelKind)}
+      oncontextmenu={openPanelMenu}
+      title={panelOpen
         ? t("titlebar.hideSidePanel")
         : t("titlebar.showSidePanel")}
       aria-label={t("titlebar.toggleSidePanel")}
-      aria-pressed={settings.state.rightPanel !== null}
+      aria-pressed={panelOpen}
     >
       <PanelRight class="size-[15px]" />
     </button>
@@ -272,3 +335,12 @@
     </div>
   {/if}
 </div>
+
+{#if panelMenu}
+  <ContextMenu
+    items={panelMenu.items}
+    x={panelMenu.x}
+    y={panelMenu.y}
+    onClose={() => (panelMenu = null)}
+  />
+{/if}

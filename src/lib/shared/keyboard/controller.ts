@@ -49,6 +49,13 @@ function matchesKey(combo: string, event: KeyboardEvent): boolean {
   if (combo === "minus") {
     return key === "-" || key === "_" || code === "Minus" || code === "NumpadSubtract";
   }
+  // The physical key, like `digit`: Shift+\ produces "|" rather than "\", so
+  // matching on event.key would give the plain and the shifted binding two
+  // different names for one key. AZERTY reaches it through AltGr, where the
+  // code is still Backslash.
+  if (combo === "backslash") {
+    return code === "Backslash" || key === "\\" || key === "|";
+  }
   return key === combo;
 }
 

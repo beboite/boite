@@ -99,6 +99,33 @@ describe("matchesCombo", () => {
     ).toBe(true);
   });
 
+  it("matches the split key by its physical position", () => {
+    // Shift+\ produces "|", so matching on e.key alone would give the split
+    // bindings two different names for the same key and Ctrl+Shift+\ would
+    // never fire.
+    expect(
+      matchesCombo(combo("mod+backslash"), key({ key: "\\", ctrl: true }), false),
+    ).toBe(true);
+    expect(
+      matchesCombo(
+        combo("mod+shift+backslash"),
+        key({ key: "|", code: "Backslash", ctrl: true, shift: true }),
+        false,
+      ),
+    ).toBe(true);
+    // AltGr on AZERTY: the character is right, the code is what identifies it.
+    expect(
+      matchesCombo(
+        combo("mod+backslash"),
+        key({ key: "\\", code: "Backslash", ctrl: true }),
+        false,
+      ),
+    ).toBe(true);
+    expect(
+      matchesCombo(combo("mod+backslash"), key({ key: "b", ctrl: true }), false),
+    ).toBe(false);
+  });
+
   it("accepts both spellings of zoom in and out", () => {
     for (const k of ["+", "="]) {
       expect(matchesCombo(combo("mod+plus"), key({ key: k, ctrl: true }), false)).toBe(true);

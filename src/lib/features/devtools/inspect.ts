@@ -182,7 +182,7 @@ const inspector = {
   panes() {
     return paneStore.groups.map((g) => ({
       id: g.id,
-      focused: g.focusedThreadId,
+      focused: g.focusedPaneId,
       threads: app.threads
         .filter((t) => paneStore.groupOf(t.id)?.id === g.id)
         .map((t) => t.label),
