@@ -24,6 +24,9 @@ import { createProject } from "$lib/features/project/api";
 import { moveThreadToProject } from "./move";
 import { takesOpeningPrompt } from "./session";
 import { launchAgent } from "./api";
+import { openPane } from "$lib/features/panes/open";
+import { paneStore } from "$lib/features/panes/store.svelte";
+import type { DropSide, PaneContent } from "$lib/features/panes/types";
 import type { IconKey } from "$lib/types";
 
 const AGENT_REQUEST = "boite://agent-request";
@@ -56,7 +59,22 @@ interface SpawnRequest {
   prompt?: string | null;
 }
 
-type AgentRequest = MoveRequest | CreateRequest | SpawnRequest;
+interface PaneOpenRequest {
+  kind: "pane.open";
+  projectId: string;
+  /** The thread that asked, so the pane lands beside it rather than beside
+      whatever the user happens to be looking at. */
+  callerThreadId?: string | null;
+  pane: PaneContent["kind"];
+  url?: string | null;
+  side?: DropSide | null;
+}
+
+type AgentRequest =
+  | MoveRequest
+  | CreateRequest
+  | SpawnRequest
+  | PaneOpenRequest;
 
 /**
  * Which command to start, from whatever the agent called it.
@@ -180,6 +198,44 @@ async function handleSpawn(req: SpawnRequest) {
   }
 }
 
+/**
+ * Show the user something beside the terminal that asked.
+ *
+ * The one agent request that changes nothing: it arranges panes. Which is
+ * exactly why it is worth having — an agent that has just started a dev server
+ * or written a diff knows what is worth looking at, and printing a path and
+ * hoping was the only way to say so.
+ *
+ * The caller's own pane is made the anchor first, so the pane appears next to
+ * the conversation it belongs to rather than next to whichever terminal the
+ * user last clicked.
+ */
+async function handlePaneOpen(req: PaneOpenRequest) {
+  const caller = req.callerThreadId;
+  if (caller && app.hasThread(caller)) {
+    const group = paneStore.groupOf(caller);
+    if (group) {
+      group.focusedPaneId = caller;
+      app.activeThreadId = caller;
+      app.selectedProjectId = req.projectId;
+    }
+  }
+  const content: PaneContent | null =
+    req.pane === "browser"
+      ? req.url
+        ? { kind: "browser", url: req.url }
+        : null
+      : ({ kind: req.pane } as PaneContent);
+  if (!content) {
+    logger.warn("agent-request", "browser pane with no url, dropping it");
+    return;
+  }
+  // Half the width for a browser, a third for a panel: a page needs room to be
+  // a page, and a file tree does not.
+  const ratio = req.pane === "browser" ? 0.5 : 0.35;
+  openPane(content, req.side ?? "right", ratio);
+}
+
 async function handle(req: AgentRequest) {
   logger.info("agent-request", req.kind, req as unknown as Record<string, unknown>);
   switch (req.kind) {
@@ -189,6 +245,8 @@ async function handle(req: AgentRequest) {
       return handleCreate(req);
     case "thread.spawn":
       return handleSpawn(req);
+    case "pane.open":
+      return handlePaneOpen(req);
   }
 }
 

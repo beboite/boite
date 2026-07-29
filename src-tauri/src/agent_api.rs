@@ -602,6 +602,79 @@ struct SpawnIn {
     prompt: Option<String>,
 }
 
+#[derive(Deserialize)]
+struct PaneOpenIn {
+    /// One of: dashboard, git, explorer, todo, editor, browser.
+    kind: String,
+    /// Required for `browser`, ignored otherwise.
+    #[serde(default)]
+    url: Option<String>,
+    /// left, right, top or bottom. Defaults to right.
+    #[serde(default)]
+    side: Option<String>,
+}
+
+/// Shows the user something, beside the terminal the agent is talking in.
+///
+/// The half of the split that no keyboard shortcut can provide: an agent that
+/// has just written a file, opened a branch or started a dev server knows what
+/// is worth looking at, and until now the only way to say so was to print a
+/// path and hope. It is deliberately the weakest verb here — it arranges panes
+/// and touches no state — which is why it is also the only one that does not
+/// pulse the sidebar: the pane appearing is its own notification.
+async fn pane_open(
+    State(inner): State<std::sync::Arc<Inner>>,
+    headers: HeaderMap,
+    Json(body): Json<PaneOpenIn>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let project_id = authorize(&inner, &headers)?;
+    let kind = body.kind.trim().to_lowercase();
+    const KINDS: [&str; 6] = ["dashboard", "git", "explorer", "todo", "editor", "browser"];
+    if !KINDS.contains(&kind.as_str()) {
+        return Ok(Json(json!({
+            "error": format!("unknown pane kind '{}', expected one of {}", kind, KINDS.join(", "))
+        })));
+    }
+    // Checked here rather than in the app: the agent is still alive to read a
+    // refusal, and a browser pane with no address is a blank frame the user has
+    // to close by hand.
+    let url = match kind.as_str() {
+        "browser" => {
+            let raw = body.url.as_deref().map(str::trim).unwrap_or("");
+            if raw.is_empty() {
+                return Ok(Json(json!({ "error": "browser panes need a url" })));
+            }
+            // http(s) only. A pane is a frame in the user's own window, and
+            // file:// or a custom scheme in one is a way to reach further than
+            // "show me a page" ever needs to.
+            if !raw.starts_with("http://") && !raw.starts_with("https://") {
+                return Ok(Json(json!({ "error": "url must start with http:// or https://" })));
+            }
+            Some(raw.to_string())
+        }
+        _ => None,
+    };
+    let side = match body.side.as_deref().map(str::trim) {
+        Some("left") => "left",
+        Some("top") => "top",
+        Some("bottom") => "bottom",
+        _ => "right",
+    };
+
+    let _ = inner.app.emit(
+        AGENT_REQUEST,
+        json!({
+            "kind": "pane.open",
+            "projectId": project_id,
+            "callerThreadId": thread_of_request(&inner, &headers).ok(),
+            "pane": kind,
+            "url": url,
+            "side": side,
+        }),
+    );
+    Ok(Json(json!({ "ok": true })))
+}
+
 /// Starts a second agent, in this project or another.
 ///
 /// The caller survives this one, so the answer is real: the request was
@@ -918,6 +991,7 @@ pub fn start(app: &tauri::AppHandle) {
         .route("/v1/projects", get(projects).post(project_create))
         .route("/v1/thread/move", post(thread_move))
         .route("/v1/threads", post(thread_spawn))
+        .route("/v1/pane/open", post(pane_open))
         .with_state(inner);
 
     // Bound here, not inside the task: the address has to be known before the
