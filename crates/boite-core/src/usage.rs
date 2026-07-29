@@ -440,7 +440,7 @@ fn codex_session_cwd(path: &Path) -> Option<String> {
             .get("payload")?
             .get("cwd")?
             .as_str()
-            .map(|c| normalize(c));
+            .map(normalize);
     }
     None
 }

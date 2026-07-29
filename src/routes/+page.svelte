@@ -17,6 +17,7 @@
   import FolderBrowser from "$lib/features/project/FolderBrowser.svelte";
   import RightPanel from "$lib/features/panes/RightPanel.svelte";
   import { paneStore } from "$lib/features/panes/store.svelte";
+  import { statusEngine } from "$lib/features/thread/statusEngine";
   import PaneShell from "$lib/features/panes/PaneShell.svelte";
   import PaneOverlay from "$lib/features/panes/PaneOverlay.svelte";
   import PaneDropOverlay from "$lib/features/panes/PaneDropOverlay.svelte";
@@ -183,6 +184,16 @@
   });
 
   onMount(() => prefetchWhenIdle(TerminalView));
+
+  // The status sweep belongs to the window, not to whichever pane happens to be
+  // mounted. It used to be started and stopped by the Terminal components
+  // themselves, so with no local pane open (the project page, the dashboard, a
+  // dynamic workspace showing only the boite's threads) nothing demoted a
+  // finished agent and its dot stayed lit until a click brought a pane back.
+  onMount(() => {
+    statusEngine.start();
+    return () => statusEngine.stop();
+  });
 
   $effect(() => {
     for (const _id in activated) {

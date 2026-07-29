@@ -1,10 +1,12 @@
-// Server-side thread status derivation. The desktop runs an equivalent engine
-// in TypeScript (features/thread/statusEngine.ts); in remote mode the server
-// owns this so disconnected clients and the thread list stay correct.
+// Server-side thread status derivation. In remote mode the server owns this so
+// disconnected clients and the thread list stay correct.
 //
-// Status is driven by the OSC title Claude Code emits: a leading marker glyph
-// means "working" (running); a clean title means idle (ready). See the
-// "Status detection" section of the project CLAUDE.md.
+// Status here is driven by the OSC title the agents emit: a leading marker glyph
+// means "working" (running); a clean title means idle (ready). The desktop no
+// longer works this way: it reads the emulator's live rows, and asks claude's
+// own session registry first, because it has an emulator and the thread's
+// session id, and the server has neither. See the "Status is measured, never
+// latched" section of AGENTS.md.
 
 // Leading marker glyphs the AI CLIs cycle through while working, plus the
 // braille/circle spinner frames some emit in the title.

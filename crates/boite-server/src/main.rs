@@ -63,7 +63,24 @@ async fn main() {
 
     let (events, _) = broadcast::channel::<AppEvent>(EVENT_CHANNEL_CAP);
     let emit = make_event_emitter(store.clone(), events.clone());
-    let registry = Registry::new(config.scrollback_bytes, emit);
+    // The status ticker needs to know which threads are claude's and which
+    // session each holds, so it can ask claude itself instead of inferring a
+    // turn from an OSC title that stopped arriving. Those two columns live in
+    // the thread table, which the PTY registry has no business owning.
+    let identity = {
+        let store = store.clone();
+        Arc::new(move |thread_id: &str| {
+            store
+                .load_thread(thread_id)
+                .ok()
+                .flatten()
+                .map(|t| registry::ThreadIdentity {
+                    icon_key: t.icon_key,
+                    session_id: t.session_id,
+                })
+        }) as registry::IdentityLookup
+    };
+    let registry = Registry::new(config.scrollback_bytes, emit, identity);
     let roots = ProjectRoots::default();
     let notifier = notify::Notifier::from_env();
     let push = push::PushManager::load(&config.data_dir);

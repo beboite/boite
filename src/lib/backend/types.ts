@@ -367,8 +367,19 @@ export interface LiveClaudeSession {
   id: string;
   /** `bg` is reachable through the agent view; `interactive` belongs to another terminal. */
   kind: string;
-  /** `busy` while a turn is in flight, `idle` otherwise. */
+  /**
+   * `busy` while a turn is in flight, `idle` otherwise.
+   *
+   * Subagents get no entry of their own (the Task tool runs them in the parent
+   * process), so the parent reads `busy` for as long as one is working. That is
+   * the only signal Boite has that survives a terminal going quiet for minutes.
+   */
   status: string;
+  /**
+   * The directory the session runs in, as claude recorded it. Lets a caller place
+   * a session whose id it has not captured yet.
+   */
+  cwd: string;
 }
 
 /**
