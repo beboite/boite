@@ -310,10 +310,9 @@
     // release is on disk and a restart is all that is left.
     const stopUpdater = updater.start();
     const stopTodoWatch = todos.watch();
-    // Loaded here rather than by the chat page: the sidebar lists chats from
-    // the moment the window opens, and a page that has never been visited is
-    // exactly the case where that list has to be right.
-    void chats.init();
+    // The list itself is loaded by `app.init`, which also runs on a workspace
+    // switch. Only the watcher belongs here: it outlives every switch, since
+    // the event it listens for comes from the desktop's own endpoint.
     const stopChatWatch = chats.watch();
 
     return () => {

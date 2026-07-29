@@ -170,6 +170,12 @@ const RECIPES: Partial<Record<NonNullable<IconKey>, ChatRecipe>> = {
   // and read. Their stdout is taken as the answer, which is a claim about the
   // flag and not about any schema — the honest limit of what can be promised
   // without the binary in hand.
+  //
+  // copilot is deliberately absent. Its print mode belongs to the standalone
+  // `copilot` binary, and the preset here launches `gh copilot`, whose
+  // subcommands are `explain` and `suggest` — `gh copilot -p` is an error, so
+  // the entry would have turned every turn into one. It falls back to a
+  // terminal until the preset says which of the two CLIs it means.
   opencode: {
     mode: "text",
     mintsSession: false,
@@ -188,15 +194,20 @@ const RECIPES: Partial<Record<NonNullable<IconKey>, ChatRecipe>> = {
       prompt,
     ],
   },
-  copilot: {
-    mode: "text",
-    mintsSession: false,
-    args: ({ prompt }) => ["-p", prompt],
-  },
   grok: {
     mode: "text",
     mintsSession: false,
     args: ({ prompt }) => ["-p", prompt],
+  },
+  // Verified by running agy 1.1.7: `--print` answers one prompt on stdout and
+  // exits, and the answer arrives as prose with no escape sequences in it.
+  // Stateless on purpose — it resumes with `--conversation <id>` and prints no
+  // id to pass back, and `--continue` picks the most recent conversation on
+  // the machine, which two chats would take turns stealing from each other.
+  antigravity: {
+    mode: "text",
+    mintsSession: false,
+    args: ({ prompt }) => ["--print", prompt],
   },
 };
 

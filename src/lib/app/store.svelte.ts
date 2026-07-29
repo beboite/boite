@@ -13,6 +13,7 @@ import {
   setProjectArchived,
 } from "$lib/storage/db";
 import { settings } from "$lib/features/settings/store.svelte";
+import { chats } from "$lib/features/chat/store.svelte";
 import { platform } from "$lib/storage/platform.svelte";
 import {
   loadThreads,
@@ -341,6 +342,13 @@ class AppState {
     await this.syncRoots();
     this.threads = threads;
 
+    // Here rather than in the layout's mount: this runs at boot *and* after
+    // every workspace switch, and a switch is the case that matters — the
+    // stores are torn down and only the things `init` rehydrates come back.
+    // Fire and forget, like the rest: the sidebar draws its chats a tick later
+    // and nothing else waits on them.
+    void chats.init();
+
     this.deduplicateSessionIds();
     pruneRenamed(this.threads.map((t) => t.id));
 
@@ -417,6 +425,7 @@ class AppState {
     this.threads = [];
     this.activeThreadId = null;
     this.selectedProjectId = null;
+    this.activeChatId = null;
     this.view = "terminal";
     this.mobileTab = "terminal";
     this.respawnNonce = {};
