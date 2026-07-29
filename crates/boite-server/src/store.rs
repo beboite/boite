@@ -78,6 +78,11 @@ const MIGRATIONS: &[&str] = &[
     // the label and the detail together, which made the label as long as
     // whatever an agent felt like writing.
     "ALTER TABLE todos ADD COLUMN description TEXT;",
+    // Mirrors desktop migration 18. Desktop 16 and 17 created the chat tables
+    // and dropped them again; neither ever ran here, so this list stays one
+    // entry per statement that applies to a boite rather than one per desktop
+    // version. Null means the project follows whatever the app is set to.
+    "ALTER TABLE projects ADD COLUMN worktrees INTEGER;",
 ];
 
 impl Store {
@@ -324,7 +329,7 @@ impl Store {
     pub fn load_projects(&self) -> Result<Vec<Project>, String> {
         let conn = self.conn.lock();
         let mut stmt = conn
-            .prepare("SELECT id, name, cwd, icon, archived, git_root FROM projects ORDER BY created_at ASC")
+            .prepare("SELECT id, name, cwd, icon, archived, git_root, worktrees FROM projects ORDER BY created_at ASC")
             .map_err(|e| e.to_string())?;
         let rows = stmt
             .query_map([], |r| {
@@ -335,6 +340,7 @@ impl Store {
                     icon: r.get(3)?,
                     archived: r.get::<_, i64>(4)? == 1,
                     git_root: r.get(5)?,
+                    worktrees: r.get::<_, Option<i64>>(6)?.map(|v| v == 1),
                 })
             })
             .map_err(|e| e.to_string())?;
@@ -344,9 +350,18 @@ impl Store {
     pub fn save_project(&self, p: &Project, created_at: i64) -> Result<(), String> {
         let conn = self.conn.lock();
         conn.execute(
-            "INSERT OR REPLACE INTO projects (id, name, cwd, default_cmd, default_args, icon, archived, git_root, created_at)
-             VALUES (?1, ?2, ?3, '', '[]', ?4, ?5, ?6, ?7)",
-            rusqlite::params![p.id, p.name, p.cwd, p.icon, p.archived as i64, p.git_root, created_at],
+            "INSERT OR REPLACE INTO projects (id, name, cwd, default_cmd, default_args, icon, archived, git_root, worktrees, created_at)
+             VALUES (?1, ?2, ?3, '', '[]', ?4, ?5, ?6, ?7, ?8)",
+            rusqlite::params![
+                p.id,
+                p.name,
+                p.cwd,
+                p.icon,
+                p.archived as i64,
+                p.git_root,
+                p.worktrees.map(|v| v as i64),
+                created_at
+            ],
         )
         .map_err(|e| e.to_string())?;
         Ok(())

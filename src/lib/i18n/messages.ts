@@ -241,8 +241,23 @@ export const EN_MESSAGES = {
   "project.repoAt": "repository at {path}",
   "project.noWorktrees": "Every thread runs in the project folder.",
   "project.worktreesOff": "Thread worktrees are off; every thread runs in the project folder.",
-  "project.tabOverview": "Overview",
-  "project.tabWorktrees": "Worktrees",
+  "project.scratchNotice": "Temporary. Nothing here is a project yet.",
+  "project.agents": "Agent access (MCP)",
+  "project.tokens": "Tokens",
+  "project.tokensRange": "last 12 months",
+  "project.tokensNone": "No agent transcript for this project yet.",
+  "project.tokensOnly": "Only claude and codex record what they spend.",
+  "project.tokensMissing": "{agents} keeps no record on this machine.",
+  "project.tokensSessions": "{count} sessions",
+  "project.tokensIn": "in",
+  "project.tokensOut": "out",
+  "project.tokensCacheWrite": "cache written",
+  "project.tokensCacheRead": "cache read",
+  "project.tokensRefresh": "Read the transcripts again",
+  "project.tokensDay": "{total} on {day}",
+  "project.tokensNothingOn": "nothing on {day}",
+  "project.tokensLess": "less",
+  "project.tokensMore": "more",
 
   "worktree.title": "Worktrees",
   "worktree.refresh": "Read the repository again",
@@ -266,6 +281,12 @@ export const EN_MESSAGES = {
   "worktree.holdsBoth":
     "It has uncommitted changes and commits on no branch. Both will be lost.",
   "worktree.inUseBy": "{thread} is still running in it.",
+  "worktree.autoLabel": "Open one per agent thread",
+  "worktree.autoOnHint":
+    "New agent threads in this project start in their own detached worktree.",
+  "worktree.autoOffHint":
+    "New agent threads in this project start in the project folder itself.",
+  "worktree.offHere": "Worktrees are off for this project.",
 
   "notification.readyForInput": "Ready for input",
   "branchDialog.uncommittedChanges": "You have uncommitted changes",

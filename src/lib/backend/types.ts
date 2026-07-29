@@ -371,7 +371,52 @@ export interface LiveClaudeSession {
   status: string;
 }
 
+/**
+ * One model's share of what was spent, as its own store recorded it.
+ *
+ * Cache reads are kept apart from input rather than folded in: on a long agent
+ * session they are most of the volume and none of the price, and one "input"
+ * number would read as twenty times the work that was actually done.
+ */
+export interface ModelUsage {
+  /** Icon key of the agent that spent it — `claude` or `codex`. */
+  provider: string;
+  model: string;
+  input: number;
+  output: number;
+  cacheWrite: number;
+  cacheRead: number;
+  total: number;
+}
+
+/** A day something was spent on, UTC. Empty days are not sent. */
+export interface DayUsage {
+  day: string;
+  total: number;
+}
+
+export interface UsageReport {
+  /** Heaviest first. */
+  models: ModelUsage[];
+  /** Ascending by day. */
+  days: DayUsage[];
+  sessions: number;
+  /** Agents whose store is not on this machine at all, by icon key. */
+  missing: string[];
+}
+
 export interface SessionApi {
+  /**
+   * What the agents spent in these directories over the last `days`.
+   *
+   * The caller passes the directories rather than a project id: since worktree
+   * isolation a project's threads mostly run outside its folder, and every
+   * store keys on the directory the agent ran in.
+   *
+   * Only claude and codex answer. The other CLIs keep no per-turn accounting
+   * this can read, and an invented number is worse than an absent one.
+   */
+  usage(cwds: string[], days: number): Promise<UsageReport>;
   /**
    * `ptyId` names the PTY asking. Its process holds the session the caller is
    * trying to bind, and that one alone is exempt from the liveness filter —

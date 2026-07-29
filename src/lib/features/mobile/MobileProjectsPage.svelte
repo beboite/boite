@@ -1,6 +1,6 @@
 <script lang="ts">
   import { app } from "$lib/app/store.svelte";
-  import { projectDisplayName } from "$lib/features/project/scratch";
+  import { isScratch, projectDisplayName } from "$lib/features/project/scratch";
   import { pickAndAddProject } from "$lib/features/project/api";
   import { closeThreadWithConfirm } from "$lib/features/thread/api";
   import type { Thread, ThreadStatus } from "$lib/types";
@@ -72,10 +72,14 @@
         {#each projects as project (project.id)}
           {@const threads = app.threadsByProjectSorted(project.id)}
           {@const isCurrent = app.currentProjectId === project.id}
+          <!-- Scratch reads as temporary here the same way it does in the
+               sidebar: the whole card faded and hatched, threads included. It
+               is a starting point, not one of the things being worked on. -->
           <section
             class="overflow-hidden rounded-xl border bg-[var(--color-surface)] {isCurrent
               ? 'border-foreground/25'
               : 'border-border'}"
+            class:scratch-card={isScratch(project)}
           >
             <div class="flex items-center gap-3 px-3 py-3">
               <button
@@ -152,3 +156,17 @@
 </div>
 
 <MobileLaunchSheet open={launchOpen} onClose={() => (launchOpen = false)} />
+
+<style>
+  /* Same reading as the sidebar's scratch card, at touch size: faded so it
+     sits behind the real projects, hatched so it stays legible as temporary
+     without a badge taking up a line. */
+  .scratch-card {
+    opacity: 0.62;
+    background-image: repeating-linear-gradient(
+      135deg,
+      transparent 0 6px,
+      color-mix(in srgb, var(--color-foreground) 7%, transparent) 6px 7px
+    );
+  }
+</style>

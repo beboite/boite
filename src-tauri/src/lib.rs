@@ -297,6 +297,17 @@ pub fn run() {
             DROP TABLE IF EXISTS chats;",
             kind: MigrationKind::Up,
         },
+        // Whether this project's threads get their own worktree. Nullable on
+        // purpose: null means "whatever the app is set to", which is what every
+        // project that predates the column has always done. Only a project the
+        // user has had an opinion about carries a 0 or a 1, so changing the
+        // global default still moves the ones nobody has touched.
+        Migration {
+            version: 18,
+            description: "add_project_worktrees",
+            sql: "ALTER TABLE projects ADD COLUMN worktrees INTEGER;",
+            kind: MigrationKind::Up,
+        },
     ];
 
     // Before the builder, not inside `setup`: plugin setup hooks run first, and
@@ -475,6 +486,7 @@ pub fn run() {
             commands::available_shells,
             commands::find_claude_session,
             commands::live_claude_sessions,
+            commands::agent_token_usage,
             commands::agent_mcp_config,
             commands::agent_api_ready,
             commands::agent_mcp_project_path,

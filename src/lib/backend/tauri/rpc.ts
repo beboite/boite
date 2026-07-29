@@ -7,6 +7,7 @@ import type {
   FolderState,
   GitApi,
   LiveClaudeSession,
+  UsageReport,
   LogApi,
   ProjectApi,
   ScopeApi,
@@ -143,6 +144,7 @@ const SESSION_COMMANDS: Record<SessionKind, string> = {
 };
 
 export const tauriSession: SessionApi = {
+  usage: (cwds, days) => invoke<UsageReport>("agent_token_usage", { cwds, days }),
   liveClaude: () => invoke<LiveClaudeSession[]>("live_claude_sessions"),
   stopClaude: (sessionId) => invoke<boolean>("stop_claude_session", { sessionId }),
   copilotResumable: (sessionId) =>

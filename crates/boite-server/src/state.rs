@@ -155,6 +155,7 @@ mod tests {
                     icon: None,
                     archived: false,
                     git_root: None,
+                    worktrees: None,
                 },
                 1,
             )
@@ -168,6 +169,7 @@ mod tests {
                     icon: None,
                     archived: true,
                     git_root: None,
+                    worktrees: None,
                 },
                 2,
             )

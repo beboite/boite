@@ -1,6 +1,9 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { app } from "$lib/app/store.svelte";
   import { backendForPath } from "$lib/backend";
+  import { settings } from "$lib/features/settings/store.svelte";
+  import { isScratch } from "$lib/features/project/scratch";
   import { notifications } from "$lib/features/notifications/store.svelte";
   import { logger } from "$lib/shared/services/logger.svelte";
   import { confirmDialog } from "$lib/shared/components/confirm.svelte";
@@ -24,6 +27,20 @@
    */
   type Props = { project: Project };
   let { project }: Props = $props();
+
+  /**
+   * Whether the next agent thread here opens its own worktree.
+   *
+   * The project's answer when it has one, the app's otherwise — a project
+   * nobody has decided for still follows the global default, so moving that
+   * still moves it. Unchecking is not retroactive and cannot be: a thread's
+   * directory is fixed when it is born, and moving a running one out from under
+   * its agent would lose whatever is in it.
+   */
+  const autoWorktrees = $derived(project.worktrees ?? settings.state.threadWorktrees);
+  // Scratch is the home folder, not a repository. It never opened a worktree
+  // and never will, so a switch on it would be one that does nothing.
+  const canToggle = $derived(!isScratch(project));
 
   let entries = $state<WorktreeEntry[]>([]);
   let loading = $state(false);
@@ -70,9 +87,13 @@
 
   // Re-reads whenever the project changes, and once on mount. Every flag here
   // costs a git process, so nothing polls: the button is the refresh.
+  //
+  // Untracked, because `load` reads `loading` and then writes it: tracked, the
+  // effect takes a dependency on its own write and re-runs the moment the read
+  // finishes.
   $effect(() => {
     void project.id;
-    void load();
+    untrack(() => void load());
   });
 
   /**
@@ -125,6 +146,21 @@
         {t("worktree.dirtyCount", { count: dirtyCount })}
       </span>
     {/if}
+    {#if canToggle}
+      <label
+        class="flex cursor-pointer select-none items-center gap-1.5 text-[11px] text-muted-foreground transition hover:text-foreground"
+        title={autoWorktrees ? t("worktree.autoOnHint") : t("worktree.autoOffHint")}
+      >
+        <input
+          type="checkbox"
+          class="size-3 accent-[var(--color-foreground)]"
+          checked={autoWorktrees}
+          onchange={(e) =>
+            void app.setProjectWorktrees(project.id, e.currentTarget.checked)}
+        />
+        {t("worktree.autoLabel")}
+      </label>
+    {/if}
     <button
       type="button"
       class="rounded p-1 text-muted-foreground transition hover:bg-accent hover:text-foreground disabled:opacity-40"
@@ -137,19 +173,31 @@
     </button>
   </header>
 
+  <!-- Dimmed while the switch is off, list and all. The worktrees already on
+       disk are still real and still removable — the setting only decides what
+       the next thread does — so this reads as "not what happens here any more"
+       rather than as a disabled control. -->
+  <div class:opacity-50={canToggle && !autoWorktrees}>
   {#if failed}
     <p class="px-3 py-4 text-center text-[12px] text-muted-foreground">
       {t("worktree.unreadable")}
     </p>
   {:else if entries.length === 0}
     <p class="px-3 py-4 text-center text-[12px] text-muted-foreground">
-      {loading ? t("worktree.loading") : t("worktree.none")}
+      {loading
+        ? t("worktree.loading")
+        : canToggle && !autoWorktrees
+          ? t("worktree.offHere")
+          : t("worktree.none")}
     </p>
   {:else}
-    <ul class="divide-y divide-border">
+    <!-- Capped and scrolled: this sits on the dashboard beside five other
+         cards now, and a repository with a dozen worktrees used to push all of
+         them off the screen. -->
+    <ul class="max-h-56 divide-y divide-border overflow-y-auto">
       {#each entries as w (w.path)}
         {@const holder = holders.get(w.path)}
-        <li class="flex items-start gap-2.5 px-3 py-2">
+        <li class="flex items-start gap-2.5 px-3 py-1.5">
           <div class="min-w-0 flex-1">
             <div class="flex items-center gap-1.5">
               <span class="truncate text-[12.5px] text-foreground/90" title={w.path}>
@@ -211,4 +259,5 @@
       {/each}
     </ul>
   {/if}
+  </div>
 </section>

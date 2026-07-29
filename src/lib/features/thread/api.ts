@@ -139,7 +139,10 @@ export async function openWorktreeFor(
   threadId: string,
   iconKey: IconKey,
 ): Promise<string | null> {
-  if (!settings.state.threadWorktrees) return null;
+  // The project's own answer when it has one, the app's otherwise. A project
+  // that has never been asked stays on the default, so flipping the global
+  // still moves every project nobody has decided for.
+  if (!(project.worktrees ?? settings.state.threadWorktrees)) return null;
   // A blank terminal is the user's own shell: dev servers, logs and manual
   // git all have to run where the user is looking, not in a clean checkout.
   if (iconKey === "terminal") return null;

@@ -13,6 +13,15 @@ export interface Project {
   // Nested repo the git panel operates on when cwd itself is not a repo
   // (parent folder opened, actual repos live one level down). Null = cwd.
   gitRoot?: string | null;
+  /**
+   * Whether a new agent thread here opens its own detached worktree.
+   *
+   * Undefined or null follows `settings.threadWorktrees`, which is what every
+   * project did before this existed. Only a project the user has had an opinion
+   * about carries a boolean, so moving the app-wide default still moves the
+   * ones nobody has touched.
+   */
+  worktrees?: boolean | null;
   origin?: WorkspaceOrigin;
 }
 

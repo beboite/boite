@@ -9,3 +9,4 @@ pub mod scope;
 pub mod session;
 pub mod shell;
 pub mod status;
+pub mod usage;
