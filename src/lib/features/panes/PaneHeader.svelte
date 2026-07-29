@@ -66,9 +66,29 @@
     }
   }
 
-  const fullTitle = $derived(
-    content.kind === "browser" ? content.url : label,
-  );
+  const fullTitle = $derived(content.kind === "browser" ? content.url : label);
+
+  /**
+   * Whether an agent just reached in through this pane.
+   *
+   * Two different questions with one answer: a thread pane asks "did the agent
+   * in me make the call", a panel pane asks "was the thing I am showing what
+   * the call changed". Both are the same violet flash, because from the user's
+   * side both mean the same thing — the app moved and nobody clicked.
+   */
+  const pulsing = $derived.by(() => {
+    if (content.kind === "thread") return mcpPulse.has(paneId);
+    if (content.kind === "todo") return mcpPulse.surface("todo");
+    if (content.kind === "dashboard") {
+      return (
+        mcpPulse.surface("todo") ||
+        mcpPulse.surface("worktree") ||
+        mcpPulse.surface("thread")
+      );
+    }
+    if (content.kind === "git") return mcpPulse.surface("worktree");
+    return false;
+  });
 
   function close() {
     paneStore.closePane(paneId);
@@ -86,7 +106,7 @@
   class="pane-header"
   class:focused
   class:finished={content.kind === "thread" && justFinished(content.threadId)}
-  class:mcp={mcpPulse.has(paneId)}
+  class:mcp={pulsing}
   onpointerdown={focus}
 >
   {#if content.kind === "thread" && thread}

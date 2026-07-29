@@ -3,6 +3,8 @@ import { notifications } from "$lib/features/notifications/store.svelte";
 import { uuid } from "$lib/shared/utils/uuid";
 import { t } from "$lib/i18n/index.svelte";
 import type { TodoItem, TodoState } from "$lib/types";
+import { diffTodos } from "./diff";
+import { todoAnnouncer } from "./announce.svelte";
 
 /**
  * Todos are the one table an outside process also writes: an agent reaches it
@@ -17,6 +19,14 @@ class TodoStore {
   private inFlight: Promise<void> | null = null;
   /** A change landed while a query was already out; that query's answer is old. */
   private stale = false;
+  /**
+   * Suppress the announcement for one reload.
+   *
+   * A failed write reloads to put the row back the way the database has it,
+   * and announcing that would tell the user an agent did something when what
+   * actually happened is that their own edit did not stick.
+   */
+  private silent = false;
 
   forProject(projectId: string | null): TodoItem[] {
     if (!projectId) return [];
@@ -42,10 +52,21 @@ class TodoStore {
     this.loading = true;
     this.inFlight = (async () => {
       try {
+        // The list before the outside changed it. Only a reload can see this:
+        // every local mutation writes one row and never comes through here, so
+        // diffing at this point announces an agent's work and stays silent
+        // about the user's own clicks, which is exactly the distinction the
+        // card in the middle of the window depends on.
+        const before = $state.snapshot(this.items) as TodoItem[];
         do {
           this.stale = false;
           this.items = await backend().db.loadTodos();
         } while (this.stale);
+        // Not on the first load: every row is new to an empty list, and a boot
+        // with eight open todos would queue eight announcements.
+        if (this.loaded && !this.silent) {
+          todoAnnouncer.push(diffTodos(before, this.items));
+        }
         this.loaded = true;
       } catch (err) {
         console.error("[todo] loadTodos failed:", err);
@@ -80,10 +101,22 @@ class TodoStore {
     };
   }
 
+  /** Re-read without announcing. For putting the list back after a failed
+      write, which is the app correcting itself rather than news. */
+  private async reloadQuietly(): Promise<void> {
+    this.silent = true;
+    try {
+      await this.reload();
+    } finally {
+      this.silent = false;
+    }
+  }
+
   /** A workspace switch invalidates everything: the rows live in that DB. */
   reset() {
     this.items = [];
     this.loaded = false;
+    todoAnnouncer.reset();
   }
 
   private async write(item: TodoItem): Promise<void> {
@@ -92,7 +125,7 @@ class TodoStore {
     } catch (err) {
       console.error("[todo] saveTodo failed:", err);
       notifications.error(t("todo.saveFailed"));
-      await this.reload();
+      await this.reloadQuietly();
     }
   }
 
@@ -203,7 +236,7 @@ class TodoStore {
     } catch (err) {
       console.error("[todo] deleteTodo failed:", err);
       notifications.error(t("todo.removeFailed"));
-      await this.reload();
+      await this.reloadQuietly();
     }
   }
 

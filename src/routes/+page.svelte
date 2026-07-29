@@ -11,6 +11,7 @@
   import ProjectSidebar from "$lib/features/project/ProjectSidebar.svelte";
   import ShortcutBar from "$lib/features/shortcut/ShortcutBar.svelte";
   import Toaster from "$lib/features/notifications/Toaster.svelte";
+  import TodoAchievement from "$lib/features/todo/TodoAchievement.svelte";
   import ConfirmHost from "$lib/shared/components/ConfirmHost.svelte";
   import BoiteLogo from "$lib/shared/components/BoiteLogo.svelte";
   import RemoteLogin from "$lib/features/workspace/RemoteLogin.svelte";
@@ -430,6 +431,9 @@
            must paint above the confirm backdrop, not dimmed under it. -->
       <ConfirmHost />
       <Toaster />
+      <!-- Between the panes and the dialogs: an agent's news must not sit on
+           top of a question the user is being asked. -->
+      <TodoAchievement />
     </main>
 
   </div>

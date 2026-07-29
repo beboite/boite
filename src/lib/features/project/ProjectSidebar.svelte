@@ -22,6 +22,7 @@
     clearFinished,
     justFinished,
   } from "$lib/features/thread/finished.svelte";
+  import { mcpPulse } from "$lib/features/thread/agentActivity.svelte";
   import { threadIconColor } from "$lib/features/fastpick/threadAccent";
   import { confirmDialog } from "$lib/shared/components/confirm.svelte";
   import { resizeHandle } from "$lib/shared/actions/resizeHandle";
@@ -1010,6 +1011,7 @@
                     ? 'bg-accent text-foreground'
                     : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground'}"
                   class:just-finished={justFinished(thread.id)}
+                  class:mcp-touch={mcpPulse.has(thread.id)}
                   role="button"
                   tabindex="0"
                   onclick={() => {
@@ -1247,5 +1249,12 @@
      before the class drops, and the card flashes green on its way out. */
   .thread-card.just-finished {
     animation: boite-finish-glow 6s var(--ease-out-quint) forwards;
+  }
+
+  /* This agent just changed something in Boite itself rather than in its own
+     terminal. Violet, not green: green is a thread finishing, and this is the
+     app being driven from outside while the thread carries on. */
+  .thread-card.mcp-touch {
+    animation: boite-mcp-pulse 1.6s var(--ease-out-quint) forwards;
   }
 </style>
