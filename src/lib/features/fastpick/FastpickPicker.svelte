@@ -138,7 +138,11 @@
     return t("fastpick.sourceConfig");
   }
 
-  function handleDocClick(e: MouseEvent) {
+  // `pointerdown`, not `click`: picking a harness swaps the pane, and the browser
+  // runs a microtask checkpoint between listeners, so Svelte has already detached
+  // the clicked row by the time a document-level `click` looks at it. The menu
+  // would then read its own item as an outside click and close on every step.
+  function handleDocPointerDown(e: PointerEvent) {
     if (!open) return;
     const target = e.target as Node;
     if (triggerRoot?.contains(target) || menu?.contains(target)) return;
@@ -152,7 +156,7 @@
   }
 
   onMount(() => {
-    document.addEventListener("click", handleDocClick);
+    document.addEventListener("pointerdown", handleDocPointerDown);
     document.addEventListener("keydown", handleKeydown);
     // Probed once so the button can hide itself on a machine with no fastpick, rather
     // than offering a menu whose every entry fails. Turned off in the settings, nothing
@@ -161,7 +165,7 @@
   });
 
   onDestroy(() => {
-    document.removeEventListener("click", handleDocClick);
+    document.removeEventListener("pointerdown", handleDocPointerDown);
     document.removeEventListener("keydown", handleKeydown);
   });
 </script>
