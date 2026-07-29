@@ -6,6 +6,7 @@
   import { threadCwd } from "$lib/features/thread/cwd";
   import { explorerStore, normalizePath } from "./store.svelte";
   import { treeMenu } from "./treeMenu.svelte";
+  import { t } from "$lib/i18n/index.svelte";
   import TreeNode from "./TreeNode.svelte";
   import ContextMenu from "$lib/shared/components/ContextMenu.svelte";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
@@ -162,15 +163,17 @@
         {projectDisplayName(project)}
       </span>
     {:else}
-      <span class="truncate text-xs text-muted-foreground">No project</span>
+      <span class="truncate text-xs text-muted-foreground">
+        {t("explorer.noProject")}
+      </span>
     {/if}
     <button
       type="button"
       class="ml-auto rounded p-1 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:opacity-40"
       onclick={collapseAll}
       disabled={!root}
-      title="Collapse all"
-      aria-label="Collapse all"
+      title={t("explorer.collapseAll")}
+      aria-label={t("explorer.collapseAll")}
     >
       <ChevronsDownUp class="size-3.5" />
     </button>
@@ -179,8 +182,8 @@
       class="rounded p-1 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:opacity-40"
       onclick={refresh}
       disabled={!root || manualRefreshing}
-      title="Refresh"
-      aria-label="Refresh"
+      title={t("explorer.refresh")}
+      aria-label={t("explorer.refresh")}
     >
       <RefreshCw class="size-3.5 {manualRefreshing ? 'animate-spin' : ''}" />
     </button>
@@ -188,13 +191,13 @@
 
   <div class="shrink-0 border-b border-border px-2 py-1.5">
     <div
-      class="flex items-center gap-1.5 rounded bg-[var(--color-surface)] px-2 py-1 text-[11.5px] focus-within:bg-[var(--color-surface-2)]"
+      class="flex items-center gap-1.5 rounded bg-[var(--color-surface)] px-2 py-1 text-sm focus-within:bg-[var(--color-surface-2)]"
     >
       <Search class="size-3 shrink-0 text-muted-foreground/70" />
       <input
         bind:this={filterInput}
         type="text"
-        placeholder="Filter files…"
+        placeholder={t("explorer.filterPlaceholder")}
         value={explorerStore.filterText}
         oninput={onFilterInput}
         onkeydown={onFilterKey}
@@ -206,25 +209,25 @@
           type="button"
           class="shrink-0 rounded p-0.5 text-muted-foreground/70 transition hover:bg-[var(--color-surface-3)] hover:text-foreground"
           onclick={clearFilter}
-          title="Clear filter (Esc)"
-          aria-label="Clear filter"
+          title={t("explorer.clearFilter")}
+          aria-label={t("explorer.clearFilter")}
         >
           <X class="size-3" />
         </button>
       {/if}
     </div>
     {#if filterActive}
-      <div class="mt-1 px-1 text-[10px] text-muted-foreground/70">
+      <div class="mt-1 px-1 text-2xs text-muted-foreground/70">
         {#if searching}
-          Searching…
+          {t("explorer.searching")}
         {:else if hitCount === 0}
-          No matches.
+          {t("explorer.noMatches")}
         {:else if truncated}
-          {hitCount}+ matches — narrow the filter to see them all.
+          {t("explorer.matchesTruncated", { count: hitCount })}
         {:else if hitCount === 1}
-          1 match.
+          {t("explorer.matchOne")}
         {:else}
-          {hitCount} matches.
+          {t("explorer.matchMany", { count: hitCount })}
         {/if}
       </div>
     {/if}
@@ -238,20 +241,20 @@
     onkeydown={onTreeKeydown}
   >
     {#if !project}
-      <div class="px-3 py-4 text-center text-[11px] text-muted-foreground/70">
-        Pick a project.
+      <div class="px-3 py-4 text-center text-xs text-muted-foreground/70">
+        {t("explorer.pickProject")}
       </div>
     {:else if err && !entries}
-      <div class="px-3 py-4 text-center text-[11px] text-[var(--color-danger)]">
+      <div class="px-3 py-4 text-center text-xs text-[var(--color-danger)]">
         {err}
       </div>
     {:else if !entries}
-      <div class="px-3 py-4 text-center text-[11px] text-muted-foreground/70">
-        Loading…
+      <div class="px-3 py-4 text-center text-xs text-muted-foreground/70">
+        {t("common.loading")}
       </div>
     {:else if entries.length === 0}
-      <div class="px-3 py-4 text-center text-[11px] text-muted-foreground/70">
-        Empty folder.
+      <div class="px-3 py-4 text-center text-xs text-muted-foreground/70">
+        {t("explorer.emptyFolder")}
       </div>
     {:else}
       {#each entries as entry (entry.path)}

@@ -54,7 +54,7 @@
         {projectDisplayName(project)}
       </span>
       {#if isScratch(project)}
-        <span class="truncate text-[11px] text-muted-foreground/70">
+        <span class="truncate text-xs text-muted-foreground/70">
           {t("project.scratchNotice")}
         </span>
       {/if}

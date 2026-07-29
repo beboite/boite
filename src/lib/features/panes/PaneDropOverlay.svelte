@@ -1,5 +1,6 @@
 <script lang="ts">
   import { paneStore, MAX_LEAVES } from "./store.svelte";
+  import { t } from "$lib/i18n/index.svelte";
 
   const preview = $derived(paneStore.dropPreview);
   const rect = $derived(
@@ -55,7 +56,7 @@
     aria-hidden="true"
   >
     {#if refused}
-      <span class="refused-label">Max {MAX_LEAVES} panes</span>
+      <span class="refused-label">{t("panes.maxReached", { count: MAX_LEAVES })}</span>
     {/if}
   </div>
 {/if}

@@ -25,13 +25,13 @@
   <div class="min-w-0 flex-1">
     <div class="text-xs font-medium text-foreground">{label}</div>
     {#if description}
-      <div class="mt-0.5 text-[11px] leading-snug text-muted-foreground">
+      <div class="mt-0.5 text-xs leading-snug text-muted-foreground">
         {description}
       </div>
     {/if}
   </div>
   <div class="flex shrink-0 items-center gap-2.5">
-    <span class="text-[10px] font-medium uppercase tracking-wider {enabled ? 'text-foreground' : 'text-muted-foreground/70'}">
+    <span class="text-2xs font-medium uppercase tracking-wider {enabled ? 'text-foreground' : 'text-muted-foreground/70'}">
       {enabled ? onLabel : offLabel}
     </span>
     <span

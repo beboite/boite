@@ -162,15 +162,15 @@
 <section class="rounded-lg border border-border bg-[var(--color-surface)] p-3">
   <header class="mb-2 flex items-center gap-1.5">
     <Coins class="size-3.5 text-muted-foreground" />
-    <h2 class="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+    <h2 class="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
       {t("project.tokens")}
     </h2>
-    <span class="text-[10.5px] text-muted-foreground/70">
+    <span class="text-xs text-muted-foreground/70">
       {t("project.tokensRange")}
     </span>
     <span class="flex-1"></span>
     {#if total > 0}
-      <span class="font-mono text-[13px] text-foreground/90">{fmt(total)}</span>
+      <span class="font-mono text-base text-foreground/90">{fmt(total)}</span>
     {/if}
     <button
       type="button"
@@ -185,10 +185,10 @@
   </header>
 
   {#if !report}
-    <p class="text-[12px] text-muted-foreground">{t("common.loading")}</p>
+    <p class="text-sm text-muted-foreground">{t("common.loading")}</p>
   {:else if total === 0}
-    <p class="text-[12px] text-muted-foreground">{t("project.tokensNone")}</p>
-    <p class="mt-1 text-[11px] text-muted-foreground/70">
+    <p class="text-sm text-muted-foreground">{t("project.tokensNone")}</p>
+    <p class="mt-1 text-xs text-muted-foreground/70">
       {missingLabel
         ? t("project.tokensMissing", { agents: missingLabel })
         : t("project.tokensOnly")}
@@ -201,7 +201,7 @@
             <li class="flex items-center gap-2">
               <ShortcutIcon iconKey={providerIcon(model.provider)} size={13} />
               <span
-                class="min-w-0 flex-1 truncate text-[11.5px] text-foreground/85"
+                class="min-w-0 flex-1 truncate text-sm text-foreground/85"
                 title="{model.model} · {model.input} in · {model.output} out · {model.cacheWrite} cache written · {model.cacheRead} cache read"
               >
                 {shortModel(model.model)}
@@ -214,7 +214,7 @@
                   style:width="{Math.max(4, Math.round((model.total / total) * 100))}%"
                 ></span>
               </span>
-              <span class="w-12 shrink-0 text-right font-mono text-[11px] text-muted-foreground">
+              <span class="w-12 shrink-0 text-right font-mono text-xs text-muted-foreground">
                 {fmt(model.total)}
               </span>
             </li>
@@ -224,13 +224,13 @@
         <!-- Cache reads sit beside input rather than inside it. Folded in they
              are most of the volume and none of the work, and the card would
              read as twenty times the session that actually happened. -->
-        <p class="mt-2 text-[11px] text-muted-foreground">
+        <p class="mt-2 text-xs text-muted-foreground">
           {fmt(totals.input)} {t("project.tokensIn")} · {fmt(totals.output)}
           {t("project.tokensOut")} · {fmt(totals.cacheWrite)}
           {t("project.tokensCacheWrite")} · {fmt(totals.cacheRead)}
           {t("project.tokensCacheRead")}
         </p>
-        <p class="mt-0.5 text-[10.5px] text-muted-foreground/70">
+        <p class="mt-0.5 text-xs text-muted-foreground/70">
           {t("project.tokensSessions", { count: report.sessions })}
           {#if missingLabel}
             · {t("project.tokensMissing", { agents: missingLabel })}
@@ -257,7 +257,7 @@
             </div>
           {/each}
         </div>
-        <div class="mt-1.5 flex items-center gap-1 text-[10px] text-muted-foreground/70">
+        <div class="mt-1.5 flex items-center gap-1 text-2xs text-muted-foreground/70">
           <span>{t("project.tokensLess")}</span>
           {#each [0, 1, 2, 3, 4] as step (step)}
             <span

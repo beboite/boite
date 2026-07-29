@@ -11,6 +11,7 @@
   import MoreVertical from "@lucide/svelte/icons/more-vertical";
   import Minus from "@lucide/svelte/icons/minus";
   import X from "@lucide/svelte/icons/x";
+  import { t } from "$lib/i18n/index.svelte";
 
   const isTauri = hasTauri();
   const win = isTauri ? getCurrentWindow() : null;
@@ -49,7 +50,7 @@
     type="button"
     class="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-1.5 py-1 text-left transition active:bg-accent/40"
     onclick={() => (app.mobileTab = "projects")}
-    aria-label="Switch project"
+    aria-label={t("mobile.switchProject")}
   >
     {#if project}
       <span
@@ -65,13 +66,13 @@
         {/if}
       </span>
       <span class="flex min-w-0 flex-col leading-tight">
-        <span class="truncate text-[13px] font-semibold text-foreground">{projectDisplayName(project)}</span>
+        <span class="truncate text-base font-semibold text-foreground">{projectDisplayName(project)}</span>
         {#if onTerminal && activeTitle}
-          <span class="truncate text-[11px] text-muted-foreground">{activeTitle}</span>
+          <span class="truncate text-xs text-muted-foreground">{activeTitle}</span>
         {/if}
       </span>
     {:else}
-      <span class="truncate text-[13px] font-medium text-muted-foreground">No project</span>
+      <span class="truncate text-base font-medium text-muted-foreground">No project</span>
     {/if}
   </button>
 
@@ -81,8 +82,8 @@
       class="flex size-9 shrink-0 items-center justify-center rounded-lg text-foreground/80 transition hover:bg-accent active:bg-accent/70 disabled:opacity-40"
       onclick={() => (launchOpen = true)}
       disabled={!project}
-      aria-label="New terminal"
-      title="New terminal"
+      aria-label={t("mobile.newTerminal")}
+      title={t("mobile.newTerminal")}
     >
       <Plus class="size-5" />
     </button>
@@ -91,8 +92,8 @@
       class="flex size-9 shrink-0 items-center justify-center rounded-lg text-foreground/80 transition hover:bg-accent active:bg-accent/70 disabled:opacity-40"
       onclick={() => (threadsOpen = true)}
       disabled={!project}
-      aria-label="Terminals"
-      title="Terminals"
+      aria-label={t("mobile.terminals")}
+      title={t("mobile.terminals")}
     >
       <MoreVertical class="size-5" />
     </button>
@@ -107,7 +108,7 @@
       type="button"
       class="flex size-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-muted/50 hover:text-foreground"
       onclick={() => void win?.minimize()}
-      aria-label="Minimize"
+      aria-label={t("mobile.minimize")}
     >
       <Minus class="size-4" />
     </button>
@@ -115,7 +116,7 @@
       type="button"
       class="flex size-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-danger hover:text-white"
       onclick={() => void win?.close()}
-      aria-label="Close"
+      aria-label={t("mobile.close")}
     >
       <X class="size-4" />
     </button>

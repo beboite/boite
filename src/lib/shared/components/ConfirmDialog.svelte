@@ -101,7 +101,7 @@
           {title}
         </h2>
         {#if message}
-          <p class="mt-1.5 text-[12px] leading-relaxed text-muted-foreground">
+          <p class="mt-1.5 text-sm leading-relaxed text-muted-foreground">
             {message}
           </p>
         {/if}

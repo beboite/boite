@@ -8,6 +8,7 @@
   import FolderTree from "@lucide/svelte/icons/folder-tree";
   import ListTodo from "@lucide/svelte/icons/list-todo";
   import X from "@lucide/svelte/icons/x";
+  import { t } from "$lib/i18n/index.svelte";
 
   let panelEl: HTMLElement | null = $state(null);
   let resizingX = $state(false);
@@ -35,7 +36,7 @@
   <div class="flex h-8 shrink-0 items-center gap-1 border-b border-border bg-[var(--color-titlebar)] px-1.5">
     <button
       type="button"
-      class="flex items-center gap-1.5 rounded px-2 py-1 text-[11px] font-medium transition {settings.state.rightPanel === 'git' ? 'bg-[var(--color-surface-2)] text-foreground' : 'text-muted-foreground hover:text-foreground'}"
+      class="flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium transition {settings.state.rightPanel === 'git' ? 'bg-[var(--color-surface-2)] text-foreground' : 'text-muted-foreground hover:text-foreground'}"
       onclick={() => selectTab("git")}
       aria-pressed={settings.state.rightPanel === "git"}
     >
@@ -44,7 +45,7 @@
     </button>
     <button
       type="button"
-      class="flex items-center gap-1.5 rounded px-2 py-1 text-[11px] font-medium transition {settings.state.rightPanel === 'explorer' ? 'bg-[var(--color-surface-2)] text-foreground' : 'text-muted-foreground hover:text-foreground'}"
+      class="flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium transition {settings.state.rightPanel === 'explorer' ? 'bg-[var(--color-surface-2)] text-foreground' : 'text-muted-foreground hover:text-foreground'}"
       onclick={() => selectTab("explorer")}
       aria-pressed={settings.state.rightPanel === "explorer"}
     >
@@ -53,7 +54,7 @@
     </button>
     <button
       type="button"
-      class="flex items-center gap-1.5 rounded px-2 py-1 text-[11px] font-medium transition {settings.state.rightPanel === 'todo' ? 'bg-[var(--color-surface-2)] text-foreground' : 'text-muted-foreground hover:text-foreground'}"
+      class="flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium transition {settings.state.rightPanel === 'todo' ? 'bg-[var(--color-surface-2)] text-foreground' : 'text-muted-foreground hover:text-foreground'}"
       onclick={() => selectTab("todo")}
       aria-pressed={settings.state.rightPanel === "todo"}
     >
@@ -64,8 +65,8 @@
       type="button"
       class="ml-auto rounded p-1 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground"
       onclick={close}
-      title="Close panel"
-      aria-label="Close panel"
+      title={t("panes.closePanel")}
+      aria-label={t("panes.closePanel")}
     >
       <X class="size-3.5" />
     </button>
@@ -88,7 +89,7 @@
       onResize: onResizeX,
       onStateChange: (r) => (resizingX = r),
     }}
-    aria-label="Resize panel"
+    aria-label={t("panes.resizePanel")}
     tabindex="-1"
   ></button>
 </aside>

@@ -127,7 +127,7 @@
     data-tree-row
     data-path={entry.path}
     data-dir={entry.isDir ? "1" : "0"}
-    class="group flex w-full items-center gap-1 px-1 py-0.5 text-left text-[11.5px] transition hover:bg-[var(--color-surface-2)] focus-visible:bg-[var(--color-surface-2)] focus-visible:outline-none {entry.isHidden ? 'text-foreground/55' : 'text-foreground/85'}"
+    class="group flex w-full items-center gap-1 px-1 py-0.5 text-left text-sm transition hover:bg-[var(--color-surface-2)] focus-visible:bg-[var(--color-surface-2)] focus-visible:outline-none {entry.isHidden ? 'text-foreground/55' : 'text-foreground/85'}"
     style:padding-left="{depth * 12 + 4}px"
     role="treeitem"
     aria-expanded={entry.isDir ? isOpen : undefined}
@@ -154,7 +154,7 @@
     <span class="truncate">{entry.name}</span>
     {#if status}
       <span
-        class="ml-auto pl-1 font-mono text-[10px] leading-none tabular-nums"
+        class="ml-auto pl-1 font-mono text-2xs leading-none tabular-nums"
         style:color={statusColor(status)}
         aria-label="git status {status}"
       >
@@ -166,14 +166,14 @@
   {#if entry.isDir && isOpen}
     {#if isLoading && !children}
       <div
-        class="px-1 py-0.5 text-[10.5px] text-muted-foreground/70"
+        class="px-1 py-0.5 text-xs text-muted-foreground/70"
         style:padding-left="{depth * 12 + 24}px"
       >
         Loading…
       </div>
     {:else if errMsg}
       <div
-        class="px-1 py-0.5 text-[10.5px] text-[var(--color-danger)]"
+        class="px-1 py-0.5 text-xs text-[var(--color-danger)]"
         style:padding-left="{depth * 12 + 24}px"
       >
         {errMsg}
@@ -184,7 +184,7 @@
       {/each}
       {#if children.length === 0}
         <div
-          class="px-1 py-0.5 text-[10.5px] text-muted-foreground/60 italic"
+          class="px-1 py-0.5 text-xs text-muted-foreground/60 italic"
           style:padding-left="{depth * 12 + 24}px"
         >
           empty

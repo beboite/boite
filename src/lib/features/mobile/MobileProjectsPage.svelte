@@ -54,7 +54,7 @@
     <h2 class="text-sm font-semibold text-foreground">Projects</h2>
     <button
       type="button"
-      class="flex items-center gap-1.5 rounded-lg border border-border bg-[var(--color-surface-2)] px-3 py-2 text-[13px] font-medium text-foreground/90 transition active:bg-[var(--color-surface-3)]"
+      class="flex items-center gap-1.5 rounded-lg border border-border bg-[var(--color-surface-2)] px-3 py-2 text-base font-medium text-foreground/90 transition active:bg-[var(--color-surface-3)]"
       onclick={() => void pickAndAddProject()}
     >
       <FolderPlus class="size-4" />
@@ -100,8 +100,8 @@
                   {/if}
                 </span>
                 <span class="min-w-0 flex-1">
-                  <span class="block truncate text-[14px] font-medium text-foreground">{projectDisplayName(project)}</span>
-                  <span class="block truncate text-[11px] text-muted-foreground">
+                  <span class="block truncate text-md font-medium text-foreground">{projectDisplayName(project)}</span>
+                  <span class="block truncate text-xs text-muted-foreground">
                     {threads.length} terminal{threads.length === 1 ? "" : "s"}
                   </span>
                 </span>
@@ -132,7 +132,7 @@
                         keepAwake={(thread.keepAwake ?? false) && !!thread.ptyId}
                       />
                       <ShortcutIcon iconKey={thread.iconKey} size={15} color={threadIconColor(thread)} />
-                      <span class="min-w-0 flex-1 truncate text-[13px] text-foreground/85">
+                      <span class="min-w-0 flex-1 truncate text-base text-foreground/85">
                         {thread.title ?? thread.label}
                       </span>
                     </button>

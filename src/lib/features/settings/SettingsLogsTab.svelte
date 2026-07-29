@@ -6,6 +6,7 @@
   import Copy from "@lucide/svelte/icons/copy";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import FolderOpen from "@lucide/svelte/icons/folder-open";
+  import { t } from "$lib/i18n/index.svelte";
 
   type Scope = "current" | "previous";
 
@@ -98,8 +99,8 @@
 <section class="flex flex-col gap-2">
   <header class="flex items-center justify-between">
     <div class="flex items-center gap-2">
-      <h3 class="text-[12px] font-semibold tracking-tight">Logs</h3>
-      <div class="flex rounded-md border border-border bg-[var(--color-surface)] p-0.5 text-[11px]">
+      <h3 class="text-sm font-semibold tracking-tight">Logs</h3>
+      <div class="flex rounded-md border border-border bg-[var(--color-surface)] p-0.5 text-xs">
         <button
           type="button"
           class="rounded-sm px-2 py-0.5 transition {scope === 'current'
@@ -123,7 +124,7 @@
     <div class="flex items-center gap-2">
       <select
         bind:value={levelFilter}
-        class="rounded-md border border-border bg-[var(--color-surface)] px-2 py-1 text-[11px]"
+        class="rounded-md border border-border bg-[var(--color-surface)] px-2 py-1 text-xs"
       >
         <option value="all">All levels</option>
         <option value="debug">Debug</option>
@@ -133,23 +134,23 @@
       </select>
       <input
         bind:value={sourceFilter}
-        placeholder="Source filter"
-        class="w-32 rounded-md border border-border bg-[var(--color-surface)] px-2 py-1 text-[11px] outline-none focus:border-foreground/30"
+        placeholder={t("logs.sourceFilter")}
+        class="w-32 rounded-md border border-border bg-[var(--color-surface)] px-2 py-1 text-xs outline-none focus:border-foreground/30"
       />
       <button
         type="button"
-        class="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground transition hover:bg-accent hover:text-foreground"
+        class="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground transition hover:bg-accent hover:text-foreground"
         onclick={refresh}
-        title="Refresh"
+        title={t("logs.refresh")}
       >
         <RotateCw class="size-3 {loading ? 'animate-spin' : ''}" />
         Refresh
       </button>
       <button
         type="button"
-        class="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground transition hover:bg-accent hover:text-foreground"
+        class="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground transition hover:bg-accent hover:text-foreground"
         onclick={copyAll}
-        title="Copy filtered entries"
+        title={t("logs.copyFiltered")}
       >
         <Copy class="size-3" />
         Copy
@@ -157,9 +158,9 @@
       {#if scope === "current"}
         <button
           type="button"
-          class="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground transition hover:bg-danger/15 hover:text-danger"
+          class="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground transition hover:bg-danger/15 hover:text-danger"
           onclick={clear}
-          title="Truncate current log"
+          title={t("logs.truncate")}
         >
           <Trash2 class="size-3" />
           Clear
@@ -169,7 +170,7 @@
   </header>
 
   <div
-    class="max-h-[60vh] min-h-[200px] overflow-y-auto rounded-md border border-border bg-[var(--color-titlebar)] p-2 font-mono text-[11px]"
+    class="max-h-[60vh] min-h-[200px] overflow-y-auto rounded-md border border-border bg-[var(--color-titlebar)] p-2 font-mono text-xs"
   >
     {#if loading && entries.length === 0}
       <p class="py-4 text-center text-muted-foreground/60">Loading…</p>
@@ -196,14 +197,14 @@
     {/if}
   </div>
 
-  <div class="flex items-center justify-between text-[10.5px] text-muted-foreground/60">
+  <div class="flex items-center justify-between text-xs text-muted-foreground/60">
     <span>{filtered.length} / {entries.length} entries</span>
     {#if logPath}
       <button
         type="button"
         class="flex items-center gap-1 transition hover:text-foreground"
         onclick={copyPath}
-        title="Copy log file path"
+        title={t("logs.copyPath")}
       >
         <FolderOpen class="size-3" />
         <span class="truncate font-mono">{logPath}</span>

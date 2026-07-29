@@ -3,6 +3,7 @@
   import { workspace } from "$lib/backend";
   import { addProjectByPath } from "./api";
   import type { DirEntry } from "$lib/features/explorer/api";
+  import { t } from "$lib/i18n/index.svelte";
 
   // This modal always browses the boite's filesystem: in pure remote mode
   // that's the active backend, in dynamic mode it's explicitly the remote one.
@@ -92,7 +93,7 @@
         <button
           class="text-muted-foreground transition hover:text-foreground"
           onclick={close}
-          aria-label="Close">✕</button
+          aria-label={t("mobile.close")}>✕</button
         >
       </div>
 
@@ -108,7 +109,7 @@
             onclick={up}
             disabled={path === root}>↑ Up</button
           >
-          <span class="truncate font-mono text-[11px] text-muted-foreground">{path}</span>
+          <span class="truncate font-mono text-xs text-muted-foreground">{path}</span>
         </div>
 
         <div class="min-h-0 flex-1 overflow-auto p-1">
