@@ -3,16 +3,18 @@
   import SettingsGeneralTab from "./SettingsGeneralTab.svelte";
   import SettingsTerminalTab from "./SettingsTerminalTab.svelte";
   import SettingsAppearanceTab from "./SettingsAppearanceTab.svelte";
+  import SettingsFastpickTab from "./SettingsFastpickTab.svelte";
   import SettingsLogsTab from "./SettingsLogsTab.svelte";
   import X from "@lucide/svelte/icons/x";
   import { t, type MessageKey } from "$lib/i18n/index.svelte";
 
-  type TabId = "general" | "terminal" | "appearance" | "logs";
+  type TabId = "general" | "terminal" | "appearance" | "fastpick" | "logs";
 
   const TABS: { id: TabId; labelKey: MessageKey }[] = [
     { id: "general", labelKey: "tabs.general" },
     { id: "terminal", labelKey: "tabs.terminal" },
     { id: "appearance", labelKey: "tabs.appearance" },
+    { id: "fastpick", labelKey: "tabs.fastpick" },
     { id: "logs", labelKey: "tabs.logs" },
   ];
 
@@ -67,6 +69,8 @@
         <SettingsTerminalTab />
       {:else if activeTab === "appearance"}
         <SettingsAppearanceTab />
+      {:else if activeTab === "fastpick"}
+        <SettingsFastpickTab />
       {:else if activeTab === "logs"}
         <SettingsLogsTab />
       {/if}

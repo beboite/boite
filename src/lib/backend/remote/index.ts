@@ -287,6 +287,8 @@ export class RemoteBackend implements Backend {
         rpc("fastpick.list", { provider: provider ?? null, refresh: refresh ?? false }).then(
           (r) => JSON.parse(r.json as string) as FastpickListing,
         ),
+      version: () =>
+        rpc("fastpick.version", {}).then((r) => (r.version as string | null) ?? null),
     };
 
     // The server derives its filesystem trust boundary from persisted projects;

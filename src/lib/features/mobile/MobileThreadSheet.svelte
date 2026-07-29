@@ -4,6 +4,7 @@
   import type { Thread, ThreadStatus } from "$lib/types";
   import StatusDot from "$lib/shared/components/StatusDot.svelte";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
+  import { threadIconColor } from "$lib/features/fastpick/threadAccent";
   import MobileSheet from "./MobileSheet.svelte";
   import X from "@lucide/svelte/icons/x";
 
@@ -60,7 +61,7 @@
               asleep={thread.autoSlept ?? false}
               keepAwake={(thread.keepAwake ?? false) && !!thread.ptyId}
             />
-            <ShortcutIcon iconKey={thread.iconKey} size={16} color={thread.iconColor ?? null} />
+            <ShortcutIcon iconKey={thread.iconKey} size={16} color={threadIconColor(thread)} />
             <span class="min-w-0 flex-1 truncate text-sm text-foreground/90">
               {thread.title ?? thread.label}
             </span>

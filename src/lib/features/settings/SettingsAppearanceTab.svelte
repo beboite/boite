@@ -6,11 +6,21 @@
   import type { MessageKey } from "$lib/i18n/index.svelte";
   import { LOCALE_OPTIONS, t } from "$lib/i18n/index.svelte";
   import type { MotionMode } from "$lib/types";
+  import { ACCENT_COLOR, type ModelAccent } from "$lib/features/fastpick/accent";
 
   const MOTION_MODES: { id: MotionMode; labelKey: MessageKey }[] = [
     { id: "system", labelKey: "appearance.motionSystem" },
     { id: "on", labelKey: "appearance.motionOn" },
     { id: "off", labelKey: "appearance.motionOff" },
+  ];
+
+  // `native` is left out: it is the absence of a tint, and a legend entry for "looks
+  // exactly like it always has" explains nothing.
+  const ACCENTS: { id: Exclude<ModelAccent, "native">; labelKey: MessageKey }[] = [
+    { id: "claude", labelKey: "appearance.accentClaude" },
+    { id: "gpt", labelKey: "appearance.accentGpt" },
+    { id: "local", labelKey: "appearance.accentLocal" },
+    { id: "other", labelKey: "appearance.accentOther" },
   ];
 
   function onSlider(e: Event) {
@@ -62,6 +72,27 @@
   offLabel={t("appearance.pc")}
   onToggle={() => settings.setMobileLayout(!settings.state.mobileLayout)}
 />
+
+<ToggleSetting
+  label={t("appearance.colorByModel")}
+  description={t("appearance.colorByModelDesc")}
+  enabled={settings.state.colorByModel}
+  onToggle={() => settings.setColorByModel(!settings.state.colorByModel)}
+/>
+
+{#if settings.state.colorByModel}
+  <div class="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-3 pb-1">
+    {#each ACCENTS as accent (accent.id)}
+      <span class="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+        <span
+          class="size-2 shrink-0 rounded-full"
+          style:background-color={ACCENT_COLOR[accent.id]}
+        ></span>
+        {t(accent.labelKey)}
+      </span>
+    {/each}
+  </div>
+{/if}
 
 <SettingsCard title={t("appearance.animations")} description={t("appearance.animationsDesc")}>
   <div class="flex gap-1.5" role="radiogroup" aria-label={t("appearance.animations")}>

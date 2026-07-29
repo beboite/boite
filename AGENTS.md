@@ -26,12 +26,22 @@ this machine and fails on a remote boite, silently.
 ## A process can rewrite its own thread
 
 A launcher is not the thing it launched, so one can say what it became:
-`ESC ] 1337 ; boite ; launch = {…} BEL` on its own stdout replaces the thread's
+`ESC ] 1337 ; boite ; launch = {json} BEL` on its own stdout replaces the thread's
 command, arguments and icon, and that is what a reload replays.
 `thread/promote.ts` parses it, and everything there is checked rather than
-spread onto the thread — a terminal's output is whatever the process printed,
+spread onto the thread. A terminal's output is whatever the process printed,
 including a file someone else wrote. Boite advertises itself as `TERM_PROGRAM=boite`
 so a tool can stay silent in every other terminal.
+
+## What a thread looks like is derived, never stored
+
+A fastpick thread keeps the agent's icon, so the tint saying which model is
+behind it is computed at render from the command, in `fastpick/threadAccent.ts`.
+Writing it onto the row would make the setting apply to new threads only, and
+would miss a thread a process promoted itself. The same holds for the combo:
+`parseCombo` reads it back out of `cmd` and `args` rather than storing it beside
+them, which is why a hand-typed `fastpick --harness ...` is described like one the
+menu launched.
 
 ## Checking your work in the running app
 

@@ -72,7 +72,7 @@ command can be added.
 ## Another provider, another model (fastpick)
 
 An agent does not have to run on its vendor's endpoint. If
-[fastpick](https://github.com/klNuno/fastpick) is on the machine that runs the
+[fastpick](https://github.com/beboite/fastpick) is on the machine that runs the
 threads, a menu appears next to the shortcut bar: pick an agent, an endpoint,
 a model, and the thread starts there. Effort level and system prompt files are
 offered where the agent takes them.
@@ -89,7 +89,16 @@ agent's icon, and live status, session resume and the todo endpoint all work as
 they do for a thread launched directly. Reopening the app replays the same
 combination rather than reopening a menu.
 
-The menu is hidden when fastpick is not installed, and nothing else changes.
+Because the icon stays the agent's, it is tinted with what is actually
+answering: yellow for a Claude served by someone else, white for a GPT, green
+for a model running on that machine, and the stock endpoint left alone. The
+colours come from the terminal palette, and the whole behaviour is one toggle
+in Appearance.
+
+The Fastpick tab in the settings installs and removes it, both as a thread you
+can watch, and removing it leaves the config where it is: that is where the
+providers and the paths to the key files are declared. The menu is hidden when
+fastpick is not installed, and nothing else changes.
 
 ## A worktree per thread
 

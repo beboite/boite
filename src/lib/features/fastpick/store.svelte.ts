@@ -21,6 +21,12 @@ class FastpickStore {
   error = $state<string | null>(null);
   loading = $state(false);
 
+  /** What that machine's fastpick reports for `--version`. Only the settings panel asks. */
+  version = $state<string | null>(null);
+  /** Whether a Rust toolchain is there to install fastpick with. Null until probed. */
+  cargoPresent = $state<boolean | null>(null);
+  probing = $state(false);
+
   models = $state<Record<string, FastpickModels>>({});
   modelsError = $state<Record<string, string>>({});
   loadingModels = $state<string | null>(null);
@@ -78,6 +84,44 @@ class FastpickStore {
     } finally {
       if (this.loadingModels === providerId) this.loadingModels = null;
     }
+  }
+
+  /**
+   * Asks that machine what it has: fastpick, its version, and a toolchain to build it with.
+   *
+   * Separate from `reload()` because only the settings panel needs it, and it is what the
+   * panel calls again after an install thread has finished compiling. It reloads the
+   * listing too: a fastpick that has just appeared has choices nobody has listed yet.
+   */
+  async probe(): Promise<void> {
+    this.probing = true;
+    try {
+      const [version, cargo] = await Promise.all([
+        backend().fastpick.version(),
+        backend().shell.commandExists("cargo"),
+      ]);
+      this.version = version;
+      this.cargoPresent = cargo;
+      const had = this.installed;
+      this.installed = version !== null;
+      // A fastpick that was not there when the menu last looked has a config to list now.
+      if (this.installed && had !== true) {
+        this.#loadedFor = null;
+        await this.ensure();
+      }
+    } finally {
+      this.probing = false;
+    }
+  }
+
+  /**
+   * A provider by id, or null while the listing is still missing.
+   *
+   * Null is a real answer here rather than a failure: the icon tint falls back to the model
+   * id, which is enough until the listing lands and then settles on its own.
+   */
+  providerById(id: string) {
+    return this.listing?.providers.find((p) => p.id === id) ?? null;
   }
 
   /** Only the harnesses whose binary is on that machine, the way fastpick's own menu does. */

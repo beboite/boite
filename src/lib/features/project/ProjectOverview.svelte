@@ -8,6 +8,7 @@
   import { threadCwd } from "$lib/features/thread/cwd";
   import { resolveIconKey } from "$lib/shared/icons/detect";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
+  import { threadIconColor } from "$lib/features/fastpick/threadAccent";
   import StatusDot from "$lib/shared/components/StatusDot.svelte";
   import GitBranch from "@lucide/svelte/icons/git-branch";
   import ListTodo from "@lucide/svelte/icons/list-todo";
@@ -91,7 +92,7 @@
                 asleep={thread.autoSlept ?? false}
                 keepAwake={(thread.keepAwake ?? false) && !!thread.ptyId}
               />
-              <ShortcutIcon iconKey={thread.iconKey} size={13} color={thread.iconColor ?? null} />
+              <ShortcutIcon iconKey={thread.iconKey} size={13} color={threadIconColor(thread)} />
               <span class="min-w-0 flex-1 truncate">{thread.title ?? thread.label}</span>
             </button>
           </li>
@@ -213,7 +214,7 @@
       <ul class="mt-2 flex flex-col gap-0.5">
         {#each isolated as thread (thread.id)}
           <li class="flex items-center gap-2 text-[11.5px] text-muted-foreground">
-            <ShortcutIcon iconKey={thread.iconKey} size={12} />
+            <ShortcutIcon iconKey={thread.iconKey} size={12} color={threadIconColor(thread)} />
             <span class="truncate text-foreground/80">{thread.title ?? thread.label}</span>
             <span class="truncate font-mono" title={thread.worktreePath}>{shortPath(thread)}</span>
           </li>

@@ -126,6 +126,18 @@ export interface Settings {
   motionMode: MotionMode;
   locale: LocaleSetting;
   setupCompleted?: boolean;
+  /**
+   * Whether the fastpick menu is offered in the shortcut bar. Off hides it whatever the
+   * machine has installed; on still hides it when fastpick is not there, since a menu whose
+   * every entry fails is worse than no menu.
+   */
+  fastpickEnabled: boolean;
+  /**
+   * Tint a thread's agent icon with what is actually answering it. A fastpick thread keeps
+   * the agent's own glyph, so without this nothing on screen tells a stock Claude apart
+   * from a Claude pointed at another endpoint.
+   */
+  colorByModel: boolean;
 }
 
 // Animation preference: "system" follows prefers-reduced-motion, "on"/"off"

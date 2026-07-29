@@ -70,3 +70,29 @@ pub fn list_blocking(
     }
     String::from_utf8(out.stdout).map_err(|_| "fastpick printed invalid UTF-8".to_string())
 }
+
+/// What `fastpick --version` says, or `None` when there is no fastpick to ask.
+///
+/// Absence is not an error here. The settings panel asks this to decide between offering an
+/// install and offering an update, and "not on this machine" is one of the two answers it
+/// is asking for rather than a failure to report.
+pub fn version_blocking() -> Option<String> {
+    let out = fastpick().arg("--version").output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&out.stdout);
+    // `fastpick 0.2.1`, the convention every `--version` follows. The name is already known
+    // here, so only the number is carried back.
+    let version = text
+        .split_whitespace()
+        .last()
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    if version.is_empty() {
+        None
+    } else {
+        Some(version)
+    }
+}

@@ -313,6 +313,19 @@ export interface FastpickProvider {
    * and boite never asks: the credential is read at spawn time, on the machine that spawns.
    */
   keyPresent: boolean;
+  /** What each wired harness reaches this provider through, keyed by harness id. */
+  harnesses?: Record<string, FastpickBinding>;
+  /** Set when fastpick has to start a local proxy first. */
+  proxyPort?: number | null;
+}
+
+export interface FastpickBinding {
+  /**
+   * Null means the harness keeps its own endpoint, which is how a native provider is
+   * declared. That is the one case where the agent runs exactly as it would have without
+   * fastpick, and it is what tells a stock Claude apart from a Claude pointed elsewhere.
+   */
+  baseUrl?: string | null;
 }
 
 export interface FastpickModels {
@@ -342,6 +355,11 @@ export interface FastpickApi {
    * message. Ask `shell.commandExists("fastpick")` first to tell the two apart.
    */
   list(provider?: string, refresh?: boolean): Promise<FastpickListing>;
+  /**
+   * What fastpick reports for `--version` on that machine, or null when there is none to
+   * ask. Never rejects: absence is one of the two answers the settings panel wants.
+   */
+  version(): Promise<string | null>;
 }
 
 export interface ScopeApi {

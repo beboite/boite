@@ -483,6 +483,13 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
             Ok(json!({ "json": json }))
         }
 
+        // Null version means no fastpick here, which is a state the settings panel draws
+        // rather than an error it reports.
+        "fastpick.version" => {
+            let version = blocking(boite_core::fastpick::version_blocking).await?;
+            Ok(json!({ "version": version }))
+        }
+
         // Warms the server's own function/alias list. The client cannot answer
         // this for a remote boite: the profile that matters is the server's.
         "shell.warm" => {

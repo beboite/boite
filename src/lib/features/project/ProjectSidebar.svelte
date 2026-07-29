@@ -21,6 +21,7 @@
   import { isScratch } from "$lib/features/project/scratch";
   import StatusDot from "$lib/shared/components/StatusDot.svelte";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
+  import { threadIconColor } from "$lib/features/fastpick/threadAccent";
   import { confirmDialog } from "$lib/shared/components/confirm.svelte";
   import { resizeHandle } from "$lib/shared/actions/resizeHandle";
   import ContextMenu from "$lib/shared/components/ContextMenu.svelte";
@@ -1040,7 +1041,7 @@
                     <span
                       class="absolute inset-0 flex items-center justify-center transition-opacity group-hover/thread:opacity-0"
                     >
-                      <ShortcutIcon iconKey={thread.iconKey} size={14} color={thread.iconColor ?? null} />
+                      <ShortcutIcon iconKey={thread.iconKey} size={14} color={threadIconColor(thread)} />
                     </span>
                     <button
                       type="button"
@@ -1106,7 +1107,7 @@
       <ShortcutIcon
               iconKey={threadDragGhost.thread.iconKey}
               size={14}
-              color={threadDragGhost.thread.iconColor ?? null}
+              color={threadIconColor(threadDragGhost.thread)}
             />
     </span>
   </div>

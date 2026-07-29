@@ -519,6 +519,7 @@ pub fn run() {
             commands::git_file_versions,
             commands::command_exists,
             commands::fastpick_list,
+            commands::fastpick_version,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

@@ -71,7 +71,7 @@
   });
 </script>
 
-<div bind:this={triggerRoot} class="relative flex items-stretch">
+<div bind:this={triggerRoot} class="relative flex shrink-0 items-stretch">
   <button
     type="button"
     class="flex shrink-0 items-center gap-1.5 rounded-l-md border border-r-0 border-dashed border-border px-2.5 py-1 text-xs text-muted-foreground transition hover:border-foreground/30 hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
