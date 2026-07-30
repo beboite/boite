@@ -28,6 +28,12 @@ export interface Project {
 export type ThreadStatus =
   | "idle"
   | "running"
+  // Blocked on the user: a permission prompt, a plan to approve, any dialog the
+  // agent put up. Deliberately not `ready`, which means the agent has nothing
+  // left to do. This one has a turn in flight that only an answer will finish,
+  // so it never auto-sleeps and it is worth a notification. Only claude declares
+  // it, through its session registry.
+  | "waiting"
   | "ready"
   | "done"
   | "exited"

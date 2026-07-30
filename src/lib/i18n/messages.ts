@@ -289,6 +289,7 @@ export const EN_MESSAGES = {
   "worktree.offHere": "Worktrees are off for this project.",
 
   "notification.readyForInput": "Ready for input",
+  "notification.waitingForYou": "Waiting for your answer",
   "branchDialog.uncommittedChanges": "You have uncommitted changes",
   "branchDialog.descriptionCreating": "Creating",
   "branchDialog.descriptionSwitching": "Switching to",

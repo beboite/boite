@@ -368,13 +368,25 @@ export interface LiveClaudeSession {
   /** `bg` is reachable through the agent view; `interactive` belongs to another terminal. */
   kind: string;
   /**
-   * `busy` while a turn is in flight, `idle` otherwise.
+   * One of `busy`, `waiting`, `shell`, `idle`. Claude's own four-state view of
+   * what it is doing, rewritten as each begins and ends:
    *
-   * Subagents get no entry of their own (the Task tool runs them in the parent
-   * process), so the parent reads `busy` for as long as one is working. That is
-   * the only signal Boite has that survives a terminal going quiet for minutes.
+   * - `busy`: a turn is in flight. Subagents get no entry of their own (the Task
+   *   tool runs them in the parent process), so the parent reads `busy` for as
+   *   long as one works. That is the only signal Boite has that survives a
+   *   terminal going quiet for minutes.
+   * - `waiting`: blocked on the user. A permission prompt, a plan to approve, any
+   *   open dialog. The turn is not over, and the answer is what ends it.
+   * - `shell`: the turn is over, but a shell it launched is still running.
+   * - `idle`: nothing in flight.
    */
   status: string;
+  /**
+   * What it is waiting for, when claude named it: `sandbox request`,
+   * `input needed`, `dialog open`, or the open dialog's own label. Only ever set
+   * alongside `waiting`.
+   */
+  waitingFor?: string | null;
   /**
    * The directory the session runs in, as claude recorded it. Lets a caller place
    * a session whose id it has not captured yet.

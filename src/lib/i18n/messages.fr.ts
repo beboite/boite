@@ -300,6 +300,7 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "worktree.offHere": "Les worktrees sont désactivés pour ce projet.",
 
   "notification.readyForInput": "Prêt pour saisie",
+  "notification.waitingForYou": "Attend votre réponse",
 
   "setup.title": "Bienvenue dans Boite",
   "setup.desc": "Boite fait tourner vos agents de code côte à côte, chacun dans son terminal.",
