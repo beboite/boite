@@ -58,16 +58,24 @@ the absence of evidence, and when the loop was refcounted off mounted
 could notice.
 
 Two sources answer, in this order. Claude rewrites
-`~/.claude/sessions/<pid>.json` as each turn starts and ends, so `declaredTurn`
-(`thread/claude-registry.ts`) reads `busy`/`idle` from the agent itself and that
-settles it, and keeps settling it through a quiet tool call, a compaction or a
-hidden pane. Everything
-else is read off the emulator's bottom rows (`terminalScreenRows`), which is
-level: the footer is on screen or it is not, so `false` means finished rather
-than "nothing seen lately". Detection never touches the byte stream. A rolling
-window of printed bytes answers a question about the recent past, and an `esc to
-interrupt` that had scrolled by kept re-matching itself for as long as the agent
-printed anything at all.
+`~/.claude/sessions/<pid>.json` as each of its four states begins and ends, so
+`declaredTurn` (`thread/claude-registry.ts`) reads `busy` / `waiting` / `shell` /
+`idle` from the agent itself and that settles it, and keeps settling it through a
+quiet tool call, a compaction or a hidden pane. Everything else is read off the
+emulator's bottom rows (`terminalScreenRows`), which is level: the footer is on
+screen or it is not, so `false` means finished rather than "nothing seen lately".
+Detection never touches the byte stream. A rolling window of printed bytes answers
+a question about the recent past, and an `esc to interrupt` that had scrolled by
+kept re-matching itself for as long as the agent printed anything at all.
+
+Only `idle` is a finished turn, and keeping the other three apart is the point.
+`waiting` means a dialog is up (a permission prompt, a plan to approve) and
+nothing moves until the user answers, so it gets its own `ThreadStatus` rather
+than reading as `ready`: it is worth a notification of its own and it must never
+be a candidate for auto-sleep. `shell` means the agent takes input again while
+something it launched still runs, so the dot says `ready` and the activity stamp
+still refuses to sleep it. That is why a pass returns a status and an `active`
+flag separately: the dot and auto-sleep are asking different questions.
 
 A subagent is only ever visible in the registry. The Task tool runs one inside
 claude's own process, so it gets no session entry of its own and its turns are
@@ -87,6 +95,12 @@ emulator, so with no registry answer it falls back to the OSC title and a 2s TTL
 that path is now only reached by non-claude agents. Both sides read the same
 files, so their rules are mirrored deliberately and tested in both languages
 (`claude-registry.test.ts`, `session.rs::turn_tests`).
+
+No other agent declares any of this. Codex, opencode, cursor, antigravity,
+copilot, grok and hermes get the screen rows and nothing else, so they are only
+ever `running` or `ready`: their approval prompts read as `ready`, and a subagent
+of theirs is covered by the raw-output and transcript stamps that hold auto-sleep
+off, not by anything that lights a dot.
 
 ## Checking your work in the running app
 

@@ -356,12 +356,21 @@ impl EventSink for ThreadSink {
 
 /// What a thread's status should become, or None to leave it alone.
 ///
-/// Claude answers for itself: `busy` holds the thread Running however quiet the
-/// terminal has gone, which is what a subagent looks like from out here: the
-/// Task tool runs in the parent process, so the parent stays `busy` for the whole
-/// run while emitting nothing. `idle` demotes at once, without waiting for a
-/// title that is never coming. Everything else falls back to the OSC title and
-/// its TTL.
+/// Claude answers for itself:
+///
+/// - `busy` holds the thread Running however quiet the terminal has gone, which
+///   is what a subagent looks like from out here: the Task tool runs in the
+///   parent process, so the parent stays `busy` for the whole run while emitting
+///   nothing.
+/// - `waiting` is its own status rather than Ready. A permission prompt is a turn
+///   still in flight, and calling it finished is both the wrong thing to show and
+///   the wrong thing to let auto-sleep act on.
+/// - `shell` reads as Ready: the agent takes input again, even though something
+///   it started is still running.
+/// - `idle` demotes at once, without waiting for a title that is never coming.
+///
+/// With no answer at all it falls back to the OSC title and its TTL, which can
+/// only ever conclude that a Running thread has gone quiet.
 fn next_status(
     status: ThreadStatus,
     last_working: Option<Instant>,
@@ -370,21 +379,30 @@ fn next_status(
 ) -> Option<ThreadStatus> {
     let settled = match declared {
         DeclaredTurn::Busy => ThreadStatus::Running,
-        DeclaredTurn::Idle => ThreadStatus::Ready,
+        DeclaredTurn::Waiting => ThreadStatus::Waiting,
+        DeclaredTurn::Shell | DeclaredTurn::Idle => ThreadStatus::Ready,
         DeclaredTurn::Unknown => {
             let stale = last_working
                 .map(|w| now.duration_since(w) >= WORKING_TTL)
                 .unwrap_or(true);
-            if status == ThreadStatus::Running && stale {
+            // Waiting ages out the same way. It is only ever set from an answer,
+            // so losing the answer (claude exited, the registry went away) leaves
+            // nothing that could ever clear it, and a status nothing can clear is
+            // the bug this whole loop exists to not have.
+            let live = matches!(status, ThreadStatus::Running | ThreadStatus::Waiting);
+            if live && stale {
                 ThreadStatus::Ready
             } else {
                 return None;
             }
         }
     };
-    // Only Ready and Running are this loop's to decide. A thread that has exited
-    // or been stopped has a real status and must keep it.
-    if !matches!(status, ThreadStatus::Ready | ThreadStatus::Running) {
+    // Only the three live statuses are this loop's to decide. A thread that has
+    // exited or been stopped has a real status and must keep it.
+    if !matches!(
+        status,
+        ThreadStatus::Ready | ThreadStatus::Running | ThreadStatus::Waiting
+    ) {
         return None;
     }
     (settled != status).then_some(settled)
@@ -443,15 +461,16 @@ fn spawn_ticker(shared: Arc<Shared>) {
                     }
                 };
                 let mut st = lt.status.lock();
+                // Any active answer refreshes the anchor, so if the registry later
+                // goes silent the TTL ages out from the last thing claude actually
+                // said rather than from whenever a title last arrived.
+                if declared.is_active() {
+                    st.last_working = Some(now);
+                }
                 let Some(next) = next_status(st.status, st.last_working, declared, now) else {
                     continue;
                 };
                 st.status = next;
-                if next == ThreadStatus::Running {
-                    // So a later Unknown pass has something to age out from
-                    // instead of demoting on the very next tick.
-                    st.last_working = Some(now);
-                }
                 drop(st);
                 changed.push((lt.thread_id.clone(), next));
             }

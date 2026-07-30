@@ -204,10 +204,12 @@ export async function moveThreadToProject(
   // doing decides what comes back up on the other side. A live PTY has to be
   // relaunched — a process cannot change directory under itself — but a thread
   // the user put to sleep stays asleep: it moves on disk and comes up in the new
-  // folder whenever it is next woken. "running" is the only status that means
-  // the agent was mid-answer, and the only one that earns being told to carry on.
+  // folder whenever it is next woken. "running" and "waiting" are the statuses
+  // that mean the agent's turn was still open, and the ones that earn being told
+  // to carry on: a thread blocked on a permission prompt has a tool call pending
+  // in its transcript, and coming back up with nothing said would abandon it.
   const wasAlive = !!thread.ptyId;
-  const wasWorking = thread.status === "running";
+  const wasWorking = thread.status === "running" || thread.status === "waiting";
 
   // A pane split holds threads of one project side by side. This one is about
   // to belong to another, so it leaves the group before anything else moves.

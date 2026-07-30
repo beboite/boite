@@ -4,9 +4,10 @@ import type { LiveClaudeSession } from "$lib/backend/types";
  * Reading a thread's turn out of claude's own session registry.
  *
  * Claude keeps `~/.claude/sessions/<pid>.json` for every session it has open and
- * rewrites `status` as each turn starts and ends: `busy` while one is in flight,
- * `idle` the moment it is not. That makes it the only signal Boite has that
- * states "finished" rather than merely stopping to say "still working".
+ * rewrites `status` as each of its four states begins and ends. That makes it the
+ * only signal Boite has that states "finished" rather than merely stopping to say
+ * "still working", and the only one that can tell a finished turn apart from one
+ * blocked on a permission prompt.
  *
  * It is also the only one that survives a subagent. The Task tool runs one in
  * claude's own process, so a subagent gets no registry entry of its own and its
@@ -20,7 +21,24 @@ import type { LiveClaudeSession } from "$lib/backend/types";
  * read the same files and must not disagree about a thread.
  */
 
-export type AgentTurn = "busy" | "idle";
+/**
+ * Claude's four states, plus what it is waiting for when it named one.
+ *
+ * Kept as four rather than collapsed to working/not-working because two of them
+ * mean "leave this thread alone" for different reasons. `waiting` needs the user
+ * and `shell` has a command still running, and neither is a finished turn even
+ * though neither is the agent thinking.
+ */
+export type AgentTurn = {
+  state: "busy" | "waiting" | "shell" | "idle";
+  /** Claude's own label for what it is blocked on. Only set with `waiting`. */
+  waitingFor?: string | null;
+};
+
+/** Whether the thread is mid-something: not a finished turn. */
+export function turnIsActive(turn: AgentTurn): boolean {
+  return turn.state !== "idle";
+}
 
 /**
  * Mirrors `normalize` in `boite-core/src/session.rs`. Claude records a native
@@ -30,11 +48,20 @@ function normalizePath(p: string): string {
   return p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
 }
 
-// Anything that is not a clean "idle" is a turn in flight. An unset or
-// unrecognised status comes from a claude whose registry format we do not know,
-// and calling that finished is the one wrong answer that loses work to auto-sleep.
 function read(s: LiveClaudeSession): AgentTurn {
-  return s.status === "idle" ? "idle" : "busy";
+  switch (s.status) {
+    case "idle":
+      return { state: "idle" };
+    case "waiting":
+      return { state: "waiting", waitingFor: s.waitingFor ?? null };
+    case "shell":
+      return { state: "shell" };
+    // `busy`, and anything else. An unset or unrecognised status comes from a
+    // claude whose registry format we do not know, and calling that finished is
+    // the one wrong answer that loses work to auto-sleep.
+    default:
+      return { state: "busy" };
+  }
 }
 
 /**
