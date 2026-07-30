@@ -506,6 +506,21 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
             Ok(json!({ "sessions": sessions }))
         }
 
+        // Same reason: the agents run here, so this is where they say what they
+        // are doing. Scoped to the threads the client is asking about, because
+        // each agent's store costs a directory walk or a database open.
+        "session.agentTurns" => {
+            let queries: Vec<boite_core::session::TurnQuery> = params
+                .get("queries")
+                .cloned()
+                .map(serde_json::from_value)
+                .transpose()
+                .map_err(|e| format!("bad queries: {e}"))?
+                .unwrap_or_default();
+            let turns = boite_core::session::agent_turns(&queries);
+            Ok(json!({ "turns": turns }))
+        }
+
         // The transcripts are here, not on the phone reading the dashboard.
         //
         // A directory outside the trust boundary is dropped rather than

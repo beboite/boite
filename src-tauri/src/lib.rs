@@ -486,6 +486,7 @@ pub fn run() {
             commands::available_shells,
             commands::find_claude_session,
             commands::live_claude_sessions,
+            commands::agent_turns,
             commands::agent_token_usage,
             commands::agent_mcp_config,
             commands::agent_api_ready,
