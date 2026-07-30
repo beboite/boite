@@ -33,6 +33,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tauri::{Emitter, Manager};
 
+use boite_core::project;
+use boite_core::scope::ProjectRoots;
+
 /// Everything an agent asks for that only the app can carry out.
 ///
 /// Moving a thread, creating a project and opening a second terminal all mean
@@ -427,8 +430,14 @@ struct CreateProjectIn {
 ///
 /// Same fire-and-forget shape as the move, and for the same reason — the
 /// default is to move the calling thread in, which kills it. Boite settles what
-/// the endpoint cannot see from here: whether the folder is free, whether a
-/// project is already there, whether an archived one should come back.
+/// the endpoint cannot see from here: whether an archived project should come
+/// back, what the folder is called, where it goes when the caller did not say.
+///
+/// What the endpoint does own, like the move, is the refusal it can reach: a
+/// path the caller spelled out is checked against the same rules the front end
+/// would apply, while the agent is still running to read the answer. Left to
+/// the app, a refusal is a notification on screen and the agent has already
+/// been told its project is being created.
 async fn project_create(
     State(inner): State<std::sync::Arc<Inner>>,
     headers: HeaderMap,
@@ -441,6 +450,9 @@ async fn project_create(
     let name = body.name.trim().to_string();
     if name.is_empty() {
         return Ok(Json(json!({ "error": "a project needs a name" })));
+    }
+    if let Some(reason) = folder_refusal(&inner, body.path.as_deref(), body.adopt.unwrap_or(false)) {
+        return Ok(Json(json!({ "error": reason })));
     }
 
     let _ = inner.app.emit(
@@ -458,6 +470,62 @@ async fn project_create(
         }),
     );
     Ok(Json(json!({ "name": name })))
+}
+
+/// Why the folder an agent named cannot become a project, if it cannot.
+///
+/// The two answers the front end would give that are reachable from here: the
+/// folder already holds somebody's work, or it sits outside the places a
+/// project is allowed to go. Both are questions about paths and the roots
+/// already registered, so both are settled before anything is emitted.
+///
+/// Only a path the caller spelled out is checked. Left to Boite, the folder
+/// lands beside the user's other projects or under their home, and both are
+/// inside the boundary by construction.
+fn folder_refusal(inner: &Inner, path: Option<&str>, adopt: bool) -> Option<String> {
+    let path = path.map(str::trim).filter(|p| !p.is_empty())?;
+    // A project already sitting there is reused, archived or not, and none of
+    // the rules about empty folders apply to it.
+    if project_already_at(inner, path) {
+        return None;
+    }
+    match project::folder_state_blocking(path) {
+        project::FolderState::Occupied if !adopt => Some(format!(
+            "{path} already has files in it. Pass adopt to take it over, or pick another path."
+        )),
+        // Where it may go is only asked when there is a folder to make. One
+        // already sitting there empty is taken as it is, exactly as the front
+        // end takes it.
+        project::FolderState::Missing => {
+            let scope = inner.app.state::<ProjectRoots>();
+            let allowed = crate::commands::new_project_roots(&inner.app, &scope);
+            (!project::may_create_project_at(path, &allowed))
+                .then(|| crate::commands::WRONG_PLACE_FOR_A_PROJECT.to_string())
+        }
+        _ => None,
+    }
+}
+
+/// Whether one of the user's projects already lives at that folder.
+///
+/// A read that cannot refuse anything on its own: a database it cannot open, or
+/// a row it cannot read, answers no and leaves the decision to the front end,
+/// which is where it was before this check existed.
+fn project_already_at(inner: &Inner, path: &str) -> bool {
+    let Ok(conn) = inner.conn.lock() else {
+        return false;
+    };
+    // Read out into owned strings before answering: the statement and the rows
+    // both borrow the connection, and nothing that borrows it may still be
+    // alive when this returns.
+    let cwds: Vec<String> = match conn.prepare("SELECT cwd FROM projects") {
+        Ok(mut stmt) => match stmt.query_map([], |row| row.get::<_, String>(0)) {
+            Ok(rows) => rows.flatten().collect(),
+            Err(_) => return false,
+        },
+        Err(_) => return false,
+    };
+    cwds.iter().any(|cwd| project::same_folder(cwd, path))
 }
 
 #[derive(Deserialize)]
