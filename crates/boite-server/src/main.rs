@@ -286,7 +286,12 @@ fn spawn_notifier_task(state: Arc<AppState>, mut rx: broadcast::Receiver<AppEven
                         continue;
                     }
                     let fire = match status.as_str() {
+                        // A turn that ended. Not from `waiting`: dismissing a
+                        // dialog without answering is not the agent finishing.
                         "ready" => prev.as_deref() == Some("running"),
+                        // Always worth a buzz: nothing moves until the user
+                        // answers, so this is the one status that is a request.
+                        "waiting" => true,
                         "exited" | "error" | "done" => true,
                         _ => false,
                     };
@@ -299,6 +304,11 @@ fn spawn_notifier_task(state: Arc<AppState>, mut rx: broadcast::Receiver<AppEven
                         .unwrap_or_else(|| "thread".to_string());
                     let (title, body, tag) = match status.as_str() {
                         "ready" => (format!("{label}: ready"), "Awaiting input".to_string(), "bell"),
+                        "waiting" => (
+                            format!("{label}: needs you"),
+                            "Waiting for your answer".to_string(),
+                            "bell",
+                        ),
                         "done" => (
                             format!("{label}: done"),
                             "Process finished".to_string(),

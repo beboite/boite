@@ -57,6 +57,8 @@ struct LiveSessionEntry {
     kind: Option<String>,
     status: Option<String>,
     cwd: Option<String>,
+    #[serde(rename = "waitingFor")]
+    waiting_for: Option<String>,
 }
 
 /// A session claude has open. The kind decides what can be done about it: a
@@ -70,15 +72,27 @@ pub struct LiveClaudeSession {
     pub pid: u32,
     /// `bg` or `interactive`, straight from the registry.
     pub kind: String,
-    /// `busy` while a turn is in flight, `idle` otherwise. An idle agent can be
-    /// released without losing anything; a busy one is mid-answer.
+    /// One of `busy`, `waiting`, `shell`, `idle`. Claude's own four-state view of
+    /// what it is doing, rewritten as each of those begins and ends:
     ///
-    /// Subagents do not get an entry of their own: the Task tool runs them in
-    /// the parent process, and their turns are appended to the parent's
-    /// transcript with `isSidechain`. So the parent reads `busy` for as long as
-    /// a subagent is working, which is the only signal Boite has that survives a
-    /// terminal going quiet for minutes.
+    /// - `busy`: a turn is in flight. Subagents get no entry of their own (the
+    ///   Task tool runs them in the parent process, appending their turns to the
+    ///   parent transcript with `isSidechain`), so the parent reads `busy` for as
+    ///   long as one works. That is the only signal Boite has that survives a
+    ///   terminal going quiet for minutes.
+    /// - `waiting`: blocked on the user. A permission prompt, a plan to approve,
+    ///   an elicitation, any open dialog. The turn is not over and the answer is
+    ///   the only thing that will end it.
+    /// - `shell`: the turn is over, but a shell it launched is still running.
+    /// - `idle`: nothing in flight.
+    ///
+    /// An idle agent can be released without losing anything; the other three are
+    /// all mid-something.
     pub status: String,
+    /// What it is waiting for, when claude named it: `sandbox request`,
+    /// `input needed`, `dialog open`, or the open dialog's own label. Only ever
+    /// set alongside `waiting`.
+    pub waiting_for: Option<String>,
     /// The directory the session runs in, as claude recorded it. Lets a caller
     /// place a session it has no id for yet.
     pub cwd: String,
@@ -206,6 +220,7 @@ pub fn live_claude_sessions() -> Vec<LiveClaudeSession> {
                 pid,
                 kind: parsed.kind.unwrap_or_else(|| "interactive".into()),
                 status: parsed.status.unwrap_or_else(|| "busy".into()),
+                waiting_for: parsed.waiting_for,
                 cwd: parsed.cwd.unwrap_or_default(),
             });
         }
@@ -214,11 +229,37 @@ pub fn live_claude_sessions() -> Vec<LiveClaudeSession> {
 }
 
 /// What claude says about a thread's turn, or that it has nothing to say.
+///
+/// Four of these are claude's own states, one is the absence of an answer. They
+/// are kept distinct rather than collapsed to working/not-working because two of
+/// them mean "do not touch this thread" for different reasons: `Waiting` needs the
+/// user and `Shell` has a command still running, and neither is a finished turn
+/// even though neither is the agent thinking.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DeclaredTurn {
+    /// A turn is in flight, subagents included.
     Busy,
+    /// Blocked on the user: a permission prompt, a plan to approve, any dialog.
+    /// The turn ends when the answer arrives and not before.
+    Waiting,
+    /// The turn is over, but a shell claude launched is still running.
+    Shell,
+    /// Nothing in flight.
     Idle,
+    /// The registry has nothing to say about this thread.
     Unknown,
+}
+
+impl DeclaredTurn {
+    /// Whether the thread is mid-something. False only for a genuinely finished
+    /// turn; `Unknown` is not an answer and answers false here too, so callers
+    /// must check for it separately when that distinction matters.
+    pub fn is_active(self) -> bool {
+        matches!(
+            self,
+            DeclaredTurn::Busy | DeclaredTurn::Waiting | DeclaredTurn::Shell
+        )
+    }
 }
 
 /// Places a thread in claude's session registry and reads its turn off it.
@@ -239,16 +280,14 @@ pub fn declared_turn(
     session_id: Option<&str>,
     cwd: &str,
 ) -> DeclaredTurn {
-    let read = |s: &LiveClaudeSession| {
-        if s.status == "idle" {
-            DeclaredTurn::Idle
-        } else {
-            // Anything that is not a clean idle counts as a turn in flight. An
-            // unset or unrecognised status comes from a claude whose registry
-            // format this does not know, and calling that finished is the one
-            // wrong answer that loses work to auto-sleep.
-            DeclaredTurn::Busy
-        }
+    let read = |s: &LiveClaudeSession| match s.status.as_str() {
+        "idle" => DeclaredTurn::Idle,
+        "waiting" => DeclaredTurn::Waiting,
+        "shell" => DeclaredTurn::Shell,
+        // `busy`, and anything else. An unset or unrecognised status comes from a
+        // claude whose registry format this does not know, and calling that
+        // finished is the one wrong answer that loses work to auto-sleep.
+        _ => DeclaredTurn::Busy,
     };
     if let Some(id) = session_id.filter(|id| !id.is_empty()) {
         return match sessions.iter().find(|s| s.id == id) {
@@ -1353,8 +1392,39 @@ mod turn_tests {
             pid: 1,
             kind: "interactive".into(),
             status: status.into(),
+            waiting_for: None,
             cwd: cwd.into(),
         }
+    }
+
+    #[test]
+    fn each_claude_state_maps_to_its_own_answer() {
+        // The four claude writes, plus the catch-all. Collapsing waiting or shell
+        // into idle is what let a thread be called finished while a permission
+        // prompt sat unanswered, or while a shell it started still ran.
+        let live = [
+            entry("busy", "busy", "/w/1"),
+            entry("waiting", "waiting", "/w/2"),
+            entry("shell", "shell", "/w/3"),
+            entry("idle", "idle", "/w/4"),
+        ];
+        assert_eq!(declared_turn(&live, Some("busy"), ""), DeclaredTurn::Busy);
+        assert_eq!(
+            declared_turn(&live, Some("waiting"), ""),
+            DeclaredTurn::Waiting
+        );
+        assert_eq!(declared_turn(&live, Some("shell"), ""), DeclaredTurn::Shell);
+        assert_eq!(declared_turn(&live, Some("idle"), ""), DeclaredTurn::Idle);
+    }
+
+    #[test]
+    fn only_a_finished_turn_is_inactive() {
+        assert!(DeclaredTurn::Busy.is_active());
+        assert!(DeclaredTurn::Waiting.is_active());
+        assert!(DeclaredTurn::Shell.is_active());
+        assert!(!DeclaredTurn::Idle.is_active());
+        // Not an answer, so not an assertion of activity either.
+        assert!(!DeclaredTurn::Unknown.is_active());
     }
 
     #[test]

@@ -141,6 +141,11 @@ fn normalize_shell_path(title: &str) -> Option<String> {
 pub enum ThreadStatus {
     Idle,
     Running,
+    /// Blocked on the user. Distinct from Ready, which means the agent has nothing
+    /// left to do: this one has a turn in flight that only an answer will finish,
+    /// so it is never a candidate for auto-sleep and it is worth telling the user
+    /// about. Only claude declares it (`waiting` in its session registry).
+    Waiting,
     Ready,
     Done,
     Exited,
@@ -153,6 +158,7 @@ impl ThreadStatus {
         match self {
             ThreadStatus::Idle => "idle",
             ThreadStatus::Running => "running",
+            ThreadStatus::Waiting => "waiting",
             ThreadStatus::Ready => "ready",
             ThreadStatus::Done => "done",
             ThreadStatus::Exited => "exited",
@@ -270,6 +276,7 @@ mod tests {
         // ThreadStatus union; renaming one silently breaks restored threads.
         assert_eq!(ThreadStatus::Idle.as_str(), "idle");
         assert_eq!(ThreadStatus::Running.as_str(), "running");
+        assert_eq!(ThreadStatus::Waiting.as_str(), "waiting");
         assert_eq!(ThreadStatus::Ready.as_str(), "ready");
         assert_eq!(ThreadStatus::Done.as_str(), "done");
         assert_eq!(ThreadStatus::Exited.as_str(), "exited");

@@ -141,17 +141,28 @@ function visibleThreadIds(): Set<string> {
 }
 
 /**
- * Whether this thread is mid-turn, or null when there is nothing to look at.
+ * What one pass concluded about a thread.
  *
- * Both answers are positive evidence, which is the point: a `false` here means
- * something was read and it said the turn is over, so the dot can be demoted on
- * it. Only `null`, a thread whose pane has never been opened so no emulator
- * ever held its rows, leaves the previous status alone.
+ * `status` is what the dot should show. `active` is the separate question of
+ * whether anything is in flight, and the two genuinely disagree: a thread waiting
+ * on a permission prompt, or one whose agent has finished while a shell it
+ * launched keeps running, is not the agent working and is not finished either.
+ * Auto-sleep reads `active`; the dot reads `status`.
  */
-function readWorking(t: Thread, iconKey: IconKey): boolean | null {
-  // Claude's own answer first. It rewrites its session registry as each turn
-  // starts and ends, so this is the agent stating what it is doing rather than
-  // Boite inferring it, and it stays right through a quiet tool call, a
+type Reading = { status: "running" | "waiting" | "ready"; active: boolean };
+
+/**
+ * What this thread is doing, or null when there is nothing to look at.
+ *
+ * A non-null answer is positive evidence in every direction, which is the point:
+ * `ready` here means something was read and it said the turn is over, so the dot
+ * can be demoted on it. Only `null`, a thread whose pane has never been opened so
+ * no emulator ever held its rows, leaves the previous status alone.
+ */
+function read(t: Thread, iconKey: IconKey): Reading | null {
+  // Claude's own answer first. It rewrites its session registry as each of its
+  // states begins and ends, so this is the agent stating what it is doing rather
+  // than Boite inferring it, and it stays right through a quiet tool call, a
   // subagent, a compaction and a hidden pane.
   //
   // The cwd is passed so a thread that has not captured its session id yet can
@@ -159,14 +170,33 @@ function readWorking(t: Thread, iconKey: IconKey): boolean | null {
   // which is the one most likely to spend ten silent minutes in a subagent.
   if (iconKey === "claude") {
     const cwd = threadCwd(t, app.projectById(t.projectId));
-    const declared = claudeTurn.stateOf(t.sessionId, cwd);
-    if (declared) return declared === "busy";
+    const turn = claudeTurn.stateOf(t.sessionId, cwd);
+    if (turn) {
+      switch (turn.state) {
+        case "busy":
+          return { status: "running", active: true };
+        // A dialog is up and nothing moves until it is answered. Its own status,
+        // never `ready`: the turn is still in flight, and the whole reason this
+        // exists is that calling it finished both showed the wrong thing and let
+        // auto-sleep kill a thread mid-question.
+        case "waiting":
+          return { status: "waiting", active: true };
+        // The agent takes input again, so the dot is `ready`, but a command it
+        // started is still running and killing the PTY would take that with it.
+        case "shell":
+          return { status: "ready", active: true };
+        case "idle":
+          return { status: "ready", active: false };
+      }
+    }
   }
-  // Otherwise the rows the agent is repainting. Level, not latched: the footer
-  // is on screen or it is not.
+  // Otherwise the rows the agent is repainting. Level, not latched: the footer is
+  // on screen or it is not. No agent but claude declares a waiting state, so this
+  // path only ever answers running or ready.
   const term = liveTerminal(t.id);
   if (!term) return null;
-  return detectWorkingOnScreen(terminalScreenRows(term, LIVE_ROW_COUNT), iconKey);
+  const working = detectWorkingOnScreen(terminalScreenRows(term, LIVE_ROW_COUNT), iconKey);
+  return { status: working ? "running" : "ready", active: working };
 }
 
 function tick() {
@@ -188,7 +218,7 @@ function tick() {
       // would flatten the ping the user expects to stay lit.
       if (parkedLocal.has(t.id)) continue;
       forgetThread(t.id);
-      if (t.status === "ready" || t.status === "running") {
+      if (t.status === "ready" || t.status === "running" || t.status === "waiting") {
         app.setThreadStatus(t.id, "idle");
       }
       continue;
@@ -210,20 +240,38 @@ function tick() {
     // the stored key: it kills PTYs, and its per-agent opt-in is a setting the
     // user made against the icons they can see, not against an inferred one.
     const iconKey = t.iconKey ?? detectIconKey(t.cmd, t.label);
-    const working = readWorking(t, iconKey);
-    if (working !== null) {
-      if (working) lastWorkingAt.set(t.id, now);
-      const next = working ? "running" : "ready";
+    const reading = read(t, iconKey);
+    if (reading) {
+      // Stamped from `active`, not from the dot: a thread waiting on a prompt, or
+      // one whose agent finished while its shell runs on, is doing something even
+      // though it is not the agent thinking. This stamp is what auto-sleep reads.
+      if (reading.active) lastWorkingAt.set(t.id, now);
+      const next = reading.status;
       if (t.status !== next) {
         app.setThreadStatus(t.id, next);
       }
-      if (prevStatus.get(t.id) === "running" && next === "ready") {
-        const label = t.title ?? t.label;
-        void notifyWhenUnfocused(label, translate("notification.readyForInput"));
+      const before = prevStatus.get(t.id);
+      // Two different pieces of news, and telling them apart is the point. One is
+      // "your agent is done", the other is "your agent cannot continue without
+      // you". Reaching `waiting` from anywhere is worth saying; reaching `ready`
+      // only is when a turn actually ended.
+      if (next === "waiting" && before !== "waiting") {
+        void notifyWhenUnfocused(
+          t.title ?? t.label,
+          translate("notification.waitingForYou"),
+        );
+      } else if (next === "ready" && before === "running") {
+        void notifyWhenUnfocused(
+          t.title ?? t.label,
+          translate("notification.readyForInput"),
+        );
       }
       prevStatus.set(t.id, next);
     }
 
+    // Only a settled `ready` is a candidate. `waiting` is excluded by being its
+    // own status, and a `ready` thread whose shell is still running is excluded by
+    // the activity stamp `maybeAutoClose` checks.
     if (t.status === "ready" && !visible.has(t.id)) {
       maybeAutoClose(t.id, t.iconKey);
     } else {
