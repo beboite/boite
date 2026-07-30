@@ -1,3 +1,4 @@
+import type { FastpickModel } from "$lib/backend/types";
 import type { IconKey } from "$lib/types";
 
 /**
@@ -111,6 +112,35 @@ export function parseCombo(cmd: string, args: readonly string[]): FastpickCombo 
   // describing it as one would put a model name in the UI that nothing confirmed.
   if (!harness || !provider || !model) return null;
   return { harness, provider, model, effort, prompts };
+}
+
+/**
+ * What each model in a list reads as in the menu, keyed by its id.
+ *
+ * A label is fastpick's when it has one, but labels come from a hand-written config and
+ * nothing there enforces that two of them differ: `claude-opus-5` and `claude-opus-5[1m]`
+ * are two different context windows, and both were once labelled "Opus 5". Two rows that
+ * launch different things and read identically are worse than a raw id, so a label shared
+ * by more than one model loses to the id, for every model wearing it.
+ */
+export function modelLabels(items: readonly FastpickModel[]): Map<string, string> {
+  const counts = new Map<string, number>();
+  for (const model of items) {
+    const label = modelLabel(model);
+    counts.set(label, (counts.get(label) ?? 0) + 1);
+  }
+
+  const labels = new Map<string, string>();
+  for (const model of items) {
+    const label = modelLabel(model);
+    labels.set(model.id, counts.get(label) === 1 ? label : model.id);
+  }
+  return labels;
+}
+
+/** A label that is absent, or whitespace pretending not to be, is no label at all. */
+function modelLabel(model: FastpickModel): string {
+  return model.label?.trim() || model.id;
 }
 
 /** How a combo reads in a tooltip or a sidebar row: the model, then where it runs. */
