@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { comboArgs, iconKeyForKind, parseCombo } from "./combo";
+import type { FastpickModel } from "$lib/backend/types";
+import { comboArgs, iconKeyForKind, modelLabels, parseCombo } from "./combo";
+
+function model(id: string, label: string | null): FastpickModel {
+  return { id, label, contextWindow: null, effort: [], effortDefault: null, prompts: [] };
+}
 
 describe("comboArgs", () => {
   it("names all three answers so fastpick opens no menu", () => {
@@ -81,5 +86,42 @@ describe("iconKeyForKind", () => {
 
   it("has no icon for a kind it has never heard of", () => {
     expect(iconKeyForKind("something-new")).toBeNull();
+  });
+});
+
+describe("modelLabels", () => {
+  it("keeps the label fastpick gave when it says something on its own", () => {
+    const labels = modelLabels([model("acme-large", "Large"), model("acme-small", "Small")]);
+    expect(labels.get("acme-large")).toBe("Large");
+    expect(labels.get("acme-small")).toBe("Small");
+  });
+
+  it("falls back to the id for every model sharing a label", () => {
+    const labels = modelLabels([
+      model("claude-opus-5[1m]", "Opus 5"),
+      model("claude-opus-5", "Opus 5"),
+      model("claude-sonnet-5", "Sonnet 5"),
+    ]);
+    expect(labels.get("claude-opus-5[1m]")).toBe("claude-opus-5[1m]");
+    expect(labels.get("claude-opus-5")).toBe("claude-opus-5");
+    expect(labels.get("claude-sonnet-5")).toBe("Sonnet 5");
+  });
+
+  it("reads a missing or blank label as no label", () => {
+    const labels = modelLabels([model("acme-large", null), model("acme-small", "  ")]);
+    expect(labels.get("acme-large")).toBe("acme-large");
+    expect(labels.get("acme-small")).toBe("acme-small");
+  });
+
+  it("does not collide a label with an id another model wears", () => {
+    // The unlabelled model already reads as `acme-large`, so the labelled one has to give
+    // its label up too, or the two rows read the same again.
+    const labels = modelLabels([model("acme-large", null), model("acme-l", "acme-large")]);
+    expect(labels.get("acme-large")).toBe("acme-large");
+    expect(labels.get("acme-l")).toBe("acme-l");
+  });
+
+  it("answers nothing for an empty list", () => {
+    expect(modelLabels([]).size).toBe(0);
   });
 });

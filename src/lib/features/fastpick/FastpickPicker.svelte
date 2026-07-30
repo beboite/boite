@@ -6,7 +6,7 @@
   import { launchFastpick, launchTargetProjectId } from "$lib/features/thread/api";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
   import { fastpick } from "./store.svelte";
-  import { iconKeyForKind, type FastpickCombo } from "./combo";
+  import { iconKeyForKind, modelLabels, type FastpickCombo } from "./combo";
   import type { FastpickHarness, FastpickModel } from "$lib/backend/types";
   import Plus from "@lucide/svelte/icons/plus";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
@@ -39,6 +39,13 @@
   );
   const providers = $derived(harnessId ? fastpick.providersFor(harnessId) : []);
   const models = $derived(providerId ? fastpick.models[providerId] ?? null : null);
+  // Resolved once per list rather than per row: telling a label apart needs the whole list,
+  // and the options pane reads the same name for a model the list is no longer drawing.
+  const labels = $derived(modelLabels(models?.items ?? []));
+
+  function nameOf(m: FastpickModel): string {
+    return labels.get(m.id) ?? m.label ?? m.id;
+  }
 
   function reset() {
     pane = "harness";
@@ -217,7 +224,7 @@
             {#if pane === "harness"}{t("fastpick.stepHarness")}
             {:else if pane === "provider"}{harness?.name}
             {:else if pane === "model"}{harness?.name} · {providerId}
-            {:else}{model?.label ?? model?.id}{/if}
+            {:else}{model ? nameOf(model) : ""}{/if}
           </span>
           {#if pane === "model" && providerId}
             <button
@@ -292,7 +299,7 @@
                     class="flex min-w-0 flex-1 items-baseline gap-2 px-2 py-1.5 text-left text-[11.5px] text-foreground/85 transition group-hover:text-foreground"
                     onclick={(e) => pickModel(m, e.shiftKey)}
                   >
-                    <span class="min-w-0 truncate font-medium">{m.label ?? m.id}</span>
+                    <span class="min-w-0 truncate font-medium">{nameOf(m)}</span>
                     {#if m.contextWindow}
                       <span class="shrink-0 font-mono text-[10px] text-muted-foreground/70">
                         {Math.round(m.contextWindow / 1000)}K
