@@ -80,9 +80,23 @@ pub fn folder_state_blocking(path: &str) -> FolderState {
 /// way.
 pub fn may_create_project_at(path: &str, roots: &[String]) -> bool {
     fn normalize(p: &str) -> String {
-        p.replace('\\', "/")
-            .trim_end_matches('/')
-            .to_lowercase()
+        let slashed = p.replace('\\', "/");
+        // The roots come out of `ProjectRoots::snapshot`, which stores what
+        // `std::fs::canonicalize` returned, and on Windows that is a verbatim
+        // path: the root reads `//?/d:/dev/perso` while the folder being asked
+        // about is the plain `d:/dev/perso/thing` the caller typed. A textual
+        // prefix test never brings those two together, so the marker comes off
+        // both sides here. Nothing is widened by it: the stripped path still
+        // has to sit under a root to be allowed.
+        let bare = match slashed.strip_prefix("//?/") {
+            // `//?/UNC/server/share` is the verbatim spelling of `//server/share`.
+            Some(rest) => match rest.get(..4).filter(|s| s.eq_ignore_ascii_case("unc/")) {
+                Some(_) => format!("//{}", &rest[4..]),
+                None => rest.to_string(),
+            },
+            None => slashed,
+        };
+        bare.trim_end_matches('/').to_lowercase()
     }
     // `..` never survives a prefix test honestly: "c:/users/me/../../windows"
     // starts with the home and lands nowhere near it.
@@ -644,6 +658,31 @@ mod new_project_tests {
         assert!(may_create_project_at("D:/Dev/Collab/newrepo", &roots()));
         // The separator and the case are the machine's business, not the rule's.
         assert!(may_create_project_at(r"d:\dev\collab\newrepo", &roots()));
+    }
+
+    /// What the roots actually look like at runtime on Windows. They are read
+    /// back from `ProjectRoots`, which holds `std::fs::canonicalize` output, and
+    /// that is verbatim: every root but the home directory arrived here with a
+    /// `\\?\` on the front and matched nothing.
+    #[test]
+    fn a_verbatim_windows_root_still_matches_a_plain_path() {
+        let roots = vec![
+            r"\\?\C:\Users\me".to_string(),
+            r"\\?\D:\Dev\Collab".to_string(),
+        ];
+        assert!(may_create_project_at(r"D:\Dev\Collab\newrepo", &roots));
+        assert!(may_create_project_at("C:/Users/me/ideas/thing", &roots));
+        // Verbatim on the asking side too, and the pair of them at once.
+        assert!(may_create_project_at(r"\\?\D:\Dev\Collab\newrepo", &roots));
+        // A UNC share keeps its own shape rather than losing a segment to the
+        // `UNC` marker.
+        assert!(may_create_project_at(
+            r"\\nas\dev\newrepo",
+            &[r"\\?\UNC\nas\dev".to_string()],
+        ));
+        // Stripping the marker is not a way in: the rest of the path still has
+        // to be under a root.
+        assert!(!may_create_project_at(r"\\?\C:\Windows\x", &roots));
     }
 
     #[test]
