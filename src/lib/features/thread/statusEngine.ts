@@ -1,6 +1,7 @@
 import { app } from "$lib/app/store.svelte";
 import { workspace } from "$lib/backend";
 import type { Backend } from "$lib/backend";
+import type { AgentTurnQuery } from "$lib/backend/types";
 import { settings } from "$lib/features/settings/store.svelte";
 import { paneStore, leavesOf } from "$lib/features/panes/store.svelte";
 import { parkedLocal } from "$lib/backend/tauri/parked";
@@ -11,7 +12,7 @@ import { t as translate } from "$lib/i18n/index.svelte";
 import { detectIconKey } from "$lib/shared/icons/detect";
 import { ptyKill } from "$lib/storage/pty";
 import { logger } from "$lib/shared/services/logger.svelte";
-import { claudeTurn } from "./agentTurn";
+import { agentTurns } from "./agent-turns";
 import { threadCwd } from "./cwd";
 import { detectWorkingOnScreen, LIVE_ROW_COUNT } from "./working-detect";
 import type { IconKey, Thread } from "$lib/types";
@@ -160,17 +161,17 @@ type Reading = { status: "running" | "waiting" | "ready"; active: boolean };
  * no emulator ever held its rows, leaves the previous status alone.
  */
 function read(t: Thread, iconKey: IconKey): Reading | null {
-  // Claude's own answer first. It rewrites its session registry as each of its
-  // states begins and ends, so this is the agent stating what it is doing rather
-  // than Boite inferring it, and it stays right through a quiet tool call, a
-  // subagent, a compaction and a hidden pane.
+  // The agent's own answer first, where it has one. Three of them do, each in a
+  // different place (see `agent-registry.ts`), and all three state that a turn
+  // ended rather than merely stopping to say it continues. That is what stays
+  // right through a quiet tool call, a subagent, a compaction and a hidden pane.
   //
   // The cwd is passed so a thread that has not captured its session id yet can
   // still be placed: those first seconds are part of the agent's opening turn,
   // which is the one most likely to spend ten silent minutes in a subagent.
-  if (iconKey === "claude") {
+  if (iconKey) {
     const cwd = threadCwd(t, app.projectById(t.projectId));
-    const turn = claudeTurn.stateOf(t.sessionId, cwd);
+    const turn = agentTurns.stateOf(iconKey, t.sessionId, cwd);
     if (turn) {
       switch (turn.state) {
         case "busy":
@@ -178,7 +179,7 @@ function read(t: Thread, iconKey: IconKey): Reading | null {
         // A dialog is up and nothing moves until it is answered. Its own status,
         // never `ready`: the turn is still in flight, and the whole reason this
         // exists is that calling it finished both showed the wrong thing and let
-        // auto-sleep kill a thread mid-question.
+        // auto-sleep kill a thread mid-question. Claude alone says this.
         case "waiting":
           return { status: "waiting", active: true };
         // The agent takes input again, so the dot is `ready`, but a command it
@@ -191,8 +192,8 @@ function read(t: Thread, iconKey: IconKey): Reading | null {
     }
   }
   // Otherwise the rows the agent is repainting. Level, not latched: the footer is
-  // on screen or it is not. No agent but claude declares a waiting state, so this
-  // path only ever answers running or ready.
+  // on screen or it is not. Nothing here can tell a question apart from a
+  // finished turn, so this path only ever answers running or ready.
   const term = liveTerminal(t.id);
   if (!term) return null;
   const working = detectWorkingOnScreen(terminalScreenRows(term, LIVE_ROW_COUNT), iconKey);
@@ -202,9 +203,12 @@ function read(t: Thread, iconKey: IconKey): Reading | null {
 function tick() {
   const now = Date.now();
   const visible = visibleThreadIds();
-  // The one backend whose threads are judged here, handed to the registry poll
-  // so it asks the machine the agents are actually running on.
+  // The one backend whose threads are judged here, handed to the poll so it asks
+  // the machine the agents are actually running on, along with exactly which
+  // threads are worth asking about. Collected while deciding and used at the end:
+  // this pass reads the previous answer, which is at most one poll old.
   let sniffing: Backend | null = null;
+  const queries: AgentTurnQuery[] = [];
 
   for (const t of app.threads) {
     // Server-owned threads (remote origin in dynamic mode) get their status
@@ -240,6 +244,13 @@ function tick() {
     // the stored key: it kills PTYs, and its per-agent opt-in is a setting the
     // user made against the icons they can see, not against an inferred one.
     const iconKey = t.iconKey ?? detectIconKey(t.cmd, t.label);
+    if (iconKey && iconKey !== "terminal") {
+      queries.push({
+        kind: iconKey,
+        sessionId: t.sessionId ?? null,
+        cwd: threadCwd(t, app.projectById(t.projectId)) ?? "",
+      });
+    }
     const reading = read(t, iconKey);
     if (reading) {
       // Stamped from `active`, not from the dot: a thread waiting on a prompt, or
@@ -279,7 +290,7 @@ function tick() {
     }
   }
 
-  if (sniffing) claudeTurn.poll(sniffing);
+  if (sniffing) agentTurns.poll(sniffing, queries);
 }
 
 export const statusEngine = {

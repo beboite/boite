@@ -57,16 +57,29 @@ the absence of evidence, and when the loop was refcounted off mounted
 `Terminal` components, closing the last local pane stopped the only thing that
 could notice.
 
-Two sources answer, in this order. Claude rewrites
-`~/.claude/sessions/<pid>.json` as each of its four states begins and ends, so
-`declaredTurn` (`thread/claude-registry.ts`) reads `busy` / `waiting` / `shell` /
-`idle` from the agent itself and that settles it, and keeps settling it through a
-quiet tool call, a compaction or a hidden pane. Everything else is read off the
-emulator's bottom rows (`terminalScreenRows`), which is level: the footer is on
-screen or it is not, so `false` means finished rather than "nothing seen lately".
-Detection never touches the byte stream. A rolling window of printed bytes answers
-a question about the recent past, and an `esc to interrupt` that had scrolled by
-kept re-matching itself for as long as the agent printed anything at all.
+Two sources answer, in this order. Three agents say what they are doing, each in
+a different place, and `boite-core/src/session.rs` reduces all three to one shape
+that `declaredTurn` (`thread/agent-registry.ts`) then reads:
+
+- claude writes `~/.claude/sessions/<pid>.json` per open session and rewrites
+  `status` as each of its four states begins and ends: `busy`, `waiting`, `shell`,
+  `idle`.
+- codex leaves no live file at all. Its status model exists but is pushed over
+  JSON-RPC to whoever spawned the process, so a terminal a human started exposes
+  nothing. What is on disk is `~/.codex/state_*.sqlite` (thread id, cwd, rollout
+  path) plus the rollout itself, which brackets every turn with `task_started` and
+  closes it with `task_complete` or `turn_aborted`.
+- opencode serves `GET /session/status`, but a plain TUI runs its server in a
+  worker thread and binds no port, so that route is unreachable in the normal
+  case. Its database answers instead: an assistant message gains `time.completed`
+  when its turn ends and does not carry the field before that.
+
+Everything else is read off the emulator's bottom rows (`terminalScreenRows`),
+which is level: the footer is on screen or it is not, so `false` means finished
+rather than "nothing seen lately". Detection never touches the byte stream. A
+rolling window of printed bytes answers a question about the recent past, and an
+`esc to interrupt` that had scrolled by kept re-matching itself for as long as the
+agent printed anything at all.
 
 Only `idle` is a finished turn, and keeping the other three apart is the point.
 `waiting` means a dialog is up (a permission prompt, a plan to approve) and
@@ -75,32 +88,32 @@ than reading as `ready`: it is worth a notification of its own and it must never
 be a candidate for auto-sleep. `shell` means the agent takes input again while
 something it launched still runs, so the dot says `ready` and the activity stamp
 still refuses to sleep it. That is why a pass returns a status and an `active`
-flag separately: the dot and auto-sleep are asking different questions.
+flag separately: the dot and auto-sleep are asking different questions. Only
+claude ever declares those two; codex and opencode answer `busy` or `idle` and
+nothing else, so their approval prompts still read as `ready`.
 
-A subagent is only ever visible in the registry. The Task tool runs one inside
-claude's own process, so it gets no session entry of its own and its turns are
-appended to the parent transcript with `isSidechain`; the parent just stays
-`busy`. From outside that looks like a terminal which has printed nothing for ten
-minutes, which is what used to get the thread scored as finished and its PTY
-killed by auto-sleep. This is also why `declaredTurn` falls back to matching by
-directory while a thread's session id is still uncaptured: those seconds are part
-of the opening turn, the one most likely to spend a long time in a subagent. That
-fallback needs exactly one live session in the directory, and answers nothing
-otherwise.
+A subagent is only ever visible this way. Claude runs one inside its own process,
+so it gets no session entry and the parent simply stays `busy`; codex holds the
+turn open across `sub_agent_activity`; opencode gives the child its own session
+row while the parent's assistant message stays incomplete. From outside, all three
+look like a terminal which has printed nothing for ten minutes, which is what used
+to get the thread scored as finished and its PTY killed by auto-sleep. This is
+also why the reading falls back to matching by directory while a thread's session
+id is still uncaptured: those seconds are part of the opening turn, the one most
+likely to spend a long time in a subagent. That fallback needs exactly one live
+session of that agent in the directory, and answers nothing otherwise.
 
-The server runs the same decision over the same registry
-(`boite-core::session::declared_turn`, called from `registry.rs`), reading each
-thread's icon key and session id back out of its own thread table. It has no
-emulator, so with no registry answer it falls back to the OSC title and a 2s TTL;
-that path is now only reached by non-claude agents. Both sides read the same
+Reading these stores is not free, so `agentTurns` is asked only about the threads
+that are actually open, and at most once a second. The server runs the same
+decision over the same stores (`boite-core::session::agent_turns` and
+`declared_turn`, called from `registry.rs`), reading each thread's icon key and
+session id back out of its own thread table. It has no emulator, so with no
+answer it falls back to the OSC title and a 2s TTL. Both sides read the same
 files, so their rules are mirrored deliberately and tested in both languages
-(`claude-registry.test.ts`, `session.rs::turn_tests`).
+(`agent-registry.test.ts`, `session.rs::turn_tests`).
 
-No other agent declares any of this. Codex, opencode, cursor, antigravity,
-copilot, grok and hermes get the screen rows and nothing else, so they are only
-ever `running` or `ready`: their approval prompts read as `ready`, and a subagent
-of theirs is covered by the raw-output and transcript stamps that hold auto-sleep
-off, not by anything that lights a dot.
+The five remaining agents (cursor, antigravity, copilot, grok, hermes) declare
+nothing that can be polled from outside, and get the screen rows alone.
 
 ## Checking your work in the running app
 

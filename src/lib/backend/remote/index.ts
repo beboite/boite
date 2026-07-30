@@ -10,6 +10,7 @@ import type {
   FolderState,
   GitApi,
   LiveClaudeSession,
+  AgentTurn,
   UsageReport,
   LogApi,
   ProjectApi,
@@ -301,6 +302,14 @@ export class RemoteBackend implements Backend {
       liveClaude: () =>
         rpc("session.liveClaude")
           .then((r) => (r.sessions ?? []) as LiveClaudeSession[])
+          .catch(() => []),
+      // Same reasoning: the agents run on the server, so it is the only machine
+      // that can read what they say about themselves. An older server answers
+      // with an error, and an empty list reads as "nobody said anything", which
+      // leaves the boite's threads on the status it derives for itself.
+      agentTurns: (queries) =>
+        rpc("session.agentTurns", { queries })
+          .then((r) => (r.turns ?? []) as AgentTurn[])
           .catch(() => []),
       stopClaude: (sessionId) =>
         rpc("session.stopClaude", { sessionId })

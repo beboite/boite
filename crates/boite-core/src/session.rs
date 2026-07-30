@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::env;
 use std::ffi::OsStr;
 use std::fs;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
@@ -262,12 +262,51 @@ impl DeclaredTurn {
     }
 }
 
-/// Places a thread in claude's session registry and reads its turn off it.
+/// What one agent says about one of its sessions, in the one shape every agent is
+/// reduced to before anything downstream looks at it.
 ///
-/// By id when the thread has captured one: that is the precise question, and a
-/// miss answers `Unknown` rather than falling back to the directory. An id that
-/// is not in the registry means claude is not holding that session (it exited, or
-/// it predates the registry), and a neighbour's state must not stand in for it.
+/// The agents disagree wildly on where this lives: claude writes a registry file
+/// per process, codex only leaves markers in the transcript it appends, opencode
+/// only records it in a SQLite row. Reading each one is a per-agent job; deciding
+/// what a thread's dot should say is not, so they meet here.
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentTurn {
+    /// The agent that said it, matching Boite's icon keys.
+    pub kind: String,
+    pub session_id: String,
+    /// As the agent recorded it. Callers normalise before comparing.
+    pub cwd: String,
+    /// `busy`, `waiting`, `shell` or `idle`. Only claude ever says the middle two.
+    pub state: String,
+    /// Claude's own label for what it is blocked on. Never set by the others.
+    pub waiting_for: Option<String>,
+}
+
+/// A thread Boite wants an answer for. Reading these stores is not free, so the
+/// caller says which threads it actually has rather than having every agent's
+/// whole history enumerated on a timer.
+#[derive(Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnQuery {
+    pub kind: String,
+    pub session_id: Option<String>,
+    pub cwd: String,
+}
+
+impl TurnQuery {
+    fn id(&self) -> Option<&str> {
+        self.session_id.as_deref().filter(|id| !id.is_empty())
+    }
+}
+
+/// Places a thread among what the agents said, and reads its turn off that.
+///
+/// Same rule whatever the agent. By id when the thread has captured one: that is
+/// the precise question, and a miss answers `Unknown` rather than falling back to
+/// the directory. An id that is not there means the agent is not holding that
+/// session (it exited, or it predates whatever records this), and a neighbour's
+/// state must not stand in for it.
 ///
 /// By directory otherwise, and only when exactly one live session claims it. The
 /// window before a session id is captured is a few seconds of the agent's first
@@ -275,23 +314,28 @@ impl DeclaredTurn {
 /// thread gets called idle while a subagent works. Two sessions in one directory
 /// answers `Unknown`: with per-thread worktrees that does not normally happen,
 /// and guessing between them would light or sleep the wrong thread.
+///
+/// `kind` scopes the search before any of that. Two agents in one directory is
+/// ordinary, and a codex thread has no business being handed a claude answer.
 pub fn declared_turn(
-    sessions: &[LiveClaudeSession],
+    turns: &[AgentTurn],
+    kind: &str,
     session_id: Option<&str>,
     cwd: &str,
 ) -> DeclaredTurn {
-    let read = |s: &LiveClaudeSession| match s.status.as_str() {
+    let read = |t: &AgentTurn| match t.state.as_str() {
         "idle" => DeclaredTurn::Idle,
         "waiting" => DeclaredTurn::Waiting,
         "shell" => DeclaredTurn::Shell,
-        // `busy`, and anything else. An unset or unrecognised status comes from a
-        // claude whose registry format this does not know, and calling that
-        // finished is the one wrong answer that loses work to auto-sleep.
+        // `busy`, and anything else. An unset or unrecognised state comes from an
+        // agent whose format this does not know, and calling that finished is the
+        // one wrong answer that loses work to auto-sleep.
         _ => DeclaredTurn::Busy,
     };
+    let mine = || turns.iter().filter(|t| t.kind == kind);
     if let Some(id) = session_id.filter(|id| !id.is_empty()) {
-        return match sessions.iter().find(|s| s.id == id) {
-            Some(s) => read(s),
+        return match mine().find(|t| t.session_id == id) {
+            Some(t) => read(t),
             None => DeclaredTurn::Unknown,
         };
     }
@@ -300,13 +344,39 @@ pub fn declared_turn(
     }
     let want = normalize(cwd);
     let mut found = None;
-    for s in sessions.iter().filter(|s| normalize(&s.cwd) == want) {
+    for t in mine().filter(|t| normalize(&t.cwd) == want) {
         if found.is_some() {
             return DeclaredTurn::Unknown;
         }
-        found = Some(s);
+        found = Some(t);
     }
     found.map(read).unwrap_or(DeclaredTurn::Unknown)
+}
+
+/// Everything the agents behind these threads say about themselves right now.
+///
+/// One pass per agent rather than one per thread: each of the three costs a
+/// directory read or a database open, and doing that per thread on a timer is how
+/// a status sweep turns into the most expensive thing in the app.
+pub fn agent_turns(queries: &[TurnQuery]) -> Vec<AgentTurn> {
+    let mut out = Vec::new();
+    let has = |kind: &str| queries.iter().any(|q| q.kind == kind);
+    if has("claude") {
+        out.extend(live_claude_sessions().into_iter().map(|s| AgentTurn {
+            kind: "claude".into(),
+            session_id: s.id,
+            cwd: s.cwd,
+            state: s.status,
+            waiting_for: s.waiting_for,
+        }));
+    }
+    if has("codex") {
+        out.extend(codex_turns(queries));
+    }
+    if has("opencode") {
+        out.extend(opencode_turns(queries));
+    }
+    out
 }
 
 fn normalize(p: &str) -> String {
@@ -753,6 +823,267 @@ pub fn find_codex_session_blocking(
         }
     }
     None
+}
+
+/// How much of a rollout's tail is scanned for the marker that ends a turn.
+///
+/// Generous, because the markers bracket a whole turn and everything the agent
+/// did lands in between. Not unbounded, because this runs on a timer: past this
+/// the answer is `Unknown` and the terminal's own rows decide, which for codex
+/// they can, since it prints an interrupt hint the whole time it works.
+const CODEX_TAIL_BYTES: u64 = 256 * 1024;
+
+/// Codex's thread index. The number is a schema version and has moved before
+/// (`state_5.sqlite` today), so it is discovered rather than hardcoded: a bumped
+/// version must degrade to "no answer" and not to "wrong answer".
+fn codex_state_db() -> Option<PathBuf> {
+    let dir = dirs::home_dir()?.join(".codex");
+    let mut best: Option<(u32, PathBuf)> = None;
+    for entry in fs::read_dir(&dir).ok()?.flatten() {
+        let path = entry.path();
+        if path.extension() != Some(OsStr::new("sqlite")) {
+            continue;
+        }
+        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        let Some(version) = stem.strip_prefix("state_").and_then(|v| v.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        if best.as_ref().is_none_or(|(seen, _)| version > *seen) {
+            best = Some((version, path));
+        }
+    }
+    best.map(|(_, path)| path)
+}
+
+/// Whether a codex turn is in flight, read off the transcript it is appending to.
+///
+/// Codex does keep the state we want, but only as an app-server protocol type
+/// pushed over JSON-RPC to whoever spawned the process. A terminal someone else
+/// started exposes none of it, so the transcript is what is left: it brackets each
+/// turn with `task_started` and closes it with `task_complete` or `turn_aborted`.
+/// Reading the last of those backwards is the whole answer.
+///
+/// `waiting` has no equivalent here. Codex knows the difference (its protocol has
+/// `waitingOnApproval` and `waitingOnUserInput`) but does not write approval
+/// events to the rollout, so an approval prompt is indistinguishable from a turn
+/// still running. Busy is the safe side of that: it keeps auto-sleep off a thread
+/// that is actually waiting for the user.
+fn codex_rollout_state(path: &Path) -> Option<&'static str> {
+    let mut file = fs::File::open(path).ok()?;
+    let len = file.metadata().ok()?.len();
+    let from = len.saturating_sub(CODEX_TAIL_BYTES);
+    file.seek(SeekFrom::Start(from)).ok()?;
+    let mut buf = String::new();
+    file.read_to_string(&mut buf).ok()?;
+    // Dropping the first line matters only when the window clipped one in half;
+    // a partial line cannot parse anyway, so this is about not scanning garbage.
+    let body = if from > 0 {
+        buf.split_once('\n').map(|(_, rest)| rest).unwrap_or("")
+    } else {
+        &buf
+    };
+    for line in body.lines().rev() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let Ok(event) = serde_json::from_str::<CodexRolloutLine>(line) else {
+            continue;
+        };
+        if event.kind.as_deref() != Some("event_msg") {
+            continue;
+        }
+        match event.payload.and_then(|p| p.kind).as_deref() {
+            Some("task_started") => return Some("busy"),
+            Some("task_complete") | Some("turn_aborted") => return Some("idle"),
+            _ => continue,
+        }
+    }
+    None
+}
+
+#[derive(Deserialize)]
+struct CodexRolloutLine {
+    #[serde(rename = "type")]
+    kind: Option<String>,
+    payload: Option<CodexRolloutPayload>,
+}
+
+#[derive(Deserialize)]
+struct CodexRolloutPayload {
+    #[serde(rename = "type")]
+    kind: Option<String>,
+}
+
+fn codex_turns(queries: &[TurnQuery]) -> Vec<AgentTurn> {
+    let Some(db) = codex_state_db() else {
+        return Vec::new();
+    };
+    let Ok(conn) = open_readonly(&db) else {
+        return Vec::new();
+    };
+    // The recent end of the index, read once. Bounded rather than filtered per
+    // query because a thread with no captured id has to be found by directory,
+    // and both lookups then happen in memory.
+    let Ok(mut stmt) = conn.prepare(
+        "SELECT id, cwd, rollout_path FROM threads \
+         WHERE archived = 0 \
+         ORDER BY coalesce(updated_at_ms, updated_at * 1000) DESC LIMIT 200",
+    ) else {
+        return Vec::new();
+    };
+    let Ok(rows) = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+        ))
+    }) else {
+        return Vec::new();
+    };
+    // Codex records the cwd with Windows's extended-length prefix. Stripped here,
+    // before anything compares it: left on, it matches no path a user ever picked
+    // through a folder browser, and the whole codex side silently answers nothing.
+    let threads: Vec<(String, String, String)> = rows
+        .flatten()
+        .map(|(id, cwd, rollout)| {
+            (
+                id,
+                cwd.strip_prefix(r"\\?\").unwrap_or(&cwd).to_string(),
+                rollout,
+            )
+        })
+        .collect();
+
+    let mut out = Vec::new();
+    for query in queries.iter().filter(|q| q.kind == "codex") {
+        let hit = match query.id() {
+            Some(id) => threads.iter().find(|(tid, _, _)| tid == id),
+            None => {
+                let want = normalize(&query.cwd);
+                // Newest first, so this is the most recent thread in the folder.
+                // Unlike the registry agents there is no liveness here at all, so
+                // a stale row is possible; the rollout markers below are what
+                // actually decide, and a finished one reads idle.
+                threads.iter().find(|(_, cwd, _)| normalize(cwd) == want)
+            }
+        };
+        let Some((id, cwd, rollout)) = hit else {
+            continue;
+        };
+        let Some(state) = codex_rollout_state(Path::new(rollout)) else {
+            continue;
+        };
+        out.push(AgentTurn {
+            kind: "codex".into(),
+            session_id: id.clone(),
+            cwd: cwd.clone(),
+            state: state.into(),
+            waiting_for: None,
+        });
+    }
+    out
+}
+
+/// Whether an opencode turn is in flight, read off the message it is writing.
+///
+/// Opencode does expose the state we want, over `GET /session/status`, but only
+/// when its server is listening: started as a plain TUI it runs the server inside
+/// a worker thread behind a fake origin and binds no port at all. So the database
+/// is what is left, and it answers cleanly: an assistant message carries
+/// `time.completed` once its turn ends, and does not have the field before that.
+///
+/// `waiting` has no equivalent on disk either. Pending permissions and questions
+/// live in `GET /permission` and `GET /question`, in memory, and the `permission`
+/// table holds saved project rules rather than pending requests.
+fn opencode_turns(queries: &[TurnQuery]) -> Vec<AgentTurn> {
+    let Some(db) = opencode_db_path() else {
+        return Vec::new();
+    };
+    if !db.is_file() {
+        return Vec::new();
+    }
+    let Ok(conn) = open_readonly(&db) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for query in queries.iter().filter(|q| q.kind == "opencode") {
+        let resolved = match query.id() {
+            Some(id) => conn
+                .query_row(
+                    "SELECT id, coalesce(directory, '') FROM session WHERE id = ?1",
+                    [id],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                )
+                .ok(),
+            // Newest first. `parent_id IS NULL` keeps a subagent's own session from
+            // standing in for the thread: it shares the directory, and its turn
+            // ends before the parent's does.
+            None => conn
+                .query_row(
+                    "SELECT id, coalesce(directory, '') FROM session \
+                     WHERE parent_id IS NULL \
+                     ORDER BY coalesce(time_updated, time_created, 0) DESC LIMIT 1",
+                    [],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                )
+                .ok()
+                .filter(|(_, dir)| !query.cwd.is_empty() && normalize(dir) == normalize(&query.cwd)),
+        };
+        let Some((id, directory)) = resolved else {
+            continue;
+        };
+        let newest: Option<String> = conn
+            .query_row(
+                "SELECT data FROM message WHERE session_id = ?1 \
+                 ORDER BY time_created DESC, id DESC LIMIT 1",
+                [&id],
+                |row| row.get::<_, String>(0),
+            )
+            .ok();
+        let Some(state) = newest.as_deref().and_then(opencode_message_state) else {
+            continue;
+        };
+        out.push(AgentTurn {
+            kind: "opencode".into(),
+            session_id: id,
+            cwd: directory,
+            state: state.into(),
+            waiting_for: None,
+        });
+    }
+    out
+}
+
+#[derive(Deserialize)]
+struct OpencodeMessage {
+    role: Option<String>,
+    time: Option<OpencodeMessageTime>,
+}
+
+#[derive(Deserialize)]
+struct OpencodeMessageTime {
+    completed: Option<i64>,
+}
+
+/// The newest message in a session, turned into a state.
+///
+/// An assistant row without `time.completed` is a turn being written right now. A
+/// user row as the newest means the prompt has landed and the reply has not been
+/// created yet, which is the very start of a turn rather than the end of one.
+fn opencode_message_state(data: &str) -> Option<&'static str> {
+    let message: OpencodeMessage = serde_json::from_str(data).ok()?;
+    match message.role.as_deref() {
+        Some("assistant") => Some(match message.time.and_then(|t| t.completed) {
+            Some(_) => "idle",
+            None => "busy",
+        }),
+        Some("user") => Some("busy"),
+        _ => None,
+    }
 }
 
 fn open_readonly(path: &Path) -> rusqlite::Result<Connection> {
@@ -1386,35 +1717,36 @@ pub fn build_exclude(ids: Option<Vec<String>>) -> HashSet<String> {
 mod turn_tests {
     use super::*;
 
-    fn entry(id: &str, status: &str, cwd: &str) -> LiveClaudeSession {
-        LiveClaudeSession {
-            id: id.into(),
-            pid: 1,
-            kind: "interactive".into(),
-            status: status.into(),
-            waiting_for: None,
+    fn turn(kind: &str, id: &str, state: &str, cwd: &str) -> AgentTurn {
+        AgentTurn {
+            kind: kind.into(),
+            session_id: id.into(),
             cwd: cwd.into(),
+            state: state.into(),
+            waiting_for: None,
         }
     }
 
+    fn claude(id: &str, state: &str, cwd: &str) -> AgentTurn {
+        turn("claude", id, state, cwd)
+    }
+
     #[test]
-    fn each_claude_state_maps_to_its_own_answer() {
+    fn each_declared_state_maps_to_its_own_answer() {
         // The four claude writes, plus the catch-all. Collapsing waiting or shell
         // into idle is what let a thread be called finished while a permission
         // prompt sat unanswered, or while a shell it started still ran.
         let live = [
-            entry("busy", "busy", "/w/1"),
-            entry("waiting", "waiting", "/w/2"),
-            entry("shell", "shell", "/w/3"),
-            entry("idle", "idle", "/w/4"),
+            claude("busy", "busy", "/w/1"),
+            claude("waiting", "waiting", "/w/2"),
+            claude("shell", "shell", "/w/3"),
+            claude("idle", "idle", "/w/4"),
         ];
-        assert_eq!(declared_turn(&live, Some("busy"), ""), DeclaredTurn::Busy);
-        assert_eq!(
-            declared_turn(&live, Some("waiting"), ""),
-            DeclaredTurn::Waiting
-        );
-        assert_eq!(declared_turn(&live, Some("shell"), ""), DeclaredTurn::Shell);
-        assert_eq!(declared_turn(&live, Some("idle"), ""), DeclaredTurn::Idle);
+        let ask = |id| declared_turn(&live, "claude", Some(id), "");
+        assert_eq!(ask("busy"), DeclaredTurn::Busy);
+        assert_eq!(ask("waiting"), DeclaredTurn::Waiting);
+        assert_eq!(ask("shell"), DeclaredTurn::Shell);
+        assert_eq!(ask("idle"), DeclaredTurn::Idle);
     }
 
     #[test]
@@ -1429,18 +1761,24 @@ mod turn_tests {
 
     #[test]
     fn a_captured_id_is_read_off_its_own_entry() {
-        let live = [entry("a", "busy", "/w/one"), entry("b", "idle", "/w/two")];
-        assert_eq!(declared_turn(&live, Some("a"), "/w/one"), DeclaredTurn::Busy);
-        assert_eq!(declared_turn(&live, Some("b"), "/w/two"), DeclaredTurn::Idle);
+        let live = [claude("a", "busy", "/w/one"), claude("b", "idle", "/w/two")];
+        assert_eq!(
+            declared_turn(&live, "claude", Some("a"), "/w/one"),
+            DeclaredTurn::Busy
+        );
+        assert_eq!(
+            declared_turn(&live, "claude", Some("b"), "/w/two"),
+            DeclaredTurn::Idle
+        );
     }
 
     #[test]
     fn a_captured_id_that_is_not_live_never_borrows_a_neighbour() {
-        // The thread's claude has gone, or predates the registry. Answering from
-        // the directory here would hand it the state of whoever else is there.
-        let live = [entry("a", "busy", "/w/one")];
+        // The thread's agent has gone, or predates whatever records this.
+        // Answering from the directory would hand it someone else's state.
+        let live = [claude("a", "busy", "/w/one")];
         assert_eq!(
-            declared_turn(&live, Some("gone"), "/w/one"),
+            declared_turn(&live, "claude", Some("gone"), "/w/one"),
             DeclaredTurn::Unknown
         );
     }
@@ -1449,38 +1787,180 @@ mod turn_tests {
     fn an_uncaptured_thread_is_placed_by_its_directory() {
         // The seconds before capture are part of the agent's first turn, which is
         // where a long subagent run would otherwise read as idle.
-        let live = [entry("a", "busy", "/w/one")];
-        assert_eq!(declared_turn(&live, None, "/w/one"), DeclaredTurn::Busy);
-        assert_eq!(declared_turn(&live, Some(""), "/w/one"), DeclaredTurn::Busy);
+        let live = [claude("a", "busy", "/w/one")];
+        assert_eq!(
+            declared_turn(&live, "claude", None, "/w/one"),
+            DeclaredTurn::Busy
+        );
+        assert_eq!(
+            declared_turn(&live, "claude", Some(""), "/w/one"),
+            DeclaredTurn::Busy
+        );
     }
 
     #[test]
     fn directory_matching_ignores_separator_and_case() {
-        let live = [entry("a", "busy", "C:\\Work\\One\\")];
-        assert_eq!(declared_turn(&live, None, "c:/work/one"), DeclaredTurn::Busy);
+        let live = [claude("a", "busy", r"C:\Work\One\")];
+        assert_eq!(
+            declared_turn(&live, "claude", None, "c:/work/one"),
+            DeclaredTurn::Busy
+        );
     }
 
     #[test]
     fn two_sessions_in_one_directory_answer_nothing() {
-        let live = [entry("a", "busy", "/w/one"), entry("b", "idle", "/w/one")];
-        assert_eq!(declared_turn(&live, None, "/w/one"), DeclaredTurn::Unknown);
+        let live = [claude("a", "busy", "/w/one"), claude("b", "idle", "/w/one")];
+        assert_eq!(
+            declared_turn(&live, "claude", None, "/w/one"),
+            DeclaredTurn::Unknown
+        );
     }
 
     #[test]
     fn an_unplaceable_thread_answers_nothing() {
-        let live = [entry("a", "busy", "/w/one")];
-        assert_eq!(declared_turn(&live, None, "/w/other"), DeclaredTurn::Unknown);
-        assert_eq!(declared_turn(&live, None, ""), DeclaredTurn::Unknown);
-        assert_eq!(declared_turn(&[], None, "/w/one"), DeclaredTurn::Unknown);
+        let live = [claude("a", "busy", "/w/one")];
+        assert_eq!(
+            declared_turn(&live, "claude", None, "/w/other"),
+            DeclaredTurn::Unknown
+        );
+        assert_eq!(declared_turn(&live, "claude", None, ""), DeclaredTurn::Unknown);
+        assert_eq!(declared_turn(&[], "claude", None, "/w/one"), DeclaredTurn::Unknown);
     }
 
     #[test]
-    fn an_unrecognised_status_is_treated_as_a_turn_in_flight() {
-        // Calling a status we cannot read "finished" is what would let auto-sleep
+    fn an_unrecognised_state_is_treated_as_a_turn_in_flight() {
+        // Calling a state we cannot read "finished" is what would let auto-sleep
         // kill a working PTY.
-        let live = [entry("a", "starting", "/w/one"), entry("b", "", "/w/two")];
-        assert_eq!(declared_turn(&live, Some("a"), "/w/one"), DeclaredTurn::Busy);
-        assert_eq!(declared_turn(&live, Some("b"), "/w/two"), DeclaredTurn::Busy);
+        let live = [claude("a", "starting", "/w/one"), claude("b", "", "/w/two")];
+        assert_eq!(
+            declared_turn(&live, "claude", Some("a"), "/w/one"),
+            DeclaredTurn::Busy
+        );
+        assert_eq!(
+            declared_turn(&live, "claude", Some("b"), "/w/two"),
+            DeclaredTurn::Busy
+        );
+    }
+
+    #[test]
+    fn an_agent_is_never_handed_another_agents_answer() {
+        // Two agents in one directory is ordinary, and both may be mid-turn. The
+        // kind is checked before the id and before the directory, so neither the
+        // id collision nor the shared folder can cross the wires.
+        let live = [
+            claude("shared", "busy", "/w/one"),
+            turn("codex", "shared", "idle", "/w/one"),
+        ];
+        assert_eq!(
+            declared_turn(&live, "claude", Some("shared"), "/w/one"),
+            DeclaredTurn::Busy
+        );
+        assert_eq!(
+            declared_turn(&live, "codex", Some("shared"), "/w/one"),
+            DeclaredTurn::Idle
+        );
+        // By directory, each agent sees exactly one candidate rather than two.
+        assert_eq!(
+            declared_turn(&live, "claude", None, "/w/one"),
+            DeclaredTurn::Busy
+        );
+        assert_eq!(
+            declared_turn(&live, "codex", None, "/w/one"),
+            DeclaredTurn::Idle
+        );
+        // An agent nobody reported stays unanswered rather than borrowing.
+        assert_eq!(
+            declared_turn(&live, "opencode", None, "/w/one"),
+            DeclaredTurn::Unknown
+        );
+    }
+
+    #[test]
+    fn codex_rollout_markers_decide_the_turn() {
+        // Codex brackets a turn with these and writes nothing else that says so,
+        // because the status it does track never reaches the transcript.
+        let dir = std::env::temp_dir().join(format!("boite-codex-turn-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let write = |name: &str, lines: &[&str]| {
+            let path = dir.join(name);
+            fs::write(&path, lines.join("
+")).unwrap();
+            path
+        };
+
+        let started = write(
+            "started.jsonl",
+            &[
+                r#"{"type":"session_meta","payload":{"id":"a","cwd":"/w"}}"#,
+                r#"{"type":"event_msg","payload":{"type":"task_started"}}"#,
+                r#"{"type":"response_item","payload":{"type":"message"}}"#,
+            ],
+        );
+        assert_eq!(codex_rollout_state(&started), Some("busy"));
+
+        let done = write(
+            "done.jsonl",
+            &[
+                r#"{"type":"event_msg","payload":{"type":"task_started"}}"#,
+                r#"{"type":"event_msg","payload":{"type":"task_complete"}}"#,
+                r#"{"type":"event_msg","payload":{"type":"token_count"}}"#,
+            ],
+        );
+        assert_eq!(codex_rollout_state(&done), Some("idle"));
+
+        // An interrupted turn is over too; only the marker differs.
+        let aborted = write(
+            "aborted.jsonl",
+            &[
+                r#"{"type":"event_msg","payload":{"type":"task_started"}}"#,
+                r#"{"type":"event_msg","payload":{"type":"turn_aborted"}}"#,
+            ],
+        );
+        assert_eq!(codex_rollout_state(&aborted), Some("idle"));
+
+        // The newest marker wins: a second turn opened after the first closed.
+        let again = write(
+            "again.jsonl",
+            &[
+                r#"{"type":"event_msg","payload":{"type":"task_started"}}"#,
+                r#"{"type":"event_msg","payload":{"type":"task_complete"}}"#,
+                r#"{"type":"event_msg","payload":{"type":"task_started"}}"#,
+            ],
+        );
+        assert_eq!(codex_rollout_state(&again), Some("busy"));
+
+        // No marker in reach is not an answer. The terminal's own rows decide,
+        // which for codex they can: it prints an interrupt hint while it works.
+        let quiet = write(
+            "quiet.jsonl",
+            &[r#"{"type":"session_meta","payload":{"id":"a","cwd":"/w"}}"#],
+        );
+        assert_eq!(codex_rollout_state(&quiet), None);
+        assert_eq!(codex_rollout_state(&dir.join("missing.jsonl")), None);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn opencode_message_rows_decide_the_turn() {
+        // An assistant row gains `time.completed` when its turn ends and does not
+        // have the field before that. A user row as the newest means the prompt
+        // landed and the reply has not been created yet.
+        assert_eq!(
+            opencode_message_state(r#"{"role":"assistant","time":{"created":1,"completed":2}}"#),
+            Some("idle")
+        );
+        assert_eq!(
+            opencode_message_state(r#"{"role":"assistant","time":{"created":1}}"#),
+            Some("busy")
+        );
+        assert_eq!(
+            opencode_message_state(r#"{"role":"user","time":{"created":1}}"#),
+            Some("busy")
+        );
+        // Nothing recognisable is not an answer.
+        assert_eq!(opencode_message_state(r#"{"role":"system"}"#), None);
+        assert_eq!(opencode_message_state("not json"), None);
     }
 }
 
