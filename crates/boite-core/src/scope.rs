@@ -21,18 +21,23 @@ impl ProjectRoots {
         *self.roots.lock() = canonical;
     }
 
-    /// The registered roots, as strings.
+    /// The folders a new project may be created next to: the parent of every
+    /// registered root.
     ///
-    /// Read by the new-project path, which needs their parent folders: a
-    /// project is allowed to be created next to the ones that already exist.
-    /// Nothing else should reach for this — every other caller wants
-    /// `ensure_allowed`, which answers the question instead of handing over the
-    /// list to be re-implemented against.
-    pub fn snapshot(&self) -> Vec<String> {
+    /// The one thing outside a scope check that needs the roots at all, and it
+    /// needs them as places to put something beside rather than as a boundary
+    /// to stay inside. Derived here so the shape `may_create_project_at` is fed
+    /// is decided once — every other caller wants `ensure_allowed`, which
+    /// answers the question instead of handing over the list to be
+    /// re-implemented against.
+    ///
+    /// These come back exactly as `replace` stored them, which on Windows means
+    /// verbatim `\\?\` paths. `may_create_project_at` takes that shape.
+    pub fn new_project_parents(&self) -> Vec<String> {
         self.roots
             .lock()
             .iter()
-            .map(|p| p.to_string_lossy().to_string())
+            .filter_map(|root| root.parent().map(|p| p.to_string_lossy().to_string()))
             .collect()
     }
 

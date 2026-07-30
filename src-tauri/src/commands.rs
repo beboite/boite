@@ -184,6 +184,26 @@ pub fn folder_state(path: String) -> project::FolderState {
     project::folder_state_blocking(&path)
 }
 
+/// Said to whoever asked for a project folder somewhere it cannot go. Shared
+/// because the agent endpoint answers the same question before it emits, and a
+/// refusal worded twice reads as two different rules.
+pub const WRONG_PLACE_FOR_A_PROJECT: &str =
+    "a new project has to go under your home folder or beside a project you already have";
+
+/// Where a new project folder is allowed to go: beside a project the user
+/// already has, or under their home.
+///
+/// Built here rather than at each call site for the same reason as the message
+/// above. `create_project_folder` enforces it; `agent_api` reads it to refuse
+/// in front of an agent that is still running.
+pub fn new_project_roots(app: &AppHandle, scope: &ProjectRoots) -> Vec<String> {
+    let mut allowed = scope.new_project_parents();
+    if let Ok(home) = app.path().home_dir() {
+        allowed.push(home.to_string_lossy().to_string());
+    }
+    allowed
+}
+
 /// Makes the folder a new project will live in.
 ///
 /// The one command here that creates a directory outside every registered root,
@@ -197,23 +217,8 @@ pub fn create_project_folder(
     scope: State<'_, ProjectRoots>,
     path: String,
 ) -> Result<(), String> {
-    let mut allowed: Vec<String> = scope
-        .snapshot()
-        .iter()
-        .filter_map(|root| {
-            std::path::Path::new(root)
-                .parent()
-                .map(|p| p.to_string_lossy().to_string())
-        })
-        .collect();
-    if let Ok(home) = app.path().home_dir() {
-        allowed.push(home.to_string_lossy().to_string());
-    }
-    if !project::may_create_project_at(&path, &allowed) {
-        return Err(
-            "a new project has to go under your home folder or beside a project you already have"
-                .into(),
-        );
+    if !project::may_create_project_at(&path, &new_project_roots(&app, &scope)) {
+        return Err(WRONG_PLACE_FOR_A_PROJECT.into());
     }
     if project::folder_state_blocking(&path) == project::FolderState::Occupied {
         return Err("there is already something in that folder".into());
