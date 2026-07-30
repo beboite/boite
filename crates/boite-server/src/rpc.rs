@@ -320,16 +320,7 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
         "project.createFolder" => {
             let path = str_param(&params, "path")?;
             state.ensure_project_path(&path)?;
-            let mut allowed: Vec<String> = state
-                .roots
-                .snapshot()
-                .iter()
-                .filter_map(|root| {
-                    std::path::Path::new(root)
-                        .parent()
-                        .map(|p| p.to_string_lossy().to_string())
-                })
-                .collect();
+            let mut allowed = state.roots.new_project_parents();
             if let Some(home) = dirs::home_dir() {
                 allowed.push(home.to_string_lossy().to_string());
             }

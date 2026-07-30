@@ -79,41 +79,52 @@ pub fn folder_state_blocking(path: &str) -> FolderState {
 /// resolve, and a symlink that escapes them is a machine the user set up that
 /// way.
 pub fn may_create_project_at(path: &str, roots: &[String]) -> bool {
-    fn normalize(p: &str) -> String {
-        let slashed = p.replace('\\', "/");
-        // The roots come out of `ProjectRoots::snapshot`, which stores what
-        // `std::fs::canonicalize` returned, and on Windows that is a verbatim
-        // path: the root reads `//?/d:/dev/perso` while the folder being asked
-        // about is the plain `d:/dev/perso/thing` the caller typed. A textual
-        // prefix test never brings those two together, so the marker comes off
-        // both sides here. Nothing is widened by it: the stripped path still
-        // has to sit under a root to be allowed.
-        let bare = match slashed.strip_prefix("//?/") {
-            // `//?/UNC/server/share` is the verbatim spelling of `//server/share`.
-            Some(rest) => match rest.get(..4).filter(|s| s.eq_ignore_ascii_case("unc/")) {
-                Some(_) => format!("//{}", &rest[4..]),
-                None => rest.to_string(),
-            },
-            None => slashed,
-        };
-        bare.trim_end_matches('/').to_lowercase()
-    }
     // `..` never survives a prefix test honestly: "c:/users/me/../../windows"
     // starts with the home and lands nowhere near it.
     if path.split(['/', '\\']).any(|seg| seg == "..") {
         return false;
     }
-    let target = normalize(path);
+    let target = normalize_folder(path);
     if target.is_empty() {
         return false;
     }
     roots.iter().any(|root| {
-        let root = normalize(root);
+        let root = normalize_folder(root);
         // Equal is refused on purpose: a project rooted at the home directory
         // itself, or on top of an existing project's parent, is never what was
         // meant.
         !root.is_empty() && target.len() > root.len() && target.starts_with(&format!("{root}/"))
     })
+}
+
+/// Whether two paths name the same folder, under the rule above.
+///
+/// Same textual comparison, so a folder the app stored and one an agent typed
+/// answer the same way here as they do to `may_create_project_at`.
+pub fn same_folder(a: &str, b: &str) -> bool {
+    let a = normalize_folder(a);
+    !a.is_empty() && a == normalize_folder(b)
+}
+
+/// One folder path, in the shape both rules above compare in.
+fn normalize_folder(p: &str) -> String {
+    let slashed = p.replace('\\', "/");
+    // The roots come out of `ProjectRoots::new_project_parents`, which stores
+    // what `std::fs::canonicalize` returned, and on Windows that is a verbatim
+    // path: the root reads `//?/d:/dev/perso` while the folder being asked
+    // about is the plain `d:/dev/perso/thing` the caller typed. A textual
+    // prefix test never brings those two together, so the marker comes off
+    // both sides here. Nothing is widened by it: the stripped path still has to
+    // sit under a root to be allowed.
+    let bare = match slashed.strip_prefix("//?/") {
+        // `//?/UNC/server/share` is the verbatim spelling of `//server/share`.
+        Some(rest) => match rest.get(..4).filter(|s| s.eq_ignore_ascii_case("unc/")) {
+            Some(_) => format!("//{}", &rest[4..]),
+            None => rest.to_string(),
+        },
+        None => slashed,
+    };
+    bare.trim_end_matches('/').to_lowercase()
 }
 
 fn basename(p: &Path) -> Option<String> {
@@ -695,6 +706,20 @@ mod new_project_tests {
         ] {
             assert!(!may_create_project_at(path, &roots()), "{path}");
         }
+    }
+
+    /// The endpoint reads this against the folders of projects the user
+    /// already has, to tell a creation apart from a reuse before it refuses
+    /// anything.
+    #[test]
+    fn the_same_folder_spelled_two_ways_is_one_folder() {
+        assert!(same_folder(r"D:\Dev\Perso\thing", "d:/dev/perso/thing/"));
+        assert!(same_folder(r"\\?\D:\Dev\Perso\thing", r"D:\Dev\Perso\thing"));
+        assert!(!same_folder(r"D:\Dev\Perso\thing", r"D:\Dev\Perso\other"));
+        // A folder deeper in is not the same folder, which is what keeps a
+        // project inside another one from reading as a reuse.
+        assert!(!same_folder(r"D:\Dev\Perso", r"D:\Dev\Perso\thing"));
+        assert!(!same_folder("", ""));
     }
 
     /// A prefix test is the whole check, so anything that walks back out of the
