@@ -395,6 +395,34 @@ export interface LiveClaudeSession {
 }
 
 /**
+ * What one agent says about one of its sessions, in the one shape every agent is
+ * reduced to before anything downstream looks at it.
+ *
+ * They disagree wildly on where this lives. Claude writes a registry file per
+ * process, codex only leaves markers in the transcript it appends, opencode only
+ * records it in a database row. Reading each is a per-agent job; deciding what a
+ * thread's dot should say is not, so they meet here.
+ */
+export interface AgentTurn {
+  /** The agent that said it, matching Boite's icon keys. */
+  kind: string;
+  sessionId: string;
+  /** As the agent recorded it. Callers normalise before comparing. */
+  cwd: string;
+  /** `busy`, `waiting`, `shell` or `idle`. Only claude ever says the middle two. */
+  state: string;
+  /** Claude's own label for what it is blocked on. Never set by the others. */
+  waitingFor?: string | null;
+}
+
+/** One thread to ask about. */
+export interface AgentTurnQuery {
+  kind: string;
+  sessionId: string | null;
+  cwd: string;
+}
+
+/**
  * One model's share of what was spent, as its own store recorded it.
  *
  * Cache reads are kept apart from input rather than folded in: on a long agent
@@ -460,6 +488,17 @@ export interface SessionApi {
    * "nothing is live" and preserves the old behaviour.
    */
   liveClaude(): Promise<LiveClaudeSession[]>;
+  /**
+   * What the agents behind these threads say they are doing right now, in the one
+   * shape all of them are reduced to.
+   *
+   * Scoped to the threads the caller has, because reading these stores is not
+   * free: claude's is a directory of small files, codex's is a SQLite index plus
+   * the tail of a transcript, opencode's is a SQLite query. Backends that cannot
+   * answer return an empty list, which reads as "nobody said anything" and leaves
+   * the caller on whatever it could work out for itself.
+   */
+  agentTurns(queries: AgentTurnQuery[]): Promise<AgentTurn[]>;
   /**
    * Releases a background agent holding a session, so `--resume` works on it
    * again. Only ever stops a background agent — an interactive session is

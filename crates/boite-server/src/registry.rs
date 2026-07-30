@@ -6,7 +6,7 @@ use parking_lot::Mutex;
 use tokio::sync::broadcast;
 
 use boite_core::pty::{EventSink, PtyEvent, PtyManager, PtySpawnArgs};
-use boite_core::session::{self, DeclaredTurn, LiveClaudeSession};
+use boite_core::session::{self, AgentTurn, DeclaredTurn, TurnQuery};
 use boite_core::status::{self, ThreadStatus};
 
 use crate::events::AppEvent;
@@ -408,33 +408,20 @@ fn next_status(
     (settled != status).then_some(settled)
 }
 
-// Keeps Ready/Running honest: claude's own answer where there is one, the OSC
-// title's TTL otherwise.
+// Keeps Ready/Running/Waiting honest: the agent's own answer where there is one,
+// the OSC title's TTL otherwise.
 fn spawn_ticker(shared: Arc<Shared>) {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(TICK);
-        let mut live: Vec<LiveClaudeSession> = Vec::new();
-        let mut live_read_at: Option<Instant> = None;
-        // Identities alongside the registry read, on the same expiry. Without it
-        // this loop would query the thread table once per live thread twice a
-        // second, forever, to re-learn two columns that almost never change.
+        let mut turns: Vec<AgentTurn> = Vec::new();
+        let mut turns_read_at: Option<Instant> = None;
+        // Identities alongside the turns read, on the same expiry. Without it this
+        // loop would query the thread table once per live thread twice a second,
+        // forever, to re-learn two columns that almost never change.
         let mut identities: HashMap<String, Option<ThreadIdentity>> = HashMap::new();
         loop {
             interval.tick().await;
             let now = Instant::now();
-            // Skipped entirely while nothing is running: an empty boite has no
-            // reason to stat a directory twice a second.
-            let any_live = !shared.threads.lock().is_empty();
-            if any_live
-                && live_read_at
-                    .map(|at| now.duration_since(at) >= REGISTRY_TTL)
-                    .unwrap_or(true)
-            {
-                live = session::live_claude_sessions();
-                live_read_at = Some(now);
-                identities.clear();
-            }
-
             // Snapshotted, so the identity lookup, which reads the thread table,
             // never runs while the live-thread map is locked against spawns
             // and attaches. Deciding and applying then happen under the one
@@ -442,22 +429,56 @@ fn spawn_ticker(shared: Arc<Shared>) {
             // cannot be overwritten by a decision taken before it.
             let live_threads: Vec<Arc<LiveThread>> =
                 shared.threads.lock().values().cloned().collect();
+
+            if !live_threads.is_empty()
+                && turns_read_at
+                    .map(|at| now.duration_since(at) >= REGISTRY_TTL)
+                    .unwrap_or(true)
+            {
+                identities.clear();
+                // Asked for exactly the threads that are running. Each agent's
+                // store costs a directory read or a database open, so an empty
+                // boite reads nothing and a busy one reads once per agent.
+                let queries: Vec<TurnQuery> = live_threads
+                    .iter()
+                    .filter_map(|lt| {
+                        let who = identities
+                            .entry(lt.thread_id.clone())
+                            .or_insert_with(|| (shared.identity)(&lt.thread_id));
+                        let kind = who.as_ref()?.icon_key.clone()?;
+                        Some(TurnQuery {
+                            kind,
+                            session_id: who.as_ref().and_then(|w| w.session_id.clone()),
+                            cwd: lt.cwd.clone(),
+                        })
+                    })
+                    .collect();
+                turns = if queries.is_empty() {
+                    Vec::new()
+                } else {
+                    session::agent_turns(&queries)
+                };
+                turns_read_at = Some(now);
+            }
+
             let mut changed = Vec::new();
             for lt in live_threads {
-                // Only claude keeps a registry, and only its threads may be
-                // placed in one. A codex thread sharing a directory with a claude
-                // session would otherwise be handed that session's answer.
-                let declared = if live.is_empty() {
+                // Scoped by agent: two of them in one directory is ordinary, and a
+                // codex thread has no business being handed a claude answer.
+                let declared = if turns.is_empty() {
                     DeclaredTurn::Unknown
                 } else {
                     let who = identities
                         .entry(lt.thread_id.clone())
                         .or_insert_with(|| (shared.identity)(&lt.thread_id));
-                    match who {
-                        Some(w) if w.icon_key.as_deref() == Some("claude") => {
-                            session::declared_turn(&live, w.session_id.as_deref(), &lt.cwd)
-                        }
-                        _ => DeclaredTurn::Unknown,
+                    match who.as_ref().and_then(|w| w.icon_key.as_deref()) {
+                        Some(kind) => session::declared_turn(
+                            &turns,
+                            kind,
+                            who.as_ref().and_then(|w| w.session_id.as_deref()),
+                            &lt.cwd,
+                        ),
+                        None => DeclaredTurn::Unknown,
                     }
                 };
                 let mut st = lt.status.lock();
