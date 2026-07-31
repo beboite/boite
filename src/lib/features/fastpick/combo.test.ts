@@ -121,6 +121,31 @@ describe("modelLabels", () => {
     expect(labels.get("acme-l")).toBe("acme-l");
   });
 
+  it("falls back for labels a reader tells apart only by case", () => {
+    const labels = modelLabels([
+      model("claude-opus-5[1m]", "Opus 5"),
+      model("claude-opus-5", "opus 5"),
+    ]);
+    expect(labels.get("claude-opus-5[1m]")).toBe("claude-opus-5[1m]");
+    expect(labels.get("claude-opus-5")).toBe("claude-opus-5");
+  });
+
+  it("falls back for labels the browser collapses into the same row", () => {
+    const labels = modelLabels([model("acme-large", "Opus  5"), model("acme-l", "Opus 5")]);
+    expect(labels.get("acme-large")).toBe("acme-large");
+    expect(labels.get("acme-l")).toBe("acme-l");
+  });
+
+  it("draws a kept label as the config wrote it, flattening only the comparison", () => {
+    const labels = modelLabels([model("acme-large", "Opus  5"), model("acme-small", "Sonnet 5")]);
+    expect(labels.get("acme-large")).toBe("Opus  5");
+  });
+
+  it("gives a repeated id nothing but the id, since both entries launch it", () => {
+    const labels = modelLabels([model("acme-large", "Large"), model("acme-large", "Also large")]);
+    expect(labels.get("acme-large")).toBe("acme-large");
+  });
+
   it("answers nothing for an empty list", () => {
     expect(modelLabels([]).size).toBe(0);
   });
