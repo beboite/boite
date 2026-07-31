@@ -77,33 +77,94 @@ pub fn folder_state_blocking(path: &str) -> FolderState {
 /// home directory. Comparison is textual and case-insensitive, on separators
 /// normalized to `/`: these are paths the app itself stored, not links to
 /// resolve, and a symlink that escapes them is a machine the user set up that
-/// way.
+/// way. A root that is only the top of a volume is dropped instead of matching
+/// everything on it, which `names_a_folder` explains.
 pub fn may_create_project_at(path: &str, roots: &[String]) -> bool {
-    // `..` never survives a prefix test honestly: "c:/users/me/../../windows"
-    // starts with the home and lands nowhere near it.
-    if path.split(['/', '\\']).any(|seg| seg == "..") {
+    let Some(target) = comparable_target(path) else {
         return false;
-    }
-    let target = normalize_folder(path);
-    if target.is_empty() {
-        return false;
-    }
+    };
     roots.iter().any(|root| {
         let root = normalize_folder(root);
         // Equal is refused on purpose: a project rooted at the home directory
         // itself, or on top of an existing project's parent, is never what was
         // meant.
-        !root.is_empty() && target.len() > root.len() && target.starts_with(&format!("{root}/"))
+        names_a_folder(&root) && target.len() > root.len() && target.starts_with(&format!("{root}/"))
     })
 }
 
-/// Whether two paths name the same folder, under the rule above.
+/// Whether a new project folder may be created directly inside this one.
 ///
-/// Same textual comparison, so a folder the app stored and one an agent typed
-/// answer the same way here as they do to `may_create_project_at`.
+/// The same rule read from the other side, for a caller that said where the
+/// project goes without saying what the folder is called. Naming it is the
+/// front end's job, which slugifies the project name, and the endpoint has no
+/// need to guess: whatever comes out is one segment under this folder, so a
+/// parent inside the boundary can only produce paths inside it and a parent
+/// outside can only produce paths outside.
+///
+/// Equal to a root is allowed here where `may_create_project_at` refuses it,
+/// and that is the point: beside the projects already there is exactly where a
+/// new one goes.
+pub fn may_create_project_in(parent: &str, roots: &[String]) -> bool {
+    let Some(target) = comparable_target(parent) else {
+        return false;
+    };
+    roots.iter().any(|root| {
+        let root = normalize_folder(root);
+        names_a_folder(&root) && (target == root || target.starts_with(&format!("{root}/")))
+    })
+}
+
+/// The path both rules above test, or nothing when it cannot be tested.
+fn comparable_target(path: &str) -> Option<String> {
+    // `..` never survives a prefix test honestly: "c:/users/me/../../windows"
+    // starts with the home and lands nowhere near it.
+    if path.split(['/', '\\']).any(|seg| seg == "..") {
+        return None;
+    }
+    let target = normalize_folder(path);
+    (!target.is_empty()).then_some(target)
+}
+
+/// Whether a normalized root names a folder rather than a whole volume.
+///
+/// `c:` and `//server` are prefixes, not places: everything on the drive or on
+/// the machine starts with them, so a root that stops there hands out all of it.
+/// They arrive for real: the roots are the *parents* of the registered project
+/// folders, and the parent of a project sitting at `C:\proj` is the drive root.
+fn names_a_folder(root: &str) -> bool {
+    let parts: Vec<&str> = root.split('/').filter(|s| !s.is_empty()).collect();
+    // One leading component that is a prefix rather than a folder: the server
+    // of a UNC path, or a drive letter. Something has to sit past it.
+    let prefix = usize::from(root.starts_with("//") || parts.first().is_some_and(|p| is_drive(p)));
+    parts.len() > prefix
+}
+
+/// A drive letter, in the shape `normalize_folder` leaves it: `c:`.
+fn is_drive(part: &str) -> bool {
+    part.len() == 2 && part.ends_with(':') && part.starts_with(|c: char| c.is_ascii_alphabetic())
+}
+
+/// Whether two paths name the same folder.
+///
+/// Case stops mattering on Windows only, where the filesystem itself ignores it
+/// and the two spellings really are one folder. Everywhere else `Data` and
+/// `data` are two folders, and folding them together would let a project that
+/// is not the one being named answer for it, which at the create endpoint is
+/// how a path skips the checks that would have refused it.
 pub fn same_folder(a: &str, b: &str) -> bool {
-    let a = normalize_folder(a);
-    !a.is_empty() && a == normalize_folder(b)
+    #[cfg(windows)]
+    {
+        let a = normalize_folder(a);
+        !a.is_empty() && a == normalize_folder(b)
+    }
+    // Nothing to normalize away here: `\\?\` is a Windows spelling, and a
+    // backslash is an ordinary character in a name on every other system. Plain
+    // path equality already ignores a trailing separator.
+    #[cfg(not(windows))]
+    {
+        let a = a.trim_end_matches('/');
+        !a.is_empty() && Path::new(a) == Path::new(b.trim_end_matches('/'))
+    }
 }
 
 /// One folder path, in the shape both rules above compare in.
@@ -671,10 +732,11 @@ mod new_project_tests {
         assert!(may_create_project_at(r"d:\dev\collab\newrepo", &roots()));
     }
 
-    /// What the roots actually look like at runtime on Windows. They are read
-    /// back from `ProjectRoots`, which holds `std::fs::canonicalize` output, and
-    /// that is verbatim: every root but the home directory arrived here with a
-    /// `\\?\` on the front and matched nothing.
+    /// What the roots actually look like at runtime on Windows. They are the
+    /// parents of what `ProjectRoots` holds, which is `std::fs::canonicalize`
+    /// output, and that is verbatim: every root but the home directory arrived
+    /// here with a `\\?\` on the front and matched nothing. The roots are passed
+    /// in that shape below, since that is the shape the rule is fed.
     #[test]
     fn a_verbatim_windows_root_still_matches_a_plain_path() {
         let roots = vec![
@@ -708,9 +770,65 @@ mod new_project_tests {
         }
     }
 
+    /// A root that is only the top of a volume matches everything on it. The
+    /// case is not theoretical: the roots are the parents of the registered
+    /// project folders, so one project sitting at `C:\proj` makes the drive
+    /// root a root, and the endpoint would let an agent create a folder
+    /// anywhere on `C:`.
+    #[test]
+    fn the_top_of_a_volume_is_not_a_root() {
+        // What `ProjectRoots` really hands over for a project at `C:\proj`.
+        let drive = vec![r"\\?\C:\".to_string()];
+        assert!(!may_create_project_at(
+            "c:/windows/system32/drivers/etc/newproj",
+            &drive
+        ));
+        assert!(!may_create_project_at("C:/anything", &drive));
+        assert!(!may_create_project_in("C:/windows/system32", &drive));
+        // Spelled every way it reaches here.
+        for root in [r"C:\", "c:/", "c:", r"\\?\C:"] {
+            assert!(
+                !may_create_project_at("C:/windows/x", &[root.to_string()]),
+                "{root}"
+            );
+        }
+        // A machine with no share named is the same kind of prefix, and so is
+        // the root of a POSIX filesystem.
+        assert!(!may_create_project_at(
+            r"\\nas\dev\newrepo",
+            &[r"\\nas".to_string()]
+        ));
+        assert!(!may_create_project_at("/etc/thing", &["/".to_string()]));
+        // The share itself is a folder, and so is a directory on the drive.
+        assert!(may_create_project_at(
+            r"\\nas\dev\newrepo",
+            &[r"\\nas\dev".to_string()]
+        ));
+        assert!(may_create_project_at("C:/Users/me/thing", &roots()));
+    }
+
+    /// What the agent endpoint asks when the caller named a parent folder and
+    /// left the folder name to Boite.
+    #[test]
+    fn a_project_may_be_created_beside_the_ones_already_there() {
+        // The root itself is where the new one goes, which is the whole
+        // difference with `may_create_project_at`.
+        assert!(may_create_project_in("D:/Dev/Collab", &roots()));
+        assert!(may_create_project_in(r"c:\users\me\", &roots()));
+        // Deeper in is still inside.
+        assert!(may_create_project_in("D:/Dev/Collab/team", &roots()));
+        // And the refusals the endpoint exists for.
+        assert!(!may_create_project_in(r"C:\Windows\System32", &roots()));
+        assert!(!may_create_project_in("D:/Dev/Other", &roots()));
+        assert!(!may_create_project_in("C:/Users/me/../../Windows", &roots()));
+        assert!(!may_create_project_in("", &roots()));
+        assert!(!may_create_project_in("C:/Users/me", &[]));
+    }
+
     /// The endpoint reads this against the folders of projects the user
     /// already has, to tell a creation apart from a reuse before it refuses
     /// anything.
+    #[cfg(windows)]
     #[test]
     fn the_same_folder_spelled_two_ways_is_one_folder() {
         assert!(same_folder(r"D:\Dev\Perso\thing", "d:/dev/perso/thing/"));
@@ -719,6 +837,24 @@ mod new_project_tests {
         // A folder deeper in is not the same folder, which is what keeps a
         // project inside another one from reading as a reuse.
         assert!(!same_folder(r"D:\Dev\Perso", r"D:\Dev\Perso\thing"));
+        assert!(!same_folder("", ""));
+    }
+
+    /// Off Windows, two spellings that differ in case are two folders, and the
+    /// answer has to say so: a project reading as already there is what stops
+    /// the create endpoint from asking whether the folder is free and whether
+    /// it may be written at all.
+    #[cfg(not(windows))]
+    #[test]
+    fn a_folder_that_differs_in_case_is_another_folder() {
+        assert!(same_folder("/home/me/dev/thing", "/home/me/dev/thing/"));
+        // A repeated separator is the same folder to the system, so it is here.
+        assert!(same_folder("/home/me/dev//thing", "/home/me/dev/thing"));
+        assert!(!same_folder("/home/me/dev/Thing", "/home/me/dev/thing"));
+        assert!(!same_folder("/home/me/dev/thing", "/home/me/dev/other"));
+        assert!(!same_folder("/home/me/dev", "/home/me/dev/thing"));
+        // A backslash is an ordinary character in a name here, not a separator.
+        assert!(!same_folder(r"\home\me", "/home/me"));
         assert!(!same_folder("", ""));
     }
 
