@@ -122,18 +122,30 @@ export function parseCombo(cmd: string, args: readonly string[]): FastpickCombo 
  * are two different context windows, and both were once labelled "Opus 5". Two rows that
  * launch different things and read identically are worse than a raw id, so a label shared
  * by more than one model loses to the id, for every model wearing it.
+ *
+ * Sharing is judged on how a row reads, not on how the string is spelled: the menu draws
+ * labels as HTML, which collapses runs of whitespace, and nobody tells "Opus 5" from
+ * "opus 5" at a glance either. Only the comparison is flattened, the label is drawn as
+ * the config wrote it.
  */
 export function modelLabels(items: readonly FastpickModel[]): Map<string, string> {
   const counts = new Map<string, number>();
+  const idCounts = new Map<string, number>();
   for (const model of items) {
-    const label = modelLabel(model);
-    counts.set(label, (counts.get(label) ?? 0) + 1);
+    const key = labelKey(modelLabel(model));
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+    idCounts.set(model.id, (idCounts.get(model.id) ?? 0) + 1);
   }
 
   const labels = new Map<string, string>();
   for (const model of items) {
     const label = modelLabel(model);
-    labels.set(model.id, counts.get(label) === 1 ? label : model.id);
+    // Two entries under one id are a broken config, and this map has no room to tell them
+    // apart: the second write would hand its label to both rows, which is the identical
+    // pair this function exists to prevent, arrived at silently. They launch the same
+    // `--model` anyway, so the id is the only thing said about them that is true of both.
+    if ((idCounts.get(model.id) ?? 0) > 1) labels.set(model.id, model.id);
+    else labels.set(model.id, counts.get(labelKey(label)) === 1 ? label : model.id);
   }
   return labels;
 }
@@ -141,6 +153,11 @@ export function modelLabels(items: readonly FastpickModel[]): Map<string, string
 /** A label that is absent, or whitespace pretending not to be, is no label at all. */
 function modelLabel(model: FastpickModel): string {
   return model.label?.trim() || model.id;
+}
+
+/** What the eye compares once the browser and the reader are done with the string. */
+function labelKey(label: string): string {
+  return label.replace(/\s+/g, " ").toLowerCase();
 }
 
 /** How a combo reads in a tooltip or a sidebar row: the model, then where it runs. */
