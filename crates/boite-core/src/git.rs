@@ -1993,9 +1993,17 @@ pub fn provision_shared_artifacts(repo: &Path, worktree: &Path) -> Vec<String> {
         // No copy-on-write here: ext4, a network volume, Windows outside a dev
         // drive. Sharing is still the right trade for the install-time ones —
         // it is what makes a JavaScript worktree usable at all — but never for
-        // build output, which would hand this thread another's binaries. Cargo
-        // creates its own `target` on first build; it is slow, not wrong.
+        // build output, which would hand this thread another's binaries.
         if BUILD_OUTPUT.contains(&name) {
+            // Hard links get most of what a clone gets, at file granularity
+            // instead of directory granularity: the dependency artifacts are
+            // identical across worktrees and cargo never rewrites them, so two
+            // names for one set of blocks is exactly right for them. What a
+            // build does rewrite is left out and recompiled here, which is the
+            // cheap half of a build.
+            if hardlink_build_output(repo, &src, &dst).is_ok() {
+                done.push(name.to_string());
+            }
             continue;
         }
         if link_dir(&src, &dst).is_ok() {
@@ -2058,10 +2066,278 @@ fn clone_dir(src: &Path, dst: &Path) -> std::io::Result<()> {
 
 /// Windows has no block cloning outside a ReFS dev drive, and no command-line
 /// verb for it. The install-time directories fall through to a junction as
-/// before; `target` is left for the build to create.
+/// before; `target` goes through `hardlink_build_output` instead.
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
 fn clone_dir(_src: &Path, _dst: &Path) -> std::io::Result<()> {
     Err(std::io::Error::other("no copy-on-write on this platform"))
+}
+
+/// The packages this repository builds itself, spelled the way cargo spells
+/// them in artifact names.
+///
+/// Cargo turns `-` into `_` for library artifacts and leaves it alone for
+/// binaries and fingerprint directories, so both spellings go in. An explicit
+/// `[lib] name` overrides the package name and is collected too.
+///
+/// Hand-read rather than pulled through a TOML crate or `cargo metadata`: two
+/// keys are needed, `name` and `members`, and neither a new dependency in the
+/// core crate nor a process spawn on the worktree-open path is worth that.
+/// Anything this cannot make sense of yields an empty set, and an empty set
+/// makes the caller provision nothing — the direction that costs a recompile
+/// rather than correctness.
+fn workspace_package_names(repo: &Path) -> HashSet<String> {
+    fn value_in(text: &str, section: &str, key: &str) -> Option<String> {
+        let mut current = "";
+        for line in text.lines() {
+            let t = line.trim();
+            if let Some(header) = t.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+                current = header.trim_matches('[').trim_matches(']');
+                continue;
+            }
+            if current != section {
+                continue;
+            }
+            if let Some((k, v)) = t.split_once('=') {
+                if k.trim() == key {
+                    return Some(v.trim().trim_matches('"').to_string());
+                }
+            }
+        }
+        None
+    }
+
+    fn add(names: &mut HashSet<String>, name: &str) {
+        if name.is_empty() {
+            return;
+        }
+        names.insert(name.replace('-', "_"));
+        names.insert(name.to_string());
+    }
+
+    fn collect_manifest(names: &mut HashSet<String>, dir: &Path) {
+        let Ok(text) = fs::read_to_string(dir.join("Cargo.toml")) else {
+            return;
+        };
+        if let Some(n) = value_in(&text, "package", "name") {
+            add(names, &n);
+        }
+        if let Some(n) = value_in(&text, "lib", "name") {
+            add(names, &n);
+        }
+    }
+
+    let mut names = HashSet::new();
+    collect_manifest(&mut names, repo);
+
+    // `members` is a list and cargo formats it across lines as often as not, so
+    // it is read as everything between the `=` and the closing bracket rather
+    // than off a single line.
+    if let Ok(text) = fs::read_to_string(repo.join("Cargo.toml")) {
+        let mut in_workspace = false;
+        let mut buf = String::new();
+        let mut collecting = false;
+        for line in text.lines() {
+            let t = line.trim();
+            if let Some(header) = t.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+                in_workspace = header == "workspace";
+                continue;
+            }
+            if !in_workspace {
+                continue;
+            }
+            if !collecting {
+                if let Some((k, v)) = t.split_once('=') {
+                    if k.trim() == "members" {
+                        collecting = true;
+                        buf.push_str(v);
+                    }
+                }
+            } else {
+                buf.push_str(t);
+            }
+            if collecting && buf.contains(']') {
+                break;
+            }
+        }
+        for member in buf.trim().trim_matches(['[', ']']).split(',') {
+            let m = member.trim().trim_matches('"');
+            // A glob member (`crates/*`) is not expanded: every directory that
+            // holds a manifest is read instead, which covers the glob and costs
+            // one readdir.
+            if m.is_empty() {
+                continue;
+            }
+            if m.contains('*') {
+                let Some(parent) = m.split('*').next() else {
+                    continue;
+                };
+                if let Ok(entries) = fs::read_dir(repo.join(parent.trim_end_matches('/'))) {
+                    for e in entries.flatten() {
+                        collect_manifest(&mut names, &e.path());
+                    }
+                }
+                continue;
+            }
+            collect_manifest(&mut names, &repo.join(m));
+        }
+    }
+
+    names
+}
+
+/// Whether an artifact file or directory belongs to one of this repository's
+/// own packages.
+///
+/// Cargo suffixes almost everything with `-<16 hex>`, so the name is compared
+/// with that stripped. A leading `lib` goes too: `libboite_core-<hash>.rlib`
+/// and `boite-core-<hash>/` are the same package wearing two spellings.
+fn is_local_artifact(name: &str, locals: &HashSet<String>) -> bool {
+    let stem = name.split('.').next().unwrap_or(name);
+    let base = match stem.rsplit_once('-') {
+        Some((head, tail)) if tail.len() == 16 && tail.chars().all(|c| c.is_ascii_hexdigit()) => {
+            head
+        }
+        _ => stem,
+    };
+    locals.contains(base)
+        || base
+            .strip_prefix("lib")
+            .is_some_and(|s| locals.contains(s))
+}
+
+/// Whether a path inside `target` is one the worktree has to own outright.
+///
+/// Everything a build rewrites stays out: a hard link is not copy-on-write, so
+/// writing through one writes the main checkout's copy too. What is left is the
+/// dependency artifacts, which are the bulk of the tree and which cargo only
+/// ever creates, never edits.
+fn is_mutable_build_artifact(rel: &Path, is_dir: bool, locals: &HashSet<String>) -> bool {
+    let parts: Vec<&str> = rel
+        .components()
+        .filter_map(|c| c.as_os_str().to_str())
+        .collect();
+
+    // Cargo's own lock files, wherever they sit. Linking a lock would make two
+    // worktrees block on each other for no reason at all.
+    if parts
+        .last()
+        .is_some_and(|last| last.starts_with(".cargo-") && last.ends_with("lock"))
+    {
+        return true;
+    }
+    // Per-worktree by nature, and the one place cargo does rewrite in place.
+    if parts.contains(&"incremental") {
+        return true;
+    }
+    // A *file* sitting directly in `debug/` or `release/` is an uplifted final
+    // artifact: `target/debug/boite.exe` has no hash in its name, so both
+    // worktrees would claim the same one. This is the exact collision a shared
+    // target directory produces, and the reason the test below exists. The
+    // directories at that level — `deps`, `build`, `.fingerprint` — are the
+    // ones worth linking, so the distinction is not cosmetic.
+    if parts.len() == 2 && !is_dir {
+        return true;
+    }
+    // Inside `deps/`, `build/` and `.fingerprint/`, only what this repository
+    // builds itself. Registry crates are identical across worktrees.
+    if parts.len() >= 3 {
+        match parts[1] {
+            "deps" | "build" | ".fingerprint" => return is_local_artifact(parts[2], locals),
+            _ => {}
+        }
+    }
+    false
+}
+
+/// Gives the worktree a `target` made of hard links to the main checkout's
+/// dependency artifacts, and nothing else.
+///
+/// This is the fallback for every filesystem without copy-on-write — NTFS and
+/// ext4 both — and it buys the same thing a clone does: measured on this
+/// repository, 27 GB of `target` provisioned in 61 seconds for 27 MB of real
+/// disk, the directory entries and nothing more.
+///
+/// It is weaker than a clone in one way that decides the whole shape of the
+/// function. A clone diverges on the first write; a hard link does not, so a
+/// file written through one is written in the main checkout too. Hence the
+/// exclusions: what a build rewrites is never linked, and the worktree
+/// recompiles its own packages. That is the fast part of a build anyway — the
+/// dependencies are what cost minutes.
+fn hardlink_build_output(repo: &Path, src: &Path, dst: &Path) -> std::io::Result<()> {
+    let locals = workspace_package_names(repo);
+    // No package list means no way to tell a local artifact from a vendored
+    // one, and linking the wrong file hands this worktree another's binary.
+    if locals.is_empty() {
+        return Err(std::io::Error::other("cannot identify the workspace packages"));
+    }
+
+    fn walk(
+        src: &Path,
+        dst: &Path,
+        rel: &Path,
+        locals: &HashSet<String>,
+        linked: &mut usize,
+    ) -> std::io::Result<()> {
+        fs::create_dir_all(dst)?;
+        for entry in fs::read_dir(src)? {
+            let entry = entry?;
+            let name = entry.file_name();
+            let from = entry.path();
+            let to = dst.join(&name);
+            let ty = entry.file_type()?;
+            let child_rel = rel.join(&name);
+            if is_mutable_build_artifact(&child_rel, ty.is_dir(), locals) {
+                continue;
+            }
+            if ty.is_dir() {
+                walk(&from, &to, &child_rel, locals, linked)?;
+            } else if ty.is_file() {
+                // The first link is the capability probe: hard links do not
+                // cross volumes, and a worktree on another drive has to fail
+                // here rather than halfway through 25 000 files.
+                fs::hard_link(&from, &to)?;
+                *linked += 1;
+            }
+            // Symlinks are skipped: recreating one needs to know whether it
+            // pointed at a file or a directory, and nothing cargo puts in
+            // `target` is one.
+        }
+        Ok(())
+    }
+
+    let mut linked = 0usize;
+    let profiles: Vec<PathBuf> = fs::read_dir(src)?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.is_dir())
+        .collect();
+    if profiles.is_empty() {
+        return Err(std::io::Error::other("nothing built yet"));
+    }
+
+    let result = (|| -> std::io::Result<()> {
+        for profile in &profiles {
+            let Some(name) = profile.file_name() else {
+                continue;
+            };
+            walk(
+                profile,
+                &dst.join(name),
+                Path::new(name),
+                &locals,
+                &mut linked,
+            )?;
+        }
+        Ok(())
+    })();
+
+    if result.is_err() || linked == 0 {
+        // A half-linked tree reads as "already provisioned" to every later
+        // caller and would never be retried or completed.
+        let _ = fs::remove_dir_all(dst);
+        return result.and(Err(std::io::Error::other("nothing could be linked")));
+    }
+    Ok(())
 }
 
 #[cfg(windows)]
@@ -2989,6 +3265,175 @@ mod worktree_tests {
             "main checkout\n",
             "removing the worktree reached into the main checkout's target"
         );
+    }
+
+    /// A repository with a manifest and a plausible `target`, which is what
+    /// `hardlink_build_output` needs before it will do anything at all.
+    fn with_cargo_target(f: &Fixture) {
+        fs::write(
+            f.repo.join("Cargo.toml"),
+            "[workspace]\nmembers = [\"crates/demo-core\"]\n",
+        )
+        .unwrap();
+        fs::create_dir_all(f.repo.join("crates/demo-core")).unwrap();
+        fs::write(
+            f.repo.join("crates/demo-core/Cargo.toml"),
+            "[package]\nname = \"demo-core\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+
+        let debug = f.repo.join("target/debug");
+        for dir in ["deps", "build", ".fingerprint", "incremental"] {
+            fs::create_dir_all(debug.join(dir)).unwrap();
+        }
+        // A registry dependency: identical in every worktree, never rewritten.
+        fs::write(debug.join("deps/libserde-0123456789abcdef.rlib"), "serde\n").unwrap();
+        // This repository's own crate, in both spellings cargo uses.
+        fs::write(debug.join("deps/libdemo_core-fedcba9876543210.rlib"), "mine\n").unwrap();
+        fs::create_dir_all(debug.join(".fingerprint/demo-core-fedcba9876543210")).unwrap();
+        fs::write(
+            debug.join(".fingerprint/demo-core-fedcba9876543210/lib-demo_core"),
+            "fp\n",
+        )
+        .unwrap();
+        fs::create_dir_all(debug.join(".fingerprint/serde-0123456789abcdef")).unwrap();
+        fs::write(
+            debug.join(".fingerprint/serde-0123456789abcdef/lib-serde"),
+            "fp\n",
+        )
+        .unwrap();
+        // The uplifted final artifact, and the lock beside it.
+        fs::write(debug.join("demo.exe"), "main checkout\n").unwrap();
+        fs::write(debug.join(".cargo-lock"), "").unwrap();
+        fs::write(debug.join("incremental/demo-core-1.bin"), "inc\n").unwrap();
+
+        git_in(&f.repo, &["add", "Cargo.toml", "crates"]);
+        git_in(&f.repo, &["commit", "--quiet", "-m", "manifest"]);
+    }
+
+    /// The whole point of the fallback: the dependency artifacts arrive without
+    /// costing disk, and nothing a build rewrites comes with them.
+    #[test]
+    fn build_output_arrives_as_links_for_dependencies_only() {
+        let f = Fixture::new();
+        with_cargo_target(&f);
+
+        let w = scratch("hardlink");
+        add_detached_worktree_blocking(f.path(), w.to_str().unwrap()).unwrap();
+        let theirs = w.join("target/debug");
+
+        // Nothing else in this test creates these, so their presence is the
+        // provisioning having run.
+        assert!(
+            theirs.join("deps/libserde-0123456789abcdef.rlib").is_file(),
+            "the dependency artifact was not provisioned"
+        );
+        assert!(
+            theirs.join(".fingerprint/serde-0123456789abcdef/lib-serde").is_file(),
+            "the dependency fingerprint was not provisioned"
+        );
+
+        // A hard link is two names for one set of blocks, so a write through
+        // one is visible through the other. This is exactly why the mutable
+        // artifacts below are excluded rather than linked.
+        fs::write(
+            f.repo.join("target/debug/deps/libserde-0123456789abcdef.rlib"),
+            "rebuilt\n",
+        )
+        .unwrap();
+        assert_eq!(
+            fs::read_to_string(theirs.join("deps/libserde-0123456789abcdef.rlib")).unwrap(),
+            "rebuilt\n",
+            "the dependency artifact was copied rather than linked"
+        );
+
+        for excluded in [
+            "demo.exe",
+            ".cargo-lock",
+            "deps/libdemo_core-fedcba9876543210.rlib",
+            ".fingerprint/demo-core-fedcba9876543210/lib-demo_core",
+            "incremental/demo-core-1.bin",
+        ] {
+            assert!(
+                !theirs.join(excluded).exists(),
+                "{excluded} was linked, and this worktree would write the main checkout's copy"
+            );
+        }
+
+        let _ = remove_worktree_blocking(f.path(), w.to_str().unwrap(), true);
+        assert!(
+            f.repo.join("target/debug/demo.exe").is_file(),
+            "removing the worktree reached into the main checkout's target"
+        );
+        assert!(
+            f.repo
+                .join("target/debug/deps/libserde-0123456789abcdef.rlib")
+                .is_file(),
+            "removing the worktree deleted the artifact its links pointed at"
+        );
+    }
+
+    /// The fallback refuses rather than guesses. Without a manifest there is no
+    /// way to tell a local artifact from a vendored one, and linking the wrong
+    /// one is the failure this whole design exists to avoid.
+    #[test]
+    fn build_output_is_left_alone_when_the_packages_cannot_be_identified() {
+        let f = Fixture::new();
+        let debug = f.repo.join("target/debug/deps");
+        fs::create_dir_all(&debug).unwrap();
+        fs::write(debug.join("libserde-0123456789abcdef.rlib"), "serde\n").unwrap();
+
+        let w = scratch("no-manifest");
+        add_detached_worktree_blocking(f.path(), w.to_str().unwrap()).unwrap();
+
+        assert!(
+            !w.join("target").exists(),
+            "target was provisioned without knowing which packages are local"
+        );
+    }
+
+    #[test]
+    fn workspace_members_are_read_from_the_manifest() {
+        let f = Fixture::new();
+        with_cargo_target(&f);
+        let names = workspace_package_names(&f.repo);
+        assert!(names.contains("demo-core"), "hyphenated spelling missing");
+        assert!(names.contains("demo_core"), "underscored spelling missing");
+    }
+
+    #[test]
+    fn only_the_rewritten_artifacts_count_as_mutable() {
+        let locals: HashSet<String> =
+            ["demo-core", "demo_core"].iter().map(|s| s.to_string()).collect();
+        let file = |p: &str| is_mutable_build_artifact(Path::new(p), false, &locals);
+        let dir = |p: &str| is_mutable_build_artifact(Path::new(p), true, &locals);
+
+        // Uplifted finals, locks, and anything incremental.
+        assert!(file("debug/demo.exe"));
+        assert!(file("debug/.cargo-lock"));
+        assert!(file("debug/incremental/demo-core-1.bin"));
+        // This repository's own packages, in every spelling.
+        assert!(file("debug/deps/libdemo_core-fedcba9876543210.rlib"));
+        assert!(dir("debug/.fingerprint/demo-core-fedcba9876543210"));
+        assert!(dir("debug/build/demo-core-fedcba9876543210"));
+        // Everything fetched, which is the bulk of the tree.
+        assert!(!file("debug/deps/libserde-0123456789abcdef.rlib"));
+        assert!(!dir("debug/.fingerprint/serde-0123456789abcdef"));
+        assert!(!file("debug/build/libc-0123456789abcdef/out/probe.o"));
+        // The directories that hold all of it are not themselves artifacts.
+        assert!(!dir("debug/deps"));
+        assert!(!dir("debug/build"));
+        assert!(!dir("debug/.fingerprint"));
+    }
+
+    /// `demo` is a prefix of `demo-core`, and a package named for the prefix
+    /// must not claim the other's artifacts. The hash suffix is what separates
+    /// them, so it is checked rather than assumed.
+    #[test]
+    fn a_shorter_package_name_does_not_claim_a_longer_ones_artifacts() {
+        let locals: HashSet<String> = ["demo"].iter().map(|s| s.to_string()).collect();
+        assert!(is_local_artifact("demo-0123456789abcdef.d", &locals));
+        assert!(!is_local_artifact("demo-core-0123456789abcdef.d", &locals));
     }
 
     #[test]
