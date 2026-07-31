@@ -1065,6 +1065,35 @@ fn opencode_turns(queries: &[TurnQuery]) -> Vec<AgentTurn> {
     let Ok(conn) = open_readonly(&db) else {
         return Vec::new();
     };
+    opencode_turns_in(&conn, queries)
+}
+
+/// The query half, split off its file so the resolution can be tested against a
+/// database built in the test rather than whatever this machine happens to hold.
+fn opencode_turns_in(conn: &Connection, queries: &[TurnQuery]) -> Vec<AgentTurn> {
+    // The recent end of the session list, newest first, read once so a thread whose
+    // id is not captured yet can be placed by its directory. The match cannot be
+    // made in SQL: the directory is recorded natively and only `normalize` compares
+    // those the way the rest of this file does, which no `LIKE` reproduces.
+    // `codex_turns` reads its index the same way, for the same reason.
+    //
+    // `parent_id IS NULL` keeps a subagent's own session from standing in for the
+    // thread, since it shares the directory and its turn ends before the parent's
+    // does.
+    let recent: Vec<(String, String)> = conn
+        .prepare(
+            "SELECT id, coalesce(directory, '') FROM session \
+             WHERE parent_id IS NULL \
+             ORDER BY coalesce(time_updated, time_created, 0) DESC LIMIT 200",
+        )
+        .and_then(|mut stmt| {
+            stmt.query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map(|rows| rows.flatten().collect())
+        })
+        .unwrap_or_default();
+
     let mut out = Vec::new();
     for query in queries.iter().filter(|q| q.kind == "opencode") {
         let resolved = match query.id() {
@@ -1075,39 +1104,22 @@ fn opencode_turns(queries: &[TurnQuery]) -> Vec<AgentTurn> {
                     |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
                 )
                 .ok(),
-            // The newest root session *in this directory*, which is not the same
-            // as the newest one anywhere. Asking for a single row and then
-            // checking its folder answered nothing whenever the thread's own
-            // session was not the most recently touched on the machine, which is
-            // every boite with more than one opencode open.
-            //
-            // Bounded and matched here rather than in the WHERE clause because the
-            // directory is recorded natively and only `normalize` compares those
-            // the same way the rest of this file does. `codex_turns` reads its
-            // index the same way, for the same reason.
-            //
-            // `parent_id IS NULL` keeps a subagent's own session from standing in
-            // for the thread: it shares the directory, and its turn ends before
-            // the parent's does.
-            None if !query.cwd.is_empty() => {
+            None if query.cwd.is_empty() => None,
+            // The newest session in that directory, not the newest session there is.
+            // Ranking globally and then checking the folder answered only when the
+            // thread happened to be the last opencode session opened anywhere, so
+            // every other thread fell through to the screen rows. There is no
+            // liveness here to narrow it further the way the registry agents allow:
+            // a session row outlives its process, so "exactly one in this folder"
+            // would hold for a first run and never again. Recency is what is left,
+            // and the message below is what actually decides the state.
+            None => {
                 let want = normalize(&query.cwd);
-                conn.prepare(
-                    "SELECT id, coalesce(directory, '') FROM session \
-                     WHERE parent_id IS NULL \
-                     ORDER BY coalesce(time_updated, time_created, 0) DESC LIMIT 200",
-                )
-                .ok()
-                .and_then(|mut stmt| {
-                    let rows = stmt
-                        .query_map([], |row| {
-                            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-                        })
-                        .ok()?;
-                    rows.flatten()
-                        .find(|(_, dir)| !dir.is_empty() && normalize(dir) == want)
-                })
+                recent
+                    .iter()
+                    .find(|(_, dir)| !dir.is_empty() && normalize(dir) == want)
+                    .cloned()
             }
-            None => None,
         };
         let Some((id, directory)) = resolved else {
             continue;
@@ -2169,6 +2181,65 @@ mod turn_tests {
             Some("busy")
         );
         assert_eq!(opencode_message_state(r#"{"role":"assistant"}"#, now), Some("busy"));
+    }
+
+    #[test]
+    fn opencode_places_a_thread_by_its_own_directory() {
+        // The regression this covers: the directory fallback used to rank every
+        // session in the database, take the single newest, and only then check the
+        // folder. That answers for one thread, the one whose agent happened to be
+        // the last opencode session started anywhere, and silently answers nothing
+        // for every other. Caught by running the reader against a real store, where
+        // the only session it would place was not the one being asked about.
+        let conn = Connection::open_in_memory().expect("in-memory database");
+        conn.execute_batch(
+            "CREATE TABLE session (id TEXT, parent_id TEXT, directory TEXT, \
+                                   time_created INTEGER, time_updated INTEGER);
+             CREATE TABLE message (id TEXT, session_id TEXT, time_created INTEGER, data TEXT);
+             INSERT INTO session VALUES ('old', NULL, 'D:/Work/One', 1, 10);
+             INSERT INTO session VALUES ('mine', NULL, 'D:/Work/One', 2, 20);
+             INSERT INTO session VALUES ('child', 'mine', 'D:/Work/One', 3, 30);
+             INSERT INTO session VALUES ('elsewhere', NULL, 'D:/Work/Two', 4, 40);
+             INSERT INTO message VALUES ('m1', 'old', 1, '{\"role\":\"assistant\",\"time\":{\"completed\":9}}');
+             INSERT INTO message VALUES ('m2', 'mine', 2, '{\"role\":\"assistant\",\"time\":{}}');
+             INSERT INTO message VALUES ('m3', 'child', 3, '{\"role\":\"assistant\",\"time\":{\"completed\":9}}');
+             INSERT INTO message VALUES ('m4', 'elsewhere', 4, '{\"role\":\"assistant\",\"time\":{\"completed\":9}}');",
+        )
+        .expect("fixture");
+
+        let ask = |id: Option<&str>, cwd: &str| TurnQuery {
+            kind: "opencode".into(),
+            session_id: id.map(str::to_string),
+            cwd: cwd.into(),
+        };
+
+        // A newer session in another folder does not stand in, and the subagent row
+        // sharing the folder does not either: its turn ends before its parent's.
+        // A row with no timestamp cannot be aged out, so `mine` still reads busy.
+        let by_cwd = opencode_turns_in(&conn, &[ask(None, r"D:\Work\One")]);
+        assert_eq!(by_cwd.len(), 1);
+        assert_eq!(by_cwd[0].session_id, "mine");
+        assert_eq!(by_cwd[0].state, "busy");
+
+        // A captured id is the precise question and skips the folder entirely.
+        let by_id = opencode_turns_in(&conn, &[ask(Some("old"), r"D:\Work\One")]);
+        assert_eq!(by_id.len(), 1);
+        assert_eq!(by_id[0].session_id, "old");
+        assert_eq!(by_id[0].state, "idle");
+
+        // Nothing to place a thread with is not an answer, and neither is a folder
+        // no session claims. Both fall back to the terminal's rows.
+        assert!(opencode_turns_in(&conn, &[ask(None, "")]).is_empty());
+        assert!(opencode_turns_in(&conn, &[ask(None, "D:/Work/Three")]).is_empty());
+        assert!(opencode_turns_in(&conn, &[ask(Some("gone"), r"D:\Work\One")]).is_empty());
+
+        // Another agent's query is not this reader's to answer.
+        let other = TurnQuery {
+            kind: "claude".into(),
+            session_id: None,
+            cwd: "D:/Work/One".into(),
+        };
+        assert!(opencode_turns_in(&conn, &[other]).is_empty());
     }
 }
 

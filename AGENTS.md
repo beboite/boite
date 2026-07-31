@@ -93,6 +93,21 @@ rolling window of printed bytes answers a question about the recent past, and an
 `esc to interrupt` that had scrolled by kept re-matching itself for as long as the
 agent printed anything at all.
 
+What that reads is the shape of the row, never the glyph leading it. Claude
+rotates its spinner through `· ✢ ✳ ∗ ✻ ✽ ✶ *`, an ASCII asterisk and a middle dot
+among the dingbats, and it leads the line it prints when a turn ENDS with one of
+the same glyphs (`✻ Crunched for 19s`) and leaves it there until the next turn. A
+list of frames therefore matches some and misses others, which is a dot flickering
+twice a second, and a leading glyph on its own reads a finished turn as a running
+one. Every live frame carries the gerund's ellipsis and an elapsed count; the
+finished line carries the count alone. Braille and circle frames are the exception
+and stand on their own, because nothing leaves one of those on screen.
+
+How far up the rows are read is decided by the screen, not by a number: the block
+is the bottom run with no blank row in it. A fixed count was calibrated on a bare
+claude, and a statusline plus a banner pushed the spinner eight rows up, out of a
+five-row window, so a working agent read as finished.
+
 When neither source answers there is nothing to measure, and that is the one
 place a clock still decides anything. A thread whose pane is gone has no emulator
 holding its rows (a `Terminal` unmounts with the PTY alive whenever the thread
