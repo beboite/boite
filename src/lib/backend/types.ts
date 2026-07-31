@@ -188,6 +188,17 @@ export interface WorktreeApi {
    * commits — is not a failure to report.
    */
   warm(repo: string): Promise<void>;
+
+  /**
+   * Moves a worktree an older layout left outside its project, and gives back
+   * where it landed. Null means there was nothing to move: only a source under
+   * that abandoned base is one this touches, so every launch after the first
+   * answers null for the same thread.
+   *
+   * Like `open`, the destination is derived rather than passed: a caller that
+   * chose both ends would be a move primitive pointed anywhere on disk.
+   */
+  migrate(repo: string, threadId: string, from: string): Promise<string | null>;
   /**
    * Every worktree of a repository, the main checkout included, each with what
    * removing it would destroy. One call rather than a list plus a `hold` per
