@@ -59,6 +59,8 @@ export const tauriGit: GitApi = {
 export const tauriWorktree: WorktreeApi = {
   open: (repo, threadId) => invoke<string | null>("worktree_open", { repo, threadId }),
   warm: (repo) => invoke<void>("worktree_warm", { repo }),
+  migrate: (repo, threadId, from) =>
+    invoke<string | null>("worktree_migrate", { repo, threadId, from }),
   list: (repo) => invoke<WorktreeEntry[]>("worktree_list", { repo }),
   claim: (path, name) => invoke("worktree_claim", { path, name }),
   reserve: (path, name) => invoke("worktree_reserve", { path, name }),
