@@ -365,6 +365,39 @@ async fn worktree_reserve(
     }
 }
 
+/// What this project shares with its worktrees, and whether anyone said so.
+async fn artifacts_status(
+    State(inner): State<Arc<Inner>>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let (repo, _) = worktree_of_request(&inner, &headers)?;
+    let policy = boite_core::git::effective_artifact_policy(std::path::Path::new(&repo));
+    Ok(Json(json!({
+        "repo": repo,
+        "file": boite_core::git::POLICY_FILE,
+        "declared": policy.declared,
+        "shared": policy.shared,
+    })))
+}
+
+/// Replaces the policy with the one given. Refusals arrive as a 200 carrying an
+/// `error`: a directory name the policy may not hold is the agent's to fix, and
+/// it needs to read which one.
+async fn artifacts_set(
+    State(inner): State<Arc<Inner>>,
+    headers: HeaderMap,
+    Json(body): Json<boite_core::git::ArtifactPolicy>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let (repo, _) = worktree_of_request(&inner, &headers)?;
+    match boite_core::git::write_artifact_policy(std::path::Path::new(&repo), &body) {
+        Ok(()) => Ok(Json(json!({
+            "file": boite_core::git::POLICY_FILE,
+            "shared": body.shared,
+        }))),
+        Err(e) => Ok(Json(json!({ "error": e }))),
+    }
+}
+
 async fn list(
     State(inner): State<Arc<Inner>>,
     headers: HeaderMap,
@@ -452,6 +485,7 @@ pub async fn start(store: Arc<Store>, events: broadcast::Sender<AppEvent>) -> Op
         .route("/v1/worktree", get(worktree_status))
         .route("/v1/worktree/branch", post(worktree_branch))
         .route("/v1/worktree/reserve", post(worktree_reserve))
+        .route("/v1/artifacts", get(artifacts_status).post(artifacts_set))
         .route("/v1/projects", get(projects).post(project_create))
         .route("/v1/thread/move", post(thread_move))
         .route("/v1/threads", post(thread_spawn))
