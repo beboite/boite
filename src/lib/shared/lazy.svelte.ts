@@ -1,4 +1,7 @@
 import type { Component } from "svelte";
+import { notifications } from "$lib/features/notifications/store.svelte";
+import { logger } from "$lib/shared/services/logger.svelte";
+import { t } from "$lib/i18n/index.svelte";
 
 /**
  * Defers a component's chunk until something actually needs it.
@@ -24,7 +27,13 @@ export function lazyComponent<T extends Component<never>>(
       },
       (err: unknown) => {
         pending = null;
-        console.error("lazy component failed to load:", err);
+        logger.error("app", "lazy component failed to load", String(err));
+        // The slot stays empty on failure, so without this the view is a blank
+        // pane and the only account of why is in a console nobody opens. A
+        // toast is the one piece of feedback that needs no change from the
+        // consumer, which decides on its own what to render while `current` is
+        // null.
+        notifications.error(t("app.viewLoadFailed"));
       },
     );
     return pending;

@@ -2,7 +2,8 @@ import type { Backend } from "./types";
 import type { WorkspaceOrigin } from "$lib/types";
 import { TauriBackend } from "./tauri";
 import { RemoteBackend } from "./remote";
-import type { ConnState } from "./remote/socket";
+import { connectFailReason, type ConnState } from "./remote/socket";
+import { hasTauri } from "./env";
 
 // The active workspace. backend() returns the current transport; mode/epoch/
 // connection are reactive so the titlebar toggle and outline track them. The
@@ -40,8 +41,30 @@ class Workspace {
   // façades (git/explorer/editor/session) route without signature changes.
   pathOriginResolver: ((path: string) => WorkspaceOrigin) | null = null;
 
+  // Whether this boite ever answered on the current socket. Tells "lost the
+  // connection" apart from "never reached it", which are different sentences and
+  // used to be the same silence.
+  linkEstablished = $state(false);
+
   #local: Backend = new TauriBackend();
   #remote: RemoteBackend | null = null;
+  #connWatchers = new Set<(s: ConnState) => void>();
+
+  // Lets the app layer act on the link coming back (finish a boot that started
+  // offline) without owning a rune effect: lib/app/workspace is a plain module
+  // and cannot run one.
+  onConnection(cb: (s: ConnState) => void): () => void {
+    this.#connWatchers.add(cb);
+    return () => this.#connWatchers.delete(cb);
+  }
+
+  #publishConnection(s: ConnState): void {
+    this.connection = s;
+    if (s === "connected") this.linkEstablished = true;
+    // Iterating the Set directly is safe against a watcher that unsubscribes
+    // itself mid-callback, which is the normal case here.
+    for (const cb of this.#connWatchers) cb(s);
+  }
 
   // The workspace-global transport: settings, logs, shell lists. In dynamic
   // mode the local device stays authoritative for those.
@@ -81,17 +104,39 @@ class Workspace {
   // Build and connect a remote backend. Throws on connect/auth failure (the
   // caller stays local). Does not flip mode: the orchestrator switches only
   // after stores are reset.
-  async createRemote(url: string, token: string): Promise<RemoteBackend> {
+  //
+  // `keepUnreachable` decides what a failure costs the socket. A dial the user is
+  // watching (typing a URL, picking a boite) discards it: its reconnect loop
+  // would keep forcing connection back to "connecting" forever, the picker
+  // button would stay stuck, and a re-add would stack another ghost socket. A
+  // boot against a boite that already worked keeps it, because the backoff loop
+  // is the only thing that can bring the workspace back and a login form cannot.
+  async createRemote(
+    url: string,
+    token: string,
+    keepUnreachable = false,
+  ): Promise<RemoteBackend> {
     this.#disposeRemote();
-    const remote = new RemoteBackend(url, token, (s) => {
-      this.connection = s;
-    });
+    const remote = new RemoteBackend(
+      url,
+      token,
+      (s) => this.#publishConnection(s),
+      () => {
+        // A refused token is the one failure a login form fixes. On the desktop
+        // there is a local workspace to fall back to, so the gate stays down and
+        // the connection banner carries it instead.
+        if (!hasTauri()) this.needsLogin = true;
+      },
+    );
     try {
       await remote.connect();
     } catch (e) {
-      // Stop the orphaned socket's reconnect loop; otherwise its state callback
-      // keeps forcing connection back to "connecting" forever and the picker
-      // button stays stuck (and a re-add stacks another ghost socket).
+      if (keepUnreachable && connectFailReason(e) !== "auth") {
+        this.#remote = remote;
+        this.remoteUrl = url;
+        this.connection = remote.connectionState;
+        throw e;
+      }
       remote.dispose();
       this.connection = "connected";
       throw e;
@@ -100,6 +145,15 @@ class Workspace {
     this.remoteUrl = url;
     this.connection = remote.connectionState;
     return remote;
+  }
+
+  // Dial again now instead of waiting out the backoff, which can be half a
+  // minute. False when no socket is left to retry, and the caller has to dial
+  // from scratch.
+  retryRemote(): boolean {
+    if (!this.#remote) return false;
+    this.#remote.retryNow();
+    return true;
   }
 
   activateRemote(): void {
@@ -130,6 +184,7 @@ class Workspace {
     this.#remote?.dispose();
     this.#remote = null;
     this.remoteUrl = null;
+    this.linkEstablished = false;
   }
 }
 

@@ -20,6 +20,7 @@ import type {
   SessionApi,
   SessionHit,
   ShellApi,
+  SystemApi,
   WorkspaceMetaApi,
   WorktreeApi,
   WorktreeEntry,
@@ -27,7 +28,7 @@ import type {
 } from "../types";
 import type { Project, Settings, Thread, TodoItem } from "$lib/types";
 import type { CommitState, PrLookup } from "$lib/features/git/api";
-import type { ShellOption } from "$lib/storage/platform.svelte";
+import type { Platform, ShellOption } from "$lib/storage/platform.svelte";
 import { Socket, type ConnState } from "./socket";
 
 interface RawSession {
@@ -53,7 +54,7 @@ function normalizeSession(raw: unknown): SessionHit | null {
 // is authoritative). pty.open attaches to a live thread or spawns then attaches.
 export class RemoteBackend implements Backend {
   readonly kind = "remote" as const;
-  readonly caps: BackendCaps = { clientStatus: false };
+  readonly caps: BackendCaps = { clientStatus: false, appLogs: false };
 
   readonly pty: PtyApi;
   readonly db: DbApi;
@@ -62,6 +63,7 @@ export class RemoteBackend implements Backend {
   readonly explorer: ExplorerApi;
   readonly editor: EditorApi;
   readonly project: ProjectApi;
+  readonly system: SystemApi;
   readonly shell: ShellApi;
   readonly fastpick: FastpickApi;
   readonly scope: ScopeApi;
@@ -76,8 +78,13 @@ export class RemoteBackend implements Backend {
   // but the server only needs the final size.
   #resizeTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
-  constructor(url: string, token: string, onState: (s: ConnState) => void = () => {}) {
-    const socket = new Socket(url, token, onState);
+  constructor(
+    url: string,
+    token: string,
+    onState: (s: ConnState) => void = () => {},
+    onAuthRejected: () => void = () => {},
+  ) {
+    const socket = new Socket(url, token, onState, onAuthRejected);
     this.#socket = socket;
     const rpc = (m: string, p?: unknown) => socket.rpc(m, p);
     const keyToThread = this.#keyToThread;
@@ -242,6 +249,21 @@ export class RemoteBackend implements Backend {
       createFolder: (path) => rpc("project.createFolder", { path }).then(() => undefined),
     };
 
+    // The boite's OS, not the phone's. An older server has no arm for this, and
+    // "unknown" is the honest answer then: the caller keeps whatever it already
+    // had rather than picking a shell list for a machine it guessed at.
+    this.system = {
+      platform: () =>
+        rpc("system.platform")
+          .then((r) => {
+            const os = r.platform as string;
+            return os === "windows" || os === "macos" || os === "linux"
+              ? (os as Platform)
+              : ("unknown" as Platform);
+          })
+          .catch(() => "unknown" as Platform),
+    };
+
     this.shell = {
       defaultShell: () => rpc("shell.default").then((r) => r.shell as string),
       warmShell: (shellId) => rpc("shell.warm", { shellId }).then(() => undefined),
@@ -331,7 +353,8 @@ export class RemoteBackend implements Backend {
     };
 
     // App-event logging is a device-local concern (the desktop writes a log
-    // file). Remote logging is a no-op for now.
+    // file). Remote logging is a no-op for now, and `caps.appLogs: false` is how
+    // the panel knows to say so instead of drawing an empty list.
     this.log = {
       event: () => Promise.resolve(),
       read: () => Promise.resolve([]),
@@ -367,6 +390,17 @@ export class RemoteBackend implements Backend {
 
   get connectionState(): ConnState {
     return this.#socket.state;
+  }
+
+  // The boite refused the token, so no amount of backoff will help and the app
+  // has to ask for a new one.
+  get authRejected(): boolean {
+    return this.#socket.authRejected;
+  }
+
+  // Jump the backoff queue. Driven by the retry button in the connection banner.
+  retryNow(): void {
+    this.#socket.retryNow();
   }
 
   subscribe(cb: (event: ControlEvent) => void): () => void {

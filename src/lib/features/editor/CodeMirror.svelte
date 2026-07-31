@@ -49,6 +49,14 @@
   let view: EditorView | null = null;
   let langCompartment = new Compartment();
   let readonlyCompartment = new Compartment();
+  // Mirror of the doc as a string, seeded with the initial doc and kept in step
+  // by the update listener below. The parent feeds our own edits straight back
+  // in as `value`, so this lets the sync effect recognise the echo without
+  // serializing the whole doc on every keypress.
+  let lastEmitted = "";
+  // Language loading is async; a second filename change must not be overtaken
+  // by the first import resolving late.
+  let langGeneration = 0;
 
   function baseExtensions() {
     return [
@@ -87,6 +95,7 @@
       EditorView.updateListener.of((u) => {
         if (u.docChanged) {
           const next = u.state.doc.toString();
+          lastEmitted = next;
           onChange?.(next);
         }
       }),
@@ -97,6 +106,7 @@
 
   onMount(() => {
     if (!host) return;
+    lastEmitted = value;
     const state = EditorState.create({
       doc: value,
       extensions: baseExtensions(),
@@ -112,6 +122,10 @@
 
   $effect(() => {
     if (!view) return;
+    // Every doc change passes through the update listener, so `lastEmitted`
+    // always holds what the view currently contains: matching it means the
+    // parent is echoing our keystroke back and there is nothing to apply.
+    if (value === lastEmitted) return;
     const current = view.state.doc.toString();
     if (current === value) return;
     view.dispatch({
@@ -129,12 +143,18 @@
   $effect(() => {
     if (!view) return;
     if (filename) void applyLanguage(filename);
-    else view.dispatch({ effects: langCompartment.reconfigure([]) });
+    else {
+      langGeneration++;
+      view.dispatch({ effects: langCompartment.reconfigure([]) });
+    }
   });
 
   async function applyLanguage(name: string) {
+    const generation = ++langGeneration;
     const lang = await loadLanguageExtension(name);
-    if (!view) return;
+    // A newer filename won the race while this import was in flight; applying
+    // now would highlight the file as the wrong language.
+    if (!view || generation !== langGeneration) return;
     view.dispatch({
       effects: langCompartment.reconfigure(lang ? lang.extension : []),
     });

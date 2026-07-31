@@ -2,6 +2,8 @@ import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { hasTauri } from "$lib/backend/env";
 import { notifications } from "$lib/features/notifications/store.svelte";
+import { logger } from "$lib/shared/services/logger.svelte";
+import { t } from "$lib/i18n/index.svelte";
 import { dropResumePlan, prepareForInstall, restoreThreads } from "./restart";
 
 // The download runs on its own, in silence, the moment a release is found. By
@@ -33,6 +35,10 @@ class UpdaterStore {
   private pending: Update | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private inFlight = false;
+  // The restart confirmation is an await, and the status stays "ready" across
+  // it, so a second click on "Restart now" used to open a second dialog behind
+  // the first and stop every thread twice.
+  private preparing = false;
 
   get busy(): boolean {
     const k = this.status.kind;
@@ -94,7 +100,7 @@ class UpdaterStore {
       const update = await check();
       if (!update) {
         this.status = { kind: "current" };
-        if (manual) notifications.success("Boite is up to date");
+        if (manual) notifications.success(t("updater.upToDate"));
         return;
       }
       await this.download(update);
@@ -104,8 +110,10 @@ class UpdaterStore {
       // or a build whose signing key was never configured. None of that is worth
       // interrupting the user over; the settings card still shows it.
       this.status = { kind: "error", message };
-      console.error("[updater]", message);
-      if (manual) notifications.error(`Update check failed: ${message}`);
+      logger.error("updater", "update check failed", message);
+      if (manual) {
+        notifications.error(t("updater.checkFailed", { error: message }));
+      }
     } finally {
       this.inFlight = false;
       this.schedule();
@@ -143,12 +151,18 @@ class UpdaterStore {
    */
   async install(): Promise<void> {
     const update = this.pending;
-    if (!update || this.status.kind !== "ready") return;
+    if (!update || this.status.kind !== "ready" || this.preparing) return;
     const version = this.status.version;
 
     // The confirm dialog is a real await: re-check that nothing changed the
     // status while it was open before committing to the swap.
-    const stopped = await prepareForInstall(version);
+    this.preparing = true;
+    let stopped: string[] | null;
+    try {
+      stopped = await prepareForInstall(version);
+    } finally {
+      this.preparing = false;
+    }
     if (stopped === null) return;
     if (this.status.kind !== "ready") {
       restoreThreads(stopped);
@@ -162,7 +176,7 @@ class UpdaterStore {
       await relaunch();
     } catch (err) {
       const message = messageOf(err);
-      console.error("[updater] install failed:", message);
+      logger.error("updater", "install failed", message);
       // The payload handle is spent once install() has thrown; a retry has to
       // start from a fresh check, and the threads we stopped for an update that
       // never happened come straight back.
@@ -172,8 +186,8 @@ class UpdaterStore {
       this.status = { kind: "error", message };
       notifications.error(
         restored > 0
-          ? `Update failed: ${message}. Your threads were restarted.`
-          : `Update failed: ${message}`,
+          ? t("updater.installFailedRestored", { error: message })
+          : t("updater.installFailed", { error: message }),
       );
       this.schedule();
     }

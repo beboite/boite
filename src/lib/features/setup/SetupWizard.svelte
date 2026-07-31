@@ -2,12 +2,26 @@
   import { settings } from "$lib/features/settings/store.svelte";
   import { SETUP_STEPS, type SetupDraft } from "./steps";
   import BoiteLogo from "$lib/shared/components/BoiteLogo.svelte";
+  import { restoreFocus } from "$lib/shared/keyboard/overlay";
   import { t, LOCALE_OPTIONS } from "$lib/i18n/index.svelte";
 
   // 0 is the welcome screen, 1..n index SETUP_STEPS.
   let step = $state(0);
 
   const draft = $state<SetupDraft>({ shortcuts: [] });
+
+  let dialogEl = $state<HTMLDivElement | null>(null);
+  let nextBtn = $state<HTMLButtonElement | null>(null);
+
+  // Same shape as ConfirmDialog. The wizard is the whole screen on a first run,
+  // and it used to open with the keyboard on nothing: Tab started from the top of
+  // the document instead of inside the dialog.
+  $effect(() => {
+    const previous = document.activeElement as HTMLElement | null;
+    const surface = dialogEl;
+    (nextBtn ?? dialogEl)?.focus();
+    return () => restoreFocus(previous, surface);
+  });
 
   const total = SETUP_STEPS.length;
   const current = $derived(step > 0 ? (SETUP_STEPS[step - 1] ?? null) : null);
@@ -29,11 +43,17 @@
 <div
   class="flex min-h-0 flex-1 items-center justify-center overflow-y-auto bg-[var(--color-background)] p-4"
 >
+  <!-- The welcome screen owns the visible title; the steps after it carry their
+       own heading, so the dialog names itself there instead of pointing at an id
+       that is no longer in the document. -->
   <div
-    class="modal flex w-[min(94vw,520px)] flex-col gap-4 rounded-2xl border border-border/70 bg-[var(--color-surface)] p-6 shadow-2xl"
+    bind:this={dialogEl}
+    class="surface-dialog modal flex w-[min(94vw,520px)] flex-col gap-4 p-6 outline-none"
     role="dialog"
     aria-modal="true"
-    aria-labelledby="setup-title"
+    aria-labelledby={step === 0 ? "setup-title" : undefined}
+    aria-label={step === 0 ? undefined : t("setup.title")}
+    tabindex="-1"
   >
     <div class="flex justify-center gap-1.5" aria-hidden="true">
       {#each Array(total + 1) as _, i (i)}
@@ -102,6 +122,7 @@
         </button>
       {/if}
       <button
+        bind:this={nextBtn}
         type="button"
         onclick={next}
         class="rounded-lg bg-foreground px-5 py-2.5 text-xs font-bold text-background transition hover:bg-foreground/90"

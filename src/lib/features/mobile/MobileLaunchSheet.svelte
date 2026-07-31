@@ -1,3 +1,11 @@
+<script module lang="ts">
+  // One picker for the whole mobile layout. The top bar mounts it once and is
+  // itself always on screen, so every other surface asks that instance to open
+  // rather than mounting its own: two copies meant two independent `open`
+  // flags, and closing one left the other believing it was still up.
+  export const launchSheet = $state({ open: false });
+</script>
+
 <script lang="ts">
   import { app } from "$lib/app/store.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
@@ -9,6 +17,7 @@
     launchTargetProjectId,
   } from "$lib/features/thread/api";
   import { launchTargetMenu } from "$lib/features/shortcut/launchMenu";
+  import { t } from "$lib/i18n/index.svelte";
   import { longPress } from "$lib/shared/actions/longPress";
   import ContextMenu from "$lib/shared/components/ContextMenu.svelte";
   import type { ContextMenuItem } from "$lib/shared/components/ContextMenu.svelte";
@@ -17,7 +26,6 @@
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
   import MobileSheet from "./MobileSheet.svelte";
   import TerminalIcon from "@lucide/svelte/icons/square-terminal";
-  import { t } from "$lib/i18n/index.svelte";
 
   type Props = { open: boolean; onClose: () => void };
   let { open, onClose }: Props = $props();
@@ -85,7 +93,7 @@
   {/if}
 
   <div class="mt-3 mb-1 px-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-    Shells
+    {t("mobile.shells")}
   </div>
   <div class="flex flex-col gap-1.5">
     <button
@@ -97,7 +105,7 @@
       }}
     >
       <TerminalIcon class="size-5 text-muted-foreground" />
-      <span class="font-medium">Default shell</span>
+      <span class="font-medium">{t("mobile.defaultShell")}</span>
     </button>
     {#each platform.shells as shell (shell.id)}
       <button

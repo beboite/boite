@@ -102,7 +102,7 @@
       });
       return true;
     }
-    if (app.view === "settings") {
+    if (app.view === "settings" || app.view === "project") {
       app.view = "terminal";
       return true;
     }
@@ -124,13 +124,14 @@
     if (isModalOpen()) return "modal";
     if (app.view === "settings") return "settings";
     if (app.view === "editor") return "editor";
+    if (app.view === "project") return "project";
     return "app";
   }
 
   const shortcuts: ShortcutBinding[] = [
     {
       combo: "escape",
-      scopes: ["settings", "editor"],
+      scopes: ["settings", "editor", "project"],
       description: "Back to the terminal",
       run: () => {
         app.view = "terminal";
@@ -138,19 +139,19 @@
     },
     {
       combo: "mod+plus",
-      scopes: ["*"],
+      scopes: ["app", "settings", "editor", "project"],
       description: "Zoom in",
       run: () => settings.setUiScalePercent(settings.state.uiScalePercent + 5),
     },
     {
       combo: "mod+minus",
-      scopes: ["*"],
+      scopes: ["app", "settings", "editor", "project"],
       description: "Zoom out",
       run: () => settings.setUiScalePercent(settings.state.uiScalePercent - 5),
     },
     {
       combo: "mod+digit0",
-      scopes: ["*"],
+      scopes: ["app", "settings", "editor", "project"],
       description: "Reset zoom",
       run: () => settings.setUiScalePercent(100),
     },
@@ -158,25 +159,25 @@
     // shell needs it. The dispatcher drops a match with a stray Ctrl there.
     {
       combo: "mod+k",
-      scopes: ["app", "settings", "editor", "palette"],
+      scopes: ["app", "settings", "editor", "project", "palette"],
       description: "Command palette",
       run: () => palette.toggle(),
     },
     {
       combo: "mod+shift+p",
-      scopes: ["app", "settings", "editor", "palette"],
+      scopes: ["app", "settings", "editor", "project", "palette"],
       description: "Command palette",
       run: () => palette.toggle(),
     },
     {
       combo: "mod+b",
-      scopes: ["*"],
+      scopes: ["app", "settings", "editor", "project"],
       description: "Toggle sidebar",
       run: () => settings.toggleSidebar(),
     },
     {
       combo: "mod+,",
-      scopes: ["app", "settings", "editor"],
+      scopes: ["app", "settings", "editor", "project"],
       description: "Settings",
       run: () => {
         app.view = app.view === "settings" ? "terminal" : "settings";
@@ -184,13 +185,13 @@
     },
     {
       combo: "mod+tab",
-      scopes: ["app", "settings", "editor"],
+      scopes: ["app", "settings", "editor", "project"],
       description: "Next thread",
       run: () => cycleThread(1),
     },
     {
       combo: "mod+shift+tab",
-      scopes: ["app", "settings", "editor"],
+      scopes: ["app", "settings", "editor", "project"],
       description: "Previous thread",
       run: () => cycleThread(-1),
     },
@@ -248,25 +249,25 @@
     },
     {
       combo: "mod+shift+t",
-      scopes: ["app", "settings", "editor"],
+      scopes: ["app", "settings", "editor", "project"],
       description: "Reopen the last closed thread",
       run: () => void restoreLastClosedThread(),
     },
     {
       combo: "mod+t",
-      scopes: ["app", "settings", "editor"],
+      scopes: ["app", "settings", "editor", "project"],
       description: "New terminal",
       run: () => void launchBlankTerminalHere(),
     },
     {
       combo: "mod+w",
-      scopes: ["app", "settings", "editor"],
+      scopes: ["app", "settings", "editor", "project"],
       description: "Close the front-most tab, panel or thread",
       run: () => closeFrontMost(),
     },
     ...([1, 2, 3, 4, 5, 6, 7, 8, 9] as const).map((n) => ({
       combo: `mod+digit${n}`,
-      scopes: ["app", "settings", "editor"] as KeyScope[],
+      scopes: ["app", "settings", "editor", "project"] as KeyScope[],
       description: n === 1 ? "Jump to thread 1-9 in this project" : undefined,
       run: () => jumpToThreadN(n),
     })),
@@ -281,6 +282,10 @@
   // Its own onMount: the boot one below returns early on the PWA path, and
   // shortcuts have to work there too.
   onMount(() => keyboard.attach());
+
+  // The layout guess is only a guess until the user overrides it, and a tablet
+  // can cross the threshold by being rotated.
+  onMount(() => settings.watchFormFactor());
 
   // Also its own: an agent can ask to be moved before boot has finished, and
   // the request would land on nobody.

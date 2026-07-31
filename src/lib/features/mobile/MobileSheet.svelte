@@ -10,31 +10,149 @@
     children: Snippet;
   };
   let { open, title = "", onClose, children }: Props = $props();
+
+  // How far the sheet has to travel before letting go dismisses it. Short
+  // enough to feel like a flick, long enough that a thumb resting mid-scroll
+  // cannot throw the sheet away.
+  const DISMISS_PX = 96;
+  // Swallowed before the sheet moves at all, so tapping a row inside it does
+  // not nudge the whole panel on the few pixels a thumb always travels.
+  const SLOP_PX = 8;
+
+  let panel: HTMLDivElement | null = $state(null);
+
+  const FOCUSABLE =
+    'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+  // Focus enters the sheet when it opens and goes back where it came from when it
+  // closes. Without this the keyboard stayed on whatever was behind, so the sheet
+  // was a wall a sighted pointer user could cross and nobody else could.
+  $effect(() => {
+    if (!open || !panel) return;
+    const previous = document.activeElement as HTMLElement | null;
+    const first = panel.querySelector<HTMLElement>(FOCUSABLE);
+    (first ?? panel).focus({ preventScroll: true });
+    return () => previous?.focus?.();
+  });
+
+  function trapTab(e: KeyboardEvent) {
+    if (!panel) return;
+    const items = [...panel.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(
+      (el) => el.offsetParent !== null,
+    );
+    if (items.length === 0) {
+      e.preventDefault();
+      panel.focus({ preventScroll: true });
+      return;
+    }
+    const first = items[0];
+    const last = items[items.length - 1];
+    const active = document.activeElement;
+    if (!panel.contains(active)) {
+      e.preventDefault();
+      (e.shiftKey ? last : first).focus();
+    } else if (!e.shiftKey && active === last) {
+      e.preventDefault();
+      first.focus();
+    } else if (e.shiftKey && active === first) {
+      e.preventDefault();
+      last.focus();
+    }
+  }
+  let dragY = $state(0);
+  let dragPointer: number | null = null;
+  let dragStartY = 0;
+  // A drag only competes with the scroll container when that container has
+  // nothing left to give: starting one mid-scroll would fight the finger.
+  let fromTop = false;
+
+  function endDrag() {
+    dragPointer = null;
+    dragY = 0;
+  }
+
+  function dragStart(e: PointerEvent) {
+    // A mouse drags nothing here: the desktop has no sheet, and swallowing its
+    // press would break text selection inside the panel.
+    if (e.pointerType === "mouse" || dragPointer !== null) return;
+    dragPointer = e.pointerId;
+    dragStartY = e.clientY;
+    fromTop = (panel?.scrollTop ?? 0) <= 0;
+    dragY = 0;
+  }
+
+  function dragMove(e: PointerEvent) {
+    if (dragPointer !== e.pointerId || !fromTop) return;
+    // Downward only, and no preventDefault: the panel is already scrolled to
+    // the top and `overscroll-contain` stops the gesture from reaching the page
+    // behind, so the browser has nothing to steal.
+    const dy = e.clientY - dragStartY;
+    dragY = dy > SLOP_PX ? dy - SLOP_PX : 0;
+  }
+
+  function dragEnd(e: PointerEvent) {
+    if (dragPointer !== e.pointerId) return;
+    const dismiss = dragY > DISMISS_PX;
+    endDrag();
+    if (dismiss) onClose();
+  }
+
+  // Escape belongs to the topmost surface, and while this sheet is up that is
+  // this sheet: propagation stops so the filter fields and pickers underneath
+  // do not also react to the key that closed it.
+  function onWindowKeyDown(e: KeyboardEvent) {
+    if (!open) return;
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      onClose();
+      return;
+    }
+    if (e.key === "Tab") trapTab(e);
+  }
 </script>
 
+<svelte:window onkeydown={onWindowKeyDown} />
+
 {#if open}
-  <div
-    class="fixed inset-0 z-[200] flex flex-col justify-end"
-    role="dialog"
-    aria-modal="true"
-  >
+  <div class="fixed inset-0 z-[var(--z-sheet)] flex flex-col justify-end">
     <button
       type="button"
-      class="absolute inset-0 bg-black/55"
-      aria-label={t("mobile.close")}
+      class="absolute inset-0 bg-[var(--color-scrim)]"
+      aria-label={t("titlebar.close")}
+      tabindex="-1"
       onclick={onClose}
       transition:fade={{ duration: 140 }}
     ></button>
+    <!-- dvh, not vh: `100vh` is the large viewport on a phone, so a 75vh sheet
+         with the URL bar showing ran past the bottom of the screen. -->
+    <!-- The pointer handlers are a swipe-to-dismiss on top of a dialog that
+         already closes with Escape, so the gesture adds a shortcut rather than
+         being the only way out. -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
-      class="relative max-h-[75vh] overflow-y-auto rounded-t-2xl border-t border-border bg-[var(--color-surface)] shadow-2xl"
-      style="padding-bottom: env(safe-area-inset-bottom, 0px);"
+      bind:this={panel}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={title ? "sheet-title" : undefined}
+      aria-label={title ? undefined : t("titlebar.close")}
+      tabindex="-1"
+      class="surface-dialog relative max-h-[75dvh] overflow-y-auto overscroll-contain rounded-b-none border-x-0 border-b-0"
+      style="padding-bottom: env(safe-area-inset-bottom, 0px); padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-area-inset-right, 0px);"
+      style:transform={dragY > 0 ? `translateY(${dragY}px)` : undefined}
+      style:transition={dragY > 0 ? "none" : "transform var(--dur-2)"}
       transition:fly={{ y: 320, duration: 200 }}
+      onpointerdown={dragStart}
+      onpointermove={dragMove}
+      onpointerup={dragEnd}
+      onpointercancel={dragEnd}
+      onpointerleave={dragEnd}
     >
-      <div class="sticky top-0 z-10 flex justify-center bg-[var(--color-surface)] pb-1 pt-2.5">
+      <div class="sticky top-0 z-[var(--z-chrome)] flex justify-center bg-[var(--color-surface)] pb-1 pt-2.5">
         <span class="h-1 w-10 rounded-full bg-[var(--color-surface-3)]"></span>
       </div>
       {#if title}
-        <div class="px-4 pb-1 text-sm font-semibold text-foreground">{title}</div>
+        <div id="sheet-title" class="px-4 pb-1 text-sm font-semibold text-foreground">{title}</div>
       {/if}
       <div class="p-2.5">
         {@render children()}

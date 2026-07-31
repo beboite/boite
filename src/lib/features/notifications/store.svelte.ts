@@ -73,6 +73,12 @@ class NotificationsStore {
     return id;
   }
 
+  // The neutral kind had no public entry point, so Toast's info glyph and its
+  // default accent were unreachable. Pass `null` for a card that waits to be
+  // dismissed by hand.
+  info(message: string, durationMs?: number | null) {
+    return this.push(message, { kind: "info", durationMs: durationMs ?? 3000 });
+  }
   success(message: string, durationMs?: number | null) {
     return this.push(message, { kind: "success", durationMs: durationMs ?? 1800 });
   }

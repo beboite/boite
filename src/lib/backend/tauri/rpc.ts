@@ -16,6 +16,7 @@ import type {
   SessionHit,
   SessionKind,
   ShellApi,
+  SystemApi,
   WorktreeApi,
   WorktreeEntry,
   WorktreeHold,
@@ -31,7 +32,7 @@ import type {
 } from "$lib/features/git/api";
 import type { ChangedPath, DirEntry, SearchHit } from "$lib/features/explorer/api";
 import type { FileVersions, TextFile } from "$lib/features/editor/api";
-import type { ShellOption } from "$lib/storage/platform.svelte";
+import type { Platform, ShellOption } from "$lib/storage/platform.svelte";
 import type { LogEntry, LogLevel } from "$lib/shared/services/logger.svelte";
 
 export const tauriGit: GitApi = {
@@ -88,6 +89,16 @@ export const tauriProject: ProjectApi = {
   homeDir: () => invoke<string>("home_dir"),
   folderState: (path) => invoke<FolderState>("folder_state", { path }),
   createFolder: (path) => invoke<void>("create_project_folder", { path }),
+};
+
+// The desktop runs the threads itself, so the device's own OS is the right
+// answer here and the plugin is the cheapest way to it.
+export const tauriSystem: SystemApi = {
+  async platform(): Promise<Platform> {
+    const { platform } = await import("@tauri-apps/plugin-os");
+    const raw = platform();
+    return raw === "windows" || raw === "macos" || raw === "linux" ? raw : "unknown";
+  },
 };
 
 interface RawShellOption {

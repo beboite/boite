@@ -1,5 +1,44 @@
+<script module lang="ts">
+  import { getContext, setContext } from "svelte";
+
+  /**
+   * The tree's cursor, owned by ExplorerPanel.
+   *
+   * The container keeps DOM focus and names the current row through
+   * aria-activedescendant, so a row only ever needs to answer "am I the one".
+   * Context rather than a prop because the tree is recursive and threading the
+   * cursor through every level would re-render whole branches on each move.
+   */
+  export interface TreeCursor {
+    readonly activePath: string | null;
+    readonly focused: boolean;
+    setActive(path: string): void;
+  }
+
+  const TREE_CURSOR = Symbol("explorer.treeCursor");
+
+  export function provideTreeCursor(cursor: TreeCursor): void {
+    setContext(TREE_CURSOR, cursor);
+  }
+
+  function treeCursor(): TreeCursor | null {
+    return getContext<TreeCursor | null>(TREE_CURSOR) ?? null;
+  }
+
+  /**
+   * A DOM id for a row. An id may not carry whitespace, and two different paths
+   * must never collapse onto one or aria-activedescendant would name the wrong
+   * row, so literal underscores are doubled before spaces become one.
+   */
+  export function treeRowId(path: string): string {
+    return `tree-${path.replace(/_/g, "__").replace(/\s/g, "_")}`;
+  }
+</script>
+
 <script lang="ts">
   import { explorerStore } from "./store.svelte";
+  import { settings } from "$lib/features/settings/store.svelte";
+  import { t, type MessageKey } from "$lib/i18n/index.svelte";
   import { threadCwd } from "$lib/features/thread/cwd";
   import { treeMenu } from "./treeMenu.svelte";
   import { revealItemInDir } from "$lib/platform/opener";
@@ -24,6 +63,18 @@
 
   let { entry, depth }: Props = $props();
 
+  const cursor = treeCursor();
+  const selected = $derived(cursor?.activePath === entry.path);
+  // The row highlight only shows while the tree itself has focus: at rest the
+  // panel has to look exactly as it did before there was a cursor.
+  const current = $derived(selected && !!cursor?.focused);
+  const rowId = $derived(treeRowId(entry.path));
+  const groupId = $derived(`${rowId}-group`);
+
+  // A 19px row is a fine density for a mouse and unhittable with a thumb, and
+  // this tree is the whole Files tab on a phone.
+  const mobile = $derived(settings.state.mobileLayout);
+
   const isOpen = $derived(!!explorerStore.expanded[entry.path]);
   const children = $derived(explorerStore.entriesByPath[entry.path] ?? null);
   const isLoading = $derived(!!explorerStore.loading[entry.path]);
@@ -42,12 +93,32 @@
     return s;
   }
 
+  // The badge is a one-letter git code, which is meaningless read aloud. Keys
+  // are literals so a typo fails the type check.
+  const STATUS_KEYS: Record<string, MessageKey> = {
+    M: "explorer.gitModified",
+    A: "explorer.gitAdded",
+    D: "explorer.gitDeleted",
+    R: "explorer.gitRenamed",
+    C: "explorer.gitCopied",
+    U: "explorer.gitConflicted",
+    "?": "explorer.gitUntracked",
+  };
+
+  function statusAria(s: string): string {
+    const key = STATUS_KEYS[s];
+    return key ? t(key) : t("explorer.gitChanged");
+  }
+
   // OS-facing calls (explorer.exe) want native separators back.
   function toNative(p: string): string {
     return /^[a-zA-Z]:\//.test(p) ? p.replaceAll("/", "\\") : p;
   }
 
   async function activate() {
+    // A click is also a cursor move, otherwise the next arrow key would resume
+    // from wherever the keyboard left off rather than from the clicked row.
+    cursor?.setActive(entry.path);
     if (entry.isDir) {
       await explorerStore.toggle(entry.path);
       return;
@@ -67,7 +138,7 @@
   async function copyPath(p: string) {
     try {
       await writeText(p);
-      notifications.success("Path copied");
+      notifications.success(t("explorer.pathCopied"));
     } catch (err) {
       logger.warn("explorer", `copy path failed for ${p}`, String(err));
     }
@@ -96,7 +167,7 @@
     const items: ContextMenuItem[] = [];
     if (!entry.isDir) {
       items.push({
-        label: "Open",
+        label: t("explorer.open"),
         action: () => {
           void editorStore.openFile(entry.path).then(() => (app.view = "editor"));
         },
@@ -104,16 +175,16 @@
       items.push({ separator: true });
     }
     items.push({
-      label: "Reveal in file manager",
+      label: t("explorer.revealInFileManager"),
       action: () => void reveal(),
     });
     items.push({ separator: true });
     items.push({
-      label: "Copy path",
+      label: t("explorer.copyPath"),
       action: () => void copyPath(toNative(entry.path)),
     });
     items.push({
-      label: "Copy relative path",
+      label: t("explorer.copyRelativePath"),
       action: () => void copyPath(relativePath()),
     });
     treeMenu.open(x, y, items);
@@ -121,18 +192,28 @@
 </script>
 
 {#if visible}
-<div>
+<!-- Presentation so the treeitem and its group flatten up to the tree: a plain
+     div here is a generic child of role="tree", which owns neither. -->
+<div role="presentation">
   <button
     type="button"
+    id={rowId}
     data-tree-row
     data-path={entry.path}
+    data-name={entry.name}
     data-dir={entry.isDir ? "1" : "0"}
-    class="group flex w-full items-center gap-1 px-1 py-0.5 text-left text-sm transition hover:bg-[var(--color-surface-2)] focus-visible:bg-[var(--color-surface-2)] focus-visible:outline-none {entry.isHidden ? 'text-foreground/55' : 'text-foreground/85'}"
+    tabindex="-1"
+    class="group flex w-full items-center px-1 text-left transition hover:bg-[var(--color-surface-2)] focus-visible:bg-[var(--color-surface-2)] focus-visible:outline-none {current
+      ? 'bg-[var(--color-surface-2)]'
+      : ''} {mobile
+      ? 'min-h-11 gap-2 py-2 text-base'
+      : 'gap-1 py-0.5 text-sm'} {entry.isHidden ? 'text-foreground/55' : 'text-foreground/85'}"
     style:padding-left="{depth * 12 + 4}px"
     role="treeitem"
     aria-expanded={entry.isDir ? isOpen : undefined}
     aria-level={depth + 1}
-    aria-selected="false"
+    aria-selected={selected}
+    aria-owns={entry.isDir && isOpen ? groupId : undefined}
     onclick={activate}
     oncontextmenu={openMenu}
     use:longPress={{ onLongPress: openMenuAt }}
@@ -156,7 +237,7 @@
       <span
         class="ml-auto pl-1 font-mono text-2xs leading-none tabular-nums"
         style:color={statusColor(status)}
-        aria-label="git status {status}"
+        aria-label={statusAria(status)}
       >
         {statusLabel(status)}
       </span>
@@ -164,33 +245,38 @@
   </button>
 
   {#if entry.isDir && isOpen}
-    {#if isLoading && !children}
-      <div
-        class="px-1 py-0.5 text-xs text-muted-foreground/70"
-        style:padding-left="{depth * 12 + 24}px"
-      >
-        Loading…
-      </div>
-    {:else if errMsg}
-      <div
-        class="px-1 py-0.5 text-xs text-[var(--color-danger)]"
-        style:padding-left="{depth * 12 + 24}px"
-      >
-        {errMsg}
-      </div>
-    {:else if children}
-      {#each children as child (child.path)}
-        <TreeNode entry={child} depth={depth + 1} />
-      {/each}
-      {#if children.length === 0}
+    <!-- The row's aria-expanded has to point at something: this is the group it
+         opens, owned by the button above through aria-owns because a treeitem
+         that is a <button> cannot contain the rows nested under it. -->
+    <div id={groupId} role="group">
+      {#if isLoading && !children}
         <div
-          class="px-1 py-0.5 text-xs text-muted-foreground/60 italic"
+          class="px-1 py-0.5 text-xs text-muted-foreground/70"
           style:padding-left="{depth * 12 + 24}px"
         >
-          empty
+          {t("common.loading")}
         </div>
+      {:else if errMsg}
+        <div
+          class="px-1 py-0.5 text-xs text-[var(--color-danger)]"
+          style:padding-left="{depth * 12 + 24}px"
+        >
+          {errMsg}
+        </div>
+      {:else if children}
+        {#each children as child (child.path)}
+          <TreeNode entry={child} depth={depth + 1} />
+        {/each}
+        {#if children.length === 0}
+          <div
+            class="px-1 py-0.5 text-xs text-muted-foreground/60 italic"
+            style:padding-left="{depth * 12 + 24}px"
+          >
+            {t("explorer.empty")}
+          </div>
+        {/if}
       {/if}
-    {/if}
+    </div>
   {/if}
 </div>
 {/if}

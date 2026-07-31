@@ -4,14 +4,14 @@
   import { app } from "$lib/app/store.svelte";
   import { projectDisplayName } from "$lib/features/project/scratch";
   import { hasTauri } from "$lib/backend/env";
+  import { t } from "$lib/i18n/index.svelte";
   import WorkspaceToggle from "$lib/features/workspace/WorkspaceToggle.svelte";
-  import MobileLaunchSheet from "./MobileLaunchSheet.svelte";
+  import MobileLaunchSheet, { launchSheet } from "./MobileLaunchSheet.svelte";
   import MobileThreadSheet from "./MobileThreadSheet.svelte";
   import Plus from "@lucide/svelte/icons/plus";
   import MoreVertical from "@lucide/svelte/icons/more-vertical";
   import Minus from "@lucide/svelte/icons/minus";
   import X from "@lucide/svelte/icons/x";
-  import { t } from "$lib/i18n/index.svelte";
 
   const isTauri = hasTauri();
   const win = isTauri ? getCurrentWindow() : null;
@@ -35,16 +35,15 @@
   const onTerminal = $derived(app.mobileTab === "terminal");
   const activeTitle = $derived(app.activeThread?.title ?? app.activeThread?.label ?? null);
 
-  let launchOpen = $state(false);
   let threadsOpen = $state(false);
 </script>
 
 <header
   data-tauri-drag-region
-  class="flex h-12 shrink-0 select-none items-center gap-2 border-b border-border bg-[var(--color-titlebar)] px-2 {isMacOS
+  class="flex min-h-12 shrink-0 select-none items-center gap-2 border-b border-border bg-[var(--color-titlebar)] {isMacOS
     ? 'pl-[78px]'
     : ''}"
-  style="padding-top: env(safe-area-inset-top, 0px);"
+  style="padding-top: env(safe-area-inset-top, 0px); padding-left: max(env(safe-area-inset-left, 0px), 0.5rem); padding-right: max(env(safe-area-inset-right, 0px), 0.5rem);"
 >
   <button
     type="button"
@@ -72,15 +71,17 @@
         {/if}
       </span>
     {:else}
-      <span class="truncate text-base font-medium text-muted-foreground">No project</span>
+      <span class="truncate text-base font-medium text-muted-foreground">{t("mobile.noProject")}</span>
     {/if}
   </button>
 
+  <!-- size-11, not size-9: this bar only ever exists under a finger, and 44px
+       is the smallest target a thumb hits reliably. -->
   {#if onTerminal}
     <button
       type="button"
-      class="flex size-9 shrink-0 items-center justify-center rounded-lg text-foreground/80 transition hover:bg-accent active:bg-accent/70 disabled:opacity-40"
-      onclick={() => (launchOpen = true)}
+      class="flex size-11 shrink-0 items-center justify-center rounded-lg text-foreground/80 transition hover:bg-accent active:bg-accent/70 disabled:opacity-40"
+      onclick={() => (launchSheet.open = true)}
       disabled={!project}
       aria-label={t("mobile.newTerminal")}
       title={t("mobile.newTerminal")}
@@ -89,7 +90,7 @@
     </button>
     <button
       type="button"
-      class="flex size-9 shrink-0 items-center justify-center rounded-lg text-foreground/80 transition hover:bg-accent active:bg-accent/70 disabled:opacity-40"
+      class="flex size-11 shrink-0 items-center justify-center rounded-lg text-foreground/80 transition hover:bg-accent active:bg-accent/70 disabled:opacity-40"
       onclick={() => (threadsOpen = true)}
       disabled={!project}
       aria-label={t("mobile.terminals")}
@@ -99,29 +100,32 @@
     </button>
   {/if}
 
-  <div class="shrink-0">
+  <!-- The header is `select-none` because it doubles as the window drag region,
+       but the workspace sheet opens inside it, and a boite's URL and name are
+       there to be read and copied. -->
+  <div class="shrink-0 select-text">
     <WorkspaceToggle />
   </div>
 
   {#if isTauri && !isMacOS}
     <button
       type="button"
-      class="flex size-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-muted/50 hover:text-foreground"
+      class="flex size-11 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-muted/50 hover:text-foreground"
       onclick={() => void win?.minimize()}
-      aria-label={t("mobile.minimize")}
+      aria-label={t("titlebar.minimize")}
     >
       <Minus class="size-4" />
     </button>
     <button
       type="button"
-      class="flex size-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-danger hover:text-white"
+      class="flex size-11 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-danger hover:text-white"
       onclick={() => void win?.close()}
-      aria-label={t("mobile.close")}
+      aria-label={t("titlebar.close")}
     >
       <X class="size-4" />
     </button>
   {/if}
 </header>
 
-<MobileLaunchSheet open={launchOpen} onClose={() => (launchOpen = false)} />
+<MobileLaunchSheet open={launchSheet.open} onClose={() => (launchSheet.open = false)} />
 <MobileThreadSheet open={threadsOpen} onClose={() => (threadsOpen = false)} />

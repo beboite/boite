@@ -3,7 +3,13 @@
  * a binding declares where it applies instead of every handler re-deriving
  * "is a dialog open?" for itself.
  */
-export type KeyScope = "modal" | "palette" | "settings" | "editor" | "app";
+export type KeyScope =
+  | "modal"
+  | "palette"
+  | "settings"
+  | "editor"
+  | "project"
+  | "app";
 
 export interface ShortcutBinding {
   /** e.g. `mod+shift+t`, `escape`, `mod+digit1`, `mod+alt+arrowleft`. */
@@ -22,7 +28,13 @@ export interface ShortcutBinding {
    * as handled and stops the event.
    */
   run: (event: KeyboardEvent) => boolean | void;
-  /** Shown in the shortcuts help; also doubles as documentation. */
+  /**
+   * What this binding does, in one line. Documentation at the declaration site,
+   * and nothing else: there is no shortcuts-help screen. It used to claim to be
+   * "shown in the shortcuts help", which was a promise no consumer kept. The
+   * command palette is where a chord is discoverable, and it renders its own
+   * label from the dictionary.
+   */
   description?: string;
 }
 

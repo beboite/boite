@@ -11,6 +11,7 @@ import {
   threadLeavesOf,
   updateRatios,
 } from "./tree";
+import { PANES_KEY, loadSavedGroups } from "./layout";
 import { uuid } from "$lib/shared/utils/uuid";
 
 function uid(): string {
@@ -37,10 +38,24 @@ export interface DropPreview {
 
 class PaneStore {
   groups = $state<PaneGroup[]>([]);
+  private hydrated = false;
+  private saveTimer: ReturnType<typeof setTimeout> | null = null;
   hoveredThreadId = $state<string | null>(null);
   draggingThreadId = $state<string | null>(null);
   dropPreview = $state<DropPreview | null>(null);
   rects = $state<Record<string, PaneRect>>({});
+
+  /**
+   * Forget a pane's measured box.
+   *
+   * syncWithThreads only prunes rects for panes that no longer exist, but a
+   * pane that merely moved keeps its entry, and the drop-target search and the
+   * terminal wrappers both read this map. The stale rect put a terminal at its
+   * old position until the new leaf measured itself.
+   */
+  clearRect(paneId: string) {
+    delete this.rects[paneId];
+  }
 
   setRect(paneId: string, rect: PaneRect) {
     const prev = this.rects[paneId];
@@ -91,7 +106,36 @@ class PaneStore {
     return g ? new Set(threadLeavesOf(g.root)) : new Set();
   }
 
+  /**
+   * Persist the tree, coalesced.
+   *
+   * A splitter drag calls setRatios at pointer rate, so writing straight through
+   * would hit localStorage sixty times a second for one gesture.
+   */
+  private saveSoon() {
+    if (typeof localStorage === "undefined") return;
+    if (this.saveTimer !== null) clearTimeout(this.saveTimer);
+    this.saveTimer = setTimeout(() => {
+      this.saveTimer = null;
+      try {
+        localStorage.setItem(PANES_KEY, JSON.stringify($state.snapshot(this.groups)));
+      } catch {
+        // A layout is not worth failing over: a full quota just means the next
+        // start rebuilds one leaf per thread, which is where this began.
+      }
+    }, 250);
+  }
+
   syncWithThreads() {
+    // Hydration happens here rather than at boot because this is the first thing
+    // to run once the threads exist, and a saved group is only meaningful next to
+    // them: loading afterwards would find every leaf already claimed by the
+    // one-per-thread pass below and overwrite the layout it was meant to restore.
+    if (!this.hydrated) {
+      this.hydrated = true;
+      const saved = loadSavedGroups();
+      if (saved.length > 0 && this.groups.length === 0) this.groups = saved;
+    }
     const valid = new Map(app.threads.map((t) => [t.id, t]));
 
     for (const t of app.threads) {
@@ -141,6 +185,7 @@ class PaneStore {
     if (this.dropPreview && !live.has(this.dropPreview.targetPaneId)) {
       this.dropPreview = null;
     }
+    this.saveSoon();
   }
 
   setFocused(groupId: string, paneId: string) {
@@ -148,12 +193,14 @@ class PaneStore {
     if (!g) return;
     if (!leavesOf(g.root).includes(paneId)) return;
     g.focusedPaneId = paneId;
+    this.saveSoon();
   }
 
   setRatios(groupId: string, splitId: string, ratios: number[]) {
     const g = this.groups.find((x) => x.id === groupId);
     if (!g) return;
     g.root = updateRatios(g.root, splitId, ratios);
+    this.saveSoon();
   }
 
   /**
@@ -179,6 +226,7 @@ class PaneStore {
     const existing = findContent(group.root, (c) => sameContent(c, content));
     if (existing) {
       group.focusedPaneId = existing.paneId;
+      this.saveSoon();
       return existing.paneId;
     }
 
@@ -200,6 +248,7 @@ class PaneStore {
     if (!next) return null;
     group.root = next;
     group.focusedPaneId = paneId;
+    this.saveSoon();
     return paneId;
   }
 
@@ -225,6 +274,7 @@ class PaneStore {
       root: { kind: "leaf", paneId, content },
       focusedPaneId: paneId,
     });
+    this.saveSoon();
     return paneId;
   }
 
@@ -240,6 +290,7 @@ class PaneStore {
     if (countLeaves(g.root) <= 1) {
       if (content.kind === "thread") return false;
       this.groups = this.groups.filter((x) => x.id !== g.id);
+      this.saveSoon();
       return true;
     }
     if (content.kind === "thread") return this.unsplit(paneId);
@@ -248,6 +299,7 @@ class PaneStore {
     g.root = next;
     if (g.focusedPaneId === paneId) g.focusedPaneId = leavesOf(next)[0];
     delete this.rects[paneId];
+    this.saveSoon();
     return true;
   }
 
@@ -299,6 +351,7 @@ class PaneStore {
     if (!next) return false;
     targetGroup.root = next;
     targetGroup.focusedPaneId = draggedThreadId;
+    this.saveSoon();
     return true;
   }
 
@@ -325,6 +378,7 @@ class PaneStore {
       root: threadPane(threadId),
       focusedPaneId: threadId,
     });
+    this.saveSoon();
     return true;
   }
 }

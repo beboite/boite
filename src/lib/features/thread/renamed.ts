@@ -6,6 +6,8 @@
 // Device-scoped, like the layout blob: the name itself lives in the thread row
 // and travels with the workspace, only the "stop retitling this" flag is local.
 
+import { logger } from "$lib/shared/services/logger.svelte";
+
 const KEY = "boite.renamedThreads";
 
 let ids: Set<string> | null = null;
@@ -30,7 +32,7 @@ function persist() {
   try {
     localStorage.setItem(KEY, JSON.stringify([...all()]));
   } catch (err) {
-    console.error("renamedThreads persist failed:", err);
+    logger.error("thread", "renamedThreads persist failed", String(err));
   }
 }
 

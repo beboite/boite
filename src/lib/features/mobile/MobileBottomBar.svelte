@@ -1,5 +1,6 @@
 <script lang="ts">
   import { app } from "$lib/app/store.svelte";
+  import { t, type MessageKey } from "$lib/i18n/index.svelte";
   import type { MobileTab } from "$lib/types";
   import type { Component } from "svelte";
   import FolderTree from "@lucide/svelte/icons/folder-tree";
@@ -8,12 +9,14 @@
   import Boxes from "@lucide/svelte/icons/boxes";
   import Settings from "@lucide/svelte/icons/settings";
 
-  const TABS: { id: MobileTab; label: string; icon: Component }[] = [
-    { id: "files", label: "Files", icon: FolderTree },
-    { id: "git", label: "Git", icon: GitBranch },
-    { id: "terminal", label: "Terminal", icon: SquareTerminal },
-    { id: "projects", label: "Projects", icon: Boxes },
-    { id: "settings", label: "Settings", icon: Settings },
+  // The label is a key, not a string: the bar is data-driven, so the literal
+  // that svelte-check verifies lives here instead of at the render site.
+  const TABS: { id: MobileTab; labelKey: MessageKey; icon: Component }[] = [
+    { id: "files", labelKey: "mobile.files", icon: FolderTree },
+    { id: "git", labelKey: "project.git", icon: GitBranch },
+    { id: "terminal", labelKey: "tabs.terminal", icon: SquareTerminal },
+    { id: "projects", labelKey: "sidebar.projects", icon: Boxes },
+    { id: "settings", labelKey: "common.settings", icon: Settings },
   ];
 
   function select(tab: MobileTab) {
@@ -24,9 +27,12 @@
   }
 </script>
 
+<!-- The side insets are what keep the outer two tabs reachable in landscape on a
+     notched phone: the bar spans the window, so the cutout eats the Files and
+     Settings targets without them. -->
 <nav
   class="flex shrink-0 items-stretch border-t border-border bg-[var(--color-titlebar)]"
-  style="padding-bottom: env(safe-area-inset-bottom, 0px);"
+  style="padding-bottom: env(safe-area-inset-bottom, 0px); padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-area-inset-right, 0px);"
 >
   {#each TABS as tab (tab.id)}
     {@const Icon = tab.icon}
@@ -40,7 +46,7 @@
       aria-current={active ? "page" : undefined}
     >
       <Icon class="size-5" />
-      <span class="text-2xs font-medium tracking-tight">{tab.label}</span>
+      <span class="text-2xs font-medium tracking-tight">{t(tab.labelKey)}</span>
     </button>
   {/each}
 </nav>

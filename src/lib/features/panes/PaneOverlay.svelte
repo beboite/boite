@@ -29,7 +29,7 @@
     position: absolute;
     inset: 0;
     pointer-events: none;
-    z-index: 5;
+    z-index: var(--z-pane-overlay);
   }
   .overlay.hovered-sidebar::after,
   .overlay.focused::after {
@@ -39,12 +39,15 @@
     border-radius: 6px;
     pointer-events: none;
   }
+  /* No fallbacks: both tokens are defined in app.css for every paint, and the
+     ones that used to sit here were translucent white where --color-border is a
+     solid dark grey, so the only thing a fallback could do was lie. */
   .overlay.focused::after {
-    box-shadow: inset 0 0 0 1px var(--color-border, rgba(255, 255, 255, 0.18));
+    box-shadow: inset 0 0 0 1px var(--color-border);
   }
   .overlay.hovered-sidebar::after {
-    box-shadow: inset 0 0 0 2px var(--color-foreground, #fafafa);
-    animation: pulse 1.2s ease-in-out infinite;
+    box-shadow: inset 0 0 0 2px var(--color-foreground);
+    animation: pulse var(--dur-pulse) ease-in-out infinite;
   }
   @keyframes pulse {
     0%, 100% { opacity: 0.85; }

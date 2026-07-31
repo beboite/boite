@@ -13,6 +13,8 @@ import {
   setProjectArchived,
 } from "$lib/storage/db";
 import { settings } from "$lib/features/settings/store.svelte";
+import { logger } from "$lib/shared/services/logger.svelte";
+import { t } from "$lib/i18n/index.svelte";
 import { platform } from "$lib/storage/platform.svelte";
 import {
   loadThreads,
@@ -118,7 +120,7 @@ class AppState {
       for (const [id, title] of batch) {
         const origin = this.threadById(id)?.origin;
         void updateThreadTitle(id, title, origin).catch((err) => {
-          console.error("updateThreadTitle failed:", err);
+          logger.error("app", "updateThreadTitle failed", err);
         });
       }
     }, 500);
@@ -138,7 +140,7 @@ class AppState {
       batch.map(([id, title]) => {
         const origin = this.threadById(id)?.origin;
         return updateThreadTitle(id, title, origin).catch((err) => {
-          console.error("updateThreadTitle failed:", err);
+          logger.error("app", "updateThreadTitle failed", err);
         });
       }),
     );
@@ -380,11 +382,11 @@ class AppState {
     }
     const [projects, threads] = await Promise.all([
       loadProjects().catch((err) => {
-        console.error("loadProjects failed:", err);
+        logger.error("app", "loadProjects failed", err);
         return [] as Project[];
       }),
       loadThreads().catch((err) => {
-        console.error("loadThreads failed:", err);
+        logger.error("app", "loadThreads failed", err);
         return [] as Thread[];
       }),
     ]);
@@ -397,13 +399,13 @@ class AppState {
     label: string,
   ): Promise<T[]> {
     const localP = load(workspace.backendFor("local")).catch((err) => {
-      console.error(`${label} (local) failed:`, err);
+      logger.error("app", `${label} (local) failed`, err);
       return [] as T[];
     });
     const remote = workspace.remoteBackend;
     const remoteP = remote
       ? load(remote).catch((err) => {
-          console.error(`${label} (remote) failed:`, err);
+          logger.error("app", `${label} (remote) failed`, err);
           return [] as T[];
         })
       : Promise.resolve([] as T[]);
@@ -531,7 +533,7 @@ class AppState {
       case "agent.request": {
         void import("$lib/features/thread/agentRequests")
           .then((m) => m.handleRemoteAgentRequest(ev.data))
-          .catch((err) => console.error("agent.request failed:", err));
+          .catch((err) => logger.error("app", "agent.request failed", err));
         break;
       }
       // The server lost track of which control events we missed (broadcast
@@ -582,7 +584,7 @@ class AppState {
         this.threads = threads;
       }
     } catch (err) {
-      console.error("resync failed:", err);
+      logger.error("app", "resync failed", err);
     }
   }
 
@@ -614,8 +616,9 @@ class AppState {
     for (const [sid, threads] of bySession) {
       if (threads.length < 2) continue;
       const labels = threads.map((t) => t.label).join(", ");
-      console.warn(
-        `[boite] sessionId ${sid} shared by ${threads.length} threads (${labels}); clearing all to break cross-talk`,
+      logger.warn(
+        "app",
+        `sessionId ${sid} shared by ${threads.length} threads (${labels}); clearing all to break cross-talk`,
       );
       for (const t of threads) {
         t.sessionId = null;
@@ -625,13 +628,11 @@ class AppState {
       }
     }
     if (cleared > 0) {
-      console.warn(
-        `[boite] cleared ${cleared} legacy thread session bindings. Use /resume in your AI CLI to rebind each thread to its conversation.`,
+      logger.warn(
+        "app",
+        `cleared ${cleared} legacy thread session bindings; each needs /resume to rebind`,
       );
-      notifications.error(
-        `Cleared ${cleared} colliding session bindings. Use /resume in each thread to rebind.`,
-        8000,
-      );
+      notifications.error(t("app.clearedSessionBindings", { count: cleared }), 8000);
     }
   }
 
@@ -656,7 +657,8 @@ class AppState {
     try {
       await dbDeleteThread(id, removed?.origin);
     } catch (err) {
-      console.error("deleteThread failed:", err);
+      logger.error("app", "deleteThread failed", err);
+      notifications.error(t("app.closeThreadFailed"));
     }
   }
 
@@ -726,19 +728,21 @@ class AppState {
   // here would never reach its row. Passing null drops the manual name — the
   // thread falls back to its label and the agent gets to title it again.
   async renameThread(id: string, name: string | null) {
-    const t = this.threadById(id);
-    if (!t) return;
+    // Named `thread`, not `t`: this file uses `t` for a thread almost everywhere,
+    // and here that shadows the translation helper.
+    const thread = this.threadById(id);
+    if (!thread) return;
     const title = name?.trim() || null;
-    t.title = title;
+    thread.title = title;
     // An OSC title queued just before the rename would land on top of it.
     this.pendingTitleSaves.delete(id);
     if (title) markRenamed(id);
     else clearRenamed(id);
     try {
-      await updateThreadTitle(id, title, t.origin);
+      await updateThreadTitle(id, title, thread.origin);
     } catch (err) {
-      console.error("renameThread failed:", err);
-      notifications.error("Failed to rename thread");
+      logger.error("app", "renameThread failed", err);
+      notifications.error(t("app.renameThreadFailed"));
     }
   }
 
@@ -758,7 +762,7 @@ class AppState {
         .map((p) => p.cwd);
       await registerProjectRoots(roots);
     } catch (err) {
-      console.error("registerProjectRoots failed:", err);
+      logger.error("app", "registerProjectRoots failed", err);
     }
   }
 
@@ -768,7 +772,8 @@ class AppState {
     try {
       await saveProject(project);
     } catch (err) {
-      console.error("saveProject failed:", err);
+      logger.error("app", "saveProject failed", err);
+      notifications.error(t("app.saveProjectFailed"));
     }
   }
 
@@ -783,8 +788,8 @@ class AppState {
     try {
       await saveProject($state.snapshot(p) as Project);
     } catch (err) {
-      console.error("renameProject failed:", err);
-      notifications.error("Failed to rename project");
+      logger.error("app", "renameProject failed", err);
+      notifications.error(t("app.renameProjectFailed"));
     }
   }
 
@@ -803,8 +808,8 @@ class AppState {
     try {
       await saveProject($state.snapshot(p) as Project);
     } catch (err) {
-      console.error("setProjectWorktrees failed:", err);
-      notifications.error("Failed to save the worktree setting");
+      logger.error("app", "setProjectWorktrees failed", err);
+      notifications.error(t("app.worktreeSettingFailed"));
     }
   }
 
@@ -826,7 +831,7 @@ class AppState {
       workspace.isDynamic ? "local" : undefined,
     );
     if (!scratch) {
-      notifications.error("No home folder to open a scratch terminal in");
+      notifications.error(t("app.noHomeFolder"));
       return null;
     }
     await this.addProject(scratch);
@@ -839,7 +844,8 @@ class AppState {
     try {
       await saveProject(project);
     } catch (err) {
-      console.error("saveProject failed:", err);
+      logger.error("app", "saveProject failed", err);
+      notifications.error(t("app.saveProjectFailed"));
     }
   }
 
@@ -856,7 +862,8 @@ class AppState {
     try {
       await setProjectArchived(id, true, p.origin);
     } catch (err) {
-      console.error("archiveProject failed:", err);
+      logger.error("app", "archiveProject failed", err);
+      notifications.error(t("app.archiveFailed"));
     }
   }
 
@@ -867,7 +874,8 @@ class AppState {
     try {
       await setProjectArchived(id, false, p.origin);
     } catch (err) {
-      console.error("unarchiveProject failed:", err);
+      logger.error("app", "unarchiveProject failed", err);
+      notifications.error(t("app.unarchiveFailed"));
     }
   }
 
@@ -893,7 +901,8 @@ class AppState {
     try {
       await deleteProject(id, removed?.origin);
     } catch (err) {
-      console.error("deleteProject failed:", err);
+      logger.error("app", "deleteProject failed", err);
+      notifications.error(t("app.removeProjectFailed"));
     }
   }
 

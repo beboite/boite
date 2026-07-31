@@ -1,4 +1,5 @@
 import { backend, workspace } from "$lib/backend";
+import { logger } from "$lib/shared/services/logger.svelte";
 import { CLI_PRESETS } from "./cliPresets";
 
 // Whether each preset's executable resolves on the machine that will run it.
@@ -45,7 +46,7 @@ class CliDetection {
     try {
       this.found[executable] = await backend().shell.commandExists(executable);
     } catch (err) {
-      console.error("Unable to check command", executable, err);
+      logger.warn("settings", `command probe failed for ${executable}`, String(err));
       this.found[executable] = false;
     }
   }

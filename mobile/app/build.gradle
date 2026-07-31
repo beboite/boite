@@ -15,10 +15,31 @@
  */
 
 import groovy.xml.MarkupBuilder
+import groovy.json.JsonSlurper
 
 plugins {
     id 'com.android.application'
 }
+
+// One version, and it is the app's. The APK shipped with an empty versionName
+// while twa-manifest.json said 0.7.0 and package.json said something else again,
+// so nothing on a device could be matched to a release. JsonSlurper ships with
+// Gradle's own Groovy, so reading it costs no plugin.
+//
+// Regenerating this module with Bubblewrap would write literal values back over
+// this block, which is why twa-manifest.json is kept in step by hand.
+def appVersionName = new JsonSlurper()
+        .parse(file("$rootDir/../package.json"))
+        .version
+
+// Play only ever compares versionCode, and it must never go down. major.minor
+// .patch packed one field per pair of digits keeps it ordered the way the semver
+// it comes from is, as long as minor and patch stay under 100.
+def semver = (appVersionName =~ /^(\d+)\.(\d+)\.(\d+)/)
+assert semver.find(), "package.json version is not a semver: $appVersionName"
+def appVersionCode = semver.group(1).toInteger() * 10000 +
+        semver.group(2).toInteger() * 100 +
+        semver.group(3).toInteger()
 
 def twaManifest = [
     applicationId: 'dev.boite.app',
@@ -57,8 +78,8 @@ android {
         applicationId "dev.boite.app"
         minSdkVersion 23
         targetSdkVersion 35
-        versionCode 1
-        versionName ""
+        versionCode appVersionCode
+        versionName appVersionName
 
         // The name for the application
         resValue "string", "appName", twaManifest.name

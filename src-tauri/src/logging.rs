@@ -1,5 +1,6 @@
+use std::collections::VecDeque;
 use std::fs::{self, OpenOptions};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -11,6 +12,14 @@ const LOG_FILE_NAME: &str = "app.log";
 const PREVIOUS_LOG_FILE_NAME: &str = "app.previous.log";
 const MAX_MESSAGE_BYTES: usize = 512;
 const MAX_DETAILS_BYTES: usize = 16_384;
+/// How many records a read hands back. The log grows without bound across a long
+/// session, and the caller is a diagnostics view that only ever looks at the end
+/// of it, so the whole file has no business crossing an IPC boundary.
+const MAX_READ_ENTRIES: usize = 5_000;
+/// Where a read starts when the file is bigger than this. Bounds the parse as
+/// well as the payload: a single record carries up to `MAX_DETAILS_BYTES`, so
+/// counting records alone would still let a read pull in tens of megabytes.
+const READ_TAIL_BYTES: u64 = 4 * 1024 * 1024;
 
 static LOG_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
@@ -204,55 +213,71 @@ pub fn append_app_log(
     Ok(())
 }
 
+fn parse_log_line(line: &str) -> Option<LogEntry> {
+    let v: serde_json::Value = serde_json::from_str(line).ok()?;
+    Some(LogEntry {
+        ts_ms: v.get("tsMs").and_then(|x| x.as_u64()).unwrap_or(0),
+        level: v
+            .get("level")
+            .and_then(|x| x.as_str())
+            .unwrap_or("info")
+            .to_string(),
+        source: v
+            .get("source")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .to_string(),
+        message: v
+            .get("message")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .to_string(),
+        details: v
+            .get("details")
+            .and_then(|x| x.as_str())
+            .map(|s| s.to_string()),
+    })
+}
+
+/// The tail of the log, never more than `MAX_READ_ENTRIES` records.
 pub fn read_log_file(path: &Path) -> Result<Vec<LogEntry>, String> {
-    let file = match fs::File::open(path) {
+    let mut file = match fs::File::open(path) {
         Ok(f) => f,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(vec![]),
         Err(e) => return Err(format!("open log: {e}")),
     };
-    let reader = BufReader::new(file);
-    let mut out = Vec::new();
-    for line in reader.lines() {
-        let line = match line {
-            Ok(l) => l,
-            Err(_) => continue,
-        };
+
+    let len = file
+        .metadata()
+        .map_err(|e| format!("stat log: {e}"))?
+        .len();
+    let seeked = len > READ_TAIL_BYTES;
+    if seeked {
+        file.seek(SeekFrom::Start(len - READ_TAIL_BYTES))
+            .map_err(|e| format!("seek log: {e}"))?;
+    }
+
+    // Keeping raw lines and parsing afterwards means a file with a million
+    // records costs a million `String`s read one at a time, not a million parsed
+    // JSON values held at once.
+    let mut recent: VecDeque<String> = VecDeque::new();
+    for (index, line) in BufReader::new(file).lines().enumerate() {
+        let Ok(line) = line else { continue };
+        // A byte offset lands mid-record, so the first line back is the tail half
+        // of a record that started before the offset.
+        if seeked && index == 0 {
+            continue;
+        }
         if line.trim().is_empty() {
             continue;
         }
-        let v: serde_json::Value = match serde_json::from_str(&line) {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-        let ts_ms = v.get("tsMs").and_then(|x| x.as_u64()).unwrap_or(0);
-        let level = v
-            .get("level")
-            .and_then(|x| x.as_str())
-            .unwrap_or("info")
-            .to_string();
-        let source = v
-            .get("source")
-            .and_then(|x| x.as_str())
-            .unwrap_or("")
-            .to_string();
-        let message = v
-            .get("message")
-            .and_then(|x| x.as_str())
-            .unwrap_or("")
-            .to_string();
-        let details = v
-            .get("details")
-            .and_then(|x| x.as_str())
-            .map(|s| s.to_string());
-        out.push(LogEntry {
-            ts_ms,
-            level,
-            source,
-            message,
-            details,
-        });
+        if recent.len() == MAX_READ_ENTRIES {
+            recent.pop_front();
+        }
+        recent.push_back(line);
     }
-    Ok(out)
+
+    Ok(recent.iter().filter_map(|l| parse_log_line(l)).collect())
 }
 
 pub fn clear_log(handle: &AppHandle) -> Result<(), String> {

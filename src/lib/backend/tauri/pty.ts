@@ -10,7 +10,17 @@ type WirePtyEvent =
   | { type: "exit"; code: number | null }
   | { type: "error"; message: string };
 
+// Native single-pass decode where the engine has it, which is every WebView2 and
+// Chrome recent enough to ship the Uint8Array base64 methods. The fallback below
+// costs two full copies of every chunk (atob's string, then a per-byte loop), and
+// a reattach replays the whole scrollback ring as one event, so that path can be
+// several hundred kilobytes of byte-at-a-time JavaScript on the main thread.
+const nativeFromBase64 = (
+  Uint8Array as unknown as { fromBase64?: (input: string) => Uint8Array }
+).fromBase64;
+
 function decodeBase64(b64: string): Uint8Array {
+  if (nativeFromBase64) return nativeFromBase64.call(Uint8Array, b64);
   const bin = atob(b64);
   const bytes = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);

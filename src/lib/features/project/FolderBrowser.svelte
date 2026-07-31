@@ -1,9 +1,11 @@
 <script lang="ts">
+  import { tick } from "svelte";
   import { folderBrowser } from "./folderBrowserStore.svelte";
   import { workspace } from "$lib/backend";
   import { addProjectByPath } from "./api";
-  import type { DirEntry } from "$lib/features/explorer/api";
   import { t } from "$lib/i18n/index.svelte";
+  import { restoreFocus } from "$lib/shared/keyboard/overlay";
+  import type { DirEntry } from "$lib/features/explorer/api";
 
   // This modal always browses the boite's filesystem: in pure remote mode
   // that's the active backend, in dynamic mode it's explicitly the remote one.
@@ -16,6 +18,68 @@
   let err = $state<string | null>(null);
   let busy = $state(false);
   let started = false;
+  let panelEl = $state<HTMLDivElement | null>(null);
+  let addBtn = $state<HTMLButtonElement | null>(null);
+
+  // Same shape as ConfirmDialog: without this the dialog opens with the keyboard
+  // still on the row behind it, and closing drops focus on <body>.
+  $effect(() => {
+    if (!folderBrowser.open) return;
+    const previous = document.activeElement as HTMLElement | null;
+    const surface = panelEl;
+    // The primary action, unless it is still disabled because the listing has
+    // not landed yet: focusing a disabled button focuses nothing at all.
+    const target = addBtn && !addBtn.disabled ? addBtn : panelEl;
+    target?.focus();
+    return () => restoreFocus(previous, surface);
+  });
+
+  // Walking into a folder destroys the row that was clicked, so without this the
+  // keyboard sits on <body> until the next Tab.
+  $effect(() => {
+    if (!folderBrowser.open) return;
+    void entries;
+    let cancelled = false;
+    void tick().then(() => {
+      if (cancelled || !folderBrowser.open) return;
+      if (panelEl?.contains(document.activeElement)) return;
+      panelEl?.focus();
+    });
+    return () => {
+      cancelled = true;
+    };
+  });
+
+  function focusables(): HTMLElement[] {
+    return Array.from(
+      panelEl?.querySelectorAll<HTMLElement>("button:not(:disabled)") ?? [],
+    );
+  }
+
+  // On the window, like ConfirmDialog, not on the dialog element: walking into a
+  // folder replaces the whole list, so the row that was clicked is gone and
+  // focus falls on <body>, from where nothing bubbles through the dialog. The
+  // layout's dispatcher leaves Escape alone while an aria-modal dialog is up.
+  function onKeydown(e: KeyboardEvent) {
+    if (!folderBrowser.open) return;
+    if (e.key === "Escape") {
+      // Stopped here: one press closes this dialog and nothing else.
+      e.preventDefault();
+      e.stopPropagation();
+      close();
+      return;
+    }
+    if (e.key !== "Tab") return;
+    const all = focusables();
+    if (all.length === 0) return;
+    const idx = all.indexOf(document.activeElement as HTMLElement);
+    e.preventDefault();
+    if (idx < 0) {
+      all[e.shiftKey ? all.length - 1 : 0].focus();
+      return;
+    }
+    all[(idx + (e.shiftKey ? -1 : 1) + all.length) % all.length].focus();
+  }
 
   // Lazily start browsing the first time the modal opens.
   $effect(() => {
@@ -72,53 +136,59 @@
   }
 </script>
 
+<svelte:window onkeydown={onKeydown} />
+
 {#if folderBrowser.open}
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
   <div
-    class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6"
+    class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-[var(--color-scrim)] backdrop-blur-sm p-6"
     role="dialog"
     aria-modal="true"
+    aria-labelledby="folder-browser-title"
     tabindex="-1"
     onclick={(e) => {
       if (e.target === e.currentTarget) close();
     }}
-    onkeydown={(e) => {
-      if (e.key === "Escape") close();
-    }}
   >
     <div
-      class="flex max-h-[70vh] w-full max-w-md flex-col rounded-lg border border-border bg-[var(--color-surface)] shadow-xl"
+      bind:this={panelEl}
+      tabindex="-1"
+      class="surface-dialog flex max-h-[70vh] w-full max-w-md flex-col outline-none"
     >
       <div class="flex items-center justify-between border-b border-border px-3 py-2">
-        <span class="text-xs font-medium text-foreground">Add a project folder</span>
+        <span id="folder-browser-title" class="text-xs font-medium text-foreground">
+          {t("folderBrowser.title")}
+        </span>
         <button
           class="text-muted-foreground transition hover:text-foreground"
           onclick={close}
-          aria-label={t("mobile.close")}>✕</button
+          aria-label={t("titlebar.close")}>✕</button
         >
       </div>
 
       {#if !root}
         <p class="p-4 text-xs text-muted-foreground">
-          This server has no browsable workspace directory. Set
-          <code class="font-mono">BOITE_WORKSPACE_DIR</code> to enable the folder picker.
+          {t("folderBrowser.noWorkspaceDir", { variable: "BOITE_WORKSPACE_DIR" })}
         </p>
       {:else}
         <div class="flex items-center gap-2 border-b border-border px-3 py-1.5">
           <button
             class="rounded px-1.5 py-0.5 text-xs text-muted-foreground transition hover:text-foreground disabled:opacity-40"
             onclick={up}
-            disabled={path === root}>↑ Up</button
+            disabled={path === root}>↑ {t("folderBrowser.up")}</button
           >
           <span class="truncate font-mono text-xs text-muted-foreground">{path}</span>
         </div>
 
         <div class="min-h-0 flex-1 overflow-auto p-1">
           {#if loading}
-            <p class="p-3 text-xs text-muted-foreground/60">Loading…</p>
+            <p class="p-3 text-xs text-muted-foreground/60">{t("common.loading")}</p>
           {:else if err}
             <p class="p-3 text-xs text-danger">{err}</p>
           {:else if entries.length === 0}
-            <p class="p-3 text-xs text-muted-foreground/60">No subfolders here.</p>
+            <p class="p-3 text-xs text-muted-foreground/60">
+              {t("folderBrowser.noSubfolders")}
+            </p>
           {:else}
             {#each entries as e (e.path)}
               <button
@@ -136,14 +206,15 @@
           <button
             class="rounded px-2 py-1 text-xs text-muted-foreground transition hover:text-foreground"
             onclick={close}
-            disabled={busy}>Cancel</button
+            disabled={busy}>{t("common.cancel")}</button
           >
           <button
+            bind:this={addBtn}
             class="rounded bg-foreground px-2.5 py-1 text-xs font-medium text-background transition hover:bg-foreground/90 disabled:opacity-50"
             onclick={addHere}
             disabled={busy || !path}
           >
-            {busy ? "Adding…" : "Add this folder"}
+            {busy ? t("folderBrowser.adding") : t("folderBrowser.addThisFolder")}
           </button>
         </div>
       {/if}

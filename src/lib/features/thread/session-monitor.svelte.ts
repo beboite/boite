@@ -3,6 +3,7 @@ import { backendFor } from "$lib/backend";
 import { saveThread, updateThreadTitle } from "$lib/storage/db";
 import { notifications } from "$lib/features/notifications/store.svelte";
 import { logger } from "$lib/shared/services/logger.svelte";
+import { t } from "$lib/i18n/index.svelte";
 import { statusEngine } from "./statusEngine";
 import type { SessionDetector } from "./session";
 import type { Thread } from "$lib/types";
@@ -35,46 +36,48 @@ export interface SessionMonitor {
 }
 
 export async function persistSessionId(
-  t: Thread,
+  thread: Thread,
   id: string | null,
   cwd: string,
   opts: { silent?: boolean } = {},
 ) {
-  if (t.sessionId === id) return;
-  const previous = t.sessionId;
-  t.sessionId = id;
-  await saveThread($state.snapshot(t) as Thread);
-  if (id) app.clearUnbound(t.id);
+  if (thread.sessionId === id) return;
+  const previous = thread.sessionId;
+  thread.sessionId = id;
+  await saveThread($state.snapshot(thread) as Thread);
+  if (id) app.clearUnbound(thread.id);
   logger.info(
     "session",
-    `${id ? (previous ? "updated" : "captured") : "cleared"} ${t.iconKey ?? "?"} session for ${t.label}`,
+    `${id ? (previous ? "updated" : "captured") : "cleared"} ${thread.iconKey ?? "?"} session for ${thread.label}`,
     { id, previous, cwd },
   );
   if (!opts.silent && id) {
     notifications.success(
-      previous ? `Session updated (${t.label})` : `Session captured (${t.label})`,
+      previous
+        ? t("thread.sessionUpdated", { name: thread.label })
+        : t("thread.sessionCaptured", { name: thread.label }),
     );
   }
 }
 
 // Prompt-derived titles (codex never emits a descriptive OSC title) only fill
 // an unnamed thread; an OSC-set or user-visible title always wins.
-function applySessionTitle(t: Thread, title: string | null | undefined) {
-  if (!title || t.title) return;
-  app.setThreadTitle(t.id, title);
+function applySessionTitle(thread: Thread, title: string | null | undefined) {
+  if (!title || thread.title) return;
+  app.setThreadTitle(thread.id, title);
   // Remote: setThreadTitle skips persistence (the server owns OSC titles),
   // but this title only exists client-side, so persist it explicitly.
-  if (!backendFor(t.origin).caps.clientStatus) {
-    void updateThreadTitle(t.id, title, t.origin).catch(() => {});
+  if (!backendFor(thread.origin).caps.clientStatus) {
+    void updateThreadTitle(thread.id, title, thread.origin).catch(() => {});
   }
 }
 
 function probeSince(
-  t: Thread,
+  thread: Thread,
   initialSince: number,
   lastActivityAt: number,
 ): number | null {
-  if (!t.sessionId) return initialSince;
+  if (!thread.sessionId) return initialSince;
   if (!lastActivityAt) return null;
   if (Date.now() - lastActivityAt > SESSION_SCAN_INTERVAL_MS * 2) return null;
   return Math.max(initialSince, lastActivityAt - 2000);
@@ -103,7 +106,7 @@ export function startSessionMonitor(opts: {
     }
     if (timer) clearInterval(timer);
     timer = null;
-    for (const t of timeouts) clearTimeout(t);
+    for (const handle of timeouts) clearTimeout(handle);
     timeouts = [];
   };
 
@@ -132,11 +135,15 @@ export function startSessionMonitor(opts: {
 
   const scanOnce = async (): Promise<boolean> => {
     if (scanInFlight) return false;
-    const t = app.threadById(threadId);
-    if (!t || t.ptyId !== targetPtyId || !opts.isPtyCurrent(targetPtyId)) {
+    const thread = app.threadById(threadId);
+    if (
+      !thread ||
+      thread.ptyId !== targetPtyId ||
+      !opts.isPtyCurrent(targetPtyId)
+    ) {
       return true;
     }
-    const sinceMs = probeSince(t, since, opts.lastActivityAt());
+    const sinceMs = probeSince(thread, since, opts.lastActivityAt());
     if (sinceMs == null) return false;
 
     // Exclude every sessionId already claimed by any thread (incl. self).
@@ -148,7 +155,7 @@ export function startSessionMonitor(opts: {
     const excludeIds = app.threads
       .map((x) => x.sessionId)
       .filter((id): id is string => !!id)
-      .filter((id) => id !== t.sessionId || !!t.title);
+      .filter((id) => id !== thread.sessionId || !!thread.title);
 
     scanInFlight = true;
     try {
@@ -156,10 +163,10 @@ export function startSessionMonitor(opts: {
       // "live" — it is the one being claimed.
       const hit = await detector(cwd, sinceMs, excludeIds, targetPtyId);
       if (!hit) {
-        if (t.sessionId) {
+        if (thread.sessionId) {
           logger.debug(
             "session",
-            `${t.label}: locked on ${t.sessionId}, no new session detected`,
+            `${thread.label}: locked on ${thread.sessionId}, no new session detected`,
             { cwd, probeSince: sinceMs },
           );
         }
@@ -169,16 +176,16 @@ export function startSessionMonitor(opts: {
       if (hit.mtimeMs != null && !attributedToSelf(hit.mtimeMs)) {
         logger.debug(
           "session",
-          `${t.label}: ${id} not attributable to this thread, deferring`,
+          `${thread.label}: ${id} not attributable to this thread, deferring`,
           { mtimeMs: hit.mtimeMs, lastActivityAt: opts.lastActivityAt() },
         );
         return false;
       }
-      if (id === t.sessionId) {
-        applySessionTitle(t, hit.title);
+      if (id === thread.sessionId) {
+        applySessionTitle(thread, hit.title);
         logger.debug(
           "session",
-          `${t.label}: detector returned current session, skip`,
+          `${thread.label}: detector returned current session, skip`,
           { id },
         );
         return false;
@@ -189,22 +196,27 @@ export function startSessionMonitor(opts: {
       if (sibling) {
         logger.warn(
           "session",
-          `${t.label}: claiming ${id} from sibling ${sibling.label}`,
+          `${thread.label}: claiming ${id} from sibling ${sibling.label}`,
           { id, sibling: sibling.label },
         );
-        notifications.success(`Session reassigned: ${sibling.label} → ${t.label}`);
+        notifications.success(
+          t("thread.sessionReassigned", {
+            from: sibling.label,
+            to: thread.label,
+          }),
+        );
         await persistSessionId(sibling, null, cwd, { silent: true });
       }
       logger.info(
         "session",
-        `${t.label}: ${t.sessionId ? "manual switch" : "captured"} ${t.sessionId ?? "(none)"} → ${id}`,
-        { cwd, previous: t.sessionId, next: id },
+        `${thread.label}: ${thread.sessionId ? "manual switch" : "captured"} ${thread.sessionId ?? "(none)"} → ${id}`,
+        { cwd, previous: thread.sessionId, next: id },
       );
-      await persistSessionId(t, id, cwd);
-      applySessionTitle(t, hit.title);
+      await persistSessionId(thread, id, cwd);
+      applySessionTitle(thread, hit.title);
       return false;
     } catch (err) {
-      logger.error("session", `detect failed for ${t.label}`, String(err));
+      logger.error("session", `detect failed for ${thread.label}`, String(err));
       return false;
     } finally {
       scanInFlight = false;
@@ -218,17 +230,17 @@ export function startSessionMonitor(opts: {
   let livenessInFlight = false;
   const probeLiveness = async () => {
     if (livenessInFlight) return;
-    const t = app.threadById(threadId);
-    if (t && !backendFor(t.origin).caps.clientStatus) return;
+    const thread = app.threadById(threadId);
+    if (thread && !backendFor(thread.origin).caps.clientStatus) return;
     if (
-      !t ||
-      !t.sessionId ||
-      t.ptyId !== targetPtyId ||
+      !thread ||
+      !thread.sessionId ||
+      thread.ptyId !== targetPtyId ||
       !opts.isPtyCurrent(targetPtyId)
     ) {
       return;
     }
-    const ownId = t.sessionId;
+    const ownId = thread.sessionId;
     const excludeOthers = app.threads
       .map((x) => x.sessionId)
       .filter((id): id is string => !!id && id !== ownId);

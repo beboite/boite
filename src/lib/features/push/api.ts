@@ -1,4 +1,5 @@
 import { backend } from "$lib/backend";
+import { logger } from "$lib/shared/services/logger.svelte";
 import { hasTauri } from "$lib/backend/env";
 
 // applicationServerKey must be the raw bytes of the VAPID public key; the
@@ -12,27 +13,37 @@ function urlB64ToUint8Array(base64: string): Uint8Array<ArrayBuffer> {
   return out;
 }
 
+/** Whether this browser can be subscribed to Web Push at all. */
+export function pushSupported(): boolean {
+  if (hasTauri() || typeof window === "undefined") return false;
+  return (
+    "serviceWorker" in navigator && "PushManager" in window && "Notification" in window
+  );
+}
+
+/** What the browser currently says about notification permission. */
+export function pushPermission(): NotificationPermission | "unsupported" {
+  if (!pushSupported()) return "unsupported";
+  return Notification.permission;
+}
+
 // Subscribe this browser to Web Push and register the endpoint server-side.
 // Web/PWA only: the desktop notifies through the OS. Idempotent (the server
 // keys subscriptions by endpoint), so it is safe to call on every connect.
+//
+// Never prompts. It used to call requestPermission() here, which meant a prompt
+// on every connect with no user gesture behind it and no sentence explaining what
+// it was for: Chrome's quieter permission UI auto-blocks that pattern, the block
+// is permanent, and there was no in-app way to ask again. The ask now lives on the
+// control in Settings > General, and this only picks up a permission that already
+// exists.
 export async function registerPush(): Promise<void> {
-  if (hasTauri() || typeof window === "undefined") return;
-  if (
-    !("serviceWorker" in navigator) ||
-    !("PushManager" in window) ||
-    !("Notification" in window)
-  ) {
-    return;
-  }
+  if (!pushSupported()) return;
   const push = backend().push;
   if (!push) return;
 
   try {
-    if (Notification.permission === "denied") return;
-    if (Notification.permission === "default") {
-      const granted = await Notification.requestPermission();
-      if (granted !== "granted") return;
-    }
+    if (Notification.permission !== "granted") return;
 
     const reg = await navigator.serviceWorker.ready;
     let sub = await reg.pushManager.getSubscription();
@@ -51,6 +62,32 @@ export async function registerPush(): Promise<void> {
     if (!json.endpoint || !p256dh || !auth) return;
     await push.subscribe({ endpoint: json.endpoint, keys: { p256dh, auth } });
   } catch (e) {
-    console.warn("push registration failed:", e);
+    logger.warn("push", "registration failed", e);
   }
+}
+
+/**
+ * Ask the browser for notification permission, then subscribe. Call this from a
+ * click and nowhere else: the gesture is what keeps Chrome from swallowing the
+ * prompt, and a swallowed prompt cannot be reopened from inside the app.
+ *
+ * Returns what the browser decided, so the caller can say so.
+ */
+export async function enablePush(): Promise<NotificationPermission | "unsupported"> {
+  if (!pushSupported()) return "unsupported";
+  if (Notification.permission !== "default") {
+    // Already answered. Granted still runs the registration: the subscription
+    // may be missing on this device even when the permission is not.
+    if (Notification.permission === "granted") await registerPush();
+    return Notification.permission;
+  }
+  let result: NotificationPermission;
+  try {
+    result = await Notification.requestPermission();
+  } catch (e) {
+    logger.warn("push", "permission request failed", e);
+    return Notification.permission;
+  }
+  if (result === "granted") await registerPush();
+  return result;
 }
