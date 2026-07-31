@@ -357,6 +357,7 @@ class AppState {
 
     this.deduplicateSessionIds();
     pruneRenamed(this.threads.map((t) => t.id));
+    await this.migrateWorktrees();
 
     // Remote: the server is authoritative for thread runtime state and pushes
     // it as control events. Local has no subscribe and derives status itself.
@@ -633,6 +634,39 @@ class AppState {
         `cleared ${cleared} legacy thread session bindings; each needs /resume to rebind`,
       );
       notifications.error(t("app.clearedSessionBindings", { count: cleared }), 8000);
+    }
+  }
+
+  /**
+   * Brings worktrees left outside their project back into it.
+   *
+   * Placed between the thread rows landing and `ready`: a terminal only mounts
+   * once the page is past its loading state, and mounting is what spawns the
+   * PTY, so nothing is holding a directory this moves. It also has to follow
+   * `syncRoots`, since the backend refuses a repository it has no root for.
+   *
+   * One thread at a time. Two `git worktree move` in the same repository fight
+   * over its lock, and threads of one project are the common case.
+   */
+  private async migrateWorktrees() {
+    for (const t of this.threads) {
+      if (!t.worktreePath) continue;
+      const project = this.projects.find((p) => p.id === t.projectId);
+      if (!project) continue;
+      try {
+        const moved = await workspace
+          .backendFor(t.origin)
+          .worktree.migrate(project.gitRoot ?? project.cwd, t.id, t.worktreePath);
+        // Null is the answer for every worktree already in its project, which
+        // after the first launch is all of them.
+        if (!moved) continue;
+        t.worktreePath = moved;
+        await saveThread($state.snapshot(t) as Thread);
+      } catch (err) {
+        // One that will not move keeps the path it has, and the thread starts
+        // in it exactly as it did before. Never a reason to hold up boot.
+        logger.warn("worktree", `kept ${t.worktreePath} for ${t.id}`, String(err));
+      }
     }
   }
 
