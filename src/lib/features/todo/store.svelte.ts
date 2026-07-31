@@ -1,3 +1,4 @@
+import { app } from "$lib/app/store.svelte";
 import { backend } from "$lib/backend";
 import { notifications } from "$lib/features/notifications/store.svelte";
 import { uuid } from "$lib/shared/utils/uuid";
@@ -20,13 +21,16 @@ class TodoStore {
   /** A change landed while a query was already out; that query's answer is old. */
   private stale = false;
   /**
-   * Suppress the announcement for one reload.
+   * Whether the reload currently running gets to announce what it finds.
    *
-   * A failed write reloads to put the row back the way the database has it,
-   * and announcing that would tell the user an agent did something when what
-   * actually happened is that their own edit did not stick.
+   * Belongs to that one reload, not to the store. A failed write reloads
+   * quietly to put the row back the way the database has it, and announcing
+   * that would say an agent did something when the truth is that the user's
+   * own edit did not stick — but reloads collapse, so a quiet one can end up
+   * being the query an agent's write is waiting on. It is un-muted when that
+   * happens: a caller joining is a caller who wants the news.
    */
-  private silent = false;
+  private announce = false;
 
   forProject(projectId: string | null): TodoItem[] {
     if (!projectId) return [];
@@ -40,6 +44,10 @@ class TodoStore {
   }
 
   async reload(): Promise<void> {
+    return this.run(true);
+  }
+
+  private async run(announce: boolean): Promise<void> {
     // Collapse concurrent reloads: a burst of agent writes would otherwise
     // start one query per event and land them out of order. The join is not
     // free though — the running query may have read the table before the write
@@ -47,9 +55,15 @@ class TodoStore {
     // in-flight one runs again rather than answering with what it already has.
     if (this.inFlight) {
       this.stale = true;
+      // The mark is not enough on its own: a quiet reload that a loud caller
+      // joins would re-read the table and then swallow that caller's deltas,
+      // which is an agent's write disappearing because the user's last edit
+      // happened to fail.
+      if (announce) this.announce = true;
       return this.inFlight;
     }
     this.loading = true;
+    this.announce = announce;
     this.inFlight = (async () => {
       try {
         // The list before the outside changed it. Only a reload can see this:
@@ -64,8 +78,17 @@ class TodoStore {
         } while (this.stale);
         // Not on the first load: every row is new to an empty list, and a boot
         // with eight open todos would queue eight announcements.
-        if (this.loaded && !this.silent) {
-          todoAnnouncer.push(diffTodos(before, this.items));
+        //
+        // Only this project's: the card takes the middle of the window for two
+        // and a half seconds, and an agent finishing a task in a repo the user
+        // is not looking at has nothing to say to them right now.
+        if (this.loaded && this.announce) {
+          const projectId = app.currentProjectId;
+          todoAnnouncer.push(
+            diffTodos(before, this.items).filter(
+              (d) => d.todo.projectId === projectId,
+            ),
+          );
         }
         this.loaded = true;
       } catch (err) {
@@ -104,12 +127,7 @@ class TodoStore {
   /** Re-read without announcing. For putting the list back after a failed
       write, which is the app correcting itself rather than news. */
   private async reloadQuietly(): Promise<void> {
-    this.silent = true;
-    try {
-      await this.reload();
-    } finally {
-      this.silent = false;
-    }
+    await this.run(false);
   }
 
   /** A workspace switch invalidates everything: the rows live in that DB. */

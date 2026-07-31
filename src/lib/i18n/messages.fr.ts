@@ -397,22 +397,18 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "palette.restoreThread": "Restaurer le dernier terminal fermé",
   "palette.closeThread": "Fermer le terminal actif",
   "palette.toggleSidebar": "Masquer/Afficher la barre latérale",
-  "palette.toggleGit": "Afficher/Masquer le panneau git",
-  "palette.toggleExplorer": "Afficher/Masquer l'explorateur de fichiers",
-  "palette.toggleTodo": "Afficher/Masquer le bloc-notes",
   "palette.openSettings": "Ouvrir les paramètres",
 
   "panes.resize": "Redimensionner les panneaux",
   "panes.maxReached": "{count} panneaux maximum",
-  "panes.closePanel": "Fermer le panneau",
-  "panes.resizePanel": "Redimensionner le panneau",
   "panes.closePane": "Fermer le pane",
+  "panes.detachPane": "Sortir de la division",
   "panes.kindDashboard": "Vue d'ensemble",
   "panes.kindGit": "Git",
   "panes.kindExplorer": "Fichiers",
   "panes.kindTodo": "Todo",
   "panes.kindEditor": "Éditeur",
-  "panes.needThread": "Ouvrez d'abord un terminal : un pane s'ouvre à côté d'un terminal.",
+  "panes.needProject": "Choisissez d'abord un projet : un pane appartient à un projet.",
   "panes.groupFull": "Ce groupe contient déjà {count} panes.",
   "panes.openGit": "Ouvrir git dans un pane",
   "panes.openExplorer": "Ouvrir les fichiers dans un pane",
@@ -420,8 +416,6 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "panes.openDashboard": "Ouvrir la vue d'ensemble dans un pane",
   "panes.openEditor": "Ouvrir l'éditeur dans un pane",
   "panes.openBrowser": "Ouvrir une page dans un pane…",
-  "panes.splitRight": "Scinder à droite",
-  "panes.splitDown": "Scinder en bas",
   "panes.browserPrompt": "Adresse à ouvrir",
 
   "todo.announceClaimed": "En attente de vous",
@@ -435,6 +429,17 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "browser.openExternal": "Ouvrir dans le navigateur du système",
   "browser.mayRefuse":
     "Toujours rien. Un site peut refuser d'être affiché dans un cadre ; le bouton de droite l'ouvre à l'extérieur.",
+  "browser.confirmExternalTitle": "Ouvrir cette page dans un pane ?",
+  "browser.confirmExternal":
+    "Un agent demande à afficher {url} dans cette fenêtre. Ce n'est pas un serveur de cette machine.",
+  "browser.confirmExternalOpen": "Afficher",
+  "browser.refuse.notAUrl": "Ce n'est pas une adresse qu'un pane peut ouvrir.",
+  "browser.refuse.scheme": "Un pane n'ouvre que les pages http:// et https://.",
+  "browser.refuse.credentials":
+    "Cette adresse contient un identifiant, ce qui masque sa vraie destination.",
+  "browser.refuse.appOrigin": "Cette adresse est Boite elle-même, pas une page.",
+  "browser.refuse.cleartext":
+    "Le http:// simple s'arrête à cette machine. Utilisez https:// pour le reste.",
 
   "closeGuard.title": "Fermer boite ?",
 

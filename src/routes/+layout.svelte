@@ -198,8 +198,18 @@
     // from the sidebar onto a live terminal. These land on the project overview
     // because there is no obvious second thing to show; the palette's Panes
     // section picks a specific one, and dragging still does the arbitrary case.
+    //
+    // Ctrl+Shift+E and Ctrl+Shift+O rather than the editor world's Ctrl+\ for
+    // two reasons, both of which the backslash fails on. Ctrl+\ is SIGQUIT: a
+    // capture-phase listener that swallows it takes away the only way to quit a
+    // wedged process in a terminal, which is not a trade a multiplexer gets to
+    // make. And on a French AZERTY the backslash is AltGr+8, so the event
+    // carries `code: "Digit8"` with `altKey` set and no binding on it can ever
+    // fire. These two are what GNOME Terminal, Terminator and Tilix already
+    // use for the same gesture, on a letter that sits in the same place on
+    // both layouts.
     {
-      combo: "mod+backslash",
+      combo: "mod+shift+e",
       scopes: ["app"],
       description: "Split right",
       run: () => {
@@ -207,7 +217,7 @@
       },
     },
     {
-      combo: "mod+shift+backslash",
+      combo: "mod+shift+o",
       scopes: ["app"],
       description: "Split down",
       run: () => {

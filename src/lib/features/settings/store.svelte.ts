@@ -134,7 +134,6 @@ const DEFAULTS: Settings = {
   },
   confirmCloseThread: true,
   rightPanel: null,
-  rightPanelWidth: 320,
   gitSplitFraction: 0.5,
   gitAutoFetch: true,
   gitAutoFetchSeconds: 180,
@@ -166,16 +165,6 @@ function migrateRightPanel(stored: Record<string, unknown>): RightPanelTab {
   if (raw === "git" || raw === "explorer" || raw === "todo" || raw === null) return raw;
   if (stored.gitPanelOpen === true) return "git";
   return DEFAULTS.rightPanel;
-}
-
-function migrateRightPanelWidth(stored: Record<string, unknown>): number {
-  if (typeof stored.rightPanelWidth === "number" && stored.rightPanelWidth > 0) {
-    return stored.rightPanelWidth;
-  }
-  if (typeof stored.gitPanelWidth === "number" && stored.gitPanelWidth > 0) {
-    return stored.gitPanelWidth;
-  }
-  return DEFAULTS.rightPanelWidth;
 }
 
 export function parseCommand(input: string): { cmd: string; args: string[] } {
@@ -210,7 +199,6 @@ const DEVICE_FIELDS = [
   "sidebarCollapsed",
   "uiScalePercent",
   "rightPanel",
-  "rightPanelWidth",
   "gitSplitFraction",
   "mobileLayout",
   "motionMode",
@@ -303,7 +291,6 @@ class SettingsStore {
             ? stored.confirmCloseThread
             : DEFAULTS.confirmCloseThread,
         rightPanel: migrateRightPanel(raw),
-        rightPanelWidth: migrateRightPanelWidth(raw),
         gitSplitFraction:
           typeof stored.gitSplitFraction === "number" &&
           stored.gitSplitFraction > 0 &&
@@ -599,11 +586,6 @@ class SettingsStore {
     await this.persist();
   }
 
-  toggleRightPanel(tab: Exclude<RightPanelTab, null>) {
-    this.state.rightPanel = this.state.rightPanel === tab ? null : tab;
-    this.persistDeviceNow();
-  }
-
   async setAgentTodoAccess(value: boolean) {
     if (this.state.agentTodoAccess === value) return;
     this.state.agentTodoAccess = value;
@@ -617,22 +599,10 @@ class SettingsStore {
     await this.persist();
   }
 
-  togglePanelRight() {
-    this.state.rightPanel = this.state.rightPanel === null ? "git" : null;
-    this.persistDeviceNow();
-  }
-
   setRightPanel(tab: RightPanelTab) {
     if (this.state.rightPanel === tab) return;
     this.state.rightPanel = tab;
     this.persistDeviceNow();
-  }
-
-  setRightPanelWidth(px: number) {
-    const clamped = Math.max(240, Math.min(600, Math.round(px)));
-    if (this.state.rightPanelWidth === clamped) return;
-    this.state.rightPanelWidth = clamped;
-    this.persistDeviceSoon();
   }
 
   setGitSplitFraction(value: number) {

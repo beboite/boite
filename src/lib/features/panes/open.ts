@@ -19,20 +19,27 @@ export function openPane(
   side: DropSide = "right",
   ratio = 0.35,
 ): string | null {
+  // A pane is part of the terminal view; opening one from the project page
+  // would otherwise put it behind the page that asked for it.
+  app.view = "terminal";
   // Beside the focused pane of the active group, which is the pane the user is
   // looking at. Falling back to the active thread covers the case where the
   // focus is on a panel the group index still knows about.
   const anchor = anchorPaneId();
-  if (!anchor) {
-    notifications.error(t("panes.needThread"));
+  if (anchor) {
+    const paneId = paneStore.openBeside(anchor, content, side, ratio);
+    if (!paneId) notifications.error(t("panes.groupFull", { count: MAX_LEAVES }));
+    return paneId;
+  }
+  // Nothing open to sit beside. The rail this replaced drew git, files and the
+  // todo list whether or not a terminal was running, so refusing here took the
+  // panels away from every project the user had not launched anything in yet.
+  const projectId = app.currentProjectId;
+  if (!projectId) {
+    notifications.error(t("panes.needProject"));
     return null;
   }
-  // A pane is part of the terminal view; opening one from the project page
-  // would otherwise put it behind the page that asked for it.
-  app.view = "terminal";
-  const paneId = paneStore.openBeside(anchor, content, side, ratio);
-  if (!paneId) notifications.error(t("panes.groupFull", { count: MAX_LEAVES }));
-  return paneId;
+  return paneStore.openGroup(projectId, content);
 }
 
 /** The pane a new one should appear beside, or null when nothing is open. */
@@ -47,6 +54,20 @@ export function anchorPaneId(): string | null {
   const projectId = app.currentProjectId;
   const group = paneStore.groups.find((g) => g.projectId === projectId);
   return group?.focusedPaneId ?? null;
+}
+
+/**
+ * The project a pane opened right now would land in.
+ *
+ * Everything else here reads the anchor and stops; this is for the one caller
+ * that has to know whose window it is about to rearrange. An agent names the
+ * project it is asking for, and the anchor is whatever the user happens to be
+ * looking at, which is very often another one.
+ */
+export function anchorProjectId(): string | null {
+  const anchor = anchorPaneId();
+  const group = anchor ? paneStore.groupOf(anchor) : null;
+  return group?.projectId ?? app.currentProjectId;
 }
 
 /** Panel kinds the titlebar button can toggle. The three the right rail held. */
@@ -83,9 +104,10 @@ export function togglePanelPane(kind: PanelKind): boolean {
 /**
  * Split the focused pane with a copy of the active thread's neighbour.
  *
- * What `Ctrl+\` does: there is nothing obvious to put in a new pane, so it
- * offers the project's dashboard rather than refusing. A user who wanted a
- * second terminal has `Ctrl+T`, and dragging still does the arbitrary case.
+ * What `Ctrl+Shift+E` and `Ctrl+Shift+O` do: there is nothing obvious to put in
+ * a new pane, so they offer the project's dashboard rather than refusing. A
+ * user who wanted a second terminal has `Ctrl+T`, and dragging still does the
+ * arbitrary case.
  */
 export function splitFocused(side: DropSide): string | null {
   return openPane({ kind: "dashboard" }, side, 0.5);

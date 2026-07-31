@@ -127,7 +127,6 @@ export interface Settings {
   idleAutocloseByIcon: Record<string, boolean>;
   confirmCloseThread: boolean;
   rightPanel: RightPanelTab;
-  rightPanelWidth: number;
   gitSplitFraction: number;
   gitAutoFetch: boolean;
   gitAutoFetchSeconds: number;
@@ -154,6 +153,14 @@ export interface Settings {
 export type MotionMode = "system" | "on" | "off";
 
 
+/**
+ * Which of git, files and todo the titlebar button reaches for.
+ *
+ * Named after the rail it used to drive, and it no longer drives one: those
+ * three are panes now, and whether any of them is open is a question for the
+ * pane tree. All this still holds is the last one the user picked, so one
+ * click opens that one instead of always git.
+ */
 export type RightPanelTab = "git" | "explorer" | "todo" | null;
 
 /**
