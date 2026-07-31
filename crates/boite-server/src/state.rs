@@ -75,10 +75,10 @@ impl AppState {
         if let Some(dir) = &self.workspace_dir {
             roots.push(dir.to_string_lossy().to_string());
         }
-        // One root for every thread worktree. They live under the data dir, so
-        // no path read back from the database can widen the boundary by naming
-        // a directory of its own. Created here because `replace` canonicalizes
-        // and drops what does not exist yet.
+        // One root for every worktree the old layout left behind. A thread's
+        // worktree now lives under its own project, which is already a root, but
+        // one not yet migrated still has to be readable to be moved. Created
+        // here because `replace` canonicalizes and drops what does not exist.
         let worktrees = self.worktree_base();
         if std::fs::create_dir_all(&worktrees).is_ok() {
             roots.push(worktrees.to_string_lossy().to_string());
@@ -87,12 +87,13 @@ impl AppState {
         Ok(())
     }
 
-    /// Where thread worktrees live, beside the database and never in a project.
+    /// Where thread worktrees used to live, beside the database.
     ///
-    /// `BOITE_WORKTREE_BASE` moves it. A worktree takes its `target` from the
-    /// main checkout by clone or by hard link, and neither crosses a volume, so
-    /// a base sitting on a different drive from the projects means every
-    /// worktree recompiles and pays full disk for its build output.
+    /// They live in their own project now, under `worktree_base_for`. This is
+    /// what a worktree is migrated *out of*, and what a source path is checked
+    /// against before anything is moved, so it stays for as long as an install
+    /// can still be carrying one. `BOITE_WORKTREE_BASE` moves it, which matters
+    /// here only for finding worktrees an earlier run put somewhere else.
     pub fn worktree_base(&self) -> PathBuf {
         std::env::var("BOITE_WORKTREE_BASE")
             .ok()
