@@ -1,5 +1,6 @@
 <script lang="ts">
   import { openUrl } from "$lib/platform/opener";
+  import { isLocalPage } from "./url";
   import { t } from "$lib/i18n/index.svelte";
   import RotateCw from "@lucide/svelte/icons/rotate-cw";
   import ExternalLink from "@lucide/svelte/icons/external-link";
@@ -25,6 +26,22 @@
 
   let frame = $state<HTMLIFrameElement | null>(null);
   let nonce = $state(0);
+
+  /**
+   * `allow-same-origin`, and who gets it.
+   *
+   * The address was chosen by an agent, not typed by the user, so the sandbox
+   * is the difference between showing a page and running it. Kept for a dev
+   * server on this machine, which is the user's own code and needs its own
+   * storage and cookies to be worth looking at; dropped for everything else,
+   * which then loads into an opaque origin with no storage to read, no cookies
+   * to send and nothing of the app's to reach back through.
+   */
+  const sandbox = $derived(
+    isLocalPage(url)
+      ? "allow-scripts allow-same-origin allow-forms allow-popups"
+      : "allow-scripts allow-forms allow-popups",
+  );
   // A frame that never fires `load` is either slow or refused, and the two are
   // indistinguishable from here — the error is delivered to the console of a
   // document we are not allowed to touch. So the notice is offered rather than
@@ -88,7 +105,7 @@
         class="size-full border-0 bg-white"
         onload={() => (settled = true)}
         referrerpolicy="no-referrer"
-        sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+        {sandbox}
       ></iframe>
     {/key}
 
