@@ -1,4 +1,5 @@
 import { backend, backendFor } from "$lib/backend";
+import { logger } from "$lib/shared/services/logger.svelte";
 import type { Project, Settings, Thread, WorkspaceOrigin } from "$lib/types";
 import { redactArgs } from "$lib/shared/utils/redact";
 
@@ -45,8 +46,9 @@ export function saveThread(thread: Thread): Promise<void> {
   const db = backendFor(thread.origin).db;
   const { args, redacted } = redactArgs(thread.args);
   if (redacted) {
-    console.warn(
-      `[boite] redacted secret-looking args for thread ${thread.id} (${thread.label}) before persisting`,
+    logger.warn(
+      "db",
+      `redacted secret-looking args for thread ${thread.id} (${thread.label}) before persisting`,
     );
     return db.saveThread(untagThread({ ...thread, args }));
   }

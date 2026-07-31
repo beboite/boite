@@ -26,6 +26,9 @@
   let merge: MergeView | null = null;
   let langA = new Compartment();
   let langB = new Compartment();
+  // Language loading is async; a second filename change must not be overtaken
+  // by the first import resolving late.
+  let langGeneration = 0;
 
   function baseExt() {
     return [
@@ -80,8 +83,11 @@
   });
 
   async function applyLanguage(name: string) {
+    const generation = ++langGeneration;
     const lang = await loadLanguageExtension(name);
-    if (!merge) return;
+    // A newer filename won the race while this import was in flight; applying
+    // now would highlight the diff as the wrong language.
+    if (!merge || generation !== langGeneration) return;
     const ext = lang ? lang.extension : [];
     merge.a.dispatch({ effects: langA.reconfigure(ext) });
     merge.b.dispatch({ effects: langB.reconfigure(ext) });
@@ -93,7 +99,7 @@
     class="flex h-7 shrink-0 items-center gap-2 border-b border-border bg-[var(--color-titlebar)] px-3 text-xs uppercase tracking-wider text-muted-foreground"
   >
     <span class="flex-1 truncate">{leftLabel}</span>
-    <span class="opacity-40">vs</span>
+    <span class="opacity-40" aria-hidden="true">vs</span>
     <span class="flex-1 truncate">{rightLabel}</span>
   </div>
   <div bind:this={host} class="min-h-0 flex-1 overflow-hidden"></div>
@@ -114,16 +120,19 @@
   div :global(.cm-editor) {
     height: 100%;
   }
+  /* Mixed from the status tokens. These four tints were Tailwind's red-500,
+     green-500 and pure white, so a diff's own add/remove colours matched
+     nothing else in the app that says "added" or "removed". */
   div :global(.cm-changedLine) {
-    background-color: rgba(255, 255, 255, 0.04);
+    background-color: color-mix(in srgb, var(--color-foreground) 4%, transparent);
   }
   div :global(.cm-deletedChunk) {
-    background-color: rgba(239, 68, 68, 0.12);
+    background-color: color-mix(in srgb, var(--color-danger) 12%, transparent);
   }
   div :global(.cm-insertedLine) {
-    background-color: rgba(34, 197, 94, 0.12);
+    background-color: color-mix(in srgb, var(--color-success) 12%, transparent);
   }
   div :global(.cm-changedText) {
-    background-color: rgba(255, 255, 255, 0.10);
+    background-color: color-mix(in srgb, var(--color-foreground) 10%, transparent);
   }
 </style>

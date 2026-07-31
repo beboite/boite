@@ -27,6 +27,17 @@ function serializeDetails(value: unknown): string {
   }
 }
 
+/**
+ * Whether `debug` does anything. Off in a release build.
+ *
+ * Every call is a console write plus an IPC hop into a mutex-guarded synchronous
+ * append, and two callers sit on timers: the status engine ticks every 500ms per
+ * agent thread waiting for a session id, and the session monitor every 12s per
+ * thread. Ungated that was a couple of file writes a second, forever, for a
+ * thread that had simply got stuck.
+ */
+const DEBUG_ENABLED = import.meta.env.DEV;
+
 class Logger {
   private send(level: LogLevel, scope: string, message: string, data?: unknown) {
     const tag = `[${scope}]`;
@@ -41,6 +52,7 @@ class Logger {
   }
 
   debug(scope: string, message: string, data?: unknown) {
+    if (!DEBUG_ENABLED) return;
     this.send("debug", scope, message, data);
   }
   info(scope: string, message: string, data?: unknown) {

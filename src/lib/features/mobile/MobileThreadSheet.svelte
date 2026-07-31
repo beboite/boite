@@ -1,13 +1,13 @@
 <script lang="ts">
   import { app } from "$lib/app/store.svelte";
   import { closeThreadWithConfirm } from "$lib/features/thread/api";
+  import { t } from "$lib/i18n/index.svelte";
   import type { Thread, ThreadStatus } from "$lib/types";
   import StatusDot from "$lib/shared/components/StatusDot.svelte";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
   import { threadIconColor } from "$lib/features/fastpick/threadAccent";
   import MobileSheet from "./MobileSheet.svelte";
   import X from "@lucide/svelte/icons/x";
-  import { t } from "$lib/i18n/index.svelte";
 
   type Props = { open: boolean; onClose: () => void };
   let { open, onClose }: Props = $props();
@@ -41,7 +41,7 @@
 <MobileSheet {open} {onClose} title={t("mobile.terminals")}>
   {#if threads.length === 0}
     <div class="px-2 py-6 text-center text-sm text-muted-foreground">
-      No terminals in this project yet.
+      {t("mobile.noTerminals")}
     </div>
   {:else}
     <div class="flex flex-col gap-1">
@@ -54,7 +54,7 @@
         >
           <button
             type="button"
-            class="flex min-w-0 flex-1 items-center gap-3 text-left"
+            class="flex min-h-11 min-w-0 flex-1 items-center gap-3 text-left"
             onclick={() => open_(thread.id)}
           >
             <StatusDot
@@ -67,11 +67,14 @@
               {thread.title ?? thread.label}
             </span>
           </button>
+          <!-- 44px, and held clear of the full-width open target it used to sit
+               flush against: this button kills a running process, so a mistap
+               on the row must not reach it. -->
           <button
             type="button"
-            class="shrink-0 rounded-lg p-2 text-muted-foreground/70 transition hover:bg-danger/20 hover:text-danger active:bg-danger/30"
+            class="ml-2 flex size-11 shrink-0 items-center justify-center rounded-lg border-l border-border/60 text-muted-foreground/70 transition hover:bg-danger/20 hover:text-danger active:bg-danger/30"
             onclick={() => close_(thread.id)}
-            aria-label="Close {thread.label}"
+            aria-label={t("mobile.closeTerminal", { name: thread.label })}
           >
             <X class="size-4" />
           </button>

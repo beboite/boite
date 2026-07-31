@@ -19,10 +19,43 @@
   ];
 
   let activeTab = $state<TabId>("general");
+  let stripEl: HTMLDivElement | null = $state(null);
 
   function close() {
     app.view = "terminal";
     app.mobileTab = "terminal";
+  }
+
+  const tabId = (id: TabId) => `settings-tab-${id}`;
+  // One panel element for the five tabs, because that is what the DOM does: the
+  // container stays and its contents are swapped. Five ids would mean four
+  // aria-controls pointing at nothing.
+  const PANEL_ID = "settings-panel";
+
+  // Selection follows focus: every panel is a plain form, so arriving on a tab
+  // and showing it are the same act, and Tab then leads straight into the
+  // controls rather than back into the strip.
+  function moveTo(index: number) {
+    const next = TABS[(index + TABS.length) % TABS.length];
+    activeTab = next.id;
+    stripEl?.querySelector<HTMLElement>(`#${tabId(next.id)}`)?.focus();
+  }
+
+  function onStripKeydown(e: KeyboardEvent) {
+    const at = TABS.findIndex((tab) => tab.id === activeTab);
+    if (e.key === "ArrowRight") {
+      e.preventDefault();
+      moveTo(at + 1);
+    } else if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      moveTo(at - 1);
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      moveTo(0);
+    } else if (e.key === "End") {
+      e.preventDefault();
+      moveTo(TABS.length - 1);
+    }
   }
 </script>
 
@@ -43,17 +76,26 @@
   </header>
 
   <div class="border-b border-border bg-[var(--color-surface)] px-4">
-    <div class="flex gap-0.5" role="tablist">
+    <div
+      bind:this={stripEl}
+      class="flex gap-0.5"
+      role="tablist"
+      aria-label={t("common.settings")}
+    >
       {#each TABS as tab (tab.id)}
         <button
           type="button"
           role="tab"
+          id={tabId(tab.id)}
           aria-selected={activeTab === tab.id}
+          aria-controls={PANEL_ID}
+          tabindex={activeTab === tab.id ? 0 : -1}
           class="relative -mb-px border-b-2 px-2.5 py-1.5 text-sm font-medium transition {activeTab ===
           tab.id
             ? 'border-foreground text-foreground'
             : 'border-transparent text-muted-foreground hover:text-foreground'}"
           onclick={() => (activeTab = tab.id)}
+          onkeydown={onStripKeydown}
         >
           {t(tab.labelKey)}
         </button>
@@ -61,7 +103,15 @@
     </div>
   </div>
 
-  <div class="flex-1 overflow-y-auto px-4 py-3">
+  <!-- tabindex on a panel that already holds focusable controls, because this one
+       is also the scroll container: without it the wheel is the only way down. -->
+  <div
+    id={PANEL_ID}
+    role="tabpanel"
+    aria-labelledby={tabId(activeTab)}
+    tabindex="0"
+    class="flex-1 overflow-y-auto px-4 py-3"
+  >
     <div class="mx-auto flex max-w-3xl flex-col gap-2.5">
       {#if activeTab === "general"}
         <SettingsGeneralTab />
@@ -80,6 +130,8 @@
   <footer
     class="flex shrink-0 items-center justify-end border-t border-border bg-[var(--color-surface)] px-4 py-1.5"
   >
-    <span class="font-mono text-xs text-muted-foreground/60">Boite v{__APP_VERSION__}</span>
+    <span class="font-mono text-xs text-muted-foreground/60"
+      >{t("settings.version", { version: __APP_VERSION__ })}</span
+    >
   </footer>
 </div>

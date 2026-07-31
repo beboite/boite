@@ -139,12 +139,14 @@
    * The rail held git, files and todo in one 320px slot outside the layout, so
    * it cost its width whichever of the three was up and could never sit beside
    * the thing it described. The button keeps its one click by remembering which
-   * of the three you last used — that is what `rightPanel` stores now — and the
-   * right-click menu is how you pick another.
+   * of the three you last used, and the right-click menu is how you pick
+   * another.
+   *
+   * The memory is local rather than a setting: the panes themselves are
+   * persisted now, so a restart already comes back with whatever was open, and
+   * a stored copy of the same answer was only there to drive the rail.
    */
-  const panelKind = $derived<PanelKind>(
-    (settings.state.rightPanel as PanelKind | null) ?? "git",
-  );
+  let panelKind = $state<PanelKind>("git");
   const panelOpen = $derived(panePresence(panelKind) !== null);
 
   let panelMenu = $state<{ x: number; y: number; items: ContextMenuItem[] } | null>(
@@ -166,8 +168,8 @@
         ...PANEL_CHOICES.map(({ kind, key }) => ({
           label: t(key),
           action: () => {
-            settings.setRightPanel(kind);
-            if (panePresence(kind) === null) openPane({ kind });
+            panelKind = kind;
+            togglePanelPane(kind);
           },
         })),
         { separator: true as const },
@@ -303,7 +305,7 @@
     <div class="flex h-full items-stretch">
       <button
         type="button"
-        class="flex h-full w-11 items-center justify-center text-muted-foreground transition hover:bg-muted/50 hover:text-foreground"
+        class="flex h-full w-11 items-center justify-center text-muted-foreground transition hover:bg-accent hover:text-foreground"
         onclick={minimize}
         aria-label={t("titlebar.minimize")}
         title={t("titlebar.minimize")}
@@ -312,7 +314,7 @@
       </button>
       <button
         type="button"
-        class="flex h-full w-11 items-center justify-center text-muted-foreground transition hover:bg-muted/50 hover:text-foreground"
+        class="flex h-full w-11 items-center justify-center text-muted-foreground transition hover:bg-accent hover:text-foreground"
         onclick={toggleMax}
         aria-label={isMaximized ? t("titlebar.restore") : t("titlebar.maximize")}
         title={isMaximized ? t("titlebar.restore") : t("titlebar.maximize")}

@@ -1,5 +1,12 @@
+<script lang="ts" module>
+  /** The header's DOM id, so the pane body it titles can point at it. */
+  export function headerId(paneId: string): string {
+    return `pane-header-${paneId}`;
+  }
+</script>
+
 <script lang="ts">
-  import { paneStore } from "./store.svelte";
+  import { paneStore, leavesOf } from "./store.svelte";
   import type { PaneContent } from "./types";
   import { app } from "$lib/app/store.svelte";
   import { justFinished } from "$lib/features/thread/finished.svelte";
@@ -113,17 +120,68 @@
   function focus() {
     paneStore.setFocused(groupId, paneId);
   }
+
+  /**
+   * Walk the group's panes with the keyboard.
+   *
+   * The right rail this replaced was a three-tab strip with exactly this
+   * movement: arrows between the views, Home and End to its ends. Panes arrived
+   * reachable by pointer only, so there was no key that changed which pane held
+   * the focus. Both axes are bound because a group can be split either way and
+   * the user should not have to know which.
+   */
+  function onKeydown(e: KeyboardEvent) {
+    const group = paneStore.groupOf(paneId);
+    if (!group) return;
+    const ids = leavesOf(group.root);
+    const at = ids.indexOf(paneId);
+    if (at < 0) return;
+    let next: number;
+    switch (e.key) {
+      case "ArrowRight":
+      case "ArrowDown":
+        next = (at + 1) % ids.length;
+        break;
+      case "ArrowLeft":
+      case "ArrowUp":
+        next = (at - 1 + ids.length) % ids.length;
+        break;
+      case "Home":
+        next = 0;
+        break;
+      case "End":
+        next = ids.length - 1;
+        break;
+      default:
+        return;
+    }
+    e.preventDefault();
+    paneStore.setFocused(groupId, ids[next]);
+    document.getElementById(headerId(ids[next]))?.focus();
+  }
 </script>
 
 <!-- Not a button: the whole strip is a focus target, and a button here would
-     nest the close button inside it. -->
+     nest the close button inside it. It is still reachable and still says which
+     pane owns the keyboard, with aria-current rather than aria-selected: these
+     are panes side by side, not one tab strip over one body. -->
+<!-- A focusable region rather than a control: nothing here is activated by
+     pressing it, the focus itself is the state. That is what tabindex="0" on a
+     plain element is for, and the rule below only knows the common case where
+     it hides a missing role. -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
+<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 <div
+  id={headerId(paneId)}
   class="pane-header"
   class:focused
   class:finished={content.kind === "thread" && justFinished(content.threadId)}
   class:mcp={pulsing}
+  tabindex="0"
+  aria-label={label}
+  aria-current={focused ? "true" : undefined}
   onpointerdown={focus}
+  onkeydown={onKeydown}
 >
   {#if content.kind === "thread" && thread}
     <ThreadGlyph

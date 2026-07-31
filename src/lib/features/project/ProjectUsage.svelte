@@ -141,6 +141,23 @@
     return out;
   });
 
+  /**
+   * The same year of data as a list, for anything that cannot read a grid of
+   * coloured squares.
+   *
+   * Only the days that carry usage: an empty square says nothing a missing row
+   * does not, and 371 "nothing on" rows would bury the handful that matter.
+   */
+  const activeDays = $derived.by(() => {
+    const out: { day: string; total: number }[] = [];
+    for (const week of weeks) {
+      for (const cell of week) {
+        if (!cell.future && cell.total > 0) out.push({ day: cell.day, total: cell.total });
+      }
+    }
+    return out;
+  });
+
   const peak = $derived(Math.max(1, ...(report?.days ?? []).map((d) => d.total)));
 
   /**
@@ -200,14 +217,26 @@
           {#each report.models as model (model.provider + model.model)}
             <li class="flex items-center gap-2">
               <ShortcutIcon iconKey={providerIcon(model.provider)} size={13} />
+              <!-- The visible label is the shortened id and the breakdown behind
+                   it was a title, which is a cursor-only affordance. The row is
+                   read from the copy below instead, so nothing is said twice. -->
               <span
                 class="min-w-0 flex-1 truncate text-sm text-foreground/85"
                 title="{model.model} · {model.input} in · {model.output} out · {model.cacheWrite} cache written · {model.cacheRead} cache read"
+                aria-hidden="true"
               >
                 {shortModel(model.model)}
               </span>
+              <span class="sr-only">
+                {model.model} · {model.input}
+                {t("project.tokensIn")} · {model.output}
+                {t("project.tokensOut")} · {model.cacheWrite}
+                {t("project.tokensCacheWrite")} · {model.cacheRead}
+                {t("project.tokensCacheRead")}
+              </span>
               <span
                 class="h-1.5 w-16 shrink-0 overflow-hidden rounded-full bg-[var(--color-surface-3)]"
+                aria-hidden="true"
               >
                 <span
                   class="block h-full rounded-full bg-foreground/45"
@@ -239,6 +268,14 @@
       </div>
 
       <div class="min-w-0 overflow-x-auto">
+        <!-- The grid stays hidden from assistive tech: 371 squares whose only
+             label is a title read as nothing at all. This is the same year, as
+             rows, and it is the only path to it without a cursor. -->
+        <ul class="sr-only" aria-label={t("project.tokensCalendar")}>
+          {#each activeDays as day (day.day)}
+            <li>{t("project.tokensDay", { total: fmt(day.total), day: day.day })}</li>
+          {/each}
+        </ul>
         <div class="flex gap-[3px]" aria-hidden="true">
           {#each weeks as week, w (w)}
             <div class="flex flex-col gap-[3px]">
@@ -257,7 +294,11 @@
             </div>
           {/each}
         </div>
-        <div class="mt-1.5 flex items-center gap-1 text-2xs text-muted-foreground/70">
+        <!-- A scale for a grid nothing can read is not worth reading either. -->
+        <div
+          class="mt-1.5 flex items-center gap-1 text-2xs text-muted-foreground/70"
+          aria-hidden="true"
+        >
           <span>{t("project.tokensLess")}</span>
           {#each [0, 1, 2, 3, 4] as step (step)}
             <span

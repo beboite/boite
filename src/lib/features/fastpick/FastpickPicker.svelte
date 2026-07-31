@@ -1,9 +1,10 @@
 <script lang="ts">
-  import { onMount, onDestroy } from "svelte";
+  import { onMount, onDestroy, tick } from "svelte";
   import { scale } from "svelte/transition";
   import { settings } from "$lib/features/settings/store.svelte";
   import { t } from "$lib/i18n/index.svelte";
   import { launchFastpick, launchTargetProjectId } from "$lib/features/thread/api";
+  import { registerEscape, restoreFocus, viewportHeight } from "$lib/shared/keyboard/overlay";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
   import { fastpick } from "./store.svelte";
   import { iconKeyForKind, modelLabels, type FastpickCombo } from "./combo";
@@ -37,6 +38,7 @@
   let triggerRoot: HTMLDivElement | null = $state(null);
   let menu: HTMLDivElement | null = $state(null);
   let menuPos = $state({ x: 0, y: 0 });
+  const EDGE_GAP = 4;
 
   const harness = $derived<FastpickHarness | null>(
     fastpick.harnesses.find((h) => h.id === harnessId) ?? null,
@@ -78,15 +80,101 @@
       open = false;
       return;
     }
-    if (triggerRoot) {
-      // Fixed positioning: the shortcut bar scrolls horizontally, which would clip an
-      // absolutely-positioned menu inside it.
-      const r = triggerRoot.getBoundingClientRect();
-      menuPos = { x: r.left, y: r.bottom + 4 };
-    }
+    anchor();
     reset();
     open = true;
     void fastpick.ensure();
+  }
+
+  // Fixed positioning: the shortcut bar scrolls horizontally, which would clip an
+  // absolutely-positioned menu inside it. First guess only, taken before the menu
+  // exists; `place` refines it once there is something to measure.
+  function anchor() {
+    if (!triggerRoot) return;
+    const r = triggerRoot.getBoundingClientRect();
+    menuPos = { x: r.left, y: r.bottom + 4 };
+  }
+
+  async function place() {
+    anchor();
+    await tick();
+    if (!menu || !triggerRoot) return;
+    const r = triggerRoot.getBoundingClientRect();
+    // Layout box, not the painted one: the open transition scales the menu, and
+    // a measurement taken mid-transition is smaller than what has to fit.
+    const w = menu.offsetWidth;
+    const h = menu.offsetHeight;
+    const vw = window.innerWidth;
+    const vh = viewportHeight();
+    const below = r.bottom + 4;
+    menuPos = {
+      // The trigger lives in a bar that scrolls sideways, so near the right edge
+      // the menu used to run off screen.
+      x: Math.max(EDGE_GAP, Math.min(r.left, vw - w - EDGE_GAP)),
+      // Flipped above the trigger rather than clamped when the room below is
+      // gone: a clamp alone parks the menu over the button that opened it.
+      y: below + h + EDGE_GAP <= vh ? below : Math.max(EDGE_GAP, r.top - 4 - h),
+    };
+  }
+
+  $effect(() => {
+    if (!open) return;
+    // Every pane is a different height, so the flip decision is re-made on each
+    // step rather than once at open.
+    void pane;
+    void models;
+    void place();
+    const replace = () => void place();
+    window.addEventListener("resize", replace);
+    // A soft keyboard shrinks the visual viewport without necessarily resizing
+    // the window, and it is the room under the trigger that changed.
+    window.visualViewport?.addEventListener("resize", replace);
+    return () => {
+      window.removeEventListener("resize", replace);
+      window.visualViewport?.removeEventListener("resize", replace);
+    };
+  });
+
+  $effect(() => {
+    if (!open) return;
+    return registerEscape(() => (open = false));
+  });
+
+  $effect(() => {
+    if (!open) return;
+    const previous = document.activeElement as HTMLElement | null;
+    const surface = menu;
+    return () => restoreFocus(previous, surface);
+  });
+
+  // Picking a harness replaces the whole list, so the row that was clicked is
+  // gone by the time the next pane paints and the keyboard would be left on
+  // <body>. Re-aimed on every pane, and again when a pane's rows arrive.
+  $effect(() => {
+    if (!open) return;
+    void pane;
+    void models;
+    void fastpick.harnesses;
+    let cancelled = false;
+    void tick().then(() => {
+      if (cancelled || !open) return;
+      (rows()[0] ?? menu)?.focus();
+    });
+    return () => {
+      cancelled = true;
+    };
+  });
+
+  function rows(): HTMLElement[] {
+    return Array.from(
+      menu?.querySelectorAll<HTMLElement>('[role^="menuitem"]:not(:disabled)') ?? [],
+    );
+  }
+
+  function focusables(): HTMLElement[] {
+    return Array.from(
+      menu?.querySelectorAll<HTMLElement>("button:not(:disabled)") ?? [],
+    );
   }
 
   function pickHarness(id: string) {
@@ -174,15 +262,49 @@
     open = false;
   }
 
-  function handleKeydown(e: KeyboardEvent) {
-    if (!open) return;
-    if (e.key === "Escape") open = false;
-    if (e.key === "ArrowLeft") back();
+  // Escape is handled by the shared stack, which runs before the global shortcut
+  // dispatcher; everything here needs focus to be inside the menu, which it is.
+  function handleMenuKeydown(e: KeyboardEvent) {
+    if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      back();
+      return;
+    }
+    const items = rows();
+    const active = document.activeElement as HTMLElement | null;
+
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      if (items.length === 0) return;
+      const idx = active ? items.indexOf(active) : -1;
+      const last = items.length - 1;
+      const down = e.key === "ArrowDown";
+      if (idx < 0) items[down ? 0 : last].focus();
+      else items[(idx + (down ? 1 : -1) + items.length) % items.length].focus();
+      return;
+    }
+    if (e.key === "Home" || e.key === "End") {
+      e.preventDefault();
+      if (items.length === 0) return;
+      items[e.key === "Home" ? 0 : items.length - 1].focus();
+      return;
+    }
+    if (e.key === "Tab") {
+      // Trapped, back and refresh included: Tab out of the menu left it open
+      // over a bar the keyboard had already left.
+      e.preventDefault();
+      const all = focusables();
+      if (all.length === 0) return;
+      const idx = active ? all.indexOf(active) : -1;
+      const last = all.length - 1;
+      if (idx < 0) all[e.shiftKey ? last : 0].focus();
+      else all[(idx + (e.shiftKey ? -1 : 1) + all.length) % all.length].focus();
+    }
+    // Enter and Space need nothing: every row is a button.
   }
 
   onMount(() => {
     document.addEventListener("pointerdown", handleDocPointerDown);
-    document.addEventListener("keydown", handleKeydown);
     // Probed once so the button can hide itself on a machine with no fastpick, rather
     // than offering a menu whose every entry fails. Turned off in the settings, nothing
     // is asked at all: the answer would only decide how to hide a button already hidden.
@@ -191,7 +313,6 @@
 
   onDestroy(() => {
     document.removeEventListener("pointerdown", handleDocPointerDown);
-    document.removeEventListener("keydown", handleKeydown);
   });
 </script>
 
@@ -218,10 +339,11 @@
         bind:this={menu}
         role="menu"
         tabindex="-1"
-        class="fixed z-[9999] flex max-h-[60vh] min-w-64 flex-col overflow-hidden rounded-md border border-border bg-[var(--color-surface-2)] shadow-xl"
+        class="surface-popover fixed z-[var(--z-popover)] flex max-h-[60vh] min-w-64 flex-col overflow-hidden"
         style:left="{menuPos.x}px"
         style:top="{menuPos.y}px"
         style:transform-origin="top left"
+        onkeydown={handleMenuKeydown}
         transition:scale={{ duration: 90, start: 0.96 }}
       >
         <div
@@ -272,7 +394,7 @@
               <button
                 type="button"
                 role="menuitem"
-                class="flex items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-foreground/85 transition hover:bg-accent hover:text-foreground"
+                class="flex items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-foreground/85 transition hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none"
                 onclick={() => pickHarness(h.id)}
               >
                 <ShortcutIcon iconKey={iconKeyForKind(h.kind)} size={14} color={null} />
@@ -285,7 +407,7 @@
               <button
                 type="button"
                 role="menuitem"
-                class="flex items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-foreground/85 transition hover:bg-accent hover:text-foreground"
+                class="flex items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-foreground/85 transition hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none"
                 onclick={() => pickProvider(p.id)}
               >
                 <span class="min-w-0 truncate font-medium">{p.name}</span>
@@ -314,7 +436,7 @@
                   <button
                     type="button"
                     role="menuitem"
-                    class="flex min-w-0 flex-1 items-baseline gap-2 px-2 py-1.5 text-left text-sm text-foreground/85 transition group-hover:text-foreground"
+                    class="flex min-w-0 flex-1 items-baseline gap-2 rounded px-2 py-1.5 text-left text-sm text-foreground/85 transition group-hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none"
                     onclick={(e) => pickModel(m, e.shiftKey)}
                   >
                     <span class="min-w-0 truncate font-medium">{nameOf(m)}</span>
@@ -358,7 +480,7 @@
                   type="button"
                   role="menuitemradio"
                   aria-checked={effort === level}
-                  class="flex items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-foreground/85 transition hover:bg-accent hover:text-foreground"
+                  class="flex items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-foreground/85 transition hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none"
                   onclick={() => (effort = level)}
                 >
                   <span
@@ -383,7 +505,7 @@
                   type="button"
                   role="menuitemcheckbox"
                   aria-checked={promptChecked(stem)}
-                  class="flex items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-foreground/85 transition hover:bg-accent hover:text-foreground"
+                  class="flex items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-foreground/85 transition hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none"
                   onclick={() => togglePrompt(stem)}
                 >
                   <span
@@ -402,7 +524,8 @@
             {/if}
             <button
               type="button"
-              class="mt-2 rounded bg-[var(--color-surface-3)] px-2 py-1.5 text-sm font-medium text-foreground transition hover:bg-accent"
+              role="menuitem"
+              class="mt-2 rounded bg-[var(--color-surface-3)] px-2 py-1.5 text-sm font-medium text-foreground transition hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
               onclick={(e) => void launch(e.shiftKey)}
             >
               {t("fastpick.launch")}

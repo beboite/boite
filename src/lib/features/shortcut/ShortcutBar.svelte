@@ -36,7 +36,7 @@
   }
 
   function tooltip(command: string): string {
-    return `${command || "Empty command"}\n${t("shortcuts.rightClickHint")}`;
+    return `${command || t("shortcuts.emptyCommand")}\n${t("shortcuts.rightClickHint")}`;
   }
 
   function openSettings() {
@@ -47,7 +47,9 @@
 <div
   class="flex h-10 shrink-0 items-center gap-2 border-b border-border bg-[var(--color-surface)] px-3"
 >
-  <div class="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto">
+  <!-- hide-scrollbar: the global scrollbar is 10px, a quarter of this 40px bar,
+       and the other horizontal strips already hide theirs. -->
+  <div class="hide-scrollbar flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto">
     {#each settings.state.shortcuts as shortcut (shortcut.id)}
       {@const iconKey = resolveIconKey(shortcut.iconKey, shortcut.label, shortcut.command)}
       <button

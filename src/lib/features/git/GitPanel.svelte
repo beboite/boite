@@ -3,9 +3,10 @@
   import { workspace } from "$lib/backend";
   import { threadGitRoot } from "$lib/features/thread/cwd";
   import { settings } from "$lib/features/settings/store.svelte";
-  import { gitStore } from "./store.svelte";
+  import { gitStore, gitScope } from "./store.svelte";
   import { editorStore } from "$lib/features/editor/store.svelte";
   import { confirmDialog } from "$lib/shared/components/confirm.svelte";
+  import { registerEscape, restoreFocus } from "$lib/shared/keyboard/overlay";
   import { basename, dirname } from "$lib/shared/utils/path";
   import { resizeHandle } from "$lib/shared/actions/resizeHandle";
   import GitGraph from "./GitGraph.svelte";
@@ -37,6 +38,10 @@
     toggle: () => void;
   }
 
+  // Git is a full tab on a phone, so the rows and their actions have to be
+  // finger-sized there while the desktop panel keeps its density.
+  const mobile = $derived(settings.state.mobileLayout);
+
   const project = $derived(
     app.currentProjectId
       ? app.projects.find((p) => p.id === app.currentProjectId) ?? null
@@ -55,34 +60,42 @@
   // repo, otherwise the folder.
   const gitRoot = $derived(project ? threadGitRoot(threadHere, project) : null);
 
+  // Which checkout every call below is about. The dashboard watches the project
+  // folder at the same time, so naming the pair keeps the two from overwriting
+  // each other's branch, status and log.
+  const scope = $derived(
+    project && gitRoot ? gitScope(project.id, gitRoot) : null,
+  );
+
   let bodyEl: HTMLElement | null = $state(null);
   let resizingY = $state(false);
   let branchMenuEl: HTMLDivElement | null = $state(null);
+  let branchPanelEl: HTMLDivElement | null = $state(null);
+  let newBranchInput: HTMLInputElement | null = $state(null);
   let branchMenuOpen = $state(false);
   let newBranchName = $state("");
   let branchAction = $state<{ name: string; create: boolean } | null>(null);
 
   $effect(() => {
     if (!project || !gitRoot) return;
-    const id = project.id;
-    gitStore.ensure(id, gitRoot);
+    const registered = gitStore.ensure(project.id, gitRoot);
     // Local refresh first, then a background fetch once we know it's a repo.
-    void gitStore.refresh(id).then(() => gitStore.autoFetch(id));
+    void gitStore.refresh(registered).then(() => gitStore.autoFetch(registered));
   });
 
   // Not a repo → look for nested repos to offer. Idempotent in the store, so
   // re-runs of this effect are free.
   $effect(() => {
-    if (!project) return;
-    const state = gitStore.get(project.id);
+    if (!project || !scope) return;
+    const state = gitStore.get(scope);
     if (state?.loaded && !state.isRepo && !project.gitRoot) {
-      void gitStore.scanRepos(project.id, project.cwd);
+      void gitStore.scanRepos(scope, project.cwd);
     }
   });
 
   $effect(() => {
-    if (!project) return;
-    const id = project.id;
+    if (!project || !scope) return;
+    const id = scope;
     // autoFetch self-rate-limits, so calling it every tick is cheap; the real
     // network fetch only fires once the configured period has elapsed.
     const poke = () => {
@@ -109,7 +122,7 @@
     };
   });
 
-  const gs = $derived(project ? gitStore.get(project.id) : null);
+  const gs = $derived(gitStore.get(scope));
 
   let stagedOpen = $state(true);
   let changesOpen = $state(true);
@@ -122,19 +135,19 @@
   const topPercent = $derived(settings.state.gitSplitFraction * 100);
 
   function fetch() {
-    if (project) void gitStore.fetch(project.id);
+    if (scope) void gitStore.fetch(scope);
   }
 
   function push() {
-    if (project) void gitStore.push(project.id);
+    if (scope) void gitStore.push(scope);
   }
 
   function pull() {
-    if (project) void gitStore.pull(project.id);
+    if (scope) void gitStore.pull(scope);
   }
 
   function initRepo() {
-    if (project) void gitStore.init(project.id);
+    if (scope) void gitStore.init(scope);
   }
 
   function repoLabel(repo: string): string {
@@ -159,7 +172,69 @@
   function toggleBranchMenu() {
     if (!project || !gs?.isRepo || gs.switchingBranch) return;
     branchMenuOpen = !branchMenuOpen;
-    if (branchMenuOpen) void gitStore.loadBranches(project.id);
+    if (branchMenuOpen) void gitStore.loadBranches(scope);
+  }
+
+  // Same shape as ConfirmDialog: the dropdown used to open with the keyboard on
+  // the trigger behind it, and close leaving focus on <body>.
+  $effect(() => {
+    if (!branchMenuOpen) return;
+    const previous = document.activeElement as HTMLElement | null;
+    const surface = branchPanelEl;
+    (newBranchInput ?? branchPanelEl)?.focus();
+    return () => restoreFocus(previous, surface);
+  });
+
+  $effect(() => {
+    if (!branchMenuOpen) return;
+    return registerEscape(() => (branchMenuOpen = false));
+  });
+
+  function branchRows(): HTMLElement[] {
+    return Array.from(
+      branchPanelEl?.querySelectorAll<HTMLElement>(
+        '[role="menuitem"]:not(:disabled)',
+      ) ?? [],
+    );
+  }
+
+  function branchFocusables(): HTMLElement[] {
+    return Array.from(
+      branchPanelEl?.querySelectorAll<HTMLElement>(
+        "input:not(:disabled), button:not(:disabled)",
+      ) ?? [],
+    );
+  }
+
+  function onBranchMenuKeydown(e: KeyboardEvent) {
+    const active = document.activeElement as HTMLElement | null;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Home" || e.key === "End") {
+      const items = branchRows();
+      if (items.length === 0) return;
+      e.preventDefault();
+      const last = items.length - 1;
+      if (e.key === "Home") return void items[0].focus();
+      if (e.key === "End") return void items[last].focus();
+      const idx = active ? items.indexOf(active) : -1;
+      const down = e.key === "ArrowDown";
+      // From the name field, which is where the dropdown opens, the two
+      // directions have to mean "first" and "last" rather than an offset from -1.
+      if (idx < 0) items[down ? 0 : last].focus();
+      else items[(idx + (down ? 1 : -1) + items.length) % items.length].focus();
+      return;
+    }
+    if (e.key === "Tab") {
+      // Trapped: Tab out of the dropdown left it hanging over a panel the
+      // keyboard had already left.
+      e.preventDefault();
+      const all = branchFocusables();
+      if (all.length === 0) return;
+      const idx = active ? all.indexOf(active) : -1;
+      const last = all.length - 1;
+      if (idx < 0) all[e.shiftKey ? last : 0].focus();
+      else all[(idx + (e.shiftKey ? -1 : 1) + all.length) % all.length].focus();
+    }
+    // Enter needs nothing: the field submits its form, the rows are buttons.
   }
 
   function closeBranchMenuOnOutsideClick(event: PointerEvent) {
@@ -192,7 +267,7 @@
   ) {
     if (!project) return;
     const changed = await gitStore.changeBranch(
-      project.id,
+      scope,
       action.name,
       action.create,
       stash,
@@ -209,11 +284,11 @@
   }
 
   function doCommit() {
-    if (project) void gitStore.commit(project.id);
+    if (scope) void gitStore.commit(scope);
   }
 
   function loadMoreCommits() {
-    if (project) void gitStore.loadMore(project.id);
+    if (scope) void gitStore.loadMore(scope);
   }
 
   function onResizeY(e: PointerEvent) {
@@ -235,13 +310,13 @@
   }
 
   function stagePaths(files: string[]) {
-    if (project) void gitStore.stage(project.id, files);
+    if (scope) void gitStore.stage(scope, files);
   }
   function unstagePaths(files: string[]) {
-    if (project) void gitStore.unstage(project.id, files);
+    if (scope) void gitStore.unstage(scope, files);
   }
   function markResolved(path: string) {
-    if (project) void gitStore.stage(project.id, [path]);
+    if (scope) void gitStore.stage(scope, [path]);
   }
   async function discardEntry(entry: ChangeEntry) {
     if (!project) return;
@@ -254,7 +329,7 @@
       confirmLabel: untracked ? t("git.confirmDeleteLabel") : t("git.confirmDiscardLabel"),
       danger: true,
     });
-    if (ok) void gitStore.discard(project.id, [entry]);
+    if (ok) void gitStore.discard(scope, [entry]);
   }
 
   async function openDiff(entry: ChangeEntry) {
@@ -281,8 +356,13 @@
 
 <svelte:window onpointerdown={closeBranchMenuOnOutsideClick} />
 
+<!-- On a phone this panel is a full-bleed tab, so in landscape on a notched
+     device the cutout would sit over the first characters of every path. -->
 <div
   class="flex h-full min-h-0 flex-col {resizingY ? 'select-none' : ''}"
+  style={mobile
+    ? "padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-area-inset-right, 0px);"
+    : undefined}
 >
   <header
     class="flex h-9 shrink-0 items-center gap-2 border-b border-border px-3"
@@ -302,17 +382,21 @@
           title={t("git.changeBranch")}
         >
           <GitBranch class="size-3.5 shrink-0 text-muted-foreground" />
-          <span class="truncate">{gs.branch ?? "(detached)"}</span>
+          <span class="truncate">{gs.branch ?? t("git.detached")}</span>
           <ChevronDown class="size-3 shrink-0 text-muted-foreground transition {branchMenuOpen ? 'rotate-180' : ''}" />
         </button>
 
         {#if branchMenuOpen}
           <div
-            class="absolute left-0 top-full z-40 mt-1 w-64 overflow-hidden rounded-md border border-border bg-[var(--color-surface)] shadow-2xl"
+            bind:this={branchPanelEl}
+            class="surface-popover absolute left-0 top-full z-[var(--z-dropdown)] mt-1 w-64 overflow-hidden outline-none"
             role="menu"
+            tabindex="-1"
+            onkeydown={onBranchMenuKeydown}
           >
             <form class="flex gap-1.5 border-b border-border p-2" onsubmit={createBranch}>
               <input
+                bind:this={newBranchInput}
                 class="min-w-0 flex-1 rounded border border-border bg-[var(--color-background)] px-2 py-1 text-xs text-foreground placeholder:text-muted-foreground/60 focus:border-foreground/30 focus:outline-none"
                 placeholder={t("git.newBranchPlaceholder")}
                 aria-label={t("git.newBranchPlaceholder")}
@@ -343,7 +427,7 @@
                 {#each gs.branches as branch (branch.name)}
                   <button
                     type="button"
-                    class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition hover:bg-[var(--color-surface-2)] disabled:opacity-60"
+                    class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition hover:bg-[var(--color-surface-2)] focus-visible:bg-[var(--color-surface-2)] focus-visible:outline-none disabled:opacity-60"
                     class:text-foreground={branch.current}
                     class:text-muted-foreground={!branch.current}
                     onclick={() => requestBranchChange(branch.name, false)}
@@ -690,34 +774,45 @@
       {#if mode === "staged"}
         <button
           type="button"
-          class="rounded p-0.5 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground"
+          class="flex shrink-0 items-center justify-center rounded text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground {mobile
+            ? 'size-11'
+            : 'p-0.5'}"
           title={t("git.unstageAll")}
           aria-label={t("git.unstageAll")}
           onclick={() => unstagePaths(entries.map((x) => x.path))}
         >
-          <Minus class="size-3" />
+          <Minus class={mobile ? "size-4" : "size-3"} />
         </button>
       {:else if mode === "unstaged"}
         <button
           type="button"
-          class="rounded p-0.5 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground"
+          class="flex shrink-0 items-center justify-center rounded text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground {mobile
+            ? 'size-11'
+            : 'p-0.5'}"
           title={t("git.stageAll")}
           aria-label={t("git.stageAll")}
           onclick={() => stagePaths(entries.map((x) => x.path))}
         >
-          <Plus class="size-3" />
+          <Plus class={mobile ? "size-4" : "size-3"} />
         </button>
       {/if}
     </div>
     {#if open}
       {#each entries as entry (entry.path + ":" + entry.staged + ":" + entry.conflicted)}
         <div
-          class="group/row flex items-center gap-1.5 px-2 py-1 text-xs hover:bg-[var(--color-surface-2)]"
+          class="group/row flex items-center gap-1.5 hover:bg-[var(--color-surface-2)] {mobile
+            ? 'min-h-11 px-3 text-base'
+            : 'px-2 py-1 text-xs'}"
           title={entry.path}
         >
+          <!-- The padding is on the button, not the row: it is what makes the
+               whole 44px band open the diff instead of a 22px strip through the
+               middle of it. -->
           <button
             type="button"
-            class="min-w-0 flex-1 truncate text-left text-foreground/85 hover:text-foreground"
+            class="min-w-0 flex-1 truncate text-left text-foreground/85 hover:text-foreground {mobile
+              ? 'py-3'
+              : ''}"
             onclick={() => openDiff(entry)}
           >
             {basename(entry.path)}
@@ -727,47 +822,61 @@
               >
             {/if}
           </button>
+          <!-- Touch has no hover: hidden behind `group-hover/row` these were
+               invisible on a phone and still hit-testable, so a tap in the right
+               few pixels discarded a file with nothing on screen to explain it.
+               Shown outright there instead. -->
           <div
-            class="flex shrink-0 items-center gap-0.5 opacity-0 transition group-hover/row:opacity-100 group-focus-within/row:opacity-100"
+            class="flex shrink-0 items-center {mobile
+              ? 'gap-1'
+              : 'gap-0.5 opacity-0 transition group-hover/row:opacity-100 group-focus-within/row:opacity-100'}"
           >
             {#if mode === "staged"}
               <button
                 type="button"
-                class="rounded p-0.5 text-muted-foreground hover:bg-[var(--color-surface-3)] hover:text-foreground"
+                class="flex items-center justify-center rounded text-muted-foreground hover:bg-[var(--color-surface-3)] hover:text-foreground {mobile
+                  ? 'size-11'
+                  : 'p-0.5'}"
                 title={t("git.unstage")}
                 aria-label={t("git.unstageFile")}
                 onclick={() => unstagePaths([entry.path])}
               >
-                <Minus class="size-3" />
+                <Minus class={mobile ? "size-4" : "size-3"} />
               </button>
             {:else if mode === "unstaged"}
               <button
                 type="button"
-                class="rounded p-0.5 text-muted-foreground hover:bg-[var(--color-surface-3)] hover:text-foreground"
+                class="flex items-center justify-center rounded text-muted-foreground hover:bg-[var(--color-surface-3)] hover:text-foreground {mobile
+                  ? 'size-11'
+                  : 'p-0.5'}"
                 title={entry.status === "?" ? t("git.deleteFile") : t("git.discard")}
                 aria-label={entry.status === "?" ? t("git.deleteFile") : t("git.discard")}
                 onclick={() => discardEntry(entry)}
               >
-                <Trash2 class="size-3" />
+                <Trash2 class={mobile ? "size-4" : "size-3"} />
               </button>
               <button
                 type="button"
-                class="rounded p-0.5 text-muted-foreground hover:bg-[var(--color-surface-3)] hover:text-foreground"
+                class="flex items-center justify-center rounded text-muted-foreground hover:bg-[var(--color-surface-3)] hover:text-foreground {mobile
+                  ? 'size-11'
+                  : 'p-0.5'}"
                 title={t("git.stage")}
                 aria-label={t("git.stageFile")}
                 onclick={() => stagePaths([entry.path])}
               >
-                <Plus class="size-3" />
+                <Plus class={mobile ? "size-4" : "size-3"} />
               </button>
             {:else if mode === "conflict"}
               <button
                 type="button"
-                class="rounded p-0.5 text-muted-foreground hover:bg-[var(--color-surface-3)] hover:text-foreground"
+                class="flex items-center justify-center rounded text-muted-foreground hover:bg-[var(--color-surface-3)] hover:text-foreground {mobile
+                  ? 'size-11'
+                  : 'p-0.5'}"
                 title={t("git.markResolvedTitle")}
                 aria-label={t("git.markResolved")}
                 onclick={() => markResolved(entry.path)}
               >
-                <Check class="size-3" />
+                <Check class={mobile ? "size-4" : "size-3"} />
               </button>
             {/if}
           </div>

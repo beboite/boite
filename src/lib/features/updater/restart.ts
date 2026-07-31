@@ -4,6 +4,8 @@ import { editorStore } from "$lib/features/editor/store.svelte";
 import { notifications } from "$lib/features/notifications/store.svelte";
 import { stopThread } from "$lib/features/thread/api";
 import { confirmDialog } from "$lib/shared/components/confirm.svelte";
+import { logger } from "$lib/shared/services/logger.svelte";
+import { t } from "$lib/i18n/index.svelte";
 import { saveThread } from "$lib/storage/db";
 import type { Thread } from "$lib/types";
 
@@ -38,7 +40,8 @@ function hasStorage(): boolean {
 // marker: the server owns runtime state for everything else.
 function liveLocalThreads(): Thread[] {
   return app.threads.filter(
-    (t) => t.ptyId && workspace.backendFor(t.origin).caps.clientStatus,
+    (thread) =>
+      thread.ptyId && workspace.backendFor(thread.origin).caps.clientStatus,
   );
 }
 
@@ -48,7 +51,7 @@ function armResumePlan(version: string, ids: string[]) {
   try {
     localStorage.setItem(PLAN_KEY, JSON.stringify(plan));
   } catch (err) {
-    console.error("[updater] could not arm the resume plan:", err);
+    logger.error("updater", "could not arm the resume plan", String(err));
   }
 }
 
@@ -86,24 +89,20 @@ function takeResumePlan(): ResumePlan | null {
   }
 }
 
+// Through the dictionaries, like every other sentence the user reads. These
+// were hardcoded English, which is what a French user got shown at the one
+// moment the app asks permission to kill their work.
 function describe(count: number, dirty: number): string {
   const parts: string[] = [];
   if (count > 0) {
     parts.push(
-      count === 1
-        ? "1 running thread will be stopped and started again after the restart."
-        : `${count} running threads will be stopped and started again after the restart.`,
-    );
-    parts.push(
-      "Agents that captured a session resume that conversation; anything else re-runs its command.",
+      // Not closeGuard's wording: that one ends at "will kill its process",
+      // which is only half of what happens here.
+      t("updater.restartConfirmThreads", { count }),
     );
   }
   if (dirty > 0) {
-    parts.push(
-      dirty === 1
-        ? "1 file has unsaved changes and will be lost."
-        : `${dirty} files have unsaved changes and will be lost.`,
-    );
+    parts.push(t("updater.restartConfirmDirty", { count: dirty }));
   }
   return parts.join(" ");
 }
@@ -118,9 +117,9 @@ export async function prepareForInstall(version: string): Promise<string[] | nul
 
   if (live.length > 0 || dirty > 0) {
     const ok = await confirmDialog.ask({
-      title: `Restart to install ${version}?`,
+      title: t("updater.restartConfirmTitle"),
       message: describe(live.length, dirty),
-      confirmLabel: "Restart and update",
+      confirmLabel: t("updater.restartConfirmAction"),
       danger: dirty > 0,
     });
     if (!ok) return null;
@@ -144,7 +143,7 @@ export async function prepareForInstall(version: string): Promise<string[] | nul
   await Promise.all(
     ids.map((id) =>
       stopThread(id).catch((err) => {
-        console.error("[updater] stopThread failed:", err);
+        logger.error("updater", "stopThread failed", String(err));
       }),
     ),
   );
@@ -156,13 +155,13 @@ export async function prepareForInstall(version: string): Promise<string[] | nul
 export function restoreThreads(ids: string[]): number {
   let restored = 0;
   for (const id of ids) {
-    const t = app.threadById(id);
-    if (!t || t.ptyId) continue;
-    t.status = "idle";
-    t.exitCode = null;
-    t.autoSlept = false;
-    void saveThread({ ...t, args: [...t.args] }).catch((err) => {
-      console.error("saveThread failed:", err);
+    const thread = app.threadById(id);
+    if (!thread || thread.ptyId) continue;
+    thread.status = "idle";
+    thread.exitCode = null;
+    thread.autoSlept = false;
+    void saveThread({ ...thread, args: [...thread.args] }).catch((err) => {
+      logger.error("updater", "saveThread failed", String(err));
     });
     app.requestActivation(id);
     app.bumpRespawn(id);
@@ -187,7 +186,7 @@ export function resumeAfterUpdate() {
   if (restored === 0) return;
   notifications.success(
     restored === 1
-      ? "Update applied. Resuming your thread."
-      : `Update applied. Resuming ${restored} threads.`,
+      ? t("updater.resumedOne")
+      : t("updater.resumedMany", { count: restored }),
   );
 }

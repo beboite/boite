@@ -11,12 +11,13 @@ import {
   tauriScope,
   tauriSession,
   tauriShell,
+  tauriSystem,
   tauriWorktree,
 } from "./rpc";
 
 export class TauriBackend implements Backend {
   readonly kind = "tauri" as const;
-  readonly caps = { clientStatus: true };
+  readonly caps = { clientStatus: true, appLogs: true };
   readonly pty = tauriPty;
   readonly db = tauriDb;
   readonly git = tauriGit;
@@ -24,6 +25,7 @@ export class TauriBackend implements Backend {
   readonly explorer = tauriExplorer;
   readonly editor = tauriEditor;
   readonly project = tauriProject;
+  readonly system = tauriSystem;
   readonly shell = tauriShell;
   readonly fastpick = tauriFastpick;
   readonly scope = tauriScope;

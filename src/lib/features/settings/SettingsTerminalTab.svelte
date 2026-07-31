@@ -19,6 +19,8 @@
     settings.setGitAutoFetchSeconds(value);
   }
 
+  // Labels are the agents' own product names, so they read the same in every
+  // locale and stay out of the dictionary.
   type IconRow = { iconKey: string; label: string };
   const SUPPORTED_AUTOCLOSE: IconRow[] = [
     { iconKey: "claude", label: "Claude" },
@@ -34,7 +36,7 @@
 
 <SettingsCard
   title={t("terminalTab.defaultShell")}
-  description="Used by + Terminal, and as the fallback for a shortcut whose command is not a program: a shell function or alias (e.g. cc → claude) only exists once this shell's profile has been read. Shortcuts that name a real program still launch directly, and inherit what the profile exports."
+  description={t("terminalTab.defaultShellDesc")}
 >
   <div class="overflow-hidden rounded-lg border border-border bg-[var(--color-surface-2)]">
     <button
@@ -43,10 +45,9 @@
       onclick={() => pickDefault(null)}
     >
       <div class="min-w-0">
-        <div class="text-xs font-medium text-foreground">None</div>
+        <div class="text-xs font-medium text-foreground">{t("terminalTab.shellNone")}</div>
         <div class="text-xs text-muted-foreground">
-          Every shortcut launches directly; functions and aliases will not
-          resolve. + Terminal launches the platform default.
+          {t("terminalTab.shellNoneDesc")}
         </div>
       </div>
       {#if settings.state.defaultShellId === null}
@@ -80,23 +81,19 @@
 {#if platform.isWindows}
   <SettingsCard
     title={t("terminalTab.windowsTweaks")}
-    description="Behaviours specific to PowerShell and the Windows console."
+    description={t("terminalTab.windowsTweaksDesc")}
   >
     <ToggleSetting
-      label="PowerShell newline translation"
-      description="Shift+Enter sends LF (Ctrl+J) so PowerShell wraps a line without executing."
+      label={t("terminalTab.psNewline")}
+      description={t("terminalTab.psNewlineDesc")}
       enabled={settings.state.powershellNewline}
-      onLabel="On"
-      offLabel="Off"
       onToggle={() =>
         settings.setPowershellNewline(!settings.state.powershellNewline)}
     />
     <ToggleSetting
-      label="Skip PowerShell profile"
-      description="Start pwsh/powershell with -NoProfile for a much faster prompt. Aliases and functions from your profile won't be available."
+      label={t("terminalTab.psNoProfile")}
+      description={t("terminalTab.psNoProfileDesc")}
       enabled={settings.state.powershellNoProfile}
-      onLabel="On"
-      offLabel="Off"
       onToggle={() =>
         settings.setPowershellNoProfile(!settings.state.powershellNoProfile)}
     />
@@ -105,14 +102,12 @@
 
 <SettingsCard
   title={t("terminalTab.threadClose")}
-  description="Behaviour when removing a thread from the sidebar."
+  description={t("terminalTab.threadCloseDesc")}
 >
   <ToggleSetting
-    label="Confirm before closing"
-    description="Show a dialog before killing a thread's process. Disable for one-click close."
+    label={t("terminalTab.confirmClose")}
+    description={t("terminalTab.confirmCloseDesc")}
     enabled={settings.state.confirmCloseThread}
-    onLabel="On"
-    offLabel="Off"
     onToggle={() =>
       settings.setConfirmCloseThread(!settings.state.confirmCloseThread)}
   />
@@ -120,14 +115,12 @@
 
 <SettingsCard
   title={t("terminalTab.gitAutoFetch")}
-  description="Periodically run git fetch in the background so the Git panel's ahead/behind count and remote commits stay current. Fetch only — never pulls or merges."
+  description={t("terminalTab.gitAutoFetchDesc")}
 >
   <ToggleSetting
-    label="Auto-fetch"
-    description="Fetch on first open and on a timer while the window is focused. Backs off automatically on repeated failures (offline, credential prompt)."
+    label={t("terminalTab.autoFetch")}
+    description={t("terminalTab.autoFetchDesc")}
     enabled={settings.state.gitAutoFetch}
-    onLabel="On"
-    offLabel="Off"
     onToggle={() => settings.setGitAutoFetch(!settings.state.gitAutoFetch)}
   />
 
@@ -139,7 +132,7 @@
       for="autofetch-period"
       class="min-w-[140px] text-xs font-medium text-foreground"
     >
-      Fetch every
+      {t("terminalTab.fetchEvery")}
     </label>
     <input
       id="autofetch-period"
@@ -155,22 +148,71 @@
     />
     <span class="min-w-[56px] text-right font-mono text-xs text-muted-foreground">
       {settings.state.gitAutoFetchSeconds < 60
-        ? `${settings.state.gitAutoFetchSeconds}s`
-        : `${Math.round(settings.state.gitAutoFetchSeconds / 60)} min`}
+        ? t("terminalTab.seconds", { count: settings.state.gitAutoFetchSeconds })
+        : t("terminalTab.minutes", {
+            count: Math.round(settings.state.gitAutoFetchSeconds / 60),
+          })}
     </span>
+  </div>
+</SettingsCard>
+
+<!-- Both of these were live settings with no way to reach them: read on every
+     thread launch, hydrated from storage, and pinned to their default because
+     nothing ever called their setter. -->
+<SettingsCard
+  title={t("terminalTab.agentLaunch")}
+  description={t("terminalTab.agentLaunchDesc")}
+>
+  <ToggleSetting
+    label={t("terminalTab.threadWorktrees")}
+    description={t("terminalTab.threadWorktreesDesc")}
+    enabled={settings.state.threadWorktrees}
+    onToggle={() => void settings.setThreadWorktrees(!settings.state.threadWorktrees)}
+  />
+  <ToggleSetting
+    label={t("terminalTab.agentTodoAccess")}
+    description={t("terminalTab.agentTodoAccessDesc")}
+    enabled={settings.state.agentTodoAccess}
+    onToggle={() => void settings.setAgentTodoAccess(!settings.state.agentTodoAccess)}
+  />
+
+  <div class="flex flex-col gap-1.5" class:opacity-50={!settings.state.agentTodoAccess}>
+    <label for="todo-template" class="text-xs font-medium text-foreground">
+      {t("terminalTab.todoTemplate")}
+    </label>
+    <p class="text-xs leading-snug text-muted-foreground">
+      {t("terminalTab.todoTemplateDesc")}
+    </p>
+    <textarea
+      id="todo-template"
+      rows="7"
+      spellcheck="false"
+      disabled={!settings.state.agentTodoAccess}
+      value={settings.state.todoPromptTemplate}
+      onchange={(e) =>
+        void settings.setTodoPromptTemplate((e.currentTarget as HTMLTextAreaElement).value)}
+      class="w-full resize-y rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-2 font-mono text-sm leading-relaxed text-foreground outline-none focus:border-foreground/40 disabled:cursor-not-allowed"
+    ></textarea>
+    <button
+      type="button"
+      class="self-start rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
+      onclick={() => void settings.setTodoPromptTemplate("")}
+    >
+      {t("common.reset")}
+    </button>
   </div>
 </SettingsCard>
 
 <SettingsCard
   title={t("terminalTab.idleAutoClose")}
-  description="Kill agent threads that finished and have not been viewed for a while. Threads stay restorable from the sidebar."
+  description={t("terminalTab.idleAutoCloseDesc")}
 >
   <div class="flex items-center gap-3">
     <label
       for="idle-timeout"
       class="min-w-[140px] text-xs font-medium text-foreground"
     >
-      Idle timeout (min)
+      {t("terminalTab.idleTimeout")}
     </label>
     <input
       id="idle-timeout"
@@ -184,8 +226,8 @@
     />
     <span class="min-w-[56px] text-right font-mono text-xs text-muted-foreground">
       {settings.state.idleTimeoutMinutes === 0
-        ? "Off"
-        : `${settings.state.idleTimeoutMinutes} min`}
+        ? t("common.off")
+        : t("terminalTab.minutes", { count: settings.state.idleTimeoutMinutes })}
     </span>
   </div>
 

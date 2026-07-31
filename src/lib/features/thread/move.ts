@@ -19,6 +19,7 @@ import { ptyKill } from "$lib/storage/pty";
 import { settings } from "$lib/features/settings/store.svelte";
 import { notifications } from "$lib/features/notifications/store.svelte";
 import { logger } from "$lib/shared/services/logger.svelte";
+import { t } from "$lib/i18n/index.svelte";
 import { paneStore } from "$lib/features/panes/store.svelte";
 import { parkedLocal } from "$lib/backend/tauri/parked";
 import { openWorktreeFor } from "./api";
@@ -103,7 +104,7 @@ async function carryTranscript(
       String(err),
     );
     notifications.error(
-      `Moved, but the conversation could not follow: ${String(err)}`,
+      t("thread.moveTranscriptFailed", { error: String(err) }),
     );
     return false;
   }
@@ -307,11 +308,14 @@ export async function moveThreadToProject(
     keptWorktree,
   });
   if (!opts.silent) {
-    notifications.success(`Moved ${thread.title ?? thread.label} to ${target.name}`);
+    notifications.success(
+      t("thread.movedTo", {
+        name: thread.title ?? thread.label,
+        project: target.name,
+      }),
+    );
     if (keptWorktree) {
-      notifications.success(
-        `Kept the old worktree at ${keptWorktree}: it still has work in it.`,
-      );
+      notifications.success(t("worktree.keptAtPath", { path: keptWorktree }));
     }
   }
   return { ok: true, cwd: toCwd, keptWorktree: keptWorktree ?? undefined };

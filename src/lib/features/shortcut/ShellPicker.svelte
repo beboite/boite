@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy } from "svelte";
+  import { onMount, onDestroy, tick } from "svelte";
   import { scale } from "svelte/transition";
   import { platform } from "$lib/storage/platform.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
@@ -11,6 +11,11 @@
   import { launchTargetMenu } from "./launchMenu";
   import ContextMenu from "$lib/shared/components/ContextMenu.svelte";
   import type { ContextMenuItem } from "$lib/shared/components/ContextMenu.svelte";
+  import {
+    registerEscape,
+    restoreFocus,
+    viewportHeight,
+  } from "$lib/shared/keyboard/overlay";
   import { longPress } from "$lib/shared/actions/longPress";
   import type { ShellOption } from "$lib/storage/platform.svelte";
   import Plus from "@lucide/svelte/icons/plus";
@@ -21,6 +26,7 @@
   let triggerRoot: HTMLDivElement | null = $state(null);
   let menu: HTMLDivElement | null = $state(null);
   let menuPos = $state({ x: 0, y: 0 });
+  const EDGE_GAP = 4;
 
   const defaultShell = $derived(
     settings.state.defaultShellId
@@ -30,13 +36,108 @@
 
   function toggle(e: MouseEvent) {
     e.stopPropagation();
-    if (!open && triggerRoot) {
-      // Fixed positioning: the shortcut bar is overflow-x-auto, which clips
-      // (or scrolls) an absolutely-positioned dropdown inside it.
-      const r = triggerRoot.getBoundingClientRect();
-      menuPos = { x: r.left, y: r.bottom + 4 };
-    }
+    if (!open) anchor();
     open = !open;
+  }
+
+  // Fixed positioning: the shortcut bar is overflow-x-auto, which clips
+  // (or scrolls) an absolutely-positioned dropdown inside it. First guess only,
+  // taken before the menu exists and refined by `place` once it can be measured.
+  function anchor() {
+    if (!triggerRoot) return;
+    const r = triggerRoot.getBoundingClientRect();
+    menuPos = { x: r.left, y: r.bottom + 4 };
+  }
+
+  async function place() {
+    anchor();
+    await tick();
+    if (!menu || !triggerRoot) return;
+    const r = triggerRoot.getBoundingClientRect();
+    // Layout box, not the painted one: the open transition scales the menu, and
+    // a measurement taken mid-transition is smaller than what has to fit.
+    const w = menu.offsetWidth;
+    const h = menu.offsetHeight;
+    const vw = window.innerWidth;
+    const vh = viewportHeight();
+    const below = r.bottom + 4;
+    menuPos = {
+      // The trigger sits in a bar that scrolls sideways, so near the right edge
+      // the menu used to hang off screen entirely.
+      x: Math.max(EDGE_GAP, Math.min(r.left, vw - w - EDGE_GAP)),
+      // Above the trigger rather than clamped when there is no room under it:
+      // clamping alone parks the menu over the button it belongs to.
+      y: below + h + EDGE_GAP <= vh ? below : Math.max(EDGE_GAP, r.top - 4 - h),
+    };
+  }
+
+  $effect(() => {
+    if (!open) return;
+    void place();
+    const replace = () => void place();
+    window.addEventListener("resize", replace);
+    // A soft keyboard shrinks the visual viewport without always resizing the
+    // window, and the room under the trigger changes with it.
+    window.visualViewport?.addEventListener("resize", replace);
+    return () => {
+      window.removeEventListener("resize", replace);
+      window.visualViewport?.removeEventListener("resize", replace);
+    };
+  });
+
+  $effect(() => {
+    if (!open) return;
+    return registerEscape(() => (open = false));
+  });
+
+  $effect(() => {
+    if (!open) return;
+    const previous = document.activeElement as HTMLElement | null;
+    const surface = menu;
+    (menuItems()[0] ?? menu)?.focus();
+    return () => restoreFocus(previous, surface);
+  });
+
+  function menuItems(): HTMLButtonElement[] {
+    return Array.from(
+      menu?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ??
+        [],
+    );
+  }
+
+  function handleMenuKeydown(e: KeyboardEvent) {
+    const buttons = menuItems();
+    if (buttons.length === 0) return;
+    const idx = buttons.indexOf(document.activeElement as HTMLButtonElement);
+    const last = buttons.length - 1;
+    const wrap = (step: number) =>
+      buttons[(idx + step + buttons.length) % buttons.length].focus();
+
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      const down = e.key === "ArrowDown";
+      if (idx < 0) buttons[down ? 0 : last].focus();
+      else wrap(down ? 1 : -1);
+      return;
+    }
+    if (e.key === "Home") {
+      e.preventDefault();
+      buttons[0].focus();
+      return;
+    }
+    if (e.key === "End") {
+      e.preventDefault();
+      buttons[last].focus();
+      return;
+    }
+    if (e.key === "Tab") {
+      // Trapped: Tab out of an open dropdown left it floating over a bar the
+      // keyboard had already left.
+      e.preventDefault();
+      if (idx < 0) buttons[e.shiftKey ? last : 0].focus();
+      else wrap(e.shiftKey ? -1 : 1);
+    }
+    // Enter and Space need nothing: the rows are buttons.
   }
 
   // Right-click, long press or shift-click opens in Scratch without leaving
@@ -72,25 +173,22 @@
     };
   }
 
-  function handleDocClick(e: MouseEvent) {
+  // `pointerdown`, not `click`: a right-click never fires one, so with this
+  // dropdown open a right-click on the button beside it raised a context menu
+  // while the dropdown stayed up, two menus stacked on the same point.
+  function handleDocPointerDown(e: PointerEvent) {
     if (!open) return;
     const target = e.target as Node;
     if (triggerRoot?.contains(target) || menu?.contains(target)) return;
     open = false;
   }
 
-  function handleKeydown(e: KeyboardEvent) {
-    if (e.key === "Escape" && open) open = false;
-  }
-
   onMount(() => {
-    document.addEventListener("click", handleDocClick);
-    document.addEventListener("keydown", handleKeydown);
+    document.addEventListener("pointerdown", handleDocPointerDown);
   });
 
   onDestroy(() => {
-    document.removeEventListener("click", handleDocClick);
-    document.removeEventListener("keydown", handleKeydown);
+    document.removeEventListener("pointerdown", handleDocPointerDown);
   });
 </script>
 
@@ -104,11 +202,13 @@
       openMenu(e.clientX, e.clientY);
     }}
     use:longPress={{ onLongPress: openMenu }}
-    title={defaultShell ? `Launch ${defaultShell.label}` : "New blank terminal"}
+    title={defaultShell
+      ? t("shell.launchNamed", { name: defaultShell.label })
+      : t("shell.newBlank")}
     aria-label={t("shell.launchTerminal")}
   >
     <Plus class="size-3.5" />
-    <span>Terminal</span>
+    <span>{t("tabs.terminal")}</span>
   </button>
   <button
     type="button"
@@ -117,8 +217,8 @@
     onclick={toggle}
     aria-haspopup="menu"
     aria-expanded={open}
-    title={t("shell.pickShell")}
-    aria-label={t("shell.pickShell")}
+    title={t("shell.pick")}
+    aria-label={t("shell.pick")}
   >
     <ChevronDown class="size-3.5" />
   </button>
@@ -127,22 +227,24 @@
     <div
       bind:this={menu}
       role="menu"
-      class="fixed z-[9999] flex min-w-44 flex-col rounded-md border border-border bg-[var(--color-surface-2)] p-1 shadow-xl"
+      tabindex="-1"
+      class="surface-popover fixed z-[var(--z-popover)] flex min-w-44 flex-col p-1"
       style:left="{menuPos.x}px"
       style:top="{menuPos.y}px"
       style:transform-origin="top left"
+      onkeydown={handleMenuKeydown}
       transition:scale={{ duration: 90, start: 0.96 }}
     >
       {#if platform.shells.length === 0}
         <div class="px-2 py-1.5 text-xs text-muted-foreground">
-          No shells detected
+          {t("shell.noneDetected")}
         </div>
       {/if}
       {#each platform.shells as shell (shell.id)}
         <button
           type="button"
           role="menuitem"
-          class="flex items-center justify-between gap-3 rounded px-2 py-1.5 text-left text-sm text-foreground/85 transition hover:bg-accent hover:text-foreground"
+          class="flex items-center justify-between gap-3 rounded px-2 py-1.5 text-left text-sm text-foreground/85 transition hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none"
           onclick={(e) => void pick(shell, e.shiftKey)}
         >
           <span class="font-medium">{shell.label}</span>

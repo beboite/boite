@@ -5,6 +5,7 @@ import type { WorkspaceOrigin } from "$lib/types";
 import { app } from "$lib/app/store.svelte";
 import { notifications } from "$lib/features/notifications/store.svelte";
 import { logger } from "$lib/shared/services/logger.svelte";
+import { t } from "$lib/i18n/index.svelte";
 import { basename, dirname } from "$lib/shared/utils/path";
 import { folderNameFor, joinPath, samePath } from "./path";
 import { techIconDataUrl } from "$lib/shared/icons/tech";
@@ -33,8 +34,8 @@ export async function pickAndAddProject(
     const { open } = await import("@tauri-apps/plugin-dialog");
     selected = await open({ directory: true, multiple: false });
   } catch (err) {
-    console.error("dialog open failed:", err);
-    notifications.error("Could not open folder picker");
+    logger.error("project", "folder dialog failed", String(err));
+    notifications.error(t("project.pickerFailed"));
     return null;
   }
   if (!selected || Array.isArray(selected)) return null;
@@ -72,12 +73,12 @@ export async function addProjectByPath(
   try {
     await app.addProject(project);
   } catch (err) {
-    console.error("addProject failed:", err);
-    notifications.error("Failed to add project");
+    logger.error("project", "addProject failed", String(err));
+    notifications.error(t("project.addFailed"));
     return null;
   }
   app.selectedProjectId = project.id;
-  notifications.success(`Added ${project.name}`);
+  notifications.success(t("project.added", { name: project.name }));
   logger.info("project", `added project ${project.name}`, { cwd: project.cwd });
   return project;
 }
@@ -231,7 +232,9 @@ export async function createProject(
       // A project without a repository is still a project. Say so and move on
       // rather than unwinding a folder the user can see.
       logger.warn("project", `git init skipped for ${path}`, String(err));
-      notifications.error(`Created ${name}, but git init failed: ${String(err)}`);
+      notifications.error(
+        t("project.gitInitFailed", { name, error: String(err) }),
+      );
     }
   }
 

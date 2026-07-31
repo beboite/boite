@@ -8,6 +8,7 @@ import { resolveIconKey } from "$lib/shared/icons/detect";
 import { platform } from "$lib/storage/platform.svelte";
 import { notifications } from "$lib/features/notifications/store.svelte";
 import { logger } from "$lib/shared/services/logger.svelte";
+import { t } from "$lib/i18n/index.svelte";
 import { confirmDialog } from "$lib/shared/components/confirm.svelte";
 import { uuid } from "$lib/shared/utils/uuid";
 import { parkedLocal } from "$lib/backend/tauri/parked";
@@ -85,7 +86,7 @@ function requireProject(projectId: string | null): Project | null {
   const project = projectId
     ? app.projects.find((p) => p.id === projectId) ?? null
     : null;
-  if (!project) notifications.error("Pick a project first");
+  if (!project) notifications.error(t("thread.pickProjectFirst"));
   return project;
 }
 
@@ -232,8 +233,8 @@ async function createThread(
   try {
     await app.upsertThread(thread);
   } catch (err) {
-    console.error("upsertThread failed:", err);
-    notifications.error("Failed to create thread");
+    logger.error("thread", "upsertThread failed", String(err));
+    notifications.error(t("thread.createFailed"));
     return null;
   }
   app.activeThreadId = thread.id;
@@ -252,7 +253,7 @@ export async function launchShortcut(
   if (!project) return null;
   const parsed = parseCommand(shortcut.command || shortcut.label);
   if (!parsed.cmd) {
-    notifications.error(`${shortcut.label}: empty command`);
+    notifications.error(t("thread.emptyCommand", { label: shortcut.label }));
     return null;
   }
   const iconKey = resolveIconKey(shortcut.iconKey, shortcut.label, shortcut.command);
@@ -386,16 +387,18 @@ export async function launchBlankTerminal(
  * that produced something real and never claimed a branch keeps its directory
  * instead of having it swept. Only empty worktrees are collected.
  */
-async function releaseWorktree(t: Thread) {
-  if (!t.worktreePath) return;
-  const project = app.projects.find((p) => p.id === t.projectId);
+async function releaseWorktree(thread: Thread) {
+  if (!thread.worktreePath) return;
+  const project = app.projects.find((p) => p.id === thread.projectId);
   if (!project) return;
   const repo = project.gitRoot ?? project.cwd;
   try {
-    await backendForPath(project.cwd).worktree.remove(repo, t.worktreePath, false);
+    await backendForPath(project.cwd).worktree.remove(repo, thread.worktreePath, false);
   } catch (err) {
-    logger.info("worktree", `kept ${t.worktreePath}`, String(err));
-    notifications.success(`Kept the worktree for ${t.title ?? t.label}: it still has work in it.`);
+    logger.info("worktree", `kept ${thread.worktreePath}`, String(err));
+    notifications.success(
+      t("worktree.keptForThread", { thread: thread.title ?? thread.label }),
+    );
   }
 }
 
@@ -403,26 +406,28 @@ export async function closeThread(threadId: string) {
   // Closed before its worktree landed: the directory would be created a moment
   // after the release below read a null path, and stay behind forever.
   await threadDirectoryReady(threadId);
-  const t = app.threadById(threadId);
-  if (t) rememberClosedThread(t);
-  const kill = t?.ptyId ? ptyKill(t.ptyId, true).catch(() => {}) : Promise.resolve();
+  const thread = app.threadById(threadId);
+  if (thread) rememberClosedThread(thread);
+  const kill = thread?.ptyId
+    ? ptyKill(thread.ptyId, true).catch(() => {})
+    : Promise.resolve();
   await app.removeThread(threadId);
   await kill;
   // After the PTY is gone: git reads a worktree whose process still holds
   // files open as busy on Windows, and the removal would fail for a reason
   // that has nothing to do with whether there is work in it.
-  if (t) await releaseWorktree(t);
+  if (thread) await releaseWorktree(thread);
 }
 
 // One close path for every entry point (sidebar X, context menu, Ctrl+W) so
 // the confirm-before-close setting is honored everywhere.
 export async function closeThreadWithConfirm(threadId: string): Promise<boolean> {
-  const t = app.threadById(threadId);
-  if (!t) return false;
+  const thread = app.threadById(threadId);
+  if (!thread) return false;
   if (settings.state.confirmCloseThread) {
     const ok = await confirmDialog.ask({
       title: "Close thread?",
-      message: `Close ${t.title ?? t.label}? Running process will be killed.`,
+      message: `Close ${thread.title ?? thread.label}? Running process will be killed.`,
       confirmLabel: "Close thread",
       danger: true,
     });
@@ -433,14 +438,14 @@ export async function closeThreadWithConfirm(threadId: string): Promise<boolean>
 }
 
 export async function stopThread(threadId: string) {
-  const t = app.threadById(threadId);
-  if (!t) return;
+  const thread = app.threadById(threadId);
+  if (!thread) return;
 
-  const previousPtyId = t.ptyId;
-  app.setThreadPtyId(t.id, null);
-  parkedLocal.delete(t.id);
+  const previousPtyId = thread.ptyId;
+  app.setThreadPtyId(thread.id, null);
+  parkedLocal.delete(thread.id);
   // setThreadStatus persists terminal statuses itself.
-  app.setThreadStatus(t.id, "stopped", null);
+  app.setThreadStatus(thread.id, "stopped", null);
 
   if (previousPtyId) {
     try {
@@ -463,29 +468,31 @@ export async function restoreLastClosedThread(): Promise<Thread | null> {
     try {
       await app.upsertThread(restored);
     } catch (err) {
-      console.error("upsertThread failed:", err);
-      notifications.error("Failed to restore thread");
+      logger.error("thread", "upsertThread failed", String(err));
+      notifications.error(t("thread.restoreFailed"));
       return null;
     }
     app.activeThreadId = restored.id;
     app.selectedProjectId = restored.projectId;
     app.view = "terminal";
-    notifications.success(`Restored ${restored.title ?? restored.label}`);
+    notifications.success(
+      t("thread.restored", { name: restored.title ?? restored.label }),
+    );
     return restored;
   }
 
-  notifications.error("No closed thread to restore");
+  notifications.error(t("thread.noClosedThread"));
   return null;
 }
 
 export async function reloadThread(threadId: string) {
-  const t = app.threadById(threadId);
-  if (!t) return;
+  const thread = app.threadById(threadId);
+  if (!thread) return;
 
-  const previousPtyId = t.ptyId;
+  const previousPtyId = thread.ptyId;
   // An explicit relaunch is never a reattach: drop any park marker so the fresh
   // PTY gets its launch input typed.
-  parkedLocal.delete(t.id);
+  parkedLocal.delete(thread.id);
 
   // Reload means "give me this conversation here, now". If a background agent
   // is still holding the session, claude would refuse to resume it and the
@@ -493,11 +500,11 @@ export async function reloadThread(threadId: string) {
   // the relaunch below be an ordinary resume. Stopping is scoped to background
   // agents backend-side; an interactive session belongs to another terminal.
   // Best-effort: a failure just means the picker path is taken, as before.
-  if (t.sessionId) {
-    const project = app.projects.find((p) => p.id === t.projectId);
+  if (thread.sessionId) {
+    const project = app.projects.find((p) => p.id === thread.projectId);
     if (project) {
       await backendForPath(project.cwd)
-        .session.stopClaude(t.sessionId)
+        .session.stopClaude(thread.sessionId)
         .catch(() => false);
     }
   }
@@ -508,16 +515,16 @@ export async function reloadThread(threadId: string) {
     await ptyKill(previousPtyId, true).catch(() => {});
   }
 
-  t.ptyId = null;
-  t.status = "idle";
-  t.exitCode = null;
-  t.autoSlept = false;
-  void saveThread({ ...t, args: [...t.args] }).catch((err) => {
-    console.error("saveThread failed:", err);
+  thread.ptyId = null;
+  thread.status = "idle";
+  thread.exitCode = null;
+  thread.autoSlept = false;
+  void saveThread({ ...thread, args: [...thread.args] }).catch((err) => {
+    logger.error("thread", "saveThread failed", String(err));
   });
 
-  app.activeThreadId = t.id;
-  app.selectedProjectId = t.projectId;
+  app.activeThreadId = thread.id;
+  app.selectedProjectId = thread.projectId;
   app.view = "terminal";
-  app.bumpRespawn(t.id);
+  app.bumpRespawn(thread.id);
 }

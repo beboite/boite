@@ -107,6 +107,17 @@ export interface Settings {
   sidebarWidth: number;
   sidebarCollapsed: boolean;
   uiScalePercent: number;
+  /**
+   * True once the user has picked a layout themselves.
+   *
+   * `mobileLayout` used to be guessed once on first run and written straight to
+   * localStorage, which made the guess indistinguishable from a choice. A
+   * coarse-pointer tablet wider than the threshold was then stuck on the PC
+   * layout for good, with no soft-keyboard button, no CLI key bar and the IME
+   * handling that exists to dodge the Gboard duplication bug switched off. While
+   * this is false the layout keeps following the form factor.
+   */
+  layoutPinned: boolean;
   projectOrder: string[];
   threadOrderByProject: Record<string, string[]>;
   /**
@@ -126,7 +137,6 @@ export interface Settings {
   idleTimeoutMinutes: number;
   idleAutocloseByIcon: Record<string, boolean>;
   confirmCloseThread: boolean;
-  rightPanel: RightPanelTab;
   gitSplitFraction: number;
   gitAutoFetch: boolean;
   gitAutoFetchSeconds: number;
@@ -152,16 +162,6 @@ export interface Settings {
 // override the OS either way.
 export type MotionMode = "system" | "on" | "off";
 
-
-/**
- * Which of git, files and todo the titlebar button reaches for.
- *
- * Named after the rail it used to drive, and it no longer drives one: those
- * three are panes now, and whether any of them is open is a question for the
- * pane tree. All this still holds is the last one the user picked, so one
- * click opens that one instead of always git.
- */
-export type RightPanelTab = "git" | "explorer" | "todo" | null;
 
 /**
  * Where a todo stands. `claimed` exists because an agent that can tick its own

@@ -6,14 +6,21 @@
   import { t } from "$lib/i18n/index.svelte";
   import {
     buildPaletteCommands,
+    commandHint,
+    commandLabel,
     SECTION_BIAS,
     SECTION_TITLE_KEYS,
     type PaletteCommand,
     type PaletteSection,
   } from "./registry";
 
-  const SECTIONS: PaletteSection[] = ["threads", "actions", "projects"];
+  // Same order as SECTION_BIAS. "panes" has to be listed or the pane commands
+  // exist only for a typed query: the empty-query list is built from this array.
+  const SECTIONS: PaletteSection[] = ["threads", "actions", "panes", "projects"];
   const SEARCH_DEBOUNCE_MS = 80;
+
+  /** A command with its text resolved: what the row shows and what search matches. */
+  type PaletteRow = { c: PaletteCommand; label: string; hint: string | null };
 
   let query = $state("");
   let debouncedQuery = $state("");
@@ -44,21 +51,27 @@
     queueMicrotask(() => inputEl?.focus());
   });
 
+  // Resolved at render, not while the list is built: a fixed command carries a
+  // dictionary key, so switching language re-renders instead of going stale.
+  const rows = $derived.by<PaletteRow[]>(() =>
+    commands.map((c) => ({ c, label: commandLabel(c), hint: commandHint(c) })),
+  );
+
   const visible = $derived.by(() => {
     const q = debouncedQuery.trim();
     if (!q) {
-      return SECTIONS.flatMap((s) => commands.filter((c) => c.section === s));
+      return SECTIONS.flatMap((s) => rows.filter((r) => r.c.section === s));
     }
-    const scored: { c: PaletteCommand; score: number }[] = [];
-    for (const c of commands) {
-      const target = c.hint ? `${c.label} ${c.hint}` : c.label;
+    const scored: { r: PaletteRow; score: number }[] = [];
+    for (const r of rows) {
+      const target = r.hint ? `${r.label} ${r.hint}` : r.label;
       const score = fuzzyScore(q, target);
       if (score !== null) {
-        scored.push({ c, score: score + SECTION_BIAS[c.section] });
+        scored.push({ r, score: score + SECTION_BIAS[r.c.section] });
       }
     }
     scored.sort((a, b) => b.score - a.score);
-    return scored.map((x) => x.c);
+    return scored.map((x) => x.r);
   });
 
   $effect(() => {
@@ -69,8 +82,8 @@
   function sectionTitleAt(index: number): string | null {
     const item = visible[index];
     if (!item) return null;
-    if (index === 0 || visible[index - 1].section !== item.section) {
-      return t(SECTION_TITLE_KEYS[item.section]);
+    if (index === 0 || visible[index - 1].c.section !== item.c.section) {
+      return t(SECTION_TITLE_KEYS[item.c.section]);
     }
     return null;
   }
@@ -116,8 +129,8 @@
     }
     if (e.key === "Enter") {
       e.preventDefault();
-      const c = visible[activeIndex];
-      if (c) runCommand(c);
+      const row = visible[activeIndex];
+      if (row) runCommand(row.c);
     }
   }
 
@@ -129,16 +142,16 @@
 {#if palette.open}
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <div
-    class="fixed inset-0 z-50 flex justify-center bg-black/50 pt-[12vh] backdrop-blur-[2px]"
+    class="fixed inset-0 z-[var(--z-modal)] flex justify-center bg-[var(--color-scrim)] pt-[12vh] backdrop-blur-[2px]"
     role="dialog"
     aria-modal="true"
-    aria-label={t("palette.label")}
+    aria-label={t("palette.title")}
     tabindex="-1"
     onclick={backdropClick}
     transition:fade={{ duration: 100 }}
   >
     <div
-      class="flex h-fit max-h-[60vh] w-[560px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl border border-border bg-[var(--color-surface)] shadow-2xl"
+      class="surface-dialog flex h-fit max-h-[60vh] w-[560px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden"
       transition:scale={{ duration: 120, start: 0.98 }}
       onkeydown={handleKeydown}
       role="presentation"
@@ -164,10 +177,10 @@
       >
         {#if visible.length === 0}
           <p class="px-4 py-6 text-center text-xs text-muted-foreground">
-            No matching command
+            {t("palette.noMatch")}
           </p>
         {/if}
-        {#each visible as c, i (c.id)}
+        {#each visible as row, i (row.c.id)}
           {@const title = sectionTitleAt(i)}
           {#if title}
             <p class="px-4 pt-2.5 pb-1 text-2xs font-semibold tracking-wider text-muted-foreground/60 uppercase">
@@ -184,19 +197,19 @@
                 ? 'bg-[var(--color-surface-3)] text-foreground'
                 : 'text-foreground/85 hover:bg-[var(--color-surface-2)]'}"
             onpointerenter={() => (activeIndex = i)}
-            onclick={() => runCommand(c)}
+            onclick={() => runCommand(row.c)}
           >
             <!-- Held even when empty: an icon on some rows and none on others
                  would step the labels in and out along the list. -->
             <span class="flex size-4 shrink-0 items-center justify-center">
-              {#if c.icon}
-                <ShortcutIcon iconKey={c.icon.key} size={14} color={c.icon.color} />
+              {#if row.c.icon}
+                <ShortcutIcon iconKey={row.c.icon.key} size={14} color={row.c.icon.color} />
               {/if}
             </span>
-            <span class="min-w-0 truncate">{c.label}</span>
-            {#if c.hint}
+            <span class="min-w-0 truncate">{row.label}</span>
+            {#if row.hint}
               <span class="min-w-0 flex-1 truncate text-xs text-muted-foreground/70">
-                {c.hint}
+                {row.hint}
               </span>
             {/if}
           </button>

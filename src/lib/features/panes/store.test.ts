@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
  * The pane tree is tested in `tree.test.ts`; this is the store on top of it,
@@ -39,11 +39,30 @@ function kindsOf(paneId: string): string[] {
   return leafNodesOf(g.root).map((l) => l.content.kind);
 }
 
+/**
+ * The store persists, and both halves of that leak across tests.
+ *
+ * `syncWithThreads` hydrates from localStorage once per module lifetime, so
+ * whatever a previous file left in the blob would arrive as extra groups in
+ * whichever test happens to run first. And `saveSoon` writes on a 250 ms timer,
+ * so a test that ends before it fires hands its layout to the next one. Fake
+ * timers keep every pending write pending, and dropping them on the way out
+ * means nothing here ever reaches the blob at all.
+ */
 beforeEach(() => {
+  vi.useFakeTimers();
+  if (typeof localStorage !== "undefined") localStorage.clear();
   paneStore.groups = [];
   paneStore.rects = {};
   paneStore.dropPreview = null;
   app.threads = [];
+});
+
+afterEach(() => {
+  // Discards the timers still queued, which is the point: none of them belongs
+  // to the test about to run.
+  vi.useRealTimers();
+  if (typeof localStorage !== "undefined") localStorage.clear();
 });
 
 describe("syncWithThreads", () => {

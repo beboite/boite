@@ -24,6 +24,7 @@
   import { app } from "$lib/app/store.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
   import { notifications } from "$lib/features/notifications/store.svelte";
+  import { logger } from "$lib/shared/services/logger.svelte";
   import {
     agentAcceptsInjection,
     agentApiReady,
@@ -187,7 +188,13 @@
     if (!shimPath || !credsPath) return;
     const snippet = agentSetupSnippet(agent.key as never, shimPath, credsPath);
     if (!snippet) return copyPath();
-    await writeText(snippet);
+    try {
+      await writeText(snippet);
+    } catch (err) {
+      logger.error("todo", "copy setup snippet failed", err);
+      notifications.error(t("terminal.copyFailed"));
+      return;
+    }
     // A command says where it goes; a JSON fragment does not, so name the file.
     const file = agentSetupTarget(agent.key as never);
     notifications.success(
@@ -199,7 +206,13 @@
 
   async function copyPath() {
     if (!shimPath) return;
-    await writeText(shimPath);
+    try {
+      await writeText(shimPath);
+    } catch (err) {
+      logger.error("todo", "copy shim path failed", err);
+      notifications.error(t("terminal.copyFailed"));
+      return;
+    }
     notifications.success(t("todo.agentPathCopied"));
   }
 

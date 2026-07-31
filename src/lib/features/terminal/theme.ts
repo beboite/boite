@@ -3,10 +3,25 @@ import type { ITheme } from "@xterm/xterm";
 // Builds the xterm theme from the CSS tokens in app.css so the terminal and
 // the chrome can never drift apart. Fallbacks cover the first paint before
 // stylesheets resolve (and tests without a DOM stylesheet).
-export function xtermTheme(): ITheme {
+function reader() {
   const style = getComputedStyle(document.documentElement);
-  const v = (name: string, fallback: string) =>
+  return (name: string, fallback: string) =>
     style.getPropertyValue(name).trim() || fallback;
+}
+
+// xterm measures the cell on a canvas, so it wants a resolved stack rather than
+// a var(): passing one leaves it measuring an invalid font. Read here for the
+// same reason the palette is, because a copy of --font-mono's string in the
+// component silently desynced the terminal every time app.css moved.
+export function xtermFontFamily(): string {
+  return reader()(
+    "--font-mono",
+    '"JetBrains Mono", "SF Mono", "Cascadia Code", Consolas, "Liberation Mono", Menlo, monospace',
+  );
+}
+
+export function xtermTheme(): ITheme {
+  const v = reader();
 
   const background = v("--color-background", "#0a0a0a");
   const foreground = v("--color-term-foreground", "#e4e4e7");
@@ -15,7 +30,9 @@ export function xtermTheme(): ITheme {
     foreground,
     cursor: v("--color-term-cursor", "#d4d4d8"),
     cursorAccent: background,
-    selectionBackground: "rgba(228, 228, 231, 0.18)",
+    // Shared with ::selection in app.css: selecting text in a pane and in the
+    // chrome used to be two different highlights.
+    selectionBackground: v("--color-selection", "rgba(228, 228, 231, 0.18)"),
     black: v("--color-term-black", "#18181b"),
     red: v("--color-term-red", "#f07178"),
     green: v("--color-term-green", "#c3e88d"),

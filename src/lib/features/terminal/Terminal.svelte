@@ -5,7 +5,7 @@
   import { WebglAddon } from "@xterm/addon-webgl";
   import { WebLinksAddon } from "@xterm/addon-web-links";
   import { Unicode11Addon } from "@xterm/addon-unicode11";
-  import { xtermTheme } from "./theme";
+  import { xtermFontFamily, xtermTheme } from "./theme";
   import { registerTerminal, unregisterTerminal } from "./live";
   import { openUrl } from "$lib/platform/opener";
   import { readText, writeText } from "$lib/platform/clipboard";
@@ -42,14 +42,15 @@
     type SessionMonitor,
   } from "$lib/features/thread/session-monitor.svelte";
   import { notifications } from "$lib/features/notifications/store.svelte";
+  import { t } from "$lib/i18n/index.svelte";
   import { logger } from "$lib/shared/services/logger.svelte";
   import { isGenericTitle } from "$lib/features/thread/title-filter";
   import { statusEngine } from "$lib/features/thread/statusEngine";
+  import { longPress } from "$lib/shared/actions/longPress";
   import ContextMenu from "$lib/shared/components/ContextMenu.svelte";
   import type { ContextMenuItem } from "$lib/shared/components/ContextMenu.svelte";
   import type { Thread } from "$lib/types";
   import Keyboard from "@lucide/svelte/icons/keyboard";
-  import { t } from "$lib/i18n/index.svelte";
 
   type Props = { thread: Thread; visible: boolean; focused: boolean };
   let { thread, visible, focused }: Props = $props();
@@ -81,6 +82,7 @@
   let lastOutputAt = 0;
   let sessionMonitor: SessionMonitor | null = null;
   let fitRafId: number | null = null;
+  let fitSettleTimer: ReturnType<typeof setTimeout> | null = null;
   let lastInputAt = 0;
   const encoder = new TextEncoder();
   const LF = new Uint8Array([0x0a]);
@@ -97,9 +99,26 @@
   let keyboardOpen = $state(false);
   const FONT_MIN = 8;
   const FONT_MAX = 32;
+  // What 100% zoom means. The UI scale is applied as a root font-size, which a
+  // canvas-drawn terminal cannot inherit, so the multiplication happens here:
+  // the slider used to grow every box around the terminal and leave the text
+  // inside it exactly where it was.
+  const FONT_BASE = 13;
   let touchMode: "none" | "pinch" | "scroll" = "none";
   let pinchStartDist = 0;
-  let pinchStartFont = 13;
+  // Pinch rides on top of the UI scale rather than replacing it, so a pinched
+  // pane still follows a later move of the slider.
+  let pinchFactor = $state(1);
+  let pinchStartFactor = 1;
+  const fontSize = $derived(
+    Math.max(
+      FONT_MIN,
+      Math.min(
+        FONT_MAX,
+        Math.round((FONT_BASE * settings.state.uiScalePercent * pinchFactor) / 100),
+      ),
+    ),
+  );
   let scrollLastY = 0;
   let scrollAccum = 0;
 
@@ -365,6 +384,22 @@
     });
   }
 
+  // Coalescing to one fit per frame is not enough for a splitter drag: the
+  // ResizeObserver fires continuously, and every fit() re-measures the character
+  // cell and reflows the whole buffer, so a drag cost 60 full passes a second per
+  // visible pane. Refit once at the start so the resize is visible, then once the
+  // pointer settles.
+  const FIT_SETTLE_MS = 60;
+
+  function scheduleSettledFit() {
+    if (fitSettleTimer === null) scheduleFit();
+    else clearTimeout(fitSettleTimer);
+    fitSettleTimer = setTimeout(() => {
+      fitSettleTimer = null;
+      scheduleFit();
+    }, FIT_SETTLE_MS);
+  }
+
   function cleanTitle(raw: string): string {
     const m = raw.match(/[\p{L}\p{N}]/u);
     if (!m || m.index === undefined) return raw.trim();
@@ -455,7 +490,10 @@
       const text = await readText();
       if (text) target.paste(text);
     } catch (err) {
-      console.error("clipboard read failed:", err);
+      // Said out loud, not only logged: Ctrl+V that quietly does nothing reads
+      // as a dead keybinding rather than as a clipboard the OS refused us.
+      logger.error("terminal", "clipboard read failed", String(err));
+      notifications.error(t("terminal.pasteFailed"));
     } finally {
       focusTerminalSoon();
     }
@@ -468,18 +506,17 @@
     try {
       await writeText(sel);
     } catch (err) {
-      console.error("clipboard write failed:", err);
+      logger.error("terminal", "clipboard write failed", String(err));
+      notifications.error(t("terminal.copyFailed"));
     }
     return true;
   }
 
-  function openTerminalContextMenu(e: MouseEvent) {
-    e.preventDefault();
-    if (!term) return;
-    const sel = term.getSelection();
-    const items: ContextMenuItem[] = [
+  function terminalMenuItems(): ContextMenuItem[] {
+    const sel = term?.getSelection();
+    return [
       {
-        label: "Copy",
+        label: t("terminal.copy"),
         disabled: !sel,
         action: () => {
           void copySelection()
@@ -488,21 +525,38 @@
         },
       },
       {
-        label: "Paste",
+        label: t("terminal.paste"),
         action: () => {
           void pasteFromClipboard();
         },
       },
       { separator: true },
       {
-        label: "Reload thread",
+        label: t("terminal.reloadThread"),
         action: () => {
           void reloadThread(thread.id);
           focusTerminalSoon();
         },
       },
     ];
-    ctxMenu = { x: e.clientX, y: e.clientY, items };
+  }
+
+  function openTerminalContextMenu(e: MouseEvent) {
+    e.preventDefault();
+    if (!term) return;
+    ctxMenu = { x: e.clientX, y: e.clientY, items: terminalMenuItems() };
+  }
+
+  // A finger held on the screen, which is the only right-click a phone has:
+  // iOS never raises `contextmenu`, and the container claims every touch for
+  // pinch-zoom and scroll, so Copy/Paste/Reload had no way in at all.
+  function openTerminalMenuAt(x: number, y: number) {
+    if (!term) return;
+    // A pinch is a zoom, not a press. The second finger landing restarts the
+    // press timer, so without this the menu would open mid-gesture.
+    if (touchMode === "pinch") return;
+    ctxMenu = { x, y, items: terminalMenuItems() };
+    navigator.vibrate?.(10);
   }
 
   function closeContextMenu() {
@@ -522,7 +576,7 @@
       await openUrl(uri);
     } catch (err) {
       logger.error("terminal", `open link failed: ${uri}`, String(err));
-      notifications.error("Failed to open link");
+      notifications.error(t("terminal.openLinkFailed"));
     }
   }
 
@@ -768,7 +822,7 @@
     if (e.touches.length >= 2) {
       touchMode = "pinch";
       pinchStartDist = touchDist(e.touches);
-      pinchStartFont = term.options.fontSize ?? 13;
+      pinchStartFactor = pinchFactor;
       e.preventDefault();
     } else {
       touchMode = "scroll";
@@ -783,21 +837,16 @@
       e.preventDefault();
       if (pinchStartDist <= 0) return;
       const ratio = touchDist(e.touches) / pinchStartDist;
-      const next = Math.max(
-        FONT_MIN,
-        Math.min(FONT_MAX, Math.round(pinchStartFont * ratio)),
-      );
-      if (next !== term.options.fontSize) {
-        term.options.fontSize = next;
-        scheduleFit();
-      }
+      // Only the factor moves; `fontSize` clamps it against FONT_MIN/FONT_MAX
+      // and the effect below applies the result and refits.
+      pinchFactor = Math.max(0.25, Math.min(4, pinchStartFactor * ratio));
       return;
     }
     if (touchMode === "scroll" && e.touches.length === 1) {
       const y = e.touches[0].clientY;
       scrollAccum += y - scrollLastY;
       scrollLastY = y;
-      const rowPx = (term.options.fontSize ?? 13) * 1.25;
+      const rowPx = fontSize * 1.25;
       const lines = Math.trunc(scrollAccum / rowPx);
       if (lines !== 0) {
         scrollAccum -= lines * rowPx;
@@ -1053,9 +1102,8 @@
     term = new Terminal({
       cursorBlink: true,
       cursorStyle: "bar",
-      fontSize: 13,
-      fontFamily:
-        '"JetBrains Mono", "SF Mono", "Cascadia Code", Consolas, "Liberation Mono", Menlo, monospace',
+      fontSize,
+      fontFamily: xtermFontFamily(),
       lineHeight: 1.25,
       letterSpacing: 0,
       scrollback: 10_000,
@@ -1192,7 +1240,7 @@
     });
 
     resizeObserver = new ResizeObserver(() => {
-      scheduleFit();
+      scheduleSettledFit();
     });
     resizeObserver.observe(container);
 
@@ -1250,12 +1298,26 @@
   // not opened its yet (status flips to ready in the same breath as ptyOpen), so
   // keystrokes would land nowhere while the caret kept implying otherwise.
   $effect(() => {
-    if (term) term.options.disableStdin = finished || thread.status === "idle";
+    if (term) {
+      const next = finished || thread.status === "idle";
+      if (term.options.disableStdin !== next) term.options.disableStdin = next;
+    }
   });
 
   $effect(() => {
     if (focused && term) {
       queueMicrotask(() => term?.focus());
+    }
+  });
+
+  // The grid is measured in pixels off a canvas, so neither the UI scale nor a
+  // pinch reaches it through CSS. Push the resolved size in, then refit: the
+  // cell size changed, so the column count did too.
+  $effect(() => {
+    const next = fontSize;
+    if (term && term.options.fontSize !== next) {
+      term.options.fontSize = next;
+      scheduleFit();
     }
   });
 
@@ -1285,6 +1347,8 @@
     releasePty();
     if (fitRafId !== null) cancelAnimationFrame(fitRafId);
     fitRafId = null;
+    if (fitSettleTimer !== null) clearTimeout(fitSettleTimer);
+    fitSettleTimer = null;
     resizeObserver?.disconnect();
     container?.removeEventListener("touchstart", onTouchStart);
     container?.removeEventListener("touchmove", onTouchMove);
@@ -1303,17 +1367,29 @@
   oncontextmenu={openTerminalContextMenu}
   role="presentation"
 >
-  <div class="relative min-h-0 flex-1 px-3 py-2">
+  <!-- In landscape on a notched phone the cutout is on a side, not the top, and
+       this pane fills the window: without the side insets the first columns of
+       every line sit under it. -->
+  <div
+    class="relative min-h-0 flex-1 px-3 py-2"
+    style={mobile
+      ? "padding-left: max(env(safe-area-inset-left, 0px), 0.75rem); padding-right: max(env(safe-area-inset-right, 0px), 0.75rem);"
+      : undefined}
+  >
     <div
       bind:this={container}
       class="h-full w-full min-h-0 overflow-hidden"
       class:touch-none={mobile}
+      use:longPress={{ onLongPress: openTerminalMenuAt }}
     ></div>
     {#if thread.status === "stopped"}
       <div
-        class="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-black text-xs text-muted-foreground/60"
+        class="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-[var(--color-background)] text-xs text-muted-foreground/60"
+        role="status"
       >
-        ( -_-) zzZ
+        <!-- Decoration only: the readable state lives in the sibling span. -->
+        <span aria-hidden="true">( -_-) zzZ</span>
+        <span class="sr-only">{t("terminal.threadStopped")}</span>
       </div>
     {:else if thread.status === "done" || thread.status === "exited" || thread.status === "error"}
       <div class="absolute inset-x-0 bottom-3 z-10 flex justify-center">
@@ -1323,11 +1399,10 @@
           onclick={() => void reloadThread(thread.id)}
         >
           {thread.status === "done"
-            ? "Process finished"
+            ? t("terminal.finishedRelaunch")
             : thread.status === "error"
-              ? "Spawn failed"
-              : `Process exited (code ${thread.exitCode ?? "?"})`}
-          — click to relaunch
+              ? t("terminal.spawnFailedRelaunch")
+              : t("terminal.exitedRelaunch", { code: thread.exitCode ?? "?" })}
         </button>
       </div>
     {/if}
@@ -1335,6 +1410,7 @@
       <button
         type="button"
         class="absolute bottom-3 right-3 z-20 flex size-11 items-center justify-center rounded-full border shadow-lg transition active:scale-95"
+        style:right="max(env(safe-area-inset-right, 0px), 0.75rem)"
         style:background-color={keyboardOpen || keyBarOpen
           ? "var(--color-foreground)"
           : "var(--color-surface-2)"}
@@ -1359,14 +1435,17 @@
   {#if showKeyBar}
     <div
       class="flex shrink-0 items-stretch gap-1 border-t border-border bg-[var(--color-surface)] px-1 py-1"
+      style="padding-left: max(env(safe-area-inset-left, 0px), 0.25rem); padding-right: max(env(safe-area-inset-right, 0px), 0.25rem);"
     >
-      <div class="keybar-scroll flex flex-1 items-stretch gap-1 overflow-x-auto">
+      <div class="hide-scrollbar flex flex-1 items-stretch gap-1 overflow-x-auto">
         {#each BAR_KEYS as k (k.id)}
           {@const armed =
             k.id === "ctrl" ? ctrlArmed : k.id === "alt" ? altArmed : false}
+          <!-- 44px, not 36px: these are the only Ctrl, Alt and Esc a phone has,
+               and h-9 puts them under the touch-target floor. -->
           <button
             type="button"
-            class="flex h-9 min-w-9 shrink-0 items-center justify-center rounded-md border border-border px-2 text-base font-medium transition active:scale-95"
+            class="flex h-11 min-w-11 shrink-0 items-center justify-center rounded-md border border-border px-2 text-base font-medium transition active:scale-95"
             style:background-color={armed
               ? "var(--color-foreground)"
               : "var(--color-surface-2)"}
@@ -1385,16 +1464,6 @@
     </div>
   {/if}
 </div>
-
-<style>
-  /* A scrollbar inside the 36px key strip would eat a third of it. */
-  .keybar-scroll {
-    scrollbar-width: none;
-  }
-  .keybar-scroll::-webkit-scrollbar {
-    display: none;
-  }
-</style>
 
 {#if ctxMenu}
   <ContextMenu

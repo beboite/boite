@@ -2,6 +2,7 @@ import { app } from "$lib/app/store.svelte";
 import { backend } from "$lib/backend";
 import { notifications } from "$lib/features/notifications/store.svelte";
 import { uuid } from "$lib/shared/utils/uuid";
+import { logger } from "$lib/shared/services/logger.svelte";
 import { t } from "$lib/i18n/index.svelte";
 import type { TodoItem, TodoState } from "$lib/types";
 import { diffTodos } from "./diff";
@@ -16,6 +17,12 @@ import { todoAnnouncer } from "./announce.svelte";
 class TodoStore {
   items = $state<TodoItem[]>([]);
   loading = $state(false);
+  /**
+   * Why the last load failed, or null. A failed load used to render exactly like
+   * an empty project: the console got the reason and the panel drew "nothing to
+   * do here".
+   */
+  loadError = $state<string | null>(null);
   private loaded = false;
   private inFlight: Promise<void> | null = null;
   /** A change landed while a query was already out; that query's answer is old. */
@@ -91,8 +98,10 @@ class TodoStore {
           );
         }
         this.loaded = true;
+        this.loadError = null;
       } catch (err) {
-        console.error("[todo] loadTodos failed:", err);
+        logger.error("todo", "loadTodos failed", err);
+        this.loadError = String(err).replace(/^Error:\s*/i, "").trim() || "load failed";
       } finally {
         this.loading = false;
         this.inFlight = null;
@@ -141,7 +150,7 @@ class TodoStore {
     try {
       await backend().db.saveTodo(item);
     } catch (err) {
-      console.error("[todo] saveTodo failed:", err);
+      logger.error("todo", "saveTodo failed", err);
       notifications.error(t("todo.saveFailed"));
       await this.reloadQuietly();
     }
@@ -244,7 +253,7 @@ class TodoStore {
     this.items = [...this.items].sort(
       (a, b) => a.position - b.position || a.createdAt - b.createdAt,
     );
-    for (const item of changed) await this.write(item);
+    await Promise.all(changed.map((item) => this.write(item)));
   }
 
   async remove(id: string): Promise<void> {
@@ -252,7 +261,7 @@ class TodoStore {
     try {
       await backend().db.deleteTodo(id);
     } catch (err) {
-      console.error("[todo] deleteTodo failed:", err);
+      logger.error("todo", "deleteTodo failed", err);
       notifications.error(t("todo.removeFailed"));
       await this.reloadQuietly();
     }
@@ -263,12 +272,20 @@ class TodoStore {
     if (doomed.length === 0) return;
     const ids = new Set(doomed.map((t) => t.id));
     this.items = this.items.filter((t) => !ids.has(t.id));
-    for (const t of doomed) {
-      try {
-        await backend().db.deleteTodo(t.id);
-      } catch (err) {
-        console.error("[todo] deleteTodo failed:", err);
-      }
+    const results = await Promise.allSettled(
+      doomed.map((item) => backend().db.deleteTodo(item.id)),
+    );
+    const failed = results.filter((r) => r.status === "rejected");
+    if (failed.length > 0) {
+      logger.error("todo", "clearDone partly failed", {
+        failed: failed.length,
+        of: doomed.length,
+      });
+      // The rows are already gone from the list, so the only honest move is to
+      // put back whatever the database still holds.
+      notifications.error(t("todo.removeFailed"));
+      await this.reload();
+      return;
     }
     notifications.success(t("todo.cleared", { count: doomed.length }));
   }

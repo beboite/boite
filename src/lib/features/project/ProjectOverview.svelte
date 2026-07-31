@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { app } from "$lib/app/store.svelte";
-  import { gitStore } from "$lib/features/git/store.svelte";
+  import { gitStore, gitScope } from "$lib/features/git/store.svelte";
   import { todos } from "$lib/features/todo/store.svelte";
   import AgentAccess from "$lib/features/todo/AgentAccess.svelte";
   import ProjectWorktrees from "./ProjectWorktrees.svelte";
@@ -32,11 +32,15 @@
   let { project, onOpenThread }: Props = $props();
 
   const threads = $derived(app.threadsByProjectSorted(project.id));
-  const git = $derived(gitStore.get(project.id));
-  const openTodos = $derived(todos.forProject(project.id).filter((x) => x.state !== "done"));
-  const claimedTodos = $derived(
-    todos.forProject(project.id).filter((x) => x.state === "claimed"),
-  );
+  // The page is about the project, so it watches the project's own checkout.
+  // The git panel may be pointed at a thread's worktree at the same time; the
+  // two are separate scopes and no longer reset each other.
+  const gitTarget = $derived(gitScope(project.id, project.gitRoot ?? project.cwd));
+  const git = $derived(gitStore.get(gitTarget));
+  // One pass over the todo table, filtered twice, instead of two passes.
+  const projectTodos = $derived(todos.forProject(project.id));
+  const openTodos = $derived(projectTodos.filter((x) => x.state !== "done"));
+  const claimedTodos = $derived(projectTodos.filter((x) => x.state === "claimed"));
   const changed = $derived(
     git ? git.staged.length + git.unstaged.length + git.conflicts.length : 0,
   );
@@ -50,10 +54,8 @@
   // `ensure` first, always: `refresh` reads the directory the store was told
   // about and returns silently when nobody has told it one.
   $effect(() => {
-    const id = project.id;
-    const cwd = project.gitRoot ?? project.cwd;
-    gitStore.ensure(id, cwd);
-    void gitStore.refresh(id, { reloadLog: true }).catch(() => {});
+    const registered = gitStore.ensure(project.id, project.gitRoot ?? project.cwd);
+    void gitStore.refresh(registered, { reloadLog: true }).catch(() => {});
   });
 </script>
 

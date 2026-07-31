@@ -22,15 +22,15 @@
     if (busyCount > 0) {
       parts.push(
         busyCount === 1
-          ? "1 thread is still alive; closing the app will kill its process."
-          : `${busyCount} threads are still alive; closing the app will kill their processes.`,
+          ? t("closeGuard.oneThread")
+          : t("closeGuard.manyThreads", { count: busyCount }),
       );
     }
     if (dirtyCount > 0) {
       parts.push(
         dirtyCount === 1
-          ? "1 file has unsaved changes."
-          : `${dirtyCount} files have unsaved changes.`,
+          ? t("closeGuard.oneDirty")
+          : t("closeGuard.manyDirty", { count: dirtyCount }),
       );
     }
     return parts.join(" ");
@@ -70,8 +70,8 @@
   danger
   title={t("closeGuard.title")}
   {message}
-  confirmLabel="Close anyway"
-  cancelLabel="Cancel"
+  confirmLabel={t("closeGuard.confirmLabel")}
+  cancelLabel={t("common.cancel")}
   onConfirm={confirmClose}
   onCancel={cancelClose}
 />
