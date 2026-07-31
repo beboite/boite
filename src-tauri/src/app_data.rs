@@ -139,18 +139,17 @@ pub fn migrate_before_plugins() -> Result<Outcome, String> {
     migrate(&parent.join(LEGACY_IDENTIFIER), &current)
 }
 
-/// Where thread worktrees live: beside the database, never inside a project.
+/// Where thread worktrees used to live: beside the database.
 ///
-/// One directory for all of them, so the filesystem trust boundary gains a
-/// single registered root instead of one per worktree read back from storage.
+/// They live in their own project now, under `worktree_base_for`, because
+/// neither a clone nor a hard link crosses a volume and a base on a different
+/// drive from the projects meant every worktree recompiled and paid full disk
+/// for its own build output.
 ///
-/// `BOITE_WORKTREE_BASE` moves that directory, and the reason is disk rather
-/// than taste. A worktree's `target` is provisioned from the main checkout by
-/// cloning or, where the filesystem cannot clone, by hard link — and neither
-/// crosses a volume. With the app data directory on one drive and the projects
-/// on another, every worktree recompiles from scratch and pays for its own copy
-/// of the build output. Pointing this at a directory on the projects' volume is
-/// what lets that provisioning happen at all.
+/// This is what a worktree is migrated *out of*, and what a source path is
+/// checked against before anything moves, so it stays for as long as an install
+/// can still be carrying one. `BOITE_WORKTREE_BASE` moves it, which matters
+/// here only for finding worktrees an earlier run put somewhere else.
 pub fn worktree_base(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     use tauri::Manager;
     if let Some(base) = std::env::var("BOITE_WORKTREE_BASE")

@@ -139,9 +139,9 @@ pub fn register_project_roots(
     state: State<'_, ProjectRoots>,
     mut roots: Vec<String>,
 ) {
-    // Always in scope, and the only worktree path that ever is. Every thread
-    // worktree lives under it, so nothing read back from the database can widen
-    // the boundary by naming a directory of its own. Created here because
+    // In scope for the worktrees the old layout left behind. A thread's worktree
+    // now lives under its own project, which is already a root, but one not yet
+    // migrated still has to be readable to be moved. Created here because
     // `replace` canonicalizes and silently drops what does not exist yet.
     if let Ok(base) = crate::app_data::worktree_base(&app) {
         if std::fs::create_dir_all(&base).is_ok() {
@@ -807,9 +807,10 @@ pub async fn git_switch_branch(
 /// Opens a detached worktree for a thread and hands back its directory, or
 /// `None` when this repository is not one to open a worktree in.
 ///
-/// The base lives beside the database, not inside the project: it is one
-/// registered root for every worktree, so a stored path can never widen the
-/// filesystem boundary on its own.
+/// The base lives inside the project, so it shares a volume with the checkout
+/// it provisions from. Nothing widens the filesystem boundary: the base is
+/// derived here from a repository already checked against the registered roots,
+/// never taken from the caller.
 #[tauri::command]
 pub async fn worktree_open(
     app: tauri::AppHandle,
@@ -818,7 +819,8 @@ pub async fn worktree_open(
     thread_id: String,
 ) -> Result<Option<String>, String> {
     scope.ensure_allowed(&repo)?;
-    let base = crate::app_data::worktree_base(&app)?;
+    let _ = &app;
+    let base = git::worktree_base_for(std::path::Path::new(&repo));
     let base = base.to_string_lossy().to_string();
     tauri::async_runtime::spawn_blocking(move || {
         git::open_worktree_if_eligible_blocking(&repo, &base, &thread_id)
@@ -839,7 +841,8 @@ pub async fn worktree_warm(
     repo: String,
 ) -> Result<(), String> {
     scope.ensure_allowed(&repo)?;
-    let base = crate::app_data::worktree_base(&app)?;
+    let _ = &app;
+    let base = git::worktree_base_for(std::path::Path::new(&repo));
     let base = base.to_string_lossy().to_string();
     tauri::async_runtime::spawn_blocking(move || {
         if let Err(err) = git::warm_worktree_pool_blocking(&repo, &base) {
@@ -848,6 +851,37 @@ pub async fn worktree_warm(
     })
     .await
     .map_err(|e| format!("worktree_warm task failed: {e}"))
+}
+
+/// Moves a worktree left over from the old layout into its project.
+///
+/// Scoped on both ends: the repository must be a registered root, and the
+/// destination is computed here from that repository rather than taken from the
+/// caller, so this cannot be used to write a worktree somewhere of the caller's
+/// choosing. The source is checked against the legacy base for the same reason.
+#[tauri::command]
+pub async fn worktree_migrate(
+    app: tauri::AppHandle,
+    scope: State<'_, ProjectRoots>,
+    repo: String,
+    thread_id: String,
+    from: String,
+) -> Result<Option<String>, String> {
+    scope.ensure_allowed(&repo)?;
+    let legacy = crate::app_data::worktree_base(&app)?;
+    let source = std::path::Path::new(&from);
+    if !source.starts_with(&legacy) {
+        return Ok(None);
+    }
+    let base = git::worktree_base_for(std::path::Path::new(&repo));
+    let to = git::scoped_dir_for(&base, &thread_id)
+        .to_string_lossy()
+        .to_string();
+    tauri::async_runtime::spawn_blocking(move || {
+        git::migrate_worktree_blocking(&repo, &from, &to).map(Some)
+    })
+    .await
+    .map_err(|e| format!("worktree_migrate task failed: {e}"))?
 }
 
 /// Every worktree of a repository, read from the repository itself.

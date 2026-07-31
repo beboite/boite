@@ -1373,14 +1373,64 @@ pub fn commit_blocking(path: &str, message: &str) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&stdout).trim().to_string())
 }
 
+/// Where a project keeps everything Boite puts on its disk.
+pub const BOITE_DIR: &str = ".boite";
+
+/// Where this project's thread worktrees live.
+///
+/// Inside the project, which reverses the earlier rule, and the reason is that
+/// neither of the two mechanisms that make a worktree cheap crosses a volume: a
+/// copy-on-write clone cannot, and neither can a hard link. A base beside the
+/// database means anyone whose projects sit on a second drive gets no `target`
+/// at all and pays a full recompile and a full copy per worktree. Measured on
+/// one machine: 19 worktrees, 45.8 GB, 99% of it build output that should have
+/// cost nothing. Living in the project makes the shared volume a property of
+/// the layout rather than something the user has to get right.
+///
+/// The objection this used to carry — a nested worktree shows up as untracked
+/// and leaves the main checkout permanently dirty — is answered by
+/// `ensure_boite_excluded` rather than by moving out of the project.
+///
+/// The trust boundary gets tighter, not looser: the project is already a
+/// registered root, so a worktree under it needs no root of its own.
+pub fn worktree_base_for(repo: &Path) -> PathBuf {
+    repo.join(BOITE_DIR).join("worktrees")
+}
+
+/// Keeps `.boite/` out of the main checkout's `git status`.
+///
+/// `.git/info/exclude` rather than `.gitignore`: the directory is this
+/// machine's business, and a collaborator who never runs Boite should not find
+/// a rule for it in a tracked file. Best-effort, because the cost of failing is
+/// a noisy `git status` rather than anything broken.
+///
+/// `git clean -xdf` is not a hazard here despite the directory being ignored:
+/// git refuses to descend into a nested checkout and prints `Skipping
+/// repository`. Only `-xdff`, which is documented as meaning exactly that,
+/// removes it.
+pub fn ensure_boite_excluded(repo: &Path) {
+    let Some(git_dir) = git_dir(repo) else {
+        return;
+    };
+    let exclude = git_dir.join("info").join("exclude");
+    let rule = format!("{BOITE_DIR}/");
+    if let Ok(text) = fs::read_to_string(&exclude) {
+        if text.lines().any(|l| l.trim() == rule || l.trim() == BOITE_DIR) {
+            return;
+        }
+        let sep = if text.ends_with('\n') || text.is_empty() { "" } else { "\n" };
+        let _ = fs::write(&exclude, format!("{text}{sep}{rule}\n"));
+        return;
+    }
+    let _ = fs::create_dir_all(exclude.parent().unwrap_or(&exclude));
+    let _ = fs::write(&exclude, format!("{rule}\n"));
+}
+
 /// One directory named after an id, directly under `base` and never elsewhere.
 ///
 /// Used for thread worktrees: the result is always exactly one level down, so
 /// the filesystem trust boundary gains one root — the base — rather than one per
-/// directory fed from a stored id. A worktree also has to live outside the
-/// project for a second reason: one nested in the repository shows up as
-/// untracked, which makes the main checkout permanently dirty and hides real
-/// changes in `git status`.
+/// directory fed from a stored id.
 pub fn scoped_dir_for(base: &Path, id: &str) -> PathBuf {
     // Ids are generated, but this path reaches `git worktree add` and
     // `create_dir_all`, so it is treated as untrusted input: anything that is
@@ -1515,6 +1565,9 @@ pub fn add_detached_worktree_blocking(repo: &str, path: &str) -> Result<String, 
     if Path::new(path).exists() {
         return Err(format!("'{path}' already exists."));
     }
+    // Before the checkout rather than after: the worktree lands inside the
+    // project, and a `git status` run in between would report it as untracked.
+    ensure_boite_excluded(r);
     let mut cmd = git(r);
     cmd.args(["worktree", "add", "--detach", path]);
     run(cmd)?;
@@ -1532,12 +1585,18 @@ pub fn add_detached_worktree_blocking(repo: &str, path: &str) -> Result<String, 
 /// "there is work in here" and what the Worktrees tab paints as a dirty row.
 const SPARE_SUFFIX: &str = ".spare";
 
-/// How many unclaimed worktrees the pool keeps, over every repository together.
+/// How many unclaimed worktrees the pool keeps for one project.
 ///
-/// A spare is a whole checkout plus a copy of the build artifacts, and it is
-/// made on the cheapest gesture in the app. Uncapped, a browse through twenty
-/// projects wrote twenty checkouts and nothing ever took one back. The most
-/// recent few are where the next thread is going.
+/// A spare is a whole checkout plus the build artifacts, and it is made on the
+/// cheapest gesture in the app. Uncapped, a browse through twenty projects wrote
+/// twenty checkouts and nothing ever took one back. The most recent few are
+/// where the next thread is going.
+///
+/// This used to count every repository together, because every base was the same
+/// directory. Each project now has its own, so the same number is a ceiling per
+/// project instead of one for the machine. Warming stops at the first spare that
+/// still matches `HEAD`, so a project at rest holds one; the rest of the
+/// allowance is for a `HEAD` that keeps moving.
 const MAX_SPARES: usize = 3;
 
 /// How long an unclaimed spare is worth keeping.
@@ -1545,7 +1604,7 @@ const MAX_SPARES: usize = 3;
 /// Its copy of `node_modules` and `.venv` was taken when it was made, so an old
 /// one would hand an agent the dependencies of an old lockfile — and in the
 /// meantime it is disk nobody asked for. Markers survive a restart, so without
-/// this the oldest spare on the machine has no upper age at all.
+/// this the oldest spare of a project has no upper age at all.
 const SPARE_MAX_AGE: Duration = Duration::from_secs(12 * 60 * 60);
 
 /// Where a worktree's marker goes, or none for a path with no final component.
@@ -2773,6 +2832,102 @@ pub fn remove_worktree_blocking(
     Ok(())
 }
 
+/// Moves an existing worktree into its project's `.boite/worktrees`, keeping
+/// everything in it.
+///
+/// `git worktree move` is not used, because it cannot do this job: it renames,
+/// and a rename across volumes fails with `Improper link`. Migrating from a
+/// base beside the database to one inside the project is precisely the
+/// cross-volume case, and it is the case that matters most, since a shared
+/// volume is the whole reason to migrate. What works instead is the sequence
+/// git documents for a relocated worktree: put the directory where you want it,
+/// then `git worktree repair`.
+///
+/// The provisioned directories are removed rather than carried across. They are
+/// reproducible by definition — that is what puts them in the policy — and they
+/// are also the only thing here big enough to make the copy slow. Removing them
+/// first is what turns migrating a 20 GB worktree into copying its source, and
+/// `provision_shared_artifacts` puts them back at the far end for nothing.
+///
+/// Links go before the copy for a harder reason: a junction copied by value is
+/// the main checkout's `node_modules` duplicated into the worktree, and a
+/// junction followed by a delete is that same directory emptied.
+pub fn migrate_worktree_blocking(repo: &str, old: &str, new: &str) -> Result<String, String> {
+    let (r, from, to) = (Path::new(repo), Path::new(old), Path::new(new));
+    if from == to {
+        return Ok(new.to_string());
+    }
+    if !r.is_dir() {
+        return Err("Not a directory".into());
+    }
+    if !from.is_dir() {
+        return Err(format!("'{old}' is not there."));
+    }
+    if to.exists() {
+        return Err(format!("'{new}' already exists."));
+    }
+
+    unlink_shared_artifacts(from);
+    // Whatever survived unlinking as a real directory is provisioned build
+    // output or fetched dependencies, and both come back for free.
+    for entry in artifact_policy(r) {
+        let dir = from.join(&entry.dir);
+        if let Ok(meta) = fs::symlink_metadata(&dir) {
+            if meta.is_dir() && !meta.file_type().is_symlink() {
+                let _ = fs::remove_dir_all(&dir);
+            }
+        }
+    }
+
+    if let Some(parent) = to.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("worktree base: {e}"))?;
+    }
+    // Same volume still renames, which is instant. The copy is the fallback,
+    // not the plan.
+    if fs::rename(from, to).is_err() {
+        copy_tree(from, to).map_err(|e| {
+            let _ = fs::remove_dir_all(to);
+            format!("could not move the worktree: {e}")
+        })?;
+        fs::remove_dir_all(from)
+            .map_err(|e| format!("the worktree was copied but the old one is still there: {e}"))?;
+    }
+
+    let mut repair = git(r);
+    repair.args(["worktree", "repair", new]);
+    run(repair)?;
+    let mut prune = git(r);
+    prune.args(["worktree", "prune"]);
+    let _ = run(prune);
+
+    ensure_boite_excluded(r);
+    provision_shared_artifacts(r, to);
+    Ok(new.to_string())
+}
+
+/// Copies a tree by value, symlinks excluded.
+///
+/// Every link is gone by the time this runs, and one appearing here would be
+/// the bug that emptied a main checkout once already, so it is skipped rather
+/// than followed.
+fn copy_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(dst)?;
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let ty = entry.file_type()?;
+        let to = dst.join(entry.file_name());
+        if ty.is_symlink() {
+            continue;
+        }
+        if ty.is_dir() {
+            copy_tree(&entry.path(), &to)?;
+        } else if ty.is_file() {
+            fs::copy(entry.path(), &to)?;
+        }
+    }
+    Ok(())
+}
+
 /// One line of `git worktree list`, with what it would cost to remove it.
 ///
 /// The repository is the authority, not Boite's thread rows: a worktree whose
@@ -3900,6 +4055,139 @@ mod worktree_tests {
         let locals: HashSet<String> = ["demo"].iter().map(|s| s.to_string()).collect();
         assert!(is_local_artifact("demo-0123456789abcdef.d", &locals));
         assert!(!is_local_artifact("demo-core-0123456789abcdef.d", &locals));
+    }
+
+    /// The nested layout only works if the main checkout stays clean. This is
+    /// the assertion the old "worktrees live outside the project" rule existed
+    /// to guarantee, now guaranteed a different way.
+    #[test]
+    fn a_worktree_inside_the_project_leaves_the_checkout_clean() {
+        let f = Fixture::new();
+        let base = worktree_base_for(&f.repo);
+        assert_eq!(base, f.repo.join(".boite").join("worktrees"));
+
+        let w = scoped_dir_for(&base, "thread-1");
+        fs::create_dir_all(&base).unwrap();
+        add_detached_worktree_blocking(f.path(), w.to_str().unwrap()).unwrap();
+        assert!(w.join("a.txt").is_file(), "the worktree was not checked out");
+
+        let mut status = git(&f.repo);
+        status.args(["status", "--porcelain", "--untracked-files=normal"]);
+        let out = run(status).unwrap();
+        assert!(
+            out.is_empty(),
+            "the nested worktree made the main checkout dirty: {}",
+            String::from_utf8_lossy(&out)
+        );
+
+        let _ = remove_worktree_blocking(f.path(), w.to_str().unwrap(), true);
+    }
+
+    #[test]
+    fn the_exclude_rule_is_written_once_and_only_once() {
+        let f = Fixture::new();
+        ensure_boite_excluded(&f.repo);
+        ensure_boite_excluded(&f.repo);
+        ensure_boite_excluded(&f.repo);
+        let text = fs::read_to_string(f.repo.join(".git/info/exclude")).unwrap();
+        assert_eq!(
+            text.lines().filter(|l| l.trim() == ".boite/").count(),
+            1,
+            "the rule was appended more than once"
+        );
+    }
+
+    /// The migration exists to carry work across, so the test is about the
+    /// work: a modification nobody committed, a commit on no branch, and git
+    /// still knowing where the worktree went.
+    #[test]
+    fn migrating_a_worktree_carries_its_work_into_the_project() {
+        let f = Fixture::new();
+        // The policy is what makes a directory disposable. Without one, output
+        // found in the worktree is just a directory nobody can prove is
+        // reproducible, and it gets carried across like anything else.
+        fs::write(
+            f.repo.join("Cargo.toml"),
+            "[package]\nname = \"demo\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        git_in(&f.repo, &["add", "Cargo.toml"]);
+        git_in(&f.repo, &["commit", "--quiet", "-m", "manifest"]);
+        let legacy = scratch("legacy-base");
+        fs::create_dir_all(&legacy).unwrap();
+        let old = scoped_dir_for(&legacy, "thread-9");
+        add_detached_worktree_blocking(f.path(), old.to_str().unwrap()).unwrap();
+
+        fs::write(old.join("kept.txt"), "committed here\n").unwrap();
+        git_in(&old, &["add", "kept.txt"]);
+        git_in(&old, &["commit", "--quiet", "-m", "on no branch"]);
+        fs::write(old.join("a.txt"), "uncommitted\n").unwrap();
+        // Provisioned output, which must be dropped rather than carried.
+        fs::create_dir_all(old.join("target/debug")).unwrap();
+        fs::write(old.join("target/debug/app"), "stale\n").unwrap();
+        // A directory the policy does not name is none of this code's business,
+        // however much it looks like build output.
+        fs::create_dir_all(old.join("dist")).unwrap();
+        fs::write(old.join("dist/theirs.txt"), "mine\n").unwrap();
+
+        let new = scoped_dir_for(&worktree_base_for(&f.repo), "thread-9");
+        let landed =
+            migrate_worktree_blocking(f.path(), old.to_str().unwrap(), new.to_str().unwrap())
+                .unwrap();
+        assert_eq!(landed, new.to_str().unwrap());
+
+        assert!(!old.exists(), "the old worktree is still on disk");
+        assert!(new.join("kept.txt").is_file(), "the commit's file did not survive");
+        assert_eq!(
+            fs::read_to_string(new.join("a.txt")).unwrap(),
+            "uncommitted\n",
+            "the uncommitted change did not survive"
+        );
+        assert!(
+            !new.join("target/debug/app").exists(),
+            "stale build output was carried across instead of dropped"
+        );
+        assert_eq!(
+            fs::read_to_string(new.join("dist/theirs.txt")).unwrap(),
+            "mine\n",
+            "a directory the policy never named was deleted"
+        );
+
+        let entries = list_worktrees_blocking(f.path()).unwrap();
+        let moved = entries.iter().find(|e| !e.main).expect("git lost the worktree");
+        assert_eq!(
+            fs::canonicalize(&moved.path).unwrap(),
+            fs::canonicalize(&new).unwrap(),
+            "git still points at the old path"
+        );
+        assert!(moved.orphan_commits, "the commit on no branch was lost");
+
+        let _ = remove_worktree_blocking(f.path(), new.to_str().unwrap(), true);
+        let _ = fs::remove_dir_all(&legacy);
+    }
+
+    #[test]
+    fn migration_refuses_to_overwrite_and_refuses_a_missing_source() {
+        let f = Fixture::new();
+        let here = scratch("occupied");
+        fs::create_dir_all(&here).unwrap();
+        assert!(
+            migrate_worktree_blocking(f.path(), "/nowhere/at/all", here.to_str().unwrap())
+                .is_err(),
+            "a missing source was accepted"
+        );
+
+        let legacy = scratch("legacy-2");
+        let old = scoped_dir_for(&legacy, "t");
+        fs::create_dir_all(&old).unwrap();
+        assert!(
+            migrate_worktree_blocking(f.path(), old.to_str().unwrap(), here.to_str().unwrap())
+                .is_err(),
+            "an existing destination was overwritten"
+        );
+
+        let _ = fs::remove_dir_all(&here);
+        let _ = fs::remove_dir_all(&legacy);
     }
 
     #[test]

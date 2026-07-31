@@ -741,7 +741,9 @@ async fn dispatch_worktree(
             let repo = str_param(&params, "repo")?;
             state.roots.ensure_allowed(&repo)?;
             let thread_id = str_param(&params, "threadId")?;
-            let base = state.worktree_base().to_string_lossy().to_string();
+            let base = git::worktree_base_for(std::path::Path::new(&repo))
+                .to_string_lossy()
+                .to_string();
             // `path` is null when the repository is not one to open a worktree
             // in: no repo, or a dirty checkout the thread has to start in.
             let r = blocking(move || {
@@ -755,7 +757,9 @@ async fn dispatch_worktree(
         "worktree.warm" => {
             let repo = str_param(&params, "repo")?;
             state.roots.ensure_allowed(&repo)?;
-            let base = state.worktree_base().to_string_lossy().to_string();
+            let base = git::worktree_base_for(std::path::Path::new(&repo))
+                .to_string_lossy()
+                .to_string();
             blocking(move || {
                 if let Err(err) = git::warm_worktree_pool_blocking(&repo, &base) {
                     eprintln!("[boite/worktree] warm failed: {err}");
@@ -763,6 +767,23 @@ async fn dispatch_worktree(
             })
             .await?;
             Ok(json!({ "ok": true }))
+        }
+        "worktree.migrate" => {
+            let repo = str_param(&params, "repo")?;
+            state.roots.ensure_allowed(&repo)?;
+            let thread_id = str_param(&params, "threadId")?;
+            let from = str_param(&params, "from")?;
+            // The destination is computed from the repository, never taken from
+            // the caller, and the source has to be one this layout left behind.
+            if !std::path::Path::new(&from).starts_with(state.worktree_base()) {
+                return Ok(json!({ "path": Value::Null }));
+            }
+            let base = git::worktree_base_for(std::path::Path::new(&repo));
+            let to = git::scoped_dir_for(&base, &thread_id)
+                .to_string_lossy()
+                .to_string();
+            let r = blocking(move || git::migrate_worktree_blocking(&repo, &from, &to)).await??;
+            Ok(json!({ "path": r }))
         }
         "worktree.list" => {
             let repo = str_param(&params, "repo")?;
