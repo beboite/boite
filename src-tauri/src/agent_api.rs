@@ -433,11 +433,11 @@ struct CreateProjectIn {
 /// the endpoint cannot see from here: whether an archived project should come
 /// back, what the folder is called, where it goes when the caller did not say.
 ///
-/// What the endpoint does own, like the move, is the refusal it can reach: a
-/// path the caller spelled out is checked against the same rules the front end
-/// would apply, while the agent is still running to read the answer. Left to
-/// the app, a refusal is a notification on screen and the agent has already
-/// been told its project is being created.
+/// What the endpoint does own, like the move, is the refusal it can reach:
+/// whatever folder the caller pointed at, path or parent, is checked against the
+/// same rules the front end would apply, while the agent is still running to
+/// read the answer. Left to the app, a refusal is a notification on screen and
+/// the agent has already been told its project is being created.
 async fn project_create(
     State(inner): State<std::sync::Arc<Inner>>,
     headers: HeaderMap,
@@ -451,7 +451,7 @@ async fn project_create(
     if name.is_empty() {
         return Ok(Json(json!({ "error": "a project needs a name" })));
     }
-    if let Some(reason) = folder_refusal(&inner, body.path.as_deref(), body.adopt.unwrap_or(false)) {
+    if let Some(reason) = folder_refusal(&inner, &body) {
         return Ok(Json(json!({ "error": reason })));
     }
 
@@ -474,19 +474,51 @@ async fn project_create(
 
 /// Why the folder an agent named cannot become a project, if it cannot.
 ///
-/// The two answers the front end would give that are reachable from here: the
+/// Everything the app has to be running for: which projects are already there,
+/// and where a new one is allowed to go. The rule itself is `folder_refusal_for`.
+fn folder_refusal(inner: &Inner, body: &CreateProjectIn) -> Option<String> {
+    let path = spelled(body.path.as_deref());
+    let parent = spelled(body.parent.as_deref());
+    if path.is_none() && parent.is_none() {
+        return None;
+    }
+    // A project already sitting there is reused, archived or not, and none of
+    // the rules about empty folders apply to it. Only asked of a path, since a
+    // parent is not the folder the project lands in.
+    let known = path.is_some_and(|path| match inner.conn.lock() {
+        Ok(conn) => project_already_at(&conn, path),
+        Err(_) => false,
+    });
+    let scope = inner.app.state::<ProjectRoots>();
+    let allowed = crate::commands::new_project_roots(&inner.app, &scope);
+    folder_refusal_for(path, parent, body.adopt.unwrap_or(false), known, &allowed)
+}
+
+/// The rule, against what the app answered.
+///
+/// The two refusals the front end would give that are reachable from here: the
 /// folder already holds somebody's work, or it sits outside the places a
 /// project is allowed to go. Both are questions about paths and the roots
 /// already registered, so both are settled before anything is emitted.
 ///
-/// Only a path the caller spelled out is checked. Left to Boite, the folder
-/// lands beside the user's other projects or under their home, and both are
-/// inside the boundary by construction.
-fn folder_refusal(inner: &Inner, path: Option<&str>, adopt: bool) -> Option<String> {
-    let path = path.map(str::trim).filter(|p| !p.is_empty())?;
-    // A project already sitting there is reused, archived or not, and none of
-    // the rules about empty folders apply to it.
-    if project_already_at(inner, path) {
+/// A caller who named neither a path nor a parent gets no refusal: Boite puts
+/// the folder beside the user's other projects, which is inside the boundary by
+/// construction. A parent is checked as a parent: where the folder goes is the
+/// only thing it settles, because the folder's name comes from the project name
+/// through a rule the front end owns.
+fn folder_refusal_for(
+    path: Option<&str>,
+    parent: Option<&str>,
+    adopt: bool,
+    known: bool,
+    allowed: &[String],
+) -> Option<String> {
+    let Some(path) = path else {
+        let parent = parent?;
+        return (!project::may_create_project_in(parent, allowed))
+            .then(|| crate::commands::WRONG_PLACE_FOR_A_PROJECT.to_string());
+    };
+    if known {
         return None;
     }
     match project::folder_state_blocking(path) {
@@ -496,25 +528,24 @@ fn folder_refusal(inner: &Inner, path: Option<&str>, adopt: bool) -> Option<Stri
         // Where it may go is only asked when there is a folder to make. One
         // already sitting there empty is taken as it is, exactly as the front
         // end takes it.
-        project::FolderState::Missing => {
-            let scope = inner.app.state::<ProjectRoots>();
-            let allowed = crate::commands::new_project_roots(&inner.app, &scope);
-            (!project::may_create_project_at(path, &allowed))
-                .then(|| crate::commands::WRONG_PLACE_FOR_A_PROJECT.to_string())
-        }
+        project::FolderState::Missing => (!project::may_create_project_at(path, allowed))
+            .then(|| crate::commands::WRONG_PLACE_FOR_A_PROJECT.to_string()),
         _ => None,
     }
 }
 
+/// A field the caller actually filled in, trimmed.
+fn spelled(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|v| !v.is_empty())
+}
+
 /// Whether one of the user's projects already lives at that folder.
 ///
-/// A read that cannot refuse anything on its own: a database it cannot open, or
-/// a row it cannot read, answers no and leaves the decision to the front end,
-/// which is where it was before this check existed.
-fn project_already_at(inner: &Inner, path: &str) -> bool {
-    let Ok(conn) = inner.conn.lock() else {
-        return false;
-    };
+/// A read that cannot refuse anything on its own: a table it cannot query, or a
+/// row it cannot read, answers no and leaves the decision to the front end,
+/// which is where it was before this check existed. The caller answers the same
+/// way for a connection it cannot lock.
+fn project_already_at(conn: &Connection, path: &str) -> bool {
     // Read out into owned strings before answering: the statement and the rows
     // both borrow the connection, and nothing that borrows it may still be
     // alive when this returns.
@@ -1062,5 +1093,227 @@ mod agent_header_tests {
         ] {
             assert_eq!(known_agent(junk), None, "{junk}");
         }
+    }
+}
+
+#[cfg(test)]
+mod create_project_tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    /// A stand-in for the user's disk: `dev` holds the projects they already
+    /// have, `home` is their home folder, `elsewhere` is the rest of the
+    /// machine. The roots are the first two, which is the shape
+    /// `new_project_roots` hands over at runtime.
+    struct Disk {
+        base: PathBuf,
+    }
+
+    impl Disk {
+        fn new(tag: &str) -> Self {
+            let base = std::env::temp_dir().join(format!(
+                "boite-agent-create-{tag}-{}-{:?}",
+                std::process::id(),
+                std::thread::current().id()
+            ));
+            let _ = std::fs::remove_dir_all(&base);
+            std::fs::create_dir_all(base.join("dev").join("thing")).unwrap();
+            std::fs::create_dir_all(base.join("home")).unwrap();
+            std::fs::create_dir_all(base.join("elsewhere")).unwrap();
+            std::fs::write(base.join("dev").join("thing").join("README.md"), "mine").unwrap();
+            Self { base }
+        }
+
+        fn at(&self, rel: &str) -> String {
+            let mut p = self.base.clone();
+            for part in rel.split('/') {
+                p = p.join(part);
+            }
+            p.to_string_lossy().to_string()
+        }
+
+        fn roots(&self) -> Vec<String> {
+            vec![self.at("dev"), self.at("home")]
+        }
+    }
+
+    impl Drop for Disk {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.base);
+        }
+    }
+
+    fn wrong_place() -> Option<String> {
+        Some(crate::commands::WRONG_PLACE_FOR_A_PROJECT.to_string())
+    }
+
+    /// The field that used to reach the front end unread: a parent is as
+    /// arbitrary as a path, and an agent naming a system folder is told so
+    /// while it is still running rather than being told its project is on the
+    /// way.
+    #[test]
+    fn a_parent_outside_the_places_a_project_may_go_is_refused() {
+        let disk = Disk::new("parent");
+        let roots = disk.roots();
+        let refusal = |parent: &str| folder_refusal_for(None, Some(parent), false, false, &roots);
+
+        assert_eq!(refusal(&disk.at("elsewhere")), wrong_place());
+        assert_eq!(refusal(&disk.at("elsewhere/deeper")), wrong_place());
+        assert_eq!(refusal(&disk.at("dev/../elsewhere")), wrong_place());
+        // Beside the projects already there, and under the home folder, are the
+        // two that are allowed.
+        assert_eq!(refusal(&disk.at("dev")), None);
+        assert_eq!(refusal(&disk.at("home")), None);
+        assert_eq!(refusal(&disk.at("dev/team")), None);
+    }
+
+    #[test]
+    fn a_path_outside_the_places_a_project_may_go_is_refused() {
+        let disk = Disk::new("path");
+        let roots = disk.roots();
+        let refusal = |path: &str| folder_refusal_for(Some(path), None, false, false, &roots);
+
+        assert_eq!(refusal(&disk.at("elsewhere/newproj")), wrong_place());
+        assert_eq!(refusal(&disk.at("elsewhere/deeper/newproj")), wrong_place());
+        // Climbing back out of a root lands outside it.
+        assert_eq!(refusal(&disk.at("dev/../elsewhere/newproj")), wrong_place());
+        assert_eq!(refusal(&disk.at("dev/newproj")), None);
+        assert_eq!(refusal(&disk.at("home/ideas/newproj")), None);
+    }
+
+    /// Somebody's work is never taken without saying so, wherever it sits.
+    #[test]
+    fn a_folder_with_files_in_it_is_refused_unless_it_is_adopted() {
+        let disk = Disk::new("occupied");
+        let occupied = disk.at("dev/thing");
+
+        let reason = folder_refusal_for(Some(&occupied), None, false, false, &disk.roots());
+        assert!(
+            reason.is_some_and(|r| r.starts_with(&occupied) && r.contains("adopt")),
+            "an occupied folder names itself in the refusal"
+        );
+        assert_eq!(
+            folder_refusal_for(Some(&occupied), None, true, false, &disk.roots()),
+            None
+        );
+    }
+
+    /// A project already at that folder is a reuse, and a reuse asks none of
+    /// the questions above, which is why the comparator behind `known` has to
+    /// be the filesystem's own idea of one folder and not a looser one.
+    #[test]
+    fn a_project_already_there_is_reused_rather_than_refused() {
+        let disk = Disk::new("known");
+        assert_eq!(
+            folder_refusal_for(Some(&disk.at("dev/thing")), None, false, true, &disk.roots()),
+            None
+        );
+        assert_eq!(
+            folder_refusal_for(
+                Some(&disk.at("elsewhere/thing")),
+                None,
+                false,
+                true,
+                &disk.roots()
+            ),
+            None
+        );
+    }
+
+    /// The path is where the project goes, so it is the one that answers. A
+    /// caller who named neither is left to Boite, which puts the folder beside
+    /// the projects already there.
+    #[test]
+    fn the_path_answers_when_both_are_given_and_nothing_does_when_neither_is() {
+        let disk = Disk::new("both");
+        let roots = disk.roots();
+
+        assert_eq!(
+            folder_refusal_for(
+                Some(&disk.at("dev/newproj")),
+                Some(&disk.at("elsewhere")),
+                false,
+                false,
+                &roots
+            ),
+            None
+        );
+        assert_eq!(
+            folder_refusal_for(
+                Some(&disk.at("elsewhere/newproj")),
+                Some(&disk.at("dev")),
+                false,
+                false,
+                &roots
+            ),
+            wrong_place()
+        );
+        assert_eq!(folder_refusal_for(None, None, false, false, &roots), None);
+        // A field holding nothing but spaces is a field nobody filled.
+        assert_eq!(
+            folder_refusal_for(spelled(Some("  ")), spelled(Some("")), false, false, &roots),
+            None
+        );
+    }
+
+    fn projects_db(cwds: &[&str]) -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute("CREATE TABLE projects (id TEXT, cwd TEXT)", [])
+            .unwrap();
+        for cwd in cwds {
+            conn.execute(
+                "INSERT INTO projects (id, cwd) VALUES (?1, ?2)",
+                rusqlite::params![cwd, cwd],
+            )
+            .unwrap();
+        }
+        conn
+    }
+
+    #[cfg(windows)]
+    const STORED: &str = r"D:\Dev\Perso\thing";
+    #[cfg(not(windows))]
+    const STORED: &str = "/home/me/dev/thing";
+
+    #[test]
+    fn a_project_is_found_at_the_folder_it_was_stored_with() {
+        let conn = projects_db(&[STORED]);
+        assert!(project_already_at(&conn, STORED));
+        assert!(!project_already_at(&conn, &format!("{STORED}-other")));
+        // A folder deeper in is another folder, or a project inside a project
+        // would read as the one holding it.
+        assert!(!project_already_at(&conn, &format!("{STORED}/inner")));
+        assert!(!project_already_at(&projects_db(&[]), STORED));
+    }
+
+    /// Windows ignores case and takes either separator, so the two spellings
+    /// are one folder and the endpoint has to read them as one.
+    #[cfg(windows)]
+    #[test]
+    fn on_windows_a_project_is_found_however_its_folder_is_spelled() {
+        let conn = projects_db(&[STORED]);
+        assert!(project_already_at(&conn, "d:/dev/perso/thing"));
+        assert!(project_already_at(&conn, r"D:\Dev\Perso\thing\"));
+    }
+
+    /// Everywhere else `Thing` and `thing` are two folders. Answering yes for
+    /// the wrong one skips both the occupied check and the scope check, so a
+    /// change of case would be a way past them.
+    #[cfg(not(windows))]
+    #[test]
+    fn off_windows_a_folder_that_differs_in_case_is_not_that_project() {
+        let conn = projects_db(&[STORED]);
+        assert!(project_already_at(&conn, &format!("{STORED}/")));
+        assert!(!project_already_at(&conn, "/home/me/dev/Thing"));
+        assert!(!project_already_at(&conn, "/HOME/me/dev/thing"));
+    }
+
+    /// A database this cannot read decides nothing: the front end still asks
+    /// every question the endpoint asks, which is where the answer came from
+    /// before the check existed.
+    #[test]
+    fn a_database_with_no_projects_table_refuses_nothing() {
+        let conn = Connection::open_in_memory().unwrap();
+        assert!(!project_already_at(&conn, STORED));
     }
 }
