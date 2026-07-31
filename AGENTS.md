@@ -74,12 +74,38 @@ that `declaredTurn` (`thread/agent-registry.ts`) then reads:
   case. Its database answers instead: an assistant message gains `time.completed`
   when its turn ends and does not carry the field before that.
 
+An answer only counts while whatever wrote it is still there. Claude's registry
+is filtered by `pid_alive`; the other two have nothing equivalent, so their open
+turns are bounded by age instead. A rollout whose last marker is `task_started`
+and an opencode row that never gained `time.completed` both stop counting once
+they have gone untouched for half an hour, which is generous because a single
+long tool call appends nothing while it runs. Killed, crashed or rebooted
+mid-turn, either would otherwise read `busy` on every poll for good, with no pid
+to check and no row that ever ages out. A claude entry carrying no `status` key
+produces no answer either, rather than a default: absence is not a state, and
+this is the status source of truth now, so a default of `busy` would pin every
+claude thread Running with nothing able to clear it.
+
 Everything else is read off the emulator's bottom rows (`terminalScreenRows`),
 which is level: the footer is on screen or it is not, so `false` means finished
 rather than "nothing seen lately". Detection never touches the byte stream. A
 rolling window of printed bytes answers a question about the recent past, and an
 `esc to interrupt` that had scrolled by kept re-matching itself for as long as the
 agent printed anything at all.
+
+When neither source answers there is nothing to measure, and that is the one
+place a clock still decides anything. A thread whose pane is gone has no emulator
+holding its rows (a `Terminal` unmounts with the PTY alive whenever the thread
+leaves a group, loses its `rect` or `group`, or flips its respawn key), and five
+of the agents declare nothing, so the pair answers nothing at all. It keeps its
+status until every activity stamp has aged out and then drops to `ready`
+(`UNREAD_TTL_MS`, two seconds, mirroring the server's `WORKING_TTL` and the
+`DeclaredTurn::Unknown` arm of its `next_status`). That is not the old grace
+period on a working signal, it is what stops "no answer" from meaning "keep the
+last answer forever": a thread frozen on `running` is also frozen out of
+auto-sleep, which only ever considers a `ready` one, so its PTY is never
+reclaimed either. Nothing is announced on that demotion, since it is the absence
+of evidence rather than a turn that ended.
 
 Only `idle` is a finished turn, and keeping the other three apart is the point.
 `waiting` means a dialog is up (a permission prompt, a plan to approve) and
@@ -92,6 +118,12 @@ flag separately: the dot and auto-sleep are asking different questions. Only
 claude ever declares those two; codex and opencode answer `busy` or `idle` and
 nothing else, so their approval prompts still read as `ready`.
 
+A notification is a transition, never a reading. The first pass after a mount, a
+workspace switch or a `forget` has no previous status to compare against and so
+says nothing: a dialog that was already up when the pane opened is not a dialog
+that just went up, and announcing it pinged for every parked thread on every app
+start.
+
 A subagent is only ever visible this way. Claude runs one inside its own process,
 so it gets no session entry and the parent simply stays `busy`; codex holds the
 turn open across `sub_agent_activity`; opencode gives the child its own session
@@ -101,16 +133,27 @@ to get the thread scored as finished and its PTY killed by auto-sleep. This is
 also why the reading falls back to matching by directory while a thread's session
 id is still uncaptured: those seconds are part of the opening turn, the one most
 likely to spend a long time in a subagent. That fallback needs exactly one live
-session of that agent in the directory, and answers nothing otherwise.
+session of that agent in the directory, and answers nothing otherwise. It also
+needs the session to have recorded a directory of its own: normalising strips a
+trailing slash, so a thread at the root of a drive would otherwise match every
+session that recorded nothing.
 
 Reading these stores is not free, so `agentTurns` is asked only about the threads
-that are actually open, and at most once a second. The server runs the same
-decision over the same stores (`boite-core::session::agent_turns` and
-`declared_turn`, called from `registry.rs`), reading each thread's icon key and
-session id back out of its own thread table. It has no emulator, so with no
-answer it falls back to the OSC title and a 2s TTL. Both sides read the same
-files, so their rules are mirrored deliberately and tested in both languages
-(`agent-registry.test.ts`, `session.rs::turn_tests`).
+that are actually open, and at most once a second. That read is one directory
+walk, two SQLite opens and up to a 256 KiB file read, which is why every caller
+puts it on a blocking thread (`spawn_blocking` in `commands.rs`, `rpc.rs` and the
+server's status ticker) and why a read that has not answered inside
+`POLL_DEADLINE_MS` is abandoned rather than waited on: a call that never settles
+used to latch the poll shut and freeze every agent thread on its last declared
+state.
+
+The server runs the same decision over the same stores
+(`boite-core::session::agent_turns` and `declared_turn`, called from
+`registry.rs`), reading each thread's icon key and session id back out of its own
+thread table. It has no emulator, so with no answer it falls back to the OSC
+title and a 2s TTL. Both sides read the same files, so their rules are mirrored
+deliberately and tested in both languages (`agent-registry.test.ts`,
+`session.rs::turn_tests`).
 
 The five remaining agents (cursor, antigravity, copilot, grok, hermes) declare
 nothing that can be polled from outside, and get the screen rows alone.

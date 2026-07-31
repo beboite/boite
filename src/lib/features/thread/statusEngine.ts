@@ -39,12 +39,34 @@ import type { IconKey, Thread } from "$lib/types";
  * what repaired it.
  *
  * So: one ticker for the lifetime of the window, and every pass answers "is
- * this thread working" from live state only. There is no TTL left to tune.
+ * this thread working" from live state only.
+ *
+ * One TTL survives, and only where there is no live state at all to read: a
+ * thread whose pane is gone and whose agent declares nothing (`UNREAD_TTL_MS`).
+ * That is not the old grace period on a working signal, it is the backstop that
+ * keeps "no answer" from meaning "keep the last answer forever".
  */
 
 // The sampling rate of the dot, not a grace period: every pass is a fresh read,
 // so this is only how long a turn boundary can go unnoticed.
 const TICK_MS = 500;
+
+/**
+ * The one place a clock still decides anything, and only where nothing else can.
+ *
+ * `read` answers null for a thread with no emulator holding its rows and an agent
+ * that declares nothing: a Terminal that unmounted while its PTY stayed alive
+ * (the thread moved out of a group, its `rect` or `group` went away, a respawn key
+ * flipped) running any of the five CLIs with no store to poll. Leaving the status
+ * alone there is not "wrong for two seconds", it is wrong for the life of the
+ * window: nothing will ever look at that thread again, so it stays lit, and being
+ * stuck on `running` also keeps it out of auto-sleep, which only ever considers a
+ * `ready` thread. Its PTY is then never reclaimed either.
+ *
+ * Mirrors WORKING_TTL and the `DeclaredTurn::Unknown` arm of `next_status` in
+ * `boite-server/src/registry.rs`, which kept its equivalent throughout.
+ */
+const UNREAD_TTL_MS = 2000;
 
 // Auto-sleep liveness. Deliberately not the same thing as the working signal:
 // these say "something happened recently", which is enough to refuse to kill a
@@ -200,6 +222,27 @@ function read(t: Thread, iconKey: IconKey): Reading | null {
   return { status: working ? "running" : "ready", active: working };
 }
 
+/**
+ * What a thread becomes when nothing at all could be read about it, or null to
+ * leave it alone.
+ *
+ * Only the two live statuses are demoted, and only once every activity stamp has
+ * aged out: raw PTY bytes, a transcript write, or a pass that concluded the thread
+ * was working. A thread with no stamp at all has nothing to measure from and is
+ * demoted at once, which is what the server does with a missing anchor too.
+ *
+ * Exported for its test; the tick is the only caller.
+ */
+export function settleUnread(
+  status: string | null | undefined,
+  lastActivityAt: number,
+  now: number,
+): "ready" | null {
+  if (status !== "running" && status !== "waiting") return null;
+  if (lastActivityAt > 0 && now - lastActivityAt < UNREAD_TTL_MS) return null;
+  return "ready";
+}
+
 function tick() {
   const now = Date.now();
   const visible = visibleThreadIds();
@@ -266,7 +309,13 @@ function tick() {
       // "your agent is done", the other is "your agent cannot continue without
       // you". Reaching `waiting` from anywhere is worth saying; reaching `ready`
       // only is when a turn actually ended.
-      if (next === "waiting" && before !== "waiting") {
+      //
+      // Neither is said on the first pass. `before` is undefined after a mount, a
+      // workspace switch or a `forget`, and a prompt that was already on screen is
+      // not news: without the guard, every app start and every pane remount
+      // notified for every thread sitting on an unanswered dialog. The `ready`
+      // arm needs no guard of its own, since it only ever fires out of `running`.
+      if (before !== undefined && next === "waiting" && before !== "waiting") {
         void notifyWhenUnfocused(
           t.title ?? t.label,
           translate("notification.waitingForYou"),
@@ -278,6 +327,26 @@ function tick() {
         );
       }
       prevStatus.set(t.id, next);
+    } else {
+      // Nothing answered: no emulator holds this thread's rows and its agent
+      // declares nothing. Left as it was, a `running` thread here would never be
+      // revisited by anything, so it stays lit and, being lit, stays out of
+      // auto-sleep's reach with its PTY held for the life of the window. Demoted
+      // on the stamps alone, the way the server does it with no emulator either.
+      // No notification: this is the absence of evidence, not a turn that ended.
+      const settled = settleUnread(
+        t.status,
+        Math.max(
+          lastWorkingAt.get(t.id) ?? 0,
+          lastOutputAt.get(t.id) ?? 0,
+          lastTranscriptAt.get(t.id) ?? 0,
+        ),
+        now,
+      );
+      if (settled) {
+        app.setThreadStatus(t.id, settled);
+        prevStatus.set(t.id, settled);
+      }
     }
 
     // Only a settled `ready` is a candidate. `waiting` is excluded by being its
