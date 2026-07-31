@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct ShellOption {
     pub id: String,
     pub label: String,
@@ -141,7 +141,50 @@ fn git_bash_path() -> Option<std::path::PathBuf> {
     which::which("bash").ok()
 }
 
+/// How long an answer stands. Long enough that a burst of spawns pays for one
+/// probe, short enough that a shell installed while the app runs shows up
+/// without a restart.
+const SHELLS_TTL: std::time::Duration = std::time::Duration::from_secs(60);
+static SHELLS: parking_lot::Mutex<Option<(std::time::Instant, Vec<ShellOption>)>> =
+    parking_lot::Mutex::new(None);
+
+/// Forgets the probe, so the next ask walks PATH again.
+///
+/// The desktop app never has to call this: it lives about as long as the window
+/// and the TTL already covers a shell installed underneath it. `boite-server`
+/// is the reason it exists — one process, running for days, one cache shared by
+/// every client connected to it, and the TTL is otherwise the only way anything
+/// installed on that machine is ever noticed.
+pub fn forget_available_shells() {
+    *SHELLS.lock() = None;
+}
+
+/// The shells this machine can start a thread in.
+///
+/// Memoized because it is not only the picker that asks: every wrapped spawn
+/// asks too, to resolve the shell it wraps in, and on Windows each name that is
+/// *not* installed costs a walk of every PATH entry against every PATHEXT
+/// suffix — 80 by 12 on this developer's machine, for one `nu` that is not
+/// there. That was tens of milliseconds in front of each agent thread, spent
+/// re-deciding something that had not changed.
+///
+/// Process-global, so in `boite-server` one client's probe answers every other
+/// client's ask. That is right — they all run on the same machine — but it also
+/// means the answer outlives any one connection; `forget_available_shells` is
+/// the way to say it is no longer true.
 pub fn available_shells_blocking() -> Vec<ShellOption> {
+    let mut cache = SHELLS.lock();
+    if let Some((at, shells)) = cache.as_ref() {
+        if at.elapsed() < SHELLS_TTL {
+            return shells.clone();
+        }
+    }
+    let shells = probe_available_shells();
+    *cache = Some((std::time::Instant::now(), shells.clone()));
+    shells
+}
+
+fn probe_available_shells() -> Vec<ShellOption> {
     let mut shells: Vec<ShellOption> = Vec::new();
 
     #[cfg(target_os = "windows")]
@@ -416,6 +459,33 @@ mod tests {
         let shell = default_shell_blocking();
         assert!(command_exists(&shell));
         assert!(!command_exists(&format!("{shell} --version")));
+    }
+
+    /// The probe is memoized for the life of the process, which in
+    /// `boite-server` is days rather than a window. The answer has to keep
+    /// standing while it is warm, and there has to be a way to say it no longer
+    /// does — the TTL alone leaves a whole minute where a machine that has just
+    /// gained a shell reports that it has not.
+    #[test]
+    fn the_shell_probe_is_memoized_and_can_be_told_to_forget() {
+        forget_available_shells();
+        let first = available_shells_blocking();
+        assert!(SHELLS.lock().is_some(), "the answer is kept");
+        // Same answer, same instant: the second ask never walked PATH again.
+        let again = available_shells_blocking();
+        assert_eq!(
+            first.iter().map(|s| &s.id).collect::<Vec<_>>(),
+            again.iter().map(|s| &s.id).collect::<Vec<_>>(),
+        );
+
+        forget_available_shells();
+        assert!(SHELLS.lock().is_none(), "and can be dropped on demand");
+        // Dropping it changes nothing about the answer, only about what it cost.
+        let after = available_shells_blocking();
+        assert_eq!(
+            first.iter().map(|s| &s.id).collect::<Vec<_>>(),
+            after.iter().map(|s| &s.id).collect::<Vec<_>>(),
+        );
     }
 
     #[test]

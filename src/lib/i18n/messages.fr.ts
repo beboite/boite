@@ -282,6 +282,9 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "worktree.orphan": "commits sur aucune branche",
   "worktree.prunable": "dossier disparu",
   "worktree.empty": "rien à perdre",
+  "worktree.spare": "en attente",
+  "worktree.spareHint":
+    "Préparé à l'avance pour que le prochain thread d'agent démarre instantanément. Le supprimer ne coûte que cette avance.",
   "worktree.dirtyCount": "{count} avec du travail dedans",
   "worktree.heldBy": "{thread} tourne ici",
   "worktree.remove": "Supprimer ce worktree",
@@ -662,9 +665,11 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "terminal.keyboardLabel": "Clavier (appui long pour la barre de touches)",
   "terminal.keyboardHint": "Tap : clavier · Appui long : barre de touches",
   "thread.pickProjectFirst": "Choisissez d'abord un projet",
-  "thread.createFailed": "Impossible de créer le terminal",
   "thread.emptyCommand": "{label} : commande vide",
-  "thread.restoreFailed": "Impossible de restaurer le terminal",
+  "thread.notSaved":
+    "Impossible d'enregistrer le terminal : il aura disparu au prochain démarrage",
+  "thread.notSavedOrphan":
+    "Impossible d'enregistrer le terminal : il aura disparu au prochain démarrage, laissant {path} sans propriétaire",
   "thread.restored": "{name} restauré",
   "thread.noClosedThread": "Aucun terminal fermé à restaurer",
   "thread.moveFailed": "Impossible de déplacer le terminal : {error}",

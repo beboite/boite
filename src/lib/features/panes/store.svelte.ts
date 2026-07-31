@@ -12,7 +12,10 @@ import {
   updateRatios,
 } from "./tree";
 import { PANES_KEY, loadSavedGroups } from "./layout";
+import { sameRect, unmeasuredRect, type PaneRect, type Viewport } from "./rect";
 import { uuid } from "$lib/shared/utils/uuid";
+
+export type { PaneRect } from "./rect";
 
 function uid(): string {
   return uuid();
@@ -22,13 +25,6 @@ function uid(): string {
 // rest of the app is concerned, and nothing outside this feature should have to
 // know the split between the reactive store and the pure functions under it.
 export { countLeaves, leafNodesOf, leavesOf, threadLeavesOf };
-
-export interface PaneRect {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-}
 
 export interface DropPreview {
   targetPaneId: string;
@@ -44,6 +40,24 @@ class PaneStore {
   draggingThreadId = $state<string | null>(null);
   dropPreview = $state<DropPreview | null>(null);
   rects = $state<Record<string, PaneRect>>({});
+  // The area every pane is laid out inside. Kept so a pane that is the only one
+  // in its group can be placed before it has been measured (see rectFor).
+  viewport = $state<Viewport | null>(null);
+
+  setViewport(w: number, h: number) {
+    if (this.viewport && this.viewport.w === w && this.viewport.h === h) return;
+    this.viewport = { w, h };
+  }
+
+  /**
+   * Where to put this thread's terminal, or null while that is unknown.
+   *
+   * `visible` is the caller's own answer about the group, and it is load
+   * bearing rather than an optimisation: see unmeasuredRect.
+   */
+  rectFor(threadId: string, group: PaneGroup, visible: boolean): PaneRect | null {
+    return this.rects[threadId] ?? unmeasuredRect(group.root, this.viewport, visible);
+  }
 
   /**
    * Forget a pane's measured box.
@@ -59,15 +73,7 @@ class PaneStore {
 
   setRect(paneId: string, rect: PaneRect) {
     const prev = this.rects[paneId];
-    if (
-      prev &&
-      prev.x === rect.x &&
-      prev.y === rect.y &&
-      prev.w === rect.w &&
-      prev.h === rect.h
-    ) {
-      return;
-    }
+    if (prev && sameRect(prev, rect)) return;
     this.rects[paneId] = rect;
   }
 
@@ -384,4 +390,24 @@ class PaneStore {
 }
 
 export const paneStore = new PaneStore();
+
+/**
+ * Action for the element every pane is positioned inside. Feeds `setViewport`,
+ * which is what lets a lone pane be placed without a measurement of its own.
+ */
+export function paneViewport(el: HTMLElement) {
+  const read = () => {
+    const r = el.getBoundingClientRect();
+    if (r.width > 0 && r.height > 0) paneStore.setViewport(r.width, r.height);
+  };
+  const observer = new ResizeObserver(read);
+  observer.observe(el);
+  read();
+  return {
+    destroy() {
+      observer.disconnect();
+    },
+  };
+}
+
 export { MAX_LEAVES, MIN_RATIO };

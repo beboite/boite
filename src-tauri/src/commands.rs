@@ -819,14 +819,35 @@ pub async fn worktree_open(
 ) -> Result<Option<String>, String> {
     scope.ensure_allowed(&repo)?;
     let base = crate::app_data::worktree_base(&app)?;
-    std::fs::create_dir_all(&base).map_err(|e| format!("worktree base: {e}"))?;
-    let path = git::scoped_dir_for(&base, &thread_id);
-    let path = path.to_string_lossy().to_string();
+    let base = base.to_string_lossy().to_string();
     tauri::async_runtime::spawn_blocking(move || {
-        git::open_worktree_if_eligible_blocking(&repo, &path)
+        git::open_worktree_if_eligible_blocking(&repo, &base, &thread_id)
     })
     .await
     .map_err(|e| format!("worktree_open task failed: {e}"))?
+}
+
+/// Makes sure a project has a worktree standing by for its next agent thread.
+///
+/// Fire and forget: the answer is only whether the warming started, never
+/// whether it finished, and a project that cannot have one (not a repository, no
+/// commits) is not an error to report.
+#[tauri::command]
+pub async fn worktree_warm(
+    app: tauri::AppHandle,
+    scope: State<'_, ProjectRoots>,
+    repo: String,
+) -> Result<(), String> {
+    scope.ensure_allowed(&repo)?;
+    let base = crate::app_data::worktree_base(&app)?;
+    let base = base.to_string_lossy().to_string();
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Err(err) = git::warm_worktree_pool_blocking(&repo, &base) {
+            eprintln!("[boite/worktree] warm failed: {err}");
+        }
+    })
+    .await
+    .map_err(|e| format!("worktree_warm task failed: {e}"))
 }
 
 /// Every worktree of a repository, read from the repository itself.

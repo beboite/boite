@@ -4,6 +4,7 @@
   import { backendForPath } from "$lib/backend";
   import { settings } from "$lib/features/settings/store.svelte";
   import { isScratch } from "$lib/features/project/scratch";
+  import { forgetWarmedWorktree } from "$lib/features/thread/api";
   import { notifications } from "$lib/features/notifications/store.svelte";
   import { logger } from "$lib/shared/services/logger.svelte";
   import { confirmDialog } from "$lib/shared/components/confirm.svelte";
@@ -137,6 +138,10 @@
     busy[w.path] = true;
     try {
       await backendForPath(project.cwd).worktree.remove(repo, w.path, holdsWork(w));
+      // The pool is primed once per project and has no way to notice a spare
+      // going away from here. Without this the project runs without one until
+      // the app is restarted.
+      if (w.spare) forgetWarmedWorktree(project);
       await load();
     } catch (err) {
       logger.warn("worktree", `could not remove ${w.path}`, String(err));
@@ -232,6 +237,14 @@
                   {t("worktree.main")}
                 </span>
               {/if}
+              {#if w.spare}
+                <span
+                  class="shrink-0 rounded-full border border-border px-1.5 py-px text-[9.5px] uppercase tracking-wide text-muted-foreground"
+                  title={t("worktree.spareHint")}
+                >
+                  {t("worktree.spare")}
+                </span>
+              {/if}
               {#if w.locked}
                 <Lock class="size-3 shrink-0 text-muted-foreground" />
               {/if}
@@ -250,7 +263,7 @@
               {#if w.prunable}
                 <span class="text-muted-foreground">{t("worktree.prunable")}</span>
               {/if}
-              {#if !w.main && !holdsWork(w) && !w.prunable}
+              {#if !w.main && !holdsWork(w) && !w.prunable && !w.spare}
                 <span class="text-muted-foreground">{t("worktree.empty")}</span>
               {/if}
             </div>

@@ -5,7 +5,7 @@
   import { settings } from "$lib/features/settings/store.svelte";
   import { pickAndAddProject } from "$lib/features/project/api";
   import { ptyKill } from "$lib/storage/pty";
-  import { reloadThread } from "$lib/features/thread/api";
+  import { reloadThread, warmWorktreeFor } from "$lib/features/thread/api";
   import TitleBar from "$lib/shared/components/TitleBar.svelte";
   import CloseGuard from "$lib/app/CloseGuard.svelte";
   import ProjectSidebar from "$lib/features/project/ProjectSidebar.svelte";
@@ -17,7 +17,11 @@
   import RemoteLogin from "$lib/features/workspace/RemoteLogin.svelte";
   import ConnectionBanner from "$lib/features/workspace/ConnectionBanner.svelte";
   import FolderBrowser from "$lib/features/project/FolderBrowser.svelte";
-  import { paneStore, threadLeavesOf } from "$lib/features/panes/store.svelte";
+  import {
+    paneStore,
+    paneViewport,
+    threadLeavesOf,
+  } from "$lib/features/panes/store.svelte";
   import { panePresence } from "$lib/features/panes/open";
   import { statusEngine } from "$lib/features/thread/statusEngine";
   import PaneShell from "$lib/features/panes/PaneShell.svelte";
@@ -123,6 +127,29 @@
     if (!id) return;
     const g = paneStore.groupOf(id);
     if (g && g.focusedPaneId !== id) g.focusedPaneId = id;
+  });
+
+  // The project the app came up on. Nobody asked for a thread in it — it is
+  // where the last session happened to stop — so warming it would make every
+  // single start pay for a checkout and a copy of the build artifacts in the
+  // background. `undefined` until the effect below has run once, which is how
+  // that first value is told from a project the user moved to.
+  let bootProjectId: string | null | undefined;
+
+  // Moving to a project is the first honest sign a thread is about to be
+  // launched in it, and a worktree takes long enough to make that it has to
+  // start now rather than on the click.
+  //
+  // Reads the id and nothing else: looking the project up inside the effect
+  // would take a dependency on the whole `projects` array, and every rename,
+  // every usage refresh, every reorder would re-run this.
+  $effect(() => {
+    const id = app.selectedProjectId;
+    if (bootProjectId === undefined) {
+      bootProjectId = id;
+      return;
+    }
+    untrack(() => warmWorktreeFor(app.projects.find((p) => p.id === id) ?? null));
   });
 
   function activateThread(id: string) {
@@ -409,6 +436,7 @@
           <div
             class="relative min-h-0 flex-1 bg-[var(--color-background)]"
             data-pane-viewport
+            use:paneViewport
           >
             {#each paneStore.groups as group (group.id)}
               {@const visible = activeGroupId === group.id && terminalActive}
@@ -427,7 +455,7 @@
                 group?.id === activeGroupId && terminalActive}
               {@const focused =
                 visible && group?.focusedPaneId === thread.id}
-              {@const rect = paneStore.rects[thread.id]}
+              {@const rect = group ? paneStore.rectFor(thread.id, group, visible) : null}
               {#if activated[thread.id] && rect && group}
                 <div
                   class="absolute"
@@ -439,12 +467,14 @@
                   aria-hidden={!visible}
                   onpointerdowncapture={() => focusPane(thread.id)}
                 >
-                  {#key app.respawnNonce[thread.id] ?? 0}
-                    {#if TerminalView.current}
-                      {@const TerminalComp = TerminalView.current}
-                      <TerminalComp {thread} {visible} {focused} />
-                    {/if}
-                  {/key}
+                  <!-- Not keyed on the relaunch nonce. It used to be, and a
+                       reload therefore threw away xterm and its WebGL context
+                       to build both again; the terminal relaunches in place and
+                       watches the nonce itself. -->
+                  {#if TerminalView.current}
+                    {@const TerminalComp = TerminalView.current}
+                    <TerminalComp {thread} {visible} {focused} />
+                  {/if}
                   <PaneOverlay {thread} {group} {focused} />
                 </div>
               {/if}

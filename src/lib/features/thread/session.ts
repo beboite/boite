@@ -1,5 +1,5 @@
-import { backendForPath } from "$lib/backend";
-import type { SessionHit, SessionKind } from "$lib/backend/types";
+import { backendForPath, workspace } from "$lib/backend";
+import type { LiveClaudeSession, SessionHit, SessionKind } from "$lib/backend/types";
 import { app } from "$lib/app/store.svelte";
 import { detectIconKey } from "$lib/shared/icons/detect";
 import { logger } from "$lib/shared/services/logger.svelte";
@@ -202,16 +202,76 @@ const builders: Partial<Record<NonNullable<IconKey>, ResumeBuilder>> = {
  * answer — forking abandons the running conversation and starts a copy, which
  * is the opposite of getting it back.
  */
-async function liveClaudeSession(sessionId: string, cwd: string) {
+/**
+ * The live-session list, held briefly.
+ *
+ * A reload asks for it twice within a few milliseconds — once to release an
+ * agent holding the session, once more from `buildResumeArgsAsync` to decide
+ * what to do about that same session — and each ask is a walk of
+ * `~/.claude/sessions`, a JSON parse per file and a liveness check per pid.
+ *
+ * Keyed by the machine that answered, because in dynamic mode a local thread
+ * and a boite thread are asking about two different `~/.claude`. Dropped
+ * outright whenever a session is released, so the second read can never be told
+ * an agent still holds what was just stopped.
+ */
+const liveClaudeCache = new Map<
+  string,
+  { at: number; sessions: Promise<LiveClaudeSession[]> }
+>();
+const LIVE_CLAUDE_TTL = 1000;
+
+function liveClaudeSessions(cwd: string): Promise<LiveClaudeSession[]> {
+  const backend = backendForPath(cwd);
+  const key =
+    backend.kind === "tauri" ? "local" : workspace.activeBoiteId ?? "remote";
+  const hit = liveClaudeCache.get(key);
+  if (hit && Date.now() - hit.at < LIVE_CLAUDE_TTL) return hit.sessions;
+  // The promise is cached rather than its result, so two overlapping asks share
+  // one scan instead of racing two.
+  const sessions: Promise<LiveClaudeSession[]> = backend.session
+    .liveClaude()
+    .catch((err) => {
+      // Never block a launch on this: an unanswered check just means the resume
+      // is attempted as before. Not remembered either — a failure must not stand
+      // in for an answer for a whole second.
+      logger.warn("resume", "liveClaude check failed", String(err));
+      // By identity, never by key. A release clears the map and the next ask
+      // starts a fresh scan under this same key, so deleting by key here would
+      // throw away that new answer for the failure of one nobody is waiting on
+      // any more.
+      if (liveClaudeCache.get(key)?.sessions === sessions) {
+        liveClaudeCache.delete(key);
+      }
+      return [] as LiveClaudeSession[];
+    });
+  liveClaudeCache.set(key, { at: Date.now(), sessions });
+  return sessions;
+}
+
+/**
+ * Releases a session a background agent is holding, so `--resume` works on it
+ * again. Answers whether it let go.
+ *
+ * The one door to `stopClaude`, because it is also the one thing that makes the
+ * cached list above wrong.
+ */
+export async function releaseClaudeSession(
+  cwd: string,
+  sessionId: string,
+): Promise<boolean> {
   try {
-    const live = await backendForPath(cwd).session.liveClaude();
-    return live.find((s) => s.id === sessionId) ?? null;
-  } catch (err) {
-    // Never block a launch on this: an unanswered check just means the resume
-    // is attempted as before.
-    logger.warn("resume", "liveClaude check failed", String(err));
-    return null;
+    return await backendForPath(cwd).session.stopClaude(sessionId);
+  } catch {
+    return false;
+  } finally {
+    liveClaudeCache.clear();
   }
+}
+
+async function liveClaudeSession(sessionId: string, cwd: string) {
+  const live = await liveClaudeSessions(cwd);
+  return live.find((s) => s.id === sessionId) ?? null;
 }
 
 /**
@@ -334,9 +394,7 @@ export async function buildResumeArgsAsync(thread: Thread, cwd: string): Promise
   // is one that stated nothing: killing a session on a status the registry never
   // wrote is the same guess with worse consequences.
   if (live.status && live.status !== "busy") {
-    const stopped = await backendForPath(cwd)
-      .session.stopClaude(id)
-      .catch(() => false);
+    const stopped = await releaseClaudeSession(cwd, id);
     if (stopped) {
       logger.info(
         "resume",
