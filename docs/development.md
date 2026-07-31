@@ -46,14 +46,43 @@ The bridge is unrelated to the agent MCP endpoint described in the README, and
 never reuses it: the bridge answers `execute_js`, that one answers ten verbs
 scoped to the calling thread.
 
-## The browser pane, and the half of it that is not built
+## The browser pane, and what it is allowed to reach
 
 `pane_open` lets an agent put a page beside its own terminal, which is the
 point: an agent that has just started a dev server knows what is worth looking
 at, and printing a URL and hoping was the only way to say so.
 
-What ships today is an `<iframe>`. That is a floor, not a ceiling, and the
-ceiling is worth naming because the shape of the fix is already decided:
+What ships today is an `<iframe>`, and the address in it is the only thing an
+agent hands this app that the app then renders in its own window. Three rules
+hold it, and they are written down in three places that have to agree:
+
+| Where | What it holds |
+|---|---|
+| `frame-src` in `tauri.conf.json` | the origins the webview will create a frame for at all |
+| `classify_browser_url` in `agent_api.rs` | what the MCP endpoint accepts from an agent |
+| `classifyBrowserUrl` in `features/browser/url.ts` | the same rules again, because the identical request also arrives from a remote boite and never passed through that endpoint |
+
+The rules themselves:
+
+- **Loopback over http, anywhere over https.** `localhost`, `127.0.0.1`,
+  `[::1]` and `0.0.0.0` are the hosts a dev server answers on, and they are the
+  only ones plain `http://` reaches. The four are listed literally in
+  `frame-src` and in both validators; a host one accepts and the CSP does not
+  is a pane that opens blank, which is exactly what shipped before this.
+- **Never the app's own origin.** Tauri serves the window from `*.localhost`
+  and the dev build from ports 1420 and 1430. A page framed there is
+  same-origin with the webview, which hands it `window.parent` and the IPC
+  behind it. Refused outright, with a message the agent can read.
+- **Off this machine means asking.** An address that survives the first two and
+  is not on this machine goes in front of the user before the frame exists, and
+  loads with `allow-same-origin` dropped, so its scripts run in an opaque
+  origin with no storage and no cookies.
+
+A URL with a userinfo segment (`http://evil.com@localhost`) is refused in all
+cases: it exists only to make the host read as something it is not.
+
+That much is a floor, not a ceiling, and the ceiling is worth naming because the
+shape of the fix is already decided:
 
 - **A site can refuse to be framed.** `X-Frame-Options: DENY` or a
   `frame-ancestors` CSP and the pane stays blank; the component offers "open
