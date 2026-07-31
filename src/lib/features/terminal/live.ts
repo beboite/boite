@@ -63,17 +63,19 @@ export function terminalText(term: Terminal, tail = 200): string {
  * alternate screen `baseY` is 0 and the region is the whole buffer, which is
  * the same thing.
  *
- * Blank rows are skipped rather than returned. How many of them sit under an
- * agent's prompt box is a layout accident, and letting them fill the window
- * would push the footer out of it.
+ * Trailing blank rows are dropped, because how many of them sit under an agent's
+ * prompt box is a layout accident and letting them fill the window would push
+ * the footer out of it. Blank rows above that are kept exactly where they are:
+ * the gap between an agent's chrome and the transcript above it is what tells
+ * the detector where one ends and the other begins, and skipping gaps let it
+ * walk up into printed output.
  */
 export function terminalScreenRows(term: Terminal, rows: number): string[] {
   const buffer = term.buffer.active;
+  const row = (i: number) => buffer.getLine(i)?.translateToString(true) ?? "";
+  let i = buffer.length - 1;
+  while (i >= buffer.baseY && row(i).trim() === "") i--;
   const out: string[] = [];
-  for (let i = buffer.length - 1; i >= buffer.baseY && out.length < rows; i--) {
-    const text = buffer.getLine(i)?.translateToString(true) ?? "";
-    if (text.trim() === "") continue;
-    out.push(text);
-  }
+  for (; i >= buffer.baseY && out.length < rows; i--) out.push(row(i));
   return out.reverse();
 }
