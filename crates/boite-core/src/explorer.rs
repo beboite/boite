@@ -50,6 +50,11 @@ pub struct SearchHit {
 
 const SKIP_DIRS: &[&str] = &[
     ".git",
+    // Thread worktrees live here, so this one directory holds a full copy of
+    // the project per open thread. Without it a search that matches nothing
+    // walks every copy to the end: the hit cap stops the pushing, not the
+    // recursion.
+    ".boite",
     "node_modules",
     "target",
     "dist",
