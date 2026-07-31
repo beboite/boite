@@ -1,4 +1,5 @@
 import { uuid } from "$lib/shared/utils/uuid";
+import { logger } from "$lib/shared/services/logger.svelte";
 
 // Device-scoped settings: per-machine, never synced to a workspace. Holds the
 // registry of saved boites (remote servers). Tokens are secrets and inherently
@@ -149,7 +150,7 @@ class DeviceSettings {
     try {
       localStorage.setItem(KEY, JSON.stringify($state.snapshot(this.state)));
     } catch (err) {
-      console.error("device settings persist failed:", err);
+      logger.error("settings", "device settings persist failed", String(err));
     }
   }
 }

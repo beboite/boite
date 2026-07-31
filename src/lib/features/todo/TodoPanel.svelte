@@ -1,10 +1,13 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onDestroy, onMount } from "svelte";
   import { app } from "$lib/app/store.svelte";
   import { projectDisplayName } from "$lib/features/project/scratch";
   import { settings } from "$lib/features/settings/store.svelte";
   import { notifications } from "$lib/features/notifications/store.svelte";
+  import { logger } from "$lib/shared/services/logger.svelte";
   import { todos } from "./store.svelte";
+  import { confirmDialog } from "$lib/shared/components/confirm.svelte";
+  import { registerEscape } from "$lib/shared/keyboard/overlay";
   import { t } from "$lib/i18n/index.svelte";
   import { ptyWrite } from "$lib/storage/pty";
   import AgentAccess from "./AgentAccess.svelte";
@@ -38,15 +41,65 @@
 
   let draft = $state("");
 
+  // No hover on a touch screen, so anything that only appears on hover is
+  // unreachable there and stays out.
+  const mobile = $derived(settings.state.mobileLayout);
+
+  // Row controls: on show where there is no pointer to reveal them, and
+  // otherwise revealed by a pointer over the row or by the keyboard reaching
+  // them, which is the half that was missing.
+  const ROW_ACTION = $derived(
+    `grid size-[22px] shrink-0 place-items-center rounded text-muted-foreground/50 transition ${
+      mobile
+        ? ""
+        : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
+    }`,
+  );
+
   // Which card is open. One at a time: the panel is a column barely wider than
   // a sentence, and two open descriptions push everything else off screen.
   let openId = $state<string | null>(null);
+
+  /**
+   * Which chip has its detail showing, for the readers with no pointer.
+   *
+   * The strip's details (the commit subject, a PR url, why gh refused) hung off
+   * `group-hover/tip` alone, so on a phone and from the keyboard they did not
+   * exist. The chips are buttons now and this is what their press toggles.
+   */
+  let openTip = $state<string | null>(null);
+
+  function toggleTip(key: string) {
+    openTip = openTip === key ? null : key;
+  }
+
+  // Escape closes it, through the same stack every other floating surface in the
+  // app claims, so one press never closes two things.
+  $effect(() => {
+    if (!openTip) return;
+    return registerEscape(() => (openTip = null));
+  });
 
   // A card opened in one project says nothing about the next one.
   $effect(() => {
     projectId;
     openId = null;
+    openTip = null;
   });
+
+  /**
+   * Deleting a task takes the description with it and nothing keeps a copy.
+   */
+  async function remove(item: TodoItem) {
+    const ok = await confirmDialog.ask({
+      title: t("todo.removeConfirmTitle"),
+      message: t("todo.removeConfirmMessage", { title: item.title }),
+      confirmLabel: t("todo.removeConfirmAction"),
+      danger: true,
+    });
+    if (!ok) return;
+    await todos.remove(item.id);
+  }
 
   /**
    * Opening a card is the only way to read its description — a tooltip cannot
@@ -55,11 +108,58 @@
    * Clicks that land on a control are that control's: the checkbox, the
    * hand-off and the delete button all sit inside the same box, and every one
    * of them would otherwise open the card on its way to doing its own job.
+   *
+   * Clicking the row is the pointer shortcut. The keyboard path is the title
+   * itself, which is a button while the card is closed, so the description is no
+   * longer behind a click nobody without a mouse can make.
    */
   function cardClick(item: TodoItem, e: MouseEvent) {
     if (suppressClick === item.id) return;
     if ((e.target as HTMLElement | null)?.closest("button, input, textarea, a")) return;
-    openId = openId === item.id ? null : item.id;
+    toggleCard(item, false);
+  }
+
+  /**
+   * Where the keyboard has to be after the next render.
+   *
+   * Opening a card replaces the title button with an input and closing it does
+   * the reverse, so whichever element had focus is gone by the time its
+   * replacement exists: without this, every toggle dropped the keyboard on
+   * <body>. Deliberately not $state: it is read once, by the action on the
+   * element that has just been created.
+   */
+  let claimFocus: string | null = null;
+
+  function toggleCard(item: TodoItem, fromKeyboard: boolean) {
+    // A drag that ended on this card produces a click on it, and on the title
+    // button the drag started from.
+    if (suppressClick === item.id) return;
+    const opening = openId !== item.id;
+    openId = opening ? item.id : null;
+    if (!fromKeyboard) return;
+    claimFocus = opening ? `title:${item.id}` : `row:${item.id}`;
+  }
+
+  /** Takes the keyboard only when the toggle above asked for this element. */
+  function keepFocus(el: HTMLElement, want: string) {
+    if (claimFocus !== want) return;
+    claimFocus = null;
+    el.focus();
+    if (el instanceof HTMLInputElement) {
+      // Caret at the end rather than a full selection: the first keystroke
+      // after opening a card should not wipe the title.
+      el.setSelectionRange(el.value.length, el.value.length);
+    }
+  }
+
+  // Escape leaves the card the way it was opened, with the keyboard back on the
+  // line it came from.
+  function fieldKeydown(item: TodoItem, e: KeyboardEvent) {
+    if (e.key !== "Escape") return;
+    e.preventDefault();
+    e.stopPropagation();
+    openId = null;
+    claimFocus = `row:${item.id}`;
   }
 
   // Grows the box to whatever was typed, up to a third of the panel. Past that
@@ -106,7 +206,13 @@
     // title input and a textarea, and selecting text in either is a drag of its
     // own that this must not steal.
     if (e.button !== 0) return;
-    if ((e.target as HTMLElement | null)?.closest("input, textarea, button, a")) return;
+    const control = (e.target as HTMLElement | null)?.closest(
+      "input, textarea, button, a",
+    );
+    // The closed title is a button now, and it covers most of the row: vetoing
+    // it would have taken the drag away from the only part of a card there is
+    // room to grab.
+    if (control && !control.hasAttribute("data-card-title")) return;
     dragCaptureEl = e.currentTarget as HTMLElement;
     drag = {
       id: item.id,
@@ -144,12 +250,13 @@
   function dragMove(e: PointerEvent) {
     const d = drag;
     if (!d || e.pointerId !== d.pointerId) return;
+    // Mutated in place. `drag` is already a $state proxy, so replacing the whole
+    // object on every pointermove invalidated liveDrag, draggingId, dropSlot and
+    // dragIndex (which walks the list) at pointer rate, plus the per-row slot
+    // const, including in the pre-threshold branch where nothing had changed.
     d.y = e.clientY;
     if (!d.active) {
-      if (Math.abs(e.clientY - d.startY) < 5) {
-        drag = { ...d };
-        return;
-      }
+      if (Math.abs(e.clientY - d.startY) < 5) return;
       d.active = true;
       suppressClick = d.id;
       // Deferred until the drag is real: capturing on pointerdown retargets the
@@ -164,7 +271,6 @@
     }
     e.preventDefault();
     d.slot = computeSlot(d);
-    drag = { ...d };
   }
 
   function dragEnd(e: PointerEvent) {
@@ -187,10 +293,23 @@
     }
     drag = null;
     dragCaptureEl = null;
+    releaseDragListeners();
+  }
+
+  function releaseDragListeners() {
     document.removeEventListener("pointermove", dragMove);
     document.removeEventListener("pointerup", dragEnd);
     document.removeEventListener("pointercancel", dragEnd);
   }
+
+  // The right panel destroys this component whenever its tab changes, which can
+  // happen mid-drag. Without this the three listeners above stayed bound to
+  // document forever, holding the dead component's drag state.
+  onDestroy(() => {
+    drag = null;
+    dragCaptureEl = null;
+    releaseDragListeners();
+  });
 
   // What the shared section says is still waiting on the user, so the folded
   // header can wear the count. Held here rather than derived: the state it
@@ -223,7 +342,11 @@
   }
 
   function openPr(url: string) {
-    if (url) void openUrl(url);
+    if (!url) return;
+    void openUrl(url).catch((err) => {
+      logger.warn("todo", `could not open ${url}`, String(err));
+      notifications.error(t("terminal.openLinkFailed"));
+    });
   }
 
   // The same box the Confirm/Reopen buttons draw, minus its resting border, so
@@ -300,7 +423,21 @@
     </p>
   {:else}
     <div class="min-h-0 flex-1 overflow-y-auto {liveDrag ? 'select-none' : ''}">
-      {#if items.length === 0 && !todos.loading}
+      <!-- The error branch comes first. A failed load left the list empty, so
+           "nothing to do here" was also what a broken database looked like. -->
+      {#if todos.loadError}
+        <div class="flex flex-col items-center gap-2 px-3 py-6 text-center">
+          <p class="text-xs text-danger">{t("todo.loadFailed")}</p>
+          <p class="text-xs text-muted-foreground">{todos.loadError}</p>
+          <button
+            type="button"
+            class="rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
+            onclick={() => void todos.reload()}
+          >
+            {t("common.retry")}
+          </button>
+        </div>
+      {:else if items.length === 0 && !todos.loading}
         <p class="px-3 py-6 text-center text-xs text-muted-foreground">
           {t("todo.empty")}
         </p>
@@ -312,6 +449,10 @@
         {#if dropSlot === slotIndex && item.id !== draggingId}
           {@render dropLine()}
         {/if}
+        <!-- The row's click is a pointer convenience on top of the controls
+             inside it: the title is a button, so opening a card and reading its
+             description no longer needs a mouse, and a key handler here would
+             fight the fields the open card holds. -->
         <!-- svelte-ignore a11y_click_events_have_key_events -->
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
@@ -354,6 +495,8 @@
                 type="text"
                 value={item.title}
                 placeholder={t("todo.titlePlaceholder")}
+                use:keepFocus={`title:${item.id}`}
+                onkeydown={(e) => fieldKeydown(item, e)}
                 onchange={(e) =>
                   todos.setTitle(item.id, (e.currentTarget as HTMLInputElement).value)}
                 class="min-w-0 flex-1 rounded border border-transparent bg-transparent px-1 py-0.5 text-sm leading-snug outline-none transition focus:border-border focus:bg-[var(--color-surface)] {item.state ===
@@ -362,14 +505,19 @@
                   : 'text-foreground'}"
               />
             {:else}
-              <span
-                class="min-w-0 flex-1 truncate px-1 py-0.5 text-sm leading-snug {item.state ===
+              <button
+                type="button"
+                data-card-title
+                aria-expanded={false}
+                use:keepFocus={`row:${item.id}`}
+                onclick={(e) => toggleCard(item, e.detail === 0)}
+                class="min-w-0 flex-1 truncate px-1 py-0.5 text-left text-sm leading-snug {item.state ===
                 'done'
                   ? 'text-muted-foreground/60 line-through'
                   : 'text-foreground'}"
               >
                 {item.title}
-              </span>
+              </button>
               {#if item.description}
                 <!-- The only sign that there is more behind the line. Dropped
                      when the card is open, where the description is right
@@ -384,7 +532,7 @@
             {/if}
             <button
               type="button"
-              class="grid size-[22px] shrink-0 place-items-center rounded text-muted-foreground/50 opacity-0 transition group-hover:opacity-100 hover:bg-[var(--color-surface-3)] hover:text-foreground disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-muted-foreground/50"
+              class="{ROW_ACTION} hover:bg-[var(--color-surface-3)] hover:text-foreground disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-muted-foreground/50"
               onclick={() => handOff(item)}
               disabled={!canSend}
               title={canSend
@@ -398,8 +546,8 @@
             </button>
             <button
               type="button"
-              class="grid size-[22px] shrink-0 place-items-center rounded text-muted-foreground/50 opacity-0 transition group-hover:opacity-100 hover:bg-danger/15 hover:text-danger"
-              onclick={() => todos.remove(item.id)}
+              class="{ROW_ACTION} hover:bg-danger/15 hover:text-danger"
+              onclick={() => void remove(item)}
               title={t("todo.remove")}
               aria-label={t("todo.removeLabel")}
             >
@@ -417,6 +565,7 @@
                 rows="2"
                 placeholder={t("todo.descriptionPlaceholder")}
                 use:descriptionBox
+                onkeydown={(e) => fieldKeydown(item, e)}
                 oninput={(e) => autosize(e.currentTarget as HTMLTextAreaElement)}
                 onchange={(e) =>
                   todos.setDescription(
@@ -470,22 +619,33 @@
                 {:else if !g.commit.known}
                   <!-- Reported a sha the repository has never heard of. Said
                        plainly: this is the one claim git can flatly contradict. -->
-                  <span class="group/tip relative text-warning {CHIP}">
+                  <button
+                    type="button"
+                    class="group/tip relative text-warning {CHIP}"
+                    aria-expanded={openTip === `${item.id}:sha`}
+                    onclick={() => toggleTip(`${item.id}:sha`)}
+                  >
                     {t("todo.gitUnknownCommit")}
-                    {@render tip(item.commitSha)}
-                  </span>
+                    {@render tip(item.commitSha, `${item.id}:sha`)}
+                  </button>
                 {:else}
                   <!-- The branch first: it says where the work is, which is the
                        question being asked. The sha is what was verified, so it
                        stays reachable rather than on show. -->
-                  <span class="group/tip relative min-w-0 {CHIP}">
+                  <button
+                    type="button"
+                    class="group/tip relative min-w-0 text-left {CHIP}"
+                    aria-expanded={openTip === `${item.id}:commit`}
+                    onclick={() => toggleTip(`${item.id}:commit`)}
+                  >
                     <span class="block truncate text-foreground/80">
                       {g.commit.branch ?? g.commit.short}
                     </span>
                     {@render tip(
                       `${g.commit.short}${g.commit.subject ? ` — ${g.commit.subject}` : ""}`,
+                      `${item.id}:commit`,
                     )}
-                  </span>
+                  </button>
                   <span class="shrink-0 text-muted-foreground/40">·</span>
                   <span
                     class="shrink-0 px-1 {g.commit.pushed ? '' : 'text-muted-foreground/70'}"
@@ -500,17 +660,27 @@
                       onclick={() => openPr(g.pr.kind === "found" ? g.pr.pr.url : "")}
                     >
                       {t("todo.gitPr", { number: String(g.pr.pr.number) })}
-                      {@render tip(g.pr.pr.url)}
+                      <!-- No toggle on this one: pressing it opens the PR, which
+                           is more than the url it would have shown. -->
+                      {@render tip(g.pr.pr.url, null)}
                     </button>
                   {:else if g.pr.kind === "failed"}
                     <!-- gh was there and refused. Said, because unlike a missing
                          gh this is a state the user can be in without knowing —
                          and the signed-out case they can fix in one command. -->
                     <span class="shrink-0 text-muted-foreground/40">·</span>
-                    <span class="group/tip relative shrink-0 text-warning/80 {CHIP}">
+                    <button
+                      type="button"
+                      class="group/tip relative shrink-0 text-warning/80 {CHIP}"
+                      aria-expanded={openTip === `${item.id}:pr`}
+                      onclick={() => toggleTip(`${item.id}:pr`)}
+                    >
                       {g.pr.auth ? t("todo.gitPrNoAuth") : t("todo.gitPrFailed")}
-                      {@render tip(g.pr.auth ? t("todo.gitPrNoAuthHint") : g.pr.detail)}
-                    </span>
+                      {@render tip(
+                        g.pr.auth ? t("todo.gitPrNoAuthHint") : g.pr.detail,
+                        `${item.id}:pr`,
+                      )}
+                    </button>
                   {/if}
                 {/if}
               {/await}
@@ -599,16 +769,22 @@
   <div class="pointer-events-none -my-px h-0.5 bg-foreground/50"></div>
 {/snippet}
 
-{#snippet tip(text: string)}
+{#snippet tip(text: string, key: string | null)}
   <!-- Replaces the native `title`, whose ~1s delay is the browser's and cannot
        be configured. Appears on hover with nothing in between.
        Below the chip, not above: the list scrolls, and anything absolute is
        clipped by that container at whichever edge it crosses. Measured — above
        the chip it lost 4.5px off the top row, which is the row that is always on
        screen, while below it there is nearly always list left. Left-aligned to
-       the chip so a long one grows into the panel rather than off it. -->
+       the chip so a long one grows into the panel rather than off it.
+       Hover was the only way in, which left it out of reach of a keyboard and of
+       every touch screen: focus opens it now, and the chip's own press keeps it
+       open for a finger that has no hover to give. -->
   <span
-    class="pointer-events-none absolute left-0 top-full z-30 mt-1 hidden w-max max-w-[240px] rounded border border-border bg-[var(--color-surface-2)] px-1.5 py-0.5 text-left text-xs leading-snug text-foreground shadow-md group-hover/tip:block"
+    class="pointer-events-none absolute left-0 top-full z-30 mt-1 w-max max-w-[240px] rounded border border-border bg-[var(--color-surface-2)] px-1.5 py-0.5 text-left text-xs leading-snug text-foreground shadow-md group-hover/tip:block group-focus-within/tip:block {key !==
+    null && openTip === key
+      ? 'block'
+      : 'hidden'}"
   >
     {text}
   </span>

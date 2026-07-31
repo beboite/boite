@@ -19,6 +19,28 @@ function joinPath(cwd: string, rel: string): string {
 
 export const SEARCH_LIMIT = 500;
 
+// A search can name up to SEARCH_LIMIT folders to open. Firing them all at once
+// buried the backend under 500 concurrent directory reads for one keystroke's
+// worth of filtering.
+const EXPLORER_LOAD_CONCURRENCY = 8;
+
+/** Run `work` over `items`, at most `limit` in flight. Rejections are swallowed
+ *  per item so one unreadable folder does not abandon the rest. */
+async function runPooled<T>(
+  items: T[],
+  limit: number,
+  work: (item: T) => Promise<unknown>,
+): Promise<void> {
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (cursor < items.length) {
+      const item = items[cursor++];
+      await work(item).catch(() => undefined);
+    }
+  });
+  await Promise.all(workers);
+}
+
 // Every directory ever visited stayed cached for the whole session, across
 // every project. Bound it, and evict what is not under the tree currently on
 // screen first — that is the only part the user can still see.
@@ -86,6 +108,14 @@ class ExplorerStore {
   hitPathSet = $state<Record<string, true>>({});
   ancestorPathSet = $state<Record<string, true>>({});
   dirHitPrefixes = $state<string[]>([]);
+  /**
+   * isVisible answers per node per render, and a directory hit means "and
+   * everything under it", which only a prefix test can decide. With up to
+   * SEARCH_LIMIT hits that was a 500-entry startsWith loop for every node in the
+   * tree, on every invalidation. Plain Map, not $state: it is a cache of what the
+   * reactive fields already say, and it is cleared wherever they are written.
+   */
+  private visibility = new Map<string, boolean>();
   private searchToken = 0;
   private debounceHandle: ReturnType<typeof setTimeout> | null = null;
 
@@ -131,7 +161,10 @@ class ExplorerStore {
     this.evictOutside(root);
     await Promise.all([
       this.load(root, true),
-      ...expandedKeys.map((k) => this.load(k, true)),
+      // Pooled rather than fired all at once: the poll runs every ten seconds,
+      // and a repo with thirty folders open was thirty concurrent directory
+      // reads a tick, forever.
+      runPooled(expandedKeys, EXPLORER_LOAD_CONCURRENCY, (k) => this.load(k, true)),
       this.loadGitStatus(root),
     ]);
   }
@@ -170,6 +203,7 @@ class ExplorerStore {
       this.hitPathSet = {};
       this.ancestorPathSet = {};
       this.dirHitPrefixes = [];
+      this.visibility.clear();
       this.searchToken++;
       return;
     }
@@ -194,6 +228,7 @@ class ExplorerStore {
       this.hitPathSet = {};
       this.ancestorPathSet = {};
       this.dirHitPrefixes = [];
+      this.visibility.clear();
     } finally {
       if (token === this.searchToken) this.searching = false;
     }
@@ -221,6 +256,7 @@ class ExplorerStore {
     this.hitPathSet = hitSet;
     this.ancestorPathSet = ancestorSet;
     this.dirHitPrefixes = dirPrefixes;
+    this.visibility.clear();
     const next = { ...this.expanded };
     for (const key of Object.keys(ancestorSet)) next[key] = true;
     for (const hit of hits) {
@@ -238,16 +274,22 @@ class ExplorerStore {
       if (slash > 0) toLoad.add(norm.slice(0, slash));
       if (hit.isDir) toLoad.add(norm);
     }
-    await Promise.all(
-      [...toLoad]
-        .filter((folder) => !this.entriesByPath[folder])
-        .map((folder) => this.load(folder)),
-    );
+    const pending = [...toLoad].filter((folder) => !this.entriesByPath[folder]);
+    await runPooled(pending, EXPLORER_LOAD_CONCURRENCY, (folder) => this.load(folder));
   }
 
   isVisible(path: string, isDir: boolean): boolean {
     if (!this.filterText.trim()) return true;
     const norm = normalizePath(path);
+    const memoKey = isDir ? `d${norm}` : `f${norm}`;
+    const cached = this.visibility.get(memoKey);
+    if (cached !== undefined) return cached;
+    const visible = this.computeVisible(norm, isDir);
+    this.visibility.set(memoKey, visible);
+    return visible;
+  }
+
+  private computeVisible(norm: string, isDir: boolean): boolean {
     if (this.hitPathSet[norm]) return true;
     if (isDir && this.ancestorPathSet[norm]) return true;
     for (const prefix of this.dirHitPrefixes) {

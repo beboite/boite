@@ -70,7 +70,7 @@
 
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <div
-  class="fixed inset-0 z-50 flex items-center justify-center bg-black/65 px-4 backdrop-blur-sm"
+  class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-[var(--color-scrim)] px-4 backdrop-blur-sm"
   role="dialog"
   aria-modal="true"
   aria-labelledby="branch-changes-title"
@@ -80,7 +80,7 @@
 >
   <div
     bind:this={dialogEl}
-    class="w-full max-w-[420px] overflow-hidden rounded-lg border border-border bg-[var(--color-surface)] shadow-2xl"
+    class="surface-dialog w-full max-w-[420px] overflow-hidden"
     transition:scale={{ duration: 140, start: 0.97 }}
   >
     <div class="px-5 py-4">

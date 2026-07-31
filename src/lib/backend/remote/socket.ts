@@ -2,6 +2,34 @@ import type { ControlEvent } from "../types";
 
 export type ConnState = "connecting" | "connected" | "disconnected";
 
+/**
+ * Why a dial failed. `auth` is the only one a login form can fix, so it is the
+ * only one that should ever raise the login gate; the rest mean the boite was
+ * never reached and retrying is the answer.
+ */
+export type ConnFailReason = "auth" | "unreachable" | "timeout" | "url";
+
+export class ConnectError extends Error {
+  readonly reason: ConnFailReason;
+  constructor(reason: ConnFailReason, message: string) {
+    super(message);
+    this.name = "ConnectError";
+    this.reason = reason;
+  }
+}
+
+/**
+ * An error the server sent back, as opposed to one this side invented when the
+ * socket died under it. This is what tells a refused token apart from a boite
+ * that never answered: both used to arrive as a bare Error and the app could
+ * only guess, so it guessed "wrong credentials" every time.
+ */
+class RpcError extends Error {}
+
+export function connectFailReason(e: unknown): ConnFailReason {
+  return e instanceof ConnectError ? e.reason : "unreachable";
+}
+
 const FRAME_OUTPUT = 0x01;
 const FRAME_INPUT = 0x02;
 const FRAME_OUTPUT_GZIP = 0x03;
@@ -58,13 +86,18 @@ interface PendingReplay {
 // ([opcode][16-byte thread uuid][payload]). Reconnects with exponential
 // backoff and re-attaches every tracked thread (the server replays scrollback).
 // Writes are dropped while disconnected: replaying stale keystrokes into a live
-// agent is worse than losing them.
+// agent is worse than losing them. What the state callback drives has to make
+// that loss visible, because this side cannot.
 export class Socket {
   #url: string;
   #token: string;
   #ws: WebSocket | null = null;
   #state: ConnState = "disconnected";
   #stateCb: (s: ConnState) => void;
+  #authRejectedCb: () => void;
+  // A refused token will be refused again, so the backoff loop stops rather
+  // than hammering the boite with a credential it already said no to.
+  #authRejected = false;
   #nextId = 1;
   #pending = new Map<number, Pending>();
   #control = new Set<(e: ControlEvent) => void>();
@@ -83,19 +116,45 @@ export class Socket {
   #backoff = BACKOFF_MIN;
   #reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
-  constructor(url: string, token: string, onState: (s: ConnState) => void) {
+  constructor(
+    url: string,
+    token: string,
+    onState: (s: ConnState) => void,
+    onAuthRejected: () => void = () => {},
+  ) {
     this.#url = url;
     this.#token = token;
     this.#stateCb = onState;
+    this.#authRejectedCb = onAuthRejected;
   }
 
   get state(): ConnState {
     return this.#state;
   }
 
+  get authRejected(): boolean {
+    return this.#authRejected;
+  }
+
   connect(): Promise<void> {
     this.#closed = false;
+    this.#authRejected = false;
     return this.#open();
+  }
+
+  // Manual retry from the connection banner. The scheduled attempt can be half a
+  // minute out, and someone who just fixed their wifi should not wait for it.
+  retryNow(): void {
+    if (this.#reconnectTimer) {
+      clearTimeout(this.#reconnectTimer);
+      this.#reconnectTimer = null;
+    }
+    // A dial is already in flight (#ws lives from construction to onclose).
+    if (this.#ws) return;
+    this.#closed = false;
+    this.#authRejected = false;
+    this.#backoff = BACKOFF_MIN;
+    void this.#open().catch(() => {});
   }
 
   close(): void {
@@ -131,14 +190,19 @@ export class Socket {
     });
   }
 
-  sendInput(threadId: string, data: Uint8Array): void {
+  // Returns whether the bytes left this device. False is a keystroke thrown away:
+  // queueing it would replay stale input into a live agent minutes later. The
+  // user has to learn about the loss from the connection state, which is why the
+  // banner exists at all.
+  sendInput(threadId: string, data: Uint8Array): boolean {
     const ws = this.#ws;
-    if (!ws || this.#state !== "connected") return;
+    if (!ws || this.#state !== "connected") return false;
     const frame = new Uint8Array(17 + data.length);
     frame[0] = FRAME_INPUT;
     frame.set(uuidToBytes(threadId), 1);
     frame.set(data, 17);
     ws.send(frame);
+    return true;
   }
 
   // Register the output sink BEFORE the attach RPC: the server pushes the
@@ -201,7 +265,12 @@ export class Socket {
         ws = new WebSocket(this.#url);
       } catch (e) {
         this.#setState("disconnected");
-        reject(e instanceof Error ? e : new Error("WebSocket construction failed"));
+        reject(
+          new ConnectError(
+            "url",
+            e instanceof Error ? e.message : "WebSocket construction failed",
+          ),
+        );
         return;
       }
       ws.binaryType = "arraybuffer";
@@ -217,7 +286,7 @@ export class Socket {
         } catch {
           // already closing
         }
-        reject(new Error("connect timeout"));
+        reject(new ConnectError("timeout", "connect timeout"));
       }, CONNECT_TIMEOUT);
 
       ws.onopen = () => {
@@ -240,10 +309,24 @@ export class Socket {
             }
           })
           .catch((e) => {
+            // A JSON error reply is the server refusing the token. Anything else
+            // (socket died mid-handshake, RPC timeout) means no answer came, and
+            // treating that as bad credentials is what dumped a PWA with no
+            // network onto the login form.
+            const refused = e instanceof RpcError;
+            if (refused) {
+              this.#authRejected = true;
+              this.#authRejectedCb();
+            }
             if (!settled) {
               settled = true;
               clearTimeout(connectTimer);
-              reject(e);
+              reject(
+                new ConnectError(
+                  refused ? "auth" : "unreachable",
+                  e instanceof Error ? e.message : "auth failed",
+                ),
+              );
             }
             ws.close();
           });
@@ -259,7 +342,7 @@ export class Socket {
         if (!this.#closed) this.#scheduleReconnect();
         if (!settled) {
           settled = true;
-          reject(new Error("socket closed before auth"));
+          reject(new ConnectError("unreachable", "socket closed before auth"));
         }
       };
 
@@ -281,7 +364,7 @@ export class Socket {
         const p = this.#pending.get(msg.id)!;
         this.#pending.delete(msg.id);
         clearTimeout(p.timer);
-        if (msg.ok === false) p.reject(new Error(msg.error ?? "rpc error"));
+        if (msg.ok === false) p.reject(new RpcError(msg.error ?? "rpc error"));
         else p.resolve(msg.result);
         return;
       }
@@ -353,7 +436,7 @@ export class Socket {
   }
 
   #scheduleReconnect(): void {
-    if (this.#closed || this.#reconnectTimer) return;
+    if (this.#closed || this.#authRejected || this.#reconnectTimer) return;
     const base = Math.min(this.#backoff, BACKOFF_MAX);
     const delay = base * (0.5 + Math.random() * 0.5);
     this.#backoff = Math.min(this.#backoff * 2, BACKOFF_MAX);

@@ -61,7 +61,10 @@
     </header>
 
     <div class="min-h-0 flex-1 overflow-y-auto" class:scratch-page={isScratch(project)}>
-      <div class="mx-auto w-full max-w-6xl px-4 py-4">
+      <div
+        class="mx-auto w-full max-w-6xl px-4 py-4"
+        class:scratch-cards={isScratch(project)}
+      >
         <ProjectOverview {project} {onOpenThread} />
       </div>
     </div>
@@ -80,7 +83,12 @@
       color-mix(in srgb, var(--color-foreground) 3%, transparent) 7px 8px
     );
   }
-  .scratch-page :global(section) {
+  /* On the wrapper that holds the cards, so the hatch behind them keeps its own
+     opacity. This used to be a global selector on the `section` tag, which faded
+     anything that happened to be a section anywhere below, from outside the
+     component that owns it: the usage figures were dimmed by a rule about
+     scratch cards. */
+  .scratch-cards {
     opacity: 0.72;
   }
 </style>

@@ -1,10 +1,13 @@
 <script lang="ts">
-  import { onMount, onDestroy } from "svelte";
+  import { onMount, onDestroy, tick } from "svelte";
   import { scale } from "svelte/transition";
   import { workspace } from "$lib/backend";
+  import { confirmDialog } from "$lib/shared/components/confirm.svelte";
+  import { registerEscape, restoreFocus, viewportHeight } from "$lib/shared/keyboard/overlay";
   import { hasTauri } from "$lib/backend/env";
   import { device, type BoiteEntry } from "$lib/features/settings/device.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
+  import { t } from "$lib/i18n/index.svelte";
   import { portal } from "$lib/shared/actions/portal";
   import {
     switchToLocal,
@@ -22,7 +25,6 @@
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
   import Monitor from "@lucide/svelte/icons/monitor";
   import Layers from "@lucide/svelte/icons/layers";
-  import { t } from "$lib/i18n/index.svelte";
 
   // No local backend in a browser/PWA: only saved boites stand.
   const isTauri = hasTauri();
@@ -42,6 +44,7 @@
   ];
 
   const MENU_W = 340;
+  const EDGE_GAP = 8;
 
   let open = $state(false);
   let showAdd = $state(false);
@@ -77,9 +80,11 @@
   const boiteLabel = $derived(
     workspace.info.name ||
       hostOf(activeEntry?.url ?? workspace.remoteUrl ?? "") ||
-      "Remote",
+      t("workspace.remote"),
   );
-  const triggerLabel = $derived(workspace.mode === "remote" ? boiteLabel : "Local");
+  const triggerLabel = $derived(
+    workspace.mode === "remote" ? boiteLabel : t("workspace.local"),
+  );
   // The pill dot shows any live boite link: the active remote workspace, or
   // the boite grafted into Local by dynamic mode.
   const triggerDot = $derived(
@@ -98,8 +103,97 @@
     if (!triggerRoot) return;
     const r = triggerRoot.getBoundingClientRect();
     const vw = window.innerWidth;
-    const x = Math.max(8, Math.min(r.left + r.width / 2 - MENU_W / 2, vw - MENU_W - 8));
+    const x = Math.max(
+      EDGE_GAP,
+      Math.min(r.left + r.width / 2 - MENU_W / 2, vw - MENU_W - EDGE_GAP),
+    );
     menuPos = { x, y: r.bottom + 6 };
+  }
+
+  // The panel is up to min(70vh, 34rem) tall, so on a short window the version
+  // placed at `trigger.bottom + 6` ran off the bottom with no way to reach its
+  // last rows. Measured rather than assumed: how tall it actually is depends on
+  // how many boites are saved and whether the add form is showing.
+  async function placeClamped() {
+    place();
+    await tick();
+    if (!menuEl || !triggerRoot) return;
+    const r = triggerRoot.getBoundingClientRect();
+    // Layout box, not the painted one: the open transition scales the panel, and
+    // a measurement taken mid-transition is shorter than what has to fit.
+    const h = menuEl.offsetHeight;
+    // The visual viewport, not innerHeight: an open soft keyboard leaves
+    // innerHeight reporting room that is no longer on screen.
+    const vh = viewportHeight();
+    const below = r.bottom + 6;
+    if (below + h + EDGE_GAP <= vh) return;
+    // Above the trigger when it fits there, clamped to the top edge otherwise:
+    // the panel scrolls, so the worst case is still reachable.
+    const above = r.top - 6 - h;
+    menuPos = { ...menuPos, y: Math.max(EDGE_GAP, above) };
+  }
+
+  $effect(() => {
+    if (!open || mobile) return;
+    void showAdd;
+    void device.boites.length;
+    void placeClamped();
+  });
+
+  $effect(() => {
+    // The mobile sheet is a modal dialog and owns Escape itself.
+    if (!open || mobile) return;
+    return registerEscape(close);
+  });
+
+  $effect(() => {
+    if (!open || mobile) return;
+    const previous = document.activeElement as HTMLElement | null;
+    const surface = menuEl;
+    return () => restoreFocus(previous, surface);
+  });
+
+  // Swapping the list for the add form (and back) replaces every control in the
+  // panel, so whatever was focused is gone and the keyboard would be left on
+  // <body>, outside the trap below.
+  $effect(() => {
+    if (!open || mobile) return;
+    void showAdd;
+    let cancelled = false;
+    void tick().then(() => {
+      if (cancelled || !open) return;
+      if (menuEl?.contains(document.activeElement)) return;
+      const primary = showAdd
+        ? menuEl?.querySelector<HTMLInputElement>("input")
+        : null;
+      (primary ?? panelFocusables()[0] ?? menuEl)?.focus();
+    });
+    return () => {
+      cancelled = true;
+    };
+  });
+
+  function panelFocusables(): HTMLElement[] {
+    return Array.from(
+      menuEl?.querySelectorAll<HTMLElement>(
+        "button:not(:disabled), input:not(:disabled)",
+      ) ?? [],
+    );
+  }
+
+  function onPanelKeydown(e: KeyboardEvent) {
+    if (e.key !== "Tab") return;
+    // Trapped: Tab used to walk out into the app and leave the panel floating
+    // over a window the keyboard had already left.
+    const all = panelFocusables();
+    if (all.length === 0) return;
+    const idx = all.indexOf(document.activeElement as HTMLElement);
+    e.preventDefault();
+    if (idx < 0) {
+      all[e.shiftKey ? all.length - 1 : 0].focus();
+      return;
+    }
+    all[(idx + (e.shiftKey ? -1 : 1) + all.length) % all.length].focus();
   }
 
   function toggle() {
@@ -164,8 +258,16 @@
       busy = false;
     }
   }
-  function remove(id: string) {
-    device.removeBoite(id);
+  // Asked first: this drops the saved entry, its URL and its auth token, and the
+  // token is the one thing here nobody can retype from memory.
+  async function remove(entry: BoiteEntry) {
+    const ok = await confirmDialog.ask({
+      title: t("workspace.removeConfirmTitle"),
+      message: t("workspace.removeConfirmMessage", { name: labelOf(entry) }),
+      confirmLabel: t("workspace.removeConfirmAction"),
+      danger: true,
+    });
+    if (ok) device.removeBoite(entry.id);
   }
   async function commitName() {
     const name = nameDraft.trim();
@@ -192,18 +294,18 @@
     if (triggerRoot?.contains(t) || menuEl?.contains(t)) return;
     close();
   }
-  function onKey(e: KeyboardEvent) {
-    if (e.key === "Escape" && open) close();
-  }
+  const replace = () => void placeClamped();
   onMount(() => {
     document.addEventListener("mousedown", onDocPointer);
-    document.addEventListener("keydown", onKey);
-    window.addEventListener("resize", place);
+    window.addEventListener("resize", replace);
+    // A soft keyboard shrinks the visual viewport without always resizing the
+    // window, and this panel has two text fields that raise one.
+    window.visualViewport?.addEventListener("resize", replace);
   });
   onDestroy(() => {
     document.removeEventListener("mousedown", onDocPointer);
-    document.removeEventListener("keydown", onKey);
-    window.removeEventListener("resize", place);
+    window.removeEventListener("resize", replace);
+    window.visualViewport?.removeEventListener("resize", replace);
   });
 </script>
 
@@ -221,7 +323,7 @@
     {#if !mobile}
       <div class="px-2 pb-1 pt-0.5">
         <span class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          Workspaces
+          {t("workspace.title")}
         </span>
       </div>
     {/if}
@@ -234,7 +336,7 @@
         disabled={busy}
       >
         <Monitor class="size-4 shrink-0 text-muted-foreground" />
-        <span class="flex-1 font-medium text-foreground">Local</span>
+        <span class="flex-1 font-medium text-foreground">{t("workspace.local")}</span>
         {#if onLocalSide}
           <Check class="size-4 text-foreground" />
         {/if}
@@ -250,13 +352,13 @@
         class={`flex items-center gap-2.5 rounded-lg text-left transition hover:bg-accent disabled:opacity-50 ${mobile ? "px-3 py-3 text-sm" : "px-2.5 py-2 text-base"}`}
         onclick={toggleDynamic}
         disabled={busy}
-        title={t("workspace.showBoiteProjects")}
+        title={t("workspace.dynamicTooltip")}
       >
         <Layers class="size-4 shrink-0 text-muted-foreground" />
         <span class="flex min-w-0 flex-1 flex-col leading-tight">
-          <span class="font-medium text-foreground">Dynamic mode</span>
+          <span class="font-medium text-foreground">{t("workspace.dynamicMode")}</span>
           <span class="truncate text-xs text-muted-foreground">
-            Boite projects inside Local
+            {t("workspace.dynamicDesc")}
           </span>
         </span>
         <span
@@ -290,7 +392,13 @@
           </span>
           {#if active}
             <span class="shrink-0 text-2xs uppercase tracking-wide text-muted-foreground">
-              {connected ? "connected" : workspace.connection}
+              {#if connected}
+                {t("workspace.connStateConnected")}
+              {:else if workspace.connection === "connecting"}
+                {t("workspace.connStateConnecting")}
+              {:else}
+                {t("workspace.connStateDisconnected")}
+              {/if}
             </span>
           {/if}
         </button>
@@ -298,9 +406,9 @@
           <button
             type="button"
             class={`flex shrink-0 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-danger/20 hover:text-danger ${mobile ? "w-11" : "w-9"}`}
-            onclick={() => remove(b.id)}
+            onclick={() => void remove(b)}
             aria-label={t("workspace.removeBoite")}
-            title={t("workspace.remove")}
+            title={t("shortcuts.remove")}
           >
             <Trash2 class="size-4" />
           </button>
@@ -310,7 +418,7 @@
       {#if active}
         <div class="mb-1 flex flex-col gap-2.5 rounded-lg bg-[var(--color-background)] px-2.5 py-2.5">
           <label class="flex flex-col gap-1 text-2xs uppercase tracking-wide text-muted-foreground">
-            Name
+            {t("workspace.name")}
             <input
               bind:value={nameDraft}
               placeholder={hostOf(b.url)}
@@ -322,7 +430,9 @@
             />
           </label>
           <div class="flex flex-col gap-1.5">
-            <span class="text-2xs uppercase tracking-wide text-muted-foreground">Color</span>
+            <span class="text-2xs uppercase tracking-wide text-muted-foreground">
+              {t("workspace.color")}
+            </span>
             <div class={`flex flex-wrap ${mobile ? "gap-2.5" : "gap-2"}`}>
               {#each PALETTE as c (c)}
                 <button
@@ -333,7 +443,7 @@
                     ? "var(--color-foreground)"
                     : "transparent"}
                   onclick={() => pickColor(c)}
-                  aria-label={t("workspace.setColor")}
+                  aria-label={t("shortcuts.setColor", { color: c })}
                 ></button>
               {/each}
             </div>
@@ -355,11 +465,11 @@
               <ArrowLeft class="size-4" />
             </button>
           {/if}
-          <span class="text-base font-semibold text-foreground">Add a boite server</span>
+          <span class="text-base font-semibold text-foreground">{t("workspace.addServer")}</span>
         </div>
 
         <label class="flex flex-col gap-1 text-2xs uppercase tracking-wide text-muted-foreground">
-          Server URL
+          {t("workspace.serverUrl")}
           <input
             bind:value={addUrl}
             placeholder="ws://host:7337/ws"
@@ -370,7 +480,7 @@
           />
         </label>
         <label class="flex flex-col gap-1 text-2xs uppercase tracking-wide text-muted-foreground">
-          Token
+          {t("workspace.token")}
           <input
             bind:value={addToken}
             type="password"
@@ -389,7 +499,7 @@
               onclick={() => (showAdd = false)}
               disabled={busy}
             >
-              Cancel
+              {t("common.cancel")}
             </button>
           {/if}
           <button
@@ -398,14 +508,14 @@
             onclick={submitAdd}
             disabled={busy || !addUrl.trim() || !addToken.trim()}
           >
-            {busy ? "Connecting…" : "Connect"}
+            {busy ? t("workspace.connecting") : t("workspace.connect")}
           </button>
         </div>
       </div>
     {:else}
       {#if device.boites.length === 0 && !isTauri}
         <p class={`text-muted-foreground/70 ${mobile ? "px-3 py-2 text-sm" : "px-2.5 py-2 text-sm"}`}>
-          No boite server yet.
+          {t("workspace.noServers")}
         </p>
       {/if}
       <button
@@ -414,7 +524,7 @@
         onclick={openAdd}
       >
         <Plus class="size-4 shrink-0" />
-        Add boite server
+        {t("workspace.addServerAction")}
       </button>
     {/if}
   </div>
@@ -425,7 +535,7 @@
     type="button"
     class="flex max-w-[40vw] items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface)] px-2 py-0.5 text-xs text-foreground transition hover:bg-[var(--color-surface-2)]"
     onclick={toggle}
-    aria-haspopup="menu"
+    aria-haspopup="dialog"
     aria-expanded={open}
     title={t("workspace.title")}
   >
@@ -445,15 +555,20 @@
       {@render panel()}
     </MobileSheet>
   {:else if open}
+    <!-- A dialog, not a menu: it holds a name field, a password field and a
+         colour grid, none of which a screen reader can present as menu items. -->
     <div
       bind:this={menuEl}
       use:portal
-      role="menu"
-      class="fixed z-[9999] max-h-[min(70vh,34rem)] overflow-y-auto rounded-xl border border-border bg-[var(--color-surface)] p-2 shadow-2xl"
+      role="dialog"
+      aria-label={t("workspace.title")}
+      tabindex="-1"
+      class="surface-popover fixed z-[var(--z-popover)] max-h-[min(70vh,34rem)] overflow-y-auto p-2"
       style:left="{menuPos.x}px"
       style:top="{menuPos.y}px"
       style:width="{MENU_W}px"
       style:transform-origin="top center"
+      onkeydown={onPanelKeydown}
       transition:scale={{ duration: 100, start: 0.97 }}
     >
       {@render panel()}

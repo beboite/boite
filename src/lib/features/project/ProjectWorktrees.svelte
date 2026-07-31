@@ -46,6 +46,9 @@
   let loading = $state(false);
   let failed = $state<string | null>(null);
   let busy = $state<Record<string, true>>({});
+  // The switch writes to the database. Left free, a second click during that
+  // write raced the first and the row could settle on the value nobody picked.
+  let togglingAuto = $state(false);
 
   const repo = $derived(project.gitRoot ?? project.cwd);
   // Which thread is standing in which directory, so a row can say who is using
@@ -95,6 +98,16 @@
     void project.id;
     untrack(() => void load());
   });
+
+  async function toggleAuto(enabled: boolean) {
+    if (togglingAuto) return;
+    togglingAuto = true;
+    try {
+      await app.setProjectWorktrees(project.id, enabled);
+    } finally {
+      togglingAuto = false;
+    }
+  }
 
   /**
    * Removes a worktree, after saying plainly what removing it destroys.
@@ -148,15 +161,18 @@
     {/if}
     {#if canToggle}
       <label
-        class="flex cursor-pointer select-none items-center gap-1.5 text-xs text-muted-foreground transition hover:text-foreground"
+        class="flex select-none items-center gap-1.5 text-xs text-muted-foreground transition hover:text-foreground {togglingAuto
+          ? 'cursor-wait opacity-60'
+          : 'cursor-pointer'}"
         title={autoWorktrees ? t("worktree.autoOnHint") : t("worktree.autoOffHint")}
       >
         <input
           type="checkbox"
           class="size-3 accent-[var(--color-foreground)]"
           checked={autoWorktrees}
-          onchange={(e) =>
-            void app.setProjectWorktrees(project.id, e.currentTarget.checked)}
+          disabled={togglingAuto}
+          aria-busy={togglingAuto}
+          onchange={(e) => void toggleAuto(e.currentTarget.checked)}
         />
         {t("worktree.autoLabel")}
       </label>
@@ -179,9 +195,15 @@
        rather than as a disabled control. -->
   <div class:opacity-50={canToggle && !autoWorktrees}>
   {#if failed}
-    <p class="px-3 py-4 text-center text-sm text-muted-foreground">
-      {t("worktree.unreadable")}
-    </p>
+    <!-- git's own words, kept: "not a repository" and "git: command not found"
+         are different problems with different fixes, and one generic line made
+         them look like the same one. -->
+    <div class="px-3 py-4 text-center" role="status">
+      <p class="text-sm text-muted-foreground">{t("worktree.unreadable")}</p>
+      <p class="mt-1 break-words font-mono text-xs leading-snug text-muted-foreground/70">
+        {failed}
+      </p>
+    </div>
   {:else if entries.length === 0}
     <p class="px-3 py-4 text-center text-sm text-muted-foreground">
       {loading

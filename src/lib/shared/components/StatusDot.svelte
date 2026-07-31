@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { ThreadStatus } from "$lib/types";
+  import { t, type MessageKey } from "$lib/i18n/index.svelte";
   import UnicodeSpinner from "./UnicodeSpinner.svelte";
-  import { t } from "$lib/i18n/index.svelte";
 
   type Props = { status: ThreadStatus; asleep?: boolean; keepAwake?: boolean };
   let { status, asleep = false, keepAwake = false }: Props = $props();
@@ -16,6 +16,21 @@
     error: "bg-danger",
     stopped: "bg-muted-foreground/30",
   };
+
+  // The dot used to hand the raw enum to assistive tech, so a screen reader
+  // announced "exited" in whatever language the app was not in.
+  const labelByStatus: Record<ThreadStatus, MessageKey> = {
+    idle: "status.idle",
+    running: "status.running",
+    waiting: "status.waiting",
+    ready: "status.ready",
+    done: "status.done",
+    exited: "status.exited",
+    error: "status.error",
+    stopped: "status.stopped",
+  };
+
+  const statusLabel = $derived(t(labelByStatus[status]));
 </script>
 
 {#if keepAwake}
@@ -49,8 +64,8 @@
 {:else if status === "running"}
   <span
     class="inline-flex size-2.5 shrink-0 items-center justify-center text-warning"
-    aria-label={status}
-    title={status}
+    aria-label={statusLabel}
+    title={statusLabel}
   >
     <UnicodeSpinner size={12} />
   </span>
@@ -66,8 +81,8 @@
 {:else}
   <span
     class="inline-block size-2.5 shrink-0 rounded-full {colorByStatus[status]}"
-    aria-label={status}
-    title={status}
+    aria-label={statusLabel}
+    title={statusLabel}
   ></span>
 {/if}
 

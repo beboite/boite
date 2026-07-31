@@ -1,10 +1,11 @@
 import { backend } from "$lib/backend";
 import { loadSettings, saveSettings } from "$lib/storage/db";
 import { notifications } from "$lib/features/notifications/store.svelte";
-import { isLocaleSetting, setLocale as applyLocale } from "$lib/i18n/index.svelte";
+import { isLocaleSetting, setLocale as applyLocale, t } from "$lib/i18n/index.svelte";
+import { logger } from "$lib/shared/services/logger.svelte";
 import { debounce } from "$lib/shared/utils/debounce";
 import { uuid } from "$lib/shared/utils/uuid";
-import type { LocaleSetting, RightPanelTab, Settings, Shortcut } from "$lib/types";
+import type { LocaleSetting, Settings, Shortcut } from "$lib/types";
 
 export const PRESET_SHORTCUTS: Shortcut[] = [
   { id: "claude", label: "Claude", command: "claude", iconKey: "claude" },
@@ -133,11 +134,11 @@ const DEFAULTS: Settings = {
     hermes: true,
   },
   confirmCloseThread: true,
-  rightPanel: null,
   gitSplitFraction: 0.5,
   gitAutoFetch: true,
   gitAutoFetchSeconds: 180,
   mobileLayout: false,
+  layoutPinned: false,
   motionMode: "system",
   locale: "system",
   setupCompleted: false,
@@ -147,11 +148,24 @@ const DEFAULTS: Settings = {
 
 // First-run guess: touch-primary, narrow screens (a phone TWA/PWA) default to
 // the mobile layout. The toggle in Appearance overrides it permanently after.
+function isMotionMode(value: unknown): value is Settings["motionMode"] {
+  return value === "system" || value === "on" || value === "off";
+}
+
+const MOBILE_LAYOUT_QUERY = "(pointer: coarse) and (max-width: 899px)";
+
+/**
+ * Whether this device wants the mobile layout right now.
+ *
+ * One media query rather than a coarse-pointer check plus a JS width read: the
+ * two could disagree, and only a query can be listened to. `watchFormFactor`
+ * below is what keeps an unpinned layout honest when the window is resized or
+ * the device is rotated.
+ */
 function detectMobileDefault(): boolean {
   if (typeof window === "undefined") return false;
   try {
-    const coarse = window.matchMedia?.("(pointer: coarse)")?.matches ?? false;
-    return coarse && window.innerWidth < 900;
+    return window.matchMedia?.(MOBILE_LAYOUT_QUERY)?.matches ?? false;
   } catch {
     return false;
   }
@@ -159,13 +173,6 @@ function detectMobileDefault(): boolean {
 
 export const GIT_AUTOFETCH_MIN_SECONDS = 30;
 export const GIT_AUTOFETCH_MAX_SECONDS = 3600;
-
-function migrateRightPanel(stored: Record<string, unknown>): RightPanelTab {
-  const raw = stored.rightPanel;
-  if (raw === "git" || raw === "explorer" || raw === "todo" || raw === null) return raw;
-  if (stored.gitPanelOpen === true) return "git";
-  return DEFAULTS.rightPanel;
-}
 
 export function parseCommand(input: string): { cmd: string; args: string[] } {
   const tokens: string[] = [];
@@ -198,9 +205,9 @@ const DEVICE_FIELDS = [
   "sidebarWidth",
   "sidebarCollapsed",
   "uiScalePercent",
-  "rightPanel",
   "gitSplitFraction",
   "mobileLayout",
+  "layoutPinned",
   "motionMode",
   "locale",
 ] as const;
@@ -290,7 +297,6 @@ class SettingsStore {
           typeof stored.confirmCloseThread === "boolean"
             ? stored.confirmCloseThread
             : DEFAULTS.confirmCloseThread,
-        rightPanel: migrateRightPanel(raw),
         gitSplitFraction:
           typeof stored.gitSplitFraction === "number" &&
           stored.gitSplitFraction > 0 &&
@@ -326,9 +332,17 @@ class SettingsStore {
           typeof stored.setupCompleted === "boolean"
             ? stored.setupCompleted
             : inheritedSetup,
-        // Device-scoped; the localStorage override below is the real source.
-        motionMode: DEFAULTS.motionMode,
+        // Device-scoped: the localStorage override below is the real source, and
+        // these two only matter as a one-shot migration from the era when the
+        // whole blob was persisted together.
+        motionMode: isMotionMode(stored.motionMode)
+          ? stored.motionMode
+          : DEFAULTS.motionMode,
         locale: isLocaleSetting(stored.locale) ? stored.locale : DEFAULTS.locale,
+        layoutPinned:
+          typeof stored.layoutPinned === "boolean"
+            ? stored.layoutPinned
+            : DEFAULTS.layoutPinned,
       };
       // Device fields come from localStorage, overriding the backend blob. If
       // there is none yet, seed it from what the blob carried (one-shot
@@ -345,19 +359,21 @@ class SettingsStore {
         // sticks; a manual toggle later overrides it for good.
         if (dev.mobileLayout === undefined) {
           this.state.mobileLayout = detectMobileDefault();
+          this.state.layoutPinned = false;
           this.persistDeviceNow();
         }
       } else {
         // No device blob yet: this machine's first run. Pick a sensible layout
         // from the form factor before seeding localStorage.
         this.state.mobileLayout = detectMobileDefault();
+        this.state.layoutPinned = false;
         this.persistDeviceNow();
       }
       if (migratedShortcuts.changed || backfilledSetup) {
         await this.persist();
       }
     } catch (err) {
-      console.error("loadSettings failed:", err);
+      logger.error("settings", "loadSettings failed", String(err));
     }
     // Push the hydrated locale before the first paint that follows: waiting on
     // an $effect would render one frame in the browser locale first.
@@ -386,8 +402,8 @@ class SettingsStore {
       for (const k of DEVICE_FIELDS) delete ws[k];
       await saveSettings(ws as unknown as Settings);
     } catch (err) {
-      console.error("saveSettings failed:", err);
-      notifications.error("Failed to save settings");
+      logger.error("settings", "saveSettings failed", String(err));
+      notifications.error(t("settings.saveFailed"));
     }
   }
 
@@ -398,7 +414,7 @@ class SettingsStore {
     try {
       localStorage.setItem(DEVICE_KEY, JSON.stringify(d));
     } catch (err) {
-      console.error("layout persist failed:", err);
+      logger.error("settings", "layout persist failed", String(err));
     }
   }
 
@@ -413,14 +429,16 @@ class SettingsStore {
   async setPowershellNewline(value: boolean) {
     this.state.powershellNewline = value;
     await this.persist();
-    notifications.success(value ? "PowerShell newline on" : "PowerShell newline off");
+    notifications.success(
+      value ? t("settings.psNewlineOn") : t("settings.psNewlineOff"),
+    );
   }
 
   async setPowershellNoProfile(value: boolean) {
     this.state.powershellNoProfile = value;
     await this.persist();
     notifications.success(
-      value ? "PowerShell profile skipped (-NoProfile)" : "PowerShell profile loaded",
+      value ? t("settings.psNoProfileOn") : t("settings.psNoProfileOff"),
     );
   }
 
@@ -431,7 +449,11 @@ class SettingsStore {
     // from the PATH alone, which is what a shell picked mid-session would
     // otherwise do until the app restarts.
     if (id) void backend().shell.warmShell(id).catch(() => {});
-    notifications.success(id ? `Default shell: ${id}` : "Default shell: none");
+    notifications.success(
+      id
+        ? t("settings.defaultShellSet", { name: id })
+        : t("settings.defaultShellNone"),
+    );
   }
 
   async setDefaultShellIdQuiet(id: string | null) {
@@ -451,10 +473,35 @@ class SettingsStore {
     this.persistDeviceNow();
   }
 
+  // A choice, unlike the first-run guess: from here the layout stops following
+  // the form factor.
   setMobileLayout(value: boolean) {
-    if (this.state.mobileLayout === value) return;
+    if (this.state.mobileLayout === value && this.state.layoutPinned) return;
     this.state.mobileLayout = value;
+    this.state.layoutPinned = true;
     this.persistDeviceNow();
+  }
+
+  /**
+   * Keep an unpinned layout following the device.
+   *
+   * The form factor used to be read once, on the very first run, and written
+   * straight to localStorage. A coarse-pointer tablet wider than the threshold
+   * was then stuck on the PC layout for the life of the install. Returns a
+   * cleanup for the media-query listener.
+   */
+  watchFormFactor(): () => void {
+    if (typeof window === "undefined") return () => {};
+    const query = window.matchMedia?.(MOBILE_LAYOUT_QUERY);
+    if (!query) return () => {};
+    const apply = () => {
+      if (this.state.layoutPinned) return;
+      if (this.state.mobileLayout === query.matches) return;
+      this.state.mobileLayout = query.matches;
+      this.persistDeviceNow();
+    };
+    query.addEventListener("change", apply);
+    return () => query.removeEventListener("change", apply);
   }
 
   setMotionMode(value: Settings["motionMode"]) {
@@ -510,7 +557,7 @@ class SettingsStore {
     };
     this.state.shortcuts.push(shortcut);
     await this.persist();
-    notifications.success(`Added ${shortcut.label}`);
+    notifications.success(t("settings.shortcutAdded", { label: shortcut.label }));
     return shortcut;
   }
 
@@ -522,14 +569,18 @@ class SettingsStore {
     if (patch.iconKey !== undefined) s.iconKey = patch.iconKey;
     if (patch.iconColor !== undefined) s.iconColor = patch.iconColor;
     await this.persist();
-    notifications.success("Shortcut saved");
+    notifications.success(t("settings.shortcutSaved"));
   }
 
   async removeShortcut(id: string) {
     const s = this.state.shortcuts.find((x) => x.id === id);
     this.state.shortcuts = this.state.shortcuts.filter((x) => x.id !== id);
     await this.persist();
-    notifications.success(`Removed ${s?.label ?? "shortcut"}`);
+    notifications.success(
+      s
+        ? t("settings.shortcutRemoved", { label: s.label })
+        : t("settings.shortcutRemovedUnnamed"),
+    );
   }
 
   async setSetupCompleted(val: boolean) {
@@ -563,7 +614,7 @@ class SettingsStore {
     this.state.shortcuts = structuredClone(PRESET_SHORTCUTS);
     this.state.seededPresets = [...BACKFILL_PRESET_IDS];
     await this.persist();
-    notifications.success("Shortcuts reset to defaults");
+    notifications.success(t("settings.shortcutsReset"));
   }
 
   setIdleTimeoutMinutes(value: number) {
@@ -586,6 +637,15 @@ class SettingsStore {
     await this.persist();
   }
 
+  // The app-wide default behind Project > Worktrees. It was hydrated, read by
+  // thread/api.ts when a thread is born, and had no setter and no UI: pinned on,
+  // changeable only one project at a time.
+  async setThreadWorktrees(value: boolean) {
+    if (this.state.threadWorktrees === value) return;
+    this.state.threadWorktrees = value;
+    await this.persist();
+  }
+
   async setAgentTodoAccess(value: boolean) {
     if (this.state.agentTodoAccess === value) return;
     this.state.agentTodoAccess = value;
@@ -597,12 +657,6 @@ class SettingsStore {
     if (this.state.todoPromptTemplate === next) return;
     this.state.todoPromptTemplate = next;
     await this.persist();
-  }
-
-  setRightPanel(tab: RightPanelTab) {
-    if (this.state.rightPanel === tab) return;
-    this.state.rightPanel = tab;
-    this.persistDeviceNow();
   }
 
   setGitSplitFraction(value: number) {

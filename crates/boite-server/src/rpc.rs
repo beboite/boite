@@ -435,6 +435,23 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
             Ok(json!({ "name": name, "color": color }))
         }
 
+        // Which OS the threads run on. The device drawing the UI cannot work
+        // this out for itself: a browser has no way to ask, and a Windows
+        // desktop driving this boite would answer for its own machine and then
+        // pick a Windows shell out of a Linux list.
+        "system.platform" => {
+            let os = if cfg!(target_os = "windows") {
+                "windows"
+            } else if cfg!(target_os = "macos") {
+                "macos"
+            } else if cfg!(target_os = "linux") {
+                "linux"
+            } else {
+                "unknown"
+            };
+            Ok(json!({ "platform": os }))
+        }
+
         "shell.default" => {
             let s = blocking(shell::default_shell_blocking).await?;
             Ok(json!({ "shell": s }))
@@ -654,6 +671,12 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
             Ok(json!({ "bytes": written }))
         }
 
+        // Fires one notification down every configured path so a remote user can
+        // tell "nothing happened" apart from "nothing was configured". Its only
+        // caller is scripts/server-smoke.mjs: no client calls it, because the
+        // frontend has no method for it (a settings button would need one added
+        // to the remote backend's capability surface first). Kept because the
+        // smoke script is how a fresh deployment gets checked.
         "notify.test" => {
             let title = params
                 .get("title")

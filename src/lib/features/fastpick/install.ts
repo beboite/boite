@@ -1,5 +1,6 @@
 import { app } from "$lib/app/store.svelte";
 import { notifications } from "$lib/features/notifications/store.svelte";
+import { t } from "$lib/i18n/index.svelte";
 import { launchAgent } from "$lib/features/thread/api";
 import type { Thread } from "$lib/types";
 
@@ -49,7 +50,7 @@ async function run(
   const project =
     app.projects.find((p) => p.id === app.currentProjectId) ?? app.projects[0] ?? null;
   if (!project) {
-    notifications.error("Add a project first");
+    notifications.error(t("fastpick.addProjectFirst"));
     return null;
   }
   return launchAgent(project, { cmd: command.cmd, args: command.args, label, iconKey: null });

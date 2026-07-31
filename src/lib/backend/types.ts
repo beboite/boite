@@ -25,7 +25,7 @@ import type {
   SearchHit,
 } from "$lib/features/explorer/api";
 import type { FileVersions, TextFile } from "$lib/features/editor/api";
-import type { ShellOption } from "$lib/storage/platform.svelte";
+import type { Platform, ShellOption } from "$lib/storage/platform.svelte";
 import type { LogEntry, LogLevel } from "$lib/shared/services/logger.svelte";
 
 // Output arrives as raw bytes regardless of transport. The Tauri channel
@@ -232,6 +232,17 @@ export interface ProjectApi {
    * limit is enforced where the folder is made, not where it is requested.
    */
   createFolder(path: string): Promise<void>;
+}
+
+export interface SystemApi {
+  /**
+   * The OS of the machine the threads run on, never of the device drawing the
+   * UI. A phone has no Tauri runtime to ask and would answer "unknown", and a
+   * Windows desktop driving a Linux boite would answer for itself: both leave
+   * the shell list, the default shell and the path separators keyed to the wrong
+   * machine. "unknown" only when the backend genuinely cannot say.
+   */
+  platform(): Promise<Platform>;
 }
 
 export interface ShellApi {
@@ -570,6 +581,14 @@ export interface PushApi {
 // title arrive as control events; the client only projects them.
 export interface BackendCaps {
   clientStatus: boolean;
+  /**
+   * Whether `log` actually records and returns this app's own events. False on
+   * remote: the log file belongs to the desktop install, and the transport has
+   * no arm for it. The panel needs to be able to ask, because an empty list and
+   * "this is a device-local feature" look identical on screen and a caller that
+   * sniffs `kind` would break the day a second transport grows one.
+   */
+  appLogs: boolean;
 }
 
 // Server-pushed control plane (remote only). Loosely typed so the store can
@@ -605,6 +624,7 @@ export interface Backend {
   readonly explorer: ExplorerApi;
   readonly editor: EditorApi;
   readonly project: ProjectApi;
+  readonly system: SystemApi;
   readonly shell: ShellApi;
   readonly fastpick: FastpickApi;
   readonly scope: ScopeApi;

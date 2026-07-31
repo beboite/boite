@@ -1,5 +1,6 @@
 import { platform as detectPlatform } from "@tauri-apps/plugin-os";
 import { backendFor } from "$lib/backend";
+import { logger } from "$lib/shared/services/logger.svelte";
 import type { WorkspaceOrigin } from "$lib/types";
 
 // Keyed by origin ("default" covers the classic single-backend modes): in
@@ -31,7 +32,7 @@ export async function getDefaultShell(origin?: WorkspaceOrigin): Promise<string>
   try {
     shell = await backendFor(origin).shell.defaultShell();
   } catch (err) {
-    console.error("default_shell failed:", err);
+    logger.warn("shell", "default_shell failed, using the platform fallback", String(err));
     shell = fallback();
   }
   cached.set(key, shell);

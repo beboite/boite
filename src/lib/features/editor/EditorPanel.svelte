@@ -71,6 +71,12 @@
     </div>
   </div>
 
+  <div
+    id="editor-panel"
+    role="tabpanel"
+    aria-labelledby={active ? `editor-tab-${active.id}` : undefined}
+    class="flex min-h-0 flex-1 flex-col"
+  >
   {#if !active}
     <div
       class="flex flex-1 flex-col items-center justify-center gap-2 text-muted-foreground/70"
@@ -111,14 +117,19 @@
           <RotateCw class="size-3.5" />
         </button>
       {/if}
-      {#if active.content !== active.savedContent}
-        <span class="text-foreground/80">●</span>
+      {#if active.dirty}
+        <span
+          class="text-foreground/80"
+          role="img"
+          aria-label={t("editor.unsaved")}
+          title={t("editor.unsaved")}>●</span
+        >
       {/if}
       <button
         type="button"
         class="rounded p-1 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:opacity-40"
         onclick={save}
-        disabled={active.isReadonly || active.content === active.savedContent || active.saving}
+        disabled={active.isReadonly || !active.dirty || active.saving}
         title={t("editor.saveWithShortcut")}
         aria-label={t("editor.save")}
       >
@@ -141,7 +152,7 @@
       <div
         class="flex flex-1 items-center justify-center px-4 text-center text-xs text-muted-foreground"
       >
-        Binary file — diff not shown.
+        {t("editor.binaryDiff")}
       </div>
     {:else}
       <div class="min-h-0 flex-1">
@@ -157,4 +168,5 @@
       </div>
     {/if}
   {/if}
+  </div>
 </div>

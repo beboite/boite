@@ -1,8 +1,8 @@
 <script lang="ts">
   import { paneStore, countLeaves } from "./store.svelte";
   import type { LayoutNode, PaneGroup } from "./types";
-  import { MIN_RATIO } from "./types";
-  import PaneHeader from "./PaneHeader.svelte";
+  import { MIN_PANE_PX, MIN_RATIO, SPLITTER_PX } from "./types";
+  import PaneHeader, { headerId } from "./PaneHeader.svelte";
   import PaneContentView from "./PaneContentView.svelte";
   import { t } from "$lib/i18n/index.svelte";
 
@@ -46,11 +46,16 @@
     return {
       update(next: string) {
         if (next === currentId) return;
+        // The previous id's rect described this box, and this box is about to
+        // describe someone else. Leaving it behind is what let a drop match a
+        // pane that had moved on.
+        paneStore.clearRect(currentId);
         currentId = next;
         schedule();
       },
       destroy() {
         if (frame !== null) cancelAnimationFrame(frame);
+        paneStore.clearRect(currentId);
         observer?.disconnect();
         window.removeEventListener("resize", schedule);
       },
@@ -68,10 +73,17 @@
     const parent = el.parentElement as HTMLElement | null;
     if (!parent) return;
     const parentRect = parent.getBoundingClientRect();
-    const total = dir === "row" ? parentRect.width : parentRect.height;
-    if (total <= 0) return;
     const nodeAtSplit = findSplit(group.root, splitId);
     if (!nodeAtSplit) return;
+    // The ratios only share out what is left after the splitters, so measuring
+    // against the full parent made every delta short by SPLITTER_PX*(n-1)/total:
+    // the divider lagged behind the cursor, and the gap grew with the pane count.
+    const gutters = SPLITTER_PX * (nodeAtSplit.children.length - 1);
+    const total = (dir === "row" ? parentRect.width : parentRect.height) - gutters;
+    if (total <= 0) return;
+    // Ratios are flex-grow values, so they are proportional rather than
+    // normalised; the pixel width of one cell is total * ratio / ratioTotal.
+    const ratioTotal = nodeAtSplit.ratios.reduce((sum, r) => sum + r, 0) || 1;
     const startRatios = [...nodeAtSplit.ratios];
     const startCoord = dir === "row" ? e.clientX : e.clientY;
     el.setPointerCapture(e.pointerId);
@@ -81,7 +93,15 @@
       const delta = (coord - startCoord) / total;
       let a = startRatios[index] + delta;
       let b = startRatios[index + 1] - delta;
-      const min = MIN_RATIO;
+      // Whichever floor bites first: the fraction, or the pixel width below which
+      // a terminal stops being readable. A ratio r takes total*r/allRatios pixels,
+      // so the pixel floor in ratio terms is MIN_PANE_PX*allRatios/total. Capped
+      // at half the pair's share, or a narrow window would pin the divider.
+      const pairSum = startRatios[index] + startRatios[index + 1];
+      const min = Math.min(
+        Math.max(MIN_RATIO, (MIN_PANE_PX * ratioTotal) / total),
+        pairSum / 2,
+      );
       if (a < min) {
         b -= min - a;
         a = min;
@@ -126,7 +146,16 @@
     <!-- A terminal alone in its group grows no chrome: the sidebar already names
          it. Anything else needs its header, if only for the close button. -->
     {@const showHeader = multi || !isThread}
-    <div class="pane-leaf" data-pane-leaf={node.paneId}>
+    <!-- Named by its own header when it has one, which is how a screen reader
+         says which pane it just entered. The rail this replaced was a tablist
+         whose body carried aria-labelledby; panes are not tabs (they are all on
+         screen at once), so the same job is done with a labelled group. -->
+    <div
+      class="pane-leaf"
+      data-pane-leaf={node.paneId}
+      role={showHeader ? "group" : undefined}
+      aria-labelledby={showHeader ? headerId(node.paneId) : undefined}
+    >
       {#if showHeader}
         <PaneHeader
           paneId={node.paneId}
@@ -221,6 +250,7 @@
     min-height: 0;
   }
   .splitter {
+    position: relative;
     flex: 0 0 4px;
     align-self: stretch;
     border: 0;
@@ -228,6 +258,17 @@
     background: transparent;
     cursor: col-resize;
     transition: background var(--dur-1) var(--ease-out-quint);
+    touch-action: none;
+  }
+  /* Same 6px-per-side grab area the sidebar and side-panel handles use, grown
+     into the gutter rather than over the terminals on either side. */
+  .splitter::after {
+    content: "";
+    position: absolute;
+    inset: 0 -3px;
+  }
+  .splitter.column::after {
+    inset: -3px 0;
   }
   .splitter.column {
     cursor: row-resize;

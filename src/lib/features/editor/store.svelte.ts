@@ -2,6 +2,7 @@ import { readTextFile, writeTextFile, gitFileVersions } from "./api";
 import { notifications } from "$lib/features/notifications/store.svelte";
 import { confirmDialog } from "$lib/shared/components/confirm.svelte";
 import { logger } from "$lib/shared/services/logger.svelte";
+import { t } from "$lib/i18n/index.svelte";
 import { basename } from "$lib/shared/utils/path";
 
 export type DiffMode = "staged" | "unstaged";
@@ -25,6 +26,12 @@ export interface FileBuffer extends BaseBuffer {
   saving: boolean;
   /** Disk content diverged while the buffer holds unsaved edits. */
   externalChange: boolean;
+  /**
+   * Cached `content !== savedContent`. Comparing the two in the markup meant a
+   * full-document comparison per tab per render; every write path below keeps
+   * this in step instead.
+   */
+  dirty: boolean;
 }
 
 export interface DiffBuffer extends BaseBuffer {
@@ -58,7 +65,7 @@ class EditorStore {
   }
 
   isDirty(b: Buffer): boolean {
-    return b.kind === "file" && b.content !== b.savedContent;
+    return b.kind === "file" && b.dirty;
   }
 
   async openFile(path: string): Promise<string> {
@@ -86,6 +93,7 @@ class EditorStore {
       isReadonly: false,
       saving: false,
       externalChange: false,
+      dirty: false,
     };
     this.buffers = [...this.buffers, buf];
     this.activeId = id;
@@ -99,17 +107,20 @@ class EditorStore {
         content: file.content,
         savedContent: file.content,
         isReadonly: file.isReadonly || file.lossy,
+        dirty: false,
       });
       if (file.lossy) {
         notifications.error(
-          `${basename(normalized)} is not UTF-8; opened read-only to avoid corrupting it`,
+          t("editor.notUtf8", { name: basename(normalized) }),
         );
       }
     } catch (err) {
       const msg = String(err);
       logger.warn("editor", `read_text_file failed for ${normalized}`, msg);
       this.patch(id, { loading: false, error: msg });
-      notifications.error(`Cannot open ${basename(normalized)}: ${msg}`);
+      notifications.error(
+        t("editor.openFailed", { name: basename(normalized), error: msg }),
+      );
     }
     return id;
   }
@@ -127,11 +138,12 @@ class EditorStore {
         fresh.externalChange = false;
         return;
       }
-      if (fresh.content === fresh.savedContent) {
+      if (!fresh.dirty) {
         fresh.content = file.content;
         fresh.savedContent = file.content;
         fresh.isReadonly = file.isReadonly || file.lossy;
         fresh.externalChange = false;
+        fresh.dirty = false;
       } else {
         fresh.externalChange = true;
       }
@@ -159,9 +171,10 @@ class EditorStore {
         savedContent: file.content,
         isReadonly: file.isReadonly || file.lossy,
         externalChange: false,
+        dirty: false,
       });
     } catch (err) {
-      notifications.error(`Reload failed: ${err}`);
+      notifications.error(t("editor.reloadFailed", { error: String(err) }));
     }
   }
 
@@ -250,16 +263,17 @@ class EditorStore {
     const b = this.buffers.find((x) => x.id === id);
     if (!b || b.kind !== "file") return;
     b.content = content;
+    b.dirty = content !== b.savedContent;
   }
 
   async save(id: string): Promise<boolean> {
     const b = this.buffers.find((x) => x.id === id);
     if (!b || b.kind !== "file") return false;
     if (b.isReadonly) {
-      notifications.error("File is read-only");
+      notifications.error(t("editor.readOnlyError"));
       return false;
     }
-    if (b.content === b.savedContent) return true;
+    if (!b.dirty) return true;
     this.patch(id, { saving: true });
     try {
       // Lost-update guard: someone (an agent, most likely) may have written
@@ -287,14 +301,15 @@ class EditorStore {
         fresh.savedContent = fresh.content;
         fresh.saving = false;
         fresh.externalChange = false;
+        fresh.dirty = false;
       }
-      notifications.success(`Saved ${b.displayName}`);
+      notifications.success(t("editor.saved", { name: b.displayName }));
       return true;
     } catch (err) {
       const msg = String(err);
       logger.warn("editor", `write_text_file failed for ${b.path}`, msg);
       this.patch(id, { saving: false });
-      notifications.error(`Save failed: ${msg}`);
+      notifications.error(t("editor.saveFailed", { error: msg }));
       return false;
     }
   }

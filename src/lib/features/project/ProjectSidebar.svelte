@@ -55,6 +55,46 @@
 
   let showArchived = $state(false);
 
+  // Anything a cursor reveals has to be permanently on screen where there is no
+  // cursor at all.
+  const mobile = $derived(settings.state.mobileLayout);
+
+  /**
+   * Arrow keys over the projects and their threads.
+   *
+   * The list is the app's main navigation and Tab was the only way through it,
+   * which on a real sidebar means a dozen presses to reach the third thread. One
+   * marked control per row carries the walk; the per-row actions stay in the tab
+   * order behind it.
+   */
+  function onListKeydown(e: KeyboardEvent) {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Home" && e.key !== "End") {
+      return;
+    }
+    const container = e.currentTarget as HTMLElement;
+    const rows = Array.from(container.querySelectorAll<HTMLElement>("[data-nav-row]"));
+    if (rows.length === 0) return;
+    const active = document.activeElement as HTMLElement | null;
+    let at = active ? rows.indexOf(active) : -1;
+    if (at < 0 && active) {
+      // Focus is on a row's own action (the status dot, the close X): the walk
+      // continues from the row that action belongs to.
+      const block = active.closest("[data-thread-row], [data-project-row]");
+      if (block) at = rows.findIndex((r) => block.contains(r));
+    }
+    e.preventDefault();
+    const next =
+      e.key === "Home"
+        ? 0
+        : e.key === "End"
+          ? rows.length - 1
+          : e.key === "ArrowDown"
+            ? Math.min(at + 1, rows.length - 1)
+            : Math.max(at < 0 ? 0 : at - 1, 0);
+    rows[next]?.focus();
+  }
+
   type RowSnapshot = { id: string; top: number; height: number };
   type SourceRect = { left: number; top: number; width: number; height: number };
   type DragState = {
@@ -341,6 +381,14 @@
     const activeGroupId = app.activeThreadId
       ? paneStore.groupOf(app.activeThreadId)?.id ?? null
       : null;
+    // No active group means no pane is on screen. Every hidden group still has a
+    // mounted PaneShell measuring the full viewport, so without this the drop
+    // matched an arbitrary invisible pane and merged the thread into a group the
+    // user could not see.
+    if (!activeGroupId) {
+      paneStore.dropPreview = null;
+      return false;
+    }
     for (const [targetPaneId, rect] of Object.entries(paneStore.rects)) {
       if (
         targetPaneId === drag.id ||
@@ -358,7 +406,7 @@
       if (!group || group.projectId !== drag.projectId) {
         continue;
       }
-      if (activeGroupId && group.id !== activeGroupId) {
+      if (group.id !== activeGroupId) {
         continue;
       }
       const sourceGroup = paneStore.groupOf(drag.id);
@@ -439,11 +487,11 @@
     const preview = paneStore.dropPreview;
     if (preview) {
       if (preview.refused) {
-        notifications.error(`Max ${MAX_LEAVES} panes per group`);
+        notifications.error(t("sidebar.maxPanes", { count: MAX_LEAVES }));
         return;
       }
       const ok = paneStore.splitInto(preview.targetPaneId, drag.id, preview.side);
-      if (!ok) notifications.error("Couldn't split pane");
+      if (!ok) notifications.error(t("sidebar.splitFailed"));
       return;
     }
 
@@ -592,7 +640,9 @@
       disabled: !thread.ptyId,
     });
     items.push({
-      label: thread.keepAwake ? "Allow auto-sleep" : "Keep awake",
+      label: thread.keepAwake
+        ? t("sidebar.allowAutoSleep")
+        : t("sidebar.keepAwake"),
       action: () => {
         app.toggleThreadKeepAwake(thread.id);
       },
@@ -636,9 +686,11 @@
     const project = app.projects.find((p) => p.id === id);
     if (!project) return;
     const ok = await confirmDialog.ask({
-      title: "Remove project?",
-      message: `Remove ${projectDisplayName(project)}? All its threads will be killed and dropped.`,
-      confirmLabel: "Remove project",
+      title: t("sidebar.removeProjectTitle"),
+      message: t("sidebar.removeProjectMsg", {
+        name: projectDisplayName(project),
+      }),
+      confirmLabel: t("sidebar.removeProject"),
       danger: true,
     });
     if (ok) onRemoveProject(id);
@@ -818,6 +870,7 @@
   <div
     class="flex-1 overflow-y-auto px-2 pb-2"
     role="list"
+    onkeydown={onListKeydown}
     onclick={(e) => {
       if (e.target === e.currentTarget) app.clearSelection();
     }}
@@ -883,7 +936,11 @@
             ? `inset 2px 0 0 0 ${workspace.info.color || "var(--color-success)"}`
             : undefined}
           title={isRemoteOrigin
-            ? `On ${workspace.info.name || "boite"}${boiteOffline ? " (disconnected)" : ""}`
+            ? boiteOffline
+              ? t("sidebar.onBoiteOffline", {
+                  name: workspace.info.name || "boite",
+                })
+              : t("sidebar.onBoite", { name: workspace.info.name || "boite" })
             : undefined}
           oncontextmenu={(e) => openProjectContextMenu(project, e)}
           use:longPress={{
@@ -924,6 +981,7 @@
           {:else}
             <button
               type="button"
+              data-nav-row
               class="min-w-0 flex-1 truncate text-left text-base font-medium leading-[19px] text-foreground/90 transition group-hover/project:text-foreground"
               title={project.cwd}
               onclick={() => {
@@ -951,9 +1009,13 @@
               <ArchiveRestore class="size-3.5" />
             </button>
           {:else}
+            <!-- Was cursor-only: transparent text until group-hover, which on a
+                 phone or from the keyboard is never. -->
             <button
               type="button"
-              class="rounded p-1 text-muted-foreground/0 transition hover:bg-accent hover:text-foreground group-hover/project:text-muted-foreground"
+              class="rounded p-1 transition hover:bg-accent hover:text-foreground focus-visible:text-foreground group-focus-within/project:text-muted-foreground {mobile
+                ? 'text-muted-foreground'
+                : 'text-muted-foreground/0 group-hover/project:text-muted-foreground'}"
               onclick={(e) => openProjectContextMenu(project, e)}
               data-drag-block
               aria-label={t("sidebar.projectOptions")}
@@ -1006,30 +1068,40 @@
                 }}
                 role="listitem"
               >
+                <!-- The row used to be a div role="button" with three real
+                     buttons inside it, which is a control nested in a control:
+                     Space activated the thread and scrolled the list at once,
+                     and the actions were unreachable from the row's own
+                     semantics. The row is now one button that fills the card,
+                     with the actions as siblings painting over it. -->
                 <div
-                  class="thread-card flex cursor-pointer items-center gap-2 rounded-sm px-1.5 py-1 transition {isActive
+                  class="thread-card relative flex cursor-pointer items-center gap-2 rounded-sm px-1.5 py-1 transition {isActive
                     ? 'bg-accent text-foreground'
                     : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground'}"
                   class:just-finished={justFinished(thread.id)}
                   class:mcp-touch={mcpPulse.has(thread.id)}
-                  role="button"
-                  tabindex="0"
-                  onclick={() => {
-                    if (consumeDragClick(thread.id)) return;
-                    // Opening it is reading it: the glow has said what it had to
-                    // say and must not still be going when the user comes back.
-                    clearFinished(thread.id);
-                    onActivateThread(thread.id);
-                  }}
-                  onauxclick={(e) => threadAuxClick(thread.id, e)}
-                  onkeydown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      clearFinished(thread.id);
-                      onActivateThread(thread.id);
-                    }
-                  }}
                 >
+                  {#if !(renaming && renaming.kind === "thread" && renaming.id === thread.id)}
+                    <button
+                      type="button"
+                      data-nav-row
+                      class="absolute inset-0 cursor-pointer rounded-sm"
+                      aria-label={thread.title ?? thread.label}
+                      onclick={() => {
+                        if (consumeDragClick(thread.id)) return;
+                        // Opening it is reading it: the glow has said what it had
+                        // to say and must not still be going when the user comes
+                        // back.
+                        clearFinished(thread.id);
+                        onActivateThread(thread.id);
+                      }}
+                      onauxclick={(e) => threadAuxClick(thread.id, e)}
+                    ></button>
+                  {/if}
+                  <!-- The glyph is itself a button (keep-awake), so it sits
+                       beside the row button rather than inside it. Its own CSS
+                       is position:relative, which is what keeps it above the
+                       overlay that fills the card. -->
                   <ThreadGlyph
                     status={displayThreadStatus(thread)}
                     iconKey={thread.iconKey}
@@ -1047,7 +1119,7 @@
                          input that brings its own box metrics makes the row
                          taller than the label it replaced, and the list jumps. -->
                     <input
-                      class="min-w-0 flex-1 rounded-sm bg-[var(--color-surface-2)] px-1 py-0 text-base leading-[19px] text-foreground outline-none ring-1 ring-foreground/25"
+                      class="relative min-w-0 flex-1 rounded-sm bg-[var(--color-surface-2)] px-1 py-0 text-base leading-[19px] text-foreground outline-none ring-1 ring-foreground/25"
                       bind:value={renaming.value}
                       use:selectOnMount
                       onclick={(e) => e.stopPropagation()}
@@ -1061,9 +1133,14 @@
                          and the row would resize on edit wherever the two
                          disagree — Inter is only a preference here, nothing
                          ships it. -->
+                    <!-- Painted over the row button, and inert to the cursor so a
+                         click on the name is still a click on the row. Hidden
+                         from assistive tech because the row button already
+                         carries this name. -->
                     <span
-                      class="min-w-0 flex-1 truncate text-left text-base leading-[19px]"
+                      class="pointer-events-none relative min-w-0 flex-1 truncate text-left text-base leading-[19px]"
                       title={thread.title ?? thread.label}
+                      aria-hidden="true"
                     >
                       {thread.title ?? thread.label}
                     </span>
@@ -1071,11 +1148,17 @@
                   <!-- The logo used to live here, opposite the status dot, and
                        swapped for the close button on hover. The glyph on the
                        left carries both now, which leaves this end for the one
-                       thing that is a control rather than a description. -->
+                       thing that is a control rather than a description.
+                       Revealed on hover, and permanently where there is no hover
+                       to give: on a touch layout the X was a control that never
+                       appeared. Focus-within counts too, so a keyboard walking
+                       the row reaches it. -->
                   <button
                     type="button"
                     data-no-drag
-                    class="flex size-4 shrink-0 items-center justify-center rounded-xs text-muted-foreground/70 opacity-0 transition hover:bg-danger/20 hover:text-danger group-hover/thread:opacity-100 focus-visible:opacity-100"
+                    class="relative flex size-4 shrink-0 items-center justify-center rounded-xs text-muted-foreground/70 transition hover:bg-danger/20 hover:text-danger focus-visible:opacity-100 group-focus-within/thread:opacity-100 {mobile
+                      ? 'opacity-100'
+                      : 'opacity-0 group-hover/thread:opacity-100'}"
                     onclick={(e) => {
                       e.stopPropagation();
                       requestRemoveThread(thread.id);
@@ -1126,7 +1209,7 @@
       keepAwake={(threadDragGhost.thread.keepAwake ?? false) && !!threadDragGhost.thread.ptyId}
     />
     <span
-      class="min-w-0 flex-1 truncate text-left text-base"
+      class="min-w-0 flex-1 truncate text-left text-base leading-[19px]"
       title={threadDragGhost.thread.title ?? threadDragGhost.thread.label}
     >
       {threadDragGhost.thread.title ?? threadDragGhost.thread.label}
@@ -1158,13 +1241,20 @@
      statement, and it is why the dashed rail down the thread list could go. */
   .project-block {
     transform-origin: left center;
-    will-change: transform;
     border: 1px solid var(--color-border);
     border-radius: var(--radius-md);
     background: color-mix(in srgb, var(--color-surface-2) 45%, transparent);
     transition:
       border-color var(--dur-2) var(--ease-out-quint),
       background-color var(--dur-2) var(--ease-out-quint);
+  }
+  /* will-change only while a drag is on. Left on permanently it gave every
+     project and every thread row its own compositor layer at rest, and each of
+     those layers is also a containing block for any position:fixed descendant.
+     The class comes from body.dragging-card, which the drag already sets. */
+  :global(body.dragging-card) .project-block,
+  :global(body.dragging-card) .thread-row {
+    will-change: transform;
   }
   .project-block:hover {
     border-color: color-mix(
@@ -1201,7 +1291,6 @@
   }
   .thread-row {
     transform-origin: left center;
-    will-change: transform;
   }
   .project-row,
   .thread-card {
@@ -1219,7 +1308,7 @@
   }
   .drag-ghost {
     pointer-events: none;
-    z-index: 9999;
+    z-index: var(--z-popover);
   }
   .thread-row.source > .thread-card {
     opacity: 0;

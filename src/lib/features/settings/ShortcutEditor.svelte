@@ -6,6 +6,8 @@
   import { cliDetection } from "./cliDetection.svelte";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
   import { resolveIconKey } from "$lib/shared/icons/detect";
+  import { confirmDialog } from "$lib/shared/components/confirm.svelte";
+  import { registerEscape, restoreFocus } from "$lib/shared/keyboard/overlay";
   import Plus from "@lucide/svelte/icons/plus";
   import Check from "@lucide/svelte/icons/check";
   import Trash2 from "@lucide/svelte/icons/trash-2";
@@ -21,8 +23,18 @@
   function onUpdate(id: string, patch: Partial<Omit<Shortcut, "id">>) {
     void settings.updateShortcut(id, patch);
   }
-  function onRemove(id: string) {
-    void settings.removeShortcut(id);
+  // Both destroyers ask first. A shortcut is a line the user typed and a reset
+  // takes the whole bar back to the presets, and neither leaves anything behind
+  // to undo it from.
+  async function onRemove(shortcut: Shortcut) {
+    const ok = await confirmDialog.ask({
+      title: t("shortcuts.removeConfirmTitle"),
+      message: t("shortcuts.removeConfirmMessage", { label: shortcut.label }),
+      confirmLabel: t("shortcuts.remove"),
+      danger: true,
+    });
+    if (!ok) return;
+    await settings.removeShortcut(shortcut.id);
   }
   function onAdd(init: Partial<Shortcut>) {
     void settings.addShortcut(init);
@@ -30,33 +42,74 @@
   function onReorder(orderedIds: string[]) {
     void settings.reorderShortcuts(orderedIds);
   }
-  function onReset() {
-    void settings.resetShortcutsToPresets();
+  async function onReset() {
+    const ok = await confirmDialog.ask({
+      title: t("shortcuts.resetConfirmTitle"),
+      message: t("shortcuts.resetConfirmMessage"),
+      confirmLabel: t("common.reset"),
+      danger: true,
+    });
+    if (!ok) return;
+    await settings.resetShortcutsToPresets();
   }
 
-  // Distinguishable at 14–16px on the dark surfaces, which rules out anything
-  // too dark or too desaturated.
-  const ICON_COLORS = [
-    "#d97757",
-    "#e5484d",
-    "#f5a524",
-    "#f2e14c",
-    "#46a758",
-    "#2ec4b6",
-    "#3b9eff",
-    "#6e56cf",
-    "#c04ad8",
-    "#ff8fab",
-    "#a1a1aa",
-    "#fafafa",
+  // The swatches live in app.css (--color-icon-*), plus the palette's own two
+  // text colours: "#a1a1aa" and "#fafafa" were --color-muted-foreground and
+  // --color-foreground written out by hand.
+  //
+  // Resolved to hex here rather than stored as var() strings, because the chosen
+  // value is persisted per shortcut and shown in the swatch's own tooltip: a
+  // token reference in the settings file would not match the hex already saved
+  // by earlier versions, and the picker would lose its "selected" ring.
+  const ICON_COLOR_TOKENS = [
+    "--color-icon-rust",
+    "--color-icon-red",
+    "--color-icon-amber",
+    "--color-icon-yellow",
+    "--color-icon-green",
+    "--color-icon-teal",
+    "--color-icon-blue",
+    "--color-icon-indigo",
+    "--color-icon-purple",
+    "--color-icon-pink",
+    "--color-muted-foreground",
+    "--color-foreground",
   ];
+  let iconColors = $state<string[]>([]);
 
   let colorPickerFor = $state<string | null>(null);
+  let colorPopoverEl = $state<HTMLElement | null>(null);
 
   function setIconColor(id: string, color: string | null) {
     colorPickerFor = null;
     onUpdate(id, { iconColor: color });
   }
+
+  /**
+   * The popover closes the way every other floating surface in the app closes:
+   * Escape through the shared stack, and a pointer landing anywhere else. It
+   * used to be dismissed only by picking a colour, so tabbing away or opening
+   * something else left it hanging over the rows below.
+   */
+  $effect(() => {
+    if (!colorPickerFor) return;
+    const previous = document.activeElement as HTMLElement | null;
+    const release = registerEscape(() => (colorPickerFor = null));
+    // Capture phase: the swatches stop their own click, and a pointerdown on the
+    // trigger has to reach the trigger so it can toggle rather than reopen.
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (!target || colorPopoverEl?.contains(target)) return;
+      if ((target as HTMLElement).closest?.("[data-color-trigger]")) return;
+      colorPickerFor = null;
+    };
+    window.addEventListener("pointerdown", onPointerDown, true);
+    return () => {
+      release();
+      window.removeEventListener("pointerdown", onPointerDown, true);
+      restoreFocus(previous, colorPopoverEl);
+    };
+  });
 
   // Detection runs where the shortcuts will run. On a remote boite that is the
   // server, so naming it beats claiming "this computer".
@@ -68,6 +121,10 @@
 
   onMount(() => {
     void cliDetection.ensure();
+    const style = getComputedStyle(document.documentElement);
+    iconColors = ICON_COLOR_TOKENS.map((name) =>
+      style.getPropertyValue(name).trim(),
+    ).filter(Boolean);
   });
 
   // Pointer-driven reorder, same mechanism as the thread sidebar: the drag
@@ -102,7 +159,10 @@
 
   // don't start a drag from an interactive control inside the row
   function isDragBlocked(el: HTMLElement | null): boolean {
-    return !!el?.closest("input, button, textarea, select, a");
+    const hit = el?.closest("input, button, textarea, select, a");
+    // The grip is one of those controls now, and it is the one control whose
+    // whole job is to start the drag, so the blanket veto cannot apply to it.
+    return !!hit && !hit.hasAttribute("data-grip");
   }
 
   function rowPointerDown(id: string, index: number, event: PointerEvent) {
@@ -183,16 +243,47 @@
     onReorder(ids);
   }
 
-  // The grip is a span, not a button, so the pointer drag still starts on it —
-  // isDragBlocked would veto a real button. Arrow keys are the keyboard path to
-  // the same reorder.
-  function gripKeydown(index: number, event: KeyboardEvent) {
+  /**
+   * The keyboard half of the reorder, on a control that says what it is.
+   *
+   * The grip was a span wearing role="button" whose only handler was the arrow
+   * keys: it announced as a button, so Enter and Space were the two keys anyone
+   * would try, and both did nothing. As a real toggle button, activating it
+   * grabs the row the way pressing the pointer down on it does, arrows move it
+   * either way, and Escape puts it back down.
+   */
+  let grabbedId = $state<string | null>(null);
+  // Read aloud after a move: the rows swap silently, and the one that moved is
+  // no longer where the reader last was. Position rather than a sentence, so it
+  // needs no translation of its own.
+  let reorderStatus = $state("");
+
+  function gripKeydown(shortcut: Shortcut, index: number, event: KeyboardEvent) {
+    if (event.key === "Enter" || event.key === " ") {
+      // Both would otherwise reach the button's own activation and, for Space,
+      // scroll the settings pane.
+      event.preventDefault();
+      grabbedId = grabbedId === shortcut.id ? null : shortcut.id;
+      return;
+    }
+    if (event.key === "Escape" && grabbedId === shortcut.id) {
+      grabbedId = null;
+      return;
+    }
     const delta = event.key === "ArrowUp" ? -1 : event.key === "ArrowDown" ? 1 : 0;
     if (delta === 0) return;
     event.preventDefault();
     const to = index + delta;
     if (to < 0 || to >= shortcuts.length) return;
     moveTo(index, to);
+    // Carrying it is what an arrow press means, whether or not it was grabbed
+    // first, so the row that is moving looks moved either way.
+    grabbedId = shortcut.id;
+    reorderStatus = t("shortcuts.movedTo", {
+      label: shortcut.label,
+      index: to + 1,
+      total: shortcuts.length,
+    });
   }
 
   function rowOffset(index: number): number {
@@ -229,7 +320,7 @@
   <button
     type="button"
     class="flex items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-1.5 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
-    onclick={onReset}
+    onclick={() => void onReset()}
     title={t("shortcuts.resetTitle")}
   >
     <RotateCcw class="size-3" />
@@ -267,36 +358,57 @@
         ? 'select-none'
         : ''} {drag && drag.fromIndex !== i
         ? 'row-slide'
-        : 'row-grabbed'} {isDragged
+        : 'row-grabbed'} {isDragged || grabbedId === shortcut.id
         ? 'rounded-md border-transparent bg-[var(--color-surface-3)] shadow-lg ring-1 ring-foreground/15'
         : ''}"
     >
-      <span
-        class="flex size-4 cursor-grab items-center justify-center rounded text-muted-foreground/40 transition hover:text-muted-foreground focus-visible:text-foreground active:cursor-grabbing"
-        role="button"
-        tabindex="0"
+      <button
+        type="button"
+        data-grip
+        class="flex size-4 cursor-grab items-center justify-center rounded transition hover:text-muted-foreground focus-visible:text-foreground active:cursor-grabbing {grabbedId ===
+        shortcut.id
+          ? 'text-foreground'
+          : 'text-muted-foreground/40'}"
         aria-label={t("shortcuts.dragToReorder")}
+        aria-pressed={grabbedId === shortcut.id}
+        aria-keyshortcuts="ArrowUp ArrowDown"
         title={t("shortcuts.reorderHint")}
-        onkeydown={(e) => gripKeydown(i, e)}
+        onkeydown={(e) => gripKeydown(shortcut, i, e)}
+        onblur={() => {
+          if (grabbedId === shortcut.id) grabbedId = null;
+        }}
       >
         <GripVertical class="size-3" />
-      </span>
-      <div class="relative flex size-6 items-center justify-center">
+      </button>
+      <!-- focusout closes what a pointer leaving cannot: tabbing out of the last
+           swatch used to leave the popover open over the rows below. -->
+      <div
+        class="relative flex size-6 items-center justify-center"
+        onfocusout={(e) => {
+          if (colorPickerFor !== shortcut.id) return;
+          const next = e.relatedTarget as Node | null;
+          if (next && e.currentTarget.contains(next)) return;
+          colorPickerFor = null;
+        }}
+      >
         <button
           type="button"
+          data-color-trigger
           class="flex size-6 items-center justify-center rounded-md border border-transparent transition hover:border-border hover:bg-[var(--color-surface-3)]"
           onclick={() => (colorPickerFor = colorPickerFor === shortcut.id ? null : shortcut.id)}
           aria-label={t("shortcuts.changeIconColor")}
+          aria-expanded={colorPickerFor === shortcut.id}
           title={t("shortcuts.changeIconColor")}
         >
           <ShortcutIcon {iconKey} size={16} color={shortcut.iconColor ?? null} />
         </button>
         {#if colorPickerFor === shortcut.id}
           <div
-            class="absolute left-0 top-7 z-50 w-max rounded-lg border border-border bg-[var(--color-surface-3)] p-2 shadow-lg"
+            bind:this={colorPopoverEl}
+            class="surface-popover absolute left-0 top-7 z-[var(--z-popover)] w-max p-2"
           >
             <div class="grid grid-cols-6 gap-1">
-              {#each ICON_COLORS as c (c)}
+              {#each iconColors as c (c)}
                 <button
                   type="button"
                   class="size-5 rounded-md border transition hover:scale-110 {shortcut.iconColor ===
@@ -339,7 +451,7 @@
       <button
         type="button"
         class="flex size-7 items-center justify-center rounded-md text-muted-foreground/60 transition hover:bg-danger/15 hover:text-danger"
-        onclick={() => onRemove(shortcut.id)}
+        onclick={() => void onRemove(shortcut)}
         aria-label={t("shortcuts.removeShortcut")}
         title={t("shortcuts.remove")}
       >
@@ -348,6 +460,8 @@
     </div>
   {/each}
 </div>
+
+<p class="sr-only" role="status" aria-live="polite">{reorderStatus}</p>
 
 <div class="mt-4 border-t border-border/40 pt-4">
   <div class="mb-3 flex items-end justify-between gap-3">

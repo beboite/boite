@@ -1,5 +1,5 @@
-import { platform as detectPlatform } from "@tauri-apps/plugin-os";
 import { backend } from "$lib/backend";
+import { logger } from "$lib/shared/services/logger.svelte";
 
 export type Platform = "windows" | "macos" | "linux" | "unknown";
 
@@ -11,6 +11,14 @@ export interface ShellOption {
   iconKey: string | null;
 }
 
+// The OS of the machine the threads run on, and the shells that machine offers.
+// Both come from the active backend rather than from this device: they are read
+// together (the shell list only makes sense against the OS that produced it), and
+// asking the device gave the wrong answer twice over. In a browser there is no
+// device OS to ask at all, so `isMacOS` stayed false and Cmd routing never
+// happened; on a Windows desktop driving a Linux boite the OS was Windows and the
+// shell list was the boite's, so the default shell was picked out of a Windows
+// preference order against a set of Linux shells.
 class PlatformStore {
   current = $state<Platform>("unknown");
   shells = $state<ShellOption[]>([]);
@@ -19,26 +27,26 @@ class PlatformStore {
   async init() {
     if (this.ready) return;
     try {
-      const raw = detectPlatform();
-      if (raw === "windows" || raw === "macos" || raw === "linux") {
-        this.current = raw;
-      }
+      this.current = await backend().system.platform();
     } catch (err) {
-      console.error("platform detect failed:", err);
+      logger.error("platform", "detect failed", err);
     }
     try {
       this.shells = await backend().shell.availableShells();
     } catch (err) {
-      console.error("available_shells failed:", err);
+      logger.error("platform", "available_shells failed", err);
     }
     this.ready = true;
   }
 
-  // Re-fetch shells on the next init (the remote workspace exposes its own,
-  // a Linux server's list differs from the desktop's).
+  // Re-read both on the next init. `current` is cleared with the shells rather
+  // than left behind: a workspace switch changes which machine is answering, and
+  // keeping the previous OS while replacing its shell list is the mismatch this
+  // store exists to avoid.
   reset() {
     this.ready = false;
     this.shells = [];
+    this.current = "unknown";
   }
 
   get isWindows() {

@@ -17,6 +17,7 @@ import { app } from "$lib/app/store.svelte";
 import { workspace } from "$lib/backend";
 import { logger } from "$lib/shared/services/logger.svelte";
 import { notifications } from "$lib/features/notifications/store.svelte";
+import { t } from "$lib/i18n/index.svelte";
 import { settings, parseCommand } from "$lib/features/settings/store.svelte";
 import { CLI_PRESETS } from "$lib/features/settings/cliPresets";
 import { resolveIconKey } from "$lib/shared/icons/detect";
@@ -28,7 +29,6 @@ import { anchorProjectId, openPane } from "$lib/features/panes/open";
 import { paneStore } from "$lib/features/panes/store.svelte";
 import { classifyBrowserUrl } from "$lib/features/browser/url";
 import { confirmDialog } from "$lib/shared/components/confirm.svelte";
-import { t } from "$lib/i18n/index.svelte";
 import type { DropSide, PaneContent } from "$lib/features/panes/types";
 import type { IconKey } from "$lib/types";
 
@@ -136,7 +136,9 @@ async function handleMove(req: MoveRequest) {
     note: req.note ?? undefined,
   });
   if (!result.ok) {
-    notifications.error(`Could not move the thread: ${result.reason}`);
+    notifications.error(
+      t("thread.moveFailed", { error: result.reason ?? "" }),
+    );
     logger.warn("agent-request", "move refused", result.reason ?? "");
   }
 }
@@ -150,14 +152,18 @@ async function handleCreate(req: CreateRequest) {
     git: req.git,
   });
   if (!result.ok || !result.project) {
-    notifications.error(`Could not create ${req.name}: ${result.reason}`);
+    notifications.error(
+      t("project.createFailed", { name: req.name, error: result.reason ?? "" }),
+    );
     logger.warn("agent-request", "create refused", result.reason ?? "");
     return;
   }
   if (result.reused === "unarchived") {
-    notifications.success(`${result.project.name} was archived; brought it back.`);
+    notifications.success(
+      t("project.unarchivedBack", { name: result.project.name }),
+    );
   } else if (!result.reused) {
-    notifications.success(`Created ${result.project.name}`);
+    notifications.success(t("project.created", { name: result.project.name }));
   }
   if (!req.move || !req.threadId) return;
 
@@ -168,14 +174,19 @@ async function handleCreate(req: CreateRequest) {
     silent: true,
   });
   if (!moved.ok) {
-    notifications.error(`Created ${result.project.name}, but the thread stayed put: ${moved.reason}`);
+    notifications.error(
+      t("project.createdThreadStayed", {
+        name: result.project.name,
+        error: moved.reason ?? "",
+      }),
+    );
   }
 }
 
 async function handleSpawn(req: SpawnRequest) {
   const project = app.projects.find((p) => p.id === req.projectId);
   if (!project) {
-    notifications.error("An agent asked for a terminal in a project that is gone");
+    notifications.error(t("thread.spawnProjectGone"));
     return;
   }
   // The caller, not the thread on screen: an agent that says nothing about
@@ -184,21 +195,23 @@ async function handleSpawn(req: SpawnRequest) {
   const caller = app.threadById(req.callerThreadId);
   const launch = resolveLaunch(req.agent, caller?.iconKey ?? "claude");
   if (!launch) {
-    notifications.error(`No agent called "${req.agent}" to start`);
+    notifications.error(t("thread.spawnNoAgent", { agent: req.agent ?? "" }));
     return;
   }
   const prompt = req.prompt?.trim();
   const thread = await launchAgent(project, launch);
   if (!thread) return;
   if (prompt) app.setPendingPrompt(thread.id, prompt);
-  notifications.success(`${launch.label} opened in ${project.name}`);
+  notifications.success(
+    t("thread.spawnedIn", { label: launch.label, project: project.name }),
+  );
   // Said out loud rather than logged. Only some CLIs take an opening
   // instruction on the command line; for the rest the new thread starts at a
   // bare prompt with no idea what it was opened for, and the agent that asked
   // for it has already been told the hand-off worked.
   if (prompt && !takesOpeningPrompt(launch.iconKey)) {
     notifications.error(
-      `${launch.label} takes no opening prompt, so it started without one. Its instructions were: ${prompt}`,
+      t("thread.spawnNoPrompt", { label: launch.label, prompt }),
     );
   }
 }

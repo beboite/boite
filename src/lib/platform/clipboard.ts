@@ -3,30 +3,31 @@ import { hasTauri } from "$lib/backend/env";
 // Clipboard that works in the desktop shell (Tauri plugin) and in a plain
 // browser / installed PWA (Async Clipboard API). Dynamic imports keep the
 // Tauri plugin out of the web bundle.
+//
+// Failures are raised, never swallowed. Only the caller knows what the user was
+// trying to do, so it owns the message and the log line: a rejection caught and
+// dropped here is what turned a clipboard the OS refused into a Ctrl+V that
+// appeared to work and a "Path copied" toast for a path nobody could paste.
 export async function writeText(text: string): Promise<void> {
-  try {
-    if (hasTauri()) {
-      const m = await import("@tauri-apps/plugin-clipboard-manager");
-      await m.writeText(text);
-    } else if (typeof navigator !== "undefined" && navigator.clipboard) {
-      await navigator.clipboard.writeText(text);
-    }
-  } catch (err) {
-    console.error("clipboard write failed:", err);
+  if (hasTauri()) {
+    const m = await import("@tauri-apps/plugin-clipboard-manager");
+    await m.writeText(text);
+    return;
+  }
+  if (typeof navigator !== "undefined" && navigator.clipboard) {
+    await navigator.clipboard.writeText(text);
   }
 }
 
+// "" only where there is no clipboard to read at all, which is not a failure:
+// a platform without one has nothing to report.
 export async function readText(): Promise<string> {
-  try {
-    if (hasTauri()) {
-      const m = await import("@tauri-apps/plugin-clipboard-manager");
-      return await m.readText();
-    }
-    if (typeof navigator !== "undefined" && navigator.clipboard?.readText) {
-      return await navigator.clipboard.readText();
-    }
-  } catch (err) {
-    console.error("clipboard read failed:", err);
+  if (hasTauri()) {
+    const m = await import("@tauri-apps/plugin-clipboard-manager");
+    return await m.readText();
+  }
+  if (typeof navigator !== "undefined" && navigator.clipboard?.readText) {
+    return await navigator.clipboard.readText();
   }
   return "";
 }

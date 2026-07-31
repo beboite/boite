@@ -28,6 +28,13 @@
   --color-surface-2: #1a1a1a;
   --color-surface-3: #232323;
 
+  /* Selection highlight, shared with the terminal (features/terminal/theme.ts
+     reads it) so selecting text in a pane and in the chrome look the same. */
+  --color-selection: rgba(228, 228, 231, 0.18);
+
+  /* Modal scrim. Four dialogs had invented four (black/50, /55, /65, blurred
+     and not), for one role. */
+  --color-scrim: rgba(0, 0, 0, 0.6);
   /* ---- Type scale -------------------------------------------------------
      In rem, deliberately: the zoom setting writes a percentage onto
      <html>'s font-size, so a size in px is a size the slider cannot reach.
@@ -89,6 +96,80 @@
 
   --font-mono: "JetBrains Mono", "SF Mono", "Cascadia Code", Consolas, "Liberation Mono", Menlo, monospace;
 
+  /* Font sizes, in rem so the UI scale reaches them.
+     The scale is applied as a root font-size (routes/+layout.svelte), which only
+     moves rem. Every size in the app used to be an absolute `text-[13px]`, so
+     dragging the zoom slider grew every box and left the text inside it exactly
+     where it was. Named after the px they resolve to at 100%, so the conversion
+     stayed reviewable one call site at a time. */
+  /* An attention pulse, not a transition: slow enough to read as breathing, and
+     so the one duration the --dur-* ramp has no step for. `theme/motion.ts`
+     owns the on/off gate; this owns how long. */
+  --dur-pulse: 1.2s;
+
+  /* One layer scale. Seven improvised values (5/10/30/50/100/9999/99999) meant
+     ordering between a menu, a modal, a sheet and a toast was decided by which
+     file happened to mount first. Toasts sit above modals on purpose: a toast
+     explaining why an action failed must not be dimmed under the dialog that
+     raised it. */
+  /* Below --z-chrome on purpose: this one paints inside a pane, under the
+     resize handles and the in-pane controls. */
+  --z-pane-overlay: 5;
+  --z-chrome: 10;
+  --z-drop: 30;
+  --z-dropdown: 40;
+  --z-modal: 50;
+  --z-sheet: 60;
+  --z-popover: 70;
+  --z-toast: 80;
+  --z-outline: 90;
+
+  /* One recipe per floating surface. Menus and popovers had spread to four
+     radii, five shadows and three backgrounds for a single role, so a context
+     menu and the picker next to it read as two different products. Tailwind's
+     own shadows are tuned for white pages (10% black over #0a0a0a is invisible),
+     which is why the elevation ramp is spelled out above instead. The recipes
+     themselves are further down, built from --radius-* and --shadow-e*. */
+
+  /* Editor syntax roles the 16 ANSI slots have no word for. Everything else in
+     features/editor/theme.ts is the --color-term-* set, so a diff and the
+     terminal that produced it finally agree on a colour. */
+  /* Between --color-term-bright-black (too dark to read on the background) and
+     --color-muted-foreground (bright enough to compete with the code). */
+  --color-syntax-comment: #71717a;
+  /* Numbers need a hue of their own: sharing green with strings hides the one
+     place a literal's type matters, and yellow is spoken for by types. */
+  --color-syntax-number: #f78c6c;
+
+  /* Icon tints offered by the shortcut colour picker
+     (features/settings/ShortcutEditor.svelte reads them at runtime, so the
+     stored value stays a plain hex). Distinguishable at 14-16px on the stacked
+     surfaces, which rules out anything dark or desaturated. */
+  --color-icon-rust: #d97757;
+  --color-icon-red: #e5484d;
+  --color-icon-amber: #f5a524;
+  --color-icon-yellow: #f2e14c;
+  --color-icon-green: #46a758;
+  --color-icon-teal: #2ec4b6;
+  --color-icon-blue: #3b9eff;
+  --color-icon-indigo: #6e56cf;
+  --color-icon-purple: #c04ad8;
+  --color-icon-pink: #ff8fab;
+
+  /* Git graph lanes (features/git/GitGraph.svelte). One hue per branch, picked
+     by hashing its name so a branch keeps its lane across refreshes. Held apart
+     from the status colours on purpose: --color-warning already means "local,
+     not pushed" in the same strip. */
+  --color-lane-remote: #38bdf8;
+  --color-lane-1: #f472b6;
+  --color-lane-2: #86efac;
+  --color-lane-3: #a78bfa;
+  --color-lane-4: #fb7185;
+  --color-lane-5: #2dd4bf;
+  --color-lane-6: #f97316;
+  --color-lane-7: #60a5fa;
+  --color-lane-8: #c084fc;
+
   /* Terminal (xterm) palette — single source of truth, read at runtime by
      features/terminal/theme.ts. */
   --color-term-foreground: #e4e4e7;
@@ -125,10 +206,13 @@
 }
 
 html,
-body,
-#svelte {
+body {
   height: 100%;
   margin: 0;
+  /* Tells the engine the app is dark, which is what makes native widgets follow:
+     without it a <select> drew a white Windows dropdown and autofill painted its
+     own light background over the fields. */
+  color-scheme: dark;
   background: transparent;
   color: var(--color-foreground);
   font-family:
@@ -161,12 +245,16 @@ html[data-motion="reduced"] *::before,
 html[data-motion="reduced"] *::after {
   animation-duration: 0.01ms !important;
   animation-delay: 0ms !important;
+  /* Without this an infinite animation (the pane pulse, the connection ring)
+     restarts every frame forever, burning style recalc for something that no
+     longer moves. */
+  animation-iteration-count: 1 !important;
   transition-duration: 0.01ms !important;
   transition-delay: 0ms !important;
 }
 
 ::selection {
-  background: rgba(255, 255, 255, 0.18);
+  background: var(--color-selection);
 }
 
 /* Keyboard-only focus ring tuned to the zinc theme; without this the UA
@@ -201,6 +289,32 @@ html[data-motion="reduced"] *::after {
 }
 *::-webkit-scrollbar-corner {
   background: transparent;
+}
+
+/* The two floating-surface recipes, so a call site names the role instead of
+   re-picking a radius and a shadow. Anything that hangs off a control (context
+   menu, dropdown, picker, hover card) is a popover; anything that owns the
+   screen behind a scrim is a dialog. */
+@utility surface-popover {
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-e3);
+}
+@utility surface-dialog {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-e4);
+}
+
+/* For the short horizontal strips (tab strip, shortcut bar, mobile key bar):
+   the global scrollbar is 10px, which is a quarter of a 40px bar. */
+@utility hide-scrollbar {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 kbd.kbd {

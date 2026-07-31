@@ -2,44 +2,56 @@ import { EditorView } from "@codemirror/view";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { tags as t } from "@lezer/highlight";
 
+// The editor palette IS the terminal palette. It used to be a hardcoded Tokyo
+// Night set, so a diff and the shell that produced it agreed on no colour at
+// all, and its foreground was blue-tinted against the app's own.
+//
+// Every entry is a token reference rather than a resolved value: CodeMirror
+// emits real stylesheets (both EditorView.theme and HighlightStyle go through
+// style-mod), so var() resolves at paint and editing app.css moves the editor
+// with no rebuild. xterm cannot do this: it measures glyphs on a canvas and
+// needs literal strings, which is why features/terminal/theme.ts resolves the
+// same tokens through getComputedStyle instead.
 const palette = {
   bg: "var(--color-background)",
   surface: "var(--color-surface)",
   surface2: "var(--color-surface-2)",
-  surface3: "var(--color-surface-3)",
   border: "var(--color-border)",
-  fg: "#c0caf5",
-  muted: "#565f89",
-  cursor: "#c0caf5",
-  selection: "rgba(125, 207, 255, 0.18)",
-  activeLine: "rgba(192, 202, 245, 0.04)",
-  search: "rgba(125, 207, 255, 0.30)",
-  invalid: "#f7768e",
+  fg: "var(--color-term-foreground)",
+  // Gutter and fold placeholder: the terminal's own dim colour, which is what
+  // "present but not the content" already means one pane over.
+  dim: "var(--color-term-bright-black)",
+  cursor: "var(--color-term-cursor)",
+  selection: "var(--color-selection)",
+  activeLine: "color-mix(in srgb, var(--color-term-foreground) 4%, transparent)",
+  selectionMatch:
+    "color-mix(in srgb, var(--color-term-foreground) 10%, transparent)",
+  search: "color-mix(in srgb, var(--color-term-yellow) 25%, transparent)",
+  searchOutline: "color-mix(in srgb, var(--color-term-yellow) 55%, transparent)",
+  bracket: "color-mix(in srgb, var(--color-term-cyan) 18%, transparent)",
+  bracketOutline: "color-mix(in srgb, var(--color-term-cyan) 40%, transparent)",
+  invalid: "var(--color-danger)",
 
-  comment: "#565f89",
-  string: "#9ece6a",
-  stringEscape: "#b4f9f8",
-  regexp: "#b4f9f8",
-  number: "#ff9e64",
-  bool: "#ff9e64",
-  keyword: "#bb9af7",
-  controlKeyword: "#bb9af7",
-  operator: "#89ddff",
-  type: "#2ac3de",
-  className: "#2ac3de",
-  namespace: "#73daca",
-  variable: "#c0caf5",
-  property: "#73daca",
-  function: "#7aa2f7",
-  definition: "#7aa2f7",
-  tag: "#f7768e",
-  attribute: "#bb9af7",
-  punctuation: "#89ddff",
-  meta: "#7dcfff",
-  heading: "#7aa2f7",
-  link: "#7dcfff",
-  emphasis: "#bb9af7",
-  strong: "#ff9e64",
+  comment: "var(--color-syntax-comment)",
+  string: "var(--color-term-green)",
+  stringEscape: "var(--color-term-bright-cyan)",
+  regexp: "var(--color-term-bright-cyan)",
+  number: "var(--color-syntax-number)",
+  keyword: "var(--color-term-magenta)",
+  operator: "var(--color-term-cyan)",
+  type: "var(--color-term-yellow)",
+  namespace: "var(--color-term-yellow)",
+  variable: "var(--color-term-foreground)",
+  property: "var(--color-term-bright-blue)",
+  function: "var(--color-term-blue)",
+  tag: "var(--color-term-red)",
+  attribute: "var(--color-term-bright-magenta)",
+  punctuation: "var(--color-term-cyan)",
+  meta: "var(--color-term-cyan)",
+  heading: "var(--color-term-blue)",
+  link: "var(--color-term-bright-blue)",
+  emphasis: "var(--color-term-magenta)",
+  strong: "var(--color-term-yellow)",
 };
 
 export const boiteTheme = EditorView.theme(
@@ -50,9 +62,12 @@ export const boiteTheme = EditorView.theme(
       height: "100%",
     },
     ".cm-scroller": {
-      fontFamily:
-        'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace',
-      fontSize: "12.5px",
+      // Both from the design system: code in the editor was a third mono stack
+      // with no JetBrains Mono in it, and its size was an absolute 12.5px that
+      // the UI scale slider could not reach (the scale is a root font-size, so
+      // only rem moves).
+      fontFamily: "var(--font-mono)",
+      fontSize: "var(--text-base)",
       lineHeight: "1.5",
     },
     ".cm-content": {
@@ -67,7 +82,7 @@ export const boiteTheme = EditorView.theme(
       },
     ".cm-gutters": {
       backgroundColor: palette.bg,
-      color: palette.muted,
+      color: palette.dim,
       borderRight: `1px solid ${palette.border}`,
     },
     ".cm-activeLineGutter": {
@@ -84,11 +99,13 @@ export const boiteTheme = EditorView.theme(
     ".cm-foldPlaceholder": {
       backgroundColor: palette.surface2,
       borderColor: palette.border,
-      color: palette.muted,
+      color: palette.dim,
     },
     ".cm-tooltip": {
-      backgroundColor: palette.surface,
+      backgroundColor: palette.surface2,
       border: `1px solid ${palette.border}`,
+      borderRadius: "var(--radius-md)",
+      boxShadow: "var(--shadow-e3)",
       color: palette.fg,
     },
     ".cm-panels": {
@@ -97,14 +114,14 @@ export const boiteTheme = EditorView.theme(
     },
     ".cm-searchMatch": {
       backgroundColor: palette.search,
-      outline: "1px solid rgba(125, 207, 255, 0.55)",
+      outline: `1px solid ${palette.searchOutline}`,
     },
     ".cm-matchingBracket, &.cm-focused .cm-matchingBracket": {
-      backgroundColor: "rgba(125, 207, 255, 0.15)",
-      outline: "1px solid rgba(125, 207, 255, 0.40)",
+      backgroundColor: palette.bracket,
+      outline: `1px solid ${palette.bracketOutline}`,
     },
     ".cm-selectionMatch": {
-      backgroundColor: "rgba(192, 202, 245, 0.10)",
+      backgroundColor: palette.selectionMatch,
     },
   },
   { dark: true },
@@ -129,7 +146,7 @@ const highlight = HighlightStyle.define([
   { tag: t.atom, color: palette.number },
 
   { tag: t.keyword, color: palette.keyword },
-  { tag: t.controlKeyword, color: palette.controlKeyword },
+  { tag: t.controlKeyword, color: palette.keyword },
   { tag: t.moduleKeyword, color: palette.keyword },
   { tag: t.modifier, color: palette.keyword },
   { tag: t.self, color: palette.tag },
@@ -137,15 +154,15 @@ const highlight = HighlightStyle.define([
   { tag: t.operator, color: palette.operator },
 
   { tag: t.typeName, color: palette.type },
-  { tag: t.className, color: palette.className },
+  { tag: t.className, color: palette.type },
   { tag: t.namespace, color: palette.namespace },
 
   { tag: t.variableName, color: palette.variable },
   { tag: t.propertyName, color: palette.property },
   { tag: t.function(t.variableName), color: palette.function },
   { tag: t.function(t.propertyName), color: palette.function },
-  { tag: t.definition(t.variableName), color: palette.definition },
-  { tag: t.definition(t.propertyName), color: palette.definition },
+  { tag: t.definition(t.variableName), color: palette.function },
+  { tag: t.definition(t.propertyName), color: palette.function },
   { tag: t.labelName, color: palette.function },
   { tag: t.constant(t.variableName), color: palette.number },
 

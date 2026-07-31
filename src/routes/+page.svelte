@@ -15,6 +15,7 @@
   import ConfirmHost from "$lib/shared/components/ConfirmHost.svelte";
   import BoiteLogo from "$lib/shared/components/BoiteLogo.svelte";
   import RemoteLogin from "$lib/features/workspace/RemoteLogin.svelte";
+  import ConnectionBanner from "$lib/features/workspace/ConnectionBanner.svelte";
   import FolderBrowser from "$lib/features/project/FolderBrowser.svelte";
   import { paneStore, threadLeavesOf } from "$lib/features/panes/store.svelte";
   import { panePresence } from "$lib/features/panes/open";
@@ -82,15 +83,16 @@
 
   // Colored inset outline marks the PURE remote workspace: green connected,
   // amber (pulsing) while connecting or dropped. Dynamic mode presents as
-  // Local, so it gets no outline — the boite shows through the sidebar
-  // accents instead.
-  const outlineClass = $derived(
-    workspace.mode !== "remote"
-      ? ""
-      : workspace.connection === "connected"
-        ? "ws-remote-ok"
-        : "ws-remote-warn",
-  );
+  // Local, so a healthy boite gets no outline there: it shows through the
+  // sidebar accents instead. An unhealthy one does: the mode-first test used to
+  // resolve to no class at all in dynamic mode, which left a dead boite looking
+  // exactly like a live one.
+  const outlineClass = $derived.by(() => {
+    if (workspace.connection !== "connected") {
+      return workspace.hasRemote ? "ws-remote-warn" : "";
+    }
+    return workspace.mode === "remote" ? "ws-remote-ok" : "";
+  });
 
   $effect(() => {
     void app.threads.length;
@@ -167,20 +169,26 @@
     await app.removeProject(projectId);
   }
 
+  // `activated` is both read and written by the four effects below, so a plain
+  // read made each of them depend on the map they were about to change: every
+  // activation scheduled one extra run of itself. The trigger stays tracked, the
+  // bookkeeping does not.
+  function markActivated(id: string) {
+    untrack(() => {
+      if (!activated[id]) activated[id] = true;
+    });
+  }
+
   $effect(() => {
     const id = app.activeThreadId;
-    if (id && app.hasThread(id) && !activated[id]) {
-      activated[id] = true;
-    }
+    if (id && app.hasThread(id)) markActivated(id);
   });
 
   $effect(() => {
     const g = paneStore.groups.find((x) => x.id === activeGroupId);
     if (!g) return;
     for (const leafId of paneStore.visibleThreads(activeGroupId)) {
-      if (!activated[leafId] && app.hasThread(leafId)) {
-        activated[leafId] = true;
-      }
+      if (app.hasThread(leafId)) markActivated(leafId);
     }
   });
 
@@ -190,23 +198,23 @@
     const requested = app.requestedActivations;
     if (requested.length === 0) return;
     for (const id of requested) {
-      if (!activated[id] && app.hasThread(id)) {
-        activated[id] = true;
-      }
+      if (app.hasThread(id)) markActivated(id);
     }
     untrack(() => app.clearRequestedActivations());
   });
 
   $effect(() => {
     const valid = new Set(app.threads.map((t) => t.id));
-    let dirty = false;
-    for (const id of Object.keys(activated)) {
-      if (!valid.has(id)) {
-        delete activated[id];
-        dirty = true;
+    untrack(() => {
+      let dirty = false;
+      for (const id of Object.keys(activated)) {
+        if (!valid.has(id)) {
+          delete activated[id];
+          dirty = true;
+        }
       }
-    }
-    if (dirty) activated = { ...activated };
+      if (dirty) activated = { ...activated };
+    });
   });
 
   onMount(() => prefetchWhenIdle(TerminalView));
@@ -241,16 +249,16 @@
   });
 
   $effect(() => {
-    if (!workspace.needsLogin && !settings.state.setupCompleted) {
+    if (app.ready && !settings.state.setupCompleted) {
       void SetupView.ensure();
     }
   });
 
   // Opening the Files or Git panel is the strongest signal that a file or a
   // diff is about to be opened; warm the editor before the click lands. Read
-  // off the panes now that the panels are panes: `settings.state.rightPanel`
-  // survives only as which of the three the titlebar button reaches for, and
-  // is set whether or not anything is open.
+  // off the panes: whether one of those panels is up is a question the pane
+  // tree answers, and the titlebar's own memory of which one is up whether or
+  // not anything is open.
   $effect(() => {
     if (panePresence("git") || panePresence("explorer")) {
       prefetchWhenIdle(EditorView);
@@ -258,8 +266,13 @@
   });
 </script>
 
+<!-- h-dvh, not h-screen: on a phone `100vh` is the large viewport, so with the
+     browser's URL bar showing, the shell was taller than the visible area and
+     `overflow-hidden` put MobileBottomBar below the fold with no way to reach
+     it. `w-full` rather than `w-screen` for the same reason on the other axis
+     (`100vw` includes the scrollbar gutter). -->
 <div
-  class="flex h-screen w-screen flex-col overflow-hidden bg-background"
+  class="flex h-dvh w-full flex-col overflow-hidden bg-background"
   class:mobile-mode={mobile}
 >
   <CloseGuard />
@@ -269,16 +282,26 @@
     <TitleBar />
   {/if}
   <FolderBrowser />
+  <!-- Above the keyed block, next to FolderBrowser: these two used to live
+       inside <main>, which the login and setup branches never render. A failed
+       connection raises a toast from the login screen, and there was no host to
+       draw it; a confirm asked from there never settled at all. -->
+  <ConfirmHost />
+  <Toaster />
 
   {#key workspace.epoch}
   {#if workspace.needsLogin}
     <div class="flex min-h-0 flex-1">
       <RemoteLogin />
     </div>
-  {:else if !settings.state.setupCompleted}
-    <!-- After login, never before: the wizard asks the backend which agents
-         are installed, and on a remote boite that answer only exists once the
-         connection is up. -->
+  {:else if app.ready && !settings.state.setupCompleted}
+    <!-- After the workspace is initialized, never before: the wizard asks the
+         backend which agents are installed, and on a remote boite that answer
+         only exists once the connection is up. `app.ready` is what says so.
+         `needsLogin` alone was not enough: a PWA that boots with an unreachable
+         boite is no longer sent to the login form, so the settings behind this
+         test are the unhydrated defaults and every such boot drew the wizard. -->
+
     {#if SetupView.current}
       {@const SetupComp = SetupView.current}
       <SetupComp />
@@ -482,12 +505,11 @@
           </div>
         {/if}
       {/if}
-      <!-- ConfirmHost first: both are z-50, so DOM order decides and toasts
-           must paint above the confirm backdrop, not dimmed under it. -->
-      <ConfirmHost />
-      <Toaster />
       <!-- Between the panes and the dialogs: an agent's news must not sit on
-           top of a question the user is being asked. -->
+           top of a question the user is being asked. --z-dropdown decides that
+           now rather than DOM order, which is why the confirm and toast hosts
+           could move out of <main> without this following them: they belong to
+           the whole app, this one belongs to the pane area. -->
       <TodoAchievement />
     </main>
 
@@ -499,20 +521,24 @@
     <MobileBottomBar />
   {/if}
 
-  {#if workspace.mode === "remote"}
+  {#if outlineClass}
     <div
       class="ws-outline {outlineClass}"
       style:--ws-color={workspace.info.color || "var(--color-success)"}
       aria-hidden="true"
     ></div>
   {/if}
+
+  <!-- The outline is 1.5px of colour and says nothing about what to do. This
+       carries the state and the retry. -->
+  <ConnectionBanner />
 </div>
 
 <style>
   .ws-outline {
     position: fixed;
     inset: 0;
-    z-index: 100;
+    z-index: var(--z-outline);
     pointer-events: none;
     /* Inset shadows follow border-radius, so this rounds the connection
        outline at the corners instead of squaring off the viewport. */
@@ -527,7 +553,7 @@
   }
   .ws-remote-warn {
     box-shadow: inset 0 0 0 1.5px var(--color-warning);
-    animation: ws-pulse 1.2s ease-in-out infinite;
+    animation: ws-pulse var(--dur-pulse) ease-in-out infinite;
   }
   @keyframes ws-pulse {
     50% {

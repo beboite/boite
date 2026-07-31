@@ -1,5 +1,6 @@
 <script lang="ts">
   import { fade, scale } from "svelte/transition";
+  import { t } from "$lib/i18n/index.svelte";
 
   type Props = {
     open: boolean;
@@ -15,8 +16,8 @@
     open,
     title,
     message = "",
-    confirmLabel = "Confirm",
-    cancelLabel = "Cancel",
+    confirmLabel = t("common.confirm"),
+    cancelLabel = t("common.cancel"),
     danger = false,
     onConfirm,
     onCancel,
@@ -24,15 +25,23 @@
 
   let dialogEl: HTMLDivElement | null = $state(null);
   let confirmBtn: HTMLButtonElement | null = $state(null);
+  let cancelBtn: HTMLButtonElement | null = $state(null);
 
   $effect(() => {
-    if (!open || !confirmBtn) return;
+    if (!open) return;
+    // A destructive dialog opens with the keyboard on Cancel. It used to open on
+    // Confirm, which put "kill every running agent and discard every unsaved
+    // buffer" one stray Enter away, and the guard meant to prevent that could
+    // not work: it only fired when focus was outside the dialog, and focus had
+    // just been moved inside it.
+    const target = danger ? cancelBtn : confirmBtn;
+    if (!target) return;
     // Captured before we steal focus and restored on close: otherwise
     // confirming leaves the keyboard on a removed button, which lands on
     // <body>, and the terminal you were typing in silently stops receiving
     // keys until you click it again.
     const previous = document.activeElement as HTMLElement | null;
-    confirmBtn.focus();
+    target.focus();
     return () => previous?.focus?.();
   });
 
@@ -48,15 +57,10 @@
       onCancel();
       return;
     }
-    if (e.key === "Enter") {
-      // Only when focus is inside the dialog: a held Enter in the terminal
-      // at open time must not instantly confirm a destructive action.
-      if (!dialogEl?.contains(document.activeElement)) return;
-      e.preventDefault();
-      e.stopPropagation();
-      onConfirm();
-      return;
-    }
+    // No window-level Enter handler. The dialog opens with one of its two
+    // buttons focused and a focused button already activates on Enter, so the
+    // handler that used to live here added nothing except a way for a keypress
+    // aimed somewhere else to confirm.
     if (e.key === "Tab") {
       // Minimal focus trap: keep Tab cycling inside the dialog.
       const focusables = dialogEl?.querySelectorAll<HTMLElement>("button");
@@ -83,7 +87,7 @@
 {#if open}
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <div
-    class="fixed inset-0 z-50 flex items-center justify-center bg-black/65 backdrop-blur-sm"
+    class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-[var(--color-scrim)] backdrop-blur-sm"
     role="dialog"
     aria-modal="true"
     aria-labelledby="confirm-title"
@@ -93,7 +97,7 @@
   >
     <div
       bind:this={dialogEl}
-      class="w-[360px] overflow-hidden rounded-xl border border-border bg-[var(--color-surface)] shadow-2xl"
+      class="surface-dialog w-[360px] overflow-hidden"
       transition:scale={{ duration: 140, start: 0.97 }}
     >
       <div class="px-5 py-4">
@@ -108,6 +112,7 @@
       </div>
       <footer class="flex justify-end gap-2 border-t border-border bg-[var(--color-titlebar)] px-5 py-3">
         <button
+          bind:this={cancelBtn}
           type="button"
           class="rounded-md px-3 py-1.5 text-xs text-muted-foreground transition hover:bg-accent hover:text-foreground"
           onclick={onCancel}

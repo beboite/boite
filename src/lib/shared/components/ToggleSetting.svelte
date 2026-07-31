@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { t } from "$lib/i18n/index.svelte";
+
   type Props = {
     label: string;
     description?: string;
@@ -11,14 +13,18 @@
     label,
     description = "",
     enabled,
-    onLabel = "On",
-    offLabel = "Off",
+    onLabel = t("common.on"),
+    offLabel = t("common.off"),
     onToggle,
   }: Props = $props();
 </script>
 
+<!-- role=switch, so the state is announced. It used to be a plain button whose
+     only account of being on was the word beside it and the pill's fill. -->
 <button
   type="button"
+  role="switch"
+  aria-checked={enabled}
   class="group flex w-full items-center justify-between gap-3 rounded-lg border border-border bg-[var(--color-surface)] px-3 py-2.5 text-left transition hover:border-foreground/25"
   onclick={onToggle}
 >

@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { paneStore, MAX_LEAVES } from "./store.svelte";
   import { t } from "$lib/i18n/index.svelte";
+  import { paneStore, MAX_LEAVES } from "./store.svelte";
 
   const preview = $derived(paneStore.dropPreview);
   const rect = $derived(

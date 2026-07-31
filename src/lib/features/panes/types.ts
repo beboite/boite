@@ -56,6 +56,17 @@ export type DropSide = "top" | "bottom" | "left" | "right";
 
 export const MAX_LEAVES = 4;
 export const MIN_RATIO = 0.12;
+/**
+ * Floor a pane in pixels, not only as a fraction of its parent.
+ *
+ * MIN_RATIO alone is 12% of whatever the parent happens to be. With both side
+ * panels open on a 720px window the main area is around 160px, so four panes
+ * clamped at roughly 19px each: a terminal too narrow to read a single word, and
+ * only recoverable by dragging the splitter back.
+ */
+export const MIN_PANE_PX = 120;
+/** Each splitter between two cells, in px. Must match `.splitter` flex-basis. */
+export const SPLITTER_PX = 4;
 
 /** A thread pane is named by its thread. See `PaneContent`. */
 export function threadPane(threadId: string): LayoutNode {

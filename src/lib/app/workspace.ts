@@ -1,6 +1,7 @@
 import { tick } from "svelte";
 import { backend, workspace } from "$lib/backend";
 import { hasTauri } from "$lib/backend/env";
+import { connectFailReason } from "$lib/backend/remote/socket";
 import { app } from "./store.svelte";
 import { settings } from "$lib/features/settings/store.svelte";
 import { platform } from "$lib/storage/platform.svelte";
@@ -8,6 +9,7 @@ import { resetShellCache } from "$lib/storage/shell";
 import { gitStore } from "$lib/features/git/store.svelte";
 import { todos } from "$lib/features/todo/store.svelte";
 import { notifications } from "$lib/features/notifications/store.svelte";
+import { logger } from "$lib/shared/services/logger.svelte";
 import { device, type BoiteEntry } from "$lib/features/settings/device.svelte";
 import { registerPush } from "$lib/features/push/api";
 import { parkedLocal } from "$lib/backend/tauri/parked";
@@ -67,6 +69,19 @@ async function confirmLeaveLocal(): Promise<boolean> {
   return true;
 }
 
+/**
+ * How a dial ended. Only `auth` is something a login form can fix; the others
+ * mean the boite was never reached, and the answer to that is to keep trying
+ * rather than to ask for the token again.
+ *
+ * `detail` is the transport's own words (`connect timeout`, the server's auth
+ * error). Diagnostic, never translated, and shown as such.
+ */
+export interface ConnectAttempt {
+  outcome: "ok" | "auth" | "unreachable" | "timeout" | "url";
+  detail: string;
+}
+
 // Connect to a saved boite and initialize the app against it. `reset` tears the
 // current workspace down first (store reset + terminal remount); it is skipped
 // at boot, where nothing is initialized yet. `mode` picks how the connection
@@ -76,14 +91,32 @@ async function connectBoite(
   entry: BoiteEntry,
   reset: boolean,
   mode: "remote" | "dynamic" = "remote",
-): Promise<boolean> {
+  keepUnreachable = false,
+): Promise<ConnectAttempt> {
   try {
-    await workspace.createRemote(entry.url, entry.token);
+    await workspace.createRemote(entry.url, entry.token, keepUnreachable);
   } catch (err) {
-    console.error("remote connect failed:", err);
-    notifications.error("Remote connection failed");
-    return false;
+    logger.error("workspace", "remote connect failed", err);
+    // A kept socket means the connection banner is about to say the link is
+    // down, and a red toast on top of it says the same thing twice.
+    if (!keepUnreachable) notifications.error("Remote connection failed");
+    return {
+      outcome: connectFailReason(err),
+      detail: err instanceof Error ? err.message : String(err),
+    };
   }
+  await adoptRemote(entry, reset, mode);
+  return { outcome: "ok", detail: "" };
+}
+
+// The half of the connect that runs once the socket is up: swap the workspace
+// over and initialize the app against it. Split out because a boot that started
+// with no network runs it later, when the backoff loop finally lands.
+async function adoptRemote(
+  entry: BoiteEntry,
+  reset: boolean,
+  mode: "remote" | "dynamic",
+): Promise<void> {
   if (reset) {
     await tearDownTerminals();
     resetStores();
@@ -100,9 +133,9 @@ async function connectBoite(
   // Dynamic keeps the local side alive: repaint the parked local dots.
   if (workspace.isDynamic) restoreParkedStatuses();
   void fetchAndApplyMeta();
-  // Fire-and-forget: a denied/unsupported push permission must not block boot.
+  // Fire-and-forget: this only subscribes an already-granted permission, so it
+  // costs nothing and prompts for nothing.
   void registerPush();
-  return true;
 }
 
 // Land on the local side, grafting the active boite onto it when the dynamic
@@ -120,8 +153,8 @@ async function initLocalSide(reset: boolean): Promise<void> {
       restoreParkedStatuses();
       return;
     }
-    const ok = await connectBoite(device.active, reset, "dynamic").catch(() => false);
-    if (ok) return;
+    const res = await connectBoite(device.active, reset, "dynamic");
+    if (res.outcome === "ok") return;
     notifications.error("Boite unreachable, local only");
   }
   if (reset) {
@@ -182,28 +215,93 @@ export async function switchToBoite(id: string): Promise<boolean> {
     return true;
   }
   if (!(await confirmLeaveLocal())) return false;
-  return connectBoite(entry, app.ready, "remote");
+  return (await connectBoite(entry, app.ready, "remote")).outcome === "ok";
 }
 
-// PWA boot: connect to the last-active saved boite, or raise the login gate.
-// Called instead of app.init() when there is no Tauri runtime.
+// PWA boot: connect to the last-active saved boite. A boite that cannot be
+// reached is not a login problem, so the app lands on the connection banner with
+// its socket still trying; only a refused token raises the gate.
 export async function bootRemoteWorkspace(): Promise<boolean> {
   const entry = device.active ?? device.boites[0] ?? null;
   if (!entry) {
     workspace.needsLogin = true;
     return false;
   }
-  const ok = await connectBoite(entry, false);
-  if (!ok) workspace.needsLogin = true;
-  return ok;
+  const res = await connectBoite(entry, false, "remote", true);
+  if (res.outcome === "ok") return true;
+  if (res.outcome === "auth" || !workspace.remoteBackend) {
+    workspace.needsLogin = true;
+    return false;
+  }
+  // Present the boite as the active workspace even though nothing is up yet: the
+  // banner explains the state, and the cached name/color keep the chrome honest
+  // about which boite is being waited on.
+  workspace.activateRemote();
+  workspace.setActiveBoite(entry.id);
+  workspace.info = { name: entry.name || null, color: entry.color || null };
+  device.setActive(entry.id);
+  finishBootWhenReachable(entry);
+  return false;
 }
 
-// Register a new boite (or re-pair an existing URL) and connect to it. Used by
-// the login screen and the "add boite" action in the workspace picker.
-export async function connectAndInit(url: string, token: string): Promise<boolean> {
-  if (!(await confirmLeaveLocal())) return false;
+// One-shot: the socket owns the retrying, so all the app has to do is be ready to
+// finish the boot it could not finish at launch.
+function finishBootWhenReachable(entry: BoiteEntry): void {
+  const off = workspace.onConnection((state) => {
+    if (state !== "connected") return;
+    off();
+    // The link that came up may belong to a different boite: the picker and the
+    // login form can both replace the socket while this is armed, and adopting
+    // the boite this boot was about would then relabel someone else's workspace.
+    if (workspace.activeBoiteId !== entry.id) return;
+    void adoptRemote(entry, false, "remote").catch((err) => {
+      logger.error("workspace", "deferred remote boot failed", err);
+    });
+  });
+}
+
+// Retry button in the connection banner. The live socket is preferred: it still
+// holds every attached thread's byte offset, so a reconnect costs the delta
+// rather than a full scrollback replay. A socket that is gone means dialling
+// again from the saved entry.
+export async function retryConnection(): Promise<void> {
+  if (workspace.retryRemote()) return;
+  const entry =
+    (workspace.activeBoiteId ? device.getBoite(workspace.activeBoiteId) : null) ??
+    device.active;
+  if (!entry) return;
+  await connectBoite(
+    entry,
+    app.ready,
+    workspace.isDynamic ? "dynamic" : "remote",
+    true,
+  );
+}
+
+// Register a new boite (or re-pair an existing URL) and connect to it, reporting
+// which of the failures it was. The login screen needs that: a refused token, a
+// hostname that does not resolve, a TLS handshake the browser rejected and a
+// connect timeout used to read as the same sentence about the token.
+export async function connectAndInitDetailed(
+  url: string,
+  token: string,
+): Promise<ConnectAttempt> {
+  if (!(await confirmLeaveLocal())) return { outcome: "unreachable", detail: "" };
+  // Whether this URL was already known decides what a failure costs. A brand new
+  // one that never connected is rolled back out of the list: it used to be saved
+  // before the dial and left marked active with its token, and on a PWA the only
+  // delete button for it sits behind the login gate it just put you behind.
+  const known = device.boites.some((b) => b.url === url);
   const entry = device.addBoite(url, token);
-  return connectBoite(entry, app.ready);
+  const res = await connectBoite(entry, app.ready);
+  if (res.outcome !== "ok" && !known) device.removeBoite(entry.id);
+  return res;
+}
+
+// Used by the "add boite" action in the workspace picker, which has a toast for a
+// failure rather than a place to explain one.
+export async function connectAndInit(url: string, token: string): Promise<boolean> {
+  return (await connectAndInitDetailed(url, token)).outcome === "ok";
 }
 
 // Push a cosmetic name/color change to the active boite. The server persists it
@@ -224,7 +322,7 @@ export async function setActiveBoiteInfo(patch: {
       });
     }
   } catch (err) {
-    console.error("workspace setInfo failed:", err);
+    logger.error("workspace", "setInfo failed", err);
     notifications.error("Update failed");
   }
 }

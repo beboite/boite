@@ -10,11 +10,12 @@ import {
 } from "$lib/features/thread/api";
 import { resolveIconKey } from "$lib/shared/icons/detect";
 import { t } from "$lib/i18n/index.svelte";
+import type { MessageKey } from "$lib/i18n/index.svelte";
+import { platform } from "$lib/storage/platform.svelte";
 import { openPane } from "$lib/features/panes/open";
 import { classifyBrowserUrl } from "$lib/features/browser/url";
 import { notifications } from "$lib/features/notifications/store.svelte";
 import type { PaneContent } from "$lib/features/panes/types";
-import type { MessageKey } from "$lib/i18n/messages";
 import type { IconKey } from "$lib/types";
 
 export type PaletteSection = "threads" | "actions" | "panes" | "projects";
@@ -22,8 +23,21 @@ export type PaletteSection = "threads" | "actions" | "panes" | "projects";
 export interface PaletteCommand {
   id: string;
   section: PaletteSection;
-  label: string;
+  /** Text straight out of user data: a thread title, a project name. Never translated. */
+  label?: string;
+  /**
+   * A fixed command's wording, held as a dictionary key and resolved at render.
+   * Resolving here instead would freeze the language the list was built in.
+   */
+  labelKey?: MessageKey;
+  labelParams?: Record<string, string | number>;
+  /** Data shown beside the label: a cwd, a command line, a project name. */
   hint?: string;
+  /**
+   * Keyboard chord in the controller's own notation ("mod+t"). Rendered per
+   * platform, since `mod` is the Command key on macOS and Ctrl everywhere else.
+   */
+  chord?: string;
   /** Same glyph the sidebar row wears, so a thread is recognised before it is read. */
   icon?: { key: IconKey; color: string | null };
   run: () => void | Promise<unknown>;
@@ -41,11 +55,50 @@ export const SECTION_BIAS: Record<PaletteSection, number> = {
 // Keys rather than strings: the section headers are drawn by a component that
 // only knows the section, so the literal has to live on the data.
 export const SECTION_TITLE_KEYS: Record<PaletteSection, MessageKey> = {
-  threads: "palette.threads",
-  actions: "palette.actions",
+  threads: "project.threads",
+  actions: "palette.sectionActions",
   panes: "palette.panes",
-  projects: "palette.projects",
+  projects: "sidebar.projects",
 };
+
+// The chord the keyboard controller actually listens for, spelled the way the
+// platform spells it. A mac user reading "Ctrl+T" is being told about a chord
+// that does nothing there.
+export function formatChord(combo: string): string {
+  const parts = combo.split("+");
+  const key = parts.pop() ?? "";
+  const label = key.length === 1 ? key.toUpperCase() : key;
+  if (platform.isMacOS) {
+    let out = "";
+    if (parts.includes("alt")) out += "⌥";
+    if (parts.includes("shift")) out += "⇧";
+    if (parts.includes("mod")) out += "⌘";
+    return out + label;
+  }
+  const chunks: string[] = [];
+  if (parts.includes("mod")) chunks.push("Ctrl");
+  if (parts.includes("shift")) chunks.push("Shift");
+  if (parts.includes("alt")) chunks.push("Alt");
+  chunks.push(label);
+  return chunks.join("+");
+}
+
+/** Both resolvers run at render time, never while the list is being built. */
+export function commandLabel(c: PaletteCommand): string {
+  return c.labelKey ? t(c.labelKey, c.labelParams) : (c.label ?? "");
+}
+
+export function commandHint(c: PaletteCommand): string | null {
+  if (c.chord) return formatChord(c.chord);
+  return c.hint ?? null;
+}
+
+function openDashboard(projectId: string) {
+  app.selectedProjectId = projectId;
+  app.activeThreadId = null;
+  app.view = "project";
+  app.mobileTab = "projects";
+}
 
 function goToThread(threadId: string, projectId: string) {
   app.activeThreadId = threadId;
@@ -68,7 +121,7 @@ export function buildPaletteCommands(): PaletteCommand[] {
         section: "threads",
         label: thread.title ?? thread.label,
         hint: thread.title
-          ? `${projectDisplayName(project)} — ${thread.label}`
+          ? `${projectDisplayName(project)} / ${thread.label}`
           : projectDisplayName(project),
         icon: { key: thread.iconKey, color: thread.iconColor ?? null },
         run: () => goToThread(thread.id, project.id),
@@ -79,15 +132,16 @@ export function buildPaletteCommands(): PaletteCommand[] {
   commands.push({
     id: "action:new-terminal",
     section: "actions",
-    label: t("palette.newTerminal"),
-    hint: "Ctrl+T",
+    labelKey: "welcome.newTerminal",
+    chord: "mod+t",
     run: () => launchBlankTerminalHere(),
   });
   for (const shortcut of settings.state.shortcuts) {
     commands.push({
       id: `action:shortcut:${shortcut.id}`,
       section: "actions",
-      label: t("palette.launch", { label: shortcut.label }),
+      labelKey: "palette.launchShortcut",
+      labelParams: { label: shortcut.label },
       hint: shortcut.command,
       icon: {
         key: resolveIconKey(shortcut.iconKey, shortcut.label, shortcut.command),
@@ -102,8 +156,8 @@ export function buildPaletteCommands(): PaletteCommand[] {
   commands.push({
     id: "action:restore-thread",
     section: "actions",
-    label: t("palette.restoreThread"),
-    hint: "Ctrl+Shift+T",
+    labelKey: "palette.restoreThread",
+    chord: "mod+shift+t",
     run: () => restoreLastClosedThread(),
   });
   if (app.activeThreadId) {
@@ -111,30 +165,42 @@ export function buildPaletteCommands(): PaletteCommand[] {
     commands.push({
       id: "action:close-thread",
       section: "actions",
-      label: t("palette.closeThread"),
-      hint: "Ctrl+W",
+      labelKey: "palette.closeActiveThread",
+      chord: "mod+w",
       run: () => closeThreadWithConfirm(id),
     });
   }
-  commands.push(
-    {
+  // The mobile layout draws no sidebar at all, so toggling the device-persisted
+  // flag there is a silent no-op on something nothing renders.
+  const mobile = settings.state.mobileLayout;
+  if (!mobile) {
+    commands.push({
       id: "action:toggle-sidebar",
       section: "actions",
-      label: t("palette.toggleSidebar"),
-      hint: "Ctrl+B",
+      labelKey: "titlebar.toggleSidebar",
+      chord: "mod+b",
       run: () => settings.toggleSidebar(),
+    });
+  }
+  commands.push({
+    id: "action:settings",
+    section: "actions",
+    labelKey: "palette.openSettings",
+    chord: "mod+,",
+    run: () => {
+      app.view = "settings";
+      app.mobileTab = "settings";
     },
-    {
-      id: "action:settings",
+  });
+
+  if (app.currentProjectId) {
+    commands.push({
+      id: "action:project-dashboard",
       section: "actions",
-      label: t("palette.openSettings"),
-      hint: "Ctrl+,",
-      run: () => {
-        app.view = "settings";
-        app.mobileTab = "settings";
-      },
-    },
-  );
+      labelKey: "palette.openDashboard",
+      run: () => openDashboard(app.currentProjectId as string),
+    });
+  }
 
   // Panes. Until now the only way to make one was to drag a thread row onto a
   // live terminal, which is a gesture nobody finds by accident and the reason
@@ -156,7 +222,7 @@ export function buildPaletteCommands(): PaletteCommand[] {
     commands.push({
       id: `pane:${id}`,
       section: "panes",
-      label: t(labelKey),
+      labelKey,
       run: () => {
         openPane(content);
       },
@@ -165,7 +231,7 @@ export function buildPaletteCommands(): PaletteCommand[] {
   commands.push({
     id: "pane:browser",
     section: "panes",
-    label: t("panes.openBrowser"),
+    labelKey: "panes.openBrowser",
     run: () => {
       // A prompt rather than a form: the palette closes on run, and a second
       // modal to type a URL into is a lot of machinery for the rare case. The
@@ -189,10 +255,10 @@ export function buildPaletteCommands(): PaletteCommand[] {
       section: "projects",
       label: projectDisplayName(project),
       hint: project.cwd,
-      run: () => {
-        app.selectedProjectId = project.id;
-        app.view = "terminal";
-      },
+      // The project's own page, the same place clicking its sidebar row lands.
+      // This used to drop you on the terminal view, which showed whatever thread
+      // happened to be active and made the two doors disagree.
+      run: () => openDashboard(project.id),
     });
   }
 
