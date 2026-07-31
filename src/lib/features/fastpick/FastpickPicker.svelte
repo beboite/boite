@@ -25,6 +25,10 @@
   let harnessId = $state<string | null>(null);
   let providerId = $state<string | null>(null);
   let model = $state<FastpickModel | null>(null);
+  // Which provider the picked model came from. It is not always the one being browsed: the
+  // selection outlives the pane it was made in, and walking back to pick another provider
+  // leaves it standing.
+  let modelProviderId = $state<string | null>(null);
   let effort = $state<string | null>(null);
   // Undefined means "let fastpick pick the file matching the model", which is what its own
   // menu starts on. Selecting anything here makes the choice explicit.
@@ -39,9 +43,20 @@
   );
   const providers = $derived(harnessId ? fastpick.providersFor(harnessId) : []);
   const models = $derived(providerId ? fastpick.models[providerId] ?? null : null);
-  // Resolved once per list rather than per row: telling a label apart needs the whole list,
-  // and the options pane reads the same name for a model the list is no longer drawing.
+  // Resolved once per list rather than per row: telling a label apart takes the whole list,
+  // so no row can name itself.
   const labels = $derived(modelLabels(models?.items ?? []));
+  // The picked model is named from its own provider's list, which the browsed one stops
+  // being as soon as the user walks back. Naming it from the browsed list would drop it to
+  // the raw label this disambiguation exists to replace, or worse, hand it the name another
+  // provider resolved for a model that happens to share its id.
+  const selectedModels = $derived(
+    modelProviderId ? fastpick.models[modelProviderId] ?? null : null,
+  );
+  const selectedLabels = $derived(modelLabels(selectedModels?.items ?? []));
+  const selectedName = $derived(
+    model ? selectedLabels.get(model.id) ?? model.label ?? model.id : "",
+  );
 
   function nameOf(m: FastpickModel): string {
     return labels.get(m.id) ?? m.label ?? m.id;
@@ -52,6 +67,7 @@
     harnessId = null;
     providerId = null;
     model = null;
+    modelProviderId = null;
     effort = null;
     prompts = undefined;
   }
@@ -86,6 +102,7 @@
 
   function pickModel(m: FastpickModel, forceScratch: boolean) {
     model = m;
+    modelProviderId = providerId;
     effort = harness?.supportsEffort ? m.effortDefault : null;
     prompts = undefined;
     void launch(forceScratch);
@@ -94,6 +111,7 @@
   function openOptions(m: FastpickModel, e: MouseEvent) {
     e.stopPropagation();
     model = m;
+    modelProviderId = providerId;
     effort = harness?.supportsEffort ? m.effortDefault : null;
     prompts = undefined;
     pane = "options";
@@ -224,7 +242,7 @@
             {#if pane === "harness"}{t("fastpick.stepHarness")}
             {:else if pane === "provider"}{harness?.name}
             {:else if pane === "model"}{harness?.name} · {providerId}
-            {:else}{model ? nameOf(model) : ""}{/if}
+            {:else}{selectedName}{/if}
           </span>
           {#if pane === "model" && providerId}
             <button
