@@ -2082,6 +2082,78 @@ pub fn artifact_policy(repo: &Path) -> Vec<SharedDir> {
     shared
 }
 
+/// A policy and the answer to the question an agent asks before touching it:
+/// is this the project's own rule, or one nobody wrote down?
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EffectivePolicy {
+    pub shared: Vec<SharedDir>,
+    /// True when the policy file decided. It stays true for a file that failed
+    /// to parse, because detection does not run behind one: an agent told
+    /// `declared` there is looking at the file, which is where the mistake is.
+    pub declared: bool,
+}
+
+/// The same answer `provision_shared_artifacts` acts on, plus where it came
+/// from.
+///
+/// The two halves are inseparable for a reader. Detection is a guess this
+/// codebase made about an ecosystem, and overwriting it costs nothing; a
+/// declared policy is a decision someone made about their own project, and
+/// overwriting that is how a rule tuned to a real build gets silently replaced
+/// by one guessed from a manifest name.
+pub fn effective_artifact_policy(repo: &Path) -> EffectivePolicy {
+    EffectivePolicy {
+        // Read rather than `exists`: a file that is there but unreadable is a
+        // file detection ran behind, and this has to say the same thing
+        // `artifact_policy` did or it describes a policy nobody is using.
+        declared: fs::read_to_string(repo.join(POLICY_FILE)).is_ok(),
+        shared: artifact_policy(repo),
+    }
+}
+
+/// Writes a project's own policy, replacing whatever was there.
+///
+/// The names are checked here rather than only at provisioning time because the
+/// two failures do not look alike. A rejected name at write time is an error the
+/// author reads and fixes; the same name reaching `provision_shared_artifacts`
+/// is skipped in silence, and the project quietly stops sharing the directory it
+/// thought it had configured.
+///
+/// One plain component, which is stricter than `join` needs and deliberately
+/// so: `dir` is also the name a worktree gets, and a policy that could name
+/// `../..` or `C:\` would have the provisioner reach outside the two trees it
+/// is allowed to touch.
+pub fn write_artifact_policy(repo: &Path, policy: &ArtifactPolicy) -> Result<(), String> {
+    for entry in &policy.shared {
+        let mut parts = Path::new(&entry.dir).components();
+        // The separator test is its own check because `components` does not
+        // agree across platforms: a backslash is a separator on Windows and an
+        // ordinary character elsewhere, so a policy written on Linux would carry
+        // a name that only splits once it is read back on Windows.
+        let plain = !entry.dir.contains(['/', '\\'])
+            && matches!(parts.next(), Some(Component::Normal(_)))
+            && parts.next().is_none();
+        if !plain {
+            return Err(format!(
+                "'{}' is not a directory this can share: one plain name at the top of the \
+                 repository, no separator, no '..' and no drive",
+                entry.dir
+            ));
+        }
+    }
+    let path = repo.join(POLICY_FILE);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("could not create {}: {e}", parent.display()))?;
+    }
+    // Pretty, and committed to the repository more often than not: this file is
+    // read by whoever wonders why their worktree has a `target` and edited by
+    // hand as often as it is written here.
+    let text = serde_json::to_string_pretty(policy).map_err(|e| e.to_string())?;
+    fs::write(&path, text + "\n").map_err(|e| format!("could not write {}: {e}", path.display()))
+}
+
 /// Whether a relative path matches a glob. `*` stops at a separator, `**` does
 /// not.
 fn glob_matches(pattern: &str, path: &str) -> bool {
@@ -3654,6 +3726,101 @@ mod worktree_tests {
         fs::create_dir_all(f.repo.join(".boite")).unwrap();
         fs::write(f.repo.join(POLICY_FILE), "{ this is not json").unwrap();
         assert!(artifact_policy(&f.repo).is_empty());
+    }
+
+    /// The two sources are not interchangeable and the caller cannot tell them
+    /// apart from the entries alone: an agent that mistakes detection for a
+    /// declared rule overwrites a decision someone made about their own build.
+    #[test]
+    fn the_effective_policy_says_whether_anyone_declared_it() {
+        let f = Fixture::new();
+        fs::write(f.repo.join("package.json"), "{}").unwrap();
+
+        let detected = effective_artifact_policy(&f.repo);
+        assert!(!detected.declared);
+        assert_eq!(detected.shared.len(), 1);
+
+        write_artifact_policy(
+            &f.repo,
+            &ArtifactPolicy {
+                shared: vec![link("vendor")],
+            },
+        )
+        .unwrap();
+
+        let declared = effective_artifact_policy(&f.repo);
+        assert!(declared.declared);
+        assert_eq!(declared.shared[0].dir, "vendor");
+    }
+
+    /// A file that fails to parse must not read as detection. Detection does not
+    /// run behind it, so reporting `detected` would send the reader looking for
+    /// a bug in the manifest sniffing instead of at the file they broke.
+    #[test]
+    fn a_malformed_policy_file_still_counts_as_declared() {
+        let f = Fixture::new();
+        fs::create_dir_all(f.repo.join(".boite")).unwrap();
+        fs::write(f.repo.join(POLICY_FILE), "{ this is not json").unwrap();
+
+        let policy = effective_artifact_policy(&f.repo);
+        assert!(policy.declared);
+        assert!(policy.shared.is_empty());
+    }
+
+    /// What is written has to be what is read back, or an agent tunes a policy
+    /// against a file the provisioner understands differently.
+    #[test]
+    fn a_written_policy_reads_back_as_it_was_written() {
+        let f = Fixture::new();
+        let entry = SharedDir {
+            dir: "_build".to_string(),
+            mode: ShareMode::Hardlink,
+            exclude: vec!["dev/lib/mine/**".to_string()],
+            cargo_workspace: false,
+        };
+        write_artifact_policy(
+            &f.repo,
+            &ArtifactPolicy {
+                shared: vec![entry],
+            },
+        )
+        .unwrap();
+
+        // The directory did not exist: creating it is the writer's job, not the
+        // caller's, and forgetting it is how the first call to this ever fails.
+        assert!(f.repo.join(POLICY_FILE).is_file());
+        let back = artifact_policy(&f.repo);
+        assert_eq!(back.len(), 1);
+        assert_eq!(back[0].dir, "_build");
+        assert_eq!(back[0].mode, ShareMode::Hardlink);
+        assert_eq!(back[0].exclude, vec!["dev/lib/mine/**".to_string()]);
+    }
+
+    /// The provisioner skips a name like these in silence, so a policy holding
+    /// one shares nothing and says nothing. Refusing at write time is what turns
+    /// that into an error its author can read.
+    #[test]
+    fn a_policy_naming_anything_but_a_plain_directory_is_refused() {
+        let f = Fixture::new();
+        let refused = |dir: &str| {
+            write_artifact_policy(
+                &f.repo,
+                &ArtifactPolicy {
+                    shared: vec![link(dir)],
+                },
+            )
+            .is_err()
+        };
+        assert!(refused(""));
+        assert!(refused(".."));
+        assert!(refused("../elsewhere"));
+        assert!(refused("build/output"));
+        // A backslash is only a separator on Windows, and the file travels.
+        assert!(refused("build\\output"));
+        assert!(refused("/etc"));
+        assert!(refused("C:\\Windows"));
+
+        assert!(!f.repo.join(POLICY_FILE).exists(), "a refused policy was written anyway");
     }
 
     #[test]

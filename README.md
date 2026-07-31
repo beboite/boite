@@ -282,7 +282,7 @@ TWA wrapper that packages the PWA as an `.aab`/`.apk`.
 
 ## Agent access (MCP)
 
-Ten tools, in three halves.
+Twelve tools, in three halves.
 
 `todo_list`, `todo_add` and `todo_claim` reach the right-hand **Todo** tab,
 which keeps a list of cards per project. An agent can read that list, append to
@@ -295,6 +295,14 @@ it, and the panel is one column wide.
 `worktree_status`, `worktree_branch` and `worktree_reserve` cover the worktree
 the thread runs in. An agent that has produced something worth keeping names a
 branch for it; until then the worktree stays detached and leaves no trace.
+
+`artifacts_status` and `artifacts_set` cover what a new worktree gets out of
+your checkout instead of building from nothing: `node_modules`, `target`, a
+virtualenv. Boite guesses that from the manifests it recognises, and the guess
+is a guess — an agent that knows the build system can read what is in force and
+write the project's own rule to `.boite/artifacts.json` instead, naming each
+directory, whether it is shared as one link or file by file, and what a build
+rewrites and must therefore be left out.
 
 `projects_list`, `thread_move`, `project_create` and `thread_spawn` cover where
 the work happens. `thread_move` takes the terminal into another project: Boite
