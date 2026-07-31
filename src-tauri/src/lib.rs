@@ -508,6 +508,7 @@ pub fn run() {
             commands::git_branches,
             commands::git_switch_branch,
             commands::worktree_open,
+            commands::worktree_warm,
             commands::worktree_list,
             commands::worktree_claim,
             commands::worktree_reserve,

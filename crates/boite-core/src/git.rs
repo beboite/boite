@@ -1413,6 +1413,89 @@ impl WorktreeHold {
     }
 }
 
+fn is_oid(text: &str) -> bool {
+    text.len() >= 40 && text.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+/// Where a repository keeps its refs and its objects.
+///
+/// A linked worktree has a `.git` directory of its own, holding its HEAD and its
+/// index, and shares everything else with the main checkout. `commondir` is
+/// where git itself records that path; join handles it whether it was written
+/// relative or absolute.
+fn common_dir(gitdir: &Path) -> PathBuf {
+    fs::read_to_string(gitdir.join("commondir"))
+        .ok()
+        .map(|rel| gitdir.join(rel.trim()))
+        .unwrap_or_else(|| gitdir.to_path_buf())
+}
+
+/// The object id a ref that has been packed away resolves to.
+fn packed_ref(common: &Path, reference: &str) -> Option<String> {
+    let packed = fs::read_to_string(common.join("packed-refs")).ok()?;
+    packed
+        .lines()
+        .filter_map(|line| line.split_once(' '))
+        .find(|(_, name)| name.trim() == reference)
+        .map(|(oid, _)| oid.trim().to_string())
+        .filter(|oid| is_oid(oid))
+}
+
+/// The commit HEAD is on, read off the filesystem.
+///
+/// `git rev-parse --verify HEAD` answers the same question and costs a process,
+/// which on Windows is the expensive part of opening a worktree — measured at
+/// 57ms on this developer's machine, in front of every new agent thread. Nothing
+/// it looks at is computed: HEAD is either an object id or a symref into
+/// `refs/`, and a ref that has been packed is a line in `packed-refs`.
+fn head_oid(repo: &Path) -> Option<String> {
+    let gitdir = git_dir(repo)?;
+    let common = common_dir(&gitdir);
+    let mut target = fs::read_to_string(gitdir.join("HEAD"))
+        .ok()?
+        .trim()
+        .to_string();
+    // A ref is allowed to name another ref, and `git symbolic-ref` writes
+    // exactly that. Bounded rather than recursive: a cycle between two of them
+    // is a broken repository, not a reason to read files forever.
+    for _ in 0..8 {
+        let Some(reference) = target.strip_prefix("ref:") else {
+            // Detached, or the end of the chain: an object id.
+            return is_oid(&target).then_some(target);
+        };
+        let reference = reference.trim().to_string();
+        match fs::read_to_string(common.join(&reference)) {
+            Ok(loose) => target = loose.trim().to_string(),
+            // `packed-refs` holds no symrefs, so a packed answer ends the chain
+            // whichever way it comes back.
+            Err(_) => return packed_ref(&common, &reference),
+        }
+    }
+    None
+}
+
+/// Whether HEAD names a commit that exists. False for an unborn branch, which
+/// is a repository nothing can be checked out from yet, false for a ref left
+/// pointing at an object that is gone, and false for a ref that resolves to
+/// something that is not a commit: a tag object or a tree, neither of which
+/// `worktree add --detach` can open a checkout on.
+///
+/// A ref outlives what it points at whenever history is rewritten or a fetch is
+/// cut short, and reading the ref file cannot see that. `cat-file -e` can, over
+/// every shape the object database comes in, packed or loose and whichever hash
+/// the repository was created with. The `^{commit}` peel is what turns object
+/// existence into the stricter question actually being asked. It costs a
+/// process, and the only caller spawns `git worktree add` right after, which is
+/// orders of magnitude more expensive than this check.
+fn head_has_commit(repo: &Path) -> bool {
+    let Some(oid) = head_oid(repo) else {
+        return false;
+    };
+    let mut cmd = git(repo);
+    cmd.args(["cat-file", "-e", &format!("{oid}^{{commit}}")]);
+    run(cmd).is_ok()
+}
+
 /// Opens a worktree on the repository's current HEAD, detached.
 ///
 /// Detached on purpose: a named branch would have to be invented before anyone
@@ -1426,7 +1509,7 @@ pub fn add_detached_worktree_blocking(repo: &str, path: &str) -> Result<String, 
     }
     // `worktree add` on a repository with no commits fails with a message about
     // an invalid reference, which reads as a bug rather than as "commit first".
-    if ref_oid(r, "HEAD").is_none() {
+    if !head_has_commit(r) {
         return Err("This repository has no commits yet.".into());
     }
     if Path::new(path).exists() {
@@ -1442,6 +1525,352 @@ pub fn add_detached_worktree_blocking(repo: &str, path: &str) -> Result<String, 
     Ok(path.to_string())
 }
 
+/// Suffix of the file that marks a worktree as unclaimed.
+///
+/// Beside the directory, never inside it. A marker file in the worktree would be
+/// an untracked file, which is exactly what `worktree_hold_blocking` reads as
+/// "there is work in here" and what the Worktrees tab paints as a dirty row.
+const SPARE_SUFFIX: &str = ".spare";
+
+/// How many unclaimed worktrees the pool keeps, over every repository together.
+///
+/// A spare is a whole checkout plus a copy of the build artifacts, and it is
+/// made on the cheapest gesture in the app. Uncapped, a browse through twenty
+/// projects wrote twenty checkouts and nothing ever took one back. The most
+/// recent few are where the next thread is going.
+const MAX_SPARES: usize = 3;
+
+/// How long an unclaimed spare is worth keeping.
+///
+/// Its copy of `node_modules` and `.venv` was taken when it was made, so an old
+/// one would hand an agent the dependencies of an old lockfile — and in the
+/// meantime it is disk nobody asked for. Markers survive a restart, so without
+/// this the oldest spare on the machine has no upper age at all.
+const SPARE_MAX_AGE: Duration = Duration::from_secs(12 * 60 * 60);
+
+/// Where a worktree's marker goes, or none for a path with no final component.
+///
+/// Refused rather than defaulted: `file_name` answers none for a filesystem
+/// root and for a path ending in `..`, and a default would name every one of
+/// them the same bare `.spare` beside a directory nobody meant.
+fn spare_marker(dir: &Path) -> Option<PathBuf> {
+    let mut name = dir.file_name()?.to_os_string();
+    name.push(SPARE_SUFFIX);
+    Some(dir.with_file_name(name))
+}
+
+/// Whether this worktree is one nobody has taken yet. Read by the listing, so an
+/// unclaimed spare is not shown as a worktree the user has something to do with.
+pub fn is_spare_worktree(dir: &str) -> bool {
+    spare_marker(Path::new(dir)).is_some_and(|marker| marker.is_file())
+}
+
+/// Takes a spare out of the pool, which is what claiming one for a thread and
+/// reworking one both have to do before they touch the directory.
+///
+/// Deleting the marker *is* the claim, and it is a single filesystem operation,
+/// so whichever caller the kernel serves first owns the directory and every
+/// other one is told plainly that it does not. That is what keeps
+/// `git checkout --detach` out of a worktree an agent has already been handed:
+/// warming does not get to touch a directory whose marker it did not take.
+fn take_marker(dir: &Path) -> bool {
+    spare_marker(dir).is_some_and(|marker| fs::remove_file(marker).is_ok())
+}
+
+/// Same directory, whatever the platform spelled it as. Compared as text rather
+/// than canonicalized: canonicalizing costs syscalls per call and resolves
+/// symlinks, and both paths here were written by this app.
+fn same_dir(a: &Path, b: &Path) -> bool {
+    let norm = |p: &Path| {
+        p.to_string_lossy()
+            .replace('\\', "/")
+            .trim_end_matches('/')
+            .to_lowercase()
+    };
+    norm(a) == norm(b)
+}
+
+struct Spare {
+    dir: PathBuf,
+    /// The repository this checkout came from, as its marker recorded it.
+    repo: PathBuf,
+    /// The commit the checkout in there is on.
+    head: String,
+    /// When it was made, in seconds since the epoch. Zero for a marker written
+    /// before this line existed, which reads as ancient and gets collected.
+    at: u64,
+}
+
+/// The unclaimed worktrees under `base`, all of them or only one repository's.
+///
+/// Read off the disk rather than held in memory, so a spare survives a restart
+/// instead of being leaked and remade. Cheap: one directory listing and a couple
+/// of small file reads.
+fn read_spares(base: &Path, repo: Option<&Path>) -> Vec<Spare> {
+    let Ok(entries) = fs::read_dir(base) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for entry in entries.flatten() {
+        let marker = entry.path();
+        let Some(name) = marker.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        let Some(dir_name) = name.strip_suffix(SPARE_SUFFIX) else {
+            continue;
+        };
+        let Ok(text) = fs::read_to_string(&marker) else {
+            continue;
+        };
+        let mut owner: Option<&str> = None;
+        let mut head: Option<&str> = None;
+        let mut at = 0u64;
+        for line in text.lines() {
+            if let Some(v) = line.strip_prefix("repo=") {
+                owner = Some(v.trim());
+            } else if let Some(v) = line.strip_prefix("head=") {
+                head = Some(v.trim());
+            } else if let Some(v) = line.strip_prefix("at=") {
+                at = v.trim().parse().unwrap_or(0);
+            }
+        }
+        let (Some(owner), Some(head)) = (owner, head) else {
+            continue;
+        };
+        if repo.is_some_and(|repo| !same_dir(Path::new(owner), repo)) {
+            continue;
+        }
+        out.push(Spare {
+            dir: base.join(dir_name),
+            repo: PathBuf::from(owner),
+            head: head.to_string(),
+            at,
+        });
+    }
+    out
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+fn write_spare_marker(dir: &Path, repo: &Path, head: &str) -> std::io::Result<()> {
+    let marker = spare_marker(dir)
+        .ok_or_else(|| std::io::Error::other("a worktree path with no name"))?;
+    fs::write(
+        marker,
+        format!(
+            "repo={}\nhead={}\nat={}\n",
+            repo.display(),
+            head,
+            now_secs()
+        ),
+    )
+}
+
+/// Gives a spare's directory back. Never a worktree anyone is using.
+///
+/// Unforced: the pool only ever owns directories nobody has been handed, so a
+/// refusal here means there is real work in one — somebody opened a shell in a
+/// spare and wrote in it — and it is left alone. Its marker is gone by the time
+/// this runs, so it shows up in the Worktrees tab as the ordinary worktree it
+/// has become, which is the one place it can still be dealt with.
+fn drop_spare(repo: &Path, dir: &Path) {
+    let _ = remove_worktree_blocking(&repo.to_string_lossy(), &dir.to_string_lossy(), false);
+}
+
+/// Keeps the pool inside its bounds, by count and by age.
+///
+/// Called from warming rather than from a timer, because warming is the only
+/// thing that ever makes the pool bigger, and therefore the only moment it can
+/// be over.
+fn collect_spares(base: &Path) {
+    let mut spares = read_spares(base, None);
+    // Newest first, so what survives the cap is what the next thread is most
+    // likely to want.
+    spares.sort_by_key(|spare| std::cmp::Reverse(spare.at));
+    let now = now_secs();
+    let mut kept = 0usize;
+    for spare in spares {
+        let expired = now.saturating_sub(spare.at) > SPARE_MAX_AGE.as_secs();
+        if !expired && kept < MAX_SPARES {
+            kept += 1;
+            continue;
+        }
+        // Taken out of the pool exactly as a thread takes one: a spare claimed
+        // between the listing above and this line is not ours to remove.
+        if !take_marker(&spare.dir) {
+            continue;
+        }
+        if spare.dir.is_dir() {
+            drop_spare(&spare.repo, &spare.dir);
+        }
+    }
+}
+
+/// Moves an existing checkout onto another commit. One process, and it writes
+/// only the paths that differ between the two trees.
+fn detach_to(worktree: &Path, oid: &str) -> Result<(), String> {
+    let mut cmd = git(worktree);
+    cmd.args(["checkout", "--detach", oid]);
+    run(cmd).map(|_| ())
+}
+
+/// Claims a ready-made worktree for this repository, or answers that there is
+/// none to claim.
+fn take_spare(base: &Path, repo: &Path) -> Option<String> {
+    let wanted = head_oid(repo)?;
+    let now = now_secs();
+    for spare in read_spares(base, Some(repo)) {
+        // Of two threads born at the same moment exactly one wins a given spare,
+        // and the other moves on to the next.
+        if !take_marker(&spare.dir) {
+            continue;
+        }
+        // A marker that outlived its directory: deleted by hand, or a creation
+        // that failed after writing it. The claim above is what cleaned it up.
+        if !spare.dir.is_dir() {
+            continue;
+        }
+        // Older than its copy of the shared directories is worth trusting.
+        // Handing it over would give the agent whatever lockfile was current
+        // when it was made.
+        if now.saturating_sub(spare.at) > SPARE_MAX_AGE.as_secs() {
+            drop_spare(repo, &spare.dir);
+            continue;
+        }
+        if spare.head == wanted {
+            return Some(spare.dir.to_string_lossy().into_owned());
+        }
+        // Made before the last commits landed. A thread has to start on the
+        // commit the project is on, and moving this checkout is one process over
+        // the diff, where making another is a whole checkout plus its shared
+        // directories again.
+        if detach_to(&spare.dir, &wanted).is_ok() {
+            // The checkout it just did can have taken one of them away, and a
+            // spare made before an install has never seen the rest. Cheap when
+            // there is nothing to do: one stat per directory.
+            provision_shared_artifacts(repo, &spare.dir);
+            return Some(spare.dir.to_string_lossy().into_owned());
+        }
+        // Refused to move — something is in there after all. Never hand back a
+        // checkout of the wrong commit. Removed here and not on a thread of its
+        // own: the caller goes straight on to `worktree add` in this same
+        // repository, and two git processes in `.git/worktrees` at once is a
+        // race for no gain.
+        drop_spare(repo, &spare.dir);
+    }
+    None
+}
+
+/// Repositories a spare is being made for right now. Two warms would otherwise
+/// each find none and each make one.
+static WARMING: parking_lot::Mutex<Vec<String>> = parking_lot::Mutex::new(Vec::new());
+
+struct WarmGuard(String);
+
+impl WarmGuard {
+    /// None when another thread is already warming this repository.
+    fn claim(repo: &Path) -> Option<Self> {
+        let key = repo.to_string_lossy().to_lowercase();
+        let mut warming = WARMING.lock();
+        if warming.contains(&key) {
+            return None;
+        }
+        warming.push(key.clone());
+        Some(Self(key))
+    }
+}
+
+impl Drop for WarmGuard {
+    fn drop(&mut self) {
+        WARMING.lock().retain(|k| k != &self.0);
+    }
+}
+
+/// Makes sure this repository has one worktree standing by, and that it is on
+/// the commit the repository is on.
+///
+/// This is the whole point of the pool: `git worktree add` plus the shared
+/// directories is around half a second on a small repository and seconds on a
+/// large one, and it used to sit between a click and a terminal that could show
+/// anything. Paid here instead, off any click.
+///
+/// Never asks whether the main checkout is clean. That question decides whether
+/// a *thread* gets a worktree; a spare is made from HEAD either way, and one
+/// made while the checkout was dirty is exactly as good once it is clean again.
+pub fn warm_worktree_pool_blocking(repo: &str, base: &str) -> Result<(), String> {
+    let r = Path::new(repo);
+    if git_dir(r).is_none() {
+        return Ok(());
+    }
+    let Some(head) = head_oid(r) else {
+        // No commits yet: nothing to check out, and nothing to warm.
+        return Ok(());
+    };
+    let base = Path::new(base);
+    fs::create_dir_all(base).map_err(|e| format!("worktree base: {e}"))?;
+    let Some(_guard) = WarmGuard::claim(r) else {
+        return Ok(());
+    };
+
+    // Before anything else, because warming is what fills the pool and this is
+    // the only thing that empties it.
+    collect_spares(base);
+
+    for spare in read_spares(base, Some(r)) {
+        if !spare.dir.is_dir() {
+            // A marker that outlived its directory.
+            let _ = take_marker(&spare.dir);
+            continue;
+        }
+        // Already standing by, on the commit the project is on.
+        if spare.head == head {
+            return Ok(());
+        }
+        // Behind the project. Brought up to date here rather than at claim time,
+        // so the thread that takes it pays nothing at all — but only after
+        // taking the marker, which is the same single operation a thread's claim
+        // uses. Losing that race means an agent now owns this directory and is
+        // already writing in it, and `git checkout --detach` in there would
+        // throw that work away.
+        if !take_marker(&spare.dir) {
+            continue;
+        }
+        if detach_to(&spare.dir, &head).is_ok() {
+            provision_shared_artifacts(r, &spare.dir);
+            // Back in the pool, and not one moment earlier: between the two
+            // lines above it belongs to this call and to nobody else.
+            let _ = write_spare_marker(&spare.dir, r, &head);
+            return Ok(());
+        }
+        // It would not move, so it is not something to hand a thread.
+        drop_spare(r, &spare.dir);
+    }
+
+    let dir = scoped_dir_for(base, &format!("spare-{}", uuid::Uuid::new_v4()));
+    add_detached_worktree_blocking(repo, &dir.to_string_lossy())?;
+    // Last, so a spare is only ever offered once it is a complete checkout: the
+    // marker is what makes it claimable, and a failed creation leaves a
+    // directory nobody will hand out.
+    write_spare_marker(&dir, r, &head).map_err(|e| format!("spare marker: {e}"))?;
+    // The one just made is the newest, so this drops the oldest over the cap
+    // rather than what was just paid for.
+    collect_spares(base);
+    Ok(())
+}
+
+fn warm_in_background(repo: &Path, base: &Path) {
+    let repo = repo.to_string_lossy().into_owned();
+    let base = base.to_string_lossy().into_owned();
+    thread::spawn(move || {
+        let _ = warm_worktree_pool_blocking(&repo, &base);
+    });
+}
+
 /// Opens a worktree for a thread, or answers that this repository is not one
 /// to open a worktree in. `Ok(None)` means the thread runs in the project
 /// folder.
@@ -1452,9 +1881,15 @@ pub fn add_detached_worktree_blocking(repo: &str, path: &str) -> Result<String, 
 /// process spawns to reach a decision that is mostly filesystem state. On
 /// Windows a process spawn is the expensive part of this whole operation, not
 /// the checkout.
+///
+/// `label` names the directory only when one has to be made here. The ordinary
+/// path hands over a spare, which was named when it was made — that is what
+/// takes `git worktree add` out from in front of the terminal, and it leaves the
+/// status check below as the only thing a new thread waits on.
 pub fn open_worktree_if_eligible_blocking(
     repo: &str,
-    path: &str,
+    base: &str,
+    label: &str,
 ) -> Result<Option<String>, String> {
     let r = Path::new(repo);
     // No subprocess: a repository is a `.git` directory, or the `gitdir:` file
@@ -1470,7 +1905,20 @@ pub fn open_worktree_if_eligible_blocking(
     if !run(status)?.is_empty() {
         return Ok(None);
     }
-    add_detached_worktree_blocking(repo, path).map(Some)
+    let base = Path::new(base);
+    fs::create_dir_all(base).map_err(|e| format!("worktree base: {e}"))?;
+
+    if let Some(dir) = take_spare(base, r) {
+        // Refill, so the next thread in this project is as cheap as this one.
+        warm_in_background(r, base);
+        return Ok(Some(dir));
+    }
+    // Nothing standing by: this thread pays for its own checkout, which is what
+    // every thread used to do.
+    let path = scoped_dir_for(base, label).to_string_lossy().into_owned();
+    let made = add_detached_worktree_blocking(repo, &path)?;
+    warm_in_background(r, base);
+    Ok(Some(made))
 }
 
 /// Turns a detached worktree into a branch, once its work has proved worth
@@ -1814,6 +2262,10 @@ pub struct WorktreeEntry {
     /// HEAD is on no local branch, so the commits here are reachable from
     /// nowhere else.
     pub orphan_commits: bool,
+    /// Made ahead of time and not claimed yet: the next agent thread in this
+    /// repository walks into it instead of waiting for a checkout. Removing it
+    /// costs nothing but the head start.
+    pub spare: bool,
 }
 
 /// Every worktree of a repository, its own checkout included.
@@ -1849,6 +2301,12 @@ pub fn list_worktrees_blocking(repo: &str) -> Result<Vec<WorktreeEntry>, String>
         if line.is_empty() {
             if let Some(p) = path.take() {
                 let main = entries.is_empty();
+                // Listed rather than hidden, and marked. It carries no thread and
+                // holds no work, so a row nobody could explain would be worse
+                // than one that says what it is — and hiding it would make the
+                // one directory the pool keeps per repository invisible to the
+                // one page that can reclaim it.
+                let spare = !main && is_spare_worktree(&p);
                 // A pruned-away directory cannot be inspected, and reporting it
                 // as clean would invite exactly the removal that is already
                 // safe. The prunable flag is what that row is about.
@@ -1865,6 +2323,7 @@ pub fn list_worktrees_blocking(repo: &str) -> Result<Vec<WorktreeEntry>, String>
                     prunable,
                     dirty: hold.dirty,
                     orphan_commits: hold.orphan_commits,
+                    spare,
                 });
             }
             locked = false;
@@ -1944,38 +2403,383 @@ mod worktree_tests {
         }
     }
 
+    /// HEAD is read off the filesystem rather than through `git rev-parse`, so
+    /// every shape it comes in has to be recognised: unborn (a symref to a
+    /// branch that has no commit), loose, packed, and detached.
+    #[test]
+    fn head_is_resolved_without_asking_git() {
+        let empty = scratch("empty");
+        fs::create_dir_all(&empty).unwrap();
+        git_in(&empty, &["init", "--quiet"]);
+        assert!(
+            !head_has_commit(&empty),
+            "an unborn HEAD has no commit to detach from"
+        );
+        let w = scratch("w-empty");
+        assert_eq!(
+            add_detached_worktree_blocking(empty.to_str().unwrap(), w.to_str().unwrap()),
+            Err("This repository has no commits yet.".into()),
+        );
+        assert!(!w.exists());
+        let _ = fs::remove_dir_all(&empty);
+
+        let f = Fixture::new();
+        assert!(head_has_commit(&f.repo), "a loose ref is a commit");
+        // Packed: the loose file under refs/heads is gone and the ref only
+        // exists as a line in packed-refs.
+        git_in(&f.repo, &["pack-refs", "--all"]);
+        assert!(
+            !f.repo.join(".git/refs/heads/master").is_file(),
+            "pack-refs should have removed the loose ref"
+        );
+        assert!(head_has_commit(&f.repo), "a packed ref is a commit too");
+
+        // Detached, and through a linked worktree, whose own HEAD sits in
+        // .git/worktrees/<name> while its refs stay with the main checkout.
+        let linked = scratch("linked");
+        assert!(add_detached_worktree_blocking(f.path(), linked.to_str().unwrap()).is_ok());
+        assert!(head_has_commit(&linked), "a detached HEAD is an object id");
+        let _ = remove_worktree_blocking(f.path(), linked.to_str().unwrap(), true);
+    }
+
+    /// A ref is allowed to name another ref, and git writes that itself for
+    /// `HEAD -> refs/heads/master` on a repository whose default branch was
+    /// renamed through a symbolic ref. Stopping at the first hop reads a working
+    /// repository as one with no commits.
+    #[test]
+    fn head_follows_a_ref_that_names_another_ref() {
+        let f = Fixture::new();
+        let real = head_oid(&f.repo).expect("the fixture has a commit");
+
+        // HEAD -> refs/heads/alias -> refs/heads/master -> <oid>.
+        fs::write(f.repo.join(".git/refs/heads/alias"), "ref: refs/heads/master\n").unwrap();
+        fs::write(f.repo.join(".git/HEAD"), "ref: refs/heads/alias\n").unwrap();
+        assert_eq!(
+            head_oid(&f.repo).as_deref(),
+            Some(real.as_str()),
+            "a chain of symrefs still ends at the commit"
+        );
+        assert!(head_has_commit(&f.repo));
+
+        // A chain that closes on itself is a broken repository, and has to
+        // answer rather than read files forever.
+        fs::write(f.repo.join(".git/refs/heads/alias"), "ref: refs/heads/alias\n").unwrap();
+        assert_eq!(head_oid(&f.repo), None, "a cycle is not a commit");
+    }
+
+    /// A ref that outlived its object. `worktree add` answers that with a
+    /// message about an invalid reference, which is the message the guard is
+    /// there to replace — so the guard has to see it, and reading the ref file
+    /// alone cannot.
+    #[test]
+    fn a_ref_pointing_at_nothing_is_not_a_commit() {
+        let f = Fixture::new();
+        let real = head_oid(&f.repo).expect("the fixture has a commit");
+        let master = f.repo.join(".git/refs/heads/master");
+
+        let dangling = "0123456789abcdef0123456789abcdef01234567";
+        fs::write(&master, format!("{dangling}\n")).unwrap();
+        assert_eq!(head_oid(&f.repo).as_deref(), Some(dangling), "the ref reads");
+        assert!(!head_has_commit(&f.repo), "but nothing is behind it");
+
+        let w = scratch("w-dangling");
+        assert_eq!(
+            add_detached_worktree_blocking(f.path(), w.to_str().unwrap()),
+            Err("This repository has no commits yet.".into()),
+        );
+        assert!(!w.exists());
+
+        // The same question, once the object is packed rather than loose. A
+        // freshly cloned repository has no loose objects at all, so a check that
+        // only looked at `objects/xx/` would answer "no commits yet" on every
+        // one of them.
+        fs::write(&master, format!("{real}\n")).unwrap();
+        git_in(&f.repo, &["repack", "-ad"]);
+        git_in(&f.repo, &["prune-packed"]);
+        assert!(
+            !f.repo
+                .join(format!(".git/objects/{}/{}", &real[..2], &real[2..]))
+                .is_file(),
+            "repack should have swept the loose object"
+        );
+        assert!(head_has_commit(&f.repo), "a packed commit is still a commit");
+    }
+
+    /// A ref is allowed to point at any object, and `worktree add --detach`
+    /// needs a commit. An object that exists but is a tree has to be refused
+    /// here rather than by git, or the user reads a message about an invalid
+    /// reference instead of the guard's own.
+    #[test]
+    fn a_ref_pointing_at_a_non_commit_is_refused() {
+        let f = Fixture::new();
+        let mut cmd = git(&f.repo);
+        cmd.args(["rev-parse", "HEAD^{tree}"]);
+        let tree = String::from_utf8(run(cmd).unwrap())
+            .unwrap()
+            .trim()
+            .to_string();
+
+        fs::write(f.repo.join(".git/refs/heads/master"), format!("{tree}\n")).unwrap();
+        assert_eq!(
+            head_oid(&f.repo).as_deref(),
+            Some(tree.as_str()),
+            "the ref reads, and the object is really there"
+        );
+        assert!(
+            !head_has_commit(&f.repo),
+            "an existing tree is still not something to check out"
+        );
+
+        let w = scratch("w-tree");
+        assert_eq!(
+            add_detached_worktree_blocking(f.path(), w.to_str().unwrap()),
+            Err("This repository has no commits yet.".into()),
+        );
+        assert!(!w.exists());
+    }
+
     /// The three answers the eligibility check has to give, since it is now the
     /// only thing standing between a thread and a worktree.
     #[test]
     fn eligibility_refuses_a_non_repo_and_a_dirty_checkout() {
         let plain = scratch("plain");
         fs::create_dir_all(&plain).unwrap();
-        let w = scratch("w");
+        let base = scratch("base-plain");
         assert_eq!(
-            open_worktree_if_eligible_blocking(plain.to_str().unwrap(), w.to_str().unwrap()),
+            open_worktree_if_eligible_blocking(
+                plain.to_str().unwrap(),
+                base.to_str().unwrap(),
+                "t1",
+            ),
             Ok(None),
         );
-        assert!(!w.exists(), "a non-repo must not get a worktree");
+        assert!(
+            !base.join("t1").exists(),
+            "a non-repo must not get a worktree"
+        );
         let _ = fs::remove_dir_all(&plain);
+        let _ = fs::remove_dir_all(&base);
 
         let f = Fixture::new();
-        // Clean: a worktree, at the path we asked for.
+        // Clean, and nothing standing by: a worktree named after the thread,
+        // under the base.
+        let base = scratch("base-clean");
+        let made = open_worktree_if_eligible_blocking(f.path(), base.to_str().unwrap(), "t1");
         assert_eq!(
-            open_worktree_if_eligible_blocking(f.path(), w.to_str().unwrap()),
-            Ok(Some(w.to_str().unwrap().to_string())),
+            made,
+            Ok(Some(base.join("t1").to_string_lossy().into_owned())),
         );
-        assert!(w.join("a.txt").is_file());
-        let _ = remove_worktree_blocking(f.path(), w.to_str().unwrap(), true);
+        assert!(base.join("t1").join("a.txt").is_file());
+        let _ = remove_worktree_blocking(
+            f.path(),
+            base.join("t1").to_str().unwrap(),
+            true,
+        );
 
         // An untracked file counts: the work under discussion is in the main
         // checkout, so the thread has to start there and see it.
-        let dirty = scratch("dirty");
+        let dirty = scratch("base-dirty");
         fs::write(f.repo.join("scratch.txt"), "wip\n").unwrap();
         assert_eq!(
-            open_worktree_if_eligible_blocking(f.path(), dirty.to_str().unwrap()),
+            open_worktree_if_eligible_blocking(f.path(), dirty.to_str().unwrap(), "t2"),
             Ok(None),
         );
-        assert!(!dirty.exists());
+        assert!(!dirty.join("t2").exists());
+        let _ = fs::remove_dir_all(&base);
+        let _ = fs::remove_dir_all(&dirty);
+    }
+
+    /// The pool, which is the difference between a thread that waits for a
+    /// checkout and one that walks into a finished one.
+    #[test]
+    fn a_spare_is_made_ahead_and_handed_to_the_next_thread() {
+        let f = Fixture::new();
+        let base = scratch("pool");
+        fs::create_dir_all(&base).unwrap();
+        let base_s = base.to_str().unwrap().to_string();
+
+        warm_worktree_pool_blocking(f.path(), &base_s).unwrap();
+        let spares = read_spares(&base, Some(&f.repo));
+        assert_eq!(spares.len(), 1, "warming leaves exactly one spare");
+        let dir = spares[0].dir.clone();
+        assert!(dir.join("a.txt").is_file(), "a spare is a real checkout");
+
+        // Warming again keeps the one that is already there.
+        warm_worktree_pool_blocking(f.path(), &base_s).unwrap();
+        assert_eq!(read_spares(&base, Some(&f.repo)).len(), 1);
+
+        let listed = list_worktrees_blocking(f.path()).unwrap();
+        let row = listed
+            .iter()
+            .find(|e| same_dir(Path::new(&e.path), &dir))
+            .expect("a spare is listed, so the page that can reclaim it sees it");
+        assert!(row.spare, "and it says what it is");
+
+        // The next thread gets that very directory, and it stops being a spare.
+        let taken = open_worktree_if_eligible_blocking(f.path(), &base_s, "t1").unwrap();
+        assert_eq!(taken.as_deref(), dir.to_str());
+        assert!(
+            !is_spare_worktree(dir.to_str().unwrap()),
+            "claiming a spare is deleting its marker"
+        );
+        let listed = list_worktrees_blocking(f.path()).unwrap();
+        let row = listed
+            .iter()
+            .find(|e| same_dir(Path::new(&e.path), &dir))
+            .expect("a claimed worktree is listed like any other");
+        assert!(!row.spare, "and is no longer standing by");
+
+        let _ = remove_worktree_blocking(f.path(), dir.to_str().unwrap(), true);
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    /// A spare is only useful if it is on the commit the project is on: a thread
+    /// that starts one commit behind is looking at the wrong code.
+    #[test]
+    fn a_spare_made_before_a_commit_is_brought_forward() {
+        let f = Fixture::new();
+        let base = scratch("pool-stale");
+        fs::create_dir_all(&base).unwrap();
+        let base_s = base.to_str().unwrap().to_string();
+
+        warm_worktree_pool_blocking(f.path(), &base_s).unwrap();
+        let dir = read_spares(&base, Some(&f.repo))[0].dir.clone();
+        assert!(!dir.join("b.txt").exists());
+
+        fs::write(f.repo.join("b.txt"), "two\n").unwrap();
+        git_in(&f.repo, &["add", "b.txt"]);
+        git_in(&f.repo, &["commit", "--quiet", "-m", "second"]);
+
+        let taken = open_worktree_if_eligible_blocking(f.path(), &base_s, "t1").unwrap();
+        assert_eq!(taken.as_deref(), dir.to_str(), "the spare is still the one used");
+        assert!(
+            dir.join("b.txt").is_file(),
+            "it has to carry the commit made after it was created"
+        );
+
+        let _ = remove_worktree_blocking(f.path(), dir.to_str().unwrap(), true);
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    /// The one thing the pool must never do: run `git checkout --detach` inside
+    /// a directory an agent has already been handed. Warming brings a spare
+    /// forward when the project has moved on, and a thread claims one by
+    /// deleting its marker — so both have to be asking the same question, and
+    /// the loser has to walk away.
+    #[test]
+    fn warming_will_not_touch_a_worktree_that_has_just_been_claimed() {
+        let f = Fixture::new();
+        let base = scratch("pool-race");
+        fs::create_dir_all(&base).unwrap();
+        let base_s = base.to_str().unwrap().to_string();
+
+        warm_worktree_pool_blocking(f.path(), &base_s).unwrap();
+        let dir = read_spares(&base, Some(&f.repo))[0].dir.clone();
+
+        // The project moves on, so the next warm has a reason to check the
+        // spare out again.
+        fs::write(f.repo.join("b.txt"), "two\n").unwrap();
+        git_in(&f.repo, &["add", "b.txt"]);
+        git_in(&f.repo, &["commit", "--quiet", "-m", "second"]);
+
+        // Warming's own read of the pool, taken before anything else happens.
+        // Everything below is what can land between that read and the checkout
+        // it was about to run.
+        let seen = read_spares(&base, Some(&f.repo));
+        assert_eq!(seen.len(), 1);
+        assert_ne!(seen[0].head, head_oid(&f.repo).unwrap(), "it is behind");
+
+        // The thread wins the claim, and its agent starts writing.
+        let taken = take_spare(&base, &f.repo).expect("the spare is claimable");
+        assert_eq!(taken.as_str(), dir.to_str().unwrap());
+        assert!(!is_spare_worktree(&taken), "and stops being a spare");
+        fs::write(dir.join("agent-notes.md"), "work in progress\n").unwrap();
+
+        // Warming resumes, holding the stale listing. The marker is the gate,
+        // and it is gone: this is the exact line that used to be a bare
+        // `detach_to` on `seen[0].dir`.
+        assert!(
+            !take_marker(&seen[0].dir),
+            "a claimed spare must refuse warming the same way it refuses a second thread"
+        );
+
+        // And the whole call, for good measure.
+        warm_worktree_pool_blocking(f.path(), &base_s).unwrap();
+
+        assert!(
+            dir.join("agent-notes.md").is_file(),
+            "warming ran a checkout in a claimed worktree and destroyed its untracked files"
+        );
+        assert!(
+            !is_spare_worktree(dir.to_str().unwrap()),
+            "and it must not have been put back in the pool"
+        );
+        // It made itself another one instead, which is the whole answer: the
+        // claimed directory is nobody's business but the thread's.
+        let spares = read_spares(&base, Some(&f.repo));
+        assert_eq!(spares.len(), 1, "a fresh spare, not the claimed one");
+        assert_ne!(spares[0].dir, dir);
+
+        let _ = remove_worktree_blocking(f.path(), spares[0].dir.to_str().unwrap(), true);
+        let _ = remove_worktree_blocking(f.path(), dir.to_str().unwrap(), true);
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    /// A spare is a whole checkout, made on project selection, and it used to be
+    /// kept forever: looking at twenty projects wrote twenty of them and nothing
+    /// took one back.
+    #[test]
+    fn the_pool_is_capped_by_count_and_by_age() {
+        let f = Fixture::new();
+        let base = scratch("pool-cap");
+        fs::create_dir_all(&base).unwrap();
+        let base_s = base.to_str().unwrap().to_string();
+
+        // More spares than the cap allows, each one a real worktree of this
+        // repository, as warming would have left them over several sessions.
+        let mut made = Vec::new();
+        for i in 0..(MAX_SPARES + 2) {
+            let dir = base.join(format!("spare-{i}"));
+            add_detached_worktree_blocking(f.path(), &dir.to_string_lossy()).unwrap();
+            write_spare_marker(&dir, &f.repo, &head_oid(&f.repo).unwrap()).unwrap();
+            made.push(dir);
+        }
+        assert_eq!(read_spares(&base, None).len(), MAX_SPARES + 2);
+
+        // Through the ordinary door: warming is the only thing that grows the
+        // pool, so it is also where it is brought back inside its bounds.
+        warm_worktree_pool_blocking(f.path(), &base_s).unwrap();
+        assert_eq!(
+            read_spares(&base, None).len(),
+            MAX_SPARES,
+            "the cap is the cap"
+        );
+
+        // Age, independent of the count: a marker old enough that its copy of
+        // the shared directories cannot be trusted goes even under the cap.
+        let left = read_spares(&base, None);
+        let ancient = left[0].dir.clone();
+        fs::write(
+            spare_marker(&ancient).unwrap(),
+            format!(
+                "repo={}\nhead={}\nat={}\n",
+                f.repo.display(),
+                head_oid(&f.repo).unwrap(),
+                now_secs() - SPARE_MAX_AGE.as_secs() - 1,
+            ),
+        )
+        .unwrap();
+        warm_worktree_pool_blocking(f.path(), &base_s).unwrap();
+        assert!(
+            !ancient.exists(),
+            "an expired spare is removed, not just unmarked"
+        );
+        assert_eq!(read_spares(&base, None).len(), MAX_SPARES - 1);
+
+        for dir in made {
+            let _ = remove_worktree_blocking(f.path(), dir.to_str().unwrap(), true);
+        }
+        let _ = fs::remove_dir_all(&base);
     }
 
     /// The whole reason for detaching: two of them on the same commit, which

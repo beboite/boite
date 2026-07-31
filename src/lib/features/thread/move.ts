@@ -23,7 +23,7 @@ import { t } from "$lib/i18n/index.svelte";
 import { paneStore } from "$lib/features/panes/store.svelte";
 import { parkedLocal } from "$lib/backend/tauri/parked";
 import { openWorktreeFor } from "./api";
-import { sessionKindOf } from "./session";
+import { releaseClaudeSession, sessionKindOf } from "./session";
 import { threadCwd } from "./cwd";
 import type { Project, Thread } from "$lib/types";
 
@@ -219,20 +219,24 @@ export async function moveThreadToProject(
   // The session has to be nobody's before it can be resumed anywhere. Same
   // reasoning as an explicit reload: a background agent still holding it makes
   // claude refuse `--resume` and the thread lands in the agent picker instead.
-  if (thread.sessionId) {
-    await backendForPath(fromCwd)
-      .session.stopClaude(thread.sessionId)
-      .catch(() => false);
-  }
+  // Alongside the kill below rather than ahead of it — different processes, so
+  // there was never an order to keep, only two waits to pay.
+  const release = thread.sessionId
+    ? releaseClaudeSession(fromCwd, thread.sessionId)
+    : Promise.resolve(false);
   // A move is never a reattach: drop any park marker so the fresh PTY over
   // there is spawned rather than resumed against a directory it no longer runs
   // in.
   parkedLocal.delete(thread.id);
-  if (thread.ptyId) {
-    // wait=true: git reads a worktree whose process still holds files open as
-    // busy on Windows, and the release below would fail for a reason that has
-    // nothing to do with whether there is work in it.
-    await ptyKill(thread.ptyId, true).catch(() => {});
+  const deadPtyId = thread.ptyId;
+  // wait=true: git reads a worktree whose process still holds files open as
+  // busy on Windows, and the release below would fail for a reason that has
+  // nothing to do with whether there is work in it.
+  await Promise.all([
+    release,
+    deadPtyId ? ptyKill(deadPtyId, true).catch(() => {}) : Promise.resolve(),
+  ]);
+  if (deadPtyId) {
     // Dropped from the row straight away rather than only in the moved copy
     // below: everything between here and there can fail, and a thread left
     // pointing at a dead PTY reads as running in the sidebar.
