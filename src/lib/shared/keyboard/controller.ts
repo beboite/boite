@@ -35,6 +35,13 @@ export function isEditableTarget(target: EventTarget | null): boolean {
 // Layout-independent aliases. `digit1` matches the physical key so a French
 // AZERTY (where 1 is Shift+&) still jumps to thread 1, and `plus`/`minus`
 // accept both the main row and the numpad.
+//
+// There is no alias for the backslash, and there cannot be a working one: on
+// fr-AZERTY that character is AltGr+8, so the event arrives as `code: "Digit8"`
+// with `altKey` set, which `matchesCombo` refuses on the alt modifier alone.
+// `code: "Backslash"` on that layout is the `*`/`µ` key, an entirely different
+// character. Splitting uses Ctrl+Shift+E and Ctrl+Shift+O instead, letters that
+// sit in the same place on both layouts.
 function matchesKey(combo: string, event: KeyboardEvent): boolean {
   const key = event.key.toLowerCase();
   const code = event.code;
@@ -48,13 +55,6 @@ function matchesKey(combo: string, event: KeyboardEvent): boolean {
   }
   if (combo === "minus") {
     return key === "-" || key === "_" || code === "Minus" || code === "NumpadSubtract";
-  }
-  // The physical key, like `digit`: Shift+\ produces "|" rather than "\", so
-  // matching on event.key would give the plain and the shifted binding two
-  // different names for one key. AZERTY reaches it through AltGr, where the
-  // code is still Backslash.
-  if (combo === "backslash") {
-    return code === "Backslash" || key === "\\" || key === "|";
   }
   return key === combo;
 }

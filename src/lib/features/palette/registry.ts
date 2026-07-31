@@ -11,6 +11,8 @@ import {
 import { resolveIconKey } from "$lib/shared/icons/detect";
 import { t } from "$lib/i18n/index.svelte";
 import { openPane } from "$lib/features/panes/open";
+import { classifyBrowserUrl } from "$lib/features/browser/url";
+import { notifications } from "$lib/features/notifications/store.svelte";
 import type { PaneContent } from "$lib/features/panes/types";
 import type { MessageKey } from "$lib/i18n/messages";
 import type { IconKey } from "$lib/types";
@@ -123,24 +125,6 @@ export function buildPaletteCommands(): PaletteCommand[] {
       run: () => settings.toggleSidebar(),
     },
     {
-      id: "action:toggle-git",
-      section: "actions",
-      label: t("palette.toggleGit"),
-      run: () => settings.toggleRightPanel("git"),
-    },
-    {
-      id: "action:toggle-explorer",
-      section: "actions",
-      label: t("palette.toggleExplorer"),
-      run: () => settings.toggleRightPanel("explorer"),
-    },
-    {
-      id: "action:toggle-todo",
-      section: "actions",
-      label: t("palette.toggleTodo"),
-      run: () => settings.toggleRightPanel("todo"),
-    },
-    {
       id: "action:settings",
       section: "actions",
       label: t("palette.openSettings"),
@@ -156,6 +140,11 @@ export function buildPaletteCommands(): PaletteCommand[] {
   // live terminal, which is a gesture nobody finds by accident and the reason
   // the split went unused. These are the same call the pane header's button and
   // the agent's MCP verb make.
+  //
+  // Git, files and todo also had an Actions entry each, toggling the right
+  // rail. The rail is gone, so those three set a stored preference and opened
+  // nothing; this is where they live now, and there is one of each rather than
+  // two.
   const paneCommands: [string, MessageKey, PaneContent][] = [
     ["git", "panes.openGit", { kind: "git" }],
     ["explorer", "panes.openExplorer", { kind: "explorer" }],
@@ -181,8 +170,16 @@ export function buildPaletteCommands(): PaletteCommand[] {
       // A prompt rather than a form: the palette closes on run, and a second
       // modal to type a URL into is a lot of machinery for the rare case. The
       // common case is an agent calling this with the URL already known.
-      const url = window.prompt(t("panes.browserPrompt"), "http://localhost:");
-      if (url?.trim()) openPane({ kind: "browser", url: url.trim() });
+      const typed = window.prompt(t("panes.browserPrompt"), "http://localhost:");
+      if (!typed?.trim()) return;
+      // Typing it is consent to see the page, not consent to frame the app's
+      // own origin inside itself. Same rules the agent's request goes through.
+      const target = classifyBrowserUrl(typed);
+      if (!target.ok) {
+        notifications.error(t(`browser.refuse.${target.reason}`));
+        return;
+      }
+      openPane({ kind: "browser", url: target.url });
     },
   });
 

@@ -16,7 +16,8 @@
   import BoiteLogo from "$lib/shared/components/BoiteLogo.svelte";
   import RemoteLogin from "$lib/features/workspace/RemoteLogin.svelte";
   import FolderBrowser from "$lib/features/project/FolderBrowser.svelte";
-  import { paneStore } from "$lib/features/panes/store.svelte";
+  import { paneStore, threadLeavesOf } from "$lib/features/panes/store.svelte";
+  import { panePresence } from "$lib/features/panes/open";
   import { statusEngine } from "$lib/features/thread/statusEngine";
   import PaneShell from "$lib/features/panes/PaneShell.svelte";
   import PaneOverlay from "$lib/features/panes/PaneOverlay.svelte";
@@ -38,7 +39,7 @@
     { keys: ["Ctrl", "T"], label: "welcome.newTerminal" },
     { keys: ["Ctrl", "Tab"], label: "welcome.cycleThreads" },
     { keys: ["Ctrl", "1-9"], label: "welcome.jumpToThread" },
-    { keys: ["Ctrl", "\\"], label: "welcome.splitPane" },
+    { keys: ["Ctrl", "Shift", "E"], label: "welcome.splitPane" },
     { keys: ["Ctrl", "B"], label: "welcome.toggleSidebar" },
     { keys: ["Ctrl", "W"], label: "welcome.closeThread" },
   ];
@@ -100,8 +101,19 @@
   });
 
   const activeGroupId = $derived.by(() => {
-    if (!app.activeThreadId) return null;
-    return paneStore.groupOf(app.activeThreadId)?.id ?? null;
+    if (app.activeThreadId) {
+      return paneStore.groupOf(app.activeThreadId)?.id ?? null;
+    }
+    // A group with no terminal in it: git, files or the todo list opened on a
+    // project nobody has launched anything in. Nothing sets `activeThreadId`
+    // for one, so which group is on screen has to come from the project.
+    const projectId = app.currentProjectId;
+    if (!projectId) return null;
+    return (
+      paneStore.groups.find(
+        (g) => g.projectId === projectId && threadLeavesOf(g.root).length === 0,
+      )?.id ?? null
+    );
   });
 
   $effect(() => {
@@ -235,9 +247,14 @@
   });
 
   // Opening the Files or Git panel is the strongest signal that a file or a
-  // diff is about to be opened; warm the editor before the click lands.
+  // diff is about to be opened; warm the editor before the click lands. Read
+  // off the panes now that the panels are panes: `settings.state.rightPanel`
+  // survives only as which of the three the titlebar button reaches for, and
+  // is set whether or not anything is open.
   $effect(() => {
-    if (settings.state.rightPanel) prefetchWhenIdle(EditorView);
+    if (panePresence("git") || panePresence("explorer")) {
+      prefetchWhenIdle(EditorView);
+    }
   });
 </script>
 
@@ -290,7 +307,10 @@
             <ShortcutBar />
           {/if}
 
-          {#if app.threads.length === 0}
+          <!-- Skipped whenever a group is on screen: with no terminal running
+               that group is a panel the user opened on purpose, and a welcome
+               card taking the full height would leave it nothing to draw in. -->
+          {#if app.threads.length === 0 && !activeGroupId}
             <div class="flex h-full items-center justify-center">
               <div class="flex flex-col items-center gap-4 text-center">
                 <span class="text-muted-foreground/40">
@@ -314,13 +334,13 @@
                 {/if}
               </div>
             </div>
-          {:else if app.activeThreadId === null && mobile}
+          {:else if app.activeThreadId === null && !activeGroupId && mobile}
             <div class="flex h-full items-center justify-center px-8 text-center">
               <p class="text-sm text-muted-foreground">
                 {t("welcome.tapOrPick")}
               </p>
             </div>
-          {:else if app.activeThreadId === null}
+          {:else if app.activeThreadId === null && !activeGroupId}
             <!-- The largest surface in the app, and it used to be a 200px
                  cheat-sheet floating in a thousand pixels of nothing. Same
                  information, given a container and a reason to be there, and
