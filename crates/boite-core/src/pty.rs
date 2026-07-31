@@ -632,9 +632,7 @@ fn read_loop(mut reader: Box<dyn Read + Send>, sink: Arc<dyn EventSink>) {
                     eprintln!("[boite/pty] output sink closed");
                     break;
                 }
-                for byte in &buf[..n] {
-                    parser.advance(&mut osc, *byte);
-                }
+                parser.advance(&mut osc, &buf[..n]);
             }
             Err(_) => break,
         }
