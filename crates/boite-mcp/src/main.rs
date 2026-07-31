@@ -423,7 +423,7 @@ fn thread_tools() -> Value {
                     },
                     "url": {
                         "type": "string",
-                        "description": "For kind=browser. http:// or https:// only. A localhost dev                                         server is the case this exists for; a public site may refuse                                         to be framed, and the user gets a button to open it outside."
+                        "description": "For kind=browser. A dev server on this machine is the case                                         this exists for: plain http:// reaches localhost, 127.0.0.1,                                         [::1] and 0.0.0.0 and nowhere else, and everywhere else                                         needs https://. Boite's own address is refused, and a page                                         off this machine waits for the user to agree before it is                                         shown. A public site may also refuse to be framed, and the                                         user gets a button to open it outside."
                     },
                     "side": {
                         "type": "string",
@@ -721,7 +721,7 @@ fn call_tool(host: &Host, name: &str, args: &Value) -> Result<String, String> {
             if let Some(url) = args.get("url").and_then(|v| v.as_str()) {
                 w.field("url", url);
             }
-            w.hint("the user sees it now; you cannot read what is in it");
+            w.hint("the user sees it now; you cannot read what is in it, and a page off this machine waits on them agreeing to it");
             Ok(w.into_string())
         }
         other => Err(format!("unknown tool: {other}")),
