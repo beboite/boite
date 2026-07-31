@@ -330,6 +330,55 @@ fn common_tools() -> Value {
             "annotations": { "title": "Take branch", "destructiveHint": false, "openWorldHint": false }
         },
         {
+            "name": "artifacts_status",
+            "description": "What this project gives each new worktree out of the user's checkout: \
+                            the heavy directories, how each one is shared, and what is left out of \
+                            it. Also says whether the rule is declared by the project or guessed \
+                            from its manifests — a guess is free to replace, a declared one was \
+                            somebody's decision. Read this before artifacts_set.",
+            "inputSchema": { "type": "object" },
+            "annotations": { "title": "Shared artifacts", "readOnlyHint": true, "idempotentHint": true, "openWorldHint": false }
+        },
+        {
+            "name": "artifacts_set",
+            "description": "Declare what this project shares with its worktrees, replacing the whole \
+                            rule. For a build system Boite does not recognise, or one whose layout \
+                            it gets wrong. mode=link is one link over the whole directory, right for \
+                            what only an install writes. mode=hardlink shares file by file and \
+                            REQUIRES exclude to name everything the build rewrites: a hard link is \
+                            not copy-on-write, so a build writing through one writes the main \
+                            checkout's copy, and the user's own working tree ends up holding this \
+                            terminal's output. Excludes are globs under the directory, `*` stopping \
+                            at a separator and `**` not.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "shared": {
+                        "type": "array",
+                        "description": "The complete list. An empty one shares nothing at all.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "dir": { "type": "string", "description": "One directory at the top of the repository, by name: no path, no '..'." },
+                                "mode": { "type": "string", "enum": ["link", "hardlink"], "description": "link for install directories, hardlink for build output." },
+                                "exclude": {
+                                    "type": "array",
+                                    "items": { "type": "string" },
+                                    "description": "Globs relative to dir, of everything the build rewrites. Ignored for link."
+                                },
+                                "cargoWorkspace": { "type": "boolean", "description": "Cargo only: read this repository's own packages from the manifests and exclude their artifacts, which no glob can express." }
+                            },
+                            "required": ["dir", "mode"],
+                            "additionalProperties": false
+                        }
+                    }
+                },
+                "required": ["shared"],
+                "additionalProperties": false
+            },
+            "annotations": { "title": "Set shared artifacts", "destructiveHint": false, "idempotentHint": true, "openWorldHint": false }
+        },
+        {
             "name": "projects_list",
             "description": "Every project in this Boite: id, name, folder, and whether it is \
                             archived. Archived ones are listed because a project the user put away \
@@ -591,6 +640,75 @@ fn format_worktree(out: &Value) -> String {
     w.into_string()
 }
 
+/// The sharing rule, one row per directory.
+///
+/// `source` comes first and is the point of the whole answer: the rows read the
+/// same either way, and only that line tells the agent whether it is looking at
+/// a decision or at a guess it is free to replace.
+fn format_artifacts(out: &Value) -> String {
+    let empty = Vec::new();
+    let shared = out.get("shared").and_then(|v| v.as_array()).unwrap_or(&empty);
+    let declared = out.get("declared").and_then(|v| v.as_bool()).unwrap_or(false);
+
+    let mut any_cargo = false;
+    let rows: Vec<Vec<String>> = shared
+        .iter()
+        .map(|e| {
+            let string_at = |key: &str| e.get(key).and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let cargo = e
+                .get("cargoWorkspace")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            any_cargo |= cargo;
+            // The globs go in one cell, comma-separated: a row per glob would
+            // repeat the directory, and this list is read as a whole anyway.
+            let exclude = e
+                .get("exclude")
+                .and_then(|v| v.as_array())
+                .map(|g| {
+                    g.iter()
+                        .filter_map(|v| v.as_str())
+                        .collect::<Vec<_>>()
+                        .join(",")
+                })
+                .unwrap_or_default();
+            vec![
+                string_at("dir"),
+                string_at("mode"),
+                clip(&exclude, MAX_CELL),
+                if cargo { "yes".into() } else { String::new() },
+            ]
+        })
+        .collect();
+
+    // The cargo rule is off on all but one project in a hundred, and a column
+    // that is empty on every row is paid for on every row.
+    let mut cols: Vec<&str> = vec!["dir", "mode", "exclude"];
+    if any_cargo {
+        cols.push("cargoWorkspace");
+    }
+    let rows: Vec<Vec<String>> = rows
+        .into_iter()
+        .map(|mut r| {
+            if !any_cargo {
+                r.pop();
+            }
+            r
+        })
+        .collect();
+
+    let mut w = Toon::new();
+    w.field("source", if declared { "declared" } else { "detected" })
+        .field("file", out.get("file").and_then(|v| v.as_str()).unwrap_or(""))
+        .table("shared", &cols, &rows);
+    if declared {
+        w.hint("the project declared this; artifacts_set replaces the whole list");
+    } else {
+        w.hint("nothing is declared: this is guessed from the manifests, artifacts_set to fix it");
+    }
+    w.into_string()
+}
+
 fn call_tool(host: &Host, name: &str, args: &Value) -> Result<String, String> {
     match name {
         "todo_list" => {
@@ -643,6 +761,30 @@ fn call_tool(host: &Host, name: &str, args: &Value) -> Result<String, String> {
         }
         "worktree_branch" => branch_call(host, args, "/v1/worktree/branch", "worktree_branch"),
         "worktree_reserve" => branch_call(host, args, "/v1/worktree/reserve", "worktree_reserve"),
+        "artifacts_status" => {
+            let out = host.send("GET", "/v1/artifacts", None)?;
+            Ok(format_artifacts(&out))
+        }
+        "artifacts_set" => {
+            let shared = args
+                .get("shared")
+                .and_then(|v| v.as_array())
+                .ok_or("artifacts_set needs shared, the complete list of directories")?;
+            // Forwarded as it came: every field is the endpoint's to validate,
+            // and a name it refuses comes back as a sentence rather than as a
+            // shape this shim guessed at.
+            let out = refusable(host, "/v1/artifacts", json!({ "shared": shared }))?;
+            let names: Vec<String> = shared
+                .iter()
+                .filter_map(|e| e.get("dir").and_then(|v| v.as_str()))
+                .map(str::to_string)
+                .collect();
+            let mut w = Toon::new();
+            w.field("declared", out.get("file").and_then(|v| v.as_str()).unwrap_or("-"))
+                .inline("shares", &names, MAX_BRANCHES)
+                .hint("it applies to worktrees opened from now on, not to this one");
+            Ok(w.into_string())
+        }
         "projects_list" => {
             let out = host.send("GET", "/v1/projects", None)?;
             Ok(format_projects(&out))
@@ -1051,6 +1193,38 @@ mod tests {
         assert!(text.contains("uncommitted: false\n"), "{text}");
         assert!(text.contains("branches(2): master feat/x\n"), "{text}");
         assert!(text.contains("hint: worktree_branch"), "{text}");
+    }
+
+    /// A detected policy and a declared one differ in one line, and that line is
+    /// what stops an agent from overwriting somebody's decision.
+    #[test]
+    fn the_artifact_policy_says_where_it_came_from() {
+        let out = json!({
+            "repo": "D:\\Dev\\Collab\\boite",
+            "file": ".boite/artifacts.json",
+            "declared": false,
+            "shared": [
+                { "dir": "target", "mode": "hardlink", "exclude": [], "cargoWorkspace": true },
+                { "dir": "node_modules", "mode": "link", "exclude": [], "cargoWorkspace": false }
+            ]
+        });
+        let text = format_artifacts(&out);
+        assert!(text.contains("source: detected\n"), "{text}");
+        assert!(text.contains("shared(2):\n"), "{text}");
+        assert!(text.contains("  dir mode exclude cargoWorkspace\n"), "{text}");
+        assert!(text.contains("  target hardlink - yes\n"), "{text}");
+        assert!(text.contains("artifacts_set"), "{text}");
+
+        let declared = json!({
+            "file": ".boite/artifacts.json",
+            "declared": true,
+            "shared": [{ "dir": "_build", "mode": "hardlink", "exclude": ["dev/lib/mine/**"] }]
+        });
+        let text = format_artifacts(&declared);
+        assert!(text.contains("source: declared\n"), "{text}");
+        // No row asks for the cargo rule, so nobody pays for the column.
+        assert!(text.contains("  dir mode exclude\n"), "{text}");
+        assert!(text.contains("  _build hardlink dev/lib/mine/**\n"), "{text}");
     }
 
     #[test]
