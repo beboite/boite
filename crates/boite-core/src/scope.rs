@@ -132,6 +132,40 @@ mod tests {
         }
     }
 
+    /// The list the new-project rule is fed: one folder per registered root,
+    /// the one it sits in. Canonical, because that is what `replace` stored.
+    #[test]
+    fn new_project_parents_are_the_folders_the_roots_sit_in() {
+        let tree = TempTree::new("parents");
+        let first = tree.dir("dev/first");
+        let second = tree.dir("dev/second");
+        let roots = ProjectRoots::default();
+        roots.replace(vec![TempTree::s(&first), TempTree::s(&second)]);
+
+        let parents = roots.new_project_parents();
+        let dev = fs::canonicalize(tree.root.join("dev")).unwrap();
+        assert_eq!(parents.len(), 2, "one per root, deduplication aside");
+        assert!(parents.iter().all(|p| Path::new(p) == dev), "{parents:?}");
+        // A folder beside the projects already there is what this list is for.
+        assert!(crate::project::may_create_project_in(
+            &TempTree::s(&dev),
+            &parents
+        ));
+        assert!(crate::project::may_create_project_at(
+            &TempTree::s(&dev.join("third")),
+            &parents
+        ));
+    }
+
+    /// Nothing to hand over before a project exists, and nothing left over
+    /// after the last one goes: an empty list refuses every path rather than
+    /// matching every path.
+    #[test]
+    fn no_roots_means_no_parents() {
+        let roots = ProjectRoots::default();
+        assert!(roots.new_project_parents().is_empty());
+    }
+
     #[test]
     fn nothing_is_allowed_before_any_root_is_registered() {
         let tree = TempTree::new("empty");

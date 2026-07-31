@@ -197,8 +197,15 @@ pub const WRONG_PLACE_FOR_A_PROJECT: &str =
 /// above. `create_project_folder` enforces it; `agent_api` reads it to refuse
 /// in front of an agent that is still running.
 pub fn new_project_roots(app: &AppHandle, scope: &ProjectRoots) -> Vec<String> {
+    new_project_roots_with_home(scope, app.path().home_dir().ok())
+}
+
+/// The list itself, with the home directory handed in instead of asked of the
+/// app. Everything a running Tauri app is needed for stays above this line, so
+/// the rule below it can be read back in a test.
+fn new_project_roots_with_home(scope: &ProjectRoots, home: Option<PathBuf>) -> Vec<String> {
     let mut allowed = scope.new_project_parents();
-    if let Ok(home) = app.path().home_dir() {
+    if let Some(home) = home {
         allowed.push(home.to_string_lossy().to_string());
     }
     allowed
@@ -1116,5 +1123,50 @@ pub async fn fastpick_version() -> Option<String> {
     tauri::async_runtime::spawn_blocking(boite_core::fastpick::version_blocking)
         .await
         .unwrap_or(None)
+}
+
+#[cfg(test)]
+mod new_project_root_tests {
+    use super::*;
+
+    /// The two places a new project may go, as `create_project_folder` and the
+    /// agent endpoint both read them: beside a project the user already has,
+    /// and under their home. Nowhere else, and nowhere at all before there is
+    /// either.
+    #[test]
+    fn the_roots_are_the_project_parents_plus_the_home_folder() {
+        let base = std::env::temp_dir().join(format!(
+            "boite-new-project-roots-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&base);
+        let project = base.join("dev").join("thing");
+        std::fs::create_dir_all(&project).unwrap();
+        let home = base.join("home");
+        std::fs::create_dir_all(&home).unwrap();
+
+        let scope = ProjectRoots::default();
+        scope.replace(vec![project.to_string_lossy().to_string()]);
+        let allowed = new_project_roots_with_home(&scope, Some(home.clone()));
+
+        let dev = std::fs::canonicalize(base.join("dev")).unwrap();
+        let text = |p: &Path| p.to_string_lossy().to_string();
+        assert!(project::may_create_project_in(&text(&dev), &allowed));
+        assert!(project::may_create_project_at(
+            &text(&home.join("idea")),
+            &allowed
+        ));
+        // A sibling of both is neither.
+        assert!(!project::may_create_project_at(
+            &text(&base.join("elsewhere").join("x")),
+            &allowed
+        ));
+        // No home to add leaves the projects, and no projects leave nothing.
+        assert_eq!(new_project_roots_with_home(&scope, None).len(), 1);
+        assert!(new_project_roots_with_home(&ProjectRoots::default(), None).is_empty());
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
 }
 
