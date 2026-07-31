@@ -39,8 +39,8 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<AppState>, addr: Socket
     let writer = tokio::spawn(async move {
         while let Some(out) = rx.recv().await {
             let msg = match out {
-                WsOut::Text(s) => Message::Text(s),
-                WsOut::Binary(b) => Message::Binary(b),
+                WsOut::Text(s) => Message::Text(s.into()),
+                WsOut::Binary(b) => Message::Binary(b.into()),
             };
             if sink.send(msg).await.is_err() {
                 break;
@@ -295,7 +295,7 @@ async fn authenticate(
     // counting it would lock out a legitimate device after five reconnects.
     let attempt: Option<(u64, String)> = match &first {
         Ok(Some(Ok(Message::Text(text)))) => Some(
-            serde_json::from_str::<Request>(text)
+            serde_json::from_str::<Request>(text.as_str())
                 .ok()
                 .filter(|req| req.method == "auth")
                 .map(|req| {

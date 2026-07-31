@@ -30,7 +30,7 @@ serde_json = "1"
 # Agent-facing todo endpoint. Loopback only, and deliberately not the dev
 # mcp-bridge: that one answers execute_js, this one answers three verbs on one
 # table.
-axum = "0.7"
+axum = "0.8"
 tokio = { version = "1", features = ["rt-multi-thread", "net"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 rand = "0.8"
