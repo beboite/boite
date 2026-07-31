@@ -499,7 +499,10 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
 
         // Same reason: the agents run here, so this is where they say what they
         // are doing. Scoped to the threads the client is asking about, because
-        // each agent's store costs a directory walk or a database open.
+        // each agent's store costs a directory walk or a database open, and off
+        // the async workers for the same reason: every connected client asks once
+        // a second, and a directory walk plus two SQLite opens inline is a tokio
+        // worker parked on the filesystem at 1 Hz per client.
         "session.agentTurns" => {
             let queries: Vec<boite_core::session::TurnQuery> = params
                 .get("queries")
@@ -508,7 +511,7 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
                 .transpose()
                 .map_err(|e| format!("bad queries: {e}"))?
                 .unwrap_or_default();
-            let turns = boite_core::session::agent_turns(&queries);
+            let turns = blocking(move || boite_core::session::agent_turns(&queries)).await?;
             Ok(json!({ "turns": turns }))
         }
 
