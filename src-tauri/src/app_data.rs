@@ -143,8 +143,23 @@ pub fn migrate_before_plugins() -> Result<Outcome, String> {
 ///
 /// One directory for all of them, so the filesystem trust boundary gains a
 /// single registered root instead of one per worktree read back from storage.
+///
+/// `BOITE_WORKTREE_BASE` moves that directory, and the reason is disk rather
+/// than taste. A worktree's `target` is provisioned from the main checkout by
+/// cloning or, where the filesystem cannot clone, by hard link — and neither
+/// crosses a volume. With the app data directory on one drive and the projects
+/// on another, every worktree recompiles from scratch and pays for its own copy
+/// of the build output. Pointing this at a directory on the projects' volume is
+/// what lets that provisioning happen at all.
 pub fn worktree_base(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     use tauri::Manager;
+    if let Some(base) = std::env::var("BOITE_WORKTREE_BASE")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+    {
+        return Ok(PathBuf::from(base));
+    }
     Ok(app
         .path()
         .app_data_dir()

@@ -88,8 +88,18 @@ impl AppState {
     }
 
     /// Where thread worktrees live, beside the database and never in a project.
+    ///
+    /// `BOITE_WORKTREE_BASE` moves it. A worktree takes its `target` from the
+    /// main checkout by clone or by hard link, and neither crosses a volume, so
+    /// a base sitting on a different drive from the projects means every
+    /// worktree recompiles and pays full disk for its build output.
     pub fn worktree_base(&self) -> PathBuf {
-        self.data_dir.join("worktrees")
+        std::env::var("BOITE_WORKTREE_BASE")
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| self.data_dir.join("worktrees"))
     }
 
     /// Boundary for adding/browsing projects. When BOITE_WORKSPACE_DIR is set,
