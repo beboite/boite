@@ -84,13 +84,6 @@ class PaneStore {
     return this.contentByPane.get(paneId) ?? null;
   }
 
-  /** Pane ids in the active group, whatever they hold. */
-  visibleLeaves(activeGroupId: string | null): Set<string> {
-    if (!activeGroupId) return new Set();
-    const g = this.groups.find((x) => x.id === activeGroupId);
-    return g ? new Set(leavesOf(g.root)) : new Set();
-  }
-
   /** Thread ids in the active group. What "which terminals are on screen" means. */
   visibleThreads(activeGroupId: string | null): Set<string> {
     if (!activeGroupId) return new Set();
@@ -117,6 +110,11 @@ class PaneStore {
       // Only thread panes can go stale: a git or browser pane is not backed by
       // a row anyone else can delete, so it lives until it is closed by hand.
       const orphans = threadLeavesOf(g.root).filter((id) => !valid.has(id));
+      // Nothing died here. Worth saying out loud because the reaping below
+      // keys on "no thread left", and a group that never had one is not a
+      // widow — it is the panels a user opened on a project with no terminal
+      // running, which is most of a project's life.
+      if (orphans.length === 0) continue;
       let root: LayoutNode | null = g.root;
       for (const id of orphans) {
         if (!root) break;
@@ -202,6 +200,31 @@ class PaneStore {
     if (!next) return null;
     group.root = next;
     group.focusedPaneId = paneId;
+    return paneId;
+  }
+
+  /**
+   * A group of one pane, for a project with no terminal open.
+   *
+   * Panels used to hang off a rail that drew itself whatever was running, so
+   * git, files and the todo list were reachable on a project nobody had opened
+   * a terminal in yet — which is how a project starts. Panes replaced the rail
+   * and inherited a rule the rail never had: every pane opens beside another
+   * one. This is the seed that rule needs.
+   *
+   * A thread never comes through here: `syncWithThreads` is what gives a
+   * terminal its group, and a second one made by hand would leave the pane
+   * tree holding the same thread twice.
+   */
+  openGroup(projectId: string, content: PaneContent): string | null {
+    if (content.kind === "thread") return null;
+    const paneId = `pane-${uid()}`;
+    this.groups.push({
+      id: uid(),
+      projectId,
+      root: { kind: "leaf", paneId, content },
+      focusedPaneId: paneId,
+    });
     return paneId;
   }
 

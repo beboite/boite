@@ -24,8 +24,11 @@ import { createProject } from "$lib/features/project/api";
 import { moveThreadToProject } from "./move";
 import { takesOpeningPrompt } from "./session";
 import { launchAgent } from "./api";
-import { openPane } from "$lib/features/panes/open";
+import { anchorProjectId, openPane } from "$lib/features/panes/open";
 import { paneStore } from "$lib/features/panes/store.svelte";
+import { classifyBrowserUrl } from "$lib/features/browser/url";
+import { confirmDialog } from "$lib/shared/components/confirm.svelte";
+import { t } from "$lib/i18n/index.svelte";
 import type { DropSide, PaneContent } from "$lib/features/panes/types";
 import type { IconKey } from "$lib/types";
 
@@ -67,6 +70,8 @@ interface PaneOpenRequest {
   callerThreadId?: string | null;
   pane: PaneContent["kind"];
   url?: string | null;
+  /** The endpoint's reading of the address: off this machine, so ask first. */
+  external?: boolean | null;
   side?: DropSide | null;
 }
 
@@ -220,20 +225,61 @@ async function handlePaneOpen(req: PaneOpenRequest) {
       app.selectedProjectId = req.projectId;
     }
   }
-  const content: PaneContent | null =
-    req.pane === "browser"
-      ? req.url
-        ? { kind: "browser", url: req.url }
-        : null
-      : ({ kind: req.pane } as PaneContent);
-  if (!content) {
-    logger.warn("agent-request", "browser pane with no url, dropping it");
+  // With no caller to anchor to, the pane lands wherever the user is looking,
+  // and that is very often another project. An agent in A asking for a pane
+  // and getting one in B is the app answering the wrong question in somebody
+  // else's workspace, so it is dropped rather than placed.
+  if (anchorProjectId() !== req.projectId) {
+    logger.warn(
+      "agent-request",
+      "pane asked for a project that is not the one on screen, dropping it",
+      { asked: req.projectId },
+    );
     return;
   }
+  const content = await paneContentOf(req);
+  if (!content) return;
   // Half the width for a browser, a third for a panel: a page needs room to be
   // a page, and a file tree does not.
   const ratio = req.pane === "browser" ? 0.5 : 0.35;
   openPane(content, req.side ?? "right", ratio);
+}
+
+/**
+ * What the pane will hold, once the address in it has been through the door.
+ *
+ * A browser pane is the only agent request that hands the app a document to
+ * host in its own window, so the address is checked here and not only at the
+ * endpoint that received it: the same event also arrives from a remote boite,
+ * which never went through that endpoint. Anything off this machine is the
+ * user's call — the agent chose the page, and it is not the agent's window.
+ */
+async function paneContentOf(req: PaneOpenRequest): Promise<PaneContent | null> {
+  if (req.pane !== "browser") return { kind: req.pane } as PaneContent;
+  if (!req.url) {
+    logger.warn("agent-request", "browser pane with no url, dropping it");
+    return null;
+  }
+  const target = classifyBrowserUrl(req.url);
+  if (!target.ok) {
+    logger.warn("agent-request", "browser pane refused", {
+      url: req.url,
+      reason: target.reason,
+    });
+    notifications.error(t(`browser.refuse.${target.reason}`));
+    return null;
+  }
+  // Either side saying "off this machine" is enough: `external` is missing on
+  // a request that took another route, and a missing answer is not a no.
+  if (!target.local || req.external !== false) {
+    const ok = await confirmDialog.ask({
+      title: t("browser.confirmExternalTitle"),
+      message: t("browser.confirmExternal", { url: target.url }),
+      confirmLabel: t("browser.confirmExternalOpen"),
+    });
+    if (!ok) return null;
+  }
+  return { kind: "browser", url: target.url };
 }
 
 async function handle(req: AgentRequest) {

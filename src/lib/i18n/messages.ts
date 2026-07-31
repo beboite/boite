@@ -395,22 +395,18 @@ export const EN_MESSAGES = {
   "palette.restoreThread": "Restore last closed thread",
   "palette.closeThread": "Close active thread",
   "palette.toggleSidebar": "Toggle sidebar",
-  "palette.toggleGit": "Toggle git panel",
-  "palette.toggleExplorer": "Toggle file explorer",
-  "palette.toggleTodo": "Toggle todo notepad",
   "palette.openSettings": "Open settings",
 
   "panes.resize": "Resize panes",
   "panes.maxReached": "Max {count} panes",
-  "panes.closePanel": "Close panel",
-  "panes.resizePanel": "Resize panel",
   "panes.closePane": "Close pane",
+  "panes.detachPane": "Move out of the split",
   "panes.kindDashboard": "Overview",
   "panes.kindGit": "Git",
   "panes.kindExplorer": "Files",
   "panes.kindTodo": "Todo",
   "panes.kindEditor": "Editor",
-  "panes.needThread": "Open a terminal first: a pane opens beside one.",
+  "panes.needProject": "Pick a project first: a pane belongs to one.",
   "panes.groupFull": "This group already holds {count} panes.",
   "panes.openGit": "Open git in a pane",
   "panes.openExplorer": "Open files in a pane",
@@ -418,8 +414,6 @@ export const EN_MESSAGES = {
   "panes.openDashboard": "Open the project overview in a pane",
   "panes.openEditor": "Open the editor in a pane",
   "panes.openBrowser": "Open a page in a pane…",
-  "panes.splitRight": "Split right",
-  "panes.splitDown": "Split down",
   "panes.browserPrompt": "Address to open",
 
   "todo.announceClaimed": "Waiting on you",
@@ -433,6 +427,17 @@ export const EN_MESSAGES = {
   "browser.openExternal": "Open in the system browser",
   "browser.mayRefuse":
     "Still nothing. A site can refuse to be framed; the button on the right opens it outside.",
+  "browser.confirmExternalTitle": "Open this page in a pane?",
+  "browser.confirmExternal":
+    "An agent asked to show {url} inside this window. It is not a server on this machine.",
+  "browser.confirmExternalOpen": "Show it",
+  "browser.refuse.notAUrl": "That is not an address a pane can open.",
+  "browser.refuse.scheme": "A pane opens http:// and https:// pages only.",
+  "browser.refuse.credentials":
+    "That address carries a username, which hides where it really goes.",
+  "browser.refuse.appOrigin": "That address is Boite itself, not a page.",
+  "browser.refuse.cleartext":
+    "Plain http:// stops at this machine. Use https:// for anywhere else.",
 
   "closeGuard.title": "Close boite?",
 

@@ -99,31 +99,25 @@ describe("matchesCombo", () => {
     ).toBe(true);
   });
 
-  it("matches the split key by its physical position", () => {
-    // Shift+\ produces "|", so matching on e.key alone would give the split
-    // bindings two different names for the same key and Ctrl+Shift+\ would
-    // never fire.
+  it("matches the split keys on both layouts and leaves Ctrl+backslash alone", () => {
+    // E and O sit in the same place on QWERTY and AZERTY, so the character the
+    // key produces identifies it on either.
     expect(
-      matchesCombo(combo("mod+backslash"), key({ key: "\\", ctrl: true }), false),
+      matchesCombo(combo("mod+shift+e"), key({ key: "E", code: "KeyE", ctrl: true, shift: true }), false),
     ).toBe(true);
     expect(
-      matchesCombo(
-        combo("mod+shift+backslash"),
-        key({ key: "|", code: "Backslash", ctrl: true, shift: true }),
-        false,
-      ),
+      matchesCombo(combo("mod+shift+o"), key({ key: "O", code: "KeyO", ctrl: true, shift: true }), false),
     ).toBe(true);
-    // AltGr on AZERTY: the character is right, the code is what identifies it.
-    expect(
-      matchesCombo(
-        combo("mod+backslash"),
-        key({ key: "\\", code: "Backslash", ctrl: true }),
-        false,
-      ),
-    ).toBe(true);
-    expect(
-      matchesCombo(combo("mod+backslash"), key({ key: "b", ctrl: true }), false),
-    ).toBe(false);
+    // Ctrl+\ is SIGQUIT and belongs to whatever is running in the terminal.
+    // Nothing may claim it, and there is no alias that could: on fr-AZERTY the
+    // backslash is AltGr+8, which arrives as Digit8 with altKey set.
+    for (const e of [
+      key({ key: "\\", code: "Backslash", ctrl: true }),
+      key({ key: "\\", code: "Digit8", ctrl: true, alt: true }),
+    ]) {
+      expect(matchesCombo(combo("mod+shift+e"), e, false)).toBe(false);
+      expect(matchesCombo(combo("mod+shift+o"), e, false)).toBe(false);
+    }
   });
 
   it("accepts both spellings of zoom in and out", () => {

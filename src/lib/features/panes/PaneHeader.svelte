@@ -8,6 +8,7 @@
   import { threadIconColor } from "$lib/features/fastpick/threadAccent";
   import { t } from "$lib/i18n/index.svelte";
   import X from "@lucide/svelte/icons/x";
+  import PictureInPicture2 from "@lucide/svelte/icons/picture-in-picture-2";
   import GitBranch from "@lucide/svelte/icons/git-branch";
   import FolderTree from "@lucide/svelte/icons/folder-tree";
   import ListTodo from "@lucide/svelte/icons/list-todo";
@@ -90,6 +91,21 @@
     return false;
   });
 
+  /**
+   * What the corner button does, which is not the same thing for both kinds.
+   *
+   * A panel is a view of something the project already has, so closing it
+   * destroys nothing and the X means what an X means. A thread is a running
+   * process with scrollback: `closePane` on one detaches it into a group of its
+   * own rather than killing it, which is the right behaviour and the wrong
+   * icon — an X over a live agent reads as "end it", and the sidebar's own
+   * close is where ending it belongs. So the thread case says what it does.
+   */
+  const detaches = $derived(content.kind === "thread");
+  const buttonLabel = $derived(
+    detaches ? t("panes.detachPane") : t("panes.closePane"),
+  );
+
   function close() {
     paneStore.closePane(paneId);
   }
@@ -138,12 +154,18 @@
   {#if closable}
     <button
       type="button"
-      class="flex size-4 shrink-0 items-center justify-center rounded-xs text-muted-foreground/70 transition hover:bg-danger/20 hover:text-danger"
+      class="flex size-4 shrink-0 items-center justify-center rounded-xs text-muted-foreground/70 transition {detaches
+        ? 'hover:bg-[var(--color-surface-2)] hover:text-foreground'
+        : 'hover:bg-danger/20 hover:text-danger'}"
       onclick={close}
-      title={t("panes.closePane")}
-      aria-label={t("panes.closePane")}
+      title={buttonLabel}
+      aria-label={buttonLabel}
     >
-      <X class="size-3" />
+      {#if detaches}
+        <PictureInPicture2 class="size-3" />
+      {:else}
+        <X class="size-3" />
+      {/if}
     </button>
   {/if}
 </div>
