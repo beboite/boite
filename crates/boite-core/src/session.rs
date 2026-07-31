@@ -88,7 +88,13 @@ pub struct LiveClaudeSession {
     ///
     /// An idle agent can be released without losing anything; the other three are
     /// all mid-something.
-    pub status: String,
+    ///
+    /// None means the entry carried no `status` key at all, which is what a claude
+    /// build predating the field writes. Kept apart from any of the four rather
+    /// than folded into `busy`: this is the status source of truth now, and a
+    /// default of "a turn is in flight" would pin every claude thread Running for
+    /// the life of the process, veto auto-sleep and never fire a notification.
+    pub status: Option<String>,
     /// What it is waiting for, when claude named it: `sandbox request`,
     /// `input needed`, `dialog open`, or the open dialog's own label. Only ever
     /// set alongside `waiting`.
@@ -219,7 +225,7 @@ pub fn live_claude_sessions() -> Vec<LiveClaudeSession> {
                 id,
                 pid,
                 kind: parsed.kind.unwrap_or_else(|| "interactive".into()),
-                status: parsed.status.unwrap_or_else(|| "busy".into()),
+                status: parsed.status,
                 waiting_for: parsed.waiting_for,
                 cwd: parsed.cwd.unwrap_or_default(),
             });
@@ -344,7 +350,9 @@ pub fn declared_turn(
     }
     let want = normalize(cwd);
     let mut found = None;
-    for t in mine().filter(|t| normalize(&t.cwd) == want) {
+    // A session that recorded no cwd is placeable by nobody. Without the guard a
+    // query for `/` normalises to the empty string and matches every one of them.
+    for t in mine().filter(|t| !t.cwd.is_empty() && normalize(&t.cwd) == want) {
         if found.is_some() {
             return DeclaredTurn::Unknown;
         }
@@ -362,13 +370,7 @@ pub fn agent_turns(queries: &[TurnQuery]) -> Vec<AgentTurn> {
     let mut out = Vec::new();
     let has = |kind: &str| queries.iter().any(|q| q.kind == kind);
     if has("claude") {
-        out.extend(live_claude_sessions().into_iter().map(|s| AgentTurn {
-            kind: "claude".into(),
-            session_id: s.id,
-            cwd: s.cwd,
-            state: s.status,
-            waiting_for: s.waiting_for,
-        }));
+        out.extend(live_claude_sessions().into_iter().filter_map(claude_turn));
     }
     if has("codex") {
         out.extend(codex_turns(queries));
@@ -377,6 +379,26 @@ pub fn agent_turns(queries: &[TurnQuery]) -> Vec<AgentTurn> {
         out.extend(opencode_turns(queries));
     }
     out
+}
+
+/// One claude registry entry as a turn, or nothing at all when it declared no
+/// status.
+///
+/// Absence is not a state. Every other reader in this file answers "no answer"
+/// when it cannot tell, and this one has to as well: folded into `busy`, a claude
+/// build that does not write the field would pin every one of its threads Running
+/// with nothing able to clear it, veto auto-sleep and never fire a notification.
+/// Silence falls back to the screen rows and the TTL, which can clear it.
+/// A state that is present but unrecognised still reads as `busy` downstream:
+/// that one is a format this does not know rather than a fact nobody stated.
+fn claude_turn(s: LiveClaudeSession) -> Option<AgentTurn> {
+    Some(AgentTurn {
+        kind: "claude".into(),
+        session_id: s.id,
+        cwd: s.cwd,
+        state: s.status?,
+        waiting_for: s.waiting_for,
+    })
 }
 
 fn normalize(p: &str) -> String {
@@ -833,6 +855,19 @@ pub fn find_codex_session_blocking(
 /// they can, since it prints an interrupt hint the whole time it works.
 const CODEX_TAIL_BYTES: u64 = 256 * 1024;
 
+/// How long a rollout can go untouched before an open turn stops counting.
+///
+/// Nothing else ever ages a codex answer out. Claude's registry is filtered by
+/// `pid_alive` and opencode's rows close themselves, but a codex killed, crashed
+/// or rebooted mid-turn leaves `task_started` as the last marker it ever wrote,
+/// and the thread index keeps the row and matches it by session id for good, so
+/// the thread reads busy on every poll until someone deletes the file.
+///
+/// Generous on purpose: the markers bracket a whole turn, and a single long tool
+/// call appends nothing at all while it runs. Past it the answer is no answer,
+/// and the terminal's own rows decide, which for codex they can.
+const CODEX_ROLLOUT_TTL: Duration = Duration::from_secs(30 * 60);
+
 /// Codex's thread index. The number is a schema version and has moved before
 /// (`state_5.sqlite` today), so it is discovered rather than hardcoded: a bumped
 /// version must degrade to "no answer" and not to "wrong answer".
@@ -871,9 +906,17 @@ fn codex_state_db() -> Option<PathBuf> {
 /// events to the rollout, so an approval prompt is indistinguishable from a turn
 /// still running. Busy is the safe side of that: it keeps auto-sleep off a thread
 /// that is actually waiting for the user.
+///
+/// Bounded by how long ago the file was written: an open turn is only an open
+/// turn while codex is still there to close it.
 fn codex_rollout_state(path: &Path) -> Option<&'static str> {
     let mut file = fs::File::open(path).ok()?;
-    let len = file.metadata().ok()?.len();
+    let meta = file.metadata().ok()?;
+    let len = meta.len();
+    let age = meta
+        .modified()
+        .ok()
+        .and_then(|m| SystemTime::now().duration_since(m).ok());
     let from = len.saturating_sub(CODEX_TAIL_BYTES);
     file.seek(SeekFrom::Start(from)).ok()?;
     let mut buf = String::new();
@@ -897,12 +940,25 @@ fn codex_rollout_state(path: &Path) -> Option<&'static str> {
             continue;
         }
         match event.payload.and_then(|p| p.kind).as_deref() {
-            Some("task_started") => return Some("busy"),
+            Some("task_started") => return bound_open_turn(age),
             Some("task_complete") | Some("turn_aborted") => return Some("idle"),
             _ => continue,
         }
     }
     None
+}
+
+/// Whether a turn left open in a rollout still counts, given the file's age.
+///
+/// Only the open side is bounded. A closed turn stays closed however old the
+/// transcript is, and an age this could not read (a clock skewed the wrong way, a
+/// filesystem that answered nothing) is not evidence of anything, so it is read
+/// as fresh rather than used to demote a working thread.
+fn bound_open_turn(age: Option<Duration>) -> Option<&'static str> {
+    match age {
+        Some(age) if age >= CODEX_ROLLOUT_TTL => None,
+        _ => Some("busy"),
+    }
 }
 
 #[derive(Deserialize)]
@@ -1019,19 +1075,39 @@ fn opencode_turns(queries: &[TurnQuery]) -> Vec<AgentTurn> {
                     |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
                 )
                 .ok(),
-            // Newest first. `parent_id IS NULL` keeps a subagent's own session from
-            // standing in for the thread: it shares the directory, and its turn
-            // ends before the parent's does.
-            None => conn
-                .query_row(
+            // The newest root session *in this directory*, which is not the same
+            // as the newest one anywhere. Asking for a single row and then
+            // checking its folder answered nothing whenever the thread's own
+            // session was not the most recently touched on the machine, which is
+            // every boite with more than one opencode open.
+            //
+            // Bounded and matched here rather than in the WHERE clause because the
+            // directory is recorded natively and only `normalize` compares those
+            // the same way the rest of this file does. `codex_turns` reads its
+            // index the same way, for the same reason.
+            //
+            // `parent_id IS NULL` keeps a subagent's own session from standing in
+            // for the thread: it shares the directory, and its turn ends before
+            // the parent's does.
+            None if !query.cwd.is_empty() => {
+                let want = normalize(&query.cwd);
+                conn.prepare(
                     "SELECT id, coalesce(directory, '') FROM session \
                      WHERE parent_id IS NULL \
-                     ORDER BY coalesce(time_updated, time_created, 0) DESC LIMIT 1",
-                    [],
-                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                     ORDER BY coalesce(time_updated, time_created, 0) DESC LIMIT 200",
                 )
                 .ok()
-                .filter(|(_, dir)| !query.cwd.is_empty() && normalize(dir) == normalize(&query.cwd)),
+                .and_then(|mut stmt| {
+                    let rows = stmt
+                        .query_map([], |row| {
+                            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                        })
+                        .ok()?;
+                    rows.flatten()
+                        .find(|(_, dir)| !dir.is_empty() && normalize(dir) == want)
+                })
+            }
+            None => None,
         };
         let Some((id, directory)) = resolved else {
             continue;
@@ -1044,7 +1120,10 @@ fn opencode_turns(queries: &[TurnQuery]) -> Vec<AgentTurn> {
                 |row| row.get::<_, String>(0),
             )
             .ok();
-        let Some(state) = newest.as_deref().and_then(opencode_message_state) else {
+        let Some(state) = newest
+            .as_deref()
+            .and_then(|data| opencode_message_state(data, ms_since_epoch(SystemTime::now())))
+        else {
             continue;
         };
         out.push(AgentTurn {
@@ -1058,6 +1137,15 @@ fn opencode_turns(queries: &[TurnQuery]) -> Vec<AgentTurn> {
     out
 }
 
+/// How long an unfinished opencode row can go untouched before it stops counting.
+///
+/// Same hole codex has: nothing ever closes one from outside. An opencode killed
+/// mid-reply leaves an assistant row that never gained `time.completed`, and a
+/// user row whose reply was never created, and either one reads busy on every
+/// poll from then on. Generous for the same reason too, since a long tool call
+/// updates nothing while it runs, and past it the answer is no answer.
+const OPENCODE_ROW_TTL_MS: i64 = 30 * 60 * 1000;
+
 #[derive(Deserialize)]
 struct OpencodeMessage {
     role: Option<String>,
@@ -1066,6 +1154,8 @@ struct OpencodeMessage {
 
 #[derive(Deserialize)]
 struct OpencodeMessageTime {
+    created: Option<i64>,
+    updated: Option<i64>,
     completed: Option<i64>,
 }
 
@@ -1074,14 +1164,28 @@ struct OpencodeMessageTime {
 /// An assistant row without `time.completed` is a turn being written right now. A
 /// user row as the newest means the prompt has landed and the reply has not been
 /// created yet, which is the very start of a turn rather than the end of one.
-fn opencode_message_state(data: &str) -> Option<&'static str> {
+///
+/// Both of those are bounded by how long ago the row was written; only the
+/// finished one is good forever.
+fn opencode_message_state(data: &str, now_ms: i64) -> Option<&'static str> {
     let message: OpencodeMessage = serde_json::from_str(data).ok()?;
+    let open = |time: Option<OpencodeMessageTime>| {
+        let touched = time
+            .map(|t| t.updated.unwrap_or(0).max(t.created.unwrap_or(0)))
+            .unwrap_or(0);
+        // A row with no timestamp at all cannot be aged, and inventing one would
+        // demote a working thread on nothing. It keeps counting, as before.
+        match touched {
+            t if t > 0 && now_ms.saturating_sub(t) >= OPENCODE_ROW_TTL_MS => None,
+            _ => Some("busy"),
+        }
+    };
     match message.role.as_deref() {
-        Some("assistant") => Some(match message.time.and_then(|t| t.completed) {
-            Some(_) => "idle",
-            None => "busy",
-        }),
-        Some("user") => Some("busy"),
+        Some("assistant") => match message.time.as_ref().and_then(|t| t.completed) {
+            Some(_) => Some("idle"),
+            None => open(message.time),
+        },
+        Some("user") => open(message.time),
         _ => None,
     }
 }
@@ -1828,6 +1932,47 @@ mod turn_tests {
     }
 
     #[test]
+    fn a_session_with_no_recorded_directory_is_placed_by_nobody() {
+        // Ported from `agent-registry.test.ts`, which had the guard this did not.
+        // `/` normalises to the empty string, so without it a thread at the root
+        // of a drive was handed the state of every session that recorded nothing.
+        let live = [claude("a", "busy", "")];
+        assert_eq!(
+            declared_turn(&live, "claude", None, "/w/one"),
+            DeclaredTurn::Unknown
+        );
+        assert_eq!(declared_turn(&live, "claude", None, "/"), DeclaredTurn::Unknown);
+    }
+
+    #[test]
+    fn a_claude_entry_with_no_status_says_nothing_at_all() {
+        // This is the status source of truth now. A build that writes no `status`
+        // key must produce no turn, so the screen rows and the TTL get the thread.
+        // Reading it as `busy` would pin it Running with nothing able to clear
+        // it, which is the bug this whole loop exists to not have.
+        let entry = |status: Option<&str>| LiveClaudeSession {
+            id: "a".into(),
+            pid: 1,
+            kind: "interactive".into(),
+            status: status.map(str::to_string),
+            waiting_for: None,
+            cwd: "/w/one".into(),
+        };
+        assert_eq!(claude_turn(entry(None)), None);
+        assert_eq!(
+            claude_turn(entry(Some("idle"))).map(|t| t.state),
+            Some("idle".to_string())
+        );
+        // Present but unreadable is a format we do not know, not a fact nobody
+        // stated: it survives as a turn and reads busy downstream.
+        let unknown = claude_turn(entry(Some("starting"))).expect("a stated state is a turn");
+        assert_eq!(
+            declared_turn(&[unknown], "claude", Some("a"), "/w/one"),
+            DeclaredTurn::Busy
+        );
+    }
+
+    #[test]
     fn an_unrecognised_state_is_treated_as_a_turn_in_flight() {
         // Calling a state we cannot read "finished" is what would let auto-sleep
         // kill a working PTY.
@@ -1942,25 +2087,88 @@ mod turn_tests {
     }
 
     #[test]
+    fn an_open_codex_turn_stops_counting_once_the_rollout_goes_stale() {
+        // Codex killed, crashed or rebooted mid-turn leaves `task_started` as the
+        // last marker it will ever write. There is no pid to check and the thread
+        // index keeps the row forever, so without this the thread reads busy on
+        // every poll until someone deletes the file.
+        assert_eq!(bound_open_turn(Some(Duration::from_secs(0))), Some("busy"));
+        assert_eq!(
+            bound_open_turn(Some(CODEX_ROLLOUT_TTL - Duration::from_secs(1))),
+            Some("busy")
+        );
+        assert_eq!(bound_open_turn(Some(CODEX_ROLLOUT_TTL)), None);
+        assert_eq!(
+            bound_open_turn(Some(CODEX_ROLLOUT_TTL * 100)),
+            None
+        );
+        // An age nothing could read is not evidence a turn ended.
+        assert_eq!(bound_open_turn(None), Some("busy"));
+    }
+
+    #[test]
     fn opencode_message_rows_decide_the_turn() {
         // An assistant row gains `time.completed` when its turn ends and does not
         // have the field before that. A user row as the newest means the prompt
         // landed and the reply has not been created yet.
+        let now = 10_000_000;
         assert_eq!(
-            opencode_message_state(r#"{"role":"assistant","time":{"created":1,"completed":2}}"#),
+            opencode_message_state(
+                r#"{"role":"assistant","time":{"created":1,"completed":2}}"#,
+                now
+            ),
             Some("idle")
         );
         assert_eq!(
-            opencode_message_state(r#"{"role":"assistant","time":{"created":1}}"#),
+            opencode_message_state(r#"{"role":"assistant","time":{"created":9999999}}"#, now),
             Some("busy")
         );
         assert_eq!(
-            opencode_message_state(r#"{"role":"user","time":{"created":1}}"#),
+            opencode_message_state(r#"{"role":"user","time":{"created":9999999}}"#, now),
             Some("busy")
         );
         // Nothing recognisable is not an answer.
-        assert_eq!(opencode_message_state(r#"{"role":"system"}"#), None);
-        assert_eq!(opencode_message_state("not json"), None);
+        assert_eq!(opencode_message_state(r#"{"role":"system"}"#, now), None);
+        assert_eq!(opencode_message_state("not json", now), None);
+    }
+
+    #[test]
+    fn an_open_opencode_row_stops_counting_once_it_goes_stale() {
+        // Same hole codex has: opencode killed mid-reply leaves an assistant row
+        // that never gains `time.completed`, and a user row whose reply is never
+        // created, and the session stays the newest one in its directory. Neither
+        // may read busy forever.
+        let now = 10 * OPENCODE_ROW_TTL_MS;
+        let stale = now - OPENCODE_ROW_TTL_MS;
+        let fresh = now - OPENCODE_ROW_TTL_MS + 1;
+        let row = |role: &str, created: i64| {
+            format!(r#"{{"role":"{role}","time":{{"created":{created}}}}}"#)
+        };
+        assert_eq!(opencode_message_state(&row("assistant", fresh), now), Some("busy"));
+        assert_eq!(opencode_message_state(&row("assistant", stale), now), None);
+        assert_eq!(opencode_message_state(&row("user", fresh), now), Some("busy"));
+        assert_eq!(opencode_message_state(&row("user", stale), now), None);
+
+        // `time_updated` is what moves while a reply is being written, so it is
+        // what keeps a long turn alive even though `created` has aged out.
+        let touched = format!(
+            r#"{{"role":"assistant","time":{{"created":{stale},"updated":{fresh}}}}}"#
+        );
+        assert_eq!(opencode_message_state(&touched, now), Some("busy"));
+
+        // A finished turn is good forever; only the open side is bounded.
+        let done = format!(
+            r#"{{"role":"assistant","time":{{"created":{stale},"completed":{stale}}}}}"#
+        );
+        assert_eq!(opencode_message_state(&done, now), Some("idle"));
+
+        // A row with no timestamp at all cannot be aged, and inventing one would
+        // demote a working thread on nothing.
+        assert_eq!(
+            opencode_message_state(r#"{"role":"assistant","time":{}}"#, now),
+            Some("busy")
+        );
+        assert_eq!(opencode_message_state(r#"{"role":"assistant"}"#, now), Some("busy"));
     }
 }
 
