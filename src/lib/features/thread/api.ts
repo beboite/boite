@@ -21,6 +21,7 @@ import {
 } from "$lib/features/fastpick/combo";
 import { barColorArgs } from "$lib/features/fastpick/threadAccent";
 import { samePromotion, type Promotion } from "./promote";
+import { releaseClaudeSession } from "./session";
 import type { IconKey, Project, Shortcut, Thread } from "$lib/types";
 import type { ShellOption } from "$lib/storage/platform.svelte";
 
@@ -165,6 +166,65 @@ export async function openWorktreeFor(
   }
 }
 
+// Repositories already asked for a spare, and when they were asked. The backend
+// refills after every thread that takes one, so a project only has to be primed
+// once — but never for the whole session: a spare removed from the Worktrees
+// tab, or dropped by the pool's own cap, has to be replaceable without a
+// restart.
+const warmed = new Map<string, number>();
+const WARM_TTL = 5 * 60_000;
+
+// The same path is two different repositories in dynamic mode: one on this
+// machine, one on the boite. Keyed on both, or landing on the remote project
+// would be told the local one had already been warmed.
+function warmKey(project: Project): string {
+  return `${project.origin ?? "local"}:${project.gitRoot ?? project.cwd}`;
+}
+
+/**
+ * Forgets that this project was warmed, so the next visit asks again.
+ *
+ * The one thing this side cannot observe is the pool losing a spare — removed
+ * by hand from the Worktrees tab, or collected by the backend's own cap — and
+ * without this the project would go without one until a restart.
+ */
+export function forgetWarmedWorktree(project: Project) {
+  warmed.delete(warmKey(project));
+}
+
+/**
+ * Asks for a worktree to be standing by for this project's next agent thread.
+ *
+ * Called when the user moves to a project, which is the earliest honest sign
+ * that something is about to be launched in it, and far enough ahead of the
+ * click that `git worktree add` is finished before it comes. Without this the
+ * checkout happened between the click and the terminal, where it was measured at
+ * half a second on a small repository and seconds on a large one.
+ *
+ * Never awaited, and a refusal is not reported: a project with no spare is the
+ * behaviour every project had before this existed.
+ */
+export function warmWorktreeFor(project: Project | null) {
+  if (!project) return;
+  if (!(project.worktrees ?? settings.state.threadWorktrees)) return;
+  if (isScratch(project)) return;
+  const key = warmKey(project);
+  const now = Date.now();
+  // Swept here rather than on a timer: this is the only thing that ever puts an
+  // entry in, so it is the only place one can have gone stale.
+  for (const [k, at] of warmed) {
+    if (now - at >= WARM_TTL) warmed.delete(k);
+  }
+  if (warmed.has(key)) return;
+  warmed.set(key, now);
+  void backendForPath(project.cwd)
+    .worktree.warm(project.gitRoot ?? project.cwd)
+    .catch((err) => {
+      warmed.delete(key);
+      logger.info("worktree", `no spare for ${project.name}`, String(err));
+    });
+}
+
 // Threads whose working directory is still being decided.
 //
 // A thread is created and shown before its worktree exists, so `git worktree
@@ -212,14 +272,42 @@ function prepareWorktree(project: Project, thread: Thread, iconKey: IconKey) {
   );
 }
 
-async function createThread(
+/**
+ * Says which directory a thread that never reached SQLite left behind.
+ *
+ * The row is what a restart reads, so without it the worktree opened for this
+ * thread is registered in git and owned by nobody: no thread claims it, no
+ * cleanup path knows it exists, and the Worktrees tab is the only place it can
+ * still be found. Removing it here is not on offer — the terminal is starting
+ * in it as this runs — so naming it is what is left, in the log and in the
+ * toast, rather than losing it quietly.
+ */
+async function recordUnsavedThread(thread: Thread, err: unknown) {
+  await threadDirectoryReady(thread.id);
+  const orphan = app.threadById(thread.id)?.worktreePath ?? null;
+  logger.error("thread", `${thread.id}: not saved, it is gone on restart`, {
+    error: String(err),
+    orphanWorktree: orphan,
+  });
+  notifications.error(
+    orphan ? t("thread.notSavedOrphan", { path: orphan }) : t("thread.notSaved"),
+  );
+}
+
+/**
+ * Synchronous, and that is the point: a launch has nothing left to wait for.
+ * The row goes to SQLite behind the caller and the worktree is opened behind the
+ * thread, so between the click and a thread the user can see there is no round
+ * trip left to pay.
+ */
+function createThread(
   project: Project,
   cmd: string,
   args: string[],
   labelPrefix: string,
   iconKey: IconKey,
   opts: { fresh?: boolean; iconColor?: string | null } = {},
-): Promise<Thread | null> {
+): Thread {
   const count = nextLabelSuffix(project.id, labelPrefix);
   const thread = buildThread(
     project,
@@ -230,13 +318,12 @@ async function createThread(
     opts.iconColor ?? null,
   );
   if (opts.fresh) app.markFresh(thread.id);
-  try {
-    await app.upsertThread(thread);
-  } catch (err) {
-    logger.error("thread", "upsertThread failed", String(err));
-    notifications.error(t("thread.createFailed"));
-    return null;
-  }
+  // Not awaited. The thread is in the store the moment this returns, which is
+  // all the sidebar and the terminal need; waiting for the INSERT to come back
+  // put an IPC round trip and a WAL commit between the click and the pane. A
+  // row that fails to land still gives a working thread for this session, and
+  // says so.
+  void app.upsertThread(thread).catch((err) => recordUnsavedThread(thread, err));
   app.activeThreadId = thread.id;
   app.view = "terminal";
   // After the thread exists, never before it: the worktree is several `git`
@@ -465,13 +552,9 @@ export async function restoreLastClosedThread(): Promise<Thread | null> {
     }
 
     const restored = snapshotThread(thread);
-    try {
-      await app.upsertThread(restored);
-    } catch (err) {
-      logger.error("thread", "upsertThread failed", String(err));
-      notifications.error(t("thread.restoreFailed"));
-      return null;
-    }
+    // Same as a launch: the row is in the store already, so nothing the user is
+    // about to look at is waiting on the write.
+    void app.upsertThread(restored).catch((err) => recordUnsavedThread(restored, err));
     app.activeThreadId = restored.id;
     app.selectedProjectId = restored.projectId;
     app.view = "terminal";
@@ -500,20 +583,24 @@ export async function reloadThread(threadId: string) {
   // the relaunch below be an ordinary resume. Stopping is scoped to background
   // agents backend-side; an interactive session belongs to another terminal.
   // Best-effort: a failure just means the picker path is taken, as before.
-  if (thread.sessionId) {
-    const project = app.projects.find((p) => p.id === thread.projectId);
-    if (project) {
-      await backendForPath(project.cwd)
-        .session.stopClaude(thread.sessionId)
-        .catch(() => false);
-    }
-  }
-  if (previousPtyId) {
-    // wait=true: respawning before the old process is dead reopens the
-    // two-`claude --resume`-on-one-session-file race the backend kill
-    // semantics were built to prevent.
-    await ptyKill(previousPtyId, true).catch(() => {});
-  }
+  //
+  // Together with the kill, not before it. The two touch different processes:
+  // a background agent somewhere else, and this pane's own PTY, so nothing
+  // ordered them; running them in series only stacked one wait on top of the
+  // other, and the release alone can spend three seconds waiting for a SIGTERM
+  // to land.
+  const project = app.projects.find((p) => p.id === thread.projectId);
+  const release =
+    thread.sessionId && project
+      ? releaseClaudeSession(project.cwd, thread.sessionId)
+      : Promise.resolve(false);
+  // wait=true: respawning before the old process is dead reopens the
+  // two-`claude --resume`-on-one-session-file race the backend kill semantics
+  // were built to prevent.
+  const kill = previousPtyId
+    ? ptyKill(previousPtyId, true).catch(() => {})
+    : Promise.resolve();
+  await Promise.all([release, kill]);
 
   thread.ptyId = null;
   thread.status = "idle";

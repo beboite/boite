@@ -146,6 +146,12 @@ export interface WorktreeEntry {
   prunable: boolean;
   dirty: boolean;
   orphanCommits: boolean;
+  /**
+   * Made ahead of time and not claimed yet: the next agent thread in this
+   * repository walks into it instead of waiting for `git worktree add`. Removing
+   * it costs nothing but that head start.
+   */
+  spare: boolean;
 }
 
 /** What a worktree still holds that removing it would destroy. */
@@ -169,6 +175,19 @@ export interface WorktreeApi {
    * what a new thread waits on.
    */
   open(repo: string, threadId: string): Promise<string | null>;
+  /**
+   * Makes sure this repository has a worktree standing by for its next thread,
+   * and that it is on the commit the repository is on.
+   *
+   * The thread id above only names a directory this call has to make; the
+   * ordinary path hands over a spare made here instead, which is what takes `git
+   * worktree add` and its shared directories out from in front of a terminal.
+   *
+   * Resolves once the spare exists. Callers do not wait for it: nothing depends
+   * on the answer, and a repository that cannot have one — not a repo, no
+   * commits — is not a failure to report.
+   */
+  warm(repo: string): Promise<void>;
   /**
    * Every worktree of a repository, the main checkout included, each with what
    * removing it would destroy. One call rather than a list plus a `hold` per

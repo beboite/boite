@@ -741,15 +741,28 @@ async fn dispatch_worktree(
             let repo = str_param(&params, "repo")?;
             state.roots.ensure_allowed(&repo)?;
             let thread_id = str_param(&params, "threadId")?;
-            let base = state.worktree_base();
-            std::fs::create_dir_all(&base).map_err(|e| format!("worktree base: {e}"))?;
-            let path = git::scoped_dir_for(&base, &thread_id)
-                .to_string_lossy()
-                .to_string();
+            let base = state.worktree_base().to_string_lossy().to_string();
             // `path` is null when the repository is not one to open a worktree
             // in: no repo, or a dirty checkout the thread has to start in.
-            let r = blocking(move || git::open_worktree_if_eligible_blocking(&repo, &path)).await??;
+            let r = blocking(move || {
+                git::open_worktree_if_eligible_blocking(&repo, &base, &thread_id)
+            })
+            .await??;
             Ok(json!({ "path": r }))
+        }
+        // Fire and forget: the answer says the warming started, never that it
+        // finished, and a project that cannot have a spare is not a failure.
+        "worktree.warm" => {
+            let repo = str_param(&params, "repo")?;
+            state.roots.ensure_allowed(&repo)?;
+            let base = state.worktree_base().to_string_lossy().to_string();
+            blocking(move || {
+                if let Err(err) = git::warm_worktree_pool_blocking(&repo, &base) {
+                    eprintln!("[boite/worktree] warm failed: {err}");
+                }
+            })
+            .await?;
+            Ok(json!({ "ok": true }))
         }
         "worktree.list" => {
             let repo = str_param(&params, "repo")?;

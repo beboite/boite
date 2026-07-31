@@ -155,11 +155,11 @@ class AppState {
     if (this.requestedActivations.length > 0) this.requestedActivations = [];
   }
 
+  // One key, not a new record: the record is a $state proxy, so writing the key
+  // is already reactive, and replacing the whole object woke every mounted
+  // terminal's relaunch effect on every single reload.
   bumpRespawn(threadId: string) {
-    this.respawnNonce = {
-      ...this.respawnNonce,
-      [threadId]: (this.respawnNonce[threadId] ?? 0) + 1,
-    };
+    this.respawnNonce[threadId] = (this.respawnNonce[threadId] ?? 0) + 1;
   }
 
   markFresh(threadId: string) {
@@ -636,13 +636,25 @@ class AppState {
     }
   }
 
-  async upsertThread(thread: Thread) {
+  /**
+   * Puts the thread in the store now, and persists it behind the caller.
+   *
+   * Not async on purpose: the store write has to happen at call time, in the
+   * click's own task, while the returned promise is only the row reaching
+   * SQLite. A launch does not await it — the sidebar entry and the terminal are
+   * what the user clicked for, and an IPC round trip plus a WAL commit in front
+   * of them is a wait for nothing. A caller that has to know the row landed
+   * (a move, which reports failure and gives up) still awaits.
+   *
+   * Rejects rather than swallowing: callers show a "Failed to create thread"
+   * toast. Swallowing here left the thread memory-only, silently vanishing on
+   * restart.
+   */
+  upsertThread(thread: Thread): Promise<void> {
     const i = this.threads.findIndex((t) => t.id === thread.id);
     if (i >= 0) this.threads[i] = thread;
     else this.threads.push(thread);
-    // Rethrow: callers show a "Failed to create thread" toast. Swallowing
-    // here left the thread memory-only, silently vanishing on restart.
-    await saveThread(thread);
+    return saveThread(thread);
   }
 
   async removeThread(id: string) {

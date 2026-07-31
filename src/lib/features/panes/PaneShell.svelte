@@ -40,7 +40,11 @@
 
     observer = new ResizeObserver(schedule);
     observer.observe(el);
-    schedule();
+    // Straight away, not on the next frame. The element is in the document by
+    // the time an action runs, so its box is one forced layout away — and this
+    // measurement is what lets the terminal mount, so deferring it cost a frame
+    // of black pane on every thread that opened.
+    update();
     window.addEventListener("resize", schedule);
 
     return {
@@ -200,10 +204,18 @@
 </div>
 
 <style>
+  /* Nothing between the viewport and a lone leaf: no padding, no border, no
+     gap. `unmeasuredRect` places that leaf at 0,0 over the whole viewport
+     before anything has been measured, and an inset of any kind here would make
+     the first frame the wrong size — the terminal would fit itself twice, once
+     against a rect that was never true. */
   .pane-shell-root {
     width: 100%;
     height: 100%;
     display: flex;
+    padding: 0;
+    border: 0;
+    gap: 0;
   }
   .pane-shell-root > :global(*) {
     flex: 1;
@@ -217,6 +229,9 @@
     height: 100%;
     min-width: 0;
     min-height: 0;
+    padding: 0;
+    border: 0;
+    margin: 0;
   }
   .pane-body {
     position: relative;

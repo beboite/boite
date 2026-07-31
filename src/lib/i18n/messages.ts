@@ -272,6 +272,9 @@ export const EN_MESSAGES = {
   "worktree.orphan": "commits on no branch",
   "worktree.prunable": "directory gone",
   "worktree.empty": "nothing to lose",
+  "worktree.spare": "standing by",
+  "worktree.spareHint":
+    "Made ahead of time so the next agent thread here starts instantly. Removing it only costs that head start.",
   "worktree.dirtyCount": "{count} holding work",
   "worktree.heldBy": "{thread} is running here",
   "worktree.remove": "Remove this worktree",
@@ -661,9 +664,10 @@ export const EN_MESSAGES = {
   "terminal.keyboardLabel": "Keyboard (long-press for key bar)",
   "terminal.keyboardHint": "Tap: keyboard · Long-press: key bar",
   "thread.pickProjectFirst": "Pick a project first",
-  "thread.createFailed": "Failed to create thread",
   "thread.emptyCommand": "{label}: empty command",
-  "thread.restoreFailed": "Failed to restore thread",
+  "thread.notSaved": "Failed to save the thread: it will be gone on restart",
+  "thread.notSavedOrphan":
+    "Failed to save the thread: it will be gone on restart, leaving {path} with no owner",
   "thread.restored": "Restored {name}",
   "thread.noClosedThread": "No closed thread to restore",
   "thread.moveFailed": "Could not move the thread: {error}",
