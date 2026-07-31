@@ -330,8 +330,10 @@ export async function buildResumeArgsAsync(thread: Thread, cwd: string): Promise
   // An idle agent is holding the session without doing anything with it, and
   // that hold is the only reason resume is refused. Release it and resume for
   // real — opening a picker to reach a conversation nothing is working on is
-  // ceremony, not safety. A busy agent is mid-answer and is left alone.
-  if (live.status !== "busy") {
+  // ceremony, not safety. A busy agent is mid-answer and is left alone, and so
+  // is one that stated nothing: killing a session on a status the registry never
+  // wrote is the same guess with worse consequences.
+  if (live.status && live.status !== "busy") {
     const stopped = await backendForPath(cwd)
       .session.stopClaude(id)
       .catch(() => false);

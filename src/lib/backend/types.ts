@@ -379,8 +379,13 @@ export interface LiveClaudeSession {
    *   open dialog. The turn is not over, and the answer is what ends it.
    * - `shell`: the turn is over, but a shell it launched is still running.
    * - `idle`: nothing in flight.
+   *
+   * Null when the entry carried no `status` key at all, which is what a claude
+   * build predating the field writes. Kept apart from the four rather than
+   * defaulted to one of them: this is the status source of truth now, and any
+   * default at all would be a fact nobody stated.
    */
-  status: string;
+  status: string | null;
   /**
    * What it is waiting for, when claude named it: `sandbox request`,
    * `input needed`, `dialog open`, or the open dialog's own label. Only ever set

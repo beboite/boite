@@ -430,10 +430,19 @@ fn spawn_ticker(shared: Arc<Shared>) {
             let live_threads: Vec<Arc<LiveThread>> =
                 shared.threads.lock().values().cloned().collect();
 
-            if !live_threads.is_empty()
-                && turns_read_at
-                    .map(|at| now.duration_since(at) >= REGISTRY_TTL)
-                    .unwrap_or(true)
+            // Nothing to judge, and nothing worth keeping either: a thread
+            // spawning inside REGISTRY_TTL would otherwise be measured against
+            // turns collected before it existed.
+            if live_threads.is_empty() {
+                turns.clear();
+                turns_read_at = None;
+                identities.clear();
+                continue;
+            }
+
+            if turns_read_at
+                .map(|at| now.duration_since(at) >= REGISTRY_TTL)
+                .unwrap_or(true)
             {
                 identities.clear();
                 // Asked for exactly the threads that are running. Each agent's
@@ -453,10 +462,15 @@ fn spawn_ticker(shared: Arc<Shared>) {
                         })
                     })
                     .collect();
+                // Off the async workers: a directory walk plus two SQLite opens
+                // plus a 256 KiB read, once a second for the life of the process,
+                // is not something a tokio worker may sit on.
                 turns = if queries.is_empty() {
                     Vec::new()
                 } else {
-                    session::agent_turns(&queries)
+                    tokio::task::spawn_blocking(move || session::agent_turns(&queries))
+                        .await
+                        .unwrap_or_default()
                 };
                 turns_read_at = Some(now);
             }
