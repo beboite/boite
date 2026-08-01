@@ -16,8 +16,10 @@
 </p>
 
 > [!NOTE]
-> Pre-1.0, used daily by its developers. Bug reports and platform feedback are
-> welcome in [Issues](https://github.com/beboite/boite/issues).
+> 1.0.0 is out, and the app updates itself from
+> [Releases](https://github.com/beboite/boite/releases). Bug reports and
+> platform feedback are welcome in
+> [Issues](https://github.com/beboite/boite/issues).
 
 ## Why
 
