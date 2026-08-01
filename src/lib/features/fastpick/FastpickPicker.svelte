@@ -3,7 +3,12 @@
   import { scale } from "svelte/transition";
   import { settings } from "$lib/features/settings/store.svelte";
   import { t } from "$lib/i18n/index.svelte";
-  import { launchFastpick, launchTargetProjectId } from "$lib/features/thread/api";
+  import {
+    launchFastpick,
+    launchTargetProjectId,
+    warmWorktreeFor,
+  } from "$lib/features/thread/api";
+  import { app } from "$lib/app/store.svelte";
   import { registerEscape, restoreFocus, viewportHeight } from "$lib/shared/keyboard/overlay";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
   import { fastpick } from "./store.svelte";
@@ -84,6 +89,12 @@
     reset();
     open = true;
     void fastpick.ensure();
+    // Opening this menu is a launch that has not picked its combination yet, and
+    // walking the three panes takes long enough that the checkout is finished
+    // before the click lands. The project switch is the other sign, but it never
+    // fires for the project the app came up on — reload, open this, launch, and
+    // the thread was paying for its own worktree in front of a black terminal.
+    warmWorktreeFor(app.projects.find((p) => p.id === app.currentProjectId) ?? null);
   }
 
   // Fixed positioning: the shortcut bar scrolls horizontally, which would clip an

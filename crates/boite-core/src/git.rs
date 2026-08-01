@@ -1594,10 +1594,18 @@ const SPARE_SUFFIX: &str = ".spare";
 ///
 /// This used to count every repository together, because every base was the same
 /// directory. Each project now has its own, so the same number is a ceiling per
-/// project instead of one for the machine. Warming stops at the first spare that
-/// still matches `HEAD`, so a project at rest holds one; the rest of the
-/// allowance is for a `HEAD` that keeps moving.
+/// project instead of one for the machine. Warming stops at `READY_SPARES`, so
+/// the rest of the allowance is for a `HEAD` that keeps moving.
 const MAX_SPARES: usize = 3;
+
+/// How many spares a project keeps standing by once it is at rest.
+///
+/// One was enough for a single thread and nothing more: launching two agents in
+/// a row emptied the pool on the first, and the second paid the whole checkout
+/// in front of its terminal while the refill was still running. Two is what
+/// makes a burst of launches cost what one costs, and it stays under
+/// `MAX_SPARES` so a moving `HEAD` still has room above it.
+const READY_SPARES: usize = 2;
 
 /// How long an unclaimed spare is worth keeping.
 ///
@@ -1780,10 +1788,18 @@ fn detach_to(worktree: &Path, oid: &str) -> Result<(), String> {
 
 /// Claims a ready-made worktree for this repository, or answers that there is
 /// none to claim.
+///
+/// Spares on the commit the project is on are offered first, whatever order the
+/// pool came back in. One that is behind still costs a `git checkout --detach`
+/// over the diff, and paying that while a ready one sits in the same pool is
+/// exactly what a thread is waiting through.
 fn take_spare(base: &Path, repo: &Path) -> Option<String> {
     let wanted = head_oid(repo)?;
     let now = now_secs();
-    for spare in read_spares(base, Some(repo)) {
+    let (ready, behind): (Vec<_>, Vec<_>) = read_spares(base, Some(repo))
+        .into_iter()
+        .partition(|spare| spare.head == wanted);
+    for spare in ready.into_iter().chain(behind) {
         // Of two threads born at the same moment exactly one wins a given spare,
         // and the other moves on to the next.
         if !take_marker(&spare.dir) {
@@ -1850,8 +1866,8 @@ impl Drop for WarmGuard {
     }
 }
 
-/// Makes sure this repository has one worktree standing by, and that it is on
-/// the commit the repository is on.
+/// Makes sure this repository has `READY_SPARES` worktrees standing by, and that
+/// each one is on the commit the repository is on.
 ///
 /// This is the whole point of the pool: `git worktree add` plus the shared
 /// directories is around half a second on a small repository and seconds on a
@@ -1880,7 +1896,13 @@ pub fn warm_worktree_pool_blocking(repo: &str, base: &str) -> Result<(), String>
     // the only thing that empties it.
     collect_spares(base);
 
+    let mut ready = 0usize;
     for spare in read_spares(base, Some(r)) {
+        if ready >= READY_SPARES {
+            // The pool is full and `collect_spares` above already trimmed it,
+            // so there is nothing left for this call to do.
+            return Ok(());
+        }
         if !spare.dir.is_dir() {
             // A marker that outlived its directory.
             let _ = take_marker(&spare.dir);
@@ -1888,7 +1910,8 @@ pub fn warm_worktree_pool_blocking(repo: &str, base: &str) -> Result<(), String>
         }
         // Already standing by, on the commit the project is on.
         if spare.head == head {
-            return Ok(());
+            ready += 1;
+            continue;
         }
         // Behind the project. Brought up to date here rather than at claim time,
         // so the thread that takes it pays nothing at all — but only after
@@ -1904,22 +1927,78 @@ pub fn warm_worktree_pool_blocking(repo: &str, base: &str) -> Result<(), String>
             // Back in the pool, and not one moment earlier: between the two
             // lines above it belongs to this call and to nobody else.
             let _ = write_spare_marker(&spare.dir, r, &head);
-            return Ok(());
+            ready += 1;
+            continue;
         }
         // It would not move, so it is not something to hand a thread.
         drop_spare(r, &spare.dir);
     }
 
-    let dir = scoped_dir_for(base, &format!("spare-{}", uuid::Uuid::new_v4()));
-    add_detached_worktree_blocking(repo, &dir.to_string_lossy())?;
-    // Last, so a spare is only ever offered once it is a complete checkout: the
-    // marker is what makes it claimable, and a failed creation leaves a
-    // directory nobody will hand out.
-    write_spare_marker(&dir, r, &head).map_err(|e| format!("spare marker: {e}"))?;
-    // The one just made is the newest, so this drops the oldest over the cap
+    // Whatever the pool is still short of. One `git worktree add` each, in this
+    // call rather than one per warm: a project seen for the first time would
+    // otherwise stand by with one spare until something claimed it, which is the
+    // launch this exists to be ahead of.
+    while ready < READY_SPARES {
+        let dir = scoped_dir_for(base, &format!("spare-{}", uuid::Uuid::new_v4()));
+        add_detached_worktree_blocking(repo, &dir.to_string_lossy())?;
+        // Last, so a spare is only ever offered once it is a complete checkout:
+        // the marker is what makes it claimable, and a failed creation leaves a
+        // directory nobody will hand out.
+        write_spare_marker(&dir, r, &head).map_err(|e| format!("spare marker: {e}"))?;
+        ready += 1;
+    }
+    // The ones just made are the newest, so this drops the oldest over the cap
     // rather than what was just paid for.
     collect_spares(base);
     Ok(())
+}
+
+/// Whether the main checkout holds anything that is not committed, untracked
+/// files included.
+///
+/// Read one byte at a time rather than collected, because the answer is one bit
+/// and a repository with an untracked tree writes thousands of lines to give it.
+/// Stopping at the first one turns a dirty checkout into however long git takes
+/// to find a single change. A clean one still costs what `git status` costs:
+/// nothing can answer "there is nothing" without having looked everywhere.
+fn has_uncommitted_changes(repo: &Path) -> Result<bool, String> {
+    let mut cmd = git(repo);
+    cmd.args(["status", "--porcelain", "--untracked-files=normal"]);
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::null());
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("git not found or failed to start: {e}"))?;
+    let mut out = child
+        .stdout
+        .take()
+        .ok_or_else(|| "git status: no output".to_string())?;
+    let mut byte = [0u8; 1];
+    let dirty = match out.read(&mut byte) {
+        Ok(0) => false,
+        Ok(_) => true,
+        Err(e) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(format!("git status: {e}"));
+        }
+    };
+    if dirty {
+        // The rest of the listing has nothing left to say, and git cannot exit
+        // while a pipe nobody is draining is still filling up.
+        let _ = child.kill();
+        let _ = child.wait();
+        return Ok(true);
+    }
+    // Only meaningful on this side: the process above was killed mid-sentence,
+    // so its status says how it died rather than what it found.
+    let status = child
+        .wait()
+        .map_err(|e| format!("git status: {e}"))?;
+    if !status.success() {
+        return Err(format!("git exited with status {status}"));
+    }
+    Ok(false)
 }
 
 fn warm_in_background(repo: &Path, base: &Path) {
@@ -1959,9 +2038,7 @@ pub fn open_worktree_if_eligible_blocking(
     // "Look at what I just changed" cannot be answered from a clean worktree.
     // A dirty main checkout means the work under discussion is there, so the
     // thread starts there too.
-    let mut status = git(r);
-    status.args(["status", "--porcelain", "--untracked-files=normal"]);
-    if !run(status)?.is_empty() {
+    if has_uncommitted_changes(r)? {
         return Ok(None);
     }
     let base = Path::new(base);
@@ -3293,36 +3370,60 @@ mod worktree_tests {
 
         warm_worktree_pool_blocking(f.path(), &base_s).unwrap();
         let spares = read_spares(&base, Some(&f.repo));
-        assert_eq!(spares.len(), 1, "warming leaves exactly one spare");
-        let dir = spares[0].dir.clone();
-        assert!(dir.join("a.txt").is_file(), "a spare is a real checkout");
+        assert_eq!(
+            spares.len(),
+            READY_SPARES,
+            "warming fills the pool, so a burst of launches costs what one costs"
+        );
+        let dirs: Vec<_> = spares.iter().map(|s| s.dir.clone()).collect();
+        for dir in &dirs {
+            assert!(dir.join("a.txt").is_file(), "a spare is a real checkout");
+        }
 
-        // Warming again keeps the one that is already there.
+        // Warming again keeps the ones that are already there.
         warm_worktree_pool_blocking(f.path(), &base_s).unwrap();
-        assert_eq!(read_spares(&base, Some(&f.repo)).len(), 1);
+        assert_eq!(read_spares(&base, Some(&f.repo)).len(), READY_SPARES);
 
         let listed = list_worktrees_blocking(f.path()).unwrap();
-        let row = listed
-            .iter()
-            .find(|e| same_dir(Path::new(&e.path), &dir))
-            .expect("a spare is listed, so the page that can reclaim it sees it");
-        assert!(row.spare, "and it says what it is");
+        for dir in &dirs {
+            let row = listed
+                .iter()
+                .find(|e| same_dir(Path::new(&e.path), dir))
+                .expect("a spare is listed, so the page that can reclaim it sees it");
+            assert!(row.spare, "and it says what it is");
+        }
 
-        // The next thread gets that very directory, and it stops being a spare.
-        let taken = open_worktree_if_eligible_blocking(f.path(), &base_s, "t1").unwrap();
-        assert_eq!(taken.as_deref(), dir.to_str());
+        // The next thread walks into one of them, and it stops being a spare.
+        let taken = open_worktree_if_eligible_blocking(f.path(), &base_s, "t1")
+            .unwrap()
+            .expect("a spare is standing by");
         assert!(
-            !is_spare_worktree(dir.to_str().unwrap()),
+            dirs.iter().any(|d| same_dir(d, Path::new(&taken))),
+            "a thread is handed a checkout that was already finished"
+        );
+        assert!(
+            !is_spare_worktree(&taken),
             "claiming a spare is deleting its marker"
         );
         let listed = list_worktrees_blocking(f.path()).unwrap();
         let row = listed
             .iter()
-            .find(|e| same_dir(Path::new(&e.path), &dir))
+            .find(|e| same_dir(Path::new(&e.path), Path::new(&taken)))
             .expect("a claimed worktree is listed like any other");
         assert!(!row.spare, "and is no longer standing by");
 
-        let _ = remove_worktree_blocking(f.path(), dir.to_str().unwrap(), true);
+        // What the second launch of a burst finds. With one spare in the pool
+        // this was empty, and that thread paid for its own checkout.
+        assert!(
+            read_spares(&base, Some(&f.repo))
+                .iter()
+                .any(|s| !same_dir(&s.dir, Path::new(&taken))),
+            "a claim leaves something standing by for the launch after it"
+        );
+
+        for dir in &dirs {
+            let _ = remove_worktree_blocking(f.path(), dir.to_str().unwrap(), true);
+        }
         let _ = fs::remove_dir_all(&base);
     }
 
@@ -3354,6 +3455,50 @@ mod worktree_tests {
         let _ = fs::remove_dir_all(&base);
     }
 
+    /// Bringing a spare forward is a `git checkout --detach` the thread waits
+    /// through, so a pool holding both kinds has to hand over the one that needs
+    /// nothing done to it.
+    #[test]
+    fn a_ready_spare_is_preferred_over_one_that_is_behind() {
+        let f = Fixture::new();
+        let base = scratch("pool-order");
+        fs::create_dir_all(&base).unwrap();
+        let base_s = base.to_str().unwrap().to_string();
+
+        // Named so the pool lists this one first: the directory order is what an
+        // ordering that ignored `HEAD` would follow, so a test that let the
+        // ready one come up first would pass either way.
+        let stale = base.join("spare-a-behind");
+        add_detached_worktree_blocking(f.path(), &stale.to_string_lossy()).unwrap();
+        write_spare_marker(&stale, &f.repo, &head_oid(&f.repo).unwrap()).unwrap();
+
+        fs::write(f.repo.join("b.txt"), "two\n").unwrap();
+        git_in(&f.repo, &["add", "b.txt"]);
+        git_in(&f.repo, &["commit", "--quiet", "-m", "second"]);
+
+        let fresh = base.join("spare-b-ready");
+        add_detached_worktree_blocking(f.path(), &fresh.to_string_lossy()).unwrap();
+        write_spare_marker(&fresh, &f.repo, &head_oid(&f.repo).unwrap()).unwrap();
+
+        let taken = take_spare(&base, &f.repo).expect("the pool has something to give");
+        assert!(
+            same_dir(Path::new(&taken), &fresh),
+            "a thread is handed the spare that is already on the commit"
+        );
+        assert!(
+            is_spare_worktree(stale.to_str().unwrap()),
+            "and the one that is behind is left in the pool for warming to fix"
+        );
+        assert!(
+            !stale.join("b.txt").exists(),
+            "nothing checked it out on the way past"
+        );
+
+        let _ = remove_worktree_blocking(f.path(), &taken, true);
+        let _ = remove_worktree_blocking(f.path(), stale.to_str().unwrap(), true);
+        let _ = fs::remove_dir_all(&base);
+    }
+
     /// The one thing the pool must never do: run `git checkout --detach` inside
     /// a directory an agent has already been handed. Warming brings a spare
     /// forward when the project has moved on, and a thread claims one by
@@ -3367,10 +3512,9 @@ mod worktree_tests {
         let base_s = base.to_str().unwrap().to_string();
 
         warm_worktree_pool_blocking(f.path(), &base_s).unwrap();
-        let dir = read_spares(&base, Some(&f.repo))[0].dir.clone();
 
         // The project moves on, so the next warm has a reason to check the
-        // spare out again.
+        // spares out again.
         fs::write(f.repo.join("b.txt"), "two\n").unwrap();
         git_in(&f.repo, &["add", "b.txt"]);
         git_in(&f.repo, &["commit", "--quiet", "-m", "second"]);
@@ -3379,20 +3523,27 @@ mod worktree_tests {
         // Everything below is what can land between that read and the checkout
         // it was about to run.
         let seen = read_spares(&base, Some(&f.repo));
-        assert_eq!(seen.len(), 1);
-        assert_ne!(seen[0].head, head_oid(&f.repo).unwrap(), "it is behind");
+        assert_eq!(seen.len(), READY_SPARES);
+        let head = head_oid(&f.repo).unwrap();
+        for spare in &seen {
+            assert_ne!(spare.head, head, "they are behind");
+        }
 
         // The thread wins the claim, and its agent starts writing.
         let taken = take_spare(&base, &f.repo).expect("the spare is claimable");
-        assert_eq!(taken.as_str(), dir.to_str().unwrap());
+        let dir = Path::new(&taken).to_path_buf();
+        let claimed = seen
+            .iter()
+            .find(|s| same_dir(&s.dir, &dir))
+            .expect("what the thread was handed came out of the pool");
         assert!(!is_spare_worktree(&taken), "and stops being a spare");
         fs::write(dir.join("agent-notes.md"), "work in progress\n").unwrap();
 
         // Warming resumes, holding the stale listing. The marker is the gate,
         // and it is gone: this is the exact line that used to be a bare
-        // `detach_to` on `seen[0].dir`.
+        // `detach_to` on the directory the thread now owns.
         assert!(
-            !take_marker(&seen[0].dir),
+            !take_marker(&claimed.dir),
             "a claimed spare must refuse warming the same way it refuses a second thread"
         );
 
@@ -3404,17 +3555,22 @@ mod worktree_tests {
             "warming ran a checkout in a claimed worktree and destroyed its untracked files"
         );
         assert!(
-            !is_spare_worktree(dir.to_str().unwrap()),
+            !is_spare_worktree(&taken),
             "and it must not have been put back in the pool"
         );
         // It made itself another one instead, which is the whole answer: the
         // claimed directory is nobody's business but the thread's.
         let spares = read_spares(&base, Some(&f.repo));
-        assert_eq!(spares.len(), 1, "a fresh spare, not the claimed one");
-        assert_ne!(spares[0].dir, dir);
+        assert_eq!(spares.len(), READY_SPARES, "fresh spares, not the claimed one");
+        assert!(
+            spares.iter().all(|s| !same_dir(&s.dir, &dir)),
+            "and the claimed directory is not among them"
+        );
 
-        let _ = remove_worktree_blocking(f.path(), spares[0].dir.to_str().unwrap(), true);
-        let _ = remove_worktree_blocking(f.path(), dir.to_str().unwrap(), true);
+        for spare in &spares {
+            let _ = remove_worktree_blocking(f.path(), spare.dir.to_str().unwrap(), true);
+        }
+        let _ = remove_worktree_blocking(f.path(), &taken, true);
         let _ = fs::remove_dir_all(&base);
     }
 
