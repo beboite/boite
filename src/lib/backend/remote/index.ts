@@ -95,12 +95,8 @@ export class RemoteBackend implements Backend {
         const { threadId, spec, meta } = args;
         const onOutput = (bytes: Uint8Array) => onEvent({ type: "output", bytes });
         const onReset = () => onEvent({ type: "reset" });
-        let res: { ptyId?: string } | undefined;
-        try {
-          res = await socket.attach(threadId, spec.cols, spec.rows, onOutput, onReset);
-        } catch (e) {
-          if (!String(e).includes("not live")) throw e;
-          await rpc("thread.spawn", {
+        const spawn = () =>
+          rpc("thread.spawn", {
             thread: {
               id: threadId,
               projectId: meta.projectId,
@@ -114,11 +110,38 @@ export class RemoteBackend implements Backend {
             rows: spec.rows,
             wrap: spec.wrap,
           });
-          res = await socket.attach(threadId, spec.cols, spec.rows, onOutput, onReset);
+        // Declarations, not consts: the two call each other, and hoisting is
+        // what keeps that from being an ordering puzzle.
+        async function attach(): Promise<string> {
+          const res = await socket.attach(
+            threadId,
+            spec.cols,
+            spec.rows,
+            onOutput,
+            onReset,
+            onLost,
+          );
+          const key = res?.ptyId ? String(res.ptyId) : threadId;
+          keyToThread.set(key, threadId);
+          return key;
         }
-        const key = res?.ptyId ? String(res.ptyId) : threadId;
-        keyToThread.set(key, threadId);
-        return key;
+        // The socket reconnected onto a server that restarted under us, so the
+        // thread row is there and its PTY is not. Spawning again is what makes
+        // a deploy survivable from the client side: the row kept its sessionId,
+        // so an agent resumes its conversation and anything else re-runs its
+        // command. Giving up here is what left a permanently blank pane.
+        function onLost(): void {
+          void spawn()
+            .then(() => attach())
+            .catch(() => {});
+        }
+        try {
+          return await attach();
+        } catch (e) {
+          if (!String(e).includes("not live")) throw e;
+          await spawn();
+          return await attach();
+        }
       },
       write: (key, data) => {
         socket.sendInput(threadIdOf(key), data);
