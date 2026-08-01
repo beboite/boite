@@ -3463,7 +3463,6 @@ mod worktree_tests {
         let f = Fixture::new();
         let base = scratch("pool-order");
         fs::create_dir_all(&base).unwrap();
-        let base_s = base.to_str().unwrap().to_string();
 
         // Named so the pool lists this one first: the directory order is what an
         // ordering that ignored `HEAD` would follow, so a test that let the
