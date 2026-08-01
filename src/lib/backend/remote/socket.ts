@@ -74,6 +74,10 @@ interface AttachReg {
   rows: number;
   onOutput: (bytes: Uint8Array) => void;
   onReset: () => void;
+  // A reconnect found the row but no PTY behind it: the server restarted under
+  // us. The socket cannot fix that alone, since only the caller holds the spawn
+  // spec, so it hands the thread back instead of leaving a blank pane.
+  onLost?: () => void;
 }
 
 interface PendingReplay {
@@ -213,8 +217,9 @@ export class Socket {
     rows: number,
     onOutput: (bytes: Uint8Array) => void,
     onReset: () => void,
+    onLost?: () => void,
   ): Promise<{ ptyId?: string; size?: { cols: number; rows: number } }> {
-    this.#attached.set(threadId, { cols, rows, onOutput, onReset });
+    this.#attached.set(threadId, { cols, rows, onOutput, onReset, onLost });
     try {
       return await this.rpc("thread.attach", this.#attachParams(threadId, cols, rows));
     } catch (e) {
@@ -300,7 +305,16 @@ export class Socket {
               this.rpc(
                 "thread.attach",
                 this.#attachParams(threadId, reg.cols, reg.rows),
-              ).catch(() => {});
+              ).catch((e) => {
+                // The row outlived its PTY, so the server went down and came
+                // back between our two attaches. Every other failure is the
+                // transport dropping again, which the next reconnect retries.
+                if (!String(e).includes("not live")) return;
+                this.#offsets.delete(threadId);
+                this.#pendingReplay.delete(threadId);
+                reg.onReset();
+                reg.onLost?.();
+              });
             }
             if (!settled) {
               settled = true;
