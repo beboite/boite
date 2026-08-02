@@ -22,7 +22,7 @@
     paneViewport,
     threadLeavesOf,
   } from "$lib/features/panes/store.svelte";
-  import { panePresence } from "$lib/features/panes/open";
+  import { followPanel, panePresence } from "$lib/features/panes/open";
   import { statusEngine } from "$lib/features/thread/statusEngine";
   import PaneShell from "$lib/features/panes/PaneShell.svelte";
   import PaneOverlay from "$lib/features/panes/PaneOverlay.svelte";
@@ -127,6 +127,16 @@
     if (!id) return;
     const g = paneStore.groupOf(id);
     if (g && g.focusedPaneId !== id) g.focusedPaneId = id;
+  });
+
+  // An open panel follows the user to the next project. Triggered on what moves
+  // the screen, and untracked inside: `followPanel` writes the very groups it
+  // reads, so a tracked call would re-run itself on its own pane.
+  $effect(() => {
+    void app.currentProjectId;
+    void app.activeThreadId;
+    void paneStore.stickyPanel;
+    untrack(() => followPanel());
   });
 
   // The project the app came up on. Nobody asked for a thread in it — it is

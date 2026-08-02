@@ -1,15 +1,13 @@
 <script lang="ts">
-  import { paneStore, countLeaves } from "./store.svelte";
+  import { paneStore } from "./store.svelte";
   import type { LayoutNode, PaneGroup } from "./types";
   import { MIN_PANE_PX, MIN_RATIO, SPLITTER_PX } from "./types";
-  import PaneHeader, { headerId } from "./PaneHeader.svelte";
   import PaneContentView from "./PaneContentView.svelte";
+  import { paneLabel } from "./label";
   import { t } from "$lib/i18n/index.svelte";
 
   type Props = { group: PaneGroup };
   let { group }: Props = $props();
-
-  const multi = $derived(countLeaves(group.root) > 1);
 
   // The rect is the pane's BODY, not the pane: a thread's terminal is positioned
   // over this rectangle from the page, and including the header would slide
@@ -147,28 +145,19 @@
 {#snippet renderNode(node: LayoutNode)}
   {#if node.kind === "leaf"}
     {@const isThread = node.content.kind === "thread"}
-    <!-- A terminal alone in its group grows no chrome: the sidebar already names
-         it. Anything else needs its header, if only for the close button. -->
-    {@const showHeader = multi || !isThread}
-    <!-- Named by its own header when it has one, which is how a screen reader
-         says which pane it just entered. The rail this replaced was a tablist
-         whose body carried aria-labelledby; panes are not tabs (they are all on
-         screen at once), so the same job is done with a labelled group. -->
+    <!-- No chrome of its own, on any pane. The strip that used to name each one
+         repeated the sidebar over a terminal and the panel's own header over a
+         panel, and it cost 26px of every pane to do it. What it also carried is
+         elsewhere now: the panels are toggled from the titlebar, and closing a
+         pane is a palette command. -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
       class="pane-leaf"
       data-pane-leaf={node.paneId}
-      role={showHeader ? "group" : undefined}
-      aria-labelledby={showHeader ? headerId(node.paneId) : undefined}
+      role="group"
+      aria-label={paneLabel(node.content)}
+      onpointerdown={() => paneStore.setFocused(group.id, node.paneId)}
     >
-      {#if showHeader}
-        <PaneHeader
-          paneId={node.paneId}
-          content={node.content}
-          groupId={group.id}
-          focused={group.focusedPaneId === node.paneId}
-          closable={!isThread || multi}
-        />
-      {/if}
       <!-- Measured whether or not anything is drawn inside it: for a thread the
            terminal arrives from the page as an absolutely positioned overlay,
            and this rectangle is the only thing that tells it where to go. -->

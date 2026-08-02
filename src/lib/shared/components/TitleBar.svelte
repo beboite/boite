@@ -18,7 +18,9 @@
   import X from "@lucide/svelte/icons/x";
   import Settings from "@lucide/svelte/icons/settings";
   import PanelLeft from "@lucide/svelte/icons/panel-left";
-  import PanelRight from "@lucide/svelte/icons/panel-right";
+  import GitBranch from "@lucide/svelte/icons/git-branch";
+  import FolderTree from "@lucide/svelte/icons/folder-tree";
+  import ListTodo from "@lucide/svelte/icons/list-todo";
   import BoiteLogo from "$lib/shared/components/BoiteLogo.svelte";
   import UpdateBadge from "$lib/features/updater/UpdateBadge.svelte";
   import ContextMenu from "$lib/shared/components/ContextMenu.svelte";
@@ -134,45 +136,36 @@
   }
 
   /**
-   * The side panel, which is a pane now rather than a fixed column.
+   * The side panels, which are panes now rather than one fixed column.
    *
-   * The rail held git, files and todo in one 320px slot outside the layout, so
-   * it cost its width whichever of the three was up and could never sit beside
-   * the thing it described. The button keeps its one click by remembering which
-   * of the three you last used, and the right-click menu is how you pick
-   * another.
-   *
-   * The memory is local rather than a setting: the panes themselves are
-   * persisted now, so a restart already comes back with whatever was open, and
-   * a stored copy of the same answer was only there to drive the rail.
+   * One button each, because the rail they replaced was three tabs and hiding
+   * two of them behind a right-click on the third is how the file explorer
+   * stopped being findable. The rail's own width is gone all the same: a panel
+   * is a pane, so it can be moved, resized and put below a terminal.
    */
-  let panelKind = $state<PanelKind>("git");
-  const panelOpen = $derived(panePresence(panelKind) !== null);
+  const PANEL_BUTTONS: {
+    kind: PanelKind;
+    key: MessageKey;
+    icon: typeof GitBranch;
+  }[] = [
+    { kind: "git", key: "panes.kindGit", icon: GitBranch },
+    { kind: "explorer", key: "panes.kindExplorer", icon: FolderTree },
+    { kind: "todo", key: "panes.kindTodo", icon: ListTodo },
+  ];
 
   let panelMenu = $state<{ x: number; y: number; items: ContextMenuItem[] } | null>(
     null,
   );
 
-  const PANEL_CHOICES: { kind: PanelKind; key: MessageKey }[] = [
-    { kind: "git", key: "panes.kindGit" },
-    { kind: "explorer", key: "panes.kindExplorer" },
-    { kind: "todo", key: "panes.kindTodo" },
-  ];
-
+  // The two panes with nowhere else to be opened from by pointer. Both are
+  // ordinary panes rather than panels: they hold a document, not a view of the
+  // project, so neither belongs in the row above.
   function openPanelMenu(e: MouseEvent) {
     e.preventDefault();
     panelMenu = {
       x: e.clientX,
       y: e.clientY,
       items: [
-        ...PANEL_CHOICES.map(({ kind, key }) => ({
-          label: t(key),
-          action: () => {
-            panelKind = kind;
-            togglePanelPane(kind);
-          },
-        })),
-        { separator: true as const },
         {
           label: t("panes.openDashboard"),
           action: () => {
@@ -282,23 +275,25 @@
 
   <div data-tauri-drag-region class="flex-1"></div>
 
-  <div class="flex items-center gap-1.5 pr-1.5">
+  <div class="flex items-center gap-0.5 pr-1.5">
     <UpdateBadge />
-    <button
-      type="button"
-      class="flex h-7 items-center justify-center rounded-md px-2 transition {panelOpen
-        ? 'bg-accent text-foreground'
-        : 'text-muted-foreground hover:bg-accent hover:text-foreground'}"
-      onclick={() => togglePanelPane(panelKind)}
-      oncontextmenu={openPanelMenu}
-      title={panelOpen
-        ? t("titlebar.hideSidePanel")
-        : t("titlebar.showSidePanel")}
-      aria-label={t("titlebar.toggleSidePanel")}
-      aria-pressed={panelOpen}
-    >
-      <PanelRight class="size-[15px]" />
-    </button>
+    {#each PANEL_BUTTONS as panel (panel.kind)}
+      {@const open = panePresence(panel.kind) !== null}
+      {@const Icon = panel.icon}
+      <button
+        type="button"
+        class="flex h-7 items-center justify-center rounded-md px-2 transition {open
+          ? 'bg-accent text-foreground'
+          : 'text-muted-foreground hover:bg-accent hover:text-foreground'}"
+        onclick={() => togglePanelPane(panel.kind)}
+        oncontextmenu={openPanelMenu}
+        title={t(panel.key)}
+        aria-label={t(panel.key)}
+        aria-pressed={open}
+      >
+        <Icon class="size-[15px]" />
+      </button>
+    {/each}
   </div>
 
   {#if isTauri && !isMacOS}

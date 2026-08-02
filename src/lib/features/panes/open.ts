@@ -1,6 +1,6 @@
 import { app } from "$lib/app/store.svelte";
 import { paneStore, MAX_LEAVES, leafNodesOf, threadLeavesOf } from "./store.svelte";
-import type { DropSide, PaneContent } from "./types";
+import type { DropSide, PaneContent, PanelKind } from "./types";
 import { notifications } from "$lib/features/notifications/store.svelte";
 import { t } from "$lib/i18n/index.svelte";
 
@@ -11,13 +11,17 @@ import { t } from "$lib/i18n/index.svelte";
  * thread row from the sidebar onto a live terminal — with no shortcut, no
  * palette command, no menu item and no button. That is the other half of why
  * nobody used it: the feature worked, and could not be found. Everything that
- * wants a pane now comes through here: the keyboard, the palette, the pane
- * header, and the MCP verb an agent calls to show what it just did.
+ * wants a pane now comes through here: the keyboard, the palette, the titlebar,
+ * and the MCP verb an agent calls to show what it just did.
+ *
+ * `ratio` is a share of the group, so a caller that wants a column says so with
+ * `panelRatio()` rather than a number: 0.35 of a 2560px window is 900px of git
+ * panel, where the rail this replaced was 320px whatever the screen.
  */
 export function openPane(
   content: PaneContent,
   side: DropSide = "right",
-  ratio = 0.35,
+  ratio = panelRatio(),
 ): string | null {
   // A pane is part of the terminal view; opening one from the project page
   // would otherwise put it behind the page that asked for it.
@@ -40,6 +44,45 @@ export function openPane(
     return null;
   }
   return paneStore.openGroup(projectId, content);
+}
+
+/** What the rail was wide, and what a panel opens at. */
+const PANEL_PX = 320;
+
+const PANEL_KINDS: PanelKind[] = ["git", "explorer", "todo"];
+
+/**
+ * Takes the panel already on screen as the one to keep open.
+ *
+ * The toggle is not the only way one gets there: a layout restored at startup,
+ * a palette command and an agent's own call all open a panel without saying it
+ * should follow the user, and a panel that came back from the last session is
+ * exactly the one they left open.
+ */
+function adoptVisiblePanel(): PanelKind | null {
+  const anchor = anchorPaneId();
+  const group = anchor ? paneStore.groupOf(anchor) : null;
+  if (!group) return null;
+  const leaf = leafNodesOf(group.root).find((l) =>
+    PANEL_KINDS.includes(l.content.kind as PanelKind),
+  );
+  if (!leaf) return null;
+  paneStore.stickyPanel = leaf.content.kind as PanelKind;
+  return paneStore.stickyPanel;
+}
+
+/**
+ * A panel's share of the group, taken from a width in pixels.
+ *
+ * Ratios are proportional, so the same number is a different panel on every
+ * screen: what a user means by "the git panel" is a column beside their work,
+ * not a third of the window. Falls back to a third of the group before the
+ * viewport has been measured, which is one frame at startup.
+ */
+export function panelRatio(): number {
+  const width = paneStore.viewport?.w ?? 0;
+  if (width <= 0) return 0.3;
+  return Math.min(0.6, Math.max(0.12, PANEL_PX / width));
 }
 
 /**
@@ -78,8 +121,7 @@ export function anchorProjectId(): string | null {
   return group?.projectId ?? app.currentProjectId;
 }
 
-/** Panel kinds the titlebar button can toggle. The three the right rail held. */
-export type PanelKind = "git" | "explorer" | "todo";
+export type { PanelKind } from "./types";
 
 /** The pane in the active group showing this panel, if one is open. */
 export function panePresence(kind: PanelKind): string | null {
@@ -103,10 +145,38 @@ export function togglePanelPane(kind: PanelKind): boolean {
   const open = panePresence(kind);
   if (open) {
     paneStore.closePane(open);
+    if (paneStore.stickyPanel === kind) paneStore.stickyPanel = null;
     return false;
   }
+  // Opened on purpose, so it stays open through a project switch: see
+  // `followPanel`.
+  paneStore.stickyPanel = kind;
   openPane({ kind });
   return true;
+}
+
+/**
+ * Puts the open panel in the group now on screen.
+ *
+ * A pane belongs to a group and a group belongs to a project, so walking to
+ * another project left the git panel behind in the group of the one before it
+ * and the screen came back without it. The rail this replaced was outside the
+ * layout and simply described whatever project you were on.
+ *
+ * Never touches `app.view`: this runs off a project switch, and a user reading
+ * a project page did not ask to be sent to the terminal.
+ */
+export function followPanel(): void {
+  const kind = paneStore.stickyPanel ?? adoptVisiblePanel();
+  if (!kind) return;
+  if (panePresence(kind)) return;
+  const anchor = anchorPaneId();
+  if (anchor) {
+    paneStore.openBeside(anchor, { kind }, "right", panelRatio());
+    return;
+  }
+  const projectId = app.currentProjectId;
+  if (projectId) paneStore.openGroup(projectId, { kind });
 }
 
 /**

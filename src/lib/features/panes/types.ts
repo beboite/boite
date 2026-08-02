@@ -35,6 +35,14 @@ export type PaneContent =
 
 export type PaneKind = PaneContent["kind"];
 
+/**
+ * The three the right rail held, and the three the titlebar toggles.
+ *
+ * Declared here rather than beside the toggle because the store remembers which
+ * one is open, and it cannot import the module that opens them.
+ */
+export type PanelKind = "git" | "explorer" | "todo";
+
 export type LayoutNode =
   | { kind: "leaf"; paneId: string; content: PaneContent }
   | {
