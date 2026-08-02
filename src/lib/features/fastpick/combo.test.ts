@@ -121,6 +121,20 @@ describe("modelLabels", () => {
     expect(labels.get("acme-l")).toBe("acme-l");
   });
 
+  it("does not collide a label with an id another model is about to fall back to", () => {
+    // The first two share a label and both drop to their ids. The third's label
+    // is one of those ids, spelled out by hand in the config, so it has to give
+    // its label up as well or it reads exactly like the row above it.
+    const labels = modelLabels([
+      model("claude-opus-5[1m]", "Opus 5"),
+      model("claude-opus-5", "Opus 5"),
+      model("acme-o5", "claude-opus-5"),
+    ]);
+    expect(labels.get("claude-opus-5[1m]")).toBe("claude-opus-5[1m]");
+    expect(labels.get("claude-opus-5")).toBe("claude-opus-5");
+    expect(labels.get("acme-o5")).toBe("acme-o5");
+  });
+
   it("falls back for labels a reader tells apart only by case", () => {
     const labels = modelLabels([
       model("claude-opus-5[1m]", "Opus 5"),

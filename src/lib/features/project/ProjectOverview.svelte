@@ -63,7 +63,7 @@
   <!-- Threads. The list is the whole card: starting one is the shortcut bar's
        job, one row up. -->
   <section class="rounded-lg border border-border bg-[var(--color-surface)] p-3">
-    <h2 class="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+    <h2 class="section-label mb-2">
       {t("project.threads")}
     </h2>
     {#if threads.length === 0}
@@ -95,7 +95,7 @@
        uncommitted, and the last few commits. -->
   <section class="rounded-lg border border-border bg-[var(--color-surface)] p-3">
     <h2
-      class="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground"
+      class="section-label mb-2 flex items-center gap-1.5"
     >
       <GitBranch class="size-3.5" />
       {t("project.git")}
@@ -131,7 +131,7 @@
        done and only the user can confirm that, which is a thing to act on. -->
   <section class="rounded-lg border border-border bg-[var(--color-surface)] p-3">
     <h2
-      class="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground"
+      class="section-label mb-2 flex items-center gap-1.5"
     >
       <ListTodo class="size-3.5" />
       {t("project.todos")}
@@ -179,7 +179,7 @@
 
   <section class="rounded-lg border border-border bg-[var(--color-surface)] p-3">
     <h2
-      class="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground"
+      class="section-label mb-2 flex items-center gap-1.5"
     >
       <Bot class="size-3.5" />
       {t("project.agents")}

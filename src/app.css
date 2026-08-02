@@ -324,13 +324,17 @@ kbd.kbd {
   border-bottom-width: 2px;
   border-radius: var(--radius-xs);
   background: var(--color-surface-2);
+  /* The lightest step in the ramp, and the only thing in the app that sits a
+     hair off the surface rather than floating over it. The doubled bottom
+     border alone was a key drawn flat. */
+  box-shadow: var(--shadow-e1);
   font-family: var(--font-mono);
   font-size: var(--text-2xs);
   color: var(--color-muted-foreground);
 }
 
-/* The heading every card in the app writes out by hand, eleven times, in three
-   different sizes. One class, so a card cannot invent its own. */
+/* The heading the cards used to write out by hand, in three different sizes.
+   One class, so a card cannot invent its own. */
 .section-label {
   font-size: var(--text-xs);
   font-weight: 600;

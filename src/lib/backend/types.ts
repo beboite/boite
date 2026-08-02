@@ -36,6 +36,11 @@ export type PtyEvent =
   // Server told the client to clear before the replay that follows (the delta
   // it asked for had rolled out of the ring, so a full repaint is coming).
   | { type: "reset" }
+  // The PTY behind this thread was replaced and the key `open` handed back no
+  // longer names anything. Remote only, and only after a server restart: the
+  // backend respawns underneath, and without this the caller keeps a key the
+  // server has forgotten, which is the id `session.find` resolves a pid from.
+  | { type: "key"; key: string }
   | { type: "title"; value: string }
   | { type: "exit"; code: number | null }
   | { type: "error"; message: string };

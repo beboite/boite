@@ -319,7 +319,10 @@ export async function moveThreadToProject(
       }),
     );
     if (keptWorktree) {
-      notifications.success(t("worktree.keptAtPath", { path: keptWorktree }));
+      // Neutral, and longer than the move above it. Nothing succeeded here: a
+      // directory the move did not take along is still on disk, and the card
+      // names the path because that is the only place it is ever said.
+      notifications.info(t("worktree.keptAtPath", { path: keptWorktree }), 8000);
     }
   }
   return { ok: true, cwd: toCwd, keptWorktree: keptWorktree ?? undefined };

@@ -131,9 +131,17 @@ export function parseCombo(cmd: string, args: readonly string[]): FastpickCombo 
 export function modelLabels(items: readonly FastpickModel[]): Map<string, string> {
   const counts = new Map<string, number>();
   const idCounts = new Map<string, number>();
+  const bump = (key: string) => counts.set(key, (counts.get(key) ?? 0) + 1);
   for (const model of items) {
-    const key = labelKey(modelLabel(model));
-    counts.set(key, (counts.get(key) ?? 0) + 1);
+    const label = labelKey(modelLabel(model));
+    const id = labelKey(model.id);
+    bump(label);
+    // The id counts too, because it is what a model that loses its label falls
+    // back to and therefore what it will read as. Counting labels alone made
+    // this a single pass: a pair sharing "Opus 5" both dropped to their ids, and
+    // a third model whose config labelled it `claude-opus-5` by hand then read
+    // identically to one of them, which is the collision this exists to prevent.
+    if (id !== label) bump(id);
     idCounts.set(model.id, (idCounts.get(model.id) ?? 0) + 1);
   }
 
