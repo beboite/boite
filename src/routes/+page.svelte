@@ -294,6 +294,12 @@
         group: group?.id ?? null,
         rect: !!rect,
         measured: !!paneStore.rects[id],
+        // The list the pane wrappers iterate, next to the lookup everything
+        // else goes through. They disagreed once, and that disagreement is the
+        // whole bug; naming both is what tells a missing thread from a thread
+        // the store cannot find.
+        inThreads: app.threads.some((t) => t.id === id),
+        known: !!app.threadById(id),
         activeGroupId,
         terminalActive,
         view: app.view,

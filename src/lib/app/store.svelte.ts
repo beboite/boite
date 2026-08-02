@@ -232,15 +232,51 @@ class AppState {
     return sorted;
   });
 
-  // Every lookup used to be a linear scan, and the status engine does one per
-  // thread twice a second — quadratic in the number of open threads.
+  // Ids the index did not know about while `threads` did. Bounded, because it
+  // grows on a failure that repeats: without a cap a stuck index would add one
+  // entry per lookup, forever.
+  #indexMisses = new Set<string>();
+
+  /**
+   * Says so when the index disagrees with the list it is built from.
+   *
+   * Once per id: the status engine asks about every thread twice a second, and
+   * a miss that survives would otherwise write a line at that rate.
+   */
+  private noteIndexMiss(id: string) {
+    if (this.#indexMisses.has(id)) return;
+    if (this.#indexMisses.size > 200) this.#indexMisses.clear();
+    this.#indexMisses.add(id);
+    logger.warn("app", `${id}: the thread index missed a row the list holds`, {
+      threads: this.threads.length,
+      indexed: this.#threadById.size,
+    });
+  }
+
+  /**
+   * Every lookup used to be a linear scan, and the status engine does one per
+   * thread twice a second — quadratic in the number of open threads.
+   *
+   * Falls back to that scan when the index misses, because the index is a
+   * `$derived` and everything here treats a null as "this thread does not
+   * exist". An index one beat behind the list therefore did not slow anything
+   * down, it made the app deny threads that were right there: the pane stayed
+   * empty (activation is gated on `hasThread`), closing refused (`closeThread`
+   * returns early on a null), and only a restart — which rebuilds the index —
+   * gave them back. The scan costs a pass over the list on a miss, and a miss
+   * is either that bug or an id that is genuinely gone.
+   */
   threadById(id: string | null | undefined): Thread | null {
     if (!id) return null;
-    return this.#threadById.get(id) ?? null;
+    const hit = this.#threadById.get(id);
+    if (hit) return hit;
+    const scanned = this.threads.find((t) => t.id === id) ?? null;
+    if (scanned) this.noteIndexMiss(id);
+    return scanned;
   }
 
   hasThread(id: string): boolean {
-    return this.#threadById.has(id);
+    return this.threadById(id) !== null;
   }
 
   /** Indexed for the same reason as `threadById`: the status sweep resolves a
