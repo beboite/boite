@@ -36,8 +36,11 @@
   import X from "@lucide/svelte/icons/x";
   import FolderOpen from "@lucide/svelte/icons/folder-open";
   import MoreHorizontal from "@lucide/svelte/icons/more-horizontal";
-  import Archive from "@lucide/svelte/icons/archive";
-  import ArchiveRestore from "@lucide/svelte/icons/archive-restore";
+  // A folder, never a box: the box with a lid is the app's own logo, and the
+  // archive button drawn with one read as a Boite button rather than a place
+  // projects are put away. What is archived here is projects, which are folders.
+  import FolderArchive from "@lucide/svelte/icons/folder-archive";
+  import FolderUp from "@lucide/svelte/icons/folder-up";
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
   import { t } from "$lib/i18n/index.svelte";
 
@@ -846,7 +849,7 @@
         aria-label={t("sidebar.showArchived")}
         title={t("sidebar.archivedProjects")}
       >
-        <Archive class="size-4" />
+        <FolderArchive class="size-4" />
       </button>
       {#if !showArchived}
         <button
@@ -893,7 +896,7 @@
       <div
         class="mx-1 mt-2 flex w-[calc(100%-0.5rem)] flex-col items-center gap-2 rounded-lg border border-dashed border-border bg-transparent px-3 py-7 text-xs text-muted-foreground"
       >
-        <Archive class="size-5 opacity-70" />
+        <FolderArchive class="size-5 opacity-70" />
         <span>{t("sidebar.noArchived")}</span>
       </div>
     {:else if !showArchived && app.projects.length === 0}
@@ -1020,7 +1023,7 @@
               aria-label={t("sidebar.unarchiveProject")}
               title={t("sidebar.unarchive")}
             >
-              <ArchiveRestore class="size-3.5" />
+              <FolderUp class="size-3.5" />
             </button>
           {:else}
             <!-- Was cursor-only: transparent text until group-hover, which from

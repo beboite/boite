@@ -306,7 +306,7 @@ function createThread(
   args: string[],
   labelPrefix: string,
   iconKey: IconKey,
-  opts: { fresh?: boolean; iconColor?: string | null } = {},
+  opts: { fresh?: boolean; iconColor?: string | null; focus?: boolean } = {},
 ): Thread {
   const count = nextLabelSuffix(project.id, labelPrefix);
   const thread = buildThread(
@@ -324,8 +324,16 @@ function createThread(
   // row that fails to land still gives a working thread for this session, and
   // says so.
   void app.upsertThread(thread).catch((err) => recordUnsavedThread(thread, err));
-  app.activeThreadId = thread.id;
-  app.view = "terminal";
+  if (opts.focus === false) {
+    // Nobody clicked, so nobody moves. Mounting the Terminal is what spawns the
+    // PTY, and that is the only reason the screen had to follow a launch: the
+    // activation queue does it without taking the user off the thread they are
+    // reading.
+    app.requestActivation(thread.id);
+  } else {
+    app.activeThreadId = thread.id;
+    app.view = "terminal";
+  }
   // After the thread exists, never before it: the worktree is several `git`
   // processes and the user was watching an empty sidebar for all of them.
   prepareWorktree(project, thread, iconKey);
@@ -408,6 +416,9 @@ export async function launchFastpick(
  * get here, and a project it may not be sitting in — while `launchShortcut`
  * looks a project up by id and complains to the user when it finds none, which
  * is the wrong conversation to have about a request nobody clicked.
+ *
+ * `focus` is the other half of that: a launch the user clicked is one they want
+ * to look at, and a launch an agent asked for is not. It still starts.
  */
 export async function launchAgent(
   project: Project,
@@ -418,6 +429,7 @@ export async function launchAgent(
     iconKey: IconKey;
     iconColor?: string | null;
   },
+  opts: { focus?: boolean } = {},
 ): Promise<Thread | null> {
   return createThread(
     project,
@@ -425,7 +437,11 @@ export async function launchAgent(
     [...launch.args],
     launch.label,
     launch.iconKey,
-    { fresh: true, iconColor: launch.iconColor ?? null },
+    {
+      fresh: true,
+      iconColor: launch.iconColor ?? null,
+      focus: opts.focus ?? true,
+    },
   );
 }
 

@@ -199,7 +199,10 @@ async function handleSpawn(req: SpawnRequest) {
     return;
   }
   const prompt = req.prompt?.trim();
-  const thread = await launchAgent(project, launch);
+  // Not focused: the user is reading the thread that asked for this one, very
+  // often in another project, and a spawn they never clicked used to take the
+  // screen away mid-sentence. The toast is what says it happened.
+  const thread = await launchAgent(project, launch, { focus: false });
   if (!thread) return;
   if (prompt) app.setPendingPrompt(thread.id, prompt);
   notifications.success(
