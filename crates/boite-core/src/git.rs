@@ -1603,16 +1603,24 @@ const SPARE_PREFIX: &str = "spare-";
 /// directory. Each project now has its own, so the same number is a ceiling per
 /// project instead of one for the machine. Warming stops at `READY_SPARES`, so
 /// the rest of the allowance is for a `HEAD` that keeps moving.
-const MAX_SPARES: usize = 3;
+const MAX_SPARES: usize = 5;
 
 /// How many spares a project keeps standing by once it is at rest.
 ///
 /// One was enough for a single thread and nothing more: launching two agents in
 /// a row emptied the pool on the first, and the second paid the whole checkout
-/// in front of its terminal while the refill was still running. Two is what
-/// makes a burst of launches cost what one costs, and it stays under
-/// `MAX_SPARES` so a moving `HEAD` still has room above it.
-const READY_SPARES: usize = 2;
+/// in front of its terminal while the refill was still running.
+///
+/// Two was not enough either, and this is the number the whole feature turns on.
+/// Measured here: a burst of four launches takes two spares in 120ms each and
+/// leaves the other two paying 26s and 35s in front of a black terminal, since
+/// the refill is still linking while they ask. Provisioning is around 42 000
+/// hard links on this repository and nothing makes that cheap — the only thing
+/// that takes it off a launch is having the directory ready before the click.
+/// A spare costs a checkout on disk and hard links that cost almost nothing, so
+/// depth is the cheap side of this trade. It stays under `MAX_SPARES` so a
+/// moving `HEAD` still has room above it.
+const READY_SPARES: usize = 3;
 
 /// How long an unclaimed spare is worth keeping.
 ///
@@ -2854,6 +2862,12 @@ fn hardlink_build_output(
         HashSet::new()
     };
 
+    // Single file on purpose, and it was measured rather than assumed: linking
+    // this repository's `target` on 8 threads came back 26s against 29s for one,
+    // because `CreateHardLink` waits on the volume and the MFT rather than on a
+    // round trip. Ten percent is not worth a worker pool, a shared error slot
+    // and a probe that has to stay outside them. What actually takes this cost
+    // off a launch is the pool of ready worktrees, not doing it faster.
     fn walk(
         src: &Path,
         dst: &Path,
