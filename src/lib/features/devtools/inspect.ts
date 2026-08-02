@@ -189,6 +189,51 @@ const inspector = {
     }));
   },
 
+  /**
+   * Why a thread has no terminal on screen.
+   *
+   * A pane is drawn only when it has a group, a rect and an entry in the page's
+   * `activated` map, and failing any of the three draws nothing whatsoever — no
+   * mount, no spawn, no error. `panes()` above shows the groups and stops there,
+   * which is how a launch that produced no terminal at all was debugged for
+   * hours against a bridge that could not see two of the three answers.
+   *
+   * `activated` lives in the page component and cannot be read from here, so it
+   * is reported as what it is: unknown. Everything the store owns is exact, and
+   * a thread with a group and a rect that still shows nothing narrows it to that
+   * one map.
+   */
+  mount(needle: string) {
+    const found = findThread(needle);
+    if ("error" in found) return found;
+    const group = paneStore.groupOf(found.id);
+    return {
+      thread: found.label,
+      id: found.id,
+      group: group?.id ?? null,
+      focusedInGroup: group?.focusedPaneId ?? null,
+      // Both answers, because the difference is the whole question: a measured
+      // rect survives the pane being hidden, a synthesised one only exists while
+      // it is visible, and a pane with neither is never drawn.
+      measuredRect: paneStore.rects[found.id] ?? null,
+      rectIfVisible: group ? paneStore.rectFor(found.id, group, true) : null,
+      rectIfHidden: group ? paneStore.rectFor(found.id, group, false) : null,
+      viewport: paneStore.viewport,
+      mounted: liveTerminalIds().includes(found.id),
+      activated: "unknown, it is the page's own map",
+    };
+  },
+
+  /** Every measured pane box, for a layout that puts a terminal nowhere. */
+  rects() {
+    return Object.fromEntries(
+      Object.entries(paneStore.rects).map(([id, rect]) => [
+        app.threadById(id)?.label ?? id,
+        rect,
+      ]),
+    );
+  },
+
   settings() {
     // Round-tripped rather than snapshotted: this is a plain `.ts` module, so
     // `$state.snapshot` is not compiled here and would be undefined at runtime.

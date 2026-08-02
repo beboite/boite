@@ -23,6 +23,7 @@
     threadLeavesOf,
   } from "$lib/features/panes/store.svelte";
   import { followPanel, panePresence } from "$lib/features/panes/open";
+  import { logger } from "$lib/shared/services/logger.svelte";
   import { statusEngine } from "$lib/features/thread/statusEngine";
   import PaneShell from "$lib/features/panes/PaneShell.svelte";
   import PaneOverlay from "$lib/features/panes/PaneOverlay.svelte";
@@ -252,6 +253,45 @@
       }
       if (dirty) activated = { ...activated };
     });
+  });
+
+  /**
+   * Says so when the thread the user is looking at has no terminal drawn.
+   *
+   * A pane needs three things at once — an entry in `activated`, a group, and a
+   * rect — and failing any of them draws nothing at all. Nothing downstream then
+   * runs: no mount, no spawn, no error, and a release log that says the worktree
+   * was handed over and stops. That silence is the whole reason this bug outlived
+   * three releases, so the three flags are named here rather than reasoned about
+   * from the outside.
+   *
+   * On a delay, because all three are false for a frame or two on any normal
+   * launch: the row lands, the group is made by an effect, and the rect is
+   * synthesised or measured after that. What this catches is the state that
+   * never resolves. Keyed to the active thread, so it costs one timer per
+   * selection change and nothing at all while the user reads.
+   */
+  $effect(() => {
+    const id = app.activeThreadId;
+    if (!id) return;
+    const timer = setTimeout(() => {
+      const group = paneStore.groupOf(id);
+      const visible = group?.id === activeGroupId && terminalActive;
+      const rect = group ? paneStore.rectFor(id, group, visible) : null;
+      if (activated[id] && group && rect) return;
+      logger.warn("panes", `${app.threadById(id)?.label ?? id}: no terminal drawn`, {
+        activated: !!activated[id],
+        group: group?.id ?? null,
+        rect: !!rect,
+        measured: !!paneStore.rects[id],
+        activeGroupId,
+        terminalActive,
+        view: app.view,
+        viewport: paneStore.viewport,
+        groups: paneStore.groups.length,
+      });
+    }, 2000);
+    return () => clearTimeout(timer);
   });
 
   onMount(() => prefetchWhenIdle(TerminalView));
