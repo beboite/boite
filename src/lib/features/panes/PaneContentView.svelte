@@ -15,6 +15,11 @@
    * be reparented, so the page positions them over the rectangle this shell
    * measured. Everything here is ordinary DOM and lives in the tree.
    */
+  /**
+   * `projectId` is the group's, and every panel gets it: a panel used to read
+   * the selected project instead, so a git panel sitting beside a terminal in
+   * one project described whichever project the sidebar was pointing at.
+   */
   type Props = { content: PaneContent; projectId: string };
   let { content, projectId }: Props = $props();
 
@@ -42,11 +47,11 @@
 
 <div class="h-full min-h-0 w-full overflow-hidden">
   {#if content.kind === "git"}
-    <GitPanel />
+    <GitPanel {projectId} />
   {:else if content.kind === "explorer"}
-    <ExplorerPanel />
+    <ExplorerPanel {projectId} />
   {:else if content.kind === "todo"}
-    <TodoPanel />
+    <TodoPanel {projectId} />
   {:else if content.kind === "browser"}
     <BrowserPane url={content.url} />
   {:else if content.kind === "editor"}

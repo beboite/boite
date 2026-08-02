@@ -27,7 +27,12 @@
 
   const encoder = new TextEncoder();
 
-  const projectId = $derived(app.currentProjectId);
+  // The pane's project when it has one, the selected project otherwise: the
+  // mobile tab has no pane around it.
+  type Props = { projectId?: string | null };
+  let { projectId: paneProjectId = null }: Props = $props();
+
+  const projectId = $derived(paneProjectId ?? app.currentProjectId);
   const project = $derived(
     projectId ? app.projects.find((p) => p.id === projectId) ?? null : null,
   );

@@ -18,11 +18,15 @@
 
   const AUTO_REFRESH_MS = 10_000;
 
-  const project = $derived(
-    app.currentProjectId
-      ? app.projects.find((p) => p.id === app.currentProjectId) ?? null
-      : null,
-  );
+  // The pane's project when it has one, the selected project otherwise: the
+  // mobile tab has no pane around it.
+  type Props = { projectId?: string | null };
+  let { projectId = null }: Props = $props();
+
+  const project = $derived.by(() => {
+    const id = projectId ?? app.currentProjectId;
+    return id ? app.projects.find((p) => p.id === id) ?? null : null;
+  });
 
   // Follows the active thread into its worktree: the point of the tree is to
   // show what the agent on screen is actually looking at. Entries are cached

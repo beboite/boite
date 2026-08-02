@@ -2,6 +2,7 @@
   import { app } from "$lib/app/store.svelte";
   import { workspace } from "$lib/backend";
   import { threadGitRoot } from "$lib/features/thread/cwd";
+  import { isScratch } from "$lib/features/project/scratch";
   import { settings } from "$lib/features/settings/store.svelte";
   import { gitStore, gitScope } from "./store.svelte";
   import { editorStore } from "$lib/features/editor/store.svelte";
@@ -42,11 +43,16 @@
   // finger-sized there while the desktop panel keeps its density.
   const mobile = $derived(settings.state.mobileLayout);
 
-  const project = $derived(
-    app.currentProjectId
-      ? app.projects.find((p) => p.id === app.currentProjectId) ?? null
-      : null,
-  );
+  // The pane's project when it has one, the selected project otherwise: the
+  // mobile tab has no pane around it, and a panel in a pane belongs to the
+  // group it was opened in rather than to whatever the sidebar points at.
+  type Props = { projectId?: string | null };
+  let { projectId = null }: Props = $props();
+
+  const project = $derived.by(() => {
+    const id = projectId ?? app.currentProjectId;
+    return id ? app.projects.find((p) => p.id === id) ?? null : null;
+  });
 
   // The thread whose checkout the panel should describe. Only when it belongs
   // to the project on screen: the active thread can live in another project
@@ -85,8 +91,13 @@
 
   // Not a repo → look for nested repos to offer. Idempotent in the store, so
   // re-runs of this effect are free.
+  //
+  // Never on Scratch. Its folder is the home directory, and the scan walks
+  // three levels of it: on Windows that is the whole of `AppData` plus every
+  // dependency tree under it, minutes of directory reads for a list of
+  // repositories nobody opened this panel to see.
   $effect(() => {
-    if (!project || !scope) return;
+    if (!project || !scope || isScratch(project)) return;
     const state = gitStore.get(scope);
     if (state?.loaded && !state.isRepo && !project.gitRoot) {
       void gitStore.scanRepos(scope, project.cwd);

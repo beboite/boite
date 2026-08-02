@@ -136,10 +136,24 @@ describe("anchorPaneId", () => {
     expect(anchorPaneId()).toBe("t2");
   });
 
-  it("falls back to a group of the selected project", () => {
+  /**
+   * The regression: the page draws the active thread's group, and with no
+   * active thread only the project's panel group — the one with no terminal in
+   * it. Anchoring in a thread group instead put the panel in a group nothing
+   * renders, so the titlebar button lit up over an unchanged screen.
+   */
+  it("ignores a thread group of the project while no thread is active", () => {
     threads(["t1", "p"], ["other", "q"]);
     app.selectedProjectId = "q";
-    expect(anchorPaneId()).toBe("other");
+    expect(anchorPaneId()).toBe(null);
+  });
+
+  it("falls back to the project's own panel group", () => {
+    threads(["other", "q"]);
+    app.selectedProjectId = "q";
+    const paneId = openPane({ kind: "git" });
+    expect(paneId).toBeTruthy();
+    expect(anchorPaneId()).toBe(paneId);
   });
 
   it("is null when the project has nothing open", () => {
@@ -184,6 +198,23 @@ describe("panePresence and togglePanelPane", () => {
 
     expect(togglePanelPane("explorer")).toBe(false);
     expect(paneStore.groups).toEqual([]);
+  });
+
+  /**
+   * A project with terminals but none of them active is where the button broke:
+   * the panel went into a thread group the page was not drawing, and the second
+   * click closed something the user had never seen.
+   */
+  it("gives a project whose threads are all in the background its own group", () => {
+    threads(["t1", "p"], ["t2", "p"]);
+    app.selectedProjectId = "p";
+
+    expect(togglePanelPane("git")).toBe(true);
+    const opened = paneStore.groups.find((g) => leafNodesOf(g.root)[0].content.kind === "git");
+    expect(opened).toBeTruthy();
+    expect(countLeaves(opened!.root)).toBe(1);
+    expect(countLeaves(paneStore.groupOf("t1")!.root)).toBe(1);
+    expect(panePresence("git")).toBe(opened!.focusedPaneId);
   });
 
   it("sees only the group it would open into", () => {
