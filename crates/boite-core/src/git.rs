@@ -2304,18 +2304,25 @@ fn link(dir: &str) -> SharedDir {
 /// What this project shares with its worktrees, read from the project or
 /// worked out from what it is built with.
 ///
-/// Detection covers the directories that are expensive and safe. It is
-/// deliberately thin outside Rust, and that is a finding rather than an
-/// omission: every other ecosystem here already keeps its expensive artifacts
-/// in a cache outside the project — `~/.nuget`, `~/.m2`, `~/.gradle/caches`,
-/// the package-manager store — so what is left inside is an install directory
-/// that a single link handles, or build output small enough to rebuild. Cargo
-/// is the exception, with gigabytes of build output per project and no global
-/// cache to fall back on.
+/// Detection covers the directories one link makes usable: an install
+/// directory that a package manager wrote once and a build does not rewrite.
+/// That is cheap wherever the filesystem is, because a link is one syscall
+/// however big the directory is.
 ///
-/// Anything this does not know is the policy file's job, which is also what the
-/// MCP writes: a project nobody here can test is better served by a rule its
-/// own agent wrote than by one guessed from documentation.
+/// Build output is deliberately not detected, `target` included. Sharing it
+/// needs a hard link per file, and on a filesystem with no copy-on-write to
+/// fall back on that is one syscall per artifact: this repository's `target`
+/// is around 42,000 of them, which measured 40 to 120 seconds per worktree on
+/// NTFS, in front of a thread the user had just asked for. The pool of spares
+/// was meant to absorb that and covers three launches; the fourth waited the
+/// full time, and past 90 seconds the thread gives up and starts in the
+/// project directory instead — the worktree it was promised arrives later and
+/// is thrown away. A saved `cargo build` is not worth a launch that slow, and
+/// it is only saved for a thread that builds at all.
+///
+/// A project where the trade goes the other way — a machine with reflinks, or
+/// output small enough for the walk to be free — says so in the policy file,
+/// which overrides all of this and is also what the MCP writes.
 pub fn artifact_policy(repo: &Path) -> Vec<SharedDir> {
     if let Ok(text) = fs::read_to_string(repo.join(POLICY_FILE)) {
         if let Ok(policy) = serde_json::from_str::<ArtifactPolicy>(&text) {
@@ -2329,15 +2336,6 @@ pub fn artifact_policy(repo: &Path) -> Vec<SharedDir> {
     let mut shared = Vec::new();
     let has = |name: &str| repo.join(name).exists();
 
-    // Rust. The one that needs the per-file treatment.
-    if has("Cargo.toml") {
-        shared.push(SharedDir {
-            dir: "target".to_string(),
-            mode: ShareMode::Hardlink,
-            exclude: Vec::new(),
-            cargo_workspace: true,
-        });
-    }
     // JavaScript. The install directory is the whole cost; build output is
     // small, fast to regenerate, and rewritten in place by most bundlers.
     if has("package.json") {
@@ -4162,6 +4160,9 @@ mod worktree_tests {
     #[test]
     fn a_worktree_never_shares_build_output_with_the_main_checkout() {
         let f = Fixture::new();
+        // Asked for explicitly, because the rule under test is what happens to
+        // build output a project shares on purpose.
+        share_target(&f);
         let out = f.repo.join("target/debug");
         fs::create_dir_all(&out).unwrap();
         fs::write(out.join("app"), "main checkout\n").unwrap();
@@ -4188,7 +4189,12 @@ mod worktree_tests {
 
     /// A repository with a manifest and a plausible `target`, which is what
     /// `hardlink_build_output` needs before it will do anything at all.
+    ///
+    /// The policy is written out rather than left to detection: detection does
+    /// not ask for build output any more, so a project that wants it says so,
+    /// and that file is the shape it says it in.
     fn with_cargo_target(f: &Fixture) {
+        share_target(f);
         fs::write(
             f.repo.join("Cargo.toml"),
             "[workspace]\nmembers = [\"crates/demo-core\"]\n",
@@ -4228,6 +4234,17 @@ mod worktree_tests {
 
         git_in(&f.repo, &["add", "Cargo.toml", "crates"]);
         git_in(&f.repo, &["commit", "--quiet", "-m", "manifest"]);
+    }
+
+    /// Asks for `target`, per file, the way a Rust project that wants it has to
+    /// now that detection stops at install directories.
+    fn share_target(f: &Fixture) {
+        fs::create_dir_all(f.repo.join(".boite")).unwrap();
+        fs::write(
+            f.repo.join(POLICY_FILE),
+            r#"{"shared":[{"dir":"target","mode":"hardlink","cargoWorkspace":true}]}"#,
+        )
+        .unwrap();
     }
 
     /// The whole point of the fallback: the dependency artifacts arrive without
@@ -4298,8 +4315,9 @@ mod worktree_tests {
     #[test]
     fn build_output_is_left_alone_when_the_packages_cannot_be_identified() {
         let f = Fixture::new();
-        // Enough of a manifest for detection to ask for the cargo profile, and
-        // not enough for it to learn a single package name.
+        // The project asks for the cargo profile, and the manifest is not
+        // enough for it to learn a single package name.
+        share_target(&f);
         fs::write(f.repo.join("Cargo.toml"), "[workspace]\nresolver = \"2\"\n").unwrap();
         let debug = f.repo.join("target/debug/deps");
         fs::create_dir_all(&debug).unwrap();
@@ -4307,7 +4325,7 @@ mod worktree_tests {
 
         assert!(
             artifact_policy(&f.repo).iter().any(|e| e.cargo_workspace),
-            "detection should have asked for the cargo profile"
+            "the policy should have asked for the cargo profile"
         );
 
         let w = scratch("no-packages");
@@ -4350,6 +4368,35 @@ mod worktree_tests {
         // link over an install directory.
         let modes: Vec<ShareMode> = artifact_policy(&f.repo).iter().map(|e| e.mode).collect();
         assert!(modes.iter().all(|m| *m == ShareMode::Link));
+    }
+
+    /// Detection stops at install directories. A Rust project gets nothing,
+    /// because sharing `target` costs a hard link per file — around 42,000 of
+    /// them here — in front of a launch the user is waiting on, and it buys a
+    /// `cargo build` only for a thread that builds.
+    #[test]
+    fn detection_leaves_build_output_to_the_project() {
+        let f = Fixture::new();
+        fs::write(
+            f.repo.join("Cargo.toml"),
+            "[workspace]\nmembers = [\"crates/demo-core\"]\n",
+        )
+        .unwrap();
+        fs::create_dir_all(f.repo.join("target/debug")).unwrap();
+
+        assert!(
+            artifact_policy(&f.repo).is_empty(),
+            "detection asked for build output"
+        );
+
+        // Still reachable, by saying so. This is the whole escape hatch: a
+        // machine with reflinks, or output small enough for the walk to be
+        // free, writes the file and gets the old behaviour back.
+        share_target(&f);
+        let asked = artifact_policy(&f.repo);
+        assert_eq!(asked.len(), 1);
+        assert_eq!(asked[0].dir, "target");
+        assert_eq!(asked[0].mode, ShareMode::Hardlink);
     }
 
     /// The project's own file wins over detection, which is what makes an
@@ -4730,6 +4777,7 @@ mod worktree_tests {
         // The policy is what makes a directory disposable. Without one, output
         // found in the worktree is just a directory nobody can prove is
         // reproducible, and it gets carried across like anything else.
+        share_target(&f);
         fs::write(
             f.repo.join("Cargo.toml"),
             "[package]\nname = \"demo\"\nversion = \"0.1.0\"\n",
