@@ -221,18 +221,46 @@ fn worktree_of_request(
     Ok((git_root.unwrap_or(cwd), worktree))
 }
 
+/// Runs git somewhere other than on the runtime's worker threads.
+///
+/// These handlers are futures like any other, so a `git` process spawned in one
+/// of them holds a worker for as long as git takes. `worktree_status` runs on
+/// most agent turns and spawns three, and the app has one runtime for
+/// everything: with a few agents talking at once, the threads that carry the
+/// window's own commands are inside `CreateProcess` instead. A launch waiting on
+/// `worktree_open` cannot be answered while that lasts.
+async fn off_thread<T, F>(work: F) -> Result<T, StatusCode>
+where
+    F: FnOnce() -> T + Send + 'static,
+    T: Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(work)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+}
+
 /// Where this terminal is working, and what it may still do about it.
 async fn worktree_status(
     State(inner): State<std::sync::Arc<Inner>>,
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let (repo, worktree) = worktree_of_request(&inner, &headers)?;
-    let hold = boite_core::git::worktree_hold_blocking(&worktree)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let branches = boite_core::git::branches_blocking(&repo).unwrap_or_default();
-    let current = boite_core::git::repo_info_blocking(&worktree)
-        .ok()
-        .and_then(|i| i.branch);
+    // One hop for the three of them: each is a process, and paying the handoff
+    // once is the difference between three round trips and one.
+    let (hold, branches, current) = {
+        let repo = repo.clone();
+        let worktree = worktree.clone();
+        off_thread(move || {
+            let hold = boite_core::git::worktree_hold_blocking(&worktree);
+            let branches = boite_core::git::branches_blocking(&repo).unwrap_or_default();
+            let current = boite_core::git::repo_info_blocking(&worktree)
+                .ok()
+                .and_then(|i| i.branch);
+            (hold, branches, current)
+        })
+        .await?
+    };
+    let hold = hold.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(Json(json!({
         "path": worktree,
         "repo": repo,
@@ -255,7 +283,12 @@ async fn worktree_branch(
     Json(body): Json<BranchIn>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let (_, worktree) = worktree_of_request(&inner, &headers)?;
-    match boite_core::git::claim_worktree_branch_blocking(&worktree, &body.name) {
+    let name = body.name.clone();
+    let claimed = off_thread(move || {
+        boite_core::git::claim_worktree_branch_blocking(&worktree, &name)
+    })
+    .await?;
+    match claimed {
         Ok(()) => {
             note_activity(&inner, &headers, "worktree");
             let _ = inner.app.emit("boite://worktrees-changed", ());
@@ -274,7 +307,12 @@ async fn worktree_reserve(
     Json(body): Json<BranchIn>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let (_, worktree) = worktree_of_request(&inner, &headers)?;
-    match boite_core::git::reserve_worktree_branch_blocking(&worktree, &body.name) {
+    let name = body.name.clone();
+    let reserved = off_thread(move || {
+        boite_core::git::reserve_worktree_branch_blocking(&worktree, &name)
+    })
+    .await?;
+    match reserved {
         Ok(()) => {
             note_activity(&inner, &headers, "worktree");
             let _ = inner.app.emit("boite://worktrees-changed", ());
