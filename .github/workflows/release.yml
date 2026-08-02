@@ -141,3 +141,41 @@ jobs:
           prerelease: false
           includeUpdaterJson: true
           args: ${{ matrix.args }}
+
+  # The bundler writes a `.sig` beside every updater payload and tauri-action
+  # uploads all of them, but nothing ever reads one: `latest.json` carries the
+  # same signature inline and is the only file the updater fetches. Six assets
+  # nobody downloads is most of the release page, so they go once every platform
+  # has finished uploading. Deleting them cannot break an update; deleting a
+  # payload would, hence the suffix match rather than a count.
+  prune:
+    needs: bundle
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Drop the signature assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          # workflow_dispatch has no tag, and tauri-action names the release
+          # from the config in that case too.
+          if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
+            tag="$GITHUB_REF_NAME"
+          else
+            tag="v$(jq -r .version src-tauri/tauri.conf.json)"
+          fi
+
+          mapfile -t sigs < <(gh release view "$tag" --json assets -q '.assets[].name' | grep '\.sig$' || true)
+          if [ "${#sigs[@]}" -eq 0 ]; then
+            echo "no .sig assets on $tag"
+            exit 0
+          fi
+
+          for name in "${sigs[@]}"; do
+            gh release delete-asset "$tag" "$name" --yes
+            echo "deleted $name"
+          done
