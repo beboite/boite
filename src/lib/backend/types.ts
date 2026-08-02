@@ -214,6 +214,18 @@ export interface WorktreeApi {
    */
   migrate(repo: string, threadId: string, from: string): Promise<WorktreeMigration>;
   /**
+   * The worktree this thread already owns, for a thread whose stored path is
+   * gone. Null when there is none to give back.
+   *
+   * The row is the only record of where a thread runs, so losing it is not
+   * cosmetic: the thread starts in the project folder instead, `--resume` looks
+   * for its transcript under a directory the agent never ran in, and the work
+   * that was meant to be isolated lands in the user's own checkout. The
+   * directory is still there in every one of those cases, which is what makes
+   * this answerable at all.
+   */
+  adopt(repo: string, threadId: string): Promise<string | null>;
+  /**
    * Every worktree of a repository, the main checkout included, each with what
    * removing it would destroy. One call rather than a list plus a `hold` per
    * entry: each flag costs a git process, and on Windows those round trips are

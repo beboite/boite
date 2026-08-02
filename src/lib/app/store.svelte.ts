@@ -649,10 +649,38 @@ class AppState {
    * over its lock, and threads of one project are the common case.
    */
   private async migrateWorktrees() {
+    let adopted = 0;
     for (const t of this.threads) {
-      if (!t.worktreePath) continue;
       const project = this.projects.find((p) => p.id === t.projectId);
       if (!project) continue;
+      if (!t.worktreePath) {
+        // A thread with no path may still own a checkout: the `gone` branch
+        // below clears the row on one unreadable answer, and the directory it
+        // forgot is still there. Left forgotten, the thread runs in the user's
+        // own project folder while claiming isolation, and `--resume` looks for
+        // its transcript under a directory the agent never ran in — which is
+        // "No conversation found with session ID" for a session that exists.
+        //
+        // Only worth asking for a thread that could have had one. A blank
+        // terminal and a scratch thread never do, and asking is a filesystem
+        // walk per thread at every boot.
+        if (t.iconKey === "terminal" || isScratch(project)) continue;
+        try {
+          const found = await workspace
+            .backendFor(t.origin)
+            .worktree.adopt(project.gitRoot ?? project.cwd, t.id);
+          if (!found) continue;
+          t.worktreePath = found;
+          await saveThread($state.snapshot(t) as Thread);
+          adopted++;
+          logger.info("worktree", `adopted ${found} back for ${t.id}`);
+        } catch (err) {
+          // Nothing is lost by not answering: the thread keeps running in the
+          // project folder, exactly as it did before this existed.
+          logger.warn("worktree", `could not look for a worktree for ${t.id}`, String(err));
+        }
+        continue;
+      }
       try {
         const answer = await workspace
           .backendFor(t.origin)
@@ -677,6 +705,9 @@ class AppState {
         // in it exactly as it did before. Never a reason to hold up boot.
         logger.warn("worktree", `kept ${t.worktreePath} for ${t.id}`, String(err));
       }
+    }
+    if (adopted > 0) {
+      notifications.success(t("worktree.adoptedBack", { count: adopted }));
     }
   }
 

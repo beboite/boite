@@ -912,9 +912,15 @@
       (clientStatus() && parkedLocal.has(thread.id));
     const attachable = reattaching && current?.status !== "idle";
     if (!current || finished || (current.status !== "idle" && !attachable)) {
-      logger.debug(
+      // Info, not debug, and it is the only skip that is: a refusal here is a
+      // pane that stays black for good, and `debug` is compiled out of a release
+      // build. A terminal that never opens and says nothing about it is the one
+      // failure the log could not explain, which is how it went three releases
+      // without being found. The others above are transient by construction —
+      // a retry is already scheduled — and this one has nothing behind it.
+      logger.info(
         "spawn",
-        `${thread.label}: skip — missing=${!current} status=${current?.status} reattach=${reattach}`,
+        `${thread.label}: not opening — missing=${!current} status=${current?.status} reattach=${reattach} attachable=${attachable}`,
       );
       return;
     }
@@ -1158,6 +1164,13 @@
   }
 
   onMount(() => {
+    // One line per pane, and it exists to split a silence in two. A thread that
+    // never opens leaves the same nothing in the log whether its terminal was
+    // never mounted — the pane is gated on a group and a measured rect, and
+    // failing either draws no terminal at all — or was mounted and refused to
+    // spawn. Those are different bugs in different files, and without this the
+    // log cannot say which one is being looked at.
+    logger.info("terminal", `${thread.label}: pane mounted`);
     term = new Terminal({
       cursorBlink: true,
       cursorStyle: "bar",
