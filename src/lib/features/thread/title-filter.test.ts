@@ -25,6 +25,12 @@ describe("isGenericTitle", () => {
     expect(isGenericTitle("/bin/bash")).toBe(true);
   });
 
+  it("treats fastpick's own image path as generic so the agent name survives", () => {
+    expect(isGenericTitle("C:\\Users\\nuno\\.local\\bin\\fastpick.exe")).toBe(true);
+    expect(isGenericTitle("fastpick")).toBe(true);
+    expect(isGenericTitle("/home/nuno/.local/bin/fastpick")).toBe(true);
+  });
+
   it("strips the elevation prefix cmd.exe prepends", () => {
     expect(isGenericTitle("Administrator: C:\\Windows\\System32\\cmd.exe")).toBe(true);
   });

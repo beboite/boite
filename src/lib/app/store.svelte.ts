@@ -30,6 +30,7 @@ import {
   pruneRenamed,
 } from "$lib/features/thread/renamed";
 import { noteStatusChange, resetFinished } from "$lib/features/thread/finished.svelte";
+import { isGenericTitle } from "$lib/features/thread/title-filter";
 import {
   isScratch,
   makeScratchProject,
@@ -392,6 +393,7 @@ class AppState {
     this.threads = threads;
 
     this.deduplicateSessionIds();
+    this.dropGenericTitles();
     pruneRenamed(this.threads.map((t) => t.id));
     await this.migrateWorktrees();
 
@@ -404,6 +406,30 @@ class AppState {
     }
 
     this.ready = true;
+  }
+
+  /**
+   * Drops titles a past version let through and this one would refuse.
+   *
+   * The filter runs when a title arrives, so a name it did not know about yet — `fastpick`
+   * announcing its own image path before the agent it launches gets to speak — was written
+   * to the row and outlives the fix: the thread is idle, no new title is coming, and the
+   * sidebar keeps showing an executable path until someone renames it by hand. Widening the
+   * set has to reach the rows already wearing the old answer.
+   *
+   * A name the user typed is left alone, and so is a remote row: the server owns those
+   * titles and re-pushes them, so writing here would be undone anyway.
+   */
+  private dropGenericTitles() {
+    for (const thread of this.threads) {
+      if (!thread.title || isRenamed(thread.id)) continue;
+      if (!isGenericTitle(thread.title)) continue;
+      thread.title = null;
+      if (!workspace.backendFor(thread.origin).caps.clientStatus) continue;
+      void updateThreadTitle(thread.id, null, thread.origin).catch((err) => {
+        logger.warn("app", `could not clear generic title for ${thread.id}`, String(err));
+      });
+    }
   }
 
   // Projects and threads are independent tables; load both concurrently.
