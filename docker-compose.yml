@@ -1,7 +1,11 @@
 services:
   boite:
     build: .
-    image: boite-server:latest
+    # Published by .github/workflows/image.yml for linux/arm64. `docker compose
+    # pull` takes the built image, `docker compose build` still overwrites it
+    # locally under the same name, so a host on another architecture, or one
+    # testing an uncommitted change, keeps working.
+    image: ghcr.io/beboite/boite-server:${BOITE_IMAGE_TAG:-latest}
     container_name: boite
     restart: unless-stopped
     ports:
