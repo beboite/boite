@@ -235,6 +235,23 @@ export function warmWorktreeFor(project: Project | null) {
 const preparing = new Map<string, Promise<void>>();
 
 /**
+ * How long a thread waits for its worktree before it starts without one.
+ *
+ * Generous, because the honest case is slow: provisioning copies the build
+ * output, which is tens of seconds on a large repository and is measured, not
+ * hung. What this exists for is the dishonest case. The wait used to have no
+ * end at all, so a `worktree_open` that never answered left the terminal black,
+ * the reload a silent no-op — `spawn` returns early while `spawning` is still
+ * latched — and the thread impossible to close, since closing waits here too.
+ * One unanswered call took three of the app's promises with it and said nothing
+ * in a release build.
+ */
+const WORKTREE_DEADLINE_MS = 90_000;
+
+/** Past this a launch is worth a line in the log, answered or not. */
+const WORKTREE_SLOW_MS = 5_000;
+
+/**
  * Resolves once this thread's working directory is final.
  *
  * An unknown id resolves immediately: a thread that is not mid-creation
@@ -244,10 +261,52 @@ export function threadDirectoryReady(threadId: string): Promise<void> {
   return preparing.get(threadId) ?? Promise.resolve();
 }
 
+/**
+ * Whether this thread stopped waiting for a worktree it never got.
+ *
+ * Read by the terminal, which has to say so on screen: a thread that quietly
+ * starts in the project folder is a thread whose isolation the user still
+ * believes in.
+ */
+const gaveUpWaiting = new Set<string>();
+
+export function worktreeWaitTimedOut(threadId: string): boolean {
+  return gaveUpWaiting.has(threadId);
+}
+
 function prepareWorktree(project: Project, thread: Thread, iconKey: IconKey) {
+  const startedAt = Date.now();
+  // A relaunch of this id starts the question over, so the last answer about it
+  // is not the one to show.
+  gaveUpWaiting.delete(thread.id);
+  // Whether anyone is still waiting on this. Once the deadline has passed the
+  // PTY may already be running in the project folder, and a directory adopted
+  // after that would send every session lookup to a path the process never
+  // started in.
+  let awaited = true;
+
   const work = (async () => {
     const path = await openWorktreeFor(project, thread.id, iconKey);
-    if (!path) return;
+    const took = Date.now() - startedAt;
+    if (!path) {
+      if (took >= WORKTREE_SLOW_MS) {
+        logger.info("worktree", `${thread.id}: no worktree, after ${took}ms`);
+      }
+      return;
+    }
+    if (!awaited) {
+      // Nothing here is recoverable, so the point is to name the directory:
+      // git knows about it, no thread claims it, and the Worktrees tab is the
+      // only place it can still be dealt with.
+      logger.error(
+        "worktree",
+        `${thread.id}: answered after ${took}ms, too late to use — ${path} belongs to nobody`,
+      );
+      return;
+    }
+    if (took >= WORKTREE_SLOW_MS) {
+      logger.info("worktree", `${thread.id}: ready after ${took}ms — ${path}`);
+    }
     // The store's thread, not the local one: that is the reactive object the
     // terminal reads its cwd from. It is gone when the thread was closed while
     // the worktree was being made — the close path waits for us before
@@ -258,18 +317,38 @@ function prepareWorktree(project: Project, thread: Thread, iconKey: IconKey) {
     await saveThread({ ...live, args: [...live.args] });
   })();
 
-  preparing.set(
-    thread.id,
-    work
-      .catch((err) => {
-        // A thread with no worktree runs in the project folder, which is the
-        // documented fallback — never a reason to fail the thread itself.
-        logger.warn("worktree", `prepare failed for ${thread.id}`, String(err));
-      })
-      .finally(() => {
-        preparing.delete(thread.id);
-      }),
-  );
+  const settled = work.catch((err) => {
+    // A thread with no worktree runs in the project folder, which is the
+    // documented fallback — never a reason to fail the thread itself.
+    logger.warn("worktree", `prepare failed for ${thread.id}`, String(err));
+  });
+
+  let deadline: ReturnType<typeof setTimeout> | null = null;
+  const bounded = new Promise<void>((resolve) => {
+    deadline = setTimeout(() => {
+      deadline = null;
+      awaited = false;
+      gaveUpWaiting.add(thread.id);
+      logger.error(
+        "worktree",
+        `${thread.id}: no answer in ${WORKTREE_DEADLINE_MS}ms, starting in ${project.cwd}`,
+      );
+      notifications.error(t("worktree.waitGaveUp", { thread: thread.label }));
+      resolve();
+    }, WORKTREE_DEADLINE_MS);
+    void settled.then(() => {
+      if (deadline !== null) clearTimeout(deadline);
+      deadline = null;
+      resolve();
+    });
+  });
+
+  const tracked: Promise<void> = bounded.finally(() => {
+    // Only if it is still ours: a relaunch of the same id replaces the entry,
+    // and deleting then would release a wait somebody else owns.
+    if (preparing.get(thread.id) === tracked) preparing.delete(thread.id);
+  });
+  preparing.set(thread.id, tracked);
 }
 
 /**
@@ -505,10 +584,35 @@ async function releaseWorktree(thread: Thread) {
   }
 }
 
+/** How long closing waits for a worktree that is still being made. */
+const CLOSE_WAIT_MS = 5_000;
+
 export async function closeThread(threadId: string) {
   // Closed before its worktree landed: the directory would be created a moment
   // after the release below read a null path, and stay behind forever.
-  await threadDirectoryReady(threadId);
+  //
+  // Bounded, because the alternative is worse. A thread the user is trying to
+  // get rid of has to go: waiting on this without an end made a stuck launch
+  // undeletable, which is how three dead terminals sat in the sidebar with no
+  // way to remove them. Past the deadline the directory is left behind and
+  // named in the log rather than the thread being held hostage to it.
+  let landed = true;
+  await Promise.race([
+    threadDirectoryReady(threadId),
+    new Promise<void>((resolve) =>
+      setTimeout(() => {
+        landed = false;
+        resolve();
+      }, CLOSE_WAIT_MS),
+    ),
+  ]);
+  if (!landed) {
+    logger.warn(
+      "worktree",
+      `${threadId}: closing without waiting for a worktree that never landed`,
+    );
+  }
+  gaveUpWaiting.delete(threadId);
   const thread = app.threadById(threadId);
   if (thread) rememberClosedThread(thread);
   const kill = thread?.ptyId

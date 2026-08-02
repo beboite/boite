@@ -684,6 +684,7 @@ export const EN_MESSAGES = {
   "updater.resumedMany": "Update applied. Resuming {count} threads.",
   "worktree.keptForThread": "Kept the worktree for {thread}: it still has work in it.",
   "worktree.keptAtPath": "Kept the old worktree at {path}: it still has work in it.",
+  "worktree.waitGaveUp": "No worktree for {thread}: it starts in the project folder.",
   "shortcuts.removeConfirmTitle": "Remove this shortcut?",
   "shortcuts.removeConfirmMessage": "Removes {label} from the bar. Terminals it already opened are untouched.",
   "shortcuts.resetConfirmTitle": "Reset every shortcut?",

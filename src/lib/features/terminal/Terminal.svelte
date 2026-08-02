@@ -27,6 +27,7 @@
     reloadThread,
     restoreLastClosedThread,
     threadDirectoryReady,
+    worktreeWaitTimedOut,
   } from "$lib/features/thread/api";
   import {
     buildResumeArgsAsync,
@@ -976,6 +977,13 @@
       await ready;
       if (notice) clearTimeout(notice);
       if (destroyed) return;
+      // The wait has an end now, and reaching it is not the same thing as
+      // getting a worktree. Said on screen because the difference is invisible
+      // otherwise: the terminal opens, it works, and it is writing in the
+      // user's own checkout rather than in an isolated one.
+      if (worktreeWaitTimedOut(thread.id)) {
+        term.write("\r\n[boite] no worktree came back — starting in the project folder\r\n");
+      }
       // Relaunched while the directory was being settled. Nothing has been
       // opened yet, so handing over to the newer launch — which the `finally`
       // below does — is the whole cleanup.
