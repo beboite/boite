@@ -299,12 +299,16 @@ the thread runs in. An agent that has produced something worth keeping names a
 branch for it; until then the worktree stays detached and leaves no trace.
 
 `artifacts_status` and `artifacts_set` cover what a new worktree gets out of
-your checkout instead of building from nothing: `node_modules`, `target`, a
-virtualenv. Boite guesses that from the manifests it recognises, and the guess
-is a guess — an agent that knows the build system can read what is in force and
-write the project's own rule to `.boite/artifacts.json` instead, naming each
-directory, whether it is shared as one link or file by file, and what a build
-rewrites and must therefore be left out.
+your checkout instead of building from nothing: `node_modules`, a virtualenv,
+a vendor directory. Boite guesses those from the manifests it recognises, and
+it stops at directories one link makes usable. Build output is not guessed:
+`target` and its equivalents are shared file by file, which on a filesystem
+without copy-on-write means one hard link per artifact and a launch that waits
+on all of them. A project where that trade is worth it says so — an agent that
+knows the build system can read what is in force and write the project's own
+rule to `.boite/artifacts.json`, naming each directory, whether it is shared as
+one link or file by file, and what a build rewrites and must therefore be left
+out.
 
 `projects_list`, `thread_move`, `project_create` and `thread_spawn` cover where
 the work happens. `thread_move` takes the terminal into another project: Boite
