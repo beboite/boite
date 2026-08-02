@@ -64,7 +64,7 @@
 <style>
   .snap-preview {
     position: absolute;
-    z-index: 30;
+    z-index: var(--z-drop);
     pointer-events: none;
     border-radius: 8px;
     border: 1px solid rgba(250, 250, 250, 0.55);

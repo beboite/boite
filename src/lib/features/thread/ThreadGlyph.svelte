@@ -50,6 +50,11 @@
     if (keepAwake) return "var(--color-awake)";
     switch (status) {
       case "running":
+      // Amber like running, because both are the agent's turn still open. The
+      // ring pulses instead of sweeping: nothing is progressing, and the only
+      // thing that will move it is the user. Without this arm the one status
+      // worth interrupting for wore the same ring as an idle thread.
+      case "waiting":
         return "var(--color-warning)";
       case "ready":
       case "done":
@@ -63,6 +68,7 @@
   });
 
   const spinning = $derived(status === "running");
+  const waiting = $derived(status === "waiting" && !keepAwake);
   const glyphSize = $derived(Math.round(size * 0.62));
 </script>
 
@@ -74,6 +80,7 @@
   <span
     class="glyph inert"
     class:spinning
+    class:waiting
     class:asleep
     style:--ring={ringColor}
     style:width="{size}px"
@@ -87,6 +94,7 @@
     type="button"
     class="glyph"
     class:spinning
+    class:waiting
     class:asleep
     style:--ring={ringColor}
     style:width="{size}px"
@@ -165,6 +173,18 @@
       transform: rotate(1turn);
     }
   }
+
+  /* Waiting on the user. The ring is whole and breathes, which reads as "stopped
+     here" next to the sweep of a thread that is still working. */
+  .glyph.waiting {
+    animation: glyph-waiting 1.2s ease-in-out infinite;
+  }
+  @keyframes glyph-waiting {
+    50% {
+      box-shadow: inset 0 0 0 1.5px
+        color-mix(in srgb, var(--ring) 30%, transparent);
+    }
+  }
   /* The global gate flattens animation-duration to near zero, which would park
      the arc at whatever angle it stopped on and read as a broken ring. A solid
      one still says "running" — it just says it without moving. */
@@ -173,5 +193,11 @@
   }
   :global(html[data-motion="reduced"]) .glyph.spinning {
     box-shadow: inset 0 0 0 1.5px var(--ring);
+  }
+  /* Same bargain as the dot: a blinking mark is what a vestibular or
+     photosensitivity setting asks to be spared, and the amber alone still
+     separates waiting from idle. */
+  :global(html[data-motion="reduced"]) .glyph.waiting {
+    animation: none;
   }
 </style>

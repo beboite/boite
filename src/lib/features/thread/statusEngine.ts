@@ -13,6 +13,7 @@ import { detectIconKey } from "$lib/shared/icons/detect";
 import { ptyKill } from "$lib/storage/pty";
 import { logger } from "$lib/shared/services/logger.svelte";
 import { agentTurns } from "./agent-turns";
+import { turnIsActive } from "./agent-registry";
 import { threadCwd } from "./cwd";
 import { detectWorkingOnScreen, LIVE_ROW_COUNT } from "./working-detect";
 import type { IconKey, Thread } from "$lib/types";
@@ -84,6 +85,11 @@ const prevStatus = new Map<string, string>();
 // Auto-sleep countdown anchor, kept apart from the activity stamps: arming the
 // countdown by stamping one of those made the next pass read it as activity.
 const idleSince = new Map<string, number>();
+// What claude said it is blocked on, for the threads that are blocked. Kept in
+// a map of its own rather than on the thread row: it is read from a store on
+// disk every pass and it is gone the moment the dialog is answered, which is
+// neither durable state nor something worth a database write.
+const waitingReason = new Map<string, string>();
 let timer: ReturnType<typeof setInterval> | null = null;
 
 function forgetThread(threadId: string) {
@@ -92,6 +98,18 @@ function forgetThread(threadId: string) {
   lastWorkingAt.delete(threadId);
   prevStatus.delete(threadId);
   idleSince.delete(threadId);
+  waitingReason.delete(threadId);
+}
+
+/**
+ * Why this thread is waiting, in the agent's own words, or null.
+ *
+ * "Waiting" alone does not say whether the agent wants a permission, a plan
+ * approved or an answer to a question, and those are three different amounts of
+ * urgency. Claude is the only agent that says which.
+ */
+export function waitingReasonFor(threadId: string): string | null {
+  return waitingReason.get(threadId) ?? null;
 }
 
 function maybeAutoClose(threadId: string, iconKey: string | null | undefined) {
@@ -172,7 +190,12 @@ function visibleThreadIds(): Set<string> {
  * launched keeps running, is not the agent working and is not finished either.
  * Auto-sleep reads `active`; the dot reads `status`.
  */
-type Reading = { status: "running" | "waiting" | "ready"; active: boolean };
+type Reading = {
+  status: "running" | "waiting" | "ready";
+  active: boolean;
+  /** Only ever set alongside `waiting`, and only by claude. */
+  waitingFor?: string | null;
+};
 
 /**
  * What this thread is doing, or null when there is nothing to look at.
@@ -195,21 +218,24 @@ function read(t: Thread, iconKey: IconKey): Reading | null {
     const cwd = threadCwd(t, app.projectById(t.projectId));
     const turn = agentTurns.stateOf(iconKey, t.sessionId, cwd);
     if (turn) {
+      // One definition of "mid-something", shared with the server's mirror of
+      // this logic rather than re-derived per arm below.
+      const active = turnIsActive(turn);
       switch (turn.state) {
         case "busy":
-          return { status: "running", active: true };
+          return { status: "running", active };
         // A dialog is up and nothing moves until it is answered. Its own status,
         // never `ready`: the turn is still in flight, and the whole reason this
         // exists is that calling it finished both showed the wrong thing and let
         // auto-sleep kill a thread mid-question. Claude alone says this.
         case "waiting":
-          return { status: "waiting", active: true };
+          return { status: "waiting", active, waitingFor: turn.waitingFor ?? null };
         // The agent takes input again, so the dot is `ready`, but a command it
         // started is still running and killing the PTY would take that with it.
         case "shell":
-          return { status: "ready", active: true };
+          return { status: "ready", active };
         case "idle":
-          return { status: "ready", active: false };
+          return { status: "ready", active };
       }
     }
   }
@@ -300,6 +326,9 @@ function tick() {
       // one whose agent finished while its shell runs on, is doing something even
       // though it is not the agent thinking. This stamp is what auto-sleep reads.
       if (reading.active) lastWorkingAt.set(t.id, now);
+      const reason = reading.waitingFor?.trim();
+      if (reading.status === "waiting" && reason) waitingReason.set(t.id, reason);
+      else waitingReason.delete(t.id);
       const next = reading.status;
       if (t.status !== next) {
         app.setThreadStatus(t.id, next);

@@ -1023,6 +1023,16 @@
           earlyEvents.push(event);
           return;
         }
+        // The backend respawned this thread's PTY under a new id. Taken here
+        // rather than in `handleEvent`, which gates every event on the id it is
+        // about to replace, and which cannot reach this closure's own copy.
+        if (event.type === "key") {
+          if (ptyId !== channelPtyId) return;
+          channelPtyId = event.key;
+          ptyId = event.key;
+          app.setThreadPtyId(thread.id, event.key);
+          return;
+        }
         handleEvent(event, channelPtyId);
       };
 
