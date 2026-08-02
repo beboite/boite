@@ -277,8 +277,14 @@ class GitStore {
           state.logHasMore = false;
         }
       } catch (err) {
-        logger.error("git", "refresh failed", err);
-        state.error = errorText(err);
+        // Only when it changes. This refresh is on a ten-second poll, so a
+        // project whose folder stopped being a repository wrote the same line
+        // six times a minute for as long as the app was open, and the lines
+        // that mattered were somewhere in between. The panel reports the
+        // failure through `state.error` either way.
+        const text = errorText(err);
+        if (state.error !== text) logger.error("git", "refresh failed", err);
+        state.error = text;
         if (options.notifyErrors) throw err;
       } finally {
         state.loaded = true;
