@@ -1,5 +1,5 @@
 import { app } from "$lib/app/store.svelte";
-import { paneStore, MAX_LEAVES, leafNodesOf } from "./store.svelte";
+import { paneStore, MAX_LEAVES, leafNodesOf, threadLeavesOf } from "./store.svelte";
 import type { DropSide, PaneContent } from "./types";
 import { notifications } from "$lib/features/notifications/store.svelte";
 import { t } from "$lib/i18n/index.svelte";
@@ -42,17 +42,25 @@ export function openPane(
   return paneStore.openGroup(projectId, content);
 }
 
-/** The pane a new one should appear beside, or null when nothing is open. */
+/**
+ * The pane a new one should appear beside, or null when nothing is on screen.
+ *
+ * Only ever a pane of the group the page is drawing. The page shows the active
+ * thread's group, and with no active thread the project's panel group — the one
+ * with no terminal in it. Anchoring anywhere else opened the panel into a group
+ * nothing renders: the titlebar button lit up, the pane existed, and there was
+ * nothing to see anywhere on screen.
+ */
 export function anchorPaneId(): string | null {
   const active = app.activeThreadId;
   if (active) {
     const group = paneStore.groupOf(active);
     if (group) return group.focusedPaneId;
   }
-  // No active thread: any group of the selected project will do, and the user
-  // sees the one they left focused.
   const projectId = app.currentProjectId;
-  const group = paneStore.groups.find((g) => g.projectId === projectId);
+  const group = paneStore.groups.find(
+    (g) => g.projectId === projectId && threadLeavesOf(g.root).length === 0,
+  );
   return group?.focusedPaneId ?? null;
 }
 
