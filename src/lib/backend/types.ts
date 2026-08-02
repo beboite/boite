@@ -154,6 +154,14 @@ export interface WorktreeEntry {
   spare: boolean;
 }
 
+/** What became of a worktree the migration was asked about. */
+export interface WorktreeMigration {
+  /** Where it landed, or null when it did not move. */
+  path: string | null;
+  /** Its directory is not there any more, so the thread has to forget it. */
+  gone: boolean;
+}
+
 /** What a worktree still holds that removing it would destroy. */
 export interface WorktreeHold {
   /** Modified, staged or untracked files. */
@@ -190,15 +198,16 @@ export interface WorktreeApi {
   warm(repo: string): Promise<void>;
 
   /**
-   * Moves a worktree an older layout left outside its project, and gives back
-   * where it landed. Null means there was nothing to move: only a source under
-   * that abandoned base is one this touches, so every launch after the first
-   * answers null for the same thread.
+   * Moves a worktree an older layout left outside its project, and says what
+   * became of it. A path is where it landed; `gone` is a directory that is not
+   * there any more, which the caller has to forget rather than keep pointing a
+   * PTY at; neither means there was nothing to move, which is what every launch
+   * after the first answers for the same thread.
    *
    * Like `open`, the destination is derived rather than passed: a caller that
    * chose both ends would be a move primitive pointed anywhere on disk.
    */
-  migrate(repo: string, threadId: string, from: string): Promise<string | null>;
+  migrate(repo: string, threadId: string, from: string): Promise<WorktreeMigration>;
   /**
    * Every worktree of a repository, the main checkout included, each with what
    * removing it would destroy. One call rather than a list plus a `hold` per
