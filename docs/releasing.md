@@ -32,6 +32,11 @@ free only while no release existed. GitHub secrets cannot be read back and there
 is no revocation, so losing the private key ends updates forever and leaking it
 cannot be undone. An offline copy is held outside GitHub.
 
+A `prune` job removes the `.sig` assets once every platform has uploaded. They
+are not the signatures the updater checks: `latest.json` carries each one inline
+and is the only file it fetches, so the uploads were duplicates on the release
+page.
+
 ## Sidecar
 
 `scripts/build-sidecar.mjs` builds `boite-mcp` before every bundle and names it
