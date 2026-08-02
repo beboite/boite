@@ -20,7 +20,9 @@ pub struct AppState {
     pub agent_api: Option<crate::agent_api::AgentApi>,
     pub registry: Arc<Registry>,
     pub auth: Auth,
-    pub roots: ProjectRoots,
+    /// Shared with the agent endpoint, which applies the same rule about where a
+    /// project may be created and has to see every refresh this one makes.
+    pub roots: Arc<ProjectRoots>,
     pub events: broadcast::Sender<AppEvent>,
     pub notifier: Notifier,
     pub push: PushManager,
@@ -192,7 +194,7 @@ mod tests {
             agent_api: None,
             registry: Registry::new_without_ticker(1024, Arc::new(|_| {})),
             auth: Auth::new("test".into()),
-            roots: ProjectRoots::default(),
+            roots: Arc::new(ProjectRoots::default()),
             events,
             notifier: Notifier::from_env(),
             push: PushManager::load(&dir),
@@ -230,7 +232,7 @@ mod tests {
             agent_api: None,
             registry: Registry::new_without_ticker(1024, Arc::new(|_| {})),
             auth: Auth::new("test".into()),
-            roots: ProjectRoots::default(),
+            roots: Arc::new(ProjectRoots::default()),
             events,
             notifier: Notifier::from_env(),
             push: PushManager::load(&dir),

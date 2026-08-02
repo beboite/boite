@@ -31,6 +31,7 @@ use rand::Rng;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use subtle::ConstantTimeEq;
 use tauri::{Emitter, Manager};
 use url::Url;
 
@@ -140,9 +141,11 @@ fn authorize(inner: &Inner, headers: &HeaderMap) -> Result<String, StatusCode> {
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
         .ok_or(StatusCode::UNAUTHORIZED)?;
-    // Length check first so the comparison below cannot be short-circuited by a
-    // truncated guess.
-    if bearer.len() != inner.token.len() || bearer != inner.token {
+    // Constant time: a byte-by-byte `!=` short-circuits, and this endpoint
+    // answers on loopback, where anything running as the same user can call it
+    // in a loop and read the token out of the timing instead of guessing it.
+    let ok: bool = bearer.as_bytes().ct_eq(inner.token.as_bytes()).into();
+    if !ok {
         return Err(StatusCode::UNAUTHORIZED);
     }
     let header = |name: &str| {
