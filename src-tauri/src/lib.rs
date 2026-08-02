@@ -510,6 +510,7 @@ pub fn run() {
             commands::worktree_open,
             commands::worktree_warm,
             commands::worktree_migrate,
+            commands::worktree_adopt,
             commands::worktree_list,
             commands::worktree_claim,
             commands::worktree_reserve,

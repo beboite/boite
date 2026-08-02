@@ -687,6 +687,7 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "worktree.keptForThread": "Worktree conservée pour {thread} : il y reste du travail.",
   "worktree.keptAtPath": "Ancienne worktree conservée dans {path} : il y reste du travail.",
   "worktree.waitGaveUp": "Pas de worktree pour {thread} : il démarre dans le dossier du projet.",
+  "worktree.adoptedBack": "{count} terminal(aux) ont retrouvé la worktree dans laquelle ils tournaient.",
   "shortcuts.removeConfirmTitle": "Supprimer ce raccourci ?",
   "shortcuts.removeConfirmMessage": "Retire {label} de la barre. Les terminaux déjà ouverts par lui ne sont pas touchés.",
   "shortcuts.resetConfirmTitle": "Réinitialiser tous les raccourcis ?",

@@ -259,6 +259,8 @@ export class RemoteBackend implements Backend {
           path: (r.path as string) ?? null,
           gone: Boolean(r.gone),
         })),
+      adopt: (repo, threadId) =>
+        rpc("worktree.adopt", { repo, threadId }).then((r) => (r.path as string) ?? null),
       list: (repo) =>
         rpc("worktree.list", { repo }).then((r) => (r.worktrees ?? []) as WorktreeEntry[]),
       claim: (path, name) => rpc("worktree.claim", { path, name }).then(() => {}),

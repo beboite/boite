@@ -808,6 +808,15 @@ async fn dispatch_worktree(
             let gone = r.is_none();
             Ok(json!({ "path": r, "gone": gone }))
         }
+        "worktree.adopt" => {
+            let repo = str_param(&params, "repo")?;
+            state.roots.ensure_allowed(&repo)?;
+            let thread_id = str_param(&params, "threadId")?;
+            // Derived from the repository and the id, like the migration above:
+            // there is no path here for a caller to point anywhere.
+            let r = blocking(move || git::adopt_worktree_blocking(&repo, &thread_id)).await?;
+            Ok(json!({ "path": r }))
+        }
         "worktree.list" => {
             let repo = str_param(&params, "repo")?;
             state.roots.ensure_allowed(&repo)?;
