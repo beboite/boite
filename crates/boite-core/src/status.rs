@@ -43,6 +43,10 @@ pub fn strip_leading_marker(title: &str) -> String {
 // OSC titles the CLIs emit by default that just restate the brand; ignoring
 // them keeps the user's thread label ("Claude #1") instead of "claude".
 const GENERIC_TITLES: &[&str] = &[
+    // A launcher naming itself before it knows what it launched: the Windows PTY
+    // titles the thread with fastpick's own image path, which would replace the
+    // agent's name with `…\.local\bin\fastpick.exe`.
+    "fastpick",
     "claude",
     "claude code",
     "claude-code",
@@ -238,6 +242,10 @@ mod tests {
     fn shell_paths_normalize_to_their_binary_name() {
         assert!(is_generic_title("C:\\Program Files\\PowerShell\\7\\pwsh.exe"));
         assert!(is_generic_title("/usr/bin/zsh"));
+        // fastpick titles the thread with its own path before the agent it
+        // launched gets to name it.
+        assert!(is_generic_title("C:\\Users\\nuno\\.local\\bin\\fastpick.exe"));
+        assert!(is_generic_title("/home/nuno/.local/bin/fastpick"));
         // cmd.exe prepends an elevation prefix.
         assert!(is_generic_title("Administrator: C:\\Windows\\system32\\cmd.exe"));
     }

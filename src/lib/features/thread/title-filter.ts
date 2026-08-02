@@ -3,6 +3,10 @@
 // generic brand name, which makes the sidebar useless. Skip these so the
 // label survives.
 const GENERIC_TITLES = new Set([
+  // A launcher, and one that names itself before it knows what it launched: the
+  // Windows PTY titles the thread with fastpick's own image path. Keeping it
+  // would replace the agent's name with `…\.local\bin\fastpick.exe`.
+  "fastpick",
   "claude",
   "claude code",
   "claude-code",
