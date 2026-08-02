@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::io::{Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc::{SyncSender, TrySendError};
 
@@ -356,6 +356,13 @@ impl PtyManager {
         sink: Arc<dyn EventSink>,
         spec: PtySpawnArgs,
     ) -> Result<String, String> {
+        // Said here rather than left to the platform. A worktree deleted from
+        // under a thread reached this as a spawn error naming a shell that is
+        // perfectly fine, and the directory it could not enter was nowhere in
+        // the message.
+        if !Path::new(&spec.cwd).is_dir() {
+            return Err(format!("this directory is not there: {}", spec.cwd));
+        }
         let pty_system = native_pty_system();
         let pair = pty_system
             .openpty(PtySize {

@@ -654,13 +654,23 @@ class AppState {
       const project = this.projects.find((p) => p.id === t.projectId);
       if (!project) continue;
       try {
-        const moved = await workspace
+        const answer = await workspace
           .backendFor(t.origin)
           .worktree.migrate(project.gitRoot ?? project.cwd, t.id, t.worktreePath);
-        // Null is the answer for every worktree already in its project, which
-        // after the first launch is all of them.
-        if (!moved) continue;
-        t.worktreePath = moved;
+        // A directory that is not there any more. Kept, the thread spawned its
+        // PTY in it and the launch failed on a path nobody could see, every
+        // start, forever. Forgotten, the thread runs in the project folder,
+        // which is what a thread with no worktree has always done.
+        if (answer.gone) {
+          logger.info("worktree", `forgot ${t.worktreePath} for ${t.id}`, "it is gone");
+          t.worktreePath = null;
+          await saveThread($state.snapshot(t) as Thread);
+          continue;
+        }
+        // No path is the answer for every worktree already in its project,
+        // which after the first launch is all of them.
+        if (!answer.path) continue;
+        t.worktreePath = answer.path;
         await saveThread($state.snapshot(t) as Thread);
       } catch (err) {
         // One that will not move keeps the path it has, and the thread starts

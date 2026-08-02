@@ -1585,6 +1585,13 @@ pub fn add_detached_worktree_blocking(repo: &str, path: &str) -> Result<String, 
 /// "there is work in here" and what the Worktrees tab paints as a dirty row.
 const SPARE_SUFFIX: &str = ".spare";
 
+/// What every directory the pool makes is called, and nothing else is.
+///
+/// A claimed spare is renamed after the thread that took it, so this prefix
+/// means "the pool made this and still answers for it" — which is what lets the
+/// sweep tell a leaked directory from a thread's checkout.
+const SPARE_PREFIX: &str = "spare-";
+
 /// How many unclaimed worktrees the pool keeps for one project.
 ///
 /// A spare is a whole checkout plus the build artifacts, and it is made on the
@@ -1754,7 +1761,8 @@ fn drop_spare(repo: &Path, dir: &Path) {
 /// Called from warming rather than from a timer, because warming is the only
 /// thing that ever makes the pool bigger, and therefore the only moment it can
 /// be over.
-fn collect_spares(base: &Path) {
+fn collect_spares(base: &Path, repo: &Path) {
+    sweep_orphan_spares(base, repo, now_secs());
     let mut spares = read_spares(base, None);
     // Newest first, so what survives the cap is what the next thread is most
     // likely to want.
@@ -1776,6 +1784,81 @@ fn collect_spares(base: &Path) {
             drop_spare(&spare.repo, &spare.dir);
         }
     }
+}
+
+/// Removes pool directories nobody can account for any more.
+///
+/// A spare is claimed by deleting its marker, so between that deletion and the
+/// rename that gives it a thread's name there is a directory with a pool name
+/// and no marker. Interrupt the app in that window — or fail the marker write
+/// that puts a reworked spare back — and the directory stays registered as a
+/// worktree with no owner: the pool cannot see it, the cap does not count it,
+/// and nothing ever removes it.
+///
+/// Age is what makes this safe. The window above is measured in milliseconds,
+/// so anything still nameless a whole `SPARE_MAX_AGE` later was left behind
+/// rather than being handed over, and the removal refuses on real work anyway.
+///
+/// `now` is passed rather than read so a test can say "a day later" without
+/// rewriting timestamps on a directory, which no two platforms spell the same.
+fn sweep_orphan_spares(base: &Path, repo: &Path, now: u64) {
+    let Ok(entries) = fs::read_dir(base) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let dir = entry.path();
+        if !dir.is_dir() {
+            continue;
+        }
+        let Some(name) = dir.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        if !name.starts_with(SPARE_PREFIX) {
+            continue;
+        }
+        // Still in the pool, so the loop below owns it.
+        if spare_marker(&dir).is_some_and(|marker| marker.is_file()) {
+            continue;
+        }
+        let age = fs::metadata(&dir)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+            .map(|d| now.saturating_sub(d.as_secs()))
+            .unwrap_or(0);
+        if age <= SPARE_MAX_AGE.as_secs() {
+            continue;
+        }
+        drop_spare(repo, &dir);
+    }
+}
+
+/// Gives a claimed spare the name of the thread that took it.
+///
+/// Without this a thread's checkout keeps the name the pool gave it, so
+/// `spare-...` on disk means either "standing by" or "handed out" and nothing
+/// tells them apart: the sweep above cannot collect what it cannot recognise,
+/// and the Worktrees tab named a thread's directory after the pool.
+///
+/// Same base, so this is a rename and not a copy, and `git worktree repair` is
+/// what makes git follow it. Every failure keeps the directory where it is: the
+/// name is cosmetic next to handing the thread a checkout that works.
+fn rename_claimed(repo: &Path, from: &Path, label: &str) -> Option<String> {
+    let base = from.parent()?;
+    let to = scoped_dir_for(base, label);
+    if to.exists() {
+        return None;
+    }
+    fs::rename(from, &to).ok()?;
+    let mut repair = git(repo);
+    repair.args(["worktree", "repair", &to.to_string_lossy()]);
+    if run(repair).is_err() {
+        // Back where git still believes it is, rather than left at a path git
+        // was never told about.
+        let _ = fs::rename(&to, from);
+        return None;
+    }
+    Some(to.to_string_lossy().into_owned())
 }
 
 /// Moves an existing checkout onto another commit. One process, and it writes
@@ -1894,7 +1977,7 @@ pub fn warm_worktree_pool_blocking(repo: &str, base: &str) -> Result<(), String>
 
     // Before anything else, because warming is what fills the pool and this is
     // the only thing that empties it.
-    collect_spares(base);
+    collect_spares(base, r);
 
     let mut ready = 0usize;
     for spare in read_spares(base, Some(r)) {
@@ -1939,7 +2022,7 @@ pub fn warm_worktree_pool_blocking(repo: &str, base: &str) -> Result<(), String>
     // otherwise stand by with one spare until something claimed it, which is the
     // launch this exists to be ahead of.
     while ready < READY_SPARES {
-        let dir = scoped_dir_for(base, &format!("spare-{}", uuid::Uuid::new_v4()));
+        let dir = scoped_dir_for(base, &format!("{SPARE_PREFIX}{}", uuid::Uuid::new_v4()));
         add_detached_worktree_blocking(repo, &dir.to_string_lossy())?;
         // Last, so a spare is only ever offered once it is a complete checkout:
         // the marker is what makes it claimable, and a failed creation leaves a
@@ -1949,7 +2032,7 @@ pub fn warm_worktree_pool_blocking(repo: &str, base: &str) -> Result<(), String>
     }
     // The ones just made are the newest, so this drops the oldest over the cap
     // rather than what was just paid for.
-    collect_spares(base);
+    collect_spares(base, r);
     Ok(())
 }
 
@@ -2045,9 +2128,13 @@ pub fn open_worktree_if_eligible_blocking(
     fs::create_dir_all(base).map_err(|e| format!("worktree base: {e}"))?;
 
     if let Some(dir) = take_spare(base, r) {
+        // Named after the thread from here on: a directory still called
+        // `spare-...` is one the pool is answering for, and that is what the
+        // orphan sweep reads.
+        let claimed = rename_claimed(r, Path::new(&dir), label).unwrap_or(dir);
         // Refill, so the next thread in this project is as cheap as this one.
         warm_in_background(r, base);
-        return Ok(Some(dir));
+        return Ok(Some(claimed));
     }
     // Nothing standing by: this thread pays for its own checkout, which is what
     // every thread used to do.
@@ -2929,16 +3016,24 @@ pub fn remove_worktree_blocking(
 /// Links go before the copy for a harder reason: a junction copied by value is
 /// the main checkout's `node_modules` duplicated into the worktree, and a
 /// junction followed by a delete is that same directory emptied.
-pub fn migrate_worktree_blocking(repo: &str, old: &str, new: &str) -> Result<String, String> {
+pub fn migrate_worktree_blocking(
+    repo: &str,
+    old: &str,
+    new: &str,
+) -> Result<Option<String>, String> {
     let (r, from, to) = (Path::new(repo), Path::new(old), Path::new(new));
     if from == to {
-        return Ok(new.to_string());
+        return Ok(Some(new.to_string()));
     }
     if !r.is_dir() {
         return Err("Not a directory".into());
     }
+    // Gone rather than failed. A directory deleted by hand has nothing left to
+    // move, and reporting that as an error left the thread pointing at it: every
+    // start retried the same move, and the launch in between spawned its PTY in
+    // a directory that is not there.
     if !from.is_dir() {
-        return Err(format!("'{old}' is not there."));
+        return Ok(None);
     }
     if to.exists() {
         return Err(format!("'{new}' already exists."));
@@ -2979,7 +3074,7 @@ pub fn migrate_worktree_blocking(repo: &str, old: &str, new: &str) -> Result<Str
 
     ensure_boite_excluded(r);
     provision_shared_artifacts(r, to);
-    Ok(new.to_string())
+    Ok(Some(new.to_string()))
 }
 
 /// Copies a tree by value, symlinks excluded.
@@ -3393,13 +3488,24 @@ mod worktree_tests {
             assert!(row.spare, "and it says what it is");
         }
 
-        // The next thread walks into one of them, and it stops being a spare.
+        // The next thread walks into one of them, and it stops being a spare:
+        // the marker goes, and the directory takes the thread's name so nothing
+        // downstream reads it as one of the pool's own.
         let taken = open_worktree_if_eligible_blocking(f.path(), &base_s, "t1")
             .unwrap()
             .expect("a spare is standing by");
+        assert_eq!(
+            Path::new(&taken),
+            scoped_dir_for(&base, "t1"),
+            "a claimed spare is renamed after the thread that took it"
+        );
         assert!(
-            dirs.iter().any(|d| same_dir(d, Path::new(&taken))),
+            dirs.iter().any(|d| !d.exists()),
             "a thread is handed a checkout that was already finished"
+        );
+        assert!(
+            Path::new(&taken).join("a.txt").is_file(),
+            "and it is the whole checkout, not an empty directory"
         );
         assert!(
             !is_spare_worktree(&taken),
@@ -3421,6 +3527,7 @@ mod worktree_tests {
             "a claim leaves something standing by for the launch after it"
         );
 
+        let _ = remove_worktree_blocking(f.path(), &taken, true);
         for dir in &dirs {
             let _ = remove_worktree_blocking(f.path(), dir.to_str().unwrap(), true);
         }
@@ -3444,14 +3551,16 @@ mod worktree_tests {
         git_in(&f.repo, &["add", "b.txt"]);
         git_in(&f.repo, &["commit", "--quiet", "-m", "second"]);
 
-        let taken = open_worktree_if_eligible_blocking(f.path(), &base_s, "t1").unwrap();
-        assert_eq!(taken.as_deref(), dir.to_str(), "the spare is still the one used");
+        let taken = open_worktree_if_eligible_blocking(f.path(), &base_s, "t1")
+            .unwrap()
+            .expect("the spare is still the one used");
+        assert!(!dir.exists(), "the spare was renamed rather than left behind");
         assert!(
-            dir.join("b.txt").is_file(),
+            Path::new(&taken).join("b.txt").is_file(),
             "it has to carry the commit made after it was created"
         );
 
-        let _ = remove_worktree_blocking(f.path(), dir.to_str().unwrap(), true);
+        let _ = remove_worktree_blocking(f.path(), &taken, true);
         let _ = fs::remove_dir_all(&base);
     }
 
@@ -3627,6 +3736,47 @@ mod worktree_tests {
         for dir in made {
             let _ = remove_worktree_blocking(f.path(), dir.to_str().unwrap(), true);
         }
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    /// A directory the pool made, whose marker is gone and whose thread never
+    /// came: interrupt the app between the claim and the rename, or fail the
+    /// marker write that puts a reworked spare back, and it stays registered as
+    /// a worktree nobody owns. Before this it was invisible to the pool and to
+    /// the cap, so it never went away.
+    #[test]
+    fn a_pool_directory_nobody_claimed_is_collected_once_it_is_old() {
+        let f = Fixture::new();
+        let base = scratch("pool-orphan");
+        fs::create_dir_all(&base).unwrap();
+
+        let orphan = base.join("spare-left-behind");
+        add_detached_worktree_blocking(f.path(), &orphan.to_string_lossy()).unwrap();
+
+        let standing_by = base.join("spare-in-the-pool");
+        add_detached_worktree_blocking(f.path(), &standing_by.to_string_lossy()).unwrap();
+        write_spare_marker(&standing_by, &f.repo, &head_oid(&f.repo).unwrap()).unwrap();
+
+        let thread_dir = scoped_dir_for(&base, "t1");
+        add_detached_worktree_blocking(f.path(), &thread_dir.to_string_lossy()).unwrap();
+
+        // The claim window, which is milliseconds wide: nothing is swept yet.
+        sweep_orphan_spares(&base, &f.repo, now_secs());
+        assert!(orphan.is_dir(), "a claim in flight must survive the sweep");
+
+        sweep_orphan_spares(&base, &f.repo, now_secs() + SPARE_MAX_AGE.as_secs() + 1);
+        assert!(!orphan.exists(), "a pool directory nobody owns is collected");
+        assert!(
+            standing_by.is_dir(),
+            "one that is still in the pool belongs to the cap, not to this"
+        );
+        assert!(
+            thread_dir.is_dir(),
+            "and a thread's own checkout is never a pool name"
+        );
+
+        let _ = remove_worktree_blocking(f.path(), standing_by.to_str().unwrap(), true);
+        let _ = remove_worktree_blocking(f.path(), thread_dir.to_str().unwrap(), true);
         let _ = fs::remove_dir_all(&base);
     }
 
@@ -4289,7 +4439,7 @@ mod worktree_tests {
         let landed =
             migrate_worktree_blocking(f.path(), old.to_str().unwrap(), new.to_str().unwrap())
                 .unwrap();
-        assert_eq!(landed, new.to_str().unwrap());
+        assert_eq!(landed.as_deref(), Some(new.to_str().unwrap()));
 
         assert!(!old.exists(), "the old worktree is still on disk");
         assert!(new.join("kept.txt").is_file(), "the commit's file did not survive");
@@ -4322,14 +4472,14 @@ mod worktree_tests {
     }
 
     #[test]
-    fn migration_refuses_to_overwrite_and_refuses_a_missing_source() {
+    fn migration_refuses_to_overwrite_and_reports_a_missing_source_as_gone() {
         let f = Fixture::new();
         let here = scratch("occupied");
         fs::create_dir_all(&here).unwrap();
-        assert!(
-            migrate_worktree_blocking(f.path(), "/nowhere/at/all", here.to_str().unwrap())
-                .is_err(),
-            "a missing source was accepted"
+        assert_eq!(
+            migrate_worktree_blocking(f.path(), "/nowhere/at/all", here.to_str().unwrap()),
+            Ok(None),
+            "a source that is not there has to read as gone, not as a failure"
         );
 
         let legacy = scratch("legacy-2");

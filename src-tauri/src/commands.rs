@@ -866,22 +866,53 @@ pub async fn worktree_migrate(
     repo: String,
     thread_id: String,
     from: String,
-) -> Result<Option<String>, String> {
+) -> Result<WorktreeMigration, String> {
     scope.ensure_allowed(&repo)?;
     let legacy = crate::app_data::worktree_base(&app)?;
     let source = std::path::Path::new(&from);
     if !source.starts_with(&legacy) {
-        return Ok(None);
+        return Ok(WorktreeMigration::left_alone());
     }
     let base = git::worktree_base_for(std::path::Path::new(&repo));
     let to = git::scoped_dir_for(&base, &thread_id)
         .to_string_lossy()
         .to_string();
-    tauri::async_runtime::spawn_blocking(move || {
-        git::migrate_worktree_blocking(&repo, &from, &to).map(Some)
+    let landed = tauri::async_runtime::spawn_blocking(move || {
+        git::migrate_worktree_blocking(&repo, &from, &to)
     })
     .await
-    .map_err(|e| format!("worktree_migrate task failed: {e}"))?
+    .map_err(|e| format!("worktree_migrate task failed: {e}"))??;
+    Ok(match landed {
+        Some(path) => WorktreeMigration {
+            path: Some(path),
+            gone: false,
+        },
+        None => WorktreeMigration {
+            path: None,
+            gone: true,
+        },
+    })
+}
+
+/// What became of a worktree the migration was asked about.
+///
+/// Three answers, and the caller has to tell them apart: a path means it moved,
+/// `gone` means the directory is not there any more and the thread has to stop
+/// pointing at it, and neither means it was left where it is.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorktreeMigration {
+    pub path: Option<String>,
+    pub gone: bool,
+}
+
+impl WorktreeMigration {
+    fn left_alone() -> Self {
+        Self {
+            path: None,
+            gone: false,
+        }
+    }
 }
 
 /// Every worktree of a repository, read from the repository itself.

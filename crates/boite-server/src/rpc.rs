@@ -776,14 +776,17 @@ async fn dispatch_worktree(
             // The destination is computed from the repository, never taken from
             // the caller, and the source has to be one this layout left behind.
             if !std::path::Path::new(&from).starts_with(state.worktree_base()) {
-                return Ok(json!({ "path": Value::Null }));
+                return Ok(json!({ "path": Value::Null, "gone": false }));
             }
             let base = git::worktree_base_for(std::path::Path::new(&repo));
             let to = git::scoped_dir_for(&base, &thread_id)
                 .to_string_lossy()
                 .to_string();
             let r = blocking(move || git::migrate_worktree_blocking(&repo, &from, &to)).await??;
-            Ok(json!({ "path": r }))
+            // No path and nothing left to move: the directory is gone, and the
+            // thread has to stop pointing at it rather than retry every start.
+            let gone = r.is_none();
+            Ok(json!({ "path": r, "gone": gone }))
         }
         "worktree.list" => {
             let repo = str_param(&params, "repo")?;

@@ -36,7 +36,11 @@ export default defineConfig(async () => ({
         }
       : undefined,
     watch: {
-      ignored: ["**/src-tauri/**"],
+      // `.boite/worktrees` holds whole checkouts of this repository, made and
+      // rewritten by the worktree pool while the dev server is up. Watched,
+      // every spare warm is a source tree appearing under the root and the page
+      // reloads on work nobody did.
+      ignored: ["**/src-tauri/**", "**/.boite/**"],
     },
   },
 }));
