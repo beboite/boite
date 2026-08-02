@@ -112,6 +112,84 @@ impl PushManager {
     }
 }
 
+/// How many endpoints the workspace will ever hold.
+///
+/// Subscriptions are global and keyed by endpoint, so the honest case is one per
+/// browser the user installed the PWA on. The cap is what stops a client that
+/// can register one from registering a million.
+pub const MAX_PUSH_SUBSCRIPTIONS: usize = 64;
+
+/// Whether this is a push endpoint the server may be told to POST to.
+///
+/// The server fetches every stored endpoint on its own, without anybody asking,
+/// so an unchecked one turns a client into an outbound request generator aimed
+/// at whatever the server can reach: a metadata service, an admin port on the
+/// host, a neighbour on the LAN. The token is not a defence here, since the main
+/// server is bound to a routable interface on purpose in a remote workspace.
+///
+/// The shape of a real endpoint is narrow and every browser agrees on it: HTTPS,
+/// a public host, the default port. Nothing legitimate is turned away by saying
+/// exactly that.
+pub fn acceptable_endpoint(endpoint: &str) -> Result<(), String> {
+    let uri: http::Uri = endpoint
+        .parse()
+        .map_err(|e| format!("bad endpoint: {e}"))?;
+    if uri.scheme_str() != Some("https") {
+        return Err("a push endpoint has to be https".into());
+    }
+    if !matches!(uri.port_u16(), None | Some(443)) {
+        return Err("a push endpoint has to be on the default https port".into());
+    }
+    let host = uri.host().ok_or("a push endpoint has to name a host")?;
+    let bare = host.trim_start_matches('[').trim_end_matches(']');
+    if bare.eq_ignore_ascii_case("localhost") || bare.to_ascii_lowercase().ends_with(".localhost") {
+        return Err("a push endpoint cannot point back at this machine".into());
+    }
+    // A name is left to DNS: rebinding it at send time is a different attack and
+    // one this check could not win anyway. A literal is the reachable half, and
+    // it is what an internal target is spelled with.
+    if let Ok(ip) = bare.parse::<std::net::IpAddr>() {
+        if !is_public_ip(ip) {
+            return Err("a push endpoint cannot point inside the network".into());
+        }
+    }
+    Ok(())
+}
+
+/// Whether an address literal is somewhere on the public internet rather than
+/// somewhere only this host or this network can reach.
+fn is_public_ip(ip: std::net::IpAddr) -> bool {
+    use std::net::IpAddr;
+    match ip {
+        IpAddr::V4(v4) => {
+            let [a, b, ..] = v4.octets();
+            !(v4.is_private()
+                || v4.is_loopback()
+                || v4.is_link_local()
+                || v4.is_broadcast()
+                || v4.is_documentation()
+                || v4.is_unspecified()
+                || v4.is_multicast()
+                // 100.64.0.0/10, which is how a container reaches its host on
+                // more than one hosting provider.
+                || (a == 100 && (64..128).contains(&b)))
+        }
+        IpAddr::V6(v6) => {
+            if let Some(mapped) = v6.to_ipv4_mapped() {
+                return is_public_ip(IpAddr::V4(mapped));
+            }
+            let first = v6.segments()[0];
+            !(v6.is_loopback()
+                || v6.is_unspecified()
+                || v6.is_multicast()
+                // fc00::/7, unique local.
+                || (first & 0xfe00) == 0xfc00
+                // fe80::/10, link local.
+                || (first & 0xffc0) == 0xfe80)
+        }
+    }
+}
+
 fn b64(s: &str) -> Result<Vec<u8>, String> {
     URL_SAFE_NO_PAD
         .decode(s.trim())
@@ -179,3 +257,40 @@ fn set_key_permissions(path: &Path) {
 
 #[cfg(not(unix))]
 fn set_key_permissions(_path: &Path) {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The endpoints a browser actually hands over, and the ones that turn the
+    /// server into somebody's outbound request.
+    #[test]
+    fn only_a_public_https_endpoint_is_accepted() {
+        let ok = |url: &str| acceptable_endpoint(url).is_ok();
+
+        assert!(ok("https://fcm.googleapis.com/fcm/send/abc123"));
+        assert!(ok("https://updates.push.services.mozilla.com/wpush/v2/gAAA"));
+        assert!(ok("https://push.example.com:443/x"));
+
+        // The cloud metadata service, the reason this check exists.
+        assert!(!ok("http://169.254.169.254/latest/meta-data/"));
+        assert!(!ok("https://169.254.169.254/latest/meta-data/"));
+        // Back at the host itself, spelled every way it is spelled.
+        assert!(!ok("https://127.0.0.1/x"));
+        assert!(!ok("https://localhost/x"));
+        assert!(!ok("https://anything.localhost/x"));
+        assert!(!ok("https://[::1]/x"));
+        assert!(!ok("https://[::ffff:127.0.0.1]/x"));
+        // A neighbour on the LAN or in the container network.
+        assert!(!ok("https://10.0.0.5/admin"));
+        assert!(!ok("https://192.168.1.1/admin"));
+        assert!(!ok("https://172.16.4.4/admin"));
+        assert!(!ok("https://100.100.0.1/admin"));
+        assert!(!ok("https://[fd00::1]/admin"));
+        assert!(!ok("https://[fe80::1]/admin"));
+        // Plain http, and an admin port behind a public name.
+        assert!(!ok("http://push.example.com/x"));
+        assert!(!ok("https://push.example.com:9200/_cluster/health"));
+        assert!(!ok("not a url at all"));
+    }
+}

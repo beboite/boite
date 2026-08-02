@@ -39,6 +39,11 @@ rand = "0.8"
 # passes every `starts_with` check ever written.
 url = "2"
 
+# Constant-time comparison for the agent endpoint's bearer token. A byte-by-byte
+# `!=` short-circuits, and this endpoint answers on loopback where anything
+# running as the same user can call it in a loop.
+subtle = "2"
+
 # Resolves the app data directory before `tauri::Builder` exists, which is where
 # the identifier migration has to run. Same crate and same rules Tauri uses for
 # `app_data_dir()`, so the two agree on the path.
