@@ -12,7 +12,8 @@ import { resolveIconKey } from "$lib/shared/icons/detect";
 import { t } from "$lib/i18n/index.svelte";
 import type { MessageKey } from "$lib/i18n/index.svelte";
 import { platform } from "$lib/storage/platform.svelte";
-import { openPane } from "$lib/features/panes/open";
+import { anchorPaneId, openPane } from "$lib/features/panes/open";
+import { paneStore } from "$lib/features/panes/store.svelte";
 import { classifyBrowserUrl } from "$lib/features/browser/url";
 import { notifications } from "$lib/features/notifications/store.svelte";
 import type { PaneContent } from "$lib/features/panes/types";
@@ -204,7 +205,7 @@ export function buildPaletteCommands(): PaletteCommand[] {
 
   // Panes. Until now the only way to make one was to drag a thread row onto a
   // live terminal, which is a gesture nobody finds by accident and the reason
-  // the split went unused. These are the same call the pane header's button and
+  // the split went unused. These are the same call the titlebar's buttons and
   // the agent's MCP verb make.
   //
   // Git, files and todo also had an Actions entry each, toggling the right
@@ -228,6 +229,20 @@ export function buildPaletteCommands(): PaletteCommand[] {
       },
     });
   }
+  // Panes carry no chrome of their own any more, so this is where a pane that
+  // is not one of the three panels — a dashboard, an editor, a page an agent
+  // opened — is closed from.
+  commands.push({
+    id: "pane:close",
+    section: "panes",
+    labelKey: "panes.closePane",
+    run: () => {
+      // The focused pane of the group on screen, which is what `anchorPaneId`
+      // answers: a pane opens beside it, and this closes it.
+      const paneId = anchorPaneId();
+      if (paneId) paneStore.closePane(paneId);
+    },
+  });
   commands.push({
     id: "pane:browser",
     section: "panes",

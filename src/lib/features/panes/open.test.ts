@@ -44,8 +44,10 @@ vi.mock("$lib/features/notifications/store.svelte", () => ({
 import {
   anchorPaneId,
   anchorProjectId,
+  followPanel,
   openPane,
   panePresence,
+  panelRatio,
   splitFocused,
   togglePanelPane,
 } from "./open";
@@ -59,6 +61,8 @@ function threads(...rows: [string, string][]) {
 beforeEach(() => {
   paneStore.groups = [];
   paneStore.rects = {};
+  paneStore.stickyPanel = null;
+  paneStore.viewport = null;
   app.threads = [];
   app.activeThreadId = null;
   app.selectedProjectId = null;
@@ -224,6 +228,74 @@ describe("panePresence and togglePanelPane", () => {
 
     app.activeThreadId = "t1";
     expect(panePresence("todo")).toBe(null);
+  });
+});
+
+describe("panelRatio", () => {
+  it("is a column of about 320px, whatever the window is wide", () => {
+    paneStore.setViewport(2560, 1400);
+    expect(Math.round(panelRatio() * 2560)).toBe(320);
+  });
+
+  it("stays a usable share of a narrow window", () => {
+    paneStore.setViewport(600, 800);
+    expect(panelRatio()).toBeLessThanOrEqual(0.6);
+    expect(panelRatio()).toBeGreaterThanOrEqual(0.12);
+  });
+});
+
+/**
+ * A pane belongs to a group and a group belongs to a project, so walking to
+ * another project left the panel behind in the one before it and the screen
+ * came back without it. The rail this replaced was outside the layout and
+ * simply described whichever project you were on.
+ */
+describe("followPanel", () => {
+  it("puts the open panel in the project the user moved to", () => {
+    threads(["t1", "p"], ["t2", "q"]);
+    app.activeThreadId = "t1";
+    togglePanelPane("git");
+    expect(panePresence("git")).toBeTruthy();
+
+    app.activeThreadId = "t2";
+    expect(panePresence("git")).toBe(null);
+    followPanel();
+    expect(panePresence("git")).toBeTruthy();
+    expect(paneStore.groupOf("t2")).toBe(paneStore.groupOf(panePresence("git")!));
+  });
+
+  it("leaves it closed once the user has closed it", () => {
+    threads(["t1", "p"], ["t2", "q"]);
+    app.activeThreadId = "t1";
+    togglePanelPane("todo");
+    togglePanelPane("todo");
+
+    app.activeThreadId = "t2";
+    followPanel();
+    expect(panePresence("todo")).toBe(null);
+  });
+
+  it("takes a panel it did not open itself as the one to keep", () => {
+    // A layout restored at startup, or a panel an agent opened: neither went
+    // through the toggle, and both are a panel the user has on screen.
+    threads(["t1", "p"], ["t2", "q"]);
+    app.activeThreadId = "t1";
+    openPane({ kind: "explorer" });
+    // The page runs this on every move, so the panel on screen is seen before
+    // the one that leaves it is.
+    followPanel();
+    expect(paneStore.stickyPanel).toBe("explorer");
+
+    app.activeThreadId = "t2";
+    followPanel();
+    expect(panePresence("explorer")).toBeTruthy();
+  });
+
+  it("opens nothing when no panel was open to begin with", () => {
+    threads(["t1", "p"]);
+    app.activeThreadId = "t1";
+    followPanel();
+    expect(countLeaves(paneStore.groupOf("t1")!.root)).toBe(1);
   });
 });
 
