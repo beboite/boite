@@ -18,7 +18,15 @@ export async function ptyOpen(
   onEvent: (event: PtyEvent) => void,
   origin?: WorkspaceOrigin,
 ): Promise<string> {
-  const key = await backendFor(origin).pty.open(args, onEvent);
+  // A respawned PTY comes back under a new key, and every route below is keyed
+  // by it. Registered here rather than by the caller: this map is the only thing
+  // that knows which transport issued a key, and a key it has never seen falls
+  // back to the default backend, which in dynamic mode is the wrong one.
+  const track = (event: PtyEvent) => {
+    if (event.type === "key") keyOrigin.set(event.key, origin);
+    onEvent(event);
+  };
+  const key = await backendFor(origin).pty.open(args, track);
   keyOrigin.set(key, origin);
   return key;
 }

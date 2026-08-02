@@ -23,6 +23,7 @@
     justFinished,
   } from "$lib/features/thread/finished.svelte";
   import { mcpPulse } from "$lib/features/thread/agentActivity.svelte";
+  import { waitingReasonFor } from "$lib/features/thread/statusEngine";
   import { threadIconColor } from "$lib/features/fastpick/threadAccent";
   import { confirmDialog } from "$lib/shared/components/confirm.svelte";
   import { resizeHandle } from "$lib/shared/actions/resizeHandle";
@@ -54,10 +55,6 @@
   }
 
   let showArchived = $state(false);
-
-  // Anything a cursor reveals has to be permanently on screen where there is no
-  // cursor at all.
-  const mobile = $derived(settings.state.mobileLayout);
 
   /**
    * Arrow keys over the projects and their threads.
@@ -535,6 +532,23 @@
     if (paneStore.hoveredThreadId === id) paneStore.hoveredThreadId = null;
   }
 
+  /**
+   * What the glyph says on hover: why the thread is blocked when it is, and the
+   * keep-awake toggle's own state the rest of the time.
+   *
+   * "Waiting" alone does not separate a permission prompt from a plan waiting to
+   * be approved, and claude says which. Read through the status, which is what
+   * makes this recompute: the reason is a plain map, and it is written and
+   * cleared by the same pass that moves the status.
+   */
+  function glyphTitle(thread: Thread): string {
+    if (displayThreadStatus(thread) === "waiting") {
+      const reason = waitingReasonFor(thread.id);
+      if (reason) return reason;
+    }
+    return thread.keepAwake ? t("sidebar.keepAwakeOn") : t("sidebar.keepAwakeOff");
+  }
+
   function displayThreadStatus(thread: Thread): ThreadStatus {
     if (app.unboundByDedup.includes(thread.id)) return "error";
     if (
@@ -807,7 +821,7 @@
     {#if showArchived}
       <button
         type="button"
-        class="flex items-center gap-1.5 rounded text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground transition hover:text-foreground"
+        class="section-label flex items-center gap-1.5 rounded transition hover:text-foreground"
         onclick={() => (showArchived = false)}
         aria-label={t("sidebar.backToProjects")}
         title={t("sidebar.backToProjects")}
@@ -817,7 +831,7 @@
       </button>
     {:else}
       <span
-        class="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground"
+        class="section-label"
       >
         {t("sidebar.projects")}
       </span>
@@ -1009,13 +1023,16 @@
               <ArchiveRestore class="size-3.5" />
             </button>
           {:else}
-            <!-- Was cursor-only: transparent text until group-hover, which on a
-                 phone or from the keyboard is never. -->
+            <!-- Was cursor-only: transparent text until group-hover, which from
+                 the keyboard or under a finger is never. `touch-reveal` is what
+                 answers the second half: this component is never mounted in the
+                 mobile layout, so asking the mobile flag here answered a
+                 question about a screen it can never be on. A pointer that
+                 cannot hover is the real condition, and a tablet or a touch
+                 laptop in the desktop layout is exactly where it is true. -->
             <button
               type="button"
-              class="rounded p-1 transition hover:bg-accent hover:text-foreground focus-visible:text-foreground group-focus-within/project:text-muted-foreground {mobile
-                ? 'text-muted-foreground'
-                : 'text-muted-foreground/0 group-hover/project:text-muted-foreground'}"
+              class="touch-reveal rounded p-1 text-muted-foreground/0 transition hover:bg-accent hover:text-foreground focus-visible:text-foreground group-hover/project:text-muted-foreground group-focus-within/project:text-muted-foreground"
               onclick={(e) => openProjectContextMenu(project, e)}
               data-drag-block
               aria-label={t("sidebar.projectOptions")}
@@ -1109,9 +1126,7 @@
                     asleep={thread.autoSlept ?? false}
                     keepAwake={(thread.keepAwake ?? false) && !!thread.ptyId}
                     onToggleKeepAwake={() => app.toggleThreadKeepAwake(thread.id)}
-                    title={thread.keepAwake
-                      ? t("sidebar.keepAwakeOn")
-                      : t("sidebar.keepAwakeOff")}
+                    title={glyphTitle(thread)}
                     label={t("sidebar.toggleKeepAwake")}
                   />
                   {#if renaming && renaming.kind === "thread" && renaming.id === thread.id}
@@ -1156,9 +1171,7 @@
                   <button
                     type="button"
                     data-no-drag
-                    class="relative flex size-4 shrink-0 items-center justify-center rounded-xs text-muted-foreground/70 transition hover:bg-danger/20 hover:text-danger focus-visible:opacity-100 group-focus-within/thread:opacity-100 {mobile
-                      ? 'opacity-100'
-                      : 'opacity-0 group-hover/thread:opacity-100'}"
+                    class="touch-reveal relative flex size-4 shrink-0 items-center justify-center rounded-xs text-muted-foreground/70 opacity-0 transition hover:bg-danger/20 hover:text-danger focus-visible:opacity-100 group-hover/thread:opacity-100 group-focus-within/thread:opacity-100"
                     onclick={(e) => {
                       e.stopPropagation();
                       requestRemoveThread(thread.id);
@@ -1227,6 +1240,17 @@
 {/if}
 
 <style>
+  /* A row control that a cursor reveals has to be permanently on screen where
+     there is no cursor. The sidebar is a desktop-layout component, so the
+     condition is the pointer rather than the layout: a touch laptop or a tablet
+     runs this exact markup and gets no hover at all. */
+  @media (hover: none) {
+    .touch-reveal {
+      opacity: 1;
+      color: var(--color-muted-foreground);
+    }
+  }
+
   :global(body.dragging-card) {
     user-select: none !important;
     cursor: grabbing !important;

@@ -155,7 +155,7 @@
 <section class="rounded-lg border border-border bg-[var(--color-surface)]">
   <header class="flex items-center gap-2 border-b border-border px-3 py-2">
     <FolderGit2 class="size-4 shrink-0 text-muted-foreground" />
-    <h2 class="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+    <h2 class="section-label">
       {t("worktree.title")}
     </h2>
     <span class="flex-1"></span>

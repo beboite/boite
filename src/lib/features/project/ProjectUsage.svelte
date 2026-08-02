@@ -179,7 +179,7 @@
 <section class="rounded-lg border border-border bg-[var(--color-surface)] p-3">
   <header class="mb-2 flex items-center gap-1.5">
     <Coins class="size-3.5 text-muted-foreground" />
-    <h2 class="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+    <h2 class="section-label">
       {t("project.tokens")}
     </h2>
     <span class="text-xs text-muted-foreground/70">

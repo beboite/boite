@@ -32,6 +32,10 @@
     type PanelKind,
   } from "$lib/features/panes/open";
   import type { MessageKey } from "$lib/i18n/messages";
+  import {
+    mcpPulse,
+    type McpSurface,
+  } from "$lib/features/thread/agentActivity.svelte";
 
   // Window controls only exist in the desktop shell. In a browser/PWA there is
   // no Tauri window object (getCurrentWindow would throw), and the OS/browser
@@ -147,10 +151,14 @@
     kind: PanelKind;
     key: MessageKey;
     icon: typeof GitBranch;
+    /** Which agent surface flashes this button, for the panels an agent can
+        change from the outside. The explorer has none: nothing in the MCP writes
+        files. */
+    surface?: McpSurface;
   }[] = [
-    { kind: "git", key: "panes.kindGit", icon: GitBranch },
+    { kind: "git", key: "panes.kindGit", icon: GitBranch, surface: "worktree" },
     { kind: "explorer", key: "panes.kindExplorer", icon: FolderTree },
-    { kind: "todo", key: "panes.kindTodo", icon: ListTodo },
+    { kind: "todo", key: "panes.kindTodo", icon: ListTodo, surface: "todo" },
   ];
 
   let panelMenu = $state<{ x: number; y: number; items: ContextMenuItem[] } | null>(
@@ -280,11 +288,13 @@
     {#each PANEL_BUTTONS as panel (panel.kind)}
       {@const open = panePresence(panel.kind) !== null}
       {@const Icon = panel.icon}
+      {@const pulsing = panel.surface !== undefined && mcpPulse.surface(panel.surface)}
       <button
         type="button"
         class="flex h-7 items-center justify-center rounded-md px-2 transition {open
           ? 'bg-accent text-foreground'
           : 'text-muted-foreground hover:bg-accent hover:text-foreground'}"
+        class:mcp-touch={pulsing}
         onclick={() => togglePanelPane(panel.kind)}
         oncontextmenu={openPanelMenu}
         title={t(panel.key)}
@@ -341,3 +351,13 @@
     onClose={() => (panelMenu = null)}
   />
 {/if}
+
+<style>
+  /* An agent just changed this panel's contents through the MCP. The pane
+     headers used to carry this flash; they are gone, so the button that opens
+     the panel wears it instead, which is the only thing on screen that stands
+     for a panel whether or not it is open. */
+  .mcp-touch {
+    animation: boite-mcp-pulse 1.6s var(--ease-out-quint) forwards;
+  }
+</style>

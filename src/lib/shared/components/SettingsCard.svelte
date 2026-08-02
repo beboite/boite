@@ -16,7 +16,7 @@
   <header class="mb-2.5 flex items-start justify-between gap-3">
     <div class="min-w-0">
       <h3
-        class="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground"
+        class="section-label"
       >
         {title}
       </h3>

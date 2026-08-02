@@ -112,6 +112,10 @@ export class RemoteBackend implements Backend {
           });
         // Declarations, not consts: the two call each other, and hoisting is
         // what keeps that from being an ordering puzzle.
+        // The key the caller is holding, so a respawn can retire it rather than
+        // leaving one dead entry per server restart in a map that is only ever
+        // added to.
+        let issued: string | null = null;
         async function attach(): Promise<string> {
           const res = await socket.attach(
             threadId,
@@ -122,6 +126,15 @@ export class RemoteBackend implements Backend {
             onLost,
           );
           const key = res?.ptyId ? String(res.ptyId) : threadId;
+          if (issued !== null && issued !== key) {
+            keyToThread.delete(issued);
+            // The old key named a PTY that is gone. Writes still routed, since
+            // the stale entry pointed at the right thread, but `session.find`
+            // asks the server to resolve a pid from this id and the server has
+            // never heard of it.
+            onEvent({ type: "key", key });
+          }
+          issued = key;
           keyToThread.set(key, threadId);
           return key;
         }
