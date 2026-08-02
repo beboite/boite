@@ -1639,6 +1639,42 @@ pub fn is_spare_worktree(dir: &str) -> bool {
     spare_marker(Path::new(dir)).is_some_and(|marker| marker.is_file())
 }
 
+/// What a claimed directory that kept its pool name is marked with.
+const CLAIM_SUFFIX: &str = ".claimed";
+
+/// Where a claim marker goes, on the same terms as `spare_marker`.
+fn claim_marker(dir: &Path) -> Option<PathBuf> {
+    let mut name = dir.file_name()?.to_os_string();
+    name.push(CLAIM_SUFFIX);
+    Some(dir.with_file_name(name))
+}
+
+/// Says a thread owns this directory even though it is still called `spare-`.
+///
+/// Renaming a claimed spare is allowed to fail, and the name is cosmetic next to
+/// handing the thread a checkout that works. What is not cosmetic is that the
+/// orphan sweep reads the name: a directory the rename left behind has a pool
+/// name and no pool marker, which is exactly the shape the sweep collects, so
+/// twelve hours later it removed a live thread's checkout out from under it.
+/// This is the flag that tells the two apart.
+fn mark_claimed(dir: &Path) {
+    if let Some(marker) = claim_marker(dir) {
+        let _ = fs::write(marker, "claimed\n");
+    }
+}
+
+/// Whether a thread was handed this directory and it never got renamed.
+fn is_claimed(dir: &Path) -> bool {
+    claim_marker(dir).is_some_and(|marker| marker.is_file())
+}
+
+/// Takes the flag off, for a directory that is being removed or renamed.
+fn drop_claim_marker(dir: &Path) {
+    if let Some(marker) = claim_marker(dir) {
+        let _ = fs::remove_file(marker);
+    }
+}
+
 /// Takes a spare out of the pool, which is what claiming one for a thread and
 /// reworking one both have to do before they touch the directory.
 ///
@@ -1818,6 +1854,12 @@ fn sweep_orphan_spares(base: &Path, repo: &Path, now: u64) {
         }
         // Still in the pool, so the loop below owns it.
         if spare_marker(&dir).is_some_and(|marker| marker.is_file()) {
+            continue;
+        }
+        // Handed to a thread, and only the rename that would have taken the pool
+        // name off it failed. Age says nothing about this one: a thread can sit
+        // in a checkout for days.
+        if is_claimed(&dir) {
             continue;
         }
         let age = fs::metadata(&dir)
@@ -2131,7 +2173,16 @@ pub fn open_worktree_if_eligible_blocking(
         // Named after the thread from here on: a directory still called
         // `spare-...` is one the pool is answering for, and that is what the
         // orphan sweep reads.
-        let claimed = rename_claimed(r, Path::new(&dir), label).unwrap_or(dir);
+        let claimed = match rename_claimed(r, Path::new(&dir), label) {
+            Some(renamed) => renamed,
+            None => {
+                // The directory keeps a pool name it no longer answers to, and
+                // its pool marker is already gone. Without this the orphan sweep
+                // reads it as leaked and removes it while the thread is in it.
+                mark_claimed(Path::new(&dir));
+                dir
+            }
+        };
         // Refill, so the next thread in this project is as cheap as this one.
         warm_in_background(r, base);
         return Ok(Some(claimed));
@@ -2363,6 +2414,31 @@ pub fn write_artifact_policy(repo: &Path, policy: &ArtifactPolicy) -> Result<(),
                  repository, no separator, no '..' and no drive",
                 entry.dir
             ));
+        }
+        // `Link` is one junction for the whole directory, so two worktrees
+        // resolve to one artifact slot and a build in either overwrites the
+        // other's output. `exclude` and `cargo_workspace` are how an author says
+        // "a build rewrites part of this", and both are ignored under `Link`, so
+        // the pair is never a policy anyone means: it is the corruption this
+        // file's own `ShareMode` doc measured, declared by hand.
+        if entry.mode == ShareMode::Link && (entry.cargo_workspace || !entry.exclude.is_empty()) {
+            return Err(format!(
+                "'{}' asks for 'link' with build-output exclusions, which link ignores. Build \
+                 output has to be 'hardlink', or two worktrees share one artifact slot and each \
+                 build overwrites the other's.",
+                entry.dir
+            ));
+        }
+        // The same mistake with nothing to spot it by: a bare `target` in a cargo
+        // project is build output whether or not the author filled in the flags.
+        if entry.mode == ShareMode::Link && entry.dir == "target" && repo.join("Cargo.toml").is_file()
+        {
+            return Err(
+                "'target' is cargo's build output and cannot be shared with 'link': two worktrees \
+                 would resolve to one artifact slot. Use 'hardlink', which is what detection \
+                 writes."
+                    .to_string(),
+            );
         }
     }
     let path = repo.join(POLICY_FILE);
@@ -2863,9 +2939,25 @@ fn link_dir(src: &Path, dst: &Path) -> std::io::Result<()> {
 /// worktree alone, nothing outside is reachable through it, and git deleting it
 /// with the rest of the tree is the correct outcome. Copy-on-write means that
 /// frees only the blocks the two copies stopped sharing.
-pub fn unlink_shared_artifacts(worktree: &Path) {
-    for name in SHARED_ARTIFACTS {
-        let dst = worktree.join(name);
+pub fn unlink_shared_artifacts(repo: &Path, worktree: &Path) {
+    // The static list alone is not enough since a project can declare its own
+    // directories: a `Link` entry naming anything outside the eight below would
+    // survive this and be handed to git, which is the destruction this whole
+    // function exists to prevent. The policy is read here rather than passed in
+    // because an unreadable one has to degrade to the static list instead of
+    // skipping the unlink entirely.
+    let mut names: Vec<String> = SHARED_ARTIFACTS.iter().map(|n| n.to_string()).collect();
+    for entry in artifact_policy(repo) {
+        if entry.dir.is_empty()
+            || entry.dir.contains(['/', '\\'])
+            || names.iter().any(|name| name == &entry.dir)
+        {
+            continue;
+        }
+        names.push(entry.dir);
+    }
+    for name in names {
+        let dst = worktree.join(&name);
         let Ok(meta) = fs::symlink_metadata(&dst) else {
             continue;
         };
@@ -2984,7 +3076,7 @@ pub fn remove_worktree_blocking(
     // Before git touches the directory, and not optional: git deletes the tree
     // and on Windows follows a junction into the main checkout's own
     // `node_modules`, emptying it.
-    unlink_shared_artifacts(Path::new(worktree));
+    unlink_shared_artifacts(r, Path::new(worktree));
     let mut cmd = git(r);
     cmd.args(["worktree", "remove", "--force", worktree]);
     run(cmd)?;
@@ -2993,6 +3085,7 @@ pub fn remove_worktree_blocking(
     let mut prune = git(r);
     prune.args(["worktree", "prune"]);
     let _ = run(prune);
+    drop_claim_marker(Path::new(worktree));
     Ok(())
 }
 
@@ -3039,7 +3132,7 @@ pub fn migrate_worktree_blocking(
         return Err(format!("'{new}' already exists."));
     }
 
-    unlink_shared_artifacts(from);
+    unlink_shared_artifacts(r, from);
     // Whatever survived unlinking as a real directory is provisioned build
     // output or fetched dependencies, and both come back for free.
     for entry in artifact_policy(r) {
@@ -3074,6 +3167,10 @@ pub fn migrate_worktree_blocking(
 
     ensure_boite_excluded(r);
     provision_shared_artifacts(r, to);
+    // The directory is neither where nor what its old marker said. A claim
+    // marker left beside a name nothing uses is the same litter a spare marker
+    // would be.
+    drop_claim_marker(from);
     Ok(Some(new.to_string()))
 }
 
@@ -4283,6 +4380,128 @@ mod worktree_tests {
         assert!(!f.repo.join(POLICY_FILE).exists(), "a refused policy was written anyway");
     }
 
+    /// `Link` is one junction for the whole directory, so declaring it for build
+    /// output puts two worktrees back on one artifact slot, which is the exact
+    /// corruption the per-file mode exists to prevent. The flags that say "a
+    /// build rewrites part of this" are ignored under `Link`, so the pair only
+    /// ever reads as a mistake.
+    #[test]
+    fn a_policy_cannot_share_build_output_with_a_whole_directory_link() {
+        let f = Fixture::new();
+        fs::write(f.repo.join("Cargo.toml"), "[workspace]\nmembers = []\n").unwrap();
+
+        let write = |entry: SharedDir| {
+            write_artifact_policy(
+                &f.repo,
+                &ArtifactPolicy {
+                    shared: vec![entry],
+                },
+            )
+        };
+
+        assert!(write(link("target")).is_err(), "cargo's target was linkable");
+        assert!(
+            write(SharedDir {
+                dir: "_build".to_string(),
+                mode: ShareMode::Link,
+                exclude: vec!["dev/**".to_string()],
+                cargo_workspace: false,
+            })
+            .is_err(),
+            "exclusions were accepted under a mode that ignores them"
+        );
+        assert!(
+            write(SharedDir {
+                dir: "_build".to_string(),
+                mode: ShareMode::Link,
+                exclude: Vec::new(),
+                cargo_workspace: true,
+            })
+            .is_err(),
+            "the cargo rule was accepted under a mode that ignores it"
+        );
+
+        // The same directory under the mode that handles build output is fine,
+        // and so is a link to anything an install writes.
+        assert!(write(SharedDir {
+            dir: "target".to_string(),
+            mode: ShareMode::Hardlink,
+            exclude: Vec::new(),
+            cargo_workspace: true,
+        })
+        .is_ok());
+        assert!(write(link("node_modules")).is_ok());
+    }
+
+    /// The static list is a fallback, not the rule. A project that declared a
+    /// directory of its own gets a link to it, and a link left in place is what
+    /// git follows into the main checkout.
+    #[test]
+    fn unlinking_covers_a_directory_the_policy_declared() {
+        let f = Fixture::new();
+        write_artifact_policy(
+            &f.repo,
+            &ArtifactPolicy {
+                shared: vec![link("deno_dir")],
+            },
+        )
+        .unwrap();
+        fs::create_dir_all(f.repo.join("deno_dir")).unwrap();
+        fs::write(f.repo.join("deno_dir/keep.txt"), "mine\n").unwrap();
+
+        let worktree = scratch("declared-link");
+        fs::create_dir_all(&worktree).unwrap();
+        let dst = worktree.join("deno_dir");
+        if link_dir(&f.repo.join("deno_dir"), &dst).is_err() {
+            // No junction or symlink on this machine, so there is nothing this
+            // test can prove. It never fails for a reason of its own.
+            let _ = fs::remove_dir_all(&worktree);
+            return;
+        }
+
+        unlink_shared_artifacts(&f.repo, &worktree);
+
+        assert!(
+            fs::symlink_metadata(&dst).is_err(),
+            "a declared directory's link survived and would be handed to git"
+        );
+        assert!(
+            f.repo.join("deno_dir/keep.txt").is_file(),
+            "unlinking followed the link and took the target with it"
+        );
+        let _ = fs::remove_dir_all(&worktree);
+    }
+
+    /// Renaming a claimed spare is allowed to fail. What must not happen is the
+    /// sweep reading the leftover pool name as "nobody owns this" and removing a
+    /// checkout a thread is sitting in.
+    #[test]
+    fn the_orphan_sweep_leaves_a_claimed_directory_alone() {
+        let f = Fixture::new();
+        let base = scratch("claimed-base");
+        fs::create_dir_all(&base).unwrap();
+
+        let claimed = base.join(format!("{SPARE_PREFIX}kept"));
+        let leaked = base.join(format!("{SPARE_PREFIX}gone"));
+        for dir in [&claimed, &leaked] {
+            add_detached_worktree_blocking(f.path(), dir.to_str().unwrap()).unwrap();
+        }
+        mark_claimed(&claimed);
+
+        // A day later, so age alone would collect both.
+        sweep_orphan_spares(&base, &f.repo, now_secs() + 24 * 60 * 60);
+
+        assert!(claimed.is_dir(), "the sweep removed a directory a thread was handed");
+        assert!(!leaked.is_dir(), "the sweep stopped collecting what nobody owns");
+
+        let _ = remove_worktree_blocking(f.path(), claimed.to_str().unwrap(), true);
+        assert!(
+            !is_claimed(&claimed),
+            "the claim marker outlived the directory it names"
+        );
+        let _ = fs::remove_dir_all(&base);
+    }
+
     #[test]
     fn exclusion_globs_stop_at_a_separator_unless_doubled() {
         assert!(glob_matches("cache/**", "cache/a/b/c.js"));
@@ -4501,7 +4720,7 @@ mod worktree_tests {
         fs::create_dir_all(dir.join("node_modules")).unwrap();
         fs::write(dir.join("node_modules/keep.txt"), "mine\n").unwrap();
 
-        unlink_shared_artifacts(&dir);
+        unlink_shared_artifacts(&dir, &dir);
 
         assert!(dir.join("node_modules/keep.txt").is_file());
         let _ = fs::remove_dir_all(&dir);
