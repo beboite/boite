@@ -686,6 +686,7 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "updater.resumedMany": "Mise à jour appliquée. Reprise de {count} terminaux.",
   "worktree.keptForThread": "Worktree conservée pour {thread} : il y reste du travail.",
   "worktree.keptAtPath": "Ancienne worktree conservée dans {path} : il y reste du travail.",
+  "worktree.waitGaveUp": "Pas de worktree pour {thread} : il démarre dans le dossier du projet.",
   "shortcuts.removeConfirmTitle": "Supprimer ce raccourci ?",
   "shortcuts.removeConfirmMessage": "Retire {label} de la barre. Les terminaux déjà ouverts par lui ne sont pas touchés.",
   "shortcuts.resetConfirmTitle": "Réinitialiser tous les raccourcis ?",

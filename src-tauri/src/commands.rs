@@ -811,6 +811,14 @@ pub async fn git_switch_branch(
 /// it provisions from. Nothing widens the filesystem boundary: the base is
 /// derived here from a repository already checked against the registered roots,
 /// never taken from the caller.
+/// Traced from end to end, and that is not decoration.
+///
+/// A thread waits on this answer before its PTY starts, so an answer that never
+/// comes is a black terminal, a reload that does nothing and a thread that
+/// cannot be closed — with nothing on screen to say why. Three records tell the
+/// three failures apart: no `done` means the work itself is stuck, `done`
+/// without the frontend's own line means the reply never crossed back, and a
+/// long `done` is simply a large repository being provisioned.
 #[tauri::command]
 pub async fn worktree_open(
     app: tauri::AppHandle,
@@ -819,14 +827,42 @@ pub async fn worktree_open(
     thread_id: String,
 ) -> Result<Option<String>, String> {
     scope.ensure_allowed(&repo)?;
-    let _ = &app;
     let base = git::worktree_base_for(std::path::Path::new(&repo));
     let base = base.to_string_lossy().to_string();
-    tauri::async_runtime::spawn_blocking(move || {
-        git::open_worktree_if_eligible_blocking(&repo, &base, &thread_id)
+    let traced = thread_id.clone();
+    let handle = app.clone();
+    let _ = crate::logging::append_app_log(
+        &app,
+        "info",
+        "worktree",
+        &format!("{traced}: opening"),
+        None,
+    );
+    let started = std::time::Instant::now();
+    let answer = tauri::async_runtime::spawn_blocking(move || {
+        let out = git::open_worktree_if_eligible_blocking(&repo, &base, &thread_id);
+        let took = started.elapsed().as_millis();
+        let said = match &out {
+            Ok(Some(path)) => format!("{thread_id}: done in {took}ms — {path}"),
+            Ok(None) => format!("{thread_id}: done in {took}ms — no worktree for this repository"),
+            Err(err) => format!("{thread_id}: failed in {took}ms — {err}"),
+        };
+        let _ = crate::logging::append_app_log(&handle, "info", "worktree", &said, None);
+        out
     })
     .await
-    .map_err(|e| format!("worktree_open task failed: {e}"))?
+    .map_err(|e| format!("worktree_open task failed: {e}"))?;
+    let _ = crate::logging::append_app_log(
+        &app,
+        "info",
+        "worktree",
+        &format!(
+            "{traced}: answering after {}ms",
+            started.elapsed().as_millis()
+        ),
+        None,
+    );
+    answer
 }
 
 /// Makes sure a project has a worktree standing by for its next agent thread.
