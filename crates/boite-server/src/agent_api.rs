@@ -8,6 +8,7 @@
 //! device that can drive the workspace is not the same principal as an agent
 //! that may append to a checklist.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::{
@@ -18,7 +19,11 @@ use axum::{
 };
 use serde::Deserialize;
 use serde_json::json;
+use subtle::ConstantTimeEq;
 use tokio::sync::broadcast;
+
+use boite_core::project;
+use boite_core::scope::ProjectRoots;
 
 use crate::events::AppEvent;
 use crate::store::Store;
@@ -33,6 +38,10 @@ struct Inner {
     store: Arc<Store>,
     events: broadcast::Sender<AppEvent>,
     token: String,
+    /// The same boundary the RPC applies, so where a project may be created is
+    /// one rule rather than two that drift.
+    roots: Arc<ProjectRoots>,
+    workspace_dir: Option<PathBuf>,
 }
 
 #[derive(Deserialize)]
@@ -71,7 +80,11 @@ fn authorize(inner: &Inner, headers: &HeaderMap) -> Result<String, StatusCode> {
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
         .ok_or(StatusCode::UNAUTHORIZED)?;
-    if bearer.len() != inner.token.len() || bearer != inner.token {
+    // Constant time, like every other token check here: a byte-by-byte `!=`
+    // short-circuits, and a local process that can call this in a loop reads the
+    // token out of the timing rather than guessing it.
+    let ok: bool = bearer.as_bytes().ct_eq(inner.token.as_bytes()).into();
+    if !ok {
         return Err(StatusCode::UNAUTHORIZED);
     }
     let thread_id = headers
@@ -252,6 +265,12 @@ async fn project_create(
     if name.is_empty() {
         return Ok(Json(json!({ "error": "a project needs a name" })));
     }
+    // Answered here, while the agent is still running to read it. Dispatched,
+    // the refusal happens on whichever device carries the request out and the
+    // agent has already been told its project was on the way.
+    if let Some(reason) = folder_refusal(&inner, &body) {
+        return Ok(Json(json!({ "error": reason })));
+    }
     dispatch(
         &inner,
         json!({
@@ -267,6 +286,73 @@ async fn project_create(
         }),
     );
     Ok(Json(json!({ "name": name })))
+}
+
+/// What the RPC says when a folder sits outside every place a project may go.
+pub const WRONG_PLACE_FOR_A_PROJECT: &str =
+    "a new project has to go under the home folder or beside a project that already exists";
+
+/// Why the folder an agent named cannot become a project, if it cannot.
+///
+/// The desktop twin of this endpoint answers the same two questions before it
+/// emits anything, and this one used to answer neither: a path outside every
+/// root, or one with somebody's files already in it, was dispatched and reported
+/// as `{"name": ...}` all the same. That is the failure the desktop side was
+/// fixed for, reached through the deployed server instead.
+///
+/// A caller who named neither a path nor a parent gets no refusal: the folder
+/// then goes beside the user's other projects, which is inside the boundary by
+/// construction.
+fn folder_refusal(inner: &Inner, body: &CreateProjectIn) -> Option<String> {
+    let spelled = |value: Option<&str>| -> Option<String> {
+        value
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(|v| v.to_string())
+    };
+    let path = spelled(body.path.as_deref());
+    let parent = spelled(body.parent.as_deref());
+    if path.is_none() && parent.is_none() {
+        return None;
+    }
+
+    let mut allowed = inner.roots.new_project_parents();
+    if let Some(home) = dirs::home_dir() {
+        allowed.push(home.to_string_lossy().to_string());
+    }
+    if let Some(workspace) = &inner.workspace_dir {
+        allowed.push(workspace.to_string_lossy().to_string());
+    }
+
+    let Some(path) = path else {
+        let parent = parent?;
+        return (!project::may_create_project_in(&parent, &allowed))
+            .then(|| WRONG_PLACE_FOR_A_PROJECT.to_string());
+    };
+    // A project already sitting there is reused, archived or not, and none of
+    // the rules about empty folders apply to it.
+    let known = inner
+        .store
+        .load_projects()
+        .map(|projects| {
+            projects
+                .iter()
+                .any(|p| project::same_folder(&p.cwd, &path))
+        })
+        .unwrap_or(false);
+    if known {
+        return None;
+    }
+    match project::folder_state_blocking(&path) {
+        project::FolderState::Occupied if !body.adopt.unwrap_or(false) => Some(format!(
+            "{path} already has files in it. Pass adopt to take it over, or pick another path."
+        )),
+        // Where it may go is only asked when there is a folder to make. One
+        // already sitting there empty is taken as it is.
+        project::FolderState::Missing => (!project::may_create_project_at(&path, &allowed))
+            .then(|| WRONG_PLACE_FOR_A_PROJECT.to_string()),
+        _ => None,
+    }
 }
 
 #[derive(Deserialize)]
@@ -471,12 +557,19 @@ async fn claim(
 /// Binds an ephemeral loopback port and returns what the PTY spawn path stamps
 /// into each child. Returns None if the listener cannot start: the workspace
 /// still works, agents just have no todo access.
-pub async fn start(store: Arc<Store>, events: broadcast::Sender<AppEvent>) -> Option<AgentApi> {
+pub async fn start(
+    store: Arc<Store>,
+    events: broadcast::Sender<AppEvent>,
+    roots: Arc<ProjectRoots>,
+    workspace_dir: Option<PathBuf>,
+) -> Option<AgentApi> {
     let token = format!("{:032x}", rand::random::<u128>());
     let inner = Arc::new(Inner {
         store,
         events,
         token: token.clone(),
+        roots,
+        workspace_dir,
     });
 
     let router = Router::new()

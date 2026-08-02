@@ -81,14 +81,23 @@ async fn main() {
         }) as registry::IdentityLookup
     };
     let registry = Registry::new(config.scrollback_bytes, emit, identity);
-    let roots = ProjectRoots::default();
+    // Shared rather than owned by the state: the agent endpoint decides where a
+    // project may be created, and it has to read the same boundary the RPC does,
+    // including every refresh after a project is added.
+    let roots = Arc::new(ProjectRoots::default());
     let notifier = notify::Notifier::from_env();
     let push = push::PushManager::load(&config.data_dir);
 
     // Loopback only, and a secret of its own: the main server may be bound to a
     // routable interface, and an agent appending to a checklist is not the same
     // principal as a device driving the workspace.
-    let agent_api = agent_api::start(store.clone(), events.clone()).await;
+    let agent_api = agent_api::start(
+        store.clone(),
+        events.clone(),
+        roots.clone(),
+        config.workspace_dir.clone(),
+    )
+    .await;
 
     let state = Arc::new(AppState {
         store,

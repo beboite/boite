@@ -328,11 +328,7 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
                 allowed.push(workspace.to_string_lossy().to_string());
             }
             if !project::may_create_project_at(&path, &allowed) {
-                return Err(
-                    "a new project has to go under the home folder or beside a project that \
-                     already exists"
-                        .into(),
-                );
+                return Err(crate::agent_api::WRONG_PLACE_FOR_A_PROJECT.into());
             }
             if project::folder_state_blocking(&path) == project::FolderState::Occupied {
                 return Err("there is already something in that folder".into());
@@ -458,6 +454,13 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
         }
 
         "shell.available" => {
+            // One process running for days, one probe cache shared by every
+            // connected device, and a 60s TTL that is otherwise the only way a
+            // shell installed on this machine is ever noticed. `refresh` is how a
+            // client that just watched an install says so.
+            if params.get("refresh").and_then(|v| v.as_bool()) == Some(true) {
+                shell::forget_available_shells();
+            }
             let shells = blocking(shell::available_shells_blocking).await?;
             Ok(json!({ "shells": shells }))
         }
@@ -699,6 +702,10 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
 
         "push.subscribe" => {
             let endpoint = str_param(&params, "endpoint")?;
+            // The server POSTs to this on its own, unprompted, on every thread
+            // transition. Unchecked, registering one is how a client borrows the
+            // server's reach into its own network.
+            crate::push::acceptable_endpoint(&endpoint)?;
             let keys = params.get("keys").ok_or("missing param: keys")?;
             let p256dh = keys
                 .get("p256dh")
@@ -708,6 +715,19 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
                 .get("auth")
                 .and_then(|v| v.as_str())
                 .ok_or("missing param: keys.auth")?;
+            // Re-registering an endpoint already stored is the ordinary case and
+            // replaces the row, so only a new one counts against the cap.
+            let full = state
+                .store
+                .list_push_subscriptions()
+                .map(|subs| {
+                    subs.len() >= crate::push::MAX_PUSH_SUBSCRIPTIONS
+                        && !subs.iter().any(|s| s.endpoint == endpoint)
+                })
+                .unwrap_or(false);
+            if full {
+                return Err("this workspace already holds as many push endpoints as it takes".into());
+            }
             state
                 .store
                 .add_push_subscription(&endpoint, p256dh, auth, now_ms())?;
