@@ -544,7 +544,7 @@ dependencies = [
 
 [[package]]
 name = "boite"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "axum",
  "base64 0.23.0",
@@ -580,7 +580,7 @@ dependencies = [
 
 [[package]]
 name = "boite-core"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "base64 0.23.0",
  "dirs",
@@ -598,7 +598,7 @@ dependencies = [
 
 [[package]]
 name = "boite-mcp"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -606,7 +606,7 @@ dependencies = [
 
 [[package]]
 name = "boite-server"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "axum",
  "base64 0.23.0",
