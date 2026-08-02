@@ -1,6 +1,6 @@
 [package]
 name = "boite-server"
-version = "1.0.1"
+version = "1.0.2"
 description = "Headless boite server: PTY orchestration over WebSocket"
 edition = "2021"
 
