@@ -9,6 +9,8 @@ build
 # VCS + local
 .git
 .github
+.env
+.env.*
 *.log
 boite-data
 data
