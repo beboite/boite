@@ -685,6 +685,7 @@ export const EN_MESSAGES = {
   "worktree.keptForThread": "Kept the worktree for {thread}: it still has work in it.",
   "worktree.keptAtPath": "Kept the old worktree at {path}: it still has work in it.",
   "worktree.waitGaveUp": "No worktree for {thread}: it starts in the project folder.",
+  "worktree.adoptedBack": "Gave {count} thread(s) back the worktree they were running in.",
   "shortcuts.removeConfirmTitle": "Remove this shortcut?",
   "shortcuts.removeConfirmMessage": "Removes {label} from the bar. Terminals it already opened are untouched.",
   "shortcuts.resetConfirmTitle": "Reset every shortcut?",

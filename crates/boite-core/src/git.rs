@@ -3123,6 +3123,50 @@ pub fn remove_worktree_blocking(
 /// Links go before the copy for a harder reason: a junction copied by value is
 /// the main checkout's `node_modules` duplicated into the worktree, and a
 /// junction followed by a delete is that same directory emptied.
+/// Gives a thread back the worktree it lost the path to.
+///
+/// The database row is the only record of which directory a thread runs in, and
+/// one startup that answered "gone" for a directory it could not read at that
+/// moment clears it for good. The checkout stays on disk; the thread starts in
+/// the project folder instead; and `--resume` then looks for its transcript
+/// under a path the agent never ran in, which is what "No conversation found
+/// with session ID" means while the session file is plainly there. It also puts
+/// an agent to work in the user's own checkout without ever saying so.
+///
+/// Nothing is created, moved or repaired here. The directory is handed back only
+/// when it is already this repository's worktree, which is what `git worktree
+/// list` would say and is read here from the one file that says it, rather than
+/// from a process: this runs once per thread at boot, and a repository with
+/// twenty threads would otherwise pay twenty spawns before the first pane.
+pub fn adopt_worktree_blocking(repo: &str, thread_id: &str) -> Option<String> {
+    let r = Path::new(repo);
+    let dir = scoped_dir_for(&worktree_base_for(r), thread_id);
+    if !dir.is_dir() {
+        return None;
+    }
+    // A worktree's `.git` is a file pointing at `<repo>/.git/worktrees/<name>`,
+    // so its grandparent is the repository's own git directory. A directory of
+    // the right name that does not say that belongs to something else, and
+    // handing it over would start an agent inside it.
+    let owner = git_dir(&dir)?;
+    let common = owner.parent()?.parent()?;
+    let mine = git_dir(r)?;
+    // `same_dir` compares text, which is the right default everywhere else here
+    // because both sides were written by this app. Not on this side: one path is
+    // built by joining and the other is read out of a `.git` file that git may
+    // have written relative to the worktree. Asking the filesystem is what
+    // settles a `..` in the middle, and it is one syscall in a boot-time pass.
+    let ours = same_dir(common, &mine)
+        || match (fs::canonicalize(common), fs::canonicalize(&mine)) {
+            (Ok(a), Ok(b)) => a == b,
+            _ => false,
+        };
+    if !ours {
+        return None;
+    }
+    Some(dir.to_string_lossy().into_owned())
+}
+
 pub fn migrate_worktree_blocking(
     repo: &str,
     old: &str,
@@ -3377,6 +3421,48 @@ mod worktree_tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.repo);
         }
+    }
+
+    /// A thread whose row lost its worktree path can be given it back, and only
+    /// when the directory really is this repository's worktree. The refusals
+    /// matter more than the hit: a wrong yes starts an agent in somebody else's
+    /// checkout.
+    #[test]
+    fn a_thread_is_given_back_only_a_worktree_this_repository_owns() {
+        let f = Fixture::new();
+        assert_eq!(
+            adopt_worktree_blocking(f.path(), "thread-1"),
+            None,
+            "nothing to give back before one exists"
+        );
+
+        let base = worktree_base_for(&f.repo);
+        let dir = scoped_dir_for(&base, "thread-1");
+        add_detached_worktree_blocking(f.path(), dir.to_str().unwrap()).unwrap();
+        assert_eq!(
+            adopt_worktree_blocking(f.path(), "thread-1").as_deref(),
+            dir.to_str(),
+            "the worktree it was running in"
+        );
+
+        // The right name in the right place, and not a worktree at all.
+        let plain = scoped_dir_for(&base, "thread-2");
+        fs::create_dir_all(&plain).unwrap();
+        assert_eq!(
+            adopt_worktree_blocking(f.path(), "thread-2"),
+            None,
+            "a directory that is not a checkout is not one to hand over"
+        );
+
+        // A worktree, but another repository's.
+        let other = Fixture::new();
+        let stranger = scoped_dir_for(&base, "thread-3");
+        add_detached_worktree_blocking(other.path(), stranger.to_str().unwrap()).unwrap();
+        assert_eq!(
+            adopt_worktree_blocking(f.path(), "thread-3"),
+            None,
+            "a checkout of another repository is never this project's to give"
+        );
     }
 
     /// HEAD is read off the filesystem rather than through `git rev-parse`, so

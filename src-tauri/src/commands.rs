@@ -930,6 +930,23 @@ pub async fn worktree_migrate(
     })
 }
 
+/// Hands back the worktree a thread already owns but has no path to.
+///
+/// Scoped like every other path-taking command here, and it needs nothing else:
+/// the directory is derived from the repository and the thread id rather than
+/// taken from the caller, so there is no path to point anywhere.
+#[tauri::command]
+pub async fn worktree_adopt(
+    scope: State<'_, ProjectRoots>,
+    repo: String,
+    thread_id: String,
+) -> Result<Option<String>, String> {
+    scope.ensure_allowed(&repo)?;
+    tauri::async_runtime::spawn_blocking(move || git::adopt_worktree_blocking(&repo, &thread_id))
+        .await
+        .map_err(|e| format!("worktree_adopt task failed: {e}"))
+}
+
 /// What became of a worktree the migration was asked about.
 ///
 /// Three answers, and the caller has to tell them apart: a path means it moved,
