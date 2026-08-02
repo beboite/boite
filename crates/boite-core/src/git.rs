@@ -1789,6 +1789,35 @@ fn write_spare_marker(dir: &Path, repo: &Path, head: &str) -> std::io::Result<()
     )
 }
 
+/// How long an administrative entry must have been pointing at nothing before
+/// pruning is allowed to take it.
+///
+/// Any delay at all would do; the window this closes is milliseconds wide. An
+/// hour is chosen for having no downside: every directory this app registers is
+/// named after a thread id, so a path is never reused and nothing waits on the
+/// entry going away.
+const PRUNE_GRACE: &str = "1.hour.ago";
+
+/// Drops administrative entries whose directory is gone, and only those that
+/// have been that way for a while.
+///
+/// The delay is the whole point. A bare `git worktree prune` takes every entry
+/// whose directory it cannot find *right now*, and this repository moves
+/// directories out from under exactly such an entry twice: `rename_claimed`
+/// renames a spare to its thread's name before `git worktree repair` tells git
+/// where it went, and the migration does the same across volumes. Both windows
+/// are one filesystem call wide, and closing several threads runs one prune per
+/// close — so closing a handful while opening one would delete the new
+/// thread's entry mid-rename. `repair` cannot undo that: the entry holds the
+/// worktree's HEAD and index, and once it is gone git answers `fatal: not a git
+/// repository` for a directory that is still full of the agent's work. Ten of
+/// them were made that way on one machine before this was understood.
+fn prune_stale_worktrees(repo: &Path) {
+    let mut prune = git(repo);
+    prune.args(["worktree", "prune", "--expire", PRUNE_GRACE]);
+    let _ = run(prune);
+}
+
 /// Gives a spare's directory back. Never a worktree anyone is using.
 ///
 /// Unforced: the pool only ever owns directories nobody has been handed, so a
@@ -3094,9 +3123,7 @@ pub fn remove_worktree_blocking(
     run(cmd)?;
     // A worktree whose directory was deleted by hand leaves an administrative
     // file behind, and the path stays "already registered" until it is pruned.
-    let mut prune = git(r);
-    prune.args(["worktree", "prune"]);
-    let _ = run(prune);
+    prune_stale_worktrees(r);
     drop_claim_marker(Path::new(worktree));
     Ok(())
 }
@@ -3162,6 +3189,16 @@ pub fn adopt_worktree_blocking(repo: &str, thread_id: &str) -> Option<String> {
     if !ours {
         return None;
     }
+    // Ours, and git no longer knows it. The administrative entry holds the
+    // worktree's HEAD and index, so without it every git command run in there
+    // answers `fatal: not a git repository` — which is what the panel reports
+    // as "this folder is not a repository" while the agent's files sit in it.
+    // Handing that back would put a thread in a directory where nothing it does
+    // can be committed, so it starts in the project folder instead and the
+    // directory is left exactly as it is, to be recovered rather than swept.
+    if !owner.is_dir() {
+        return None;
+    }
     Some(dir.to_string_lossy().into_owned())
 }
 
@@ -3217,9 +3254,7 @@ pub fn migrate_worktree_blocking(
     let mut repair = git(r);
     repair.args(["worktree", "repair", new]);
     run(repair)?;
-    let mut prune = git(r);
-    prune.args(["worktree", "prune"]);
-    let _ = run(prune);
+    prune_stale_worktrees(r);
 
     ensure_boite_excluded(r);
     provision_shared_artifacts(r, to);
@@ -3460,6 +3495,52 @@ mod worktree_tests {
             adopt_worktree_blocking(f.path(), "thread-3"),
             None,
             "a checkout of another repository is never this project's to give"
+        );
+
+        // Ours by name and by `.git`, and git no longer knows it: the entry
+        // holding its HEAD and index is gone, so nothing done in there could be
+        // committed. Handing it back is worse than starting in the project.
+        let orphan = scoped_dir_for(&base, "thread-4");
+        add_detached_worktree_blocking(f.path(), orphan.to_str().unwrap()).unwrap();
+        let admin = git_dir(&orphan).unwrap();
+        fs::remove_dir_all(&admin).unwrap();
+        assert_eq!(
+            adopt_worktree_blocking(f.path(), "thread-4"),
+            None,
+            "a checkout git has lost track of is not one to start a thread in"
+        );
+    }
+
+    /// The window this closes: a spare is renamed to its thread's name, and
+    /// `git worktree repair` has not yet told git where it went. A prune in
+    /// that instant — one runs per thread closed, and closing several while
+    /// opening one is an ordinary afternoon — deletes the entry holding the
+    /// worktree's HEAD and index, and nothing can put it back.
+    #[test]
+    fn pruning_leaves_alone_an_entry_whose_directory_has_just_moved() {
+        let f = Fixture::new();
+        let base = worktree_base_for(&f.repo);
+        let from = scoped_dir_for(&base, "spare-1");
+        add_detached_worktree_blocking(f.path(), from.to_str().unwrap()).unwrap();
+        let admin = git_dir(&from).unwrap();
+
+        // Mid-rename: on disk at the new name, and git still pointed at the old.
+        let to = scoped_dir_for(&base, "thread-1");
+        fs::rename(&from, &to).unwrap();
+        prune_stale_worktrees(&f.repo);
+        assert!(
+            admin.is_dir(),
+            "the entry was pruned out from under a directory that had only moved"
+        );
+
+        // And the repair that follows still lands, which is the whole point.
+        let mut repair = git(&f.repo);
+        repair.args(["worktree", "repair", &to.to_string_lossy()]);
+        run(repair).unwrap();
+        assert_eq!(
+            adopt_worktree_blocking(f.path(), "thread-1").as_deref(),
+            to.to_str(),
+            "the renamed worktree is not usable again"
         );
     }
 
