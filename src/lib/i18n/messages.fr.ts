@@ -268,6 +268,14 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "project.tokensLess": "moins",
   "project.tokensMore": "plus",
 
+  "approval.action.other": "demande {action} ({detail})",
+  "approval.title": "Un agent demande",
+  "approval.allow": "Autoriser",
+  "approval.refuse": "Refuser",
+  "approval.action.thread.move": "veut déplacer ce terminal dans {detail}",
+  "approval.action.project.create": "veut créer le projet {detail}",
+  "approval.action.thread.spawn": "veut ouvrir un terminal dans un autre projet ({detail})",
+
   "worktree.title": "Worktrees",
   "worktree.refresh": "Relire le dépôt",
   "worktree.loading": "Lecture du dépôt…",

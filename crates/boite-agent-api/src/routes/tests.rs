@@ -209,3 +209,86 @@ fn a_name_two_projects_answer_to_is_refused() {
         "name the project to move into"
     );
 }
+
+/// A caller with a terminal behind it, as `auth::identify` would have built one.
+fn agent(project_id: &str, thread_id: &str) -> Caller {
+    Caller {
+        project_id: project_id.into(),
+        thread_id: Some(thread_id.into()),
+        grant: boite_core::capability::Grant::Owner,
+        agent: None,
+    }
+}
+
+/// A gated call is not carried out. It is recorded, the user is told, and the
+/// agent is told to stop asking.
+#[test]
+fn a_call_across_projects_waits_for_the_user() {
+    let fake = Fake::new("gate").with_project("p1", "/w/one");
+    let caller = agent("p1", "t1");
+    let request = json!({ "kind": "thread.move", "threadId": "t1", "projectId": "p2" });
+
+    let Json(answer) = ask_the_user(&fake, &caller, "thread.move", "other", request.clone());
+
+    assert_eq!(answer["retryable"], json!(false));
+    assert!(answer["error"].as_str().unwrap().contains("Do not ask again"));
+    // Nothing was dispatched. This is the whole difference from the route it
+    // replaced, which handed the move to a device and answered success.
+    assert!(fake.asked.lock().unwrap().is_empty());
+    assert_eq!(fake.announced.lock().unwrap().as_slice(), [Change::Approvals]);
+
+    let open = fake.store.open_approvals().unwrap();
+    assert_eq!(open.len(), 1);
+    assert_eq!(open[0].action, "thread.move");
+    assert_eq!(open[0].detail, "other");
+    assert_eq!(open[0].thread_id, "t1");
+    assert_eq!(open[0].id, answer["approvalId"].as_str().unwrap());
+
+    // And allowing it runs what was stored, not a rebuild of it.
+    let decided = crate::decide(&fake, &open[0].id, boite_core::approval::Verdict::Allowed, 99)
+        .unwrap()
+        .expect("the first answer lands");
+    assert_eq!(decided.id, open[0].id);
+    assert_eq!(fake.asked.lock().unwrap().as_slice(), [request]);
+}
+
+/// Refusing one dispatches nothing at all.
+#[test]
+fn a_refused_call_never_runs() {
+    let fake = Fake::new("gate-refuse").with_project("p1", "/w/one");
+    let caller = agent("p1", "t1");
+    let Json(answer) = ask_the_user(
+        &fake,
+        &caller,
+        "project.create",
+        "newproj",
+        json!({ "kind": "project.create", "name": "newproj" }),
+    );
+    let id = answer["approvalId"].as_str().unwrap().to_string();
+
+    crate::decide(&fake, &id, boite_core::approval::Verdict::Refused, 99)
+        .unwrap()
+        .expect("the answer lands");
+    assert!(fake.asked.lock().unwrap().is_empty());
+    assert!(fake.store.open_approvals().unwrap().is_empty());
+}
+
+/// A credential with no terminal behind it does not get to ask at all, so the
+/// user is never shown a card for it. The refusal is the answer, and it says
+/// retrying is pointless.
+#[test]
+fn a_credentials_file_is_refused_before_anybody_is_asked() {
+    let fake = Fake::new("gate-project-grant").with_project("p1", "/w/one");
+    let caller = Caller {
+        project_id: "p1".into(),
+        thread_id: None,
+        grant: boite_core::capability::Grant::Project,
+        agent: None,
+    };
+    let refusal = permitted(&fake, &caller, Capability::MutateAcross, "thread.move", "");
+    let Err(Json(body)) = refusal else {
+        panic!("a credentials file must not reach across projects");
+    };
+    assert_eq!(body["retryable"], json!(false));
+    assert!(fake.store.open_approvals().unwrap().is_empty());
+}

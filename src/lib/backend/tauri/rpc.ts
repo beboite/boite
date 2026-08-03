@@ -1,5 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  ApprovalsApi,
+  PendingApproval,
   EditorApi,
   ExplorerApi,
   FastpickApi,
@@ -202,6 +204,11 @@ export const tauriSession: SessionApi = {
     });
     return hit ? { id: hit.id, mtimeMs: hit.modifiedMs } : null;
   },
+};
+
+export const tauriApprovals: ApprovalsApi = {
+  list: () => invoke<PendingApproval[]>("approvals_open"),
+  decide: (id, allow) => invoke<PendingApproval | null>("approval_decide", { id, allow }),
 };
 
 export const tauriLog: LogApi = {

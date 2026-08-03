@@ -36,6 +36,7 @@ import { isScratch, SCRATCH_PROJECT_ID } from "$lib/domain/project";
 import { makeScratchProject } from "$lib/features/project/scratch";
 import { gitStore } from "$lib/features/git/store.svelte";
 import { todos } from "$lib/features/todo/store.svelte";
+import { approvals } from "$lib/features/approvals/store.svelte";
 import { notifications } from "$lib/features/notifications/store.svelte";
 import { backend, workspace, type Backend } from "$lib/backend";
 import { device } from "$lib/features/settings/device.svelte";
@@ -496,6 +497,13 @@ class AppState {
       // event carries no row — reload instead of patching one in.
       case "todos.changed": {
         void todos.reload().catch(() => {});
+        break;
+      }
+      // Same shape, and the same reason it cannot carry the row: a request is
+      // opened by an agent talking to the server, not by anything this client
+      // did.
+      case "approvals.changed": {
+        void approvals.reload().catch(() => {});
         break;
       }
       // Another device renamed/recolored this boite. Cosmetic; update the

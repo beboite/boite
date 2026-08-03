@@ -44,6 +44,8 @@ pub use routes::router;
 pub enum Change {
     Todos,
     Worktrees,
+    /// Something is waiting on the user. See `boite_core::approval`.
+    Approvals,
 }
 
 /// What an agent is told when it asks for something no device is there to do.
@@ -125,3 +127,49 @@ pub trait Workspace: Send + Sync + 'static {
 
 /// The concrete state axum carries. A handler never sees anything else.
 pub type Shared = Arc<dyn Workspace>;
+
+/// Answers a request an agent put in front of the user.
+///
+/// Shared rather than written once per host, because the interesting half is
+/// not the update: it is that allowing one replays the dispatch that was stored
+/// with it, verbatim. Two copies of that would be two ideas of what the user
+/// agreed to.
+///
+/// `None` means somebody already answered it, which is what a second device
+/// looking at the same card gets. Not an error: the request has been dealt
+/// with, and telling the user it failed would be worse than saying nothing.
+pub fn decide(
+    workspace: &dyn Workspace,
+    id: &str,
+    verdict: boite_core::approval::Verdict,
+    now: i64,
+) -> Result<Option<boite_core::approval::Pending>, String> {
+    use boite_core::approval::Verdict;
+    use boite_core::journal::{Action, Actor, Entry};
+
+    let Some((pending, request)) = workspace.store().decide_approval(id, verdict, now)? else {
+        return Ok(None);
+    };
+    let mut entry = Entry::new(
+        &pending.project_id,
+        // The user, not the thread. The thread asked; this is the answer.
+        Actor::System,
+        Action::ApprovalDecided,
+    )
+    .about(&pending.id)
+    .with("of", &pending.action)
+    .with("verdict", verdict.as_str());
+
+    if verdict == Verdict::Allowed {
+        // The dispatch as it was recorded. Nothing is rebuilt from the pending
+        // row, so what runs is what the card described.
+        if let Err(reason) = workspace.ask(request) {
+            entry = entry.with("failed", &reason);
+        }
+    }
+    if let Err(e) = workspace.store().record(entry) {
+        eprintln!("[boite/agent-api] journal write failed: {e}");
+    }
+    workspace.announce(Change::Approvals);
+    Ok(Some(pending))
+}

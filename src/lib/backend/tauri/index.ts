@@ -2,6 +2,7 @@ import type { Backend } from "../types";
 import { tauriPty } from "./pty";
 import { tauriDb } from "./db";
 import {
+  tauriApprovals,
   tauriEditor,
   tauriExplorer,
   tauriFastpick,
@@ -31,4 +32,5 @@ export class TauriBackend implements Backend {
   readonly scope = tauriScope;
   readonly session = tauriSession;
   readonly log = tauriLog;
+  readonly approvals = tauriApprovals;
 }

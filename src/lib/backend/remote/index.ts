@@ -1,4 +1,5 @@
 import type {
+  ApprovalsApi,
   Backend,
   BackendCaps,
   ControlEvent,
@@ -13,6 +14,7 @@ import type {
   AgentTurn,
   UsageReport,
   LogApi,
+  PendingApproval,
   ProjectApi,
   PtyApi,
   PushApi,
@@ -69,6 +71,7 @@ export class RemoteBackend implements Backend {
   readonly scope: ScopeApi;
   readonly session: SessionApi;
   readonly log: LogApi;
+  readonly approvals: ApprovalsApi;
   readonly push: PushApi;
   readonly meta: WorkspaceMetaApi;
 
@@ -209,6 +212,15 @@ export class RemoteBackend implements Backend {
       loadTodos: () => rpc("todo.list").then((r) => (r.todos ?? []) as TodoItem[]),
       saveTodo: (todo) => rpc("todo.save", { todo }).then(() => {}),
       deleteTodo: (id) => rpc("todo.delete", { todoId: id }).then(() => {}),
+    };
+
+    this.approvals = {
+      list: () =>
+        rpc("approval.list").then((r) => (r.approvals ?? []) as PendingApproval[]),
+      decide: (id, allow) =>
+        rpc("approval.decide", { id, allow }).then(
+          (r) => (r.decided ?? null) as PendingApproval | null,
+        ),
     };
 
     this.git = {

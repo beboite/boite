@@ -35,6 +35,13 @@ use crate::events::AppEvent;
 pub struct AgentApi {
     pub url: String,
     pub keys_dir: PathBuf,
+    /// The same workspace the routes are served over.
+    ///
+    /// Held so the RPC can answer an approval without a second implementation
+    /// of what allowing one does: the interesting half is replaying the stored
+    /// dispatch, and two copies of that would be two ideas of what the user
+    /// agreed to.
+    pub workspace: boite_agent_api::Shared,
 }
 
 struct ServerWorkspace {
@@ -106,12 +113,18 @@ impl Workspace for ServerWorkspace {
 
     /// Tells every device to re-read.
     ///
-    /// One event for both kinds, which is not right and is not new: no client
-    /// redraws worktree state on a push today, so a claimed branch is announced
-    /// as a todo change and the panel that would care refreshes anyway. The
-    /// event to add is a client-side change, not a server one.
-    fn announce(&self, _change: Change) {
-        let _ = self.events.send(AppEvent::TodosChanged);
+    /// Todos and worktrees share an event, which is not right and is not new:
+    /// no client redraws worktree state on a push today, so a claimed branch is
+    /// announced as a todo change and the panel that would care refreshes
+    /// anyway. The event to add there is a client-side change, not a server one.
+    ///
+    /// An approval is not in that bucket. Nothing else makes a card appear, and
+    /// a request the user never sees is a request that never gets answered.
+    fn announce(&self, change: Change) {
+        let _ = self.events.send(match change {
+            Change::Approvals => AppEvent::ApprovalsChanged,
+            Change::Todos | Change::Worktrees => AppEvent::TodosChanged,
+        });
     }
 }
 
@@ -139,7 +152,7 @@ pub async fn start(
         tracing::warn!("agent api disabled, cannot make the key directory: {e}");
         return None;
     }
-    let router = boite_agent_api::router(Arc::new(ServerWorkspace {
+    let workspace: boite_agent_api::Shared = Arc::new(ServerWorkspace {
         store,
         events,
         devices,
@@ -147,7 +160,8 @@ pub async fn start(
         roots,
         workspace_dir,
         registry,
-    }));
+    });
+    let router = boite_agent_api::router(workspace.clone());
 
     let listener = match tokio::net::TcpListener::bind("127.0.0.1:0").await {
         Ok(l) => l,
@@ -167,6 +181,7 @@ pub async fn start(
     Some(AgentApi {
         url: format!("http://127.0.0.1:{port}"),
         keys_dir,
+        workspace,
     })
 }
 

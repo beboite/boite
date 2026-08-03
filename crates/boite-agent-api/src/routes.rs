@@ -135,17 +135,63 @@ fn permitted(
     of: &str,
     about: &str,
 ) -> Result<(), Json<Value>> {
-    match caller.ensure(capability) {
-        Ok(()) => Ok(()),
-        Err(reason) => Err(deny(
-            workspace,
-            caller,
-            &caller.project_id,
-            of,
-            about,
-            &reason,
-        )),
+    let Err(reason) = caller.ensure(capability) else {
+        return Ok(());
+    };
+    let Json(mut body) = deny(workspace, caller, &caller.project_id, of, about, &reason);
+    // Nothing about asking again changes the answer: the grant is a property of
+    // the credential, not of the moment. Taken from Buzz, which is right that a
+    // refusal an agent cannot tell apart from a hiccup is a refusal it retries.
+    body["retryable"] = json!(false);
+    Err(Json(body))
+}
+
+/// Puts a dispatch in front of the user instead of carrying it out, and answers
+/// the agent.
+///
+/// The three calls that reach past the project an agent is in go through here.
+/// A credential with no terminal never gets this far — `permitted` refused it
+/// already — so what is left is the agent in a terminal the user opened, and the
+/// question is not whether it may ask but whether the user agrees.
+///
+/// The agent does not wait for the answer. It is told the request is with the
+/// user and told not to retry, which is `retryable: false` in the body: a tool
+/// call that blocks on a human is a turn that stalls until somebody looks at the
+/// window, and an agent that gets no answer retries.
+fn ask_the_user(
+    workspace: &dyn Workspace,
+    caller: &Caller,
+    action: &str,
+    detail: &str,
+    request: Value,
+) -> Json<Value> {
+    let pending = boite_core::approval::Pending {
+        id: uuid::Uuid::new_v4().to_string(),
+        project_id: caller.project_id.clone(),
+        thread_id: caller.thread_or_empty().to_string(),
+        action: action.to_string(),
+        detail: detail.to_string(),
+        created_at: now_ms(),
+    };
+    if let Err(e) = workspace.store().open_approval(&pending, &request) {
+        // A request that cannot be recorded is not carried out either. Falling
+        // through to the dispatch would mean the gate is off whenever the
+        // database is unhappy, which is exactly when it should not be.
+        return refused(format!("cannot ask the user right now: {e}"));
     }
+    record(
+        workspace,
+        Entry::new(&caller.project_id, actor(caller), Action::ApprovalOpened)
+            .about(&pending.id)
+            .with("of", action)
+            .with("detail", detail),
+    );
+    workspace.announce(Change::Approvals);
+    Json(json!({
+        "error": boite_core::approval::waiting_on_a_human(action),
+        "retryable": false,
+        "approvalId": pending.id,
+    }))
 }
 
 /// The repository and worktree behind this caller's thread.
@@ -553,29 +599,18 @@ async fn thread_move(
         Ok(found) => found,
         Err(reason) => return Ok(refused(reason)),
     };
-    if let Err(reason) = workspace.ask(json!({
-        "kind": "thread.move",
-        "threadId": thread_id,
-        "projectId": project_id,
-        "note": body.note,
-    })) {
-        return Ok(deny(
-            &*workspace,
-            &caller,
-            &project_id,
-            "thread.move",
-            &thread_id,
-            &reason,
-        ));
-    }
-    record(
+    Ok(ask_the_user(
         &*workspace,
-        Entry::new(&project_id, actor(&caller), Action::ThreadMoved)
-            .about(&thread_id)
-            .with("to", &name),
-    );
-    workspace.touched(&thread_id, "thread");
-    Ok(Json(json!({ "project": name })))
+        &caller,
+        "thread.move",
+        &name,
+        json!({
+            "kind": "thread.move",
+            "threadId": thread_id,
+            "projectId": project_id,
+            "note": body.note,
+        }),
+    ))
 }
 
 #[derive(Deserialize)]
@@ -622,33 +657,25 @@ async fn project_create(
     if let Some(reason) = folder_refusal(&*workspace, &body) {
         return Ok(refused(reason));
     }
-    if let Err(reason) = workspace.ask(json!({
-        "kind": "project.create",
-        "threadId": (!thread_id.is_empty()).then(|| thread_id.clone()),
-        "name": name,
-        "path": body.path,
-        "parent": body.parent,
-        "adopt": body.adopt.unwrap_or(false),
-        "git": body.git.unwrap_or(true),
-        // Nothing to move when the caller is not a thread this workspace knows.
-        "move": body.r#move.unwrap_or(true) && !thread_id.is_empty(),
-        "note": body.note,
-    })) {
-        return Ok(deny(
-            &*workspace,
-            &caller,
-            &caller_project,
-            "project.create",
-            &name,
-            &reason,
-        ));
-    }
-    record(
+    let _ = caller_project;
+    Ok(ask_the_user(
         &*workspace,
-        Entry::new(&caller_project, actor(&caller), Action::ProjectCreated).about(&name),
-    );
-    workspace.touched(&thread_id, "project");
-    Ok(Json(json!({ "name": name })))
+        &caller,
+        "project.create",
+        &name,
+        json!({
+            "kind": "project.create",
+            "threadId": (!thread_id.is_empty()).then(|| thread_id.clone()),
+            "name": name,
+            "path": body.path,
+            "parent": body.parent,
+            "adopt": body.adopt.unwrap_or(false),
+            "git": body.git.unwrap_or(true),
+            // Nothing to move when the caller is not a thread this workspace knows.
+            "move": body.r#move.unwrap_or(true) && !thread_id.is_empty(),
+            "note": body.note,
+        }),
+    ))
 }
 
 /// Why the folder an agent named cannot become a project, if it cannot.
@@ -727,10 +754,11 @@ async fn thread_spawn(
         },
         None => own_project.clone(),
     };
+    let elsewhere = project_id != own_project;
     // Only when it lands somewhere else. Opening a second terminal beside your
     // own is what an agent splitting a job does, and asking for a wider grant
     // for it would make the capability mean "spawn", not "across".
-    if project_id != own_project {
+    if elsewhere {
         if let Err(refusal) = permitted(
             &*workspace,
             &caller,
@@ -742,7 +770,7 @@ async fn thread_spawn(
         }
     }
     let asking_thread = caller.thread_or_empty().to_string();
-    if let Err(reason) = workspace.ask(json!({
+    let request = json!({
         "kind": "thread.spawn",
         "projectId": project_id,
         // Who asked, so an unnamed agent defaults to another of the caller
@@ -750,7 +778,17 @@ async fn thread_spawn(
         "callerThreadId": (!asking_thread.is_empty()).then(|| asking_thread.clone()),
         "agent": body.agent,
         "prompt": body.prompt,
-    })) {
+    });
+    if elsewhere {
+        return Ok(ask_the_user(
+            &*workspace,
+            &caller,
+            "thread.spawn",
+            &project_id,
+            request,
+        ));
+    }
+    if let Err(reason) = workspace.ask(request) {
         return Ok(deny(
             &*workspace,
             &caller,

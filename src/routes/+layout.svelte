@@ -27,6 +27,8 @@
   import { updater } from "$lib/features/updater/store.svelte";
   import { resumeAfterUpdate } from "$lib/features/updater/restart";
   import { todos } from "$lib/features/todo/store.svelte";
+  import { approvals } from "$lib/features/approvals/store.svelte";
+  import ApprovalTray from "$lib/features/approvals/ApprovalTray.svelte";
   import CommandPalette from "$lib/features/palette/CommandPalette.svelte";
   import { createKeyboardController } from "$lib/shared/keyboard/controller";
   import type { KeyScope, ShortcutBinding } from "$lib/shared/keyboard/types";
@@ -359,11 +361,16 @@
     // release is on disk and a restart is all that is left.
     const stopUpdater = updater.start();
     const stopTodoWatch = todos.watch();
+    // Read once at boot as well as on notice: a request opened while the app
+    // was closed is still waiting, and nothing will announce it again.
+    const stopApprovalWatch = approvals.watch();
+    void approvals.reload();
 
     return () => {
       unlisten?.();
       stopUpdater();
       stopTodoWatch();
+      stopApprovalWatch();
     };
   });
 </script>
@@ -371,5 +378,7 @@
 <svelte:window onwheel={handleWheel} />
 
 {@render children()}
+
+<ApprovalTray />
 
 <CommandPalette />

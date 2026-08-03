@@ -4,7 +4,7 @@ use parking_lot::Mutex;
 use rusqlite::Connection;
 
 use crate::model::{Project, Thread, Todo};
-use crate::{journal, migrations};
+use crate::{approval, journal, migrations};
 
 pub struct Store {
     conn: Mutex<Connection>,
@@ -264,6 +264,111 @@ impl Store {
             |r| r.get::<_, String>(0),
         )
         .map_err(|_| "unknown thread".to_string())
+    }
+
+    /// Puts a request in front of the user, and hands back the record.
+    ///
+    /// The dispatch is stored whole, so allowing one replays exactly what was
+    /// asked for. See `crate::approval`.
+    pub fn open_approval(
+        &self,
+        pending: &approval::Pending,
+        request: &serde_json::Value,
+    ) -> Result<(), String> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "INSERT INTO approvals
+             (id, project_id, thread_id, action, detail, request, verdict, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'pending', ?7)",
+            rusqlite::params![
+                pending.id,
+                pending.project_id,
+                pending.thread_id,
+                pending.action,
+                pending.detail,
+                request.to_string(),
+                pending.created_at,
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    /// Everything still waiting, oldest first, across every project.
+    ///
+    /// Not scoped: the card belongs to the window, and a user looking at one
+    /// project still has to see that an agent in another is asking. Scoping it
+    /// would mean a request that is only visible if you happen to be standing in
+    /// the right place.
+    pub fn open_approvals(&self) -> Result<Vec<approval::Pending>, String> {
+        let conn = self.conn.lock();
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, project_id, thread_id, action, detail, created_at
+                 FROM approvals WHERE verdict = 'pending' ORDER BY created_at ASC",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(approval::Pending {
+                    id: r.get(0)?,
+                    project_id: r.get(1)?,
+                    thread_id: r.get(2)?,
+                    action: r.get(3)?,
+                    detail: r.get(4)?,
+                    created_at: r.get(5)?,
+                })
+            })
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    }
+
+    /// Answers one, once.
+    ///
+    /// `WHERE verdict = 'pending'` rather than a check above it: two devices can
+    /// be looking at the same card, and the one that loses has to come back with
+    /// `None` rather than dispatching the same move a second time.
+    ///
+    /// `Some(request)` is what was asked for, ready to hand to whoever carries
+    /// it out. `None` means somebody else already answered.
+    pub fn decide_approval(
+        &self,
+        id: &str,
+        verdict: approval::Verdict,
+        now: i64,
+    ) -> Result<Option<(approval::Pending, serde_json::Value)>, String> {
+        let conn = self.conn.lock();
+        let changed = conn
+            .execute(
+                "UPDATE approvals SET verdict = ?1, decided_at = ?2
+                 WHERE id = ?3 AND verdict = 'pending'",
+                rusqlite::params![verdict.as_str(), now, id],
+            )
+            .map_err(|e| e.to_string())?;
+        if changed == 0 {
+            return Ok(None);
+        }
+        conn.query_row(
+            "SELECT id, project_id, thread_id, action, detail, request, created_at
+             FROM approvals WHERE id = ?1",
+            [id],
+            |r| {
+                let raw: String = r.get(5)?;
+                Ok((
+                    approval::Pending {
+                        id: r.get(0)?,
+                        project_id: r.get(1)?,
+                        thread_id: r.get(2)?,
+                        action: r.get(3)?,
+                        detail: r.get(4)?,
+                        created_at: r.get(6)?,
+                    },
+                    serde_json::from_str(&raw).unwrap_or(serde_json::Value::Null),
+                ))
+            },
+        )
+        .map(Some)
+        .map_err(|e| e.to_string())
     }
 
     /// Records what happened in the project's log.
@@ -794,6 +899,45 @@ mod tests {
             .unwrap();
         assert_eq!(store.public_key_of_thread("old"), None);
         assert_eq!(store.public_key_of_thread("never-existed"), None);
+    }
+
+    /// Two devices can be looking at the same card. Only one answer lands, and
+    /// the other has to come back empty rather than dispatching the same move
+    /// a second time.
+    #[test]
+    fn an_approval_is_answered_once() {
+        let (store, _dir) = scratch_store("approval");
+        let pending = approval::Pending {
+            id: "a1".into(),
+            project_id: "p1".into(),
+            thread_id: "t1".into(),
+            action: "thread.move".into(),
+            detail: "other".into(),
+            created_at: 10,
+        };
+        let request = serde_json::json!({ "kind": "thread.move", "threadId": "t1" });
+        store.open_approval(&pending, &request).unwrap();
+
+        assert_eq!(store.open_approvals().unwrap(), vec![pending.clone()]);
+
+        let allowed = store
+            .decide_approval("a1", approval::Verdict::Allowed, 20)
+            .unwrap()
+            .expect("the first answer lands");
+        assert_eq!(allowed.0, pending);
+        // What is replayed is what was asked for, not a reconstruction.
+        assert_eq!(allowed.1, request);
+
+        assert!(store
+            .decide_approval("a1", approval::Verdict::Refused, 21)
+            .unwrap()
+            .is_none());
+        assert!(store.open_approvals().unwrap().is_empty());
+        // And an id nobody opened is not an answer either.
+        assert!(store
+            .decide_approval("never", approval::Verdict::Allowed, 22)
+            .unwrap()
+            .is_none());
     }
 
     /// A migrated database in its own directory, removed when the guard drops.

@@ -258,6 +258,14 @@ export const EN_MESSAGES = {
   "project.tokensLess": "less",
   "project.tokensMore": "more",
 
+  "approval.action.other": "asked for {action} ({detail})",
+  "approval.title": "An agent is asking",
+  "approval.allow": "Allow",
+  "approval.refuse": "Refuse",
+  "approval.action.thread.move": "wants to move this terminal into {detail}",
+  "approval.action.project.create": "wants to create the project {detail}",
+  "approval.action.thread.spawn": "wants to open a terminal in another project ({detail})",
+
   "worktree.title": "Worktrees",
   "worktree.refresh": "Read the repository again",
   "worktree.loading": "Reading the repository…",
