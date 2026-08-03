@@ -335,7 +335,10 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
             let store = state.store.clone();
             let roots = state.roots.clone();
             let taken = blocking(move || {
-                boite_core::snapshot::take("server", &store, &roots, live)
+                // No window on this side, so nothing describes one. A device
+                // attached to this server has its own, and answers for it from
+                // its own snapshot.
+                boite_core::snapshot::take("server", &store, &roots, live, None)
             })
             .await?;
             Ok(serde_json::to_value(taken).unwrap())

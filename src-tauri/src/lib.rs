@@ -199,6 +199,7 @@ pub fn run() {
         .manage(local_pty::LocalSessions::new())
         .manage(BootState::default())
         .manage(ProjectRoots::default())
+        .manage(commands::app::LastScreen::default())
         .setup(|app| {
             let setup_handle = app.handle().clone();
             if let Err(e) = logging::begin_log_session(&setup_handle) {
@@ -294,6 +295,7 @@ pub fn run() {
             commands::app::workspace_timeline,
             commands::app::clear_app_log,
             commands::app::workspace_snapshot,
+            commands::app::record_screen,
             commands::app::log_file_path,
             commands::files::register_project_roots,
             commands::files::inspect_project,
