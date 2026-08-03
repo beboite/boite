@@ -33,8 +33,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use subtle::ConstantTimeEq;
 use tauri::{Emitter, Manager};
-use url::Url;
 
+use boite_core::browser;
 use boite_core::project;
 use boite_core::scope::ProjectRoots;
 
@@ -689,79 +689,6 @@ struct PaneOpenIn {
     side: Option<String>,
 }
 
-/// Hosts that mean "this machine", spelled exactly as a URL serializes them.
-///
-/// The list is short and literal on purpose: it is mirrored one for one by the
-/// `frame-src` list in `tauri.conf.json`, and a host this accepts that the CSP
-/// does not is a pane that opens blank. `127.0.0.2` is loopback to the network
-/// stack and is deliberately not here — nobody runs a dev server on it, and a
-/// rule the CSP cannot express is a rule that does not hold.
-const LOCAL_HOSTS: [&str; 4] = ["localhost", "127.0.0.1", "[::1]", "0.0.0.0"];
-
-/// The ports the app itself is served from in a dev build. See `BrowserUrl`.
-const APP_PORTS: [u16; 2] = [1420, 1430];
-
-/// An address a browser pane may point at, and whether it leaves this machine.
-struct BrowserUrl {
-    /// Re-serialized by the parser, so what the app frames is what was checked.
-    url: String,
-    /// Off this machine, so the app asks the user before framing it.
-    external: bool,
-}
-
-/// Decides what a browser pane is allowed to point at.
-///
-/// The address is not a link an agent printed, it is a document the app is
-/// about to host inside its own window, and a `starts_with("http://")` says
-/// nothing about that: `http://evil.com@localhost` passes it, so does
-/// `http://[::]`, and so does the app's own origin. Four rules, all of them on
-/// a parsed URL:
-///
-/// - **Scheme.** http or https, so `file://` and custom schemes cannot reach
-///   further than "show me a page" ever needs to.
-/// - **No credentials.** A userinfo segment exists here only to make the host
-///   read as something it is not.
-/// - **Never the app's own origin.** Tauri serves the window from
-///   `*.localhost`, and the dev build from a port on loopback. A page framed
-///   there is same-origin with the webview, which means `window.parent` and
-///   the IPC behind it.
-/// - **Cleartext stays on this machine.** A local dev server is the case this
-///   exists for; plain http to anywhere else is a document the network writes,
-///   and the shipped CSP frames no such thing either.
-///
-/// Anything that survives all four and is not on this machine is legal but not
-/// silent: it comes back marked `external`, and the app puts the user in front
-/// of it before the frame is created.
-fn classify_browser_url(raw: &str) -> Result<BrowserUrl, String> {
-    let parsed = Url::parse(raw).map_err(|_| "that is not a url".to_string())?;
-    if !matches!(parsed.scheme(), "http" | "https") {
-        return Err("url must start with http:// or https://".to_string());
-    }
-    if !parsed.username().is_empty() || parsed.password().is_some() {
-        return Err("url must not carry a username or a password".to_string());
-    }
-    let Some(host) = parsed.host_str().map(|h| h.to_ascii_lowercase()) else {
-        return Err("url must name a host".to_string());
-    };
-    if host.ends_with(".localhost") {
-        return Err("that is Boite's own origin, not a page".to_string());
-    }
-    let on_this_machine = LOCAL_HOSTS.contains(&host.as_str());
-    if on_this_machine && parsed.port().is_some_and(|p| APP_PORTS.contains(&p)) {
-        return Err("that is Boite's own origin, not a page".to_string());
-    }
-    if parsed.scheme() == "http" && !on_this_machine {
-        return Err(format!(
-            "http reaches {} only; use https off this machine",
-            LOCAL_HOSTS.join(", ")
-        ));
-    }
-    Ok(BrowserUrl {
-        url: parsed.to_string(),
-        external: !on_this_machine,
-    })
-}
-
 /// Shows the user something, beside the terminal the agent is talking in.
 ///
 /// The half of the split that no keyboard shortcut can provide: an agent that
@@ -777,10 +704,13 @@ async fn pane_open(
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let project_id = authorize(&inner, &headers)?;
     let kind = body.kind.trim().to_lowercase();
-    const KINDS: [&str; 6] = ["dashboard", "git", "explorer", "todo", "editor", "browser"];
-    if !KINDS.contains(&kind.as_str()) {
+    if !browser::PANE_KINDS.contains(&kind.as_str()) {
         return Ok(Json(json!({
-            "error": format!("unknown pane kind '{}', expected one of {}", kind, KINDS.join(", "))
+            "error": format!(
+                "unknown pane kind '{}', expected one of {}",
+                kind,
+                browser::PANE_KINDS.join(", ")
+            )
         })));
     }
     // Checked here rather than in the app: the agent is still alive to read a
@@ -792,19 +722,14 @@ async fn pane_open(
             if raw.is_empty() {
                 return Ok(Json(json!({ "error": "browser panes need a url" })));
             }
-            match classify_browser_url(raw) {
+            match browser::classify(raw) {
                 Ok(target) => (Some(target.url), target.external),
                 Err(reason) => return Ok(Json(json!({ "error": reason }))),
             }
         }
         _ => (None, false),
     };
-    let side = match body.side.as_deref().map(str::trim) {
-        Some("left") => "left",
-        Some("top") => "top",
-        Some("bottom") => "bottom",
-        _ => "right",
-    };
+    let side = browser::side_or_right(body.side.as_deref());
 
     let _ = inner.app.emit(
         AGENT_REQUEST,
@@ -1332,111 +1257,6 @@ mod cwd_resolution_tests {
     fn a_stray_percent_survives_decoding() {
         assert_eq!(decode_header_path("/w/100%/x"), "/w/100%/x");
         assert_eq!(decode_header_path("/w/a%zz"), "/w/a%zz");
-    }
-}
-
-/// The security boundary of the browser pane, so it is tested as one.
-///
-/// Everything here is a case that the old `starts_with("http://")` check let
-/// through: a host that is not the host it reads as, the app's own origin, and
-/// a remote page opening silently in the user's window.
-#[cfg(test)]
-mod browser_url_tests {
-    use super::classify_browser_url;
-
-    fn refused(raw: &str) -> String {
-        classify_browser_url(raw)
-            .err()
-            .unwrap_or_else(|| panic!("{raw} was allowed"))
-    }
-
-    fn allowed(raw: &str) -> (String, bool) {
-        let target = classify_browser_url(raw)
-            .unwrap_or_else(|e| panic!("{raw} was refused: {e}"));
-        (target.url, target.external)
-    }
-
-    #[test]
-    fn a_dev_server_on_this_machine_opens_without_asking() {
-        for raw in [
-            "http://localhost:5173/",
-            "http://127.0.0.1:3000/x?y=1",
-            "http://[::1]:8080/",
-            "http://0.0.0.0:4000/",
-            "https://localhost:5173/",
-        ] {
-            let (_, external) = allowed(raw);
-            assert!(!external, "{raw}");
-        }
-    }
-
-    #[test]
-    fn anywhere_else_is_legal_but_never_silent() {
-        let (url, external) = allowed("https://github.com/beboite/boite/pull/1");
-        assert!(external);
-        assert_eq!(url, "https://github.com/beboite/boite/pull/1");
-    }
-
-    /// The one the prefix check could never see: the host a human reads is the
-    /// userinfo, and the host the request goes to is whatever follows the `@`.
-    #[test]
-    fn credentials_in_the_authority_are_refused() {
-        for raw in [
-            "http://evil.com@localhost/",
-            "http://evil.com@127.0.0.1:1234/",
-            "https://user:pass@example.com/",
-        ] {
-            assert!(refused(raw).contains("username"), "{raw}");
-        }
-    }
-
-    /// `tauri.localhost` is the window itself on Windows, and 1420 is the dev
-    /// server. A page framed at either reaches `window.parent` and the IPC.
-    #[test]
-    fn the_apps_own_origin_is_refused_outright() {
-        for raw in [
-            "http://tauri.localhost/index.html",
-            "http://ipc.localhost/",
-            "http://asset.localhost/x",
-            "https://tauri.localhost/",
-            "http://localhost:1420/",
-            "http://127.0.0.1:1420/",
-            "http://localhost:1430/",
-        ] {
-            assert!(refused(raw).contains("own origin"), "{raw}");
-        }
-    }
-
-    /// Cleartext off this machine is refused rather than confirmed: the shipped
-    /// `frame-src` does not carry plain `http:` either, so allowing it here
-    /// would only produce a pane that asks the user a question and then stays
-    /// blank whatever they answer.
-    #[test]
-    fn cleartext_stops_at_this_machine() {
-        assert!(refused("http://example.com/").contains("https"));
-        assert!(refused("http://[::]/").contains("https"));
-        assert!(refused("http://127.0.0.2:3000/").contains("https"));
-    }
-
-    #[test]
-    fn only_http_and_https_are_schemes() {
-        for raw in [
-            "file:///etc/passwd",
-            "javascript:alert(1)",
-            "data:text/html,<script>x</script>",
-            "tauri://localhost/",
-            "not a url at all",
-            "localhost:3000",
-        ] {
-            let _ = refused(raw);
-        }
-    }
-
-    /// What the app frames is what was checked, not the string the agent sent.
-    #[test]
-    fn the_answer_is_the_parsed_form() {
-        let (url, _) = allowed("HTTP://LocalHost:3000");
-        assert_eq!(url, "http://localhost:3000/");
     }
 }
 

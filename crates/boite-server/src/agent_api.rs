@@ -22,6 +22,7 @@ use serde_json::json;
 use subtle::ConstantTimeEq;
 use tokio::sync::broadcast;
 
+use boite_core::browser;
 use boite_core::project;
 use boite_core::scope::ProjectRoots;
 
@@ -37,6 +38,9 @@ pub struct AgentApi {
 struct Inner {
     store: Arc<Store>,
     events: broadcast::Sender<AppEvent>,
+    /// Authenticated clients right now. Zero means nothing on the other side
+    /// can carry out a request, and saying so beats answering `200`.
+    devices: Arc<std::sync::atomic::AtomicUsize>,
     token: String,
     /// The same boundary the RPC applies, so where a project may be created is
     /// one rule rather than two that drift.
@@ -200,10 +204,24 @@ fn resolve_project(inner: &Inner, needle: &str) -> Result<(String, String), Stri
 /// PTY and opening a worktree, and the client is what drives both. It also
 /// cannot know which device is looking, so the request goes to all of them and
 /// `agent.claimRequest` settles who takes it.
-fn dispatch(inner: &Inner, mut request: serde_json::Value) {
+fn dispatch(inner: &Inner, mut request: serde_json::Value) -> Result<(), String> {
+    if inner.devices.load(std::sync::atomic::Ordering::Relaxed) == 0 {
+        return Err(NOBODY_TO_CARRY_IT_OUT.to_string());
+    }
     request["requestId"] = json!(uuid::Uuid::new_v4().to_string());
     let _ = inner.events.send(AppEvent::AgentRequest(request));
+    Ok(())
 }
+
+/// What an agent is told when it asks for something no device is there to do.
+///
+/// It used to be told nothing: the send failed with no receiver, the error was
+/// dropped on the floor and the handler answered success anyway. On a headless
+/// boite with nobody connected — which is the deployment this crate exists for
+/// — the agent read `moving to <project>`, carried on as if it had moved, and
+/// no PTY had been touched.
+pub const NOBODY_TO_CARRY_IT_OUT: &str =
+    "no Boite device is connected, and the server cannot do this on its own: it means killing a      PTY and rearranging rows a client owns. Open Boite on a device and ask again.";
 
 #[derive(Deserialize)]
 struct MoveIn {
@@ -229,7 +247,7 @@ async fn thread_move(
         Ok(found) => found,
         Err(reason) => return Ok(Json(json!({ "error": reason }))),
     };
-    dispatch(
+    if let Err(reason) = dispatch(
         &inner,
         json!({
             "kind": "thread.move",
@@ -237,7 +255,9 @@ async fn thread_move(
             "projectId": project_id,
             "note": body.note,
         }),
-    );
+    ) {
+        return Ok(Json(json!({ "error": reason })));
+    }
     Ok(Json(json!({ "project": name })))
 }
 
@@ -271,7 +291,7 @@ async fn project_create(
     if let Some(reason) = folder_refusal(&inner, &body) {
         return Ok(Json(json!({ "error": reason })));
     }
-    dispatch(
+    if let Err(reason) = dispatch(
         &inner,
         json!({
             "kind": "project.create",
@@ -284,13 +304,15 @@ async fn project_create(
             "move": body.r#move.unwrap_or(true),
             "note": body.note,
         }),
-    );
+    ) {
+        return Ok(Json(json!({ "error": reason })));
+    }
     Ok(Json(json!({ "name": name })))
 }
 
 /// What the RPC says when a folder sits outside every place a project may go.
-pub const WRONG_PLACE_FOR_A_PROJECT: &str =
-    "a new project has to go under the home folder or beside a project that already exists";
+/// One wording for both endpoints; see the constant's own comment for why.
+pub use boite_core::project::WRONG_PLACE_FOR_A_PROJECT;
 
 /// Why the folder an agent named cannot become a project, if it cannot.
 ///
@@ -379,7 +401,7 @@ async fn thread_spawn(
         },
         None => own_project,
     };
-    dispatch(
+    if let Err(reason) = dispatch(
         &inner,
         json!({
             "kind": "thread.spawn",
@@ -391,21 +413,108 @@ async fn thread_spawn(
             "agent": body.agent,
             "prompt": body.prompt,
         }),
-    );
+    ) {
+        return Ok(Json(json!({ "error": reason })));
+    }
     Ok(Json(json!({ "ok": true })))
 }
 
+#[derive(Deserialize)]
+struct PaneOpenIn {
+    kind: String,
+    #[serde(default)]
+    url: Option<String>,
+    /// left, right, top or bottom. Defaults to right.
+    #[serde(default)]
+    side: Option<String>,
+}
+
+/// Shows the user something, beside the terminal the agent is talking in.
+///
+/// The MCP has advertised `pane_open` since it was written and this route did
+/// not exist, so every call against a boite-server came back 404 and the agent
+/// read an opaque failure for a verb the tool list told it it had. What it does
+/// is the desktop handler's job, decided by the same shared rules: which pane
+/// kinds exist, and what a browser pane may point at.
+async fn pane_open(
+    State(inner): State<Arc<Inner>>,
+    headers: HeaderMap,
+    Json(body): Json<PaneOpenIn>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let project_id = authorize(&inner, &headers)?;
+    let kind = body.kind.trim().to_lowercase();
+    if !browser::PANE_KINDS.contains(&kind.as_str()) {
+        return Ok(Json(json!({
+            "error": format!(
+                "unknown pane kind '{}', expected one of {}",
+                kind,
+                browser::PANE_KINDS.join(", ")
+            )
+        })));
+    }
+    // Settled here rather than on the device: the agent is still running to
+    // read a refusal, and a browser pane with no address is a blank frame
+    // somebody has to close by hand.
+    let (url, external) = match kind.as_str() {
+        "browser" => {
+            let raw = body.url.as_deref().map(str::trim).unwrap_or("");
+            if raw.is_empty() {
+                return Ok(Json(json!({ "error": "browser panes need a url" })));
+            }
+            match browser::classify(raw) {
+                Ok(target) => (Some(target.url), target.external),
+                Err(reason) => return Ok(Json(json!({ "error": reason }))),
+            }
+        }
+        _ => (None, false),
+    };
+    if let Err(reason) = dispatch(
+        &inner,
+        json!({
+            "kind": "pane.open",
+            "projectId": project_id,
+            "callerThreadId": thread_of_request(&inner, &headers).ok(),
+            "pane": kind,
+            "url": url,
+            // Off this machine, so the device asks before framing it. It
+            // classifies the address again on its side rather than trusting
+            // this one.
+            "external": external,
+            "side": browser::side_or_right(body.side.as_deref()),
+        }),
+    ) {
+        return Ok(Json(json!({ "error": reason })));
+    }
+    Ok(Json(json!({ "ok": true })))
+}
+
+/// The worktree an agent is standing in, and what it could switch to.
+///
+/// Three `git` processes, off the async runtime. This ran inline and was the
+/// one place in the crate that did: with a few agents asking at once — and
+/// they ask on most turns — the threads carrying every client's own commands
+/// end up inside `CreateProcess` instead. The desktop twin says the same thing
+/// above its own `off_thread`, which is where this was missed when the handler
+/// was retyped here.
 async fn worktree_status(
     State(inner): State<Arc<Inner>>,
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let (repo, worktree) = worktree_of_request(&inner, &headers)?;
-    let hold = boite_core::git::worktree_hold_blocking(&worktree)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let branches = boite_core::git::branches_blocking(&repo).unwrap_or_default();
-    let current = boite_core::git::repo_info_blocking(&worktree)
-        .ok()
-        .and_then(|i| i.branch);
+    let (hold, branches, current) = {
+        let (repo, worktree) = (repo.clone(), worktree.clone());
+        tokio::task::spawn_blocking(move || {
+            let hold = boite_core::git::worktree_hold_blocking(&worktree);
+            let branches = boite_core::git::branches_blocking(&repo).unwrap_or_default();
+            let current = boite_core::git::repo_info_blocking(&worktree)
+                .ok()
+                .and_then(|i| i.branch);
+            (hold, branches, current)
+        })
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    };
+    let hold = hold.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(Json(json!({
         "path": worktree,
         "repo": repo,
@@ -562,11 +671,13 @@ pub async fn start(
     events: broadcast::Sender<AppEvent>,
     roots: Arc<ProjectRoots>,
     workspace_dir: Option<PathBuf>,
+    devices: Arc<std::sync::atomic::AtomicUsize>,
 ) -> Option<AgentApi> {
     let token = format!("{:032x}", rand::random::<u128>());
     let inner = Arc::new(Inner {
         store,
         events,
+        devices,
         token: token.clone(),
         roots,
         workspace_dir,
@@ -582,6 +693,7 @@ pub async fn start(
         .route("/v1/projects", get(projects).post(project_create))
         .route("/v1/thread/move", post(thread_move))
         .route("/v1/threads", post(thread_spawn))
+        .route("/v1/pane/open", post(pane_open))
         .with_state(inner);
 
     let listener = match tokio::net::TcpListener::bind("127.0.0.1:0").await {

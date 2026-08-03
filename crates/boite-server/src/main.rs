@@ -91,11 +91,13 @@ async fn main() {
     // Loopback only, and a secret of its own: the main server may be bound to a
     // routable interface, and an agent appending to a checklist is not the same
     // principal as a device driving the workspace.
+    let devices = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let agent_api = agent_api::start(
         store.clone(),
         events.clone(),
         roots.clone(),
         config.workspace_dir.clone(),
+        devices.clone(),
     )
     .await;
 
@@ -111,6 +113,7 @@ async fn main() {
         max_threads: config.max_threads,
         max_connections: config.max_connections,
         conns: std::sync::atomic::AtomicUsize::new(0),
+        devices,
         workspace_dir: config.workspace_dir,
         data_dir: config.data_dir,
         claimed_requests: Default::default(),

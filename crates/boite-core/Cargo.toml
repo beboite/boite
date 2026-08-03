@@ -19,6 +19,9 @@ base64 = "0.23"
 uuid = { version = "1", features = ["v4"] }
 parking_lot = "0.12"
 rusqlite = { version = "0.32", features = ["bundled"] }
+# Parsing, not string matching: what a browser pane may frame is decided on a
+# parsed URL, and both endpoints ask the same module (`browser`).
+url = "2"
 
 # kill(pid, 0) to tell a live claude session from a registry entry left behind
 # by one that died. Windows uses OpenProcess from windows-sys below.
