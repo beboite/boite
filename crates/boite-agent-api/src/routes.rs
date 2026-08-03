@@ -58,6 +58,7 @@ pub fn router(workspace: Shared) -> Router {
         .route("/v1/pane/open", post(pane_open))
         .route("/v1/snapshot", get(snapshot))
         .route("/v1/transcript", get(transcript))
+        .route("/v1/search", get(search))
         .layer(axum::middleware::from_fn_with_state(
             workspace.clone(),
             crate::auth::identify,
@@ -387,6 +388,50 @@ async fn transcript(
         Ok(text) => Json(json!({ "text": text })),
         Err(reason) => refused(reason),
     })
+}
+
+#[derive(Deserialize)]
+struct SearchIn {
+    q: Option<String>,
+    limit: Option<u32>,
+}
+
+/// Anything in this workspace with that text in it.
+///
+/// Three sources and one answer: todos, the project's log, and what the
+/// terminals printed. An agent looking for where an error came from should not
+/// have to know which of the three it is in, and until this existed the answer
+/// was "none of them, because nothing was written down".
+async fn search(
+    State(workspace): State<Shared>,
+    Extension(_caller): Extension<Caller>,
+    axum::extract::Query(query): axum::extract::Query<SearchIn>,
+) -> Result<Json<Value>, StatusCode> {
+    let needle = query.q.unwrap_or_default().trim().to_string();
+    if needle.is_empty() {
+        return Ok(refused("say what to look for"));
+    }
+    let limit = query.limit.unwrap_or(20).clamp(1, 100) as usize;
+    let dir = workspace.transcripts_dir();
+    let hits = blocking({
+        let workspace = workspace.clone();
+        move || {
+            let mut hits = workspace.store().search(&needle, limit);
+            if let Some(dir) = dir {
+                // The rows first: a todo or a refusal is a shorter answer than
+                // a line of terminal output, and a caller reading a list wants
+                // the short ones at the top.
+                hits.extend(boite_core::search::transcripts(
+                    &dir,
+                    &needle,
+                    limit.saturating_sub(hits.len()),
+                ));
+            }
+            hits
+        }
+    })
+    .await?;
+    Ok(Json(json!({ "hits": hits })))
 }
 
 // ------------------------------------------------------------ worktrees

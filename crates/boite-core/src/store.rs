@@ -4,7 +4,7 @@ use parking_lot::Mutex;
 use rusqlite::Connection;
 
 use crate::model::{Project, Thread, Todo};
-use crate::{approval, journal, migrations};
+use crate::{approval, journal, migrations, search};
 
 pub struct Store {
     conn: Mutex<Connection>,
@@ -126,6 +126,18 @@ impl Store {
 
     pub fn save_todo(&self, t: &Todo) -> Result<(), String> {
         let conn = self.conn.lock();
+        search::index(
+            &conn,
+            search::Kind::Todo,
+            &t.project_id,
+            &t.id,
+            &[
+                t.title.as_str(),
+                t.description.as_deref().unwrap_or_default(),
+                t.note.as_deref().unwrap_or_default(),
+            ]
+            .join(" "),
+        );
         conn.execute(
             "INSERT OR REPLACE INTO todos
              (id, project_id, text, description, state, note, commit_sha, claimed_by,
@@ -381,7 +393,25 @@ impl Store {
     /// inventing one, which is the right way round.
     pub fn record(&self, entry: journal::Entry) -> Result<journal::Recorded, String> {
         let mut conn = self.conn.lock();
-        journal::append(&mut conn, entry)
+        let recorded = journal::append(&mut conn, entry)?;
+        // What happened is half of what anybody searches for. An entry never
+        // changes, so this is an insert and never a correction.
+        search::index(
+            &conn,
+            search::Kind::Event,
+            &recorded.project_id,
+            &format!("{}#{}", recorded.project_id, recorded.seq),
+            &searchable(&recorded),
+        );
+        Ok(recorded)
+    }
+
+    /// Everything a caller might type when looking for one entry, and nothing
+    /// that is only meaningful to the chain: a hash is not something anyone
+    /// searches by, and indexing it would put two hex strings in every row.
+    pub fn search(&self, needle: &str, limit: usize) -> Vec<search::Hit> {
+        let conn = self.conn.lock();
+        search::rows(&conn, needle, limit)
     }
 
     pub fn add_todo(
@@ -411,6 +441,15 @@ impl Store {
             rusqlite::params![id, project_id, title, description, position, now],
         )
         .map_err(|e| e.to_string())?;
+        // Indexed where it is written, so there is no rebuild to run and no
+        // reconciliation to get wrong.
+        search::index(
+            &conn,
+            search::Kind::Todo,
+            project_id,
+            &id,
+            &[title, description.unwrap_or_default()].join(" "),
+        );
         Ok(id)
     }
 
@@ -444,6 +483,7 @@ impl Store {
         let conn = self.conn.lock();
         conn.execute("DELETE FROM todos WHERE id = ?1", rusqlite::params![id])
             .map_err(|e| e.to_string())?;
+        search::forget(&conn, search::Kind::Todo, id);
         Ok(())
     }
 
@@ -762,6 +802,24 @@ impl Store {
         .map_err(|e| e.to_string())?;
         Ok(())
     }
+}
+
+/// One journal entry flattened into the words it could be found by.
+fn searchable(recorded: &journal::Recorded) -> String {
+    let mut out = String::from(&recorded.action);
+    out.push(' ');
+    out.push_str(&recorded.actor);
+    if let Some(object) = &recorded.object_id {
+        out.push(' ');
+        out.push_str(object);
+    }
+    for (key, value) in &recorded.detail {
+        out.push(' ');
+        out.push_str(key);
+        out.push(' ');
+        out.push_str(value);
+    }
+    out
 }
 
 pub struct PushSub {

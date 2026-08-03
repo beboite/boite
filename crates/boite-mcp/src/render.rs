@@ -277,6 +277,37 @@ pub(crate) fn format_projects(out: &Value) -> String {
     w.into_string()
 }
 
+/// What a search found, one row each.
+///
+/// The kind is the first column on purpose: a hit in the log carries a reason
+/// somebody already wrote down, and a hit in a transcript is raw output. Which
+/// one it is decides what to do next.
+pub(crate) fn format_hits(out: &Value) -> String {
+    let hits = out.get("hits").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    if hits.is_empty() {
+        let mut w = Toon::new();
+        w.field("hits", "none");
+        w.hint("try fewer words, or a path or error code exactly as it was printed");
+        return w.into_string();
+    }
+    let rows: Vec<Vec<String>> = hits
+        .iter()
+        .map(|hit| {
+            let at = |key: &str| {
+                hit.get(key)
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string()
+            };
+            vec![at("kind"), clip(&at("refId"), 12), clip(&at("excerpt"), MAX_CELL)]
+        })
+        .collect();
+    let mut w = Toon::new();
+    w.table("hits", &["kind", "ref", "text"], &rows);
+    w.hint("a transcript ref is a thread id: terminal_transcript threadId=<ref> reads more of it");
+    w.into_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

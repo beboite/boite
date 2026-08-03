@@ -354,6 +354,30 @@ if (agentUrl && keyFile) {
     `status=${other.status}`,
   );
 
+  // Three sources, one answer. The todo list is empty here, so what this
+  // proves is the other two: the log of what was refused, and what a terminal
+  // printed. Both were unfindable before, because neither was written down.
+  const looking = "MIDMARK";
+  const searched = await fetch(`${agentUrl}/v1/search?limit=20&q=${looking}`, {
+    headers: signedHeaders(key, probeId, "GET", `/v1/search?limit=20&q=${looking}`, ""),
+  });
+  const hits = searched.status === 200 ? await searched.json() : null;
+  check(
+    "what a terminal printed is findable across the workspace",
+    (hits?.hits ?? []).some((h) => h.kind === "transcript" && h.excerpt.includes(looking)),
+    `status=${searched.status}`,
+  );
+
+  const denied = await fetch(`${agentUrl}/v1/search?limit=20&q=thread.move`, {
+    headers: signedHeaders(key, probeId, "GET", "/v1/search?limit=20&q=thread.move", ""),
+  });
+  const events = denied.status === 200 ? await denied.json() : null;
+  check(
+    "what an agent asked for is findable in the log",
+    (events?.hits ?? []).some((h) => h.kind === "event"),
+    `status=${denied.status}`,
+  );
+
   // The one call an agent makes instead of asking a human what they see. Its
   // value is the comparison: what the rows claim, next to what this process
   // actually has a process for.
