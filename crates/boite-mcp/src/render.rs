@@ -277,6 +277,36 @@ pub(crate) fn format_projects(out: &Value) -> String {
     w.into_string()
 }
 
+/// What happened, one row each, newest first.
+///
+/// No timestamps in the table. They are milliseconds since the epoch and the
+/// order is the answer, so a column of thirteen-digit numbers would cost a
+/// token per row and tell the reader nothing they do not already have from the
+/// order itself.
+pub(crate) fn format_moments(out: &Value) -> String {
+    let moments = out
+        .get("moments")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    if moments.is_empty() {
+        let mut w = Toon::new();
+        w.field("moments", "none");
+        return w.into_string();
+    }
+    let rows: Vec<Vec<String>> = moments
+        .iter()
+        .map(|m| {
+            let at = |key: &str| m.get(key).and_then(|v| v.as_str()).unwrap_or("").to_string();
+            vec![at("kind"), clip(&at("text"), MAX_CELL)]
+        })
+        .collect();
+    let mut w = Toon::new();
+    w.table("moments", &["kind", "what"], &rows);
+    w.hint("newest first; workspace_search finds where something is, this shows what it was next to");
+    w.into_string()
+}
+
 /// What a search found, one row each.
 ///
 /// The kind is the first column on purpose: a hit in the log carries a reason

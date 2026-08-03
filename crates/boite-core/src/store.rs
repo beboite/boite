@@ -4,7 +4,7 @@ use parking_lot::Mutex;
 use rusqlite::Connection;
 
 use crate::model::{Project, Thread, Todo};
-use crate::{approval, journal, migrations, search};
+use crate::{approval, journal, migrations, search, timeline};
 
 pub struct Store {
     conn: Mutex<Connection>,
@@ -412,6 +412,12 @@ impl Store {
     pub fn search(&self, needle: &str, limit: usize) -> Vec<search::Hit> {
         let conn = self.conn.lock();
         search::rows(&conn, needle, limit)
+    }
+
+    /// What happened here, newest first. See `crate::timeline`.
+    pub fn timeline(&self, project_id: Option<&str>, limit: usize) -> Vec<timeline::Moment> {
+        let conn = self.conn.lock();
+        timeline::from_store(&conn, project_id, limit)
     }
 
     pub fn add_todo(

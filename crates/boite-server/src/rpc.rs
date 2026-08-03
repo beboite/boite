@@ -552,6 +552,23 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
             Ok(json!({ "hits": hits }))
         }
 
+        "timeline.read" => {
+            let limit = params
+                .get("limit")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(40)
+                .clamp(1, 200) as usize;
+            let project = params
+                .get("project")
+                .and_then(|v| v.as_str())
+                .filter(|p| !p.is_empty())
+                .map(|p| p.to_string());
+            let store = state.store.clone();
+            let moments =
+                blocking(move || store.timeline(project.as_deref(), limit)).await?;
+            Ok(json!({ "moments": moments }))
+        }
+
         "approval.list" => {
             let api = state.agent_api.as_ref().ok_or("the agent endpoint is not running")?;
             Ok(json!({ "approvals": api.workspace.store().open_approvals()? }))

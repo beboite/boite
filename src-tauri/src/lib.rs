@@ -291,6 +291,7 @@ pub fn run() {
             commands::app::finish_boot,
             commands::app::log_app_event,
             commands::app::read_app_log,
+            commands::app::workspace_timeline,
             commands::app::clear_app_log,
             commands::app::workspace_snapshot,
             commands::app::log_file_path,

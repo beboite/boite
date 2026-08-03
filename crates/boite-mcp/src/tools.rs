@@ -144,6 +144,18 @@ fn common_tools() -> Value {
             "annotations": { "title": "Snapshot", "readOnlyHint": true, "idempotentHint": true, "openWorldHint": false }
         },
         {
+            "name": "workspace_timeline",
+            "description": "What happened in this workspace, newest first: what agents did and were                             refused, what moved on the todo list, and when each terminal was                             opened, all on one clock. Read it when something changed and you do                             not know what else changed with it. workspace_search finds where                             something is; this shows what it happened next to.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "project": { "type": "string", "description": "One project. Omit for the whole workspace." },
+                    "limit": { "type": "number", "description": "How many moments. Default 40, max 200." }
+                }
+            },
+            "annotations": { "title": "Timeline", "readOnlyHint": true, "idempotentHint": false, "openWorldHint": false }
+        },
+        {
             "name": "workspace_search",
             "description": "Find text anywhere in this workspace: the todo list, the log of what                             agents did and were refused, and what the terminals printed. Use it                             before asking a human where something is, and before assuming a                             failure is new — the same error is often already in another                             terminal or already in the log with the reason attached.",
             "inputSchema": {
