@@ -378,6 +378,22 @@ if (agentUrl && keyFile) {
     `status=${denied.status}`,
   );
 
+  // And the other axis: what happened, in order, across all three sources.
+  const when = await fetch(`${agentUrl}/v1/timeline?limit=50`, {
+    headers: signedHeaders(key, probeId, "GET", "/v1/timeline?limit=50", ""),
+  });
+  const moments = when.status === 200 ? await when.json() : null;
+  const kinds = new Set((moments?.moments ?? []).map((m) => m.kind));
+  check(
+    "the timeline carries every source on one clock",
+    kinds.has("event") && kinds.has("thread"),
+    `status=${when.status} kinds=${[...kinds].join(",")}`,
+  );
+  check(
+    "the timeline is newest first",
+    (moments?.moments ?? []).every((m, i, all) => i === 0 || all[i - 1].at >= m.at),
+  );
+
   // The one call an agent makes instead of asking a human what they see. Its
   // value is the comparison: what the rows claim, next to what this process
   // actually has a process for.

@@ -59,6 +59,7 @@ pub fn router(workspace: Shared) -> Router {
         .route("/v1/snapshot", get(snapshot))
         .route("/v1/transcript", get(transcript))
         .route("/v1/search", get(search))
+        .route("/v1/timeline", get(timeline))
         .layer(axum::middleware::from_fn_with_state(
             workspace.clone(),
             crate::auth::identify,
@@ -432,6 +433,34 @@ async fn search(
     })
     .await?;
     Ok(Json(json!({ "hits": hits })))
+}
+
+#[derive(Deserialize)]
+struct TimelineIn {
+    /// Scoped to one project, or the whole workspace when absent.
+    project: Option<String>,
+    limit: Option<u32>,
+}
+
+/// What happened here, newest first.
+///
+/// `search` answers where something is; this answers when, and next to what.
+/// Three sources on one clock, because each misses what the others have: an
+/// agent's work is in the journal, a user ticking a box is only on the todo
+/// row, and a terminal being opened is only on the thread.
+async fn timeline(
+    State(workspace): State<Shared>,
+    Extension(_caller): Extension<Caller>,
+    axum::extract::Query(query): axum::extract::Query<TimelineIn>,
+) -> Result<Json<Value>, StatusCode> {
+    let limit = query.limit.unwrap_or(40).clamp(1, 200) as usize;
+    let project = query.project.filter(|p| !p.is_empty());
+    let moments = blocking({
+        let workspace = workspace.clone();
+        move || workspace.store().timeline(project.as_deref(), limit)
+    })
+    .await?;
+    Ok(Json(json!({ "moments": moments })))
 }
 
 // ------------------------------------------------------------ worktrees

@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 
 use crate::host::Host;
 use crate::render::{
-    format_artifacts, format_hits, format_projects, format_todos, format_worktree, prefix,
+    format_artifacts, format_hits, format_moments, format_projects, format_todos, format_worktree, prefix,
 };
 use crate::toon::Toon;
 use crate::{encode_query, MAX_BRANCHES};
@@ -70,6 +70,19 @@ pub(crate) fn call_tool(host: &Host, name: &str, args: &Value) -> Result<String,
         "workspace_snapshot" => {
             let out = host.send("GET", "/v1/snapshot", None)?;
             Ok(serde_json::to_string_pretty(&out).unwrap_or_else(|_| out.to_string()))
+        }
+        "workspace_timeline" => {
+            let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(40);
+            let mut path = format!("/v1/timeline?limit={limit}");
+            if let Some(project) = args.get("project").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+                path.push_str("&project=");
+                path.push_str(&encode_query(project));
+            }
+            let out = host.send("GET", &path, None)?;
+            if let Some(error) = out.get("error").and_then(|v| v.as_str()) {
+                return Err(error.to_string());
+            }
+            Ok(format_moments(&out))
         }
         "workspace_search" => {
             let needle = args.get("q").and_then(|v| v.as_str()).unwrap_or("").trim();

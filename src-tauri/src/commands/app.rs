@@ -91,6 +91,48 @@ pub fn log_app_event(
     logging::append_app_log(&app, &level, &source, &message, details.as_deref())
 }
 
+/// What happened here, newest first, with this app's own log merged in.
+///
+/// The one place the whole timeline can actually be assembled. The database
+/// knows what agents did and what moved; the log file knows what the Rust side
+/// and the window threw, and it is a file only a desktop has. The server
+/// answers `timeline.read` without this half, because on that side the Rust log
+/// is stdout and belongs to whatever is running the container.
+#[tauri::command]
+pub fn workspace_timeline(
+    app: AppHandle,
+    project: Option<String>,
+    limit: Option<u32>,
+) -> Result<Vec<boite_core::timeline::Moment>, String> {
+    use boite_core::timeline::Moment;
+
+    let limit = limit.unwrap_or(40).clamp(1, 200) as usize;
+    let config_dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|e| format!("app_config_dir: {e}"))?;
+    let store = boite_core::store::Store::attach(&config_dir.join("boite.db"))?;
+    let rows = store.timeline(project.as_deref().filter(|p| !p.is_empty()), limit);
+
+    // Only what went wrong. A log line per IPC call would bury the three
+    // sources that are actually about the workspace, and an `info` about a
+    // successful command is not a moment anybody is looking for.
+    let logged: Vec<Moment> = logging::log_file_path(&app)
+        .and_then(|path| logging::read_log_file(&path))
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|e| e.level == "error" || e.level == "warn")
+        .map(|e| Moment {
+            at: e.ts_ms as i64,
+            kind: format!("log.{}", e.level),
+            project_id: String::new(),
+            text: format!("{}: {}", e.source, e.message),
+        })
+        .collect();
+
+    Ok(boite_core::timeline::merge(vec![rows, logged], limit))
+}
+
 #[tauri::command]
 pub fn read_app_log(app: AppHandle, scope: String) -> Result<Vec<LogEntry>, String> {
     let path = match scope.as_str() {
