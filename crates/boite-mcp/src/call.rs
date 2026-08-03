@@ -71,6 +71,26 @@ pub(crate) fn call_tool(host: &Host, name: &str, args: &Value) -> Result<String,
             let out = host.send("GET", "/v1/snapshot", None)?;
             Ok(serde_json::to_string_pretty(&out).unwrap_or_else(|_| out.to_string()))
         }
+        // Text, not TOON: it is what a screen said, and any framing around it
+        // is one more thing between the agent and the line it is looking for.
+        "terminal_transcript" => {
+            let mut path = String::from("/v1/transcript?bytes=");
+            path.push_str(&args.get("bytes").and_then(|v| v.as_u64()).unwrap_or(16_384).to_string());
+            if let Some(id) = args.get("threadId").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+                path.push_str("&threadId=");
+                path.push_str(id);
+            }
+            let out = host.send("GET", &path, None)?;
+            if let Some(error) = out.get("error").and_then(|v| v.as_str()) {
+                return Err(error.to_string());
+            }
+            let text = out.get("text").and_then(|v| v.as_str()).unwrap_or("");
+            Ok(if text.is_empty() {
+                "this terminal has printed nothing that was kept".to_string()
+            } else {
+                text.to_string()
+            })
+        }
         "worktree_branch" => branch_call(host, args, "/v1/worktree/branch", "worktree_branch"),
         "worktree_reserve" => branch_call(host, args, "/v1/worktree/reserve", "worktree_reserve"),
         "artifacts_status" => {

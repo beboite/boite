@@ -13,6 +13,7 @@ use std::path::PathBuf;
 
 
 use serde_json::Value;
+use tauri::Manager;
 
 use boite_core::capability::Grant;
 use boite_core::command::Command;
@@ -32,6 +33,7 @@ pub(super) struct DesktopHost<'a> {
     roots: &'a ProjectRoots,
     manager: Option<&'a PtyManager>,
     legacy_worktree_base: Option<PathBuf>,
+    transcripts: Option<PathBuf>,
 }
 
 impl<'a> DesktopHost<'a> {
@@ -40,7 +42,20 @@ impl<'a> DesktopHost<'a> {
             roots,
             manager: None,
             legacy_worktree_base: None,
+            transcripts: None,
         }
+    }
+
+    /// Where this app writes what its terminals print. Built from the app
+    /// handle rather than held, so a command that has one can answer and one
+    /// that has none says so.
+    pub(super) fn with_transcripts(mut self, app: &tauri::AppHandle) -> Self {
+        self.transcripts = app
+            .path()
+            .app_config_dir()
+            .ok()
+            .map(|dir| dir.join("transcripts"));
+        self
     }
 
     pub(super) fn with_pty(mut self, manager: &'a PtyManager) -> Self {
@@ -65,6 +80,10 @@ impl boite_core::command::Host for DesktopHost<'_> {
 
     fn child_pid(&self, pty_id: &str) -> Option<u32> {
         self.manager.and_then(|m| m.child_pid(pty_id))
+    }
+
+    fn transcripts_dir(&self) -> Option<PathBuf> {
+        self.transcripts.clone()
     }
 }
 

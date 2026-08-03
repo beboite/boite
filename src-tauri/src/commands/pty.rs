@@ -80,6 +80,15 @@ pub async fn pty_open(
             ),
         }
     }
+    // Beside the database, so a terminal's whole run outlives the process that
+    // printed it. `None` only when the app has no config directory, which is
+    // the same condition that leaves it with no database either.
+    let transcripts = app
+        .path()
+        .app_config_dir()
+        .ok()
+        .map(|dir| dir.join("transcripts"));
+
     tauri::async_runtime::spawn_blocking(move || {
         if let Some((pty_id, sink)) = sessions.get(&thread_id) {
             if manager.is_alive(&pty_id) {
@@ -90,7 +99,10 @@ pub async fn pty_open(
             }
             sessions.remove_by_pty(&pty_id);
         }
-        let sink = Arc::new(LocalSink::new(on_event));
+        let sink = Arc::new(match &transcripts {
+            Some(dir) => LocalSink::recording(on_event, dir, &thread_id),
+            None => LocalSink::new(on_event),
+        });
         let pty_id = manager.spawn(sink.clone(), spec)?;
         sessions.insert(thread_id, pty_id.clone(), sink);
         Ok(pty_id)

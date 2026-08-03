@@ -78,7 +78,17 @@ async fn main() {
                 })
         }) as registry::IdentityLookup
     };
-    let registry = Registry::new(config.scrollback_bytes, emit, identity);
+    // Beside the database. A transcript is the only record of what an agent
+    // actually did in its terminal, and it used to die with the process.
+    let transcripts = config.data_dir.join("transcripts");
+    let transcripts = match std::fs::create_dir_all(&transcripts) {
+        Ok(()) => Some(transcripts),
+        Err(e) => {
+            tracing::warn!("terminals run without a transcript: {e}");
+            None
+        }
+    };
+    let registry = Registry::new(config.scrollback_bytes, transcripts, emit, identity);
     // Shared rather than owned by the state: the agent endpoint decides where a
     // project may be created, and it has to read the same boundary the RPC does,
     // including every refresh after a project is added.

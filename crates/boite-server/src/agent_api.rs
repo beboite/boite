@@ -98,6 +98,10 @@ impl Workspace for ServerWorkspace {
         Ok(())
     }
 
+    fn transcripts_dir(&self) -> Option<PathBuf> {
+        self.registry.transcripts_dir()
+    }
+
     fn live_ptys(&self) -> Vec<boite_core::snapshot::LivePty> {
         let manager = self.registry.pty_manager();
         self.registry

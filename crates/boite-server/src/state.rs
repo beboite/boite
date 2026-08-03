@@ -205,6 +205,10 @@ impl boite_core::command::Host for ServerHost<'_> {
     fn child_pid(&self, pty_id: &str) -> Option<u32> {
         self.state.registry.pty_manager().child_pid(pty_id)
     }
+
+    fn transcripts_dir(&self) -> Option<PathBuf> {
+        self.state.registry.transcripts_dir()
+    }
 }
 
 fn ensure_under(root: &Path, path: &str) -> Result<(), String> {

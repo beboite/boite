@@ -6,7 +6,7 @@
 //! and the server had always had the single version.
 
 
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use serde_json::Value;
 
@@ -16,7 +16,7 @@ use boite_core::scope::ProjectRoots;
 use boite_core::session;
 
 
-use super::bus::{on_bus, on_bus_with_pty};
+use super::bus::{on_bus, on_bus_with_pty, through, DesktopHost};
 
 /// Whether copilot still has something to come back to under this id. Threads
 /// captured before empty sessions were filtered out carry ids copilot refuses.
@@ -80,6 +80,30 @@ pub async fn migrate_session(
             session_id,
             from_cwd,
             to_cwd,
+        }
+        .into(),
+    )
+    .await
+}
+
+/// What a terminal printed, read back from its transcript.
+///
+/// The panel behind an agent that stopped talking, and the one thing an agent
+/// asked to work out what went wrong could never reach: a PTY's output used to
+/// die with the process.
+#[tauri::command]
+pub async fn thread_transcript(
+    app: AppHandle,
+    scope: State<'_, ProjectRoots>,
+    thread_id: String,
+    bytes: u32,
+) -> Result<Value, String> {
+    through(
+        DesktopHost::new(scope.inner()).with_transcripts(&app),
+        Sessions::Transcript {
+            thread_id,
+            bytes,
+            dir: None,
         }
         .into(),
     )

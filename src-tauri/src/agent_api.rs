@@ -122,6 +122,14 @@ impl Workspace for DesktopWorkspace {
         );
     }
 
+    fn transcripts_dir(&self) -> Option<std::path::PathBuf> {
+        self.app
+            .path()
+            .app_config_dir()
+            .ok()
+            .map(|dir| dir.join("transcripts"))
+    }
+
     fn live_ptys(&self) -> Vec<boite_core::snapshot::LivePty> {
         let Some(sessions) = self.app.try_state::<crate::local_pty::LocalSessions>() else {
             return Vec::new();

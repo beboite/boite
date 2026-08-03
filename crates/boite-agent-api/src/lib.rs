@@ -118,6 +118,15 @@ pub trait Workspace: Send + Sync + 'static {
         Vec::new()
     }
 
+    /// Where this host keeps what its terminals printed.
+    ///
+    /// `None` means it keeps none. Answered rather than assumed, because "no
+    /// transcript for that thread" and "this Boite writes none" send an agent
+    /// to two different places.
+    fn transcripts_dir(&self) -> Option<std::path::PathBuf> {
+        None
+    }
+
     /// Called after an agent acts, for whatever the host shows about it.
     ///
     /// The desktop pulses the thread's dot in the sidebar. The server has no
