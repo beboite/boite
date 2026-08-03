@@ -26,6 +26,15 @@
   // narrows the next one anyway, so a pane that is already decided is only in the way.
   type Pane = "harness" | "provider" | "model" | "options";
 
+  /** See ShellPicker: the project a launch lands in, when one is named. */
+  type Props = {
+    projectId?: string | null;
+    onLaunched?: () => void;
+    /** Inside the launcher popover: a full-width row, no dashed outline. */
+    compact?: boolean;
+  };
+  let { projectId = null, onLaunched, compact = false }: Props = $props();
+
   let open = $state(false);
   let pane = $state<Pane>("harness");
   let harnessId = $state<string | null>(null);
@@ -250,9 +259,10 @@
       prompts,
     };
     open = false;
-    const projectId = await launchTargetProjectId(forceScratch);
-    if (!projectId) return;
-    await launchFastpick(combo, harness, projectId);
+    const target = projectId ?? (await launchTargetProjectId(forceScratch));
+    if (!target) return;
+    await launchFastpick(combo, harness, target);
+    onLaunched?.();
   }
 
   function sourceLabel(source: { kind: string; ageSecs?: number }): string {
@@ -328,10 +338,15 @@
 </script>
 
 {#if settings.state.fastpickEnabled && fastpick.installed !== false}
-  <div bind:this={triggerRoot} class="relative flex shrink-0 items-stretch">
+  <div
+    bind:this={triggerRoot}
+    class="relative flex items-stretch {compact ? 'w-full' : 'shrink-0'}"
+  >
     <button
       type="button"
-      class="flex shrink-0 items-center gap-1.5 rounded-md border border-dashed border-border px-2.5 py-1 text-xs text-muted-foreground transition hover:border-foreground/30 hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+      class="flex items-center gap-1.5 text-xs text-muted-foreground transition hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 {compact
+        ? 'w-full rounded-md px-2 py-1 hover:bg-accent'
+        : 'shrink-0 rounded-md border border-dashed border-border px-2.5 py-1 hover:border-foreground/30 hover:bg-[var(--color-surface-2)]'}"
       onclick={toggle}
       aria-haspopup="menu"
       aria-expanded={open}
@@ -342,7 +357,7 @@
            a button with no glyph reads as smaller than its neighbours whatever its box says. -->
       <Plus class="size-3.5" />
       <span>{t("fastpick.label")}</span>
-      <ChevronDown class="size-3.5" />
+      <ChevronDown class="size-3.5 {compact ? 'ml-auto' : ''}" />
     </button>
 
     {#if open}

@@ -1,11 +1,15 @@
 <script lang="ts">
+  import { app } from "$lib/app/store.svelte";
   import { editorStore } from "./store.svelte";
   import X from "@lucide/svelte/icons/x";
   import FileIcon from "@lucide/svelte/icons/file";
   import GitCompareArrows from "@lucide/svelte/icons/git-compare-arrows";
   import { t } from "$lib/i18n/index.svelte";
 
-  const buffers = $derived(editorStore.buffers);
+  // This project's files only. A buffer belonging to another project is still
+  // open — it is just not in this strip, the same way its threads are not in
+  // this project's list.
+  const buffers = $derived(editorStore.forProject(app.currentProjectId));
 
   // The strip is one tab stop and it is the selected tab that holds it. Falling
   // back to the first tab matters for the moment between a buffer opening and
@@ -85,6 +89,127 @@
     }
   }
 
+  /**
+   * Dragging a tab to reorder the strip.
+   *
+   * Pointer events, not HTML drag-and-drop. The native API looked like the
+   * right tool for a one-axis drag inside one strip, and it does not work here:
+   * the Tauri webview owns the OS drag-and-drop session — that is what catches
+   * folders dropped on the window to add a project — so a drag started inside
+   * the page is handed to the system, which paints macOS's green `+` copy
+   * cursor and never delivers a drop back. The sidebar reorders projects and
+   * threads with pointer events for the same reason.
+   *
+   * `dropBefore` is the id the tab would land in front of, or `"end"` past the
+   * last one, which is exactly what gets handed to the store — so the line on
+   * screen is the move that will happen.
+   */
+  type TabSnapshot = { id: string; left: number; width: number };
+
+  let draggingId = $state<string | null>(null);
+  /** Where the carried tab would be inserted, counting the strip without it. */
+  let slot = $state<number | null>(null);
+  /** How far it has been carried from where it started, in px. */
+  let carryX = $state(0);
+  let snaps: TabSnapshot[] = [];
+  let dragFromX = 0;
+  let dragArmedId: string | null = null;
+  // A drag ends on the same element a click would fire from; without this every
+  // reorder also switched to the tab that happened to be under the finger.
+  let suppressClickId: string | null = null;
+
+  const DRAG_THRESHOLD = 4;
+
+  function tabPointerDown(e: PointerEvent, id: string) {
+    if (e.button !== 0) return;
+    dragArmedId = id;
+    dragFromX = e.clientX;
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  }
+
+  /**
+   * Every tab's box, taken once when the drag arms.
+   *
+   * Once: the whole point is that the tabs move while the pointer does, so
+   * measuring them mid-drag would read the preview back as if it were the real
+   * layout and the slot would chase its own tail.
+   */
+  function snapshot(): TabSnapshot[] {
+    const list = Array.from(stripEl?.querySelectorAll<HTMLElement>(".tab") ?? []);
+    return list.flatMap((el) => {
+      const id = el.dataset.tabId;
+      if (!id) return [];
+      const rect = el.getBoundingClientRect();
+      return [{ id, left: rect.left, width: rect.width }];
+    });
+  }
+
+  /** The slot the carried tab would drop into, in the strip minus itself. */
+  function slotAt(x: number): number {
+    const rest = snaps.filter((s) => s.id !== draggingId);
+    // Walked against each remaining tab's midpoint, shifted by however much the
+    // gap the carried tab left behind has moved them.
+    let cursor = rest.length > 0 ? Math.min(snaps[0].left, rest[0].left) : 0;
+    for (let i = 0; i < rest.length; i++) {
+      if (x < cursor + rest[i].width / 2) return i;
+      cursor += rest[i].width;
+    }
+    return rest.length;
+  }
+
+  function tabPointerMove(e: PointerEvent) {
+    if (!dragArmedId) return;
+    if (!draggingId) {
+      if (Math.abs(e.clientX - dragFromX) < DRAG_THRESHOLD) return;
+      snaps = snapshot();
+      draggingId = dragArmedId;
+    }
+    carryX = e.clientX - dragFromX;
+    slot = slotAt(e.clientX);
+  }
+
+  function tabPointerUp(e: PointerEvent) {
+    const el = e.currentTarget as HTMLElement;
+    if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId);
+    if (draggingId && slot !== null) {
+      const rest = buffers.filter((b) => b.id !== draggingId);
+      editorStore.reorder(draggingId, rest[slot]?.id ?? null);
+      suppressClickId = draggingId;
+    }
+    dragArmedId = null;
+    draggingId = null;
+    slot = null;
+    carryX = 0;
+    snaps = [];
+  }
+
+  /**
+   * How far a tab slides to open the gap, the horizontal twin of the sidebar's
+   * `rowShift`. `base` takes out the width the carried tab no longer occupies
+   * for everything to its right; `drop` puts back the width it is about to take
+   * at its new slot.
+   */
+  function tabShift(idx: number, sourceIdx: number, at: number, width: number): number {
+    if (idx === sourceIdx) return 0;
+    const eff = idx < sourceIdx ? idx : idx - 1;
+    const base = idx > sourceIdx ? -width : 0;
+    const drop = eff >= at ? width : 0;
+    return base + drop;
+  }
+
+  const sourceIdx = $derived(
+    draggingId ? buffers.findIndex((b) => b.id === draggingId) : -1,
+  );
+  const carriedWidth = $derived(snaps.find((s) => s.id === draggingId)?.width ?? 0);
+
+  function clickTab(id: string) {
+    if (suppressClickId === id) {
+      suppressClickId = null;
+      return;
+    }
+    activate(id);
+  }
+
   // The bar is horizontal; convert vertical wheel input instead of ignoring it.
   function wheelScroll(e: WheelEvent) {
     if (!stripEl || e.deltaY === 0 || e.deltaX !== 0) return;
@@ -108,16 +233,31 @@
   role="tablist"
   aria-label={t("editor.openFiles")}
 >
-  {#each buffers as b (b.id)}
+  {#each buffers as b, i (b.id)}
     {@const active = editorStore.activeId === b.id}
+    {@const carried = draggingId === b.id}
+    {@const shift =
+      draggingId && slot !== null && sourceIdx >= 0 && !carried
+        ? tabShift(i, sourceIdx, slot, carriedWidth)
+        : 0}
     <!-- Presentation, not a bare div: an un-roled wrapper is a generic child of
          the tablist, which leaves the aria-selected on the button inside it
          describing a tab the tablist does not own. -->
     <div
       role="presentation"
-      class="group flex shrink-0 items-center border-r border-border transition {active
+      data-tab-id={b.id}
+      class="tab group flex shrink-0 items-center border-r border-border transition {active
         ? 'bg-[var(--color-background)] text-foreground'
         : 'text-muted-foreground hover:bg-[var(--color-surface-2)] hover:text-foreground'}"
+      class:carried
+      style:transform={carried ? `translateX(${carryX}px)` : `translateX(${shift}px)`}
+      style:transition={carried || !draggingId
+        ? "none"
+        : "transform 160ms cubic-bezier(0.22, 1, 0.36, 1)"}
+      onpointerdown={(e) => tabPointerDown(e, b.id)}
+      onpointermove={tabPointerMove}
+      onpointerup={tabPointerUp}
+      onpointercancel={tabPointerUp}
     >
       <button
         type="button"
@@ -128,7 +268,7 @@
         aria-controls={PANEL_ID}
         tabindex={b.id === tabStopId ? 0 : -1}
         class="flex h-full items-center gap-1.5 pl-2.5 text-sm"
-        onclick={() => activate(b.id)}
+        onclick={() => clickTab(b.id)}
         onkeydown={onStripKeydown}
         onauxclick={(e) => middleClickClose(e, b.id)}
         title={b.path}
@@ -158,6 +298,10 @@
       </button>
     </div>
   {/each}
+  <!-- The empty run past the last tab, so the strip keeps its background out to
+       the edge. Inert: with pointer capture the drag is delivered to the tab
+       that started it wherever the pointer goes, so nothing here listens. -->
+  <div role="presentation" class="drop-tail"></div>
 </div>
 
 <style>
@@ -167,5 +311,26 @@
   }
   .tab-strip::-webkit-scrollbar {
     display: none;
+  }
+
+  .tab {
+    cursor: grab;
+  }
+
+  /* The tab under the pointer, lifted out of the row rather than marked with a
+     line beside it. Its neighbours slide to open the gap, so the strip shows
+     the order it will have on release instead of an indicator to interpret. */
+  .tab.carried {
+    cursor: grabbing;
+    z-index: 2;
+    box-shadow: var(--shadow-e2);
+    /* A drag across a filename is a text selection unless something says
+       otherwise, and highlighted text following the pointer reads as a bug. */
+    user-select: none;
+  }
+
+  .drop-tail {
+    flex: 1 0 24px;
+    min-width: 24px;
   }
 </style>
