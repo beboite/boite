@@ -25,10 +25,6 @@ use boite_core::store::Store;
 
 use crate::events::AppEvent;
 
-/// What the RPC says when a folder sits outside every place a project may go.
-/// Re-exported so `rpc.rs` keeps one name for it.
-pub use boite_agent_api::WRONG_PLACE_FOR_A_PROJECT;
-
 /// What a spawned terminal is told about the agent endpoint.
 ///
 /// There is no token here on purpose. It used to carry the value, which then

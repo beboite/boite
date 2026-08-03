@@ -2,9 +2,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 
-use boite_core::command::Command;
+use boite_core::command::{self, Command};
 use boite_core::pty::PtySpawnArgs;
-use boite_core::{editor, explorer, project, session, shell};
+use boite_core::{session, shell};
 
 use crate::events::AppEvent;
 use boite_core::model::{Project, Thread};
@@ -295,51 +295,11 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
             Ok(json!({ "ok": true }))
         }
 
-        "project.inspect" => {
-            let path = str_param(&params, "path")?;
-            state.ensure_project_path(&path)?;
-            let inspection = blocking(move || project::inspect_project_blocking(path)).await??;
-            Ok(serde_json::to_value(inspection).unwrap())
-        }
-
         // Where a thread with no project of its own runs. This machine's home,
         // not the connecting device's: the threads live here.
         "project.homeDir" => {
             let home = dirs::home_dir().ok_or("no home directory")?;
             Ok(json!({ "path": home.to_string_lossy() }))
-        }
-
-        "project.folderState" => {
-            let path = str_param(&params, "path")?;
-            state.ensure_project_path(&path)?;
-            let folder_state = blocking(move || project::folder_state_blocking(&path)).await?;
-            Ok(serde_json::to_value(folder_state).unwrap())
-        }
-
-        // The one call that makes a directory outside every registered root,
-        // because a project's folder is not a root until the project exists.
-        // `ensure_project_path` is the outer boundary a server has and the
-        // desktop does not; the same beside-an-existing-project rule is applied
-        // on top of it, so an agent reaching this through the MCP endpoint
-        // cannot point it at the filesystem at large.
-        "project.createFolder" => {
-            let path = str_param(&params, "path")?;
-            state.ensure_project_path(&path)?;
-            let mut allowed = state.roots.new_project_parents();
-            if let Some(home) = dirs::home_dir() {
-                allowed.push(home.to_string_lossy().to_string());
-            }
-            if let Some(workspace) = &state.workspace_dir {
-                allowed.push(workspace.to_string_lossy().to_string());
-            }
-            if !project::may_create_project_at(&path, &allowed) {
-                return Err(crate::agent_api::WRONG_PLACE_FOR_A_PROJECT.into());
-            }
-            if project::folder_state_blocking(&path) == project::FolderState::Occupied {
-                return Err("there is already something in that folder".into());
-            }
-            std::fs::create_dir_all(&path).map_err(|e| format!("cannot create the folder: {e}"))?;
-            Ok(json!({ "ok": true }))
         }
 
         // An agent request reaches every connected device; this decides which
@@ -648,37 +608,6 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
             "root": state.workspace_dir.as_ref().map(|p| p.to_string_lossy().to_string())
         })),
 
-        "fs.readDir" => {
-            let path = str_param(&params, "path")?;
-            state.roots.ensure_allowed(&path)?;
-            let entries = blocking(move || explorer::read_dir_blocking(path)).await??;
-            Ok(json!({ "entries": entries }))
-        }
-
-        "fs.search" => {
-            let path = str_param(&params, "path")?;
-            let query = str_param(&params, "query")?;
-            let limit = params.get("limit").and_then(|v| v.as_u64()).unwrap_or(200) as u32;
-            state.roots.ensure_allowed(&path)?;
-            let hits = blocking(move || explorer::search_blocking(&path, &query, limit)).await??;
-            Ok(json!({ "hits": hits }))
-        }
-
-        "file.read" => {
-            let path = str_param(&params, "path")?;
-            state.roots.ensure_allowed(&path)?;
-            let file = blocking(move || editor::read_blocking(&path)).await??;
-            Ok(serde_json::to_value(file).unwrap())
-        }
-
-        "file.write" => {
-            let path = str_param(&params, "path")?;
-            let content = str_param(&params, "content")?;
-            state.roots.ensure_allowed_for_write(&path)?;
-            let written = blocking(move || editor::write_blocking(&path, &content)).await??;
-            Ok(json!({ "bytes": written }))
-        }
-
         // Fires one notification down every configured path so a remote user can
         // tell "nothing happened" apart from "nothing was configured". Its only
         // caller is scripts/server-smoke.mjs: no client calls it, because the
@@ -745,12 +674,12 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
             Ok(json!({ "ok": true }))
         }
 
-        // The git and worktree surface is a command bus rather than a list of
-        // arms, because the desktop serves the same twenty-seven capabilities
-        // and used to carry its own copy of each. What is left here is the
-        // decoding and the envelope this protocol wraps an answer in; the trust
-        // boundary and the work both live in `boite_core::command`.
-        m if m.starts_with("git.") || m.starts_with("worktree.") => {
+        // Every domain the desktop serves too — git, worktrees, the
+        // filesystem, the editor, the folders a project lives in — is one bus
+        // in `boite_core::command` rather than a list of arms here. What is
+        // left on this side is the decoding and the envelope this protocol
+        // wraps an answer in.
+        m if command::handles(m) => {
             let command = Command::decode(m, &params)?;
             let wire = command.wire();
             let ready = command.prepare(&state.command_host())?;

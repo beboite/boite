@@ -134,14 +134,70 @@ impl AppState {
 
     /// What a command on the bus is allowed to reach on this side.
     ///
-    /// The roots and the directory an earlier layout put worktrees under, which
-    /// is the whole of it: everything else a command needs, it derives from what
-    /// the caller gave it. Cheap enough to build per call, and built per call on
-    /// purpose — a host held somewhere would be a second place for the boundary
-    /// to go stale after `refresh_roots`.
-    pub fn command_host(&self) -> boite_core::command::Scoped<'_> {
-        boite_core::command::Scoped::new(self.roots.as_ref())
-            .with_legacy_worktree_base(Some(self.worktree_base()))
+    /// Cheap enough to build per call, and built per call on purpose — a host
+    /// held somewhere would be a second place for the boundary to go stale after
+    /// `refresh_roots`.
+    pub fn command_host(&self) -> ServerHost<'_> {
+        ServerHost { state: self }
+    }
+}
+
+/// The server's answer to what a command may reach.
+///
+/// It differs from a desktop's in one way: a server can be bound to a workspace
+/// directory, and then a folder outside it may not become a project however the
+/// caller spells it. A desktop has no equivalent — the user's own folder dialog
+/// is the gate.
+pub struct ServerHost<'a> {
+    state: &'a AppState,
+}
+
+impl boite_core::command::Host for ServerHost<'_> {
+    fn roots(&self) -> &ProjectRoots {
+        self.state.roots.as_ref()
+    }
+
+    fn legacy_worktree_base(&self) -> Option<PathBuf> {
+        Some(self.state.worktree_base())
+    }
+
+    /// Checked without requiring the path to exist.
+    ///
+    /// The folder a project is about to go in does not exist yet, and asking
+    /// about it is the whole point of `project.folderState`. This walks up to
+    /// the nearest ancestor that is really there and checks that one, so a
+    /// caller cannot climb out with `..` and cannot be refused for asking about
+    /// a folder it is allowed to create.
+    fn ensure_new_project_path(&self, path: &str) -> Result<(), String> {
+        let Some(workspace) = &self.state.workspace_dir else {
+            return Ok(());
+        };
+        let workspace = std::fs::canonicalize(workspace)
+            .map_err(|e| format!("invalid workspace root: {e}"))?;
+        let mut candidate = Path::new(path);
+        let resolved = loop {
+            if let Ok(real) = std::fs::canonicalize(candidate) {
+                break real;
+            }
+            match candidate.parent() {
+                Some(parent) => candidate = parent,
+                None => return Err("invalid path".into()),
+            }
+        };
+        if resolved.starts_with(&workspace) {
+            return Ok(());
+        }
+        Err("path is outside workspace root".into())
+    }
+
+    fn extra_project_parents(&self) -> Vec<String> {
+        let mut allowed: Vec<String> = dirs::home_dir()
+            .map(|home| vec![home.to_string_lossy().to_string()])
+            .unwrap_or_default();
+        if let Some(workspace) = &self.state.workspace_dir {
+            allowed.push(workspace.to_string_lossy().to_string());
+        }
+        allowed
     }
 }
 
