@@ -8,12 +8,10 @@ use tauri::{
 
 use serde_json::Value;
 
-use boite_core::command::{Command, Files, Git, Scoped};
+use boite_core::command::{sessions::Own, Command, Files, Git, Sessions};
 use boite_core::pty::{PtyManager, PtySpawnArgs};
 use boite_core::scope::ProjectRoots;
-use boite_core::session::{ClaudeSessionHit, CodexSessionHit};
-use boite_core::shell::ShellOption;
-use boite_core::{session, shell, usage};
+use boite_core::session;
 
 use crate::BootState;
 use crate::local_pty::{LocalSessions, LocalSink};
@@ -253,25 +251,23 @@ pub async fn write_text_file(
 }
 
 #[tauri::command]
-pub async fn default_shell() -> String {
-    tauri::async_runtime::spawn_blocking(shell::default_shell_blocking)
-        .await
-        .unwrap_or_else(|_| shell::fallback_shell())
+pub async fn default_shell(scope: State<'_, ProjectRoots>) -> Result<Value, String> {
+    on_bus(scope.inner(), Sessions::ShellDefault.into()).await
 }
 
 #[tauri::command]
-pub async fn available_shells() -> Vec<ShellOption> {
-    tauri::async_runtime::spawn_blocking(shell::available_shells_blocking)
-        .await
-        .unwrap_or_default()
-}
-
-async fn run_lookup<F, T>(f: F) -> Option<T>
-where
-    F: FnOnce() -> Option<T> + Send + 'static,
-    T: Send + 'static,
-{
-    tauri::async_runtime::spawn_blocking(f).await.ok().flatten()
+pub async fn available_shells(
+    scope: State<'_, ProjectRoots>,
+    refresh: Option<bool>,
+) -> Result<Value, String> {
+    on_bus(
+        scope.inner(),
+        Sessions::ShellAvailable {
+            refresh: refresh.unwrap_or(false),
+        }
+        .into(),
+    )
+    .await
 }
 
 #[derive(serde::Serialize)]
@@ -560,198 +556,192 @@ pub fn agent_api_ready(app: AppHandle) -> bool {
 /// Whether copilot still has something to come back to under this id. Threads
 /// captured before empty sessions were filtered out carry ids copilot refuses.
 #[tauri::command]
-pub async fn copilot_session_resumable(session_id: String) -> bool {
-    tauri::async_runtime::spawn_blocking(move || session::copilot_session_resumable(&session_id))
-        .await
-        .unwrap_or(true)
+pub async fn copilot_session_resumable(
+    scope: State<'_, ProjectRoots>,
+    session_id: String,
+) -> Result<Value, String> {
+    on_bus(scope.inner(), Sessions::CopilotResumable { session_id }.into()).await
 }
 
-/// Session ids claude currently has open. `--resume` refuses every one of
-/// them, so a thread holding a captured id has to ask before replaying it.
+/// Session ids claude currently has open. `--resume` refuses every one of them,
+/// so a thread holding a captured id has to ask before replaying it.
 #[tauri::command]
-pub async fn live_claude_sessions() -> Vec<session::LiveClaudeSession> {
-    tauri::async_runtime::spawn_blocking(session::live_claude_sessions)
-        .await
-        .unwrap_or_default()
+pub async fn live_claude_sessions(scope: State<'_, ProjectRoots>) -> Result<Value, String> {
+    on_bus(scope.inner(), Sessions::LiveClaude.into()).await
 }
 
 /// What the agents behind these threads say they are doing right now.
-///
-/// Scoped to the threads the caller actually has: reading these stores costs a
-/// directory walk or a database open per agent, and this is polled on a timer.
 #[tauri::command]
-pub async fn agent_turns(queries: Vec<session::TurnQuery>) -> Vec<session::AgentTurn> {
-    tauri::async_runtime::spawn_blocking(move || session::agent_turns(&queries))
-        .await
-        .unwrap_or_default()
+pub async fn agent_turns(
+    scope: State<'_, ProjectRoots>,
+    queries: Vec<session::TurnQuery>,
+) -> Result<Value, String> {
+    on_bus(scope.inner(), Sessions::AgentTurns { queries }.into()).await
 }
 
 /// Releases a background agent so `--resume` works on that session again.
-/// Refuses anything that is not a background agent: an interactive entry is
-/// another terminal's open session.
 #[tauri::command]
-pub async fn stop_claude_session(session_id: String) -> bool {
-    tauri::async_runtime::spawn_blocking(move || session::stop_claude_session(&session_id))
-        .await
-        .unwrap_or(false)
+pub async fn stop_claude_session(
+    scope: State<'_, ProjectRoots>,
+    session_id: String,
+) -> Result<Value, String> {
+    on_bus(scope.inner(), Sessions::StopClaude { session_id }.into()).await
 }
 
 /// What the agents spent in these folders, read out of their own transcripts.
-///
-/// The directories come from the caller because a project's threads no longer
-/// all run inside it: since worktree isolation most of them run in a detached
-/// checkout elsewhere, and every store keys on the directory the agent ran in.
 #[tauri::command]
-pub async fn agent_token_usage(cwds: Vec<String>, days: u32) -> usage::UsageReport {
-    tauri::async_runtime::spawn_blocking(move || usage::collect_usage_blocking(cwds, days))
-        .await
-        .unwrap_or_default()
+pub async fn agent_token_usage(
+    scope: State<'_, ProjectRoots>,
+    cwds: Vec<String>,
+    days: u32,
+) -> Result<Value, String> {
+    on_bus(scope.inner(), Sessions::Usage { cwds, days }.into()).await
 }
 
-/// Carries a thread's transcript to the folder it is moving to.
-///
-/// Claude files its sessions under the directory they ran in, so a thread that
-/// changes project changes where `--resume` looks. Answers `false` when there
-/// was nothing to carry — a CLI that does not file by directory, or a thread
-/// that never wrote a transcript here — which is not a failure and must not
-/// stop the move.
+/// Carries a captured conversation to the folder its agent will look for it in
+/// after a thread changed project.
 #[tauri::command]
 pub async fn migrate_session(
+    scope: State<'_, ProjectRoots>,
     kind: String,
     session_id: String,
     from_cwd: String,
     to_cwd: String,
-) -> Result<bool, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        session::migrate_session_blocking(&kind, &session_id, &from_cwd, &to_cwd)
-    })
+) -> Result<Value, String> {
+    on_bus(
+        scope.inner(),
+        Sessions::Migrate {
+            kind,
+            session_id,
+            from_cwd,
+            to_cwd,
+        }
+        .into(),
+    )
     .await
-    .map_err(|e| e.to_string())?
 }
 
-#[tauri::command]
-pub async fn find_claude_session(
-    manager: State<'_, PtyManager>,
-    cwd: String,
-    after_unix_ms: i64,
-    exclude_ids: Option<Vec<String>>,
-    pty_id: Option<String>,
-) -> Result<Option<ClaudeSessionHit>, String> {
-    let exclude = session::build_exclude(exclude_ids);
-    // Resolved here rather than passed in: the pid is the manager's to know,
-    // and it changes on every respawn while the pty id does not.
-    let own_pid = pty_id.and_then(|id| manager.child_pid(&id));
-    // A Result only because borrowing State from an async command demands one;
-    // a detector failure is still "no hit", never an error the caller handles.
-    Ok(tauri::async_runtime::spawn_blocking(move || {
-        session::find_claude_session_blocking(cwd, after_unix_ms, &exclude, own_pid)
-    })
-    .await
-    .ok()
-    .flatten())
+/// The session an agent opened in this directory.
+///
+/// Eight commands, one per agent, each a codec onto the same command. They were
+/// eight copies of the same four lines on this side and one `kind` switch on the
+/// server; the names stay because the frontend calls them, the behaviour does
+/// not because there is only one of it now.
+///
+/// `pty_id` rather than a pid: the pid is the manager's to know and it changes
+/// on every respawn, while the id does not.
+macro_rules! session_finder {
+    ($name:ident, $kind:literal) => {
+        #[tauri::command]
+        pub async fn $name(
+            scope: State<'_, ProjectRoots>,
+            manager: State<'_, PtyManager>,
+            cwd: String,
+            after_unix_ms: i64,
+            exclude_ids: Option<Vec<String>>,
+            pty_id: Option<String>,
+        ) -> Result<Value, String> {
+            on_bus_with_pty(
+                scope.inner(),
+                manager.inner(),
+                Sessions::Find {
+                    kind: $kind.into(),
+                    cwd,
+                    after_unix_ms,
+                    exclude_ids: exclude_ids.unwrap_or_default(),
+                    own: Own::Pty(pty_id),
+                }
+                .into(),
+            )
+            .await
+        }
+    };
 }
 
-#[tauri::command]
-pub async fn find_codex_session(
-    cwd: String,
-    after_unix_ms: i64,
-    exclude_ids: Option<Vec<String>>,
-) -> Option<CodexSessionHit> {
-    let exclude = session::build_exclude(exclude_ids);
-    tauri::async_runtime::spawn_blocking(move || {
-        session::find_codex_session_blocking(cwd, after_unix_ms, &exclude)
-    })
-    .await
-    .ok()
-    .flatten()
+session_finder!(find_claude_session, "claude");
+session_finder!(find_codex_session, "codex");
+session_finder!(find_opencode_session, "opencode");
+session_finder!(find_cursor_session, "cursor");
+session_finder!(find_antigravity_session, "antigravity");
+session_finder!(find_copilot_session, "copilot");
+session_finder!(find_grok_session, "grok");
+session_finder!(find_hermes_session, "hermes");
+
+/// The desktop's answer to what a command may reach.
+///
+/// Built per call, and small: the registered roots for anything that takes a
+/// path, this app's own PTY manager for the one command that has to tell its
+/// own live session from a neighbour's, and the directory an earlier release
+/// put worktrees under. Everything else a command needs, it derives from what
+/// the caller gave it.
+struct DesktopHost<'a> {
+    roots: &'a ProjectRoots,
+    manager: Option<&'a PtyManager>,
+    legacy_worktree_base: Option<PathBuf>,
 }
 
-#[tauri::command]
-pub async fn find_opencode_session(
-    cwd: String,
-    after_unix_ms: i64,
-    exclude_ids: Option<Vec<String>>,
-) -> Option<session::SessionHit> {
-    let exclude = session::build_exclude(exclude_ids);
-    run_lookup(move || session::find_opencode_session_blocking(cwd, after_unix_ms, &exclude)).await
+impl<'a> DesktopHost<'a> {
+    fn new(roots: &'a ProjectRoots) -> Self {
+        Self {
+            roots,
+            manager: None,
+            legacy_worktree_base: None,
+        }
+    }
+
+    fn with_pty(mut self, manager: &'a PtyManager) -> Self {
+        self.manager = Some(manager);
+        self
+    }
+
+    fn with_legacy_worktree_base(mut self, base: PathBuf) -> Self {
+        self.legacy_worktree_base = Some(base);
+        self
+    }
 }
 
-#[tauri::command]
-pub async fn find_cursor_session(
-    cwd: String,
-    after_unix_ms: i64,
-    exclude_ids: Option<Vec<String>>,
-) -> Option<session::SessionHit> {
-    let exclude = session::build_exclude(exclude_ids);
-    run_lookup(move || session::find_cursor_session_blocking(cwd, after_unix_ms, &exclude)).await
-}
+impl boite_core::command::Host for DesktopHost<'_> {
+    fn roots(&self) -> &ProjectRoots {
+        self.roots
+    }
 
-#[tauri::command]
-pub async fn find_antigravity_session(
-    cwd: String,
-    after_unix_ms: i64,
-    exclude_ids: Option<Vec<String>>,
-) -> Option<session::SessionHit> {
-    let exclude = session::build_exclude(exclude_ids);
-    run_lookup(move || session::find_antigravity_session_blocking(cwd, after_unix_ms, &exclude))
-        .await
-}
+    fn legacy_worktree_base(&self) -> Option<PathBuf> {
+        self.legacy_worktree_base.clone()
+    }
 
-#[tauri::command]
-pub async fn find_copilot_session(
-    cwd: String,
-    after_unix_ms: i64,
-    exclude_ids: Option<Vec<String>>,
-) -> Option<session::SessionHit> {
-    let exclude = session::build_exclude(exclude_ids);
-    run_lookup(move || session::find_copilot_session_blocking(cwd, after_unix_ms, &exclude)).await
-}
-
-#[tauri::command]
-pub async fn find_grok_session(
-    cwd: String,
-    after_unix_ms: i64,
-    exclude_ids: Option<Vec<String>>,
-) -> Option<session::SessionHit> {
-    let exclude = session::build_exclude(exclude_ids);
-    run_lookup(move || session::find_grok_session_blocking(cwd, after_unix_ms, &exclude)).await
-}
-
-#[tauri::command]
-pub async fn find_hermes_session(
-    cwd: String,
-    after_unix_ms: i64,
-    exclude_ids: Option<Vec<String>>,
-) -> Option<session::SessionHit> {
-    let exclude = session::build_exclude(exclude_ids);
-    run_lookup(move || session::find_hermes_session_blocking(cwd, after_unix_ms, &exclude)).await
+    fn child_pid(&self, pty_id: &str) -> Option<u32> {
+        self.manager.and_then(|m| m.child_pid(pty_id))
+    }
 }
 
 /// Puts a command through the bus and hands back its answer.
 ///
-/// Every git and worktree capability on this side is one of these: the trust
-/// boundary, the work and the refusals all live in `boite_core::command`, and
-/// what is left here is naming the command and handing over the arguments the
-/// webview sent. The desktop reads an answer bare — the envelopes in
-/// `command::Wire` are the WebSocket protocol's, and `invoke` already carries
-/// the shape the frontend types.
-async fn on_bus(roots: &ProjectRoots, command: Command) -> Result<Value, String> {
-    on_bus_with_legacy_base(roots, None, command).await
-}
-
-/// Same, for the one command that needs to know where this app's earlier layout
-/// put worktrees. Nothing else on the bus has anything to ask the host beyond
-/// the roots.
-async fn on_bus_with_legacy_base(
-    roots: &ProjectRoots,
-    legacy: Option<PathBuf>,
-    command: Command,
-) -> Result<Value, String> {
-    let host = Scoped::new(roots).with_legacy_worktree_base(legacy);
+/// Every git, worktree, filesystem and session capability on this side is one of
+/// these: the trust boundary, the work and the refusals all live in
+/// `boite_core::command`, and what is left here is naming the command and
+/// handing over the arguments the webview sent. The desktop reads an answer bare
+/// — the envelopes in `command::Wire` are the WebSocket protocol's, and `invoke`
+/// already carries the shape the frontend types.
+async fn through(host: DesktopHost<'_>, command: Command) -> Result<Value, String> {
     let ready = command.prepare(&host)?;
     tauri::async_runtime::spawn_blocking(move || ready.run())
         .await
         .map_err(|e| format!("command task failed: {e}"))?
+}
+
+/// The common form: a command that needs nothing but the roots.
+async fn on_bus(roots: &ProjectRoots, command: Command) -> Result<Value, String> {
+    through(DesktopHost::new(roots), command).await
+}
+
+/// A session lookup, which needs this app's PTY manager to know which process
+/// the caller's own terminal is running.
+async fn on_bus_with_pty(
+    roots: &ProjectRoots,
+    manager: &PtyManager,
+    command: Command,
+) -> Result<Value, String> {
+    through(DesktopHost::new(roots).with_pty(manager), command).await
 }
 
 #[tauri::command]
@@ -822,7 +812,7 @@ pub async fn worktree_open(
 ) -> Result<Value, String> {
     let traced = thread_id.clone();
     let ready = Command::from(Git::WorktreeOpen { repo, thread_id })
-        .prepare(&Scoped::new(scope.inner()))?;
+        .prepare(&DesktopHost::new(scope.inner()))?;
     let handle = app.clone();
     let label = traced.clone();
     let _ = crate::logging::append_app_log(
@@ -887,9 +877,8 @@ pub async fn worktree_migrate(
     from: String,
 ) -> Result<Value, String> {
     let legacy = crate::app_data::worktree_base(&app)?;
-    on_bus_with_legacy_base(
-        scope.inner(),
-        Some(legacy),
+    through(
+        DesktopHost::new(scope.inner()).with_legacy_worktree_base(legacy),
         Git::WorktreeMigrate {
             repo,
             thread_id,
@@ -1128,31 +1117,35 @@ pub fn log_file_path(app: AppHandle) -> Result<String, String> {
 // the hand-rolled PATH walk behind it had its own PATHEXT list. `which` is
 // already a dependency and already correct on both.
 #[tauri::command]
-pub async fn command_exists(cmd: String) -> bool {
-    tauri::async_runtime::spawn_blocking(move || shell::command_exists(&cmd))
-        .await
-        .unwrap_or(false)
+pub async fn command_exists(
+    scope: State<'_, ProjectRoots>,
+    cmd: String,
+) -> Result<Value, String> {
+    on_bus(scope.inner(), Sessions::CommandExists { cmd }.into()).await
 }
 
-// Returns fastpick's JSON verbatim rather than a parsed shape: its schema is fastpick's to
-// grow, and the frontend types only the fields it reads.
+// Returns fastpick's JSON verbatim rather than a parsed shape: its schema is
+// fastpick's to grow, and the frontend types only the fields it reads.
 #[tauri::command]
 pub async fn fastpick_list(
+    scope: State<'_, ProjectRoots>,
     provider: Option<String>,
     refresh: Option<bool>,
-) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        boite_core::fastpick::list_blocking(provider, refresh.unwrap_or(false))
-    })
+) -> Result<Value, String> {
+    on_bus(
+        scope.inner(),
+        Sessions::FastpickList {
+            provider,
+            refresh: refresh.unwrap_or(false),
+        }
+        .into(),
+    )
     .await
-    .map_err(|e| e.to_string())?
 }
 
-// Null means fastpick is not on this machine, which the settings panel reads as "offer the
-// install" rather than as a failure.
+// Null means fastpick is not on this machine, which the settings panel reads as
+// "offer the install" rather than as a failure.
 #[tauri::command]
-pub async fn fastpick_version() -> Option<String> {
-    tauri::async_runtime::spawn_blocking(boite_core::fastpick::version_blocking)
-        .await
-        .unwrap_or(None)
+pub async fn fastpick_version(scope: State<'_, ProjectRoots>) -> Result<Value, String> {
+    on_bus(scope.inner(), Sessions::FastpickVersion.into()).await
 }
