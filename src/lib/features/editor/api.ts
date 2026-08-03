@@ -16,6 +16,11 @@ export function writeTextFile(path: string, content: string): Promise<number> {
   return backendForPath(path).editor.writeTextFile(path, content);
 }
 
+/** A whole file as base64, for PDFs and images. See `EditorApi.readBase64`. */
+export function readBase64(path: string): Promise<string> {
+  return backendForPath(path).editor.readBase64(path);
+}
+
 export interface FileVersions {
   head: string | null;
   index: string | null;

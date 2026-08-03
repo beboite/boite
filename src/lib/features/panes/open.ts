@@ -1,6 +1,6 @@
 import { app } from "$lib/app/store.svelte";
 import { paneStore, MAX_LEAVES, leafNodesOf, threadLeavesOf } from "./store.svelte";
-import type { DropSide, PaneContent, PanelKind } from "./types";
+import type { DropSide, PaneContent, PaneKind, PanelKind } from "./types";
 import { notifications } from "$lib/features/notifications/store.svelte";
 import { t } from "$lib/i18n/index.svelte";
 
@@ -48,28 +48,6 @@ export function openPane(
 
 /** What the rail was wide, and what a panel opens at. */
 const PANEL_PX = 320;
-
-const PANEL_KINDS: PanelKind[] = ["git", "explorer", "todo"];
-
-/**
- * Takes the panel already on screen as the one to keep open.
- *
- * The toggle is not the only way one gets there: a layout restored at startup,
- * a palette command and an agent's own call all open a panel without saying it
- * should follow the user, and a panel that came back from the last session is
- * exactly the one they left open.
- */
-function adoptVisiblePanel(): PanelKind | null {
-  const anchor = anchorPaneId();
-  const group = anchor ? paneStore.groupOf(anchor) : null;
-  if (!group) return null;
-  const leaf = leafNodesOf(group.root).find((l) =>
-    PANEL_KINDS.includes(l.content.kind as PanelKind),
-  );
-  if (!leaf) return null;
-  paneStore.stickyPanel = leaf.content.kind as PanelKind;
-  return paneStore.stickyPanel;
-}
 
 /**
  * A panel's share of the group, taken from a width in pixels.
@@ -123,8 +101,14 @@ export function anchorProjectId(): string | null {
 
 export type { PanelKind } from "./types";
 
-/** The pane in the active group showing this panel, if one is open. */
-export function panePresence(kind: PanelKind): string | null {
+/**
+ * The pane in the active group showing this kind, if one is open.
+ *
+ * Answers for any singleton kind, not only the three panels: the editor asks it
+ * to find out whether it already has a pane before falling back to covering the
+ * window with itself.
+ */
+export function panePresence(kind: PaneKind): string | null {
   const anchor = anchorPaneId();
   if (!anchor) return null;
   const group = paneStore.groupOf(anchor);
@@ -134,49 +118,18 @@ export function panePresence(kind: PanelKind): string | null {
 }
 
 /**
- * Open the panel, or close it if it is already there.
+ * Close a detached panel, wherever in the tree it ended up.
  *
- * What the titlebar button does, and what the right rail used to do from a
- * fixed 320px column outside the layout. The difference is that this one is a
- * pane: it can be moved, resized against its neighbours, and put below a
- * terminal rather than always to the right of everything.
+ * The docked column is the normal home for these three, so this is only about
+ * the copy someone detached: the titlebar button reads the column, and a panel
+ * left behind in a pane would keep answering for a button that no longer means
+ * it.
  */
-export function togglePanelPane(kind: PanelKind): boolean {
+export function closePanelPane(kind: PanelKind): boolean {
   const open = panePresence(kind);
-  if (open) {
-    paneStore.closePane(open);
-    if (paneStore.stickyPanel === kind) paneStore.stickyPanel = null;
-    return false;
-  }
-  // Opened on purpose, so it stays open through a project switch: see
-  // `followPanel`.
-  paneStore.stickyPanel = kind;
-  openPane({ kind });
+  if (!open) return false;
+  paneStore.closePane(open);
   return true;
-}
-
-/**
- * Puts the open panel in the group now on screen.
- *
- * A pane belongs to a group and a group belongs to a project, so walking to
- * another project left the git panel behind in the group of the one before it
- * and the screen came back without it. The rail this replaced was outside the
- * layout and simply described whatever project you were on.
- *
- * Never touches `app.view`: this runs off a project switch, and a user reading
- * a project page did not ask to be sent to the terminal.
- */
-export function followPanel(): void {
-  const kind = paneStore.stickyPanel ?? adoptVisiblePanel();
-  if (!kind) return;
-  if (panePresence(kind)) return;
-  const anchor = anchorPaneId();
-  if (anchor) {
-    paneStore.openBeside(anchor, { kind }, "right", panelRatio());
-    return;
-  }
-  const projectId = app.currentProjectId;
-  if (projectId) paneStore.openGroup(projectId, { kind });
 }
 
 /**

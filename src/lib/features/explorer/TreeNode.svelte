@@ -47,6 +47,7 @@
   import { logger } from "$lib/shared/services/logger.svelte";
   import { notifications } from "$lib/features/notifications/store.svelte";
   import { editorStore } from "$lib/features/editor/store.svelte";
+  import { revealEditor } from "$lib/features/editor/reveal";
   import { app } from "$lib/app/store.svelte";
   import TreeNode from "./TreeNode.svelte";
   import FileTypeIcon from "./FileTypeIcon.svelte";
@@ -123,8 +124,8 @@
       await explorerStore.toggle(entry.path);
       return;
     }
-    await editorStore.openFile(entry.path);
-    app.view = "editor";
+    await editorStore.open(entry.path);
+    revealEditor();
   }
 
   async function reveal() {
@@ -169,7 +170,7 @@
       items.push({
         label: t("explorer.open"),
         action: () => {
-          void editorStore.openFile(entry.path).then(() => (app.view = "editor"));
+          void editorStore.open(entry.path).then(() => revealEditor());
         },
       });
       items.push({ separator: true });

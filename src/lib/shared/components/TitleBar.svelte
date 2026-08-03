@@ -26,11 +26,14 @@
   import ContextMenu from "$lib/shared/components/ContextMenu.svelte";
   import type { ContextMenuItem } from "$lib/shared/components/ContextMenu.svelte";
   import {
+    closePanelPane,
     openPane,
     panePresence,
-    togglePanelPane,
     type PanelKind,
   } from "$lib/features/panes/open";
+  import { editorStore } from "$lib/features/editor/store.svelte";
+  import { revealEditor } from "$lib/features/editor/reveal";
+  import FileCode from "@lucide/svelte/icons/file-code";
   import type { MessageKey } from "$lib/i18n/messages";
   import {
     mcpPulse,
@@ -165,6 +168,51 @@
     null,
   );
 
+  /**
+   * One button per panel, answering "is this on screen anywhere".
+   *
+   * A panel normally lives in the docked column, but it can be detached into a
+   * pane, and the button has to mean the same thing either way — otherwise the
+   * one panel you detached is the one whose button lies. So: lit when it is up
+   * in either place, and a click puts it away wherever it is.
+   */
+  function panelShowing(kind: PanelKind): boolean {
+    return settings.state.rightPanel === kind || panePresence(kind) !== null;
+  }
+
+  function togglePanel(kind: PanelKind) {
+    if (closePanelPane(kind)) return;
+    settings.toggleRightPanel(kind);
+  }
+
+  /**
+   * The way back to open files.
+   *
+   * The editor takes the whole main area and puts its tab strip where the agent
+   * shortcuts normally are, so leaving it for a terminal took the tabs off
+   * screen with it — and nothing anywhere said those buffers were still open.
+   * It was a one-way door: the only path back was to open a file again.
+   *
+   * Shown only while something is open, which is what keeps it from being a
+   * fourth permanent button for a view most sessions never use.
+   */
+  // Scoped to the project on screen, like the strip itself: a count that added
+  // up three projects' files pointed at a view that would only show one of
+  // them.
+  const openHere = $derived(editorStore.forProject(app.currentProjectId).length);
+  const editorOpen = $derived(openHere > 0);
+  const editorShowing = $derived(
+    app.view === "editor" || panePresence("editor") !== null,
+  );
+
+  function toggleEditor() {
+    if (app.view === "editor") {
+      app.view = "terminal";
+      return;
+    }
+    revealEditor();
+  }
+
   // The two panes with nowhere else to be opened from by pointer. Both are
   // ordinary panes rather than panels: they hold a document, not a view of the
   // project, so neither belongs in the row above.
@@ -285,8 +333,23 @@
 
   <div class="flex items-center gap-0.5 pr-1.5">
     <UpdateBadge />
+    {#if editorOpen}
+      <button
+        type="button"
+        class="flex h-7 items-center justify-center gap-1 rounded-md px-2 transition {editorShowing
+          ? 'bg-accent text-foreground'
+          : 'text-muted-foreground hover:bg-accent hover:text-foreground'}"
+        onclick={toggleEditor}
+        title={t("titlebar.editor", { count: openHere })}
+        aria-label={t("titlebar.editor", { count: openHere })}
+        aria-pressed={editorShowing}
+      >
+        <FileCode class="size-[15px]" />
+        <span class="text-[11px] tabular-nums">{openHere}</span>
+      </button>
+    {/if}
     {#each PANEL_BUTTONS as panel (panel.kind)}
-      {@const open = panePresence(panel.kind) !== null}
+      {@const open = panelShowing(panel.kind)}
       {@const Icon = panel.icon}
       {@const pulsing = panel.surface !== undefined && mcpPulse.surface(panel.surface)}
       <button
@@ -295,7 +358,7 @@
           ? 'bg-accent text-foreground'
           : 'text-muted-foreground hover:bg-accent hover:text-foreground'}"
         class:mcp-touch={pulsing}
-        onclick={() => togglePanelPane(panel.kind)}
+        onclick={() => togglePanel(panel.kind)}
         oncontextmenu={openPanelMenu}
         title={t(panel.key)}
         aria-label={t(panel.key)}

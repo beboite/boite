@@ -3,31 +3,42 @@
   import { editorStore } from "./store.svelte";
   import EditorTabStrip from "./EditorTabStrip.svelte";
   import CodeMirror from "./CodeMirror.svelte";
+  import PdfView from "./PdfView.svelte";
   import DiffView from "./DiffView.svelte";
+  import { revealItemInDir } from "$lib/platform/opener";
   import Save from "@lucide/svelte/icons/save";
+  import FolderOpen from "@lucide/svelte/icons/folder-open";
   import FileText from "@lucide/svelte/icons/file-text";
-  import TerminalSquare from "@lucide/svelte/icons/terminal-square";
   import RotateCw from "@lucide/svelte/icons/rotate-cw";
   import { t } from "$lib/i18n/index.svelte";
 
   /**
    * `inPane` is the editor living inside a pane rather than covering the whole
-   * main area. It drops the "back to terminal" button, which in a pane points at
-   * a place the user has not left, and it stops the empty-buffer effect from
-   * changing the app view out from under a layout that never set it.
+   * main area. It stops the empty-buffer effect from changing the app view out
+   * from under a layout that never set it.
    */
   type Props = { inPane?: boolean };
   let { inPane = false }: Props = $props();
 
-  const active = $derived(editorStore.active);
+  const here = $derived(editorStore.forProject(app.currentProjectId));
 
-  function backToTerminal() {
-    app.view = "terminal";
-  }
+  // Nothing from another project is drawn: the active buffer is global, and
+  // walking to another project would otherwise leave its file on screen with a
+  // tab strip that does not contain it.
+  const active = $derived(
+    here.some((b) => b.id === editorStore.activeId) ? editorStore.active : null,
+  );
+
+  // Stepping onto a project whose files are open but none of them active: take
+  // the first rather than show "pick a file" over a strip full of tabs.
+  $effect(() => {
+    if (active || here.length === 0) return;
+    editorStore.setActive(here[0].id);
+  });
 
   $effect(() => {
     if (inPane) return;
-    if (editorStore.buffers.length === 0 && app.view === "editor") {
+    if (here.length === 0 && app.view === "editor") {
       app.view = "terminal";
     }
   });
@@ -53,19 +64,11 @@
 <svelte:window onkeydown={handleKeydown} />
 
 <div class="flex h-full min-h-0 flex-col">
+  <!-- No way-out button of its own any more: the titlebar's editor button is
+       lit while this view is up and takes you back, which is the same round
+       trip in the place that already owns "which surface am I on". A second
+       one here spent a tab's worth of the strip saying it twice. -->
   <div class="flex items-stretch border-b border-border bg-[var(--color-titlebar)]">
-    {#if !inPane}
-      <button
-        type="button"
-        class="flex h-8 shrink-0 items-center gap-1.5 border-r border-border px-2.5 text-xs text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground"
-        onclick={backToTerminal}
-        title={t("editor.backToTerminal")}
-        aria-label={t("editor.backToTerminal")}
-      >
-        <TerminalSquare class="size-3.5" />
-        <span>{t("editor.terminal")}</span>
-      </button>
-    {/if}
     <div class="min-w-0 flex-1">
       <EditorTabStrip />
     </div>
@@ -94,6 +97,36 @@
     >
       {active.error}
     </div>
+  {:else if active.kind === "preview"}
+    <div class="flex h-7 shrink-0 items-center gap-2 border-b border-border bg-[var(--color-titlebar)] px-3 text-xs text-muted-foreground">
+      <span class="truncate flex-1" title={active.path}>{active.path}</span>
+      <!-- Reveal, not open: `opener:allow-open-path` is not among the app's
+           capabilities, and handing the OS an arbitrary path to run its default
+           handler on is a wider door than a preview button needs. -->
+      <button
+        type="button"
+        class="rounded p-1 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground"
+        onclick={() => active && void revealItemInDir(active.path)}
+        title={t("explorer.revealInFileManager")}
+        aria-label={t("explorer.revealInFileManager")}
+      >
+        <FolderOpen class="size-3.5" />
+      </button>
+    </div>
+    {#if active.media === "pdf"}
+      <PdfView bytes={active.bytes} name={active.displayName} />
+    {:else}
+      <!-- A data URL, which `img-src 'self' data: blob:` already allows, so an
+           image needs no endpoint and no frame. `object-contain` rather than a
+           natural size: a screenshot is usually wider than the pane. -->
+      <div class="checkerboard min-h-0 flex-1 overflow-auto p-4">
+        <img
+          class="mx-auto max-h-full max-w-full object-contain"
+          src={active.dataUrl}
+          alt={active.displayName}
+        />
+      </div>
+    {/if}
   {:else if active.kind === "file"}
     <div class="flex h-7 shrink-0 items-center gap-2 border-b border-border bg-[var(--color-titlebar)] px-3 text-xs text-muted-foreground">
       <span class="truncate flex-1" title={active.path}>{active.path}</span>
@@ -170,3 +203,17 @@
   {/if}
   </div>
 </div>
+
+<style>
+  /* Transparency has to look like transparency, not like the app's background:
+     a PNG with an alpha channel is exactly what you open a preview to check. */
+  .checkerboard {
+    background-image:
+      linear-gradient(45deg, var(--color-surface-2) 25%, transparent 25%),
+      linear-gradient(-45deg, var(--color-surface-2) 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, var(--color-surface-2) 75%),
+      linear-gradient(-45deg, transparent 75%, var(--color-surface-2) 75%);
+    background-size: 16px 16px;
+    background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+  }
+</style>
