@@ -292,6 +292,7 @@ pub fn run() {
             commands::log_app_event,
             commands::read_app_log,
             commands::clear_app_log,
+            commands::workspace_snapshot,
             commands::log_file_path,
             commands::register_project_roots,
             commands::inspect_project,

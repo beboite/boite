@@ -97,6 +97,7 @@ async fn main() {
         config.workspace_dir.clone(),
         devices.clone(),
         config.data_dir.clone(),
+        registry.clone(),
     )
     .await;
 

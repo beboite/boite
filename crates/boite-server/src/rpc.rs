@@ -293,6 +293,31 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
         // one carries it out. True for exactly one caller per id — two devices
         // running the same move would kill one PTY twice and leave a second
         // worktree behind.
+        // Everything at once, for whoever has to work out why something is
+        // wrong. Assembled in `boite_core::snapshot` so this side and the
+        // desktop answer the same question the same way; what is added here is
+        // the registry's own view of which PTYs still have a process.
+        "system.snapshot" => {
+            let manager = state.registry.pty_manager();
+            let live: Vec<boite_core::snapshot::LivePty> = state
+                .registry
+                .live_snapshot()
+                .into_iter()
+                .map(|(thread_id, (pty_id, _, _))| boite_core::snapshot::LivePty {
+                    child_pid: manager.child_pid(&pty_id),
+                    thread_id,
+                    pty_id,
+                })
+                .collect();
+            let store = state.store.clone();
+            let roots = state.roots.clone();
+            let taken = blocking(move || {
+                boite_core::snapshot::take("server", &store, &roots, live)
+            })
+            .await?;
+            Ok(serde_json::to_value(taken).unwrap())
+        }
+
         "agent.claimRequest" => {
             let id = str_param(&params, "requestId")?;
             Ok(json!({ "claimed": state.claim_agent_request(&id) }))

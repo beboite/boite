@@ -86,6 +86,15 @@ impl Store {
         Ok(())
     }
 
+    /// Takes a table away, so a caller's "what if this cannot be read" path can
+    /// be tested rather than assumed.
+    #[cfg(test)]
+    pub fn drop_table_for_test(&self, table: &str) {
+        let conn = self.conn.lock();
+        conn.execute_batch(&format!("DROP TABLE IF EXISTS {table}"))
+            .unwrap();
+    }
+
     pub fn load_todos(&self) -> Result<Vec<Todo>, String> {
         let conn = self.conn.lock();
         let mut stmt = conn

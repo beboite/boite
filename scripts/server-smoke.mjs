@@ -249,6 +249,27 @@ if (agentUrl && tokenFile) {
     "x-boite-thread": crypto.randomUUID(),
   });
   check("a thread this workspace does not have reaches nothing", stranger.status === 404, `status=${stranger.status}`);
+
+  // The one call an agent makes instead of asking a human what they see. Its
+  // value is the comparison: what the rows claim, next to what this process
+  // actually has a process for.
+  const snap = await fetch(`${agentUrl}/v1/snapshot`, {
+    headers: { authorization: `Bearer ${token}`, "x-boite-thread": probeId },
+  });
+  const state = snap.status === 200 ? await snap.json() : null;
+  check(
+    "the snapshot answers with both lists",
+    Array.isArray(state?.threads) && Array.isArray(state?.livePtys) && Array.isArray(state?.projects),
+    `status=${snap.status}`,
+  );
+  check(
+    "the snapshot sees the probe's own terminal running",
+    (state?.livePtys ?? []).some((p) => p.threadId === probeId && p.childPid > 0),
+  );
+  check("the snapshot carries no problem to report", (state?.problems ?? []).length === 0, JSON.stringify(state?.problems ?? []));
+  // Whatever else it holds, it must not hold a credential.
+  const asText = JSON.stringify(state ?? {});
+  check("the snapshot carries no token", !asText.includes(token) && !asText.includes(TOKEN));
 }
 try {
   await c.rpc("thread.kill", { threadId: probeId, wait: false });

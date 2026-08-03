@@ -97,6 +97,17 @@ pub trait Workspace: Send + Sync + 'static {
     /// Something changed that every device should re-read.
     fn announce(&self, change: Change);
 
+    /// The PTYs this host still has a process for.
+    ///
+    /// The half a database row cannot know, and the half the snapshot exists
+    /// for: a thread whose status says `running` and whose id is not in here is
+    /// the shape of nearly every "my terminal is dead" report. The default is
+    /// empty because a host might genuinely run no terminals; one that does and
+    /// answers empty makes the snapshot lie, so both of Boite's implement it.
+    fn live_ptys(&self) -> Vec<boite_core::snapshot::LivePty> {
+        Vec::new()
+    }
+
     /// How this host resolves the caller's project. See [`Resolution`].
     fn resolution(&self) -> Resolution {
         Resolution::ThreadOnly

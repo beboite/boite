@@ -364,6 +364,12 @@ fn common_tools() -> Value {
             "annotations": { "title": "Worktree", "readOnlyHint": true, "idempotentHint": true, "openWorldHint": false }
         },
         {
+            "name": "workspace_snapshot",
+            "description": "Everything Boite knows about itself right now, in one answer: every                             project and whether its folder is still there, every thread with what                             its row claims, and the terminals this workspace actually has a live                             process for. Read it before asking a human what they see. The two lists                             are the point — a thread whose status says running and whose id is not                             in livePtys is a dead terminal, and that comparison is not visible from                             anywhere else. Carries no secret, so it can be pasted into an issue.",
+            "inputSchema": { "type": "object" },
+            "annotations": { "title": "Snapshot", "readOnlyHint": true, "idempotentHint": true, "openWorldHint": false }
+        },
+        {
             "name": "worktree_branch",
             "description": "Create a NEW branch for the work in this terminal. Call it once the work \
                             is worth keeping: until then detached leaves no trace, and the worktree \
@@ -823,6 +829,13 @@ fn call_tool(host: &Host, name: &str, args: &Value) -> Result<String, String> {
         "worktree_status" => {
             let out = host.send("GET", "/v1/worktree", None)?;
             Ok(format_worktree(&out))
+        }
+        // Verbatim JSON rather than TOON: this is the one answer whose shape is
+        // the point, and an agent reading it is about to compare two lists
+        // field by field.
+        "workspace_snapshot" => {
+            let out = host.send("GET", "/v1/snapshot", None)?;
+            Ok(serde_json::to_string_pretty(&out).unwrap_or_else(|_| out.to_string()))
         }
         "worktree_branch" => branch_call(host, args, "/v1/worktree/branch", "worktree_branch"),
         "worktree_reserve" => branch_call(host, args, "/v1/worktree/reserve", "worktree_reserve"),

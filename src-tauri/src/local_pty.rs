@@ -117,6 +117,18 @@ impl LocalSessions {
             .map(|s| (s.pty_id.clone(), s.sink.clone()))
     }
 
+    /// Every thread that still has a PTY here, attached or detached.
+    ///
+    /// For the snapshot, which exists to be compared against what the rows
+    /// claim: a thread whose status says `running` and whose id is not in this
+    /// list is the shape of nearly every "my terminal is dead" report.
+    pub fn all(&self) -> Vec<(String, String)> {
+        lock(&self.inner)
+            .iter()
+            .map(|(thread_id, s)| (thread_id.clone(), s.pty_id.clone()))
+            .collect()
+    }
+
     pub fn detach_by_pty(&self, pty_id: &str) {
         if let Some(s) = lock(&self.inner).values().find(|s| s.pty_id == pty_id) {
             s.sink.set_channel(None);

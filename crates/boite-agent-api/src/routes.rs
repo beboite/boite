@@ -48,6 +48,7 @@ pub fn router(workspace: Shared) -> Router {
         .route("/v1/thread/move", post(thread_move))
         .route("/v1/threads", post(thread_spawn))
         .route("/v1/pane/open", post(pane_open))
+        .route("/v1/snapshot", get(snapshot))
         .with_state(workspace)
 }
 
@@ -216,6 +217,34 @@ async fn claim(
     workspace.announce(Change::Todos);
     workspace.touched(thread_header(&headers), "todo");
     Ok(Json(json!({ "ok": true })))
+}
+
+/// Everything at once, for an agent asked to work out why something is wrong.
+///
+/// Not scoped to the caller's project, and that is deliberate: the question this
+/// answers is "what is this workspace doing", and a thread in another project
+/// holding a dead PTY is exactly the kind of thing the caller needs to see. It
+/// carries no secret — no token, no environment, no file contents — so it is
+/// meant to be pasted into an issue.
+async fn snapshot(
+    State(workspace): State<Shared>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, StatusCode> {
+    authorize(&*workspace, &headers)?;
+    let live = workspace.live_ptys();
+    let taken = blocking({
+        let workspace = workspace.clone();
+        move || {
+            serde_json::to_value(boite_core::snapshot::take(
+                "workspace",
+                workspace.store(),
+                workspace.roots(),
+                live,
+            ))
+        }
+    })
+    .await?;
+    taken.map(Json).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
 
 // ------------------------------------------------------------ worktrees

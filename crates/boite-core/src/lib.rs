@@ -14,6 +14,7 @@ pub mod scope;
 pub mod secret_file;
 pub mod session;
 pub mod shell;
+pub mod snapshot;
 pub mod status;
 pub mod store;
 pub mod usage;
