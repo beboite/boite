@@ -299,6 +299,37 @@ if (agentUrl && keyFile) {
   const device = await ask({ authorization: `Bearer ${TOKEN}`, "x-boite-project": "smoke" });
   check("the device token is not an agent credential", device.status === 401, `status=${device.status}`);
 
+  // A call that reaches past the project the agent is in. It used to be handed
+  // to a device and answered "moving to <project>"; it waits for the user now,
+  // and the agent is told so in a way it should not retry.
+  const moved = await fetch(`${agentUrl}/v1/thread/move`, {
+    method: "POST",
+    headers: {
+      ...signedHeaders(key, probeId, "POST", "/v1/thread/move", JSON.stringify({ project: "smoke" })),
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ project: "smoke" }),
+  });
+  const gate = moved.status === 200 ? await moved.json() : null;
+  check(
+    "a move across projects waits for the user",
+    gate?.retryable === false && typeof gate?.approvalId === "string",
+    `status=${moved.status}`,
+  );
+
+  const waiting = await c.rpc("approval.list");
+  check(
+    "the request is waiting where a device can see it",
+    (waiting.approvals ?? []).some((a) => a.id === gate?.approvalId && a.action === "thread.move"),
+  );
+
+  // Refused, so nothing runs and the probe stays where it is. Allowing it would
+  // kill the PTY the rest of this script is still talking to.
+  const answered = await c.rpc("approval.decide", { id: gate?.approvalId, allow: false });
+  check("the user's answer closes it", answered.decided?.id === gate?.approvalId);
+  const after = await c.rpc("approval.list");
+  check("an answered request stops waiting", (after.approvals ?? []).length === 0);
+
   // The one call an agent makes instead of asking a human what they see. Its
   // value is the comparison: what the rows claim, next to what this process
   // actually has a process for.

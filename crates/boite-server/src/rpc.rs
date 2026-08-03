@@ -523,6 +523,27 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
             Ok(json!({ "ok": true }))
         }
 
+        // What an agent has put in front of the user, and the user's answer.
+        // Not scoped to a project: an agent in another one asking to move is
+        // exactly what would otherwise be invisible from wherever a device
+        // happens to be standing.
+        "approval.list" => {
+            let api = state.agent_api.as_ref().ok_or("the agent endpoint is not running")?;
+            Ok(json!({ "approvals": api.workspace.store().open_approvals()? }))
+        }
+
+        "approval.decide" => {
+            use boite_core::approval::Verdict;
+            let api = state.agent_api.as_ref().ok_or("the agent endpoint is not running")?;
+            let id = str_param(&params, "id")?;
+            let allow = params.get("allow").and_then(|v| v.as_bool()).unwrap_or(false);
+            let verdict = if allow { Verdict::Allowed } else { Verdict::Refused };
+            // `None` is another device having answered first, not a failure:
+            // the request has been dealt with either way.
+            let decided = boite_agent_api::decide(&*api.workspace, &id, verdict, now_ms())?;
+            Ok(json!({ "decided": decided }))
+        }
+
         "push.unsubscribe" => {
             let endpoint = str_param(&params, "endpoint")?;
             state.store.delete_push_subscription(&endpoint)?;

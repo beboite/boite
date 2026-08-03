@@ -674,6 +674,43 @@ export interface WorkspaceMetaApi {
   set(patch: Partial<WorkspaceMeta>): Promise<WorkspaceMeta>;
 }
 
+/**
+ * A call an agent made that reaches past the project it is working in, waiting
+ * on the user.
+ *
+ * Mirrors `boite_core::approval::Pending`. The dispatch itself is not in here
+ * and never comes to the client: allowing one replays what was stored with it,
+ * server side, so what runs is what was asked for rather than what a card
+ * happened to render.
+ */
+export interface PendingApproval {
+  id: string;
+  /** The project the *caller* is in, not the one being reached into. */
+  projectId: string;
+  threadId: string;
+  /** `thread.move`, `project.create`, `thread.spawn`. */
+  action: string;
+  /** One line for the card: the project being moved into, the name being made. */
+  detail: string;
+  createdAt: number;
+}
+
+export interface ApprovalsApi {
+  /**
+   * Everything still waiting, across every project.
+   *
+   * Not scoped to the project on screen: an agent in another one asking to move
+   * is exactly what would otherwise be invisible until somebody happened to
+   * stand in the right place.
+   */
+  list(): Promise<PendingApproval[]>;
+  /**
+   * The user's answer. `null` means another device answered first, which is not
+   * a failure: the request has been dealt with either way.
+   */
+  decide(id: string, allow: boolean): Promise<PendingApproval | null>;
+}
+
 export interface Backend {
   readonly kind: "tauri" | "remote";
   readonly caps: BackendCaps;
@@ -693,6 +730,7 @@ export interface Backend {
   readonly scope: ScopeApi;
   readonly session: SessionApi;
   readonly log: LogApi;
+  readonly approvals: ApprovalsApi;
   // Web Push registration. Present only on remote (web/PWA); undefined on
   // desktop, which notifies through the OS directly.
   readonly push?: PushApi;

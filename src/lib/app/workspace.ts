@@ -8,6 +8,7 @@ import { platform } from "$lib/storage/platform.svelte";
 import { resetShellCache } from "$lib/storage/shell";
 import { gitStore } from "$lib/features/git/store.svelte";
 import { todos } from "$lib/features/todo/store.svelte";
+import { approvals } from "$lib/features/approvals/store.svelte";
 import { notifications } from "$lib/features/notifications/store.svelte";
 import { logger } from "$lib/shared/services/logger.svelte";
 import { device, type BoiteEntry } from "$lib/features/settings/device.svelte";
@@ -26,6 +27,7 @@ export function defaultRemoteWsUrl(): string {
 function resetStores() {
   settings.reset();
   todos.reset();
+  approvals.reset();
   platform.reset();
   resetShellCache();
   gitStore.reset();

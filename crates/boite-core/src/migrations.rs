@@ -258,6 +258,25 @@ pub const ALL: &[Migration] = &[
             public_key TEXT NOT NULL
         );",
     ),
+    // What an agent asked for and the user has not answered yet. The whole
+    // dispatch is kept verbatim in `request`, so allowing one replays exactly
+    // what was asked rather than a reconstruction of it.
+    both(
+        "create_approvals",
+        "CREATE TABLE IF NOT EXISTS approvals (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            thread_id TEXT NOT NULL,
+            action TEXT NOT NULL,
+            detail TEXT NOT NULL,
+            request TEXT NOT NULL,
+            verdict TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            decided_at INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_approvals_open
+            ON approvals (verdict, created_at);",
+    ),
 ];
 
 /// The desktop's list: `(version, description, sql)`, versions from 1.
@@ -291,7 +310,7 @@ mod tests {
     #[test]
     fn the_shipped_order_is_preserved_on_both_sides() {
         let desktop = desktop();
-        assert_eq!(desktop.len(), 20);
+        assert_eq!(desktop.len(), 21);
         assert_eq!(desktop[0], (1, "create_projects", ALL[0].sql));
         assert_eq!(desktop[4].1, "add_thread_session_and_icon");
         assert_eq!(desktop[8].1, "add_project_git_root", "no push table here");
@@ -300,9 +319,10 @@ mod tests {
         assert_eq!(desktop[17].1, "add_project_worktrees");
         assert_eq!(desktop[18].1, "create_events");
         assert_eq!(desktop[19].1, "create_thread_keys");
+        assert_eq!(desktop[20].1, "create_approvals");
 
         let server = server();
-        assert_eq!(server.len(), 19);
+        assert_eq!(server.len(), 20);
         assert_eq!(server[8].description, "create_push_subscriptions");
         assert_eq!(server[9].description, "add_project_git_root");
         assert_eq!(
@@ -312,6 +332,7 @@ mod tests {
         );
         assert_eq!(server[17].description, "create_events");
         assert_eq!(server[18].description, "create_thread_keys");
+        assert_eq!(server[19].description, "create_approvals");
         assert!(
             !server.iter().any(|m| m.description.contains("chat")),
             "no chat migration ever ran on a server"
@@ -408,6 +429,11 @@ mod tests {
         );
         assert_eq!(columns(&conn, "settings"), ["key", "value"]);
         assert_eq!(columns(&conn, "thread_keys"), ["thread_id", "public_key"]);
+        assert_eq!(
+            columns(&conn, "approvals"),
+            ["id", "project_id", "thread_id", "action", "detail", "request", "verdict",
+             "created_at", "decided_at"]
+        );
         assert!(columns(&conn, "chats").is_empty(), "dropped again by 17");
         assert!(
             columns(&conn, "push_subscriptions").is_empty(),

@@ -71,6 +71,10 @@ pub enum Action {
     ArtifactsSet,
     /// Asked for, and refused. The reason is in the detail.
     Denied,
+    /// Asked for, and put in front of the user. See `crate::approval`.
+    ApprovalOpened,
+    /// The user answered. `verdict` is in the detail.
+    ApprovalDecided,
 }
 
 impl Action {
@@ -86,6 +90,8 @@ impl Action {
             Action::PaneOpened => "pane.opened",
             Action::ArtifactsSet => "artifacts.set",
             Action::Denied => "denied",
+            Action::ApprovalOpened => "approval.opened",
+            Action::ApprovalDecided => "approval.decided",
         }
     }
 }

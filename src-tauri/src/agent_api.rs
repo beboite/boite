@@ -64,6 +64,10 @@ pub struct AgentApi {
     /// field here would be one autocomplete away from a value in an environment
     /// again.
     secret: String,
+    /// The same workspace the routes are served over, so the commands below
+    /// answer an approval through `boite_agent_api::decide` rather than through
+    /// a second idea of what allowing one does.
+    workspace: boite_agent_api::Shared,
 }
 
 impl AgentApi {
@@ -112,6 +116,7 @@ impl Workspace for DesktopWorkspace {
             match change {
                 Change::Todos => "boite://todos-changed",
                 Change::Worktrees => "boite://worktrees-changed",
+                Change::Approvals => "boite://approvals-changed",
             },
             (),
         );
@@ -161,6 +166,45 @@ pub fn mint_thread_key(
         .map_err(|e| format!("app_config_dir: {e}"))?;
     let store = Store::attach(&config_dir.join("boite.db"))?;
     boite_agent_api::keys::mint(&store, &api.keys_dir, thread_id)
+}
+
+/// Everything an agent has put in front of the user and nobody has answered.
+///
+/// Not scoped to the project the window is showing: an agent in another project
+/// asking to move is exactly the thing that would otherwise be invisible until
+/// somebody happened to stand in the right place.
+#[tauri::command]
+pub fn approvals_open(app: tauri::AppHandle) -> Result<Vec<boite_core::approval::Pending>, String> {
+    let api = app
+        .try_state::<AgentApi>()
+        .ok_or("the agent endpoint is not running")?;
+    api.workspace.store().open_approvals()
+}
+
+/// The user's answer.
+///
+/// Allowing one replays the dispatch that was stored with it, which is why this
+/// goes through `boite_agent_api::decide` rather than rebuilding the request
+/// from what the card was showing.
+#[tauri::command]
+pub fn approval_decide(
+    app: tauri::AppHandle,
+    id: String,
+    allow: bool,
+) -> Result<Option<boite_core::approval::Pending>, String> {
+    use boite_core::approval::Verdict;
+    let api = app
+        .try_state::<AgentApi>()
+        .ok_or("the agent endpoint is not running")?;
+    let verdict = if allow { Verdict::Allowed } else { Verdict::Refused };
+    boite_agent_api::decide(&*api.workspace, &id, verdict, now_ms())
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
 }
 
 /// Removes a deleted thread's key file.
@@ -303,18 +347,26 @@ pub fn start(app: &tauri::AppHandle) {
         );
         return;
     }
+    let workspace: boite_agent_api::Shared = Arc::new(DesktopWorkspace {
+        store: match Store::attach(&config_dir.join("boite.db")) {
+            Ok(store) => store,
+            Err(e) => {
+                crate::logging::warn_to_log(app, "agent-api", &format!("disabled: {e}"));
+                return;
+            }
+        },
+        secret: secret.clone(),
+        app: app.clone(),
+    });
     let api = AgentApi {
         url: url.clone(),
         keys_dir,
-        secret: secret.clone(),
+        secret,
+        workspace: workspace.clone(),
     };
     write_project_credentials(app, &store, &api);
 
-    let router = boite_agent_api::router(Arc::new(DesktopWorkspace {
-        store,
-        secret,
-        app: app.clone(),
-    }));
+    let router = boite_agent_api::router(workspace);
     app.manage(api);
 
     let served = app.clone();

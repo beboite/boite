@@ -25,6 +25,8 @@ pub enum AppEvent {
     /// the MCP endpoint. Clients reload rather than receive the row, since the
     /// writer may not be a client at all.
     TodosChanged,
+    /// Something is waiting on the user. See `boite_core::approval`.
+    ApprovalsChanged,
     WorkspaceInfo {
         name: Option<String>,
         color: Option<String>,
@@ -70,6 +72,7 @@ impl AppEvent {
             AppEvent::ProjectChanged => Event::new("project.changed", serde_json::json!({})),
             AppEvent::SettingsChanged => Event::new("settings.changed", serde_json::json!({})),
             AppEvent::TodosChanged => Event::new("todos.changed", serde_json::json!({})),
+        AppEvent::ApprovalsChanged => Event::new("approvals.changed", serde_json::json!({})),
             AppEvent::WorkspaceInfo { name, color } => Event::new(
                 "workspace.info",
                 serde_json::json!({ "name": name, "color": color }),
