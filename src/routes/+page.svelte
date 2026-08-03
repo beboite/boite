@@ -9,7 +9,6 @@
   import TitleBar from "$lib/shared/components/TitleBar.svelte";
   import CloseGuard from "$lib/app/CloseGuard.svelte";
   import ProjectSidebar from "$lib/features/project/ProjectSidebar.svelte";
-  import ShortcutBar from "$lib/features/shortcut/ShortcutBar.svelte";
   import Toaster from "$lib/features/notifications/Toaster.svelte";
   import TodoAchievement from "$lib/features/todo/TodoAchievement.svelte";
   import ConfirmHost from "$lib/shared/components/ConfirmHost.svelte";
@@ -22,9 +21,10 @@
     paneViewport,
     threadLeavesOf,
   } from "$lib/features/panes/store.svelte";
-  import { followPanel, panePresence } from "$lib/features/panes/open";
+  import { panePresence } from "$lib/features/panes/open";
   import { statusEngine } from "$lib/features/thread/statusEngine";
   import PaneShell from "$lib/features/panes/PaneShell.svelte";
+  import SidePanel from "$lib/features/panes/SidePanel.svelte";
   import PaneOverlay from "$lib/features/panes/PaneOverlay.svelte";
   import PaneDropOverlay from "$lib/features/panes/PaneDropOverlay.svelte";
   import GitPanel from "$lib/features/git/GitPanel.svelte";
@@ -127,16 +127,6 @@
     if (!id) return;
     const g = paneStore.groupOf(id);
     if (g && g.focusedPaneId !== id) g.focusedPaneId = id;
-  });
-
-  // An open panel follows the user to the next project. Triggered on what moves
-  // the screen, and untracked inside: `followPanel` writes the very groups it
-  // reads, so a tracked call would re-run itself on its own pane.
-  $effect(() => {
-    void app.currentProjectId;
-    void app.activeThreadId;
-    void paneStore.stickyPanel;
-    untrack(() => followPanel());
   });
 
   // The project the app came up on. Nobody asked for a thread in it — it is
@@ -297,6 +287,11 @@
   // tree answers, and the titlebar's own memory of which one is up whether or
   // not anything is open.
   $effect(() => {
+    const docked = settings.state.rightPanel;
+    if (docked === "git" || docked === "explorer") {
+      prefetchWhenIdle(EditorView);
+      return;
+    }
     if (panePresence("git") || panePresence("explorer")) {
       prefetchWhenIdle(EditorView);
     }
@@ -363,10 +358,6 @@
           class="flex h-full min-h-0 flex-col"
           class:hidden={!terminalActive}
         >
-          {#if !mobile}
-            <ShortcutBar />
-          {/if}
-
           <!-- Skipped whenever a group is on screen: with no terminal running
                that group is a panel the user opened on purpose, and a welcome
                card taking the full height would leave it nothing to draw in. -->
@@ -553,6 +544,12 @@
       <TodoAchievement />
     </main>
 
+    <!-- Outside <main>, beside it: the column describes the project rather than
+         whatever view is up, so it stays put across the terminal, the project
+         page and the editor instead of being something each one has to draw. -->
+    {#if !mobile && app.ready && settings.state.rightPanel}
+      <SidePanel />
+    {/if}
   </div>
   {/if}
   {/key}

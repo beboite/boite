@@ -82,6 +82,7 @@ export const tauriEditor: EditorApi = {
     invoke<number>("write_text_file", { path, content }),
   fileVersions: (path, file, headFile) =>
     invoke<FileVersions>("git_file_versions", { path, file, headFile }),
+  readBase64: (path) => invoke<string>("read_file_base64", { path }),
 };
 
 export const tauriProject: ProjectApi = {

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
+  import { scale } from "svelte/transition";
   import { app } from "$lib/app/store.svelte";
   import { workspace } from "$lib/backend";
   import { settings } from "$lib/features/settings/store.svelte";
@@ -10,6 +11,8 @@
   } from "$lib/features/panes/store.svelte";
   import {
     closeThreadWithConfirm,
+    launchBlankTerminal,
+    launchShortcut,
     reloadThread,
     stopThread,
   } from "$lib/features/thread/api";
@@ -39,6 +42,7 @@
   import Archive from "@lucide/svelte/icons/archive";
   import ArchiveRestore from "@lucide/svelte/icons/archive-restore";
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
+  import ShortcutBar from "$lib/features/shortcut/ShortcutBar.svelte";
   import { t } from "$lib/i18n/index.svelte";
 
   type Props = {
@@ -765,6 +769,64 @@
     ctxMenu = { x, y, items };
   }
 
+  /**
+   * The launcher, one project at a time.
+   *
+   * It used to be a 40px strip across the top of the main area offering every
+   * agent at all times, in the space the agent's own output wants — and it said
+   * nothing about where a launch would land, so the answer had to be a second
+   * menu behind a right-click. Asking from the project's own row answers that
+   * question by construction: this project, the one whose `+` you pressed.
+   *
+   * A menu beside the button, on the app's own dropdown recipe — the same
+   * `surface-popover` box, scale transition and fixed placement the shell and
+   * fastpick pickers use. Two earlier attempts sat it directly under the card,
+   * card-width: however exactly it lined up it read as a second rectangle
+   * grafted onto the first. Clearing the sidebar entirely is what makes it a
+   * menu rather than more card.
+   */
+  let launcher = $state<{
+    projectId: string;
+    x: number;
+    y: number;
+    w: number;
+  } | null>(null);
+
+  function toggleLauncher(projectId: string, e: MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (launcher?.projectId === projectId) {
+      launcher = null;
+      return;
+    }
+    const button = e.currentTarget as HTMLElement;
+    const fallback = button.getBoundingClientRect();
+    const card = button.closest<HTMLElement>(".project-block")?.getBoundingClientRect();
+    launcher = {
+      projectId,
+      // Under the whole card, not under the button. The button sits in the
+      // header row, so anchoring to it opened the menu across the project's own
+      // threads — covering the list you launch alongside. Six pixels of air
+      // below the card is what says the menu belongs to it without touching it.
+      //
+      // Left edge and width come from the card too, measured rather than fixed:
+      // the sidebar is resizable, so any constant is right at exactly one size.
+      x: card?.left ?? fallback.left,
+      y: (card?.bottom ?? fallback.bottom) + 6,
+      w: card?.width ?? fallback.width,
+    };
+  }
+
+  // pointerdown, like the pickers inside it: a click listener would see the row
+  // the launch just removed as an outside click.
+  function closeLauncherOnOutside(e: PointerEvent) {
+    if (!launcher) return;
+    const target = e.target as Element | null;
+    if (target?.closest("[data-launcher-root]")) return;
+    if (target?.closest("[data-launcher-trigger]")) return;
+    launcher = null;
+  }
+
   const visibleProjects = $derived(
     showArchived ? app.archivedProjects : app.sortedProjects,
   );
@@ -808,6 +870,8 @@
     document.body.classList.remove("dragging-card");
   });
 </script>
+
+<svelte:window onpointerdown={closeLauncherOnOutside} />
 
 <aside
   bind:this={asideEl}
@@ -925,7 +989,8 @@
           : 0}
       <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
       <div
-        class="project-block mb-2"
+        class="project-block group/block mb-2"
+        class:launching={launcher?.projectId === project.id}
         class:scratch-block={isScratchRow}
         class:selected={isSelected}
         class:dragging={isProjectSource}
@@ -1029,10 +1094,28 @@
                  mobile layout, so asking the mobile flag here answered a
                  question about a screen it can never be on. A pointer that
                  cannot hover is the real condition, and a tablet or a touch
-                 laptop in the desktop layout is exactly where it is true. -->
+                 laptop in the desktop layout is exactly where it is true.
+
+                 Keyed on the card, not the header row: reaching for the launcher
+                 with three threads listed under it means crossing them, and both
+                 buttons used to vanish the moment the pointer left the top line.
+                 The card is the thing you are in. -->
             <button
               type="button"
-              class="touch-reveal rounded p-1 text-muted-foreground/0 transition hover:bg-accent hover:text-foreground focus-visible:text-foreground group-hover/project:text-muted-foreground group-focus-within/project:text-muted-foreground"
+              class="row-action touch-reveal rounded p-1 text-muted-foreground/0 transition hover:bg-accent hover:text-foreground focus-visible:text-foreground group-hover/block:text-muted-foreground group-focus-within/block:text-muted-foreground"
+              class:is-open={launcher?.projectId === project.id}
+              onclick={(e) => toggleLauncher(project.id, e)}
+              data-drag-block
+              data-launcher-trigger
+              aria-label={t("sidebar.launchHere")}
+              title={t("sidebar.launchHere")}
+              aria-expanded={launcher?.projectId === project.id}
+            >
+              <Plus class="size-3.5" />
+            </button>
+            <button
+              type="button"
+              class="row-action touch-reveal rounded p-1 text-muted-foreground/0 transition hover:bg-accent hover:text-foreground focus-visible:text-foreground group-hover/block:text-muted-foreground group-focus-within/block:text-muted-foreground"
               onclick={(e) => openProjectContextMenu(project, e)}
               data-drag-block
               aria-label={t("sidebar.projectOptions")}
@@ -1188,6 +1271,7 @@
             {/each}
           </ul>
         {/if}
+
       </div>
     {/each}
   </div>
@@ -1204,6 +1288,31 @@
     tabindex="-1"
   ></button>
 </aside>
+
+{#if launcher}
+  <!-- The dropdown recipe, spelled the way ShellPicker and FastpickPicker spell
+       it: `surface-popover`, fixed, scale-in from the corner it hangs off.
+       `transition:scale` rather than a CSS keyframe because an animation that
+       never ticks — an unfocused window throttles them — leaves the box frozen
+       at 96% of its own size, which is its own kind of wrong. -->
+  <div
+    data-launcher-root
+    role="menu"
+    tabindex="-1"
+    class="launcher-menu fixed z-[var(--z-popover)]"
+    style:left="{launcher.x}px"
+    style:top="{launcher.y}px"
+    style:width="{launcher.w}px"
+    style:transform-origin="top center"
+    transition:scale={{ duration: 90, start: 0.96 }}
+  >
+    <ShortcutBar
+      compact
+      projectId={launcher.projectId}
+      onLaunched={() => (launcher = null)}
+    />
+  </div>
+{/if}
 
 {#if threadDragGhost}
   <div
@@ -1263,6 +1372,36 @@
      under it: at a dozen threads across three projects, nothing on screen said
      where one project stopped and the next began. The outline is that
      statement, and it is why the dashed rail down the thread list could go. */
+  /* An open launcher pins both buttons visible.
+     Reaching the popover means leaving the card, and the card is what reveals
+     them — so the `+` you just pressed faded out from under your own pointer,
+     taking the `…` next to it along. Written here rather than as a conditional
+     utility because it has to beat `text-muted-foreground/0`, and two Tailwind
+     classes setting the same property are resolved by stylesheet order, not by
+     the order they appear in the attribute. */
+  .project-block.launching .row-action {
+    color: var(--color-muted-foreground);
+  }
+  .project-block.launching .row-action.is-open {
+    background: var(--color-accent);
+    color: var(--color-foreground);
+  }
+
+  /* The project card's own recipe, not `surface-popover`.
+     Every `--shadow-e*` step is two lines — a `0 0 0 1px` ring outside and a
+     top-only `inset 0 1px 0` highlight — so a bordered popover reads as light /
+     dark / light along its top edge whatever the border is set to. The cards
+     this menu belongs to draw one flat 1px line and no shadow at all, so it
+     draws the same one, and keeps only the diffuse half of the elevation to say
+     it is floating. Opaque surface rather than the card's translucent mix: it
+     covers rows instead of sitting among them. */
+  .launcher-menu {
+    background: var(--color-surface-2);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    box-shadow: 0 12px 32px -6px rgb(0 0 0 / 0.75);
+  }
+
   .project-block {
     transform-origin: left center;
     border: 1px solid var(--color-border);
@@ -1280,13 +1419,12 @@
   :global(body.dragging-card) .thread-row {
     will-change: transform;
   }
-  .project-block:hover {
-    border-color: color-mix(
-      in srgb,
-      var(--color-border-strong) 60%,
-      var(--color-border)
-    );
-  }
+  /* No hover border. Passing over a card is not an event: the outline lit up
+     under the pointer on the way to somewhere else, and it read as a weaker
+     version of `selected`, which is the same property saying something the user
+     actually did. What hover reveals now is the two buttons, which is an offer
+     rather than a state. */
+
   /* Selected is the card, not the header row. The row used to carry a
      background for it, which put "this project is selected" and "this thread is
      open" on the same property one indent apart. */

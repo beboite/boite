@@ -481,6 +481,7 @@ pub fn run() {
             commands::read_dir,
             commands::explorer_search,
             commands::read_text_file,
+            commands::read_file_base64,
             commands::write_text_file,
             commands::default_shell,
             commands::available_shells,

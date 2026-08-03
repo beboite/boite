@@ -137,6 +137,19 @@ export interface Settings {
   idleTimeoutMinutes: number;
   idleAutocloseByIcon: Record<string, boolean>;
   confirmCloseThread: boolean;
+  /**
+   * Which of git, files and todo the side panel is showing, or null when it is
+   * closed.
+   *
+   * These three describe the project you are on rather than a document you are
+   * working in, so they share one column and one width instead of each taking
+   * a slice of the layout: picking a tab changes what the panel holds and never
+   * where anything is. A panel that has to sit beside one particular terminal
+   * is detached into a pane from the panel's own header, which is the case the
+   * column cannot serve.
+   */
+  rightPanel: RightPanelTab;
+  rightPanelWidth: number;
   gitSplitFraction: number;
   gitAutoFetch: boolean;
   gitAutoFetchSeconds: number;
@@ -162,6 +175,14 @@ export interface Settings {
 // override the OS either way.
 export type MotionMode = "system" | "on" | "off";
 
+/**
+ * Which tab the side panel is on, or null when it is closed.
+ *
+ * The same three names as `PanelKind` in the pane tree, and deliberately so: a
+ * panel is the same panel whether it is docked in the column or detached into a
+ * pane, and the detach button hands one straight to the other.
+ */
+export type RightPanelTab = "git" | "explorer" | "todo" | null;
 
 /**
  * Where a todo stands. `claimed` exists because an agent that can tick its own
