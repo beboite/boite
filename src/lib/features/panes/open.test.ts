@@ -44,12 +44,11 @@ vi.mock("$lib/features/notifications/store.svelte", () => ({
 import {
   anchorPaneId,
   anchorProjectId,
-  followPanel,
+  closePanelPane,
   openPane,
   panePresence,
   panelRatio,
   splitFocused,
-  togglePanelPane,
 } from "./open";
 import { paneStore, countLeaves, leafNodesOf } from "./store.svelte";
 
@@ -61,7 +60,6 @@ function threads(...rows: [string, string][]) {
 beforeEach(() => {
   paneStore.groups = [];
   paneStore.rects = {};
-  paneStore.stickyPanel = null;
   paneStore.viewport = null;
   app.threads = [];
   app.activeThreadId = null;
@@ -182,43 +180,34 @@ describe("anchorProjectId", () => {
   });
 });
 
-describe("panePresence and togglePanelPane", () => {
-  it("opens the panel, then closes the one it opened", () => {
+describe("panePresence and closePanelPane", () => {
+  it("closes a detached panel and leaves its neighbour alone", () => {
     threads(["t1", "p"]);
     app.activeThreadId = "t1";
 
     expect(panePresence("git")).toBe(null);
-    expect(togglePanelPane("git")).toBe(true);
+    openPane({ kind: "git" });
     expect(panePresence("git")).toBeTruthy();
-    expect(togglePanelPane("git")).toBe(false);
+    expect(closePanelPane("git")).toBe(true);
     expect(panePresence("git")).toBe(null);
     expect(countLeaves(paneStore.groupOf("t1")!.root)).toBe(1);
   });
 
-  it("works on a project with no terminal, and takes the group with it", () => {
-    app.selectedProjectId = "p";
-    expect(togglePanelPane("explorer")).toBe(true);
-    expect(paneStore.groups.length).toBe(1);
-
-    expect(togglePanelPane("explorer")).toBe(false);
-    expect(paneStore.groups).toEqual([]);
+  it("says so when there is no detached panel to close", () => {
+    threads(["t1", "p"]);
+    app.activeThreadId = "t1";
+    // What tells the titlebar button to fall through to the docked column
+    // instead of swallowing the click.
+    expect(closePanelPane("todo")).toBe(false);
   });
 
-  /**
-   * A project with terminals but none of them active is where the button broke:
-   * the panel went into a thread group the page was not drawing, and the second
-   * click closed something the user had never seen.
-   */
-  it("gives a project whose threads are all in the background its own group", () => {
-    threads(["t1", "p"], ["t2", "p"]);
+  it("takes the group with it on a project with no terminal", () => {
     app.selectedProjectId = "p";
+    openPane({ kind: "explorer" });
+    expect(paneStore.groups.length).toBe(1);
 
-    expect(togglePanelPane("git")).toBe(true);
-    const opened = paneStore.groups.find((g) => leafNodesOf(g.root)[0].content.kind === "git");
-    expect(opened).toBeTruthy();
-    expect(countLeaves(opened!.root)).toBe(1);
-    expect(countLeaves(paneStore.groupOf("t1")!.root)).toBe(1);
-    expect(panePresence("git")).toBe(opened!.focusedPaneId);
+    expect(closePanelPane("explorer")).toBe(true);
+    expect(paneStore.groups).toEqual([]);
   });
 
   it("sees only the group it would open into", () => {
@@ -228,6 +217,15 @@ describe("panePresence and togglePanelPane", () => {
 
     app.activeThreadId = "t1";
     expect(panePresence("todo")).toBe(null);
+  });
+
+  /** The editor asks the same question before covering the window with itself. */
+  it("answers for the editor, not only the three panels", () => {
+    threads(["t1", "p"]);
+    app.activeThreadId = "t1";
+    expect(panePresence("editor")).toBe(null);
+    const paneId = openPane({ kind: "editor" });
+    expect(panePresence("editor")).toBe(paneId);
   });
 });
 
@@ -241,61 +239,6 @@ describe("panelRatio", () => {
     paneStore.setViewport(600, 800);
     expect(panelRatio()).toBeLessThanOrEqual(0.6);
     expect(panelRatio()).toBeGreaterThanOrEqual(0.12);
-  });
-});
-
-/**
- * A pane belongs to a group and a group belongs to a project, so walking to
- * another project left the panel behind in the one before it and the screen
- * came back without it. The rail this replaced was outside the layout and
- * simply described whichever project you were on.
- */
-describe("followPanel", () => {
-  it("puts the open panel in the project the user moved to", () => {
-    threads(["t1", "p"], ["t2", "q"]);
-    app.activeThreadId = "t1";
-    togglePanelPane("git");
-    expect(panePresence("git")).toBeTruthy();
-
-    app.activeThreadId = "t2";
-    expect(panePresence("git")).toBe(null);
-    followPanel();
-    expect(panePresence("git")).toBeTruthy();
-    expect(paneStore.groupOf("t2")).toBe(paneStore.groupOf(panePresence("git")!));
-  });
-
-  it("leaves it closed once the user has closed it", () => {
-    threads(["t1", "p"], ["t2", "q"]);
-    app.activeThreadId = "t1";
-    togglePanelPane("todo");
-    togglePanelPane("todo");
-
-    app.activeThreadId = "t2";
-    followPanel();
-    expect(panePresence("todo")).toBe(null);
-  });
-
-  it("takes a panel it did not open itself as the one to keep", () => {
-    // A layout restored at startup, or a panel an agent opened: neither went
-    // through the toggle, and both are a panel the user has on screen.
-    threads(["t1", "p"], ["t2", "q"]);
-    app.activeThreadId = "t1";
-    openPane({ kind: "explorer" });
-    // The page runs this on every move, so the panel on screen is seen before
-    // the one that leaves it is.
-    followPanel();
-    expect(paneStore.stickyPanel).toBe("explorer");
-
-    app.activeThreadId = "t2";
-    followPanel();
-    expect(panePresence("explorer")).toBeTruthy();
-  });
-
-  it("opens nothing when no panel was open to begin with", () => {
-    threads(["t1", "p"]);
-    app.activeThreadId = "t1";
-    followPanel();
-    expect(countLeaves(paneStore.groupOf("t1")!.root)).toBe(1);
   });
 });
 

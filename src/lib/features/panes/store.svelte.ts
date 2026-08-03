@@ -4,7 +4,6 @@ import type {
   LayoutNode,
   PaneContent,
   PaneGroup,
-  PanelKind,
   SplitDir,
 } from "./types";
 import { MAX_LEAVES, MIN_RATIO, sameContent, threadPane } from "./types";
@@ -43,17 +42,6 @@ class PaneStore {
   groups = $state<PaneGroup[]>([]);
   private hydrated = false;
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
-  /**
-   * The panel the user has open, which is a preference rather than a pane.
-   *
-   * A pane belongs to a group and a group belongs to a project, so moving to
-   * another project used to close the git panel: the pane was still there, in
-   * the group of the project left behind. The rail this replaced was app-wide
-   * and simply re-pointed itself, which is what a user means by leaving a panel
-   * open. Remembered here so the page can put it back in whatever group it is
-   * now drawing.
-   */
-  stickyPanel = $state<PanelKind | null>(null);
   hoveredThreadId = $state<string | null>(null);
   draggingThreadId = $state<string | null>(null);
   dropPreview = $state<DropPreview | null>(null);

@@ -283,6 +283,10 @@ export class RemoteBackend implements Backend {
         rpc("file.write", { path, content }).then((r) => r.bytes as number),
       fileVersions: (path, file, headFile) =>
         rpc("git.fileVersions", { path, file, headFile }),
+      // No server-side twin yet: the bytes would have to cross the socket, and
+      // the protocol carries no binary frame. A refusal with a reason beats a
+      // preview that renders nothing.
+      readBase64: () => Promise.reject(new Error("not-supported-remote")),
     };
 
     this.project = {
