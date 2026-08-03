@@ -1,12 +1,12 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import { backendForPath } from "$lib/backend";
   import { app } from "$lib/app/store.svelte";
+  import DashboardCard from "./DashboardCard.svelte";
+  import { projectUsage } from "./usage.svelte";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import Coins from "@lucide/svelte/icons/coins";
   import { t } from "$lib/i18n/index.svelte";
-  import type { UsageReport } from "$lib/backend/types";
   import type { IconKey, Project } from "$lib/types";
 
   /**
@@ -17,16 +17,19 @@
    * `~/.codex/sessions`, done on the machine the agents ran on. It is the only
    * card here whose numbers are not already in a store, which is why it is the
    * only one with a refresh button.
+   *
+   * The card says one thing: how much, and on which days. The breakdown that
+   * used to sit beside the calendar is a card of its own now, which is what
+   * freed the calendar to take the whole width — it was a fixed 636px grid in a
+   * flexible column, so a card the width of two others ended in dead space.
    */
   type Props = { project: Project };
   let { project }: Props = $props();
 
-  /** A year, so the calendar has the same span the one it looks like has. */
-  const DAYS = 371;
   const WEEKS = 53;
 
-  let report = $state<UsageReport | null>(null);
-  let loading = $state(false);
+  const report = $derived(projectUsage.report(project.id));
+  const loading = $derived(projectUsage.loading(project.id));
 
   /**
    * Every directory this project's agents could have run in.
@@ -45,42 +48,22 @@
     return [...out];
   });
 
-  async function load() {
-    if (loading) return;
-    loading = true;
-    try {
-      report = await backendForPath(project.cwd).session.usage($state.snapshot(cwds), DAYS);
-    } catch {
-      // Nothing to say that an empty card does not already say: the stores are
-      // read-only files that either parse or do not.
-      report = { models: [], days: [], sessions: 0, missing: [] };
-    } finally {
-      loading = false;
-    }
+  function load() {
+    void projectUsage.load(project, $state.snapshot(cwds));
   }
 
   // Reads once per project. Nothing polls: a scan walks every transcript the
   // project has, and the answer only moves while an agent is mid-turn.
   //
-  // The call is untracked. `load` reads and then writes `loading`, and reads
-  // `cwds`, which moves every time a thread gets a worktree — tracked, the
-  // effect would re-run on its own writes and re-scan on thread churn.
+  // The call is untracked. It reads `cwds`, which moves every time a thread gets
+  // a worktree, and writes the store it also reads — tracked, the effect would
+  // re-scan on its own writes and on thread churn.
   $effect(() => {
     void project.id;
-    untrack(() => void load());
+    untrack(() => projectUsage.ensure(project, $state.snapshot(cwds)));
   });
 
   const total = $derived(report?.models.reduce((sum, m) => sum + m.total, 0) ?? 0);
-  const totals = $derived.by(() => {
-    const acc = { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 };
-    for (const m of report?.models ?? []) {
-      acc.input += m.input;
-      acc.output += m.output;
-      acc.cacheWrite += m.cacheWrite;
-      acc.cacheRead += m.cacheRead;
-    }
-    return acc;
-  });
 
   function fmt(n: number): string {
     if (n >= 1_000_000) {
@@ -128,18 +111,40 @@
     // column is seven cells and the weekday rows line up.
     const start = today - (WEEKS * 7 - 1) * DAY;
     const startSunday = start - new Date(start).getUTCDay() * DAY;
-    const out: { day: string; total: number; future: boolean }[][] = [];
+    const out: { day: string; total: number; future: boolean; at: number }[][] = [];
     for (let w = 0; w < WEEKS; w++) {
-      const col: { day: string; total: number; future: boolean }[] = [];
+      const col: { day: string; total: number; future: boolean; at: number }[] = [];
       for (let d = 0; d < 7; d++) {
         const at = startSunday + (w * 7 + d) * DAY;
         const day = new Date(at).toISOString().slice(0, 10);
-        col.push({ day, total: dayTotals.get(day) ?? 0, future: at > today });
+        col.push({ day, total: dayTotals.get(day) ?? 0, future: at > today, at });
       }
       out.push(col);
     }
     return out;
   });
+
+  /**
+   * A name over the column each month opens in. The label is wider than the
+   * column it sits in and is allowed to spill to the right, the way every
+   * contribution calendar's is.
+   */
+  const monthMarks = $derived.by(() => {
+    const out: (string | null)[] = [];
+    let previous = -1;
+    for (const week of weeks) {
+      const month = new Date(week[0].at).getUTCMonth();
+      // Skipped for the first column: a label there is half a month's worth of
+      // days claiming the whole column.
+      out.push(month !== previous && out.length > 0 ? monthName(week[0].at) : null);
+      previous = month;
+    }
+    return out;
+  });
+
+  function monthName(at: number): string {
+    return new Date(at).toLocaleDateString(undefined, { month: "short", timeZone: "UTC" });
+  }
 
   /**
    * The same year of data as a list, for anything that cannot read a grid of
@@ -171,27 +176,22 @@
     return Math.min(4, Math.max(1, Math.ceil(ratio * 4)));
   }
 
+  function cellColor(total: number): string {
+    if (total === 0) return "var(--color-surface-3)";
+    return `color-mix(in srgb, var(--color-foreground) ${level(total) * 22}%, var(--color-surface-3))`;
+  }
+
   const missingLabel = $derived(
     (report?.missing ?? []).map((m) => m.charAt(0).toUpperCase() + m.slice(1)).join(", "),
   );
 </script>
 
-<section class="rounded-lg border border-border bg-[var(--color-surface)] p-3">
-  <header class="mb-2 flex items-center gap-1.5">
-    <Coins class="size-3.5 text-muted-foreground" />
-    <h2 class="section-label">
-      {t("project.tokens")}
-    </h2>
-    <span class="text-xs text-muted-foreground/70">
-      {t("project.tokensRange")}
-    </span>
-    <span class="flex-1"></span>
-    {#if total > 0}
-      <span class="font-mono text-base text-foreground/90">{fmt(total)}</span>
-    {/if}
+<DashboardCard title={t("project.tokens")} class="lg:col-span-2">
+  {#snippet icon()}<Coins class="size-3.5" />{/snippet}
+  {#snippet actions()}
     <button
       type="button"
-      class="rounded p-1 text-muted-foreground transition hover:bg-accent hover:text-foreground disabled:opacity-40"
+      class="rounded-sm p-1 text-muted-foreground transition hover:bg-accent hover:text-foreground disabled:opacity-40"
       onclick={load}
       disabled={loading}
       title={t("project.tokensRefresh")}
@@ -199,7 +199,7 @@
     >
       <RefreshCw class="size-3.5 {loading ? 'animate-spin' : ''}" />
     </button>
-  </header>
+  {/snippet}
 
   {#if !report}
     <p class="text-sm text-muted-foreground">{t("common.loading")}</p>
@@ -211,106 +211,124 @@
         : t("project.tokensOnly")}
     </p>
   {:else}
-    <div class="grid gap-3 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]">
-      <div class="min-w-0">
-        <ul class="flex flex-col gap-1">
-          {#each report.models as model (model.provider + model.model)}
-            <li class="flex items-center gap-2">
-              <ShortcutIcon iconKey={providerIcon(model.provider)} size={13} />
-              <!-- The visible label is the shortened id and the breakdown behind
-                   it was a title, which is a cursor-only affordance. The row is
-                   read from the copy below instead, so nothing is said twice. -->
-              <span
-                class="min-w-0 flex-1 truncate text-sm text-foreground/85"
-                title="{model.model} · {model.input} in · {model.output} out · {model.cacheWrite} cache written · {model.cacheRead} cache read"
-                aria-hidden="true"
-              >
-                {shortModel(model.model)}
-              </span>
-              <span class="sr-only">
-                {model.model} · {model.input}
-                {t("project.tokensIn")} · {model.output}
-                {t("project.tokensOut")} · {model.cacheWrite}
-                {t("project.tokensCacheWrite")} · {model.cacheRead}
-                {t("project.tokensCacheRead")}
-              </span>
-              <span
-                class="h-1.5 w-16 shrink-0 overflow-hidden rounded-full bg-[var(--color-surface-3)]"
-                aria-hidden="true"
-              >
-                <span
-                  class="block h-full rounded-full bg-foreground/45"
-                  style:width="{Math.max(4, Math.round((model.total / total) * 100))}%"
-                ></span>
-              </span>
-              <span class="w-12 shrink-0 text-right font-mono text-xs text-muted-foreground">
-                {fmt(model.total)}
-              </span>
-            </li>
-          {/each}
-        </ul>
-
-        <!-- Cache reads sit beside input rather than inside it. Folded in they
-             are most of the volume and none of the work, and the card would
-             read as twenty times the session that actually happened. -->
-        <p class="mt-2 text-xs text-muted-foreground">
-          {fmt(totals.input)} {t("project.tokensIn")} · {fmt(totals.output)}
-          {t("project.tokensOut")} · {fmt(totals.cacheWrite)}
-          {t("project.tokensCacheWrite")} · {fmt(totals.cacheRead)}
-          {t("project.tokensCacheRead")}
-        </p>
-        <p class="mt-0.5 text-xs text-muted-foreground/70">
-          {t("project.tokensSessions", { count: report.sessions })}
-          {#if missingLabel}
-            · {t("project.tokensMissing", { agents: missingLabel })}
-          {/if}
-        </p>
+    <div class="flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
+      <div>
+        <p class="font-mono text-xl leading-none text-foreground">{fmt(total)}</p>
+        <p class="mt-1 text-xs text-muted-foreground/70">{t("project.tokensRange")}</p>
       </div>
 
-      <div class="min-w-0 overflow-x-auto">
-        <!-- The grid stays hidden from assistive tech: 371 squares whose only
-             label is a title read as nothing at all. This is the same year, as
-             rows, and it is the only path to it without a cursor. -->
-        <ul class="sr-only" aria-label={t("project.tokensCalendar")}>
-          {#each activeDays as day (day.day)}
-            <li>{t("project.tokensDay", { total: fmt(day.total), day: day.day })}</li>
-          {/each}
-        </ul>
-        <div class="flex gap-[3px]" aria-hidden="true">
-          {#each weeks as week, w (w)}
-            <div class="flex flex-col gap-[3px]">
-              {#each week as cell (cell.day)}
-                <span
-                  class="size-[9px] rounded-[2px]"
-                  class:invisible={cell.future}
-                  style:background-color={cell.total === 0
-                    ? "var(--color-surface-3)"
-                    : `color-mix(in srgb, var(--color-foreground) ${level(cell.total) * 22}%, var(--color-surface-3))`}
-                  title={cell.total === 0
-                    ? t("project.tokensNothingOn", { day: cell.day })
-                    : t("project.tokensDay", { total: fmt(cell.total), day: cell.day })}
-                ></span>
-              {/each}
-            </div>
-          {/each}
-        </div>
-        <!-- A scale for a grid nothing can read is not worth reading either. -->
-        <div
-          class="mt-1.5 flex items-center gap-1 text-2xs text-muted-foreground/70"
-          aria-hidden="true"
-        >
-          <span>{t("project.tokensLess")}</span>
-          {#each [0, 1, 2, 3, 4] as step (step)}
+      <!-- One row per model, as a share of the whole rather than a second set of
+           numbers: the figures are the card next door. -->
+      <ul class="flex min-w-0 flex-1 flex-col gap-1 sm:max-w-xs">
+        {#each report.models as model (model.provider + model.model)}
+          <li class="flex items-center gap-2">
+            <ShortcutIcon iconKey={providerIcon(model.provider)} size={13} />
             <span
-              class="size-[9px] rounded-[2px]"
-              style:background-color={step === 0
-                ? "var(--color-surface-3)"
-                : `color-mix(in srgb, var(--color-foreground) ${step * 22}%, var(--color-surface-3))`}
+              class="min-w-0 flex-1 truncate text-sm text-foreground/85"
+              title={model.model}
+              aria-hidden="true"
+            >
+              {shortModel(model.model)}
+            </span>
+            <span class="sr-only">
+              {model.model} · {model.input}
+              {t("project.tokensIn")} · {model.output}
+              {t("project.tokensOut")} · {model.cacheWrite}
+              {t("project.tokensCacheWrite")} · {model.cacheRead}
+              {t("project.tokensCacheRead")}
+            </span>
+            <span
+              class="h-1.5 w-16 shrink-0 overflow-hidden rounded-full bg-[var(--color-surface-3)]"
+              aria-hidden="true"
+            >
+              <span
+                class="block h-full rounded-full bg-foreground/45"
+                style:width="{Math.max(4, Math.round((model.total / total) * 100))}%"
+              ></span>
+            </span>
+            <span class="w-11 shrink-0 text-right font-mono text-xs text-muted-foreground">
+              {fmt(model.total)}
+            </span>
+          </li>
+        {/each}
+      </ul>
+    </div>
+
+    <!-- The grid stays hidden from assistive tech: 371 squares whose only
+         label is a title read as nothing at all. This is the same year, as
+         rows, and it is the only path to it without a cursor. -->
+    <ul class="sr-only" aria-label={t("project.tokensCalendar")}>
+      {#each activeDays as day (day.day)}
+        <li>{t("project.tokensDay", { total: fmt(day.total), day: day.day })}</li>
+      {/each}
+    </ul>
+
+    <!-- Sized by the card, not by the year: every column is a fraction of the
+         width, so the calendar ends where the card does. -->
+    <div class="mt-3" aria-hidden="true">
+      <div class="cal-months mb-1">
+        {#each monthMarks as label, w (w)}
+          <span class="text-2xs whitespace-nowrap text-muted-foreground/60">
+            {label ?? ""}
+          </span>
+        {/each}
+      </div>
+      <div class="cal-grid">
+        {#each weeks as week, w (w)}
+          {#each week as cell (cell.day)}
+            <span
+              class="cal-cell"
+              class:invisible={cell.future}
+              style:background-color={cellColor(cell.total)}
+              title={cell.total === 0
+                ? t("project.tokensNothingOn", { day: cell.day })
+                : t("project.tokensDay", { total: fmt(cell.total), day: cell.day })}
             ></span>
           {/each}
-          <span>{t("project.tokensMore")}</span>
-        </div>
+        {/each}
+      </div>
+      <div class="mt-1.5 flex items-center justify-end gap-1 text-2xs text-muted-foreground/70">
+        <span>{t("project.tokensLess")}</span>
+        {#each [0, 1, 2, 3, 4] as step (step)}
+          <span class="size-[9px] rounded-[2px]" style:background-color={step === 0
+            ? "var(--color-surface-3)"
+            : `color-mix(in srgb, var(--color-foreground) ${step * 22}%, var(--color-surface-3))`}
+          ></span>
+        {/each}
+        <span>{t("project.tokensMore")}</span>
       </div>
     </div>
+    {#if missingLabel}
+      <p class="mt-1 text-xs text-muted-foreground/70">
+        {t("project.tokensMissing", { agents: missingLabel })}
+      </p>
+    {/if}
   {/if}
-</section>
+</DashboardCard>
+
+<style>
+  /* One column per week, each a share of whatever the card is wide, and square
+     cells derived from that. The old grid was 53 fixed 9px columns, so on a
+     card wider than 636px it stopped and left a gap the size of the shortfall. */
+  .cal-grid {
+    display: grid;
+    grid-auto-flow: column;
+    grid-template-rows: repeat(7, minmax(0, 1fr));
+    grid-auto-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+  .cal-cell {
+    aspect-ratio: 1;
+    border-radius: 2px;
+    min-width: 0;
+  }
+  /* The same columns as the grid below, so a month name sits over the week it
+     opens. Labels are wider than a column and spill to the right on purpose. */
+  .cal-months {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
+    gap: 2px;
+    overflow: hidden;
+  }
+</style>

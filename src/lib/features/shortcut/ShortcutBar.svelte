@@ -1,16 +1,31 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import { app } from "$lib/app/store.svelte";
+  import { platform } from "$lib/storage/platform.svelte";
+  import type { ShellOption } from "$lib/storage/platform.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
-  import { launchShortcut, launchTargetProjectId } from "$lib/features/thread/api";
+  import {
+    launchBlankTerminal,
+    launchShell,
+    launchShortcut,
+    launchTargetProjectId,
+  } from "$lib/features/thread/api";
   import { launchTargetMenu } from "./launchMenu";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
   import ContextMenu from "$lib/shared/components/ContextMenu.svelte";
   import type { ContextMenuItem } from "$lib/shared/components/ContextMenu.svelte";
   import ShellPicker from "./ShellPicker.svelte";
   import FastpickPicker from "$lib/features/fastpick/FastpickPicker.svelte";
+  import FastpickMenu from "$lib/features/fastpick/FastpickMenu.svelte";
+  import { fastpick } from "$lib/features/fastpick/store.svelte";
+  import { registerEscape } from "$lib/shared/keyboard/overlay";
   import { longPress } from "$lib/shared/actions/longPress";
   import { resolveIconKey } from "$lib/shared/icons/detect";
   import { t } from "$lib/i18n/index.svelte";
+  import ChevronLeft from "@lucide/svelte/icons/chevron-left";
+  import ChevronRight from "@lucide/svelte/icons/chevron-right";
+  import TerminalIcon from "@lucide/svelte/icons/terminal";
+  import Sparkles from "@lucide/svelte/icons/sparkles";
 
   // A plain click on no project already lands in Scratch; the menu — and the
   // shift-click behind it — is how you get there without giving up the project
@@ -46,7 +61,14 @@
    * agent's own output wants — and it owned the slot the editor needs for its
    * tabs. It is a popover off a project's `+` now.
    *
-   * `compact` is that popover: 220px, wrapped icons rather than labelled chips.
+   * `compact` is that popover, and it is one menu that walks between panes, not a
+   * menu that opens more menus. The agents first, then fastpick, then the
+   * terminal: fastpick is a launch like the ones above it, a plain shell is what
+   * you take when none of them fits, so it sits at the bottom. Both used to open
+   * a second floating box on top of this one, which meant picking a model across
+   * two stacked popovers; they replace the list in place now, the way fastpick's
+   * own three steps already did.
+   *
    * `projectId` is the row it was opened from, which spares the launch the
    * "where does this land" question the strip had to ask with a second menu.
    */
@@ -54,8 +76,52 @@
     compact?: boolean;
     projectId?: string | null;
     onLaunched?: () => void;
+    /** Escape at the top of the walk: nothing left to go back to, so it closes. */
+    onClose?: () => void;
   };
-  let { compact = false, projectId = null, onLaunched }: Props = $props();
+  let { compact = false, projectId = null, onLaunched, onClose }: Props = $props();
+
+  type Pane = "root" | "shell" | "fastpick";
+  let pane = $state<Pane>("root");
+
+  const fastpickAvailable = $derived(
+    settings.state.fastpickEnabled && fastpick.installed !== false,
+  );
+
+  const defaultShell = $derived(
+    settings.state.defaultShellId
+      ? platform.shells.find((s) => s.id === settings.state.defaultShellId) ?? null
+      : null,
+  );
+
+  async function launchDefaultShell(forceScratch: boolean) {
+    onLaunched?.();
+    const target = projectId ?? (await launchTargetProjectId(forceScratch));
+    if (!target) return;
+    if (defaultShell) await launchShell(defaultShell, target);
+    else await launchBlankTerminal(target);
+  }
+
+  async function pickShell(shell: ShellOption, forceScratch: boolean) {
+    onLaunched?.();
+    const target = projectId ?? (await launchTargetProjectId(forceScratch));
+    if (!target) return;
+    await launchShell(shell, target);
+  }
+
+  $effect(() => {
+    if (!compact) return;
+    return registerEscape(() => {
+      if (pane === "root") onClose?.();
+      else pane = "root";
+    });
+  });
+
+  onMount(() => {
+    // The fastpick row hides itself on a machine with no fastpick, and only the
+    // probe knows. In the bar, `FastpickPicker` asks; here nothing else would.
+    if (compact && settings.state.fastpickEnabled) void fastpick.ensure();
+  });
 
   function tooltip(label: string, command: string): string {
     const head = compact ? `${label}\n` : "";
@@ -65,73 +131,149 @@
   function openSettings() {
     app.view = "settings";
   }
+
+  const rowClass =
+    "flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1 text-left text-xs text-foreground/85 transition hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-40";
 </script>
 
 <!-- Compact carries no surface of its own: it is the contents of a popover, and
      the popover owns the background, the border and the radius. Painting a
      second opaque box in here squared off the corners it sits inside. -->
-<div
-  class={compact
-    ? "shrink-0 p-1.5"
-    : "flex h-10 shrink-0 items-center gap-2 border-b border-border bg-[var(--color-surface)] px-3"}
->
-  <!-- hide-scrollbar: the global scrollbar is 10px, a quarter of this 40px bar,
-       and the other horizontal strips already hide theirs. Compact wraps
-       instead: a sidebar that scrolls sideways hides half its own buttons. -->
+{#if compact && pane === "fastpick"}
+  <FastpickMenu
+    {projectId}
+    {onLaunched}
+    onExit={() => (pane = "root")}
+  />
+{:else if compact && pane === "shell"}
+  <div class="flex min-h-0 flex-1 flex-col">
+    <div
+      class="flex items-center gap-1.5 border-b border-border px-2 py-1.5 text-xs text-muted-foreground"
+    >
+      <button
+        type="button"
+        class="flex items-center rounded p-0.5 transition hover:bg-accent hover:text-foreground"
+        onclick={() => (pane = "root")}
+        aria-label={t("fastpick.back")}
+        title={t("fastpick.back")}
+      >
+        <ChevronLeft class="size-3.5" />
+      </button>
+      <span class="truncate font-medium">{t("shell.pick")}</span>
+    </div>
+    <div class="flex min-h-0 flex-col overflow-y-auto p-1.5">
+      {#if platform.shells.length === 0}
+        <div class="px-2 py-1.5 text-xs text-muted-foreground">
+          {t("shell.noneDetected")}
+        </div>
+      {/if}
+      {#each platform.shells as shell (shell.id)}
+        <button type="button" class={rowClass} onclick={(e) => void pickShell(shell, e.shiftKey)}>
+          <span class="min-w-0 truncate font-medium">{shell.label}</span>
+          <span class="ml-auto shrink-0 font-mono text-2xs text-muted-foreground/70">
+            {shell.id}
+          </span>
+        </button>
+      {/each}
+    </div>
+  </div>
+{:else}
   <div
     class={compact
-      ? "flex flex-wrap items-center gap-1"
-      : "hide-scrollbar flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto"}
+      ? "flex min-h-0 flex-1 flex-col p-1.5"
+      : "flex h-10 shrink-0 items-center gap-2 border-b border-border bg-[var(--color-surface)] px-3"}
   >
-    {#each settings.state.shortcuts as shortcut (shortcut.id)}
-      {@const iconKey = resolveIconKey(shortcut.iconKey, shortcut.label, shortcut.command)}
-      <button
-        type="button"
-        class="group flex shrink-0 items-center text-xs text-foreground/85 transition hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 {compact
-          ? 'size-8 justify-center rounded-md hover:bg-accent'
-          : 'gap-1.5 rounded-md border border-transparent bg-[var(--color-surface-2)] px-2.5 py-1 hover:border-border hover:bg-[var(--color-surface-3)]'}"
-        disabled={!shortcut.command.trim()}
-        onclick={(e) => void launch(shortcut.id, e.shiftKey)}
-        oncontextmenu={(e) => {
-          e.preventDefault();
-          openMenu(shortcut.id, e.clientX, e.clientY);
-        }}
-        use:longPress={{ onLongPress: (x, y) => openMenu(shortcut.id, x, y) }}
-        title={tooltip(shortcut.label, shortcut.command)}
-        aria-label={compact ? shortcut.label : undefined}
-      >
-        <ShortcutIcon {iconKey} size={15} color={shortcut.iconColor ?? null} />
-        {#if !compact}
-          <span class="font-medium">{shortcut.label}</span>
+    <!-- hide-scrollbar: the global scrollbar is 10px, a quarter of this 40px bar,
+         and the other horizontal strips already hide theirs. Compact stacks
+         instead: a sidebar that scrolls sideways hides half its own buttons. -->
+    <div
+      class={compact
+        ? "flex min-h-0 flex-col gap-0.5 overflow-y-auto"
+        : "hide-scrollbar flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto"}
+    >
+      {#each settings.state.shortcuts as shortcut (shortcut.id)}
+        {@const iconKey = resolveIconKey(shortcut.iconKey, shortcut.label, shortcut.command)}
+        <button
+          type="button"
+          class={compact
+            ? rowClass
+            : "group flex shrink-0 items-center gap-1.5 rounded-md border border-transparent bg-[var(--color-surface-2)] px-2.5 py-1 text-xs text-foreground/85 transition hover:border-border hover:bg-[var(--color-surface-3)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"}
+          disabled={!shortcut.command.trim()}
+          onclick={(e) => void launch(shortcut.id, e.shiftKey)}
+          oncontextmenu={(e) => {
+            e.preventDefault();
+            openMenu(shortcut.id, e.clientX, e.clientY);
+          }}
+          use:longPress={{ onLongPress: (x, y) => openMenu(shortcut.id, x, y) }}
+          title={tooltip(shortcut.label, shortcut.command)}
+        >
+          <ShortcutIcon {iconKey} size={15} color={shortcut.iconColor ?? null} />
+          <!-- Truncated rather than wrapped: the popover is as wide as the project
+               card, and a two-line row would break the rhythm the list reads by. -->
+          <span class="min-w-0 truncate font-medium">{shortcut.label}</span>
+        </button>
+      {/each}
+
+      {#if settings.state.shortcuts.length === 0}
+        <button
+          type="button"
+          class="shrink-0 text-xs text-muted-foreground transition hover:text-foreground"
+          onclick={openSettings}
+        >
+          {t("shortcuts.addShortcuts")}
+        </button>
+      {/if}
+
+      {#if !compact}
+        <ShellPicker {projectId} {onLaunched} />
+        <FastpickPicker {projectId} {onLaunched} />
+      {/if}
+    </div>
+
+    <!-- Under a hairline, and both step into the list rather than over it. The
+         terminal keeps its two targets: the row launches the default shell, the
+         chevron is the one that asks which. -->
+    {#if compact}
+      <div class="mt-1 flex shrink-0 flex-col gap-0.5 border-t border-border/50 pt-1">
+        {#if fastpickAvailable}
+          <button
+            type="button"
+            class="{rowClass} text-muted-foreground"
+            onclick={() => (pane = "fastpick")}
+            title={t("fastpick.tooltip")}
+          >
+            <Sparkles class="size-3.5 shrink-0" />
+            <span class="min-w-0 truncate">{t("fastpick.label")}</span>
+            <ChevronRight class="ml-auto size-3.5 shrink-0 opacity-50" />
+          </button>
         {/if}
-      </button>
-    {/each}
-
-    {#if settings.state.shortcuts.length === 0}
-      <button
-        type="button"
-        class="shrink-0 text-xs text-muted-foreground transition hover:text-foreground"
-        onclick={openSettings}
-      >
-        {t("shortcuts.addShortcuts")}
-      </button>
-    {/if}
-
-    {#if !compact}
-      <ShellPicker {projectId} {onLaunched} />
-      <FastpickPicker {projectId} {onLaunched} />
+        <div class="group flex items-stretch rounded-md transition hover:bg-accent">
+          <button
+            type="button"
+            class="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1 text-left text-xs text-muted-foreground transition group-hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none"
+            onclick={(e) => void launchDefaultShell(e.shiftKey)}
+            title={defaultShell
+              ? t("shell.launchNamed", { name: defaultShell.label })
+              : t("shell.newBlank")}
+          >
+            <TerminalIcon class="size-3.5 shrink-0" />
+            <span class="min-w-0 truncate">{t("tabs.terminal")}</span>
+          </button>
+          <button
+            type="button"
+            class="flex shrink-0 items-center rounded-r-md border-l border-border/60 px-1.5 text-muted-foreground/70 transition hover:bg-[var(--color-surface-3)] hover:text-foreground focus-visible:bg-[var(--color-surface-3)] focus-visible:text-foreground focus-visible:outline-none group-hover:text-foreground/70 disabled:cursor-not-allowed disabled:opacity-40"
+            disabled={platform.shells.length === 0}
+            onclick={() => (pane = "shell")}
+            aria-label={t("shell.pick")}
+            title={t("shell.pick")}
+          >
+            <ChevronRight class="size-3.5" />
+          </button>
+        </div>
+      </div>
     {/if}
   </div>
-
-  <!-- Stacked under a hairline in the popover: side by side they were two
-       dashed pills competing with the icons above them, in 200px. -->
-  {#if compact}
-    <div class="mt-1 flex flex-col gap-0.5 border-t border-border/50 pt-1">
-      <ShellPicker {projectId} {onLaunched} compact />
-      <FastpickPicker {projectId} {onLaunched} compact />
-    </div>
-  {/if}
-</div>
+{/if}
 
 {#if ctxMenu}
   <ContextMenu

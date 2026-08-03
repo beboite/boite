@@ -13,6 +13,7 @@
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import ChevronsDownUp from "@lucide/svelte/icons/chevrons-down-up";
   import FolderTree from "@lucide/svelte/icons/folder-tree";
+  import PanelDockActions from "$lib/features/panes/PanelDockActions.svelte";
   import Search from "@lucide/svelte/icons/search";
   import X from "@lucide/svelte/icons/x";
 
@@ -20,8 +21,13 @@
 
   // The pane's project when it has one, the selected project otherwise: the
   // mobile tab has no pane around it.
-  type Props = { projectId?: string | null };
-  let { projectId = null }: Props = $props();
+  // The two column verbs, passed only by SidePanel: see PanelDockActions.
+  type Props = {
+    projectId?: string | null;
+    onDetach?: () => void;
+    onClose?: () => void;
+  };
+  let { projectId = null, onDetach, onClose }: Props = $props();
 
   const project = $derived.by(() => {
     const id = projectId ?? app.currentProjectId;
@@ -320,6 +326,9 @@
     >
       <RefreshCw class="size-3.5 {manualRefreshing ? 'animate-spin' : ''}" />
     </button>
+    {#if onDetach && onClose}
+      <PanelDockActions {onDetach} {onClose} />
+    {/if}
   </header>
 
   <div class="shrink-0 border-b border-border px-2 py-1.5">

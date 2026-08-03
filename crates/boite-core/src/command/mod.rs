@@ -527,6 +527,7 @@ mod tests {
             ("worktree.reserve", MutateProject),
             ("worktree.hold", ReadProject),
             ("worktree.remove", MutateProject),
+            ("worktree.sizes", ReadProject),
             ("fs.readDir", ReadProject),
             ("fs.search", ReadProject),
             ("file.read", ReadProject),

@@ -1,17 +1,11 @@
 <script lang="ts">
-  import { settings } from "$lib/features/settings/store.svelte";
+  import { app } from "$lib/app/store.svelte";
+  import { settings, clampRightPanelWidth } from "$lib/features/settings/store.svelte";
   import { resizeHandle } from "$lib/shared/actions/resizeHandle";
   import { openPane } from "./open";
-  import type { PanelKind } from "./types";
   import GitPanel from "$lib/features/git/GitPanel.svelte";
   import ExplorerPanel from "$lib/features/explorer/ExplorerPanel.svelte";
   import TodoPanel from "$lib/features/todo/TodoPanel.svelte";
-  import GitBranch from "@lucide/svelte/icons/git-branch";
-  import FolderTree from "@lucide/svelte/icons/folder-tree";
-  import ListTodo from "@lucide/svelte/icons/list-todo";
-  import SquareArrowOutUpRight from "@lucide/svelte/icons/square-arrow-out-up-right";
-  import X from "@lucide/svelte/icons/x";
-  import type { MessageKey } from "$lib/i18n/messages";
   import { t } from "$lib/i18n/index.svelte";
 
   /**
@@ -26,26 +20,33 @@
    *
    * The tab strip is the three titlebar buttons, not a second row of the same
    * three in here: clicking Todo while Git is up switches the column, so they
-   * already behave as tabs and drawing them twice was one control too many. The
-   * header names what is showing and carries the two verbs the titlebar has no
-   * room for.
+   * already behave as tabs and drawing them twice was one control too many.
    *
-   * The pane is not gone, it is a deliberate act now: the detach button hands
-   * the panel to the pane tree, which is the one thing this column cannot do —
-   * sit beside one particular terminal rather than beside all of them.
+   * This column draws no chrome of its own. It used to carry a header naming
+   * the panel and holding the two verbs, above the panel's own header naming
+   * the project and holding its actions: two bars, eight pixels apart, saying
+   * different halves of one thing. The panel keeps its header — it is the one
+   * that survives being detached — and is handed the two verbs to put at the end
+   * of it.
+   *
+   * The pane is not gone, it is a deliberate act now: detaching hands the panel
+   * to the pane tree, which is the one thing this column cannot do — sit beside
+   * one particular terminal rather than beside all of them.
    */
-
-  const NAMES: Record<PanelKind, { labelKey: MessageKey; icon: typeof GitBranch }> = {
-    git: { labelKey: "panes.kindGit", icon: GitBranch },
-    explorer: { labelKey: "panes.kindExplorer", icon: FolderTree },
-    todo: { labelKey: "panes.kindTodo", icon: ListTodo },
-  };
 
   let panelEl: HTMLElement | null = $state(null);
   let resizing = $state(false);
+  let viewportWidth = $state(0);
 
-  const current = $derived(settings.state.rightPanel);
-  const named = $derived(current ? NAMES[current] : null);
+  const current = $derived(settings.rightPanelFor(app.currentProjectId));
+  // Re-clamped against the live window, not only against the one the width was
+  // dragged in: the stored value is per machine, and a restored window can be
+  // narrower than the monitor it was sized on.
+  const width = $derived(
+    viewportWidth > 0
+      ? Math.min(settings.state.rightPanelWidth, clampRightPanelWidth(viewportWidth))
+      : settings.state.rightPanelWidth,
+  );
 
   function onResize(e: PointerEvent) {
     if (!panelEl) return;
@@ -53,60 +54,35 @@
     settings.setRightPanelWidth(rect.right - e.clientX);
   }
 
+  function close() {
+    settings.setRightPanel(app.currentProjectId, null);
+  }
+
   // Detaching closes the column: the same panel docked and floating at once is
   // two views of one thing fighting over which is the real one.
   function detach() {
     const kind = current;
     if (!kind) return;
-    settings.setRightPanel(null);
+    close();
     openPane({ kind });
   }
 </script>
+
+<svelte:window bind:innerWidth={viewportWidth} />
 
 <aside
   bind:this={panelEl}
   class="relative flex h-full shrink-0 flex-col border-l border-border bg-[var(--color-surface)]"
   class:select-none={resizing}
-  style:width="{settings.state.rightPanelWidth}px"
+  style:width="{width}px"
 >
-  <div
-    class="flex h-8 shrink-0 items-center gap-1 border-b border-border bg-[var(--color-titlebar)] px-1.5"
-  >
-    {#if named}
-      {@const Icon = named.icon}
-      <span class="flex items-center gap-1.5 px-1 text-xs font-medium text-foreground">
-        <Icon class="size-3.5" />
-        {t(named.labelKey)}
-      </span>
-    {/if}
-
-    <button
-      type="button"
-      class="ml-auto rounded p-1 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground"
-      onclick={detach}
-      title={t("panel.detach")}
-      aria-label={t("panel.detach")}
-    >
-      <SquareArrowOutUpRight class="size-3.5" />
-    </button>
-    <button
-      type="button"
-      class="rounded p-1 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground"
-      onclick={() => settings.setRightPanel(null)}
-      title={t("panel.close")}
-      aria-label={t("panel.close")}
-    >
-      <X class="size-3.5" />
-    </button>
-  </div>
-
   <div class="min-h-0 min-w-0 flex-1">
     {#if current === "git"}
-      <GitPanel />
+      <GitPanel onDetach={detach} onClose={close} />
     {:else if current === "explorer"}
-      <ExplorerPanel />
+      <ExplorerPanel onDetach={detach} onClose={close} />
     {:else if current === "todo"}
-      <TodoPanel />
+      <TodoPanel onDetach={detach} onClose={close} />
     {/if}
   </div>
 

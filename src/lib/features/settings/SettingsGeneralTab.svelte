@@ -2,14 +2,10 @@
   import { onMount } from "svelte";
   import ShortcutEditor from "$lib/features/settings/ShortcutEditor.svelte";
   import SettingsCard from "$lib/shared/components/SettingsCard.svelte";
-  import UpdatesCard from "$lib/features/updater/UpdatesCard.svelte";
-  import { hasTauri } from "$lib/backend/env";
   import { enablePush, pushPermission, pushSupported } from "$lib/features/push/api";
   import { t } from "$lib/i18n/index.svelte";
 
-  // Nothing to update in a browser tab: the page is whatever the server last
-  // served.
-  const canUpdate = hasTauri();
+  // Updates moved to About, with the version they are about.
 
   // Web Push only exists in a browser/PWA; the desktop notifies through the OS.
   const showPush = pushSupported();
@@ -33,10 +29,6 @@
     }
   }
 </script>
-
-{#if canUpdate}
-  <UpdatesCard />
-{/if}
 
 {#if showPush}
   <SettingsCard title={t("general.pushTitle")} description={t("general.pushDesc")}>

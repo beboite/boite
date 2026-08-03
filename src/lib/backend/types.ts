@@ -249,6 +249,16 @@ export interface WorktreeApi {
    * work, which is what makes automatic cleanup safe.
    */
   remove(repo: string, path: string, force: boolean): Promise<void>;
+  /**
+   * What each of these directories takes on disk, in bytes, in the order they
+   * were given. Apart from `list` because it walks every file of every
+   * checkout: the panel draws first and asks for the number after.
+   *
+   * Links count as nothing. A worktree's heavy directories are junctions into
+   * the main checkout, so following them would offer to free space that
+   * removing the worktree never gives back.
+   */
+  sizes(paths: string[]): Promise<number[]>;
 }
 
 export interface ExplorerApi {
