@@ -110,6 +110,22 @@ impl Workspace for DesktopWorkspace {
         );
     }
 
+    fn live_ptys(&self) -> Vec<boite_core::snapshot::LivePty> {
+        let Some(sessions) = self.app.try_state::<crate::local_pty::LocalSessions>() else {
+            return Vec::new();
+        };
+        let manager = self.app.state::<boite_core::pty::PtyManager>();
+        sessions
+            .all()
+            .into_iter()
+            .map(|(thread_id, pty_id)| boite_core::snapshot::LivePty {
+                child_pid: manager.child_pid(&pty_id),
+                thread_id,
+                pty_id,
+            })
+            .collect()
+    }
+
     /// See the enum: a working directory is not an identity, and this is the
     /// only host that still accepts one.
     fn resolution(&self) -> Resolution {

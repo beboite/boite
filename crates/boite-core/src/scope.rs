@@ -41,6 +41,24 @@ impl ProjectRoots {
             .collect()
     }
 
+    /// The roots as they stand, for a snapshot to report.
+    ///
+    /// Reading them back is not how a boundary is applied — every caller wants
+    /// `ensure_allowed`, which answers the question instead of handing over the
+    /// list to be re-implemented against. This one exists so an agent looking at
+    /// "path is outside registered project roots" can see what the roots
+    /// actually were.
+    pub fn registered(&self) -> Vec<String> {
+        let mut roots: Vec<String> = self
+            .roots
+            .lock()
+            .iter()
+            .map(|r| r.to_string_lossy().to_string())
+            .collect();
+        roots.sort();
+        roots
+    }
+
     fn is_allowed(&self, canonical: &Path) -> bool {
         let roots = self.roots.lock();
         roots.iter().any(|root| canonical.starts_with(root))

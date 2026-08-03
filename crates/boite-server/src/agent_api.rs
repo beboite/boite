@@ -48,6 +48,9 @@ struct ServerWorkspace {
     /// one rule rather than two that drift.
     roots: Arc<ProjectRoots>,
     workspace_dir: Option<PathBuf>,
+    /// Only ever read for the snapshot: what the rows claim about a thread and
+    /// what this process actually has a PTY for are two different questions.
+    registry: Arc<crate::registry::Registry>,
 }
 
 impl Workspace for ServerWorkspace {
@@ -88,6 +91,19 @@ impl Workspace for ServerWorkspace {
         Ok(())
     }
 
+    fn live_ptys(&self) -> Vec<boite_core::snapshot::LivePty> {
+        let manager = self.registry.pty_manager();
+        self.registry
+            .live_snapshot()
+            .into_iter()
+            .map(|(thread_id, (pty_id, _, _))| boite_core::snapshot::LivePty {
+                child_pid: manager.child_pid(&pty_id),
+                thread_id,
+                pty_id,
+            })
+            .collect()
+    }
+
     /// Tells every device to re-read.
     ///
     /// One event for both kinds, which is not right and is not new: no client
@@ -109,6 +125,7 @@ pub async fn start(
     workspace_dir: Option<PathBuf>,
     devices: Arc<AtomicUsize>,
     data_dir: PathBuf,
+    registry: Arc<crate::registry::Registry>,
 ) -> Option<AgentApi> {
     let token = format!("{:032x}", rand::random::<u128>());
     let token_path = data_dir.join("agent-token");
@@ -123,6 +140,7 @@ pub async fn start(
         token,
         roots,
         workspace_dir,
+        registry,
     }));
 
     let listener = match tokio::net::TcpListener::bind("127.0.0.1:0").await {

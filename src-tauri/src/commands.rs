@@ -1068,6 +1068,51 @@ pub async fn git_file_versions(
     .await
 }
 
+/// Everything at once, for whoever has to work out why something is wrong.
+///
+/// Assembled in `boite_core::snapshot` so this side and the server answer the
+/// same question the same way. What is added here is this app's own view of
+/// which PTYs still have a process, which is the half a database row cannot
+/// know.
+///
+/// Its own connection to the database rather than the endpoint's: a diagnostic
+/// call runs rarely, and a snapshot that fails because something else holds a
+/// handle would be the second thing that does not work.
+#[tauri::command]
+pub async fn workspace_snapshot(
+    app: AppHandle,
+    manager: State<'_, PtyManager>,
+    sessions: State<'_, LocalSessions>,
+    scope: State<'_, ProjectRoots>,
+) -> Result<Value, String> {
+    let live: Vec<boite_core::snapshot::LivePty> = sessions
+        .all()
+        .into_iter()
+        .map(|(thread_id, pty_id)| boite_core::snapshot::LivePty {
+            child_pid: manager.child_pid(&pty_id),
+            thread_id,
+            pty_id,
+        })
+        .collect();
+    let db = app
+        .path()
+        .app_config_dir()
+        .map_err(|e| format!("app_config_dir: {e}"))?
+        .join("boite.db");
+    let roots = scope.inner().registered();
+    let taken = tauri::async_runtime::spawn_blocking(move || {
+        let store = boite_core::store::Store::attach(&db)?;
+        let scope = ProjectRoots::default();
+        scope.replace(roots);
+        Ok::<_, String>(serde_json::to_value(boite_core::snapshot::take(
+            "desktop", &store, &scope, live,
+        )))
+    })
+    .await
+    .map_err(|e| format!("workspace_snapshot task failed: {e}"))??;
+    taken.map_err(|e| format!("snapshot could not be serialised: {e}"))
+}
+
 #[tauri::command]
 pub fn finish_boot(app: AppHandle, boot: State<'_, BootState>) {
     if !boot.mark_completed() {
