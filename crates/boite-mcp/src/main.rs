@@ -226,6 +226,50 @@ impl Host {
 /// `tools/list` answers before any credential is needed: a shim with no host was
 /// launched from a config file, and a config file is only ever written for a
 /// project, so the answer is the same set either way.
+/// Read once, at connection, before any tool is called.
+///
+/// It used to describe the answer format and nothing else, which told an agent
+/// how to read a reply it had no reason to ask for. A tool nobody knows to
+/// reach for does not exist, and none of these have an equivalent anywhere
+/// else: the todo list is shared with the user and with the other terminals,
+/// the worktree is why the work is not visible in their checkout, and the pane
+/// is the only way to show them something.
+///
+/// Written as moments rather than as a catalogue. The tool list already says
+/// what each one does; what is missing without this is when any of it applies.
+const INSTRUCTIONS: &str = "\
+You are running inside a Boite terminal. Boite is the user's workspace: several \
+agent terminals side by side, one shared todo list per project, and a git \
+worktree per terminal. The tools below reach that workspace, and nothing else \
+you have reaches it.
+
+Where you are. This terminal has its own detached worktree of the project: your \
+own checkout, isolated from the user's and from the other terminals, sharing one \
+history. So your edits are invisible in their working tree, and a detached \
+worktree is discarded when the thread closes. Call worktree_status when you need \
+to know where you are working and what branches exist.
+
+When to reach for these:
+
+- Starting on something the user asked for: todo_list first. The card usually \
+carries context this conversation does not, and another terminal may already be \
+on it.
+- Finishing a task that was on the list: todo_claim. It does not tick the card \
+off, it moves it to awaiting the user's confirmation.
+- Work worth keeping: worktree_branch for a new branch, worktree_reserve to \
+continue one that exists. Until you call one of them the work is on a detached \
+head and closing the thread throws it away. Do this before you finish, not after.
+- Work that surfaced along the way and does not belong in this turn: todo_add \
+rather than a note in your answer, which nobody reads again.
+- Something the user should look at, a diff, a dev server, a file: pane_open puts \
+it beside this terminal. Printing a path only works if they are reading this one.
+- Independent work that should run at the same time: thread_spawn. It gets its \
+own terminal and worktree, does not report back, and knows only the prompt you \
+give it.
+
+Answers are TOON: `key: value` for a single record, and `name(N):` followed by a \
+header row then one row per item for a list.";
+
 fn tools(_host: Option<&Host>) -> Value {
     let mut list = common_tools();
     if let (Some(all), Value::Array(tail)) = (list.as_array_mut(), thread_tools()) {
@@ -1010,12 +1054,7 @@ fn main() {
                         "protocolVersion": negotiate(&params),
                         "capabilities": { "tools": {} },
                         "serverInfo": { "name": "boite", "version": env!("CARGO_PKG_VERSION") },
-                        // Read once per session, and it saves every tool from
-                        // repeating where it is running.
-                        "instructions": "This terminal belongs to a Boite project: it has a shared \
-                             todo list and its own detached git worktree. Answers are TOON — \
-                             `key: value`, and `name(N):` followed by a header row then one row \
-                             per item."
+                        "instructions": INSTRUCTIONS
                     }),
                 )
             }
