@@ -2,8 +2,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 
+use boite_core::command::Command;
 use boite_core::pty::PtySpawnArgs;
-use boite_core::{editor, explorer, git, project, session, shell};
+use boite_core::{editor, explorer, project, session, shell};
 
 use crate::events::AppEvent;
 use crate::models::{Project, Thread};
@@ -744,121 +745,18 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
             Ok(json!({ "ok": true }))
         }
 
-        m if m.starts_with("git.") => dispatch_git(state, m, params).await,
+        // The git and worktree surface is a command bus rather than a list of
+        // arms, because the desktop serves the same twenty-seven capabilities
+        // and used to carry its own copy of each. What is left here is the
+        // decoding and the envelope this protocol wraps an answer in; the trust
+        // boundary and the work both live in `boite_core::command`.
+        m if m.starts_with("git.") || m.starts_with("worktree.") => {
+            let command = Command::decode(m, &params)?;
+            let wire = command.wire();
+            let ready = command.prepare(&state.command_host())?;
+            Ok(wire.wrap(blocking(move || ready.run()).await??))
+        }
 
-        m if m.starts_with("worktree.") => dispatch_worktree(state, m, params).await,
-
-        other => Err(format!("unknown method: {other}")),
-    }
-}
-
-/// Worktree lifecycle. Every path here is checked against the trust boundary
-/// the same way the git methods are; `worktree.open` builds its own path under
-/// the server's worktree base rather than accepting one from the client.
-async fn dispatch_worktree(
-    state: &AppState,
-    method: &str,
-    params: Value,
-) -> Result<Value, String> {
-    match method {
-        "worktree.open" => {
-            let repo = str_param(&params, "repo")?;
-            state.roots.ensure_allowed(&repo)?;
-            let thread_id = str_param(&params, "threadId")?;
-            let base = git::worktree_base_for(std::path::Path::new(&repo))
-                .to_string_lossy()
-                .to_string();
-            // `path` is null when the repository is not one to open a worktree
-            // in: no repo, or a dirty checkout the thread has to start in.
-            let r = blocking(move || {
-                git::open_worktree_if_eligible_blocking(&repo, &base, &thread_id)
-            })
-            .await??;
-            Ok(json!({ "path": r }))
-        }
-        // Fire and forget: the answer says the warming started, never that it
-        // finished, and a project that cannot have a spare is not a failure.
-        "worktree.warm" => {
-            let repo = str_param(&params, "repo")?;
-            state.roots.ensure_allowed(&repo)?;
-            let base = git::worktree_base_for(std::path::Path::new(&repo))
-                .to_string_lossy()
-                .to_string();
-            blocking(move || {
-                if let Err(err) = git::warm_worktree_pool_blocking(&repo, &base) {
-                    eprintln!("[boite/worktree] warm failed: {err}");
-                }
-            })
-            .await?;
-            Ok(json!({ "ok": true }))
-        }
-        "worktree.migrate" => {
-            let repo = str_param(&params, "repo")?;
-            state.roots.ensure_allowed(&repo)?;
-            let thread_id = str_param(&params, "threadId")?;
-            let from = str_param(&params, "from")?;
-            // The destination is computed from the repository, never taken from
-            // the caller, and the source has to be one this layout left behind.
-            if !std::path::Path::new(&from).starts_with(state.worktree_base()) {
-                return Ok(json!({ "path": Value::Null, "gone": false }));
-            }
-            let base = git::worktree_base_for(std::path::Path::new(&repo));
-            let to = git::scoped_dir_for(&base, &thread_id)
-                .to_string_lossy()
-                .to_string();
-            let r = blocking(move || git::migrate_worktree_blocking(&repo, &from, &to)).await??;
-            // No path and nothing left to move: the directory is gone, and the
-            // thread has to stop pointing at it rather than retry every start.
-            let gone = r.is_none();
-            Ok(json!({ "path": r, "gone": gone }))
-        }
-        "worktree.adopt" => {
-            let repo = str_param(&params, "repo")?;
-            state.roots.ensure_allowed(&repo)?;
-            let thread_id = str_param(&params, "threadId")?;
-            // Derived from the repository and the id, like the migration above:
-            // there is no path here for a caller to point anywhere.
-            let r = blocking(move || git::adopt_worktree_blocking(&repo, &thread_id)).await?;
-            Ok(json!({ "path": r }))
-        }
-        "worktree.list" => {
-            let repo = str_param(&params, "repo")?;
-            state.roots.ensure_allowed(&repo)?;
-            let r = blocking(move || git::list_worktrees_blocking(&repo)).await??;
-            Ok(json!({ "worktrees": r }))
-        }
-        "worktree.claim" => {
-            let path = str_param(&params, "path")?;
-            state.roots.ensure_allowed(&path)?;
-            let name = str_param(&params, "name")?;
-            blocking(move || git::claim_worktree_branch_blocking(&path, &name)).await??;
-            Ok(json!({ "ok": true }))
-        }
-        "worktree.reserve" => {
-            let path = str_param(&params, "path")?;
-            state.roots.ensure_allowed(&path)?;
-            let name = str_param(&params, "name")?;
-            blocking(move || git::reserve_worktree_branch_blocking(&path, &name)).await??;
-            Ok(json!({ "ok": true }))
-        }
-        "worktree.hold" => {
-            let path = str_param(&params, "path")?;
-            state.roots.ensure_allowed(&path)?;
-            let r = blocking(move || git::worktree_hold_blocking(&path)).await??;
-            Ok(serde_json::to_value(r).unwrap())
-        }
-        "worktree.remove" => {
-            let repo = str_param(&params, "repo")?;
-            let path = str_param(&params, "path")?;
-            state.roots.ensure_allowed(&repo)?;
-            state.roots.ensure_allowed(&path)?;
-            let force = params
-                .get("force")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-            blocking(move || git::remove_worktree_blocking(&repo, &path, force)).await??;
-            Ok(json!({ "ok": true }))
-        }
         other => Err(format!("unknown method: {other}")),
     }
 }
@@ -877,114 +775,4 @@ fn valid_hex_color(s: &str) -> bool {
         return false;
     };
     (hex.len() == 3 || hex.len() == 6) && hex.bytes().all(|b| b.is_ascii_hexdigit())
-}
-
-async fn dispatch_git(state: &AppState, method: &str, params: Value) -> Result<Value, String> {
-    let path = str_param(&params, "path")?;
-    state.roots.ensure_allowed(&path)?;
-    let p = path.clone();
-    match method {
-        "git.repoInfo" => {
-            let r = blocking(move || git::repo_info_blocking(&p)).await??;
-            Ok(serde_json::to_value(r).unwrap())
-        }
-        "git.findRepos" => {
-            let r = blocking(move || git::find_repos_blocking(&p, 3)).await??;
-            Ok(json!({ "repos": r }))
-        }
-        "git.branches" => {
-            let r = blocking(move || git::branches_blocking(&p)).await??;
-            Ok(json!({ "branches": r }))
-        }
-        "git.switchBranch" => {
-            let name = str_param(&params, "name")?;
-            let create = params
-                .get("create")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-            let stash = params
-                .get("stash")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-            let r =
-                blocking(move || git::switch_branch_blocking(&p, &name, create, stash)).await??;
-            Ok(serde_json::to_value(r).unwrap())
-        }
-        "git.status" => {
-            let r = blocking(move || git::status_blocking(&p)).await??;
-            Ok(json!({ "entries": r }))
-        }
-        "git.changedPaths" => {
-            let r = blocking(move || git::changed_paths_blocking(&p)).await??;
-            Ok(json!({ "paths": r }))
-        }
-        "git.log" => {
-            let limit = params.get("limit").and_then(|v| v.as_u64()).unwrap_or(100) as u32;
-            let skip = params.get("skip").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-            let r = blocking(move || git::log_blocking(&p, limit, skip)).await??;
-            Ok(json!({ "commits": r }))
-        }
-        // The repository is here, so this is where a claimed sha can be read
-        // back and where `gh` would be reachable.
-        "git.commitState" => {
-            let sha = str_param(&params, "sha")?;
-            let r = blocking(move || git::commit_state_blocking(&p, &sha)).await?;
-            Ok(json!({ "state": r }))
-        }
-        "git.pullRequest" => {
-            let branch = str_param(&params, "branch")?;
-            let r = blocking(move || git::pull_request_for_branch_blocking(&p, &branch)).await?;
-            Ok(json!({ "lookup": r }))
-        }
-        "git.stage" => {
-            let files = str_list(&params, "files");
-            blocking(move || git::run_files(&p, "add", &files, true)).await??;
-            Ok(json!({ "ok": true }))
-        }
-        "git.unstage" => {
-            let files = str_list(&params, "files");
-            blocking(move || git::unstage_blocking(&p, files)).await??;
-            Ok(json!({ "ok": true }))
-        }
-        "git.discard" => {
-            let files = str_list(&params, "files");
-            let untracked = str_list(&params, "untracked");
-            blocking(move || git::discard_blocking(&p, files, untracked)).await??;
-            Ok(json!({ "ok": true }))
-        }
-        "git.commit" => {
-            let message = str_param(&params, "message")?;
-            let sha = blocking(move || git::commit_blocking(&p, &message)).await??;
-            Ok(json!({ "sha": sha }))
-        }
-        "git.fetch" => {
-            blocking(move || git::fetch_blocking(&p)).await??;
-            Ok(json!({ "ok": true }))
-        }
-        "git.push" => {
-            blocking(move || git::push_blocking(&p)).await??;
-            Ok(json!({ "ok": true }))
-        }
-        "git.pull" => {
-            blocking(move || git::pull_blocking(&p)).await??;
-            Ok(json!({ "ok": true }))
-        }
-        "git.init" => {
-            blocking(move || git::init_blocking(&p)).await??;
-            Ok(json!({ "ok": true }))
-        }
-        "git.fileVersions" => {
-            let file = str_param(&params, "file")?;
-            let head_file = params
-                .get("headFile")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string());
-            let r = blocking(move || {
-                git::file_versions_blocking(&p, &file, head_file.as_deref())
-            })
-            .await??;
-            Ok(serde_json::to_value(r).unwrap())
-        }
-        other => Err(format!("unknown git method: {other}")),
-    }
 }
