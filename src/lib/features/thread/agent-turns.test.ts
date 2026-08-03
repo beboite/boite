@@ -41,6 +41,114 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+/**
+ * Whether the window is being looked at, for the tests that care.
+ *
+ * These run in a bare node environment, which is the right one: the module is
+ * plain TypeScript and pulling a whole DOM in to read one boolean would be the
+ * slowest way to test a branch. `document.hidden` is the only thing it touches,
+ * so that is the only thing stood up here — and a module that read more of the
+ * DOM than it admitted to would fail on the missing property rather than pass
+ * against a fake window.
+ */
+function setHidden(hidden: boolean) {
+  (globalThis as { document?: { hidden: boolean } }).document = { hidden };
+}
+
+afterEach(() => {
+  delete (globalThis as { document?: unknown }).document;
+});
+
+describe("agentTurns backs off while nobody is looking", () => {
+  it("reads five times less often when the window is hidden", async () => {
+    let calls = 0;
+    const backend = backendOf(async () => {
+      calls += 1;
+      return [];
+    });
+
+    setHidden(true);
+    mod.agentTurns.poll(backend, QUERY);
+    await settled();
+    expect(calls).toBe(1);
+
+    // What would have been another read while visible is not one now. This is
+    // the saving: `session::agent_turns` is 10.1 ms of blocking work for three
+    // agent kinds, and a hidden window has nobody reading the dot it feeds.
+    clock += mod.POLL_MS;
+    mod.agentTurns.poll(backend, QUERY);
+    await settled();
+    expect(calls).toBe(1);
+
+    clock += mod.POLL_MS_HIDDEN - mod.POLL_MS;
+    mod.agentTurns.poll(backend, QUERY);
+    await settled();
+    expect(calls).toBe(2);
+  });
+
+  it("keeps its normal rate while the window is being looked at", async () => {
+    let calls = 0;
+    const backend = backendOf(async () => {
+      calls += 1;
+      return [];
+    });
+
+    setHidden(false);
+    mod.agentTurns.poll(backend, QUERY);
+    await settled();
+    clock += mod.POLL_MS;
+    mod.agentTurns.poll(backend, QUERY);
+    await settled();
+    expect(calls).toBe(2);
+  });
+
+  it("coming back reads at once instead of waiting out the interval", async () => {
+    let calls = 0;
+    const backend = backendOf(async () => {
+      calls += 1;
+      return [];
+    });
+
+    setHidden(true);
+    mod.agentTurns.poll(backend, QUERY);
+    await settled();
+    expect(calls).toBe(1);
+
+    // The user looks at the window again one millisecond later. Without `wake`
+    // they would read a stale dot for the rest of the hidden interval, which is
+    // the one moment they are actually reading it.
+    clock += 1;
+    setHidden(false);
+    mod.agentTurns.wake();
+    mod.agentTurns.poll(backend, QUERY);
+    await settled();
+    expect(calls).toBe(2);
+  });
+
+  it("the backoff does not let a hung read out early", async () => {
+    // The deadline is about a read that never settles, and it is generous next
+    // to either interval. Backing off must not turn into a second read against
+    // one that is still in flight.
+    let calls = 0;
+    const backend = backendOf(() => {
+      calls += 1;
+      return new Promise<AgentTurn[]>(() => {});
+    });
+
+    setHidden(true);
+    mod.agentTurns.poll(backend, QUERY);
+    expect(calls).toBe(1);
+
+    clock += mod.POLL_MS_HIDDEN;
+    mod.agentTurns.poll(backend, QUERY);
+    expect(calls).toBe(1);
+
+    clock += mod.POLL_DEADLINE_MS;
+    mod.agentTurns.poll(backend, QUERY);
+    expect(calls).toBe(2);
+  });
+});
+
 describe("agentTurns.poll", () => {
   it("asks again once a read has gone past its deadline", async () => {
     // A promise that never settles: a hung `invoke`, or a remote boite's rpc,

@@ -93,6 +93,21 @@ const idleSince = new Map<string, number>();
 const waitingReason = new Map<string, string>();
 let timer: ReturnType<typeof setInterval> | null = null;
 
+function onVisibility() {
+  if (!document.hidden) agentTurns.wake();
+}
+
+/**
+ * `document`, where there is one.
+ *
+ * The sweep is started from the root page in a browser and from a bare node
+ * environment in its own tests, and it must not need a DOM to run: what it
+ * measures is thread state, and the visibility hook is a refinement on top.
+ */
+function windowDocument(): Document | null {
+  return typeof document === "undefined" ? null : document;
+}
+
 function forgetThread(threadId: string) {
   lastOutputAt.delete(threadId);
   lastTranscriptAt.delete(threadId);
@@ -396,12 +411,19 @@ export const statusEngine = {
   start() {
     if (timer !== null) return;
     timer = setInterval(tick, TICK_MS);
+    // The sweep itself keeps its rate whether or not anybody is looking: what it
+    // demotes are the threads nobody is looking at, and a notification is a
+    // transition it has to be awake to see. The read behind it backs off
+    // instead, and this is what makes coming back immediate rather than up to
+    // POLL_MS_HIDDEN late.
+    windowDocument()?.addEventListener("visibilitychange", onVisibility);
   },
 
   stop() {
     if (timer === null) return;
     clearInterval(timer);
     timer = null;
+    windowDocument()?.removeEventListener("visibilitychange", onVisibility);
   },
 
   // Raw PTY output and transcript writes only defer auto-sleep; neither is
