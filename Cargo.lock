@@ -549,6 +549,7 @@ dependencies = [
  "axum",
  "base64 0.23.0",
  "block2 0.6.2",
+ "boite-agent-api",
  "boite-core",
  "dirs",
  "mimalloc",
@@ -556,10 +557,8 @@ dependencies = [
  "objc2-app-kit 0.3.2",
  "objc2-foundation 0.3.2",
  "rand 0.8.6",
- "rusqlite",
  "serde",
  "serde_json",
- "subtle",
  "tauri",
  "tauri-build",
  "tauri-plugin-clipboard-manager",
@@ -576,6 +575,20 @@ dependencies = [
  "tokio",
  "url",
  "windows",
+]
+
+[[package]]
+name = "boite-agent-api"
+version = "1.0.2"
+dependencies = [
+ "axum",
+ "boite-core",
+ "dirs",
+ "serde",
+ "serde_json",
+ "subtle",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]
@@ -612,6 +625,7 @@ version = "1.0.2"
 dependencies = [
  "axum",
  "base64 0.23.0",
+ "boite-agent-api",
  "boite-core",
  "dirs",
  "flate2",
@@ -621,7 +635,6 @@ dependencies = [
  "parking_lot",
  "rand 0.8.6",
  "reqwest 0.12.28",
- "rusqlite",
  "serde",
  "serde_json",
  "subtle",
