@@ -23,16 +23,23 @@ use subtle::ConstantTimeEq;
 use tokio::sync::broadcast;
 
 use boite_core::browser;
+use boite_core::journal::{Action, Actor, Entry};
 use boite_core::project;
 use boite_core::scope::ProjectRoots;
 
 use crate::events::AppEvent;
 use crate::store::Store;
 
+/// What a spawned terminal is told about the agent endpoint.
+///
+/// There is no token here on purpose. It used to carry the value, which then
+/// went into every child's environment; a terminal is handed the path now, and
+/// the only copy of the secret outside this process is a file only its user can
+/// read.
 #[derive(Clone)]
 pub struct AgentApi {
     pub url: String,
-    pub token: String,
+    pub token_path: PathBuf,
 }
 
 struct Inner {
@@ -198,6 +205,28 @@ fn resolve_project(inner: &Inner, needle: &str) -> Result<(String, String), Stri
     ))
 }
 
+/// The actor behind a request, for the log.
+///
+/// A thread id is not an identity yet, it is an address the caller presents.
+/// It is what the log can honestly say today, and the one place that will
+/// change when threads carry a key.
+fn actor(headers: &HeaderMap) -> Actor {
+    match headers.get("x-boite-thread").and_then(|v| v.to_str().ok()) {
+        Some(id) if !id.is_empty() => Actor::Thread(id.to_string()),
+        _ => Actor::System,
+    }
+}
+
+/// Writes what just happened into the project's log.
+///
+/// A failed record is a gap in the history, never a failed action: an agent
+/// told its work failed when it succeeded does the work twice.
+fn record(inner: &Inner, entry: Entry) {
+    if let Err(e) = inner.store.record(entry) {
+        tracing::warn!("journal write failed: {e}");
+    }
+}
+
 /// Hands a request to the connected devices, tagged so exactly one acts on it.
 ///
 /// The server cannot carry any of these out: moving a thread means killing a
@@ -256,8 +285,21 @@ async fn thread_move(
             "note": body.note,
         }),
     ) {
+        record(
+            &inner,
+            Entry::new(&project_id, actor(&headers), Action::Denied)
+                .about(&thread_id)
+                .with("of", "thread.move")
+                .with("reason", &reason),
+        );
         return Ok(Json(json!({ "error": reason })));
     }
+    record(
+        &inner,
+        Entry::new(&project_id, actor(&headers), Action::ThreadMoved)
+            .about(&thread_id)
+            .with("to", &name),
+    );
     Ok(Json(json!({ "project": name })))
 }
 
@@ -280,6 +322,9 @@ async fn project_create(
     headers: HeaderMap,
     Json(body): Json<CreateProjectIn>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
+    // The log entry belongs to the project the caller is in: the one being
+    // created has no history yet, and this is the thread that asked for it.
+    let caller_project = authorize(&inner, &headers)?;
     let thread_id = thread_of_request(&inner, &headers)?;
     let name = body.name.trim().to_string();
     if name.is_empty() {
@@ -305,8 +350,19 @@ async fn project_create(
             "note": body.note,
         }),
     ) {
+        record(
+            &inner,
+            Entry::new(&caller_project, actor(&headers), Action::Denied)
+                .about(&name)
+                .with("of", "project.create")
+                .with("reason", &reason),
+        );
         return Ok(Json(json!({ "error": reason })));
     }
+    record(
+        &inner,
+        Entry::new(&caller_project, actor(&headers), Action::ProjectCreated).about(&name),
+    );
     Ok(Json(json!({ "name": name })))
 }
 
@@ -399,7 +455,7 @@ async fn thread_spawn(
             Ok((id, _)) => id,
             Err(reason) => return Ok(Json(json!({ "error": reason }))),
         },
-        None => own_project,
+        None => own_project.clone(),
     };
     if let Err(reason) = dispatch(
         &inner,
@@ -414,8 +470,18 @@ async fn thread_spawn(
             "prompt": body.prompt,
         }),
     ) {
+        record(
+            &inner,
+            Entry::new(&own_project, actor(&headers), Action::Denied)
+                .with("of", "thread.spawn")
+                .with("reason", &reason),
+        );
         return Ok(Json(json!({ "error": reason })));
     }
+    record(
+        &inner,
+        Entry::new(&own_project, actor(&headers), Action::ThreadSpawned).with("into", &project_id),
+    );
     Ok(Json(json!({ "ok": true })))
 }
 
@@ -485,6 +551,12 @@ async fn pane_open(
     ) {
         return Ok(Json(json!({ "error": reason })));
     }
+    record(
+        &inner,
+        Entry::new(&project_id, actor(&headers), Action::PaneOpened)
+            .about(&kind)
+            .with("url", url.unwrap_or_default()),
+    );
     Ok(Json(json!({ "ok": true })))
 }
 
@@ -535,13 +607,29 @@ async fn worktree_branch(
     headers: HeaderMap,
     Json(body): Json<BranchIn>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
+    let project_id = authorize(&inner, &headers)?;
     let (_, worktree) = worktree_of_request(&inner, &headers)?;
     match boite_core::git::claim_worktree_branch_blocking(&worktree, &body.name) {
         Ok(()) => {
+            record(
+                &inner,
+                Entry::new(&project_id, actor(&headers), Action::WorktreeBranchClaimed)
+                    .about(&body.name)
+                    .with("worktree", &worktree),
+            );
             let _ = inner.events.send(AppEvent::TodosChanged);
             Ok(Json(json!({ "branch": body.name })))
         }
-        Err(e) => Ok(Json(json!({ "error": e }))),
+        Err(e) => {
+            record(
+                &inner,
+                Entry::new(&project_id, actor(&headers), Action::Denied)
+                    .about(&body.name)
+                    .with("of", "worktree_branch")
+                    .with("reason", &e),
+            );
+            Ok(Json(json!({ "error": e })))
+        }
     }
 }
 
@@ -550,13 +638,29 @@ async fn worktree_reserve(
     headers: HeaderMap,
     Json(body): Json<BranchIn>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
+    let project_id = authorize(&inner, &headers)?;
     let (_, worktree) = worktree_of_request(&inner, &headers)?;
     match boite_core::git::reserve_worktree_branch_blocking(&worktree, &body.name) {
         Ok(()) => {
+            record(
+                &inner,
+                Entry::new(&project_id, actor(&headers), Action::WorktreeReserved)
+                    .about(&body.name)
+                    .with("worktree", &worktree),
+            );
             let _ = inner.events.send(AppEvent::TodosChanged);
             Ok(Json(json!({ "branch": body.name })))
         }
-        Err(e) => Ok(Json(json!({ "error": e }))),
+        Err(e) => {
+            record(
+                &inner,
+                Entry::new(&project_id, actor(&headers), Action::Denied)
+                    .about(&body.name)
+                    .with("of", "worktree_reserve")
+                    .with("reason", &e),
+            );
+            Ok(Json(json!({ "error": e })))
+        }
     }
 }
 
@@ -627,6 +731,12 @@ async fn add(
         .store
         .add_todo(&project_id, title, description, now_ms())
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    record(
+        &inner,
+        Entry::new(&project_id, actor(&headers), Action::TodoAdded)
+            .about(&id)
+            .with("title", title),
+    );
     let _ = inner.events.send(AppEvent::TodosChanged);
     Ok(Json(json!({ "id": id })))
 }
@@ -656,9 +766,23 @@ async fn claim(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     if !changed {
         // Not this project's row, or no longer open. Both are refusals, and the
-        // agent does not get to learn which.
+        // agent does not get to learn which. The log keeps both, because "who
+        // tried to claim what and was turned away" is the question a stuck
+        // multi-agent run actually asks.
+        record(
+            &inner,
+            Entry::new(&project_id, actor(&headers), Action::Denied)
+                .about(&body.id)
+                .with("of", "todo.claim")
+                .with("reason", "not open, or not this project"),
+        );
         return Err(StatusCode::CONFLICT);
     }
+    let mut entry = Entry::new(&project_id, actor(&headers), Action::TodoClaimed).about(&body.id);
+    if let Some(commit) = body.commit.as_deref() {
+        entry = entry.with("commit", commit);
+    }
+    record(&inner, entry);
     let _ = inner.events.send(AppEvent::TodosChanged);
     Ok(Json(json!({ "ok": true })))
 }
@@ -672,8 +796,14 @@ pub async fn start(
     roots: Arc<ProjectRoots>,
     workspace_dir: Option<PathBuf>,
     devices: Arc<std::sync::atomic::AtomicUsize>,
+    data_dir: PathBuf,
 ) -> Option<AgentApi> {
     let token = format!("{:032x}", rand::random::<u128>());
+    let token_path = data_dir.join("agent-token");
+    if let Err(e) = boite_core::secret_file::write(&token_path, &token) {
+        tracing::warn!("agent api disabled, cannot write the token file: {e}");
+        return None;
+    }
     let inner = Arc::new(Inner {
         store,
         events,
@@ -713,7 +843,7 @@ pub async fn start(
 
     Some(AgentApi {
         url: format!("http://127.0.0.1:{port}"),
-        token,
+        token_path,
     })
 }
 

@@ -104,7 +104,11 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
             // cannot override them.
             if let Some(api) = &state.agent_api {
                 env.insert("BOITE_MCP_URL".into(), api.url.clone());
-                env.insert("BOITE_TOKEN".into(), api.token.clone());
+                // The path, never the token. See `AgentApi::token_path`.
+                env.insert(
+                    "BOITE_TOKEN_FILE".into(),
+                    api.token_path.to_string_lossy().into_owned(),
+                );
                 env.insert("BOITE_THREAD_ID".into(), thread.id.clone());
             }
             let env = Some(env);

@@ -1,10 +1,14 @@
 //! MCP server exposing the todo list of the Boite terminal it was launched in.
 //!
 //! It holds no configuration and no credentials of its own. Boite stamps
-//! `BOITE_MCP_URL`, `BOITE_TOKEN` and `BOITE_THREAD_ID` into every PTY it
+//! `BOITE_MCP_URL`, `BOITE_TOKEN_FILE` and `BOITE_THREAD_ID` into every PTY it
 //! spawns, so this reads its whole identity from the environment. Launched
 //! anywhere else, those variables are absent and it refuses to start — which is
 //! the point: an agent outside Boite has nothing to present.
+//!
+//! The token arrives as a path rather than a value, because an environment is
+//! something a terminal prints: `BOITE_TOKEN` put the credential into the
+//! output of any `env` an agent typed, and that output is kept and replayed.
 //!
 //! The same binary serves the desktop app and `boite-server`; only the URL in
 //! the environment differs, so a remote workspace needs no separate shim.
@@ -95,10 +99,7 @@ impl Host {
     /// never arrive; it names a project instead, which is the unit the list
     /// belongs to anyway.
     fn resolve() -> Result<Host, String> {
-        if let (Ok(url), Ok(token)) = (
-            std::env::var("BOITE_MCP_URL"),
-            std::env::var("BOITE_TOKEN"),
-        ) {
+        if let (Ok(url), Some(token)) = (std::env::var("BOITE_MCP_URL"), Self::token_from_env()) {
             let thread_id = std::env::var("BOITE_THREAD_ID").ok().filter(|s| !s.is_empty());
             if thread_id.is_some() {
                 return Ok(Host {
@@ -135,6 +136,26 @@ impl Host {
             agent,
             ids: RefCell::new(HashMap::new()),
         })
+    }
+
+    /// The bearer token for a terminal Boite spawned.
+    ///
+    /// `BOITE_TOKEN_FILE` names a file only this user can read; the value used
+    /// to be in `BOITE_TOKEN` itself, which meant an agent typing `env` printed
+    /// its own credential into a scrollback that is kept and replayed. That
+    /// variable is still read, and only for one reason: a terminal opened
+    /// before the app was updated is still running with the old environment,
+    /// and its agent should not lose its todo list mid-session.
+    fn token_from_env() -> Option<String> {
+        if let Ok(path) = std::env::var("BOITE_TOKEN_FILE") {
+            if !path.trim().is_empty() {
+                return std::fs::read_to_string(&path)
+                    .ok()
+                    .map(|t| t.trim().to_string())
+                    .filter(|t| !t.is_empty());
+            }
+        }
+        std::env::var("BOITE_TOKEN").ok().filter(|t| !t.is_empty())
     }
 
     fn send(&self, method: &str, path: &str, body: Option<Value>) -> Result<Value, String> {

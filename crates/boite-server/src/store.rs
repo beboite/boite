@@ -3,7 +3,7 @@ use std::path::Path;
 use parking_lot::Mutex;
 use rusqlite::Connection;
 
-use boite_core::migrations;
+use boite_core::{journal, migrations};
 
 use crate::models::{Project, Thread, Todo};
 
@@ -180,6 +180,19 @@ impl Store {
             |r| r.get::<_, String>(0),
         )
         .map_err(|_| "unknown thread".to_string())
+    }
+
+    /// Records what happened in the project's log.
+    ///
+    /// Not in the same transaction as the write it describes, and that is a
+    /// known gap rather than an oversight: threading a transaction through
+    /// every handler would buy an atomicity that belongs one layer up, at the
+    /// single dispatch every mutation will go through. Until then the record
+    /// follows the write, so a crash between the two loses an entry rather than
+    /// inventing one, which is the right way round.
+    pub fn record(&self, entry: journal::Entry) -> Result<journal::Recorded, String> {
+        let mut conn = self.conn.lock();
+        journal::append(&mut conn, entry)
     }
 
     pub fn add_todo(

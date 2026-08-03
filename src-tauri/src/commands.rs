@@ -64,7 +64,11 @@ pub async fn pty_open(
     if let Some(api) = app.try_state::<crate::agent_api::AgentApi>() {
         let env = spec.env.get_or_insert_with(Default::default);
         env.insert("BOITE_MCP_URL".into(), api.url.clone());
-        env.insert("BOITE_TOKEN".into(), api.token.clone());
+        // The path, never the token. See `AgentApi::token_path`.
+        env.insert(
+            "BOITE_TOKEN_FILE".into(),
+            api.token_path.to_string_lossy().into_owned(),
+        );
         env.insert("BOITE_THREAD_ID".into(), thread_id.clone());
     }
     tauri::async_runtime::spawn_blocking(move || {
@@ -611,7 +615,7 @@ pub fn agent_mcp_project_path(app: AppHandle, project_id: String) -> Result<Stri
     let api = app
         .try_state::<crate::agent_api::AgentApi>()
         .ok_or("the agent endpoint is not running")?;
-    let written = crate::agent_api::write_one(&app, &api.url, &api.token, &project_id)?;
+    let written = crate::agent_api::write_one(&app, &api.url, &api.token_path, &project_id)?;
     Ok(written.to_string_lossy().into_owned())
 }
 

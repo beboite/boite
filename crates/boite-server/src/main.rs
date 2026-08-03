@@ -98,6 +98,7 @@ async fn main() {
         roots.clone(),
         config.workspace_dir.clone(),
         devices.clone(),
+        config.data_dir.clone(),
     )
     .await;
 
