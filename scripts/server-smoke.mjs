@@ -330,6 +330,30 @@ if (agentUrl && keyFile) {
   const after = await c.rpc("approval.list");
   check("an answered request stops waiting", (after.approvals ?? []).length === 0);
 
+  // What the terminal actually printed, read back from the file rather than
+  // from a ring that dies with the process. The probe echoed its own
+  // environment, so its transcript has to contain what it said.
+  const printed = await fetch(`${agentUrl}/v1/transcript?bytes=4096`, {
+    headers: signedHeaders(key, probeId, "GET", "/v1/transcript?bytes=4096", ""),
+  });
+  const said2 = printed.status === 200 ? await printed.json() : null;
+  check(
+    "a terminal's own output is kept where it can be read back",
+    typeof said2?.text === "string" && said2.text.includes("URL="),
+    `status=${printed.status}`,
+  );
+  // And any thread in the workspace, which is how one agent finds out what
+  // another was doing when it stopped.
+  const other = await fetch(`${agentUrl}/v1/transcript?bytes=4096&threadId=${threadId}`, {
+    headers: signedHeaders(key, probeId, "GET", `/v1/transcript?bytes=4096&threadId=${threadId}`, ""),
+  });
+  const otherText = other.status === 200 ? await other.json() : null;
+  check(
+    "another terminal's output is readable too",
+    typeof otherText?.text === "string" && otherText.text.includes("MIDMARK"),
+    `status=${other.status}`,
+  );
+
   // The one call an agent makes instead of asking a human what they see. Its
   // value is the comparison: what the rows claim, next to what this process
   // actually has a process for.

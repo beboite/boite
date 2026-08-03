@@ -18,7 +18,7 @@ use super::{
     opt_str_param, str_list, str_param, u32_param, value_of, Command, Host, Ready, Wire,
 };
 use crate::capability::Capability;
-use crate::{fastpick, session, shell, usage};
+use crate::{fastpick, session, shell, transcript, usage};
 
 /// Every method in this domain, in the order they appear below.
 pub const ALL_METHODS: &[&str] = &[
@@ -34,6 +34,7 @@ pub const ALL_METHODS: &[&str] = &[
     "shell.commandExists",
     "fastpick.list",
     "fastpick.version",
+    "session.transcript",
 ];
 
 /// Which PTY the caller is, for the one command that has to tell its own live
@@ -102,6 +103,17 @@ pub enum Sessions {
     /// Null means no fastpick here, which is a state the settings panel draws
     /// rather than an error it reports.
     FastpickVersion,
+    /// What a terminal printed, as text, from the end.
+    ///
+    /// The question anybody actually has is what it was doing when it stopped,
+    /// so this reads from the end rather than the start. `dir` is the host's
+    /// answer, resolved in `prepare`: a caller naming a directory would be a
+    /// caller reading any file on the machine.
+    Transcript {
+        thread_id: String,
+        bytes: u32,
+        dir: Option<std::path::PathBuf>,
+    },
 }
 
 impl Sessions {
@@ -155,6 +167,13 @@ impl Sessions {
                 refresh: super::bool_param(params, "refresh", false),
             },
             "fastpick.version" => Sessions::FastpickVersion,
+            "session.transcript" => Sessions::Transcript {
+                thread_id: str_param(params, "threadId")?,
+                // A terminal prints more in a minute than anybody reads, and
+                // this answer goes into a context window.
+                bytes: u32_param(params, "bytes", 16_384).min(1024 * 1024),
+                dir: None,
+            },
             other => return Err(format!("unknown method: {other}")),
         })
     }
@@ -173,6 +192,7 @@ impl Sessions {
             Sessions::CommandExists { .. } => "shell.commandExists",
             Sessions::FastpickList { .. } => "fastpick.list",
             Sessions::FastpickVersion => "fastpick.version",
+            Sessions::Transcript { .. } => "session.transcript",
         }
     }
 
@@ -190,6 +210,7 @@ impl Sessions {
             Sessions::CommandExists { .. } => Wire::Key("found"),
             Sessions::FastpickList { .. } => Wire::Key("json"),
             Sessions::FastpickVersion => Wire::Key("version"),
+            Sessions::Transcript { .. } => Wire::Key("text"),
         }
     }
 
@@ -210,7 +231,8 @@ impl Sessions {
             | Sessions::ShellAvailable { .. }
             | Sessions::CommandExists { .. }
             | Sessions::FastpickList { .. }
-            | Sessions::FastpickVersion => Capability::ReadProject,
+            | Sessions::FastpickVersion
+            | Sessions::Transcript { .. } => Capability::ReadProject,
 
             Sessions::StopClaude { .. } | Sessions::Migrate { .. } => Capability::MutateProject,
         }
@@ -221,6 +243,9 @@ impl Sessions {
             if let Own::Pty(pty_id) = own {
                 *own = Own::Pid(pty_id.as_deref().and_then(|id| host.child_pid(id)));
             }
+        }
+        if let Sessions::Transcript { dir, .. } = &mut self {
+            *dir = host.transcripts_dir();
         }
         Ok(Ready::Work(Command::Sessions(self)))
     }
@@ -321,6 +346,16 @@ impl Sessions {
                 value_of(fastpick::list_blocking(provider, refresh)?)
             }
             Sessions::FastpickVersion => value_of(fastpick::version_blocking()),
+            Sessions::Transcript {
+                thread_id,
+                bytes,
+                dir,
+            } => {
+                let dir = dir.ok_or(
+                    "this Boite keeps no transcripts, so there is nothing to read back",
+                )?;
+                value_of(transcript::tail(&dir, &thread_id, bytes as usize)?)
+            }
         })
     }
 }
@@ -343,6 +378,7 @@ mod tests {
             "toCwd": "/b",
             "cmd": "claude",
             "cwds": ["/w"],
+            "threadId": "t1",
         });
         for method in ALL_METHODS {
             let command = Command::decode(method, &params)

@@ -144,6 +144,18 @@ fn common_tools() -> Value {
             "annotations": { "title": "Snapshot", "readOnlyHint": true, "idempotentHint": true, "openWorldHint": false }
         },
         {
+            "name": "terminal_transcript",
+            "description": "What a terminal actually printed, read back from the end. Any thread in                             this workspace, not only your own: this is how you find out what                             another agent was doing when it stopped, and what its command really                             said before it failed. Ask workspace_snapshot for the thread ids.                             Defaults to your own terminal, which is how you re-read output you                             have lost track of. Escape sequences are stripped; a redrawn progress                             line stays as many lines.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "threadId": { "type": "string", "description": "Which terminal. Omit for your own." },
+                    "bytes": { "type": "number", "description": "How much of the end to read. Default 16384, max 1048576." }
+                }
+            },
+            "annotations": { "title": "Transcript", "readOnlyHint": true, "idempotentHint": false, "openWorldHint": false }
+        },
+        {
             "name": "worktree_branch",
             "description": "Create a NEW branch for the work in this terminal. Call it once the work \
                             is worth keeping: until then detached leaves no trace, and the worktree \

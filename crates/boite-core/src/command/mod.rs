@@ -108,6 +108,17 @@ pub trait Host {
         None
     }
 
+    /// Where this host keeps what its terminals printed.
+    ///
+    /// `None` means it keeps none, which is honest for a host with no PTYs of
+    /// its own and for one whose directory could not be made. The one command
+    /// that asks says so rather than answering with nothing, because "there is
+    /// no transcript" and "this Boite does not keep transcripts" send whoever
+    /// is reading to two different places.
+    fn transcripts_dir(&self) -> Option<PathBuf> {
+        None
+    }
+
     /// Places a new project may go beyond the parents of the registered roots.
     ///
     /// The user's home on both sides; a server bound to a workspace directory
@@ -485,6 +496,7 @@ mod tests {
             ("shell.commandExists", ReadProject),
             ("fastpick.list", ReadProject),
             ("fastpick.version", ReadProject),
+            ("session.transcript", ReadProject),
         ];
         let actual: Vec<(&str, Capability)> = every_command()
             .iter()
@@ -540,6 +552,7 @@ mod tests {
             "file": "a", "files": [], "untracked": [], "query": "q",
             "content": "", "kind": "claude", "sessionId": "s", "cmd": "git",
             "fromCwd": ".", "toCwd": ".", "queries": [], "limit": 1, "skip": 0, "days": 1,
+            "bytes": 16,
         });
         methods()
             .map(|method| {

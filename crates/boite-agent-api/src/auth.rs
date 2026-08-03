@@ -105,10 +105,18 @@ pub async fn identify(
         .await
         .map_err(|_| StatusCode::PAYLOAD_TOO_LARGE)?;
 
+    // Path *and* query, which is the whole request line a client sent. Signing
+    // the path alone would leave `?threadId=` outside the signature, and that
+    // parameter is which terminal's output comes back.
+    let path = parts
+        .uri
+        .path_and_query()
+        .map(|p| p.as_str())
+        .unwrap_or_else(|| parts.uri.path());
     let caller = prove(
         &*workspace,
         parts.method.as_str(),
-        parts.uri.path(),
+        path,
         &parts.headers,
         &bytes,
         now_ms(),

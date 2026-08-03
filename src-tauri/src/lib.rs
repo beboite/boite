@@ -320,6 +320,7 @@ pub fn run() {
             commands::agents::register_agent_mcp,
             commands::sessions::stop_claude_session,
             commands::sessions::migrate_session,
+            commands::sessions::thread_transcript,
             commands::sessions::copilot_session_resumable,
             commands::sessions::find_codex_session,
             commands::sessions::find_opencode_session,

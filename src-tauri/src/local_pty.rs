@@ -1,4 +1,5 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use base64::Engine as _;
@@ -6,12 +7,19 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use tauri::ipc::Channel;
 
 use boite_core::pty::{EventSink, PtyEvent};
+use boite_core::transcript::{self, Scrollback};
 
 use crate::commands::WirePtyEvent;
 
-// Scrollback kept per detached local PTY so a reattaching terminal isn't blank
-// until the next byte. Matches tmux-ish "recent screen" behavior, not full
-// history.
+/// Scrollback kept per detached local PTY, so a reattaching terminal is not
+/// blank until the next byte. A recent screen, not a history: the history is
+/// the transcript file behind it.
+///
+/// This used to be a `VecDeque` and a constant here, and the server had a
+/// different one that also tracked an absolute offset. Two rings, one of which
+/// could answer "what have I missed" and one of which could not, so a reattach
+/// on a local workspace repainted the whole screen and a reattach on a remote
+/// one did not. Neither behaviour was a decision.
 const RING_CAP: usize = 256 * 1024;
 
 // Output sink for a local PTY with a *detachable* channel plus a scrollback
@@ -22,15 +30,33 @@ const RING_CAP: usize = 256 * 1024;
 // dies or kill_all), which is what removes the PTY from the manager.
 pub struct LocalSink {
     channel: Mutex<Option<Channel<WirePtyEvent>>>,
-    ring: Mutex<VecDeque<u8>>,
+    ring: Mutex<Scrollback>,
     last_title: Mutex<Option<String>>,
 }
 
 impl LocalSink {
+    /// A sink with no memory beyond its ring. For a terminal opened before the
+    /// app knew where to put transcripts.
     pub fn new(channel: Channel<WirePtyEvent>) -> Self {
         Self {
             channel: Mutex::new(Some(channel)),
-            ring: Mutex::new(VecDeque::new()),
+            ring: Mutex::new(Scrollback::new(RING_CAP)),
+            last_title: Mutex::new(None),
+        }
+    }
+
+    /// The same, writing everything this terminal prints to `dir`.
+    ///
+    /// A transcript that cannot be opened is not a terminal that fails to
+    /// start: the caller gets a sink either way, and only the memory is lost.
+    pub fn recording(channel: Channel<WirePtyEvent>, dir: &Path, thread_id: &str) -> Self {
+        let mut ring = Scrollback::new(RING_CAP);
+        if let Some(path) = transcript::path_for(dir, thread_id) {
+            ring.to_file(&path);
+        }
+        Self {
+            channel: Mutex::new(Some(channel)),
+            ring: Mutex::new(ring),
             last_title: Mutex::new(None),
         }
     }
@@ -48,9 +74,8 @@ impl LocalSink {
         };
         let ring = lock(&self.ring);
         if !ring.is_empty() {
-            let bytes: Vec<u8> = ring.iter().copied().collect();
             let _ = channel.send(WirePtyEvent::Output {
-                data: BASE64.encode(&bytes),
+                data: BASE64.encode(ring.snapshot()),
             });
         }
         if let Some(title) = lock(&self.last_title).clone() {
@@ -62,18 +87,13 @@ impl LocalSink {
 impl EventSink for LocalSink {
     fn send(&self, event: PtyEvent) -> bool {
         match &event {
-            PtyEvent::Output(bytes) => {
-                let mut ring = lock(&self.ring);
-                ring.extend(bytes.iter().copied());
-                let overflow = ring.len().saturating_sub(RING_CAP);
-                if overflow > 0 {
-                    ring.drain(0..overflow);
-                }
-            }
+            PtyEvent::Output(bytes) => lock(&self.ring).extend(bytes),
             PtyEvent::Title(value) => {
                 *lock(&self.last_title) = Some(value.clone());
             }
-            _ => {}
+            // The end of a run is the one moment the transcript has to be on
+            // disk: nothing else will call this sink again.
+            PtyEvent::Exit(_) | PtyEvent::Error(_) => lock(&self.ring).flush(),
         }
         if let Some(channel) = lock(&self.channel).as_ref() {
             let wire = match event {

@@ -1,4 +1,5 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -8,6 +9,7 @@ use tokio::sync::broadcast;
 use boite_core::pty::{EventSink, PtyEvent, PtyManager, PtySpawnArgs};
 use boite_core::session::{self, AgentTurn, DeclaredTurn, TurnQuery};
 use boite_core::status::{self, ThreadStatus};
+use boite_core::transcript::{self, Scrollback};
 
 use crate::events::AppEvent;
 
@@ -46,7 +48,7 @@ struct StatusState {
 pub struct LiveThread {
     pub thread_id: String,
     pty_id: Mutex<String>,
-    ring: Mutex<Ring>,
+    ring: Mutex<Scrollback>,
     output: broadcast::Sender<Arc<Vec<u8>>>,
     title: Mutex<String>,
     status: Mutex<StatusState>,
@@ -80,6 +82,11 @@ struct Shared {
 pub struct Registry {
     pty: PtyManager,
     scrollback_bytes: usize,
+    /// Where a thread's whole run is written, as opposed to the last few
+    /// hundred kilobytes the ring holds. `None` in the tests, and in a server
+    /// that could not make the directory: a terminal with no memory still
+    /// works.
+    transcripts: Option<PathBuf>,
     shared: Arc<Shared>,
 }
 
@@ -99,6 +106,7 @@ pub struct AttachSnapshot {
 impl Registry {
     pub fn new(
         scrollback_bytes: usize,
+        transcripts: Option<PathBuf>,
         events: Arc<dyn Fn(AppEvent) + Send + Sync>,
         identity: IdentityLookup,
     ) -> Arc<Registry> {
@@ -110,6 +118,7 @@ impl Registry {
         let registry = Arc::new(Registry {
             pty: PtyManager::new(),
             scrollback_bytes,
+            transcripts,
             shared: shared.clone(),
         });
         spawn_ticker(shared);
@@ -129,8 +138,14 @@ impl Registry {
         Arc::new(Registry {
             pty: PtyManager::new(),
             scrollback_bytes,
+            transcripts: None,
             shared,
         })
+    }
+
+    /// Where this server writes what its terminals print, if it writes it.
+    pub fn transcripts_dir(&self) -> Option<PathBuf> {
+        self.transcripts.clone()
     }
 
     pub fn live(&self, thread_id: &str) -> Option<Arc<LiveThread>> {
@@ -173,10 +188,21 @@ impl Registry {
         }
 
         let (output, _) = broadcast::channel(OUTPUT_CHANNEL_CAP);
+        // The ring is what a reattaching client repaints from; the file is what
+        // is still there tomorrow. A thread whose transcript cannot be opened
+        // keeps its terminal and loses only its memory, so the failure is a
+        // warning rather than a refusal to spawn.
+        let mut ring = Scrollback::new(self.scrollback_bytes);
+        if let Some(dir) = &self.transcripts {
+            match transcript::path_for(dir, &thread_id) {
+                Some(path) if ring.to_file(&path) => {}
+                _ => tracing::warn!("thread {thread_id} runs without a transcript"),
+            }
+        }
         let live = Arc::new(LiveThread {
             thread_id: thread_id.clone(),
             pty_id: Mutex::new(String::new()),
-            ring: Mutex::new(Ring::new(self.scrollback_bytes)),
+            ring: Mutex::new(ring),
             output,
             title: Mutex::new(String::new()),
             status: Mutex::new(StatusState {
@@ -548,55 +574,7 @@ fn spawn_ticker(shared: Arc<Shared>) {
     });
 }
 
-struct Ring {
-    buf: VecDeque<u8>,
-    cap: usize,
-    // Absolute count of bytes ever written. The oldest byte still in `buf` sits
-    // at offset `written - buf.len()`; clients track this offset so a reattach
-    // (reconnect or unhide) can ask for just the delta instead of the full ring.
-    written: u64,
-}
 
-impl Ring {
-    fn new(cap: usize) -> Ring {
-        Ring {
-            buf: VecDeque::new(),
-            cap,
-            written: 0,
-        }
-    }
-    fn extend(&mut self, bytes: &[u8]) {
-        self.written += bytes.len() as u64;
-        if bytes.len() >= self.cap {
-            self.buf.clear();
-            self.buf.extend(&bytes[bytes.len() - self.cap..]);
-            return;
-        }
-        self.buf.extend(bytes.iter().copied());
-        while self.buf.len() > self.cap {
-            self.buf.pop_front();
-        }
-    }
-    fn total(&self) -> u64 {
-        self.written
-    }
-    fn start(&self) -> u64 {
-        self.written - self.buf.len() as u64
-    }
-    fn snapshot(&self) -> Vec<u8> {
-        self.buf.iter().copied().collect()
-    }
-    /// Bytes written since absolute offset `since`, or None if `since` fell out
-    /// of the ring (caller must send a full snapshot + reset instead). An empty
-    /// vec means the client is already current.
-    fn delta_from(&self, since: u64) -> Option<Vec<u8>> {
-        if since < self.start() || since > self.written {
-            return None;
-        }
-        let skip = (since - self.start()) as usize;
-        Some(self.buf.iter().skip(skip).copied().collect())
-    }
-}
 
 #[cfg(test)]
 mod status_tests {
@@ -686,7 +664,7 @@ mod sink_tests {
         Arc::new(LiveThread {
             thread_id: thread_id.to_string(),
             pty_id: Mutex::new(pty_id.to_string()),
-            ring: Mutex::new(Ring::new(1024)),
+            ring: Mutex::new(Scrollback::new(1024)),
             output,
             title: Mutex::new(String::new()),
             status: Mutex::new(StatusState {

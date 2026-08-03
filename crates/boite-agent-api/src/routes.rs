@@ -57,6 +57,7 @@ pub fn router(workspace: Shared) -> Router {
         .route("/v1/threads", post(thread_spawn))
         .route("/v1/pane/open", post(pane_open))
         .route("/v1/snapshot", get(snapshot))
+        .route("/v1/transcript", get(transcript))
         .layer(axum::middleware::from_fn_with_state(
             workspace.clone(),
             crate::auth::identify,
@@ -344,6 +345,48 @@ async fn snapshot(
     })
     .await?;
     taken.map(Json).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+}
+
+#[derive(Deserialize)]
+struct TranscriptIn {
+    /// Which terminal. Any thread in the workspace, not only the caller's.
+    #[serde(rename = "threadId")]
+    thread_id: Option<String>,
+    bytes: Option<u32>,
+}
+
+/// What a terminal printed, read back from the end.
+///
+/// Not scoped to the caller's own thread, and that is the point: an agent asked
+/// why another one stopped had nothing to read, because a PTY's output died
+/// with the process. It carries no credential — the key files are not in the
+/// workspace and a transcript is what was on somebody's screen — and it is the
+/// single most useful thing an agent can be handed when something is wrong.
+///
+/// Defaults to the caller's own terminal, which is the other half of it: an
+/// agent that lost track of what it printed can re-read itself.
+async fn transcript(
+    State(workspace): State<Shared>,
+    Extension(caller): Extension<Caller>,
+    axum::extract::Query(query): axum::extract::Query<TranscriptIn>,
+) -> Result<Json<Value>, StatusCode> {
+    let Some(dir) = workspace.transcripts_dir() else {
+        return Ok(refused(
+            "this Boite keeps no transcripts, so there is nothing to read back",
+        ));
+    };
+    let thread_id = match query.thread_id.filter(|id| !id.is_empty()) {
+        Some(id) => id,
+        None => caller.thread()?.to_string(),
+    };
+    // A terminal prints more in a minute than anybody reads, and this answer
+    // goes into a context window.
+    let bytes = query.bytes.unwrap_or(16_384).min(1024 * 1024) as usize;
+    let read = blocking(move || boite_core::transcript::tail(&dir, &thread_id, bytes)).await?;
+    Ok(match read {
+        Ok(text) => Json(json!({ "text": text })),
+        Err(reason) => refused(reason),
+    })
 }
 
 // ------------------------------------------------------------ worktrees
