@@ -9,15 +9,17 @@ use tauri::{
     ipc::{Channel, InvokeBody, Request},
 };
 
+use serde_json::Value;
+
+use boite_core::command::{Command, Git, Scoped};
 use boite_core::editor::TextFile;
 use boite_core::explorer::{DirEntry, SearchHit};
-use boite_core::git::{ChangeEntry, Commit, FileVersions, PathStatus, RepoInfo};
 use boite_core::project::ProjectInspection;
 use boite_core::pty::{PtyManager, PtySpawnArgs};
 use boite_core::scope::ProjectRoots;
 use boite_core::session::{ClaudeSessionHit, CodexSessionHit};
 use boite_core::shell::ShellOption;
-use boite_core::{editor, explorer, git, project, session, shell, usage};
+use boite_core::{editor, explorer, project, session, shell, usage};
 
 use crate::BootState;
 use crate::local_pty::{LocalSessions, LocalSink};
@@ -798,37 +800,55 @@ pub async fn find_hermes_session(
     run_lookup(move || session::find_hermes_session_blocking(cwd, after_unix_ms, &exclude)).await
 }
 
+/// Puts a command through the bus and hands back its answer.
+///
+/// Every git and worktree capability on this side is one of these: the trust
+/// boundary, the work and the refusals all live in `boite_core::command`, and
+/// what is left here is naming the command and handing over the arguments the
+/// webview sent. The desktop reads an answer bare — the envelopes in
+/// `command::Wire` are the WebSocket protocol's, and `invoke` already carries
+/// the shape the frontend types.
+async fn on_bus(roots: &ProjectRoots, command: Command) -> Result<Value, String> {
+    on_bus_with_legacy_base(roots, None, command).await
+}
+
+/// Same, for the one command that needs to know where this app's earlier layout
+/// put worktrees. Nothing else on the bus has anything to ask the host beyond
+/// the roots.
+async fn on_bus_with_legacy_base(
+    roots: &ProjectRoots,
+    legacy: Option<PathBuf>,
+    command: Command,
+) -> Result<Value, String> {
+    let host = Scoped::new(roots).with_legacy_worktree_base(legacy);
+    let ready = command.prepare(&host)?;
+    tauri::async_runtime::spawn_blocking(move || ready.run())
+        .await
+        .map_err(|e| format!("command task failed: {e}"))?
+}
+
 #[tauri::command]
 pub async fn git_repo_info(
     scope: State<'_, ProjectRoots>,
     path: String,
-) -> Result<RepoInfo, String> {
-    scope.ensure_allowed(&path)?;
-    tauri::async_runtime::spawn_blocking(move || git::repo_info_blocking(&path))
-        .await
-        .map_err(|e| format!("git_repo_info task failed: {e}"))?
+) -> Result<Value, String> {
+    on_bus(scope.inner(), Git::RepoInfo { path }.into()).await
 }
 
 #[tauri::command]
 pub async fn git_find_repos(
     scope: State<'_, ProjectRoots>,
     path: String,
-) -> Result<Vec<String>, String> {
-    scope.ensure_allowed(&path)?;
-    tauri::async_runtime::spawn_blocking(move || git::find_repos_blocking(&path, 3))
-        .await
-        .map_err(|e| format!("git_find_repos task failed: {e}"))?
+) -> Result<Value, String> {
+    on_bus(scope.inner(), Git::FindRepos { path }.into()).await
 }
 
 #[tauri::command]
 pub async fn git_branches(
     scope: State<'_, ProjectRoots>,
     path: String,
-) -> Result<Vec<git::BranchInfo>, String> {
-    scope.ensure_allowed(&path)?;
-    tauri::async_runtime::spawn_blocking(move || git::branches_blocking(&path))
-        .await
-        .map_err(|e| format!("git_branches task failed: {e}"))?
+) -> Result<Value, String> {
+    on_bus(scope.inner(), Git::Branches { path }.into()).await
 }
 
 #[tauri::command]
@@ -838,42 +858,46 @@ pub async fn git_switch_branch(
     name: String,
     create: bool,
     stash: bool,
-) -> Result<git::BranchChangeResult, String> {
-    scope.ensure_allowed(&path)?;
-    tauri::async_runtime::spawn_blocking(move || {
-        git::switch_branch_blocking(&path, &name, create, stash)
-    })
+) -> Result<Value, String> {
+    on_bus(
+        scope.inner(),
+        Git::SwitchBranch {
+            path,
+            name,
+            create,
+            stash,
+        }
+        .into(),
+    )
     .await
-    .map_err(|e| format!("git_switch_branch task failed: {e}"))?
 }
 
-/// Opens a detached worktree for a thread and hands back its directory, or
-/// `None` when this repository is not one to open a worktree in.
+/// Opens a detached worktree for a thread and hands back its directory, or null
+/// when this repository is not one to open a worktree in.
 ///
-/// The base lives inside the project, so it shares a volume with the checkout
-/// it provisions from. Nothing widens the filesystem boundary: the base is
-/// derived here from a repository already checked against the registered roots,
-/// never taken from the caller.
-/// Traced from end to end, and that is not decoration.
+/// Traced from end to end, and that is not decoration. A thread waits on this
+/// answer before its PTY starts, so an answer that never comes is a black
+/// terminal, a reload that does nothing and a thread that cannot be closed —
+/// with nothing on screen to say why. Three records tell the three failures
+/// apart: no `done` means the work itself is stuck, `done` without the
+/// frontend's own line means the reply never crossed back, and a long `done` is
+/// simply a large repository being provisioned.
 ///
-/// A thread waits on this answer before its PTY starts, so an answer that never
-/// comes is a black terminal, a reload that does nothing and a thread that
-/// cannot be closed — with nothing on screen to say why. Three records tell the
-/// three failures apart: no `done` means the work itself is stuck, `done`
-/// without the frontend's own line means the reply never crossed back, and a
-/// long `done` is simply a large repository being provisioned.
+/// That is why this one does not go through `on_bus`: the middle record has to
+/// be written on the blocking thread, next to the work, rather than after the
+/// await where it would say nothing the last record does not.
 #[tauri::command]
 pub async fn worktree_open(
     app: tauri::AppHandle,
     scope: State<'_, ProjectRoots>,
     repo: String,
     thread_id: String,
-) -> Result<Option<String>, String> {
-    scope.ensure_allowed(&repo)?;
-    let base = git::worktree_base_for(std::path::Path::new(&repo));
-    let base = base.to_string_lossy().to_string();
+) -> Result<Value, String> {
     let traced = thread_id.clone();
+    let ready = Command::from(Git::WorktreeOpen { repo, thread_id })
+        .prepare(&Scoped::new(scope.inner()))?;
     let handle = app.clone();
+    let label = traced.clone();
     let _ = crate::logging::append_app_log(
         &app,
         "info",
@@ -883,12 +907,17 @@ pub async fn worktree_open(
     );
     let started = std::time::Instant::now();
     let answer = tauri::async_runtime::spawn_blocking(move || {
-        let out = git::open_worktree_if_eligible_blocking(&repo, &base, &thread_id);
+        let out = ready.run();
         let took = started.elapsed().as_millis();
         let said = match &out {
-            Ok(Some(path)) => format!("{thread_id}: done in {took}ms — {path}"),
-            Ok(None) => format!("{thread_id}: done in {took}ms — no worktree for this repository"),
-            Err(err) => format!("{thread_id}: failed in {took}ms — {err}"),
+            Ok(Value::Null) => {
+                format!("{label}: done in {took}ms — no worktree for this repository")
+            }
+            Ok(value) => format!(
+                "{label}: done in {took}ms — {}",
+                value.as_str().unwrap_or_default()
+            ),
+            Err(err) => format!("{label}: failed in {took}ms — {err}"),
         };
         let _ = crate::logging::append_app_log(&handle, "info", "worktree", &said, None);
         out
@@ -908,36 +937,20 @@ pub async fn worktree_open(
     answer
 }
 
-/// Makes sure a project has a worktree standing by for its next agent thread.
-///
-/// Fire and forget: the answer is only whether the warming started, never
-/// whether it finished, and a project that cannot have one (not a repository, no
-/// commits) is not an error to report.
 #[tauri::command]
 pub async fn worktree_warm(
-    app: tauri::AppHandle,
     scope: State<'_, ProjectRoots>,
     repo: String,
-) -> Result<(), String> {
-    scope.ensure_allowed(&repo)?;
-    let _ = &app;
-    let base = git::worktree_base_for(std::path::Path::new(&repo));
-    let base = base.to_string_lossy().to_string();
-    tauri::async_runtime::spawn_blocking(move || {
-        if let Err(err) = git::warm_worktree_pool_blocking(&repo, &base) {
-            eprintln!("[boite/worktree] warm failed: {err}");
-        }
-    })
-    .await
-    .map_err(|e| format!("worktree_warm task failed: {e}"))
+) -> Result<Value, String> {
+    on_bus(scope.inner(), Git::WorktreeWarm { repo }.into()).await
 }
 
 /// Moves a worktree left over from the old layout into its project.
 ///
-/// Scoped on both ends: the repository must be a registered root, and the
-/// destination is computed here from that repository rather than taken from the
-/// caller, so this cannot be used to write a worktree somewhere of the caller's
-/// choosing. The source is checked against the legacy base for the same reason.
+/// The legacy base is read here rather than inside the bus because this app is
+/// the only thing that knows where its own earlier releases put it, and a data
+/// directory it cannot resolve is an error to report rather than a worktree to
+/// leave alone.
 #[tauri::command]
 pub async fn worktree_migrate(
     app: tauri::AppHandle,
@@ -945,85 +958,36 @@ pub async fn worktree_migrate(
     repo: String,
     thread_id: String,
     from: String,
-) -> Result<WorktreeMigration, String> {
-    scope.ensure_allowed(&repo)?;
+) -> Result<Value, String> {
     let legacy = crate::app_data::worktree_base(&app)?;
-    let source = std::path::Path::new(&from);
-    if !source.starts_with(&legacy) {
-        return Ok(WorktreeMigration::left_alone());
-    }
-    let base = git::worktree_base_for(std::path::Path::new(&repo));
-    let to = git::scoped_dir_for(&base, &thread_id)
-        .to_string_lossy()
-        .to_string();
-    let landed = tauri::async_runtime::spawn_blocking(move || {
-        git::migrate_worktree_blocking(&repo, &from, &to)
-    })
+    on_bus_with_legacy_base(
+        scope.inner(),
+        Some(legacy),
+        Git::WorktreeMigrate {
+            repo,
+            thread_id,
+            from,
+        }
+        .into(),
+    )
     .await
-    .map_err(|e| format!("worktree_migrate task failed: {e}"))??;
-    Ok(match landed {
-        Some(path) => WorktreeMigration {
-            path: Some(path),
-            gone: false,
-        },
-        None => WorktreeMigration {
-            path: None,
-            gone: true,
-        },
-    })
 }
 
-/// Hands back the worktree a thread already owns but has no path to.
-///
-/// Scoped like every other path-taking command here, and it needs nothing else:
-/// the directory is derived from the repository and the thread id rather than
-/// taken from the caller, so there is no path to point anywhere.
 #[tauri::command]
 pub async fn worktree_adopt(
     scope: State<'_, ProjectRoots>,
     repo: String,
     thread_id: String,
-) -> Result<Option<String>, String> {
-    scope.ensure_allowed(&repo)?;
-    tauri::async_runtime::spawn_blocking(move || git::adopt_worktree_blocking(&repo, &thread_id))
-        .await
-        .map_err(|e| format!("worktree_adopt task failed: {e}"))
+) -> Result<Value, String> {
+    on_bus(scope.inner(), Git::WorktreeAdopt { repo, thread_id }.into()).await
 }
 
-/// What became of a worktree the migration was asked about.
-///
-/// Three answers, and the caller has to tell them apart: a path means it moved,
-/// `gone` means the directory is not there any more and the thread has to stop
-/// pointing at it, and neither means it was left where it is.
-#[derive(Debug, Clone, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WorktreeMigration {
-    pub path: Option<String>,
-    pub gone: bool,
-}
-
-impl WorktreeMigration {
-    fn left_alone() -> Self {
-        Self {
-            path: None,
-            gone: false,
-        }
-    }
-}
-
-/// Every worktree of a repository, read from the repository itself.
-///
-/// Scoped on the repo alone: the paths come back from git rather than going in,
-/// so there is nothing here for a caller to point somewhere it should not.
 #[tauri::command]
 pub async fn worktree_list(
     scope: State<'_, ProjectRoots>,
     repo: String,
-) -> Result<Vec<git::WorktreeEntry>, String> {
-    scope.ensure_allowed(&repo)?;
-    tauri::async_runtime::spawn_blocking(move || git::list_worktrees_blocking(&repo))
-        .await
-        .map_err(|e| format!("worktree_list task failed: {e}"))?
+) -> Result<Value, String> {
+    on_bus(scope.inner(), Git::WorktreeList { repo }.into()).await
 }
 
 #[tauri::command]
@@ -1031,11 +995,8 @@ pub async fn worktree_claim(
     scope: State<'_, ProjectRoots>,
     path: String,
     name: String,
-) -> Result<(), String> {
-    scope.ensure_allowed(&path)?;
-    tauri::async_runtime::spawn_blocking(move || git::claim_worktree_branch_blocking(&path, &name))
-        .await
-        .map_err(|e| format!("worktree_claim task failed: {e}"))?
+) -> Result<Value, String> {
+    on_bus(scope.inner(), Git::WorktreeClaim { path, name }.into()).await
 }
 
 #[tauri::command]
@@ -1043,24 +1004,16 @@ pub async fn worktree_reserve(
     scope: State<'_, ProjectRoots>,
     path: String,
     name: String,
-) -> Result<(), String> {
-    scope.ensure_allowed(&path)?;
-    tauri::async_runtime::spawn_blocking(move || {
-        git::reserve_worktree_branch_blocking(&path, &name)
-    })
-    .await
-    .map_err(|e| format!("worktree_reserve task failed: {e}"))?
+) -> Result<Value, String> {
+    on_bus(scope.inner(), Git::WorktreeReserve { path, name }.into()).await
 }
 
 #[tauri::command]
 pub async fn worktree_hold(
     scope: State<'_, ProjectRoots>,
     path: String,
-) -> Result<git::WorktreeHold, String> {
-    scope.ensure_allowed(&path)?;
-    tauri::async_runtime::spawn_blocking(move || git::worktree_hold_blocking(&path))
-        .await
-        .map_err(|e| format!("worktree_hold task failed: {e}"))?
+) -> Result<Value, String> {
+    on_bus(scope.inner(), Git::WorktreeHold { path }.into()).await
 }
 
 #[tauri::command]
@@ -1069,66 +1022,39 @@ pub async fn worktree_remove(
     repo: String,
     path: String,
     force: bool,
-) -> Result<(), String> {
-    scope.ensure_allowed(&repo)?;
-    scope.ensure_allowed(&path)?;
-    tauri::async_runtime::spawn_blocking(move || {
-        git::remove_worktree_blocking(&repo, &path, force)
-    })
-    .await
-    .map_err(|e| format!("worktree_remove task failed: {e}"))?
+) -> Result<Value, String> {
+    on_bus(scope.inner(), Git::WorktreeRemove { repo, path, force }.into()).await
 }
 
 #[tauri::command]
-pub async fn git_status(
-    scope: State<'_, ProjectRoots>,
-    path: String,
-) -> Result<Vec<ChangeEntry>, String> {
-    scope.ensure_allowed(&path)?;
-    tauri::async_runtime::spawn_blocking(move || git::status_blocking(&path))
-        .await
-        .map_err(|e| format!("git_status task failed: {e}"))?
+pub async fn git_status(scope: State<'_, ProjectRoots>, path: String) -> Result<Value, String> {
+    on_bus(scope.inner(), Git::Status { path }.into()).await
 }
 
 #[tauri::command]
 pub async fn git_changed_paths(
     scope: State<'_, ProjectRoots>,
     path: String,
-) -> Result<Vec<PathStatus>, String> {
-    scope.ensure_allowed(&path)?;
-    tauri::async_runtime::spawn_blocking(move || git::changed_paths_blocking(&path))
-        .await
-        .map_err(|e| format!("git_changed_paths task failed: {e}"))?
+) -> Result<Value, String> {
+    on_bus(scope.inner(), Git::ChangedPaths { path }.into()).await
 }
 
-/// What the repository says about a commit an agent claimed. Scoped like every
-/// other git command: a sha is not a path, but the repository it is read in is.
 #[tauri::command]
 pub async fn git_commit_state(
     scope: State<'_, ProjectRoots>,
     path: String,
     sha: String,
-) -> Result<git::CommitState, String> {
-    scope.ensure_allowed(&path)?;
-    tauri::async_runtime::spawn_blocking(move || git::commit_state_blocking(&path, &sha))
-        .await
-        .map_err(|e| format!("git_commit_state task failed: {e}"))
+) -> Result<Value, String> {
+    on_bus(scope.inner(), Git::CommitState { path, sha }.into()).await
 }
 
-/// What `gh` says about a branch: a pull request, none, nothing it can answer,
-/// or a refusal worth passing on.
 #[tauri::command]
 pub async fn git_pull_request(
     scope: State<'_, ProjectRoots>,
     path: String,
     branch: String,
-) -> Result<git::PrLookup, String> {
-    scope.ensure_allowed(&path)?;
-    tauri::async_runtime::spawn_blocking(move || {
-        git::pull_request_for_branch_blocking(&path, &branch)
-    })
-    .await
-    .map_err(|e| format!("git_pull_request task failed: {e}"))
+) -> Result<Value, String> {
+    on_bus(scope.inner(), Git::PullRequest { path, branch }.into()).await
 }
 
 #[tauri::command]
@@ -1137,11 +1063,8 @@ pub async fn git_log(
     path: String,
     limit: u32,
     skip: u32,
-) -> Result<Vec<Commit>, String> {
-    scope.ensure_allowed(&path)?;
-    tauri::async_runtime::spawn_blocking(move || git::log_blocking(&path, limit, skip))
-        .await
-        .map_err(|e| format!("git_log task failed: {e}"))?
+) -> Result<Value, String> {
+    on_bus(scope.inner(), Git::Log { path, limit, skip }.into()).await
 }
 
 #[tauri::command]
@@ -1149,11 +1072,8 @@ pub async fn git_stage(
     scope: State<'_, ProjectRoots>,
     path: String,
     files: Vec<String>,
-) -> Result<(), String> {
-    scope.ensure_allowed(&path)?;
-    tauri::async_runtime::spawn_blocking(move || git::run_files(&path, "add", &files, true))
-        .await
-        .map_err(|e| format!("git_stage task failed: {e}"))?
+) -> Result<Value, String> {
+    on_bus(scope.inner(), Git::Stage { path, files }.into()).await
 }
 
 #[tauri::command]
@@ -1161,11 +1081,8 @@ pub async fn git_unstage(
     scope: State<'_, ProjectRoots>,
     path: String,
     files: Vec<String>,
-) -> Result<(), String> {
-    scope.ensure_allowed(&path)?;
-    tauri::async_runtime::spawn_blocking(move || git::unstage_blocking(&path, files))
-        .await
-        .map_err(|e| format!("git_unstage task failed: {e}"))?
+) -> Result<Value, String> {
+    on_bus(scope.inner(), Git::Unstage { path, files }.into()).await
 }
 
 #[tauri::command]
@@ -1174,11 +1091,17 @@ pub async fn git_discard(
     path: String,
     files: Vec<String>,
     untracked: Vec<String>,
-) -> Result<(), String> {
-    scope.ensure_allowed(&path)?;
-    tauri::async_runtime::spawn_blocking(move || git::discard_blocking(&path, files, untracked))
-        .await
-        .map_err(|e| format!("git_discard task failed: {e}"))?
+) -> Result<Value, String> {
+    on_bus(
+        scope.inner(),
+        Git::Discard {
+            path,
+            files,
+            untracked,
+        }
+        .into(),
+    )
+    .await
 }
 
 #[tauri::command]
@@ -1186,43 +1109,28 @@ pub async fn git_commit(
     scope: State<'_, ProjectRoots>,
     path: String,
     message: String,
-) -> Result<String, String> {
-    scope.ensure_allowed(&path)?;
-    tauri::async_runtime::spawn_blocking(move || git::commit_blocking(&path, &message))
-        .await
-        .map_err(|e| format!("git_commit task failed: {e}"))?
+) -> Result<Value, String> {
+    on_bus(scope.inner(), Git::Commit { path, message }.into()).await
 }
 
 #[tauri::command]
-pub async fn git_fetch(scope: State<'_, ProjectRoots>, path: String) -> Result<(), String> {
-    scope.ensure_allowed(&path)?;
-    tauri::async_runtime::spawn_blocking(move || git::fetch_blocking(&path))
-        .await
-        .map_err(|e| format!("git_fetch task failed: {e}"))?
+pub async fn git_fetch(scope: State<'_, ProjectRoots>, path: String) -> Result<Value, String> {
+    on_bus(scope.inner(), Git::Fetch { path }.into()).await
 }
 
 #[tauri::command]
-pub async fn git_push(scope: State<'_, ProjectRoots>, path: String) -> Result<(), String> {
-    scope.ensure_allowed(&path)?;
-    tauri::async_runtime::spawn_blocking(move || git::push_blocking(&path))
-        .await
-        .map_err(|e| format!("git_push task failed: {e}"))?
+pub async fn git_push(scope: State<'_, ProjectRoots>, path: String) -> Result<Value, String> {
+    on_bus(scope.inner(), Git::Push { path }.into()).await
 }
 
 #[tauri::command]
-pub async fn git_pull(scope: State<'_, ProjectRoots>, path: String) -> Result<(), String> {
-    scope.ensure_allowed(&path)?;
-    tauri::async_runtime::spawn_blocking(move || git::pull_blocking(&path))
-        .await
-        .map_err(|e| format!("git_pull task failed: {e}"))?
+pub async fn git_pull(scope: State<'_, ProjectRoots>, path: String) -> Result<Value, String> {
+    on_bus(scope.inner(), Git::Pull { path }.into()).await
 }
 
 #[tauri::command]
-pub async fn git_init(scope: State<'_, ProjectRoots>, path: String) -> Result<(), String> {
-    scope.ensure_allowed(&path)?;
-    tauri::async_runtime::spawn_blocking(move || git::init_blocking(&path))
-        .await
-        .map_err(|e| format!("git_init task failed: {e}"))?
+pub async fn git_init(scope: State<'_, ProjectRoots>, path: String) -> Result<Value, String> {
+    on_bus(scope.inner(), Git::Init { path }.into()).await
 }
 
 #[tauri::command]
@@ -1231,13 +1139,17 @@ pub async fn git_file_versions(
     path: String,
     file: String,
     head_file: Option<String>,
-) -> Result<FileVersions, String> {
-    scope.ensure_allowed(&path)?;
-    tauri::async_runtime::spawn_blocking(move || {
-        git::file_versions_blocking(&path, &file, head_file.as_deref())
-    })
+) -> Result<Value, String> {
+    on_bus(
+        scope.inner(),
+        Git::FileVersions {
+            path,
+            file,
+            head_file,
+        }
+        .into(),
+    )
     .await
-    .map_err(|e| format!("git_file_versions task failed: {e}"))?
 }
 
 #[tauri::command]

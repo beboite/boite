@@ -2,9 +2,11 @@
 //   docker cp scripts/server-smoke.mjs boite:/app/ && \
 //   docker exec -e BOITE_TOKEN=$BOITE_TOKEN boite node /app/server-smoke.mjs
 // Pure Node (>= 22, global WebSocket + crypto.randomUUID), no dependencies.
-// Exercises: auth, project/shell RPC, spawn + live output, multi-device
-// attach (second client sees replay), detach -> output keeps buffering ->
-// reattach replays it, live status, webhook test, kill.
+// Exercises: auth, project/shell RPC, the git command bus and its trust
+// boundary, spawn + live output, multi-device attach (second client sees
+// replay), detach -> output keeps buffering -> reattach replays it, live
+// status, webhook test, kill. Nothing here writes to the repository it is
+// pointed at.
 
 const URL = process.env.SMOKE_URL || "ws://127.0.0.1:7337/ws";
 const TOKEN = process.env.BOITE_TOKEN || "test";
@@ -116,6 +118,28 @@ check("project round-trip", (pl.projects || []).some((p) => p.id === "smoke"));
 
 const sh = await c.rpc("shell.available");
 check("shell.available", (sh.shells || []).length > 0, `(${(sh.shells || []).length})`);
+
+// The git surface is one command bus in boite-core with two front doors over
+// it. Two things can break there without a compiler noticing: the trust
+// boundary, and the envelope a remote client reads an answer out of. Both are
+// checked here over the real socket, with read-only methods only.
+const info = await c.rpc("git.repoInfo", { path: CWD });
+check("git.repoInfo answers bare", typeof info?.isRepo === "boolean", `isRepo=${info?.isRepo}`);
+if (info?.isRepo) {
+  const st = await c.rpc("git.status", { path: CWD });
+  check("git.status wraps its answer in entries", Array.isArray(st?.entries));
+  const br = await c.rpc("git.branches", { path: CWD });
+  check("git.branches wraps its answer in branches", Array.isArray(br?.branches));
+  const lg = await c.rpc("git.log", { path: CWD, limit: 1, skip: 0 });
+  check("git.log wraps its answer in commits", Array.isArray(lg?.commits));
+}
+try {
+  await c.rpc("git.status", { path: "/" });
+  check("a path outside the roots is refused", false, "it was accepted");
+} catch (e) {
+  const said = String(e?.message ?? e);
+  check("a path outside the roots is refused", said.includes("outside registered project roots"), said);
+}
 
 const threadId = crypto.randomUUID();
 const thread = {

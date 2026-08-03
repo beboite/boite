@@ -1,4 +1,5 @@
 pub mod browser;
+pub mod command;
 pub mod editor;
 pub mod env;
 pub mod explorer;

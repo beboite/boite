@@ -131,6 +131,18 @@ impl AppState {
     pub fn ensure_registered_path(&self, path: &str) -> Result<(), String> {
         self.roots.ensure_allowed(path)
     }
+
+    /// What a command on the bus is allowed to reach on this side.
+    ///
+    /// The roots and the directory an earlier layout put worktrees under, which
+    /// is the whole of it: everything else a command needs, it derives from what
+    /// the caller gave it. Cheap enough to build per call, and built per call on
+    /// purpose — a host held somewhere would be a second place for the boundary
+    /// to go stale after `refresh_roots`.
+    pub fn command_host(&self) -> boite_core::command::Scoped<'_> {
+        boite_core::command::Scoped::new(self.roots.as_ref())
+            .with_legacy_worktree_base(Some(self.worktree_base()))
+    }
 }
 
 fn ensure_under(root: &Path, path: &str) -> Result<(), String> {
