@@ -13,23 +13,21 @@ name: image
 # Actions are pinned by commit SHA, same rule as release.yml: what this
 # workflow produces runs as root on the server, so an upstream repo must not be
 # able to change what builds it by moving a tag.
+# Gated on ci, not on the push. This used to trigger on `push: branches:
+# [master]` with its own paths filter, independently of whether anything
+# passed: a commit that broke `cargo test` still published the `:latest` the
+# server pulls, which is how a release reached the machine broken. Waiting for
+# a green ci on the same sha is the whole point of this trigger.
+#
+# The paths filter goes with it: `workflow_run` cannot carry one, so every
+# green master run rebuilds. The registry cache absorbs most of that, and a
+# rebuild nobody needed costs a runner, while a publish nobody tested costs the
+# server.
 on:
-  push:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
     branches: [master]
-    paths:
-      - Dockerfile
-      - .dockerignore
-      - docker/**
-      - crates/**
-      - src/**
-      - static/**
-      - Cargo.toml
-      - Cargo.lock
-      - package.json
-      - bun.lock
-      - svelte.config.js
-      - vite.config.js
-      - .github/workflows/image.yml
   workflow_dispatch:
 
 permissions:
@@ -37,14 +35,22 @@ permissions:
   packages: write
 
 concurrency:
-  group: image-${{ github.ref }}
+  group: image-${{ github.event.workflow_run.head_sha || github.ref }}
   cancel-in-progress: true
 
 jobs:
   build:
+    # A manual dispatch stays possible; an automatic run only follows a ci that
+    # actually passed.
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-24.04-arm
     steps:
+      # workflow_run starts from the default branch, not from what ci tested,
+      # so the sha is named explicitly: publishing a different tree than the
+      # one that went green would defeat the gate this workflow exists for.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
 
       # The version tag comes from package.json rather than from the git tag:
       # a release tag is pushed on the same commit as the bump, and this
@@ -77,7 +83,7 @@ jobs:
           tags: |
             ${{ steps.meta.outputs.image }}:latest
             ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}
-            ${{ steps.meta.outputs.image }}:sha-${{ github.sha }}
+            ${{ steps.meta.outputs.image }}:sha-${{ github.event.workflow_run.head_sha || github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

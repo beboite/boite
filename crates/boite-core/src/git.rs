@@ -2504,18 +2504,27 @@ fn glob_matches(pattern: &str, path: &str) -> bool {
             },
         }
     }
+    // The end of the pattern is anchored at the end of the name, and the start
+    // at the start. Only the segments in between are searched left to right,
+    // which is what makes `*.js` match `a.js.js`: the trailing literal is
+    // matched from the right, never by the first `find` that happens to hit.
     fn star_matches(pattern: &str, name: &str) -> bool {
-        let mut parts = pattern.split('*');
-        let Some(first) = parts.next() else {
-            return true;
-        };
-        if !name.starts_with(first) {
+        let parts: Vec<&str> = pattern.split('*').collect();
+        // No star at all is a literal, and a literal matches the whole name.
+        if parts.len() == 1 {
+            return pattern == name;
+        }
+        let first = parts[0];
+        let last = parts[parts.len() - 1];
+        if !name.starts_with(first) || !name.ends_with(last) {
             return false;
         }
-        let mut rest = &name[first.len()..];
-        let mut last: Option<&str> = None;
-        for part in parts {
-            last = Some(part);
+        // Anchors that would have to share characters do not both hold.
+        if first.len() + last.len() > name.len() {
+            return false;
+        }
+        let mut rest = &name[first.len()..name.len() - last.len()];
+        for part in &parts[1..parts.len() - 1] {
             if part.is_empty() {
                 continue;
             }
@@ -2524,11 +2533,7 @@ fn glob_matches(pattern: &str, path: &str) -> bool {
             };
             rest = &rest[at + part.len()..];
         }
-        match last {
-            // A trailing `*` takes whatever is left.
-            Some("") | None => true,
-            Some(tail) => pattern.ends_with(tail) || rest.is_empty(),
-        }
+        true
     }
     let p: Vec<&str> = pattern.split('/').filter(|s| !s.is_empty()).collect();
     let s: Vec<&str> = path.split(['/', '\\']).filter(|s| !s.is_empty()).collect();
@@ -4739,6 +4744,27 @@ mod worktree_tests {
         assert!(!glob_matches("dev/lib/*/ebin", "dev/lib/mine/deep/ebin"));
         assert!(!glob_matches("cache/*", "other/a"));
         assert!(glob_matches("**/*.pdb", "debug/deps/thing.pdb"));
+    }
+
+    /// The end of a pattern is an anchor. It read as one and checked nothing:
+    /// the guard was `pattern.ends_with(tail)`, where `tail` is the pattern's
+    /// own last segment, so it was true by construction for every pattern that
+    /// does not end in `*`. Anything sharing a prefix with the pattern matched,
+    /// which for a build-artifact exclusion means excluding files nobody named.
+    #[test]
+    fn a_glob_anchors_at_the_end_of_the_name() {
+        assert!(!glob_matches("*.tsbuildinfo", "app.tsbuildinfo.bak"));
+        assert!(!glob_matches("*.pdb", "thing.pdb.tmp"));
+        assert!(!glob_matches("cache/*.js", "cache/a.js.map"));
+        // The trailing literal is matched from the right, so a name that
+        // repeats it still matches: `*` takes `a.js`.
+        assert!(glob_matches("*.js", "a.js.js"));
+        // A pattern with no star is a literal, not a prefix.
+        assert!(glob_matches("target", "target"));
+        assert!(!glob_matches("target", "targetting"));
+        // Anchors that would have to overlap do not both hold.
+        assert!(!glob_matches("ab*ba", "aba"));
+        assert!(glob_matches("ab*ba", "abba"));
     }
 
     /// A policy with globs and no cargo rule is the generic path: everything is
