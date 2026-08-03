@@ -18,10 +18,20 @@ data instead.
 ## Talking to the machine
 
 Components never call `invoke`. Everything goes through `backend()`, which is
-Tauri locally and a WebSocket when the boite is a server. A new capability is
-four edits: `backend/types.ts`, the Tauri implementation, the remote one, and
-the matching arm in `crates/boite-server/src/rpc.rs`. Miss one and it works on
-this machine and fails on a remote boite, silently.
+Tauri locally and a WebSocket when the boite is a server.
+
+On the Rust side a capability is a value on one bus, `boite_core::command`, and
+the two front doors are codecs over it. Adding one is a variant, its name in
+that domain's `ALL_METHODS`, the arms the compiler then demands, and a
+`#[tauri::command]` calling `on_bus`; the server needs nothing, because
+`command::handles` routes it. It used to be four coordinated edits with nothing
+checking that the four agreed, and every divergence found in the audit was a
+capability that existed on one side only.
+
+Inside the Tauri backend, the facades import `invoke` from
+`backend/tauri/ipc.ts` rather than from `@tauri-apps/api/core`. That door writes
+a `warn` when a command refuses and re-throws untouched. Importing the real one
+means a refusal that reaches a `catch` somewhere and is never written down.
 
 ## A process can rewrite its own thread
 
@@ -185,6 +195,17 @@ id, `toasts()` returns what was raised even after it vanished. Dev builds only;
 
 A terminal only exists once its pane has been opened. A thread nobody clicked
 has no buffer to read, which is a different answer from an empty one.
+
+From outside the window, ask the workspace instead of asking a human. One
+`workspace_snapshot` carries every project and thread, the terminals the process
+really has a child for, and `screen`: each pane with its kind, its title and its
+measured size, which one has focus, and what is covering the layout. A pane
+listed at zero pixels is open and not visible, and nothing else reports that.
+`screen.at` is a heartbeat, so one far behind `takenAtMs` means the window
+stopped answering. `workspace_search` and `workspace_timeline` answer where and
+when across the todo list, the log of what agents did and what the terminals
+printed, and `terminal_transcript` reads any thread's output back from the end,
+including a thread that has already stopped.
 
 ## Before pushing
 
