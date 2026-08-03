@@ -1,0 +1,20 @@
+{
+  "note": [
+    "Ceilings for scripts/bundle-budget.mjs. Measured on 2026-08-03, then rounded up",
+    "for headroom: a budget that fails on every unrelated commit is one somebody",
+    "raises without reading. Moving a number here is allowed and is the point — it",
+    "has to happen in the same commit as the growth, with the reason in the message.",
+    "",
+    "What they were when they were set:",
+    "  eager graph            683.5 KB   33 files",
+    "  everything shipped    5500.6 KB  173 files",
+    "  largest eager chunk    216.2 KB   the main route",
+    "",
+    "The gap between the first two is what the lazy imports are worth: 4.8 MB the",
+    "window does not fetch before it can paint, most of it the PDF worker. That is",
+    "the measurement those imports never had attached to them."
+  ],
+  "eagerBytes": 768000,
+  "totalBytes": 6144000,
+  "largestEagerChunkBytes": 256000
+}

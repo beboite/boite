@@ -26,6 +26,12 @@ jobs:
         run: bun run test
       - name: Build (vite only)
         run: bun run build
+      # What the window downloads before it can paint, against a committed
+      # ceiling. Boite's two bundle optimisations — the lazily imported PDF
+      # worker and the split route chunks — had no number attached to them and
+      # nothing that would notice the day one stopped working.
+      - name: Bundle budget
+        run: bun run budget
 
   rust:
     runs-on: ubuntu-latest
