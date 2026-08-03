@@ -6,6 +6,7 @@
   import { settings } from "$lib/features/settings/store.svelte";
   import { gitStore, gitScope } from "./store.svelte";
   import { editorStore } from "$lib/features/editor/store.svelte";
+  import { revealEditor } from "$lib/features/editor/reveal";
   import { confirmDialog } from "$lib/shared/components/confirm.svelte";
   import { registerEscape, restoreFocus } from "$lib/shared/keyboard/overlay";
   import { basename, dirname } from "$lib/shared/utils/path";
@@ -349,8 +350,8 @@
     if (entry.status === "?" || entry.conflicted) {
       const sep = repo.includes("\\") ? "\\" : "/";
       const root = repo.endsWith(sep) ? repo : repo + sep;
-      await editorStore.openFile(root + entry.path.replace(/[\\/]/g, sep));
-      app.view = "editor";
+      await editorStore.open(root + entry.path.replace(/[\\/]/g, sep));
+      revealEditor();
       return;
     }
     const mode = entry.staged ? "staged" : "unstaged";
@@ -361,7 +362,7 @@
       mode,
       headFile: entry.origPath ?? undefined,
     });
-    app.view = "editor";
+    revealEditor();
   }
 </script>
 

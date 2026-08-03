@@ -1,21 +1,28 @@
-import { readTextFile, writeTextFile, gitFileVersions } from "./api";
+import { readTextFile, writeTextFile, gitFileVersions, readBase64 } from "./api";
 import { notifications } from "$lib/features/notifications/store.svelte";
 import { confirmDialog } from "$lib/shared/components/confirm.svelte";
 import { logger } from "$lib/shared/services/logger.svelte";
 import { t } from "$lib/i18n/index.svelte";
 import { basename } from "$lib/shared/utils/path";
+import { projectOwning } from "./owner";
 
 export type DiffMode = "staged" | "unstaged";
 
-export type Buffer = FileBuffer | DiffBuffer;
+export type Buffer = FileBuffer | DiffBuffer | PreviewBuffer;
 
 export interface BaseBuffer {
   id: string;
-  kind: "file" | "diff";
+  kind: "file" | "diff" | "preview";
   path: string;
   displayName: string;
   loading: boolean;
   error: string | null;
+  /**
+   * The project this buffer belongs to, so the tab strip can show one project's
+   * files rather than every project's at once. Null for a file that sits under
+   * none of them — it stays open and reachable, it just has no strip to be in.
+   */
+  projectId: string | null;
 }
 
 export interface FileBuffer extends BaseBuffer {
@@ -48,6 +55,76 @@ export interface DiffBuffer extends BaseBuffer {
   binary: boolean;
 }
 
+/**
+ * A document to be drawn rather than read: a PDF, an image.
+ *
+ * `read_text_file` refuses these outright — it stops at the first NUL byte and
+ * answers "binary file" — so before this they were a tab showing an error.
+ *
+ * The bytes come across whole rather than as a URL the webview fetches: a data
+ * URL is what `img-src 'self' data: blob:` already allows for an image, and
+ * pdf.js wants an array either way. Nothing to serve, nothing to authorise, and
+ * the same road for both kinds — so there is one answer to "what happens when
+ * you open a file the editor cannot read".
+ */
+export interface PreviewBuffer extends BaseBuffer {
+  kind: "preview";
+  /** The file itself. Empty until it has been read. */
+  bytes: Uint8Array;
+  /** `pdf` renders through pdf.js, `image` through a data URL. */
+  media: "pdf" | "image";
+  /** Populated for images only; a data URL the CSP's `img-src` already allows. */
+  dataUrl: string;
+}
+
+/** Extensions handed to the webview rather than to the text editor. */
+const PREVIEWABLE = new Set([
+  "pdf",
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "webp",
+  "avif",
+  "bmp",
+  "ico",
+  "svg",
+]);
+
+/** Whether opening this path should draw it rather than try to read it. */
+export function isPreviewable(path: string): boolean {
+  return PREVIEWABLE.has(extensionOf(path));
+}
+
+function extensionOf(path: string): string {
+  const dot = path.lastIndexOf(".");
+  return dot < 0 ? "" : path.slice(dot + 1).toLowerCase();
+}
+
+const IMAGE_MIME: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+  avif: "image/avif",
+  bmp: "image/bmp",
+  ico: "image/x-icon",
+  svg: "image/svg+xml",
+};
+
+function imageMime(path: string): string {
+  return IMAGE_MIME[extensionOf(path)] ?? "application/octet-stream";
+}
+
+/** base64 → bytes. `atob` gives a binary string; pdf.js wants the array. */
+function decodeBase64(b64: string): Uint8Array {
+  const binary = atob(b64);
+  const out = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
+  return out;
+}
+
 function fileBufferId(path: string): string {
   return `file:${path}`;
 }
@@ -66,6 +143,64 @@ class EditorStore {
 
   isDirty(b: Buffer): boolean {
     return b.kind === "file" && b.dirty;
+  }
+
+  /**
+   * Open a file the one way it can be read: as text, or drawn by the webview.
+   *
+   * The single entry point on purpose. Every caller — the explorer, the git
+   * panel, the palette, an agent — wants "show me this path", and none of them
+   * should have to know that a PDF takes a different road than a `.ts`.
+   */
+  async open(path: string): Promise<string> {
+    return isPreviewable(path) ? this.openPreview(path) : this.openFile(path);
+  }
+
+  /** A PDF or an image, handed to the webview as a URL it can render. */
+  async openPreview(path: string): Promise<string> {
+    const normalized = path.replace(/\\/g, "/");
+    const id = `preview:${normalized}`;
+    const existing = this.buffers.find((b) => b.id === id);
+    if (existing) {
+      this.activeId = id;
+      return id;
+    }
+    const media = normalized.toLowerCase().endsWith(".pdf") ? "pdf" : "image";
+    const buf: PreviewBuffer = {
+      id,
+      kind: "preview",
+      path: normalized,
+      displayName: basename(normalized),
+      loading: true,
+      error: null,
+      projectId: projectOwning(normalized),
+      bytes: new Uint8Array(),
+      media,
+      dataUrl: "",
+    };
+    this.buffers = [...this.buffers, buf];
+    this.activeId = id;
+    try {
+      const b64 = await readBase64(normalized);
+      // An image goes straight to a data URL — `img-src 'self' data: blob:` is
+      // already in the app's CSP, so nothing has to be decoded by hand. A PDF
+      // goes to pdf.js, which wants the bytes.
+      if (media === "image") {
+        this.patch(id, { loading: false, dataUrl: `data:${imageMime(normalized)};base64,${b64}` });
+      } else {
+        this.patch(id, { loading: false, bytes: decodeBase64(b64) });
+      }
+    } catch (err) {
+      const msg = String(err);
+      logger.warn("editor", `no view url for ${normalized}`, msg);
+      this.patch(id, {
+        loading: false,
+        error: msg.includes("not-supported-remote")
+          ? t("editor.previewRemote")
+          : msg,
+      });
+    }
+    return id;
   }
 
   async openFile(path: string): Promise<string> {
@@ -88,6 +223,7 @@ class EditorStore {
       displayName: basename(normalized),
       loading: true,
       error: null,
+      projectId: projectOwning(normalized),
       content: "",
       savedContent: "",
       isReadonly: false,
@@ -333,6 +469,41 @@ class EditorStore {
       this.activeId = next?.id ?? null;
     }
     return true;
+  }
+
+  /**
+   * The buffers one project owns, which is what the strip and the titlebar
+   * count show.
+   *
+   * Everything stays open across a project switch — walking away from a project
+   * is not closing its files, and coming back finds them where they were. It is
+   * only what is on screen that narrows, so eight files from three projects
+   * stop sharing one strip with nothing to say which is which.
+   */
+  forProject(projectId: string | null): Buffer[] {
+    if (!projectId) return [];
+    return this.buffers.filter((b) => b.projectId === projectId);
+  }
+
+  /**
+   * Put the dragged tab where it was dropped.
+   *
+   * Order is the strip's own, not the order files happened to be opened in, and
+   * it is the one thing about a tab the user can arrange. Takes ids rather than
+   * indices because the strip reads them off the DOM, and a stale index after a
+   * close would silently move the wrong buffer.
+   */
+  reorder(draggedId: string, beforeId: string | null) {
+    const from = this.buffers.findIndex((b) => b.id === draggedId);
+    if (from < 0) return;
+    const next = this.buffers.slice();
+    const [moved] = next.splice(from, 1);
+    // Resolved after the removal: an index taken before it is off by one for
+    // every target to the right of where the tab came from.
+    const to = beforeId === null ? next.length : next.findIndex((b) => b.id === beforeId);
+    if (to < 0) return;
+    next.splice(to, 0, moved);
+    this.buffers = next;
   }
 
   setActive(id: string) {
