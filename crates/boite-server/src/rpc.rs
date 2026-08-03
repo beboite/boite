@@ -4,7 +4,6 @@ use serde_json::{json, Value};
 
 use boite_core::command::{self, Command};
 use boite_core::pty::PtySpawnArgs;
-use boite_core::{session, shell};
 
 use crate::events::AppEvent;
 use boite_core::model::{Project, Thread};
@@ -32,18 +31,6 @@ fn u16_param(params: &Value, key: &str) -> Result<u16, String> {
         .and_then(|v| v.as_u64())
         .map(|n| n as u16)
         .ok_or_else(|| format!("missing param: {key}"))
-}
-
-fn str_list(params: &Value, key: &str) -> Vec<String> {
-    params
-        .get(key)
-        .and_then(|v| v.as_array())
-        .map(|a| {
-            a.iter()
-                .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                .collect()
-        })
-        .unwrap_or_default()
 }
 
 async fn blocking<F, T>(f: F) -> Result<T, String>
@@ -413,192 +400,12 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
             Ok(json!({ "platform": os }))
         }
 
-        "shell.default" => {
-            let s = blocking(shell::default_shell_blocking).await?;
-            Ok(json!({ "shell": s }))
-        }
-
-        "shell.available" => {
-            // One process running for days, one probe cache shared by every
-            // connected device, and a 60s TTL that is otherwise the only way a
-            // shell installed on this machine is ever noticed. `refresh` is how a
-            // client that just watched an install says so.
-            if params.get("refresh").and_then(|v| v.as_bool()) == Some(true) {
-                shell::forget_available_shells();
-            }
-            let shells = blocking(shell::available_shells_blocking).await?;
-            Ok(json!({ "shells": shells }))
-        }
-
-        // The setup wizard asks whether an agent is installed. The agents run
-        // here, so this server's PATH is the one that decides, not the PATH of
-        // whatever device is driving the UI.
-        "shell.commandExists" => {
-            let cmd = str_param(&params, "cmd")?;
-            let found = blocking(move || shell::command_exists(&cmd)).await?;
-            Ok(json!({ "found": found }))
-        }
-
-        // fastpick lives on the machine that runs the agents, which is this one. That is
-        // what keeps its key files here: the device drawing the menu gets the choices, and
-        // the credential is read at spawn time on this side and never travels.
-        //
-        // The payload is fastpick's own JSON, passed through as a string rather than
-        // reparsed. Its schema is fastpick's to grow, and the client types what it reads.
-        "fastpick.list" => {
-            let provider = params
-                .get("provider")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string());
-            let refresh = params
-                .get("refresh")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-            let json =
-                blocking(move || boite_core::fastpick::list_blocking(provider, refresh)).await??;
-            Ok(json!({ "json": json }))
-        }
-
-        // Null version means no fastpick here, which is a state the settings panel draws
-        // rather than an error it reports.
-        "fastpick.version" => {
-            let version = blocking(boite_core::fastpick::version_blocking).await?;
-            Ok(json!({ "version": version }))
-        }
-
         // Warms the server's own function/alias list. The client cannot answer
         // this for a remote boite: the profile that matters is the server's.
         "shell.warm" => {
             let id = str_param(&params, "shellId")?;
             state.registry.warm_shell_names(&id);
             Ok(json!({ "ok": true }))
-        }
-
-        // The agents run here, so this is where the registry of open sessions
-        // is. Clients ask before replaying a captured id: claude refuses
-        // `--resume` for anything it still has open.
-        "session.liveClaude" => {
-            let sessions = boite_core::session::live_claude_sessions();
-            Ok(json!({ "sessions": sessions }))
-        }
-
-        // Same reason: the agents run here, so this is where they say what they
-        // are doing. Scoped to the threads the client is asking about, because
-        // each agent's store costs a directory walk or a database open, and off
-        // the async workers for the same reason: every connected client asks once
-        // a second, and a directory walk plus two SQLite opens inline is a tokio
-        // worker parked on the filesystem at 1 Hz per client.
-        "session.agentTurns" => {
-            let queries: Vec<boite_core::session::TurnQuery> = params
-                .get("queries")
-                .cloned()
-                .map(serde_json::from_value)
-                .transpose()
-                .map_err(|e| format!("bad queries: {e}"))?
-                .unwrap_or_default();
-            let turns = blocking(move || boite_core::session::agent_turns(&queries)).await?;
-            Ok(json!({ "turns": turns }))
-        }
-
-        // The transcripts are here, not on the phone reading the dashboard.
-        //
-        // A directory outside the trust boundary is dropped rather than
-        // refused: the list carries the project's worktrees, which live under
-        // the server's own base and not under any project root, and one of
-        // those must not take the whole card down with it. Nothing here opens
-        // the paths — they are compared as strings against what the agents
-        // recorded — so a dropped one costs coverage, never safety.
-        "session.usage" => {
-            let cwds: Vec<String> = params
-                .get("cwds")
-                .and_then(|v| v.as_array())
-                .map(|a| {
-                    a.iter()
-                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                        .collect()
-                })
-                .unwrap_or_default();
-            let days = params.get("days").and_then(|v| v.as_u64()).unwrap_or(365) as u32;
-            let report =
-                blocking(move || boite_core::usage::collect_usage_blocking(cwds, days)).await?;
-            Ok(serde_json::to_value(report).unwrap())
-        }
-
-        "session.stopClaude" => {
-            let id = str_param(&params, "sessionId")?;
-            let stopped = blocking(move || boite_core::session::stop_claude_session(&id)).await?;
-            Ok(json!({ "stopped": stopped }))
-        }
-
-        // Same reason, different refusal: copilot turns down an id whose
-        // session was opened and never used.
-        "session.copilotResumable" => {
-            let id = str_param(&params, "sessionId")?;
-            let resumable =
-                blocking(move || boite_core::session::copilot_session_resumable(&id)).await?;
-            Ok(json!({ "resumable": resumable }))
-        }
-
-        // A thread that changed project changed the folder claude searches for
-        // its transcripts, so the file has to follow it here — the agents and
-        // their session stores both live on this machine.
-        "session.migrate" => {
-            let kind = str_param(&params, "kind")?;
-            let id = str_param(&params, "sessionId")?;
-            let from = str_param(&params, "fromCwd")?;
-            let to = str_param(&params, "toCwd")?;
-            let migrated = blocking(move || {
-                boite_core::session::migrate_session_blocking(&kind, &id, &from, &to)
-            })
-            .await??;
-            Ok(json!({ "migrated": migrated }))
-        }
-
-        "session.find" => {
-            let kind = str_param(&params, "kind")?;
-            let cwd = str_param(&params, "cwd")?;
-            let after = params
-                .get("afterUnixMs")
-                .and_then(|v| v.as_i64())
-                .unwrap_or(0);
-            let exclude = session::build_exclude(Some(str_list(&params, "excludeIds")));
-            // Which process the caller's PTY is running, so the session it
-            // holds open is not mistaken for someone else's live one.
-            let own_pid = params
-                .get("ptyId")
-                .and_then(|v| v.as_str())
-                .and_then(|id| state.registry.pty_manager().child_pid(id));
-            let result = blocking(move || -> Value {
-                match kind.as_str() {
-                    "claude" => session::find_claude_session_blocking(cwd, after, &exclude, own_pid)
-                        .map(|h| json!({ "id": h.id, "modifiedMs": h.modified_ms }))
-                        .unwrap_or(Value::Null),
-                    "codex" => session::find_codex_session_blocking(cwd, after, &exclude)
-                        .map(|h| json!({ "id": h.id, "modifiedMs": h.modified_ms, "title": h.title }))
-                        .unwrap_or(Value::Null),
-                    "opencode" => {
-                        hit_or_null(session::find_opencode_session_blocking(cwd, after, &exclude))
-                    }
-                    "cursor" => {
-                        hit_or_null(session::find_cursor_session_blocking(cwd, after, &exclude))
-                    }
-                    "antigravity" => hit_or_null(session::find_antigravity_session_blocking(
-                        cwd, after, &exclude,
-                    )),
-                    "copilot" => {
-                        hit_or_null(session::find_copilot_session_blocking(cwd, after, &exclude))
-                    }
-                    "grok" => {
-                        hit_or_null(session::find_grok_session_blocking(cwd, after, &exclude))
-                    }
-                    "hermes" => {
-                        hit_or_null(session::find_hermes_session_blocking(cwd, after, &exclude))
-                    }
-                    _ => Value::Null,
-                }
-            })
-            .await?;
-            Ok(json!({ "session": result }))
         }
 
         // Base dir for the web folder picker (Docker repos mount). Browsing
@@ -688,15 +495,6 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
 
         other => Err(format!("unknown method: {other}")),
     }
-}
-
-/// A hit from one of the detectors that answer with an id and an activity
-/// timestamp. The timestamp is omitted rather than zeroed when the store had
-/// none to give: the client skips attribution on a missing one, and would have
-/// refused the session outright on a zero.
-fn hit_or_null(opt: Option<session::SessionHit>) -> Value {
-    opt.map(|h| json!({ "id": h.id, "modifiedMs": h.modified_ms }))
-        .unwrap_or(Value::Null)
 }
 
 fn valid_hex_color(s: &str) -> bool {

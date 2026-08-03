@@ -199,6 +199,12 @@ impl boite_core::command::Host for ServerHost<'_> {
         }
         allowed
     }
+
+    /// Which process one of this server's PTYs is running right now, so the
+    /// session it holds open is not mistaken for someone else's live one.
+    fn child_pid(&self, pty_id: &str) -> Option<u32> {
+        self.state.registry.pty_manager().child_pid(pty_id)
+    }
 }
 
 fn ensure_under(root: &Path, path: &str) -> Result<(), String> {

@@ -35,9 +35,11 @@ use crate::scope::ProjectRoots;
 
 pub mod files;
 pub mod git;
+pub mod sessions;
 
 pub use files::Files;
 pub use git::Git;
+pub use sessions::Sessions;
 
 /// What a command wants to do with a path the caller handed it.
 ///
@@ -92,6 +94,17 @@ pub trait Host {
         Ok(())
     }
 
+    /// Which process a PTY is running right now, when the caller named one.
+    ///
+    /// A pid the caller sends could name anything on the machine; this is the
+    /// host's own registry answering for an id it minted itself. The default is
+    /// `None`, which is honest for a host with no process registry — a test, or
+    /// a transport that never spawns anything — and costs the one command that
+    /// asks a tie-break rather than an answer.
+    fn child_pid(&self, _pty_id: &str) -> Option<u32> {
+        None
+    }
+
     /// Places a new project may go beyond the parents of the registered roots.
     ///
     /// The user's home on both sides; a server bound to a workspace directory
@@ -110,7 +123,11 @@ pub trait Host {
 /// shadowed by one. The lists are per domain and this is the only place they are
 /// read together.
 pub fn methods() -> impl Iterator<Item = &'static str> {
-    git::ALL_METHODS.iter().chain(files::ALL_METHODS).copied()
+    git::ALL_METHODS
+        .iter()
+        .chain(files::ALL_METHODS)
+        .chain(sessions::ALL_METHODS)
+        .copied()
 }
 
 /// Whether the bus answers for this method.
@@ -122,10 +139,11 @@ pub fn handles(method: &str) -> bool {
 ///
 /// One variant per method the front doors accept. Domains are separate enums so
 /// this one stays a table of contents.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum Command {
     Files(Files),
     Git(Git),
+    Sessions(Sessions),
 }
 
 impl From<Git> for Command {
@@ -137,6 +155,12 @@ impl From<Git> for Command {
 impl From<Files> for Command {
     fn from(files: Files) -> Self {
         Command::Files(files)
+    }
+}
+
+impl From<Sessions> for Command {
+    fn from(sessions: Sessions) -> Self {
+        Command::Sessions(sessions)
     }
 }
 
@@ -153,6 +177,9 @@ impl Command {
             Some(("fs", _)) | Some(("file", _)) | Some(("project", _)) => {
                 Files::decode(method, params).map(Command::Files)
             }
+            Some(("session", _)) | Some(("shell", _)) | Some(("fastpick", _)) => {
+                Sessions::decode(method, params).map(Command::Sessions)
+            }
             _ => Err(format!("unknown method: {method}")),
         }
     }
@@ -162,6 +189,7 @@ impl Command {
         match self {
             Command::Files(f) => f.name(),
             Command::Git(g) => g.name(),
+            Command::Sessions(s) => s.name(),
         }
     }
 
@@ -170,6 +198,7 @@ impl Command {
         match self {
             Command::Files(f) => f.wire(),
             Command::Git(g) => g.wire(),
+            Command::Sessions(s) => s.wire(),
         }
     }
 
@@ -183,6 +212,7 @@ impl Command {
         match self {
             Command::Files(f) => f.prepare(host),
             Command::Git(g) => g.prepare(host),
+            Command::Sessions(s) => s.prepare(host),
         }
     }
 }
@@ -206,6 +236,7 @@ impl Ready {
             Ready::Settled(value) => Ok(value),
             Ready::Work(Command::Files(f)) => f.run(),
             Ready::Work(Command::Git(g)) => g.run(),
+            Ready::Work(Command::Sessions(s)) => s.run(),
         }
     }
 }
