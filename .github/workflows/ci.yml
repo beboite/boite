@@ -5,6 +5,10 @@ on:
     branches: [master, main]
   pull_request:
     branches: [master, main]
+  # release.yml calls this before it builds anything: a tag push does not
+  # trigger the branch events above, so without the call a release was signed
+  # and published without a single test having run on that tree.
+  workflow_call:
 
 jobs:
   frontend:
@@ -69,3 +73,65 @@ jobs:
         run: cargo clippy --workspace --all-targets --no-deps -- -D warnings
       - name: cargo test
         run: cargo test --workspace
+
+  # The real-time path — spawn, live output, detach, replay on reattach, two
+  # devices on one thread — is what a broken release breaks first, and no
+  # #[test] covers it: rpc.rs, ws.rs and auth.rs have none between them. The
+  # script that does cover it has existed since the server did and was never
+  # run by anything. This job is that missing call.
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          # server-smoke.mjs is dependency-free and leans on a global
+          # WebSocket, which lands in Node 22.
+          node-version: 22
+      # Same key as the rust job so this reuses whatever it just compiled
+      # rather than building the workspace a second time from scratch.
+      - name: Cache cargo
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+      - name: Build the server
+        run: cargo build -p boite-server
+      - name: Start it
+        env:
+          BOITE_TOKEN: test
+          BOITE_BIND: 127.0.0.1:7337
+          BOITE_DATA_DIR: ${{ runner.temp }}/boite-smoke
+        run: |
+          set -euo pipefail
+          ./target/debug/boite-server > "${{ runner.temp }}/server.log" 2>&1 &
+          echo $! > "${{ runner.temp }}/server.pid"
+          for _ in $(seq 1 50); do
+            if (echo > /dev/tcp/127.0.0.1/7337) 2>/dev/null; then
+              echo "listening"
+              exit 0
+            fi
+            sleep 0.2
+          done
+          echo "::error::boite-server never started listening on 127.0.0.1:7337" >&2
+          cat "${{ runner.temp }}/server.log" >&2
+          exit 1
+      - name: Smoke the real-time path
+        env:
+          BOITE_TOKEN: test
+          SMOKE_URL: ws://127.0.0.1:7337/ws
+          SMOKE_CWD: ${{ github.workspace }}
+        run: node scripts/server-smoke.mjs
+      # The server's own stderr is the only place a spawn refusal or a store
+      # error says why, and a failed smoke gives no hint on its own.
+      - name: Server log
+        if: always()
+        run: cat "${{ runner.temp }}/server.log" || true
+      - name: Stop it
+        if: always()
+        run: kill "$(cat "${{ runner.temp }}/server.pid")" 2>/dev/null || true

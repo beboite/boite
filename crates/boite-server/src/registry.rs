@@ -270,6 +270,21 @@ impl ThreadSink {
         (self.shared.events)(event);
     }
 
+    /// Whether this sink still speaks for the thread it was created with.
+    ///
+    /// `spawn` replaces a stale PTY and inserts the new `LiveThread` under the
+    /// same key without waiting for the old one to die, and the old PTY reports
+    /// its exit from its own OS thread. So an event can arrive from a PTY that
+    /// has already been superseded, and acting on it means speaking for a
+    /// process that is not the one running.
+    fn is_current(&self) -> bool {
+        self.shared
+            .threads
+            .lock()
+            .get(&self.live.thread_id)
+            .is_some_and(|current| Arc::ptr_eq(current, &self.live))
+    }
+
     fn set_status(&self, next: ThreadStatus, exit_code: Option<i32>) {
         let changed = {
             let mut st = self.live.status.lock();
@@ -325,7 +340,10 @@ impl EventSink for ThreadSink {
                                 false
                             }
                         };
-                        if changed {
+                        // Checked only once the title actually moved, so a
+                        // superseded PTY cannot rename the thread that replaced
+                        // it and the lock stays off the per-frame path.
+                        if changed && self.is_current() {
                             self.emit(AppEvent::ThreadTitle {
                                 thread_id: self.live.thread_id.clone(),
                                 title: clean,
@@ -340,6 +358,15 @@ impl EventSink for ThreadSink {
                     let mut s = self.live.status.lock();
                     s.status = st;
                     s.last_working = None;
+                }
+                // A superseded PTY announces its own death, never the thread's.
+                // Removing the entry here without checking dropped the live
+                // thread of a process that was still running: `kill` then found
+                // nothing to kill and returned Ok, every client was told the
+                // thread had exited, and the PTY stayed alive with no way left
+                // to reach it.
+                if !self.is_current() {
+                    return true;
                 }
                 self.emit(AppEvent::ThreadStatus {
                     thread_id: self.live.thread_id.clone(),
@@ -647,5 +674,85 @@ mod status_tests {
                 assert_eq!(next_status(status, None, declared, now), None, "{status:?}");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod sink_tests {
+    use super::*;
+
+    fn live(thread_id: &str, pty_id: &str) -> Arc<LiveThread> {
+        let (output, _) = broadcast::channel(OUTPUT_CHANNEL_CAP);
+        Arc::new(LiveThread {
+            thread_id: thread_id.to_string(),
+            pty_id: Mutex::new(pty_id.to_string()),
+            ring: Mutex::new(Ring::new(1024)),
+            output,
+            title: Mutex::new(String::new()),
+            status: Mutex::new(StatusState {
+                status: ThreadStatus::Running,
+                last_working: Some(Instant::now()),
+            }),
+            size: Mutex::new((80, 24)),
+            cwd: String::new(),
+        })
+    }
+
+    fn shared() -> (Arc<Shared>, Arc<Mutex<Vec<AppEvent>>>) {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let sink = seen.clone();
+        let shared = Arc::new(Shared {
+            threads: Mutex::new(HashMap::new()),
+            events: Arc::new(move |e| sink.lock().push(e)),
+            identity: Arc::new(|_| None),
+        });
+        (shared, seen)
+    }
+
+    /// The reattach race. `spawn` replaces a stale PTY and inserts the new live
+    /// thread without waiting for the old one to die, so the old PTY's exit can
+    /// land afterwards. It used to remove whatever sat under the thread id,
+    /// which was the new process: `kill` then found nothing, the clients were
+    /// told the thread had exited, and the PTY it names stayed alive with
+    /// nothing left able to reach it.
+    #[test]
+    fn a_superseded_pty_does_not_bury_the_one_that_replaced_it() {
+        let (shared, seen) = shared();
+        let old = live("t1", "pty-old");
+        let new = live("t1", "pty-new");
+        shared.threads.lock().insert("t1".to_string(), new.clone());
+
+        let stale = ThreadSink {
+            shared: shared.clone(),
+            live: old,
+        };
+        stale.send(PtyEvent::Exit(Some(0)));
+
+        let held = shared.threads.lock();
+        let current = held.get("t1").expect("the live thread is still registered");
+        assert!(Arc::ptr_eq(current, &new), "the running PTY kept its entry");
+        assert!(seen.lock().is_empty(), "no client was told this thread ended");
+    }
+
+    /// The same event from the PTY that is actually current still has to do its
+    /// job, or the guard above would just break exit reporting instead.
+    #[test]
+    fn the_current_pty_still_reports_its_exit() {
+        let (shared, seen) = shared();
+        let current = live("t1", "pty-1");
+        shared.threads.lock().insert("t1".to_string(), current.clone());
+
+        let sink = ThreadSink {
+            shared: shared.clone(),
+            live: current,
+        };
+        sink.send(PtyEvent::Exit(Some(0)));
+
+        assert!(shared.threads.lock().is_empty(), "the entry was released");
+        let seen = seen.lock();
+        assert!(
+            matches!(seen.as_slice(), [AppEvent::ThreadStatus { thread_id, .. }] if thread_id == "t1"),
+            "one status event, for this thread: {seen:?}"
+        );
     }
 }

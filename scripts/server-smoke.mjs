@@ -24,6 +24,23 @@ function bytesToUuid(b) {
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
 }
 
+function uuidToBytes(u) {
+  const hex = u.replace(/-/g, "");
+  const b = new Uint8Array(16);
+  for (let i = 0; i < 16; i++) b[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  return b;
+}
+
+// Input frame: [0x02][16 byte thread id][payload].
+function inputFrame(threadId, text) {
+  const payload = new TextEncoder().encode(text);
+  const frame = new Uint8Array(17 + payload.length);
+  frame[0] = 0x02;
+  frame.set(uuidToBytes(threadId), 1);
+  frame.set(payload, 17);
+  return frame;
+}
+
 class Client {
   constructor() {
     this.ws = new WebSocket(URL);
@@ -53,7 +70,13 @@ class Client {
     const buf = new Uint8Array(ev.data);
     if (buf.length < 17 || buf[0] !== 0x01) return;
     const tid = bytesToUuid(buf.subarray(1, 17));
-    this.outputs.set(tid, (this.outputs.get(tid) || "") + dec.decode(buf.subarray(17)));
+    const chunk = dec.decode(buf.subarray(17));
+    this.outputs.set(tid, (this.outputs.get(tid) || "") + chunk);
+    // ConPTY asks the terminal where the cursor is (DSR, ESC[6n) and holds the
+    // child's output back until something answers. A real client answers
+    // through xterm; with no emulator here the whole test reads zero bytes on
+    // Windows and passes on Linux, which is the worst way for a gate to fail.
+    if (chunk.includes("\x1b[6n")) this.ws.send(inputFrame(tid, "\x1b[1;1R"));
   }
   rpc(method, params = {}) {
     const id = this.id++;
@@ -133,7 +156,15 @@ check("live status + ptyId", !!t && !!t.ptyId && (t.status === "running" || t.st
 const nt = await c.rpc("notify.test", { title: "Smoke", body: "ping" });
 check("notify.test responds", nt?.ok === true, `webhook_enabled=${nt?.enabled}`);
 
-await c.rpc("thread.kill", { threadId, wait: true });
+// A refused kill is a result, not a reason to stop: the checks after it still
+// say something, and an uncaught rejection here reported the whole run as a
+// crash with no summary line.
+try {
+  await c.rpc("thread.kill", { threadId, wait: true });
+  check("kill accepted", true);
+} catch (e) {
+  check("kill accepted", false, String(e?.message ?? e));
+}
 await sleep(500);
 const tl2 = await c.rpc("thread.list");
 const t2 = (tl2.threads || []).find((x) => x.id === threadId);
