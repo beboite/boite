@@ -13,6 +13,7 @@ import { SCRATCH_PROJECT_ID } from "$lib/domain/project";
 import { makeScratchProject } from "$lib/features/project/scratch";
 import { gitStore } from "$lib/features/git/store.svelte";
 import { settings } from "$lib/features/settings/store.svelte";
+import { device } from "$lib/features/settings/device.svelte";
 import { syncRoots } from "./hydrate";
 import type { AppState } from "./store.svelte";
 
@@ -103,6 +104,12 @@ export async function ensureScratch(app: AppState): Promise<Project | null> {
 
 export async function addProject(app: AppState, project: Project) {
   app.projects.push(project);
+  // A project just added on the boite is one the user asked for by name, so it
+  // joins this device's shown list on its own. Without this it would land in the
+  // database and nowhere else, since dynamic mode shows only ticked projects.
+  if (workspace.isDynamic && project.origin === "remote" && workspace.activeBoiteId) {
+    device.setRemoteProjectShown(workspace.activeBoiteId, project.id, true);
+  }
   await syncRoots(app);
   try {
     await saveProject(project);
@@ -156,6 +163,9 @@ export async function removeProject(app: AppState, id: string) {
   }
   gitStore.drop(id);
   settings.forgetRightPanel(id);
+  if (workspace.activeBoiteId) {
+    device.setRemoteProjectShown(workspace.activeBoiteId, id, false);
+  }
   void syncRoots(app);
   for (const thread of orphanThreads) {
     try {

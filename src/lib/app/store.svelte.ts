@@ -12,6 +12,7 @@ import {
   deleteThread as dbDeleteThread,
 } from "$lib/storage/db";
 import { settings } from "$lib/features/settings/store.svelte";
+import { device } from "$lib/features/settings/device.svelte";
 import { logger } from "$lib/shared/services/logger.svelte";
 import { isDurable } from "$lib/domain/thread-status";
 import { t } from "$lib/i18n/index.svelte";
@@ -245,11 +246,24 @@ export class AppState {
 
   // $derived (not getters): several components read these per render pass;
   // getters would rebuild the Map + sort on every access.
+  /**
+   * A boite project this device has not asked for.
+   *
+   * Dynamic mode loads every remote row, because the picker that ticks them has
+   * to list what is there. Which of them reach the sidebar is a per-device
+   * choice, and it is applied here rather than at load time so unticking one is
+   * instant instead of a round trip to the boite.
+   */
+  #hiddenRemote(project: Project): boolean {
+    if (!workspace.isDynamic || project.origin !== "remote") return false;
+    return !device.isRemoteProjectShown(workspace.activeBoiteId, project.id);
+  }
+
   sortedProjects: Project[] = $derived.by(() => {
     const order = settings.state.projectOrder ?? [];
     const idx = new Map(order.map((id, i) => [id, i]));
     return this.projects
-      .filter((p) => !p.archived)
+      .filter((p) => !p.archived && !this.#hiddenRemote(p))
       // Scratch stays listed even with nothing in it. It was hidden while empty,
       // on the reading that a door nobody has walked through is not a project
       // the user has — but the launcher hangs off a card's own `+`, so hiding
@@ -271,7 +285,7 @@ export class AppState {
 
   archivedProjects: Project[] = $derived.by(() => {
     return this.projects
-      .filter((p) => p.archived)
+      .filter((p) => p.archived && !this.#hiddenRemote(p))
       .sort((a, b) => a.name.localeCompare(b.name));
   });
 
@@ -311,6 +325,19 @@ export class AppState {
     const { projects, threads } = await rowsReady;
     bootTiming.mark("rows");
     this.projects = projects;
+    // Before anything reads sortedProjects: a device coming from the era when
+    // dynamic mode grafted every remote project keeps seeing all of them, and
+    // unticks the ones it does not want from the picker like everyone else.
+    if (
+      workspace.isDynamic &&
+      workspace.activeBoiteId &&
+      device.needsRemoteProjectSeed
+    ) {
+      device.seedRemoteProjects(
+        workspace.activeBoiteId,
+        projects.filter((p) => p.origin === "remote").map((p) => p.id),
+      );
+    }
     // Boot lands on Scratch's own page rather than on the first project's
     // terminals. It is the one place in the app that starts something without
     // committing to a project, which is what opening the app usually is; the

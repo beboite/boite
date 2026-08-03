@@ -14,6 +14,7 @@ export const EN_MESSAGES = {
   "common.on": "On",
   "common.off": "Off",
   "common.retry": "Retry",
+  "common.close": "Close",
 
   "tabs.general": "General",
   "tabs.terminal": "Terminal",
@@ -85,6 +86,12 @@ export const EN_MESSAGES = {
   "appearance.accentGpt": "GPT",
   "appearance.accentLocal": "Running on this machine",
   "appearance.accentOther": "Something else",
+  "appearance.threadGlow": "Glowing thread cards",
+  "appearance.threadGlowDesc":
+    "The sidebar card lights up with what its thread is doing, and two lights orbit it while an agent works.",
+  "appearance.harnessLogos": "Show agent logos",
+  "appearance.harnessLogosDesc":
+    "Off, the glyph carries only the thread's state and the logo comes back while you hold the card.",
   "appearance.animations": "Animations",
   "appearance.animationsDesc": "System follows the OS reduced-motion setting.",
   "appearance.motionSystem": "System",
@@ -135,6 +142,15 @@ export const EN_MESSAGES = {
   "sidebar.addProjectFromFolder": "Add project from folder",
   "sidebar.addProjectOnBoite": "Add project on boite",
   "sidebar.addProjectOn": "Add project on {name}",
+  "sidebar.remoteProjects": "Boite projects",
+  "sidebar.remoteProjectsOn": "Which projects of {name} to show",
+  "sidebar.remoteProjectsTitle": "Projects on {name}",
+  "sidebar.remoteProjectsDesc":
+    "Ticked projects join this sidebar. The choice is this device's own.",
+  "sidebar.remoteProjectsCount": "{shown} of {total} shown",
+  "sidebar.remoteProjectsAll": "All",
+  "sidebar.remoteProjectsNone": "None",
+  "sidebar.remoteProjectsEmpty": "This boite has no project yet.",
   "sidebar.projectName": "Project name",
   "sidebar.unarchiveProject": "Unarchive project",
   "sidebar.unarchive": "Unarchive",

@@ -2,6 +2,7 @@
   import type { ThreadStatus } from "$lib/types";
   import type { IconKey } from "$lib/types";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
+  import { stateGlyphOf, threadVisual } from "./threadVisual";
 
   /**
    * One mark per thread, carrying what it is and how it is doing.
@@ -14,6 +15,12 @@
    *
    * It stays the keep-awake toggle, which is the one affordance the dot owned:
    * losing it would have moved a one-click setting into a context menu.
+   *
+   * Under the glow design the card behind it says the status, so the ring drops
+   * to a hairline and the middle is free to say something the colour cannot: the
+   * Z's of a sleeping thread, the question mark of one that is blocked on an
+   * answer. Those replace the logo rather than crowd it, and holding the card
+   * brings the logo back.
    */
   type Props = {
     status: ThreadStatus;
@@ -26,6 +33,12 @@
     /** Rendered as a span rather than a button. For drag ghosts and read-only
         lists, where a nested button would swallow the row's own click. */
     inert?: boolean;
+    /** The card carries the status: draw the quiet variant of the glyph. */
+    glow?: boolean;
+    /** Whether the agent's logo is shown at all. Glow design only. */
+    showLogo?: boolean;
+    /** The card is being held, which asks for the logo whatever the rest says. */
+    revealLogo?: boolean;
     onToggleKeepAwake?: () => void;
     title?: string;
     label?: string;
@@ -38,6 +51,9 @@
     keepAwake = false,
     size = 20,
     inert = false,
+    glow = false,
+    showLogo = true,
+    revealLogo = false,
     onToggleKeepAwake,
     title,
     label,
@@ -67,10 +83,34 @@
     }
   });
 
-  const spinning = $derived(status === "running");
-  const waiting = $derived(status === "waiting" && !keepAwake);
+  const spinning = $derived(!glow && status === "running");
+  const waiting = $derived(!glow && status === "waiting" && !keepAwake);
   const glyphSize = $derived(Math.round(size * 0.62));
+
+  const visual = $derived(threadVisual({ status, asleep, keepAwake }));
+  // The logo wins while the card is held, whatever is in its place. Nothing else
+  // is a way to ask "which agent is this one", and it is the question the glyph
+  // exists to answer.
+  const stateGlyph = $derived(glow && !revealLogo ? stateGlyphOf(visual.state) : null);
+  const logo = $derived(!glow || revealLogo || (showLogo && !stateGlyph));
 </script>
+
+{#snippet body()}
+  {#if stateGlyph === "sleep"}
+    <!-- ZZz, ZzZ, zZZ: one wave crossing three letters rather than four hand-
+         written frames, so it never lands between two of them. Small and grey on
+         purpose — a sleeping thread is the one the eye should skip. -->
+    <span class="mark zzz" aria-hidden="true">
+      <span style:--phase="0s">Z</span><span style:--phase="-0.53s">Z</span><span
+        style:--phase="-1.06s">Z</span
+      >
+    </span>
+  {:else if stateGlyph === "ask"}
+    <span class="mark ask" aria-hidden="true">?</span>
+  {:else if logo}
+    <ShortcutIcon {iconKey} size={glyphSize} {color} />
+  {/if}
+{/snippet}
 
 <!-- Two branches rather than one <svelte:element>: the interactive form has to
      be a real button to be reachable by keyboard, and the inert form has to not
@@ -82,12 +122,13 @@
     class:spinning
     class:waiting
     class:asleep
+    class:quiet={glow}
     style:--ring={ringColor}
     style:width="{size}px"
     style:height="{size}px"
     {title}
   >
-    <ShortcutIcon {iconKey} size={glyphSize} {color} />
+    {@render body()}
   </span>
 {:else}
   <button
@@ -96,6 +137,7 @@
     class:spinning
     class:waiting
     class:asleep
+    class:quiet={glow}
     style:--ring={ringColor}
     style:width="{size}px"
     style:height="{size}px"
@@ -107,7 +149,7 @@
     aria-label={label}
     data-no-drag
   >
-    <ShortcutIcon {iconKey} size={glyphSize} {color} />
+    {@render body()}
   </button>
 {/if}
 
@@ -129,6 +171,13 @@
   }
   .glyph.inert {
     cursor: default;
+  }
+
+  /* Under the glow design the card is the status. A second full-strength ring
+     around the logo is the same sentence twice, and the keep-awake violet is the
+     one thing the card does not say, so the ring stays as a hairline for it. */
+  .glyph.quiet {
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ring) 45%, transparent);
   }
 
   /* A thread nobody is keeping awake and nothing is running reads as furniture;
@@ -185,6 +234,54 @@
         color-mix(in srgb, var(--ring) 30%, transparent);
     }
   }
+
+  /* Both marks are deliberately under-lit. They stand where the agent's logo
+     stands, and a Z that is louder than the logo it replaced turns a row that is
+     doing nothing into the loudest thing in the sidebar. */
+  .mark {
+    display: inline-flex;
+    align-items: baseline;
+    font-size: 0.55em;
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: -0.02em;
+    color: var(--color-muted-foreground);
+    user-select: none;
+  }
+  .zzz > span {
+    animation: glyph-zzz 1.6s var(--ease-in-out-quad) infinite;
+    animation-delay: var(--phase);
+    opacity: 0.35;
+  }
+  @keyframes glyph-zzz {
+    0%,
+    100% {
+      opacity: 0.28;
+      transform: scale(0.72) translateY(0.5px);
+    }
+    25% {
+      opacity: 0.8;
+      transform: scale(1) translateY(-0.5px);
+    }
+    60% {
+      opacity: 0.28;
+      transform: scale(0.72) translateY(0.5px);
+    }
+  }
+  .ask {
+    font-size: 0.72em;
+    animation: glyph-ask 1.5s var(--ease-in-out-quad) infinite;
+  }
+  @keyframes glyph-ask {
+    0%,
+    100% {
+      opacity: 0.75;
+    }
+    50% {
+      opacity: 0.25;
+    }
+  }
+
   /* The global gate flattens animation-duration to near zero, which would park
      the arc at whatever angle it stopped on and read as a broken ring. A solid
      one still says "running" — it just says it without moving. */
@@ -199,5 +296,10 @@
      separates waiting from idle. */
   :global(html[data-motion="reduced"]) .glyph.waiting {
     animation: none;
+  }
+  :global(html[data-motion="reduced"]) .zzz > span,
+  :global(html[data-motion="reduced"]) .ask {
+    animation: none;
+    opacity: 0.6;
   }
 </style>

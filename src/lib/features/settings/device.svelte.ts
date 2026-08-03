@@ -24,9 +24,37 @@ interface DeviceState {
   // Dynamic mode preference: when on, connecting to a boite merges its
   // projects with the local ones instead of replacing the workspace.
   dynamicMode: boolean;
+  /**
+   * Which of a boite's projects this device shows, keyed by boite id.
+   *
+   * Dynamic mode used to graft every remote project onto the local list the
+   * moment it was switched on, which on a boite with a dozen repositories is a
+   * sidebar nobody asked for. The list is opt-in per project and per device: the
+   * phone and the desktop want different halves of the same boite, and neither
+   * choice belongs in the workspace database.
+   *
+   * A boite with no entry shows nothing, which is what "just turned it on"
+   * looks like.
+   */
+  remoteProjects: Record<string, string[]>;
 }
 
-const DEFAULTS: DeviceState = { boites: [], activeBoiteId: null, dynamicMode: false };
+const DEFAULTS: DeviceState = {
+  boites: [],
+  activeBoiteId: null,
+  dynamicMode: false,
+  remoteProjects: {},
+};
+
+function normalizeRemoteProjects(raw: unknown): Record<string, string[]> {
+  if (!raw || typeof raw !== "object") return {};
+  const out: Record<string, string[]> = {};
+  for (const [boiteId, ids] of Object.entries(raw as Record<string, unknown>)) {
+    if (!Array.isArray(ids)) continue;
+    out[boiteId] = ids.filter((id): id is string => typeof id === "string");
+  }
+  return out;
+}
 
 function hasStorage(): boolean {
   return typeof localStorage !== "undefined";
@@ -45,6 +73,17 @@ function normalizeEntry(raw: unknown): BoiteEntry | null {
   };
 }
 
+/**
+ * A blob written before projects could be picked one by one, on a device that
+ * had dynamic mode on.
+ *
+ * Its owner was seeing every remote project, and shipping the opt-in list would
+ * empty their sidebar with no explanation. Read once by `app.init()`, which
+ * seeds the list from whatever the boite turns out to have; from then on the key
+ * exists and this stays false.
+ */
+let legacyDynamic = false;
+
 function load(): DeviceState {
   if (!hasStorage()) return { ...DEFAULTS };
   try {
@@ -52,6 +91,7 @@ function load(): DeviceState {
     if (!raw) return { ...DEFAULTS };
     const p = JSON.parse(raw) as Record<string, unknown>;
     if (Array.isArray(p.boites)) {
+      legacyDynamic = p.dynamicMode === true && p.remoteProjects === undefined;
       const boites = p.boites
         .map(normalizeEntry)
         .filter((e): e is BoiteEntry => e !== null);
@@ -60,7 +100,12 @@ function load(): DeviceState {
         boites.some((b) => b.id === p.activeBoiteId)
           ? p.activeBoiteId
           : (boites[0]?.id ?? null);
-      return { boites, activeBoiteId, dynamicMode: p.dynamicMode === true };
+      return {
+        boites,
+        activeBoiteId,
+        dynamicMode: p.dynamicMode === true,
+        remoteProjects: normalizeRemoteProjects(p.remoteProjects),
+      };
     }
     // Migrate the pre-multi-boite shape ({ remoteUrl, remoteToken }) into a
     // single entry so an existing PWA/desktop keeps its saved connection.
@@ -72,7 +117,12 @@ function load(): DeviceState {
         name: "",
         color: "",
       };
-      return { boites: [entry], activeBoiteId: entry.id, dynamicMode: false };
+      return {
+        boites: [entry],
+        activeBoiteId: entry.id,
+        dynamicMode: false,
+        remoteProjects: {},
+      };
     }
     return { ...DEFAULTS };
   } catch {
@@ -128,6 +178,50 @@ class DeviceSettings {
     if (this.state.activeBoiteId === id) {
       this.state.activeBoiteId = this.state.boites[0]?.id ?? null;
     }
+    delete this.state.remoteProjects[id];
+    this.#persist();
+  }
+
+  /**
+   * Whether this device is arriving from the era when dynamic mode showed
+   * everything. True at most once per install, and only until the list is
+   * written.
+   */
+  get needsRemoteProjectSeed(): boolean {
+    return legacyDynamic;
+  }
+
+  /** Show all of them once, for a device that was already seeing all of them. */
+  seedRemoteProjects(boiteId: string, projectIds: string[]): void {
+    legacyDynamic = false;
+    this.setRemoteProjects(boiteId, projectIds);
+  }
+
+  /** The project ids this device shows for that boite. Empty means none. */
+  remoteProjectsOf(boiteId: string | null): string[] {
+    if (!boiteId) return [];
+    return this.state.remoteProjects[boiteId] ?? [];
+  }
+
+  isRemoteProjectShown(boiteId: string | null, projectId: string): boolean {
+    if (!boiteId) return false;
+    return this.remoteProjectsOf(boiteId).includes(projectId);
+  }
+
+  setRemoteProjectShown(boiteId: string, projectId: string, shown: boolean): void {
+    const current = this.remoteProjectsOf(boiteId);
+    if (current.includes(projectId) === shown) return;
+    // Write the key, never spread the record: `$state` proxies keep their
+    // identity per key, and a replaced object is a fresh proxy every consumer
+    // has to re-read. See rules/performance.md.
+    this.state.remoteProjects[boiteId] = shown
+      ? [...current, projectId]
+      : current.filter((id) => id !== projectId);
+    this.#persist();
+  }
+
+  setRemoteProjects(boiteId: string, projectIds: string[]): void {
+    this.state.remoteProjects[boiteId] = [...projectIds];
     this.#persist();
   }
 

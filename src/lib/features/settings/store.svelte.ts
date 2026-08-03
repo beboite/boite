@@ -152,6 +152,8 @@ const DEFAULTS: Settings = {
   setupCompleted: false,
   fastpickEnabled: true,
   colorByModel: true,
+  sidebarThreadGlow: false,
+  sidebarHarnessLogos: true,
 };
 
 // First-run guess: touch-primary, narrow screens (a phone TWA/PWA) default to
@@ -350,6 +352,14 @@ class SettingsStore {
           typeof stored.colorByModel === "boolean"
             ? stored.colorByModel
             : DEFAULTS.colorByModel,
+        sidebarThreadGlow:
+          typeof stored.sidebarThreadGlow === "boolean"
+            ? stored.sidebarThreadGlow
+            : DEFAULTS.sidebarThreadGlow,
+        sidebarHarnessLogos:
+          typeof stored.sidebarHarnessLogos === "boolean"
+            ? stored.sidebarHarnessLogos
+            : DEFAULTS.sidebarHarnessLogos,
         // A settings row written before the wizard existed carries no flag.
         // Its owner already has a shortcut list, and finishing the wizard
         // replaces that list wholesale, so an existing install counts as
@@ -601,6 +611,18 @@ class SettingsStore {
   async setColorByModel(value: boolean) {
     if (this.state.colorByModel === value) return;
     this.state.colorByModel = value;
+    await this.persist();
+  }
+
+  async setSidebarThreadGlow(value: boolean) {
+    if (this.state.sidebarThreadGlow === value) return;
+    this.state.sidebarThreadGlow = value;
+    await this.persist();
+  }
+
+  async setSidebarHarnessLogos(value: boolean) {
+    if (this.state.sidebarHarnessLogos === value) return;
+    this.state.sidebarHarnessLogos = value;
     await this.persist();
   }
 
