@@ -8,6 +8,8 @@
 // status, webhook test, kill. Nothing here writes to the repository it is
 // pointed at.
 
+import { readFile } from "node:fs/promises";
+
 const URL = process.env.SMOKE_URL || "ws://127.0.0.1:7337/ws";
 const TOKEN = process.env.BOITE_TOKEN || "test";
 const CWD = process.env.SMOKE_CWD || "/workspace";
@@ -176,6 +178,62 @@ check("reattach replays detached output", c.out(threadId).includes("MIDMARK"));
 const tl = await c.rpc("thread.list");
 const t = (tl.threads || []).find((x) => x.id === threadId);
 check("live status + ptyId", !!t && !!t.ptyId && (t.status === "running" || t.status === "ready"), `status=${t?.status}`);
+
+// The agent endpoint, from where an agent actually stands: inside a terminal
+// this server spawned, holding only what was stamped into its environment. It
+// is the one surface with no other caller — no frontend reaches it — so nothing
+// else notices when it breaks. Wide columns because the terminal would wrap a
+// long path and cut the value in half.
+const probeId = crypto.randomUUID();
+await c.rpc("thread.spawn", {
+  thread: {
+    id: probeId,
+    projectId: "smoke",
+    label: "probe",
+    cmd: "bash",
+    args: ["-c", "echo URL=$BOITE_MCP_URL; echo FILE=$BOITE_TOKEN_FILE; sleep 30"],
+    iconKey: null,
+  },
+  cwd: CWD,
+  cols: 200,
+  rows: 24,
+});
+await c.rpc("thread.attach", { threadId: probeId, cols: 200, rows: 24 });
+await sleep(900);
+const said = c.out(probeId);
+const agentUrl = said.match(/URL=(\S+)/)?.[1];
+const tokenFile = said.match(/FILE=(\S+)/)?.[1];
+check("a spawned terminal is told where the agent endpoint is", !!agentUrl && !!tokenFile);
+if (agentUrl && tokenFile) {
+  // The path, never the value: the token travels in a file only its user can
+  // read, so an agent typing `env` does not print its own credential into a
+  // scrollback that is kept and replayed.
+  const token = (await readFile(tokenFile, "utf8")).trim();
+  const ask = (headers) => fetch(`${agentUrl}/v1/todos`, { headers });
+  const mine = await ask({ authorization: `Bearer ${token}`, "x-boite-thread": probeId });
+  const body = mine.status === 200 ? await mine.json() : null;
+  check("the agent endpoint answers its own thread", Array.isArray(body?.todos), `status=${mine.status}`);
+
+  const wrong = await ask({ authorization: "Bearer not-the-token", "x-boite-thread": probeId });
+  check("a wrong token reaches nothing", wrong.status === 401, `status=${wrong.status}`);
+
+  // A leaked token with no thread reaches nothing either: the token says the
+  // caller came from Boite, the thread says what it may see.
+  const anonymous = await ask({ authorization: `Bearer ${token}` });
+  check("a token with no thread reaches nothing", anonymous.status === 400, `status=${anonymous.status}`);
+
+  const stranger = await ask({
+    authorization: `Bearer ${token}`,
+    "x-boite-thread": crypto.randomUUID(),
+  });
+  check("a thread this workspace does not have reaches nothing", stranger.status === 404, `status=${stranger.status}`);
+}
+try {
+  await c.rpc("thread.kill", { threadId: probeId, wait: false });
+} catch {
+  // The probe is about to be deleted either way.
+}
+await c.rpc("thread.delete", { threadId: probeId });
 
 const nt = await c.rpc("notify.test", { title: "Smoke", body: "ping" });
 check("notify.test responds", nt?.ok === true, `webhook_enabled=${nt?.enabled}`);
