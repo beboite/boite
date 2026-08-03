@@ -1,4 +1,5 @@
 import Database from "@tauri-apps/plugin-sql";
+import { invoke } from "@tauri-apps/api/core";
 import type {
   IconKey,
   Project,
@@ -206,6 +207,14 @@ export const tauriDb: DbApi = {
 
   async deleteThread(id: string): Promise<void> {
     await getDb().execute("DELETE FROM threads WHERE id = ?", [id]);
+    // The identity goes with the thread. Nothing can be signed for an id whose
+    // row is gone anyway, since the project is resolved from that row, but a
+    // key left behind would let a reused id inherit an owner it never had.
+    await getDb().execute("DELETE FROM thread_keys WHERE thread_id = ?", [id]);
+    await invoke("agent_forget_thread_key", { threadId: id }).catch(() => {
+      // The file grants nothing without the row. Worth removing, not worth
+      // failing a delete over.
+    });
   },
 
   async loadSettings(): Promise<Partial<Settings>> {

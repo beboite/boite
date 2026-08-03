@@ -9,5 +9,9 @@ name = "boite-mcp"
 path = "src/main.rs"
 
 [dependencies]
+# The only thing this shim links beyond serde. It signs every request, and the
+# canonical string it signs has to be the one the endpoint verifies, so both
+# sides read it out of the same crate rather than from two format strings.
+boite-identity = { path = "../boite-identity" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

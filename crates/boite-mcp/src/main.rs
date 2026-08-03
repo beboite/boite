@@ -1,14 +1,19 @@
 //! MCP server exposing the todo list of the Boite terminal it was launched in.
 //!
-//! It holds no configuration and no credentials of its own. Boite stamps
-//! `BOITE_MCP_URL`, `BOITE_TOKEN_FILE` and `BOITE_THREAD_ID` into every PTY it
-//! spawns, so this reads its whole identity from the environment. Launched
-//! anywhere else, those variables are absent and it refuses to start — which is
-//! the point: an agent outside Boite has nothing to present.
+//! It holds no configuration of its own. Boite stamps `BOITE_MCP_URL`,
+//! `BOITE_KEY_FILE` and `BOITE_THREAD_ID` into every PTY it spawns, so this
+//! reads its whole identity from the environment. Launched anywhere else, those
+//! variables are absent and it refuses to start — which is the point: an agent
+//! outside Boite has nothing to present.
 //!
-//! The token arrives as a path rather than a value, because an environment is
-//! something a terminal prints: `BOITE_TOKEN` put the credential into the
-//! output of any `env` an agent typed, and that output is kept and replayed.
+//! The key arrives as a path rather than a value, because an environment is
+//! something a terminal prints: `BOITE_TOKEN` put a credential into the output
+//! of any `env` an agent typed, and that output is kept and replayed.
+//!
+//! What goes over the socket is a signature, never the key. Each request is
+//! signed for its own method, path, thread, timestamp and body, so a request
+//! captured anywhere is worth nothing on its own and one thread cannot speak
+//! for another. See `boite_identity`.
 //!
 //! The same binary serves the desktop app and `boite-server`; only the URL in
 //! the environment differs, so a remote workspace needs no separate shim.
@@ -32,6 +37,13 @@ use http::Endpoint;
 
 use toon::{clip, Toon};
 
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
 /// Newest version this speaks. A client asking for an older one gets that one
 /// back — the shape of these five tools has not changed across any of them, and
 /// answering with a version the client did not offer ends the handshake.
@@ -45,15 +57,21 @@ const MAX_CELL: usize = 200;
 /// the naming convention and the few most recent, not all of them.
 const MAX_BRANCHES: usize = 40;
 
+/// What this shim proves itself with. Exactly one of the two.
+enum Credential {
+    /// A terminal Boite opened. Signs every request with a key of its own.
+    Thread {
+        id: String,
+        key: boite_identity::ThreadKey,
+    },
+    /// A credentials file, issued for one project. Nothing to sign with, and a
+    /// narrower grant at the other end: it cannot move between projects.
+    Project { id: String, token: String },
+}
+
 struct Host {
     endpoint: Endpoint,
-    token: String,
-    /// The thread this shim was spawned for, when Boite launched the agent.
-    thread_id: Option<String>,
-    /// The project, when credentials came from a file instead. Agents that do
-    /// not pass their environment to a server process can only be reached this
-    /// way — the endpoint takes either, and resolves both to one project.
-    project_id: Option<String>,
+    credential: Credential,
     /// Which agent this is, when the registration said so. Only ever used to
     /// put the right badge on a claim; it grants nothing.
     agent: Option<String>,
@@ -71,42 +89,29 @@ struct Credentials {
     project_id: String,
 }
 
-/// Percent-encodes a path so it survives as an HTTP header value.
-///
-/// A header value is visible ASCII, and a directory is not: an accented path
-/// would fail the whole request rather than just the lookup it feeds. Encoding
-/// beats skipping the header on those paths, which would have left exactly the
-/// users with non-ASCII directories on the old per-project behaviour.
-fn encode_header_path(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for b in s.as_bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' | b':' => {
-                out.push(*b as char)
-            }
-            _ => out.push_str(&format!("%{b:02X}")),
-        }
-    }
-    out
-}
-
 impl Host {
     /// Environment first, then the credentials file named on the command line.
     ///
     /// The environment is what Boite stamps into a terminal it launched, and it
-    /// carries the thread — the most precise answer. The file exists for agents
-    /// that hand a server process nothing but PATH, where the environment can
-    /// never arrive; it names a project instead, which is the unit the list
-    /// belongs to anyway.
+    /// carries the thread — the most precise answer, and the only one that can
+    /// sign. The file exists for agents that hand a server process nothing but
+    /// PATH, where the environment can never arrive; it names a project instead,
+    /// which is the unit the list belongs to anyway.
     fn resolve() -> Result<Host, String> {
-        if let (Ok(url), Some(token)) = (std::env::var("BOITE_MCP_URL"), Self::token_from_env()) {
-            let thread_id = std::env::var("BOITE_THREAD_ID").ok().filter(|s| !s.is_empty());
-            if thread_id.is_some() {
+        if let (Ok(url), Some(seed)) = (
+            std::env::var(boite_identity::env::URL),
+            Self::key_from_env(),
+        ) {
+            let thread_id = std::env::var(boite_identity::env::THREAD)
+                .ok()
+                .filter(|s| !s.is_empty());
+            if let Some(id) = thread_id {
                 return Ok(Host {
                     endpoint: Endpoint::parse(&url)?,
-                    token,
-                    thread_id,
-                    project_id: None,
+                    credential: Credential::Thread {
+                        id,
+                        key: boite_identity::ThreadKey::from_seed_hex(&seed)?,
+                    },
                     // The thread names the agent better than any argument could:
                     // Boite launched it and knows what it is.
                     agent: None,
@@ -130,60 +135,62 @@ impl Host {
         let agent = std::env::args().nth(2).filter(|s| !s.is_empty());
         Ok(Host {
             endpoint: Endpoint::parse(&creds.url)?,
-            token: creds.token,
-            thread_id: None,
-            project_id: Some(creds.project_id),
+            credential: Credential::Project {
+                id: creds.project_id,
+                token: creds.token,
+            },
             agent,
             ids: RefCell::new(HashMap::new()),
         })
     }
 
-    /// The bearer token for a terminal Boite spawned.
+    /// This thread's private key, for a terminal Boite spawned.
     ///
-    /// `BOITE_TOKEN_FILE` names a file only this user can read; the value used
-    /// to be in `BOITE_TOKEN` itself, which meant an agent typing `env` printed
-    /// its own credential into a scrollback that is kept and replayed. That
-    /// variable is still read, and only for one reason: a terminal opened
-    /// before the app was updated is still running with the old environment,
-    /// and its agent should not lose its todo list mid-session.
-    fn token_from_env() -> Option<String> {
-        if let Ok(path) = std::env::var("BOITE_TOKEN_FILE") {
-            if !path.trim().is_empty() {
-                return std::fs::read_to_string(&path)
-                    .ok()
-                    .map(|t| t.trim().to_string())
-                    .filter(|t| !t.is_empty());
-            }
+    /// A path, never a value: `BOITE_TOKEN` held the credential itself, so an
+    /// agent typing `env` printed it into a scrollback that is kept and
+    /// replayed. Neither that variable nor `BOITE_TOKEN_FILE` is read any more.
+    /// A terminal still running with the old environment gets no tools rather
+    /// than a weaker way in, which is the right way round for a credential.
+    fn key_from_env() -> Option<String> {
+        let path = std::env::var(boite_identity::env::KEY_FILE).ok()?;
+        if path.trim().is_empty() {
+            return None;
         }
-        std::env::var("BOITE_TOKEN").ok().filter(|t| !t.is_empty())
+        std::fs::read_to_string(&path)
+            .ok()
+            .map(|t| t.trim().to_string())
+            .filter(|t| !t.is_empty())
     }
 
     fn send(&self, method: &str, path: &str, body: Option<Value>) -> Result<Value, String> {
-        let auth = format!("Bearer {}", self.token);
-        // Only ever alongside a project: a thread already names one exactly.
-        // Bound before the header list so it outlives the borrows in it.
-        let cwd = self.project_id.as_ref().and_then(|_| {
-            std::env::current_dir()
-                .ok()
-                .and_then(|p| p.to_str().map(encode_header_path))
-        });
-        let mut headers: Vec<(&str, &str)> = vec![("Authorization", &auth)];
-        if let Some(thread) = &self.thread_id {
-            headers.push(("x-boite-thread", thread));
-        }
-        if let Some(project) = &self.project_id {
-            headers.push(("x-boite-project", project));
-        }
-        // What lets one registration serve every project: the file names the
-        // project it was made from, this names the one the agent is actually
-        // in. The endpoint decides whether any project claims it.
-        if let Some(cwd) = &cwd {
-            headers.push(("x-boite-cwd", cwd));
+        let body = body.map(|b| b.to_string().into_bytes());
+        // Bound before the header list, so they outlive the borrows in it.
+        let (auth, stamp, signature);
+        let mut headers: Vec<(&str, &str)> = Vec::with_capacity(4);
+        match &self.credential {
+            Credential::Thread { id, key } => {
+                let ts = now_ms();
+                stamp = ts.to_string();
+                signature = key.sign(&boite_identity::canonical(
+                    method,
+                    path,
+                    id,
+                    ts,
+                    body.as_deref().unwrap_or(&[]),
+                ));
+                headers.push((boite_identity::header::THREAD, id));
+                headers.push((boite_identity::header::TIMESTAMP, &stamp));
+                headers.push((boite_identity::header::SIGNATURE, &signature));
+            }
+            Credential::Project { id, token } => {
+                auth = format!("Bearer {token}");
+                headers.push(("Authorization", &auth));
+                headers.push((boite_identity::header::PROJECT, id));
+            }
         }
         if let Some(agent) = &self.agent {
-            headers.push(("x-boite-agent", agent));
+            headers.push((boite_identity::header::AGENT, agent));
         }
-        let body = body.map(|b| b.to_string().into_bytes());
         let res = self.endpoint.send(method, path, &headers, body)?;
         let status = res.status;
         if status == 409 {
@@ -1134,9 +1141,10 @@ mod tests {
     fn host() -> Host {
         Host {
             endpoint: Endpoint::parse("http://127.0.0.1:1").unwrap(),
-            token: "t".into(),
-            thread_id: Some("thread".into()),
-            project_id: None,
+            credential: Credential::Thread {
+                id: "thread".into(),
+                key: boite_identity::ThreadKey::mint(),
+            },
             agent: None,
             ids: RefCell::new(HashMap::new()),
         }

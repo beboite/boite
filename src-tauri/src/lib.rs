@@ -312,6 +312,7 @@ pub fn run() {
             commands::agent_token_usage,
             commands::agent_mcp_config,
             commands::agent_api_ready,
+            agent_api::agent_forget_thread_key,
             commands::agent_mcp_project_path,
             commands::agent_mcp_registration,
             commands::register_agent_mcp,

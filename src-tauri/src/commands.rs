@@ -8,6 +8,7 @@ use tauri::{
 
 use serde_json::Value;
 
+use boite_core::capability::Grant;
 use boite_core::command::{sessions::Own, Command, Files, Git, Sessions};
 use boite_core::pty::{PtyManager, PtySpawnArgs};
 use boite_core::scope::ProjectRoots;
@@ -52,18 +53,32 @@ pub async fn pty_open(
     let manager = manager.inner().clone();
     let sessions = sessions.inner().clone();
     // Boite spawns the child, so it can hand it credentials no configuration
-    // could: the agent inside this terminal reaches its own todo list and
-    // nothing else, because the thread id it presents is the one stamped here.
-    // An agent started outside Boite simply has no token.
+    // could: a key minted for this thread alone, in a file only this user can
+    // read. The agent inside this terminal reaches its own project and nothing
+    // else, because that is what its key verifies against. An agent started
+    // outside Boite has no key and gets in nowhere.
+    //
+    // A thread that cannot be given one opens anyway, without Boite tools. The
+    // alternative is refusing to open a terminal because its todo list would be
+    // missing, which is the wrong thing to lose.
     if let Some(api) = app.try_state::<crate::agent_api::AgentApi>() {
-        let env = spec.env.get_or_insert_with(Default::default);
-        env.insert("BOITE_MCP_URL".into(), api.url.clone());
-        // The path, never the token. See `AgentApi::token_path`.
-        env.insert(
-            "BOITE_TOKEN_FILE".into(),
-            api.token_path.to_string_lossy().into_owned(),
-        );
-        env.insert("BOITE_THREAD_ID".into(), thread_id.clone());
+        match crate::agent_api::mint_thread_key(&app, &api, &thread_id) {
+            Ok(key_path) => {
+                let env = spec.env.get_or_insert_with(Default::default);
+                env.insert(boite_agent_api::env::URL.into(), api.url.clone());
+                // The path, never the key itself. See `boite_core::secret_file`.
+                env.insert(
+                    boite_agent_api::env::KEY_FILE.into(),
+                    key_path.to_string_lossy().into_owned(),
+                );
+                env.insert(boite_agent_api::env::THREAD.into(), thread_id.clone());
+            }
+            Err(e) => crate::logging::warn_to_log(
+                &app,
+                "agent-api",
+                &format!("thread {thread_id} spawns without tools: {e}"),
+            ),
+        }
     }
     tauri::async_runtime::spawn_blocking(move || {
         if let Some((pty_id, sink)) = sessions.get(&thread_id) {
@@ -540,7 +555,7 @@ pub fn agent_mcp_project_path(app: AppHandle, project_id: String) -> Result<Stri
     let api = app
         .try_state::<crate::agent_api::AgentApi>()
         .ok_or("the agent endpoint is not running")?;
-    let written = crate::agent_api::write_one(&app, &api.url, &api.token_path, &project_id)?;
+    let written = crate::agent_api::write_one(&app, &api, &project_id)?;
     Ok(written.to_string_lossy().into_owned())
 }
 
@@ -723,7 +738,9 @@ impl boite_core::command::Host for DesktopHost<'_> {
 /// — the envelopes in `command::Wire` are the WebSocket protocol's, and `invoke`
 /// already carries the shape the frontend types.
 async fn through(host: DesktopHost<'_>, command: Command) -> Result<Value, String> {
-    let ready = command.prepare(&host)?;
+    // `Local`: this door is the user's own window. An agent never reaches it —
+    // it goes through the agent endpoint, which carries its own grant.
+    let ready = command.prepare(&host, Grant::Local)?;
     tauri::async_runtime::spawn_blocking(move || ready.run())
         .await
         .map_err(|e| format!("command task failed: {e}"))?
@@ -812,7 +829,7 @@ pub async fn worktree_open(
 ) -> Result<Value, String> {
     let traced = thread_id.clone();
     let ready = Command::from(Git::WorktreeOpen { repo, thread_id })
-        .prepare(&DesktopHost::new(scope.inner()))?;
+        .prepare(&DesktopHost::new(scope.inner()), Grant::Local)?;
     let handle = app.clone();
     let label = traced.clone();
     let _ = crate::logging::append_app_log(

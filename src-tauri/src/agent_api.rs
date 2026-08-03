@@ -7,23 +7,16 @@
 //! and it writes a credentials file per project for agents it cannot hand
 //! anything at launch.
 //!
-//! Bound to loopback, behind a per-session bearer token. That narrowness is the
-//! whole security argument: the dev-only `mcp-bridge` could already do this
-//! through `invoke_tauri`, which is exactly why it cannot ship — a door that
-//! does everything cannot be defended.
+//! Bound to loopback. That narrowness is the whole security argument: the
+//! dev-only `mcp-bridge` could already do this through `invoke_tauri`, which is
+//! exactly why it cannot ship — a door that does everything cannot be defended.
 //!
-//! An agent Boite launched never names a project: it presents the thread id
-//! stamped into its environment at spawn, and the project is resolved from that,
-//! so it cannot reach another project's list.
-//!
-//! An agent registered from a credentials file does name one, and the check on
-//! it is that the project exists — not that it is the agent's own. Every file
-//! carries the same session token, so an agent wired for one project can read
-//! and write the lists of the others by editing the id in its own config. That
-//! is the price of reaching agents that hand a server process nothing but PATH;
-//! it is a scope within one workspace, not across workspaces, and the token dies
-//! with the process. `Resolution::ThreadThenCwd` is the same debt named in the
-//! shared crate, and phase 3 closes both.
+//! Who may ask for what is `boite_agent_api::auth`, and it is the same on both
+//! hosts. An agent Boite launched signs with a key minted for its thread; an
+//! agent registered from a credentials file presents a token derived for one
+//! project and cannot reach another. The desktop used to accept a third thing —
+//! a working directory, with the project resolved to whichever one contained it
+//! — and that is gone.
 
 use std::sync::Arc;
 
@@ -31,7 +24,7 @@ use rand::Rng;
 use serde_json::{json, Value};
 use tauri::{Emitter, Manager};
 
-use boite_agent_api::{Change, Resolution, Workspace};
+use boite_agent_api::{Change, Workspace};
 use boite_core::scope::ProjectRoots;
 use boite_core::store::Store;
 
@@ -59,14 +52,28 @@ const AGENT_ACTIVITY: &str = "boite://agent-activity";
 
 /// What a spawned terminal is told about the agent endpoint.
 ///
-/// There is no token here on purpose. It used to carry the value, which then
-/// went into every child's environment: an agent that types `env` printed its
-/// own credential into a scrollback that is kept and replayed, and everything it
-/// launched inherited it. A terminal is handed the path now.
+/// No secret here on purpose, and not even a shared one to point at. Each
+/// terminal gets a key of its own, minted into [`AgentApi::keys_dir`] when it
+/// spawns; the workspace secret never leaves this process.
 #[derive(Clone)]
 pub struct AgentApi {
     pub url: String,
-    pub token_path: std::path::PathBuf,
+    pub keys_dir: std::path::PathBuf,
+    /// Private, and it stays private: the only thing anyone may have out of it
+    /// is a token for one project, through [`AgentApi::project_token`]. A `pub`
+    /// field here would be one autocomplete away from a value in an environment
+    /// again.
+    secret: String,
+}
+
+impl AgentApi {
+    /// The token a credentials file for that project carries.
+    ///
+    /// Derived rather than stored, so a file that names a different project
+    /// than the one it was written for carries a token that no longer verifies.
+    pub fn project_token(&self, project_id: &str) -> String {
+        boite_identity::project_token(&self.secret, project_id)
+    }
 }
 
 struct DesktopWorkspace {
@@ -75,7 +82,7 @@ struct DesktopWorkspace {
     /// an sqlx checksum ledger, and a second migration mechanism over the same
     /// tables is how an install ends up with a half-applied schema.
     store: Store,
-    token: String,
+    secret: String,
     app: tauri::AppHandle,
 }
 
@@ -88,8 +95,8 @@ impl Workspace for DesktopWorkspace {
         self.app.state::<ProjectRoots>().inner()
     }
 
-    fn token(&self) -> &str {
-        &self.token
+    fn secret(&self) -> &str {
+        &self.secret
     }
 
     /// There is one webview and it is this app's own, so there is nobody to be
@@ -126,12 +133,6 @@ impl Workspace for DesktopWorkspace {
             .collect()
     }
 
-    /// See the enum: a working directory is not an identity, and this is the
-    /// only host that still accepts one.
-    fn resolution(&self) -> Resolution {
-        Resolution::ThreadThenCwd
-    }
-
     /// Attribution is best-effort: an agent registered from a credentials file
     /// presents a project rather than a thread, and there is no row to point at.
     /// The surface still pulses; only the "which of these agents" half is lost.
@@ -143,19 +144,45 @@ impl Workspace for DesktopWorkspace {
     }
 }
 
+/// The key a terminal about to open will sign with.
+///
+/// Its own database connection, opened per spawn rather than held: the desktop's
+/// schema belongs to tauri-plugin-sql and this side only ever attaches. A
+/// terminal opens at human speed, so one sqlite open costs nothing measurable,
+/// and a second long-lived connection to a file the plugin is writing does.
+pub fn mint_thread_key(
+    app: &tauri::AppHandle,
+    api: &AgentApi,
+    thread_id: &str,
+) -> Result<std::path::PathBuf, String> {
+    let config_dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|e| format!("app_config_dir: {e}"))?;
+    let store = Store::attach(&config_dir.join("boite.db"))?;
+    boite_agent_api::keys::mint(&store, &api.keys_dir, thread_id)
+}
+
+/// Removes a deleted thread's key file.
+///
+/// Called by the delete path in the front end, which owns the rows: it drops
+/// the `thread_keys` row itself in the same statement batch, and this is the
+/// half that is not SQL. Quiet about a thread that never had one.
+#[tauri::command]
+pub fn agent_forget_thread_key(app: tauri::AppHandle, thread_id: String) {
+    if let Some(api) = app.try_state::<AgentApi>() {
+        boite_agent_api::keys::forget(&api.keys_dir, &thread_id);
+    }
+}
+
 /// One credentials file per project, for agents Boite cannot hand anything at
 /// launch.
 ///
 /// Rewritten on every start, because the port is ephemeral: a file kept from a
-/// previous run would name an address nothing answers on. That is also why the
-/// token inside is the session's own — there is no second secret to manage, and
-/// nothing here outlives the app by more than one launch.
-fn write_project_credentials(
-    app: &tauri::AppHandle,
-    store: &Store,
-    url: &str,
-    token_path: &std::path::Path,
-) {
+/// previous run would name an address nothing answers on. The token inside dies
+/// with the process too, since the secret it is derived from is minted at
+/// startup and written nowhere.
+fn write_project_credentials(app: &tauri::AppHandle, store: &Store, api: &AgentApi) {
     let projects = match store.load_projects() {
         Ok(p) => p,
         Err(e) => {
@@ -164,7 +191,7 @@ fn write_project_credentials(
         }
     };
     for project in projects {
-        if let Err(e) = write_one(app, url, token_path, &project.id) {
+        if let Err(e) = write_one(app, api, &project.id) {
             crate::logging::warn_to_log(
                 app,
                 "agent-api",
@@ -182,27 +209,29 @@ fn write_project_credentials(
 /// it then. Late or early is the same act: the file names a port that lives and
 /// dies with this process.
 ///
-/// Mode 0600 on unix: it grants write access to this workspace's todo lists,
+/// Mode 0600 on unix: it grants write access to this one project's todo list,
 /// which is modest but not nothing, and there is no reason for it to be readable
 /// by anyone else on the machine.
+///
+/// The token in it opens that project and no other. It used to be the workspace
+/// token, the same value in every file, so an agent wired for one project could
+/// read and write the lists of the rest by editing the id in its own config.
 pub fn write_one(
     app: &tauri::AppHandle,
-    url: &str,
-    token_path: &std::path::Path,
+    api: &AgentApi,
     project_id: &str,
 ) -> Result<std::path::PathBuf, String> {
-    // Read back rather than passed around: the endpoint's own token file is the
-    // single copy, and a second one travelling through call arguments is a
-    // second thing to keep in step.
-    let token = boite_core::secret_file::read(token_path)
-        .map_err(|e| format!("cannot read the agent token: {e}"))?;
     let base = app
         .path()
         .app_config_dir()
         .map_err(|e| format!("app_config_dir: {e}"))?;
     let path = base.join("mcp").join(format!("{project_id}.json"));
 
-    let body = json!({ "url": url, "token": token, "projectId": project_id });
+    let body = json!({
+        "url": api.url,
+        "token": api.project_token(project_id),
+        "projectId": project_id,
+    });
     // Through the shared helper: this file holds a bearer token in the clear and
     // used to be restricted on unix alone, with Windows left to whatever the
     // parent directory happened to allow.
@@ -232,7 +261,10 @@ pub fn start(app: &tauri::AppHandle) {
         }
     };
 
-    let token = format!("{:032x}", rand::thread_rng().gen::<u128>());
+    // In memory for the life of the process and written nowhere. Every
+    // credential this workspace issues is derived from it, so a copy on disk
+    // would be the one file worth stealing.
+    let secret = format!("{:032x}", rand::thread_rng().gen::<u128>());
 
     // Bound here, not inside the task: the address has to be known before the
     // first thread can spawn. Registering it from the task left a window where
@@ -259,24 +291,31 @@ pub fn start(app: &tauri::AppHandle) {
         return;
     }
     let url = format!("http://127.0.0.1:{port}");
-    let token_path = config_dir.join("agent-token");
-    // Written before anything can want to read it back.
-    if let Err(e) = boite_core::secret_file::write(&token_path, &token) {
+    // Beside the database rather than under a temp directory: a thread's key
+    // file and its row have to be lost together or not at all. See
+    // `boite_agent_api::keys::mint`.
+    let keys_dir = config_dir.join("thread-keys");
+    if let Err(e) = std::fs::create_dir_all(&keys_dir) {
         crate::logging::warn_to_log(
             app,
             "agent-api",
-            &format!("cannot write the token file: {e}"),
+            &format!("cannot make the key directory: {e}"),
         );
         return;
     }
-    write_project_credentials(app, &store, &url, &token_path);
+    let api = AgentApi {
+        url: url.clone(),
+        keys_dir,
+        secret: secret.clone(),
+    };
+    write_project_credentials(app, &store, &api);
 
     let router = boite_agent_api::router(Arc::new(DesktopWorkspace {
         store,
-        token,
+        secret,
         app: app.clone(),
     }));
-    app.manage(AgentApi { url, token_path });
+    app.manage(api);
 
     let served = app.clone();
     tauri::async_runtime::spawn(async move {

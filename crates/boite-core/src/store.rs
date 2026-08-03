@@ -193,6 +193,67 @@ impl Store {
         .filter(|k| !k.is_empty() && k != "terminal")
     }
 
+    /// Binds a thread to the identity it was spawned with. Once.
+    ///
+    /// The owner lock. `ON CONFLICT DO NOTHING` plus a read back rather than a
+    /// check above the SQL: the check would leave a window between the read and
+    /// the write that two spawns of the same thread could both pass through.
+    ///
+    /// Re-binding the *same* key succeeds, because that is not a takeover: it is
+    /// a respawn of a terminal whose key file is still on disk, and refusing it
+    /// would mean an agent loses its own workspace when its PTY restarts.
+    ///
+    /// No foreign key to `threads`, and deliberately: the desktop persists a
+    /// thread's row behind the caller while the terminal is already mounting, so
+    /// the key can be minted before the row lands. A key with no thread grants
+    /// nothing, since resolving a project still needs the row.
+    pub fn bind_thread_identity(&self, thread_id: &str, public_key: &str) -> Result<(), String> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "INSERT INTO thread_keys (thread_id, public_key) VALUES (?1, ?2)
+             ON CONFLICT(thread_id) DO NOTHING",
+            rusqlite::params![thread_id, public_key],
+        )
+        .map_err(|e| e.to_string())?;
+        let owner: String = conn
+            .query_row(
+                "SELECT public_key FROM thread_keys WHERE thread_id = ?1",
+                [thread_id],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if owner == public_key {
+            return Ok(());
+        }
+        Err(format!(
+            "thread {thread_id} already has an owner, and an owner is never replaced"
+        ))
+    }
+
+    /// The public half of a thread's identity, for verifying what it signed.
+    ///
+    /// `None` covers both "no such thread" and "a thread from before identities
+    /// existed". Neither can prove anything, and the endpoint treats them the
+    /// same way, so there is nothing to tell apart here.
+    pub fn public_key_of_thread(&self, thread_id: &str) -> Option<String> {
+        let conn = self.conn.lock();
+        conn.query_row(
+            "SELECT public_key FROM thread_keys WHERE thread_id = ?1",
+            [thread_id],
+            |r| r.get::<_, String>(0),
+        )
+        .ok()
+        .filter(|k| !k.is_empty())
+    }
+
+    /// Drops a thread's identity. For a thread being deleted.
+    pub fn forget_thread_identity(&self, thread_id: &str) -> Result<(), String> {
+        let conn = self.conn.lock();
+        conn.execute("DELETE FROM thread_keys WHERE thread_id = ?1", [thread_id])
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
     /// What scopes an agent: it presents the thread Boite spawned it for, never
     /// a project of its choosing.
     pub fn project_of_thread(&self, thread_id: &str) -> Result<String, String> {
@@ -489,9 +550,15 @@ impl Store {
         .ok()
     }
 
+    /// Deletes a thread and the identity that belonged to it.
+    ///
+    /// Both, always. A key left behind would let a reused id inherit an owner it
+    /// never had, and the owner lock means that one could never be corrected.
     pub fn delete_thread(&self, id: &str) -> Result<(), String> {
         let conn = self.conn.lock();
         conn.execute("DELETE FROM threads WHERE id = ?1", [id])
+            .map_err(|e| e.to_string())?;
+        conn.execute("DELETE FROM thread_keys WHERE thread_id = ?1", [id])
             .map_err(|e| e.to_string())?;
         Ok(())
     }
@@ -674,5 +741,79 @@ mod tests {
         Store::open(&db).expect("third open");
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A thread's identity is set once and never replaced, which is the whole
+    /// reason a stolen thread id is worth nothing on its own.
+    #[test]
+    fn an_owner_is_never_replaced() {
+        let (store, _dir) = scratch_store("owner-lock");
+        assert!(store.bind_thread_identity("t1", "aa").is_ok());
+        assert_eq!(store.public_key_of_thread("t1").as_deref(), Some("aa"));
+
+        // A second, different key is refused, and the first one stays.
+        let stolen = store.bind_thread_identity("t1", "bb").unwrap_err();
+        assert!(stolen.contains("already has an owner"), "{stolen}");
+        assert_eq!(store.public_key_of_thread("t1").as_deref(), Some("aa"));
+
+        // The same key again is a respawn, not a takeover.
+        assert!(store.bind_thread_identity("t1", "aa").is_ok());
+
+        // Forgetting it lets the id be minted again, which is what a deleted
+        // thread and a reused id look like.
+        store.forget_thread_identity("t1").unwrap();
+        assert_eq!(store.public_key_of_thread("t1"), None);
+        assert!(store.bind_thread_identity("t1", "bb").is_ok());
+    }
+
+    /// A key can be minted before the thread's row lands, because the desktop
+    /// persists that row behind the caller while the terminal is mounting.
+    #[test]
+    fn a_key_does_not_wait_for_the_row_it_belongs_to() {
+        let (store, _dir) = scratch_store("early-key");
+        assert!(store.bind_thread_identity("not-yet", "aa").is_ok());
+        assert_eq!(store.public_key_of_thread("not-yet").as_deref(), Some("aa"));
+        // And it still opens nothing on its own: the project comes from a row
+        // that is not there.
+        assert!(store.project_of_thread("not-yet").is_err());
+    }
+
+    /// A thread that predates identities has none, and cannot be given one by
+    /// asking: there is nothing to read back.
+    #[test]
+    fn a_thread_with_no_key_proves_nothing() {
+        let (store, _dir) = scratch_store("no-key");
+        store
+            .conn
+            .lock()
+            .execute(
+                "INSERT INTO threads (id, project_id, label, cmd, args, created_at)
+                 VALUES ('old', 'p1', 'a', 'sh', '[]', 0)",
+                [],
+            )
+            .unwrap();
+        assert_eq!(store.public_key_of_thread("old"), None);
+        assert_eq!(store.public_key_of_thread("never-existed"), None);
+    }
+
+    /// A migrated database in its own directory, removed when the guard drops.
+    fn scratch_store(name: &str) -> (Store, ScratchDir) {
+        let dir = std::env::temp_dir().join(format!(
+            "boite-store-{name}-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = Store::open(&dir.join("boite.db")).unwrap();
+        (store, ScratchDir(dir))
+    }
+
+    struct ScratchDir(std::path::PathBuf);
+
+    impl Drop for ScratchDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
     }
 }

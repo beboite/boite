@@ -15,9 +15,9 @@
 //! says, what lands in the log — is here, once.
 //!
 //! ```text
-//!   desktop Inner ─┐                                  ┌─ authorize      one token check
-//!                  ├─ dyn Workspace ── router() ──────┤─ handlers       one behaviour
-//!   server  Inner ─┘                                  └─ journal        one history
+//!   desktop Inner ─┐                                  ┌─ identify   one proof of who
+//!                  ├─ dyn Workspace ── router() ──────┤─ handlers   one behaviour
+//!   server  Inner ─┘                                  └─ journal    one history
 //! ```
 
 use std::sync::Arc;
@@ -26,11 +26,13 @@ use boite_core::scope::ProjectRoots;
 use boite_core::store::Store;
 
 mod auth;
+pub mod keys;
 mod routes;
 #[cfg(test)]
 mod testing;
 
-pub use auth::{known_agent, Resolution};
+pub use auth::{known_agent, Caller};
+pub use boite_identity::env;
 pub use routes::router;
 
 /// What changed, for the devices that are drawing it.
@@ -72,8 +74,14 @@ pub trait Workspace: Send + Sync + 'static {
     /// rule rather than two that drift.
     fn roots(&self) -> &ProjectRoots;
 
-    /// The secret a caller has to present. Compared in constant time.
-    fn token(&self) -> &str;
+    /// The workspace secret. Never handed to anybody as it is.
+    ///
+    /// One value per run of the process, and the only thing derived from it is
+    /// a per-project token for a credentials file, through
+    /// `boite_identity::project_token`. A thread never sees it at all: it signs
+    /// with a key of its own, and this endpoint verifies against the public half
+    /// on its row.
+    fn secret(&self) -> &str;
 
     /// Places a project may go beyond the parents of the registered roots.
     ///
@@ -106,11 +114,6 @@ pub trait Workspace: Send + Sync + 'static {
     /// answers empty makes the snapshot lie, so both of Boite's implement it.
     fn live_ptys(&self) -> Vec<boite_core::snapshot::LivePty> {
         Vec::new()
-    }
-
-    /// How this host resolves the caller's project. See [`Resolution`].
-    fn resolution(&self) -> Resolution {
-        Resolution::ThreadOnly
     }
 
     /// Called after an agent acts, for whatever the host shows about it.

@@ -17,6 +17,7 @@ use serde_json::Value;
 use super::{
     opt_str_param, str_list, str_param, u32_param, value_of, Command, Host, Ready, Wire,
 };
+use crate::capability::Capability;
 use crate::{fastpick, session, shell, usage};
 
 /// Every method in this domain, in the order they appear below.
@@ -192,6 +193,29 @@ impl Sessions {
         }
     }
 
+    /// What a caller needs to hold to ask for this.
+    ///
+    /// Most of the domain reads what the agents left on disk, which is a read
+    /// however many directories it walks. The two that are not are the two that
+    /// reach a process or move a file: stopping a claude session, and following
+    /// a thread's transcript into its new folder.
+    pub(super) fn capability(&self) -> Capability {
+        match self {
+            Sessions::Find { .. }
+            | Sessions::LiveClaude
+            | Sessions::AgentTurns { .. }
+            | Sessions::Usage { .. }
+            | Sessions::CopilotResumable { .. }
+            | Sessions::ShellDefault
+            | Sessions::ShellAvailable { .. }
+            | Sessions::CommandExists { .. }
+            | Sessions::FastpickList { .. }
+            | Sessions::FastpickVersion => Capability::ReadProject,
+
+            Sessions::StopClaude { .. } | Sessions::Migrate { .. } => Capability::MutateProject,
+        }
+    }
+
     pub(super) fn prepare(mut self, host: &dyn Host) -> Result<Ready, String> {
         if let Sessions::Find { own, .. } = &mut self {
             if let Own::Pty(pty_id) = own {
@@ -304,6 +328,7 @@ impl Sessions {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::capability::Grant;
     use crate::command::Scoped;
     use crate::scope::ProjectRoots;
     use serde_json::json;
@@ -338,7 +363,7 @@ mod tests {
             &json!({ "kind": "claude", "cwd": "/w", "ptyId": "pty-1" }),
         )
         .unwrap()
-        .prepare(&host)
+        .prepare(&host, Grant::Local)
         .unwrap();
         match ready {
             Ready::Work(Command::Sessions(Sessions::Find { own, .. })) => {
@@ -358,7 +383,7 @@ mod tests {
             &json!({ "kind": "nothing-like-that", "cwd": "/w" }),
         )
         .unwrap()
-        .prepare(&Scoped::new(&roots))
+        .prepare(&Scoped::new(&roots), Grant::Local)
         .unwrap()
         .run()
         .unwrap();

@@ -7,6 +7,7 @@
 use serde_json::{json, Value};
 
 use super::{str_param, u32_param, value_of, Access, Command, Host, Ready, Wire};
+use crate::capability::Capability;
 use crate::{editor, explorer, project};
 
 /// Every method in this domain, in the order they appear below.
@@ -130,6 +131,26 @@ impl Files {
         }
     }
 
+    /// What a caller needs to hold to ask for this.
+    ///
+    /// `project.createFolder` is a mutation of the project it belongs to rather
+    /// than one across projects, even though the folder is not a project yet:
+    /// making a directory somewhere the boundary already allows changes nothing
+    /// about where the caller works. Deciding to *move* there is
+    /// `thread.move`, and that is the call that needs the wider grant.
+    pub(super) fn capability(&self) -> Capability {
+        match self {
+            Files::ReadDir { .. }
+            | Files::Search { .. }
+            | Files::Read { .. }
+            | Files::ReadBase64 { .. }
+            | Files::Inspect { .. }
+            | Files::FolderState { .. } => Capability::ReadProject,
+
+            Files::Write { .. } | Files::CreateFolder { .. } => Capability::MutateProject,
+        }
+    }
+
     /// What the caller handed over, and what it wants to do with it.
     ///
     /// The three project commands are not in here: they run on folders that are
@@ -198,6 +219,7 @@ impl Files {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::capability::Grant;
     use crate::command::Scoped;
     use crate::scope::ProjectRoots;
 
@@ -241,7 +263,7 @@ mod tests {
             let params = json!({ "path": outside.join("a.txt").to_str().unwrap(), "query": "x" });
             let err = Command::decode(method, &params)
                 .unwrap()
-                .prepare(&host)
+                .prepare(&host, Grant::Local)
                 .err()
                 .unwrap_or_else(|| panic!("{method} accepted a path outside the roots"));
             assert!(err.contains("outside registered project roots"), "{method}: {err}");
@@ -254,7 +276,7 @@ mod tests {
         });
         assert!(Command::decode("file.write", &params)
             .unwrap()
-            .prepare(&host)
+            .prepare(&host, Grant::Local)
             .is_err());
     }
 
@@ -270,7 +292,7 @@ mod tests {
         let params = json!({ "path": base.join("not-yet").to_str().unwrap() });
         let answer = Command::decode("project.folderState", &params)
             .unwrap()
-            .prepare(&host)
+            .prepare(&host, Grant::Local)
             .unwrap()
             .run()
             .unwrap();
@@ -294,7 +316,7 @@ mod tests {
         let ask = |path: &std::path::Path| {
             Command::decode("project.createFolder", &json!({ "path": path.to_str().unwrap() }))
                 .unwrap()
-                .prepare(&host)
+                .prepare(&host, Grant::Local)
         };
 
         assert!(ask(&base.join("elsewhere").join("newproj")).is_err());

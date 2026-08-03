@@ -340,17 +340,30 @@ hint: todo_claim id=<id> note=<what changed>, the user confirms, not you
 Ids are shortened to the prefix that still tells the list apart, and
 `todo_claim` takes either that or the full one.
 
-Boite spawns the terminal, so it stamps `BOITE_MCP_URL`, `BOITE_TOKEN_FILE` and
-`BOITE_THREAD_ID` into the child's environment, and resolves the project from
-the thread id. An agent reaches its own project and no other with nothing to
-configure; one started outside Boite has no token at all.
+Boite spawns the terminal, so it mints a keypair for it first: the public half
+goes in the database, the private half in a file only that user can read, and
+`BOITE_MCP_URL`, `BOITE_KEY_FILE` and `BOITE_THREAD_ID` go into the child's
+environment. The agent signs each request with that key, and the project is
+resolved from the thread it proves it is. An agent reaches its own project and
+no other with nothing to configure; one started outside Boite holds no key and
+gets in nowhere.
 
-`BOITE_TOKEN_FILE` is a path, not the token. The value used to be in the
+Nothing reusable travels over the socket, so a request captured in a log is
+worth nothing, and one agent cannot speak for another because it does not hold
+the other's key. A thread's identity is bound once and never replaced.
+
+`BOITE_KEY_FILE` is a path, not the key. The value used to be in the
 environment itself, which put it in the output of any `env` an agent typed, and
 that output is kept in the thread's scrollback and replayed on reattach. The
-file is 0600 inside the application data directory. The endpoint lives
-on `127.0.0.1` with an ephemeral port, in both the desktop app and
-`boite-server`.
+file is 0600 beside the database. The endpoint lives on `127.0.0.1` with an
+ephemeral port, in both the desktop app and `boite-server`.
+
+Agents that hand a server process nothing but `PATH` cannot receive an
+environment at all, and those reach Boite through a credentials file the Todo
+panel writes. The token in it is derived from the project it names, so editing
+that id produces a token that no longer verifies, and it carries a narrower
+grant: it reads and writes one project's list and cannot move a thread, open a
+terminal elsewhere or create a project.
 
 The `boite-mcp` shim ships inside the app, next to the Boite binary. Point your
 agent at it. On macOS:
