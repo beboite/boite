@@ -15,7 +15,7 @@ import {
   leavesOf,
   pruneLeaf,
   threadLeavesOf,
-  updateRatios,
+  findSplit,
 } from "./tree";
 import { PANES_KEY, loadSavedGroups } from "./layout";
 import { sameRect, unmeasuredRect, type PaneRect, type Viewport } from "./rect";
@@ -208,10 +208,21 @@ class PaneStore {
     this.saveSoon();
   }
 
+  /**
+   * Moves one splitter. Called at pointer rate for the whole of a drag.
+   *
+   * The ratios are written in place rather than through `updateRatios`, and
+   * that is the point: rebuilding the tree replaces every node from the root
+   * down, so `groupByPane` and `contentByPane` recomputed on every pointermove
+   * even though no pane had appeared, moved or gone. Neither index reads a
+   * ratio, so writing one now invalidates nothing that walks the leaves.
+   */
   setRatios(groupId: string, splitId: string, ratios: number[]) {
     const g = this.groups.find((x) => x.id === groupId);
     if (!g) return;
-    g.root = updateRatios(g.root, splitId, ratios);
+    const split = findSplit(g.root, splitId);
+    if (!split) return;
+    split.ratios = ratios;
     this.saveSoon();
   }
 

@@ -7,7 +7,7 @@ import {
   normalize,
   pruneLeaf,
   threadLeavesOf,
-  updateRatios,
+  findSplit,
 } from "./tree";
 import { sameContent, threadPane, threadIdOf } from "./types";
 import type { LayoutNode } from "./types";
@@ -242,9 +242,16 @@ describe("ratios", () => {
     tree = injectSibling(tree, "b", threadPane("c"), "column", false, 0.5, nextId)!;
     const innerId = splitOf(splitOf(tree).children[1]).id;
 
-    const updated = updateRatios(tree, innerId, [0.8, 0.2]);
-    expect(splitOf(splitOf(updated).children[1]).ratios).toEqual([0.8, 0.2]);
-    expect(splitOf(updated).ratios).toEqual(splitOf(tree).ratios);
-    expect(splitOf(updated).id).toBe(outerId);
+    // Found rather than rebuilt, and mutated in place. A splitter drag calls
+    // this at pointer rate, and replacing the tree from the root down made the
+    // store's leaf indexes recompute on every move even though no pane had
+    // appeared, moved or gone.
+    const split = findSplit(tree, innerId)!;
+    expect(split).toBe(splitOf(splitOf(tree).children[1]));
+    split.ratios = [0.8, 0.2];
+    expect(splitOf(splitOf(tree).children[1]).ratios).toEqual([0.8, 0.2]);
+    expect(splitOf(tree).id).toBe(outerId);
+    // And a splitter that is not in this tree is not found.
+    expect(findSplit(tree, "no-such-split")).toBe(null);
   });
 });
