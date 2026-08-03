@@ -200,6 +200,12 @@ impl boite_core::command::Host for ServerHost<'_> {
         allowed
     }
 
+    /// This server owns the database, so the record commands read and write the
+    /// same rows every other part of it does.
+    fn store(&self) -> Option<Arc<boite_core::store::Store>> {
+        Some(self.state.store.clone())
+    }
+
     /// Which process one of this server's PTYs is running right now, so the
     /// session it holds open is not mistaken for someone else's live one.
     fn child_pid(&self, pty_id: &str) -> Option<u32> {

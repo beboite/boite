@@ -200,6 +200,7 @@ pub fn run() {
         .manage(BootState::default())
         .manage(ProjectRoots::default())
         .manage(commands::app::LastScreen::default())
+        .manage(commands::records::Rows::default())
         .setup(|app| {
             let setup_handle = app.handle().clone();
             if let Err(e) = logging::begin_log_session(&setup_handle) {
@@ -315,7 +316,6 @@ pub fn run() {
             commands::sessions::agent_token_usage,
             commands::agents::agent_mcp_config,
             commands::agents::agent_api_ready,
-            agent_api::agent_forget_thread_key,
             agent_api::approvals_open,
             agent_api::approval_decide,
             commands::agents::agent_mcp_project_path,
@@ -362,6 +362,21 @@ pub fn run() {
             commands::app::command_exists,
             commands::app::fastpick_list,
             commands::app::fastpick_version,
+            commands::records::records_project_list,
+            commands::records::records_project_create,
+            commands::records::records_project_archive,
+            commands::records::records_project_delete,
+            commands::records::records_thread_list,
+            commands::records::records_thread_create,
+            commands::records::records_thread_update,
+            commands::records::records_thread_delete,
+            commands::records::records_todo_list,
+            commands::records::records_todo_save,
+            commands::records::records_todo_delete,
+            commands::records::records_settings_get,
+            commands::records::records_settings_set,
+            commands::records::records_workspace_info,
+            commands::records::records_workspace_set_info,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

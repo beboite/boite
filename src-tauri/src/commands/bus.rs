@@ -10,7 +10,7 @@
 //! and its own capability check.
 
 use std::path::PathBuf;
-
+use std::sync::Arc;
 
 use serde_json::Value;
 use tauri::Manager;
@@ -19,6 +19,7 @@ use boite_core::capability::Grant;
 use boite_core::command::Command;
 use boite_core::pty::PtyManager;
 use boite_core::scope::ProjectRoots;
+use boite_core::store::Store;
 
 
 
@@ -34,6 +35,7 @@ pub(super) struct DesktopHost<'a> {
     manager: Option<&'a PtyManager>,
     legacy_worktree_base: Option<PathBuf>,
     transcripts: Option<PathBuf>,
+    store: Option<Arc<Store>>,
 }
 
 impl<'a> DesktopHost<'a> {
@@ -43,6 +45,7 @@ impl<'a> DesktopHost<'a> {
             manager: None,
             legacy_worktree_base: None,
             transcripts: None,
+            store: None,
         }
     }
 
@@ -67,6 +70,14 @@ impl<'a> DesktopHost<'a> {
         self.legacy_worktree_base = Some(base);
         self
     }
+
+    /// The rows this app keeps. Attached once and held in `commands::records`,
+    /// rather than opened per call the way every earlier reader on this side
+    /// did.
+    pub(super) fn with_store(mut self, store: Arc<Store>) -> Self {
+        self.store = Some(store);
+        self
+    }
 }
 
 impl boite_core::command::Host for DesktopHost<'_> {
@@ -84,6 +95,10 @@ impl boite_core::command::Host for DesktopHost<'_> {
 
     fn transcripts_dir(&self) -> Option<PathBuf> {
         self.transcripts.clone()
+    }
+
+    fn store(&self) -> Option<Arc<Store>> {
+        self.store.clone()
     }
 }
 

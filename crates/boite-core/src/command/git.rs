@@ -682,7 +682,7 @@ mod tests {
                 Ready::Settled(value) => {
                     assert_eq!(value, json!({ "path": null, "gone": false }))
                 }
-                Ready::Work(_) => panic!("a worktree outside the old layout was moved"),
+                other => panic!("a worktree outside the old layout was moved: {other:?}"),
             }
         }
     }

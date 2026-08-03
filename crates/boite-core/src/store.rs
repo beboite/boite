@@ -10,6 +10,18 @@ pub struct Store {
     conn: Mutex<Connection>,
 }
 
+/// Names itself and stops there.
+///
+/// `Ready` derives `Debug` and one of its arms carries a store, so this has to
+/// exist. Printing anything about the connection would put a database path into
+/// whatever log the value was formatted into, which is the kind of thing
+/// `sanitize_log_text` exists to undo after the fact.
+impl std::fmt::Debug for Store {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Store")
+    }
+}
+
 impl Store {
     /// Opens the database and brings the schema up to date.
     ///
@@ -111,7 +123,7 @@ impl Store {
                     project_id: r.get(1)?,
                     title: r.get(2)?,
                     description: r.get(3)?,
-                    state: r.get(4)?,
+                    state: normalize_todo_state(r.get(4)?),
                     note: r.get(5)?,
                     commit_sha: r.get(6)?,
                     claimed_by: r.get(7)?,
@@ -177,7 +189,7 @@ impl Store {
                     project_id: r.get(1)?,
                     title: r.get(2)?,
                     description: r.get(3)?,
-                    state: r.get(4)?,
+                    state: normalize_todo_state(r.get(4)?),
                     note: r.get(5)?,
                     commit_sha: r.get(6)?,
                     claimed_by: r.get(7)?,
@@ -874,6 +886,23 @@ fn normalize_status(raw: Option<String>) -> String {
     match raw {
         Some(s) if TERMINAL_STATUSES.contains(&s.as_str()) => s,
         _ => "idle".to_string(),
+    }
+}
+
+/// The three states a todo can be in, and what anything else reads as.
+///
+/// The agent endpoint writes this table too, so a row can carry a state this
+/// build does not know — an older Boite reading a database a newer one wrote, or
+/// a value nothing here produced. Unknown reads as `open` rather than
+/// disappearing from the list, because a card nobody can see is a card nobody
+/// finishes.
+///
+/// This was in the desktop's TypeScript and nowhere else. Both hosts read the
+/// same rows, so only one of them was guarded.
+fn normalize_todo_state(raw: String) -> String {
+    match raw.as_str() {
+        "done" | "claimed" => raw,
+        _ => "open".to_string(),
     }
 }
 

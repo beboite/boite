@@ -449,6 +449,37 @@ try {
 }
 await c.rpc("thread.delete", { threadId: probeId });
 
+// The record domain: the last four tables to reach the bus, and the two guards
+// each of which used to exist on one side only.
+await c.rpc("todo.save", {
+  todo: {
+    id: "smoke-todo",
+    projectId: "smoke",
+    title: "a todo written by the smoke run",
+    // A state this build does not know. The desktop's TypeScript folded these
+    // back to `open` and the Rust reader did not, so the same row read two ways
+    // gave two answers.
+    state: "banana",
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  },
+});
+const todos = await c.rpc("todo.list");
+const saved = (todos.todos || []).find((t) => t.id === "smoke-todo");
+check("a todo state nothing knows reads as open", saved?.state === "open", `state=${saved?.state}`);
+await c.rpc("todo.delete", { todoId: "smoke-todo" });
+const gone = await c.rpc("todo.list");
+check("a deleted todo is gone", !(gone.todos || []).some((t) => t.id === "smoke-todo"));
+
+// The colour lands in a CSS custom property on every connected device, so
+// anything that is not one is dropped rather than stored.
+await c.rpc("workspace.setInfo", { name: "smoke boite", color: "#0a0" });
+await c.rpc("workspace.setInfo", { color: "javascript:alert(1)" });
+const meta = await c.rpc("workspace.info");
+check("a workspace colour that is not one is dropped", meta?.color === "#0a0", `color=${meta?.color}`);
+check("and the name beside it survived", meta?.name === "smoke boite", `name=${meta?.name}`);
+await c.rpc("workspace.setInfo", { name: null, color: null });
+
 const nt = await c.rpc("notify.test", { title: "Smoke", body: "ping" });
 check("notify.test responds", nt?.ok === true, `webhook_enabled=${nt?.enabled}`);
 

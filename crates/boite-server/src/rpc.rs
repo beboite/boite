@@ -1,5 +1,3 @@
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use serde_json::{json, Value};
 
 use boite_core::capability::Grant;
@@ -7,16 +5,9 @@ use boite_core::command::{self, Command};
 use boite_core::pty::PtySpawnArgs;
 
 use crate::events::AppEvent;
-use boite_core::model::{Project, Thread};
 use crate::state::AppState;
-use boite_core::store::{ColVal, ThreadCol};
-
-fn now_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
-}
+use boite_core::model::Thread;
+use boite_core::now_ms;
 
 fn str_param(params: &Value, key: &str) -> Result<String, String> {
     params
@@ -44,14 +35,37 @@ where
         .map_err(|e| format!("task join failed: {e}"))
 }
 
+/// Runs a record command on the bus and hands back the bare answer.
+///
+/// The rows are `boite_core::command::records`; what stays on this side is what
+/// this host does *about* a row changing — broadcasting to every connected
+/// device, refreshing the roots, killing a PTY. Those are not the capability,
+/// and a bus that owned them would need a `Host` method per host quirk.
+///
+/// Bare rather than wire-wrapped: the arms below already carry the envelope
+/// this protocol has always used, and the fallthrough at the bottom is what
+/// applies `Wire` for the commands that need nothing around them.
+async fn on_bus(state: &AppState, method: &str, params: &Value) -> Result<Value, String> {
+    let ready = Command::decode(method, params)?.prepare(&state.command_host(), Grant::Local)?;
+    blocking(move || ready.run()).await?
+}
+
 // Dispatch every non-streaming method. thread.attach / thread.detach and
 // binary input frames are handled in ws.rs (they need the socket writer).
 pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<Value, String> {
     match method {
         "hello" => Ok(json!({ "ok": true, "protocol": 1 })),
 
+        // The rows come from the bus; what this host adds is which of them has a
+        // process behind it right now. Kept as two steps rather than folded into
+        // the command, because the difference between the two is the thing worth
+        // seeing: a row saying `running` with no live PTY is the shape of nearly
+        // every "my terminal is dead" report, and `system.snapshot` reports it by
+        // handing over both lists separately.
         "thread.list" => {
-            let mut threads = state.store.load_threads()?;
+            let mut threads: Vec<Thread> =
+                serde_json::from_value(on_bus(state, "thread.list", &params).await?)
+                    .map_err(|e| format!("bad thread rows: {e}"))?;
             let live = state.registry.live_snapshot();
             for t in &mut threads {
                 if let Some((pty_id, status, title)) = live.get(&t.id) {
@@ -143,44 +157,21 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
         // terminal mounts (thread.spawn). status is forced idle: the client is
         // not authoritative for runtime state.
         "thread.create" => {
-            let mut thread: Thread = serde_json::from_value(
-                params
-                    .get("thread")
-                    .cloned()
-                    .ok_or("missing param: thread")?,
-            )
-            .map_err(|e| format!("bad thread: {e}"))?;
-            if thread.created_at == 0 {
-                thread.created_at = now_ms();
-            }
-            thread.pty_id = None;
-            // saveThread doubles as create AND re-save (session-id dedup, label
-            // edit). The client is not authoritative for runtime state: on an
-            // EXISTING row keep the persisted status/exit_code and announce it
-            // as an update; only a genuinely new row is idle + created.
-            //
-            // "Persisted" is `Store::thread_status`, which collapses anything
-            // that is not a terminal status to idle. So a closed thread keeps
-            // its ending and a busy one does not keep its claim — a row that
-            // says `running` describes a process that stopped existing when the
-            // last one of these ended.
-            let existed = state.store.thread_status(&thread.id);
-            match &existed {
-                Some((status, exit_code)) => {
-                    thread.status = status.clone();
-                    thread.exit_code = *exit_code;
-                }
-                None => {
-                    thread.status = "idle".to_string();
-                    thread.exit_code = None;
-                }
-            }
-            state.store.save_thread(&thread)?;
-            let value = serde_json::to_value(&thread).unwrap();
-            let _ = state.events.send(if existed.is_some() {
-                AppEvent::ThreadUpdated(value)
+            // Whether this is a create or a re-save is read before the row is
+            // written, because it decides which event every connected device
+            // gets. The row work itself, including refusing to take the
+            // client's word for a run that has already ended, is on the bus.
+            let existed = params
+                .get("thread")
+                .and_then(|t| t.get("id"))
+                .and_then(|v| v.as_str())
+                .and_then(|id| state.store.thread_status(id))
+                .is_some();
+            let thread = on_bus(state, "thread.create", &params).await?;
+            let _ = state.events.send(if existed {
+                AppEvent::ThreadUpdated(thread.clone())
             } else {
-                AppEvent::ThreadCreated(value)
+                AppEvent::ThreadCreated(thread.clone())
             });
             Ok(json!({ "thread": thread }))
         }
@@ -204,41 +195,11 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
 
         "thread.update" => {
             let id = str_param(&params, "threadId")?;
-            if let Some(label) = params.get("label").and_then(|v| v.as_str()) {
-                state
-                    .store
-                    .update_thread_field(&id, ThreadCol::Label, ColVal::Text(label.to_string()))?;
-            }
-            if let Some(icon) = params.get("iconKey") {
-                let v = icon
-                    .as_str()
-                    .map(|s| ColVal::Text(s.to_string()))
-                    .unwrap_or(ColVal::Null);
-                state.store.update_thread_field(&id, ThreadCol::IconKey, v)?;
-            }
-            if let Some(session) = params.get("sessionId") {
-                let v = session
-                    .as_str()
-                    .map(|s| ColVal::Text(s.to_string()))
-                    .unwrap_or(ColVal::Null);
-                state.store.update_thread_field(&id, ThreadCol::SessionId, v)?;
-            }
-            if let Some(keep) = params.get("keepAwake").and_then(|v| v.as_bool()) {
-                state
-                    .store
-                    .update_thread_field(&id, ThreadCol::KeepAwake, ColVal::Int(keep as i64))?;
-            }
-            if let Some(title) = params.get("title") {
-                let v = title
-                    .as_str()
-                    .map(|s| ColVal::Text(s.to_string()))
-                    .unwrap_or(ColVal::Null);
-                state.store.update_thread_field(&id, ThreadCol::Title, v)?;
-            }
-            // Emit the full persisted row so clients merge user-owned fields
-            // (label/title/iconKey/sessionId/keepAwake). Clients ignore the
-            // runtime fields (status/ptyId/exitCode) here; those flow via the
-            // thread.status control event and the live overlay.
+            on_bus(state, "thread.update", &params).await?;
+            // The full persisted row, so clients merge the fields the user owns
+            // (label/title/iconKey/sessionId/keepAwake). They ignore the runtime
+            // ones here; those flow through the thread.status control event and
+            // the live overlay.
             if let Ok(Some(updated)) = state.store.load_thread(&id) {
                 let _ = state
                     .events
@@ -252,10 +213,9 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
             let registry = state.registry.clone();
             let id2 = id.clone();
             let _ = blocking(move || registry.kill(&id2, false)).await?;
-            state.store.delete_thread(&id)?;
-            // The row is what a public key is looked up on, so the file grants
-            // nothing once it is gone. Removed anyway rather than left to
-            // accumulate one per thread ever opened.
+            on_bus(state, "thread.delete", &params).await?;
+            // The row and the key binding go on the bus; the key *file* is this
+            // host's own directory and no other host has one to remove.
             if let Some(api) = &state.agent_api {
                 boite_agent_api::keys::forget(&api.keys_dir, &id);
             }
@@ -265,41 +225,35 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
             Ok(json!({ "ok": true }))
         }
 
-        "project.list" => {
-            let projects = state.store.load_projects()?;
-            Ok(json!({ "projects": projects }))
-        }
-
         "project.create" => {
-            let project: Project = serde_json::from_value(
-                params
-                    .get("project")
-                    .cloned()
-                    .ok_or("missing param: project")?,
-            )
-            .map_err(|e| format!("bad project: {e}"))?;
-            state.ensure_project_path(&project.cwd)?;
-            state.store.save_project(&project, now_ms())?;
+            // Two boundaries, and they are not the same one. The bus applies
+            // *where* a project may go, which a desktop has too. This applies
+            // the half only a server has: the folder must already be a
+            // directory, because nobody is standing at this machine to make it.
+            let cwd = params
+                .get("project")
+                .and_then(|p| p.get("cwd"))
+                .and_then(|v| v.as_str())
+                .ok_or("missing param: project.cwd")?;
+            state.ensure_project_path(cwd)?;
+            let project = on_bus(state, "project.create", &params).await?;
             state.refresh_roots()?;
             let _ = state.events.send(AppEvent::ProjectChanged);
             Ok(json!({ "project": project }))
         }
 
         "project.archive" => {
-            let id = str_param(&params, "id")?;
-            let archived = params
-                .get("archived")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-            state.store.set_project_archived(&id, archived)?;
+            on_bus(state, "project.archive", &params).await?;
+            // Archived projects are out of the registered roots, so the
+            // boundary every path-taking command is checked against moves with
+            // this. That is why it is not just a flag on a row.
             state.refresh_roots()?;
             let _ = state.events.send(AppEvent::ProjectChanged);
             Ok(json!({ "ok": true }))
         }
 
         "project.delete" => {
-            let id = str_param(&params, "id")?;
-            state.store.delete_project(&id)?;
+            on_bus(state, "project.delete", &params).await?;
             state.refresh_roots()?;
             let _ = state.events.send(AppEvent::ProjectChanged);
             Ok(json!({ "ok": true }))
@@ -349,89 +303,35 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
             Ok(json!({ "claimed": state.claim_agent_request(&id) }))
         }
 
-        "settings.get" => {
-            let value = state.store.load_settings()?;
-            Ok(json!({ "settings": value }))
-        }
-
         "settings.set" => {
-            let value = params.get("settings").cloned().ok_or("missing settings")?;
-            state.store.save_settings(&value)?;
+            on_bus(state, "settings.set", &params).await?;
             let _ = state.events.send(AppEvent::SettingsChanged);
             Ok(json!({ "ok": true }))
         }
 
-        "todo.list" => {
-            let todos = state.store.load_todos()?;
-            Ok(json!({ "todos": todos }))
-        }
-
         "todo.save" => {
-            let raw = params.get("todo").cloned().ok_or("missing todo")?;
-            let todo: boite_core::model::Todo =
-                serde_json::from_value(raw).map_err(|e| format!("bad todo: {e}"))?;
-            state.store.save_todo(&todo)?;
+            on_bus(state, "todo.save", &params).await?;
             let _ = state.events.send(AppEvent::TodosChanged);
             Ok(json!({ "ok": true }))
         }
 
         "todo.delete" => {
-            let id = params
-                .get("todoId")
-                .and_then(|v| v.as_str())
-                .ok_or("missing todoId")?;
-            state.store.delete_todo(id)?;
+            on_bus(state, "todo.delete", &params).await?;
             let _ = state.events.send(AppEvent::TodosChanged);
             Ok(json!({ "ok": true }))
         }
 
-        // Cosmetic workspace identity, server-synced so any connected device can
-        // rename/recolor a boite and the rest see it live.
-        "workspace.info" => {
-            let meta = state.store.load_workspace_meta()?;
-            Ok(json!({
-                "name": meta.get("name").and_then(|v| v.as_str()),
-                "color": meta.get("color").and_then(|v| v.as_str()),
-            }))
-        }
-
         "workspace.setInfo" => {
-            let mut meta = state.store.load_workspace_meta()?;
-            let obj = meta
-                .as_object_mut()
-                .ok_or("corrupt workspace meta")?;
-            if let Some(name) = params.get("name") {
-                match name.as_str().map(|s| s.trim()) {
-                    Some(s) if !s.is_empty() => {
-                        obj.insert("name".into(), json!(s.chars().take(64).collect::<String>()));
-                    }
-                    // Explicit null or blank clears the override (falls back to host).
-                    _ => {
-                        obj.remove("name");
-                    }
-                }
-            }
-            if let Some(color) = params.get("color") {
-                match color.as_str() {
-                    // Reject anything that is not a hex color: the value lands in
-                    // a CSS custom property on every client.
-                    Some(s) if valid_hex_color(s) => {
-                        obj.insert("color".into(), json!(s));
-                    }
-                    _ if color.is_null() => {
-                        obj.remove("color");
-                    }
-                    _ => {}
-                }
-            }
-            state.store.save_workspace_meta(&meta)?;
-            let name = meta.get("name").and_then(|v| v.as_str()).map(str::to_string);
-            let color = meta.get("color").and_then(|v| v.as_str()).map(str::to_string);
+            on_bus(state, "workspace.setInfo", &params).await?;
+            // Read back rather than echoed: a colour the bus refused must not
+            // travel to every connected device as if it had been taken.
+            let info = on_bus(state, "workspace.info", &json!({})).await?;
+            let of = |key: &str| info.get(key).and_then(|v| v.as_str()).map(str::to_string);
             let _ = state.events.send(AppEvent::WorkspaceInfo {
-                name: name.clone(),
-                color: color.clone(),
+                name: of("name"),
+                color: of("color"),
             });
-            Ok(json!({ "name": name, "color": color }))
+            Ok(info)
         }
 
         // Which OS the threads run on. The device drawing the UI cannot work
@@ -614,17 +514,12 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
     }
 }
 
-fn valid_hex_color(s: &str) -> bool {
-    let Some(hex) = s.strip_prefix('#') else {
-        return false;
-    };
-    (hex.len() == 3 || hex.len() == 6) && hex.bytes().all(|b| b.is_ascii_hexdigit())
-}
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::state::state_for_test;
+    use boite_core::store::{ColVal, ThreadCol};
 
     fn scratch(tag: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("boite-rpc-{}-{tag}", std::process::id()));
