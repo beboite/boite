@@ -55,7 +55,7 @@ pub fn from_store(conn: &Connection, project_id: Option<&str>, limit: usize) -> 
 /// can defend when the clock cannot tell them apart.
 pub fn merge(sources: Vec<Vec<Moment>>, limit: usize) -> Vec<Moment> {
     let mut all: Vec<Moment> = sources.into_iter().flatten().collect();
-    all.sort_by(|a, b| b.at.cmp(&a.at));
+    all.sort_by_key(|m| std::cmp::Reverse(m.at));
     all.truncate(limit);
     all
 }

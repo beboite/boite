@@ -394,6 +394,25 @@ if (agentUrl && keyFile) {
     (moments?.moments ?? []).every((m, i, all) => i === 0 || all[i - 1].at >= m.at),
   );
 
+  // What the stop hook asks at the end of a turn. The probe has no worktree of
+  // its own, so the answer here is the empty one — and that is the case worth
+  // pinning, because the hook turns anything but a reason into "carry on" and a
+  // refusal at this route would end every turn with a hook that failed.
+  const ending = await fetch(`${agentUrl}/v1/finish`, {
+    headers: signedHeaders(key, probeId, "GET", "/v1/finish", ""),
+  });
+  const unfinished = ending.status === 200 ? await ending.json() : null;
+  check(
+    "the endpoint behind the stop hook answers rather than refusing",
+    Array.isArray(unfinished?.objections),
+    `status=${ending.status}`,
+  );
+  check(
+    "nothing to object to is no message at all",
+    (unfinished?.objections ?? []).length > 0 || !unfinished?.reason,
+    `reason=${JSON.stringify(unfinished?.reason)}`,
+  );
+
   // The one call an agent makes instead of asking a human what they see. Its
   // value is the comparison: what the rows claim, next to what this process
   // actually has a process for.
