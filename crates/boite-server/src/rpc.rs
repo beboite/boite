@@ -2,6 +2,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 
+use boite_core::capability::Grant;
 use boite_core::command::{self, Command};
 use boite_core::pty::PtySpawnArgs;
 
@@ -86,25 +87,36 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
                         .ok()
                 })
                 .unwrap_or_default();
-            // The server spawns the child, so it hands it credentials no client
-            // could forge: the thread id stamped here is what scopes the agent
-            // to this project's list. Stamped last so a client-supplied env
-            // cannot override them.
-            if let Some(api) = &state.agent_api {
-                env.insert("BOITE_MCP_URL".into(), api.url.clone());
-                // The path, never the token. See `AgentApi::token_path`.
-                env.insert(
-                    "BOITE_TOKEN_FILE".into(),
-                    api.token_path.to_string_lossy().into_owned(),
-                );
-                env.insert("BOITE_THREAD_ID".into(), thread.id.clone());
-            }
-            let env = Some(env);
             if thread.created_at == 0 {
                 thread.created_at = now_ms();
             }
             thread.status = "running".to_string();
+            // Before the key is minted: `bind_thread_identity` updates a row,
+            // and there is no row until this runs.
             state.store.save_thread(&thread)?;
+
+            // The server spawns the child, so it hands it credentials no client
+            // could forge: a key minted for this thread alone, in a file only
+            // this user can read. Stamped last so a client-supplied env cannot
+            // override them.
+            //
+            // A thread that cannot be given a key opens anyway, without Boite
+            // tools. The alternative is refusing to open a terminal because its
+            // todo list would be missing, which is the wrong thing to lose.
+            if let Some(api) = &state.agent_api {
+                match boite_agent_api::keys::mint(&state.store, &api.keys_dir, &thread.id) {
+                    Ok(key_path) => {
+                        env.insert(boite_agent_api::env::URL.into(), api.url.clone());
+                        env.insert(
+                            boite_agent_api::env::KEY_FILE.into(),
+                            key_path.to_string_lossy().into_owned(),
+                        );
+                        env.insert(boite_agent_api::env::THREAD.into(), thread.id.clone());
+                    }
+                    Err(e) => tracing::warn!("thread {} spawns without tools: {e}", thread.id),
+                }
+            }
+            let env = Some(env);
 
             let wrap = params
                 .get("wrap")
@@ -241,6 +253,12 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
             let id2 = id.clone();
             let _ = blocking(move || registry.kill(&id2, false)).await?;
             state.store.delete_thread(&id)?;
+            // The row is what a public key is looked up on, so the file grants
+            // nothing once it is gone. Removed anyway rather than left to
+            // accumulate one per thread ever opened.
+            if let Some(api) = &state.agent_api {
+                boite_agent_api::keys::forget(&api.keys_dir, &id);
+            }
             let _ = state.events.send(AppEvent::ThreadDeleted {
                 thread_id: id.clone(),
             });
@@ -519,7 +537,10 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
         m if command::handles(m) => {
             let command = Command::decode(m, &params)?;
             let wire = command.wire();
-            let ready = command.prepare(&state.command_host())?;
+            // `Local`: this is a device that authenticated on the workspace's
+            // own token, which is the user, not an agent. Agents reach the bus
+            // through their own endpoint and carry a narrower grant.
+            let ready = command.prepare(&state.command_host(), Grant::Local)?;
             Ok(wire.wrap(blocking(move || ready.run()).await??))
         }
 

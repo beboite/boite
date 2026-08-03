@@ -240,6 +240,24 @@ pub const ALL: &[Migration] = &[
         CREATE INDEX IF NOT EXISTS idx_events_project_time
             ON events (project_id, created_at);",
     ),
+    // The public half of the keypair minted when a thread was spawned. Absent
+    // for every thread that predates it, which is what makes those threads
+    // unable to prove anything: there is no migration path from "presented an
+    // id" to "holds a key", and inventing one would be issuing an identity to
+    // whoever happens to ask first.
+    //
+    // Its own table rather than a column on `threads`, and that is not tidiness.
+    // The desktop puts a thread in its store and persists the row behind the
+    // caller, in the same breath as mounting the terminal, so at the moment a
+    // key is minted the row may not be there yet. A column could not be written;
+    // a row here can, and the two meet when the request arrives.
+    both(
+        "create_thread_keys",
+        "CREATE TABLE IF NOT EXISTS thread_keys (
+            thread_id TEXT PRIMARY KEY,
+            public_key TEXT NOT NULL
+        );",
+    ),
 ];
 
 /// The desktop's list: `(version, description, sql)`, versions from 1.
@@ -273,7 +291,7 @@ mod tests {
     #[test]
     fn the_shipped_order_is_preserved_on_both_sides() {
         let desktop = desktop();
-        assert_eq!(desktop.len(), 19);
+        assert_eq!(desktop.len(), 20);
         assert_eq!(desktop[0], (1, "create_projects", ALL[0].sql));
         assert_eq!(desktop[4].1, "add_thread_session_and_icon");
         assert_eq!(desktop[8].1, "add_project_git_root", "no push table here");
@@ -281,9 +299,10 @@ mod tests {
         assert_eq!(desktop[16].1, "drop_chats");
         assert_eq!(desktop[17].1, "add_project_worktrees");
         assert_eq!(desktop[18].1, "create_events");
+        assert_eq!(desktop[19].1, "create_thread_keys");
 
         let server = server();
-        assert_eq!(server.len(), 18);
+        assert_eq!(server.len(), 19);
         assert_eq!(server[8].description, "create_push_subscriptions");
         assert_eq!(server[9].description, "add_project_git_root");
         assert_eq!(
@@ -292,6 +311,7 @@ mod tests {
             "the chat pair is desktop-only and must not shift this"
         );
         assert_eq!(server[17].description, "create_events");
+        assert_eq!(server[18].description, "create_thread_keys");
         assert!(
             !server.iter().any(|m| m.description.contains("chat")),
             "no chat migration ever ran on a server"
@@ -387,6 +407,7 @@ mod tests {
             ["id", "project_id", "text", "state", "note", "position", "created_at", "updated_at", "commit_sha", "claimed_by", "description"]
         );
         assert_eq!(columns(&conn, "settings"), ["key", "value"]);
+        assert_eq!(columns(&conn, "thread_keys"), ["thread_id", "public_key"]);
         assert!(columns(&conn, "chats").is_empty(), "dropped again by 17");
         assert!(
             columns(&conn, "push_subscriptions").is_empty(),

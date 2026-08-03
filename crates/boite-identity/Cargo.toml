@@ -1,0 +1,18 @@
+[package]
+name = "boite-identity"
+version = "1.0.2"
+description = "Who a Boite request is from, proved rather than presented"
+edition = "2021"
+
+[lib]
+name = "boite_identity"
+doctest = false
+
+[dependencies]
+# Pure Rust, two dependencies of its own, no runtime. The shim is spawned once
+# per agent terminal and had two crates in it before this; ed25519-dalek would
+# have brought curve25519-dalek and its build machinery for the same 64 bytes.
+ed25519-compact = "2"
+sha2 = "0.10"
+hmac = "0.12"
+hex = "0.4"

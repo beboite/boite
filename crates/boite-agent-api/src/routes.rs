@@ -7,27 +7,31 @@
 //!
 //! Refusals an agent can act on come back `200` carrying an `error`, not a
 //! status code. An agent reads a sentence; a 409 with an empty body is a wall.
-//! Status codes are kept for the caller being wrong about itself: no token, no
-//! thread, a thread this workspace does not have.
+//! Status codes are kept for the caller being wrong about itself: no
+//! credential, no terminal, a thread this workspace does not have.
+//!
+//! No handler here checks who is calling. `crate::auth::identify` runs before
+//! the router picks one and attaches a [`Caller`] that could not have been built
+//! without proof, so the question a handler asks is what this caller may do, not
+//! whether it is real.
 
 use std::path::Path;
 
 use axum::{
     extract::State,
-    http::{HeaderMap, StatusCode},
+    http::StatusCode,
     routing::{get, post},
-    Json, Router,
+    Extension, Json, Router,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
 
+use boite_core::capability::Capability;
 use boite_core::git;
 use boite_core::journal::{Action, Actor, Entry};
 use boite_core::project;
 
-use crate::auth::{
-    agent_of_request, authorize, thread_header, thread_of_request, worktree_of_request,
-};
+use crate::auth::Caller;
 use crate::{Change, Shared, Workspace, WRONG_PLACE_FOR_A_PROJECT};
 
 #[cfg(test)]
@@ -36,6 +40,10 @@ mod tests;
 /// Every route an agent has. Bound by each host to its own listener: the two
 /// differ in how they take a port and what they write beside it, and in nothing
 /// else.
+///
+/// The identity check is a layer rather than a line in each handler: eleven
+/// handlers each beginning with the same call is eleven chances for the twelfth
+/// to be written without it.
 pub fn router(workspace: Shared) -> Router {
     Router::new()
         .route("/v1/todos", get(list).post(add))
@@ -49,6 +57,10 @@ pub fn router(workspace: Shared) -> Router {
         .route("/v1/threads", post(thread_spawn))
         .route("/v1/pane/open", post(pane_open))
         .route("/v1/snapshot", get(snapshot))
+        .layer(axum::middleware::from_fn_with_state(
+            workspace.clone(),
+            crate::auth::identify,
+        ))
         .with_state(workspace)
 }
 
@@ -61,13 +73,14 @@ fn now_ms() -> i64 {
 
 /// The actor behind a request, for the log.
 ///
-/// A thread id is not an identity yet, it is an address the caller presents. It
-/// is what the log can honestly say today, and the one place that changes when
-/// threads carry a key.
-fn actor(headers: &HeaderMap) -> Actor {
-    match thread_header(headers) {
-        "" => Actor::System,
-        id => Actor::Thread(id.to_string()),
+/// A thread here is a thread that proved itself with its own key, so the log
+/// can name it rather than repeat what a caller claimed. A credentials file has
+/// no terminal behind it and is recorded as the system acting on its behalf,
+/// which is what it is.
+fn actor(caller: &Caller) -> Actor {
+    match caller.thread_id.as_deref() {
+        Some(id) if !id.is_empty() => Actor::Thread(id.to_string()),
+        _ => Actor::System,
     }
 }
 
@@ -93,13 +106,13 @@ fn refused(reason: impl Into<String>) -> Json<Value> {
 /// multi-agent run actually asks.
 fn deny(
     workspace: &dyn Workspace,
-    headers: &HeaderMap,
+    caller: &Caller,
     project_id: &str,
     of: &str,
     about: &str,
     reason: &str,
 ) -> Json<Value> {
-    let mut entry = Entry::new(project_id, actor(headers), Action::Denied)
+    let mut entry = Entry::new(project_id, actor(caller), Action::Denied)
         .with("of", of)
         .with("reason", reason);
     if !about.is_empty() {
@@ -107,6 +120,47 @@ fn deny(
     }
     record(workspace, entry);
     refused(reason)
+}
+
+/// Refuses a call this credential may not make, and says so in the log.
+///
+/// Every route that reaches past the caller's own project goes through it. The
+/// answer is a `200` carrying an `error` and a `retryable: false`, because the
+/// agent is meant to read it and stop rather than try again with the same
+/// credential: nothing about it will be different next time.
+fn permitted(
+    workspace: &dyn Workspace,
+    caller: &Caller,
+    capability: Capability,
+    of: &str,
+    about: &str,
+) -> Result<(), Json<Value>> {
+    match caller.ensure(capability) {
+        Ok(()) => Ok(()),
+        Err(reason) => Err(deny(
+            workspace,
+            caller,
+            &caller.project_id,
+            of,
+            about,
+            &reason,
+        )),
+    }
+}
+
+/// The repository and worktree behind this caller's thread.
+///
+/// CONFLICT when the thread runs in the project folder: it exists, it simply
+/// has no worktree, and the agent should be told that rather than given a
+/// not-found.
+fn worktree_of(
+    workspace: &dyn Workspace,
+    caller: &Caller,
+) -> Result<(String, String), StatusCode> {
+    workspace
+        .store()
+        .worktree_of_thread(caller.thread()?)
+        .ok_or(StatusCode::CONFLICT)
 }
 
 // ---------------------------------------------------------------- todos
@@ -124,9 +178,9 @@ struct AddIn {
 
 async fn list(
     State(workspace): State<Shared>,
-    headers: HeaderMap,
+    Extension(caller): Extension<Caller>,
 ) -> Result<Json<Value>, StatusCode> {
-    let project_id = authorize(&*workspace, &headers)?;
+    let project_id = caller.project_id.clone();
     let todos = workspace
         .store()
         .todos_for_project(&project_id)
@@ -136,10 +190,10 @@ async fn list(
 
 async fn add(
     State(workspace): State<Shared>,
-    headers: HeaderMap,
+    Extension(caller): Extension<Caller>,
     Json(body): Json<AddIn>,
 ) -> Result<Json<Value>, StatusCode> {
-    let project_id = authorize(&*workspace, &headers)?;
+    let project_id = caller.project_id.clone();
     let title = body.title.trim();
     if title.is_empty() {
         return Err(StatusCode::BAD_REQUEST);
@@ -158,12 +212,12 @@ async fn add(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     record(
         &*workspace,
-        Entry::new(&project_id, actor(&headers), Action::TodoAdded)
+        Entry::new(&project_id, actor(&caller), Action::TodoAdded)
             .about(&id)
             .with("title", title),
     );
     workspace.announce(Change::Todos);
-    workspace.touched(thread_header(&headers), "todo");
+    workspace.touched(caller.thread_or_empty(), "todo");
     Ok(Json(json!({ "id": id })))
 }
 
@@ -179,12 +233,12 @@ struct ClaimIn {
 
 async fn claim(
     State(workspace): State<Shared>,
-    headers: HeaderMap,
+    Extension(caller): Extension<Caller>,
     Json(body): Json<ClaimIn>,
 ) -> Result<Json<Value>, StatusCode> {
-    let project_id = authorize(&*workspace, &headers)?;
+    let project_id = caller.project_id.clone();
     // The thread names the agent: Boite spawned it, so it knows what it is.
-    let agent = agent_of_request(&*workspace, &headers);
+    let agent = caller.agent.clone();
     let changed = workspace
         .store()
         .claim_todo(
@@ -201,7 +255,7 @@ async fn claim(
         // agent does not get to learn which.
         let _ = deny(
             &*workspace,
-            &headers,
+            &caller,
             &project_id,
             "todo.claim",
             &body.id,
@@ -209,13 +263,13 @@ async fn claim(
         );
         return Err(StatusCode::CONFLICT);
     }
-    let mut entry = Entry::new(&project_id, actor(&headers), Action::TodoClaimed).about(&body.id);
+    let mut entry = Entry::new(&project_id, actor(&caller), Action::TodoClaimed).about(&body.id);
     if let Some(commit) = body.commit.as_deref() {
         entry = entry.with("commit", commit);
     }
     record(&*workspace, entry);
     workspace.announce(Change::Todos);
-    workspace.touched(thread_header(&headers), "todo");
+    workspace.touched(caller.thread_or_empty(), "todo");
     Ok(Json(json!({ "ok": true })))
 }
 
@@ -228,9 +282,8 @@ async fn claim(
 /// meant to be pasted into an issue.
 async fn snapshot(
     State(workspace): State<Shared>,
-    headers: HeaderMap,
+    Extension(_caller): Extension<Caller>,
 ) -> Result<Json<Value>, StatusCode> {
-    authorize(&*workspace, &headers)?;
     let live = workspace.live_ptys();
     let taken = blocking({
         let workspace = workspace.clone();
@@ -257,9 +310,9 @@ async fn snapshot(
 /// commands end up inside `CreateProcess` instead.
 async fn worktree_status(
     State(workspace): State<Shared>,
-    headers: HeaderMap,
+    Extension(caller): Extension<Caller>,
 ) -> Result<Json<Value>, StatusCode> {
-    let (repo, worktree) = worktree_of_request(&*workspace, &headers)?;
+    let (repo, worktree) = worktree_of(&*workspace, &caller)?;
     let read = {
         let (repo, worktree) = (repo.clone(), worktree.clone());
         blocking(move || {
@@ -289,18 +342,18 @@ struct BranchIn {
 
 async fn worktree_branch(
     State(workspace): State<Shared>,
-    headers: HeaderMap,
+    Extension(caller): Extension<Caller>,
     Json(body): Json<BranchIn>,
 ) -> Result<Json<Value>, StatusCode> {
-    claim_a_branch(workspace, headers, body, Held::Claimed).await
+    claim_a_branch(workspace, caller, body, Held::Claimed).await
 }
 
 async fn worktree_reserve(
     State(workspace): State<Shared>,
-    headers: HeaderMap,
+    Extension(caller): Extension<Caller>,
     Json(body): Json<BranchIn>,
 ) -> Result<Json<Value>, StatusCode> {
-    claim_a_branch(workspace, headers, body, Held::Reserved).await
+    claim_a_branch(workspace, caller, body, Held::Reserved).await
 }
 
 /// Claiming and reserving differ in one git call and one log verb.
@@ -318,12 +371,12 @@ enum Held {
 
 async fn claim_a_branch(
     workspace: Shared,
-    headers: HeaderMap,
+    caller: Caller,
     body: BranchIn,
     held: Held,
 ) -> Result<Json<Value>, StatusCode> {
-    let project_id = authorize(&*workspace, &headers)?;
-    let (_, worktree) = worktree_of_request(&*workspace, &headers)?;
+    let project_id = caller.project_id.clone();
+    let (_, worktree) = worktree_of(&*workspace, &caller)?;
     let name = body.name.clone();
     let done = {
         let (worktree, name) = (worktree.clone(), name.clone());
@@ -343,7 +396,7 @@ async fn claim_a_branch(
                 &*workspace,
                 Entry::new(
                     &project_id,
-                    actor(&headers),
+                    actor(&caller),
                     match held {
                         Held::Claimed => Action::WorktreeBranchClaimed,
                         Held::Reserved => Action::WorktreeReserved,
@@ -353,19 +406,19 @@ async fn claim_a_branch(
                 .with("worktree", &worktree),
             );
             workspace.announce(Change::Worktrees);
-            workspace.touched(thread_header(&headers), "worktree");
+            workspace.touched(caller.thread_or_empty(), "worktree");
             Ok(Json(json!({ "branch": name })))
         }
-        Err(e) => Ok(deny(&*workspace, &headers, &project_id, of, &name, &e)),
+        Err(e) => Ok(deny(&*workspace, &caller, &project_id, of, &name, &e)),
     }
 }
 
 /// What this project shares with its worktrees, and whether anyone said so.
 async fn artifacts_status(
     State(workspace): State<Shared>,
-    headers: HeaderMap,
+    Extension(caller): Extension<Caller>,
 ) -> Result<Json<Value>, StatusCode> {
-    let (repo, _) = worktree_of_request(&*workspace, &headers)?;
+    let (repo, _) = worktree_of(&*workspace, &caller)?;
     let policy = blocking(move || {
         let policy = git::effective_artifact_policy(Path::new(&repo));
         (repo, policy)
@@ -385,10 +438,10 @@ async fn artifacts_status(
 /// it needs to read which one.
 async fn artifacts_set(
     State(workspace): State<Shared>,
-    headers: HeaderMap,
+    Extension(caller): Extension<Caller>,
     Json(body): Json<git::ArtifactPolicy>,
 ) -> Result<Json<Value>, StatusCode> {
-    let (repo, _) = worktree_of_request(&*workspace, &headers)?;
+    let (repo, _) = worktree_of(&*workspace, &caller)?;
     let shared = body.shared.clone();
     let written = blocking(move || git::write_artifact_policy(Path::new(&repo), &body)).await?;
     Ok(match written {
@@ -405,9 +458,9 @@ async fn artifacts_set(
 /// first.
 async fn projects(
     State(workspace): State<Shared>,
-    headers: HeaderMap,
+    Extension(caller): Extension<Caller>,
 ) -> Result<Json<Value>, StatusCode> {
-    let current = authorize(&*workspace, &headers)?;
+    let current = caller.project_id.clone();
     let projects = workspace
         .store()
         .load_projects()
@@ -479,10 +532,23 @@ struct MoveIn {
 /// while the agent is still running to read it.
 async fn thread_move(
     State(workspace): State<Shared>,
-    headers: HeaderMap,
+    Extension(caller): Extension<Caller>,
     Json(body): Json<MoveIn>,
 ) -> Result<Json<Value>, StatusCode> {
-    let thread_id = thread_of_request(&*workspace, &headers)?;
+    let thread_id = caller.thread()?.to_string();
+    // The call this capability exists for. Changing files in a repository is
+    // what an agent is there to do; deciding on its own to go and work in a
+    // different one is not, and a credential Boite handed to a process it never
+    // launched has no terminal for anyone to notice it happening in.
+    if let Err(refusal) = permitted(
+        &*workspace,
+        &caller,
+        Capability::MutateAcross,
+        "thread.move",
+        &thread_id,
+    ) {
+        return Ok(refusal);
+    }
     let (project_id, name) = match resolve_project(&*workspace, &body.project) {
         Ok(found) => found,
         Err(reason) => return Ok(refused(reason)),
@@ -495,7 +561,7 @@ async fn thread_move(
     })) {
         return Ok(deny(
             &*workspace,
-            &headers,
+            &caller,
             &project_id,
             "thread.move",
             &thread_id,
@@ -504,7 +570,7 @@ async fn thread_move(
     }
     record(
         &*workspace,
-        Entry::new(&project_id, actor(&headers), Action::ThreadMoved)
+        Entry::new(&project_id, actor(&caller), Action::ThreadMoved)
             .about(&thread_id)
             .with("to", &name),
     );
@@ -528,16 +594,27 @@ struct CreateProjectIn {
 /// move, for the same reason.
 async fn project_create(
     State(workspace): State<Shared>,
-    headers: HeaderMap,
+    Extension(caller): Extension<Caller>,
     Json(body): Json<CreateProjectIn>,
 ) -> Result<Json<Value>, StatusCode> {
     // The log entry belongs to the project the caller is in: the one being
     // created has no history yet, and this is the thread that asked for it.
-    let caller_project = authorize(&*workspace, &headers)?;
-    let thread_id = thread_header(&headers).to_string();
+    let caller_project = caller.project_id.clone();
+    let thread_id = caller.thread_or_empty().to_string();
     let name = body.name.trim().to_string();
     if name.is_empty() {
         return Ok(refused("a project needs a name"));
+    }
+    // A new project is a new place for work to happen, and by default this
+    // terminal moves into it. Both halves are across.
+    if let Err(refusal) = permitted(
+        &*workspace,
+        &caller,
+        Capability::MutateAcross,
+        "project.create",
+        &name,
+    ) {
+        return Ok(refusal);
     }
     // Answered here, while the agent is still running to read it. Dispatched,
     // the refusal happens on whichever device carries the request out and the
@@ -559,7 +636,7 @@ async fn project_create(
     })) {
         return Ok(deny(
             &*workspace,
-            &headers,
+            &caller,
             &caller_project,
             "project.create",
             &name,
@@ -568,7 +645,7 @@ async fn project_create(
     }
     record(
         &*workspace,
-        Entry::new(&caller_project, actor(&headers), Action::ProjectCreated).about(&name),
+        Entry::new(&caller_project, actor(&caller), Action::ProjectCreated).about(&name),
     );
     workspace.touched(&thread_id, "project");
     Ok(Json(json!({ "name": name })))
@@ -639,10 +716,10 @@ struct SpawnIn {
 /// with one.
 async fn thread_spawn(
     State(workspace): State<Shared>,
-    headers: HeaderMap,
+    Extension(caller): Extension<Caller>,
     Json(body): Json<SpawnIn>,
 ) -> Result<Json<Value>, StatusCode> {
-    let own_project = authorize(&*workspace, &headers)?;
+    let own_project = caller.project_id.clone();
     let project_id = match &body.project {
         Some(needle) => match resolve_project(&*workspace, needle) {
             Ok((id, _)) => id,
@@ -650,19 +727,33 @@ async fn thread_spawn(
         },
         None => own_project.clone(),
     };
-    let caller = thread_header(&headers).to_string();
+    // Only when it lands somewhere else. Opening a second terminal beside your
+    // own is what an agent splitting a job does, and asking for a wider grant
+    // for it would make the capability mean "spawn", not "across".
+    if project_id != own_project {
+        if let Err(refusal) = permitted(
+            &*workspace,
+            &caller,
+            Capability::MutateAcross,
+            "thread.spawn",
+            &project_id,
+        ) {
+            return Ok(refusal);
+        }
+    }
+    let asking_thread = caller.thread_or_empty().to_string();
     if let Err(reason) = workspace.ask(json!({
         "kind": "thread.spawn",
         "projectId": project_id,
         // Who asked, so an unnamed agent defaults to another of the caller
         // rather than to whatever terminal the user happens to be looking at.
-        "callerThreadId": (!caller.is_empty()).then(|| caller.clone()),
+        "callerThreadId": (!asking_thread.is_empty()).then(|| asking_thread.clone()),
         "agent": body.agent,
         "prompt": body.prompt,
     })) {
         return Ok(deny(
             &*workspace,
-            &headers,
+            &caller,
             &own_project,
             "thread.spawn",
             "",
@@ -671,9 +762,9 @@ async fn thread_spawn(
     }
     record(
         &*workspace,
-        Entry::new(&own_project, actor(&headers), Action::ThreadSpawned).with("into", &project_id),
+        Entry::new(&own_project, actor(&caller), Action::ThreadSpawned).with("into", &project_id),
     );
-    workspace.touched(&caller, "thread");
+    workspace.touched(&asking_thread, "thread");
     Ok(Json(json!({ "ok": true })))
 }
 
@@ -694,12 +785,12 @@ struct PaneOpenIn {
 /// dot that lights up for it says the wrong thing.
 async fn pane_open(
     State(workspace): State<Shared>,
-    headers: HeaderMap,
+    Extension(caller): Extension<Caller>,
     Json(body): Json<PaneOpenIn>,
 ) -> Result<Json<Value>, StatusCode> {
     use boite_core::browser;
 
-    let project_id = authorize(&*workspace, &headers)?;
+    let project_id = caller.project_id.clone();
     let kind = body.kind.trim().to_lowercase();
     if !browser::PANE_KINDS.contains(&kind.as_str()) {
         return Ok(refused(format!(
@@ -724,11 +815,11 @@ async fn pane_open(
         }
         _ => (None, false),
     };
-    let caller = thread_header(&headers).to_string();
+    let asking_thread = caller.thread_or_empty().to_string();
     if let Err(reason) = workspace.ask(json!({
         "kind": "pane.open",
         "projectId": project_id,
-        "callerThreadId": (!caller.is_empty()).then(|| caller.clone()),
+        "callerThreadId": (!asking_thread.is_empty()).then(|| asking_thread.clone()),
         "pane": kind,
         "url": url,
         // Off this machine, so the device asks before framing it. It classifies
@@ -740,7 +831,7 @@ async fn pane_open(
     }
     record(
         &*workspace,
-        Entry::new(&project_id, actor(&headers), Action::PaneOpened)
+        Entry::new(&project_id, actor(&caller), Action::PaneOpened)
             .about(&kind)
             .with("url", url.unwrap_or_default()),
     );

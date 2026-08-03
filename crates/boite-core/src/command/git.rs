@@ -16,6 +16,7 @@ use serde_json::{json, Value};
 use super::{
     bool_param, opt_str_param, str_list, str_param, u32_param, value_of, Command, Host, Ready, Wire,
 };
+use crate::capability::Capability;
 use crate::git;
 
 /// Every method in this domain, in the order they appear below.
@@ -338,6 +339,45 @@ impl Git {
         }
     }
 
+    /// What a caller needs to hold to ask for this.
+    ///
+    /// Every one of these stays inside the repository it names, so nothing in
+    /// this domain reaches [`Capability::MutateAcross`]. `worktree.remove` is
+    /// the closest and is still not one: it deletes a worktree of the repository
+    /// it was given, and the boundary already had to allow both paths.
+    pub(super) fn capability(&self) -> Capability {
+        match self {
+            Git::RepoInfo { .. }
+            | Git::FindRepos { .. }
+            | Git::Branches { .. }
+            | Git::Status { .. }
+            | Git::ChangedPaths { .. }
+            | Git::Log { .. }
+            | Git::CommitState { .. }
+            | Git::PullRequest { .. }
+            | Git::FileVersions { .. }
+            | Git::WorktreeList { .. }
+            | Git::WorktreeHold { .. } => Capability::ReadProject,
+
+            Git::SwitchBranch { .. }
+            | Git::Stage { .. }
+            | Git::Unstage { .. }
+            | Git::Discard { .. }
+            | Git::Commit { .. }
+            | Git::Fetch { .. }
+            | Git::Push { .. }
+            | Git::Pull { .. }
+            | Git::Init { .. }
+            | Git::WorktreeOpen { .. }
+            | Git::WorktreeWarm { .. }
+            | Git::WorktreeMigrate { .. }
+            | Git::WorktreeAdopt { .. }
+            | Git::WorktreeClaim { .. }
+            | Git::WorktreeReserve { .. }
+            | Git::WorktreeRemove { .. } => Capability::MutateProject,
+        }
+    }
+
     /// Every path this command took from its caller.
     ///
     /// The whole trust boundary for this domain, in one list. A command that
@@ -520,6 +560,7 @@ fn worktree_base(repo: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::capability::Grant;
     use crate::command::Scoped;
     use crate::scope::ProjectRoots;
     use std::path::PathBuf;
@@ -587,7 +628,7 @@ mod tests {
         for method in ALL_METHODS {
             let command = Command::decode(method, &params).unwrap();
             let err = command
-                .prepare(&host)
+                .prepare(&host, Grant::Local)
                 .err()
                 .unwrap_or_else(|| panic!("{method} accepted a path outside the roots"));
             assert!(
@@ -613,7 +654,7 @@ mod tests {
             &json!({ "repo": root.to_str().unwrap(), "path": outside.to_str().unwrap() }),
         )
         .unwrap();
-        assert!(command.prepare(&host).is_err());
+        assert!(command.prepare(&host, Grant::Local).is_err());
     }
 
     /// A worktree that never lived under this host's old layout is left where it
@@ -635,7 +676,7 @@ mod tests {
             let host = Scoped::new(&roots).with_legacy_worktree_base(base);
             let ready = Command::decode("worktree.migrate", &params)
                 .unwrap()
-                .prepare(&host)
+                .prepare(&host, Grant::Local)
                 .unwrap();
             match ready {
                 Ready::Settled(value) => {

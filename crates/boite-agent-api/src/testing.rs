@@ -14,13 +14,12 @@ use boite_core::model::Project;
 use boite_core::scope::ProjectRoots;
 use boite_core::store::Store;
 
-use crate::{Change, Resolution, Workspace};
+use crate::{Change, Workspace};
 
 pub struct Fake {
     pub store: Store,
     pub roots: ProjectRoots,
     pub extra_parents: Vec<String>,
-    pub resolution: Resolution,
     /// What `ask` refuses with, when it refuses.
     pub refuse_with: Option<String>,
     pub asked: Mutex<Vec<Value>>,
@@ -40,7 +39,6 @@ impl Fake {
             store: Store::open(&dir.join("boite.db")).unwrap(),
             roots: ProjectRoots::default(),
             extra_parents: Vec::new(),
-            resolution: Resolution::ThreadThenCwd,
             refuse_with: None,
             asked: Mutex::new(Vec::new()),
             announced: Mutex::new(Vec::new()),
@@ -67,6 +65,31 @@ impl Fake {
         self
     }
 
+    /// A thread row, so a caller can be given a key and a project to answer for.
+    pub fn with_thread(self, id: &str, project_id: &str) -> Fake {
+        self.store
+            .save_thread(&boite_core::model::Thread {
+                id: id.into(),
+                project_id: project_id.into(),
+                pty_id: None,
+                label: id.into(),
+                title: None,
+                cmd: "sh".into(),
+                args: Vec::new(),
+                icon_key: None,
+                icon_color: None,
+                session_id: None,
+                status: "idle".into(),
+                exit_code: None,
+                created_at: 1,
+                auto_slept: false,
+                keep_awake: false,
+                worktree_path: None,
+            })
+            .unwrap();
+        self
+    }
+
     pub fn scratch(&self) -> &PathBuf {
         &self.dir
     }
@@ -87,8 +110,8 @@ impl Workspace for Fake {
         &self.roots
     }
 
-    fn token(&self) -> &str {
-        "a-token"
+    fn secret(&self) -> &str {
+        "a-workspace-secret"
     }
 
     fn extra_project_parents(&self) -> Vec<String> {
@@ -105,10 +128,6 @@ impl Workspace for Fake {
 
     fn announce(&self, change: Change) {
         self.announced.lock().unwrap().push(change);
-    }
-
-    fn resolution(&self) -> Resolution {
-        self.resolution
     }
 
     fn touched(&self, thread_id: &str, surface: &str) {

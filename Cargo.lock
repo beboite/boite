@@ -551,6 +551,7 @@ dependencies = [
  "block2 0.6.2",
  "boite-agent-api",
  "boite-core",
+ "boite-identity",
  "dirs",
  "mimalloc",
  "objc2 0.6.4",
@@ -583,6 +584,7 @@ version = "1.0.2"
 dependencies = [
  "axum",
  "boite-core",
+ "boite-identity",
  "dirs",
  "serde",
  "serde_json",
@@ -612,9 +614,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "boite-identity"
+version = "1.0.2"
+dependencies = [
+ "ed25519-compact",
+ "hex",
+ "hmac",
+ "sha2",
+]
+
+[[package]]
 name = "boite-mcp"
 version = "1.0.2"
 dependencies = [
+ "boite-identity",
  "serde",
  "serde_json",
 ]

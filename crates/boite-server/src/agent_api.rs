@@ -6,9 +6,9 @@
 //! it knows there may be none, and it takes its port from the OS on loopback.
 //!
 //! It gets its own listener rather than routes on the main router, and its own
-//! token. The main server may be bound to a routable interface — that is the
+//! secret. The main server may be bound to a routable interface — that is the
 //! whole point of a remote workspace — and nothing here belongs on a network.
-//! The client token and this one are also different secrets: a device that can
+//! The client token and this secret are also different things: a device that can
 //! drive the workspace is not the same principal as an agent that may append to
 //! a checklist.
 
@@ -27,14 +27,14 @@ use crate::events::AppEvent;
 
 /// What a spawned terminal is told about the agent endpoint.
 ///
-/// There is no token here on purpose. It used to carry the value, which then
-/// went into every child's environment; a terminal is handed the path now, and
-/// the only copy of the secret outside this process is a file only its user can
-/// read.
+/// No secret here on purpose, and not even a shared one to point at any more:
+/// each terminal gets a key of its own, minted into [`AgentApi::keys_dir`] when
+/// it spawns. The workspace secret never leaves this process; the only thing
+/// derived from it is a per-project token in a credentials file.
 #[derive(Clone)]
 pub struct AgentApi {
     pub url: String,
-    pub token_path: PathBuf,
+    pub keys_dir: PathBuf,
 }
 
 struct ServerWorkspace {
@@ -43,7 +43,7 @@ struct ServerWorkspace {
     /// Authenticated clients right now. Zero means nothing on the other side
     /// can carry out a request, and saying so beats answering `200`.
     devices: Arc<AtomicUsize>,
-    token: String,
+    secret: String,
     /// The same boundary the RPC applies, so where a project may be created is
     /// one rule rather than two that drift.
     roots: Arc<ProjectRoots>,
@@ -62,8 +62,8 @@ impl Workspace for ServerWorkspace {
         &self.roots
     }
 
-    fn token(&self) -> &str {
-        &self.token
+    fn secret(&self) -> &str {
+        &self.secret
     }
 
     fn extra_project_parents(&self) -> Vec<String> {
@@ -127,17 +127,23 @@ pub async fn start(
     data_dir: PathBuf,
     registry: Arc<crate::registry::Registry>,
 ) -> Option<AgentApi> {
-    let token = format!("{:032x}", rand::random::<u128>());
-    let token_path = data_dir.join("agent-token");
-    if let Err(e) = boite_core::secret_file::write(&token_path, &token) {
-        tracing::warn!("agent api disabled, cannot write the token file: {e}");
+    // In memory for the life of the process and written nowhere. Every
+    // credential this workspace issues is derived from it, so a copy on disk
+    // would be the one file worth stealing.
+    let secret = format!("{:032x}", rand::random::<u128>());
+    let keys_dir = data_dir.join("thread-keys");
+    // Beside the database rather than under a temp directory: a thread's key
+    // file and its row have to be lost together or not at all. See
+    // `boite_agent_api::keys::mint`.
+    if let Err(e) = std::fs::create_dir_all(&keys_dir) {
+        tracing::warn!("agent api disabled, cannot make the key directory: {e}");
         return None;
     }
     let router = boite_agent_api::router(Arc::new(ServerWorkspace {
         store,
         events,
         devices,
-        token,
+        secret,
         roots,
         workspace_dir,
         registry,
@@ -160,7 +166,7 @@ pub async fn start(
 
     Some(AgentApi {
         url: format!("http://127.0.0.1:{port}"),
-        token_path,
+        keys_dir,
     })
 }
 

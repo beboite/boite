@@ -10,17 +10,19 @@
 //! So a capability is a value here, and the two front doors are codecs over it:
 //!
 //! ```text
-//!   Tauri command  ─┐                                    ┌─ prepare(host)  the boundary
-//!                   ├─ Command ── Ready ── run() ── Value ┤
-//!   WebSocket RPC  ─┘                                    └─ run()          the work
+//!   Tauri command  ─┐                                     ┌─ grant   who is asking
+//!                   ├─ Command ── Ready ── run() ── Value ┼─ host    what it may reach
+//!   WebSocket RPC  ─┘                                     └─ run()   the work
 //! ```
 //!
-//! [`Command::prepare`] is the only thing that touches the [`Host`], and
-//! [`Ready`] is the only thing that can be run. That is not decoration: it makes
-//! "was this path checked against the trust boundary" a question with exactly
-//! one answer per command, instead of a line a new command can forget to copy.
-//! The test at the bottom of `command/git.rs` walks every command in the surface
-//! and asserts that none of them prepares outside the registered roots.
+//! [`Command::prepare`] is the only thing that touches the [`Host`] or the
+//! caller's [`Grant`], and [`Ready`] is the only thing that can be run. That is
+//! not decoration: it makes "was this checked" a question with exactly one
+//! answer per command, instead of a line a new command can forget to copy. The
+//! test at the bottom of `command/git.rs` walks every command in the surface and
+//! asserts that none of them prepares outside the registered roots; the one at
+//! the bottom of this file asserts that every one of them declares what it
+//! needs.
 //!
 //! `Ready` is deliberately free of the host and of any lifetime, so a transport
 //! can hand it to its own blocking pool. `boite-core` takes no async runtime and
@@ -31,6 +33,7 @@ use std::path::PathBuf;
 
 use serde_json::Value;
 
+use crate::capability::{Capability, Grant};
 use crate::scope::ProjectRoots;
 
 pub mod files;
@@ -202,13 +205,32 @@ impl Command {
         }
     }
 
-    /// Checks the command against the host, and hands back something runnable.
+    /// What a caller has to hold to be allowed to ask for this.
     ///
-    /// Everything the host has a say in happens here: the trust boundary, and
-    /// any path the host rather than the caller decides. A command that turns
-    /// out to have nothing to do comes back [`Ready::Settled`] with the answer
-    /// already in it.
-    pub fn prepare(self, host: &dyn Host) -> Result<Ready, String> {
+    /// One table for the whole surface, and it is read in exactly one place:
+    /// [`Command::prepare`]. A transport cannot check it early, cannot check it
+    /// twice and cannot forget to check it, because there is no way to reach
+    /// [`Ready`] without going through the check.
+    pub fn capability(&self) -> Capability {
+        match self {
+            Command::Files(f) => f.capability(),
+            Command::Git(g) => g.capability(),
+            Command::Sessions(s) => s.capability(),
+        }
+    }
+
+    /// Checks the command against the caller and the host, and hands back
+    /// something runnable.
+    ///
+    /// Two boundaries, in the order they can be answered: what this caller is
+    /// allowed to ask for at all, then whether the paths it named are inside the
+    /// registered roots. Both are here rather than at the transports, which is
+    /// the whole reason [`Ready`] cannot be built any other way.
+    ///
+    /// A command that turns out to have nothing to do comes back
+    /// [`Ready::Settled`] with the answer already in it.
+    pub fn prepare(self, host: &dyn Host, grant: Grant) -> Result<Ready, String> {
+        grant.ensure(self.capability())?;
         match self {
             Command::Files(f) => f.prepare(host),
             Command::Git(g) => g.prepare(host),
@@ -402,5 +424,128 @@ mod tests {
             .with_extra_project_parents(Vec::new())
             .extra_project_parents()
             .is_empty());
+    }
+
+    /// What each method needs, pinned.
+    ///
+    /// A table rather than a rule read off the method names, because the names
+    /// do not carry it: `git.commitState` asks what the repository says about a
+    /// commit somebody else made, and any heuristic that reads `commit` as a
+    /// write calls it one. Pinned for the same reason the wire envelopes are: a
+    /// capability that quietly widens is a check that quietly passes, and this
+    /// is where that shows up as a diff somebody has to agree with.
+    #[test]
+    fn what_each_method_needs_is_what_was_decided() {
+        use Capability::*;
+        const EXPECTED: &[(&str, Capability)] = &[
+            ("git.repoInfo", ReadProject),
+            ("git.findRepos", ReadProject),
+            ("git.branches", ReadProject),
+            ("git.switchBranch", MutateProject),
+            ("git.status", ReadProject),
+            ("git.changedPaths", ReadProject),
+            ("git.log", ReadProject),
+            ("git.commitState", ReadProject),
+            ("git.pullRequest", ReadProject),
+            ("git.stage", MutateProject),
+            ("git.unstage", MutateProject),
+            ("git.discard", MutateProject),
+            ("git.commit", MutateProject),
+            ("git.fetch", MutateProject),
+            ("git.push", MutateProject),
+            ("git.pull", MutateProject),
+            ("git.init", MutateProject),
+            ("git.fileVersions", ReadProject),
+            ("worktree.open", MutateProject),
+            ("worktree.warm", MutateProject),
+            ("worktree.migrate", MutateProject),
+            ("worktree.adopt", MutateProject),
+            ("worktree.list", ReadProject),
+            ("worktree.claim", MutateProject),
+            ("worktree.reserve", MutateProject),
+            ("worktree.hold", ReadProject),
+            ("worktree.remove", MutateProject),
+            ("fs.readDir", ReadProject),
+            ("fs.search", ReadProject),
+            ("file.read", ReadProject),
+            ("file.write", MutateProject),
+            ("file.readBase64", ReadProject),
+            ("project.inspect", ReadProject),
+            ("project.folderState", ReadProject),
+            ("project.createFolder", MutateProject),
+            ("session.find", ReadProject),
+            ("session.liveClaude", ReadProject),
+            ("session.agentTurns", ReadProject),
+            ("session.usage", ReadProject),
+            ("session.stopClaude", MutateProject),
+            ("session.copilotResumable", ReadProject),
+            ("session.migrate", MutateProject),
+            ("shell.default", ReadProject),
+            ("shell.available", ReadProject),
+            ("shell.commandExists", ReadProject),
+            ("fastpick.list", ReadProject),
+            ("fastpick.version", ReadProject),
+        ];
+        let actual: Vec<(&str, Capability)> = every_command()
+            .iter()
+            .map(|c| (c.name(), c.capability()))
+            .collect();
+        assert_eq!(actual, EXPECTED, "a method changed what it needs, or a new one arrived");
+    }
+
+    /// A read that spawns `git fetch` is still a write to somebody's disk.
+    ///
+    /// The one rule the table above cannot state about itself: nothing that
+    /// reaches the network or rewrites the index may be a read. Stated
+    /// separately so the table stays a list of decisions rather than a list of
+    /// decisions with an argument in it.
+    #[test]
+    fn nothing_that_changes_the_repository_is_labelled_a_read() {
+        for method in [
+            "git.switchBranch", "git.stage", "git.unstage", "git.discard", "git.commit",
+            "git.fetch", "git.push", "git.pull", "git.init", "file.write",
+            "project.createFolder", "session.stopClaude", "session.migrate",
+        ] {
+            let command = every_command()
+                .into_iter()
+                .find(|c| c.name() == method)
+                .unwrap();
+            assert_eq!(command.capability(), Capability::MutateProject, "{method}");
+        }
+    }
+
+    /// Nothing on the bus reaches past the project it was called in, which is
+    /// why a credentials file can use all of it. The calls that do move between
+    /// projects are agent-endpoint routes, not commands, and they are refused
+    /// there. If a command ever needs `MutateAcross`, this test failing is the
+    /// notice that the endpoint's own check is no longer the only one.
+    #[test]
+    fn no_command_reaches_past_the_project_it_was_called_in() {
+        for command in every_command() {
+            assert_ne!(
+                command.capability(),
+                Capability::MutateAcross,
+                "{}",
+                command.name()
+            );
+            assert!(Grant::Project.allows(command.capability()), "{}", command.name());
+        }
+    }
+
+    /// One decoded command per method, with every parameter any of them reads.
+    fn every_command() -> Vec<Command> {
+        let params = serde_json::json!({
+            "path": ".", "repo": ".", "from": ".", "cwd": ".", "cwds": ["."],
+            "threadId": "t", "name": "b", "sha": "0", "branch": "b", "message": "m",
+            "file": "a", "files": [], "untracked": [], "query": "q",
+            "content": "", "kind": "claude", "sessionId": "s", "cmd": "git",
+            "fromCwd": ".", "toCwd": ".", "queries": [], "limit": 1, "skip": 0, "days": 1,
+        });
+        methods()
+            .map(|method| {
+                Command::decode(method, &params)
+                    .unwrap_or_else(|err| panic!("{method} did not decode: {err}"))
+            })
+            .collect()
     }
 }

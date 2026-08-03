@@ -9,6 +9,7 @@
 // pointed at.
 
 import { readFile } from "node:fs/promises";
+import { createPrivateKey, sign as signBytes, createHash } from "node:crypto";
 
 const URL = process.env.SMOKE_URL || "ws://127.0.0.1:7337/ws";
 const TOKEN = process.env.BOITE_TOKEN || "test";
@@ -20,6 +21,38 @@ let fail = false;
 function check(label, ok, extra = "") {
   console.log(`${ok ? "ok  " : "FAIL"} ${label} ${extra}`);
   if (!ok) fail = true;
+}
+
+// The agent endpoint takes a signature, not a bearer token, from anything that
+// presents a thread. This is the same canonical string `boite_identity` builds
+// in Rust, and it has to stay that way: a separator that drifts here reads as
+// "invalid signature", which looks like a wrong key and sends whoever is
+// debugging it to the wrong file.
+function canonical(method, path, threadId, ts, body) {
+  const digest = createHash("sha256").update(body ?? "").digest("hex");
+  return `boite-v1\n${method.toUpperCase()}\n${path}\n${threadId}\n${ts}\n${digest}`;
+}
+
+// A raw 32-byte ed25519 seed, which is what Boite writes, wrapped in the fixed
+// PKCS#8 prefix node insists on before it will hold one.
+function keyFromSeed(seedHex) {
+  const der = Buffer.concat([
+    Buffer.from("302e020100300506032b657004220420", "hex"),
+    Buffer.from(seedHex, "hex"),
+  ]);
+  return createPrivateKey({ key: der, format: "der", type: "pkcs8" });
+}
+
+// What a shim sends: the thread, when it signed, and the signature over the
+// request itself. Nothing reusable, which is the point.
+function signedHeaders(key, threadId, method, path, body) {
+  const ts = Date.now();
+  const message = canonical(method, path, threadId, ts, body);
+  return {
+    "x-boite-thread": threadId,
+    "x-boite-ts": String(ts),
+    "x-boite-sig": signBytes(null, Buffer.from(message), key).toString("hex"),
+  };
 }
 
 function bytesToUuid(b) {
@@ -213,7 +246,7 @@ await c.rpc("thread.spawn", {
     projectId: "smoke",
     label: "probe",
     cmd: "bash",
-    args: ["-c", "echo URL=$BOITE_MCP_URL; echo FILE=$BOITE_TOKEN_FILE; sleep 30"],
+    args: ["-c", "echo URL=$BOITE_MCP_URL; echo FILE=$BOITE_KEY_FILE; sleep 30"],
     iconKey: null,
   },
   cwd: CWD,
@@ -224,37 +257,53 @@ await c.rpc("thread.attach", { threadId: probeId, cols: 200, rows: 24 });
 await sleep(900);
 const said = c.out(probeId);
 const agentUrl = said.match(/URL=(\S+)/)?.[1];
-const tokenFile = said.match(/FILE=(\S+)/)?.[1];
-check("a spawned terminal is told where the agent endpoint is", !!agentUrl && !!tokenFile);
-if (agentUrl && tokenFile) {
-  // The path, never the value: the token travels in a file only its user can
+const keyFile = said.match(/FILE=(\S+)/)?.[1];
+check("a spawned terminal is told where the agent endpoint is", !!agentUrl && !!keyFile);
+if (agentUrl && keyFile) {
+  // The path, never the value: the key travels in a file only its user can
   // read, so an agent typing `env` does not print its own credential into a
   // scrollback that is kept and replayed.
-  const token = (await readFile(tokenFile, "utf8")).trim();
+  const seed = (await readFile(keyFile, "utf8")).trim();
+  const key = keyFromSeed(seed);
   const ask = (headers) => fetch(`${agentUrl}/v1/todos`, { headers });
-  const mine = await ask({ authorization: `Bearer ${token}`, "x-boite-thread": probeId });
+  const mine = await ask(signedHeaders(key, probeId, "GET", "/v1/todos", ""));
   const body = mine.status === 200 ? await mine.json() : null;
   check("the agent endpoint answers its own thread", Array.isArray(body?.todos), `status=${mine.status}`);
 
-  const wrong = await ask({ authorization: "Bearer not-the-token", "x-boite-thread": probeId });
-  check("a wrong token reaches nothing", wrong.status === 401, `status=${wrong.status}`);
+  // The blocker this closes. Presenting a thread id used to be the whole of it.
+  const bare = await ask({ "x-boite-thread": probeId });
+  check("a thread id with no signature reaches nothing", bare.status === 401, `status=${bare.status}`);
 
-  // A leaked token with no thread reaches nothing either: the token says the
-  // caller came from Boite, the thread says what it may see.
-  const anonymous = await ask({ authorization: `Bearer ${token}` });
-  check("a token with no thread reaches nothing", anonymous.status === 400, `status=${anonymous.status}`);
+  // A signature made with a key this workspace never issued.
+  const forged = keyFromSeed("11".repeat(32));
+  const impostor = await ask(signedHeaders(forged, probeId, "GET", "/v1/todos", ""));
+  check("another key does not open this thread", impostor.status === 401, `status=${impostor.status}`);
 
-  const stranger = await ask({
-    authorization: `Bearer ${token}`,
-    "x-boite-thread": crypto.randomUUID(),
+  // And the signature covers the request, so one lifted off this call does not
+  // authorise a different one.
+  const lifted = await fetch(`${agentUrl}/v1/todos`, {
+    method: "POST",
+    headers: {
+      ...signedHeaders(key, probeId, "GET", "/v1/todos", ""),
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ title: "should never land" }),
   });
-  check("a thread this workspace does not have reaches nothing", stranger.status === 404, `status=${stranger.status}`);
+  check("a signature does not travel between requests", lifted.status === 401, `status=${lifted.status}`);
+
+  const stranger = await ask(signedHeaders(key, crypto.randomUUID(), "GET", "/v1/todos", ""));
+  check("a thread this workspace does not have reaches nothing", stranger.status === 401, `status=${stranger.status}`);
+
+  // The workspace token drives devices. It was never an agent credential and is
+  // not one now, whatever thread it is presented with.
+  const device = await ask({ authorization: `Bearer ${TOKEN}`, "x-boite-project": "smoke" });
+  check("the device token is not an agent credential", device.status === 401, `status=${device.status}`);
 
   // The one call an agent makes instead of asking a human what they see. Its
   // value is the comparison: what the rows claim, next to what this process
   // actually has a process for.
   const snap = await fetch(`${agentUrl}/v1/snapshot`, {
-    headers: { authorization: `Bearer ${token}`, "x-boite-thread": probeId },
+    headers: signedHeaders(key, probeId, "GET", "/v1/snapshot", ""),
   });
   const state = snap.status === 200 ? await snap.json() : null;
   check(
@@ -269,7 +318,7 @@ if (agentUrl && tokenFile) {
   check("the snapshot carries no problem to report", (state?.problems ?? []).length === 0, JSON.stringify(state?.problems ?? []));
   // Whatever else it holds, it must not hold a credential.
   const asText = JSON.stringify(state ?? {});
-  check("the snapshot carries no token", !asText.includes(token) && !asText.includes(TOKEN));
+  check("the snapshot carries no credential", !asText.includes(seed) && !asText.includes(TOKEN));
 }
 try {
   await c.rpc("thread.kill", { threadId: probeId, wait: false });
