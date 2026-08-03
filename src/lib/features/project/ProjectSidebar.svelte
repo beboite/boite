@@ -35,6 +35,7 @@ import { projectDisplayName } from "$lib/shared/project-label";
   import { longPress } from "$lib/shared/actions/longPress";
   import ContextMenu from "$lib/shared/components/ContextMenu.svelte";
   import type { ContextMenuItem } from "$lib/shared/components/ContextMenu.svelte";
+  import { viewportHeight } from "$lib/shared/keyboard/overlay";
   import {
     dropIntent,
     hasBecomeADrag,
@@ -736,11 +737,74 @@ import { projectDisplayName } from "$lib/shared/project-label";
    */
   let launcher = $state<{
     projectId: string;
-    x: number;
-    y: number;
-    w: number;
-    maxH: number;
+    // The card it belongs to, measured at open. Under the whole card, not under
+    // the button: the button sits in the header row, so anchoring to it opened
+    // the menu across the project's own threads — covering the list you launch
+    // alongside. Left edge and width come from the card too, measured rather
+    // than fixed, because the sidebar is resizable and any constant is right at
+    // exactly one width.
+    anchor: { left: number; top: number; bottom: number; width: number };
   } | null>(null);
+  let launcherEl: HTMLDivElement | null = $state(null);
+  let launcherPos = $state({ x: 0, y: 0, w: 0, maxH: 0, above: false });
+
+  const LAUNCHER_GAP = 6;
+  const LAUNCHER_EDGE = 6;
+  /** Under this, a menu is a scrollbar with two rows in it. Flip instead. */
+  const LAUNCHER_MIN_H = 220;
+
+  /**
+   * Kept inside the window, on both axes.
+   *
+   * Six pixels of air under the card is what says the menu belongs to it without
+   * touching it — but a card at the bottom of a long sidebar has no six pixels,
+   * and the panes behind fastpick are several times taller than the list they
+   * replace. So: flip above the card when the room below cannot hold a usable
+   * menu and the room above is better, cap the height to whichever side won, and
+   * clamp the left edge for a sidebar dragged wider than the window can show.
+   *
+   * Re-run on every resize of the menu itself, which is what a pane change is.
+   */
+  function placeLauncher() {
+    const el = launcherEl;
+    if (!launcher || !el) return;
+    const a = launcher.anchor;
+    const vw = window.innerWidth;
+    const vh = viewportHeight();
+    const w = Math.min(a.width, vw - LAUNCHER_EDGE * 2);
+    const below = a.bottom + LAUNCHER_GAP;
+    const roomBelow = vh - below - LAUNCHER_EDGE;
+    const roomAbove = a.top - LAUNCHER_GAP - LAUNCHER_EDGE;
+    const above = roomBelow < LAUNCHER_MIN_H && roomAbove > roomBelow;
+    const maxH = Math.max(160, above ? roomAbove : roomBelow);
+    // offsetHeight is the layout box, so it is already capped by the max-height
+    // of the previous pass rather than by whatever the pane would like to be.
+    const h = Math.min(el.offsetHeight, maxH);
+    launcherPos = {
+      x: Math.max(LAUNCHER_EDGE, Math.min(a.left, vw - w - LAUNCHER_EDGE)),
+      y: above ? Math.max(LAUNCHER_EDGE, a.top - LAUNCHER_GAP - h) : below,
+      w,
+      maxH,
+      above,
+    };
+  }
+
+  $effect(() => {
+    if (!launcher || !launcherEl) return;
+    placeLauncher();
+    // The menu changes height when it walks into a pane, and nothing else tells
+    // us: the panes live two components down and own their own state.
+    const observer = new ResizeObserver(() => placeLauncher());
+    observer.observe(launcherEl);
+    const replace = () => placeLauncher();
+    window.addEventListener("resize", replace);
+    window.visualViewport?.addEventListener("resize", replace);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", replace);
+      window.visualViewport?.removeEventListener("resize", replace);
+    };
+  });
 
   function toggleLauncher(projectId: string, e: MouseEvent) {
     e.preventDefault();
@@ -751,25 +815,25 @@ import { projectDisplayName } from "$lib/shared/project-label";
     }
     const button = e.currentTarget as HTMLElement;
     const fallback = button.getBoundingClientRect();
-    const card = button.closest<HTMLElement>(".project-block")?.getBoundingClientRect();
-    const top = (card?.bottom ?? fallback.bottom) + 6;
+    const card =
+      button.closest<HTMLElement>(".project-block")?.getBoundingClientRect() ?? fallback;
     launcher = {
       projectId,
-      // Under the whole card, not under the button. The button sits in the
-      // header row, so anchoring to it opened the menu across the project's own
-      // threads — covering the list you launch alongside. Six pixels of air
-      // below the card is what says the menu belongs to it without touching it.
-      //
-      // Left edge and width come from the card too, measured rather than fixed:
-      // the sidebar is resizable, so any constant is right at exactly one size.
-      x: card?.left ?? fallback.left,
-      y: top,
-      w: card?.width ?? fallback.width,
-      // The panes behind fastpick are taller than the list they replace, and a
-      // menu anchored under a card near the bottom of the sidebar had nowhere to
-      // grow: it ran off the window and the models were unreachable. The room
-      // that is left, floored so a card at the very bottom still gets a menu.
-      maxH: Math.max(180, window.innerHeight - top - 8),
+      anchor: {
+        left: card.left,
+        top: card.top,
+        bottom: card.bottom,
+        width: card.width,
+      },
+    };
+    // First guess, so the menu paints where it belongs rather than at 0,0 for a
+    // frame; the effect measures it and corrects on the next tick.
+    launcherPos = {
+      x: card.left,
+      y: card.bottom + LAUNCHER_GAP,
+      w: card.width,
+      maxH: Math.max(160, window.innerHeight - card.bottom - LAUNCHER_GAP - LAUNCHER_EDGE),
+      above: false,
     };
   }
 
@@ -1252,15 +1316,16 @@ import { projectDisplayName } from "$lib/shared/project-label";
        never ticks — an unfocused window throttles them — leaves the box frozen
        at 96% of its own size, which is its own kind of wrong. -->
   <div
+    bind:this={launcherEl}
     data-launcher-root
     role="menu"
     tabindex="-1"
     class="launcher-menu fixed z-[var(--z-popover)] flex flex-col overflow-hidden"
-    style:left="{launcher.x}px"
-    style:top="{launcher.y}px"
-    style:width="{launcher.w}px"
-    style:max-height="{launcher.maxH}px"
-    style:transform-origin="top center"
+    style:left="{launcherPos.x}px"
+    style:top="{launcherPos.y}px"
+    style:width="{launcherPos.w}px"
+    style:max-height="{launcherPos.maxH}px"
+    style:transform-origin={launcherPos.above ? "bottom center" : "top center"}
     transition:scale={{ duration: 90, start: 0.96 }}
   >
     <ShortcutBar
