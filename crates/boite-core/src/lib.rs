@@ -1,3 +1,4 @@
+pub mod browser;
 pub mod editor;
 pub mod env;
 pub mod explorer;

@@ -187,11 +187,10 @@ pub fn folder_state(path: String) -> project::FolderState {
     project::folder_state_blocking(&path)
 }
 
-/// Said to whoever asked for a project folder somewhere it cannot go. Shared
-/// because the agent endpoint answers the same question before it emits, and a
-/// refusal worded twice reads as two different rules.
-pub const WRONG_PLACE_FOR_A_PROJECT: &str =
-    "a new project has to go under your home folder or beside a project you already have";
+/// Said to whoever asked for a project folder somewhere it cannot go. It lives
+/// in `boite_core::project` so the desktop and the server cannot word it
+/// differently, which is exactly what happened while they each held a copy.
+pub use boite_core::project::WRONG_PLACE_FOR_A_PROJECT;
 
 /// Where a new project folder is allowed to go: beside a project the user
 /// already has, or under their home.

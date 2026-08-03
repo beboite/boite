@@ -62,6 +62,11 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<AppState>, addr: Socket
         writer.abort();
         return;
     }
+    // Past this point the client receives control events, so it is one of the
+    // devices that can carry out an agent request. The agent endpoint refuses
+    // to promise anything when this reaches zero.
+    state.devices.fetch_add(1, Ordering::Relaxed);
+    let _device = ConnGuard(&state.devices);
 
     // Fan control-plane events out to this client.
     let mut events_rx = state.events.subscribe();

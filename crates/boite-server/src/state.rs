@@ -29,6 +29,12 @@ pub struct AppState {
     pub max_threads: usize,
     pub max_connections: usize,
     pub conns: AtomicUsize,
+    /// Authenticated clients, which is not the same question as `conns`: that
+    /// one counts sockets from the moment they open, this one counts the ones
+    /// that got past `auth` and are therefore receiving control events. The
+    /// agent endpoint asks it before promising an agent that something it
+    /// cannot do itself will happen.
+    pub devices: Arc<AtomicUsize>,
     pub workspace_dir: Option<PathBuf>,
     /// Persisted data dir, used to serve `/.well-known/assetlinks.json` (the
     /// Android TWA Digital Asset Links file, dropped here after the APK build).
@@ -201,6 +207,7 @@ mod tests {
             max_threads: 1,
             max_connections: 1,
             conns: AtomicUsize::new(0),
+            devices: Arc::new(AtomicUsize::new(0)),
             workspace_dir: None,
             data_dir: dir.clone(),
             claimed_requests: Default::default(),
@@ -239,6 +246,7 @@ mod tests {
             max_threads: 1,
             max_connections: 1,
             conns: AtomicUsize::new(0),
+            devices: Arc::new(AtomicUsize::new(0)),
             workspace_dir: Some(dir.clone()),
             data_dir: dir.clone(),
             claimed_requests: Default::default(),

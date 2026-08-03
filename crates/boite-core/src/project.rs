@@ -4,6 +4,18 @@ use std::path::{Path, PathBuf};
 use base64::Engine;
 use serde::Serialize;
 
+/// Said to whoever asked for a project folder somewhere it cannot go.
+///
+/// It lived in the desktop commands with a comment saying it was shared so
+/// that one refusal would not read as two rules, and then the server retyped
+/// it: "under your home folder or beside a project you already have" on one
+/// side, "under the home folder or beside a project that already exists" on
+/// the other. Same refusal, two voices, depending on whether the agent ran
+/// locally or on a deployed boite. It lives here now, where neither side can
+/// have its own.
+pub const WRONG_PLACE_FOR_A_PROJECT: &str =
+    "a new project has to go under your home folder or beside a project you already have";
+
 #[derive(Serialize)]
 pub struct ProjectInspection {
     pub name: String,
