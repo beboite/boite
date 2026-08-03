@@ -728,8 +728,12 @@ pub(super) fn link_dir(src: &Path, dst: &Path) -> std::io::Result<()> {
     }
 }
 
+// Both arms are `pub(super)`, and that is not decoration: `worktree.rs` reaches
+// this from a test, so an arm left private compiles on the platform whose twin
+// is public and nowhere else. The split raised one and missed the other, and it
+// took a Linux runner to say so.
 #[cfg(not(windows))]
-fn link_dir(src: &Path, dst: &Path) -> std::io::Result<()> {
+pub(super) fn link_dir(src: &Path, dst: &Path) -> std::io::Result<()> {
     std::os::unix::fs::symlink(src, dst)
 }
 
