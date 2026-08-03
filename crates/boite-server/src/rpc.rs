@@ -144,9 +144,14 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
             thread.pty_id = None;
             // saveThread doubles as create AND re-save (session-id dedup, label
             // edit). The client is not authoritative for runtime state: on an
-            // EXISTING row keep the persisted status/exit_code (a running or
-            // closed thread must not be clobbered back to idle), and announce
-            // it as an update; only a genuinely new row is idle + created.
+            // EXISTING row keep the persisted status/exit_code and announce it
+            // as an update; only a genuinely new row is idle + created.
+            //
+            // "Persisted" is `Store::thread_status`, which collapses anything
+            // that is not a terminal status to idle. So a closed thread keeps
+            // its ending and a busy one does not keep its claim — a row that
+            // says `running` describes a process that stopped existing when the
+            // last one of these ended.
             let existed = state.store.thread_status(&thread.id);
             match &existed {
                 Some((status, exit_code)) => {
@@ -527,4 +532,206 @@ fn valid_hex_color(s: &str) -> bool {
         return false;
     };
     (hex.len() == 3 || hex.len() == 6) && hex.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::state_for_test;
+
+    fn scratch(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("boite-rpc-{}-{tag}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::canonicalize(&dir).unwrap()
+    }
+
+    async fn call(state: &AppState, method: &str, params: Value) -> Result<Value, String> {
+        dispatch(state, method, params).await
+    }
+
+    #[tokio::test]
+    async fn a_method_nobody_serves_is_refused_by_name() {
+        let dir = scratch("unknown");
+        let state = state_for_test(&dir);
+        assert_eq!(
+            call(&state, "thread.explode", json!({})).await.unwrap_err(),
+            "unknown method: thread.explode"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The trust boundary, through the real dispatcher rather than through the
+    /// bus directly: this is the path a client actually reaches.
+    #[tokio::test]
+    async fn a_path_outside_the_roots_is_refused_through_the_dispatcher() {
+        let dir = scratch("scope");
+        let state = state_for_test(&dir);
+        let err = call(&state, "git.status", json!({ "path": dir.to_str().unwrap() }))
+            .await
+            .unwrap_err();
+        assert!(err.contains("outside registered project roots"), "{err}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Creating a project is what puts its folder inside the boundary, and the
+    /// two have to happen together: a project whose folder is not a root is a
+    /// project nothing in it can be read from.
+    #[tokio::test]
+    async fn creating_a_project_is_what_opens_its_folder() {
+        let dir = scratch("project");
+        let state = state_for_test(&dir);
+        assert!(call(&state, "git.status", json!({ "path": dir.to_str().unwrap() }))
+            .await
+            .is_err());
+
+        call(
+            &state,
+            "project.create",
+            json!({ "project": {
+                "id": "p", "name": "p", "cwd": dir.to_str().unwrap(),
+                "icon": null, "archived": false,
+            }}),
+        )
+        .await
+        .unwrap();
+
+        // Not refused any more: the folder is a root. Whether it is a repository
+        // is another question, and the one git answers.
+        let after = call(&state, "git.repoInfo", json!({ "path": dir.to_str().unwrap() })).await;
+        assert!(after.is_ok(), "{after:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The client is not authoritative for runtime state. `thread.create`
+    /// doubles as create and re-save — a session id captured, a label edited —
+    /// and taking the client's word on the second call would let a reload
+    /// rewrite how a thread ended.
+    ///
+    /// What survives is a terminal status. What does not is `running`: a row
+    /// claiming it describes a process that stopped existing when the last
+    /// server did, which is `Store::thread_status`'s job to know rather than
+    /// this handler's.
+    #[tokio::test]
+    async fn re_saving_a_thread_keeps_how_it_ended_and_not_what_it_claims() {
+        let dir = scratch("thread");
+        let state = state_for_test(&dir);
+        let row = |status: &str| {
+            json!({ "thread": {
+                "id": "t1", "projectId": "p", "label": "one", "cmd": "bash",
+                "args": [], "status": status, "createdAt": 0,
+            }})
+        };
+
+        // A new row is idle whatever the client says it is.
+        let first = call(&state, "thread.create", row("running")).await.unwrap();
+        assert_eq!(first["thread"]["status"], json!("idle"));
+
+        // How it ended is the server's, and a re-save cannot rewrite it.
+        state
+            .store
+            .update_thread_field("t1", ThreadCol::Status, ColVal::Text("exited".into()))
+            .unwrap();
+        state
+            .store
+            .update_thread_field("t1", ThreadCol::ExitCode, ColVal::Int(3))
+            .unwrap();
+        let again = call(&state, "thread.create", row("idle")).await.unwrap();
+        assert_eq!(again["thread"]["status"], json!("exited"));
+        assert_eq!(again["thread"]["exitCode"], json!(3));
+
+        // And a stored `running` reads back as idle: the process it named is
+        // gone, so keeping the word would be a thread that is busy with nothing.
+        state
+            .store
+            .update_thread_field("t1", ThreadCol::Status, ColVal::Text("running".into()))
+            .unwrap();
+        let restarted = call(&state, "thread.create", row("running")).await.unwrap();
+        assert_eq!(restarted["thread"]["status"], json!("idle"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The colour lands in a CSS custom property on every connected client, so
+    /// anything that is not a hex colour is dropped rather than stored.
+    #[tokio::test]
+    async fn a_workspace_colour_that_is_not_a_colour_is_dropped() {
+        let dir = scratch("workspace");
+        let state = state_for_test(&dir);
+        let set = |value: Value| json!({ "color": value });
+
+        call(&state, "workspace.setInfo", set(json!("#0af"))).await.unwrap();
+        let kept = call(&state, "workspace.info", json!({})).await.unwrap();
+        assert_eq!(kept["color"], json!("#0af"));
+
+        for bad in ["red", "#gggggg", "url(x)", "#12345"] {
+            call(&state, "workspace.setInfo", set(json!(bad))).await.unwrap();
+            let after = call(&state, "workspace.info", json!({})).await.unwrap();
+            assert_eq!(after["color"], json!("#0af"), "{bad} was stored");
+        }
+
+        // Explicit null is how a client clears it, and has to keep working.
+        call(&state, "workspace.setInfo", set(Value::Null)).await.unwrap();
+        assert_eq!(
+            call(&state, "workspace.info", json!({})).await.unwrap()["color"],
+            Value::Null
+        );
+
+        // The name is capped rather than refused: it is text on a chip, not a
+        // value anything parses.
+        call(&state, "workspace.setInfo", json!({ "name": "x".repeat(200) }))
+            .await
+            .unwrap();
+        let named = call(&state, "workspace.info", json!({})).await.unwrap();
+        assert_eq!(named["name"].as_str().unwrap().chars().count(), 64);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The server POSTs to a push endpoint on its own, unprompted, on every
+    /// thread transition. Registering one unchecked is how a client borrows the
+    /// server's reach into its own network.
+    #[tokio::test]
+    async fn a_push_endpoint_the_server_should_not_reach_is_refused() {
+        let dir = scratch("push");
+        let state = state_for_test(&dir);
+        let subscribe = |endpoint: &str| {
+            json!({
+                "endpoint": endpoint,
+                "keys": { "p256dh": "a", "auth": "b" },
+            })
+        };
+        for bad in [
+            "http://192.168.1.1/push",
+            "http://127.0.0.1/push",
+            "https://localhost/push",
+            "ftp://example.com/push",
+        ] {
+            assert!(
+                call(&state, "push.subscribe", subscribe(bad)).await.is_err(),
+                "{bad} was accepted"
+            );
+        }
+        call(&state, "push.subscribe", subscribe("https://push.example.com/x"))
+            .await
+            .unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// An agent request reaches every connected device and exactly one of them
+    /// may act on it: two clients running the same move would kill one PTY
+    /// twice and leave a second worktree behind.
+    #[tokio::test]
+    async fn exactly_one_caller_claims_an_agent_request() {
+        let dir = scratch("claim");
+        let state = state_for_test(&dir);
+        let id = json!({ "requestId": "abc" });
+        assert_eq!(
+            call(&state, "agent.claimRequest", id.clone()).await.unwrap()["claimed"],
+            json!(true)
+        );
+        assert_eq!(
+            call(&state, "agent.claimRequest", id).await.unwrap()["claimed"],
+            json!(false)
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
