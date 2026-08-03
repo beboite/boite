@@ -40,6 +40,8 @@ import { notifications } from "$lib/features/notifications/store.svelte";
 import { backend, workspace, type Backend } from "$lib/backend";
 import { device } from "$lib/features/settings/device.svelte";
 import type { ControlEvent } from "$lib/backend/types";
+import { ThreadSignals } from "./thread-signals.svelte";
+import { TitleWrites } from "./title-writes";
 
 // Shared so a project with no threads always yields the same reference, and
 // frozen so a caller that tries to mutate an index array fails loudly here
@@ -55,17 +57,17 @@ class AppState {
   // Phone layout only: which bottom-bar page is showing. Desktop ignores it.
   mobileTab = $state<MobileTab>("terminal");
   ready = $state(false);
-  respawnNonce = $state<Record<string, number>>({});
-  freshThreadIds = new Set<string>();
-  // Threads whose sessionId was nulled by legacy dedup. Reactive array so
-  // sidebar can show a red status dot on each until the binding is restored
-  // (via /resume in the AI CLI -> session monitor's steal logic).
-  unboundByDedup = $state<string[]>([]);
-  // Terminals mount lazily (the page only mounts a thread the user has
-  // visited), and mounting is what spawns the PTY. Anything outside the page
-  // that needs a thread running again — the post-update resume — queues its id
-  // here instead of reaching into the page's local state.
-  requestedActivations = $state<string[]>([]);
+
+  /**
+   * What the app remembers about a thread until something consumes it, and the
+   * coalescer that keeps an agent's title stream off the disk.
+   *
+   * Both are reached through this object rather than held here: neither has
+   * anything to do with the projects, the threads or the navigation that make
+   * up the rest of it, and both are worth reading on their own.
+   */
+  readonly signals = new ThreadSignals();
+  readonly titleWrites = new TitleWrites((id) => this.threadById(id)?.origin);
 
   // Unsubscribe from the remote control plane; set while a remote workspace is
   // active so a switch can tear the subscription down.
@@ -92,103 +94,29 @@ class AppState {
     return best?.origin ?? "local";
   }
 
-  markUnbound(id: string) {
-    if (!this.unboundByDedup.includes(id)) {
-      this.unboundByDedup = [...this.unboundByDedup, id];
-    }
+  // Kept on `app` so no caller has to know where any of this moved to. Each one
+  // is the whole of what it does.
+  markUnbound = (id: string) => this.signals.markUnbound(id);
+  clearUnbound = (id: string) => this.signals.clearUnbound(id);
+  requestActivation = (id: string) => this.signals.requestActivation(id);
+  clearRequestedActivations = () => this.signals.clearRequestedActivations();
+  bumpRespawn = (id: string) => this.signals.bumpRespawn(id);
+  markFresh = (id: string) => this.signals.markFresh(id);
+  consumeFresh = (id: string) => this.signals.consumeFresh(id);
+  setPendingPrompt = (id: string, prompt: string) => this.signals.setPendingPrompt(id, prompt);
+  consumePendingPrompt = (id: string) => this.signals.consumePendingPrompt(id);
+  flushPendingWrites = () => this.titleWrites.flush();
+
+  get respawnNonce(): Record<string, number> {
+    return this.signals.respawnNonce;
   }
 
-  clearUnbound(id: string) {
-    if (this.unboundByDedup.includes(id)) {
-      this.unboundByDedup = this.unboundByDedup.filter((x) => x !== id);
-    }
+  get unboundByDedup(): string[] {
+    return this.signals.unbound;
   }
 
-  // Title bursts (OSC during agent streaming) would write SQLite per token.
-  // Fixed-window coalescing (not a trailing debounce — continuous bursts
-  // would starve a trailing debounce forever), and only the title column is
-  // written so a delayed flush can't clobber concurrent row updates.
-  private pendingTitleSaves = new Map<string, string | null>();
-  private titleFlushTimer: ReturnType<typeof setTimeout> | null = null;
-  private scheduleTitleFlush() {
-    if (this.titleFlushTimer !== null) return;
-    this.titleFlushTimer = setTimeout(() => {
-      this.titleFlushTimer = null;
-      const batch = [...this.pendingTitleSaves];
-      this.pendingTitleSaves.clear();
-      for (const [id, title] of batch) {
-        const origin = this.threadById(id)?.origin;
-        void updateThreadTitle(id, title, origin).catch((err) => {
-          logger.error("app", "updateThreadTitle failed", err);
-        });
-      }
-    }, 500);
-  }
-
-  // Force the debounced title batch out now. Called before anything that ends
-  // the process on purpose (applying an update): the 500ms window is otherwise
-  // long enough to lose the last title of every thread.
-  async flushPendingWrites(): Promise<void> {
-    if (this.titleFlushTimer !== null) {
-      clearTimeout(this.titleFlushTimer);
-      this.titleFlushTimer = null;
-    }
-    const batch = [...this.pendingTitleSaves];
-    this.pendingTitleSaves.clear();
-    await Promise.all(
-      batch.map(([id, title]) => {
-        const origin = this.threadById(id)?.origin;
-        return updateThreadTitle(id, title, origin).catch((err) => {
-          logger.error("app", "updateThreadTitle failed", err);
-        });
-      }),
-    );
-  }
-
-  requestActivation(threadId: string) {
-    if (this.requestedActivations.includes(threadId)) return;
-    this.requestedActivations = [...this.requestedActivations, threadId];
-  }
-
-  clearRequestedActivations() {
-    if (this.requestedActivations.length > 0) this.requestedActivations = [];
-  }
-
-  // One key, not a new record: the record is a $state proxy, so writing the key
-  // is already reactive, and replacing the whole object woke every mounted
-  // terminal's relaunch effect on every single reload.
-  bumpRespawn(threadId: string) {
-    this.respawnNonce[threadId] = (this.respawnNonce[threadId] ?? 0) + 1;
-  }
-
-  markFresh(threadId: string) {
-    this.freshThreadIds.add(threadId);
-  }
-
-  consumeFresh(threadId: string): boolean {
-    if (this.freshThreadIds.has(threadId)) {
-      this.freshThreadIds.delete(threadId);
-      return true;
-    }
-    return false;
-  }
-
-  // One line to hand the agent the moment its next PTY starts, as the CLI's own
-  // initial prompt. A moved thread uses it to say where it landed and what was
-  // left behind; a spawned one to say what it is for. In-memory and consumed on
-  // read: it describes one launch, and replaying it on a later relaunch would
-  // re-brief an agent about a move it already knows about.
-  #pendingPrompts = new Map<string, string>();
-
-  setPendingPrompt(threadId: string, prompt: string) {
-    const text = prompt.trim();
-    if (text) this.#pendingPrompts.set(threadId, text);
-  }
-
-  consumePendingPrompt(threadId: string): string | null {
-    const prompt = this.#pendingPrompts.get(threadId) ?? null;
-    this.#pendingPrompts.delete(threadId);
-    return prompt;
+  get requestedActivations(): string[] {
+    return this.signals.requestedActivations;
   }
 
   // Rebuilt only when the thread set changes, never on a status or title
@@ -482,12 +410,8 @@ class AppState {
   reset() {
     this.#unsubscribeControl?.();
     this.#unsubscribeControl = null;
-    if (this.titleFlushTimer !== null) {
-      clearTimeout(this.titleFlushTimer);
-      this.titleFlushTimer = null;
-    }
-    this.pendingTitleSaves.clear();
-    this.freshThreadIds.clear();
+    this.titleWrites.discard();
+    this.signals.reset();
     resetFinished();
     this.projects = [];
     this.threads = [];
@@ -495,9 +419,6 @@ class AppState {
     this.selectedProjectId = null;
     this.view = "terminal";
     this.mobileTab = "terminal";
-    this.respawnNonce = {};
-    this.unboundByDedup = [];
-    this.requestedActivations = [];
     this.ready = false;
   }
 
@@ -865,8 +786,7 @@ class AppState {
     t.title = title;
     // Remote owns the title (parsed server-side, pushed as a control event).
     if (!workspace.backendFor(t.origin).caps.clientStatus) return;
-    this.pendingTitleSaves.set(id, title);
-    this.scheduleTitleFlush();
+    this.titleWrites.queue(id, title);
   }
 
   // Manual rename. Unlike setThreadTitle this persists on every backend: the
@@ -881,7 +801,7 @@ class AppState {
     const title = name?.trim() || null;
     thread.title = title;
     // An OSC title queued just before the rename would land on top of it.
-    this.pendingTitleSaves.delete(id);
+    this.titleWrites.cancel(id);
     if (title) markRenamed(id);
     else clearRenamed(id);
     try {
