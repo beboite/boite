@@ -6,6 +6,9 @@
   import { WebLinksAddon } from "@xterm/addon-web-links";
   import { Unicode11Addon } from "@xterm/addon-unicode11";
   import { xtermFontFamily, xtermTheme } from "./theme";
+  import { encodeBarKey, encodeText, isLineFeed, wheelLines, type Press } from "./keys";
+  import { installMobileInput } from "./mobile-input";
+  import { Touches } from "./touch";
   import { registerTerminal, unregisterTerminal } from "$lib/shared/terminals";
   import { openUrl } from "$lib/platform/opener";
   import { readText, writeText } from "$lib/platform/clipboard";
@@ -166,100 +169,34 @@
     { id: "~", label: "~" },
     { id: "-", label: "-" },
   ];
-  const ARROW: Record<string, "A" | "B" | "C" | "D"> = {
-    up: "A",
-    down: "B",
-    right: "C",
-    left: "D",
-  };
-
   function rawWrite(s: string) {
     if (!shouldUsePty(ptyId)) return;
     lastInputAt = Date.now();
     void ptyWrite(ptyId, encoder.encode(s));
   }
 
-  function applyCtrl(ch: string): string {
-    const c = ch.charCodeAt(0);
-    if (c >= 97 && c <= 122) return String.fromCharCode(c - 96); // a-z
-    if (c >= 64 && c <= 95) return String.fromCharCode(c - 64); // @A-Z[\]^_
-    return ch;
+  /** The two armed modifiers, as `keys` wants them. */
+  function modifiers() {
+    return { ctrl: ctrlArmed, alt: altArmed };
   }
 
-  // Apply the armed Ctrl/Alt modifiers to a single typed/tapped character.
-  function emitChar(ch: string) {
-    let out = ch;
-    if (ctrlArmed) {
-      out = applyCtrl(out);
-      ctrlArmed = false;
-    }
-    if (altArmed) {
-      out = "\x1b" + out;
-      altArmed = false;
-    }
-    rawWrite(out);
+  function applyPress(press: Press) {
+    ctrlArmed = press.modifiers.ctrl;
+    altArmed = press.modifiers.alt;
+    if (press.send !== null) rawWrite(press.send);
   }
 
-  // Text from the mobile input takeover. A single char honours armed Ctrl/Alt
-  // (so the CLI key-bar modifiers work with the soft keyboard); longer strings
-  // (a committed word, a paste) go straight through.
+  // Text from the mobile input takeover, and from xterm's own onData.
   function sendInputText(data: string) {
-    if (!data) return;
-    if ((ctrlArmed || altArmed) && data.length === 1) {
-      emitChar(data);
-      return;
-    }
-    rawWrite(data);
+    applyPress(encodeText(data, modifiers()));
   }
 
   function pressBarKey(id: string) {
-    if (id === "ctrl") {
-      ctrlArmed = !ctrlArmed;
-      return;
-    }
-    if (id === "alt") {
-      altArmed = !altArmed;
-      return;
-    }
-    switch (id) {
-      case "esc":
-        rawWrite("\x1b");
-        break;
-      case "tab":
-        rawWrite(altArmed ? "\x1b\t" : "\t");
-        break;
-      case "intr":
-        rawWrite("\x03");
-        break;
-      case "up":
-      case "down":
-      case "left":
-      case "right": {
-        const mod = 1 + (altArmed ? 2 : 0) + (ctrlArmed ? 4 : 0);
-        const l = ARROW[id];
-        rawWrite(mod === 1 ? `\x1b[${l}` : `\x1b[1;${mod}${l}`);
-        break;
-      }
-      case "home":
-        rawWrite("\x1b[H");
-        break;
-      case "end":
-        rawWrite("\x1b[F");
-        break;
-      case "pgup":
-        rawWrite("\x1b[5~");
-        break;
-      case "pgdn":
-        rawWrite("\x1b[6~");
-        break;
-      default:
-        emitChar(id); // literal char: honours armed modifiers
-        ctrlArmed = altArmed = false;
-        term?.focus();
-        return;
-    }
-    ctrlArmed = altArmed = false;
-    term?.focus();
+    const press = encodeBarKey(id, modifiers());
+    applyPress(press);
+    // Focus goes back to the terminal on anything that sent. A modifier tap
+    // leaves it where it is, because the next tap is on the bar too.
+    if (press.send !== null) term?.focus();
   }
 
   // preventDefault keeps terminal focus (and the soft keyboard) on tap.
@@ -588,27 +525,10 @@
   }
 
   function shouldSendLineFeed(e: KeyboardEvent, code: string): boolean {
-    const isEnter = code === "Enter" || code === "NumpadEnter";
-    const isCodex = thread.iconKey === "codex";
-    const isCtrlJ =
-      e.ctrlKey &&
-      !e.shiftKey &&
-      !e.altKey &&
-      (code === "KeyJ" ||
-        e.key === "j" ||
-        e.key === "J" ||
-        e.key === "\n" ||
-        e.key === "LineFeed");
-    if (
-      isEnter &&
-      e.shiftKey &&
-      !e.ctrlKey &&
-      !e.altKey &&
-      (settings.state.powershellNewline || isCodex)
-    ) {
-      return true;
-    }
-    return isCodex && isCtrlJ;
+    return isLineFeed(e, code, {
+      codex: thread.iconKey === "codex",
+      powershellNewline: settings.state.powershellNewline,
+    });
   }
 
   function sendLineFeed(e: KeyboardEvent): boolean {
@@ -619,22 +539,11 @@
     return false;
   }
 
-  function wheelLines(e: WheelEvent): number {
-    const raw =
-      e.deltaMode === WheelEvent.DOM_DELTA_LINE
-        ? e.deltaY
-        : e.deltaMode === WheelEvent.DOM_DELTA_PAGE
-          ? e.deltaY * (term?.rows ?? 24)
-          : e.deltaY / 20;
-    if (raw === 0) return 0;
-    return Math.sign(raw) * Math.max(1, Math.min(12, Math.round(Math.abs(raw))));
-  }
-
   function handleCodexWheel(e: WheelEvent): boolean {
     if (thread.iconKey !== "codex" || e.ctrlKey || e.metaKey || !term) return true;
     if (e.deltaY === 0) return true;
 
-    const lines = wheelLines(e);
+    const lines = wheelLines(e.deltaY, e.deltaMode, term.rows);
     if (lines === 0) return true;
 
     const buffer = term.buffer.active;
@@ -659,134 +568,11 @@
     else ta.removeAttribute("inputmode");
   }
 
-  // Mobile input takeover. Android/Gboard drives xterm's helper textarea through
-  // predictive composition + keyCode-229 events whose value-diffing duplicates
-  // text: a tapped word-completion re-sends the whole line, deleted text comes
-  // back on the next key. We block those events from ever reaching xterm
-  // (capture-phase stopPropagation on the container, an ancestor of the
-  // textarea, so xterm's own textarea listeners never fire) and translate the
-  // intent-based `beforeinput`/composition events to PTY bytes ourselves:
-  // nothing is sent mid-composition, so a completed word is sent exactly once.
-  // The scratch textarea is kept empty between words so Backspace at line start
-  // still emits a real key event we can forward. Desktop/hardware keyboards are
-  // untouched — every handler early-returns when not in the mobile layout.
-  let imeComposing = false;
   let disposeMobileInput: (() => void) | null = null;
 
   function clearHelperTextarea() {
     const ta = helperTextarea();
     if (ta && ta.value !== "") ta.value = "";
-  }
-
-  function onImeCompositionStart(e: Event) {
-    if (!mobile) return;
-    e.stopPropagation();
-    imeComposing = true;
-  }
-
-  function onImeCompositionEnd(e: CompositionEvent) {
-    if (!mobile) return;
-    e.stopPropagation();
-    imeComposing = false;
-    sendInputText(e.data ?? "");
-    clearHelperTextarea();
-  }
-
-  function onImeBeforeInput(e: InputEvent) {
-    if (!mobile) return;
-    e.stopPropagation();
-    // Mid-composition keystrokes are committed together at compositionend.
-    if (imeComposing || e.inputType === "insertCompositionText") return;
-    switch (e.inputType) {
-      case "insertText":
-      case "insertReplacementText":
-      case "insertFromPaste":
-        if (e.cancelable) e.preventDefault();
-        sendInputText(e.data ?? "");
-        break;
-      case "insertLineBreak":
-      case "insertParagraph":
-        if (e.cancelable) e.preventDefault();
-        rawWrite("\r");
-        break;
-      case "deleteContentBackward":
-        if (e.cancelable) e.preventDefault();
-        rawWrite("\x7f");
-        break;
-      case "deleteWordBackward":
-        if (e.cancelable) e.preventDefault();
-        rawWrite("\x17"); // Ctrl+W
-        break;
-      case "deleteContentForward":
-        if (e.cancelable) e.preventDefault();
-        rawWrite("\x1b[3~");
-        break;
-    }
-  }
-
-  function onImeInput(e: Event) {
-    if (!mobile) return;
-    e.stopPropagation();
-    // beforeinput already produced the bytes; keep the scratch buffer empty so
-    // it can never accumulate a stale baseline (only when not mid-composition).
-    if (!imeComposing) clearHelperTextarea();
-  }
-
-  // Keys the soft keyboard emits as real key events (empty field, or a hardware
-  // key) rather than beforeinput. Handle them here and preventDefault so the
-  // matching beforeinput never fires — no double send.
-  function onImeKeyDown(e: KeyboardEvent) {
-    if (!mobile) return;
-    e.stopPropagation();
-    if (imeComposing || e.keyCode === 229) return;
-    const seq: string | null =
-      e.key === "Backspace"
-        ? "\x7f"
-        : e.key === "Enter"
-          ? "\r"
-          : e.key === "Tab"
-            ? "\t"
-            : e.key === "Escape"
-              ? "\x1b"
-              : e.key === "ArrowUp"
-                ? "\x1b[A"
-                : e.key === "ArrowDown"
-                  ? "\x1b[B"
-                  : e.key === "ArrowRight"
-                    ? "\x1b[C"
-                    : e.key === "ArrowLeft"
-                      ? "\x1b[D"
-                      : null;
-    if (seq === null) return; // printable: let beforeinput/composition handle it
-    e.preventDefault();
-    rawWrite(seq);
-  }
-
-  function onImeKeyOther(e: Event) {
-    if (!mobile) return;
-    e.stopPropagation();
-  }
-
-  function installMobileInput() {
-    const el = container;
-    if (!el) return;
-    const cap = { capture: true } as const;
-    el.addEventListener("compositionstart", onImeCompositionStart, cap);
-    el.addEventListener("compositionend", onImeCompositionEnd as EventListener, cap);
-    el.addEventListener("beforeinput", onImeBeforeInput as EventListener, cap);
-    el.addEventListener("input", onImeInput, cap);
-    el.addEventListener("keydown", onImeKeyDown as EventListener, cap);
-    el.addEventListener("keypress", onImeKeyOther, cap);
-    el.addEventListener("keyup", onImeKeyOther, cap);
-    disposeMobileInput = () => {
-      el.removeEventListener("compositionstart", onImeCompositionStart, cap);
-      el.removeEventListener("compositionend", onImeCompositionEnd as EventListener, cap);
-      el.removeEventListener("beforeinput", onImeBeforeInput as EventListener, cap);
-      el.removeEventListener("input", onImeInput, cap);
-      el.removeEventListener("keydown", onImeKeyDown as EventListener, cap);
-      el.removeEventListener("keypress", onImeKeyOther, cap);
-      el.removeEventListener("keyup", onImeKeyOther, cap);
-    };
   }
 
   function toggleKeyboard() {
@@ -817,62 +603,35 @@
     requestAnimationFrame(() => term?.scrollToBottom());
   }
 
-  function touchDist(t: TouchList): number {
-    return Math.hypot(
-      t[0].clientX - t[1].clientX,
-      t[0].clientY - t[1].clientY,
-    );
-  }
+  const touches = new Touches();
 
   function onTouchStart(e: TouchEvent) {
     if (!mobile || !term) return;
-    if (e.touches.length >= 2) {
-      touchMode = "pinch";
-      pinchStartDist = touchDist(e.touches);
-      pinchStartFactor = pinchFactor;
-      e.preventDefault();
-    } else {
-      touchMode = "scroll";
-      scrollLastY = e.touches[0].clientY;
-      scrollAccum = 0;
-    }
+    touches.start(e.touches, pinchFactor);
+    if (touches.mode === "pinch") e.preventDefault();
   }
 
   function onTouchMove(e: TouchEvent) {
     if (!mobile || !term) return;
-    if (touchMode === "pinch" && e.touches.length >= 2) {
-      e.preventDefault();
-      if (pinchStartDist <= 0) return;
-      const ratio = touchDist(e.touches) / pinchStartDist;
+    // A pinch always owns the event, gesture or not: letting one through is the
+    // browser zooming the whole page under a canvas that has its own idea of a
+    // font size.
+    if (touches.mode === "pinch") e.preventDefault();
+    const gesture = touches.move(e.touches, fontSize * 1.25);
+    if (gesture.kind === "zoom") {
       // Only the factor moves; `fontSize` clamps it against FONT_MIN/FONT_MAX
       // and the effect below applies the result and refits.
-      pinchFactor = Math.max(0.25, Math.min(4, pinchStartFactor * ratio));
+      pinchFactor = Math.max(0.25, Math.min(4, gesture.factor));
       return;
     }
-    if (touchMode === "scroll" && e.touches.length === 1) {
-      const y = e.touches[0].clientY;
-      scrollAccum += y - scrollLastY;
-      scrollLastY = y;
-      const rowPx = fontSize * 1.25;
-      const lines = Math.trunc(scrollAccum / rowPx);
-      if (lines !== 0) {
-        scrollAccum -= lines * rowPx;
-        // Content follows the finger: drag up (lines<0) reveals newer output.
-        term.scrollLines(-lines);
-        e.preventDefault();
-      }
+    if (gesture.kind === "scroll") {
+      term.scrollLines(gesture.lines);
+      e.preventDefault();
     }
   }
 
   function onTouchEnd(e: TouchEvent) {
-    if (e.touches.length === 0) {
-      touchMode = "none";
-    } else if (e.touches.length === 1) {
-      // Pinch released one finger: hand back to scroll cleanly.
-      touchMode = "scroll";
-      scrollLastY = e.touches[0].clientY;
-      scrollAccum = 0;
-    }
+    touches.end(e.touches);
   }
 
   async function spawn(reattach = false) {
@@ -1258,13 +1017,7 @@
     term.onData((data) => {
       if (!shouldUsePty(ptyId)) return;
       syncAliveThread();
-      lastInputAt = Date.now();
-      if ((ctrlArmed || altArmed) && data.length === 1) {
-        emitChar(data);
-        return;
-      }
-      const bytes = encoder.encode(data);
-      void ptyWrite(ptyId, bytes);
+      sendInputText(data);
     });
 
     term.onResize(({ cols, rows }) => {
@@ -1278,7 +1031,12 @@
     registerTerminal(thread.id, term);
     // Set inputmode before the focus below so the phone keyboard never flashes.
     syncMobileInput();
-    installMobileInput();
+    disposeMobileInput = installMobileInput({
+      container,
+      enabled: () => mobile,
+      sendText: sendInputText,
+      sendSequence: rawWrite,
+    });
 
     try {
       const webgl = new WebglAddon();
