@@ -1,7 +1,7 @@
 <script lang="ts">
   import { app } from "$lib/app/store.svelte";
   import { t } from "$lib/i18n/index.svelte";
-  import { projectDisplayName } from "$lib/features/project/scratch";
+  import { projectDisplayName } from "$lib/shared/project-label";
   import { workspace } from "$lib/backend";
   import { settings } from "$lib/features/settings/store.svelte";
   import { threadCwd } from "$lib/features/thread/cwd";

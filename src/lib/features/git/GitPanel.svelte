@@ -2,7 +2,7 @@
   import { app } from "$lib/app/store.svelte";
   import { workspace } from "$lib/backend";
   import { threadGitRoot } from "$lib/features/thread/cwd";
-  import { isScratch } from "$lib/features/project/scratch";
+  import { isScratch } from "$lib/domain/project";
   import { settings } from "$lib/features/settings/store.svelte";
   import { gitStore, gitScope } from "./store.svelte";
   import { editorStore } from "$lib/features/editor/store.svelte";

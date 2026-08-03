@@ -20,7 +20,8 @@
   import { moveThreadToProject } from "$lib/features/thread/move";
   import { notifications } from "$lib/features/notifications/store.svelte";
   import { refreshProjectIcon } from "$lib/features/project/api";
-  import { isScratch, projectDisplayName } from "$lib/features/project/scratch";
+  import { isScratch } from "$lib/domain/project";
+import { projectDisplayName } from "$lib/shared/project-label";
   import ThreadGlyph from "$lib/features/thread/ThreadGlyph.svelte";
   import {
     clearFinished,

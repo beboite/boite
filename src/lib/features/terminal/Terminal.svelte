@@ -6,7 +6,7 @@
   import { WebLinksAddon } from "@xterm/addon-web-links";
   import { Unicode11Addon } from "@xterm/addon-unicode11";
   import { xtermFontFamily, xtermTheme } from "./theme";
-  import { registerTerminal, unregisterTerminal } from "./live";
+  import { registerTerminal, unregisterTerminal } from "$lib/shared/terminals";
   import { openUrl } from "$lib/platform/opener";
   import { readText, writeText } from "$lib/platform/clipboard";
   import {

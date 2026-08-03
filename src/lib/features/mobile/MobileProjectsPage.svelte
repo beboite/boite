@@ -1,7 +1,8 @@
 <script lang="ts">
   import { app } from "$lib/app/store.svelte";
   import { visibleStatus } from "$lib/domain/thread-status";
-  import { isScratch, projectDisplayName } from "$lib/features/project/scratch";
+  import { isScratch } from "$lib/domain/project";
+import { projectDisplayName } from "$lib/shared/project-label";
   import { pickAndAddProject } from "$lib/features/project/api";
   import { closeThreadWithConfirm } from "$lib/features/thread/api";
   import { t } from "$lib/i18n/index.svelte";

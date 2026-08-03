@@ -32,11 +32,8 @@ import {
 } from "$lib/features/thread/renamed";
 import { noteStatusChange, resetFinished } from "$lib/features/thread/finished.svelte";
 import { isGenericTitle } from "$lib/features/thread/title-filter";
-import {
-  isScratch,
-  makeScratchProject,
-  SCRATCH_PROJECT_ID,
-} from "$lib/features/project/scratch";
+import { isScratch, SCRATCH_PROJECT_ID } from "$lib/domain/project";
+import { makeScratchProject } from "$lib/features/project/scratch";
 import { gitStore } from "$lib/features/git/store.svelte";
 import { todos } from "$lib/features/todo/store.svelte";
 import { notifications } from "$lib/features/notifications/store.svelte";
@@ -600,7 +597,7 @@ class AppState {
       // one device acts. Imported late: the handler pulls in the thread and
       // project APIs, which import this store.
       case "agent.request": {
-        void import("$lib/features/thread/agentRequests")
+        void import("./agent-requests")
           .then((m) => m.handleRemoteAgentRequest(ev.data))
           .catch((err) => logger.error("app", "agent.request failed", err));
         break;

@@ -15,10 +15,10 @@
     restoreLastClosedThread,
   } from "$lib/features/thread/api";
   import { addProjectByPath } from "$lib/features/project/api";
-  import { watchAgentRequests } from "$lib/features/thread/agentRequests";
+  import { watchAgentRequests } from "$lib/app/agent-requests";
   import { watchAgentActivity } from "$lib/features/thread/agentActivity.svelte";
   import { installInspector } from "$lib/features/devtools/inspect";
-import { captureWindowErrors } from "$lib/shared/services/logger.svelte";
+  import { captureWindowErrors } from "$lib/shared/services/logger.svelte";
   import { editorStore } from "$lib/features/editor/store.svelte";
   import { paneStore, threadLeavesOf } from "$lib/features/panes/store.svelte";
   import { splitFocused } from "$lib/features/panes/open";

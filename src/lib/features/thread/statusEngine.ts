@@ -6,7 +6,7 @@ import type { AgentTurnQuery } from "$lib/backend/types";
 import { settings } from "$lib/features/settings/store.svelte";
 import { paneStore, threadLeavesOf } from "$lib/features/panes/store.svelte";
 import { parkedLocal } from "$lib/backend/tauri/parked";
-import { liveTerminal, terminalScreenRows } from "$lib/features/terminal/live";
+import { liveTerminal, terminalScreenRows } from "$lib/shared/terminals";
 import { notifyWhenUnfocused } from "$lib/storage/notify";
 // Aliased: `t` is the loop variable for a thread all through this file.
 import { t as translate } from "$lib/i18n/index.svelte";

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
   import { app } from "$lib/app/store.svelte";
-  import { projectDisplayName } from "$lib/features/project/scratch";
+  import { projectDisplayName } from "$lib/shared/project-label";
   import { settings } from "$lib/features/settings/store.svelte";
   import { notifications } from "$lib/features/notifications/store.svelte";
   import { logger } from "$lib/shared/services/logger.svelte";

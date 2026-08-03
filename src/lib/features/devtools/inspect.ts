@@ -37,7 +37,7 @@ import {
   liveTerminal,
   liveTerminalIds,
   terminalText,
-} from "$lib/features/terminal/live";
+} from "$lib/shared/terminals";
 import type { Thread } from "$lib/types";
 
 /** One thread, with the fields that decide what it is and where it runs. */
