@@ -18,6 +18,7 @@
   import { watchAgentRequests } from "$lib/features/thread/agentRequests";
   import { watchAgentActivity } from "$lib/features/thread/agentActivity.svelte";
   import { installInspector } from "$lib/features/devtools/inspect";
+import { captureWindowErrors } from "$lib/shared/services/logger.svelte";
   import { editorStore } from "$lib/features/editor/store.svelte";
   import { paneStore, threadLeavesOf } from "$lib/features/panes/store.svelte";
   import { splitFocused } from "$lib/features/panes/open";
@@ -300,6 +301,11 @@
   // from the MCP bridge: the terminals render to a canvas, so their output is
   // invisible to anything that reads the DOM.
   onMount(() => installInspector());
+
+  // Before anything else has a chance to throw. What the window raises on its
+  // own reached the devtools console and stopped there, which on a packaged
+  // desktop app is nowhere at all.
+  captureWindowErrors();
 
   onMount(() => {
     // No Tauri runtime: this is a browser/PWA. The only backend is the server

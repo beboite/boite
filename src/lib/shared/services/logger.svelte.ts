@@ -79,3 +79,64 @@ class Logger {
 }
 
 export const logger = new Logger();
+
+/**
+ * Sends what the window throws on its own to the same log as everything else.
+ *
+ * Anything an `await` never caught, a listener that threw, a rejected promise
+ * nobody handled: none of it went anywhere. It reached the devtools console,
+ * which a packaged desktop app does not open, and then it was gone. The symptom
+ * a user reports is "a panel stopped updating"; the cause was one line in a
+ * console that no longer exists.
+ *
+ * Idempotent, because hot reload calls it again and two handlers would write
+ * every error twice.
+ */
+let capturing = false;
+
+export function captureWindowErrors() {
+  if (capturing || typeof window === "undefined") return;
+  capturing = true;
+
+  // A failure inside the logger itself would come back through here and loop.
+  // One record about the loop is worth having; the rest are not.
+  let reporting = false;
+  const report = (source: string, message: string, data: unknown) => {
+    if (reporting) return;
+    reporting = true;
+    try {
+      logger.error(source, message, data);
+    } finally {
+      reporting = false;
+    }
+  };
+
+  window.addEventListener("error", (event) => {
+    // `error` also fires for an <img> or a <script> that failed to load, and
+    // those carry no Error — the element is the target. Worth recording: a
+    // missing asset is exactly the kind of thing that renders as nothing.
+    if (event.error instanceof Error) {
+      report("window.error", event.error.message, event.error);
+      return;
+    }
+    const target = event.target as { tagName?: string; src?: string } | null;
+    if (target?.tagName) {
+      report("window.resource", `${target.tagName.toLowerCase()} failed to load`, target.src ?? "");
+      return;
+    }
+    report("window.error", event.message || "unknown error", {
+      filename: event.filename,
+      line: event.lineno,
+      column: event.colno,
+    });
+  }, true);
+
+  window.addEventListener("unhandledrejection", (event) => {
+    const reason = event.reason;
+    report(
+      "window.rejection",
+      reason instanceof Error ? reason.message : String(reason),
+      reason,
+    );
+  });
+}
