@@ -38,7 +38,7 @@
     getDetector,
     resolveKey,
   } from "$lib/features/thread/session";
-  import { withPowershellFastFlags } from "$lib/features/thread/shell-wrap";
+  import { decideSpawn, launchPlan } from "./launch";
   import { claimTypedPrompt } from "$lib/features/thread/typedPrompt";
   import { parsePromotion, PROMOTE_OSC } from "$lib/features/thread/promote";
   import { platform } from "$lib/storage/platform.svelte";
@@ -636,45 +636,27 @@
 
   async function spawn(reattach = false) {
     const generation = spawnGeneration;
-    if (spawned || spawning || destroyed) {
-      logger.debug(
-        "spawn",
-        `${thread.label}: skip — spawned=${spawned} spawning=${spawning} destroyed=${destroyed}`,
-      );
-      return;
-    }
     const current = currentThread();
-    // Idle threads spawn fresh. A reattach (a remote thread we detached for
-    // visibility) re-opens even though the server still reports it running/ready
-    // — ptyOpen attaches to the live PTY. Finished threads (done/exited/error)
-    // never auto-respawn; relaunch is explicit via reloadThread + remount.
-    const finished = !!current && isFinished(current.status);
-    // A local PTY parked by a workspace switch is still alive: reattach (replay
-    // its ring) instead of spawning fresh, same as an explicit reattach.
-    // A remote thread the server already reports live (non-idle) is owned by the
-    // server too — attach to replay its ring rather than skip it (the old guard
-    // left it a black screen on first click) and never re-inject launch input.
-    // Remote idle still spawns fresh so wrap-shell launch input is typed.
-    const remote = !clientStatus();
-    const liveRemote = remote && !finished && current?.status !== "idle";
-    const reattaching =
-      reattach ||
-      liveRemote ||
-      (clientStatus() && parkedLocal.has(thread.id));
-    const attachable = reattaching && current?.status !== "idle";
-    if (!current || finished || (current.status !== "idle" && !attachable)) {
-      // Info, not debug, and it is the only skip that is: a refusal here is a
-      // pane that stays black for good, and `debug` is compiled out of a release
-      // build. A terminal that never opens and says nothing about it is the one
-      // failure the log could not explain, which is how it went three releases
-      // without being found. The others above are transient by construction —
-      // a retry is already scheduled — and this one has nothing behind it.
-      logger.info(
-        "spawn",
-        `${thread.label}: not opening — missing=${!current} status=${current?.status} reattach=${reattach} attachable=${attachable}`,
-      );
+    // Whether to open at all, and whether opening means attaching to something
+    // already running. Both live in `launch.ts`, where they can be tested: every
+    // bug this function has had was in that verdict, and it was reachable only
+    // through a mounted component with a live PTY behind it.
+    const verdict = decideSpawn({
+      spawned,
+      spawning,
+      destroyed,
+      status: current?.status ?? null,
+      reattach,
+      clientStatus: clientStatus(),
+      parked: parkedLocal.has(thread.id),
+    });
+    if (!verdict.go) {
+      const said = `${thread.label}: not opening — ${verdict.why}`;
+      if (verdict.level === "info") logger.info("spawn", said);
+      else logger.debug("spawn", said);
       return;
     }
+    const reattaching = verdict.reattaching;
     if (!term || !fit) {
       logger.warn(
         "spawn",
@@ -754,28 +736,14 @@
       // under the project folder finds nothing and silently loses `--resume`.
       const cwd = threadCwd(thread, project) ?? project.cwd;
 
-      const userArgs = await buildResumeArgsAsync(thread, cwd);
-      // A blank terminal *is* the shell; anything else may be a shell function
-      // or alias, which only exists once a profile has been sourced. Whether it
-      // actually is one is decided by the machine that owns the PTY — for a
-      // remote thread the server's PATH and profile are the ones that count, and
-      // an id it does not have simply falls through to a direct spawn.
-      const isBlankTerminal = thread.iconKey === "terminal";
-      const wrap =
-        !isBlankTerminal && settings.state.defaultShellId
-          ? {
-              shellId: settings.state.defaultShellId,
-              noProfile: settings.state.powershellNoProfile,
-            }
-          : undefined;
-      const plan = {
+      const plan = launchPlan({
         cmd: thread.cmd,
-        args: withPowershellFastFlags(
-          thread.cmd,
-          userArgs,
-          settings.state.powershellNoProfile,
-        ),
-      };
+        userArgs: await buildResumeArgsAsync(thread, cwd),
+        iconKey: thread.iconKey,
+        defaultShellId: settings.state.defaultShellId,
+        powershellNoProfile: settings.state.powershellNoProfile,
+      });
+      const wrap = plan.wrap;
 
       const spawnedAt = Date.now();
 
