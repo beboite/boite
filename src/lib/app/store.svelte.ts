@@ -14,6 +14,7 @@ import {
 } from "$lib/storage/db";
 import { settings } from "$lib/features/settings/store.svelte";
 import { logger } from "$lib/shared/services/logger.svelte";
+import { isDurable, isFinished } from "$lib/domain/thread-status";
 import { t } from "$lib/i18n/index.svelte";
 import { platform } from "$lib/storage/platform.svelte";
 import {
@@ -520,7 +521,12 @@ class AppState {
         noteStatusChange(t.id, t.status, incomingStatus);
         t.status = incomingStatus;
         t.exitCode = (data?.exitCode as number | null) ?? null;
-        if (t.status === "done" || t.status === "exited" || t.status === "error") {
+        // Four statuses, not three. `stopped` used to be missing here and
+        // nowhere else, so a thread the server had put to sleep kept a ptyId
+        // pointing at a process it had already reaped — and `visibleStatus`
+        // then drew it as ready. `stopThread` clears the id on the local path
+        // for the same reason.
+        if (isFinished(t.status)) {
           t.ptyId = null;
         }
         break;
@@ -827,13 +833,7 @@ class AppState {
     // Remote: the server persists runtime state and pushes it back; a client
     // write would clobber it. Only the local backend persists status here.
     if (!workspace.backendFor(t.origin).caps.clientStatus) return;
-    if (
-      status === "done" ||
-      status === "exited" ||
-      status === "error" ||
-      status === "stopped" ||
-      status === "idle"
-    ) {
+    if (isDurable(status)) {
       void saveThread($state.snapshot(t) as Thread);
     }
   }

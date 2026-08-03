@@ -1,5 +1,6 @@
 <script lang="ts">
   import { app } from "$lib/app/store.svelte";
+  import { visibleStatus } from "$lib/domain/thread-status";
   import { isScratch, projectDisplayName } from "$lib/features/project/scratch";
   import { pickAndAddProject } from "$lib/features/project/api";
   import { closeThreadWithConfirm } from "$lib/features/thread/api";
@@ -17,10 +18,7 @@
 
   function displayStatus(thread: Thread): ThreadStatus {
     if (app.unboundByDedup.includes(thread.id)) return "error";
-    if (thread.ptyId && (thread.status === "idle" || thread.status === "stopped")) {
-      return "ready";
-    }
-    return thread.status;
+    return visibleStatus(thread.status, !!thread.ptyId);
   }
 
   function openThread(thread: Thread) {

@@ -1,3 +1,4 @@
+import { isFinished } from "$lib/domain/thread-status";
 import { app } from "$lib/app/store.svelte";
 import { workspace } from "$lib/backend";
 import type { Backend } from "$lib/backend";
@@ -296,12 +297,7 @@ function tick() {
       }
       continue;
     }
-    if (
-      t.status === "done" ||
-      t.status === "exited" ||
-      t.status === "error" ||
-      t.status === "stopped"
-    ) {
+    if (isFinished(t.status)) {
       prevStatus.set(t.id, t.status);
       idleSince.delete(t.id);
       continue;

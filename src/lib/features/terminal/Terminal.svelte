@@ -20,6 +20,7 @@
   import { backendFor } from "$lib/backend";
   import { parkedLocal } from "$lib/backend/tauri/parked";
   import { app } from "$lib/app/store.svelte";
+  import { isFinished } from "$lib/domain/thread-status";
   import { settings } from "$lib/features/settings/store.svelte";
   import { threadCwd } from "$lib/features/thread/cwd";
   import {
@@ -144,12 +145,7 @@
   let keyBarOpen = $state(false);
   let lpTimer: ReturnType<typeof setTimeout> | null = null;
   let lpFired = false;
-  const finished = $derived(
-    thread.status === "done" ||
-      thread.status === "exited" ||
-      thread.status === "error" ||
-      thread.status === "stopped",
-  );
+  const finished = $derived(isFinished(thread.status));
   const showKeyBar = $derived(mobile && focused && !finished && keyBarOpen);
   const BAR_KEYS: { id: string; label: string }[] = [
     { id: "esc", label: "Esc" },
@@ -893,11 +889,7 @@
     // visibility) re-opens even though the server still reports it running/ready
     // — ptyOpen attaches to the live PTY. Finished threads (done/exited/error)
     // never auto-respawn; relaunch is explicit via reloadThread + remount.
-    const finished =
-      current?.status === "done" ||
-      current?.status === "exited" ||
-      current?.status === "error" ||
-      current?.status === "stopped";
+    const finished = !!current && isFinished(current.status);
     // A local PTY parked by a workspace switch is still alive: reattach (replay
     // its ring) instead of spawning fresh, same as an explicit reattach.
     // A remote thread the server already reports live (non-idle) is owned by the
@@ -1401,12 +1393,7 @@
     const remote = !clientStatus();
     if (!remote || !mobile) return;
     const cur = currentThread();
-    const finished =
-      cur?.status === "done" ||
-      cur?.status === "exited" ||
-      cur?.status === "error" ||
-      cur?.status === "stopped";
-    if (finished) return;
+    if (cur && isFinished(cur.status)) return;
     if (shown) {
       if (released && !spawned && !spawning) {
         released = false;
