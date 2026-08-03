@@ -40,6 +40,24 @@ use serde_json::{json, Value};
 use call::call_tool;
 use tools::{tools, INSTRUCTIONS};
 
+/// Percent-encodes a value so it survives as a query parameter.
+///
+/// A needle is whatever somebody typed: a path with spaces in it, an error
+/// string with a `&`, a branch name. Unencoded, the first `&` would end the
+/// parameter and the search would quietly be for half of it.
+pub(crate) fn encode_query(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.as_bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                out.push(*b as char)
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
 fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

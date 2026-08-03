@@ -144,6 +144,19 @@ fn common_tools() -> Value {
             "annotations": { "title": "Snapshot", "readOnlyHint": true, "idempotentHint": true, "openWorldHint": false }
         },
         {
+            "name": "workspace_search",
+            "description": "Find text anywhere in this workspace: the todo list, the log of what                             agents did and were refused, and what the terminals printed. Use it                             before asking a human where something is, and before assuming a                             failure is new — the same error is often already in another                             terminal or already in the log with the reason attached.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "q": { "type": "string", "description": "What to look for. A path, an error code, a branch name." },
+                    "limit": { "type": "number", "description": "How many hits. Default 20, max 100." }
+                },
+                "required": ["q"]
+            },
+            "annotations": { "title": "Search", "readOnlyHint": true, "idempotentHint": false, "openWorldHint": false }
+        },
+        {
             "name": "terminal_transcript",
             "description": "What a terminal actually printed, read back from the end. Any thread in                             this workspace, not only your own: this is how you find out what                             another agent was doing when it stopped, and what its command really                             said before it failed. Ask workspace_snapshot for the thread ids.                             Defaults to your own terminal, which is how you re-read output you                             have lost track of. Escape sequences are stripped; a redrawn progress                             line stays as many lines.",
             "inputSchema": {

@@ -527,6 +527,31 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
         // Not scoped to a project: an agent in another one asking to move is
         // exactly what would otherwise be invisible from wherever a device
         // happens to be standing.
+        // The same three sources the agent endpoint searches, for a device.
+        "search.query" => {
+            let needle = str_param(&params, "q")?;
+            let limit = params
+                .get("limit")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(20)
+                .clamp(1, 100) as usize;
+            let store = state.store.clone();
+            let dir = state.registry.transcripts_dir();
+            let hits = blocking(move || {
+                let mut hits = store.search(&needle, limit);
+                if let Some(dir) = dir {
+                    hits.extend(boite_core::search::transcripts(
+                        &dir,
+                        &needle,
+                        limit.saturating_sub(hits.len()),
+                    ));
+                }
+                hits
+            })
+            .await?;
+            Ok(json!({ "hits": hits }))
+        }
+
         "approval.list" => {
             let api = state.agent_api.as_ref().ok_or("the agent endpoint is not running")?;
             Ok(json!({ "approvals": api.workspace.store().open_approvals()? }))

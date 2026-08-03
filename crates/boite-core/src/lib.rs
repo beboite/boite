@@ -13,6 +13,7 @@ pub mod model;
 pub mod project;
 pub mod pty;
 pub mod scope;
+pub mod search;
 pub mod secret_file;
 pub mod session;
 pub mod shell;
