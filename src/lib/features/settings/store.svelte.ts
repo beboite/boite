@@ -6,6 +6,11 @@ import { logger } from "$lib/shared/services/logger.svelte";
 import { debounce } from "$lib/shared/utils/debounce";
 import { uuid } from "$lib/shared/utils/uuid";
 import type { LocaleSetting, RightPanelTab, Settings, Shortcut } from "$lib/types";
+import {
+  clampRightPanelWidth,
+  isRightPanelTab,
+  readRightPanelMap,
+} from "./right-panel";
 
 export const PRESET_SHORTCUTS: Shortcut[] = [
   { id: "claude", label: "Claude", command: "claude", iconKey: "claude" },
@@ -135,6 +140,7 @@ const DEFAULTS: Settings = {
   },
   confirmCloseThread: true,
   rightPanel: null,
+  rightPanelByProject: {},
   rightPanelWidth: 320,
   gitSplitFraction: 0.5,
   gitAutoFetch: true,
@@ -154,9 +160,12 @@ function isMotionMode(value: unknown): value is Settings["motionMode"] {
   return value === "system" || value === "on" || value === "off";
 }
 
-function isRightPanelTab(value: unknown): value is Settings["rightPanel"] {
-  return value === "git" || value === "explorer" || value === "todo" || value === null;
-}
+// The column's own two rules live beside it, not in here: see right-panel.ts.
+export {
+  clampRightPanelWidth,
+  RIGHT_PANEL_MIN_WIDTH,
+  RIGHT_PANEL_MAX_WIDTH,
+} from "./right-panel";
 
 const MOBILE_LAYOUT_QUERY = "(pointer: coarse) and (max-width: 899px)";
 
@@ -211,6 +220,7 @@ const DEVICE_FIELDS = [
   "sidebarWidth",
   "sidebarCollapsed",
   "rightPanel",
+  "rightPanelByProject",
   "rightPanelWidth",
   "uiScalePercent",
   "gitSplitFraction",
@@ -308,6 +318,7 @@ class SettingsStore {
         rightPanel: isRightPanelTab(stored.rightPanel)
           ? stored.rightPanel
           : DEFAULTS.rightPanel,
+        rightPanelByProject: readRightPanelMap(stored.rightPanelByProject),
         rightPanelWidth:
           typeof stored.rightPanelWidth === "number" && stored.rightPanelWidth > 0
             ? stored.rightPanelWidth
@@ -368,6 +379,13 @@ class SettingsStore {
         for (const k of DEVICE_FIELDS) {
           if (dev[k] !== undefined) target[k] = dev[k];
         }
+        this.state.rightPanelByProject = readRightPanelMap(
+          this.state.rightPanelByProject,
+        );
+        // The stored width was chosen in whatever window was open at the time,
+        // and this one may be smaller. Clamped on the way in rather than only in
+        // the setter, which a boot never calls.
+        this.state.rightPanelWidth = clampRightPanelWidth(this.state.rightPanelWidth);
         // Device blobs written before 0.7.1 have no mobileLayout key, so a
         // phone that used an earlier build would stay on the PC layout. Seed it
         // from the form factor (a no-op on desktops) and persist so the choice
@@ -489,6 +507,22 @@ class SettingsStore {
   }
 
   /**
+   * Which panel this project has open, or null for none.
+   *
+   * A project nobody has opened a panel on yet inherits the last choice made
+   * anywhere, which is also the answer while on no project at all. That is not a
+   * fallback for lack of data: arriving in a new project with git already up is
+   * what somebody who works with git open means, and the first close is what
+   * makes it that project's own answer.
+   */
+  rightPanelFor(projectId: string | null): RightPanelTab {
+    if (projectId && projectId in this.state.rightPanelByProject) {
+      return this.state.rightPanelByProject[projectId];
+    }
+    return this.state.rightPanel;
+  }
+
+  /**
    * What the three titlebar buttons do: show this panel, or close the column
    * when it is the one already showing.
    *
@@ -496,19 +530,27 @@ class SettingsStore {
    * which is the whole point of the column — the second click on a panel you
    * are already looking at is the only one that changes the layout.
    */
-  toggleRightPanel(tab: Exclude<RightPanelTab, null>) {
-    this.state.rightPanel = this.state.rightPanel === tab ? null : tab;
+  toggleRightPanel(projectId: string | null, tab: Exclude<RightPanelTab, null>) {
+    this.setRightPanel(projectId, this.rightPanelFor(projectId) === tab ? null : tab);
+  }
+
+  setRightPanel(projectId: string | null, tab: RightPanelTab) {
+    if (this.rightPanelFor(projectId) === tab && this.state.rightPanel === tab) return;
+    this.state.rightPanel = tab;
+    if (projectId) this.state.rightPanelByProject[projectId] = tab;
     this.persistDeviceNow();
   }
 
-  setRightPanel(tab: RightPanelTab) {
-    if (this.state.rightPanel === tab) return;
-    this.state.rightPanel = tab;
+  /** A project that is gone keeps no memory: its entry would sit in the device
+      blob forever, growing by one per project ever deleted. */
+  forgetRightPanel(projectId: string) {
+    if (!(projectId in this.state.rightPanelByProject)) return;
+    delete this.state.rightPanelByProject[projectId];
     this.persistDeviceNow();
   }
 
   setRightPanelWidth(px: number) {
-    const clamped = Math.max(240, Math.min(600, Math.round(px)));
+    const clamped = clampRightPanelWidth(px);
     if (this.state.rightPanelWidth === clamped) return;
     this.state.rightPanelWidth = clamped;
     this.persistDeviceSoon();

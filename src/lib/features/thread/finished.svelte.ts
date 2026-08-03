@@ -1,6 +1,7 @@
 import type { ThreadStatus } from "$lib/types";
 import { isFinished } from "$lib/domain/thread-status";
 import { TransientMark } from "$lib/shared/utils/transientMark.svelte";
+import { noteThreadActivity, resetThreadActivity } from "./activity.svelte";
 
 // Long enough that a glance a few seconds after the agent stopped still catches
 // it, short enough that a row is never still claiming to be fresh news by the
@@ -29,6 +30,10 @@ export function noteStatusChange(
   next: ThreadStatus,
 ) {
   if (previous === next) return;
+  // Every change, not only the finishing ones: "working for 3 min" needs the
+  // moment it started as much as "idle for 2 h" needs the moment it stopped,
+  // and this is the one call both the local and the remote path make.
+  noteThreadActivity(threadId);
   if (isFinished(previous) || !isFinished(next)) return;
   marks.mark(threadId);
 }
@@ -46,4 +51,5 @@ export function clearFinished(threadId: string) {
 /** A workspace switch replaces every thread; no mark survives it. */
 export function resetFinished() {
   marks.reset();
+  resetThreadActivity();
 }

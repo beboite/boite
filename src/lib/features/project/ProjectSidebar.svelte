@@ -739,6 +739,7 @@ import { projectDisplayName } from "$lib/shared/project-label";
     x: number;
     y: number;
     w: number;
+    maxH: number;
   } | null>(null);
 
   function toggleLauncher(projectId: string, e: MouseEvent) {
@@ -751,6 +752,7 @@ import { projectDisplayName } from "$lib/shared/project-label";
     const button = e.currentTarget as HTMLElement;
     const fallback = button.getBoundingClientRect();
     const card = button.closest<HTMLElement>(".project-block")?.getBoundingClientRect();
+    const top = (card?.bottom ?? fallback.bottom) + 6;
     launcher = {
       projectId,
       // Under the whole card, not under the button. The button sits in the
@@ -761,8 +763,13 @@ import { projectDisplayName } from "$lib/shared/project-label";
       // Left edge and width come from the card too, measured rather than fixed:
       // the sidebar is resizable, so any constant is right at exactly one size.
       x: card?.left ?? fallback.left,
-      y: (card?.bottom ?? fallback.bottom) + 6,
+      y: top,
       w: card?.width ?? fallback.width,
+      // The panes behind fastpick are taller than the list they replace, and a
+      // menu anchored under a card near the bottom of the sidebar had nowhere to
+      // grow: it ran off the window and the models were unreachable. The room
+      // that is left, floored so a card at the very bottom still gets a menu.
+      maxH: Math.max(180, window.innerHeight - top - 8),
     };
   }
 
@@ -909,7 +916,7 @@ import { projectDisplayName } from "$lib/shared/project-label";
         <FolderArchive class="size-5 opacity-70" />
         <span>{t("sidebar.noArchived")}</span>
       </div>
-    {:else if !showArchived && app.projects.length === 0}
+    {:else if !showArchived && app.projects.every((p) => isScratch(p))}
       <button
         type="button"
         class="mx-1 mt-2 flex w-[calc(100%-0.5rem)] flex-col items-center gap-2 rounded-lg border border-dashed border-border bg-transparent px-3 py-7 text-xs text-muted-foreground transition hover:border-foreground/30 hover:bg-accent/30 hover:text-foreground"
@@ -1248,10 +1255,11 @@ import { projectDisplayName } from "$lib/shared/project-label";
     data-launcher-root
     role="menu"
     tabindex="-1"
-    class="launcher-menu fixed z-[var(--z-popover)]"
+    class="launcher-menu fixed z-[var(--z-popover)] flex flex-col overflow-hidden"
     style:left="{launcher.x}px"
     style:top="{launcher.y}px"
     style:width="{launcher.w}px"
+    style:max-height="{launcher.maxH}px"
     style:transform-origin="top center"
     transition:scale={{ duration: 90, start: 0.96 }}
   >
@@ -1259,6 +1267,7 @@ import { projectDisplayName } from "$lib/shared/project-label";
       compact
       projectId={launcher.projectId}
       onLaunched={() => (launcher = null)}
+      onClose={() => (launcher = null)}
     />
   </div>
 {/if}

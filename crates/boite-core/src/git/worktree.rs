@@ -1272,6 +1272,44 @@ pub fn list_worktrees_blocking(repo: &str) -> Result<Vec<WorktreeEntry>, String>
     Ok(entries)
 }
 
+/// What each of these directories takes on disk, in bytes.
+///
+/// Its own call rather than a field on [`WorktreeEntry`]: listing worktrees is
+/// what draws the panel, and walking every file of every checkout in front of
+/// it would trade a page that appears for a number nobody asked for yet.
+///
+/// Links are counted as nothing, deliberately. A worktree's heavy directories
+/// are junctions into the main checkout — the whole point of the pool — so
+/// following one would report `node_modules` once per worktree and offer to
+/// free disk that removing it would not give back. A directory that is not
+/// there answers zero rather than failing: a prunable worktree is one of the
+/// rows this is asked about.
+pub fn worktree_sizes_blocking(paths: &[String]) -> Vec<u64> {
+    paths.iter().map(|p| dir_size(Path::new(p))).collect()
+}
+
+fn dir_size(root: &Path) -> u64 {
+    let mut total: u64 = 0;
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let Ok(ty) = entry.file_type() else { continue };
+            if ty.is_symlink() {
+                continue;
+            }
+            if ty.is_dir() {
+                stack.push(entry.path());
+            } else if let Ok(meta) = entry.metadata() {
+                total = total.saturating_add(meta.len());
+            }
+        }
+    }
+    total
+}
+
 #[cfg(test)]
 mod worktree_tests {
     // Provisioning artifacts is something a worktree does, so what exercises it
@@ -1332,6 +1370,26 @@ mod worktree_tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.repo);
         }
+    }
+
+    /// The number a sweep button promises. A directory git has already lost
+    /// weighs nothing rather than failing the whole call: a prunable worktree is
+    /// one of the rows that gets measured.
+    #[test]
+    fn a_worktree_weighs_the_files_it_holds() {
+        let dir = scratch("sizes");
+        fs::create_dir_all(dir.join("sub")).unwrap();
+        fs::write(dir.join("a.bin"), vec![0u8; 2048]).unwrap();
+        fs::write(dir.join("sub").join("b.bin"), vec![0u8; 1024]).unwrap();
+
+        let gone = scratch("sizes-gone");
+        let sizes = worktree_sizes_blocking(&[
+            dir.to_string_lossy().to_string(),
+            gone.to_string_lossy().to_string(),
+        ]);
+        assert_eq!(sizes, vec![3072, 0]);
+
+        let _ = fs::remove_dir_all(&dir);
     }
 
     /// A thread whose row lost its worktree path can be given it back, and only

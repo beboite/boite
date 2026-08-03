@@ -177,12 +177,15 @@
    * in either place, and a click puts it away wherever it is.
    */
   function panelShowing(kind: PanelKind): boolean {
-    return settings.state.rightPanel === kind || panePresence(kind) !== null;
+    return (
+      settings.rightPanelFor(app.currentProjectId) === kind ||
+      panePresence(kind) !== null
+    );
   }
 
   function togglePanel(kind: PanelKind) {
     if (closePanelPane(kind)) return;
-    settings.toggleRightPanel(kind);
+    settings.toggleRightPanel(app.currentProjectId, kind);
   }
 
   /**

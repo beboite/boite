@@ -59,8 +59,11 @@ import { projectDisplayName } from "$lib/shared/project-label";
     </header>
 
     <div class="min-h-0 flex-1 overflow-y-auto" class:scratch-page={isScratch(project)}>
+      <!-- Wider than the old 72rem, because the page is a dashboard rather than
+           a document: a 27" monitor was drawing six cards down the middle and
+           two hand-widths of background on either side. -->
       <div
-        class="mx-auto w-full max-w-6xl px-4 py-4"
+        class="mx-auto w-full max-w-[110rem] px-5 py-5"
         class:scratch-cards={isScratch(project)}
       >
         <ProjectOverview {project} {onOpenThread} />

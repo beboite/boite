@@ -12,6 +12,7 @@ import { workspace } from "$lib/backend";
 import { SCRATCH_PROJECT_ID } from "$lib/domain/project";
 import { makeScratchProject } from "$lib/features/project/scratch";
 import { gitStore } from "$lib/features/git/store.svelte";
+import { settings } from "$lib/features/settings/store.svelte";
 import { syncRoots } from "./hydrate";
 import type { AppState } from "./store.svelte";
 
@@ -154,6 +155,7 @@ export async function removeProject(app: AppState, id: string) {
     app.selectedProjectId = app.sortedProjects[0]?.id ?? null;
   }
   gitStore.drop(id);
+  settings.forgetRightPanel(id);
   void syncRoots(app);
   for (const thread of orphanThreads) {
     try {

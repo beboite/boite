@@ -52,6 +52,7 @@ pub const ALL_METHODS: &[&str] = &[
     "worktree.reserve",
     "worktree.hold",
     "worktree.remove",
+    "worktree.sizes",
 ];
 
 #[derive(Debug, Clone, PartialEq)]
@@ -183,6 +184,13 @@ pub enum Git {
         path: String,
         force: bool,
     },
+    /// What these worktrees take on disk, so a panel offering to reclaim space
+    /// can say how much. Apart from the listing because walking the files costs
+    /// far more than reading git's own answer, and nothing that only draws the
+    /// list has to pay for it.
+    WorktreeSizes {
+        paths: Vec<String>,
+    },
 }
 
 impl Git {
@@ -270,6 +278,9 @@ impl Git {
                 path: path()?,
                 force: bool_param(params, "force", false),
             },
+            "worktree.sizes" => Git::WorktreeSizes {
+                paths: str_list(params, "paths"),
+            },
             other => return Err(format!("unknown method: {other}")),
         })
     }
@@ -303,6 +314,7 @@ impl Git {
             Git::WorktreeReserve { .. } => "worktree.reserve",
             Git::WorktreeHold { .. } => "worktree.hold",
             Git::WorktreeRemove { .. } => "worktree.remove",
+            Git::WorktreeSizes { .. } => "worktree.sizes",
         }
     }
 
@@ -324,6 +336,7 @@ impl Git {
             Git::Commit { .. } => Wire::Key("sha"),
             Git::WorktreeOpen { .. } | Git::WorktreeAdopt { .. } => Wire::Key("path"),
             Git::WorktreeList { .. } => Wire::Key("worktrees"),
+            Git::WorktreeSizes { .. } => Wire::Key("sizes"),
 
             Git::Stage { .. }
             | Git::Unstage { .. }
@@ -357,6 +370,7 @@ impl Git {
             | Git::PullRequest { .. }
             | Git::FileVersions { .. }
             | Git::WorktreeList { .. }
+            | Git::WorktreeSizes { .. }
             | Git::WorktreeHold { .. } => Capability::ReadProject,
 
             Git::SwitchBranch { .. }
@@ -415,6 +429,10 @@ impl Git {
             | Git::WorktreeList { repo } => vec![repo],
 
             Git::WorktreeRemove { repo, path, .. } => vec![repo, path],
+
+            // Every one of them, for the same reason `worktree.remove` offers
+            // both of its own: a list is not a weaker claim than a single path.
+            Git::WorktreeSizes { paths } => paths.iter().map(String::as_str).collect(),
         }
     }
 
@@ -547,6 +565,7 @@ impl Git {
                 git::remove_worktree_blocking(&repo, &path, force)?;
                 Value::Null
             }
+            Git::WorktreeSizes { paths } => value_of(git::worktree_sizes_blocking(&paths)),
         })
     }
 }
@@ -594,6 +613,7 @@ mod tests {
             "headFile": "b.txt",
             "files": ["a.txt"],
             "untracked": ["b.txt"],
+            "paths": [path],
             "limit": 10,
             "skip": 0,
             "create": false,
@@ -721,6 +741,7 @@ mod tests {
             ("worktree.reserve", Wire::Ok),
             ("worktree.hold", Wire::Bare),
             ("worktree.remove", Wire::Ok),
+            ("worktree.sizes", Wire::Key("sizes")),
         ];
         assert_eq!(expected.len(), ALL_METHODS.len());
         for (method, wire) in expected {

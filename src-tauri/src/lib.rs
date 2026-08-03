@@ -345,6 +345,7 @@ pub fn run() {
             commands::git::worktree_reserve,
             commands::git::worktree_hold,
             commands::git::worktree_remove,
+            commands::git::worktree_sizes,
             commands::git::git_status,
             commands::git::git_changed_paths,
             commands::git::git_log,

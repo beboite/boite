@@ -218,7 +218,7 @@ export function buildPaletteCommands(): PaletteCommand[] {
       id: `panel:${kind}`,
       section: "panes",
       labelKey,
-      run: () => settings.setRightPanel(kind),
+      run: () => settings.setRightPanel(app.currentProjectId, kind),
     });
   }
 

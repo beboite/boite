@@ -70,6 +70,7 @@ export const tauriWorktree: WorktreeApi = {
   reserve: (path, name) => invoke("worktree_reserve", { path, name }),
   hold: (path) => invoke<WorktreeHold>("worktree_hold", { path }),
   remove: (repo, path, force) => invoke("worktree_remove", { repo, path, force }),
+  sizes: (paths) => invoke<number[]>("worktree_sizes", { paths }),
 };
 
 export const tauriExplorer: ExplorerApi = {

@@ -339,7 +339,7 @@
   // tree answers, and the titlebar's own memory of which one is up whether or
   // not anything is open.
   $effect(() => {
-    const docked = settings.state.rightPanel;
+    const docked = settings.rightPanelFor(app.currentProjectId);
     if (docked === "git" || docked === "explorer") {
       prefetchWhenIdle(EditorView);
       return;
@@ -599,7 +599,7 @@
     <!-- Outside <main>, beside it: the column describes the project rather than
          whatever view is up, so it stays put across the terminal, the project
          page and the editor instead of being something each one has to draw. -->
-    {#if !mobile && app.ready && settings.state.rightPanel}
+    {#if !mobile && app.ready && settings.rightPanelFor(app.currentProjectId)}
       <SidePanel />
     {/if}
   </div>
