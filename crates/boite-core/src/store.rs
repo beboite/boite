@@ -3,16 +3,31 @@ use std::path::Path;
 use parking_lot::Mutex;
 use rusqlite::Connection;
 
-use boite_core::{journal, migrations};
-
-use crate::models::{Project, Thread, Todo};
+use crate::model::{Project, Thread, Todo};
+use crate::{journal, migrations};
 
 pub struct Store {
     conn: Mutex<Connection>,
 }
 
 impl Store {
+    /// Opens the database and brings the schema up to date.
+    ///
+    /// For the process that owns the file. On the desktop the schema belongs to
+    /// tauri-plugin-sql, which keeps its own ledger — use [`Store::attach`]
+    /// there, or two migration mechanisms race over the same tables.
     pub fn open(path: &Path) -> Result<Store, String> {
+        let store = Store::attach(path)?;
+        store.migrate()?;
+        Ok(store)
+    }
+
+    /// Opens the database of a process that migrates it some other way.
+    ///
+    /// The desktop is one: its schema is applied by tauri-plugin-sql from the
+    /// frontend, against an sqlx checksum ledger, and this connection is a
+    /// second reader of the same file. Same pragmas, no migration.
+    pub fn attach(path: &Path) -> Result<Store, String> {
         let conn = Connection::open(path).map_err(|e| format!("open db failed: {e}"))?;
         // WAL + NORMAL: thread status/title updates fire on agent activity, and
         // the default rollback journal with synchronous=FULL costs an fsync per
@@ -20,23 +35,22 @@ impl Store {
         // and flash wear. WAL still survives a process crash; only a host power
         // loss can lose the last commits, which for cosmetic thread metadata is
         // the right trade. busy_timeout keeps a concurrent reader from erroring
-        // out instantly on a write lock.
+        // out instantly on a write lock, which on the desktop is the plugin and
+        // this connection taking turns.
         conn.execute_batch(
             "PRAGMA journal_mode = WAL;
              PRAGMA synchronous = NORMAL;
              PRAGMA busy_timeout = 5000;",
         )
         .map_err(|e| format!("pragma setup failed: {e}"))?;
-        let store = Store {
+        Ok(Store {
             conn: Mutex::new(conn),
-        };
-        store.migrate()?;
-        Ok(store)
+        })
     }
 
     /// Applies whatever `PRAGMA user_version` says is still pending.
     ///
-    /// The list itself lives in `boite_core::migrations`, shared with the
+    /// The list itself lives in `crate::migrations`, shared with the
     /// desktop, which keeps two hand-copied schemas from drifting. What stays
     /// here is the mechanism: this side counts positions, the desktop counts
     /// explicit versions, and the shared list is ordered so both readings land
@@ -210,7 +224,11 @@ impl Store {
                 |r| r.get(0),
             )
             .unwrap_or(0);
-        let id = format!("{:032x}", rand::random::<u128>());
+        // Thirty-two hex characters, which is the shape every id in this table
+        // already has. It used to come from `rand`, a dependency this crate did
+        // not have and does not need: a v4 uuid is the same width, the same
+        // alphabet, and already here for the thread ids.
+        let id = uuid::Uuid::new_v4().simple().to_string();
         conn.execute(
             "INSERT INTO todos
              (id, project_id, text, description, state, note, position, created_at, updated_at)

@@ -11,7 +11,7 @@ use crate::events::AppEvent;
 use crate::notify::Notifier;
 use crate::push::PushManager;
 use crate::registry::Registry;
-use crate::store::Store;
+use boite_core::store::Store;
 
 pub struct AppState {
     pub store: Arc<Store>,
@@ -159,7 +159,7 @@ fn ensure_under(root: &Path, path: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::Project;
+    use boite_core::model::Project;
     use std::sync::atomic::AtomicUsize;
     use tokio::sync::broadcast;
 

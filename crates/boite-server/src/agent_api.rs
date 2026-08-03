@@ -28,7 +28,7 @@ use boite_core::project;
 use boite_core::scope::ProjectRoots;
 
 use crate::events::AppEvent;
-use crate::store::Store;
+use boite_core::store::Store;
 
 /// What a spawned terminal is told about the agent endpoint.
 ///
@@ -188,7 +188,7 @@ fn resolve_project(inner: &Inner, needle: &str) -> Result<(String, String), Stri
     if let Some(p) = projects.iter().find(|p| norm(&p.cwd) == target) {
         return Ok((p.id.clone(), p.name.clone()));
     }
-    let by_name: Vec<&crate::models::Project> = projects
+    let by_name: Vec<&boite_core::model::Project> = projects
         .iter()
         .filter(|p| p.name.to_lowercase() == target)
         .collect();

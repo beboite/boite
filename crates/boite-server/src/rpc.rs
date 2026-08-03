@@ -7,9 +7,9 @@ use boite_core::pty::PtySpawnArgs;
 use boite_core::{editor, explorer, project, session, shell};
 
 use crate::events::AppEvent;
-use crate::models::{Project, Thread};
+use boite_core::model::{Project, Thread};
 use crate::state::AppState;
-use crate::store::{ColVal, ThreadCol};
+use boite_core::store::{ColVal, ThreadCol};
 
 fn now_ms() -> i64 {
     SystemTime::now()
@@ -370,7 +370,7 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
 
         "todo.save" => {
             let raw = params.get("todo").cloned().ok_or("missing todo")?;
-            let todo: crate::models::Todo =
+            let todo: boite_core::model::Todo =
                 serde_json::from_value(raw).map_err(|e| format!("bad todo: {e}"))?;
             state.store.save_todo(&todo)?;
             let _ = state.events.send(AppEvent::TodosChanged);
