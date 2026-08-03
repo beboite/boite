@@ -39,6 +39,7 @@
     resolveKey,
   } from "$lib/features/thread/session";
   import { decideSpawn, launchPlan } from "./launch";
+  import { keyIntent } from "./key-intent";
   import { claimTypedPrompt } from "$lib/features/thread/typedPrompt";
   import { parsePromotion, PROMOTE_OSC } from "$lib/features/thread/promote";
   import { platform } from "$lib/storage/platform.svelte";
@@ -922,59 +923,39 @@
     });
 
     term.attachCustomKeyEventHandler((e) => {
-      if (e.type !== "keydown") return true;
-      const code = e.code;
-
-      if (e.ctrlKey && e.shiftKey && code === "KeyC") {
-        consumeTerminalShortcut(e);
-        void copySelection();
-        return false;
-      }
-      if (e.ctrlKey && e.shiftKey && code === "KeyV") {
-        consumeTerminalShortcut(e);
-        void pasteFromClipboard();
-        return false;
-      }
-      if (e.ctrlKey && !e.shiftKey && !e.altKey && code === "KeyC") {
-        const sel = term?.getSelection();
-        if (sel) {
+      // What the key means is `key-intent.ts`; what to do about it is here.
+      // Splitting the two is what made the branch deciding whether Ctrl+C
+      // copies or interrupts reachable by a test at all.
+      const intent = keyIntent(
+        e,
+        { isMacOS: platform.isMacOS, hasSelection: () => !!term?.getSelection() },
+        shouldSendLineFeed(e, e.code),
+      );
+      switch (intent) {
+        case "copy":
+          consumeTerminalShortcut(e);
+          void copySelection();
+          return false;
+        case "copy-and-clear":
           consumeTerminalShortcut(e);
           void copySelection().then(() => term?.clearSelection());
           return false;
-        }
+        case "paste":
+          consumeTerminalShortcut(e);
+          void pasteFromClipboard();
+          return false;
+        case "restore-thread":
+          consumeTerminalShortcut(e);
+          void restoreLastClosedThread();
+          return false;
+        case "swallow":
+          e.preventDefault();
+          return false;
+        case "line-feed":
+          return sendLineFeed(e);
+        case "pass":
+          return true;
       }
-      if (e.ctrlKey && !e.shiftKey && !e.altKey && code === "KeyV") {
-        consumeTerminalShortcut(e);
-        void pasteFromClipboard();
-        return false;
-      }
-      if (e.ctrlKey && e.shiftKey && !e.altKey && code === "KeyT") {
-        e.preventDefault();
-        e.stopPropagation();
-        void restoreLastClosedThread();
-        return false;
-      }
-      // Command palette combos never reach the shell; the layout handler
-      // (window keydown, still bubbling) opens it. On macOS the palette is
-      // Cmd+K, so Ctrl+K stays with the shell (readline kill-line).
-      if (e.ctrlKey && !e.shiftKey && !e.altKey && code === "KeyK" && !platform.isMacOS) {
-        e.preventDefault();
-        return false;
-      }
-      if (e.metaKey && !e.shiftKey && !e.altKey && code === "KeyK" && platform.isMacOS) {
-        e.preventDefault();
-        return false;
-      }
-      if (e.ctrlKey && e.shiftKey && !e.altKey && code === "KeyP") {
-        e.preventDefault();
-        return false;
-      }
-
-      if (shouldSendLineFeed(e, code)) {
-        return sendLineFeed(e);
-      }
-
-      return true;
     });
 
     term.attachCustomWheelEventHandler(handleCodexWheel);

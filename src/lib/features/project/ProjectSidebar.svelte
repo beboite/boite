@@ -35,7 +35,15 @@ import { projectDisplayName } from "$lib/shared/project-label";
   import { longPress } from "$lib/shared/actions/longPress";
   import ContextMenu from "$lib/shared/components/ContextMenu.svelte";
   import type { ContextMenuItem } from "$lib/shared/components/ContextMenu.svelte";
-  import type { DropSide } from "$lib/features/panes/types";
+  import {
+    dropIntent,
+    hasBecomeADrag,
+    reordered,
+    rowShift,
+    sideFromRect,
+    slotIndexAt,
+    type RowSnapshot,
+  } from "./sidebar-drag";
   import type { Thread, ThreadStatus } from "$lib/types";
   import Plus from "@lucide/svelte/icons/plus";
   import X from "@lucide/svelte/icons/x";
@@ -101,7 +109,6 @@ import { projectDisplayName } from "$lib/shared/project-label";
     rows[next]?.focus();
   }
 
-  type RowSnapshot = { id: string; top: number; height: number };
   type SourceRect = { left: number; top: number; width: number; height: number };
   type DragState = {
     kind: "project" | "thread";
@@ -283,8 +290,7 @@ import { projectDisplayName } from "$lib/shared/project-label";
     drag.y = e.clientY;
 
     if (!drag.active) {
-      const moved = Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY);
-      if (moved < 5) {
+      if (!hasBecomeADrag({ x: drag.startX, y: drag.startY }, { x: e.clientX, y: e.clientY })) {
         dragState = { ...drag };
         return;
       }
@@ -306,26 +312,12 @@ import { projectDisplayName } from "$lib/shared/project-label";
 
     e.preventDefault();
     if (drag.kind === "project") {
-      drag.slotIndex = computeSlotIndex(drag);
+      drag.slotIndex = slotIndexAt(drag.siblings, drag.id, drag.y);
       paneStore.dropPreview = null;
     } else {
       updateThreadDrag(drag, e);
     }
     dragState = { ...drag };
-  }
-
-  function computeSlotIndex(drag: DragState): number | null {
-    if (drag.siblings.length === 0) return null;
-    const sourceIdx = drag.siblings.findIndex((s) => s.id === drag.id);
-    if (sourceIdx < 0) return null;
-    const reduced = drag.siblings.filter((_, i) => i !== sourceIdx);
-    if (reduced.length === 0) return 0;
-    const cy = drag.y;
-    for (let i = 0; i < reduced.length; i++) {
-      const mid = reduced[i].top + reduced[i].height / 2;
-      if (cy < mid) return i;
-    }
-    return reduced.length;
   }
 
   function updateThreadDrag(drag: DragState, e: PointerEvent) {
@@ -335,35 +327,24 @@ import { projectDisplayName } from "$lib/shared/project-label";
       drag.dropProjectId = null;
       return;
     }
+    // Reading the DOM is this half's job; deciding what the reading means is
+    // `dropIntent`, which is where the three outcomes are kept exclusive.
     const overEl = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
-    const inAside = !!overEl?.closest("[data-sidebar-root]");
-    const sameProjectList = !!overEl?.closest(
-      `[data-thread-list][data-project-id="${drag.projectId}"]`,
-    );
-    const overSourceProjectHeader = !!overEl?.closest(
-      `[data-project-row="${drag.projectId}"]`,
-    );
-    if (inAside && (sameProjectList || overSourceProjectHeader)) {
-      drag.slotIndex = computeSlotIndex(drag);
-      drag.dropProjectId = null;
-      return;
-    }
-    drag.slotIndex = null;
-    // Over a different project — its header or the space its threads occupy —
-    // the card is being given to it. Archived rows are excluded: they are only
-    // on screen while the archive list is open, and dropping onto one would
-    // move a live thread into a project the user has put away.
-    const overProject =
-      overEl?.closest<HTMLElement>("[data-project-row]")?.dataset.projectRow ??
-      overEl?.closest<HTMLElement>("[data-thread-list]")?.dataset.projectId ??
-      null;
-    drag.dropProjectId =
-      inAside &&
-      overProject &&
-      overProject !== drag.projectId &&
-      app.sortedProjects.some((p) => p.id === overProject)
-        ? overProject
-        : null;
+    const intent = dropIntent(drag.projectId, {
+      inSidebar: !!overEl?.closest("[data-sidebar-root]"),
+      overOwnList: !!overEl?.closest(
+        `[data-thread-list][data-project-id="${drag.projectId}"]`,
+      ),
+      overOwnHeader: !!overEl?.closest(`[data-project-row="${drag.projectId}"]`),
+      overProjectId:
+        overEl?.closest<HTMLElement>("[data-project-row]")?.dataset.projectRow ??
+        overEl?.closest<HTMLElement>("[data-thread-list]")?.dataset.projectId ??
+        null,
+      isLiveProject: (id) => app.sortedProjects.some((p) => p.id === id),
+    });
+    drag.slotIndex =
+      intent.kind === "reorder" ? slotIndexAt(drag.siblings, drag.id, drag.y) : null;
+    drag.dropProjectId = intent.kind === "give" ? intent.projectId : null;
   }
 
   function updatePaneDropPreview(
@@ -430,19 +411,6 @@ import { projectDisplayName } from "$lib/shared/project-label";
     return false;
   }
 
-  function sideFromRect(
-    rect: { x: number; y: number; w: number; h: number },
-    x: number,
-    y: number,
-  ): DropSide {
-    const localX = x - rect.x;
-    const localY = y - rect.y;
-    const dx = Math.min(localX, rect.w - localX) / rect.w;
-    const dy = Math.min(localY, rect.h - localY) / rect.h;
-    if (dx < dy) return localX < rect.w / 2 ? "left" : "right";
-    return localY < rect.h / 2 ? "top" : "bottom";
-  }
-
   function pointerDragEnd(e: PointerEvent) {
     const drag = dragState;
     if (!drag || e.pointerId !== drag.pointerId) return;
@@ -470,15 +438,9 @@ import { projectDisplayName } from "$lib/shared/project-label";
   }
 
   function commitProjectDrag(drag: DragState) {
-    const slot = drag.slotIndex;
-    if (slot === null) return;
-    const ids = app.sortedProjects.map((p) => p.id);
-    const fromIdx = ids.indexOf(drag.id);
-    if (fromIdx < 0) return;
-    ids.splice(fromIdx, 1);
-    const insertAt = Math.min(slot, ids.length);
-    ids.splice(insertAt, 0, drag.id);
-    void settings.setProjectOrder(ids);
+    if (drag.slotIndex === null) return;
+    const next = reordered(app.sortedProjects.map((p) => p.id), drag.id, drag.slotIndex);
+    if (next) void settings.setProjectOrder(next);
   }
 
   function commitThreadDrag(drag: DragState, e: PointerEvent) {
@@ -503,12 +465,8 @@ import { projectDisplayName } from "$lib/shared/project-label";
 
     if (drag.slotIndex !== null) {
       const ids = app.threadsByProjectSorted(drag.projectId).map((t) => t.id);
-      const fromIdx = ids.indexOf(drag.id);
-      if (fromIdx < 0) return;
-      ids.splice(fromIdx, 1);
-      const insertAt = Math.min(drag.slotIndex, ids.length);
-      ids.splice(insertAt, 0, drag.id);
-      void settings.setThreadOrder(drag.projectId, ids);
+      const next = reordered(ids, drag.id, drag.slotIndex);
+      if (next) void settings.setThreadOrder(drag.projectId, next);
       return;
     }
 
@@ -524,14 +482,6 @@ import { projectDisplayName } from "$lib/shared/project-label";
         paneStore.unsplit(drag.id);
       }
     }
-  }
-
-  function rowShift(idx: number, sourceIdx: number, slot: number, height: number): number {
-    if (idx === sourceIdx) return 0;
-    const eff = idx < sourceIdx ? idx : idx - 1;
-    const base = idx > sourceIdx ? -height : 0;
-    const drop = eff >= slot ? height : 0;
-    return base + drop;
   }
 
   function threadHoverEnter(id: string) {
