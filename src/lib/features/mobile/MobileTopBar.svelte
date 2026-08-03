@@ -2,7 +2,7 @@
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { platform as detectPlatform } from "@tauri-apps/plugin-os";
   import { app } from "$lib/app/store.svelte";
-  import { projectDisplayName } from "$lib/features/project/scratch";
+  import { projectDisplayName } from "$lib/shared/project-label";
   import { hasTauri } from "$lib/backend/env";
   import { t } from "$lib/i18n/index.svelte";
   import WorkspaceToggle from "$lib/features/workspace/WorkspaceToggle.svelte";

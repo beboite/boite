@@ -2,7 +2,8 @@
   import { onMount } from "svelte";
   import { app } from "$lib/app/store.svelte";
   import { cliDetection } from "$lib/features/settings/cliDetection.svelte";
-  import { isScratch, projectDisplayName } from "$lib/features/project/scratch";
+  import { isScratch } from "$lib/domain/project";
+import { projectDisplayName } from "$lib/shared/project-label";
   import ProjectOverview from "./ProjectOverview.svelte";
   import BoiteLogo from "$lib/shared/components/BoiteLogo.svelte";
   import { t } from "$lib/i18n/index.svelte";

@@ -7,13 +7,18 @@
  * in the app, and the endpoint's whole job is to decide whether the request
  * makes sense and then say so.
  *
+ * In `lib/app` rather than under a feature, which is where it used to sit: it
+ * reaches into projects, threads, settings and notifications in the same
+ * function, and being filed under `thread` made the one import it needs from
+ * `project` into a cycle between the two.
+ *
  * Which is why these arrive as an event rather than as the answer to an HTTP
  * call: two of the three kill the process that asked. The reply is written
  * while the agent is still alive to read a refusal, and the work happens after
  * it has gone.
  */
 
-import { app } from "$lib/app/store.svelte";
+import { app } from "./store.svelte";
 import { workspace } from "$lib/backend";
 import { logger } from "$lib/shared/services/logger.svelte";
 import { notifications } from "$lib/features/notifications/store.svelte";
@@ -22,9 +27,9 @@ import { settings, parseCommand } from "$lib/features/settings/store.svelte";
 import { CLI_PRESETS } from "$lib/features/settings/cliPresets";
 import { resolveIconKey } from "$lib/shared/icons/detect";
 import { createProject } from "$lib/features/project/api";
-import { moveThreadToProject } from "./move";
-import { takesOpeningPrompt } from "./session";
-import { launchAgent } from "./api";
+import { moveThreadToProject } from "$lib/features/thread/move";
+import { takesOpeningPrompt } from "$lib/features/thread/session";
+import { launchAgent } from "$lib/features/thread/api";
 import { anchorProjectId, openPane } from "$lib/features/panes/open";
 import { paneStore } from "$lib/features/panes/store.svelte";
 import { classifyBrowserUrl } from "$lib/features/browser/url";

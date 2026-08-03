@@ -1,6 +1,6 @@
 import { app } from "$lib/app/store.svelte";
 import { settings } from "$lib/features/settings/store.svelte";
-import { projectDisplayName } from "$lib/features/project/scratch";
+import { projectDisplayName } from "$lib/shared/project-label";
 import {
   closeThreadWithConfirm,
   launchBlankTerminalHere,

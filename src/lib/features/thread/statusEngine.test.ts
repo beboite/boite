@@ -58,7 +58,7 @@ vi.mock("$lib/backend/tauri/parked", () => ({ parkedLocal: new Map() }));
 
 // The case the whole backstop exists for: a thread whose pane is gone has no
 // emulator holding its rows, and nothing can be read off it at all.
-vi.mock("$lib/features/terminal/live", () => ({
+vi.mock("$lib/shared/terminals", () => ({
   liveTerminal: (id: string) => (h.emulators.has(id) ? { id } : null),
   terminalScreenRows: () => [],
 }));

@@ -9,7 +9,8 @@
  */
 
 import { app } from "$lib/app/store.svelte";
-import { isScratch, projectDisplayName } from "$lib/features/project/scratch";
+import { isScratch } from "$lib/domain/project";
+import { projectDisplayName } from "$lib/shared/project-label";
 import { t } from "$lib/i18n/index.svelte";
 import type { ContextMenuItem } from "$lib/shared/components/ContextMenu.svelte";
 

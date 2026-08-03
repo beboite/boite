@@ -12,7 +12,7 @@ import { t } from "$lib/i18n/index.svelte";
 import { confirmDialog } from "$lib/shared/components/confirm.svelte";
 import { uuid } from "$lib/shared/utils/uuid";
 import { parkedLocal } from "$lib/backend/tauri/parked";
-import { isScratch } from "$lib/features/project/scratch";
+import { isScratch } from "$lib/domain/project";
 import {
   comboArgs,
   iconKeyForKind,

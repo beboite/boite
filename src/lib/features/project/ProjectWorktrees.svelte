@@ -3,7 +3,7 @@
   import { app } from "$lib/app/store.svelte";
   import { backendForPath } from "$lib/backend";
   import { settings } from "$lib/features/settings/store.svelte";
-  import { isScratch } from "$lib/features/project/scratch";
+  import { isScratch } from "$lib/domain/project";
   import { forgetWarmedWorktree } from "$lib/features/thread/api";
   import { notifications } from "$lib/features/notifications/store.svelte";
   import { logger } from "$lib/shared/services/logger.svelte";
