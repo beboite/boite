@@ -143,13 +143,17 @@ fn write_project_credentials(
     let projects = match store.load_projects() {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("[boite/agent-api] credentials: {e}");
+            crate::logging::warn_to_log(app, "agent-api", &format!("credentials: {e}"));
             return;
         }
     };
     for project in projects {
         if let Err(e) = write_one(app, url, token_path, &project.id) {
-            eprintln!("[boite/agent-api] credentials for {}: {e}", project.id);
+            crate::logging::warn_to_log(
+                app,
+                "agent-api",
+                &format!("credentials for {}: {e}", project.id),
+            );
         }
     }
 }
@@ -198,6 +202,8 @@ pub fn start(app: &tauri::AppHandle) {
     let config_dir = match app.path().app_config_dir() {
         Ok(dir) => dir,
         Err(e) => {
+            // The one that stays on stderr alone: without a config dir there is
+            // no log file to write it to.
             eprintln!("[boite/agent-api] disabled, no config dir: {e}");
             return;
         }
@@ -205,7 +211,7 @@ pub fn start(app: &tauri::AppHandle) {
     let store = match Store::attach(&config_dir.join("boite.db")) {
         Ok(store) => store,
         Err(e) => {
-            eprintln!("[boite/agent-api] disabled: {e}");
+            crate::logging::warn_to_log(app, "agent-api", &format!("disabled: {e}"));
             return;
         }
     };
@@ -221,26 +227,30 @@ pub fn start(app: &tauri::AppHandle) {
     let listener = match std::net::TcpListener::bind("127.0.0.1:0") {
         Ok(l) => l,
         Err(e) => {
-            eprintln!("[boite/agent-api] bind failed: {e}");
+            crate::logging::warn_to_log(app, "agent-api", &format!("bind failed: {e}"));
             return;
         }
     };
     let port = match listener.local_addr() {
         Ok(a) => a.port(),
         Err(e) => {
-            eprintln!("[boite/agent-api] local_addr failed: {e}");
+            crate::logging::warn_to_log(app, "agent-api", &format!("local_addr failed: {e}"));
             return;
         }
     };
     if let Err(e) = listener.set_nonblocking(true) {
-        eprintln!("[boite/agent-api] set_nonblocking failed: {e}");
+        crate::logging::warn_to_log(app, "agent-api", &format!("set_nonblocking failed: {e}"));
         return;
     }
     let url = format!("http://127.0.0.1:{port}");
     let token_path = config_dir.join("agent-token");
     // Written before anything can want to read it back.
     if let Err(e) = boite_core::secret_file::write(&token_path, &token) {
-        eprintln!("[boite/agent-api] cannot write the token file: {e}");
+        crate::logging::warn_to_log(
+            app,
+            "agent-api",
+            &format!("cannot write the token file: {e}"),
+        );
         return;
     }
     write_project_credentials(app, &store, &url, &token_path);
@@ -252,16 +262,17 @@ pub fn start(app: &tauri::AppHandle) {
     }));
     app.manage(AgentApi { url, token_path });
 
+    let served = app.clone();
     tauri::async_runtime::spawn(async move {
         let listener = match tokio::net::TcpListener::from_std(listener) {
             Ok(l) => l,
             Err(e) => {
-                eprintln!("[boite/agent-api] listener adoption failed: {e}");
+                crate::logging::warn_to_log(&served, "agent-api", &format!("listener adoption failed: {e}"));
                 return;
             }
         };
         if let Err(e) = axum::serve(listener, router).await {
-            eprintln!("[boite/agent-api] serve ended: {e}");
+            crate::logging::warn_to_log(&served, "agent-api", &format!("serve ended: {e}"));
         }
     });
 }
