@@ -16,7 +16,7 @@ import { anchorPaneId, openPane } from "$lib/features/panes/open";
 import { paneStore } from "$lib/features/panes/store.svelte";
 import { classifyBrowserUrl } from "$lib/features/browser/url";
 import { notifications } from "$lib/features/notifications/store.svelte";
-import type { PaneContent } from "$lib/features/panes/types";
+import type { PaneContent, PanelKind } from "$lib/features/panes/types";
 import type { IconKey } from "$lib/types";
 
 export type PaletteSection = "threads" | "actions" | "panes" | "projects";
@@ -203,19 +203,30 @@ export function buildPaletteCommands(): PaletteCommand[] {
     });
   }
 
+  // Git, files and the todo list show in the docked column, which is where they
+  // live: asking for git from the palette means the same thing as clicking git
+  // in the titlebar, and neither should rearrange the panes. The pane is still
+  // reachable — the column's own detach button — but it is a deliberate act
+  // rather than what the obvious command does.
+  const panelCommands: [PanelKind, MessageKey][] = [
+    ["git", "panes.openGit"],
+    ["explorer", "panes.openExplorer"],
+    ["todo", "panes.openTodo"],
+  ];
+  for (const [kind, labelKey] of panelCommands) {
+    commands.push({
+      id: `panel:${kind}`,
+      section: "panes",
+      labelKey,
+      run: () => settings.setRightPanel(kind),
+    });
+  }
+
   // Panes. Until now the only way to make one was to drag a thread row onto a
   // live terminal, which is a gesture nobody finds by accident and the reason
-  // the split went unused. These are the same call the titlebar's buttons and
-  // the agent's MCP verb make.
-  //
-  // Git, files and todo also had an Actions entry each, toggling the right
-  // rail. The rail is gone, so those three set a stored preference and opened
-  // nothing; this is where they live now, and there is one of each rather than
-  // two.
+  // the split went unused. These are the same call the titlebar's context menu
+  // and the agent's MCP verb make.
   const paneCommands: [string, MessageKey, PaneContent][] = [
-    ["git", "panes.openGit", { kind: "git" }],
-    ["explorer", "panes.openExplorer", { kind: "explorer" }],
-    ["todo", "panes.openTodo", { kind: "todo" }],
     ["dashboard", "panes.openDashboard", { kind: "dashboard" }],
     ["editor", "panes.openEditor", { kind: "editor" }],
   ];

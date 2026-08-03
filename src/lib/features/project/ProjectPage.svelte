@@ -4,7 +4,6 @@
   import { cliDetection } from "$lib/features/settings/cliDetection.svelte";
   import { isScratch, projectDisplayName } from "$lib/features/project/scratch";
   import ProjectOverview from "./ProjectOverview.svelte";
-  import ShortcutBar from "$lib/features/shortcut/ShortcutBar.svelte";
   import BoiteLogo from "$lib/shared/components/BoiteLogo.svelte";
   import { t } from "$lib/i18n/index.svelte";
 
@@ -44,8 +43,6 @@
   </div>
 {:else}
   <div class="flex h-full min-h-0 flex-col">
-    <ShortcutBar />
-
     <header class="flex h-8 shrink-0 items-center gap-2 border-b border-border px-4">
       {#if project.icon}
         <img src={project.icon} alt="" class="size-4 shrink-0 rounded-sm object-cover" />

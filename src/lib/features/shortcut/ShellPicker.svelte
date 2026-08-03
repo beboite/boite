@@ -22,6 +22,19 @@
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import { t } from "$lib/i18n/index.svelte";
 
+  /**
+   * `projectId` names the project a launch lands in, set when this picker is
+   * inside a project's own launcher. Null keeps the old behaviour: the selected
+   * project, or Scratch when there is none.
+   */
+  type Props = {
+    projectId?: string | null;
+    onLaunched?: () => void;
+    /** Inside the launcher popover: a full-width row, no dashed outline. */
+    compact?: boolean;
+  };
+  let { projectId = null, onLaunched, compact = false }: Props = $props();
+
   let open = $state(false);
   let triggerRoot: HTMLDivElement | null = $state(null);
   let menu: HTMLDivElement | null = $state(null);
@@ -145,20 +158,22 @@
   // click already lands there.
   async function launchDefault(forceScratch: boolean) {
     open = false;
-    const projectId = await launchTargetProjectId(forceScratch);
-    if (!projectId) return;
+    const target = projectId ?? (await launchTargetProjectId(forceScratch));
+    if (!target) return;
     if (defaultShell) {
-      await launchShell(defaultShell, projectId);
+      await launchShell(defaultShell, target);
     } else {
-      await launchBlankTerminal(projectId);
+      await launchBlankTerminal(target);
     }
+    onLaunched?.();
   }
 
   async function pick(shell: ShellOption, forceScratch: boolean) {
     open = false;
-    const projectId = await launchTargetProjectId(forceScratch);
-    if (!projectId) return;
-    await launchShell(shell, projectId);
+    const target = projectId ?? (await launchTargetProjectId(forceScratch));
+    if (!target) return;
+    await launchShell(shell, target);
+    onLaunched?.();
   }
 
   let ctxMenu = $state<{ x: number; y: number; items: ContextMenuItem[] } | null>(
@@ -192,10 +207,15 @@
   });
 </script>
 
-<div bind:this={triggerRoot} class="relative flex shrink-0 items-stretch">
+<div
+  bind:this={triggerRoot}
+  class="relative flex items-stretch {compact ? 'w-full' : 'shrink-0'}"
+>
   <button
     type="button"
-    class="flex shrink-0 items-center gap-1.5 rounded-l-md border border-r-0 border-dashed border-border px-2.5 py-1 text-xs text-muted-foreground transition hover:border-foreground/30 hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+    class="flex items-center gap-1.5 text-xs text-muted-foreground transition hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 {compact
+      ? 'min-w-0 flex-1 rounded-md px-2 py-1 hover:bg-accent'
+      : 'shrink-0 rounded-l-md border border-r-0 border-dashed border-border px-2.5 py-1 hover:border-foreground/30 hover:bg-[var(--color-surface-2)]'}"
     onclick={(e) => void launchDefault(e.shiftKey)}
     oncontextmenu={(e) => {
       e.preventDefault();
@@ -212,7 +232,9 @@
   </button>
   <button
     type="button"
-    class="flex shrink-0 items-center justify-center rounded-r-md border border-dashed border-border px-1.5 py-1 text-muted-foreground transition hover:border-foreground/30 hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+    class="flex shrink-0 items-center justify-center text-muted-foreground transition hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 {compact
+      ? 'rounded-md px-1.5 py-1 hover:bg-accent'
+      : 'rounded-r-md border border-dashed border-border px-1.5 py-1 hover:border-foreground/30 hover:bg-[var(--color-surface-2)]'}"
     disabled={platform.shells.length === 0}
     onclick={toggle}
     aria-haspopup="menu"

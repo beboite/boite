@@ -5,7 +5,7 @@ import { isLocaleSetting, setLocale as applyLocale, t } from "$lib/i18n/index.sv
 import { logger } from "$lib/shared/services/logger.svelte";
 import { debounce } from "$lib/shared/utils/debounce";
 import { uuid } from "$lib/shared/utils/uuid";
-import type { LocaleSetting, Settings, Shortcut } from "$lib/types";
+import type { LocaleSetting, RightPanelTab, Settings, Shortcut } from "$lib/types";
 
 export const PRESET_SHORTCUTS: Shortcut[] = [
   { id: "claude", label: "Claude", command: "claude", iconKey: "claude" },
@@ -134,6 +134,8 @@ const DEFAULTS: Settings = {
     hermes: true,
   },
   confirmCloseThread: true,
+  rightPanel: null,
+  rightPanelWidth: 320,
   gitSplitFraction: 0.5,
   gitAutoFetch: true,
   gitAutoFetchSeconds: 180,
@@ -150,6 +152,10 @@ const DEFAULTS: Settings = {
 // the mobile layout. The toggle in Appearance overrides it permanently after.
 function isMotionMode(value: unknown): value is Settings["motionMode"] {
   return value === "system" || value === "on" || value === "off";
+}
+
+function isRightPanelTab(value: unknown): value is Settings["rightPanel"] {
+  return value === "git" || value === "explorer" || value === "todo" || value === null;
 }
 
 const MOBILE_LAYOUT_QUERY = "(pointer: coarse) and (max-width: 899px)";
@@ -204,6 +210,8 @@ const DEVICE_KEY = "boite.layout";
 const DEVICE_FIELDS = [
   "sidebarWidth",
   "sidebarCollapsed",
+  "rightPanel",
+  "rightPanelWidth",
   "uiScalePercent",
   "gitSplitFraction",
   "mobileLayout",
@@ -297,6 +305,13 @@ class SettingsStore {
           typeof stored.confirmCloseThread === "boolean"
             ? stored.confirmCloseThread
             : DEFAULTS.confirmCloseThread,
+        rightPanel: isRightPanelTab(stored.rightPanel)
+          ? stored.rightPanel
+          : DEFAULTS.rightPanel,
+        rightPanelWidth:
+          typeof stored.rightPanelWidth === "number" && stored.rightPanelWidth > 0
+            ? stored.rightPanelWidth
+            : DEFAULTS.rightPanelWidth,
         gitSplitFraction:
           typeof stored.gitSplitFraction === "number" &&
           stored.gitSplitFraction > 0 &&
@@ -471,6 +486,32 @@ class SettingsStore {
   toggleSidebar() {
     this.state.sidebarCollapsed = !this.state.sidebarCollapsed;
     this.persistDeviceNow();
+  }
+
+  /**
+   * What the three titlebar buttons do: show this panel, or close the column
+   * when it is the one already showing.
+   *
+   * Clicking Todo while Git is up switches tabs rather than closing anything,
+   * which is the whole point of the column — the second click on a panel you
+   * are already looking at is the only one that changes the layout.
+   */
+  toggleRightPanel(tab: Exclude<RightPanelTab, null>) {
+    this.state.rightPanel = this.state.rightPanel === tab ? null : tab;
+    this.persistDeviceNow();
+  }
+
+  setRightPanel(tab: RightPanelTab) {
+    if (this.state.rightPanel === tab) return;
+    this.state.rightPanel = tab;
+    this.persistDeviceNow();
+  }
+
+  setRightPanelWidth(px: number) {
+    const clamped = Math.max(240, Math.min(600, Math.round(px)));
+    if (this.state.rightPanelWidth === clamped) return;
+    this.state.rightPanelWidth = clamped;
+    this.persistDeviceSoon();
   }
 
   // A choice, unlike the first-run guess: from here the layout stops following

@@ -54,12 +54,20 @@ export async function addProjectByPath(
     return existing;
   }
 
+  // `inspect` is also the only thing that checks the path is a folder at all —
+  // it answers "not a directory" and nothing else does. Falling back to the
+  // basename swallowed that: dropping or pasting a file, an image in
+  // particular, made a project out of `photo.png`, complete with a success
+  // toast. A path that cannot be inspected is refused now rather than guessed
+  // at; the drop handler is fed whatever the OS had on the pasteboard, so this
+  // is the boundary that has to say no.
   let inspection: { name: string; icon: string | null; tech?: string | null };
   try {
     inspection = await backendFor(origin).project.inspect(path);
   } catch (err) {
-    logger.warn("project", `inspect_project failed for ${path}, using fallback`, String(err));
-    inspection = { name: basename(path) || "project", icon: null };
+    logger.warn("project", `inspect_project refused ${path}`, String(err));
+    notifications.error(t("project.notAFolder", { name: basename(path) || path }));
+    return null;
   }
 
   const project: Project = {

@@ -1,6 +1,9 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine as _;
+
 use tauri::{
     AppHandle, Manager, State,
     ipc::{Channel, InvokeBody, Request},
@@ -255,6 +258,43 @@ pub async fn explorer_search(
     tauri::async_runtime::spawn_blocking(move || explorer::search_blocking(&path, &query, limit))
         .await
         .map_err(|e| format!("explorer_search task failed: {e}"))?
+}
+
+/// The largest document the window will be handed in one piece.
+///
+/// The bytes cross the IPC bridge as base64 and land in the page as one string,
+/// so this is a memory ceiling on the window, not a disk limit. A 64 MB PDF is
+/// already a poor thing to open in a side pane.
+const MAX_VIEW_BYTES: u64 = 64 * 1024 * 1024;
+
+/// A whole file, base64, for the window to draw.
+///
+/// PDFs and images: `read_text_file` refuses them at the first NUL byte, and
+/// there is nowhere else for the bytes to come from. Base64 rather than a byte
+/// array because Tauri serialises `Vec<u8>` as a JSON array of numbers — six
+/// characters per byte instead of one and a third.
+///
+/// Scoped through `ProjectRoots` like every other path-taking command.
+#[tauri::command]
+pub async fn read_file_base64(
+    scope: State<'_, ProjectRoots>,
+    path: String,
+) -> Result<String, String> {
+    scope.ensure_allowed(&path)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let meta = std::fs::metadata(&path).map_err(|e| format!("stat failed: {e}"))?;
+        if meta.len() > MAX_VIEW_BYTES {
+            return Err(format!(
+                "file too large ({} bytes > {} max)",
+                meta.len(),
+                MAX_VIEW_BYTES
+            ));
+        }
+        let bytes = std::fs::read(&path).map_err(|e| format!("read failed: {e}"))?;
+        Ok(BASE64.encode(bytes))
+    })
+    .await
+    .map_err(|e| format!("read_file_base64 task failed: {e}"))?
 }
 
 #[tauri::command]
