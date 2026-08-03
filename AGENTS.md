@@ -28,6 +28,22 @@ that domain's `ALL_METHODS`, the arms the compiler then demands, and a
 checking that the four agreed, and every divergence found in the audit was a
 capability that existed on one side only.
 
+`Command::decode` routes on each domain's own method list, not on the wire
+prefix. `project.` means two things: `project.inspect` asks about a folder that
+is not a project yet and belongs to files, `project.list` reads rows. A test
+asserts no two domains claim the same name, because a duplicate would decode
+into the wrong domain with the wrong capability and the wrong envelope rather
+than failing.
+
+**The rows are on it too, and nothing in the webview writes SQL.** Projects,
+threads, todos and settings go through `commands::records`; `db.ts` holds no
+statements. The eight it used to hold were the desktop's half of a schema the
+server read with fifteen hand-written arms, and the two had drifted: a whole-row
+`REPLACE` built from a stale snapshot could put `running` back on a thread whose
+process had ended, and only one side folded an unknown todo state back to
+`open`. A row rule belongs in `boite_core::store` or `command::records`, where
+both hosts get it.
+
 Inside the Tauri backend, the facades import `invoke` from
 `backend/tauri/ipc.ts` rather than from `@tauri-apps/api/core`. That door writes
 a `warn` when a command refuses and re-throws untouched. Importing the real one
@@ -207,11 +223,32 @@ when across the todo list, the log of what agents did and what the terminals
 printed, and `terminal_transcript` reads any thread's output back from the end,
 including a thread that has already stopped.
 
+## Measuring, before claiming
+
+An optimisation with no measurement attached does not stay. There are three
+ways to get one, and each already found something the comments had wrong.
+
+- `bun run budget` separates what the window downloads before it can paint from
+  what is merely shipped, against ceilings in `scripts/bundle-budget.json`. CI
+  runs it. Moving a ceiling is allowed and is the point: it happens in the same
+  commit as the growth, with the reason in the message.
+- `cargo bench -p boite-core` covers the paths whose cost is asserted in a doc
+  comment. Not in CI, because a benchmark on a shared runner measures the runner.
+  The first numbers are recorded in `benches/hot_paths.rs`.
+- `src/lib/app/boot-timing.ts` writes one line per boot, at `warn` past two
+  seconds so a slow one reaches the timeline beside whatever else was happening.
+
+A timer may slow down while `document.hidden`; a status timer may not stop.
+Nobody is reading a dot they cannot see, but the threads a status sweep demotes
+are exactly the ones nobody is looking at, and a notification is a transition it
+has to be awake to notice.
+
 ## Before pushing
 
 ```bash
 bun run check
 bun run test
+bun run budget
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 ```
