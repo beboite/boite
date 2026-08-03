@@ -182,6 +182,26 @@ export interface Settings {
    * from a Claude pointed at another endpoint.
    */
   colorByModel: boolean;
+  /**
+   * The sidebar's second way of saying what a thread is doing: the card itself
+   * glows, and two lights orbit it while an agent is working.
+   *
+   * Opt-in rather than a replacement, because the two designs answer the same
+   * question in opposite registers. The old one is a ring around a 20px glyph,
+   * legible at a glance and silent at rest; this one is the whole row, which is
+   * easier to catch out of the corner of an eye and busier when several threads
+   * are alive. `features/thread/threadVisual.ts` decides what either draws.
+   */
+  sidebarThreadGlow: boolean;
+  /**
+   * Whether the agent's own logo stays on the card under the glow design.
+   *
+   * Off, the glyph carries only what the thread is doing — the sleeping Z's,
+   * the question mark of a thread waiting on an answer — and the logo comes
+   * back while the card is held. Ignored by the classic design, which has no
+   * second thing to put in the glyph's place.
+   */
+  sidebarHarnessLogos: boolean;
 }
 
 // Animation preference: "system" follows prefers-reduced-motion, "on"/"off"
