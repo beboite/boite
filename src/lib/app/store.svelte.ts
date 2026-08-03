@@ -23,7 +23,8 @@ import {
   pruneRenamed,
 } from "$lib/features/thread/renamed";
 import { noteStatusChange, resetFinished } from "$lib/features/thread/finished.svelte";
-import { isScratch, SCRATCH_PROJECT_ID } from "$lib/domain/project";
+import { forgetThreadActivity } from "$lib/features/thread/activity.svelte";
+import { SCRATCH_PROJECT_ID } from "$lib/domain/project";
 import { notifications } from "$lib/features/notifications/store.svelte";
 import { backend, workspace } from "$lib/backend";
 import { applyControlEvent } from "./control-events";
@@ -249,9 +250,11 @@ export class AppState {
     const idx = new Map(order.map((id, i) => [id, i]));
     return this.projects
       .filter((p) => !p.archived)
-      // An empty Scratch is not a project the user has, it is a door they have
-      // not walked through. It comes back the moment a thread lands in it.
-      .filter((p) => !isScratch(p) || this.threadsByProject(p.id).length > 0)
+      // Scratch stays listed even with nothing in it. It was hidden while empty,
+      // on the reading that a door nobody has walked through is not a project
+      // the user has — but the launcher hangs off a card's own `+`, so hiding
+      // the card removed the only way to start a thread with no project at all,
+      // and the door was shut from the outside.
       .sort((a, b) => {
         // Scratch sits last whatever the manual order says. It is where work
         // starts, not one of the things being worked on, and drifting into the
@@ -308,10 +311,20 @@ export class AppState {
     const { projects, threads } = await rowsReady;
     bootTiming.mark("rows");
     this.projects = projects;
-    // The one place the selection is decided for the user: landing on nothing
-    // with projects in the sidebar would send every shortcut to Scratch, which
-    // is not what a user with projects means by launching one.
-    this.selectedProjectId ??= this.sortedProjects[0]?.id ?? null;
+    // Boot lands on Scratch's own page rather than on the first project's
+    // terminals. It is the one place in the app that starts something without
+    // committing to a project, which is what opening the app usually is; the
+    // previous landing was whatever project happened to sort first, showing its
+    // panels and its threads to somebody who had not asked for either.
+    //
+    // The row is seeded here rather than left to `ensureScratch`'s first caller
+    // because both the page and the sidebar card need one to draw, and that card
+    // is the only `+` a user with no project has.
+    if (this.selectedProjectId === null) {
+      const scratch = await projectWrites.ensureScratch(this);
+      this.selectedProjectId = scratch?.id ?? this.sortedProjects[0]?.id ?? null;
+      if (scratch) this.view = "project";
+    }
     // Before ready: panels start polling fs/git commands as soon as they
     // mount, and those commands reject paths outside registered roots.
     await syncRoots(this);
@@ -379,15 +392,52 @@ export class AppState {
     return saveThread(thread);
   }
 
+  /**
+   * Where the window goes once the terminal it was showing is gone.
+   *
+   * It used to go nowhere: the active thread was cleared and the view stayed on
+   * the terminal, so whatever pane the project happened to have open took the
+   * whole screen — closing the last thread of a project with the git panel
+   * docked left the user staring at a full-window diff nobody asked for.
+   *
+   * A sibling still running wins, because that is a terminal to look at. With
+   * none, the project's own page is the answer, and with no project at all it is
+   * Scratch, which is the same place boot lands on.
+   *
+   * Only from the terminal view. A thread closed from the palette while the
+   * editor or the settings are up is not a reason to throw away what the user
+   * was reading.
+   */
+  private fallBackFromClosed(removed: Thread | null) {
+    const projectId = removed?.projectId ?? this.selectedProjectId;
+    const project = this.projectById(projectId);
+    if (project) {
+      this.selectedProjectId = project.id;
+      const sibling = this.threadsByProjectSorted(project.id).find((t) => t.ptyId);
+      if (sibling) {
+        this.activeThreadId = sibling.id;
+        return;
+      }
+      if (this.view === "terminal") this.view = "project";
+      return;
+    }
+    if (this.view !== "terminal") return;
+    void projectWrites.ensureScratch(this).then((scratch) => {
+      if (!scratch || this.activeThreadId !== null) return;
+      this.selectedProjectId = scratch.id;
+      if (this.view === "terminal") this.view = "project";
+    });
+  }
+
   async removeThread(id: string) {
     const removed = this.threadById(id);
     this.threads = this.threads.filter((t) => t.id !== id);
     if (this.activeThreadId === id) {
-      const projectId = removed?.projectId ?? this.selectedProjectId;
-      this.selectedProjectId = projectId ?? this.selectedProjectId;
       this.activeThreadId = null;
+      this.fallBackFromClosed(removed);
     }
     clearRenamed(id);
+    forgetThreadActivity(id);
     try {
       await dbDeleteThread(id, removed?.origin);
     } catch (err) {

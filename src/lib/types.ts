@@ -147,8 +147,21 @@ export interface Settings {
    * where anything is. A panel that has to sit beside one particular terminal
    * is detached into a pane from the panel's own header, which is the case the
    * column cannot serve.
+   *
+   * This field is the last choice made, and it answers for a project that has
+   * never been on screen and for being on no project at all. What a project
+   * remembers is in `rightPanelByProject`.
    */
   rightPanel: RightPanelTab;
+  /**
+   * What each project had open, keyed by project id.
+   *
+   * One column for the whole window meant a repository with nothing to commit
+   * still opened on git because the last project had, and closing it there lost
+   * it for the project that wanted it. The panels describe a project, so which
+   * one is up is the project's own answer.
+   */
+  rightPanelByProject: Record<string, RightPanelTab>;
   rightPanelWidth: number;
   gitSplitFraction: number;
   gitAutoFetch: boolean;

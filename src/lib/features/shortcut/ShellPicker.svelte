@@ -30,10 +30,8 @@
   type Props = {
     projectId?: string | null;
     onLaunched?: () => void;
-    /** Inside the launcher popover: a full-width row, no dashed outline. */
-    compact?: boolean;
   };
-  let { projectId = null, onLaunched, compact = false }: Props = $props();
+  let { projectId = null, onLaunched }: Props = $props();
 
   let open = $state(false);
   let triggerRoot: HTMLDivElement | null = $state(null);
@@ -207,15 +205,10 @@
   });
 </script>
 
-<div
-  bind:this={triggerRoot}
-  class="relative flex items-stretch {compact ? 'w-full' : 'shrink-0'}"
->
+<div bind:this={triggerRoot} class="relative flex shrink-0 items-stretch">
   <button
     type="button"
-    class="flex items-center gap-1.5 text-xs text-muted-foreground transition hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 {compact
-      ? 'min-w-0 flex-1 rounded-md px-2 py-1 hover:bg-accent'
-      : 'shrink-0 rounded-l-md border border-r-0 border-dashed border-border px-2.5 py-1 hover:border-foreground/30 hover:bg-[var(--color-surface-2)]'}"
+    class="flex shrink-0 items-center gap-1.5 rounded-l-md border border-r-0 border-dashed border-border px-2.5 py-1 text-xs text-muted-foreground transition hover:border-foreground/30 hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
     onclick={(e) => void launchDefault(e.shiftKey)}
     oncontextmenu={(e) => {
       e.preventDefault();
@@ -232,9 +225,7 @@
   </button>
   <button
     type="button"
-    class="flex shrink-0 items-center justify-center text-muted-foreground transition hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 {compact
-      ? 'rounded-md px-1.5 py-1 hover:bg-accent'
-      : 'rounded-r-md border border-dashed border-border px-1.5 py-1 hover:border-foreground/30 hover:bg-[var(--color-surface-2)]'}"
+    class="flex shrink-0 items-center justify-center rounded-r-md border border-dashed border-border px-1.5 py-1 text-muted-foreground transition hover:border-foreground/30 hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
     disabled={platform.shells.length === 0}
     onclick={toggle}
     aria-haspopup="menu"

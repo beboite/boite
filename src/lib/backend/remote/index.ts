@@ -280,6 +280,8 @@ export class RemoteBackend implements Backend {
       hold: (path) => rpc("worktree.hold", { path }).then((r) => r as WorktreeHold),
       remove: (repo, path, force) =>
         rpc("worktree.remove", { repo, path, force }).then(() => {}),
+      sizes: (paths) =>
+        rpc("worktree.sizes", { paths }).then((r) => (r.sizes ?? []) as number[]),
     };
 
     this.explorer = {

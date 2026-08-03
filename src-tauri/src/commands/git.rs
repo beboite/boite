@@ -216,6 +216,14 @@ pub async fn worktree_remove(
 }
 
 #[tauri::command]
+pub async fn worktree_sizes(
+    scope: State<'_, ProjectRoots>,
+    paths: Vec<String>,
+) -> Result<Value, String> {
+    on_bus(scope.inner(), Git::WorktreeSizes { paths }.into()).await
+}
+
+#[tauri::command]
 pub async fn git_status(scope: State<'_, ProjectRoots>, path: String) -> Result<Value, String> {
     on_bus(scope.inner(), Git::Status { path }.into()).await
 }

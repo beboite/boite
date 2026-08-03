@@ -19,6 +19,7 @@
   import CornerDownRight from "@lucide/svelte/icons/corner-down-right";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import Eraser from "@lucide/svelte/icons/eraser";
+  import PanelDockActions from "$lib/features/panes/PanelDockActions.svelte";
   import Check from "@lucide/svelte/icons/check";
   import Undo2 from "@lucide/svelte/icons/undo-2";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
@@ -29,8 +30,13 @@
 
   // The pane's project when it has one, the selected project otherwise: the
   // mobile tab has no pane around it.
-  type Props = { projectId?: string | null };
-  let { projectId: paneProjectId = null }: Props = $props();
+  // The two column verbs, passed only by SidePanel: see PanelDockActions.
+  type Props = {
+    projectId?: string | null;
+    onDetach?: () => void;
+    onClose?: () => void;
+  };
+  let { projectId: paneProjectId = null, onDetach, onClose }: Props = $props();
 
   const projectId = $derived(paneProjectId ?? app.currentProjectId);
   const project = $derived(
@@ -420,6 +426,9 @@
     >
       <Eraser class="size-3.5" />
     </button>
+    {#if onDetach && onClose}
+      <PanelDockActions {onDetach} {onClose} />
+    {/if}
   </header>
 
   {#if !projectId}

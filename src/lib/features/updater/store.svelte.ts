@@ -12,6 +12,8 @@ import { dropResumePlan, prepareForInstall, restoreThreads } from "./restart";
 // makes an in-app update feel instant.
 const FIRST_CHECK_DELAY_MS = 8_000;
 const RECHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+// How stale an answer has to be before opening the About tab asks again.
+const OPEN_CHECK_FLOOR_MS = 30_000;
 
 export type UpdateStatus =
   | { kind: "idle" }
@@ -35,6 +37,7 @@ class UpdaterStore {
   private pending: Update | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private inFlight = false;
+  private lastCheckAt = 0;
   // The restart confirmation is an await, and the status stays "ready" across
   // it, so a second click on "Restart now" used to open a second dialog behind
   // the first and stop every thread twice.
@@ -80,6 +83,20 @@ class UpdaterStore {
     await this.run(true);
   }
 
+  /**
+   * Opening the About tab checks, the way opening Chrome's about page does.
+   *
+   * Silent: this is not a button press, so an offline moment belongs on the card
+   * and nowhere else. The floor is what keeps clicking between tabs from firing
+   * a network check each time — the answer cannot have changed in half a minute,
+   * and the background schedule is still the thing that finds a release.
+   */
+  checkOnOpen(): void {
+    if (!this.enabled) return;
+    if (Date.now() - this.lastCheckAt < OPEN_CHECK_FLOOR_MS) return;
+    void this.run(false);
+  }
+
   private schedule() {
     if (this.timer) clearTimeout(this.timer);
     this.timer = setTimeout(() => void this.run(false), RECHECK_INTERVAL_MS);
@@ -116,6 +133,7 @@ class UpdaterStore {
       }
     } finally {
       this.inFlight = false;
+      this.lastCheckAt = Date.now();
       this.schedule();
     }
   }
