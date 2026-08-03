@@ -265,6 +265,13 @@ export interface EditorApi {
     file: string,
     headFile: string | null,
   ): Promise<FileVersions>;
+  /**
+   * A whole file as base64, for the documents the text editor refuses.
+   *
+   * PDFs and images. Base64 rather than bytes because the IPC bridge serialises
+   * a byte array as JSON numbers, which is six characters per byte.
+   */
+  readBase64(path: string): Promise<string>;
 }
 
 /** What is already sitting where a new project wants to go. */
