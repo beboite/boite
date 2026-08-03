@@ -17,7 +17,8 @@
     "build:sidecar": "bun scripts/build-sidecar.mjs",
     "dev:isolated": "tauri dev --config src-tauri/tauri.dev-isolated.conf.json --features mcp-bridge",
     "typecheck:fast": "tsgo --noEmit",
-    "prepare": "git config core.hooksPath .githooks || exit 0"
+    "prepare": "git config core.hooksPath .githooks || exit 0",
+    "budget": "node scripts/bundle-budget.mjs"
   },
   "license": "MIT",
   "dependencies": {

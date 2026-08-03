@@ -34,6 +34,7 @@ import {
   migrateWorktrees,
 } from "./repair.svelte";
 import * as projectWrites from "./projects.svelte";
+import { bootTiming } from "./boot-timing";
 import { ThreadSignals } from "./thread-signals.svelte";
 import { TitleWrites } from "./title-writes";
 
@@ -273,6 +274,7 @@ export class AppState {
 
   async init() {
     if (this.ready) return;
+    bootTiming.start();
 
     // Rows depend on neither the settings blob nor the shell list, so all of
     // it goes out at once: boot is then two round trips deep (loads, then
@@ -301,7 +303,10 @@ export class AppState {
         .catch(() => {});
     }
 
+    bootTiming.mark("settings+platform");
+
     const { projects, threads } = await rowsReady;
+    bootTiming.mark("rows");
     this.projects = projects;
     // The one place the selection is decided for the user: landing on nothing
     // with projects in the sidebar would send every shortcut to Scratch, which
@@ -310,12 +315,14 @@ export class AppState {
     // Before ready: panels start polling fs/git commands as soon as they
     // mount, and those commands reject paths outside registered roots.
     await syncRoots(this);
+    bootTiming.mark("roots");
     this.threads = threads;
 
     deduplicateSessionIds(this);
     dropGenericTitles(this);
     pruneRenamed(this.threads.map((t) => t.id));
     await migrateWorktrees(this);
+    bootTiming.mark("repair");
 
     // Remote: the server is authoritative for thread runtime state and pushes
     // it as control events. Local has no subscribe and derives status itself.
@@ -326,6 +333,9 @@ export class AppState {
     }
 
     this.ready = true;
+    // Last, so the line covers everything a user waited through rather than
+    // everything up to the phase somebody remembered to mark.
+    bootTiming.report();
   }
 
   // Clear reactive state so a workspace switch re-hydrates from the new
@@ -343,6 +353,9 @@ export class AppState {
     this.view = "terminal";
     this.mobileTab = "terminal";
     this.ready = false;
+    // A workspace switch is another boot and gets its own measurement. Keeping
+    // the old one would report the switch as having taken since app start.
+    bootTiming.restart();
   }
 
   /**

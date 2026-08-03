@@ -29,6 +29,16 @@ sha2 = "0.10"
 # kill(pid, 0) to tell a live claude session from a registry entry left behind
 # by one that died. Windows uses OpenProcess from windows-sys below.
 
+# Benchmarks only. `default-features = false` drops plotters and rayon: the
+# numbers are what this is for, and the HTML reports would pull a graphics stack
+# into a CI job that compiles `--all-targets`.
+[dev-dependencies]
+criterion = { version = "0.5", default-features = false }
+
+[[bench]]
+name = "hot_paths"
+harness = false
+
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.60", features = [
     "Win32_Foundation",
