@@ -340,10 +340,15 @@ hint: todo_claim id=<id> note=<what changed>, the user confirms, not you
 Ids are shortened to the prefix that still tells the list apart, and
 `todo_claim` takes either that or the full one.
 
-Boite spawns the terminal, so it stamps `BOITE_MCP_URL`, `BOITE_TOKEN` and
+Boite spawns the terminal, so it stamps `BOITE_MCP_URL`, `BOITE_TOKEN_FILE` and
 `BOITE_THREAD_ID` into the child's environment, and resolves the project from
 the thread id. An agent reaches its own project and no other with nothing to
-configure; one started outside Boite has no token at all. The endpoint lives
+configure; one started outside Boite has no token at all.
+
+`BOITE_TOKEN_FILE` is a path, not the token. The value used to be in the
+environment itself, which put it in the output of any `env` an agent typed, and
+that output is kept in the thread's scrollback and replayed on reattach. The
+file is 0600 inside the application data directory. The endpoint lives
 on `127.0.0.1` with an ephemeral port, in both the desktop app and
 `boite-server`.
 

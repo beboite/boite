@@ -78,9 +78,15 @@ fn note_activity(inner: &Inner, headers: &HeaderMap, surface: &str) {
 /// Handed to spawned children so they can find and authenticate to this
 /// endpoint without any configuration of their own.
 #[derive(Clone)]
+/// What a spawned terminal is told about the agent endpoint.
+///
+/// There is no token here on purpose. It used to carry the value, which then
+/// went into every child's environment: an agent that types `env` printed its
+/// own credential into a scrollback that is kept and replayed, and everything
+/// it launched inherited it. A terminal is handed the path now.
 pub struct AgentApi {
     pub url: String,
-    pub token: String,
+    pub token_path: std::path::PathBuf,
 }
 
 struct Inner {
@@ -985,7 +991,7 @@ fn open_db(app: &tauri::AppHandle) -> Result<Connection, String> {
 /// Mode 0600 on unix: it grants write access to this workspace's todo lists,
 /// which is modest but not nothing, and there is no reason for it to be
 /// readable by anyone else on the machine.
-fn write_project_credentials(app: &tauri::AppHandle, url: &str, token: &str) {
+fn write_project_credentials(app: &tauri::AppHandle, url: &str, token_path: &std::path::Path) {
     let conn = match open_db(app) {
         Ok(c) => c,
         Err(e) => {
@@ -1000,7 +1006,7 @@ fn write_project_credentials(app: &tauri::AppHandle, url: &str, token: &str) {
         return;
     };
     for project_id in rows.flatten() {
-        if let Err(e) = write_one(app, url, token, &project_id) {
+        if let Err(e) = write_one(app, url, token_path, &project_id) {
             eprintln!("[boite/agent-api] credentials for {project_id}: {e}");
         }
     }
@@ -1016,24 +1022,26 @@ fn write_project_credentials(app: &tauri::AppHandle, url: &str, token: &str) {
 pub fn write_one(
     app: &tauri::AppHandle,
     url: &str,
-    token: &str,
+    token_path: &std::path::Path,
     project_id: &str,
 ) -> Result<std::path::PathBuf, String> {
+    // Read back rather than passed around: the endpoint's own token file is the
+    // single copy, and a second one travelling through call arguments is a
+    // second thing to keep in step.
+    let token = boite_core::secret_file::read(token_path)
+        .map_err(|e| format!("cannot read the agent token: {e}"))?;
     let base = app
         .path()
         .app_config_dir()
         .map_err(|e| format!("app_config_dir: {e}"))?;
-    let dir = base.join("mcp");
-    std::fs::create_dir_all(&dir).map_err(|e| format!("credentials dir: {e}"))?;
+    let path = base.join("mcp").join(format!("{project_id}.json"));
 
     let body = json!({ "url": url, "token": token, "projectId": project_id });
-    let path = dir.join(format!("{project_id}.json"));
-    std::fs::write(&path, body.to_string()).map_err(|e| format!("write: {e}"))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
-    }
+    // Through the shared helper: this file holds a bearer token in the clear
+    // and used to be restricted on unix alone, with Windows left to whatever
+    // the parent directory happened to allow.
+    boite_core::secret_file::write(&path, &body.to_string())
+        .map_err(|e| format!("write: {e}"))?;
     Ok(path)
 }
 
@@ -1095,11 +1103,20 @@ pub fn start(app: &tauri::AppHandle) {
         return;
     }
     let url = format!("http://127.0.0.1:{port}");
-    write_project_credentials(app, &url, &token);
-    app.manage(AgentApi {
-        url,
-        token,
-    });
+    let token_path = match app.path().app_config_dir() {
+        Ok(dir) => dir.join("agent-token"),
+        Err(e) => {
+            eprintln!("[boite/agent-api] no config dir for the token file: {e}");
+            return;
+        }
+    };
+    // Written before anything can want to read it back.
+    if let Err(e) = boite_core::secret_file::write(&token_path, &token) {
+        eprintln!("[boite/agent-api] cannot write the token file: {e}");
+        return;
+    }
+    write_project_credentials(app, &url, &token_path);
+    app.manage(AgentApi { url, token_path });
 
     tauri::async_runtime::spawn(async move {
         let listener = match tokio::net::TcpListener::from_std(listener) {

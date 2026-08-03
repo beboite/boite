@@ -219,6 +219,27 @@ pub const ALL: &[Migration] = &[
         "add_project_worktrees",
         "ALTER TABLE projects ADD COLUMN worktrees INTEGER;",
     ),
+    // The event log. Rows keep being the state; this is how the state got
+    // there, one monotonic sequence per project with each entry carrying the
+    // hash of the one before it. See `crate::journal` for why an entry cannot
+    // be deserialised and what the hash covers.
+    both(
+        "create_events",
+        "CREATE TABLE IF NOT EXISTS events (
+            project_id TEXT NOT NULL,
+            seq INTEGER NOT NULL,
+            hash BLOB NOT NULL,
+            prev_hash BLOB,
+            action TEXT NOT NULL,
+            actor TEXT NOT NULL,
+            object_id TEXT,
+            detail TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            PRIMARY KEY (project_id, seq)
+        );
+        CREATE INDEX IF NOT EXISTS idx_events_project_time
+            ON events (project_id, created_at);",
+    ),
 ];
 
 /// The desktop's list: `(version, description, sql)`, versions from 1.
@@ -252,16 +273,17 @@ mod tests {
     #[test]
     fn the_shipped_order_is_preserved_on_both_sides() {
         let desktop = desktop();
-        assert_eq!(desktop.len(), 18, "18 desktop versions shipped");
+        assert_eq!(desktop.len(), 19);
         assert_eq!(desktop[0], (1, "create_projects", ALL[0].sql));
         assert_eq!(desktop[4].1, "add_thread_session_and_icon");
         assert_eq!(desktop[8].1, "add_project_git_root", "no push table here");
         assert_eq!(desktop[15].1, "create_chats");
         assert_eq!(desktop[16].1, "drop_chats");
         assert_eq!(desktop[17].1, "add_project_worktrees");
+        assert_eq!(desktop[18].1, "create_events");
 
         let server = server();
-        assert_eq!(server.len(), 17, "17 server entries shipped");
+        assert_eq!(server.len(), 18);
         assert_eq!(server[8].description, "create_push_subscriptions");
         assert_eq!(server[9].description, "add_project_git_root");
         assert_eq!(
@@ -269,6 +291,7 @@ mod tests {
             "add_project_worktrees",
             "the chat pair is desktop-only and must not shift this"
         );
+        assert_eq!(server[17].description, "create_events");
         assert!(
             !server.iter().any(|m| m.description.contains("chat")),
             "no chat migration ever ran on a server"
