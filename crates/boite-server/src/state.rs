@@ -218,6 +218,39 @@ fn ensure_under(root: &Path, path: &str) -> Result<(), String> {
     Err("path is outside workspace root".into())
 }
 
+/// An `AppState` on a scratch directory, for the tests that drive the real
+/// dispatcher rather than a socket.
+///
+/// Nothing is mocked: a real store, a real registry, a real trust boundary. The
+/// point of an in-process test here is that it goes through the same code a
+/// client reaches, minus the WebSocket.
+#[cfg(test)]
+pub fn state_for_test(dir: &Path) -> AppState {
+    use std::sync::atomic::AtomicUsize;
+
+    std::fs::create_dir_all(dir).unwrap();
+    // The receiver is dropped on purpose: `send` returning Err with no receiver
+    // is the ordinary case here and never a failure.
+    let (events, _) = tokio::sync::broadcast::channel::<AppEvent>(64);
+    AppState {
+        store: Arc::new(boite_core::store::Store::open(&dir.join("boite.db")).unwrap()),
+        agent_api: None,
+        registry: crate::registry::Registry::new_without_ticker(1024, Arc::new(|_| {})),
+        auth: crate::auth::Auth::new("test".into()),
+        roots: Arc::new(ProjectRoots::default()),
+        events,
+        notifier: crate::notify::Notifier::from_env(),
+        push: crate::push::PushManager::load(dir),
+        max_threads: 4,
+        max_connections: 4,
+        conns: AtomicUsize::new(0),
+        devices: Arc::new(AtomicUsize::new(0)),
+        workspace_dir: None,
+        data_dir: dir.to_path_buf(),
+        claimed_requests: Default::default(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

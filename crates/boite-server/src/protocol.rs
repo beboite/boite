@@ -81,3 +81,74 @@ pub fn parse_frame(bytes: &[u8]) -> Option<(u8, uuid::Uuid, &[u8])> {
     id.copy_from_slice(&bytes[1..17]);
     Some((opcode, uuid::Uuid::from_bytes(id), &bytes[17..]))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_frame_survives_the_round_trip() {
+        let id = uuid::Uuid::new_v4();
+        let frame = encode_output(&id, b"hello");
+        let (op, back, payload) = parse_frame(&frame).unwrap();
+        assert_eq!(op, FRAME_OUTPUT);
+        assert_eq!(back, id);
+        assert_eq!(payload, b"hello");
+
+        // An empty payload is a valid frame: a PTY can produce a zero-byte read
+        // and the header is still seventeen bytes.
+        let nothing = encode_output(&id, b"");
+        let (_, _, empty) = parse_frame(&nothing).unwrap();
+        assert!(empty.is_empty());
+    }
+
+    /// Anything shorter than the header is refused rather than indexed into.
+    /// The bytes come off a socket, so a truncated frame is a thing that
+    /// happens rather than a thing that would be a bug.
+    #[test]
+    fn a_frame_too_short_to_hold_a_header_is_refused() {
+        assert!(parse_frame(&[]).is_none());
+        assert!(parse_frame(&[FRAME_INPUT]).is_none());
+        assert!(parse_frame(&[0u8; 16]).is_none());
+        // Exactly the header and nothing else is valid.
+        assert!(parse_frame(&[0u8; 17]).is_some());
+    }
+
+    /// The opcode is passed through rather than validated here: `ws.rs` decides
+    /// what it will act on, and a frame it does not know is dropped there. This
+    /// pins that the parser does not quietly rewrite it.
+    #[test]
+    fn the_opcode_is_reported_as_it_arrived() {
+        let id = uuid::Uuid::new_v4();
+        for op in [FRAME_OUTPUT, FRAME_INPUT, FRAME_OUTPUT_GZIP, 0x7f] {
+            let frame = encode_frame(op, &id, b"x");
+            let (back, _, _) = parse_frame(&frame).unwrap();
+            assert_eq!(back, op);
+        }
+    }
+
+    /// The wire shape a client parses. `result` and `error` are skipped when
+    /// absent rather than sent as null: a client that checks for the key would
+    /// read a null error as an error.
+    #[test]
+    fn a_reply_carries_one_of_the_two_and_never_both() {
+        let ok = serde_json::to_value(Response::ok(1, serde_json::json!({ "a": 1 }))).unwrap();
+        assert_eq!(ok["ok"], serde_json::json!(true));
+        assert!(ok.get("error").is_none());
+
+        let err = serde_json::to_value(Response::err(2, "no".into())).unwrap();
+        assert_eq!(err["ok"], serde_json::json!(false));
+        assert_eq!(err["error"], serde_json::json!("no"));
+        assert!(err.get("result").is_none());
+    }
+
+    /// A request with no `params` is the ordinary case for the methods that
+    /// take none, and must not be a parse failure.
+    #[test]
+    fn a_request_without_params_is_still_a_request() {
+        let r: Request = serde_json::from_str(r#"{"id":1,"method":"hello"}"#).unwrap();
+        assert_eq!(r.method, "hello");
+        assert_eq!(r.id, Some(1));
+        assert!(r.params.is_null());
+    }
+}
