@@ -14,3 +14,7 @@ vite.config.ts.timestamp-*
 # Built by scripts/build-sidecar.mjs before each bundle; carries the target
 # triple in its name and is never a source artifact.
 /src-tauri/binaries/
+
+# Written by a locally started boite-server (smoke runs). Holds a database, transcripts
+# and a VAPID keypair, none of which belong to anybody but the machine that ran it.
+boite-data/

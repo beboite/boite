@@ -218,22 +218,18 @@ pub fn approval_decide(
     boite_agent_api::decide(&*api.workspace, &id, verdict, now_ms())
 }
 
-fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
-}
+use boite_core::now_ms;
 
 /// Removes a deleted thread's key file.
 ///
-/// Called by the delete path in the front end, which owns the rows: it drops
-/// the `thread_keys` row itself in the same statement batch, and this is the
-/// half that is not SQL. Quiet about a thread that never had one.
-#[tauri::command]
-pub fn agent_forget_thread_key(app: tauri::AppHandle, thread_id: String) {
+/// Not a command any more. It used to be one because the front end owned the
+/// rows and dropped `thread_keys` itself in a statement batch, leaving this as
+/// the half that was not SQL; deleting a thread is one call on the bus now, and
+/// this is what that call does afterwards. Quiet about a thread that never had
+/// a key.
+pub fn forget_thread_key_file(app: &tauri::AppHandle, thread_id: &str) {
     if let Some(api) = app.try_state::<AgentApi>() {
-        boite_agent_api::keys::forget(&api.keys_dir, &thread_id);
+        boite_agent_api::keys::forget(&api.keys_dir, thread_id);
     }
 }
 

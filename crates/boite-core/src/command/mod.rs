@@ -30,18 +30,22 @@
 //! in whatever it already uses.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use serde_json::Value;
 
 use crate::capability::{Capability, Grant};
 use crate::scope::ProjectRoots;
+use crate::store::Store;
 
 pub mod files;
 pub mod git;
+pub mod records;
 pub mod sessions;
 
 pub use files::Files;
 pub use git::Git;
+pub use records::{Records, ThreadPatch};
 pub use sessions::Sessions;
 
 /// What a command wants to do with a path the caller handed it.
@@ -128,6 +132,19 @@ pub trait Host {
             .map(|home| vec![home.to_string_lossy().to_string()])
             .unwrap_or_default()
     }
+
+    /// The rows this host keeps: projects, threads, todos, settings.
+    ///
+    /// `None` means it keeps none, and the record commands say so rather than
+    /// answering an empty list — "there are no projects" and "this Boite keeps
+    /// no rows" send whoever is reading to two different places.
+    ///
+    /// An `Arc` rather than a borrow because [`Ready`] outlives the host on
+    /// purpose: a transport hands it to its own blocking pool, and a `&Store`
+    /// would tie the whole bus to the lifetime of the call that built it.
+    fn store(&self) -> Option<Arc<Store>> {
+        None
+    }
 }
 
 /// Every method the bus serves, across every domain.
@@ -141,6 +158,7 @@ pub fn methods() -> impl Iterator<Item = &'static str> {
         .iter()
         .chain(files::ALL_METHODS)
         .chain(sessions::ALL_METHODS)
+        .chain(records::ALL_METHODS)
         .copied()
 }
 
@@ -157,12 +175,19 @@ pub fn handles(method: &str) -> bool {
 pub enum Command {
     Files(Files),
     Git(Git),
+    Records(Records),
     Sessions(Sessions),
 }
 
 impl From<Git> for Command {
     fn from(git: Git) -> Self {
         Command::Git(git)
+    }
+}
+
+impl From<Records> for Command {
+    fn from(records: Records) -> Self {
+        Command::Records(records)
     }
 }
 
@@ -183,19 +208,27 @@ impl Command {
     ///
     /// The failure is the same sentence the WebSocket dispatcher used to
     /// produce, because it is the one the frontend already reads.
+    /// Reads a wire method name and its parameters into a command.
+    ///
+    /// Routed on each domain's own `ALL_METHODS` rather than on the prefix. The
+    /// prefix stopped being enough the moment `project.` meant two things:
+    /// `project.inspect` asks about a folder that is not a project yet and
+    /// belongs to files, `project.list` reads rows. A prefix table would have
+    /// had to name the exception, and the exception is what drifts.
     pub fn decode(method: &str, params: &Value) -> Result<Self, String> {
-        match method.split_once('.') {
-            Some(("git", _)) | Some(("worktree", _)) => {
-                Git::decode(method, params).map(Command::Git)
-            }
-            Some(("fs", _)) | Some(("file", _)) | Some(("project", _)) => {
-                Files::decode(method, params).map(Command::Files)
-            }
-            Some(("session", _)) | Some(("shell", _)) | Some(("fastpick", _)) => {
-                Sessions::decode(method, params).map(Command::Sessions)
-            }
-            _ => Err(format!("unknown method: {method}")),
+        if git::ALL_METHODS.contains(&method) {
+            return Git::decode(method, params).map(Command::Git);
         }
+        if files::ALL_METHODS.contains(&method) {
+            return Files::decode(method, params).map(Command::Files);
+        }
+        if sessions::ALL_METHODS.contains(&method) {
+            return Sessions::decode(method, params).map(Command::Sessions);
+        }
+        if records::ALL_METHODS.contains(&method) {
+            return Records::decode(method, params).map(Command::Records);
+        }
+        Err(format!("unknown method: {method}"))
     }
 
     /// The wire name this command answers to. Round-trips with [`Command::decode`].
@@ -203,6 +236,7 @@ impl Command {
         match self {
             Command::Files(f) => f.name(),
             Command::Git(g) => g.name(),
+            Command::Records(r) => r.name(),
             Command::Sessions(s) => s.name(),
         }
     }
@@ -212,6 +246,7 @@ impl Command {
         match self {
             Command::Files(f) => f.wire(),
             Command::Git(g) => g.wire(),
+            Command::Records(r) => r.wire(),
             Command::Sessions(s) => s.wire(),
         }
     }
@@ -226,6 +261,7 @@ impl Command {
         match self {
             Command::Files(f) => f.capability(),
             Command::Git(g) => g.capability(),
+            Command::Records(r) => r.capability(),
             Command::Sessions(s) => s.capability(),
         }
     }
@@ -245,6 +281,7 @@ impl Command {
         match self {
             Command::Files(f) => f.prepare(host),
             Command::Git(g) => g.prepare(host),
+            Command::Records(r) => r.prepare(host),
             Command::Sessions(s) => s.prepare(host),
         }
     }
@@ -260,6 +297,14 @@ pub enum Ready {
     Settled(Value),
     /// Work to do, off whatever runtime the transport is on.
     Work(Command),
+    /// A record command, and the store `prepare` resolved for it.
+    ///
+    /// The one domain whose work needs something only the host can hand over.
+    /// `Ready` is deliberately free of the host, so the store is resolved during
+    /// `prepare` and travels here rather than being fetched later — which keeps
+    /// "a host that keeps no records" a refusal at the boundary instead of an
+    /// error thrown from inside the work.
+    Records(Records, Arc<Store>),
 }
 
 impl Ready {
@@ -270,6 +315,12 @@ impl Ready {
             Ready::Work(Command::Files(f)) => f.run(),
             Ready::Work(Command::Git(g)) => g.run(),
             Ready::Work(Command::Sessions(s)) => s.run(),
+            // `prepare` turns every record command into the arm below, so this
+            // is unreachable rather than a case with an answer.
+            Ready::Work(Command::Records(r)) => {
+                Err(format!("{} was not prepared with a store", r.name()))
+            }
+            Ready::Records(r, store) => r.run(&store),
         }
     }
 }
@@ -497,6 +548,21 @@ mod tests {
             ("fastpick.list", ReadProject),
             ("fastpick.version", ReadProject),
             ("session.transcript", ReadProject),
+            ("project.list", ReadProject),
+            ("project.create", MutateAcross),
+            ("project.archive", MutateProject),
+            ("project.delete", MutateAcross),
+            ("thread.list", ReadProject),
+            ("thread.create", MutateProject),
+            ("thread.update", MutateProject),
+            ("thread.delete", MutateAcross),
+            ("todo.list", ReadProject),
+            ("todo.save", MutateProject),
+            ("todo.delete", MutateProject),
+            ("settings.get", ReadProject),
+            ("settings.set", MutateProject),
+            ("workspace.info", ReadProject),
+            ("workspace.setInfo", MutateProject),
         ];
         let actual: Vec<(&str, Capability)> = every_command()
             .iter()
@@ -517,30 +583,61 @@ mod tests {
             "git.switchBranch", "git.stage", "git.unstage", "git.discard", "git.commit",
             "git.fetch", "git.push", "git.pull", "git.init", "file.write",
             "project.createFolder", "session.stopClaude", "session.migrate",
+            "project.create", "project.archive", "project.delete",
+            "thread.create", "thread.update", "thread.delete",
+            "todo.save", "todo.delete", "settings.set", "workspace.setInfo",
         ] {
             let command = every_command()
                 .into_iter()
                 .find(|c| c.name() == method)
                 .unwrap();
-            assert_eq!(command.capability(), Capability::MutateProject, "{method}");
+            assert_ne!(command.capability(), Capability::ReadProject, "{method}");
         }
     }
 
-    /// Nothing on the bus reaches past the project it was called in, which is
-    /// why a credentials file can use all of it. The calls that do move between
-    /// projects are agent-endpoint routes, not commands, and they are refused
-    /// there. If a command ever needs `MutateAcross`, this test failing is the
-    /// notice that the endpoint's own check is no longer the only one.
+    /// Exactly three commands reach past the project they were called in, and a
+    /// credentials file can use everything else.
+    ///
+    /// This test used to assert that the number was zero, with a note saying
+    /// that it failing would be the notice that the endpoint's own check is no
+    /// longer the only one. That is what happened: the record domain brought
+    /// creating a project, deleting one and deleting a thread onto the bus, and
+    /// those are the calls the capability doc names as reaching past. So the
+    /// list is written out rather than counted, and a fourth arrival is a diff
+    /// somebody has to agree with instead of a silently widened grant.
     #[test]
-    fn no_command_reaches_past_the_project_it_was_called_in() {
+    fn only_the_three_calls_that_change_where_work_happens_reach_across() {
+        const ACROSS: &[&str] = &["project.create", "project.delete", "thread.delete"];
         for command in every_command() {
-            assert_ne!(
-                command.capability(),
-                Capability::MutateAcross,
+            let across = command.capability() == Capability::MutateAcross;
+            assert_eq!(
+                across,
+                ACROSS.contains(&command.name()),
+                "{} is {:?}",
+                command.name(),
+                command.capability()
+            );
+            assert_eq!(
+                Grant::Project.allows(command.capability()),
+                !across,
                 "{}",
                 command.name()
             );
-            assert!(Grant::Project.allows(command.capability()), "{}", command.name());
+        }
+    }
+
+    /// No method is claimed by two domains.
+    ///
+    /// [`Command::decode`] walks the domain lists in order and takes the first
+    /// that contains the name, so a duplicate would not be an error anywhere —
+    /// it would be a method that quietly decodes into the wrong domain, with a
+    /// different capability and a different wire envelope. `project.` already
+    /// means two things across two domains, which is how close this is.
+    #[test]
+    fn no_two_domains_claim_the_same_method() {
+        let mut seen = std::collections::BTreeSet::new();
+        for method in methods() {
+            assert!(seen.insert(method), "{method} is declared by two domains");
         }
     }
 
@@ -553,6 +650,11 @@ mod tests {
             "content": "", "kind": "claude", "sessionId": "s", "cmd": "git",
             "fromCwd": ".", "toCwd": ".", "queries": [], "limit": 1, "skip": 0, "days": 1,
             "bytes": 16,
+            "project": { "id": "p", "name": "n", "cwd": ".", "icon": null },
+            "thread": { "id": "t", "projectId": "p", "label": "l", "cmd": "c" },
+            "todo": { "id": "d", "projectId": "p", "title": "t", "state": "open",
+                      "createdAt": 0, "updatedAt": 0 },
+            "id": "p", "todoId": "d", "settings": {},
         });
         methods()
             .map(|method| {

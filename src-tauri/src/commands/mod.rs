@@ -9,7 +9,10 @@
 //! - [`pty`] is the exception, and the reason there is one: a PTY is a process
 //!   this app owns, with a channel to the webview and a scrollback the bus has
 //!   no vocabulary for.
-//! - [`files`], [`git`] and [`sessions`] are codecs over the bus.
+//! - [`files`], [`git`], [`sessions`] and [`records`] are codecs over the bus.
+//!   [`records`] is the newest and replaces nothing on this side: the rows it
+//!   answers for were read by the webview in raw SQL, so this half of the schema
+//!   had no Rust reader while the server had fifteen arms over the same tables.
 //! - [`agents`] is how an agent gets wired to Boite in the first place, which is
 //!   config files on disk rather than anything the bus answers for.
 //! - [`app`] is what only this process can say: its own log, its boot, and the
@@ -28,6 +31,7 @@ mod bus;
 pub mod files;
 pub mod git;
 pub mod pty;
+pub mod records;
 pub mod sessions;
 
 // The one type outside this module that a command's shape is part of: the PTY

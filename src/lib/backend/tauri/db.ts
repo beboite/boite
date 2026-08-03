@@ -1,273 +1,97 @@
-import Database from "@tauri-apps/plugin-sql";
 import { invoke } from "./ipc";
-import type {
-  IconKey,
-  Project,
-  Settings,
-  Thread,
-  TodoItem,
-  TodoState,
-} from "$lib/types";
-import type { DbApi } from "../types";
+import type { Project, Settings, Thread, TodoItem } from "$lib/types";
+import type { DbApi, WorkspaceMeta, WorkspaceMetaApi } from "../types";
 
-let db: Database | null = null;
-
-// The DB is preloaded Rust-side (plugins.sql.preload in tauri.conf.json), so
-// the webview never needs the sql:allow-load permission — `load` could open
-// or create SQLite files anywhere on disk.
-function getDb(): Database {
-  if (!db) {
-    db = Database.get("sqlite:boite.db");
-  }
-  return db;
-}
-
-interface TodoRow {
-  id: string;
-  project_id: string;
-  text: string;
-  description: string | null;
-  state: string;
-  note: string | null;
-  commit_sha: string | null;
-  claimed_by: string | null;
-  position: number;
-  created_at: number;
-  updated_at: number;
-}
-
-// The MCP endpoint writes this table too, so a row can carry a state this build
-// does not know. Anything unrecognised reads as open rather than vanishing.
-function rowToTodo(r: TodoRow): TodoItem {
-  const state: TodoState =
-    r.state === "done" || r.state === "claimed" ? r.state : "open";
-  return {
-    id: r.id,
-    projectId: r.project_id,
-    // The column kept its old name; the field did not. Renaming it would have
-    // meant a table rebuild for a word.
-    title: r.text,
-    description: r.description,
-    state,
-    note: r.note,
-    commitSha: r.commit_sha,
-    claimedBy: (r.claimed_by as IconKey) ?? null,
-    position: r.position,
-    createdAt: r.created_at,
-    updatedAt: r.updated_at,
-  };
-}
-
-interface ProjectRow {
-  id: string;
-  name: string;
-  cwd: string;
-  icon: string | null;
-  archived: number;
-  git_root: string | null;
-  worktrees: number | null;
-  created_at: number;
-}
-
-interface ThreadRow {
-  id: string;
-  project_id: string;
-  label: string;
-  title: string | null;
-  cmd: string;
-  args: string;
-  exit_code: number | null;
-  session_id: string | null;
-  icon_key: string | null;
-  icon_color: string | null;
-  status: string | null;
-  keep_awake: number;
-  worktree_path: string | null;
-  created_at: number;
-}
-
-interface SettingsRow {
-  value: string;
-}
-
-function safeParseArgs(raw: string): string[] {
-  try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.filter((v) => typeof v === "string") : [];
-  } catch {
-    return [];
-  }
-}
-
-const TERMINAL_STATUSES: Thread["status"][] = ["done", "exited", "error", "stopped"];
-
-function normalizeStatus(raw: string | null): Thread["status"] {
-  if (!raw) return "idle";
-  if ((TERMINAL_STATUSES as string[]).includes(raw)) return raw as Thread["status"];
-  return "idle";
-}
+// No SQL here, and that is the change. This file used to hold eight statements
+// against tauri-plugin-sql while the server held fifteen hand-written Rust arms
+// over the same tables — one schema, two readers, nothing checking that they
+// agreed. They had already stopped agreeing: a whole-row REPLACE built from a
+// stale snapshot could put `running` back on a thread whose process had ended,
+// which the server had refused to do for as long as it had existed.
+//
+// Both sides are `boite_core::command::records` now. The shaping that used to
+// live here — the args JSON, the status normalisation, the `text` column that
+// is called `title` on the wire — is in the row types in `boite_core::model`,
+// applied once for both hosts.
+//
+// tauri-plugin-sql stays loaded: the schema is still its ledger, and its
+// migrations are what the Rust side attaches to. It is no longer a way for the
+// webview to reach the tables.
 
 export const tauriDb: DbApi = {
-  async loadProjects(): Promise<Project[]> {
-    const rows = await getDb().select<ProjectRow[]>(
-      "SELECT id, name, cwd, icon, archived, git_root, worktrees, created_at FROM projects ORDER BY created_at ASC",
-    );
-    return rows.map((r) => ({
-      id: r.id,
-      name: r.name,
-      cwd: r.cwd,
-      icon: r.icon,
-      archived: r.archived === 1,
-      gitRoot: r.git_root,
-      worktrees: r.worktrees === null ? null : r.worktrees === 1,
-    }));
+  loadProjects(): Promise<Project[]> {
+    return invoke("records_project_list");
   },
 
   async saveProject(project: Project): Promise<void> {
-    await getDb().execute(
-      "INSERT OR REPLACE INTO projects (id, name, cwd, default_cmd, default_args, icon, archived, git_root, worktrees, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      [
-        project.id,
-        project.name,
-        project.cwd,
-        "",
-        "[]",
-        project.icon,
-        project.archived ? 1 : 0,
-        project.gitRoot ?? null,
-        project.worktrees == null ? null : project.worktrees ? 1 : 0,
-        Date.now(),
-      ],
-    );
+    await invoke("records_project_create", { params: { project } });
   },
 
   async setProjectArchived(id: string, archived: boolean): Promise<void> {
-    await getDb().execute("UPDATE projects SET archived = ? WHERE id = ?", [
-      archived ? 1 : 0,
-      id,
-    ]);
+    await invoke("records_project_archive", { params: { id, archived } });
   },
 
   async deleteProject(id: string): Promise<void> {
-    await getDb().execute("DELETE FROM projects WHERE id = ?", [id]);
+    await invoke("records_project_delete", { params: { id } });
   },
 
-  async loadThreads(): Promise<Thread[]> {
-    const rows = await getDb().select<ThreadRow[]>(
-      "SELECT id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, icon_color, status, keep_awake, worktree_path, created_at FROM threads ORDER BY created_at ASC",
-    );
-    return rows.map((r) => ({
-      id: r.id,
-      projectId: r.project_id,
-      ptyId: null,
-      label: r.label,
-      title: r.title,
-      cmd: r.cmd,
-      args: safeParseArgs(r.args),
-      iconKey: (r.icon_key ?? null) as Thread["iconKey"],
-      iconColor: r.icon_color ?? null,
-      sessionId: r.session_id,
-      status: normalizeStatus(r.status),
-      exitCode: r.exit_code,
-      createdAt: r.created_at,
-      autoSlept: false,
-      keepAwake: r.keep_awake === 1,
-      worktreePath: r.worktree_path ?? null,
-    }));
+  loadThreads(): Promise<Thread[]> {
+    return invoke("records_thread_list");
   },
 
   async saveThread(thread: Thread): Promise<void> {
-    await getDb().execute(
-      "INSERT OR REPLACE INTO threads (id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, icon_color, status, keep_awake, worktree_path, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      [
-        thread.id,
-        thread.projectId,
-        thread.label,
-        thread.title,
-        thread.cmd,
-        JSON.stringify(thread.args),
-        thread.exitCode,
-        thread.sessionId,
-        thread.iconKey,
-        thread.iconColor ?? null,
-        thread.status,
-        thread.keepAwake ? 1 : 0,
-        thread.worktreePath ?? null,
-        thread.createdAt,
-      ],
-    );
+    await invoke("records_thread_create", { params: { thread } });
   },
 
-  // Column-targeted on purpose: title bursts are flushed on a delay, and a
-  // whole-row REPLACE built from a stale snapshot would overwrite concurrent
-  // writes (sessionId capture, keepAwake, exit status) with old values.
+  // Still column-targeted, and still for the same reason: title bursts are
+  // flushed on a delay, so a whole-row write built from a snapshot taken before
+  // the burst would undo a session-id capture or an exit status that landed in
+  // between. The difference is that the row write now refuses that anyway.
   async updateThreadTitle(id: string, title: string | null): Promise<void> {
-    await getDb().execute("UPDATE threads SET title = ? WHERE id = ?", [title, id]);
+    await invoke("records_thread_update", { params: { threadId: id, title } });
   },
 
   async deleteThread(id: string): Promise<void> {
-    await getDb().execute("DELETE FROM threads WHERE id = ?", [id]);
-    // The identity goes with the thread. Nothing can be signed for an id whose
-    // row is gone anyway, since the project is resolved from that row, but a
-    // key left behind would let a reused id inherit an owner it never had.
-    await getDb().execute("DELETE FROM thread_keys WHERE thread_id = ?", [id]);
-    await invoke("agent_forget_thread_key", { threadId: id }).catch(() => {
-      // The file grants nothing without the row. Worth removing, not worth
-      // failing a delete over.
-    });
+    // The key row and the key file go with it, inside the one command. There
+    // used to be three calls here, and the third was allowed to fail quietly.
+    await invoke("records_thread_delete", { params: { threadId: id } });
   },
 
-  async loadSettings(): Promise<Partial<Settings>> {
-    const rows = await getDb().select<SettingsRow[]>(
-      "SELECT value FROM settings WHERE key = ?",
-      ["main"],
-    );
-    if (rows.length === 0) return {};
-    try {
-      return JSON.parse(rows[0].value) as Partial<Settings>;
-    } catch {
-      return {};
-    }
+  loadSettings(): Promise<Partial<Settings>> {
+    return invoke("records_settings_get");
   },
 
   async saveSettings(settings: Settings): Promise<void> {
-    await getDb().execute(
-      "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
-      ["main", JSON.stringify(settings)],
-    );
+    await invoke("records_settings_set", { params: { settings } });
   },
 
-  async loadTodos(): Promise<TodoItem[]> {
-    const rows = await getDb().select<TodoRow[]>(
-      "SELECT id, project_id, text, description, state, note, commit_sha, claimed_by, position, created_at, updated_at \
-       FROM todos ORDER BY position ASC, created_at ASC",
-    );
-    return rows.map(rowToTodo);
+  loadTodos(): Promise<TodoItem[]> {
+    return invoke("records_todo_list");
   },
 
   async saveTodo(todo: TodoItem): Promise<void> {
-    await getDb().execute(
-      "INSERT OR REPLACE INTO todos \
-       (id, project_id, text, description, state, note, commit_sha, claimed_by, position, created_at, updated_at) \
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      [
-        todo.id,
-        todo.projectId,
-        todo.title,
-        todo.description,
-        todo.state,
-        todo.note,
-        todo.commitSha,
-        todo.claimedBy,
-        todo.position,
-        todo.createdAt,
-        todo.updatedAt,
-      ],
-    );
+    await invoke("records_todo_save", { params: { todo } });
   },
 
   async deleteTodo(id: string): Promise<void> {
-    await getDb().execute("DELETE FROM todos WHERE id = ?", [id]);
+    await invoke("records_todo_delete", { params: { todoId: id } });
+  },
+};
+
+// Naming and colouring a boite used to be remote-only, and not because a
+// desktop could not do it: the rows were behind a WebSocket method with no twin
+// on this side. The bus answers for both now, so the asymmetry cost six lines
+// to remove and would have cost a hand-written SQL pair to keep.
+//
+// The set answers with what was stored rather than what was sent, so a colour
+// the bus dropped does not show up as taken.
+export const tauriWorkspaceMeta: WorkspaceMetaApi = {
+  get(): Promise<WorkspaceMeta> {
+    return invoke("records_workspace_info");
   },
 
+  async set(patch: Partial<WorkspaceMeta>): Promise<WorkspaceMeta> {
+    await invoke("records_workspace_set_info", { params: patch });
+    return invoke("records_workspace_info");
+  },
 };
