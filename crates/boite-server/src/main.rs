@@ -2,14 +2,12 @@ mod agent_api;
 mod auth;
 mod config;
 mod events;
-mod models;
 mod notify;
 mod protocol;
 mod push;
 mod registry;
 mod rpc;
 mod state;
-mod store;
 mod ws;
 
 use std::net::SocketAddr;
@@ -30,7 +28,7 @@ use config::Config;
 use events::AppEvent;
 use registry::Registry;
 use state::AppState;
-use store::{ColVal, Store, ThreadCol};
+use boite_core::store::{ColVal, Store, ThreadCol};
 
 const EVENT_CHANNEL_CAP: usize = 1024;
 

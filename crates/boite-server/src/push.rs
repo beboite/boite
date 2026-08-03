@@ -6,7 +6,7 @@ use base64::Engine;
 use web_push_native::jwt_simple::algorithms::ES256KeyPair;
 use web_push_native::{Auth, WebPushBuilder};
 
-use crate::store::{PushSub, Store};
+use boite_core::store::{PushSub, Store};
 
 // Native Web Push (VAPID, RFC 8030/8291/8292). Lets the PWA receive a system
 // notification when a thread finishes a turn or its process exits, even with
