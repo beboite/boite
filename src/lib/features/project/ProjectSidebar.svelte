@@ -2,6 +2,7 @@
   import { onDestroy } from "svelte";
   import { scale } from "svelte/transition";
   import { app } from "$lib/app/store.svelte";
+  import { visibleStatus } from "$lib/domain/thread-status";
   import { workspace } from "$lib/backend";
   import { settings } from "$lib/features/settings/store.svelte";
   import {
@@ -558,13 +559,7 @@
 
   function displayThreadStatus(thread: Thread): ThreadStatus {
     if (app.unboundByDedup.includes(thread.id)) return "error";
-    if (
-      thread.ptyId &&
-      (thread.status === "idle" || thread.status === "stopped")
-    ) {
-      return "ready";
-    }
-    return thread.status;
+    return visibleStatus(thread.status, !!thread.ptyId);
   }
 
   let ctxMenu = $state<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);

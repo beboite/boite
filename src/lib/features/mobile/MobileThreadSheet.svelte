@@ -1,5 +1,6 @@
 <script lang="ts">
   import { app } from "$lib/app/store.svelte";
+  import { visibleStatus } from "$lib/domain/thread-status";
   import { closeThreadWithConfirm } from "$lib/features/thread/api";
   import { t } from "$lib/i18n/index.svelte";
   import type { Thread, ThreadStatus } from "$lib/types";
@@ -21,10 +22,7 @@
   // really ready, and dedup-orphaned threads flag an error.
   function displayStatus(thread: Thread): ThreadStatus {
     if (app.unboundByDedup.includes(thread.id)) return "error";
-    if (thread.ptyId && (thread.status === "idle" || thread.status === "stopped")) {
-      return "ready";
-    }
-    return thread.status;
+    return visibleStatus(thread.status, !!thread.ptyId);
   }
 
   function open_(id: string) {

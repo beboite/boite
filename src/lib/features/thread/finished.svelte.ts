@@ -1,4 +1,5 @@
 import type { ThreadStatus } from "$lib/types";
+import { isFinished } from "$lib/domain/thread-status";
 import { TransientMark } from "$lib/shared/utils/transientMark.svelte";
 
 // Long enough that a glance a few seconds after the agent stopped still catches
@@ -7,16 +8,6 @@ import { TransientMark } from "$lib/shared/utils/transientMark.svelte";
 const FINISH_WINDOW_MS = 6000;
 
 const marks = new TransientMark(FINISH_WINDOW_MS);
-
-/** Statuses that mean the process is over rather than merely quiet. */
-function isFinished(status: ThreadStatus): boolean {
-  return (
-    status === "done" ||
-    status === "exited" ||
-    status === "error" ||
-    status === "stopped"
-  );
-}
 
 /**
  * Record a status change, and say whether it was a thread crossing the finish

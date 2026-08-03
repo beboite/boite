@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, untrack } from "svelte";
   import { app } from "$lib/app/store.svelte";
+  import { isFinished } from "$lib/domain/thread-status";
   import { workspace } from "$lib/backend";
   import { settings } from "$lib/features/settings/store.svelte";
   import { pickAndAddProject } from "$lib/features/project/api";
@@ -165,19 +166,14 @@
 
   function activateThread(id: string) {
     const t = app.threadById(id);
-    const isFinished =
-      t &&
-      (t.status === "done" ||
-        t.status === "exited" ||
-        t.status === "error" ||
-        t.status === "stopped");
+    const finished = !!t && isFinished(t.status);
 
-    if (app.activeThreadId === id && app.view === "terminal" && !isFinished) {
+    if (app.activeThreadId === id && app.view === "terminal" && !finished) {
       return;
     }
 
     activated[id] = true;
-    if (isFinished) {
+    if (finished) {
       void reloadThread(id);
       app.view = "terminal";
       return;
