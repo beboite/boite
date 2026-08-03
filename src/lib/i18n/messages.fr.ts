@@ -17,6 +17,7 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "common.on": "Activé",
   "common.off": "Désactivé",
   "common.retry": "Réessayer",
+  "common.close": "Fermer",
 
   "tabs.general": "Général",
   "tabs.terminal": "Terminal",
@@ -86,6 +87,12 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "appearance.accentGpt": "GPT",
   "appearance.accentLocal": "Tourne sur cette machine",
   "appearance.accentOther": "Autre chose",
+  "appearance.threadGlow": "Cartes de thread lumineuses",
+  "appearance.threadGlowDesc":
+    "La carte de la barre latérale s'allume selon ce que fait son thread, et deux lumières tournent autour pendant qu'un agent travaille.",
+  "appearance.harnessLogos": "Afficher les logos des agents",
+  "appearance.harnessLogosDesc":
+    "Désactivé, le glyphe ne porte que l'état du thread et le logo revient tant que vous maintenez la carte.",
   "appearance.animations": "Animations",
   "appearance.animationsDesc": "Système suit le réglage de réduction des mouvements du système.",
   "appearance.motionSystem": "Système",
@@ -136,6 +143,15 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "sidebar.addProjectFromFolder": "Ajouter un projet depuis un dossier",
   "sidebar.addProjectOnBoite": "Ajouter un projet sur la boite",
   "sidebar.addProjectOn": "Ajouter un projet sur {name}",
+  "sidebar.remoteProjects": "Projets de la boite",
+  "sidebar.remoteProjectsOn": "Quels projets de {name} afficher",
+  "sidebar.remoteProjectsTitle": "Projets sur {name}",
+  "sidebar.remoteProjectsDesc":
+    "Les projets cochés rejoignent cette barre latérale. Le choix appartient à cet appareil.",
+  "sidebar.remoteProjectsCount": "{shown} sur {total} affichés",
+  "sidebar.remoteProjectsAll": "Tous",
+  "sidebar.remoteProjectsNone": "Aucun",
+  "sidebar.remoteProjectsEmpty": "Cette boite n'a encore aucun projet.",
   "sidebar.projectName": "Nom du projet",
   "sidebar.unarchiveProject": "Désarchiver le projet",
   "sidebar.unarchive": "Désarchiver",

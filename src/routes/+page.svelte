@@ -637,17 +637,29 @@
   :global(.mobile-mode) .ws-outline {
     border-radius: 18px;
   }
+  /* A glow hugging the edges rather than a line drawn on them. The 1.5px of
+     solid colour was a border the app did not have, and it read as chrome —
+     something to look at instead of something to notice. A hairline at half
+     strength with the light falling inward says the same thing at the edge of
+     vision and disappears the moment you are reading a terminal. */
   .ws-remote-ok {
-    box-shadow: inset 0 0 0 1.5px var(--ws-color, var(--color-success));
+    box-shadow:
+      inset 0 0 0 1px color-mix(in srgb, var(--ws-color, var(--color-success)) 40%, transparent),
+      inset 0 0 24px -8px color-mix(in srgb, var(--ws-color, var(--color-success)) 75%, transparent);
   }
+  /* The unhealthy one keeps the pulse, and rather more light: this is the state
+     the user has to act on. */
   .ws-remote-warn {
-    box-shadow: inset 0 0 0 1.5px var(--color-warning);
+    box-shadow:
+      inset 0 0 0 1px color-mix(in srgb, var(--color-warning) 55%, transparent),
+      inset 0 0 26px -6px color-mix(in srgb, var(--color-warning) 80%, transparent);
     animation: ws-pulse var(--dur-pulse) ease-in-out infinite;
   }
   @keyframes ws-pulse {
     50% {
-      box-shadow: inset 0 0 0 1.5px
-        color-mix(in srgb, var(--color-warning) 35%, transparent);
+      box-shadow:
+        inset 0 0 0 1px color-mix(in srgb, var(--color-warning) 22%, transparent),
+        inset 0 0 26px -10px color-mix(in srgb, var(--color-warning) 30%, transparent);
     }
   }
 </style>

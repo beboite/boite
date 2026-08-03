@@ -94,6 +94,27 @@
   </div>
 {/if}
 
+<ToggleSetting
+  label={t("appearance.threadGlow")}
+  description={t("appearance.threadGlowDesc")}
+  enabled={settings.state.sidebarThreadGlow}
+  onToggle={() => settings.setSidebarThreadGlow(!settings.state.sidebarThreadGlow)}
+/>
+
+<!-- Only under the glow design: with the classic ring the logo is the only
+     thing the glyph ever holds, so hiding it would leave an empty circle. -->
+{#if settings.state.sidebarThreadGlow}
+  <div class="pl-3">
+    <ToggleSetting
+      label={t("appearance.harnessLogos")}
+      description={t("appearance.harnessLogosDesc")}
+      enabled={settings.state.sidebarHarnessLogos}
+      onToggle={() =>
+        settings.setSidebarHarnessLogos(!settings.state.sidebarHarnessLogos)}
+    />
+  </div>
+{/if}
+
 <SettingsCard title={t("appearance.animations")} description={t("appearance.animationsDesc")}>
   <div class="flex gap-1.5" role="radiogroup" aria-label={t("appearance.animations")}>
     {#each MOTION_MODES as mode (mode.id)}

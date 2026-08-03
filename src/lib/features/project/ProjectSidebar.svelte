@@ -5,6 +5,7 @@
   import { visibleStatus } from "$lib/domain/thread-status";
   import { workspace } from "$lib/backend";
   import { settings } from "$lib/features/settings/store.svelte";
+  import { device } from "$lib/features/settings/device.svelte";
   import {
     paneStore,
     countLeaves,
@@ -30,6 +31,8 @@ import { projectDisplayName } from "$lib/shared/project-label";
   import { mcpPulse } from "$lib/features/thread/agentActivity.svelte";
   import { waitingReasonFor } from "$lib/features/thread/statusEngine";
   import { threadIconColor } from "$lib/features/fastpick/threadAccent";
+  import { TONE_COLOR, threadVisual } from "$lib/features/thread/threadVisual";
+  import RemoteProjectPicker from "./RemoteProjectPicker.svelte";
   import { confirmDialog } from "$lib/shared/components/confirm.svelte";
   import { resizeHandle } from "$lib/shared/actions/resizeHandle";
   import { longPress } from "$lib/shared/actions/longPress";
@@ -66,13 +69,54 @@ import { projectDisplayName } from "$lib/shared/project-label";
   };
   let { onActivateThread, onNewProject, onRemoveProject }: Props = $props();
 
-  // Dynamic mode: the plain + adds locally, the boite-colored + adds on the
-  // boite (server-side folder browser).
+  // Dynamic mode: the plain + adds locally, the boite-colored + opens the list
+  // of the boite's own projects to pick from (adding one lives in there too).
   function addProjectClick() {
     onNewProject(workspace.isDynamic ? "local" : undefined);
   }
 
   let showArchived = $state(false);
+  let remotePicker = $state(false);
+
+  /**
+   * The glow design, and what it does to the glyph.
+   *
+   * Two separate answers on purpose: the card lighting up is the design, and
+   * whether the agent's logo stays on it is a second question that only exists
+   * once the glyph has something else to show. With the classic design the logo
+   * is all the glyph ever holds, so the second toggle does not apply.
+   */
+  const glowDesign = $derived(settings.state.sidebarThreadGlow);
+  const showLogos = $derived(!glowDesign || settings.state.sidebarHarnessLogos);
+
+  /**
+   * Holding a card brings its agent's logo back.
+   *
+   * The only way to ask "which agent is this one" when the logos are off, and
+   * the press has to be long enough not to fire on the click that opens the
+   * thread. A drag cancels it: a card on its way somewhere is not being
+   * questioned.
+   */
+  const HOLD_REVEAL_MS = 260;
+  let heldThreadId = $state<string | null>(null);
+  let holdTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function startHold(threadId: string) {
+    cancelHold();
+    if (showLogos) return;
+    holdTimer = setTimeout(() => {
+      holdTimer = null;
+      heldThreadId = threadId;
+    }, HOLD_REVEAL_MS);
+  }
+
+  function cancelHold() {
+    if (holdTimer !== null) {
+      clearTimeout(holdTimer);
+      holdTimer = null;
+    }
+    heldThreadId = null;
+  }
 
   /**
    * Arrow keys over the projects and their threads.
@@ -186,6 +230,9 @@ import { projectDisplayName } from "$lib/shared/project-label";
       slotIndex: null,
       dropProjectId: null,
     });
+    // After startPointerDrag, which clears any hold left over from the last
+    // press: the two share the same pointer sequence.
+    startHold(thread.id);
   }
 
   function threadAuxClick(id: string, e: MouseEvent) {
@@ -281,6 +328,23 @@ import { projectDisplayName } from "$lib/shared/project-label";
       drag.grabY = drag.startY - r.top;
       drag.sourceHeight = r.height;
     }
+    // What the neighbours slide by is the row plus the gap under it, not the row:
+    // both lists are laid out with space between them, so shifting by the box
+    // alone left every row one gap short of where it will land. Measured rather
+    // than assumed, because the thread gap depends on which sidebar design is on
+    // and the project gap is a Tailwind class away from changing.
+    drag.sourceHeight += Math.max(0, rowGap(snaps, drag.id) ?? 0);
+  }
+
+  /** The empty space between this row and the one next to it. */
+  function rowGap(snaps: RowSnapshot[], id: string): number | null {
+    const i = snaps.findIndex((s) => s.id === id);
+    if (i < 0) return null;
+    if (i + 1 < snaps.length) {
+      return snaps[i + 1].top - (snaps[i].top + snaps[i].height);
+    }
+    if (i > 0) return snaps[i].top - (snaps[i - 1].top + snaps[i - 1].height);
+    return null;
   }
 
   function pointerDragMove(e: PointerEvent) {
@@ -307,6 +371,7 @@ import { projectDisplayName } from "$lib/shared/project-label";
         // pointer already released
       }
       closeContextMenu();
+      cancelHold();
       captureSiblings(drag);
       if (drag.kind === "thread") paneStore.draggingThreadId = drag.id;
     }
@@ -412,11 +477,47 @@ import { projectDisplayName } from "$lib/shared/project-label";
     return false;
   }
 
+  /**
+   * The click a finished drag leaves behind, dropped before anything sees it.
+   *
+   * Letting go after a drag still fires a click, and where it lands is not the
+   * row it started on: the browser targets the nearest common ancestor of the
+   * press and the release, so carrying a project card past its neighbours ends
+   * on the scrolling list itself — whose click handler means "you clicked the
+   * empty space", clears the selection and takes the window off the project the
+   * user was looking at. `suppressClickFor` could not catch that one, because it
+   * is only consulted by the row handlers the click never reaches.
+   *
+   * Capture phase and document level, so it is dropped above every handler
+   * rather than beside them. The timeout is for the drags that end with no click
+   * at all, which is most of them once the pointer is captured.
+   */
+  function swallowNextClick() {
+    if (typeof document === "undefined") return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const stop = () => {
+      document.removeEventListener("click", swallow, true);
+      if (timer !== null) clearTimeout(timer);
+      timer = null;
+    };
+    function swallow(e: MouseEvent) {
+      e.preventDefault();
+      e.stopPropagation();
+      stop();
+    }
+    document.addEventListener("click", swallow, true);
+    timer = setTimeout(stop, 300);
+  }
+
   function pointerDragEnd(e: PointerEvent) {
     const drag = dragState;
     if (!drag || e.pointerId !== drag.pointerId) return;
+    // A press held long enough to have shown the logo was a question, not a
+    // click: letting go of it must not open the thread.
+    if (heldThreadId !== null) swallowNextClick();
     if (drag.active) {
       e.preventDefault();
+      swallowNextClick();
       if (drag.kind === "project") commitProjectDrag(drag);
       else commitThreadDrag(drag, e);
       setTimeout(() => {
@@ -427,6 +528,7 @@ import { projectDisplayName } from "$lib/shared/project-label";
   }
 
   function cleanupPointerDrag() {
+    cancelHold();
     if (typeof document !== "undefined") {
       document.removeEventListener("pointermove", pointerDragMove);
       document.removeEventListener("pointerup", pointerDragEnd);
@@ -490,6 +592,7 @@ import { projectDisplayName } from "$lib/shared/project-label";
   }
   function threadHoverLeave(id: string) {
     if (paneStore.hoveredThreadId === id) paneStore.hoveredThreadId = null;
+    if (heldThreadId === id) cancelHold();
   }
 
   /**
@@ -887,6 +990,7 @@ import { projectDisplayName } from "$lib/shared/project-label";
 
   onDestroy(() => {
     cleanupPointerDrag();
+    cancelHold();
     document.body.classList.remove("dragging-card");
   });
 </script>
@@ -943,15 +1047,22 @@ import { projectDisplayName } from "$lib/shared/project-label";
           <Plus class="size-4" />
         </button>
         {#if workspace.isDynamic}
-          <!-- Boite-colored twin of the + button: adds a project on the
-               connected boite via the server-side folder browser. -->
+          <!-- Boite-colored twin of the + button. It used to go straight to the
+               server-side folder browser; it opens the boite's own project list
+               instead, because dynamic mode no longer grafts all of them on and
+               picking which ones show is the question asked far more often.
+               Adding one is still there, at the bottom of that list. -->
           <button
             type="button"
             class="rounded-md border p-1 text-muted-foreground transition hover:bg-accent hover:text-foreground"
+            class:is-open={remotePicker}
             style:border-color={workspace.info.color || "var(--color-success)"}
-            onclick={() => onNewProject("remote")}
-            aria-label={t("sidebar.addProjectOnBoite")}
-            title={t("sidebar.addProjectOn", { name: workspace.info.name || "boite" })}
+            onclick={() => (remotePicker = true)}
+            aria-label={t("sidebar.remoteProjects")}
+            aria-expanded={remotePicker}
+            title={t("sidebar.remoteProjectsOn", {
+              name: workspace.info.name || "boite",
+            })}
           >
             <Plus class="size-4" />
           </button>
@@ -1017,6 +1128,10 @@ import { projectDisplayName } from "$lib/shared/project-label";
         class:source={isProjectSource}
         class:opacity-50={boiteOffline}
         class:drop-target={dropProjectId === project.id}
+        class:remote-origin={isRemoteOrigin}
+        style:--boite={isRemoteOrigin
+          ? workspace.info.color || "var(--color-success)"
+          : undefined}
         data-project-row={project.id}
         style:transform={isProjectSource
           ? `translate(0px, ${dragOffset}px) scale(1.015)`
@@ -1031,9 +1146,6 @@ import { projectDisplayName } from "$lib/shared/project-label";
           class="project-row group/project relative flex items-center gap-2 px-2 py-1.5 transition hover:text-foreground {showArchived
             ? ''
             : 'cursor-pointer'}"
-          style:box-shadow={isRemoteOrigin
-            ? `inset 2px 0 0 0 ${workspace.info.color || "var(--color-success)"}`
-            : undefined}
           title={isRemoteOrigin
             ? boiteOffline
               ? t("sidebar.onBoiteOffline", {
@@ -1153,8 +1265,11 @@ import { projectDisplayName } from "$lib/shared/project-label";
           <!-- No rail down the left any more: the card's own outline is what
                says these threads belong to this project, and a dashed line
                inside a box is the same statement made twice. -->
+          <!-- A hairline between rows is enough for a flat card and too little
+               for a lit one: the halo of one thread would sit on top of its
+               neighbour, and two rows would read as one blur. -->
           <ul
-            class="space-y-px px-1 pb-1"
+            class="px-1 pb-1 {glowDesign ? 'space-y-1.5' : 'space-y-px'}"
             data-thread-list
             data-project-id={project.id}
           >
@@ -1166,6 +1281,13 @@ import { projectDisplayName } from "$lib/shared/project-label";
                 dragInThisProject && liveDrag.slotIndex !== null && threadSourceIdx >= 0
                   ? rowShift(threadIdx, threadSourceIdx, liveDrag.slotIndex, liveDrag.sourceHeight)
                   : 0}
+              {@const keepAwake = (thread.keepAwake ?? false) && !!thread.ptyId}
+              {@const visual = threadVisual({
+                status: displayThreadStatus(thread),
+                asleep: thread.autoSlept ?? false,
+                keepAwake,
+              })}
+              {@const fresh = justFinished(thread.id)}
               <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
               <li
                 class="thread-row group/thread"
@@ -1198,9 +1320,24 @@ import { projectDisplayName } from "$lib/shared/project-label";
                   class="thread-card relative flex cursor-pointer items-center gap-2 rounded-sm px-1.5 py-1 transition {isActive
                     ? 'bg-accent text-foreground'
                     : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground'}"
-                  class:just-finished={justFinished(thread.id)}
+                  class:just-finished={fresh && !glowDesign}
                   class:mcp-touch={mcpPulse.has(thread.id)}
+                  class:glow={glowDesign}
+                  class:fresh={glowDesign && fresh}
+                  data-glow={glowDesign ? visual.state : undefined}
+                  style:--glow={glowDesign ? TONE_COLOR[visual.tone] : undefined}
                 >
+                  {#if glowDesign && (visual.state === "working" || visual.state === "sleeping")}
+                    <!-- Two lights going round the card. Working, they are the
+                         thing that says an agent is mid-turn from the other side
+                         of the room; asleep, they are the same motion at a tenth
+                         of the light, which reads as breathing rather than as
+                         work. Both are decoration over a card that already
+                         carries the colour, so they are hidden outright rather
+                         than frozen when motion is turned down. -->
+                    <span class="orbit orbit-a" aria-hidden="true"></span>
+                    <span class="orbit orbit-b" aria-hidden="true"></span>
+                  {/if}
                   {#if !(renaming && renaming.kind === "thread" && renaming.id === thread.id)}
                     <button
                       type="button"
@@ -1227,7 +1364,10 @@ import { projectDisplayName } from "$lib/shared/project-label";
                     iconKey={thread.iconKey}
                     color={threadIconColor(thread)}
                     asleep={thread.autoSlept ?? false}
-                    keepAwake={(thread.keepAwake ?? false) && !!thread.ptyId}
+                    {keepAwake}
+                    glow={glowDesign}
+                    showLogo={showLogos}
+                    revealLogo={heldThreadId === thread.id}
                     onToggleKeepAwake={() => app.toggleThreadKeepAwake(thread.id)}
                     title={glyphTitle(thread)}
                     label={t("sidebar.toggleKeepAwake")}
@@ -1352,6 +1492,8 @@ import { projectDisplayName } from "$lib/shared/project-label";
       color={threadIconColor(threadDragGhost.thread)}
       asleep={threadDragGhost.thread.autoSlept ?? false}
       keepAwake={(threadDragGhost.thread.keepAwake ?? false) && !!threadDragGhost.thread.ptyId}
+      glow={glowDesign}
+      showLogo={showLogos}
     />
     <span
       class="min-w-0 flex-1 truncate text-left text-base leading-[19px]"
@@ -1360,6 +1502,16 @@ import { projectDisplayName } from "$lib/shared/project-label";
       {threadDragGhost.thread.title ?? threadDragGhost.thread.label}
     </span>
   </div>
+{/if}
+
+{#if remotePicker}
+  <RemoteProjectPicker
+    onClose={() => (remotePicker = false)}
+    onAddRemote={() => {
+      remotePicker = false;
+      onNewProject("remote");
+    }}
+  />
 {/if}
 
 {#if ctxMenu}
@@ -1530,5 +1682,163 @@ import { projectDisplayName } from "$lib/shared/project-label";
      app being driven from outside while the thread carries on. */
   .thread-card.mcp-touch {
     animation: boite-mcp-pulse 1.6s var(--ease-out-quint) forwards;
+  }
+
+  /* ---- The glow design ---------------------------------------------------
+     Opt-in, and the whole of it hangs off `.thread-card.glow` with the state on
+     a data attribute. The halo is a ::before rather than the card's own
+     box-shadow because `mcp-touch` animates that one, and an agent touching
+     Boite must not blow away the row's own state for 1.6 seconds.
+     `--glow` is the tone, written by the markup from threadVisual(). */
+  .thread-card.glow::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    transition: box-shadow 260ms var(--ease-out-quint);
+  }
+
+  /* Mid-turn. Half-lit, because this is the state a busy sidebar spends most of
+     its time in and a full-strength amber on four rows at once is a warning
+     light rather than a status. The two orbiting lights carry the urgency. */
+  .thread-card.glow[data-glow="working"]::before {
+    box-shadow:
+      inset 0 0 0 1px color-mix(in srgb, var(--glow) 40%, transparent),
+      0 0 12px 1px color-mix(in srgb, var(--glow) 50%, transparent);
+  }
+
+  /* Blocked on an answer. Whole and breathing at full strength: nothing is
+     progressing, and this is the one row worth crossing the room for. */
+  .thread-card.glow[data-glow="waiting"]::before {
+    animation: card-breathe 1.7s var(--ease-in-out-quad) infinite;
+  }
+  @keyframes card-breathe {
+    0%,
+    100% {
+      box-shadow:
+        inset 0 0 0 1px color-mix(in srgb, var(--glow) 35%, transparent),
+        0 0 8px 0 color-mix(in srgb, var(--glow) 28%, transparent);
+    }
+    50% {
+      box-shadow:
+        inset 0 0 0 1px var(--glow),
+        0 0 16px 2px color-mix(in srgb, var(--glow) 70%, transparent);
+    }
+  }
+
+  /* Done. Rests at half, and the arrival flash is the `fresh` rule below: the
+     news is worth a second of full green, the row is not worth it for the next
+     hour. */
+  .thread-card.glow[data-glow="finished"]::before {
+    box-shadow:
+      inset 0 0 0 1px color-mix(in srgb, var(--glow) 40%, transparent),
+      0 0 10px 0 color-mix(in srgb, var(--glow) 50%, transparent);
+  }
+  .thread-card.glow.fresh[data-glow="finished"]::before {
+    animation: card-finish 1.4s var(--ease-out-quint) forwards;
+  }
+  @keyframes card-finish {
+    0% {
+      box-shadow:
+        inset 0 0 0 1px var(--glow),
+        0 0 18px 2px color-mix(in srgb, var(--glow) 100%, transparent);
+    }
+    100% {
+      box-shadow:
+        inset 0 0 0 1px color-mix(in srgb, var(--glow) 40%, transparent),
+        0 0 10px 0 color-mix(in srgb, var(--glow) 50%, transparent);
+    }
+  }
+
+  /* Attached and quiet: alive, and nothing more than that. */
+  .thread-card.glow[data-glow="ready"]::before {
+    box-shadow:
+      inset 0 0 0 1px color-mix(in srgb, var(--glow) 22%, transparent),
+      0 0 8px -1px color-mix(in srgb, var(--glow) 22%, transparent);
+  }
+
+  /* Asleep. A tenth of the light, which is what a row that has been done for an
+     hour is worth; the Z's in the glyph are what actually say it. */
+  .thread-card.glow[data-glow="sleeping"]::before {
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--glow) 12%, transparent);
+  }
+
+  /* Ended badly. Steady, never pulsing: a crash is not urgent, it is finished,
+     and a red light that moves reads as something still going wrong. */
+  .thread-card.glow[data-glow="failed"]::before {
+    box-shadow:
+      inset 0 0 0 1px color-mix(in srgb, var(--glow) 55%, transparent),
+      0 0 10px 0 color-mix(in srgb, var(--glow) 40%, transparent);
+  }
+
+  /* Never started: no light at all. A row with nothing behind it is the one
+     thing in this design that has nothing to say. */
+
+  /* The lights themselves, walked round the card's own rounded rectangle by a
+     motion path — the same corner radius, so they never cut the corners. Two of
+     them, half a lap apart. */
+  .orbit {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 4px;
+    height: 4px;
+    border-radius: 9999px;
+    background: var(--glow);
+    box-shadow: 0 0 6px 1px color-mix(in srgb, var(--glow) 60%, transparent);
+    offset-path: inset(0 round var(--radius-sm));
+    offset-rotate: 0deg;
+    offset-anchor: center;
+    animation: card-orbit 3.4s linear infinite;
+    pointer-events: none;
+  }
+  .orbit-b {
+    animation-delay: -1.7s;
+  }
+  .thread-card.glow[data-glow="sleeping"] .orbit {
+    opacity: 0.1;
+    box-shadow: none;
+    animation-duration: 7s;
+  }
+  @keyframes card-orbit {
+    from {
+      offset-distance: 0%;
+    }
+    to {
+      offset-distance: 100%;
+    }
+  }
+  /* A browser without motion paths would park both lights on the top-left
+     corner, which reads as damage rather than as a missing flourish. */
+  @supports not (offset-path: inset(0 round 5px)) {
+    .orbit {
+      display: none;
+    }
+  }
+  :global(html[data-motion="reduced"]) .orbit {
+    display: none;
+  }
+  :global(html[data-motion="reduced"]) .thread-card.glow[data-glow="waiting"]::before {
+    animation: none;
+    box-shadow:
+      inset 0 0 0 1px var(--glow),
+      0 0 12px 1px color-mix(in srgb, var(--glow) 55%, transparent);
+  }
+
+  /* A project that lives on the connected boite. It used to be a two-pixel bar
+     down the left of the header row, which is a marker glued to a card rather
+     than a property of it; the boite's own colour on the card's outline says the
+     same thing about the whole thing it is true of, threads included. */
+  /* `:not(.source)` because the drag lift is a box-shadow too, and it is
+     declared above: a card being carried keeps its elevation rather than
+     swapping it for a coloured halo. */
+  .project-block.remote-origin:not(.source) {
+    border-color: color-mix(in srgb, var(--boite) 55%, var(--color-border));
+    box-shadow: 0 0 10px -4px color-mix(in srgb, var(--boite) 70%, transparent);
+  }
+  .project-block.remote-origin.selected:not(.source) {
+    border-color: color-mix(in srgb, var(--boite) 80%, var(--color-border-strong));
+    box-shadow: 0 0 12px -3px color-mix(in srgb, var(--boite) 80%, transparent);
   }
 </style>
