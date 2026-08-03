@@ -52,6 +52,34 @@ fn looks_binary(bytes: &[u8]) -> bool {
     head.contains(&0u8)
 }
 
+/// The largest document a window will be handed in one piece.
+///
+/// The bytes cross to the page as one base64 string, so this is a memory
+/// ceiling on the window rather than a disk limit. A 64 MB PDF is already a poor
+/// thing to open in a side pane.
+pub const MAX_VIEW_BYTES: u64 = 64 * 1024 * 1024;
+
+/// A whole file, base64, for a window to draw.
+///
+/// PDFs and images: [`read_blocking`] refuses them at the first NUL byte, and
+/// there is nowhere else for the bytes to come from. Base64 rather than a byte
+/// array because both transports serialise `Vec<u8>` as a JSON array of numbers
+/// — six characters per byte instead of one and a third.
+pub fn read_base64_blocking(path: &str) -> Result<String, String> {
+    use base64::Engine as _;
+
+    let meta = fs::metadata(path).map_err(|e| format!("stat failed: {e}"))?;
+    if meta.len() > MAX_VIEW_BYTES {
+        return Err(format!(
+            "file too large ({} bytes > {} max)",
+            meta.len(),
+            MAX_VIEW_BYTES
+        ));
+    }
+    let bytes = fs::read(path).map_err(|e| format!("read failed: {e}"))?;
+    Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
+}
+
 pub fn write_blocking(path: &str, content: &str) -> Result<u64, String> {
     let p = Path::new(path);
     if p.parent().is_none() {

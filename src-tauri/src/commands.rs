@@ -1,9 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use base64::engine::general_purpose::STANDARD as BASE64;
-use base64::Engine as _;
-
 use tauri::{
     AppHandle, Manager, State,
     ipc::{Channel, InvokeBody, Request},
@@ -11,15 +8,12 @@ use tauri::{
 
 use serde_json::Value;
 
-use boite_core::command::{Command, Git, Scoped};
-use boite_core::editor::TextFile;
-use boite_core::explorer::{DirEntry, SearchHit};
-use boite_core::project::ProjectInspection;
+use boite_core::command::{Command, Files, Git, Scoped};
 use boite_core::pty::{PtyManager, PtySpawnArgs};
 use boite_core::scope::ProjectRoots;
 use boite_core::session::{ClaudeSessionHit, CodexSessionHit};
 use boite_core::shell::ShellOption;
-use boite_core::{editor, explorer, project, session, shell, usage};
+use boite_core::{session, shell, usage};
 
 use crate::BootState;
 use crate::local_pty::{LocalSessions, LocalSink};
@@ -160,21 +154,6 @@ pub fn register_project_roots(
     state.replace(roots);
 }
 
-// Deliberately NOT scoped through ProjectRoots, unlike every other path-taking
-// command here: inspection is what produces the name/icon a project is created
-// WITH, so it necessarily runs before that project is a registered root. The
-// server twin (rpc.rs "project.inspect") can gate on BOITE_WORKSPACE_DIR; the
-// desktop has no equivalent outer boundary, the user's own folder dialog is it.
-// What the command can reveal is therefore capped in boite-core::project:
-// `.git/config` remotes, plus an image from a fixed list of subdirectories,
-// image extensions only, 2 MB max. Keep it that way.
-#[tauri::command]
-pub async fn inspect_project(path: String) -> Result<ProjectInspection, String> {
-    tauri::async_runtime::spawn_blocking(move || project::inspect_project_blocking(path))
-        .await
-        .map_err(|e| format!("inspect_project task failed: {e}"))?
-}
-
 /// Where a thread with no project of its own runs, and the default parent for
 /// a project that has no path yet.
 #[tauri::command]
@@ -185,71 +164,51 @@ pub fn home_dir(app: AppHandle) -> Result<String, String> {
         .map_err(|e| format!("no home directory: {e}"))
 }
 
-/// What is already sitting at a path a new project wants. Unscoped like
-/// `inspect_project` and for the same reason — it runs before the folder is
-/// anyone's root — and it reveals strictly less: three words, no listing.
-#[tauri::command]
-pub fn folder_state(path: String) -> project::FolderState {
-    project::folder_state_blocking(&path)
-}
-
-/// Said to whoever asked for a project folder somewhere it cannot go. It lives
-/// in `boite_core::project` so the desktop and the server cannot word it
-/// differently, which is exactly what happened while they each held a copy.
-pub use boite_core::project::WRONG_PLACE_FOR_A_PROJECT;
-
-/// Where a new project folder is allowed to go: beside a project the user
-/// already has, or under their home.
+/// What is already sitting at a path a new project wants.
 ///
-/// Built here rather than at each call site for the same reason as the message
-/// above. `create_project_folder` enforces it; `agent_api` reads it to refuse
-/// in front of an agent that is still running.
-pub fn new_project_roots(app: &AppHandle, scope: &ProjectRoots) -> Vec<String> {
-    new_project_roots_with_home(scope, app.path().home_dir().ok())
-}
-
-/// The list itself, with the home directory handed in instead of asked of the
-/// app. Everything a running Tauri app is needed for stays above this line, so
-/// the rule below it can be read back in a test.
-fn new_project_roots_with_home(scope: &ProjectRoots, home: Option<PathBuf>) -> Vec<String> {
-    let mut allowed = scope.new_project_parents();
-    if let Some(home) = home {
-        allowed.push(home.to_string_lossy().to_string());
-    }
-    allowed
+/// Unscoped through the registered roots, like `inspect_project`, and for the
+/// same reason: it runs before the folder is anyone's root. Both boundaries and
+/// both refusals live on the bus now, so this side and the server cannot answer
+/// the question differently.
+#[tauri::command]
+pub async fn folder_state(
+    scope: State<'_, ProjectRoots>,
+    path: String,
+) -> Result<Value, String> {
+    on_bus(scope.inner(), Files::FolderState { path }.into()).await
 }
 
 /// Makes the folder a new project will live in.
-///
-/// The one command here that creates a directory outside every registered root,
-/// which it has to: a project's folder is not a root until the project exists.
-/// The boundary instead is *where*: under the user's home, or beside a project
-/// they already have. An agent can reach this through the MCP endpoint, so a
-/// free-form `create_dir_all` was never an option.
 #[tauri::command]
-pub fn create_project_folder(
-    app: AppHandle,
+pub async fn create_project_folder(
     scope: State<'_, ProjectRoots>,
     path: String,
-) -> Result<(), String> {
-    if !project::may_create_project_at(&path, &new_project_roots(&app, &scope)) {
-        return Err(WRONG_PLACE_FOR_A_PROJECT.into());
-    }
-    if project::folder_state_blocking(&path) == project::FolderState::Occupied {
-        return Err("there is already something in that folder".into());
-    }
-    std::fs::create_dir_all(&path).map_err(|e| format!("cannot create the folder: {e}"))
+) -> Result<Value, String> {
+    on_bus(scope.inner(), Files::CreateFolder { path }.into()).await
+}
+
+/// What a folder says about itself before it is a project: a name, an icon, a
+/// remote.
+///
+/// Deliberately NOT scoped through `ProjectRoots`, unlike every other
+/// path-taking command here: inspection is what produces the name and icon a
+/// project is created WITH, so it necessarily runs before that project is a
+/// registered root. The desktop has no outer boundary to apply — the user's own
+/// folder dialog is it — so what the command can reveal is capped in
+/// `boite_core::project` instead: `.git/config` remotes, plus an image from a
+/// fixed list of subdirectories, image extensions only, 2 MB max. Keep it that
+/// way.
+#[tauri::command]
+pub async fn inspect_project(
+    scope: State<'_, ProjectRoots>,
+    path: String,
+) -> Result<Value, String> {
+    on_bus(scope.inner(), Files::Inspect { path }.into()).await
 }
 
 #[tauri::command]
-pub async fn read_dir(
-    scope: State<'_, ProjectRoots>,
-    path: String,
-) -> Result<Vec<DirEntry>, String> {
-    scope.ensure_allowed(&path)?;
-    tauri::async_runtime::spawn_blocking(move || explorer::read_dir_blocking(path))
-        .await
-        .map_err(|e| format!("read_dir task failed: {e}"))?
+pub async fn read_dir(scope: State<'_, ProjectRoots>, path: String) -> Result<Value, String> {
+    on_bus(scope.inner(), Files::ReadDir { path }.into()).await
 }
 
 #[tauri::command]
@@ -258,59 +217,30 @@ pub async fn explorer_search(
     path: String,
     query: String,
     limit: u32,
-) -> Result<Vec<SearchHit>, String> {
-    scope.ensure_allowed(&path)?;
-    tauri::async_runtime::spawn_blocking(move || explorer::search_blocking(&path, &query, limit))
-        .await
-        .map_err(|e| format!("explorer_search task failed: {e}"))?
+) -> Result<Value, String> {
+    on_bus(scope.inner(), Files::Search { path, query, limit }.into()).await
 }
-
-/// The largest document the window will be handed in one piece.
-///
-/// The bytes cross the IPC bridge as base64 and land in the page as one string,
-/// so this is a memory ceiling on the window, not a disk limit. A 64 MB PDF is
-/// already a poor thing to open in a side pane.
-const MAX_VIEW_BYTES: u64 = 64 * 1024 * 1024;
 
 /// A whole file, base64, for the window to draw.
 ///
 /// PDFs and images: `read_text_file` refuses them at the first NUL byte, and
-/// there is nowhere else for the bytes to come from. Base64 rather than a byte
-/// array because Tauri serialises `Vec<u8>` as a JSON array of numbers — six
-/// characters per byte instead of one and a third.
-///
-/// Scoped through `ProjectRoots` like every other path-taking command.
+/// there is nowhere else for the bytes to come from. The size ceiling lives with
+/// the reader in `boite_core::editor`; it is a memory ceiling on the window, not
+/// a disk limit.
 #[tauri::command]
 pub async fn read_file_base64(
     scope: State<'_, ProjectRoots>,
     path: String,
-) -> Result<String, String> {
-    scope.ensure_allowed(&path)?;
-    tauri::async_runtime::spawn_blocking(move || {
-        let meta = std::fs::metadata(&path).map_err(|e| format!("stat failed: {e}"))?;
-        if meta.len() > MAX_VIEW_BYTES {
-            return Err(format!(
-                "file too large ({} bytes > {} max)",
-                meta.len(),
-                MAX_VIEW_BYTES
-            ));
-        }
-        let bytes = std::fs::read(&path).map_err(|e| format!("read failed: {e}"))?;
-        Ok(BASE64.encode(bytes))
-    })
-    .await
-    .map_err(|e| format!("read_file_base64 task failed: {e}"))?
+) -> Result<Value, String> {
+    on_bus(scope.inner(), Files::ReadBase64 { path }.into()).await
 }
 
 #[tauri::command]
 pub async fn read_text_file(
     scope: State<'_, ProjectRoots>,
     path: String,
-) -> Result<TextFile, String> {
-    scope.ensure_allowed(&path)?;
-    tauri::async_runtime::spawn_blocking(move || editor::read_blocking(&path))
-        .await
-        .map_err(|e| format!("read_text_file task failed: {e}"))?
+) -> Result<Value, String> {
+    on_bus(scope.inner(), Files::Read { path }.into()).await
 }
 
 #[tauri::command]
@@ -318,11 +248,8 @@ pub async fn write_text_file(
     scope: State<'_, ProjectRoots>,
     path: String,
     content: String,
-) -> Result<u64, String> {
-    scope.ensure_allowed_for_write(&path)?;
-    tauri::async_runtime::spawn_blocking(move || editor::write_blocking(&path, &content))
-        .await
-        .map_err(|e| format!("write_text_file task failed: {e}"))?
+) -> Result<Value, String> {
+    on_bus(scope.inner(), Files::Write { path, content }.into()).await
 }
 
 #[tauri::command]
@@ -1229,49 +1156,3 @@ pub async fn fastpick_version() -> Option<String> {
         .await
         .unwrap_or(None)
 }
-
-#[cfg(test)]
-mod new_project_root_tests {
-    use super::*;
-
-    /// The two places a new project may go, as `create_project_folder` and the
-    /// agent endpoint both read them: beside a project the user already has,
-    /// and under their home. Nowhere else, and nowhere at all before there is
-    /// either.
-    #[test]
-    fn the_roots_are_the_project_parents_plus_the_home_folder() {
-        let base = std::env::temp_dir().join(format!(
-            "boite-new-project-roots-{}-{:?}",
-            std::process::id(),
-            std::thread::current().id()
-        ));
-        let _ = std::fs::remove_dir_all(&base);
-        let project = base.join("dev").join("thing");
-        std::fs::create_dir_all(&project).unwrap();
-        let home = base.join("home");
-        std::fs::create_dir_all(&home).unwrap();
-
-        let scope = ProjectRoots::default();
-        scope.replace(vec![project.to_string_lossy().to_string()]);
-        let allowed = new_project_roots_with_home(&scope, Some(home.clone()));
-
-        let dev = std::fs::canonicalize(base.join("dev")).unwrap();
-        let text = |p: &Path| p.to_string_lossy().to_string();
-        assert!(project::may_create_project_in(&text(&dev), &allowed));
-        assert!(project::may_create_project_at(
-            &text(&home.join("idea")),
-            &allowed
-        ));
-        // A sibling of both is neither.
-        assert!(!project::may_create_project_at(
-            &text(&base.join("elsewhere").join("x")),
-            &allowed
-        ));
-        // No home to add leaves the projects, and no projects leave nothing.
-        assert_eq!(new_project_roots_with_home(&scope, None).len(), 1);
-        assert!(new_project_roots_with_home(&ProjectRoots::default(), None).is_empty());
-
-        let _ = std::fs::remove_dir_all(&base);
-    }
-}
-

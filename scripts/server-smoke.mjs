@@ -143,6 +143,28 @@ try {
   check("a path outside the roots is refused", said.includes("outside registered project roots"), said);
 }
 
+// The filesystem half of the same bus. `file.readBase64` is new on this side:
+// the desktop has had it since panes could hold a document, and a remote
+// workspace answered `not-supported-remote`, so a PDF in a pane was a blank
+// frame. `project.folderState` is the other one worth a check — it is asked
+// about folders that do not exist yet, which is precisely what this side used
+// to refuse.
+const dir = await c.rpc("fs.readDir", { path: CWD });
+check("fs.readDir wraps its answer in entries", Array.isArray(dir?.entries));
+
+const pkg = `${CWD}/package.json`;
+const text = await c.rpc("file.read", { path: pkg });
+check("file.read answers bare", typeof text?.content === "string");
+
+const bytes = await c.rpc("file.readBase64", { path: pkg });
+const decoded = bytes?.base64 ? Buffer.from(bytes.base64, "base64").toString("utf8") : "";
+check("file.readBase64 hands back the same file", decoded === text?.content, `${decoded.length}b`);
+
+const missing = await c.rpc("project.folderState", { path: `${CWD}/not-a-folder-${Date.now()}` });
+check("a folder that does not exist answers missing", missing === "missing", String(missing));
+const occupied = await c.rpc("project.folderState", { path: CWD });
+check("a folder with files in it says so", occupied === "occupied", String(occupied));
+
 const threadId = crypto.randomUUID();
 const thread = {
   id: threadId,

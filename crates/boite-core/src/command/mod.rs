@@ -33,9 +33,31 @@ use serde_json::Value;
 
 use crate::scope::ProjectRoots;
 
+pub mod files;
 pub mod git;
 
+pub use files::Files;
 pub use git::Git;
+
+/// What a command wants to do with a path the caller handed it.
+///
+/// The two boundaries are not the same check: a write target may not exist yet,
+/// so its parent is what has to be inside the roots, and a symlink sitting in an
+/// allowed directory can point anywhere.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Access {
+    Read,
+    Write,
+}
+
+impl Access {
+    pub(crate) fn ensure(self, host: &dyn Host, path: &str) -> Result<(), String> {
+        match self {
+            Access::Read => host.roots().ensure_allowed(path),
+            Access::Write => host.roots().ensure_allowed_for_write(path),
+        }
+    }
+}
 
 /// What a command is allowed to reach.
 ///
@@ -54,6 +76,46 @@ pub trait Host {
     fn legacy_worktree_base(&self) -> Option<PathBuf> {
         None
     }
+
+    /// Whether a path that is not a project yet may be looked at, or made.
+    ///
+    /// A different boundary from [`Host::roots`]: that one is "inside a project
+    /// the user has", this one is "may become one". A desktop has no outer
+    /// boundary to apply — inspecting a folder is what produces the name a
+    /// project is created with, and the user's own folder dialog is the gate —
+    /// so its answer is yes. A server bound to a workspace directory has one.
+    ///
+    /// Note what this does *not* do: require the path to exist. The folder a
+    /// project is about to go in does not, and asking about it is the whole
+    /// point of `project.folderState`.
+    fn ensure_new_project_path(&self, _path: &str) -> Result<(), String> {
+        Ok(())
+    }
+
+    /// Places a new project may go beyond the parents of the registered roots.
+    ///
+    /// The user's home on both sides; a server bound to a workspace directory
+    /// adds that too.
+    fn extra_project_parents(&self) -> Vec<String> {
+        dirs::home_dir()
+            .map(|home| vec![home.to_string_lossy().to_string()])
+            .unwrap_or_default()
+    }
+}
+
+/// Every method the bus serves, across every domain.
+///
+/// What a transport asks before handing a method over, so a front door that
+/// still serves something itself cannot accidentally shadow a command — or be
+/// shadowed by one. The lists are per domain and this is the only place they are
+/// read together.
+pub fn methods() -> impl Iterator<Item = &'static str> {
+    git::ALL_METHODS.iter().chain(files::ALL_METHODS).copied()
+}
+
+/// Whether the bus answers for this method.
+pub fn handles(method: &str) -> bool {
+    methods().any(|m| m == method)
 }
 
 /// A capability, named and carrying its arguments.
@@ -62,12 +124,19 @@ pub trait Host {
 /// this one stays a table of contents.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Command {
+    Files(Files),
     Git(Git),
 }
 
 impl From<Git> for Command {
     fn from(git: Git) -> Self {
         Command::Git(git)
+    }
+}
+
+impl From<Files> for Command {
+    fn from(files: Files) -> Self {
+        Command::Files(files)
     }
 }
 
@@ -81,6 +150,9 @@ impl Command {
             Some(("git", _)) | Some(("worktree", _)) => {
                 Git::decode(method, params).map(Command::Git)
             }
+            Some(("fs", _)) | Some(("file", _)) | Some(("project", _)) => {
+                Files::decode(method, params).map(Command::Files)
+            }
             _ => Err(format!("unknown method: {method}")),
         }
     }
@@ -88,6 +160,7 @@ impl Command {
     /// The wire name this command answers to. Round-trips with [`Command::decode`].
     pub fn name(&self) -> &'static str {
         match self {
+            Command::Files(f) => f.name(),
             Command::Git(g) => g.name(),
         }
     }
@@ -95,6 +168,7 @@ impl Command {
     /// How the WebSocket protocol wraps this command's answer. See [`Wire`].
     pub fn wire(&self) -> Wire {
         match self {
+            Command::Files(f) => f.wire(),
             Command::Git(g) => g.wire(),
         }
     }
@@ -107,6 +181,7 @@ impl Command {
     /// already in it.
     pub fn prepare(self, host: &dyn Host) -> Result<Ready, String> {
         match self {
+            Command::Files(f) => f.prepare(host),
             Command::Git(g) => g.prepare(host),
         }
     }
@@ -129,6 +204,7 @@ impl Ready {
     pub fn run(self) -> Result<Value, String> {
         match self {
             Ready::Settled(value) => Ok(value),
+            Ready::Work(Command::Files(f)) => f.run(),
             Ready::Work(Command::Git(g)) => g.run(),
         }
     }
@@ -222,6 +298,8 @@ pub(crate) fn str_list(params: &Value, key: &str) -> Vec<String> {
 pub struct Scoped<'a> {
     pub roots: &'a ProjectRoots,
     pub legacy_worktree_base: Option<PathBuf>,
+    /// `None` keeps the trait's answer, which is the user's home.
+    pub extra_project_parents: Option<Vec<String>>,
 }
 
 impl<'a> Scoped<'a> {
@@ -229,12 +307,23 @@ impl<'a> Scoped<'a> {
         Self {
             roots,
             legacy_worktree_base: None,
+            extra_project_parents: None,
         }
     }
 
     /// Declares where this host's earlier layout left worktrees behind.
     pub fn with_legacy_worktree_base(mut self, base: Option<PathBuf>) -> Self {
         self.legacy_worktree_base = base;
+        self
+    }
+
+    /// Replaces the places a new project may go beyond the registered roots.
+    ///
+    /// A server bound to a workspace directory adds it here. A test passes an
+    /// empty list, which is the only way to have a scratch folder under the
+    /// user's home not count as a place a project may go.
+    pub fn with_extra_project_parents(mut self, parents: Vec<String>) -> Self {
+        self.extra_project_parents = Some(parents);
         self
     }
 }
@@ -246,5 +335,41 @@ impl Host for Scoped<'_> {
 
     fn legacy_worktree_base(&self) -> Option<PathBuf> {
         self.legacy_worktree_base.clone()
+    }
+
+    fn extra_project_parents(&self) -> Vec<String> {
+        match &self.extra_project_parents {
+            Some(parents) => parents.clone(),
+            None => dirs::home_dir()
+                .map(|home| vec![home.to_string_lossy().to_string()])
+                .unwrap_or_default(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The two places a new project may go, as `files::CreateFolder` reads
+    /// them: beside a project the user already has, and under their home. The
+    /// first half comes from the roots and is tested in `command/files.rs`; this
+    /// is the second, which every host gets unless it says otherwise.
+    #[test]
+    fn a_host_that_says_nothing_allows_a_project_under_the_home_folder() {
+        let roots = ProjectRoots::default();
+        let default = Scoped::new(&roots).extra_project_parents();
+        assert_eq!(
+            default,
+            dirs::home_dir()
+                .map(|home| vec![home.to_string_lossy().to_string()])
+                .unwrap_or_default()
+        );
+        // And a host with nowhere else to offer says so, rather than falling
+        // back to a home directory that would quietly widen it.
+        assert!(Scoped::new(&roots)
+            .with_extra_project_parents(Vec::new())
+            .extra_project_parents()
+            .is_empty());
     }
 }
