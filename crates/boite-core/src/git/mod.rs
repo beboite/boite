@@ -1109,6 +1109,35 @@ fn bytes_binary(bytes: &[u8]) -> bool {
     head.contains(&0u8)
 }
 
+/// Commits this checkout has that no remote does, and whether there is a remote
+/// at all.
+///
+/// `rev-list --not --remotes` rather than the ahead count out of
+/// [`repo_info_blocking`]: that one needs an upstream, and a branch an agent
+/// just made with `worktree_branch` has none, which is exactly the branch nobody
+/// else can see. Measured against every remote ref rather than one, because a
+/// commit already on a fork is a commit that survives this machine.
+///
+/// The flag is separate from the count on purpose. A repository that never had a
+/// remote is not behind on pushing, and answering `(n, false)` lets the caller
+/// tell "nothing to push" apart from "nowhere to push to" without a second call.
+pub fn unshared_commits_blocking(path: &str) -> Result<(u32, bool), String> {
+    let p = Path::new(path);
+    let mut remotes = git(p);
+    remotes.arg("remote");
+    let has_remote = !String::from_utf8_lossy(&run(remotes)?).trim().is_empty();
+    if !has_remote {
+        return Ok((0, false));
+    }
+    let mut rev = git(p);
+    rev.args(["rev-list", "--count", "HEAD", "--not", "--remotes"]);
+    let count = String::from_utf8_lossy(&run(rev)?)
+        .trim()
+        .parse()
+        .unwrap_or(0);
+    Ok((count, true))
+}
+
 pub fn commit_blocking(path: &str, message: &str) -> Result<String, String> {
     let trimmed = message.trim();
     if trimmed.is_empty() {
