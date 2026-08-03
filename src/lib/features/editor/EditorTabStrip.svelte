@@ -120,11 +120,23 @@
 
   const DRAG_THRESHOLD = 4;
 
+  /**
+   * Arms a drag. It does not capture the pointer — that waits until the drag
+   * actually starts, in `tabPointerMove`.
+   *
+   * Capturing here broke closing a tab. A captured pointer retargets its events
+   * to the capturing element, and the `click` that follows is dispatched from
+   * where pointerdown and pointerup agree — the wrapper, not the X inside it. So
+   * the close button's handler never ran, on any tab, and the only symptom was
+   * that clicking it did nothing.
+   */
   function tabPointerDown(e: PointerEvent, id: string) {
     if (e.button !== 0) return;
+    // The X is not a handle: a press that starts on it is a close, and arming a
+    // drag from it would also let a twitchy finger reorder instead of closing.
+    if ((e.target as Element | null)?.closest("[data-tab-close]")) return;
     dragArmedId = id;
     dragFromX = e.clientX;
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
   }
 
   /**
@@ -163,6 +175,10 @@
       if (Math.abs(e.clientX - dragFromX) < DRAG_THRESHOLD) return;
       snaps = snapshot();
       draggingId = dragArmedId;
+      // Captured now that it is a drag: from here the pointer has to keep
+      // reporting to this tab even when it leaves it, which is the whole point.
+      // A click is no longer coming, so retargeting costs nothing.
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     }
     carryX = e.clientX - dragFromX;
     slot = slotAt(e.clientX);
@@ -289,6 +305,7 @@
       </button>
       <button
         type="button"
+        data-tab-close
         class="ml-1 mr-1.5 rounded p-0.5 opacity-0 transition hover:bg-[var(--color-surface-3)] hover:opacity-100 focus-visible:opacity-100 group-hover:opacity-80"
         tabindex="-1"
         onclick={(e) => close(e, b.id)}
