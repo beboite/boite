@@ -3,8 +3,14 @@ name: ci
 on:
   push:
     branches: [master, main]
+  # Every pull request, whatever it targets. This used to be filtered to
+  # `[master, main]` like the push trigger above, and the two are not the same
+  # question: a branch stacked on another branch opens a PR whose base is not
+  # master, no job runs, and GitHub reports it MERGEABLE and CLEAN because
+  # nothing failed. Zero checks reads as a pass on the page somebody merges
+  # from. That is the same shape as the blocker this whole repair started with,
+  # where publication waited on a `ci` it never asked for.
   pull_request:
-    branches: [master, main]
   # release.yml calls this before it builds anything: a tag push does not
   # trigger the branch events above, so without the call a release was signed
   # and published without a single test having run on that tree.
