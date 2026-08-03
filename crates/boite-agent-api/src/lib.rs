@@ -127,6 +127,16 @@ pub trait Workspace: Send + Sync + 'static {
         None
     }
 
+    /// What is on this host's window, when it has one.
+    ///
+    /// `None` on the server, which has no window, and on a desktop whose webview
+    /// has not described itself yet. It is the last question an agent had to ask
+    /// a human, and the default answer is the honest one for a host that cannot
+    /// know: see `boite_core::screen`.
+    fn on_screen(&self) -> Option<boite_core::screen::Screen> {
+        None
+    }
+
     /// Called after an agent acts, for whatever the host shows about it.
     ///
     /// The desktop pulses the thread's dot in the sidebar. The server has no

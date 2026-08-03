@@ -139,7 +139,20 @@ fn common_tools() -> Value {
         },
         {
             "name": "workspace_snapshot",
-            "description": "Everything Boite knows about itself right now, in one answer: every                             project and whether its folder is still there, every thread with what                             its row claims, and the terminals this workspace actually has a live                             process for. Read it before asking a human what they see. The two lists                             are the point — a thread whose status says running and whose id is not                             in livePtys is a dead terminal, and that comparison is not visible from                             anywhere else. Carries no secret, so it can be pasted into an issue.",
+            "description": "Everything Boite knows about itself right now, in one answer: every \
+                            project and whether its folder is still there, every thread with what \
+                            its row claims, the terminals this workspace actually has a live \
+                            process for, and what is on the window. Read it before asking a human \
+                            what they see, and read `screen` before asking what it looks like: it \
+                            carries every pane with its kind, its title and its measured size, \
+                            which pane has focus, and what is covering the layout. A pane listed \
+                            with a size of zero is open and not visible, and nothing else reports \
+                            that. `screen.at` is a heartbeat, so one far behind `takenAtMs` means \
+                            the window stopped answering, which is itself the answer. The two \
+                            thread lists are the other half: a thread whose status says running \
+                            and whose id is not in livePtys is a dead terminal, and that \
+                            comparison is not visible from anywhere else. Carries no secret, so \
+                            it can be pasted into an issue.",
             "inputSchema": { "type": "object" },
             "annotations": { "title": "Snapshot", "readOnlyHint": true, "idempotentHint": true, "openWorldHint": false }
         },

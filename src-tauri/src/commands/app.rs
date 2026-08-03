@@ -21,6 +21,37 @@ use crate::logging::{self, LogEntry};
 
 use super::bus::on_bus;
 
+/// What the window last said was on it.
+///
+/// Kept in memory rather than on a row: a description of a screen belongs to
+/// the process that has the screen, and one left behind by a run that ended is
+/// worse than nothing, because it reads as current.
+///
+/// The window pushes into this when its layout changes and on a slow beat
+/// otherwise. Nothing here ever asks the webview for it, and that is the point:
+/// asking means a call into the half that may be the broken one, so a window
+/// that has stopped answering would hang the diagnostic instead of being it.
+/// A `screen.at` that stopped moving is the diagnosis.
+#[derive(Default)]
+pub struct LastScreen(std::sync::Mutex<Option<boite_core::screen::Screen>>);
+
+impl LastScreen {
+    pub fn take(&self) -> Option<boite_core::screen::Screen> {
+        self.0.lock().ok()?.clone()
+    }
+}
+
+/// The window describing itself. See `boite_core::screen`.
+///
+/// Bounded on the way in rather than on the way out, because the sender is the
+/// half that may be misbehaving.
+#[tauri::command]
+pub fn record_screen(last: State<'_, LastScreen>, screen: boite_core::screen::Screen) {
+    if let Ok(mut held) = last.0.lock() {
+        *held = Some(screen.trimmed());
+    }
+}
+
 /// Everything at once, for whoever has to work out why something is wrong.
 ///
 /// Assembled in `boite_core::snapshot` so this side and the server answer the
@@ -37,6 +68,7 @@ pub async fn workspace_snapshot(
     manager: State<'_, PtyManager>,
     sessions: State<'_, LocalSessions>,
     scope: State<'_, ProjectRoots>,
+    last_screen: State<'_, LastScreen>,
 ) -> Result<Value, String> {
     let live: Vec<boite_core::snapshot::LivePty> = sessions
         .all()
@@ -53,12 +85,13 @@ pub async fn workspace_snapshot(
         .map_err(|e| format!("app_config_dir: {e}"))?
         .join("boite.db");
     let roots = scope.inner().registered();
+    let screen = last_screen.take();
     let taken = tauri::async_runtime::spawn_blocking(move || {
         let store = boite_core::store::Store::attach(&db)?;
         let scope = ProjectRoots::default();
         scope.replace(roots);
         Ok::<_, String>(serde_json::to_value(boite_core::snapshot::take(
-            "desktop", &store, &scope, live,
+            "desktop", &store, &scope, live, screen,
         )))
     })
     .await

@@ -146,6 +146,16 @@ impl Workspace for DesktopWorkspace {
             .collect()
     }
 
+    /// What the window last said was on it. The one question an agent used to
+    /// have to ask a human, and the endpoint carries it in the snapshot rather
+    /// than behind a call of its own: an agent working out why something looks
+    /// wrong should not have to know it exists.
+    fn on_screen(&self) -> Option<boite_core::screen::Screen> {
+        self.app
+            .try_state::<crate::commands::app::LastScreen>()
+            .and_then(|last| last.take())
+    }
+
     /// Attribution is best-effort: an agent registered from a credentials file
     /// presents a project rather than a thread, and there is no row to point at.
     /// The surface still pulses; only the "which of these agents" half is lost.

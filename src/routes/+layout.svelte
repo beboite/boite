@@ -17,6 +17,7 @@
   import { addProjectByPath } from "$lib/features/project/api";
   import { watchAgentRequests } from "$lib/app/agent-requests";
   import { watchAgentActivity } from "$lib/features/thread/agentActivity.svelte";
+  import { watchScreen } from "$lib/app/screen.svelte";
   import { installInspector } from "$lib/features/devtools/inspect";
   import { captureWindowErrors } from "$lib/shared/services/logger.svelte";
   import { editorStore } from "$lib/features/editor/store.svelte";
@@ -298,6 +299,11 @@
   // own terminal. Mounted here for the same reason: the first call can land
   // during boot, and a mark laid on nobody is a mark nothing shows.
   onMount(() => watchAgentActivity());
+
+  // The window saying what is on it, so an agent debugging this app stops
+  // having to ask a human what they see. It lands in workspace_snapshot; see
+  // `boite_core::screen`.
+  onMount(() => watchScreen());
 
   // Development builds only, and the one thing that makes this app inspectable
   // from the MCP bridge: the terminals render to a canvas, so their output is

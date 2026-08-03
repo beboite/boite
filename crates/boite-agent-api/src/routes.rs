@@ -335,6 +335,9 @@ async fn snapshot(
     Extension(_caller): Extension<Caller>,
 ) -> Result<Json<Value>, StatusCode> {
     let live = workspace.live_ptys();
+    // Read here rather than inside the blocking closure: it is a lock on this
+    // process's own state, and the point of that closure is the database.
+    let screen = workspace.on_screen();
     let taken = blocking({
         let workspace = workspace.clone();
         move || {
@@ -343,6 +346,7 @@ async fn snapshot(
                 workspace.store(),
                 workspace.roots(),
                 live,
+                screen,
             ))
         }
     })

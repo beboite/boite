@@ -55,6 +55,12 @@ pub struct Snapshot {
     pub roots: Vec<String>,
     /// Todos per project, by state.
     pub todos: BTreeMap<String, BTreeMap<String, usize>>,
+    /// What is on the window, when the host has one. `None` on the server,
+    /// which has no window, and on a desktop whose webview has never described
+    /// itself. See [`crate::screen`], including why a stale `at` here is worth
+    /// more than no field at all.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub screen: Option<crate::screen::Screen>,
     /// What could not be read, and why. Never a reason to answer nothing: a
     /// snapshot missing one section is still worth more than an error.
     pub problems: Vec<String>,
@@ -96,6 +102,7 @@ pub fn take(
     store: &Store,
     roots: &ProjectRoots,
     live_ptys: Vec<LivePty>,
+    screen: Option<crate::screen::Screen>,
 ) -> Snapshot {
     let mut problems = Vec::new();
 
@@ -139,6 +146,7 @@ pub fn take(
         live_ptys,
         roots: roots.registered(),
         todos,
+        screen,
         problems,
     }
 }
@@ -206,7 +214,7 @@ mod tests {
         store.drop_table_for_test("todos");
 
         let roots = ProjectRoots::default();
-        let snapshot = take("test", &store, &roots, Vec::new());
+        let snapshot = take("test", &store, &roots, Vec::new(), None);
         assert!(snapshot.todos.is_empty());
         assert_eq!(snapshot.problems.len(), 1);
         assert!(snapshot.problems[0].starts_with("todos could not be read"));
@@ -249,6 +257,7 @@ mod tests {
                 pty_id: "pty-2".into(),
                 child_pid: Some(1234),
             }],
+            None,
         );
 
         assert_eq!(snapshot.projects.len(), 1);
@@ -280,7 +289,7 @@ mod tests {
                 1,
             )
             .unwrap();
-        let snapshot = take("test", &store, &ProjectRoots::default(), Vec::new());
+        let snapshot = take("test", &store, &ProjectRoots::default(), Vec::new(), None);
         assert!(!snapshot.projects[0].cwd_exists);
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -430,6 +430,14 @@ if (agentUrl && keyFile) {
     (state?.livePtys ?? []).some((p) => p.threadId === probeId && p.childPid > 0),
   );
   check("the snapshot carries no problem to report", (state?.problems ?? []).length === 0, JSON.stringify(state?.problems ?? []));
+  // The window's own description of itself is in here on a desktop. This host
+  // has no window, so it says nothing about one rather than inventing an empty
+  // description that an agent would read as "nothing is open".
+  check(
+    "a host with no window describes none",
+    state?.screen === undefined,
+    JSON.stringify(state?.screen ?? null),
+  );
   // Whatever else it holds, it must not hold a credential.
   const asText = JSON.stringify(state ?? {});
   check("the snapshot carries no credential", !asText.includes(seed) && !asText.includes(TOKEN));
