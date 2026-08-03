@@ -3,87 +3,13 @@ use std::path::Path;
 use parking_lot::Mutex;
 use rusqlite::Connection;
 
+use boite_core::migrations;
+
 use crate::models::{Project, Thread, Todo};
 
 pub struct Store {
     conn: Mutex<Connection>,
 }
-
-// Append-only, mirrors the tauri-plugin-sql migrations in src-tauri/src/lib.rs.
-// Each entry runs once, gated by PRAGMA user_version.
-const MIGRATIONS: &[&str] = &[
-    "CREATE TABLE IF NOT EXISTS projects (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        cwd TEXT NOT NULL,
-        default_cmd TEXT NOT NULL,
-        default_args TEXT NOT NULL,
-        created_at INTEGER NOT NULL
-    );",
-    "ALTER TABLE projects ADD COLUMN icon TEXT;",
-    "CREATE TABLE IF NOT EXISTS settings (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL
-    );",
-    "CREATE TABLE IF NOT EXISTS threads (
-        id TEXT PRIMARY KEY,
-        project_id TEXT NOT NULL,
-        label TEXT NOT NULL,
-        title TEXT,
-        cmd TEXT NOT NULL,
-        args TEXT NOT NULL,
-        exit_code INTEGER,
-        created_at INTEGER NOT NULL
-    );",
-    "ALTER TABLE threads ADD COLUMN session_id TEXT;
-     ALTER TABLE threads ADD COLUMN icon_key TEXT;",
-    "ALTER TABLE projects ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;",
-    "ALTER TABLE threads ADD COLUMN status TEXT;
-     ALTER TABLE threads ADD COLUMN auto_slept INTEGER NOT NULL DEFAULT 0;",
-    "ALTER TABLE threads ADD COLUMN keep_awake INTEGER NOT NULL DEFAULT 0;",
-    // Web Push subscriptions (server-global, like settings). endpoint is the
-    // browser-issued push URL and the natural primary key: re-subscribing the
-    // same browser replaces the row instead of duplicating it.
-    "CREATE TABLE IF NOT EXISTS push_subscriptions (
-        endpoint TEXT PRIMARY KEY,
-        p256dh TEXT NOT NULL,
-        auth TEXT NOT NULL,
-        created_at INTEGER NOT NULL
-    );",
-    "ALTER TABLE projects ADD COLUMN git_root TEXT;",
-    "ALTER TABLE threads ADD COLUMN icon_color TEXT;",
-    // A table rather than a key in the settings blob: an agent writes here
-    // through the MCP endpoint while a client is connected, and a whole-blob
-    // rewrite from either side would drop the other's edits.
-    "CREATE TABLE IF NOT EXISTS todos (
-        id TEXT PRIMARY KEY,
-        project_id TEXT NOT NULL,
-        text TEXT NOT NULL,
-        state TEXT NOT NULL,
-        note TEXT,
-        position INTEGER NOT NULL,
-        created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_todos_project ON todos (project_id);",
-    // Both mirror a desktop migration: the same client reads either store, and
-    // a column missing on one side means a claim made against a remote boite
-    // silently loses its commit and its badge.
-    "ALTER TABLE todos ADD COLUMN commit_sha TEXT;",
-    "ALTER TABLE todos ADD COLUMN claimed_by TEXT;",
-    // Mirrors desktop migration 14. The directory a thread runs in when it is
-    // not the project's own; null for every thread that predates the column.
-    "ALTER TABLE threads ADD COLUMN worktree_path TEXT;",
-    // Mirrors desktop migration 15. The body of the card: `text` used to carry
-    // the label and the detail together, which made the label as long as
-    // whatever an agent felt like writing.
-    "ALTER TABLE todos ADD COLUMN description TEXT;",
-    // Mirrors desktop migration 18. Desktop 16 and 17 created the chat tables
-    // and dropped them again; neither ever ran here, so this list stays one
-    // entry per statement that applies to a boite rather than one per desktop
-    // version. Null means the project follows whatever the app is set to.
-    "ALTER TABLE projects ADD COLUMN worktrees INTEGER;",
-];
 
 impl Store {
     pub fn open(path: &Path) -> Result<Store, String> {
@@ -108,13 +34,21 @@ impl Store {
         Ok(store)
     }
 
+    /// Applies whatever `PRAGMA user_version` says is still pending.
+    ///
+    /// The list itself lives in `boite_core::migrations`, shared with the
+    /// desktop, which keeps two hand-copied schemas from drifting. What stays
+    /// here is the mechanism: this side counts positions, the desktop counts
+    /// explicit versions, and the shared list is ordered so both readings land
+    /// on the entry they already applied.
     fn migrate(&self) -> Result<(), String> {
+        let pending = migrations::server();
         let mut conn = self.conn.lock();
         let version: i64 = conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .map_err(|e| format!("read user_version failed: {e}"))?;
         let mut applied = version as usize;
-        if applied >= MIGRATIONS.len() {
+        if applied >= pending.len() {
             return Ok(());
         }
         // One transaction over every pending migration AND the user_version
@@ -125,9 +59,10 @@ impl Store {
         let tx = conn
             .transaction()
             .map_err(|e| format!("migration transaction failed: {e}"))?;
-        while applied < MIGRATIONS.len() {
-            tx.execute_batch(MIGRATIONS[applied])
-                .map_err(|e| format!("migration {} failed: {e}", applied + 1))?;
+        while applied < pending.len() {
+            let m = pending[applied];
+            tx.execute_batch(m.sql)
+                .map_err(|e| format!("migration {} ({}) failed: {e}", applied + 1, m.description))?;
             applied += 1;
         }
         tx.execute_batch(&format!("PRAGMA user_version = {applied};"))
@@ -692,7 +627,7 @@ mod tests {
             .lock()
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(version as usize, MIGRATIONS.len());
+        assert_eq!(version as usize, migrations::server().len());
 
         // Third open, to catch a version bump that only sticks in-memory.
         drop(second);

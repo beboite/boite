@@ -22,6 +22,9 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 # Parsing, not string matching: what a browser pane may frame is decided on a
 # parsed URL, and both endpoints ask the same module (`browser`).
 url = "2"
+# SHA-256 for the event journal's hash chain, and SHA-384 in one test, which is
+# the digest sqlx keys its migration ledger on.
+sha2 = "0.10"
 
 # kill(pid, 0) to tell a live claude session from a registry entry left behind
 # by one that died. Windows uses OpenProcess from windows-sys below.

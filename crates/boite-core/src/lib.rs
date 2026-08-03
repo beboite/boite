@@ -4,6 +4,7 @@ pub mod env;
 pub mod explorer;
 pub mod fastpick;
 pub mod git;
+pub mod migrations;
 pub mod project;
 pub mod pty;
 pub mod scope;
