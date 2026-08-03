@@ -1,4 +1,5 @@
-import { Channel, invoke } from "@tauri-apps/api/core";
+import { Channel } from "@tauri-apps/api/core";
+import { invoke } from "./ipc";
 import type { PtyApi, PtyEvent, PtyOpenArgs } from "../types";
 
 // The Rust side base64-encodes output: a byte array would arrive as a JSON

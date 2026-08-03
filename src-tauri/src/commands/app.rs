@@ -114,9 +114,12 @@ pub fn workspace_timeline(
     let store = boite_core::store::Store::attach(&config_dir.join("boite.db"))?;
     let rows = store.timeline(project.as_deref().filter(|p| !p.is_empty()), limit);
 
-    // Only what went wrong. A log line per IPC call would bury the three
-    // sources that are actually about the workspace, and an `info` about a
-    // successful command is not a moment anybody is looking for.
+    // Only what went wrong, and that is what puts the IPC boundary on this
+    // clock: `src/lib/backend/tauri/ipc.ts` writes a `warn` when a Tauri command
+    // refuses, so a panel that went blank and an agent that reserved a branch in
+    // the same second finally line up. An `info` per successful call would bury
+    // the three sources that are actually about the workspace under a trace of
+    // the app running normally, so those stay off it.
     let logged: Vec<Moment> = logging::log_file_path(&app)
         .and_then(|path| logging::read_log_file(&path))
         .unwrap_or_default()

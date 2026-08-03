@@ -1,5 +1,5 @@
 import Database from "@tauri-apps/plugin-sql";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./ipc";
 import type {
   IconKey,
   Project,
