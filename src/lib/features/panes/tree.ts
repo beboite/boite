@@ -91,19 +91,6 @@ export function findSplit(
   return null;
 }
 
-export function updateRatios(
-  node: LayoutNode,
-  splitId: string,
-  ratios: number[],
-): LayoutNode {
-  if (node.kind === "leaf") return node;
-  if (node.id === splitId) return { ...node, ratios };
-  return {
-    ...node,
-    children: node.children.map((c) => updateRatios(c, splitId, ratios)),
-  };
-}
-
 /**
  * Put `dragged` next to the leaf `targetId`, and give it `ratio` of that leaf's
  * share.

@@ -4,6 +4,7 @@
   import { MIN_PANE_PX, MIN_RATIO, SPLITTER_PX } from "./types";
   import PaneContentView from "./PaneContentView.svelte";
   import { paneLabel } from "./label";
+  import { findSplit } from "./tree";
   import { t } from "$lib/i18n/index.svelte";
 
   type Props = { group: PaneGroup };
@@ -126,19 +127,6 @@
     el.addEventListener("pointermove", move);
     el.addEventListener("pointerup", up);
     el.addEventListener("pointercancel", up);
-  }
-
-  function findSplit(
-    node: LayoutNode,
-    splitId: string,
-  ): Extract<LayoutNode, { kind: "split" }> | null {
-    if (node.kind === "leaf") return null;
-    if (node.id === splitId) return node;
-    for (const c of node.children) {
-      const r = findSplit(c, splitId);
-      if (r) return r;
-    }
-    return null;
   }
 </script>
 
