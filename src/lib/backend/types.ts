@@ -175,19 +175,40 @@ export interface WorktreeHold {
   orphanCommits: boolean;
 }
 
+/**
+ * What became of a thread's request for a worktree.
+ *
+ * The refusal carries its reason because nothing on this side can work it out:
+ * a thread in the project folder looks the same whether the project turned
+ * worktrees off or the main checkout was holding work. Only the second is
+ * worth telling anyone about, and it is the one they can act on.
+ */
+export interface WorktreeOpening {
+  /** Where the thread runs. Null is the project folder. */
+  path: string | null;
+  /**
+   * A few of the tracked changes that kept the thread in the main checkout.
+   * Empty when the answer had nothing to do with them. Untracked files are
+   * never among them: a directory some tool dropped is not work in flight.
+   */
+  dirty: string[];
+  /** More files are changed than `dirty` names. */
+  more: boolean;
+}
+
 export interface WorktreeApi {
   /**
-   * Opens a detached worktree for a thread and returns its directory, or null
-   * when this repository is not one to open a worktree in — not a repo, or a
-   * dirty checkout whose in-flight work the thread has to see. The caller does
-   * not choose the path: it is derived from the thread id under the machine's
-   * own worktree base, which is the only one in scope.
+   * Opens a detached worktree for a thread and says where it landed, or why it
+   * did not: this repository is not one to open a worktree in, or its main
+   * checkout holds tracked changes the thread has to see. The caller does not
+   * choose the path: it is derived from the thread id under the machine's own
+   * worktree base, which is the only one in scope.
    *
    * The eligibility check belongs to this call rather than to the caller: on
    * Windows every extra round trip costs a `git` process spawn, and those are
    * what a new thread waits on.
    */
-  open(repo: string, threadId: string): Promise<string | null>;
+  open(repo: string, threadId: string): Promise<WorktreeOpening>;
   /**
    * Makes sure this repository has a worktree standing by for its next thread,
    * and that it is on the commit the repository is on.

@@ -159,7 +159,20 @@ export async function openWorktreeFor(
     // backend-side now: asking "is this a repo" and "is it clean" from here
     // cost two more round trips and two more `git` processes, and on Windows
     // the process spawns are what a new thread actually waits on.
-    return await backendForPath(project.cwd).worktree.open(repo, threadId);
+    const opening = await backendForPath(project.cwd).worktree.open(repo, threadId);
+    if (!opening.path && opening.dirty.length > 0) {
+      // The one refusal the user can do something about, and the one that used
+      // to be invisible: a project silently ran every agent in the main
+      // checkout until somebody went looking in a log file.
+      notifications.warning(
+        t("worktree.mainDirty", { project: project.name }),
+        7000,
+        t(opening.more ? "worktree.mainDirtyMore" : "worktree.mainDirtyFiles", {
+          files: opening.dirty.join(", "),
+        }),
+      );
+    }
+    return opening.path;
   } catch (err) {
     logger.warn("worktree", `no worktree for ${threadId}`, String(err));
     return null;

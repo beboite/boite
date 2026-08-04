@@ -334,7 +334,10 @@ impl Git {
             Git::CommitState { .. } => Wire::Key("state"),
             Git::PullRequest { .. } => Wire::Key("lookup"),
             Git::Commit { .. } => Wire::Key("sha"),
-            Git::WorktreeOpen { .. } | Git::WorktreeAdopt { .. } => Wire::Key("path"),
+            // `worktree.open` answers a path and, when there is none, why: the
+            // object is the answer rather than a wrapper around one.
+            Git::WorktreeOpen { .. } => Wire::Bare,
+            Git::WorktreeAdopt { .. } => Wire::Key("path"),
             Git::WorktreeList { .. } => Wire::Key("worktrees"),
             Git::WorktreeSizes { .. } => Wire::Key("sizes"),
 
@@ -732,7 +735,7 @@ mod tests {
             ("git.pull", Wire::Ok),
             ("git.init", Wire::Ok),
             ("git.fileVersions", Wire::Bare),
-            ("worktree.open", Wire::Key("path")),
+            ("worktree.open", Wire::Bare),
             ("worktree.warm", Wire::Ok),
             ("worktree.migrate", Wire::Bare),
             ("worktree.adopt", Wire::Key("path")),

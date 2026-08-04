@@ -344,6 +344,10 @@ export const EN_MESSAGES = {
   "worktree.spareHint":
     "Made ahead of time so the next agent thread here starts instantly. Removing it only costs that head start.",
   "worktree.dirtyCount": "{count} holding work",
+  "worktree.mainDirty":
+    "{project} has uncommitted changes, so this thread runs in the project folder.",
+  "worktree.mainDirtyFiles": "{files}",
+  "worktree.mainDirtyMore": "{files}, and others",
   "worktree.heldBy": "{thread} is running here",
   "worktree.remove": "Remove this worktree",
   "worktree.removeTitle": "Remove {name}?",

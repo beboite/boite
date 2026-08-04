@@ -750,17 +750,47 @@ pub fn warm_worktree_pool_blocking(repo: &str, base: &str) -> Result<(), String>
     Ok(())
 }
 
-/// Whether the main checkout holds anything that is not committed, untracked
-/// files included.
+/// How many of the changed files are worth naming to the user. Enough to
+/// recognise the work, short enough to read in a toast that expires.
+const DIRTY_SAMPLE: usize = 3;
+
+/// How much of `git status` is read before the rest is taken on trust. A
+/// repository with more changes than this fills the sample and sets `more`,
+/// which is all the difference the caller can say anything about.
+const DIRTY_READ: usize = 8 * 1024;
+
+/// What the main checkout is holding, as far as a thread starting here cares.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MainCheckoutWork {
+    /// A few of the changed paths, for the message that explains the refusal.
+    pub files: Vec<String>,
+    /// There are more than the sample names.
+    pub more: bool,
+}
+
+impl MainCheckoutWork {
+    fn clean(&self) -> bool {
+        self.files.is_empty()
+    }
+}
+
+/// The tracked changes in the main checkout, capped at a readable sample.
 ///
-/// Read one byte at a time rather than collected, because the answer is one bit
-/// and a repository with an untracked tree writes thousands of lines to give it.
-/// Stopping at the first one turns a dirty checkout into however long git takes
-/// to find a single change. A clean one still costs what `git status` costs:
-/// nothing can answer "there is nothing" without having looked everywhere.
-fn has_uncommitted_changes(repo: &Path) -> Result<bool, String> {
+/// Untracked files are deliberately not among them. A tool that drops a
+/// directory nobody ever ignored — a playwright artifact folder, a wrangler
+/// state directory, a build cache — is not work in flight, and letting one
+/// stand between every thread of that project and its worktree turned the
+/// feature off silently, for weeks, with the reason only in a log file. A
+/// modified or staged file is the opposite: it is what "look at what I just
+/// changed" means, and a thread that cannot see it is answering the wrong
+/// question.
+///
+/// Read into a bounded buffer rather than collected: `git status` on a large
+/// repository writes more than anyone will read, and the answer here is a
+/// handful of names plus whether there were others.
+fn tracked_changes(repo: &Path) -> Result<MainCheckoutWork, String> {
     let mut cmd = git(repo);
-    cmd.args(["status", "--porcelain", "--untracked-files=normal"]);
+    cmd.args(["status", "--porcelain", "--untracked-files=no"]);
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::null());
     let mut child = cmd
@@ -770,32 +800,70 @@ fn has_uncommitted_changes(repo: &Path) -> Result<bool, String> {
         .stdout
         .take()
         .ok_or_else(|| "git status: no output".to_string())?;
-    let mut byte = [0u8; 1];
-    let dirty = match out.read(&mut byte) {
-        Ok(0) => false,
-        Ok(_) => true,
-        Err(e) => {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(format!("git status: {e}"));
+
+    let mut buf = Vec::with_capacity(DIRTY_READ);
+    let mut chunk = [0u8; 1024];
+    let mut truncated = false;
+    loop {
+        match out.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(n) => {
+                buf.extend_from_slice(&chunk[..n]);
+                if buf.len() >= DIRTY_READ {
+                    truncated = true;
+                    break;
+                }
+            }
+            Err(e) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("git status: {e}"));
+            }
         }
-    };
-    if dirty {
-        // The rest of the listing has nothing left to say, and git cannot exit
-        // while a pipe nobody is draining is still filling up.
+    }
+    if truncated {
+        // git cannot exit while a pipe nobody is draining is still filling up,
+        // and the rest of the listing has nothing left to say.
         let _ = child.kill();
         let _ = child.wait();
-        return Ok(true);
+    } else {
+        // Only meaningful when the process was allowed to finish its sentence.
+        let status = child
+            .wait()
+            .map_err(|e| format!("git status: {e}"))?;
+        if !status.success() {
+            return Err(format!("git exited with status {status}"));
+        }
     }
-    // Only meaningful on this side: the process above was killed mid-sentence,
-    // so its status says how it died rather than what it found.
-    let status = child
-        .wait()
-        .map_err(|e| format!("git status: {e}"))?;
-    if !status.success() {
-        return Err(format!("git exited with status {status}"));
+
+    let text = String::from_utf8_lossy(&buf);
+    let mut lines: Vec<&str> = text.lines().collect();
+    // The read stopped mid-sentence, so the last name is a fragment.
+    if truncated {
+        lines.pop();
     }
-    Ok(false)
+    let files: Vec<String> = lines
+        .iter()
+        .filter_map(|line| porcelain_path(line))
+        .take(DIRTY_SAMPLE)
+        .collect();
+    Ok(MainCheckoutWork {
+        more: truncated || lines.len() > files.len(),
+        files,
+    })
+}
+
+/// The path out of one `git status --porcelain` line.
+///
+/// The format is two status letters, a space, then the path; a rename writes
+/// `old -> new`, and the new name is the one that exists on disk to go look at.
+fn porcelain_path(line: &str) -> Option<String> {
+    let path = line.get(3..)?.trim();
+    if path.is_empty() {
+        return None;
+    }
+    let named = path.rsplit(" -> ").next().unwrap_or(path);
+    Some(named.trim_matches('"').to_string())
 }
 
 fn warm_in_background(repo: &Path, base: &Path) {
@@ -806,8 +874,43 @@ fn warm_in_background(repo: &Path, base: &Path) {
     });
 }
 
+/// What became of a thread's request for a worktree.
+///
+/// The refusal carries its reason because nothing downstream can work it out:
+/// the frontend sees a thread in the project folder and cannot tell a project
+/// that turned worktrees off from a checkout that was holding work. Only one
+/// refusal has anything to say — a dirty main checkout — and it is the one the
+/// user can act on.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorktreeOpening {
+    /// Where the thread runs. `None` is the project folder.
+    pub path: Option<String>,
+    /// A few of the tracked changes that kept the thread in the main checkout.
+    /// Empty when the answer had nothing to do with them.
+    pub dirty: Vec<String>,
+    /// More files are changed than `dirty` names.
+    pub more: bool,
+}
+
+impl WorktreeOpening {
+    fn at(path: String) -> Self {
+        Self {
+            path: Some(path),
+            ..Self::default()
+        }
+    }
+
+    /// No worktree, and no reason worth putting in front of anyone: this
+    /// directory is not a repository, which is a property of the project rather
+    /// than something the user just did.
+    fn nowhere() -> Self {
+        Self::default()
+    }
+}
+
 /// Opens a worktree for a thread, or answers that this repository is not one
-/// to open a worktree in. `Ok(None)` means the thread runs in the project
+/// to open a worktree in. A `None` path means the thread runs in the project
 /// folder.
 ///
 /// The eligibility checks live here rather than in the caller because each one
@@ -825,18 +928,24 @@ pub fn open_worktree_if_eligible_blocking(
     repo: &str,
     base: &str,
     label: &str,
-) -> Result<Option<String>, String> {
+) -> Result<WorktreeOpening, String> {
     let r = Path::new(repo);
     // No subprocess: a repository is a `.git` directory, or the `gitdir:` file
     // a worktree and a submodule get, and both are one stat away.
     if git_dir(r).is_none() {
-        return Ok(None);
+        return Ok(WorktreeOpening::nowhere());
     }
     // "Look at what I just changed" cannot be answered from a clean worktree.
-    // A dirty main checkout means the work under discussion is there, so the
-    // thread starts there too.
-    if has_uncommitted_changes(r)? {
-        return Ok(None);
+    // A main checkout holding tracked changes means the work under discussion
+    // is there, so the thread starts there too — and says so, because a thread
+    // that quietly lost its isolation is a thread nobody knows to fix.
+    let work = tracked_changes(r)?;
+    if !work.clean() {
+        return Ok(WorktreeOpening {
+            path: None,
+            dirty: work.files,
+            more: work.more,
+        });
     }
     let base = Path::new(base);
     fs::create_dir_all(base).map_err(|e| format!("worktree base: {e}"))?;
@@ -857,14 +966,14 @@ pub fn open_worktree_if_eligible_blocking(
         };
         // Refill, so the next thread in this project is as cheap as this one.
         warm_in_background(r, base);
-        return Ok(Some(claimed));
+        return Ok(WorktreeOpening::at(claimed));
     }
     // Nothing standing by: this thread pays for its own checkout, which is what
     // every thread used to do.
     let path = scoped_dir_for(base, label).to_string_lossy().into_owned();
     let made = add_detached_worktree_blocking(repo, &path)?;
     warm_in_background(r, base);
-    Ok(Some(made))
+    Ok(WorktreeOpening::at(made))
 }
 
 /// Turns a detached worktree into a branch, once its work has proved worth
@@ -1615,10 +1724,10 @@ mod worktree_tests {
         assert!(!w.exists());
     }
 
-    /// The three answers the eligibility check has to give, since it is now the
-    /// only thing standing between a thread and a worktree.
+    /// Every answer the eligibility check has to give, since it is the only
+    /// thing standing between a thread and a worktree.
     #[test]
-    fn eligibility_refuses_a_non_repo_and_a_dirty_checkout() {
+    fn eligibility_refuses_a_non_repo_and_a_checkout_holding_tracked_work() {
         let plain = scratch("plain");
         fs::create_dir_all(&plain).unwrap();
         let base = scratch("base-plain");
@@ -1628,7 +1737,8 @@ mod worktree_tests {
                 base.to_str().unwrap(),
                 "t1",
             ),
-            Ok(None),
+            Ok(WorktreeOpening::default()),
+            "a non-repo has no worktree to open and nothing to explain"
         );
         assert!(
             !base.join("t1").exists(),
@@ -1644,7 +1754,9 @@ mod worktree_tests {
         let made = open_worktree_if_eligible_blocking(f.path(), base.to_str().unwrap(), "t1");
         assert_eq!(
             made,
-            Ok(Some(base.join("t1").to_string_lossy().into_owned())),
+            Ok(WorktreeOpening::at(
+                base.join("t1").to_string_lossy().into_owned()
+            )),
         );
         assert!(base.join("t1").join("a.txt").is_file());
         let _ = remove_worktree_blocking(
@@ -1653,17 +1765,86 @@ mod worktree_tests {
             true,
         );
 
-        // An untracked file counts: the work under discussion is in the main
-        // checkout, so the thread has to start there and see it.
-        let dirty = scratch("base-dirty");
+        // An untracked file does not count. A tool that drops a directory
+        // nobody ignored is not work in flight, and it used to turn worktrees
+        // off for the whole project without saying so.
+        let untracked = scratch("base-untracked");
         fs::write(f.repo.join("scratch.txt"), "wip\n").unwrap();
         assert_eq!(
-            open_worktree_if_eligible_blocking(f.path(), dirty.to_str().unwrap(), "t2"),
-            Ok(None),
+            open_worktree_if_eligible_blocking(f.path(), untracked.to_str().unwrap(), "t2"),
+            Ok(WorktreeOpening::at(
+                untracked.join("t2").to_string_lossy().into_owned()
+            )),
         );
-        assert!(!dirty.join("t2").exists());
+        let _ = remove_worktree_blocking(
+            f.path(),
+            untracked.join("t2").to_str().unwrap(),
+            true,
+        );
+
+        // A tracked file that changed does count: that is the work under
+        // discussion, so the thread starts where it is and is told why.
+        let dirty = scratch("base-dirty");
+        fs::write(f.repo.join("a.txt"), "changed\n").unwrap();
+        assert_eq!(
+            open_worktree_if_eligible_blocking(f.path(), dirty.to_str().unwrap(), "t3"),
+            Ok(WorktreeOpening {
+                path: None,
+                dirty: vec!["a.txt".into()],
+                more: false,
+            }),
+            "the refusal names what caused it, since nothing downstream can find out"
+        );
+        assert!(!dirty.join("t3").exists());
         let _ = fs::remove_dir_all(&base);
+        let _ = fs::remove_dir_all(&untracked);
         let _ = fs::remove_dir_all(&dirty);
+    }
+
+    /// The sample the toast reads from: a few names, and whether there were
+    /// others. Staged, unstaged and renamed all have to arrive as paths.
+    #[test]
+    fn tracked_changes_names_a_few_and_says_there_are_more() {
+        let f = Fixture::new();
+        assert_eq!(
+            tracked_changes(&f.repo),
+            Ok(MainCheckoutWork::default()),
+            "a clean checkout holds nothing"
+        );
+
+        for i in 0..DIRTY_SAMPLE + 2 {
+            fs::write(f.repo.join(format!("f{i}.txt")), "x\n").unwrap();
+        }
+        git_in(&f.repo, &["add", "."]);
+        git_in(&f.repo, &["commit", "--quiet", "-m", "more files"]);
+
+        for i in 0..DIRTY_SAMPLE + 2 {
+            fs::write(f.repo.join(format!("f{i}.txt")), "changed\n").unwrap();
+        }
+        let found = tracked_changes(&f.repo).unwrap();
+        assert_eq!(
+            found.files.len(),
+            DIRTY_SAMPLE,
+            "the sample is capped at what fits in a message"
+        );
+        assert!(found.more, "and the rest is reported as a count, not a list");
+        assert!(
+            found.files.iter().all(|name| name.starts_with("f")),
+            "porcelain status letters are not part of a path: {:?}",
+            found.files
+        );
+    }
+
+    /// The one porcelain line that is not `XY path`.
+    #[test]
+    fn a_renamed_file_arrives_under_the_name_it_has_now() {
+        assert_eq!(
+            porcelain_path("R  old/name.txt -> new/name.txt").as_deref(),
+            Some("new/name.txt"),
+        );
+        assert_eq!(porcelain_path(" M src/lib.rs").as_deref(), Some("src/lib.rs"));
+        assert_eq!(porcelain_path("M  \"quoted path.txt\"").as_deref(), Some("quoted path.txt"));
+        assert_eq!(porcelain_path("").as_deref(), None);
     }
 
     /// The pool, which is the difference between a thread that waits for a
@@ -1705,6 +1886,7 @@ mod worktree_tests {
         // downstream reads it as one of the pool's own.
         let taken = open_worktree_if_eligible_blocking(f.path(), &base_s, "t1")
             .unwrap()
+            .path
             .expect("a spare is standing by");
         assert_eq!(
             Path::new(&taken),
@@ -1765,6 +1947,7 @@ mod worktree_tests {
 
         let taken = open_worktree_if_eligible_blocking(f.path(), &base_s, "t1")
             .unwrap()
+            .path
             .expect("the spare is still the one used");
         assert!(!dir.exists(), "the spare was renamed rather than left behind");
         assert!(
