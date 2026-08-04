@@ -86,54 +86,67 @@
     bottom: auto;
     top: calc(1rem + env(safe-area-inset-top, 0px));
   }
+  /* The design tokens, not invented ones. This card used to name `--border`,
+     `--bg` and `--accent`, none of which the app defines, so every one of those
+     declarations was dropped as invalid: the card had no background at all and
+     the terminal showed straight through a dialog waiting for an answer. */
   .card {
-    border: 1px solid var(--border);
-    border-radius: 0.5rem;
-    background: var(--bg-elevated, var(--bg));
-    box-shadow: 0 8px 24px rgb(0 0 0 / 0.25);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-surface-2);
+    box-shadow: var(--shadow-e3);
     padding: 0.625rem 0.75rem;
     display: flex;
     flex-direction: column;
     gap: 0.375rem;
   }
   .who {
-    font-size: 0.75rem;
+    font-size: var(--text-xs);
     font-weight: 600;
-    color: var(--text);
+    color: var(--color-foreground);
     display: flex;
     justify-content: space-between;
     gap: 0.5rem;
   }
   .where {
     font-weight: 400;
-    color: var(--text-muted);
+    color: var(--color-muted-foreground);
   }
   .what {
-    font-size: 0.8125rem;
-    color: var(--text);
+    font-size: var(--text-sm);
+    color: var(--color-foreground);
     line-height: 1.35;
   }
   .row {
     display: flex;
     justify-content: flex-end;
-    gap: 0.375rem;
+    gap: 0.5rem;
   }
+  /* Same pair as ConfirmDialog: refusing is the quiet one, allowing is the
+     solid one, so the answer to an agent's request reads like every other
+     confirmation in the app. */
   .btn {
-    font-size: 0.75rem;
+    font-size: var(--text-xs);
     padding: 0.25rem 0.625rem;
-    border-radius: 0.375rem;
-    border: 1px solid var(--border);
-    color: var(--text);
+    border-radius: var(--radius-sm);
+    transition: background-color var(--dur-1) ease, color var(--dur-1) ease;
+  }
+  .btn.refuse {
+    color: var(--color-muted-foreground);
+  }
+  .btn.refuse:hover:not(:disabled) {
+    background: var(--color-accent);
+    color: var(--color-foreground);
+  }
+  .btn.allow {
+    font-weight: 500;
+    background: var(--color-foreground);
+    color: var(--color-background);
+  }
+  .btn.allow:hover:not(:disabled) {
+    opacity: 0.9;
   }
   .btn:disabled {
     opacity: 0.5;
-  }
-  .btn.allow {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: var(--accent-fg, #fff);
-  }
-  .btn:hover:not(:disabled) {
-    filter: brightness(1.1);
   }
 </style>
