@@ -46,15 +46,28 @@ fn set_traffic_lights_hidden(window: tauri::WebviewWindow, hidden: bool) {
 /// no window attribute reassigns it (`DWMWA_BORDER_COLOR`, frame recalculation
 /// through `SWP_FRAMECHANGED` and a full `RDW_FRAME` redraw all leave it white).
 ///
-/// Colour comes from `--color-background` in `src/app.css`, as a `COLORREF`, so
-/// the row reads as more window rather than as a seam.
+/// Colour comes from `--color-background` in `src/app.css`, opaque, so the row
+/// reads as more window rather than as a seam.
+///
+/// Blitted from a 32-bit DIB rather than filled with a brush, because the window
+/// is `"transparent": true` on Windows and therefore per-pixel alpha: every GDI
+/// call that takes a `COLORREF` writes a zero alpha byte, so `FillRect` turned
+/// the white row into a see-through one instead of removing it. `BitBlt` copies
+/// all four bytes of each source pixel, alpha included, which is the only way to
+/// hand DWM an opaque row from GDI.
 #[cfg(windows)]
 pub(crate) fn paint_frame_gap(win: &tauri::WebviewWindow) {
-    use windows::Win32::Foundation::{COLORREF, POINT, RECT};
+    use windows::Win32::Foundation::{POINT, RECT};
     use windows::Win32::Graphics::Gdi::{
-        ClientToScreen, CreateSolidBrush, DeleteObject, FillRect, GetWindowDC, ReleaseDC,
+        BitBlt, ClientToScreen, CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject,
+        GetWindowDC, ReleaseDC, SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB,
+        DIB_RGB_COLORS, SRCCOPY,
     };
     use windows::Win32::UI::WindowsAndMessaging::{GetClientRect, GetWindowRect};
+
+    // 0xAARRGGBB, matching `--color-background`. Stored per pixel in the DIB,
+    // so the alpha byte survives the blit.
+    const OPAQUE_BACKGROUND: u32 = 0xff0a_0a0a;
 
     // Maximized only. A windowed frame is inset on every side too, but that gap
     // is the undecorated shadow and the compositor owns it: filling it would
@@ -82,19 +95,50 @@ pub(crate) fn paint_frame_gap(win: &tauri::WebviewWindow) {
             return;
         }
 
+        let width = window.right - window.left;
+        let height = bottom - top;
+        if width <= 0 {
+            return;
+        }
+
         let dc = GetWindowDC(Some(hwnd));
         if dc.is_invalid() {
             return;
         }
-        let brush = CreateSolidBrush(COLORREF(0x000a0a0a));
-        let strip = RECT {
-            left: 0,
-            top,
-            right: window.right - window.left,
-            bottom,
+        let mem = CreateCompatibleDC(Some(dc));
+        if mem.is_invalid() {
+            ReleaseDC(Some(hwnd), dc);
+            return;
+        }
+
+        // Negative height: top-down rows, so `bits` is a plain left-to-right
+        // pixel run and the fill below needs no stride arithmetic.
+        let info = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: width,
+                biHeight: -height,
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB.0,
+                ..Default::default()
+            },
+            ..Default::default()
         };
-        FillRect(dc, &strip, brush);
-        let _ = DeleteObject(brush.into());
+        let mut bits: *mut core::ffi::c_void = std::ptr::null_mut();
+        let bitmap = CreateDIBSection(Some(dc), &info, DIB_RGB_COLORS, &mut bits, None, 0);
+        if let (Ok(bitmap), false) = (bitmap, bits.is_null()) {
+            let pixels = bits.cast::<u32>();
+            for i in 0..(width as isize * height as isize) {
+                pixels.offset(i).write(OPAQUE_BACKGROUND);
+            }
+            let previous = SelectObject(mem, bitmap.into());
+            let _ = BitBlt(dc, 0, top, width, height, Some(mem), 0, 0, SRCCOPY);
+            SelectObject(mem, previous);
+            let _ = DeleteObject(bitmap.into());
+        }
+
+        let _ = DeleteDC(mem);
         ReleaseDC(Some(hwnd), dc);
     }
 }
