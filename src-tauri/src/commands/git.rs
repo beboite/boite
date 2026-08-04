@@ -99,14 +99,33 @@ pub async fn worktree_open(
     let answer = tauri::async_runtime::spawn_blocking(move || {
         let out = ready.run();
         let took = started.elapsed().as_millis();
+        // The answer is an object now: a path, or the reason there is none. The
+        // reason is the half worth having in a log, since a thread that quietly
+        // ran in the project folder is exactly what this line gets read for.
         let said = match &out {
-            Ok(Value::Null) => {
-                format!("{label}: done in {took}ms — no worktree for this repository")
-            }
-            Ok(value) => format!(
-                "{label}: done in {took}ms — {}",
-                value.as_str().unwrap_or_default()
-            ),
+            Ok(value) => match value.get("path").and_then(Value::as_str) {
+                Some(path) => format!("{label}: done in {took}ms — {path}"),
+                None => {
+                    let dirty = value
+                        .get("dirty")
+                        .and_then(Value::as_array)
+                        .map(|names| {
+                            names
+                                .iter()
+                                .filter_map(Value::as_str)
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        })
+                        .unwrap_or_default();
+                    if dirty.is_empty() {
+                        format!("{label}: done in {took}ms — no worktree for this repository")
+                    } else {
+                        format!(
+                            "{label}: done in {took}ms — main checkout holds {dirty}, staying in the project folder"
+                        )
+                    }
+                }
+            },
             Err(err) => format!("{label}: failed in {took}ms — {err}"),
         };
         let _ = crate::logging::append_app_log(&handle, "info", "worktree", &said, None);

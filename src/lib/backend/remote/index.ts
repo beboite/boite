@@ -264,7 +264,11 @@ export class RemoteBackend implements Backend {
 
     this.worktree = {
       open: (repo, threadId) =>
-        rpc("worktree.open", { repo, threadId }).then((r) => (r.path as string) ?? null),
+        rpc("worktree.open", { repo, threadId }).then((r) => ({
+          path: (r.path as string) ?? null,
+          dirty: (r.dirty ?? []) as string[],
+          more: Boolean(r.more),
+        })),
       warm: (repo) => rpc("worktree.warm", { repo }).then(() => {}),
       migrate: (repo, threadId, from) =>
         rpc("worktree.migrate", { repo, threadId, from }).then((r) => ({
