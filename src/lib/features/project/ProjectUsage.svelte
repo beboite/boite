@@ -107,10 +107,12 @@
     const now = new Date();
     const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
     const DAY = 86_400_000;
-    // Back up to the Sunday that opens the earliest week in range, so every
-    // column is seven cells and the weekday rows line up.
-    const start = today - (WEEKS * 7 - 1) * DAY;
-    const startSunday = start - new Date(start).getUTCDay() * DAY;
+    // The last column is the week we are in, whole. Anchoring the span on today
+    // and only then backing up to a Sunday dropped the rest of the current week
+    // off the right edge, so on a Tuesday the calendar stopped four days ago and
+    // today's own square was not on it.
+    const endSaturday = today + (6 - new Date(today).getUTCDay()) * DAY;
+    const startSunday = endSaturday - (WEEKS * 7 - 1) * DAY;
     const out: { day: string; total: number; future: boolean; at: number }[][] = [];
     for (let w = 0; w < WEEKS; w++) {
       const col: { day: string; total: number; future: boolean; at: number }[] = [];
@@ -211,48 +213,57 @@
         : t("project.tokensOnly")}
     </p>
   {:else}
-    <div class="flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
-      <div>
-        <p class="font-mono text-xl leading-none text-foreground">{fmt(total)}</p>
-        <p class="mt-1 text-xs text-muted-foreground/70">{t("project.tokensRange")}</p>
-      </div>
-
-      <!-- One row per model, as a share of the whole rather than a second set of
-           numbers: the figures are the card next door. -->
-      <ul class="flex min-w-0 flex-1 flex-col gap-1 sm:max-w-xs">
-        {#each report.models as model (model.provider + model.model)}
-          <li class="flex items-center gap-2">
-            <ShortcutIcon iconKey={providerIcon(model.provider)} size={13} />
-            <span
-              class="min-w-0 flex-1 truncate text-sm text-foreground/85"
-              title={model.model}
-              aria-hidden="true"
-            >
-              {shortModel(model.model)}
-            </span>
-            <span class="sr-only">
-              {model.model} · {model.input}
-              {t("project.tokensIn")} · {model.output}
-              {t("project.tokensOut")} · {model.cacheWrite}
-              {t("project.tokensCacheWrite")} · {model.cacheRead}
-              {t("project.tokensCacheRead")}
-            </span>
-            <span
-              class="h-1.5 w-16 shrink-0 overflow-hidden rounded-full bg-[var(--color-surface-3)]"
-              aria-hidden="true"
-            >
-              <span
-                class="block h-full rounded-full bg-foreground/45"
-                style:width="{Math.max(4, Math.round((model.total / total) * 100))}%"
-              ></span>
-            </span>
-            <span class="w-11 shrink-0 text-right font-mono text-xs text-muted-foreground">
-              {fmt(model.total)}
-            </span>
-          </li>
-        {/each}
-      </ul>
+    <!-- The total on its own line rather than in a column beside the models:
+         one short number next to eight rows left a third of the card empty and
+         put the headline figure at the bottom of the hole. -->
+    <div class="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
+      <p class="font-mono text-2xl leading-none text-foreground">{fmt(total)}</p>
+      <p class="text-xs text-muted-foreground/70">{t("project.tokensRange")}</p>
+      <span class="flex-1"></span>
+      {#if report.sessions > 0}
+        <p class="font-mono text-xs text-muted-foreground/70">
+          {t("project.tokensSessions", { count: report.sessions })}
+        </p>
+      {/if}
     </div>
+
+    <!-- One row per model, as a share of the whole rather than a second set of
+         numbers: the figures are the card next door. Two columns from `sm` up,
+         so eight models are four rows and the bars get the width they were
+         being denied by a 16-unit cap next to a column of nothing. -->
+    <ul class="mt-2.5 grid grid-cols-1 gap-x-6 gap-y-1.5 sm:grid-cols-2">
+      {#each report.models as model (model.provider + model.model)}
+        <li class="flex min-w-0 items-center gap-2">
+          <ShortcutIcon iconKey={providerIcon(model.provider)} size={13} />
+          <span
+            class="w-24 shrink-0 truncate text-sm text-foreground/85"
+            title={model.model}
+            aria-hidden="true"
+          >
+            {shortModel(model.model)}
+          </span>
+          <span class="sr-only">
+            {model.model} · {model.input}
+            {t("project.tokensIn")} · {model.output}
+            {t("project.tokensOut")} · {model.cacheWrite}
+            {t("project.tokensCacheWrite")} · {model.cacheRead}
+            {t("project.tokensCacheRead")}
+          </span>
+          <span
+            class="h-1.5 min-w-6 flex-1 overflow-hidden rounded-full bg-[var(--color-surface-3)]"
+            aria-hidden="true"
+          >
+            <span
+              class="block h-full rounded-full bg-foreground/45"
+              style:width="{Math.max(2, Math.round((model.total / total) * 100))}%"
+            ></span>
+          </span>
+          <span class="w-11 shrink-0 text-right font-mono text-xs text-muted-foreground">
+            {fmt(model.total)}
+          </span>
+        </li>
+      {/each}
+    </ul>
 
     <!-- The grid stays hidden from assistive tech: 371 squares whose only
          label is a title read as nothing at all. This is the same year, as
