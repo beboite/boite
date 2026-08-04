@@ -11,6 +11,7 @@
   import CloseGuard from "$lib/app/CloseGuard.svelte";
   import ProjectSidebar from "$lib/features/project/ProjectSidebar.svelte";
   import Toaster from "$lib/features/notifications/Toaster.svelte";
+  import { toastArea } from "$lib/features/notifications/anchor.svelte";
   import TodoAchievement from "$lib/features/todo/TodoAchievement.svelte";
   import ConfirmHost from "$lib/shared/components/ConfirmHost.svelte";
   import BoiteLogo from "$lib/shared/components/BoiteLogo.svelte";
@@ -400,7 +401,9 @@
       />
     {/if}
 
-    <main class="relative flex min-w-0 flex-1 flex-col">
+    <!-- use:toastArea: the toast stack is fixed to the window, and this is what
+         keeps it over the work area rather than over the docked panel. -->
+    <main class="relative flex min-w-0 flex-1 flex-col" use:toastArea>
       {#if !app.ready}
         <div class="flex h-full items-center justify-center">
           <p class="font-mono text-xs text-muted-foreground/60">{t("common.loading")}</p>
