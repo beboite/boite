@@ -325,8 +325,52 @@
     if (fitRafId !== null) return;
     fitRafId = requestAnimationFrame(() => {
       fitRafId = null;
-      if (visible) fit?.fit();
+      if (!visible) return;
+      fit?.fit();
+      loadWebgl();
     });
+  }
+
+  // Whether the WebGL renderer is on, or has been given up on.
+  let webglSettled = false;
+
+  /**
+   * Hands rendering to the GPU, but only once the cell has a measured size.
+   *
+   * `WebglRenderer` acquires its glyph atlas once, from the cell dimensions it
+   * finds at that moment, and a terminal whose box is not laid out yet has none:
+   * `_refreshCharAtlas` returns without one, `GlyphRenderer.render` returns
+   * early for the rest of that atlas's life, and `renderBackgrounds` keeps
+   * drawing. That is a pane painting every diff block, every agent panel and
+   * every selection in the right place with no text in any of them, until some
+   * later pass — the cursor blink, the next byte out of the PTY — happens to
+   * retry the atlas. It lasted seconds, and it was the whole screen.
+   *
+   * The addon used to load in the same breath as `term.open()`, before the first
+   * fit, which is exactly when a freshly mounted pane has nothing measured yet.
+   * `proposeDimensions()` is the public form of the same question the renderer
+   * asks itself: it answers `undefined` while the cell is 0x0. So this is called
+   * after every fit instead, and the terminal spends the meantime on the DOM
+   * renderer, which needs no atlas and shows its text.
+   */
+  function loadWebgl() {
+    if (webglSettled || !term) return;
+    let measured = false;
+    try {
+      measured = !!fit?.proposeDimensions();
+    } catch {
+      measured = false;
+    }
+    if (!measured) return;
+    try {
+      const webgl = new WebglAddon();
+      webgl.onContextLoss(() => webgl.dispose());
+      term.loadAddon(webgl);
+    } catch {
+      // WebGL unavailable (e.g. webkit2gtk without GPU). Fall back to DOM
+      // renderer, and stop asking: it will not appear later.
+    }
+    webglSettled = true;
   }
 
   // Coalescing to one fit per frame is not enough for a splitter drag: the
@@ -987,14 +1031,6 @@
       sendSequence: rawWrite,
     });
 
-    try {
-      const webgl = new WebglAddon();
-      webgl.onContextLoss(() => webgl.dispose());
-      term.loadAddon(webgl);
-    } catch {
-      // WebGL unavailable (e.g. webkit2gtk without GPU). Fall back to DOM renderer.
-    }
-
     const initialFit = () => {
       try {
         fit?.fit();
@@ -1003,6 +1039,7 @@
       }
     };
     initialFit();
+    loadWebgl();
     if (focused) term.focus();
 
     // Now, in this same tick, whenever the pane already has a box — which it
@@ -1016,6 +1053,7 @@
 
     requestAnimationFrame(() => {
       initialFit();
+      loadWebgl();
       void spawn();
     });
 
@@ -1085,6 +1123,9 @@
     if (visible && term) {
       queueMicrotask(() => {
         fit?.fit();
+        // A pane that mounted hidden measured nothing, so this is where its
+        // renderer becomes the GPU one.
+        loadWebgl();
         void spawn();
       });
     }
