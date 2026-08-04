@@ -316,6 +316,13 @@ if (agentUrl && keyFile) {
     gate?.retryable === false && typeof gate?.approvalId === "string",
     `status=${moved.status}`,
   );
+  // And says so as a status rather than as an error. Every client on the far
+  // side reads an `error` field as a failed call, which this one is not.
+  check(
+    "waiting on the user is not answered as a failure",
+    gate?.status === "awaiting-user" && gate?.error === undefined,
+    `body=${JSON.stringify(gate)}`,
+  );
 
   const waiting = await c.rpc("approval.list");
   check(

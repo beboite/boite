@@ -69,17 +69,43 @@ impl Verdict {
     }
 }
 
+/// The `status` an agent reads while its call sits in front of the user.
+///
+/// A word rather than an `error`, because it is not one. The endpoint used to
+/// answer these the way it answers a project that does not exist, and every
+/// client on the other side treats an `error` field as a failed call: agents
+/// apologised for something that had not gone wrong, then went looking for
+/// another way round the gate.
+pub const AWAITING: &str = "awaiting-user";
+
+/// The `status` when the workspace answered for the user, see `mcpYolo`.
+pub const AUTO_ALLOWED: &str = "auto-allowed";
+
 /// What an agent reads when a call is put to the user.
 ///
-/// A `200` carrying an error rather than a status code, like every other refusal
-/// an agent is meant to act on, and `retryable: false` because nothing about
-/// asking again changes the answer. The wording says who has it now, so the
-/// agent explains the wait rather than reporting a failure.
+/// Says the call worked before it says anything else. `retryable: false` rides
+/// along because nothing about asking again changes the answer, and the wording
+/// says who has it now, so the agent explains the wait rather than reporting a
+/// failure or reaching for a workaround.
 pub fn waiting_on_a_human(action: &str) -> String {
     format!(
-        "{action} is with the user to approve. Do not ask again: they will see it \
-         in Boite, and the call runs on its own if they allow it. Carry on with \
-         something else, or say you are waiting."
+        "{action} worked: the call was accepted and is now waiting for the user to \
+         allow it in Boite. This is not a refusal and nothing failed. It runs on \
+         its own the moment they accept, so do not ask again and do not look for \
+         another way round it. Carry on with something else, or say you are \
+         waiting on them."
+    )
+}
+
+/// What an agent reads when the workspace allowed it without asking.
+///
+/// Worth a sentence of its own: the same call answers two ways depending on a
+/// setting the agent cannot see, and "it already ran" is the half that changes
+/// what it should do next.
+pub fn answered_by_yolo(action: &str) -> String {
+    format!(
+        "{action} ran straight away. This workspace is in yolo mode, so Boite \
+         answers for the user on the calls that would otherwise wait for them."
     )
 }
 
@@ -99,12 +125,24 @@ mod tests {
     }
 
     /// The sentence an agent reads is the whole interface here, so it has to
-    /// say who has it and that retrying is pointless.
+    /// say the call worked, who has it, and that retrying is pointless.
     #[test]
-    fn the_agent_is_told_not_to_retry() {
+    fn the_agent_is_told_it_worked_and_not_to_retry() {
         let said = waiting_on_a_human("thread.move");
         assert!(said.contains("thread.move"));
-        assert!(said.contains("Do not ask again"));
+        assert!(said.contains("worked"));
+        assert!(said.contains("not a refusal"));
+        assert!(said.contains("do not ask again"));
         assert!(said.contains("user"));
+    }
+
+    /// The other half of the same interface: allowed without asking is a
+    /// different next move from waiting, so it does not borrow the wording.
+    #[test]
+    fn yolo_says_the_call_already_ran() {
+        let said = answered_by_yolo("project.create");
+        assert!(said.contains("project.create"));
+        assert!(said.contains("ran straight away"));
+        assert!(!said.contains("waiting"));
     }
 }

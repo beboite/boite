@@ -162,6 +162,11 @@ fn permitted(
 /// user and told not to retry, which is `retryable: false` in the body: a tool
 /// call that blocks on a human is a turn that stalls until somebody looks at the
 /// window, and an agent that gets no answer retries.
+///
+/// The answer carries no `error`. It used to, and every client on the far side
+/// reads that field as "the call failed": agents said sorry for a call that had
+/// worked and went hunting for a way round the gate. What it carries instead is
+/// a `status`, which is `awaiting-user` here and `auto-allowed` under yolo.
 fn ask_the_user(
     workspace: &dyn Workspace,
     caller: &Caller,
@@ -190,12 +195,61 @@ fn ask_the_user(
             .with("of", action)
             .with("detail", detail),
     );
+    if yolo(workspace) {
+        // Opened and journalled first, then answered: yolo leaves the same trail
+        // as a card somebody clicked, so the timeline still shows what was asked
+        // for and who said yes. Going straight to the dispatch would make the
+        // one mode with nothing holding it back the one mode with no record.
+        return match crate::decide(
+            workspace,
+            &pending.id,
+            boite_core::approval::Verdict::Allowed,
+            now_ms(),
+        ) {
+            Ok(_) => Json(json!({
+                "ok": true,
+                "status": boite_core::approval::AUTO_ALLOWED,
+                "note": boite_core::approval::answered_by_yolo(action),
+            })),
+            // The row is open and the user will see it. Answering the agent as
+            // if it had run would be the one lie this whole file exists to
+            // avoid, so it falls back to what happens without yolo.
+            Err(_) => {
+                workspace.announce(Change::Approvals);
+                awaiting(action, &pending.id)
+            }
+        };
+    }
     workspace.announce(Change::Approvals);
+    awaiting(action, &pending.id)
+}
+
+/// The body for a call that is now the user's to answer.
+fn awaiting(action: &str, approval_id: &str) -> Json<Value> {
     Json(json!({
-        "error": boite_core::approval::waiting_on_a_human(action),
+        "status": boite_core::approval::AWAITING,
+        "pending": true,
         "retryable": false,
-        "approvalId": pending.id,
+        "approvalId": approval_id,
+        "note": boite_core::approval::waiting_on_a_human(action),
     }))
+}
+
+/// Whether this workspace answers for the user on the calls that would wait.
+///
+/// Read out of the settings blob the window writes, on every call rather than
+/// held in memory: the toggle exists to be turned off in the middle of a
+/// session, and a cached copy would keep saying yes after it was.
+///
+/// Unreadable settings mean no. A workspace that cannot say whether the user
+/// asked for yolo has not asked for it.
+fn yolo(workspace: &dyn Workspace) -> bool {
+    workspace
+        .store()
+        .load_settings()
+        .ok()
+        .and_then(|s| s.get("mcpYolo").and_then(Value::as_bool))
+        .unwrap_or(false)
 }
 
 /// The repository and worktree behind this caller's thread.

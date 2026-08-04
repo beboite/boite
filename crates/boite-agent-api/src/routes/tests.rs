@@ -231,7 +231,11 @@ fn a_call_across_projects_waits_for_the_user() {
     let Json(answer) = ask_the_user(&fake, &caller, "thread.move", "other", request.clone());
 
     assert_eq!(answer["retryable"], json!(false));
-    assert!(answer["error"].as_str().unwrap().contains("Do not ask again"));
+    assert_eq!(answer["status"], json!(boite_core::approval::AWAITING));
+    // No `error` field, deliberately. Every client on the far side reads one as
+    // a failed call, and this call did not fail.
+    assert!(answer.get("error").is_none(), "{answer}");
+    assert!(answer["note"].as_str().unwrap().contains("worked"));
     // Nothing was dispatched. This is the whole difference from the route it
     // replaced, which handed the move to a device and answered success.
     assert!(fake.asked.lock().unwrap().is_empty());
@@ -271,6 +275,44 @@ fn a_refused_call_never_runs() {
         .expect("the answer lands");
     assert!(fake.asked.lock().unwrap().is_empty());
     assert!(fake.store.open_approvals().unwrap().is_empty());
+}
+
+/// Yolo answers for the user, and leaves the same trail as a card they clicked.
+#[test]
+fn yolo_allows_the_call_without_asking() {
+    let fake = Fake::new("gate-yolo").with_project("p1", "/w/one");
+    fake.store
+        .save_settings(&json!({ "mcpYolo": true }))
+        .unwrap();
+    let caller = agent("p1", "t1");
+    let request = json!({ "kind": "thread.spawn", "projectId": "p2" });
+
+    let Json(answer) = ask_the_user(&fake, &caller, "thread.spawn", "other", request.clone());
+
+    assert_eq!(answer["status"], json!(boite_core::approval::AUTO_ALLOWED));
+    assert_eq!(answer["ok"], json!(true));
+    // Dispatched, not queued: nothing is left for the user to answer.
+    assert_eq!(fake.asked.lock().unwrap().as_slice(), [request]);
+    assert!(fake.store.open_approvals().unwrap().is_empty());
+}
+
+/// And the toggle is read per call, so turning it off stops the next one rather
+/// than the next session.
+#[test]
+fn yolo_off_still_waits() {
+    let fake = Fake::new("gate-yolo-off").with_project("p1", "/w/one");
+    fake.store
+        .save_settings(&json!({ "mcpYolo": false }))
+        .unwrap();
+    let Json(answer) = ask_the_user(
+        &fake,
+        &agent("p1", "t1"),
+        "thread.spawn",
+        "other",
+        json!({ "kind": "thread.spawn" }),
+    );
+    assert_eq!(answer["status"], json!(boite_core::approval::AWAITING));
+    assert!(fake.asked.lock().unwrap().is_empty());
 }
 
 /// Runs one handler to completion. A current-thread runtime is enough: the only
