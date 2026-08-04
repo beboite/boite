@@ -160,6 +160,9 @@ pub(crate) fn call_tool(host: &Host, name: &str, args: &Value) -> Result<String,
                 "/v1/thread/move",
                 json!({ "project": project, "note": args.get("note").and_then(|v| v.as_str()) }),
             )?;
+            if let Some(waiting) = awaiting(&out) {
+                return Ok(waiting);
+            }
             let name = out.get("project").and_then(|v| v.as_str()).unwrap_or(project);
             // Written for a reader that will almost certainly never exist: the
             // terminal goes down before an agent gets to read it. Worth the
@@ -190,7 +193,10 @@ pub(crate) fn call_tool(host: &Host, name: &str, args: &Value) -> Result<String,
                 }
             }
             let moving = args.get("move").and_then(|v| v.as_bool()).unwrap_or(true);
-            refusable(host, "/v1/projects", body)?;
+            let out = refusable(host, "/v1/projects", body)?;
+            if let Some(waiting) = awaiting(&out) {
+                return Ok(waiting);
+            }
             let mut w = Toon::new();
             w.field("creating", name).flag("moves-this-terminal", moving);
             if moving {
@@ -205,7 +211,10 @@ pub(crate) fn call_tool(host: &Host, name: &str, args: &Value) -> Result<String,
                     body[key] = json!(v);
                 }
             }
-            refusable(host, "/v1/threads", body)?;
+            let out = refusable(host, "/v1/threads", body)?;
+            if let Some(waiting) = awaiting(&out) {
+                return Ok(waiting);
+            }
             let mut w = Toon::new();
             w.field("opened", args.get("agent").and_then(|v| v.as_str()).unwrap_or("agent"))
                 .hint("it runs on its own: no report back, and you cannot read its output");
@@ -229,6 +238,31 @@ pub(crate) fn call_tool(host: &Host, name: &str, args: &Value) -> Result<String,
         }
         other => Err(format!("unknown tool: {other}")),
     }
+}
+
+/// The `status` the endpoint answers with when a call is now the user's to
+/// allow. Spelled here rather than imported: this shim links serde and the
+/// identity crate, and one string is not worth a third dependency.
+const AWAITING: &str = "awaiting-user";
+
+/// The answer to a call that worked and is waiting on the user.
+///
+/// Not an `Err`, and that is the whole point. A tool result flagged as an error
+/// is read as a failure: agents apologised for a call that had gone through,
+/// then tried to reach the same thing another way, which is precisely what a
+/// gate exists to stop. This says accepted, says who has it, and says the wait
+/// is the normal path.
+fn awaiting(out: &Value) -> Option<String> {
+    if out.get("status").and_then(|v| v.as_str()) != Some(AWAITING) {
+        return None;
+    }
+    let mut w = Toon::new();
+    w.field("call", "accepted").field("state", "waiting-on-user");
+    w.hint(out.get("note").and_then(|v| v.as_str()).unwrap_or(
+        "it worked and the user has it in Boite; it runs on its own when they allow it. \
+         Nothing failed, asking again changes nothing, and there is no other way round it",
+    ));
+    Some(w.into_string())
 }
 
 /// A POST whose refusals arrive as a 200 carrying an `error`.

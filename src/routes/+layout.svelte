@@ -29,7 +29,7 @@
   import { resumeAfterUpdate } from "$lib/features/updater/restart";
   import { todos } from "$lib/features/todo/store.svelte";
   import { approvals } from "$lib/features/approvals/store.svelte";
-  import ApprovalTray from "$lib/features/approvals/ApprovalTray.svelte";
+  import ApprovalDock from "$lib/features/approvals/ApprovalDock.svelte";
   import CommandPalette from "$lib/features/palette/CommandPalette.svelte";
   import { createKeyboardController } from "$lib/shared/keyboard/controller";
   import type { KeyScope, ShortcutBinding } from "$lib/shared/keyboard/types";
@@ -385,6 +385,6 @@
 
 {@render children()}
 
-<ApprovalTray />
+<ApprovalDock />
 
 <CommandPalette />

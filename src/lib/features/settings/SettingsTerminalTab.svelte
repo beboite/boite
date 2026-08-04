@@ -175,6 +175,19 @@
     enabled={settings.state.agentTodoAccess}
     onToggle={() => void settings.setAgentTodoAccess(!settings.state.agentTodoAccess)}
   />
+  <ToggleSetting
+    label={t("terminalTab.mcpYolo")}
+    description={t("terminalTab.mcpYoloDesc")}
+    enabled={settings.state.mcpYolo}
+    onToggle={() => void settings.setMcpYolo(!settings.state.mcpYolo)}
+  />
+  {#if settings.state.mcpYolo}
+    <!-- Said on the card rather than in the description: the line that matters
+         is the one you read while it is on, not the one you read deciding. -->
+    <p class="-mt-0.5 text-xs leading-snug text-warning">
+      {t("terminalTab.mcpYoloOn")}
+    </p>
+  {/if}
 
   <div class="flex flex-col gap-1.5" class:opacity-50={!settings.state.agentTodoAccess}>
     <label for="todo-template" class="text-xs font-medium text-foreground">

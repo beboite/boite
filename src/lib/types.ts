@@ -134,6 +134,18 @@ export interface Settings {
    * the point of the panel is that an agent can use it.
    */
   agentTodoAccess: boolean;
+  /**
+   * Answer yes for the user on the MCP calls that would otherwise wait for
+   * them: moving a terminal into another project, creating one, opening a
+   * terminal somewhere else.
+   *
+   * Off by default, and read by the endpoint out of this blob on every call
+   * rather than at launch, so turning it off stops the next request instead of
+   * the next session. What it does not change is the record: the request is
+   * still opened and still journalled, it is just answered without anybody
+   * being asked.
+   */
+  mcpYolo: boolean;
   idleTimeoutMinutes: number;
   idleAutocloseByIcon: Record<string, boolean>;
   confirmCloseThread: boolean;

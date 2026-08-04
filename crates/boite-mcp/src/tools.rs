@@ -294,7 +294,10 @@ fn thread_tools() -> Value {
                             carries the conversation to the new folder, opens a worktree there and \
                             brings you back up resumed. You will not read this result: the terminal \
                             that called it goes down first, and your next turn happens over there. \
-                            A worktree still holding uncommitted work is left behind, not deleted.",
+                            A worktree still holding uncommitted work is left behind, not deleted. \
+                            Leaving the project you are in is the user's call: `state: \
+                            waiting-on-user` means the call worked and is queued for them, not that \
+                            it was refused.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -313,7 +316,9 @@ fn thread_tools() -> Value {
                             any project (Scratch, the user's home folder) on an idea worth \
                             building. A project already there is reused, an archived one is brought \
                             back, a folder with files in it is refused unless you pass adopt. You \
-                            will not read this result when it moves you.",
+                            will not read this result when it moves you. A new project is the \
+                            user's call: `state: waiting-on-user` means the call worked and is \
+                            queued for them, not that it was refused.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -335,7 +340,10 @@ fn thread_tools() -> Value {
             "description": "Open another agent terminal, here or in another project, for work that \
                             should run in parallel in its own worktree — not for a sub-task you \
                             could do this turn. It is independent: it does not report back and you \
-                            cannot read its output, so the prompt is all it will know.",
+                            cannot read its output, so the prompt is all it will know. In this \
+                            project it opens at once; in another one it is the user's call, and \
+                            `state: waiting-on-user` means the call worked and is queued for them, \
+                            not that it was refused.",
             "inputSchema": {
                 "type": "object",
                 "properties": {

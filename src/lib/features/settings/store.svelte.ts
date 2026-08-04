@@ -127,6 +127,7 @@ const DEFAULTS: Settings = {
   threadOrderByProject: {},
   todoPromptTemplate: DEFAULT_TODO_PROMPT,
   agentTodoAccess: true,
+  mcpYolo: false,
   idleTimeoutMinutes: 10,
   idleAutocloseByIcon: {
     claude: true,
@@ -298,6 +299,10 @@ class SettingsStore {
           typeof stored.agentTodoAccess === "boolean"
             ? stored.agentTodoAccess
             : DEFAULTS.agentTodoAccess,
+        // Anything that is not exactly `true` is off. A blob from a build that
+        // never had the key, or one whose value did not survive a round trip,
+        // is a workspace nobody armed.
+        mcpYolo: stored.mcpYolo === true,
         todoPromptTemplate:
           typeof stored.todoPromptTemplate === "string" && stored.todoPromptTemplate.trim()
             ? stored.todoPromptTemplate
@@ -748,6 +753,17 @@ class SettingsStore {
   async setThreadWorktrees(value: boolean) {
     if (this.state.threadWorktrees === value) return;
     this.state.threadWorktrees = value;
+    await this.persist();
+  }
+
+  /**
+   * Persisted rather than kept here: the endpoint reads this out of the
+   * workspace database on every gated call, so an unwritten toggle is a toggle
+   * the agents never see.
+   */
+  async setMcpYolo(value: boolean) {
+    if (this.state.mcpYolo === value) return;
+    this.state.mcpYolo = value;
     await this.persist();
   }
 
