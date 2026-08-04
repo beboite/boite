@@ -43,8 +43,15 @@ It declares twenty tools, around 26 KB of schema in every session that loads it,
 so it is worth registering only while actually driving the dev window.
 
 The bridge is unrelated to the agent MCP endpoint described in the README, and
-never reuses it: the bridge answers `execute_js`, that one answers ten verbs
-scoped to the calling thread.
+never reuses it: the bridge answers `execute_js`, that one answers seventeen
+tools scoped to the calling thread.
+
+It is also no longer the way to find out what the app is doing. It drives an
+instance it started itself, under a different identifier and therefore a
+different database, so it can never observe the app a bug is in.
+`workspace_snapshot` carries `screen`, the window's own account of what is on
+it, and `window.__boite` below reads a terminal back as text. Reach for the
+bridge for what only a real pointer can do.
 
 ## The browser pane, and what it is allowed to reach
 
