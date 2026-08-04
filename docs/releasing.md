@@ -6,17 +6,20 @@ opens a **draft** release: clients see nothing until you publish it.
 
 ## Cutting a release
 
-Bump the version in the six places that carry it:
+Bump the version in the eight places that carry it:
 
 - `package.json`
 - `src-tauri/tauri.conf.json`
 - `src-tauri/Cargo.toml`
-- `crates/boite-core/Cargo.toml`
-- `crates/boite-server/Cargo.toml`
-- `crates/boite-mcp/Cargo.toml`
+- every `crates/*/Cargo.toml`: `boite-core`, `boite-identity`,
+  `boite-agent-api`, `boite-server`, `boite-mcp`
 
-Commit, then tag `vX.Y.Z` and push the tag. The `verify` job checks all six
+Commit, then tag `vX.Y.Z` and push the tag. The `verify` job checks all of them
 against each other and against the tag before a single runner starts building.
+It globs the Cargo manifests rather than listing them, so a crate added to the
+workspace is covered the day it lands. That is the fix for what happened here:
+the list was written when there were three crates, two more were added, and
+neither this file nor the job noticed.
 
 ## Signing
 

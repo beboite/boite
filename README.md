@@ -16,7 +16,7 @@
 </p>
 
 > [!NOTE]
-> 1.0.0 is out, and the app updates itself from
+> 1.0.x is out, and the app updates itself from
 > [Releases](https://github.com/beboite/boite/releases). Bug reports and
 > platform feedback are welcome in
 > [Issues](https://github.com/beboite/boite/issues).
@@ -25,8 +25,9 @@
 
 Talking to half a dozen coding agents on the same repo means half a dozen
 terminals, and no way to tell at a glance which one is waiting for you. Boite
-gives every agent a persistent thread inside a project, reads its working/ready
-state from the OSC title, and remembers the command and the last session id.
+gives every agent a persistent thread inside a project, measures its
+working/ready state from what the agent itself declares and from what is on the
+terminal's last rows, and remembers the command and the last session id.
 
 It is a terminal multiplexer first: everything is a real PTY, nothing is
 wrapped, and a blank shell is one keystroke away.
@@ -34,7 +35,7 @@ wrapped, and a blank shell is one keystroke away.
 ## Features
 
 - **Projects and threads.** A sidebar of projects, each holding a tree of threads that stay mounted across tab switches.
-- **Status at a glance.** A per-thread dot read from the agent's own OSC title: working, ready, error.
+- **Status at a glance.** A per-thread dot, measured every pass rather than latched: three agents write what they are doing to a file of their own, and the rest are read off the terminal's bottom rows.
 - **A worktree per thread.** Every agent works in its own detached git worktree, so two of them on the same repo never write to the same files.
 - **Session resume.** Boite reads each tool's session store to find the conversation that belongs to the thread's directory.
 - **A page per project.** Threads, branch and upstream distance, recent commits, open todos and which worktree sits where.
@@ -68,8 +69,12 @@ won't get status or resume detection.
 | Hermes         | `hermes`                | ✅          | `--resume <id>`   | ❌            | ❌         |
 | Plain shell    | your default shell      | n/a         | n/a               | n/a           | n/a        |
 
-- **Live status** is the working/ready dot, read from the OSC title the agent
-  emits.
+- **Live status** is the working/ready dot. Claude, Codex and Opencode each
+  record what they are doing in a store of their own, and Boite reads all three
+  back as one answer; the other five declare nothing from outside, so their dot
+  comes from the shape of the terminal's bottom rows. Neither source is a
+  timestamp that expires, so a finished turn reads as finished rather than as
+  the absence of noise.
 - **Resume flag** is what Boite appends once it has found the conversation
   matching the thread's cwd. Only Claude files its transcript by directory, so
   it is also the only one whose transcript has to travel when a thread moves.
@@ -284,7 +289,8 @@ TWA wrapper that packages the PWA as an `.aab`/`.apk`.
 
 ## Agent access (MCP)
 
-Twelve tools, in three halves.
+Seventeen tools, in four groups: the shared list, the worktree the thread runs
+in, where the work happens, and what the workspace can be asked about.
 
 `todo_list`, `todo_add` and `todo_claim` reach the right-hand **Todo** tab,
 which keeps a list of cards per project. An agent can read that list, append to
@@ -318,6 +324,20 @@ conversation intact. `project_create` does the same for a conversation that has
 no project yet, making the folder and running `git init` first. `thread_spawn`
 opens a second agent terminal, here or elsewhere, for work that should run in
 parallel in its own worktree.
+
+`workspace_snapshot`, `workspace_search`, `workspace_timeline`,
+`terminal_transcript` and `pane_open` are how an agent answers "what is wrong
+here" without asking you. One snapshot carries every project and thread, the
+terminals the process really has a live child for, and `screen`: each pane with
+its kind, its title and its measured size, which one has focus, and what is
+covering the layout. A pane listed at zero pixels is open and not visible, and
+nothing else reports that. `workspace_search` and `workspace_timeline` answer
+where and when across the todo list, the log of what agents did and what the
+terminals printed. `terminal_transcript` reads any thread's output back from the
+end, including a thread that has already stopped, because the output is appended
+to a file rather than kept in memory. `pane_open` puts a diff, a file or a dev
+server beside the agent's own terminal, which is the only way to say "look at
+this" to someone who is not reading that terminal.
 
 Those answer before they finish, which is not a shortcut: two of them kill the
 process that called them. A thread cannot change project while its PTY is alive,
@@ -428,7 +448,8 @@ release.
 - **Frontend**: SvelteKit (`adapter-static`, SSR off), Svelte 5 runes,
   Tailwind 4, xterm 6 with the WebGL renderer, CodeMirror 6 for the editor.
 - **Core**: Rust. `portable-pty` for PTYs, `vte` for OSC parsing, `which` for
-  PATH resolution, `rusqlite` (read-only) to read each agent's session store.
+  PATH resolution, `rusqlite` for the workspace database and for reading each
+  agent's own session store.
 - **Server**: axum, one multiplexed WebSocket, gzip scrollback replay,
   Web Push.
 - **Build**: Vite (aliased to `rolldown-vite`), Bun for packages, `tsgo` for
@@ -438,18 +459,22 @@ release.
 
 ```text
 src/lib/
-  app/                    # shell controllers, keyboard, workspace orchestration
+  app/                    # shell controllers, workspace orchestration, boot
   backend/                # transport abstraction: TauriBackend | RemoteBackend
+  domain/                 # rules the features share: no runes, no store behind them
   features/               # vertical slices, each owning components + store
-    terminal git explorer editor panes palette
+    terminal git explorer editor panes palette browser
     project thread shortcut settings workspace mobile push notifications updater
-    fastpick todo devtools setup
-  shared/                 # reusable components, brand icons, utils
+    fastpick todo approvals devtools setup
+  shared/                 # reusable components, brand icons, keyboard, services, utils
   storage/                # DB facade
 crates/
-  boite-core/             # portable PTY / git / fs / session core
-    pty.rs status.rs session.rs git.rs explorer.rs editor.rs project.rs fastpick.rs
+  boite-core/             # everything portable, and where a capability is decided
+    command/ git/ session/ store.rs pty.rs journal.rs snapshot.rs transcript.rs
+  boite-identity/         # the signing vocabulary both ends share
+  boite-agent-api/        # the HTTP routes an agent reaches, written once
   boite-server/           # headless axum server, serves the SPA as a PWA
+  boite-mcp/              # the stdio shim a terminal's agent talks to
 src-tauri/                # thin Tauri wrapper over boite-core
 mobile/                   # Bubblewrap TWA wrapper for the Android build
 ```

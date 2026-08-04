@@ -17,9 +17,14 @@ permissions:
   contents: write
 
 jobs:
-  # Runs first and alone: the version lives in five files, and a release built
-  # from a mismatched set is worse than no release at all. Catching it here also
-  # avoids paying for four platform runners before the mistake surfaces.
+  # Runs first and alone: the version lives in one manifest per crate plus the
+  # two JSON files, and a release built from a mismatched set is worse than no
+  # release at all. Catching it here also avoids paying for four platform
+  # runners before the mistake surfaces.
+  #
+  # The Cargo manifests are discovered rather than listed. They were listed
+  # once, and `boite-identity` and `boite-agent-api` were added to the workspace
+  # without being added here, so two crates could ship a version nobody checked.
   verify:
     runs-on: ubuntu-latest
     steps:
@@ -30,16 +35,19 @@ jobs:
           set -euo pipefail
           conf=$(jq -r .version src-tauri/tauri.conf.json)
           pkg=$(jq -r .version package.json)
-          app=$(grep -m1 '^version = ' src-tauri/Cargo.toml | cut -d'"' -f2)
-          core=$(grep -m1 '^version = ' crates/boite-core/Cargo.toml | cut -d'"' -f2)
-          server=$(grep -m1 '^version = ' crates/boite-server/Cargo.toml | cut -d'"' -f2)
-          mcp=$(grep -m1 '^version = ' crates/boite-mcp/Cargo.toml | cut -d'"' -f2)
 
-          echo "tauri.conf.json=$conf package.json=$pkg boite=$app core=$core server=$server mcp=$mcp"
+          echo "tauri.conf.json=$conf package.json=$pkg"
 
-          for v in "$pkg" "$app" "$core" "$server" "$mcp"; do
+          if [ "$pkg" != "$conf" ]; then
+            echo "::error::version mismatch: tauri.conf.json says $conf, package.json says $pkg" >&2
+            exit 1
+          fi
+
+          for manifest in src-tauri/Cargo.toml crates/*/Cargo.toml; do
+            v=$(grep -m1 '^version = ' "$manifest" | cut -d'"' -f2)
+            echo "$manifest=$v"
             if [ "$v" != "$conf" ]; then
-              echo "::error::version mismatch — tauri.conf.json says $conf, another manifest says $v" >&2
+              echo "::error::version mismatch: tauri.conf.json says $conf, $manifest says $v" >&2
               exit 1
             fi
           done

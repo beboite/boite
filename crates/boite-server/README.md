@@ -8,8 +8,21 @@ can attach to the same thread at once.
 
 ## Run with Docker (recommended)
 
-Built and tested natively on `linux/arm64` (Orange Pi). `docker buildx` is not
-required: build on the target arch.
+The image is published on every push to master that touches the server, for
+`linux/arm64` only, and the package is public, so nothing needs a registry
+login. On any other architecture, build it yourself as below:
+
+```bash
+docker pull ghcr.io/beboite/boite-server:latest
+```
+
+Tags are `latest`, the `package.json` version, and `sha-<commit>`. The compose
+file reads `${BOITE_IMAGE_TAG:-latest}`, so pinning a version or rolling back is
+`BOITE_IMAGE_TAG=1.0.2 docker compose up -d`.
+
+Building it yourself still works and is what `--build` below does. Built and
+tested natively on `linux/arm64` (Orange Pi); `docker buildx` is not required if
+you build on the target arch.
 
 ```bash
 # 1. Pick a token (this is the only credential; treat it like a root password).
