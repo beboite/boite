@@ -6,12 +6,14 @@
 
   type Props = {
     message: string;
+    detail?: string;
     durationMs?: number | null;
     kind?: ToastKind;
     onDone: () => void;
   };
   let {
     message,
+    detail = undefined,
     durationMs = 3000,
     kind = "info",
     onDone,
@@ -42,47 +44,33 @@
 <div
   class="toast"
   class:success={kind === "success"}
+  class:warning={kind === "warning"}
   class:error={kind === "error"}
   class:sticky
   role={kind === "error" ? "alert" : "status"}
 >
-  <div class="accent"></div>
-  <div class="body">
-    <svg
-      class="icon"
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      stroke-width="2"
-      stroke-linecap="round"
-      stroke-linejoin="round"
-      aria-hidden="true"
-    >
-      {#if kind === "success"}
-        <path d="M20 6L9 17l-5-5" />
-      {:else if kind === "error"}
-        <circle cx="12" cy="12" r="10" />
-        <line x1="15" y1="9" x2="9" y2="15" />
-        <line x1="9" y1="9" x2="15" y2="15" />
-      {:else}
-        <circle cx="12" cy="12" r="10" />
-        <line x1="12" y1="16" x2="12" y2="12" />
-        <line x1="12" y1="8" x2="12.01" y2="8" />
-      {/if}
-    </svg>
-    <span class="text">{message}</span>
-    <button
-      type="button"
-      class="dismiss"
-      onclick={onDone}
-      aria-label={t("common.dismiss")}
-      title={t("common.dismiss")}
-    >
-      <X class="size-3" />
-    </button>
+  <!-- A dot rather than a glyph per kind. Three hand-drawn SVG icons said the
+       same thing the colour already says, cost a different silhouette each and
+       made the card read like every other framework's toast. Kind is not
+       carried by colour alone: the role above is what a screen reader gets. -->
+  <span class="dot" aria-hidden="true"></span>
+  <div class="lines">
+    <span class="message">{message}</span>
+    <!-- Paths, branch names, git output: monospace, because that is what it is
+         and because it keeps the specifics from competing with the sentence. -->
+    {#if detail}
+      <span class="detail">{detail}</span>
+    {/if}
   </div>
+  <button
+    type="button"
+    class="dismiss"
+    onclick={onDone}
+    aria-label={t("common.dismiss")}
+    title={t("common.dismiss")}
+  >
+    <X class="size-3" />
+  </button>
 </div>
 
 <style>
@@ -91,40 +79,56 @@
      keyboard FAB for as long as the toast lasted. */
   .toast {
     pointer-events: none;
-    display: flex;
-    overflow: hidden;
-    background: var(--color-surface-2);
-    border: 1px solid var(--color-border);
-    border-radius: 6px;
-    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: start;
+    column-gap: 8px;
+    padding: 9px 10px 10px 11px;
+    border-radius: var(--radius-md);
+    /* Slightly translucent over the elevation ring rather than a flat panel
+       with a border of its own: the stack sits over a terminal, and reading as
+       something above it is the whole job. */
+    background: color-mix(in srgb, var(--color-surface-2) 94%, transparent);
+    backdrop-filter: blur(10px);
+    box-shadow: var(--shadow-e3);
+    /* The only chromatic thing on the card, and it fades out before the text
+       starts, so the kind is legible without tinting what has to be read. */
+    background-image: linear-gradient(
+      100deg,
+      color-mix(in srgb, var(--toast-accent) 13%, transparent),
+      transparent 42%
+    );
     --toast-accent: var(--color-muted-foreground);
   }
   .toast.success {
     --toast-accent: var(--color-success);
   }
+  .toast.warning {
+    --toast-accent: var(--color-warning);
+  }
   .toast.error {
     --toast-accent: var(--color-danger);
   }
-  .accent {
-    width: 3px;
-    flex-shrink: 0;
+  /* Sized in em against the message it marks, so the UI scale moves the dot and
+     the line it sits on together. In px it drifted off the first line as soon
+     as the zoom slider left 100%. */
+  .dot {
+    width: 0.42em;
+    height: 0.42em;
+    font-size: var(--text-sm);
+    border-radius: 999px;
     background: var(--toast-accent);
+    /* Optically on the first line's baseline rather than its box top. */
+    margin-top: 0.55em;
+    box-shadow: 0 0 0 0.25em color-mix(in srgb, var(--toast-accent) 14%, transparent);
   }
-  .body {
+  .lines {
     display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 12px;
+    flex-direction: column;
+    gap: 2px;
     min-width: 0;
-    flex: 1;
   }
-  .icon {
-    flex-shrink: 0;
-    color: var(--toast-accent);
-  }
-  .text {
-    flex: 1;
-    min-width: 0;
+  .message {
     font-size: var(--text-sm);
     color: var(--color-foreground);
     /* Errors are the messages users actually need to read, so let them wrap up
@@ -136,16 +140,28 @@
     overflow: hidden;
     overflow-wrap: anywhere;
   }
+  .detail {
+    font-family: var(--font-mono);
+    font-size: var(--text-2xs);
+    line-height: 1.5;
+    color: var(--color-muted-foreground);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+  }
   .dismiss {
     pointer-events: auto;
-    flex-shrink: 0;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    align-self: flex-start;
-    margin: -2px -4px 0 0;
+    /* Reserved, not conditional: the button appearing on hover used to reflow
+       the text beside it. */
+    margin: -3px -3px 0 0;
     padding: 4px;
-    border-radius: 4px;
+    border-radius: var(--radius-xs);
     color: var(--color-muted-foreground);
     opacity: 0;
     transition: opacity var(--dur-1) ease, background-color var(--dur-1) ease;

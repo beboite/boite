@@ -33,6 +33,7 @@
       {#key toast.resetKey}
         <Toast
           message={toast.message}
+          detail={toast.detail}
           kind={toast.kind}
           durationMs={toast.durationMs}
           onDone={() => notifications.dismiss(toast.id)}
