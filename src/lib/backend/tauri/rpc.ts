@@ -23,6 +23,7 @@ import type {
   WorktreeEntry,
   WorktreeHold,
   WorktreeMigration,
+  WorktreeOpening,
 } from "../types";
 import type {
   BranchChangeResult,
@@ -60,7 +61,7 @@ export const tauriGit: GitApi = {
 };
 
 export const tauriWorktree: WorktreeApi = {
-  open: (repo, threadId) => invoke<string | null>("worktree_open", { repo, threadId }),
+  open: (repo, threadId) => invoke<WorktreeOpening>("worktree_open", { repo, threadId }),
   warm: (repo) => invoke<void>("worktree_warm", { repo }),
   migrate: (repo, threadId, from) =>
     invoke<WorktreeMigration>("worktree_migrate", { repo, threadId, from }),

@@ -349,6 +349,10 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "worktree.spareHint":
     "Préparé à l'avance pour que le prochain thread d'agent démarre instantanément. Le supprimer ne coûte que cette avance.",
   "worktree.dirtyCount": "{count} avec du travail dedans",
+  "worktree.mainDirty":
+    "{project} a des modifications non commitées, ce terminal démarre donc dans le dossier du projet.",
+  "worktree.mainDirtyFiles": "{files}",
+  "worktree.mainDirtyMore": "{files}, et d'autres",
   "worktree.heldBy": "{thread} tourne ici",
   "worktree.remove": "Supprimer ce worktree",
   "worktree.removeTitle": "Supprimer {name} ?",
