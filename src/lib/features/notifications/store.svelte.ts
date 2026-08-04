@@ -1,11 +1,24 @@
 import { uuid } from "$lib/shared/utils/uuid";
 
-export type ToastKind = "info" | "success" | "error";
+/**
+ * `warning` is not a weaker error: an error is something that failed, a warning
+ * is something that worked differently than asked. A thread that starts in the
+ * project folder because the checkout was busy has not failed, and reporting it
+ * in red would teach the user to ignore red.
+ */
+export type ToastKind = "info" | "success" | "warning" | "error";
 
 export interface Toast {
   id: string;
   kind: ToastKind;
   message: string;
+  /**
+   * The specifics under the message: the files that caused it, the branch it
+   * happened on. Kept apart from the message rather than glued onto it with a
+   * colon, because the message is what deduplicates a repeating card and the
+   * specifics are what change between two of them.
+   */
+  detail?: string;
   durationMs: number | null;
   // Bumped when the same message is raised again; the component restarts its
   // dismiss timer on a change instead of a second card appearing.
@@ -15,12 +28,42 @@ export interface Toast {
 interface AddOptions {
   kind?: ToastKind;
   durationMs?: number | null;
+  detail?: string;
 }
 
 // Nothing dismisses a toast the user never saw, and the panels raise theirs
 // from polls that repeat forever. Without a ceiling a repeatedly failing
 // refresh grows this array for the whole session.
 const MAX_TOASTS = 5;
+
+/**
+ * How long a card stays up when the caller does not say.
+ *
+ * The floor is per kind, because a card is not read the same way: a success is
+ * recognised, an error is read, a warning is read and then acted on. Every one
+ * of them used to expire on a fixed count that assumed six words — long enough
+ * for "Copié", and gone before a sentence naming three files had been found on
+ * screen, let alone read.
+ */
+const DWELL_FLOOR: Record<ToastKind, number> = {
+  success: 3000,
+  info: 4500,
+  warning: 8000,
+  error: 10000,
+};
+
+/** Unhurried reading, in words per minute: this is glanced at, not studied. */
+const READING_WPM = 130;
+
+/** Nothing sits on screen longer than this on its own. */
+const DWELL_CEILING = 20000;
+
+function dwellFor(kind: ToastKind, message: string, detail?: string): number {
+  const words = `${message} ${detail ?? ""}`.trim().split(/\s+/).length;
+  const reading = (words / READING_WPM) * 60_000;
+  // Time to notice the card at all, then time to read it.
+  return Math.min(DWELL_CEILING, Math.max(DWELL_FLOOR[kind], 1200 + reading));
+}
 
 /**
  * Every toast raised this session, newest last. Development builds only.
@@ -55,6 +98,9 @@ class NotificationsStore {
     if (existing) {
       if (opts.kind) existing.kind = opts.kind;
       if (opts.durationMs !== undefined) existing.durationMs = opts.durationMs;
+      // The newer specifics win: the same failure on a second file is the same
+      // card saying what it is about now, not the first one repeated.
+      existing.detail = opts.detail;
       existing.resetKey++;
       return existing.id;
     }
@@ -64,7 +110,10 @@ class NotificationsStore {
       id,
       kind: opts.kind ?? "info",
       message,
-      durationMs: opts.durationMs ?? 3000,
+      detail: opts.detail,
+      // Already resolved by `raise`: undefined only reaches here from a caller
+      // that went through `push` itself, and a readable default beats a guess.
+      durationMs: opts.durationMs === undefined ? dwellFor(opts.kind ?? "info", message) : opts.durationMs,
       resetKey: 0,
     });
     if (this.toasts.length > MAX_TOASTS) {
@@ -73,17 +122,33 @@ class NotificationsStore {
     return id;
   }
 
-  // The neutral kind had no public entry point, so Toast's info glyph and its
-  // default accent were unreachable. Pass `null` for a card that waits to be
-  // dismissed by hand.
-  info(message: string, durationMs?: number | null) {
-    return this.push(message, { kind: "info", durationMs: durationMs ?? 3000 });
+  // Leaving the duration out is "however long this one takes to read"; `null`
+  // is a card that waits to be dismissed by hand, which is what the comment
+  // here promised while `?? 3000` quietly gave it three seconds like the rest.
+  info(message: string, durationMs?: number | null, detail?: string) {
+    return this.raise("info", message, durationMs, detail);
   }
-  success(message: string, durationMs?: number | null) {
-    return this.push(message, { kind: "success", durationMs: durationMs ?? 1800 });
+  success(message: string, durationMs?: number | null, detail?: string) {
+    return this.raise("success", message, durationMs, detail);
   }
-  error(message: string, durationMs?: number | null) {
-    return this.push(message, { kind: "error", durationMs: durationMs ?? 4500 });
+  warning(message: string, durationMs?: number | null, detail?: string) {
+    return this.raise("warning", message, durationMs, detail);
+  }
+  error(message: string, durationMs?: number | null, detail?: string) {
+    return this.raise("error", message, durationMs, detail);
+  }
+
+  private raise(
+    kind: ToastKind,
+    message: string,
+    durationMs: number | null | undefined,
+    detail?: string,
+  ) {
+    return this.push(message, {
+      kind,
+      durationMs: durationMs === undefined ? dwellFor(kind, message, detail) : durationMs,
+      detail,
+    });
   }
 
   // Splice, not a filtered reassignment: replacing the array invalidates every
