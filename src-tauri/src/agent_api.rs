@@ -20,7 +20,6 @@
 
 use std::sync::Arc;
 
-use rand::Rng;
 use serde_json::{json, Value};
 use tauri::{Emitter, Manager};
 
@@ -322,7 +321,7 @@ pub fn start(app: &tauri::AppHandle) {
     // In memory for the life of the process and written nowhere. Every
     // credential this workspace issues is derived from it, so a copy on disk
     // would be the one file worth stealing.
-    let secret = format!("{:032x}", rand::thread_rng().gen::<u128>());
+    let secret = format!("{:032x}", rand::random::<u128>());
 
     // Bound here, not inside the task: the address has to be known before the
     // first thread can spawn. Registering it from the task left a window where
