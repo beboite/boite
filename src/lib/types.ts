@@ -195,26 +195,34 @@ export interface Settings {
    */
   colorByModel: boolean;
   /**
-   * The sidebar's second way of saying what a thread is doing: the card itself
-   * glows, and two lights orbit it while an agent is working.
+   * Which of the two sidebar designs the thread rows are drawn in.
    *
-   * Opt-in rather than a replacement, because the two designs answer the same
-   * question in opposite registers. The old one is a ring around a 20px glyph,
-   * legible at a glance and silent at rest; this one is the whole row, which is
-   * easier to catch out of the corner of an eye and busier when several threads
-   * are alive. `features/thread/threadVisual.ts` decides what either draws.
+   * They answer the same question in opposite registers, so this is a choice
+   * rather than a feature flag. `classic` rings the agent's logo, which is
+   * legible once you look at it and silent at rest. `signal` puts the state on a
+   * 2px rail down the card's left edge and sweeps it while an agent is working,
+   * which is catchable out of the corner of an eye and stays out of the row's
+   * own space. `features/thread/threadVisual.ts` decides what either draws.
    */
-  sidebarThreadGlow: boolean;
+  sidebarDesign: SidebarDesign;
   /**
-   * Whether the agent's own logo stays on the card under the glow design.
+   * Whether the agent's own logo is drawn on the row at all.
    *
-   * Off, the glyph carries only what the thread is doing — the sleeping Z's,
-   * the question mark of a thread waiting on an answer — and the logo comes
-   * back while the card is held. Ignored by the classic design, which has no
-   * second thing to put in the glyph's place.
+   * Off, the glyph carries a mark for what the thread is doing instead — one per
+   * state, never an empty slot — and hovering the row brings the logo back. The
+   * classic design has one thing to put in the glyph and ignores this.
    */
   sidebarHarnessLogos: boolean;
 }
+
+/**
+ * The sidebar's two thread-row designs.
+ *
+ * A string rather than the `sidebarThreadGlow` boolean it replaces: the boolean
+ * was named after one design's decoration, so a third design or a renamed second
+ * one could not be spelled at all. `SettingsStore` migrates the old key.
+ */
+export type SidebarDesign = "classic" | "signal";
 
 // Animation preference: "system" follows prefers-reduced-motion, "on"/"off"
 // override the OS either way.

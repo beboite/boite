@@ -1,23 +1,23 @@
 /**
  * What a thread row looks like, decided once for both sidebar designs.
  *
- * The classic design draws a ring around the agent's logo; the glow design
- * lights the whole card and orbits two lights around it. They disagree about
- * where to paint and agree about everything else, so the mapping from a thread's
- * state to "which of seven situations is this" lives here rather than twice in
- * two components' `$derived` blocks.
+ * The classic design draws a ring around the agent's logo; the signal design
+ * puts a rail down the card's left edge and sweeps it while an agent works. They
+ * disagree about where to paint and agree about everything else, so the mapping
+ * from a thread's state to "which of six situations is this" lives here rather
+ * than twice in two components' `$derived` blocks.
  *
  * No runes and no Svelte import: this is a pure function over what the row knows,
- * which is what makes the seven cases testable without mounting a sidebar.
+ * which is what makes the six cases testable without mounting a sidebar.
  */
 
 import type { ThreadStatus } from "$lib/types";
 
 /**
- * The seven situations a row can be in.
+ * The six situations a row can be in.
  *
  * `finished` and `sleeping` are deliberately separate. A thread that just ended
- * is news and gets the bright end of the glow; one that ended a while ago and
+ * is news and gets the bright end of the rail; one that ended a while ago and
  * had its PTY reaped is furniture, and furniture that still claims to be news is
  * how a sidebar stops meaning anything.
  */
@@ -73,11 +73,15 @@ export function threadVisual(input: ThreadVisualInput): ThreadVisual {
     case "exited":
     case "error":
       return { state: "failed", tone: "danger" };
+    // Every way of being asleep is grey, including the two that ended cleanly.
+    // They used to be green, which put a finished thread and a dormant one in
+    // the same colour with nothing between them; the state already says
+    // "asleep", and a second signal that agrees with it says nothing twice.
     case "stopped":
-      return { state: "sleeping", tone: "success" };
+      return { state: "sleeping", tone: "neutral" };
     case "done":
       return asleep
-        ? { state: "sleeping", tone: "success" }
+        ? { state: "sleeping", tone: "neutral" }
         : { state: "finished", tone: keepAwake ? "awake" : "success" };
     case "ready":
       return { state: "ready", tone: keepAwake ? "awake" : "success" };
@@ -90,9 +94,28 @@ export function threadVisual(input: ThreadVisualInput): ThreadVisual {
   }
 }
 
-/** Whether this state replaces the agent's logo with a mark of its own. */
-export function stateGlyphOf(state: ThreadVisualState): "sleep" | "ask" | null {
-  if (state === "sleeping") return "sleep";
-  if (state === "waiting") return "ask";
-  return null;
+/**
+ * The mark that stands where the agent's logo stands when the logos are off.
+ *
+ * Total on purpose. Its predecessor answered for two states out of six and left
+ * the other four with nothing to draw, so turning the logos off emptied the
+ * glyph rather than changing it: a row that was working showed a bare circle,
+ * which reads as a component that failed to render.
+ *
+ * The names are shapes rather than characters, so the one place that picks a
+ * glyph for each is the component that draws it.
+ */
+export type ThreadToken = "dot" | "ask" | "check" | "ring" | "zed" | "bang";
+
+const TOKENS: Record<ThreadVisualState, ThreadToken> = {
+  working: "dot",
+  waiting: "ask",
+  finished: "check",
+  ready: "ring",
+  sleeping: "zed",
+  failed: "bang",
+};
+
+export function stateTokenOf(state: ThreadVisualState): ThreadToken {
+  return TOKENS[state];
 }

@@ -87,12 +87,16 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "appearance.accentGpt": "GPT",
   "appearance.accentLocal": "Tourne sur cette machine",
   "appearance.accentOther": "Autre chose",
-  "appearance.threadGlow": "Cartes de thread lumineuses",
-  "appearance.threadGlowDesc":
-    "La carte de la barre latérale s'allume selon ce que fait son thread, et deux lumières tournent autour pendant qu'un agent travaille.",
+  "appearance.sidebarDesign": "Lignes de thread",
+  "appearance.sidebarDesignDesc":
+    "Classique entoure le logo de l'agent avec l'état du thread. Signal le pose sur un rail au bord de la ligne, et y fait descendre une lumière pendant qu'un agent travaille.",
+  "appearance.designClassic": "Classique",
+  "appearance.designSignal": "Signal",
   "appearance.harnessLogos": "Afficher les logos des agents",
   "appearance.harnessLogosDesc":
-    "Désactivé, le glyphe ne porte que l'état du thread et le logo revient tant que vous maintenez la carte.",
+    "Désactivé, chaque ligne porte une marque de ce que fait son thread, et survoler une ligne y ramène son logo.",
+  "appearance.harnessLogosClassic":
+    "Le design classique n'a rien à mettre à la place du logo, il en affiche donc toujours un.",
   "appearance.animations": "Animations",
   "appearance.animationsDesc": "Système suit le réglage de réduction des mouvements du système.",
   "appearance.motionSystem": "Système",

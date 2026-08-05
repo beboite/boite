@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { stateGlyphOf, threadVisual } from "./threadVisual";
+import {
+  stateTokenOf,
+  threadVisual,
+  type ThreadVisualState,
+} from "./threadVisual";
 
 const base = { asleep: false, keepAwake: false } as const;
 
@@ -39,18 +43,31 @@ describe("threadVisual", () => {
     });
   });
 
-  it("reads a row with no process behind it as asleep, and says nothing about how it ended", () => {
-    expect(threadVisual({ ...base, status: "idle" })).toEqual({
-      state: "sleeping",
-      tone: "neutral",
-    });
+  // Grey for all three, `idle` included: after a restart every row is idle, and
+  // a thread that ended in a previous session left no word on how it ended.
+  it("says nothing about how a sleeping thread got there", () => {
+    for (const input of [
+      { ...base, status: "stopped" },
+      { ...base, status: "done", asleep: true },
+      { ...base, status: "idle" },
+    ] as const) {
+      expect(threadVisual(input)).toEqual({ state: "sleeping", tone: "neutral" });
+    }
   });
 
-  it("only sleeping and waiting take the glyph over from the logo", () => {
-    expect(stateGlyphOf("sleeping")).toBe("sleep");
-    expect(stateGlyphOf("waiting")).toBe("ask");
-    for (const state of ["working", "finished", "ready", "failed"] as const) {
-      expect(stateGlyphOf(state)).toBeNull();
-    }
+  it("gives every state a token, so hiding the logos never empties the glyph", () => {
+    const states: ThreadVisualState[] = [
+      "working",
+      "waiting",
+      "finished",
+      "ready",
+      "sleeping",
+      "failed",
+    ];
+    const tokens = states.map(stateTokenOf);
+    expect(tokens.every(Boolean)).toBe(true);
+    // Distinct, because two states sharing a mark is the same hole in a
+    // different shape: the row would show something and still not say which.
+    expect(new Set(tokens).size).toBe(states.length);
   });
 });
