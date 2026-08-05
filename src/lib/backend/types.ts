@@ -462,6 +462,13 @@ export type SessionKind =
 export interface SessionHit {
   id: string;
   mtimeMs: number | null;
+  /**
+   * The agent's own registry tied this session to the process behind the
+   * caller's PTY, rather than it being the likeliest transcript in the folder.
+   * Only claude keeps such a registry, so only its detector ever says true —
+   * and where it does, the attribution guess is not asked for an opinion.
+   */
+  ownPid?: boolean;
   // First user prompt, for CLIs that never emit a descriptive OSC title
   // (codex). Used to name the thread when it has no title yet.
   title?: string | null;

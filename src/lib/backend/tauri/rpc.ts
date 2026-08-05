@@ -180,13 +180,17 @@ export const tauriSession: SessionApi = {
     if (kind === "claude") {
       // Only claude keeps a registry of what it holds open, so only its
       // detector has a liveness filter to exempt the caller from.
-      const hit = await invoke<{ id: string; modifiedMs: number } | null>(command, {
+      const hit = await invoke<{
+        id: string;
+        modifiedMs: number;
+        ownPid: boolean;
+      } | null>(command, {
         cwd,
         afterUnixMs,
         excludeIds,
         ptyId: ptyId ?? null,
       });
-      return hit ? { id: hit.id, mtimeMs: hit.modifiedMs } : null;
+      return hit ? { id: hit.id, mtimeMs: hit.modifiedMs, ownPid: hit.ownPid } : null;
     }
     if (kind === "codex") {
       const hit = await invoke<{

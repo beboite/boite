@@ -179,6 +179,29 @@ needs the session to have recorded a directory of its own: normalising strips a
 trailing slash, so a thread at the root of a drive would otherwise match every
 session that recorded nothing.
 
+## Which conversation a thread is bound to
+
+A thread with no `sessionId` relaunches into a blank agent, so binding one is not
+cosmetic. The rule is asked in `find_claude_session_blocking`: the caller passes
+its pty id, the host turns it into the pid of the process behind it, and a
+registry entry naming that pid is the answer outright. Nothing else outranks it,
+neither a newer transcript nor an id another thread already claimed, and the hit
+says so with `ownPid` so the window knows it was told rather than having guessed.
+
+Everything else is the guess, and it stays for the seven agents that keep no such
+registry: the newest unclaimed transcript in the directory, accepted only when
+its mtime lines up with this pty's own activity and with no sibling's
+(`attributedToSelf`). What that cannot settle is two agents of one kind busy in
+one folder — each is "recently active" whenever the other writes — and it settled
+it by binding neither, silently, for as long as both ran. Threads sharing a
+project folder rather than a worktree are the common case, and a `debug` line is
+compiled out of the builds where this happened, which is why the refusal now says
+so at `warn` once it has stopped looking early.
+
+An attach starts the monitor too. A thread parked before its first scan landed
+had no second chance at binding, and the pane coming back is exactly when it
+should get one.
+
 Reading these stores is not free, so `agentTurns` is asked only about the threads
 that are actually open, and at most once a second. That read is one directory
 walk, two SQLite opens and up to a 256 KiB file read, which is why every caller
