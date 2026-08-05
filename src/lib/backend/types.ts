@@ -698,11 +698,18 @@ export interface ControlEvent {
 export interface WorkspaceMeta {
   name: string | null;
   color: string | null;
+  // The app version the host answering is running, compiled in rather than
+  // stored: read-only, and the one field of this record nobody can set.
+  version: string | null;
 }
+
+// Only the cosmetic half travels back. `version` is what the host is, so a
+// patch carrying one would be a device telling a server which build it runs.
+export type WorkspaceMetaPatch = Partial<Pick<WorkspaceMeta, "name" | "color">>;
 
 export interface WorkspaceMetaApi {
   get(): Promise<WorkspaceMeta>;
-  set(patch: Partial<WorkspaceMeta>): Promise<WorkspaceMeta>;
+  set(patch: WorkspaceMetaPatch): Promise<WorkspaceMeta>;
 }
 
 /**
