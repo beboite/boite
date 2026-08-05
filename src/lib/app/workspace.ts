@@ -139,6 +139,12 @@ async function adoptRemote(
   workspace.needsLogin = false;
   device.setActive(entry.id);
   await app.init();
+  // The dock's rows live in the workspace being adopted, and nothing else asks
+  // for them on this path: the desktop's boot reads them once in `+layout`,
+  // which a PWA never reaches, and the socket only says *that* they changed.
+  // Without this a request opened while the phone was closed stayed invisible
+  // until an agent happened to open a second one.
+  void approvals.reload();
   // Dynamic keeps the local side alive: repaint the parked local dots.
   if (workspace.isDynamic) restoreParkedStatuses();
   void fetchAndApplyMeta();
