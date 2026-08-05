@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { hasTauri } from "$lib/backend/env";
-import { backend } from "$lib/backend";
+import { backend, backendForPath } from "$lib/backend";
 import { logger } from "$lib/shared/services/logger.svelte";
 import type { IconKey } from "$lib/types";
 
@@ -250,11 +250,25 @@ export async function registerAgentMcp(cli: string): Promise<string> {
  * Extra launch arguments giving this agent access to its project's todo list,
  * or nothing when the agent cannot take them, access is switched off, or the
  * shim is missing.
+ *
+ * `cwd` decides which machine is about to run the command, and that is the
+ * question these paths answer badly. They name a shim and two generated files
+ * on THIS device; a thread whose PTY is spawned by a boite-server runs on
+ * another one, where those paths mean nothing or, worse, name something else.
+ * A remote launch therefore gets no flags rather than flags pointing into a
+ * filesystem it cannot see. What it would take to give a remote agent the
+ * endpoint is the server shipping the shim and answering for it, which is a
+ * capability that does not exist yet, not a path this can guess.
  */
-export async function mcpArgsFor(key: IconKey, enabled: boolean): Promise<string[]> {
+export async function mcpArgsFor(
+  key: IconKey,
+  enabled: boolean,
+  cwd: string,
+): Promise<string[]> {
   if (!enabled) return [];
   const injector = key ? INJECTORS[key] : undefined;
   if (!injector) return [];
+  if (backendForPath(cwd).kind !== "tauri") return [];
   const paths = await mcpPaths();
   if (!paths) return [];
   return injector(paths);
