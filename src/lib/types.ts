@@ -222,7 +222,7 @@ export interface Settings {
  * was named after one design's decoration, so a third design or a renamed second
  * one could not be spelled at all. `SettingsStore` migrates the old key.
  */
-export type SidebarDesign = "classic" | "signal";
+export type SidebarDesign = "classic" | "glow";
 
 // Animation preference: "system" follows prefers-reduced-motion, "on"/"off"
 // override the OS either way.

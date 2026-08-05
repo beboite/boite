@@ -34,11 +34,11 @@
    * It stays the keep-awake toggle, which is the one affordance the dot owned:
    * losing it would have moved a one-click setting into a context menu.
    *
-   * Under the signal design the rail beside the row says the status, so the ring
-   * goes away entirely rather than dimming: a hairline circle around a logo that
-   * is already inside a lit card is a third frame drawn around one fact. What is
-   * left is the logo on its own, or — when the logos are off — the state's own
-   * mark, and keep-awake moves to a violet pip on the corner.
+   * Under the glow design the card itself carries the status, so the ring goes
+   * away entirely rather than dimming to a hairline: a circle around a logo that
+   * is already inside a lit card is a second frame drawn around one fact. What
+   * is left is the logo on its own, or — when the logos are off — the state's
+   * own mark, and keep-awake moves to a violet pip on the corner.
    */
   type Props = {
     status: ThreadStatus;
@@ -53,7 +53,7 @@
     inert?: boolean;
     /** Which sidebar design the row is drawn in. */
     design?: SidebarDesign;
-    /** Whether the agent's logo is shown at all. Signal design only. */
+    /** Whether the agent's logo is shown at all. Glow design only. */
     showLogo?: boolean;
     /** The row is hovered, which asks for the logo whatever the rest says. */
     revealLogo?: boolean;
@@ -101,27 +101,20 @@
     }
   });
 
-  const signal = $derived(design === "signal");
-  const spinning = $derived(!signal && status === "running");
-  const waiting = $derived(!signal && status === "waiting" && !keepAwake);
-  const glyphSize = $derived(Math.round(size * (signal ? 0.7 : 0.62)));
+  const glow = $derived(design === "glow");
+  const spinning = $derived(!glow && status === "running");
+  const waiting = $derived(!glow && status === "waiting" && !keepAwake);
+  const glyphSize = $derived(Math.round(size * (glow ? 0.7 : 0.62)));
 
   const visual = $derived(threadVisual({ status, asleep, keepAwake }));
   // The logo wins while the row is hovered, whatever is in its place. Nothing
   // else is a way to ask "which agent is this one", and it is the question the
   // glyph exists to answer.
   const token = $derived(
-    signal && !showLogo && !revealLogo ? stateTokenOf(visual.state) : null,
+    glow && !showLogo && !revealLogo ? stateTokenOf(visual.state) : null,
   );
 
-  // `neutral` is the rail's grey, which is a hairline colour: legible as a line
-  // down a card, not as a character on a row. The muted text colour is what the
-  // rest of a quiet row is already drawn in.
-  const toneColor = $derived(
-    visual.tone === "neutral"
-      ? "var(--color-muted-foreground)"
-      : TONE_COLOR[visual.tone],
-  );
+  const toneColor = $derived(TONE_COLOR[visual.tone]);
 </script>
 
 {#snippet body()}
@@ -130,10 +123,10 @@
   {:else}
     <ShortcutIcon {iconKey} size={glyphSize} {color} />
   {/if}
-  <!-- Keep-awake was the ring's one job, and the signal design has no ring. A
+  <!-- Keep-awake was the ring's one job, and the glow design has no ring. A
        pip on the corner rather than a tint on the mark itself, because the mark
        is already spending its colour on the state. -->
-  {#if signal && keepAwake}
+  {#if glow && keepAwake}
     <span class="pip" aria-hidden="true"></span>
   {/if}
 {/snippet}
@@ -147,8 +140,8 @@
     class="glyph inert"
     class:spinning
     class:waiting
-    class:asleep={asleep && !signal}
-    class:bare={signal}
+    class:asleep={asleep && !glow}
+    class:bare={glow}
     style:--ring={ringColor}
     style:--tone={toneColor}
     style:--token-size="{Math.round(size * 0.58)}px"
@@ -164,8 +157,8 @@
     class="glyph"
     class:spinning
     class:waiting
-    class:asleep={asleep && !signal}
-    class:bare={signal}
+    class:asleep={asleep && !glow}
+    class:bare={glow}
     style:--ring={ringColor}
     style:--tone={toneColor}
     style:--token-size="{Math.round(size * 0.58)}px"
@@ -203,9 +196,9 @@
     cursor: default;
   }
 
-  /* The signal design's glyph is the logo and nothing else. No ring, no track,
-     no second circle: the rail on the card's edge is where the state lives, and
-     a mark drawn around a mark is how a 200px row runs out of room. */
+  /* The glow design's glyph is the logo and nothing else. No ring, no track, no
+     second circle: the lit card is where the state lives, and a mark drawn
+     around a mark is how a 200px row runs out of room. */
   .glyph.bare {
     box-shadow: none;
     border-radius: var(--radius-sm);
