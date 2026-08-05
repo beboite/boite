@@ -96,7 +96,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           # server-smoke.mjs is dependency-free and leans on a global
           # WebSocket, which lands in Node 22.
