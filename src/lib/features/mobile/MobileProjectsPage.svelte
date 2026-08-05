@@ -4,6 +4,7 @@
   import { isScratch } from "$lib/domain/project";
 import { projectDisplayName } from "$lib/shared/project-label";
   import { pickAndAddProject } from "$lib/features/project/api";
+  import { openProjectDashboard } from "$lib/features/project/dashboard";
   import { closeThreadWithConfirm } from "$lib/features/thread/api";
   import { t } from "$lib/i18n/index.svelte";
   import type { Thread, ThreadStatus } from "$lib/types";
@@ -13,6 +14,7 @@ import { projectDisplayName } from "$lib/shared/project-label";
   import { launchSheet } from "./MobileLaunchSheet.svelte";
   import Plus from "@lucide/svelte/icons/plus";
   import FolderPlus from "@lucide/svelte/icons/folder-plus";
+  import LayoutDashboard from "@lucide/svelte/icons/layout-dashboard";
   import X from "@lucide/svelte/icons/x";
 
   const projects = $derived(app.sortedProjects);
@@ -33,6 +35,13 @@ import { projectDisplayName } from "$lib/shared/project-label";
   function launchInto(id: string) {
     app.selectedProjectId = id;
     launchSheet.open = true;
+  }
+
+  // The overview the PC gets by clicking a project row. It has no row here —
+  // tapping a card opens a terminal, which is what a phone is usually for — so
+  // the page it used to have no way to reach gets a button of its own.
+  function showDashboard(id: string) {
+    openProjectDashboard(id);
   }
 
   // Tapping a project should land on a live terminal: open its most recent
@@ -114,6 +123,16 @@ import { projectDisplayName } from "$lib/shared/project-label";
                       : t("mobile.terminalCount", { count: threads.length })}
                   </span>
                 </span>
+              </button>
+              <button
+                type="button"
+                class="flex size-11 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-accent active:bg-accent/70"
+                onclick={() => showDashboard(project.id)}
+                aria-label={t("mobile.openDashboard", {
+                  project: projectDisplayName(project),
+                })}
+              >
+                <LayoutDashboard class="size-5" />
               </button>
               <button
                 type="button"

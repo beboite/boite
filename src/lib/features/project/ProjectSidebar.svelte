@@ -21,6 +21,7 @@
   import { moveThreadToProject } from "$lib/features/thread/move";
   import { notifications } from "$lib/features/notifications/store.svelte";
   import { refreshProjectIcon } from "$lib/features/project/api";
+  import { openProjectDashboard } from "$lib/features/project/dashboard";
   import { isScratch } from "$lib/domain/project";
 import { projectDisplayName } from "$lib/shared/project-label";
   import ThreadGlyph from "$lib/features/thread/ThreadGlyph.svelte";
@@ -253,9 +254,7 @@ import { projectDisplayName } from "$lib/shared/project-label";
   // sidebar that did nothing. With a page to land on rather than a thread's
   // terminal, that is now also the only way the click has anything to show.
   function selectProject(projectId: string) {
-    app.selectedProjectId = projectId;
-    app.activeThreadId = null;
-    app.view = "project";
+    openProjectDashboard(projectId);
   }
 
   function projectPointerDown(projectId: string, e: PointerEvent) {

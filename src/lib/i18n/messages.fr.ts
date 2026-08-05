@@ -438,6 +438,7 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "mobile.noTerminals": "Aucun terminal dans ce projet pour l'instant.",
   "mobile.closeTerminal": "Fermer {name}",
   "mobile.newTerminalIn": "Nouveau terminal dans {project}",
+  "mobile.openDashboard": "Vue d'ensemble de {project}",
   "mobile.terminalCountOne": "{count} terminal",
   "mobile.terminalCount": "{count} terminaux",
   "mobile.noProjects": "Aucun projet. Ajoutez un dossier pour commencer.",
