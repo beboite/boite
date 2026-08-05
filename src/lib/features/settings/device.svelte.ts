@@ -16,6 +16,11 @@ export interface BoiteEntry {
   // Last-seen server identity. Empty string = unknown (fall back to host).
   name: string;
   color: string;
+  // The app version that boite was running the last time this device reached
+  // it. Empty = never seen. Cached for the same reason the label is: the picker
+  // has to say something about a boite it is not connected to, and the version
+  // is the one thing there that says "this one is behind" before you switch.
+  version: string;
 }
 
 interface DeviceState {
@@ -70,6 +75,7 @@ function normalizeEntry(raw: unknown): BoiteEntry | null {
     token: r.token,
     name: typeof r.name === "string" ? r.name : "",
     color: typeof r.color === "string" ? r.color : "",
+    version: typeof r.version === "string" ? r.version : "",
   };
 }
 
@@ -116,6 +122,7 @@ function load(): DeviceState {
         token: p.remoteToken,
         name: "",
         color: "",
+        version: "",
       };
       return {
         boites: [entry],
@@ -156,7 +163,7 @@ class DeviceSettings {
       this.#persist();
       return existing;
     }
-    const entry: BoiteEntry = { id: uuid(), url, token, name: "", color: "" };
+    const entry: BoiteEntry = { id: uuid(), url, token, name: "", color: "", version: "" };
     this.state.boites.push(entry);
     this.state.activeBoiteId = entry.id;
     this.#persist();
@@ -170,6 +177,7 @@ class DeviceSettings {
     if (patch.token !== undefined) b.token = patch.token;
     if (patch.name !== undefined) b.name = patch.name;
     if (patch.color !== undefined) b.color = patch.color;
+    if (patch.version !== undefined) b.version = patch.version;
     this.#persist();
   }
 

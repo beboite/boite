@@ -103,7 +103,9 @@ export function applyControlEvent(app: AppState, ev: ControlEvent) {
     case "workspace.info": {
       const name = typeof data?.name === "string" ? data.name : null;
       const color = typeof data?.color === "string" ? data.color : null;
-      workspace.info = { name, color };
+      // The event carries the cosmetic pair only, so the version stays what the
+      // last read said: a rename on another device is not a redeploy.
+      workspace.info = { name, color, version: workspace.info.version };
       if (workspace.activeBoiteId) {
         device.updateBoite(workspace.activeBoiteId, {
           name: name ?? "",

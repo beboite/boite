@@ -435,9 +435,13 @@ export class RemoteBackend implements Backend {
       unsubscribe: (endpoint) => rpc("push.unsubscribe", { endpoint }).then(() => {}),
     };
 
-    const readMeta = (r: { name?: unknown; color?: unknown } | undefined) => ({
+    const readMeta = (
+      r: { name?: unknown; color?: unknown; version?: unknown } | undefined,
+    ) => ({
       name: typeof r?.name === "string" ? r.name : null,
       color: typeof r?.color === "string" ? r.color : null,
+      // Absent on a boite older than this field: unknown, not empty.
+      version: typeof r?.version === "string" && r.version ? r.version : null,
     });
     this.meta = {
       get: () => rpc("workspace.info").then(readMeta),
