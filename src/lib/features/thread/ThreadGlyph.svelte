@@ -97,7 +97,12 @@
       case "error":
         return "var(--color-danger)";
       default:
-        return "var(--color-border-strong)";
+        // The muted text colour rather than the strong border one. A border
+        // colour is a hairline against a surface it is already nearly the same
+        // as, and this ring is drawn at 1.5px through an `.asleep` opacity on
+        // top: a dormant row came out as a gap in the column rather than as a
+        // ring, which reads as a glyph that failed to render.
+        return "var(--color-muted-foreground)";
     }
   });
 
@@ -204,10 +209,12 @@
     border-radius: var(--radius-sm);
   }
 
-  /* A thread nobody is keeping awake and nothing is running reads as furniture;
-     the ring is there to be found, not to be seen. */
+  /* A thread nobody is keeping awake and nothing is running is quieter than the
+     rest of the column, not absent from it. 0.55 was the second half of the same
+     mistake as the ring colour above: the two multiplied, and what was meant as
+     "quiet" landed on "not drawn". */
   .glyph.asleep {
-    opacity: 0.55;
+    opacity: 0.78;
   }
 
   /* Running. The ring's own colour drops to a track and an arc of it sweeps

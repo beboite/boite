@@ -1782,11 +1782,15 @@ import { projectDisplayName } from "$lib/shared/project-label";
     --wash: 12%;
   }
 
-  /* Asleep. The bottom of the scale, and still on it: a column where one row in
-     six has no outline at all reads as a row that failed to draw rather than as
-     a row with nothing to say. */
+  /* Asleep. Exactly half of `finished` on both axes, which is what lets the two
+     share a colour: a thread that finished and was then parked by the idle timer
+     keeps its green and reads as the same fact an hour later, quieter. The tone
+     is what separates it from a thread that was killed or that came back from a
+     restart with nothing to say, and those stay grey.
+     Half, not off: a column where one row in six has no outline at all reads as
+     a row that failed to draw. */
   .thread-card.glow[data-state="sleeping"] {
-    --lit: 0.3;
+    --lit: 0.4;
     --wash: 8%;
   }
 
