@@ -17,6 +17,29 @@ import type { Project } from "$lib/types";
 /** A year, so the calendar has the same span the one it looks like has. */
 export const USAGE_DAYS = 371;
 
+/**
+ * A token count, short enough to sit in a card's right-hand column.
+ *
+ * It used to stop at M, and a project that has been worked on for a season
+ * reads in the billions: cache reads alone put the total past 10^10, so the
+ * figures column showed "24000M" and the headline "1200M" — a unit nobody
+ * reads at a glance, in a column sized for five characters. B and T carry on
+ * from there, and every step keeps three significant digits.
+ *
+ * One function rather than one per card: the calendar, the breakdown and the
+ * per-model rows are three views of the same numbers, and they drifted apart
+ * as two copies of the same body.
+ */
+export function formatTokens(n: number): string {
+  const step = (value: number, unit: string) =>
+    `${value >= 100 ? value.toFixed(0) : value.toFixed(value >= 10 ? 1 : 2)}${unit}`;
+  if (n >= 1e12) return step(n / 1e12, "T");
+  if (n >= 1e9) return step(n / 1e9, "B");
+  if (n >= 1e6) return step(n / 1e6, "M");
+  if (n >= 1000) return `${Math.round(n / 1000)}k`;
+  return String(n);
+}
+
 const EMPTY: UsageReport = { models: [], days: [], sessions: 0, missing: [] };
 
 /** How long a scan stands for before arriving on the page asks again. Long

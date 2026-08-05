@@ -2,7 +2,7 @@
   import { untrack } from "svelte";
   import { app } from "$lib/app/store.svelte";
   import DashboardCard from "./DashboardCard.svelte";
-  import { projectUsage } from "./usage.svelte";
+  import { formatTokens as fmt, projectUsage } from "./usage.svelte";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import Coins from "@lucide/svelte/icons/coins";
@@ -64,15 +64,6 @@
   });
 
   const total = $derived(report?.models.reduce((sum, m) => sum + m.total, 0) ?? 0);
-
-  function fmt(n: number): string {
-    if (n >= 1_000_000) {
-      const m = n / 1_000_000;
-      return `${m >= 100 ? m.toFixed(0) : m.toFixed(m >= 10 ? 1 : 2)}M`;
-    }
-    if (n >= 1000) return `${Math.round(n / 1000)}k`;
-    return String(n);
-  }
 
   /**
    * A model string down to the part that tells two of them apart. The stores

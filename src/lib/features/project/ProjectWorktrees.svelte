@@ -10,6 +10,7 @@
   import { confirmDialog } from "$lib/shared/components/confirm.svelte";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
   import ToggleSetting from "$lib/shared/components/ToggleSetting.svelte";
+  import AgentAccess from "$lib/features/todo/AgentAccess.svelte";
   import DashboardCard from "./DashboardCard.svelte";
   import { formatBytes, reclaimable, reclaimableBytes } from "./worktree-flush";
   import { basename } from "$lib/shared/utils/path";
@@ -296,6 +297,15 @@
       {t("worktree.sweepHint", { count: sweepable.length })}
     </p>
   {/if}
+
+  <!-- Which agents can reach this project's MCP endpoint. A card of its own
+       until now, full width, holding one line per agent — three columns of
+       chrome around six words. It belongs here anyway: everything in this card
+       is a thing this project does to every thread launched in it. -->
+  <div class="mt-3 border-t border-border/60 pt-2.5">
+    <p class="section-label mb-1">{t("project.agents")}</p>
+    <AgentAccess {project} />
+  </div>
 </DashboardCard>
 
 <DashboardCard
