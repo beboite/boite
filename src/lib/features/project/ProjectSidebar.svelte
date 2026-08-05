@@ -1697,8 +1697,8 @@ import { projectDisplayName } from "$lib/shared/project-label";
     border-radius: inherit;
     pointer-events: none;
     box-shadow:
-      inset 0 0 0 1px color-mix(in srgb, var(--tone) 60%, transparent),
-      0 0 12px -3px color-mix(in srgb, var(--tone) 75%, transparent);
+      inset 0 0 0 1px color-mix(in srgb, var(--tone) 75%, transparent),
+      0 0 10px -2px color-mix(in srgb, var(--tone) 70%, transparent);
     /* The wash rides the same layer as the halo rather than taking one of its
        own. ::after would have been the obvious second layer and is the wrong
        one: a pseudo-element paints after the children, so the tint would have
@@ -1712,12 +1712,20 @@ import { projectDisplayName } from "$lib/shared/project-label";
       background-color 260ms var(--ease-out-quint);
   }
 
-  /* Mid-turn. Half-lit at rest, because this is the state a busy sidebar spends
-     most of its time in and four rows at full amber is a warning light rather
-     than a status. The sheen below carries the rest. */
+  /* Every state carries a wash, including the quiet ones.
+     `--wash` used to be declared on three states out of six, so the other three
+     fell through to the `0%` default and were left holding a one-pixel liner at
+     a fraction of its own opacity: `finished` came to 0.55 of 75% of one pixel
+     of green, which is a row that renders and says nothing. A hue is only read
+     off an area, so the area is what separates the states and `--lit` grades
+     them. The two loud ones stay loud by margin, not by being the only ones
+     drawn at all. */
+
+  /* Mid-turn. Lit, but the sheen below is what makes this state the one that
+     moves: four amber rows at rest have to sit still enough to be scanned. */
   .thread-card.glow[data-state="working"] {
-    --lit: 0.6;
-    --wash: 12%;
+    --lit: 0.85;
+    --wash: 17%;
   }
 
   /* Blocked on an answer. Full strength, breathing, and the one row in the list
@@ -1725,58 +1733,68 @@ import { projectDisplayName } from "$lib/shared/project-label";
      keyframes it replaces, none of the repainting. */
   .thread-card.glow[data-state="waiting"] {
     --lit: 1;
-    --wash: 11%;
+    --wash: 18%;
   }
   .thread-card.glow[data-state="waiting"]::before {
     animation: card-breathe 1.7s var(--ease-in-out-quad) infinite;
   }
+  /* Off `--lit` rather than off two literals, so the trough follows the state's
+     own resting brightness instead of drifting from it the next time one of the
+     two numbers is touched. */
   @keyframes card-breathe {
     0%,
     100% {
-      opacity: 0.4;
+      opacity: calc(var(--lit) * 0.45);
     }
     50% {
-      opacity: 1;
+      opacity: var(--lit);
     }
   }
 
-  /* Done. Rests at just over half; the arrival flash is the `fresh` rule below.
-     The news is worth a second of full green, the row is not worth it for the
-     next hour. */
+  /* Done. Green, and green enough to be found by a glance that arrives an hour
+     late: this is the state the user is scanning the column for. The arrival
+     flash is the `fresh` rule below, and it decays to this, not past it. */
   .thread-card.glow[data-state="finished"] {
-    --lit: 0.55;
+    --lit: 0.8;
+    --wash: 16%;
   }
   .thread-card.glow.fresh[data-state="finished"]::before {
     animation: card-finish 1.4s var(--ease-out-quint) forwards;
   }
+  /* `forwards` pins the last keyframe for as long as `.fresh` is on the card, so
+     a literal here is not a starting point the state rule can correct: it is the
+     state rule, overriding it for the whole flash. It reads `--lit` for that
+     reason. */
   @keyframes card-finish {
     0% {
       opacity: 1;
       transform: scale(1.015);
     }
     100% {
-      opacity: 0.55;
+      opacity: var(--lit);
       transform: scale(1);
     }
   }
 
   /* Attached and quiet: alive, and nothing more than that. */
   .thread-card.glow[data-state="ready"] {
-    --lit: 0.28;
+    --lit: 0.5;
+    --wash: 12%;
   }
 
-  /* Asleep. Barely there, and there on purpose: a column where one row in six
-     has no outline at all reads as a row that failed to draw rather than as a
-     row with nothing to say. */
+  /* Asleep. The bottom of the scale, and still on it: a column where one row in
+     six has no outline at all reads as a row that failed to draw rather than as
+     a row with nothing to say. */
   .thread-card.glow[data-state="sleeping"] {
-    --lit: 0.16;
+    --lit: 0.3;
+    --wash: 8%;
   }
 
   /* Ended badly. Steady, never breathing: a crash is not urgent, it is over, and
      a red light that moves reads as something still going wrong. */
   .thread-card.glow[data-state="failed"] {
-    --lit: 0.8;
-    --wash: 10%;
+    --lit: 0.9;
+    --wash: 16%;
   }
 
   /* The sheen: one light crossing the card left to right while an agent works.
