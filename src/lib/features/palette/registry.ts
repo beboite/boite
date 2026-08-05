@@ -8,6 +8,7 @@ import {
   launchTargetProjectId,
   restoreLastClosedThread,
 } from "$lib/features/thread/api";
+import { openProjectDashboard } from "$lib/features/project/dashboard";
 import { resolveIconKey } from "$lib/shared/icons/detect";
 import { t } from "$lib/i18n/index.svelte";
 import type { MessageKey } from "$lib/i18n/index.svelte";
@@ -92,13 +93,6 @@ export function commandLabel(c: PaletteCommand): string {
 export function commandHint(c: PaletteCommand): string | null {
   if (c.chord) return formatChord(c.chord);
   return c.hint ?? null;
-}
-
-function openDashboard(projectId: string) {
-  app.selectedProjectId = projectId;
-  app.activeThreadId = null;
-  app.view = "project";
-  app.mobileTab = "projects";
 }
 
 function goToThread(threadId: string, projectId: string) {
@@ -199,7 +193,7 @@ export function buildPaletteCommands(): PaletteCommand[] {
       id: "action:project-dashboard",
       section: "actions",
       labelKey: "palette.openDashboard",
-      run: () => openDashboard(app.currentProjectId as string),
+      run: () => openProjectDashboard(app.currentProjectId as string),
     });
   }
 
@@ -284,7 +278,7 @@ export function buildPaletteCommands(): PaletteCommand[] {
       // The project's own page, the same place clicking its sidebar row lands.
       // This used to drop you on the terminal view, which showed whatever thread
       // happened to be active and made the two doors disagree.
-      run: () => openDashboard(project.id),
+      run: () => openProjectDashboard(project.id),
     });
   }
 

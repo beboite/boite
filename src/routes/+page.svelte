@@ -32,6 +32,9 @@
   import PaneDropOverlay from "$lib/features/panes/PaneDropOverlay.svelte";
   import GitPanel from "$lib/features/git/GitPanel.svelte";
   import ExplorerPanel from "$lib/features/explorer/ExplorerPanel.svelte";
+  // Already in the entry graph through SidePanel, so the phone's tab costs
+  // nothing the window was not downloading anyway.
+  import TodoPanel from "$lib/features/todo/TodoPanel.svelte";
   import MobileTopBar from "$lib/features/mobile/MobileTopBar.svelte";
   import MobileBottomBar from "$lib/features/mobile/MobileBottomBar.svelte";
   import MobileProjectsPage from "$lib/features/mobile/MobileProjectsPage.svelte";
@@ -582,6 +585,15 @@
         {#if mobile && app.view === "terminal" && app.mobileTab === "files"}
           <div class="absolute inset-0 z-10 bg-[var(--color-background)]">
             <ExplorerPanel />
+          </div>
+        {/if}
+
+        <!-- No `projectId` prop: with no pane around it the page follows the
+             project the bottom bar is showing, which is what the panel already
+             falls back to. -->
+        {#if mobile && app.view === "terminal" && app.mobileTab === "todo"}
+          <div class="absolute inset-0 z-10 bg-[var(--color-background)]">
+            <TodoPanel />
           </div>
         {/if}
 
