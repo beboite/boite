@@ -5,7 +5,13 @@ import { isLocaleSetting, setLocale as applyLocale, t } from "$lib/i18n/index.sv
 import { logger } from "$lib/shared/services/logger.svelte";
 import { debounce } from "$lib/shared/utils/debounce";
 import { uuid } from "$lib/shared/utils/uuid";
-import type { LocaleSetting, RightPanelTab, Settings, Shortcut } from "$lib/types";
+import type {
+  LocaleSetting,
+  RightPanelTab,
+  Settings,
+  Shortcut,
+  SidebarDesign,
+} from "$lib/types";
 import {
   clampRightPanelWidth,
   isRightPanelTab,
@@ -153,7 +159,7 @@ const DEFAULTS: Settings = {
   setupCompleted: false,
   fastpickEnabled: true,
   colorByModel: true,
-  sidebarThreadGlow: false,
+  sidebarDesign: "classic",
   sidebarHarnessLogos: true,
 };
 
@@ -161,6 +167,21 @@ const DEFAULTS: Settings = {
 // the mobile layout. The toggle in Appearance overrides it permanently after.
 function isMotionMode(value: unknown): value is Settings["motionMode"] {
   return value === "system" || value === "on" || value === "off";
+}
+
+/**
+ * The sidebar design, from a row that may predate it.
+ *
+ * `sidebarThreadGlow` was the same choice spelled as a boolean, and a row
+ * written while it was on means the user asked for the second design. Reading it
+ * here rather than migrating the column keeps the fallback for a workspace that
+ * never gets written again.
+ */
+function readSidebarDesign(stored: Record<string, unknown>): SidebarDesign {
+  if (stored.sidebarDesign === "classic" || stored.sidebarDesign === "signal") {
+    return stored.sidebarDesign;
+  }
+  return stored.sidebarThreadGlow === true ? "signal" : DEFAULTS.sidebarDesign;
 }
 
 // The column's own two rules live beside it, not in here: see right-panel.ts.
@@ -357,10 +378,7 @@ class SettingsStore {
           typeof stored.colorByModel === "boolean"
             ? stored.colorByModel
             : DEFAULTS.colorByModel,
-        sidebarThreadGlow:
-          typeof stored.sidebarThreadGlow === "boolean"
-            ? stored.sidebarThreadGlow
-            : DEFAULTS.sidebarThreadGlow,
+        sidebarDesign: readSidebarDesign(raw),
         sidebarHarnessLogos:
           typeof stored.sidebarHarnessLogos === "boolean"
             ? stored.sidebarHarnessLogos
@@ -619,9 +637,9 @@ class SettingsStore {
     await this.persist();
   }
 
-  async setSidebarThreadGlow(value: boolean) {
-    if (this.state.sidebarThreadGlow === value) return;
-    this.state.sidebarThreadGlow = value;
+  async setSidebarDesign(value: SidebarDesign) {
+    if (this.state.sidebarDesign === value) return;
+    this.state.sidebarDesign = value;
     await this.persist();
   }
 

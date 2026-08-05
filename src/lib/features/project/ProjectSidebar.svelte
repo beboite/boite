@@ -80,44 +80,29 @@ import { projectDisplayName } from "$lib/shared/project-label";
   let remotePicker = $state(false);
 
   /**
-   * The glow design, and what it does to the glyph.
+   * The signal design, and what it does to the glyph.
    *
-   * Two separate answers on purpose: the card lighting up is the design, and
-   * whether the agent's logo stays on it is a second question that only exists
-   * once the glyph has something else to show. With the classic design the logo
-   * is all the glyph ever holds, so the second toggle does not apply.
+   * Two separate answers on purpose: where the state is painted is the design,
+   * and whether the agent's logo stays on the row is a second question that only
+   * exists once the glyph has something else to show. With the classic design
+   * the logo is all the glyph ever holds, so the second toggle does not apply.
    */
-  const glowDesign = $derived(settings.state.sidebarThreadGlow);
-  const showLogos = $derived(!glowDesign || settings.state.sidebarHarnessLogos);
+  const signalDesign = $derived(settings.state.sidebarDesign === "signal");
+  const showLogos = $derived(!signalDesign || settings.state.sidebarHarnessLogos);
 
   /**
-   * Holding a card brings its agent's logo back.
+   * Hovering a row brings its agent's logo back.
    *
-   * The only way to ask "which agent is this one" when the logos are off, and
-   * the press has to be long enough not to fire on the click that opens the
-   * thread. A drag cancels it: a card on its way somewhere is not being
-   * questioned.
+   * It used to be a 260ms press, which cost the row's own click: letting go
+   * after asking "which agent is this" had to be swallowed, so the answer and
+   * the opening were the same gesture and only one of them could win. On touch
+   * it was worse, because `longPress` opened the context menu on top of the
+   * reveal at 500ms. The list already tracks the hovered row for the panels, and
+   * a hover costs nothing.
    */
-  const HOLD_REVEAL_MS = 260;
-  let heldThreadId = $state<string | null>(null);
-  let holdTimer: ReturnType<typeof setTimeout> | null = null;
-
-  function startHold(threadId: string) {
-    cancelHold();
-    if (showLogos) return;
-    holdTimer = setTimeout(() => {
-      holdTimer = null;
-      heldThreadId = threadId;
-    }, HOLD_REVEAL_MS);
-  }
-
-  function cancelHold() {
-    if (holdTimer !== null) {
-      clearTimeout(holdTimer);
-      holdTimer = null;
-    }
-    heldThreadId = null;
-  }
+  const revealedThreadId = $derived(
+    showLogos ? null : paneStore.hoveredThreadId,
+  );
 
   /**
    * Arrow keys over the projects and their threads.
@@ -231,9 +216,6 @@ import { projectDisplayName } from "$lib/shared/project-label";
       slotIndex: null,
       dropProjectId: null,
     });
-    // After startPointerDrag, which clears any hold left over from the last
-    // press: the two share the same pointer sequence.
-    startHold(thread.id);
   }
 
   function threadAuxClick(id: string, e: MouseEvent) {
@@ -370,7 +352,6 @@ import { projectDisplayName } from "$lib/shared/project-label";
         // pointer already released
       }
       closeContextMenu();
-      cancelHold();
       captureSiblings(drag);
       if (drag.kind === "thread") paneStore.draggingThreadId = drag.id;
     }
@@ -511,9 +492,6 @@ import { projectDisplayName } from "$lib/shared/project-label";
   function pointerDragEnd(e: PointerEvent) {
     const drag = dragState;
     if (!drag || e.pointerId !== drag.pointerId) return;
-    // A press held long enough to have shown the logo was a question, not a
-    // click: letting go of it must not open the thread.
-    if (heldThreadId !== null) swallowNextClick();
     if (drag.active) {
       e.preventDefault();
       swallowNextClick();
@@ -527,7 +505,6 @@ import { projectDisplayName } from "$lib/shared/project-label";
   }
 
   function cleanupPointerDrag() {
-    cancelHold();
     if (typeof document !== "undefined") {
       document.removeEventListener("pointermove", pointerDragMove);
       document.removeEventListener("pointerup", pointerDragEnd);
@@ -591,7 +568,6 @@ import { projectDisplayName } from "$lib/shared/project-label";
   }
   function threadHoverLeave(id: string) {
     if (paneStore.hoveredThreadId === id) paneStore.hoveredThreadId = null;
-    if (heldThreadId === id) cancelHold();
   }
 
   /**
@@ -996,7 +972,6 @@ import { projectDisplayName } from "$lib/shared/project-label";
 
   onDestroy(() => {
     cleanupPointerDrag();
-    cancelHold();
     document.body.classList.remove("dragging-card");
   });
 </script>
@@ -1271,11 +1246,12 @@ import { projectDisplayName } from "$lib/shared/project-label";
           <!-- No rail down the left any more: the card's own outline is what
                says these threads belong to this project, and a dashed line
                inside a box is the same statement made twice. -->
-          <!-- A hairline between rows is enough for a flat card and too little
-               for a lit one: the halo of one thread would sit on top of its
-               neighbour, and two rows would read as one blur. -->
+          <!-- One hairline between rows, in both designs. The glow design used
+               to push this to 6px so its halos would not land on each other,
+               which cost the sidebar a row of threads per screen; the rail is
+               inside the card and has nothing to bleed onto. -->
           <ul
-            class="px-1 pb-1 {glowDesign ? 'space-y-1.5' : 'space-y-px'}"
+            class="px-1 pb-1 space-y-px"
             data-thread-list
             data-project-id={project.id}
           >
@@ -1323,26 +1299,33 @@ import { projectDisplayName } from "$lib/shared/project-label";
                      semantics. The row is now one button that fills the card,
                      with the actions as siblings painting over it. -->
                 <div
-                  class="thread-card relative flex cursor-pointer items-center gap-2 rounded-sm px-1.5 py-1 transition {isActive
+                  class="thread-card relative flex cursor-pointer items-center gap-2 rounded-sm py-1 pr-1.5 transition {signalDesign
+                    ? 'pl-2.5'
+                    : 'pl-1.5'} {isActive
                     ? 'bg-accent text-foreground'
                     : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground'}"
-                  class:just-finished={fresh && !glowDesign}
+                  class:just-finished={fresh && !signalDesign}
                   class:mcp-touch={mcpPulse.has(thread.id)}
-                  class:glow={glowDesign}
-                  class:fresh={glowDesign && fresh}
-                  data-glow={glowDesign ? visual.state : undefined}
-                  style:--glow={glowDesign ? TONE_COLOR[visual.tone] : undefined}
+                  class:signal={signalDesign}
+                  class:fresh={signalDesign && fresh}
+                  data-state={signalDesign ? visual.state : undefined}
+                  style:--tone={signalDesign ? TONE_COLOR[visual.tone] : undefined}
                 >
-                  {#if glowDesign && (visual.state === "working" || visual.state === "sleeping")}
-                    <!-- Two lights going round the card. Working, they are the
-                         thing that says an agent is mid-turn from the other side
-                         of the room; asleep, they are the same motion at a tenth
-                         of the light, which reads as breathing rather than as
-                         work. Both are decoration over a card that already
-                         carries the colour, so they are hidden outright rather
-                         than frozen when motion is turned down. -->
-                    <span class="orbit orbit-a" aria-hidden="true"></span>
-                    <span class="orbit orbit-b" aria-hidden="true"></span>
+                  {#if signalDesign}
+                    <!-- The rail: the whole of what this design says, on two
+                         pixels at the card's edge. It replaced a halo that bled
+                         onto the neighbouring row and two lights walking the
+                         card's perimeter, which on a row eight times wider than
+                         it is tall spent most of a lap crawling and crossed the
+                         short sides in a fifth of a second.
+                         The sweep is the one moving thing, it moves on one axis,
+                         and it moves by transform, so a sidebar full of working
+                         threads composites rather than repainting. -->
+                    <span class="rail" aria-hidden="true">
+                      {#if visual.state === "working"}
+                        <span class="sweep"></span>
+                      {/if}
+                    </span>
                   {/if}
                   {#if !(renaming && renaming.kind === "thread" && renaming.id === thread.id)}
                     <button
@@ -1352,9 +1335,9 @@ import { projectDisplayName } from "$lib/shared/project-label";
                       aria-label={thread.title ?? thread.label}
                       onclick={() => {
                         if (consumeDragClick(thread.id)) return;
-                        // Opening it is reading it: the glow has said what it had
-                        // to say and must not still be going when the user comes
-                        // back.
+                        // Opening it is reading it: the arrival flash has said
+                        // what it had to say and must not still be going when
+                        // the user comes back.
                         clearFinished(thread.id);
                         onActivateThread(thread.id);
                       }}
@@ -1371,9 +1354,9 @@ import { projectDisplayName } from "$lib/shared/project-label";
                     color={threadIconColor(thread)}
                     asleep={thread.autoSlept ?? false}
                     {keepAwake}
-                    glow={glowDesign}
+                    design={settings.state.sidebarDesign}
                     showLogo={showLogos}
-                    revealLogo={heldThreadId === thread.id}
+                    revealLogo={revealedThreadId === thread.id}
                     onToggleKeepAwake={() => app.toggleThreadKeepAwake(thread.id)}
                     title={glyphTitle(thread)}
                     label={t("sidebar.toggleKeepAwake")}
@@ -1498,7 +1481,7 @@ import { projectDisplayName } from "$lib/shared/project-label";
       color={threadIconColor(threadDragGhost.thread)}
       asleep={threadDragGhost.thread.autoSlept ?? false}
       keepAwake={(threadDragGhost.thread.keepAwake ?? false) && !!threadDragGhost.thread.ptyId}
-      glow={glowDesign}
+      design={settings.state.sidebarDesign}
       showLogo={showLogos}
     />
     <span
@@ -1690,146 +1673,147 @@ import { projectDisplayName } from "$lib/shared/project-label";
     animation: boite-mcp-pulse 1.6s var(--ease-out-quint) forwards;
   }
 
-  /* ---- The glow design ---------------------------------------------------
-     Opt-in, and the whole of it hangs off `.thread-card.glow` with the state on
-     a data attribute. The halo is a ::before rather than the card's own
-     box-shadow because `mcp-touch` animates that one, and an agent touching
-     Boite must not blow away the row's own state for 1.6 seconds.
-     `--glow` is the tone, written by the markup from threadVisual(). */
-  .thread-card.glow::before {
+  /* ---- The signal design -------------------------------------------------
+     Opt-in, and the whole of it hangs off `.thread-card.signal` with the state
+     on a data attribute. `--tone` is the state's colour, written by the markup
+     from threadVisual().
+
+     What it replaced was a halo drawn round the whole card, which had to push
+     the rows 6px apart to stop bleeding onto each other and still did, plus two
+     lights walking the perimeter on a motion path. Everything here is inside the
+     card's own box, so the list goes back to a hairline between rows. */
+
+  /* The rail. Full-height, 2px, hugging the left edge — the one place on a row
+     of text that is always empty. Opacity is the whole scale: what a state is
+     worth, in one property, with no second colour to reconcile. */
+  .thread-card.signal .rail {
+    position: absolute;
+    left: 3px;
+    top: 3px;
+    bottom: 3px;
+    width: 2px;
+    border-radius: 9999px;
+    overflow: hidden;
+    pointer-events: none;
+    background: color-mix(in srgb, var(--tone) var(--rail-strength, 100%), transparent);
+    /* Widening grows into the padding rather than out of both sides, which on a
+       2px bar three pixels from the edge is the difference between a thicker
+       rail and a rail that moved. */
+    transform-origin: left center;
+    transition: opacity var(--dur-2) var(--ease-out-quint);
+  }
+
+  /* Mid-turn and blocked both hold the rail at full strength: they are the two
+     states where the agent's turn is still open. The card takes a wash of the
+     same colour, which is what makes a working row findable without hunting for
+     a 2px line.
+     A layer over the card rather than its background: the card's background is
+     already how selection and hover are drawn, and a state that overwrote it
+     would make the open thread stop looking open. */
+  .thread-card.signal::before {
     content: "";
     position: absolute;
     inset: 0;
     border-radius: inherit;
     pointer-events: none;
-    transition: box-shadow 260ms var(--ease-out-quint);
+    background-color: color-mix(in srgb, var(--tone) var(--wash, 0%), transparent);
+    transition: background-color var(--dur-2) var(--ease-out-quint);
+  }
+  .thread-card.signal[data-state="working"] {
+    --wash: 7%;
+  }
+  .thread-card.signal[data-state="waiting"] {
+    --wash: 11%;
+  }
+  .thread-card.signal[data-state="failed"] {
+    --wash: 7%;
   }
 
-  /* Mid-turn. Half-lit, because this is the state a busy sidebar spends most of
-     its time in and a full-strength amber on four rows at once is a warning
-     light rather than a status. The two orbiting lights carry the urgency. */
-  .thread-card.glow[data-glow="working"]::before {
-    box-shadow:
-      inset 0 0 0 1px color-mix(in srgb, var(--glow) 40%, transparent),
-      0 0 12px 1px color-mix(in srgb, var(--glow) 50%, transparent);
+  /* Blocked on an answer. The rail breathes on opacity alone — a compositor
+     property — where the old design animated box-shadow and repainted the whole
+     card sixty times a second per waiting row. */
+  .thread-card.signal[data-state="waiting"] .rail {
+    animation: rail-breathe 1.7s var(--ease-in-out-quad) infinite;
   }
-
-  /* Blocked on an answer. Whole and breathing at full strength: nothing is
-     progressing, and this is the one row worth crossing the room for. */
-  .thread-card.glow[data-glow="waiting"]::before {
-    animation: card-breathe 1.7s var(--ease-in-out-quad) infinite;
-  }
-  @keyframes card-breathe {
+  @keyframes rail-breathe {
     0%,
     100% {
-      box-shadow:
-        inset 0 0 0 1px color-mix(in srgb, var(--glow) 35%, transparent),
-        0 0 8px 0 color-mix(in srgb, var(--glow) 28%, transparent);
+      opacity: 0.45;
     }
     50% {
-      box-shadow:
-        inset 0 0 0 1px var(--glow),
-        0 0 16px 2px color-mix(in srgb, var(--glow) 70%, transparent);
+      opacity: 1;
     }
   }
 
-  /* Done. Rests at half, and the arrival flash is the `fresh` rule below: the
-     news is worth a second of full green, the row is not worth it for the next
-     hour. */
-  .thread-card.glow[data-glow="finished"]::before {
-    box-shadow:
-      inset 0 0 0 1px color-mix(in srgb, var(--glow) 40%, transparent),
-      0 0 10px 0 color-mix(in srgb, var(--glow) 50%, transparent);
+  /* Done, attached-and-quiet, asleep: three steps down the same scale. A row
+     that has been done for an hour is furniture and is painted like it.
+     The bottom step is 32% of a grey and not lower. At 18% the rail was gone
+     rather than quiet, and a column where one row in six has no mark reads as a
+     row that failed to draw, not as a row with nothing to say. */
+  .thread-card.signal[data-state="finished"] .rail {
+    --rail-strength: 85%;
   }
-  .thread-card.glow.fresh[data-glow="finished"]::before {
-    animation: card-finish 1.4s var(--ease-out-quint) forwards;
+  .thread-card.signal[data-state="ready"] .rail {
+    --rail-strength: 45%;
   }
-  @keyframes card-finish {
+  .thread-card.signal[data-state="sleeping"] .rail {
+    --rail-strength: 32%;
+  }
+
+  /* The news of a thread finishing, and only the news: a second of the full
+     colour draining back to where the rail rests. `forwards` matters — without
+     it the last frame snaps back to 0% before the class drops. */
+  .thread-card.signal.fresh[data-state="finished"] .rail {
+    animation: rail-finish 1.4s var(--ease-out-quint) forwards;
+  }
+  @keyframes rail-finish {
     0% {
-      box-shadow:
-        inset 0 0 0 1px var(--glow),
-        0 0 18px 2px color-mix(in srgb, var(--glow) 100%, transparent);
+      transform: scaleX(2.5);
+      filter: brightness(1.6);
     }
     100% {
-      box-shadow:
-        inset 0 0 0 1px color-mix(in srgb, var(--glow) 40%, transparent),
-        0 0 10px 0 color-mix(in srgb, var(--glow) 50%, transparent);
+      transform: scaleX(1);
+      filter: brightness(1);
     }
   }
 
-  /* Attached and quiet: alive, and nothing more than that. */
-  .thread-card.glow[data-glow="ready"]::before {
-    box-shadow:
-      inset 0 0 0 1px color-mix(in srgb, var(--glow) 22%, transparent),
-      0 0 8px -1px color-mix(in srgb, var(--glow) 22%, transparent);
-  }
-
-  /* Asleep. A tenth of the light, which is what a row that has been done for an
-     hour is worth; the Z's in the glyph are what actually say it. */
-  .thread-card.glow[data-glow="sleeping"]::before {
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--glow) 12%, transparent);
-  }
-
-  /* Ended badly. Steady, never pulsing: a crash is not urgent, it is finished,
-     and a red light that moves reads as something still going wrong. */
-  .thread-card.glow[data-glow="failed"]::before {
-    box-shadow:
-      inset 0 0 0 1px color-mix(in srgb, var(--glow) 55%, transparent),
-      0 0 10px 0 color-mix(in srgb, var(--glow) 40%, transparent);
-  }
-
-  /* Never started: no light at all. A row with nothing behind it is the one
-     thing in this design that has nothing to say. */
-
-  /* The lights themselves, walked round the card's own rounded rectangle by a
-     motion path — the same corner radius, so they never cut the corners. Two of
-     them, half a lap apart. */
-  .orbit {
+  /* The sweep. One light, running down the rail, on transform only. It is the
+     single moving thing in this design, and it moves along the axis the rail
+     actually has: the orbit it replaced spent 94% of a lap on the long sides of
+     a card eight times wider than it is tall, and crossed the short ones in a
+     fifth of a second. */
+  .thread-card.signal .sweep {
     position: absolute;
-    top: 0;
     left: 0;
-    width: 4px;
-    height: 4px;
-    border-radius: 9999px;
-    background: var(--glow);
-    box-shadow: 0 0 6px 1px color-mix(in srgb, var(--glow) 60%, transparent);
-    offset-path: inset(0 round var(--radius-sm));
-    offset-rotate: 0deg;
-    offset-anchor: center;
-    animation: card-orbit 3.4s linear infinite;
-    pointer-events: none;
+    top: -60%;
+    width: 100%;
+    height: 60%;
+    border-radius: inherit;
+    background: linear-gradient(
+      to bottom,
+      transparent,
+      color-mix(in srgb, white 70%, var(--tone)),
+      transparent
+    );
+    animation: rail-sweep 1.5s var(--ease-in-out-quad) infinite;
   }
-  .orbit-b {
-    animation-delay: -1.7s;
-  }
-  .thread-card.glow[data-glow="sleeping"] .orbit {
-    opacity: 0.1;
-    box-shadow: none;
-    animation-duration: 7s;
-  }
-  @keyframes card-orbit {
+  @keyframes rail-sweep {
     from {
-      offset-distance: 0%;
+      transform: translateY(0);
     }
     to {
-      offset-distance: 100%;
+      transform: translateY(266%);
     }
   }
-  /* A browser without motion paths would park both lights on the top-left
-     corner, which reads as damage rather than as a missing flourish. */
-  @supports not (offset-path: inset(0 round 5px)) {
-    .orbit {
-      display: none;
-    }
-  }
-  :global(html[data-motion="reduced"]) .orbit {
+
+  /* Motion down means "something is happening", and with it gone the rail alone
+     has to. It is already at full strength for both amber states, so nothing is
+     lost but the movement. */
+  :global(html[data-motion="reduced"]) .thread-card.signal .sweep {
     display: none;
   }
-  :global(html[data-motion="reduced"]) .thread-card.glow[data-glow="waiting"]::before {
+  :global(html[data-motion="reduced"]) .thread-card.signal[data-state="waiting"] .rail {
     animation: none;
-    box-shadow:
-      inset 0 0 0 1px var(--glow),
-      0 0 12px 1px color-mix(in srgb, var(--glow) 55%, transparent);
   }
 
   /* A project that lives on the connected boite. It used to be a two-pixel bar
