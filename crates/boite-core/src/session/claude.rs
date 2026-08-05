@@ -16,6 +16,11 @@ use super::*;
 pub struct ClaudeSessionHit {
     pub id: String,
     pub modified_ms: i64,
+    /// Whether claude's own registry says this session belongs to the process
+    /// the caller's PTY is running, rather than it being the newest transcript
+    /// that could plausibly be theirs. The caller weighs the two differently:
+    /// a guess has to survive an attribution check, a fact does not.
+    pub own_pid: bool,
 }
 
 #[derive(Deserialize)]
@@ -282,8 +287,8 @@ pub(super) fn migrate_claude_transcript(
 
 /// `own_pid` is the process the calling thread's PTY spawned, when it has one.
 /// The session that process holds open is the one the thread is meant to bind
-/// to, so it survives the liveness filter below; every other live session is
-/// still skipped.
+/// to: the registry names it outright, so it is returned as an answer rather
+/// than as a candidate, and every other live session is still skipped.
 pub fn find_claude_session_blocking(
     cwd: String,
     after_unix_ms: i64,
@@ -349,27 +354,42 @@ pub fn find_claude_session_blocking(
 
     // Read once, not per candidate: the registry is a handful of small files,
     // but the candidate list is every transcript on the machine.
-    //
+    let registry = live_claude_sessions();
+
+    // What our own process says it has open. Everything else in this function
+    // is a way of guessing that without being told, and the guessing is what
+    // fails: two claude in one directory write their transcripts at the same
+    // moments, so neither is attributable by timestamp and neither ever binds.
+    // A pid settles it, however many neighbours there are.
+    let own_session: Option<String> = own_pid.and_then(|pid| {
+        registry
+            .iter()
+            .find(|s| s.pid == pid)
+            .map(|s| s.id.clone())
+    });
+
     // A session held by our own PTY's process is not a reason to skip: it is
     // the thread's session, and the whole point of the scan is to bind it.
     // Skipping it left an interactive claude unbindable for as long as it ran,
     // which is its entire life — and the resume that needed the binding then
     // had nothing to replay. Liveness at *replay* time is a separate question,
     // re-asked at launch by buildResumeArgsAsync.
-    let live: HashSet<String> = live_claude_sessions()
+    let live: HashSet<String> = registry
         .into_iter()
         .filter(|s| own_pid.is_none_or(|p| s.pid != p))
         .map(|s| s.id)
         .collect();
 
-    for cand in candidates {
+    // Lazy on purpose. Reading a candidate's head is a file open, and with no
+    // session of our own to look for, the first one that matches ends the walk
+    // exactly as it did before.
+    let matching = candidates.into_iter().filter_map(|cand| {
         // Exact match only. A substring test let short project dir names
         // match unrelated cwds, attaching the wrong session to a thread; the
         // cwd read from the jsonl below remains the robust fallback.
         let dir_matches = cand.dir_name_lower == target_encoded;
 
-        let meta = read_claude_session_meta(&cand.path);
-        let (session_id, session_cwd) = match meta {
+        let (session_id, session_cwd) = match read_claude_session_meta(&cand.path) {
             Some(m) => (m.session_id, m.cwd),
             None => (None, None),
         };
@@ -380,30 +400,70 @@ pub fn find_claude_session_blocking(
             .unwrap_or(false);
 
         if !cwd_matches && !dir_matches {
-            continue;
+            return None;
         }
 
-        if let Some(id) = session_id {
-            if exclude.contains(&id) || live.contains(&id) {
-                continue;
-            }
+        // The head of the file when it names itself, the file name otherwise:
+        // a transcript is named after its session either way.
+        let id = session_id.or_else(|| {
+            cand.path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .map(str::to_string)
+        })?;
+        Some((id, cand.modified_ms))
+    });
+
+    choose_claude_hit(matching, own_session.as_deref(), exclude, &live)
+}
+
+/// Which transcript of this directory is the caller's, given newest first.
+///
+/// Two answers of different worth, which is why the hit says which one it is.
+/// A session the registry ties to the caller's own process is a fact, and it
+/// outranks every other candidate however recently they were written; anything
+/// else is the newest transcript nobody has claimed, which is a guess and is
+/// still the only answer available for a thread whose process the registry does
+/// not name.
+fn choose_claude_hit<I: IntoIterator<Item = (String, i64)>>(
+    candidates: I,
+    own_session: Option<&str>,
+    exclude: &HashSet<String>,
+    live: &HashSet<String>,
+) -> Option<ClaudeSessionHit> {
+    // Held while the walk keeps looking for a pid-confirmed hit. Only ever
+    // filled when there is something better to wait for.
+    let mut guessed: Option<ClaudeSessionHit> = None;
+
+    for (id, modified_ms) in candidates {
+        // Ours by the registry's word. Neither exclusion applies: a session
+        // another thread claimed is a claim that was wrong, and our own live
+        // session is the one being bound rather than a neighbour's to avoid.
+        if own_session == Some(id.as_str()) {
             return Some(ClaudeSessionHit {
                 id,
-                modified_ms: cand.modified_ms,
+                modified_ms,
+                own_pid: true,
             });
         }
-        if let Some(stem) = cand.path.file_stem().and_then(|s| s.to_str()) {
-            if exclude.contains(stem) || live.contains(stem) {
-                continue;
+
+        if guessed.is_none() && !exclude.contains(&id) && !live.contains(&id) {
+            let hit = ClaudeSessionHit {
+                id,
+                modified_ms,
+                own_pid: false,
+            };
+            if own_session.is_none() {
+                return Some(hit);
             }
-            return Some(ClaudeSessionHit {
-                id: stem.to_string(),
-                modified_ms: cand.modified_ms,
-            });
+            guessed = Some(hit);
         }
     }
 
-    None
+    // Our session exists but wrote nothing inside the window asked about, so
+    // the caller gets the guess it would have had before — and is told it is
+    // one.
+    guessed
 }
 
 #[cfg(test)]
@@ -535,6 +595,78 @@ mod tests {
             writeln!(f, "{l}").unwrap();
         }
         path
+    }
+
+    fn ids(list: &[(&str, i64)]) -> Vec<(String, i64)> {
+        list.iter().map(|(id, ms)| ((*id).to_string(), *ms)).collect()
+    }
+
+    fn set(list: &[&str]) -> HashSet<String> {
+        list.iter().map(|s| (*s).to_string()).collect()
+    }
+
+    /// The bug this exists for. Two claude in one directory write at the same
+    /// moments, so neither thread could ever tell which transcript was its own
+    /// and both stayed unbound for good — every relaunch starting a blank
+    /// conversation. The registry names ours, and it wins whatever else is
+    /// newer.
+    #[test]
+    fn our_own_process_beats_a_newer_neighbour() {
+        let hit = choose_claude_hit(
+            ids(&[("neighbour", 200), ("ours", 100)]),
+            Some("ours"),
+            &set(&[]),
+            &set(&["neighbour"]),
+        )
+        .expect("the registry named one");
+        assert_eq!(hit.id, "ours");
+        assert!(hit.own_pid);
+    }
+
+    /// A stale claim by another thread is a claim that was wrong: the process
+    /// holding the session says whose it is.
+    #[test]
+    fn our_own_process_beats_a_claim_somebody_else_made() {
+        let hit = choose_claude_hit(ids(&[("ours", 100)]), Some("ours"), &set(&["ours"]), &set(&[]))
+            .expect("an excluded id is still ours");
+        assert!(hit.own_pid);
+    }
+
+    /// Nothing to confirm with — an agent whose pid the registry does not name,
+    /// a claude too old to write one — so the old rule answers, and says so.
+    #[test]
+    fn with_no_registry_answer_the_newest_unclaimed_one_still_wins() {
+        let hit = choose_claude_hit(
+            ids(&[("claimed", 300), ("live", 200), ("free", 100)]),
+            None,
+            &set(&["claimed"]),
+            &set(&["live"]),
+        )
+        .expect("one was free");
+        assert_eq!(hit.id, "free");
+        assert!(!hit.own_pid, "a guess never passes for a fact");
+    }
+
+    /// Our session exists but has not been written inside the window asked
+    /// about. The guess is still worth returning — it is what the caller had
+    /// before — and the caller weighs it as one.
+    #[test]
+    fn a_session_of_ours_that_wrote_nothing_falls_back_to_the_guess() {
+        let hit = choose_claude_hit(ids(&[("other", 100)]), Some("ours"), &set(&[]), &set(&[]))
+            .expect("the other one is unclaimed");
+        assert_eq!(hit.id, "other");
+        assert!(!hit.own_pid);
+    }
+
+    #[test]
+    fn nothing_free_and_nothing_confirmed_is_no_answer() {
+        assert!(choose_claude_hit(
+            ids(&[("claimed", 100)]),
+            Some("ours"),
+            &set(&["claimed"]),
+            &set(&[])
+        )
+        .is_none());
     }
 
     #[test]

@@ -37,6 +37,7 @@ interface RawSession {
   id: string;
   modifiedMs?: number;
   title?: string | null;
+  ownPid?: boolean;
 }
 
 function normalizeSession(raw: unknown): SessionHit | null {
@@ -48,6 +49,9 @@ function normalizeSession(raw: unknown): SessionHit | null {
     id: r.id,
     mtimeMs: typeof r.modifiedMs === "number" ? r.modifiedMs : null,
     title: typeof r.title === "string" && r.title ? r.title : null,
+    // Absent from a server too old to send it, which reads as "not confirmed"
+    // and leaves the attribution guess in charge, exactly as before.
+    ownPid: r.ownPid === true,
   };
 }
 
