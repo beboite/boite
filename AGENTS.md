@@ -260,6 +260,17 @@ ways to get one, and each already found something the comments had wrong.
   The first numbers are recorded in `benches/hot_paths.rs`.
 - `src/lib/app/boot-timing.ts` writes one line per boot, at `warn` past two
   seconds so a slow one reaches the timeline beside whatever else was happening.
+- `src/lib/features/thread/spawn-timing.ts` does the same for one thread lighting
+  up: one line per launch, phased into `worktree`, `resume`, `pty` and `output`,
+  at `warn` past three seconds. Written on the first byte the process prints
+  rather than when the PTY comes back, because a PTY that opened in 40ms and
+  showed nothing for eight seconds is the case being looked for. Two watchdogs
+  cover the launches that would otherwise write nothing at all: one says a
+  launch is still opening after fifteen seconds and names the phase it is stuck
+  in, the other writes the line without a first byte after ten. A thread that is
+  worked in for two minutes with no session captured gets one line too, from
+  `session-monitor.svelte.ts`, since a silent capture failure is a thread with
+  no `--resume` behind it.
 
 A timer may slow down while `document.hidden`; a status timer may not stop.
 Nobody is reading a dot they cannot see, but the threads a status sweep demotes

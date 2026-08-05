@@ -28,6 +28,20 @@ const UNBOUND_INFO_AT = 5;
 // so the PTY isn't killed mid-work; it never lights the running dot, because a
 // just-finished session is "recently written" too.
 const TRANSCRIPT_LIVENESS_WINDOW_MS = 20_000;
+// How long a thread that is being used may go without its session being
+// captured before that is worth one line.
+//
+// Capture is the other half of a thread lighting up: until it lands, `--resume`
+// has nothing to resume, the status engine falls back to matching by directory,
+// and a reload opens a conversation the agent has already forgotten. It fails
+// silently, because a detector that finds nothing is also what a brand new
+// thread looks like, and the scan that found nothing only ever wrote `debug`,
+// which a release build drops.
+const SESSION_CAPTURE_WARN_MS = 120_000;
+// The thread has to have been used before the silence means anything. An agent
+// nobody has typed into has no transcript to find, and warning about it would
+// put a line on the timeline for every parked terminal.
+const SESSION_CAPTURE_USED_MS = 30_000;
 
 // Single in-flight slot across ALL monitors. Two sibling terminals scanning
 // concurrently could both see the same unclaimed jsonl and both claim it.
@@ -107,6 +121,10 @@ export function startSessionMonitor(opts: {
   let timer: ReturnType<typeof setInterval> | null = null;
   let timeouts: ReturnType<typeof setTimeout>[] = [];
   let stopped = false;
+  // When this thread started looking for its session, which is what turns the
+  // capture line into a duration and what the silence below is measured from.
+  const startedAt = Date.now();
+  let warnedUncaptured = false;
 
   const stop = () => {
     stopped = true;
@@ -264,11 +282,20 @@ export function startSessionMonitor(opts: {
       }
       logger.info(
         "session",
-        `${thread.label}: ${thread.sessionId ? "manual switch" : "captured"} ${thread.sessionId ?? "(none)"} → ${id}`,
-        // How it was decided, because the two are worth different amounts when
-        // a binding later turns out to be wrong: `pid` is the agent's registry
-        // naming this PTY's process, `mtime` is the timestamp guess.
-        { cwd, previous: thread.sessionId, next: id, by: hit.ownPid ? "pid" : "mtime" },
+        `${thread.label}: ${thread.sessionId ? "manual switch" : "captured"} ${thread.sessionId ?? "(none)"} → ${id} after ${Math.round((Date.now() - startedAt) / 1000)}s`,
+        {
+          cwd,
+          previous: thread.sessionId,
+          next: id,
+          // How it was decided, because the two are worth different amounts when
+          // a binding later turns out to be wrong: `pid` is the agent's registry
+          // naming this PTY's process, `mtime` is the timestamp guess.
+          by: hit.ownPid ? "pid" : "mtime",
+          // A capture that took two scans and one that took ten look the same
+          // in a line without this, and the second means the thread spent that
+          // long with no resume behind it.
+          afterMs: Date.now() - startedAt,
+        },
       );
       await persistSessionId(thread, id, cwd);
       applySessionTitle(thread, hit.title);
@@ -318,8 +345,29 @@ export function startSessionMonitor(opts: {
     }
   };
 
+  // Said once, and only about a thread that was actually worked in: the
+  // interesting case is an agent that has been running for two minutes with a
+  // session Boite never found, which is a wrong cwd or a store that moved, not
+  // a terminal sitting at a prompt.
+  const warnIfUncaptured = () => {
+    if (warnedUncaptured) return;
+    const waited = Date.now() - startedAt;
+    if (waited < SESSION_CAPTURE_WARN_MS) return;
+    const thread = app.threadById(threadId);
+    if (!thread || thread.sessionId) return;
+    if (thread.ptyId !== targetPtyId || !opts.isPtyCurrent(targetPtyId)) return;
+    if (opts.lastActivityAt() - startedAt < SESSION_CAPTURE_USED_MS) return;
+    warnedUncaptured = true;
+    logger.warn(
+      "session",
+      `${thread.label}: no ${kind} session captured after ${Math.round(waited / 1000)}s of use`,
+      { cwd, kind, waitedMs: waited, lastActivityAt: opts.lastActivityAt() },
+    );
+  };
+
   const runScan = () => {
     if (stopped) return;
+    warnIfUncaptured();
     void probeLiveness();
     void scanOnce().then((done) => {
       if (done) stop();
