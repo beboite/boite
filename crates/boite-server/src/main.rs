@@ -291,13 +291,42 @@ fn make_event_emitter(
     })
 }
 
+/// One line for a request the user has to answer, in the endpoint's own verbs.
+///
+/// Spelled out rather than templated from the action, so a verb this build has
+/// never heard of still says something: a notification nobody can read is worth
+/// as little as the one that was never sent.
+fn approval_sentence(action: &str, detail: &str) -> String {
+    match action {
+        "thread.move" => format!("Wants to move to {detail}"),
+        "project.create" => format!("Wants to create the project {detail}"),
+        "thread.spawn" => format!("Wants a terminal in {detail}"),
+        _ => format!("{action}: {detail}"),
+    }
+}
+
 // Fire a webhook on meaningful thread transitions: a turn finishing
 // (running -> ready, claude awaiting input) and process exit. Tracks the last
 // status per thread so a status that did not actually cross an edge is silent.
+//
+// Approvals go down the same paths, and for a stronger reason: nothing at all
+// moves until one is answered, and the device most likely to be holding the
+// answer is a phone with the app closed. The socket event alone only reaches a
+// client that is already connected and looking.
 fn spawn_notifier_task(state: Arc<AppState>, mut rx: broadcast::Receiver<AppEvent>) {
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
     tokio::spawn(async move {
         let mut last: HashMap<String, String> = HashMap::new();
+        // Seeded from the table rather than left empty: the rows outlive the
+        // process, and a restart would otherwise announce every request that
+        // was already waiting as if it had just arrived.
+        let mut announced: HashSet<String> = state
+            .store
+            .open_approvals()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|p| p.id)
+            .collect();
         loop {
             match rx.recv().await {
                 Ok(AppEvent::ThreadStatus {
@@ -345,10 +374,75 @@ fn spawn_notifier_task(state: Arc<AppState>, mut rx: broadcast::Receiver<AppEven
                     state.notifier.send(&title, &body, tag).await;
                     state.push.notify_all(&state.store, &title, &body, tag).await;
                 }
+                // The event carries nothing, so the table answers what changed.
+                // Ids rather than a count: answering one and opening another in
+                // the same breath leaves the count where it was, and the new
+                // request would go unannounced.
+                Ok(AppEvent::ApprovalsChanged) => {
+                    let open = state.store.open_approvals().unwrap_or_default();
+                    let fresh: Vec<_> = open
+                        .iter()
+                        .filter(|p| !announced.contains(&p.id))
+                        .collect();
+                    // Rebuilt from what is still open, so an answered request
+                    // stops being remembered and the set cannot grow forever.
+                    let next: HashSet<String> = open.iter().map(|p| p.id.clone()).collect();
+                    if fresh.is_empty() {
+                        announced = next;
+                        continue;
+                    }
+                    let (title, body) = if let [only] = fresh.as_slice() {
+                        let who = state
+                            .store
+                            .thread_label(&only.thread_id)
+                            .unwrap_or_else(|| "An agent".to_string());
+                        (
+                            format!("{who}: needs your approval"),
+                            approval_sentence(&only.action, &only.detail),
+                        )
+                    } else {
+                        (
+                            "Boite: approvals waiting".to_string(),
+                            format!("{} requests need an answer", fresh.len()),
+                        )
+                    };
+                    announced = next;
+                    state.notifier.send(&title, &body, "lock").await;
+                    state.push.notify_all(&state.store, &title, &body, "lock").await;
+                }
                 Ok(_) => {}
                 Err(RecvError::Lagged(_)) => continue,
                 Err(RecvError::Closed) => break,
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::approval_sentence;
+
+    #[test]
+    fn each_gated_call_says_what_it_is_asking_for() {
+        assert_eq!(
+            approval_sentence("thread.move", "Boite"),
+            "Wants to move to Boite"
+        );
+        assert_eq!(
+            approval_sentence("project.create", "notes"),
+            "Wants to create the project notes"
+        );
+        assert_eq!(
+            approval_sentence("thread.spawn", "Boite"),
+            "Wants a terminal in Boite"
+        );
+    }
+
+    /// A verb this build has never heard of still produces a line. The dock
+    /// draws an unknown action rather than dropping the card, and a
+    /// notification that said nothing would be the one place the two disagree.
+    #[test]
+    fn an_action_with_no_sentence_still_gets_one() {
+        assert_eq!(approval_sentence("thread.eat", "lunch"), "thread.eat: lunch");
+    }
 }

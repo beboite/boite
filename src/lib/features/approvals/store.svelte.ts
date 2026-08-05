@@ -155,7 +155,10 @@ class ApprovalStore {
    * Desktop only, like the todo list's: an agent writes through the loopback
    * endpoint, so the change arrives as a Rust event rather than through any
    * call this store made. The remote transport has its own control plane and
-   * reloads from `workspace.boot`.
+   * reloads on `approvals.changed` (`app/control-events.ts`); what it needs
+   * beyond that is the first read, which `adoptRemote` does once the workspace
+   * is up. This comment used to name a `workspace.boot` that has never
+   * existed, and nothing was reading the table on that path at all.
    */
   watch(): () => void {
     let stop: (() => void) | null = null;

@@ -171,8 +171,11 @@
     transform: translateX(-50%);
     bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
   }
+  /* Under the phone's top bar rather than over it: that bar is 3rem tall, it
+     carries the project name and the two launch buttons, and a card parked on
+     top of them hid what the request was about while asking about it. */
   .dock.dock-top {
     bottom: auto;
-    top: calc(1rem + env(safe-area-inset-top, 0px));
+    top: calc(3.5rem + env(safe-area-inset-top, 0px));
   }
 </style>
