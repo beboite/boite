@@ -607,7 +607,9 @@ mod tests {
     /// on a workspace nobody has ever named and no `setInfo` can rewrite it.
     #[test]
     fn a_workspace_reports_the_version_it_runs() {
-        let host = Rows::new("workspace");
+        // Its own store name: `Rows::new` keys the temp database on it, and two
+        // tests sharing one race each other's migrations under the test runner.
+        let host = Rows::new("workspace-version");
         let info = ask(&host, "workspace.info", json!({})).unwrap();
         assert_eq!(info["version"], json!(env!("CARGO_PKG_VERSION")));
 
