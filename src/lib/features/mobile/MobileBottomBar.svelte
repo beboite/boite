@@ -6,15 +6,22 @@
   import FolderTree from "@lucide/svelte/icons/folder-tree";
   import GitBranch from "@lucide/svelte/icons/git-branch";
   import SquareTerminal from "@lucide/svelte/icons/square-terminal";
+  import ListTodo from "@lucide/svelte/icons/list-todo";
   import Boxes from "@lucide/svelte/icons/boxes";
   import Settings from "@lucide/svelte/icons/settings";
 
   // The label is a key, not a string: the bar is data-driven, so the literal
   // that svelte-check verifies lives here instead of at the render site.
+  //
+  // Todo sits beside the terminal because that is what it is for here: the list
+  // is the one surface an agent writes into from the other side, so a phone
+  // that could not open it could see what an agent was doing and never what it
+  // had been asked to do.
   const TABS: { id: MobileTab; labelKey: MessageKey; icon: Component }[] = [
     { id: "files", labelKey: "mobile.files", icon: FolderTree },
     { id: "git", labelKey: "project.git", icon: GitBranch },
     { id: "terminal", labelKey: "tabs.terminal", icon: SquareTerminal },
+    { id: "todo", labelKey: "panes.kindTodo", icon: ListTodo },
     { id: "projects", labelKey: "sidebar.projects", icon: Boxes },
     { id: "settings", labelKey: "common.settings", icon: Settings },
   ];
@@ -22,8 +29,10 @@
   function select(tab: MobileTab) {
     app.mobileTab = tab;
     // Diff/editor overlays sit above the tab pages; leaving them when the user
-    // taps a tab keeps the bottom bar honest about what's on screen.
-    if (app.view === "editor" || app.view === "settings") app.view = "terminal";
+    // taps a tab keeps the bottom bar honest about what's on screen. `project`
+    // is one of them: the dashboard is opened over the terminal page, and
+    // without this a tap moved the tab underneath it and changed nothing.
+    if (app.view !== "terminal") app.view = "terminal";
   }
 </script>
 
@@ -39,14 +48,18 @@
     {@const active = app.mobileTab === tab.id}
     <button
       type="button"
-      class="flex flex-1 flex-col items-center justify-center gap-0.5 py-2 transition active:bg-accent/40 {active
+      class="flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 px-0.5 py-2 transition active:bg-accent/40 {active
         ? 'text-foreground'
         : 'text-muted-foreground'}"
       onclick={() => select(tab.id)}
       aria-current={active ? "page" : undefined}
     >
       <Icon class="size-5" />
-      <span class="text-2xs font-medium tracking-tight">{t(tab.labelKey)}</span>
+      <!-- Six tabs now, and a French label is half again as long as its English
+           twin: the row has to give up the word rather than the tap target. -->
+      <span class="w-full truncate text-center text-2xs font-medium tracking-tight">
+        {t(tab.labelKey)}
+      </span>
     </button>
   {/each}
 </nav>

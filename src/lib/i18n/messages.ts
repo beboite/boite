@@ -438,6 +438,7 @@ export const EN_MESSAGES = {
   "mobile.noTerminals": "No terminals in this project yet.",
   "mobile.closeTerminal": "Close {name}",
   "mobile.newTerminalIn": "New terminal in {project}",
+  "mobile.openDashboard": "Overview of {project}",
   "mobile.terminalCountOne": "{count} terminal",
   "mobile.terminalCount": "{count} terminals",
   "mobile.noProjects": "No projects yet. Add a folder to start.",
