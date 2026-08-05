@@ -13,6 +13,15 @@ const SESSION_SCAN_INTERVAL_MS = 12_000;
 // streaming, so file mtime and thread activity land within a few seconds of
 // each other.
 const ATTRIBUTION_WINDOW_MS = 5_000;
+// How many scans may be spent refusing to attribute a transcript before the
+// refusal is worth a line somebody will read. `debug` is compiled out of a
+// release build, so the one failure that leaves a thread permanently unbound —
+// and therefore relaunching into a blank conversation — used to say nothing at
+// all in the builds it happened in.
+const DEFER_WARN_AT = 3;
+// The same idea for a thread that finds nothing at all: said once, well after
+// the scans that are simply early (3s, 8s, then every 12s).
+const UNBOUND_INFO_AT = 5;
 // Transcript liveness: a captured session whose jsonl was written this recently
 // means the agent is actively working (a tool call, a subagent step, streamed
 // tokens) even when the terminal is visually quiet. This only defers auto-sleep
@@ -110,10 +119,24 @@ export function startSessionMonitor(opts: {
     timeouts = [];
   };
 
+  // How many consecutive scans have found a transcript and refused it, and how
+  // many have found nothing at all while this thread has no session.
+  let deferrals = 0;
+  let emptyScans = 0;
+
+  // The guess, for the agents whose store cannot answer who owns what. Claude
+  // can — `hit.ownPid` is its registry naming the process behind this very PTY
+  // — and a fact is never put to a vote below.
+  //
   // With several threads on the same cwd, "newest session file" alone picks
   // the wrong owner: a /clear or new conversation in thread A used to get
   // claimed by thread B's monitor, swapping their sessions. Only claim a file
   // whose mtime correlates with OUR pty activity and with no sibling's.
+  //
+  // Two agents of the same kind, both busy in one folder, are the case this
+  // cannot settle: each is "recently active" whenever the other writes, so
+  // neither ever attributes anything and both stay unbound for as long as they
+  // run. That is what `ownPid` exists to skip.
   //
   // Same agent only. Each detector reads one agent's store, so a codex thread
   // is never a candidate owner of a claude transcript and has no business
@@ -169,18 +192,50 @@ export function startSessionMonitor(opts: {
             `${thread.label}: locked on ${thread.sessionId}, no new session detected`,
             { cwd, probeSince: sinceMs },
           );
+          return false;
+        }
+        // An unbound thread whose agent has written nothing findable. Ordinary
+        // for the first scans of a thread nobody has typed into yet, which is
+        // why it is said once and late rather than every 12s: what it explains
+        // is a relaunch that started a blank conversation, read afterwards.
+        emptyScans++;
+        if (emptyScans === UNBOUND_INFO_AT) {
+          logger.info(
+            "session",
+            `${thread.label}: nothing to bind to after ${emptyScans} scans`,
+            { cwd, probeSince: sinceMs },
+          );
         }
         return false;
       }
+      emptyScans = 0;
       const id = hit.id;
-      if (hit.mtimeMs != null && !attributedToSelf(hit.mtimeMs)) {
-        logger.debug(
-          "session",
-          `${thread.label}: ${id} not attributable to this thread, deferring`,
-          { mtimeMs: hit.mtimeMs, lastActivityAt: opts.lastActivityAt() },
-        );
+      if (hit.mtimeMs != null && !hit.ownPid && !attributedToSelf(hit.mtimeMs)) {
+        deferrals++;
+        const details = {
+          mtimeMs: hit.mtimeMs,
+          lastActivityAt: opts.lastActivityAt(),
+          deferrals,
+        };
+        // Said once, at the point where deferring has stopped looking like a
+        // scan that came too early. Repeating it every 12s for the life of the
+        // thread would bury the log it is meant to reach.
+        if (deferrals === DEFER_WARN_AT) {
+          logger.warn(
+            "session",
+            `${thread.label}: ${id} is unattributable after ${deferrals} scans; nothing is bound, so a relaunch would start a fresh conversation`,
+            details,
+          );
+        } else {
+          logger.debug(
+            "session",
+            `${thread.label}: ${id} not attributable to this thread, deferring`,
+            details,
+          );
+        }
         return false;
       }
+      deferrals = 0;
       if (id === thread.sessionId) {
         applySessionTitle(thread, hit.title);
         logger.debug(
@@ -210,7 +265,10 @@ export function startSessionMonitor(opts: {
       logger.info(
         "session",
         `${thread.label}: ${thread.sessionId ? "manual switch" : "captured"} ${thread.sessionId ?? "(none)"} → ${id}`,
-        { cwd, previous: thread.sessionId, next: id },
+        // How it was decided, because the two are worth different amounts when
+        // a binding later turns out to be wrong: `pid` is the agent's registry
+        // naming this PTY's process, `mtime` is the timestamp guess.
+        { cwd, previous: thread.sessionId, next: id, by: hit.ownPid ? "pid" : "mtime" },
       );
       await persistSessionId(thread, id, cwd);
       applySessionTitle(thread, hit.title);

@@ -901,8 +901,14 @@
         return;
       }
 
+      // An attach gets one too. The agent it is attaching to may have started a
+      // conversation nobody wrote down — a thread parked before its first scan
+      // could bind, a workspace switched away from and back — and skipping the
+      // monitor there left that thread unbound for the rest of its life, so its
+      // next relaunch opened a blank agent. Nothing is bound twice: a scan that
+      // returns the session already on the row is a no-op.
       const detector = getDetector(thread);
-      if (!reattaching && detector && ptyId) {
+      if (detector && ptyId) {
         const since = Math.max(0, spawnedAt - (thread.sessionId ? 1000 : 5000));
         stopSessionMonitor();
         sessionMonitor = startSessionMonitor({
