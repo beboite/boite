@@ -52,11 +52,14 @@ async function fetchAndApplyMeta() {
   if (!meta) return;
   try {
     const info = await meta.get();
-    workspace.info = { name: info.name, color: info.color };
+    workspace.info = { name: info.name, color: info.color, version: info.version };
     if (workspace.activeBoiteId) {
       device.updateBoite(workspace.activeBoiteId, {
         name: info.name ?? "",
         color: info.color ?? "",
+        // A boite too old to report one leaves the cache empty rather than
+        // keeping the version it had before: this read is what it runs now.
+        version: info.version ?? "",
       });
     }
   } catch {
@@ -128,7 +131,11 @@ async function adoptRemote(
   workspace.setActiveBoite(entry.id);
   // Seed the label/color from the device cache so the pill shows this boite's
   // identity immediately; fetchAndApplyMeta refreshes it from the server.
-  workspace.info = { name: entry.name || null, color: entry.color || null };
+  workspace.info = {
+    name: entry.name || null,
+    color: entry.color || null,
+    version: entry.version || null,
+  };
   workspace.needsLogin = false;
   device.setActive(entry.id);
   await app.init();
@@ -240,7 +247,11 @@ export async function bootRemoteWorkspace(): Promise<boolean> {
   // about which boite is being waited on.
   workspace.activateRemote();
   workspace.setActiveBoite(entry.id);
-  workspace.info = { name: entry.name || null, color: entry.color || null };
+  workspace.info = {
+    name: entry.name || null,
+    color: entry.color || null,
+    version: entry.version || null,
+  };
   device.setActive(entry.id);
   finishBootWhenReachable(entry);
   return false;
@@ -316,7 +327,7 @@ export async function setActiveBoiteInfo(patch: {
   if (!meta) return;
   try {
     const res = await meta.set(patch);
-    workspace.info = { name: res.name, color: res.color };
+    workspace.info = { name: res.name, color: res.color, version: res.version };
     if (workspace.activeBoiteId) {
       device.updateBoite(workspace.activeBoiteId, {
         name: res.name ?? "",

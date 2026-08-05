@@ -17,6 +17,7 @@
     setDynamicMode,
     defaultRemoteWsUrl,
   } from "$lib/app/workspace";
+  import { isBehind } from "./version";
   import MobileSheet from "$lib/features/mobile/MobileSheet.svelte";
   import Plus from "@lucide/svelte/icons/plus";
   import Trash2 from "@lucide/svelte/icons/trash-2";
@@ -69,6 +70,12 @@
   }
   function isActiveBoite(id: string): boolean {
     return workspace.mode === "remote" && workspace.activeBoiteId === id;
+  }
+  // What that boite is running. The live read wins for the one that is
+  // connected; every other row shows what this device last saw, which is the
+  // only answer available without dialling a server to draw a menu.
+  function versionOf(b: BoiteEntry, active: boolean): string {
+    return (active ? workspace.info.version || b.version : b.version) || "";
   }
   // Dynamic mode presents as the local side: the boite is grafted, not active.
   const onLocalSide = $derived(workspace.mode !== "remote");
@@ -337,6 +344,14 @@
       >
         <Monitor class="size-4 shrink-0 text-muted-foreground" />
         <span class="flex-1 font-medium text-foreground">{t("workspace.local")}</span>
+        <!-- The build every row below is compared against, spelled out rather
+             than left implicit: "behind" is only meaningful next to it. -->
+        <span
+          class="shrink-0 font-mono text-2xs text-muted-foreground"
+          title={t("workspace.versionThis")}
+        >
+          v{__APP_VERSION__}
+        </span>
         {#if onLocalSide}
           <Check class="size-4 text-foreground" />
         {/if}
@@ -374,6 +389,8 @@
     {#each device.boites as b (b.id)}
       {@const active = isActiveBoite(b.id)}
       {@const connected = active && workspace.connection === "connected"}
+      {@const version = versionOf(b, active)}
+      {@const behind = isBehind(version, __APP_VERSION__)}
       <div class="flex items-stretch gap-1">
         <button
           type="button"
@@ -388,7 +405,30 @@
           )}
           <span class="flex min-w-0 flex-1 flex-col leading-tight">
             <span class="truncate font-medium text-foreground">{labelOf(b)}</span>
-            <span class="truncate text-xs text-muted-foreground">{hostOf(b.url)}</span>
+            <span class="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+              <span class="truncate">{hostOf(b.url)}</span>
+              <!-- A boite that is behind is worth seeing before switching to
+                   it, so it is tinted rather than left as one number among
+                   two. One this device has never reached says so instead of
+                   showing a blank, which reads as "up to date". -->
+              {#if version}
+                <span
+                  class={`shrink-0 font-mono text-2xs ${behind ? "rounded bg-warning/15 px-1 text-warning" : "text-muted-foreground/70"}`}
+                  title={behind
+                    ? t("workspace.versionBehind", {
+                        version,
+                        local: __APP_VERSION__,
+                      })
+                    : t("workspace.versionSeen", { version })}
+                >
+                  v{version}
+                </span>
+              {:else}
+                <span class="shrink-0 text-2xs text-muted-foreground/60">
+                  {t("workspace.versionUnknown")}
+                </span>
+              {/if}
+            </span>
           </span>
           {#if active}
             <span class="shrink-0 text-2xs uppercase tracking-wide text-muted-foreground">

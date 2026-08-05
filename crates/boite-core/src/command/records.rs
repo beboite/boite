@@ -422,6 +422,13 @@ impl Records {
                 json!({
                     "name": meta.get("name").and_then(|v| v.as_str()),
                     "color": meta.get("color").and_then(|v| v.as_str()),
+                    // Not stored beside the cosmetic pair: it is what this
+                    // binary is, not what someone named it. Every crate in the
+                    // workspace carries the same version as the app, so the
+                    // one compiled in here is the boite's own version, and a
+                    // device can tell a server it is about to connect to from
+                    // one that is behind its own build.
+                    "version": env!("CARGO_PKG_VERSION"),
                 })
             }
             Records::WorkspaceSetInfo { name, color } => {
@@ -594,6 +601,19 @@ mod tests {
         ask(&host, "workspace.setInfo", json!({ "name": "   " })).unwrap();
         let info = ask(&host, "workspace.info", json!({})).unwrap();
         assert_eq!(info["name"], json!(null));
+    }
+
+    /// The version comes from the binary, not from the meta blob, so it answers
+    /// on a workspace nobody has ever named and no `setInfo` can rewrite it.
+    #[test]
+    fn a_workspace_reports_the_version_it_runs() {
+        let host = Rows::new("workspace");
+        let info = ask(&host, "workspace.info", json!({})).unwrap();
+        assert_eq!(info["version"], json!(env!("CARGO_PKG_VERSION")));
+
+        ask(&host, "workspace.setInfo", json!({ "version": "9.9.9" })).unwrap();
+        let info = ask(&host, "workspace.info", json!({})).unwrap();
+        assert_eq!(info["version"], json!(env!("CARGO_PKG_VERSION")));
     }
 
     /// A host that keeps no rows says so, rather than answering an empty list
