@@ -33,7 +33,7 @@ sha2 = "0.10"
 # numbers are what this is for, and the HTML reports would pull a graphics stack
 # into a CI job that compiles `--all-targets`.
 [dev-dependencies]
-criterion = { version = "0.5", default-features = false }
+criterion = { version = "0.8", default-features = false }
 
 [[bench]]
 name = "hot_paths"
