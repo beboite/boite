@@ -242,7 +242,12 @@ fn generate_keys() -> (String, String) {
     use p256::elliptic_curve::sec1::ToEncodedPoint;
     use p256::SecretKey;
 
-    let secret = SecretKey::random(&mut rand::rngs::OsRng);
+    // p256's own `rand_core`, not this crate's `rand`. `SecretKey::random` takes
+    // the RNG traits of the `rand_core` p256 was built against, and the `rand`
+    // the rest of the server uses is several major versions ahead of it: passing
+    // its OS RNG here does not typecheck, whatever it is called this year. Both
+    // read the same system entropy source.
+    let secret = SecretKey::random(&mut p256::elliptic_curve::rand_core::OsRng);
     let private_b64 = URL_SAFE_NO_PAD.encode(secret.to_bytes());
     let point = secret.public_key().to_encoded_point(false);
     let public_b64 = URL_SAFE_NO_PAD.encode(point.as_bytes());

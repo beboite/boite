@@ -1,7 +1,10 @@
 use std::fs;
 use std::path::PathBuf;
 
-use rand::RngCore;
+// `Rng` is what `RngCore` was called before rand 0.10: same `fill_bytes`, and
+// the thread RNG behind it is still a CSPRNG, which is the only property this
+// token needs.
+use rand::Rng;
 
 pub struct Config {
     pub bind: String,
@@ -91,7 +94,7 @@ fn resolve_token(data_dir: &std::path::Path) -> Result<String, String> {
         }
     }
     let mut bytes = [0u8; 32];
-    rand::thread_rng().fill_bytes(&mut bytes);
+    rand::rng().fill_bytes(&mut bytes);
     let token: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
     fs::write(&token_path, &token)
         .map_err(|e| format!("cannot write token file {}: {e}", token_path.display()))?;
