@@ -89,9 +89,9 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "appearance.accentOther": "Autre chose",
   "appearance.sidebarDesign": "Lignes de thread",
   "appearance.sidebarDesignDesc":
-    "Classique entoure le logo de l'agent avec l'état du thread. Signal le pose sur un rail au bord de la ligne, et y fait descendre une lumière pendant qu'un agent travaille.",
+    "Classique entoure le logo de l'agent avec l'état du thread. Lumineux allume toute la ligne avec, et y fait traverser une lumière pendant qu'un agent travaille.",
   "appearance.designClassic": "Classique",
-  "appearance.designSignal": "Signal",
+  "appearance.designGlow": "Lumineux",
   "appearance.harnessLogos": "Afficher les logos des agents",
   "appearance.harnessLogosDesc":
     "Désactivé, chaque ligne porte une marque de ce que fait son thread, et survoler une ligne y ramène son logo.",

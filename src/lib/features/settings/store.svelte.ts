@@ -178,10 +178,10 @@ function isMotionMode(value: unknown): value is Settings["motionMode"] {
  * never gets written again.
  */
 function readSidebarDesign(stored: Record<string, unknown>): SidebarDesign {
-  if (stored.sidebarDesign === "classic" || stored.sidebarDesign === "signal") {
+  if (stored.sidebarDesign === "classic" || stored.sidebarDesign === "glow") {
     return stored.sidebarDesign;
   }
-  return stored.sidebarThreadGlow === true ? "signal" : DEFAULTS.sidebarDesign;
+  return stored.sidebarThreadGlow === true ? "glow" : DEFAULTS.sidebarDesign;
 }
 
 // The column's own two rules live beside it, not in here: see right-panel.ts.
