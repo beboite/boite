@@ -46,12 +46,22 @@ export interface ThreadVisualInput {
   keepAwake: boolean;
 }
 
+/**
+ * `neutral` is the muted text colour rather than the strong border one, and the
+ * difference is the whole quiet end of the scale.
+ *
+ * A border colour is a hairline against a surface it is already almost the same
+ * as: painted at the third of its strength a dormant row is worth, it is the
+ * background. On a sidebar where five rows in twelve are asleep, that is a
+ * column with holes in it, and a hole reads as a row that failed to draw rather
+ * than as a row with nothing to say.
+ */
 export const TONE_COLOR: Record<ThreadTone, string> = {
   warning: "var(--color-warning)",
   success: "var(--color-success)",
   danger: "var(--color-danger)",
   awake: "var(--color-awake)",
-  neutral: "var(--color-border-strong)",
+  neutral: "var(--color-muted-foreground)",
 };
 
 /**

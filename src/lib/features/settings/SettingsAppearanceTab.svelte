@@ -97,28 +97,28 @@
 <ToggleSetting
   label={t("appearance.sidebarDesign")}
   description={t("appearance.sidebarDesignDesc")}
-  enabled={settings.state.sidebarDesign === "signal"}
-  onLabel={t("appearance.designSignal")}
+  enabled={settings.state.sidebarDesign === "glow"}
+  onLabel={t("appearance.designGlow")}
   offLabel={t("appearance.designClassic")}
   onToggle={() =>
     settings.setSidebarDesign(
-      settings.state.sidebarDesign === "signal" ? "classic" : "signal",
+      settings.state.sidebarDesign === "glow" ? "classic" : "glow",
     )}
 />
 
 <!-- Rendered in both designs, and disabled rather than hidden under the classic
      one. A row that vanishes with the setting above it reads as a setting that
      was lost, and the classic ring has nothing to put in the logo's place. -->
-<div class="pl-3" class:opacity-50={settings.state.sidebarDesign !== "signal"}>
+<div class="pl-3" class:opacity-50={settings.state.sidebarDesign !== "glow"}>
   <ToggleSetting
     label={t("appearance.harnessLogos")}
-    description={settings.state.sidebarDesign === "signal"
+    description={settings.state.sidebarDesign === "glow"
       ? t("appearance.harnessLogosDesc")
       : t("appearance.harnessLogosClassic")}
-    enabled={settings.state.sidebarDesign !== "signal" ||
+    enabled={settings.state.sidebarDesign !== "glow" ||
       settings.state.sidebarHarnessLogos}
     onToggle={() => {
-      if (settings.state.sidebarDesign !== "signal") return;
+      if (settings.state.sidebarDesign !== "glow") return;
       settings.setSidebarHarnessLogos(!settings.state.sidebarHarnessLogos);
     }}
   />

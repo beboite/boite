@@ -88,9 +88,9 @@ export const EN_MESSAGES = {
   "appearance.accentOther": "Something else",
   "appearance.sidebarDesign": "Thread rows",
   "appearance.sidebarDesignDesc":
-    "Classic rings the agent's logo with the thread's state. Signal puts it on a rail down the row's edge, and runs a light down it while an agent works.",
+    "Classic rings the agent's logo with the thread's state. Glow lights the whole row with it, and runs a light across the row while an agent works.",
   "appearance.designClassic": "Classic",
-  "appearance.designSignal": "Signal",
+  "appearance.designGlow": "Glow",
   "appearance.harnessLogos": "Show agent logos",
   "appearance.harnessLogosDesc":
     "Off, each row shows a mark for what its thread is doing, and hovering a row brings its logo back.",
