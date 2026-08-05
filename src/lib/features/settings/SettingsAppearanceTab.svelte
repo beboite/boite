@@ -95,25 +95,34 @@
 {/if}
 
 <ToggleSetting
-  label={t("appearance.threadGlow")}
-  description={t("appearance.threadGlowDesc")}
-  enabled={settings.state.sidebarThreadGlow}
-  onToggle={() => settings.setSidebarThreadGlow(!settings.state.sidebarThreadGlow)}
+  label={t("appearance.sidebarDesign")}
+  description={t("appearance.sidebarDesignDesc")}
+  enabled={settings.state.sidebarDesign === "signal"}
+  onLabel={t("appearance.designSignal")}
+  offLabel={t("appearance.designClassic")}
+  onToggle={() =>
+    settings.setSidebarDesign(
+      settings.state.sidebarDesign === "signal" ? "classic" : "signal",
+    )}
 />
 
-<!-- Only under the glow design: with the classic ring the logo is the only
-     thing the glyph ever holds, so hiding it would leave an empty circle. -->
-{#if settings.state.sidebarThreadGlow}
-  <div class="pl-3">
-    <ToggleSetting
-      label={t("appearance.harnessLogos")}
-      description={t("appearance.harnessLogosDesc")}
-      enabled={settings.state.sidebarHarnessLogos}
-      onToggle={() =>
-        settings.setSidebarHarnessLogos(!settings.state.sidebarHarnessLogos)}
-    />
-  </div>
-{/if}
+<!-- Rendered in both designs, and disabled rather than hidden under the classic
+     one. A row that vanishes with the setting above it reads as a setting that
+     was lost, and the classic ring has nothing to put in the logo's place. -->
+<div class="pl-3" class:opacity-50={settings.state.sidebarDesign !== "signal"}>
+  <ToggleSetting
+    label={t("appearance.harnessLogos")}
+    description={settings.state.sidebarDesign === "signal"
+      ? t("appearance.harnessLogosDesc")
+      : t("appearance.harnessLogosClassic")}
+    enabled={settings.state.sidebarDesign !== "signal" ||
+      settings.state.sidebarHarnessLogos}
+    onToggle={() => {
+      if (settings.state.sidebarDesign !== "signal") return;
+      settings.setSidebarHarnessLogos(!settings.state.sidebarHarnessLogos);
+    }}
+  />
+</div>
 
 <SettingsCard title={t("appearance.animations")} description={t("appearance.animationsDesc")}>
   <div class="flex gap-1.5" role="radiogroup" aria-label={t("appearance.animations")}>

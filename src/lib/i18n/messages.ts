@@ -86,12 +86,16 @@ export const EN_MESSAGES = {
   "appearance.accentGpt": "GPT",
   "appearance.accentLocal": "Running on this machine",
   "appearance.accentOther": "Something else",
-  "appearance.threadGlow": "Glowing thread cards",
-  "appearance.threadGlowDesc":
-    "The sidebar card lights up with what its thread is doing, and two lights orbit it while an agent works.",
+  "appearance.sidebarDesign": "Thread rows",
+  "appearance.sidebarDesignDesc":
+    "Classic rings the agent's logo with the thread's state. Signal puts it on a rail down the row's edge, and runs a light down it while an agent works.",
+  "appearance.designClassic": "Classic",
+  "appearance.designSignal": "Signal",
   "appearance.harnessLogos": "Show agent logos",
   "appearance.harnessLogosDesc":
-    "Off, the glyph carries only the thread's state and the logo comes back while you hold the card.",
+    "Off, each row shows a mark for what its thread is doing, and hovering a row brings its logo back.",
+  "appearance.harnessLogosClassic":
+    "The classic design has nothing to put in the logo's place, so it always shows one.",
   "appearance.animations": "Animations",
   "appearance.animationsDesc": "System follows the OS reduced-motion setting.",
   "appearance.motionSystem": "System",

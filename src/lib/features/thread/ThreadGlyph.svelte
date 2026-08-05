@@ -1,8 +1,26 @@
+<script lang="ts" module>
+  import type { ThreadToken as Token } from "./threadVisual";
+
+  /**
+   * One character per state, none of them a shape the eye has to resolve at
+   * 12px. `zed` is lowercase because a capital Z beside a filename reads as the
+   * first letter of the filename.
+   */
+  const TOKEN_CHAR: Record<Token, string> = {
+    dot: "●",
+    ask: "?",
+    check: "✓",
+    ring: "○",
+    zed: "z",
+    bang: "!",
+  };
+</script>
+
 <script lang="ts">
-  import type { ThreadStatus } from "$lib/types";
+  import type { SidebarDesign, ThreadStatus } from "$lib/types";
   import type { IconKey } from "$lib/types";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
-  import { stateGlyphOf, threadVisual } from "./threadVisual";
+  import { stateTokenOf, threadVisual, TONE_COLOR } from "./threadVisual";
 
   /**
    * One mark per thread, carrying what it is and how it is doing.
@@ -16,11 +34,11 @@
    * It stays the keep-awake toggle, which is the one affordance the dot owned:
    * losing it would have moved a one-click setting into a context menu.
    *
-   * Under the glow design the card behind it says the status, so the ring drops
-   * to a hairline and the middle is free to say something the colour cannot: the
-   * Z's of a sleeping thread, the question mark of one that is blocked on an
-   * answer. Those replace the logo rather than crowd it, and holding the card
-   * brings the logo back.
+   * Under the signal design the rail beside the row says the status, so the ring
+   * goes away entirely rather than dimming: a hairline circle around a logo that
+   * is already inside a lit card is a third frame drawn around one fact. What is
+   * left is the logo on its own, or — when the logos are off — the state's own
+   * mark, and keep-awake moves to a violet pip on the corner.
    */
   type Props = {
     status: ThreadStatus;
@@ -33,11 +51,11 @@
     /** Rendered as a span rather than a button. For drag ghosts and read-only
         lists, where a nested button would swallow the row's own click. */
     inert?: boolean;
-    /** The card carries the status: draw the quiet variant of the glyph. */
-    glow?: boolean;
-    /** Whether the agent's logo is shown at all. Glow design only. */
+    /** Which sidebar design the row is drawn in. */
+    design?: SidebarDesign;
+    /** Whether the agent's logo is shown at all. Signal design only. */
     showLogo?: boolean;
-    /** The card is being held, which asks for the logo whatever the rest says. */
+    /** The row is hovered, which asks for the logo whatever the rest says. */
     revealLogo?: boolean;
     onToggleKeepAwake?: () => void;
     title?: string;
@@ -51,7 +69,7 @@
     keepAwake = false,
     size = 20,
     inert = false,
-    glow = false,
+    design = "classic",
     showLogo = true,
     revealLogo = false,
     onToggleKeepAwake,
@@ -83,32 +101,40 @@
     }
   });
 
-  const spinning = $derived(!glow && status === "running");
-  const waiting = $derived(!glow && status === "waiting" && !keepAwake);
-  const glyphSize = $derived(Math.round(size * 0.62));
+  const signal = $derived(design === "signal");
+  const spinning = $derived(!signal && status === "running");
+  const waiting = $derived(!signal && status === "waiting" && !keepAwake);
+  const glyphSize = $derived(Math.round(size * (signal ? 0.7 : 0.62)));
 
   const visual = $derived(threadVisual({ status, asleep, keepAwake }));
-  // The logo wins while the card is held, whatever is in its place. Nothing else
-  // is a way to ask "which agent is this one", and it is the question the glyph
-  // exists to answer.
-  const stateGlyph = $derived(glow && !revealLogo ? stateGlyphOf(visual.state) : null);
-  const logo = $derived(!glow || revealLogo || (showLogo && !stateGlyph));
+  // The logo wins while the row is hovered, whatever is in its place. Nothing
+  // else is a way to ask "which agent is this one", and it is the question the
+  // glyph exists to answer.
+  const token = $derived(
+    signal && !showLogo && !revealLogo ? stateTokenOf(visual.state) : null,
+  );
+
+  // `neutral` is the rail's grey, which is a hairline colour: legible as a line
+  // down a card, not as a character on a row. The muted text colour is what the
+  // rest of a quiet row is already drawn in.
+  const toneColor = $derived(
+    visual.tone === "neutral"
+      ? "var(--color-muted-foreground)"
+      : TONE_COLOR[visual.tone],
+  );
 </script>
 
 {#snippet body()}
-  {#if stateGlyph === "sleep"}
-    <!-- ZZz, ZzZ, zZZ: one wave crossing three letters rather than four hand-
-         written frames, so it never lands between two of them. Small and grey on
-         purpose — a sleeping thread is the one the eye should skip. -->
-    <span class="mark zzz" aria-hidden="true">
-      <span style:--phase="0s">Z</span><span style:--phase="-0.53s">Z</span><span
-        style:--phase="-1.06s">Z</span
-      >
-    </span>
-  {:else if stateGlyph === "ask"}
-    <span class="mark ask" aria-hidden="true">?</span>
-  {:else if logo}
+  {#if token}
+    <span class="token" aria-hidden="true">{TOKEN_CHAR[token]}</span>
+  {:else}
     <ShortcutIcon {iconKey} size={glyphSize} {color} />
+  {/if}
+  <!-- Keep-awake was the ring's one job, and the signal design has no ring. A
+       pip on the corner rather than a tint on the mark itself, because the mark
+       is already spending its colour on the state. -->
+  {#if signal && keepAwake}
+    <span class="pip" aria-hidden="true"></span>
   {/if}
 {/snippet}
 
@@ -121,9 +147,11 @@
     class="glyph inert"
     class:spinning
     class:waiting
-    class:asleep
-    class:quiet={glow}
+    class:asleep={asleep && !signal}
+    class:bare={signal}
     style:--ring={ringColor}
+    style:--tone={toneColor}
+    style:--token-size="{Math.round(size * 0.58)}px"
     style:width="{size}px"
     style:height="{size}px"
     {title}
@@ -136,9 +164,11 @@
     class="glyph"
     class:spinning
     class:waiting
-    class:asleep
-    class:quiet={glow}
+    class:asleep={asleep && !signal}
+    class:bare={signal}
     style:--ring={ringColor}
+    style:--tone={toneColor}
+    style:--token-size="{Math.round(size * 0.58)}px"
     style:width="{size}px"
     style:height="{size}px"
     onclick={(e) => {
@@ -173,11 +203,12 @@
     cursor: default;
   }
 
-  /* Under the glow design the card is the status. A second full-strength ring
-     around the logo is the same sentence twice, and the keep-awake violet is the
-     one thing the card does not say, so the ring stays as a hairline for it. */
-  .glyph.quiet {
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ring) 45%, transparent);
+  /* The signal design's glyph is the logo and nothing else. No ring, no track,
+     no second circle: the rail on the card's edge is where the state lives, and
+     a mark drawn around a mark is how a 200px row runs out of room. */
+  .glyph.bare {
+    box-shadow: none;
+    border-radius: var(--radius-sm);
   }
 
   /* A thread nobody is keeping awake and nothing is running reads as furniture;
@@ -235,51 +266,37 @@
     }
   }
 
-  /* Both marks are deliberately under-lit. They stand where the agent's logo
-     stands, and a Z that is louder than the logo it replaced turns a row that is
-     doing nothing into the loudest thing in the sidebar. */
-  .mark {
+  /* The state's own mark, standing where the logo stands. It is drawn in the
+     state's colour and it never moves: the rail beside it is already the one
+     moving thing on the row, and a second one turns a list into a fairground. */
+  .token {
     display: inline-flex;
-    align-items: baseline;
-    font-size: 0.55em;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+    /* Sized off the glyph's own box rather than off `em`: the card sets no
+       font-size, so an em here would inherit whatever the sidebar happens to be
+       and the mark would not keep step with the logo it replaced. */
+    font-size: var(--token-size);
     font-weight: 700;
     line-height: 1;
-    letter-spacing: -0.02em;
-    color: var(--color-muted-foreground);
+    color: var(--tone);
     user-select: none;
   }
-  .zzz > span {
-    animation: glyph-zzz 1.6s var(--ease-in-out-quad) infinite;
-    animation-delay: var(--phase);
-    opacity: 0.35;
-  }
-  @keyframes glyph-zzz {
-    0%,
-    100% {
-      opacity: 0.28;
-      transform: scale(0.72) translateY(0.5px);
-    }
-    25% {
-      opacity: 0.8;
-      transform: scale(1) translateY(-0.5px);
-    }
-    60% {
-      opacity: 0.28;
-      transform: scale(0.72) translateY(0.5px);
-    }
-  }
-  .ask {
-    font-size: 0.72em;
-    animation: glyph-ask 1.5s var(--ease-in-out-quad) infinite;
-  }
-  @keyframes glyph-ask {
-    0%,
-    100% {
-      opacity: 0.75;
-    }
-    50% {
-      opacity: 0.25;
-    }
+
+  /* Keep-awake, on the corner. Ringed in the surface colour so it stays a
+     separate object over a logo of any shape. */
+  .pip {
+    position: absolute;
+    right: -1px;
+    bottom: -1px;
+    width: 5px;
+    height: 5px;
+    border-radius: 9999px;
+    background: var(--color-awake);
+    box-shadow: 0 0 0 1.5px var(--color-surface-2);
+    pointer-events: none;
   }
 
   /* The global gate flattens animation-duration to near zero, which would park
@@ -296,10 +313,5 @@
      separates waiting from idle. */
   :global(html[data-motion="reduced"]) .glyph.waiting {
     animation: none;
-  }
-  :global(html[data-motion="reduced"]) .zzz > span,
-  :global(html[data-motion="reduced"]) .ask {
-    animation: none;
-    opacity: 0.6;
   }
 </style>
