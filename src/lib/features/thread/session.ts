@@ -339,7 +339,7 @@ export async function buildResumeArgsAsync(thread: Thread, cwd: string): Promise
   const key = resolveKey(thread);
   // Every agent that can take it gets todo access, resume or not: the endpoint
   // serves the project, and a fresh thread wants it as much as a resumed one.
-  const mcp = await mcpArgsFor(key, settings.state.agentTodoAccess);
+  const mcp = await mcpArgsFor(key, settings.state.agentTodoAccess, cwd);
   // Last, so the prompt stays a positional: an mcp flag appended after it would
   // be read as part of the sentence.
   const args = withPendingPrompt(thread, key, mcp.length > 0 ? [...base, ...mcp] : base);
