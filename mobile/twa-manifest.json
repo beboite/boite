@@ -20,8 +20,8 @@
     "path": "./android.keystore",
     "alias": "boite"
   },
-  "appVersionName": "1.0.0",
-  "appVersionCode": 10000,
+  "appVersionName": "1.0.2",
+  "appVersionCode": 10002,
   "shortcuts": [],
   "generatorApp": "bubblewrap-cli",
   "webManifestUrl": "https://boite.net.tasbem.ch/manifest.webmanifest",
