@@ -1,11 +1,11 @@
 /**
  * What a thread row looks like, decided once for both sidebar designs.
  *
- * The classic design draws a ring around the agent's logo; the signal design
- * puts a rail down the card's left edge and sweeps it while an agent works. They
- * disagree about where to paint and agree about everything else, so the mapping
- * from a thread's state to "which of six situations is this" lives here rather
- * than twice in two components' `$derived` blocks.
+ * The classic design draws a ring around the agent's logo; the glow design lights
+ * the whole card and sweeps it while an agent works. They disagree about where to
+ * paint and agree about everything else, so the mapping from a thread's state to
+ * "which of six situations is this" lives here rather than twice in two
+ * components' `$derived` blocks.
  *
  * No runes and no Svelte import: this is a pure function over what the row knows,
  * which is what makes the six cases testable without mounting a sidebar.
@@ -16,10 +16,11 @@ import type { ThreadStatus } from "$lib/types";
 /**
  * The six situations a row can be in.
  *
- * `finished` and `sleeping` are deliberately separate. A thread that just ended
- * is news and gets the bright end of the rail; one that ended a while ago and
- * had its PTY reaped is furniture, and furniture that still claims to be news is
- * how a sidebar stops meaning anything.
+ * `finished` and `sleeping` are deliberately separate, and they can hold the same
+ * tone. A thread that just ended is news and gets the bright end of the scale;
+ * one that ended a while ago and had its PTY reaped keeps the colour and loses
+ * the brightness, because furniture that still claims to be news is how a sidebar
+ * stops meaning anything.
  */
 export type ThreadVisualState =
   | "working"
@@ -83,15 +84,18 @@ export function threadVisual(input: ThreadVisualInput): ThreadVisual {
     case "exited":
     case "error":
       return { state: "failed", tone: "danger" };
-    // Every way of being asleep is grey, including the two that ended cleanly.
-    // They used to be green, which put a finished thread and a dormant one in
-    // the same colour with nothing between them; the state already says
-    // "asleep", and a second signal that agrees with it says nothing twice.
+    // Killed rather than ended. Nothing was completed, so nothing is green.
     case "stopped":
       return { state: "sleeping", tone: "neutral" };
+    // A thread that finished and was then parked by the idle timer keeps the
+    // colour it earned. What it loses is the brightness: `sleeping` is graded at
+    // half of `finished`, so the row still answers "this one is done" to a
+    // glance that arrives an hour late without competing with the one that
+    // finished a minute ago. The tone alone is the difference between a dormant
+    // thread that did its work and one that was cut off.
     case "done":
       return asleep
-        ? { state: "sleeping", tone: "neutral" }
+        ? { state: "sleeping", tone: keepAwake ? "awake" : "success" }
         : { state: "finished", tone: keepAwake ? "awake" : "success" };
     case "ready":
       return { state: "ready", tone: keepAwake ? "awake" : "success" };

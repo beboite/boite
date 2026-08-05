@@ -43,16 +43,29 @@ describe("threadVisual", () => {
     });
   });
 
-  // Grey for all three, `idle` included: after a restart every row is idle, and
-  // a thread that ended in a previous session left no word on how it ended.
-  it("says nothing about how a sleeping thread got there", () => {
+  // Grey for both, `idle` included: after a restart every row is idle, and a
+  // thread that ended in a previous session left no word on how it ended.
+  // `stopped` is a thread that was killed, which completed nothing.
+  it("says nothing about a sleeping thread that never reported an ending", () => {
     for (const input of [
       { ...base, status: "stopped" },
-      { ...base, status: "done", asleep: true },
       { ...base, status: "idle" },
     ] as const) {
       expect(threadVisual(input)).toEqual({ state: "sleeping", tone: "neutral" });
     }
+  });
+
+  // The one sleeping row that kept a colour. It is dimmed by `--lit` rather than
+  // by its tone, so "it is done" survives the idle timer and "it is done and it
+  // just happened" does not.
+  it("keeps the green of a finished thread once the idle timer parks it", () => {
+    expect(threadVisual({ ...base, status: "done", asleep: true })).toEqual({
+      state: "sleeping",
+      tone: "success",
+    });
+    expect(
+      threadVisual({ status: "done", asleep: true, keepAwake: true }),
+    ).toEqual({ state: "sleeping", tone: "awake" });
   });
 
   it("gives every state a token, so hiding the logos never empties the glyph", () => {
