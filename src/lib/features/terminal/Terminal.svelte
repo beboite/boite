@@ -52,6 +52,7 @@
   import { logger } from "$lib/shared/services/logger.svelte";
   import { isGenericTitle } from "$lib/features/thread/title-filter";
   import { statusEngine } from "$lib/features/thread/statusEngine";
+  import { SpawnTiming } from "$lib/features/thread/spawn-timing";
   import { longPress } from "$lib/shared/actions/longPress";
   import ContextMenu from "$lib/shared/components/ContextMenu.svelte";
   import type { ContextMenuItem } from "$lib/shared/components/ContextMenu.svelte";
@@ -82,6 +83,16 @@
   let spawnRetryTimer: ReturnType<typeof setTimeout> | null = null;
   let spawnRetryCount = 0;
   const SPAWN_RETRY_MAX = 30;
+  // The launch currently being measured, and when this pane was mounted.
+  //
+  // The timing outlives the `spawn()` call that made it: the line is written on
+  // the first byte the process prints, which arrives after `spawn()` has
+  // returned, and the pane is what still exists then. The mount stamp is the
+  // other half of the same question, because a thread that took six seconds to
+  // show anything spent most of them before `spawn()` was ever called, waiting
+  // on a pane that had no measured size yet.
+  let launchTiming: SpawnTiming | null = null;
+  let mountedAt = 0;
   // Which launch the pane is on. A relaunch bumps it, and a spawn that was
   // mid-flight when that happened reads its own number as stale and drops the
   // process it opened instead of installing it over the newer one. This is what
@@ -733,6 +744,23 @@
 
     spawning = true;
 
+    // A relaunch landing on a pane whose previous launch never printed a byte:
+    // that measurement is over, and leaving it pending would let the older
+    // launch write the line for the newer one's first output.
+    launchTiming?.report("abandoned", { because: "relaunched" });
+    const timing = new SpawnTiming(thread.label);
+    launchTiming = timing;
+    timing.start();
+    // Whether this launch got as far as installing its PTY, which is what tells
+    // an abandoned launch apart from one still on its way to a line of its own.
+    let installed = false;
+    let sawOutput = false;
+    // Both read now rather than at report time, because both are gone by then:
+    // the line is written after the first byte, and a successful install has
+    // already put the retry count back to zero.
+    const sinceMountMs = mountedAt ? Date.now() - mountedAt : null;
+    const retries = spawnRetryCount;
+
     // Everything from here down runs with the flag latched, so it is wrapped:
     // the only way out is the `finally`. It used to be cleared inside the
     // spawn's own try and at each early return, which left the awaits above that
@@ -760,6 +788,9 @@
       }, 400);
       await ready;
       if (notice) clearTimeout(notice);
+      // Marked whether or not it waited: a zero here is the answer to "was it
+      // the worktree?", and only a phase that is always present can give it.
+      timing.mark("worktree");
       if (destroyed) return;
       // The wait has an end now, and reaching it is not the same thing as
       // getting a worktree. Said on screen because the difference is invisible
@@ -789,14 +820,54 @@
         powershellNoProfile: settings.state.powershellNoProfile,
       });
       const wrap = plan.wrap;
+      // Everything between the worktree and the PTY: the resume lookup, which
+      // searches a transcript store, and the launch plan. It is the phase most
+      // likely to grow without anybody noticing, because it grows with the
+      // user's history rather than with this code.
+      timing.mark("resume");
 
       const spawnedAt = Date.now();
+
+      // What the line says besides its durations. Built here because the
+      // deadline below can write it long after `spawn()` has returned, and the
+      // pane is the only thing still holding these by then.
+      const launchDetail = () => ({
+        cmd: plan.cmd,
+        args: plan.args,
+        cwd,
+        reattaching,
+        wrapShell: wrap?.shellId ?? null,
+        iconKey: thread.iconKey ?? null,
+        // A pane that was mounted seconds before the launch started spent them
+        // being retried for want of a measured size, and that time is invisible
+        // in the phases: they only start when the launch does.
+        sinceMountMs,
+        retries,
+      });
+      const reportLaunch = (extra?: Record<string, unknown>) =>
+        timing.report(reattaching ? "reattached" : "spawned", {
+          ...launchDetail(),
+          ...extra,
+        });
+
+      // The first byte the process printed, which is what a user means by the
+      // terminal having opened: a live PTY with nothing on screen looks exactly
+      // like one that failed. Recorded whenever it arrives, including before
+      // `open` resolves, but not written down until there is a PTY to write it
+      // about.
+      const noteOutput = () => {
+        if (sawOutput || !timing.pendingReport) return;
+        sawOutput = true;
+        timing.mark("output");
+        if (installed) reportLaunch();
+      };
 
       // The reader thread can emit before invoke resolves with the pty id;
       // queue those events and flush them once the id is known.
       let channelPtyId: string | null = null;
       const earlyEvents: PtyEvent[] = [];
       const onEvent = (event: PtyEvent) => {
+        if (event.type === "output") noteOutput();
         if (channelPtyId === null) {
           earlyEvents.push(event);
           return;
@@ -835,6 +906,7 @@
           onEvent,
           thread.origin,
         );
+        timing.mark("pty");
         const current = currentThread();
         if (
           destroyed ||
@@ -851,6 +923,7 @@
         }
         ptyId = nextPtyId;
         spawned = true;
+        installed = true;
         channelPtyId = nextPtyId;
         parkedLocal.delete(thread.id);
         for (const event of earlyEvents.splice(0)) {
@@ -874,17 +947,13 @@
             });
           }
         }
-        logger.info(
-          "spawn",
-          `${thread.label} (${thread.iconKey ?? "?"}): ${reattaching ? "reattached" : "spawned"}`,
-          {
-            cmd: plan.cmd,
-            args: plan.args,
-            cwd,
-            reattaching,
-            wrapShell: wrap?.shellId ?? null,
-          },
-        );
+        // The line is written on the first byte rather than here, because a PTY
+        // that came back in 40ms and printed nothing for eight seconds is the
+        // case worth seeing, and a line written here calls that one fast. The
+        // deadline is what stops a shell that legitimately prints nothing from
+        // costing the launch its only record.
+        if (sawOutput) reportLaunch();
+        else timing.opened(() => reportLaunch({ output: "none" }));
       } catch (err) {
         term?.write(`\r\n[boite] spawn failed: ${err}\r\n`);
         // Not for a launch that has already been superseded: an error status is
@@ -897,7 +966,7 @@
         ) {
           app.setThreadStatus(thread.id, "error");
         }
-        logger.error("spawn", `${thread.label}: spawn failed`, String(err));
+        timing.report("failed", { ...launchDetail(), error: String(err) });
         return;
       }
 
@@ -926,6 +995,12 @@
       }
     } finally {
       spawning = false;
+      // Every way out of the block above that did not install a PTY: destroyed
+      // mid-wait, superseded by a relaunch, no project, killed on arrival. None
+      // of them is a launch anybody is waiting on, and leaving the timing armed
+      // would have its stall watchdog fire about a thread that stopped being
+      // launched fifteen seconds earlier.
+      if (!installed) timing.report("abandoned", { because: "left before the pty was installed" });
       // Whatever this attempt did with its own PTY, the launch the user is
       // actually waiting for has not started yet, and this is the attempt that
       // has to hand over to it.
@@ -941,6 +1016,7 @@
     // spawn. Those are different bugs in different files, and without this the
     // log cannot say which one is being looked at.
     logger.info("terminal", `${thread.label}: pane mounted`);
+    mountedAt = Date.now();
     term = new Terminal({
       cursorBlink: true,
       cursorStyle: "bar",
@@ -1215,6 +1291,11 @@
     stopSessionMonitor();
     disposeMobileInput?.();
     disposeMobileInput = null;
+    // Silently: the pane is gone, so a line about how long it took to open
+    // describes something nobody is looking at any more, and its watchdog would
+    // fire about a launch that has no pane left to land in.
+    launchTiming?.dispose();
+    launchTiming = null;
     releasePty();
     if (fitRafId !== null) cancelAnimationFrame(fitRafId);
     fitRafId = null;
