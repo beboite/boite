@@ -1110,6 +1110,7 @@ import { projectDisplayName } from "$lib/shared/project-label";
         class:opacity-50={boiteOffline}
         class:drop-target={dropProjectId === project.id}
         class:remote-origin={isRemoteOrigin}
+        class:boite-offline={boiteOffline}
         style:--boite={isRemoteOrigin
           ? workspace.info.color || "var(--color-success)"
           : undefined}
@@ -1860,5 +1861,16 @@ import { projectDisplayName } from "$lib/shared/project-label";
   .project-block.remote-origin.selected:not(.source) {
     border-color: color-mix(in srgb, var(--boite) 80%, var(--color-border-strong));
     box-shadow: 0 0 12px -3px color-mix(in srgb, var(--boite) 80%, transparent);
+  }
+  /* The boite these blocks were imported from is unreachable. This used to be a
+     ring around the whole window, which said the app was down while the local
+     projects two rows up kept working. Said here instead, on the only rows it is
+     true of: the boite's colour drops for the warning colour, and the fade the
+     block already had stays.
+     After the two rules above and with the same weight, so it wins over both the
+     resting accent and the selected one. */
+  .project-block.remote-origin.boite-offline:not(.source) {
+    border-color: color-mix(in srgb, var(--color-warning) 65%, var(--color-border));
+    box-shadow: 0 0 12px -3px color-mix(in srgb, var(--color-warning) 70%, transparent);
   }
 </style>

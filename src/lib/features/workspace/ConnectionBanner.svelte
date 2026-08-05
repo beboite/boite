@@ -1,5 +1,6 @@
 <script lang="ts">
   import { workspace } from "$lib/backend";
+  import { app } from "$lib/app/store.svelte";
   import { retryConnection } from "$lib/app/workspace";
   import { device } from "$lib/features/settings/device.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
@@ -15,10 +16,26 @@
 
   let retrying = $state(false);
 
+  // In dynamic mode the boite is one source of two, and the other one is fine.
+  // A banner over the whole window then reports an outage the app is not having,
+  // so it waits until the boite is what the user is actually working in: a
+  // remote thread in the pane, or an imported project selected. The rest of the
+  // time the sidebar ring and the pane ring carry it, and they say it where the
+  // thing that is unreachable is. Pure remote mode has no such elsewhere: the
+  // banner is unconditional there.
+  const concernsScreen = $derived.by(() => {
+    if (!workspace.isDynamic) return true;
+    if (app.activeThread?.origin === "remote") return true;
+    return app.projectById(app.currentProjectId)?.origin === "remote";
+  });
+
   // Both modes that have a boite in play, not just pure remote. The login screen
   // carries its own message, so the banner stays out of its way.
   const visible = $derived(
-    workspace.hasRemote && !workspace.needsLogin && workspace.connection !== "connected",
+    workspace.hasRemote &&
+      !workspace.needsLogin &&
+      workspace.connection !== "connected" &&
+      concernsScreen,
   );
 
   const activeEntry = $derived(
