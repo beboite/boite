@@ -92,17 +92,25 @@
   );
 
   // Colored inset outline marks the PURE remote workspace: green connected,
-  // amber (pulsing) while connecting or dropped. Dynamic mode presents as
-  // Local, so a healthy boite gets no outline there: it shows through the
-  // sidebar accents instead. An unhealthy one does: the mode-first test used to
-  // resolve to no class at all in dynamic mode, which left a dead boite looking
-  // exactly like a live one.
+  // amber (pulsing) while connecting or dropped. There the boite IS the
+  // workspace, so a window-wide ring is the truth.
+  //
+  // Dynamic mode gets none of it, dropped included. Two sources are live at
+  // once and only one of them went away: ringing the whole window says the app
+  // is down while the local half keeps working, which is the loudest possible
+  // way to be wrong. What is unreachable is marked where it is instead — the
+  // imported project blocks in the sidebar, and the pane of an open remote
+  // thread, both below.
   const outlineClass = $derived.by(() => {
-    if (workspace.connection !== "connected") {
-      return workspace.hasRemote ? "ws-remote-warn" : "";
-    }
-    return workspace.mode === "remote" ? "ws-remote-ok" : "";
+    if (workspace.mode !== "remote") return "";
+    return workspace.connection === "connected" ? "ws-remote-ok" : "ws-remote-warn";
   });
+
+  // Dynamic mode with its boite unreachable. Scopes the marks that replace the
+  // window ring; false in pure remote mode, where the ring above already said it.
+  const boiteDown = $derived(
+    workspace.isDynamic && workspace.hasRemote && workspace.connection !== "connected",
+  );
 
   $effect(() => {
     // Which threads, not how many. A count cannot see a replacement — close
@@ -534,7 +542,16 @@
                     {@const TerminalComp = TerminalView.current}
                     <TerminalComp {thread} {visible} {focused} />
                   {/if}
-                  <PaneOverlay {thread} {group} {focused} />
+                  <!-- A thread that lives on the dropped boite: what is typed
+                       into it is going nowhere, and the pane is the only place
+                       that can say so about this thread rather than about the
+                       whole window. -->
+                  <PaneOverlay
+                    {thread}
+                    {group}
+                    {focused}
+                    offline={boiteDown && thread.origin === "remote"}
+                  />
                 </div>
               {/if}
             {/each}
