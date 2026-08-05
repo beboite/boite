@@ -3,7 +3,6 @@
   import { app } from "$lib/app/store.svelte";
   import { gitStore, gitScope } from "$lib/features/git/store.svelte";
   import { todos } from "$lib/features/todo/store.svelte";
-  import AgentAccess from "$lib/features/todo/AgentAccess.svelte";
   import DashboardCard from "./DashboardCard.svelte";
   import ProjectWorktrees from "./ProjectWorktrees.svelte";
   import ProjectUsage from "./ProjectUsage.svelte";
@@ -18,7 +17,6 @@
   import GitBranch from "@lucide/svelte/icons/git-branch";
   import ListTodo from "@lucide/svelte/icons/list-todo";
   import TerminalIcon from "@lucide/svelte/icons/terminal";
-  import Bot from "@lucide/svelte/icons/bot";
   import ArrowUp from "@lucide/svelte/icons/arrow-up";
   import ArrowDown from "@lucide/svelte/icons/arrow-down";
   import { t } from "$lib/i18n/index.svelte";
@@ -245,13 +243,10 @@
 
   <!-- Where the agents actually are, and what this project does with them.
        Two cards from one component, because the switch decides what the list
-       below it will hold. -->
+       below it will hold. The MCP access rows are inside the first of them:
+       they were a full-width card of their own holding two lines of text, and
+       three columns of nothing under it. -->
   <ProjectWorktrees {project} />
-
-  <DashboardCard title={t("project.agents")} class="lg:col-span-3">
-    {#snippet icon()}<Bot class="size-3.5" />{/snippet}
-    <AgentAccess {project} />
-  </DashboardCard>
 
   <!-- The paths, as a line rather than a card. They are the one thing here
        that never changes, and a card's worth of chrome around two static

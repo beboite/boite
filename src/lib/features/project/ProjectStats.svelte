@@ -1,6 +1,6 @@
 <script lang="ts">
   import DashboardCard from "./DashboardCard.svelte";
-  import { projectUsage } from "./usage.svelte";
+  import { formatTokens as fmt, projectUsage } from "./usage.svelte";
   import { app } from "$lib/app/store.svelte";
   import ChartNoAxesColumn from "@lucide/svelte/icons/chart-no-axes-column";
   import { t } from "$lib/i18n/index.svelte";
@@ -35,15 +35,6 @@
     }
     return acc;
   });
-
-  function fmt(n: number): string {
-    if (n >= 1_000_000) {
-      const m = n / 1_000_000;
-      return `${m >= 100 ? m.toFixed(0) : m.toFixed(m >= 10 ? 1 : 2)}M`;
-    }
-    if (n >= 1000) return `${Math.round(n / 1000)}k`;
-    return String(n);
-  }
 
   // Two groups, because they answer different questions: what the project is,
   // and what its agents have burned reading it.

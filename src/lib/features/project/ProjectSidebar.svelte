@@ -835,36 +835,37 @@ import { projectDisplayName } from "$lib/shared/project-label";
    * `surface-popover` box, scale transition and fixed placement the shell and
    * fastpick pickers use. Two earlier attempts sat it directly under the card,
    * card-width: however exactly it lined up it read as a second rectangle
-   * grafted onto the first. Clearing the sidebar entirely is what makes it a
-   * menu rather than more card.
+   * grafted onto the first, and on a project with a dozen threads the menu
+   * opened a screen away from the `+` that had been pressed. Clearing the
+   * sidebar sideways is what makes it a menu rather than more card, and it puts
+   * it where the pointer already is.
    */
   let launcher = $state<{
     projectId: string;
-    // The card it belongs to, measured at open. Under the whole card, not under
-    // the button: the button sits in the header row, so anchoring to it opened
-    // the menu across the project's own threads — covering the list you launch
-    // alongside. Left edge and width come from the card too, measured rather
-    // than fixed, because the sidebar is resizable and any constant is right at
-    // exactly one width.
-    anchor: { left: number; top: number; bottom: number; width: number };
+    // The button, and the card's right edge. The menu hangs off the sidebar
+    // beside the `+` rather than under the project: anchoring to the card's
+    // bottom put it below every thread the project holds, which is the far end
+    // of a list the button sits at the top of. The card supplies the edge to
+    // clear and the width to draw, both measured, because the sidebar is
+    // resizable and any constant is right at exactly one width.
+    anchor: { left: number; right: number; top: number; bottom: number; width: number };
   } | null>(null);
   let launcherEl: HTMLDivElement | null = $state(null);
-  let launcherPos = $state({ x: 0, y: 0, w: 0, maxH: 0, above: false });
+  let launcherPos = $state({ x: 0, y: 0, w: 0, maxH: 0, flipped: false });
 
   const LAUNCHER_GAP = 6;
   const LAUNCHER_EDGE = 6;
-  /** Under this, a menu is a scrollbar with two rows in it. Flip instead. */
-  const LAUNCHER_MIN_H = 220;
 
   /**
-   * Kept inside the window, on both axes.
+   * Beside the button, kept inside the window on both axes.
    *
-   * Six pixels of air under the card is what says the menu belongs to it without
-   * touching it — but a card at the bottom of a long sidebar has no six pixels,
-   * and the panes behind fastpick are several times taller than the list they
-   * replace. So: flip above the card when the room below cannot hold a usable
-   * menu and the room above is better, cap the height to whichever side won, and
-   * clamp the left edge for a sidebar dragged wider than the window can show.
+   * Six pixels of air past the card's right edge is what says the menu belongs
+   * to it without touching it. A sidebar dragged wide enough to leave no room
+   * there flips the menu to the card's left instead, the way a submenu does.
+   * Vertically it hangs from the button's own top line and rides up when the
+   * pane behind fastpick is taller than the room under it — those panes are
+   * several times the height of the list they replace, so the cap and the
+   * shift are both needed.
    *
    * Re-run on every resize of the menu itself, which is what a pane change is.
    */
@@ -875,20 +876,23 @@ import { projectDisplayName } from "$lib/shared/project-label";
     const vw = window.innerWidth;
     const vh = viewportHeight();
     const w = Math.min(a.width, vw - LAUNCHER_EDGE * 2);
-    const below = a.bottom + LAUNCHER_GAP;
-    const roomBelow = vh - below - LAUNCHER_EDGE;
-    const roomAbove = a.top - LAUNCHER_GAP - LAUNCHER_EDGE;
-    const above = roomBelow < LAUNCHER_MIN_H && roomAbove > roomBelow;
-    const maxH = Math.max(160, above ? roomAbove : roomBelow);
+    const right = a.right + LAUNCHER_GAP;
+    const flipped = right + w + LAUNCHER_EDGE > vw && a.left - LAUNCHER_GAP - w >= LAUNCHER_EDGE;
+    const maxH = Math.max(160, vh - LAUNCHER_EDGE * 2);
     // offsetHeight is the layout box, so it is already capped by the max-height
     // of the previous pass rather than by whatever the pane would like to be.
     const h = Math.min(el.offsetHeight, maxH);
     launcherPos = {
-      x: Math.max(LAUNCHER_EDGE, Math.min(a.left, vw - w - LAUNCHER_EDGE)),
-      y: above ? Math.max(LAUNCHER_EDGE, a.top - LAUNCHER_GAP - h) : below,
+      x: flipped
+        ? a.left - LAUNCHER_GAP - w
+        : Math.max(LAUNCHER_EDGE, Math.min(right, vw - w - LAUNCHER_EDGE)),
+      // Top-aligned with the button, then pulled up by whatever hangs off the
+      // bottom of the window rather than flipped: a menu that jumps above the
+      // pointer on its second pane is the same menu in two places.
+      y: Math.max(LAUNCHER_EDGE, Math.min(a.top, vh - h - LAUNCHER_EDGE)),
       w,
       maxH,
-      above,
+      flipped,
     };
   }
 
@@ -917,14 +921,17 @@ import { projectDisplayName } from "$lib/shared/project-label";
       return;
     }
     const button = e.currentTarget as HTMLElement;
-    const fallback = button.getBoundingClientRect();
+    const trigger = button.getBoundingClientRect();
     const card =
-      button.closest<HTMLElement>(".project-block")?.getBoundingClientRect() ?? fallback;
+      button.closest<HTMLElement>(".project-block")?.getBoundingClientRect() ?? trigger;
     launcher = {
       projectId,
       anchor: {
         left: card.left,
-        top: card.top,
+        right: card.right,
+        // The button's own top line, not the card's: the `+` sits in the header
+        // row and the menu reads as coming out of it.
+        top: trigger.top,
         bottom: card.bottom,
         width: card.width,
       },
@@ -932,11 +939,11 @@ import { projectDisplayName } from "$lib/shared/project-label";
     // First guess, so the menu paints where it belongs rather than at 0,0 for a
     // frame; the effect measures it and corrects on the next tick.
     launcherPos = {
-      x: card.left,
-      y: card.bottom + LAUNCHER_GAP,
+      x: card.right + LAUNCHER_GAP,
+      y: trigger.top,
       w: card.width,
-      maxH: Math.max(160, window.innerHeight - card.bottom - LAUNCHER_GAP - LAUNCHER_EDGE),
-      above: false,
+      maxH: Math.max(160, window.innerHeight - LAUNCHER_EDGE * 2),
+      flipped: false,
     };
   }
 
@@ -1465,7 +1472,7 @@ import { projectDisplayName } from "$lib/shared/project-label";
     style:top="{launcherPos.y}px"
     style:width="{launcherPos.w}px"
     style:max-height="{launcherPos.maxH}px"
-    style:transform-origin={launcherPos.above ? "bottom center" : "top center"}
+    style:transform-origin={launcherPos.flipped ? "top right" : "top left"}
     transition:scale={{ duration: 90, start: 0.96 }}
   >
     <ShortcutBar
