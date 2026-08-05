@@ -19,6 +19,38 @@ the Android packaging (icons, splash, manifest, Digital Asset Links).
   service, resources).
 - `gradlew`, `gradle/`, `*.gradle` — Gradle wrapper + build scripts.
 
+## What the phone layout is
+
+The shell is thin, the layout behind it is not. `settings.mobileLayout` (guessed
+from the form factor on first run, pinned for good once toggled) swaps the
+sidebar and the docked column for a top bar and a six-tab bottom bar: Files,
+Git, Terminal, Todo, Projects, Settings. A project's overview is opened from the
+button on its card in Projects, since there is no project row to click.
+
+Every one of those goes through the same `backend()` the PC uses, which on a
+phone is always the WebSocket one, so what works here is what the server can
+answer. Two things stay on the PC and are not oversights: the command palette
+(no way to open it without a keyboard) and anything reading the local
+filesystem — the folder picker falls back to the server-side browser, and the
+MCP shim an agent is launched with is a path on the device that spawns the PTY,
+so a launch from the phone gets no `--mcp-config` at all. See
+`src/lib/features/thread/agentMcp.ts`.
+
+## Staying in step with the PWA
+
+`manifest-checksum.txt` records the web manifest the wrapper was generated
+from. When `static/manifest.webmanifest` changes (name, icons, scope, display),
+the two drift apart and the wrapper wants regenerating:
+
+```bash
+npx @bubblewrap/cli update --appVersionName=$(node -p "require('../package.json').version")
+```
+
+Read the diff before keeping it. Bubblewrap writes literal values back over
+`app/build.gradle`, which reads the version out of `package.json` on purpose —
+that block has to survive. `twa-manifest.json`'s own `appVersionName` /
+`appVersionCode` are cosmetic for the same reason and are kept in step by hand.
+
 ## Build
 
 ```bash
