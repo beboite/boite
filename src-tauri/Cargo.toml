@@ -70,8 +70,17 @@ mimalloc = { version = "0.1", default-features = false }
 # Paints the one row of a maximized borderless window that the client area is
 # not given. Already in the tree through tauri, which takes it for the same HWND
 # this hands back.
+#
+# **This version tracks tauri's, it is not ours to bump.** `win.hwnd()` returns
+# the `HWND` of whatever `windows` tauri was built against, and that type is a
+# different type in every release of the crate: ask for 0.62 while tauri is on
+# 0.61 and the two coexist in the tree, every call here stops compiling with
+# `expected HWND, found windows::Win32::Foundation::HWND`, and cargo is right.
+# It is a Windows-only path, so ci on Linux says nothing about it and the break
+# only surfaces in the release bundle. A dependabot bump belongs here the day
+# tauri's own `windows` moves, not before.
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.62", features = [
+windows = { version = "0.61", features = [
   "Win32_Foundation",
   "Win32_Graphics_Gdi",
   "Win32_UI_WindowsAndMessaging",
