@@ -29,7 +29,7 @@ import { SCRATCH_PROJECT_ID } from "$lib/domain/project";
 import { notifications } from "$lib/features/notifications/store.svelte";
 import { backend, workspace } from "$lib/backend";
 import { applyControlEvent } from "./control-events";
-import { loadRows, syncRoots } from "./hydrate";
+import { loadRows, resyncFromServer, syncRoots } from "./hydrate";
 import {
   deduplicateSessionIds,
   dropGenericTitles,
@@ -376,6 +376,37 @@ export class AppState {
     // Last, so the line covers everything a user waited through rather than
     // everything up to the phase somebody remembered to mark.
     bootTiming.report();
+  }
+
+  /**
+   * Add a boite's half to a workspace that is already running.
+   *
+   * The dynamic graft used to happen inside `init()`, which meant boot waited on
+   * the dial: a boite that was off bought twelve seconds of an app with no
+   * projects and no threads in it, and an app with nothing in it reads as a
+   * machine that lost everything rather than as a boite that is down. So the
+   * local side boots on its own and the remote rows land here, whenever they
+   * land.
+   *
+   * Nothing local is touched: `resyncFromServer` replaces the remote half and
+   * leaves the local rows, their runtime state and the current selection exactly
+   * as they are.
+   */
+  async attachRemote() {
+    const remote = workspace.remoteBackend;
+    if (!remote || !this.ready) return;
+    await resyncFromServer(this);
+    if (workspace.activeBoiteId && device.needsRemoteProjectSeed) {
+      device.seedRemoteProjects(
+        workspace.activeBoiteId,
+        this.projects.filter((p) => p.origin === "remote").map((p) => p.id),
+      );
+    }
+    // The boite is authoritative for its threads' runtime state and pushes it as
+    // control events; local derives its own. Re-subscribing is safe because a
+    // local-only boot left no subscription behind.
+    this.#unsubscribeControl?.();
+    this.#unsubscribeControl = remote.subscribe((ev) => applyControlEvent(this, ev));
   }
 
   // Clear reactive state so a workspace switch re-hydrates from the new
