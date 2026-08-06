@@ -2,7 +2,7 @@ import type { Backend } from "./types";
 import type { WorkspaceOrigin } from "$lib/types";
 import { TauriBackend } from "./tauri";
 import { RemoteBackend } from "./remote";
-import { connectFailReason, type ConnState } from "./remote/socket";
+import { ConnectError, connectFailReason, type ConnState } from "./remote/socket";
 import { hasTauri } from "./env";
 
 // The active workspace. backend() returns the current transport; mode/epoch/
@@ -52,6 +52,12 @@ class Workspace {
   #local: Backend = new TauriBackend();
   #remote: RemoteBackend | null = null;
   #connWatchers = new Set<(s: ConnState) => void>();
+  // Bumped by every dial and every return to local. A dial can take the twelve
+  // seconds of the connect timeout, and the workspace can move twice in that
+  // time; the generation is what tells the socket that lands late that it is
+  // landing on a workspace nobody is on any more. Without it a boot dial could
+  // install itself over the boite the user picked while it was still ringing.
+  #gen = 0;
 
   // Lets the app layer act on the link coming back (finish a boot that started
   // offline) without owning a rune effect: lib/app/workspace is a plain module
@@ -119,30 +125,40 @@ class Workspace {
     token: string,
     keepUnreachable = false,
   ): Promise<RemoteBackend> {
+    const gen = ++this.#gen;
+    const current = () => this.#gen === gen;
     this.#disposeRemote();
     const remote = new RemoteBackend(
       url,
       token,
-      (s) => this.#publishConnection(s),
+      // A superseded socket publishes nothing: its state is about a workspace
+      // that has been left.
+      (s) => {
+        if (current()) this.#publishConnection(s);
+      },
       () => {
         // A refused token is the one failure a login form fixes. On the desktop
         // there is a local workspace to fall back to, so the gate stays down and
         // the connection banner carries it instead.
-        if (!hasTauri()) this.needsLogin = true;
+        if (!hasTauri() && current()) this.needsLogin = true;
       },
     );
     try {
       await remote.connect();
     } catch (e) {
-      if (keepUnreachable && connectFailReason(e) !== "auth") {
+      if (keepUnreachable && current() && connectFailReason(e) !== "auth") {
         this.#remote = remote;
         this.remoteUrl = url;
         this.connection = remote.connectionState;
         throw e;
       }
       remote.dispose();
-      this.connection = "connected";
+      if (current()) this.connection = "connected";
       throw e;
+    }
+    if (!current()) {
+      remote.dispose();
+      throw new ConnectError("unreachable", "superseded by a newer connection");
     }
     this.#remote = remote;
     this.remoteUrl = url;
@@ -172,6 +188,8 @@ class Workspace {
   }
 
   activateLocal(): void {
+    // Any dial still ringing was for the workspace being left.
+    this.#gen++;
     this.mode = "local";
     this.connection = "connected";
     this.activeBoiteId = null;

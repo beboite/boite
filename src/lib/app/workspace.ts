@@ -98,6 +98,8 @@ async function connectBoite(
   mode: "remote" | "dynamic" = "remote",
   keepUnreachable = false,
 ): Promise<ConnectAttempt> {
+  // A dial the user is watching outranks a background graft waiting on a boite.
+  disarmGraft();
   try {
     await workspace.createRemote(entry.url, entry.token, keepUnreachable);
   } catch (err) {
@@ -154,23 +156,29 @@ async function adoptRemote(
 }
 
 // Land on the local side, grafting the active boite onto it when the dynamic
-// preference is on (and degrading to plain local when it is unreachable).
+// preference is on.
+//
+// The local workspace never waits for the boite. It used to: the dial was
+// awaited before the stores were hydrated, so a boite that was off held the app
+// on an empty shell for the twelve seconds of the connect timeout, which reads
+// as a machine that reset itself. The graft is asynchronous now and lands
+// through `graftRemote` whenever the socket comes up, minutes later if that is
+// what it takes.
 async function initLocalSide(reset: boolean): Promise<void> {
-  if (device.dynamicMode && hasTauri() && device.active) {
-    // Reuse a live socket (e.g. coming back from pure remote); otherwise dial.
-    if (workspace.remoteBackend) {
-      if (reset) {
-        await tearDownTerminals();
-        resetStores();
-      }
-      workspace.activateDynamic();
-      await app.init();
-      restoreParkedStatuses();
-      return;
+  // Whatever this init decides replaces the one a previous init armed.
+  disarmGraft();
+  const wantsGraft = device.dynamicMode && hasTauri() && device.active !== null;
+  // Reuse a live socket (e.g. coming back from pure remote): nothing to wait
+  // for, so the graft is part of this init rather than deferred.
+  if (wantsGraft && workspace.remoteBackend) {
+    if (reset) {
+      await tearDownTerminals();
+      resetStores();
     }
-    const res = await connectBoite(device.active, reset, "dynamic");
-    if (res.outcome === "ok") return;
-    notifications.error("Boite unreachable, local only");
+    workspace.activateDynamic();
+    await app.init();
+    restoreParkedStatuses();
+    return;
   }
   if (reset) {
     await tearDownTerminals();
@@ -179,6 +187,73 @@ async function initLocalSide(reset: boolean): Promise<void> {
   workspace.activateLocal();
   await app.init();
   restoreParkedStatuses();
+  if (wantsGraft && device.active) void dialAndGraft(device.active);
+}
+
+// Dial a boite for dynamic mode without anything waiting on it. The socket is
+// kept on failure so its backoff loop owns the retrying, and the graft is armed
+// on the connection instead: a boite booted after the app still shows up, with
+// no toast and no button to press. Only a failure that leaves no socket (a
+// refused token, a URL nothing can dial) ends here.
+async function dialAndGraft(entry: BoiteEntry): Promise<void> {
+  disarmGraft();
+  try {
+    await workspace.createRemote(entry.url, entry.token, true);
+  } catch (err) {
+    logger.error("workspace", "dynamic dial failed", err);
+    if (workspace.remoteBackend) armGraft(entry);
+    return;
+  }
+  await graftRemote(entry);
+}
+
+// At most one armed graft: toggling dynamic mode off and on again re-dials, and
+// two watchers would graft the same boite twice.
+let armedGraft: (() => void) | null = null;
+
+function disarmGraft(): void {
+  armedGraft?.();
+  armedGraft = null;
+}
+
+// One-shot: graft as soon as the backoff loop lands the link.
+function armGraft(entry: BoiteEntry): void {
+  const off = workspace.onConnection((state) => {
+    if (state !== "connected") return;
+    disarmGraft();
+    void graftRemote(entry).catch((err) => {
+      logger.error("workspace", "deferred graft failed", err);
+    });
+  });
+  armedGraft = off;
+}
+
+// Merge a boite into the local workspace that is already running. Unlike
+// adoptRemote this resets no store, remounts no terminal and re-inits nothing:
+// the local rows, the live PTYs and the current selection all survive, and only
+// the boite's half is added.
+async function graftRemote(entry: BoiteEntry): Promise<void> {
+  // The world can move while a socket dials. A switch to pure remote, another
+  // boite picked, dynamic mode turned back off: grafting then would relabel a
+  // workspace nobody asked about.
+  if (!device.dynamicMode || workspace.mode !== "local") return;
+  if (device.active?.id !== entry.id || !workspace.remoteBackend) return;
+  workspace.activateDynamic();
+  workspace.setActiveBoite(entry.id);
+  // Seed the label/color from the device cache; fetchAndApplyMeta refreshes it.
+  workspace.info = {
+    name: entry.name || null,
+    color: entry.color || null,
+    version: entry.version || null,
+  };
+  await app.attachRemote();
+  // Same reason as adoptRemote: the dock's rows live in the half being grafted,
+  // and the socket only says that they changed, never what they are.
+  void approvals.reload();
+  void fetchAndApplyMeta();
+  // Fire-and-forget: this only subscribes an already-granted permission, so it
+  // costs nothing and prompts for nothing.
+  void registerPush();
 }
 
 // Flip the dynamic-mode preference. Applies immediately when sitting on the
