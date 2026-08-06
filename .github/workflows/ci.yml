@@ -86,6 +86,46 @@ jobs:
       - name: cargo test
         run: cargo test --workspace
 
+  # The desktop code the job above never compiles. `paint_frame_gap` is
+  # `#[cfg(windows)]` and the fullscreen observer is `#[cfg(target_os = "macos")]`,
+  # so a Linux `cargo check --workspace` type-checks neither, and the first thing
+  # that ever built them was the release bundle: after the tag, with the signing
+  # key already in play. A `windows` bump to a version tauri is not on did
+  # exactly that — every `win.hwnd()` call stopped compiling while ci stayed
+  # green — and nothing would have said so before the four platform runners
+  # started. Two `cargo check`s are cheaper than a release that fails half way.
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+      # Same reason as the rust job: the tauri build script resolves externalBin
+      # before compiling anything, so the sidecar has to exist under the host
+      # triple's name. A debug build satisfies it.
+      - name: Sidecar placeholder
+        shell: bash
+        run: |
+          cargo build -p boite-mcp
+          mkdir -p src-tauri/binaries
+          triple=$(rustc -vV | sed -n 's/^host: //p')
+          if [ "${{ runner.os }}" = "Windows" ]; then ext=".exe"; else ext=""; fi
+          cp "target/debug/boite-mcp$ext" "src-tauri/binaries/boite-mcp-$triple$ext"
+      - name: cargo check
+        run: cargo check -p boite --all-targets
+
   # The real-time path — spawn, live output, detach, replay on reattach, two
   # devices on one thread — is what a broken release breaks first, and no
   # #[test] covers it: rpc.rs, ws.rs and auth.rs have none between them. The
