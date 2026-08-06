@@ -176,11 +176,16 @@
       effort,
       prompts,
     };
+    // Read before closing, never after: the prop is a getter, and the launcher
+    // spells it `launcher.projectId` over state its own `onLaunched` sets to
+    // null. Reading it afterwards threw on every launch from the sidebar
+    // popover, which is a click that does nothing and says nothing.
+    const own = projectId;
     // Before the await, not after it: the combination is picked, so the menu has
     // nothing left to ask, and holding it open through a checkout reads as a
     // click that did nothing.
     onLaunched?.();
-    const target = projectId ?? (await launchTargetProjectId(forceScratch));
+    const target = own ?? (await launchTargetProjectId(forceScratch));
     if (!target) return;
     await launchFastpick(combo, harness, target);
   }
