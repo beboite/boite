@@ -1468,9 +1468,12 @@ import { projectDisplayName } from "$lib/shared/project-label";
     style:transform-origin={launcherPos.above ? "bottom center" : "top center"}
     transition:scale={{ duration: 90, start: 0.96 }}
   >
+    <!-- `projectId` is optional even under `{#if launcher}`: a prop is a getter,
+         and a consumer reading it after its own `onLaunched` has run reads it
+         against the null that callback just wrote. -->
     <ShortcutBar
       compact
-      projectId={launcher.projectId}
+      projectId={launcher?.projectId ?? null}
       onLaunched={() => (launcher = null)}
       onClose={() => (launcher = null)}
     />

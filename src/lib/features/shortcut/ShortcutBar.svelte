@@ -95,16 +95,20 @@
   );
 
   async function launchDefaultShell(forceScratch: boolean) {
+    // Same order as `pickShell` and the fastpick walk: the prop is a getter over
+    // the launcher's own state, and `onLaunched` is what clears it.
+    const own = projectId;
     onLaunched?.();
-    const target = projectId ?? (await launchTargetProjectId(forceScratch));
+    const target = own ?? (await launchTargetProjectId(forceScratch));
     if (!target) return;
     if (defaultShell) await launchShell(defaultShell, target);
     else await launchBlankTerminal(target);
   }
 
   async function pickShell(shell: ShellOption, forceScratch: boolean) {
+    const own = projectId;
     onLaunched?.();
-    const target = projectId ?? (await launchTargetProjectId(forceScratch));
+    const target = own ?? (await launchTargetProjectId(forceScratch));
     if (!target) return;
     await launchShell(shell, target);
   }
