@@ -22,6 +22,13 @@
   --color-danger: #f87171;
   --color-awake: #a855f7;
 
+  /* A sleeping row that has nothing to report: killed, or back from a restart.
+     The success hue taken dark and desaturated, so it still reads as a thread
+     rather than as chrome, and still loses to the mint green of one that
+     actually finished. Light enough to survive `--lit: 0.4`, which is where the
+     sleeping state sits: a forest green any darker is the card. */
+  --color-dormant: #35916a;
+
   /* Stacked surfaces (each ~3% lighter). */
   --color-titlebar: #060606;
   --color-surface: #131313;

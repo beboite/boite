@@ -43,21 +43,23 @@ describe("threadVisual", () => {
     });
   });
 
-  // Grey for both, `idle` included: after a restart every row is idle, and a
+  // Dormant for both, `idle` included: after a restart every row is idle, and a
   // thread that ended in a previous session left no word on how it ended.
-  // `stopped` is a thread that was killed, which completed nothing.
-  it("says nothing about a sleeping thread that never reported an ending", () => {
+  // `stopped` is a thread that was killed, which completed nothing. Neither
+  // earns the success green, and neither is grey: grey read as a row that had
+  // failed to draw, on a launch where every row is one of these two.
+  it("paints a sleeping thread that never reported an ending dormant, not grey", () => {
     for (const input of [
       { ...base, status: "stopped" },
       { ...base, status: "idle" },
     ] as const) {
-      expect(threadVisual(input)).toEqual({ state: "sleeping", tone: "neutral" });
+      expect(threadVisual(input)).toEqual({ state: "sleeping", tone: "dormant" });
     }
   });
 
-  // The one sleeping row that kept a colour. It is dimmed by `--lit` rather than
-  // by its tone, so "it is done" survives the idle timer and "it is done and it
-  // just happened" does not.
+  // The one sleeping row that keeps the bright colour. It is dimmed by `--lit`
+  // rather than by its tone, so "it is done" survives the idle timer and "it is
+  // done and it just happened" does not.
   it("keeps the green of a finished thread once the idle timer parks it", () => {
     expect(threadVisual({ ...base, status: "done", asleep: true })).toEqual({
       state: "sleeping",
