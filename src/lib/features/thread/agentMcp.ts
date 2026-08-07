@@ -20,11 +20,6 @@ export interface McpPaths {
   configPath: string;
   /** The shim binary itself, for agents that take a command. */
   sidecarPath: string;
-  /**
-   * Generated settings file carrying the lifecycle hooks. Only claude takes one
-   * at launch; the others keep hooks in a file of their own or have none.
-   */
-  settingsPath: string;
 }
 
 export type McpInjection = (paths: McpPaths) => string[];
@@ -34,16 +29,7 @@ const INJECTORS: Partial<Record<NonNullable<IconKey>, McpInjection>> = {
   // launches through a wrap shell, which re-quotes arguments and escapes `"` as
   // `\"` — accepted by POSIX shells, not by PowerShell. A path carries neither
   // quotes nor braces and survives all of them.
-  // Two files, two flags. `--settings` carries the Stop hook, which is what
-  // puts Boite in front of an agent ending a turn on top of work its worktree
-  // is about to throw away. Merged by claude on top of the user's own settings
-  // rather than replacing them.
-  claude: ({ configPath, settingsPath }) => [
-    "--mcp-config",
-    configPath,
-    "--settings",
-    settingsPath,
-  ],
+  claude: ({ configPath }) => ["--mcp-config", configPath],
   // A per-invocation TOML override; codex has no file equivalent. The value
   // carries quotes, which is why this waited on the wrap shell learning to
   // quote for PowerShell — before that it was silently broken on Windows only.

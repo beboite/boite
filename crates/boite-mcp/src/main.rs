@@ -25,7 +25,6 @@
 //! still distinguishes them.
 
 mod call;
-mod hook;
 mod host;
 mod http;
 mod render;
@@ -107,18 +106,13 @@ fn negotiate(params: &Value) -> &'static str {
 }
 
 fn main() {
-    // One flag, before anything else: under `--hook stop` this process is not an
-    // MCP server at all. The agent's runner starts it, hands it one JSON object
-    // and reads one back, and the stdio loop below would sit there waiting for a
-    // `jsonrpc` line that is never coming.
+    // This binary answers no lifecycle hook. The guard stays because settings
+    // files written by older versions still name `--hook stop`, and reaching the
+    // stdio loop below would leave that process waiting for a `jsonrpc` line
+    // that is never coming. Silence and a zero exit is what every hook contract
+    // reads as "nothing to say".
     if std::env::args().nth(1).as_deref() == Some("--hook") {
-        match std::env::args().nth(2).as_deref() {
-            Some("stop") => hook::run(),
-            // Named rather than guessed: a runner asking for a lifecycle event
-            // this binary does not answer gets silence and a zero exit, which is
-            // what every hook contract reads as "nothing to say".
-            _ => std::process::exit(0),
-        }
+        std::process::exit(0);
     }
 
     // Resolved but not required. Exiting here would kill the connection during

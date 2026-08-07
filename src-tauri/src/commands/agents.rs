@@ -25,11 +25,6 @@ pub struct AgentMcpConfig {
     pub sidecar_path: String,
     /// Generated file to hand an agent that takes one at launch.
     pub config_path: String,
-    /// Generated settings file carrying the lifecycle hooks, for an agent that
-    /// takes one. Separate from `config_path` because they are two different
-    /// flags to two different readers: one describes a server, the other
-    /// describes what happens around a turn.
-    pub settings_path: String,
 }
 
 /// Prepares the MCP server definition agents are pointed at, and returns where
@@ -79,84 +74,10 @@ pub async fn agent_mcp_config(app: AppHandle) -> Result<AgentMcpConfig, String> 
     )
     .map_err(|e| format!("write mcp config: {e}"))?;
 
-    let settings_path = config_dir.join("settings-boite.json");
-    std::fs::write(
-        &settings_path,
-        serde_json::to_vec_pretty(&stop_hook(&sidecar))
-            .map_err(|e| format!("serialize: {e}"))?,
-    )
-    .map_err(|e| format!("write agent settings: {e}"))?;
-
     Ok(AgentMcpConfig {
         sidecar_path: sidecar.to_string_lossy().into_owned(),
         config_path: config_path.to_string_lossy().into_owned(),
-        settings_path: settings_path.to_string_lossy().into_owned(),
     })
-}
-
-/// The settings document that puts Boite in front of an agent ending its turn.
-///
-/// One hook, and it is the same binary the agent already has as an MCP server:
-/// it reads the same environment, proves itself with the same key, and asks the
-/// endpoint whether this thread is leaving anything behind. See
-/// `boite_core::finish` for what counts and `boite-mcp`'s `hook` module for the
-/// rails that stop it from ever holding an agent.
-///
-/// The command is built as one quoted string rather than a program and an
-/// argument list, because that is the shape every runner's hook contract takes.
-/// The quoting is the shell's, not JSON's: the program lives under `Program
-/// Files` on Windows, where an unquoted path runs the wrong half of itself, and
-/// the separators must reach the shell as single backslashes. Escaping them here
-/// with `serde_json` would double them, because the writer escapes the value
-/// again on its way into the file.
-fn stop_hook(sidecar: &Path) -> serde_json::Value {
-    let quoted = format!("\"{}\"", sidecar.to_string_lossy().replace('"', "\\\""));
-    serde_json::json!({
-        "hooks": {
-            "Stop": [{
-                "hooks": [{
-                    "type": "command",
-                    "command": format!("{quoted} --hook stop"),
-                    // Short on purpose: the answer is three git calls on a
-                    // worktree that is already warm, and a hook that hangs is a
-                    // turn that hangs. Past it the runner carries on, which is
-                    // the same thing every other failure here does.
-                    "timeout": 10
-                }]
-            }]
-        }
-    })
-}
-
-#[cfg(test)]
-mod hook_tests {
-    use super::stop_hook;
-    use std::path::Path;
-
-    /// The path is quoted, because on Windows the shim sits under a directory
-    /// with a space in it and an unquoted command line runs the wrong half.
-    #[test]
-    fn the_command_survives_a_path_with_a_space() {
-        let value = stop_hook(Path::new(r"C:\Program Files\Boite\boite-mcp.exe"));
-        let command = value["hooks"]["Stop"][0]["hooks"][0]["command"]
-            .as_str()
-            .unwrap();
-        assert!(command.starts_with('"'), "{command}");
-        assert!(command.ends_with(r#".exe" --hook stop"#), "{command}");
-    }
-
-    /// A backslash separator is escaped once, not doubled again by the writer:
-    /// the value is a JSON string and `to_vec_pretty` escapes what it is given.
-    #[test]
-    fn a_windows_separator_is_escaped_exactly_once() {
-        let value = stop_hook(Path::new(r"C:\Boite\boite-mcp.exe"));
-        let written = serde_json::to_string(&value).unwrap();
-        let read: serde_json::Value = serde_json::from_str(&written).unwrap();
-        assert_eq!(
-            read["hooks"]["Stop"][0]["hooks"][0]["command"],
-            r#""C:\Boite\boite-mcp.exe" --hook stop"#
-        );
-    }
 }
 
 /// Registers the shim with an agent that keeps its MCP servers in a config

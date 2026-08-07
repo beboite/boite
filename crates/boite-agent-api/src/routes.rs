@@ -60,7 +60,6 @@ pub fn router(workspace: Shared) -> Router {
         .route("/v1/transcript", get(transcript))
         .route("/v1/search", get(search))
         .route("/v1/timeline", get(timeline))
-        .route("/v1/finish", get(finish))
         .layer(axum::middleware::from_fn_with_state(
             workspace.clone(),
             crate::auth::identify,
@@ -520,52 +519,6 @@ async fn timeline(
     })
     .await?;
     Ok(Json(json!({ "moments": moments })))
-}
-
-/// Whether this thread is done, or only says it is.
-///
-/// Read at the one moment nothing else in the app is watching: an agent ending
-/// its turn. Its worktree is detached and a detached worktree is discarded when
-/// the thread closes, so this is the last chance to say that the diff is
-/// somewhere nobody else will ever see it.
-///
-/// Never a refusal. A caller with no terminal, a thread with no worktree, a
-/// directory git will not answer for: all of them come back with an empty list,
-/// because the hook on the other end turns anything it does not understand into
-/// "carry on" and an error here would only be a slower way of saying that. See
-/// `boite_core::finish` for the rails.
-async fn finish(
-    State(workspace): State<Shared>,
-    Extension(caller): Extension<Caller>,
-) -> Result<Json<Value>, StatusCode> {
-    let worktree = caller
-        .thread_id
-        .as_deref()
-        .filter(|id| !id.is_empty())
-        .and_then(|id| workspace.store().worktree_of_thread(id))
-        .map(|(_, worktree)| worktree);
-    // A thread running in the project folder itself is standing in the user's
-    // own checkout. Its uncommitted files are the user's, and objecting about
-    // them would be Boite telling somebody to commit their own work in progress.
-    let Some(worktree) = worktree else {
-        return Ok(Json(json!({ "objections": [] })));
-    };
-    let loose = blocking(move || {
-        let hold = git::worktree_hold_blocking(&worktree).ok();
-        let info = git::repo_info_blocking(&worktree).ok();
-        let (unshared, has_remote) = git::unshared_commits_blocking(&worktree).unwrap_or((0, false));
-        boite_core::finish::Loose {
-            dirty: hold.as_ref().map(|h| h.dirty).unwrap_or(false),
-            orphan_commits: hold.map(|h| h.orphan_commits).unwrap_or(false),
-            branch: info.and_then(|i| i.branch),
-            unshared,
-            has_remote,
-        }
-    })
-    .await?;
-    let objections = boite_core::finish::objections(&loose);
-    let reason = boite_core::finish::reason(&objections);
-    Ok(Json(json!({ "objections": objections, "reason": reason })))
 }
 
 // ------------------------------------------------------------ worktrees
