@@ -6,6 +6,7 @@ import { device } from "$lib/features/settings/device.svelte";
 import { isFinished } from "$lib/domain/thread-status";
 import { isRenamed } from "$lib/features/thread/renamed";
 import { noteStatusChange } from "$lib/features/thread/finished.svelte";
+import { announceStatus } from "$lib/features/thread/statusEngine";
 import { todos } from "$lib/features/todo/store.svelte";
 import { approvals } from "$lib/features/approvals/store.svelte";
 import { refreshRemoteProjects, resyncFromServer } from "./hydrate";
@@ -34,6 +35,14 @@ export function applyControlEvent(app: AppState, ev: ControlEvent) {
       if (!thread) return;
       const incomingStatus = (data?.status as Thread["status"]) ?? thread.status;
       noteStatusChange(thread.id, thread.status, incomingStatus);
+      // The other half of the same repetition. `statusEngine` skips every
+      // thread whose backend owns its own status, so the two notifications it
+      // raises were unreachable for a boite's threads: a desktop connected to
+      // one got no toast when an agent finished or put a dialog up, and it has
+      // no web push either. Called with the pushed status rather than the
+      // stored one, and it keeps its own record of what each thread last read,
+      // so the first event about a thread is a reading and says nothing.
+      announceStatus(thread, incomingStatus);
       thread.status = incomingStatus;
       thread.exitCode = (data?.exitCode as number | null) ?? null;
       // Four statuses, not three. `stopped` used to be missing here and nowhere

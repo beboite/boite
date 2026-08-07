@@ -80,6 +80,31 @@ describe("classifyBrowserUrl", () => {
   it("answers with the parsed form, not the string it was handed", () => {
     expect(allowed("  HTTP://LocalHost:3000  ").url).toBe("http://localhost:3000/");
   });
+
+  it("refuses loopback that another machine wrote", () => {
+    const other = { requesterIsThisMachine: false };
+    for (const raw of [
+      "http://localhost:5173/",
+      "http://127.0.0.1:8080/",
+      "http://[::1]:3000/",
+      "https://localhost:5173/",
+    ]) {
+      const target = classifyBrowserUrl(raw, other);
+      expect(target.ok).toBe(false);
+      if (!target.ok) expect(target.reason).toBe("otherMachine");
+    }
+  });
+
+  it("leaves a real host alone whoever wrote it", () => {
+    const other = { requesterIsThisMachine: false };
+    const target = classifyBrowserUrl("https://example.com/", other);
+    expect(target.ok).toBe(true);
+    if (target.ok) expect(target.local).toBe(false);
+  });
+
+  it("keeps loopback local by default, which is every address this window produces", () => {
+    expect(allowed("http://localhost:5173/").local).toBe(true);
+  });
 });
 
 describe("isLocalPage", () => {

@@ -20,8 +20,8 @@
 </script>
 
 <script lang="ts">
-  import { onMount } from "svelte";
   import { app } from "$lib/app/store.svelte";
+  import { workspace } from "$lib/backend";
   import { settings } from "$lib/features/settings/store.svelte";
   import { notifications } from "$lib/features/notifications/store.svelte";
   import { logger } from "$lib/shared/services/logger.svelte";
@@ -29,6 +29,7 @@
     agentAcceptsInjection,
     agentApiReady,
     agentCredentialsPath,
+    agentHostFor,
     agentIsInstalled,
     agentSetupSnippet,
     agentSetupTarget,
@@ -39,7 +40,7 @@
   } from "$lib/features/thread/agentMcp";
   import { writeText } from "$lib/platform/clipboard";
   import { t } from "$lib/i18n/index.svelte";
-  import type { Project } from "$lib/types";
+  import type { Project, WorkspaceOrigin } from "$lib/types";
 
   /**
    * Which agents can reach this project's MCP endpoint, and what is left to do
@@ -58,6 +59,12 @@
   let { project, onPending }: Props = $props();
 
   const projectId = $derived(project?.id ?? null);
+  // Every answer below is a property of the machine that spawns this project's
+  // agents, and this window can only ask one machine. The card used to mix the
+  // two: a local shim path, a local credentials file and a local endpoint's
+  // health beside one answer that had come from the boite.
+  const origin = $derived(project?.origin);
+  const host = $derived(agentHostFor(origin));
 
   let shimPath = $state<string | null>(null);
   let endpointUp = $state(true);
@@ -96,13 +103,35 @@
   // changes rather than once on mount.
   $effect(() => {
     const id = projectId;
+    const at = origin;
     if (!id) {
       credsPath = null;
       return;
     }
     let cancelled = false;
-    void agentCredentialsPath(id).then((p) => {
+    void agentCredentialsPath(id, at).then((p) => {
       if (!cancelled) credsPath = p;
+    });
+    return () => {
+      cancelled = true;
+    };
+  });
+
+  // The shim and the endpoint belong to a machine, not to a project, but which
+  // machine changes with the project in dynamic mode. On mount alone they were
+  // read once, against whichever project happened to be up first.
+  $effect(() => {
+    const at = origin;
+    if (host !== "here") {
+      shimPath = null;
+      return;
+    }
+    let cancelled = false;
+    void mcpPaths(at).then((p) => {
+      if (!cancelled) shimPath = p?.sidecarPath ?? null;
+    });
+    void agentApiReady(at).then((up) => {
+      if (!cancelled) endpointUp = up;
     });
     return () => {
       cancelled = true;
@@ -125,14 +154,21 @@
     );
   }
 
-  async function resolveAgents(rows: AgentRow[], id: string, cwd: string | null) {
-    const present = await Promise.all(rows.map((r) => agentIsInstalled(r.cmd)));
+  async function resolveAgents(
+    rows: AgentRow[],
+    id: string,
+    cwd: string | null,
+    at: WorkspaceOrigin | undefined,
+  ) {
+    const present = await Promise.all(rows.map((r) => agentIsInstalled(r.cmd, at)));
     const here = rows.filter((_, i) => present[i]);
     // Only the ones Boite cannot wire at launch have a config to look into;
     // claude and codex are handed everything and keep nothing on disk.
     const regs = await Promise.all(
       here.map((r) =>
-        r.auto ? Promise.resolve("this" as const) : agentRegistration(r.key as never, id, cwd),
+        r.auto
+          ? Promise.resolve("this" as const)
+          : agentRegistration(r.key as never, id, cwd, at),
       ),
     );
     return here.map((r, i) => ({ ...r, reg: regs[i] }));
@@ -142,14 +178,18 @@
     const rows = candidates;
     const id = projectId;
     const cwd = project?.cwd ?? null;
-    if (!id) {
+    const at = origin;
+    // Nothing to resolve for a machine that cannot be asked, and nothing worth
+    // putting on a five-second timer either: the poll exists to notice a config
+    // file the user edited outside Boite, and there is no such file here.
+    if (!id || host !== "here") {
       agentsHere = [];
       return;
     }
     agentsHere = lastAgentRows.get(id) ?? [];
     let cancelled = false;
     const run = () =>
-      void resolveAgents(rows, id, cwd).then((next) => {
+      void resolveAgents(rows, id, cwd, at).then((next) => {
         lastAgentRows.set(id, next);
         // The poll below re-answers the same question every five seconds and
         // the answer almost never changes. Assigning anyway would rebuild this
@@ -174,8 +214,12 @@
   // Agents still waiting on the user. An unreachable endpoint or a missing shim
   // counts too: nothing works in either case, and the row saying so is the only
   // place that says it.
+  //
+  // A boite counts as nothing. Pending means there is something to do from
+  // here, and there is not: the wiring happens on that machine. A badge that
+  // can never reach zero is a badge people stop reading.
   const pending = $derived.by(() => {
-    if (!settings.state.agentTodoAccess) return 0;
+    if (!settings.state.agentTodoAccess || host !== "here") return 0;
     if (shimPath === null || !endpointUp) return 1;
     return agentsHere.filter((a) => a.reg !== "this").length;
   });
@@ -219,7 +263,7 @@
   async function addToAgent(label: string, cli: string) {
     adding = cli;
     try {
-      await registerAgentMcp(cli);
+      await registerAgentMcp(cli, origin);
       notifications.success(t("todo.agentAdded", { agent: label }));
     } catch (err) {
       notifications.error(t("todo.agentAddFailed", { agent: label, error: String(err) }));
@@ -227,15 +271,18 @@
       adding = null;
     }
   }
-
-  onMount(() => {
-    void mcpPaths().then((p) => (shimPath = p?.sidecarPath ?? null));
-    void agentApiReady().then((up) => (endpointUp = up));
-  });
 </script>
 
 {#if !settings.state.agentTodoAccess}
   <p class="text-xs text-muted-foreground">{t("todo.agentOff")}</p>
+{:else if host !== "here"}
+  <!-- Said rather than answered. The shim, the credentials file and the
+       endpoint are three files on the machine that spawns, and nothing in the
+       transport carries any of the three, so every row below would have been
+       this device's answer wearing the boite's name. -->
+  <p class="text-xs leading-snug text-muted-foreground">
+    {t("todo.agentOnBoite", { name: workspace.info.name || "boite" })}
+  </p>
 {:else if shimPath === null}
   <p class="text-xs text-muted-foreground">{t("todo.agentUnavailable")}</p>
 {:else if !endpointUp}

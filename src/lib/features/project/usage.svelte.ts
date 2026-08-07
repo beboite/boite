@@ -78,9 +78,11 @@ class ProjectUsageStore {
         USAGE_DAYS,
       );
     } catch {
-      // Nothing to say that an empty card does not already say: the stores are
-      // read-only files that either parse or do not.
-      this.#reports[project.id] = EMPTY;
+      // The stores were not walked, so this holds no reading of them. The bare
+      // EMPTY it used to hold is a machine that has spent nothing, which is a
+      // fact, and a failed read is not that fact. Same shape a transport that
+      // could not reach the boite hands back, so both draw the same.
+      this.#reports[project.id] = { ...EMPTY, unreachable: true };
     } finally {
       delete this.#loading[project.id];
     }

@@ -1,4 +1,5 @@
 import { backendForPath } from "$lib/backend";
+import type { CommitStateAnswer } from "$lib/backend/types";
 
 export interface RepoInfo {
   isRepo: boolean;
@@ -73,7 +74,16 @@ export function gitRepoInfo(path: string): Promise<RepoInfo> {
   return backendForPath(path).git.repoInfo(path);
 }
 
-export function gitCommitState(path: string, sha: string): Promise<CommitState> {
+/**
+ * The transport's whole answer, `unreachable` included. Annotated
+ * `Promise<CommitState>` this compiled against every backend and narrowed the
+ * flag off on the way out, so the one caller that has to tell "git said no"
+ * apart from "nobody asked git" never saw which of the two it had.
+ */
+export function gitCommitState(
+  path: string,
+  sha: string,
+): Promise<CommitStateAnswer> {
   return backendForPath(path).git.commitState(path, sha);
 }
 

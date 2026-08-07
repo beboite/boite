@@ -75,10 +75,22 @@ class Workspace {
     for (const cb of this.#connWatchers) cb(s);
   }
 
-  // The workspace-global transport: settings, logs, shell lists. In dynamic
-  // mode the local device stays authoritative for those.
+  // The workspace-global transport: settings, shell lists, anything that
+  // describes the machine the threads run on. In dynamic mode the local device
+  // stays authoritative for those.
+  //
+  // This is not the transport for anything describing the machine the user is
+  // sitting at. Those ask `local()`, whatever the mode.
   current(): Backend {
     return this.mode === "remote" && this.#remote ? this.#remote : this.#local;
+  }
+
+  // This device, always. App logs are the reason it exists: they are written
+  // by this window about this window, and routing them through `current()`
+  // handed every line to a remote stub that dropped it, so the desktop's own
+  // log file stopped recording for as long as a boite was connected.
+  local(): Backend {
+    return this.#local;
   }
 
   // Route by an entity's origin tag. Outside dynamic mode this is current(),
@@ -213,6 +225,11 @@ export const workspace = new Workspace();
 
 export function backend(): Backend {
   return workspace.current();
+}
+
+/** The transport for this device, never the boite. See `Workspace.local`. */
+export function localBackend(): Backend {
+  return workspace.local();
 }
 
 export function backendFor(origin: WorkspaceOrigin | undefined): Backend {

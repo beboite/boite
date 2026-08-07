@@ -1,4 +1,5 @@
-import type { ControlEvent } from "../types";
+import type { ControlEvent, ServerIdentity } from "../types";
+import type { Platform } from "$lib/storage/platform.svelte";
 
 export type ConnState = "connecting" | "connected" | "disconnected";
 
@@ -37,6 +38,70 @@ const RPC_TIMEOUT = 20_000;
 const CONNECT_TIMEOUT = 12_000;
 const BACKOFF_MIN = 500;
 const BACKOFF_MAX = 30_000;
+
+/**
+ * The calls twenty seconds is the wrong number for, and what each one is
+ * actually waiting on.
+ *
+ * One flat ceiling treats a question about a directory and a `git push` over a
+ * mobile link as the same kind of work. They are not, and the failure was not
+ * symmetric: a slow read that times out is a read to ask again, while a write
+ * that times out is reported as a write that did not happen. A push that landed
+ * at twenty-one seconds came back as an error, and the branch was on the remote
+ * the whole time.
+ *
+ * Every entry is a ceiling on something the boite does with a disk or a network,
+ * never a target. Nothing here waits the full amount in the ordinary case.
+ */
+const RPC_TIMEOUTS: Record<string, number> = {
+  // Who the boite is, on a socket that is already open. Held short on purpose:
+  // the handshake waits for it, so a server that will not answer must cost the
+  // connection a few seconds rather than the flat ceiling.
+  hello: 5_000,
+  // A year of transcripts, per directory: a directory walk, a SQLite open each
+  // for codex and opencode, and up to a 256 KiB read per session. `USAGE_DAYS`
+  // is 371, and a boite that has been worked in all year has thousands.
+  "session.usage": 180_000,
+  // Objects over whatever link the boite has to the forge. Nothing bounds this
+  // but the size of what is being sent.
+  "git.push": 300_000,
+  "git.pull": 300_000,
+  "git.fetch": 300_000,
+  // `git worktree add`, plus the junctions it makes, against a cold repository.
+  // This is the call a new agent thread waits on before it has a directory.
+  "worktree.open": 120_000,
+  // Walks every file of every checkout of the repository.
+  "worktree.sizes": 120_000,
+};
+
+function rpcTimeout(method: string): number {
+  return RPC_TIMEOUTS[method] ?? RPC_TIMEOUT;
+}
+
+/**
+ * `hello`, as far as it can be trusted. Every field but the protocol is read
+ * defensively and left null when it is not there: a server built before this
+ * answered with `{ ok, protocol }` and nothing else, and null is what draws as
+ * "it did not say" rather than as a machine named `undefined`.
+ */
+function readIdentity(r: unknown): ServerIdentity {
+  const d = (r ?? {}) as {
+    protocol?: unknown;
+    version?: unknown;
+    platform?: unknown;
+    host?: unknown;
+  };
+  const os = d.platform;
+  return {
+    protocol: typeof d.protocol === "number" ? d.protocol : 0,
+    version: typeof d.version === "string" && d.version ? d.version : null,
+    platform:
+      os === "windows" || os === "macos" || os === "linux" || os === "unknown"
+        ? (os as Platform)
+        : null,
+    host: typeof d.host === "string" && d.host ? d.host : null,
+  };
+}
 
 // DecompressionStream is missing on some older WebKitGTK builds; only advertise
 // gzip support to the server when we can actually inflate.
@@ -102,6 +167,10 @@ export class Socket {
   // A refused token will be refused again, so the backoff loop stops rather
   // than hammering the boite with a credential it already said no to.
   #authRejected = false;
+  // What the boite answered `hello` with, re-read on every successful
+  // handshake: a server that was redeployed under a reconnect is a different
+  // build, and the previous one's version would outlive it otherwise.
+  #server: ServerIdentity | null = null;
   #nextId = 1;
   #pending = new Map<number, Pending>();
   #control = new Set<(e: ControlEvent) => void>();
@@ -140,6 +209,13 @@ export class Socket {
     return this.#authRejected;
   }
 
+  // Set before the state reaches "connected", so anything that reads this off a
+  // connected socket finds it there. Null is a socket that has never completed a
+  // handshake, or one whose `hello` failed.
+  get serverIdentity(): ServerIdentity | null {
+    return this.#server;
+  }
+
   connect(): Promise<void> {
     this.#closed = false;
     this.#authRejected = false;
@@ -168,6 +244,7 @@ export class Socket {
       this.#reconnectTimer = null;
     }
     this.#failAllPending(new Error("socket disposed"));
+    this.#server = null;
     this.#attached.clear();
     this.#offsets.clear();
     this.#pendingReplay.clear();
@@ -184,11 +261,12 @@ export class Socket {
       return Promise.reject(new Error("socket not open"));
     }
     const id = this.#nextId++;
+    const ceiling = rpcTimeout(method);
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.#pending.delete(id);
-        reject(new Error(`rpc timeout: ${method}`));
-      }, RPC_TIMEOUT);
+        reject(new Error(`rpc timeout: ${method} (${ceiling}ms)`));
+      }, ceiling);
       this.#pending.set(id, { resolve, reject, timer });
       ws.send(JSON.stringify({ id, method, params }));
     });
@@ -296,11 +374,22 @@ export class Socket {
 
       ws.onopen = () => {
         this.rpc("auth", { token: this.#token })
-          .then(() => {
+          .then(async () => {
             this.#backoff = BACKOFF_MIN;
-            this.#setState("connected");
+            // Asked here rather than by a caller, and asked again on every
+            // reconnect. It is one round trip on a socket that is already open,
+            // and it has to be in hand before the state says "connected":
+            // whatever reads the boite's version has that flag as its only
+            // reactive signal, and a `hello` that landed after it would never
+            // be looked at again. A failure costs the identity and not the
+            // connection: a server too old to answer is still a server.
+            const identity = this.rpc("hello")
+              .then((r) => readIdentity(r))
+              .catch(() => null);
             // Reconnect: re-attach everything. The server sends only the delta
             // since our tracked offset (full ring + reset if it rolled off).
+            // Fired, never awaited, so the replay is already on the wire while
+            // the answer above is still coming back.
             for (const [threadId, reg] of this.#attached) {
               this.rpc(
                 "thread.attach",
@@ -316,6 +405,12 @@ export class Socket {
                 reg.onLost?.();
               });
             }
+            this.#server = await identity;
+            // The connect timeout can have closed this socket while `hello` was
+            // out; `onclose` already published "disconnected" and dropped it.
+            // Calling `connected` on it now would light a link that is gone.
+            if (this.#ws !== ws) return;
+            this.#setState("connected");
             if (!settled) {
               settled = true;
               clearTimeout(connectTimer);

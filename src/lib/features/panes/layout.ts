@@ -19,7 +19,43 @@ import { leavesOf } from "./tree";
  * syncWithThreads as one leaf per thread. Device-scoped, like the sidebar width
  * and the zoom, because a layout describes this screen rather than the workspace.
  */
-export const PANES_KEY = "boite.panes";
+const PANES_KEY = "boite.panes";
+
+/**
+ * One key per workspace this device has arranged, rather than one key for all
+ * of them.
+ *
+ * A layout is device-scoped but its groups name projects, and project ids only
+ * mean anything in the database they came from. Under a single key, machine A's
+ * tree was re-hydrated onto machine B and `syncWithThreads` did not catch it:
+ * it prunes thread panes, and a panel-only group has zero thread leaves, so it
+ * survived with A's `projectId` and drew a git panel for a repository that is
+ * not there. The alternative was deleting the blob on every switch, which made
+ * every machine lose its arrangement to keep them from mixing.
+ *
+ * The mode is in the key as well as the boite, because dynamic shows a superset
+ * of what remote shows against the same boite: a dynamic layout restored into a
+ * pure remote workspace carries local groups the workspace does not have.
+ */
+export function panesKey(
+  mode: "local" | "remote" | "dynamic",
+  boiteId: string | null,
+): string {
+  if (mode === "local" || !boiteId) return PANES_KEY;
+  return `${PANES_KEY}:${mode}:${boiteId}`;
+}
+
+/** Drops every layout this device kept for a boite it no longer knows. */
+export function forgetPanesOf(boiteId: string): void {
+  if (typeof localStorage === "undefined") return;
+  for (const mode of ["remote", "dynamic"] as const) {
+    try {
+      localStorage.removeItem(panesKey(mode, boiteId));
+    } catch {
+      // A layout is not worth failing a removal over.
+    }
+  }
+}
 
 /**
  * A pane's content, one arm of the union at a time.
@@ -87,10 +123,10 @@ export function isPaneGroup(value: unknown): value is PaneGroup {
   return leavesOf(g.root as LayoutNode).includes(g.focusedPaneId);
 }
 
-export function loadSavedGroups(): PaneGroup[] {
+export function loadSavedGroups(key: string): PaneGroup[] {
   if (typeof localStorage === "undefined") return [];
   try {
-    const raw = localStorage.getItem(PANES_KEY);
+    const raw = localStorage.getItem(key);
     if (!raw) return [];
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];

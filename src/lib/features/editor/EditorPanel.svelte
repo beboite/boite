@@ -5,7 +5,7 @@
   import CodeMirror from "./CodeMirror.svelte";
   import PdfView from "./PdfView.svelte";
   import DiffView from "./DiffView.svelte";
-  import { revealItemInDir } from "$lib/platform/opener";
+  import { canRevealItem, revealItemInDir } from "$lib/platform/opener";
   import Save from "@lucide/svelte/icons/save";
   import FolderOpen from "@lucide/svelte/icons/folder-open";
   import FileText from "@lucide/svelte/icons/file-text";
@@ -102,16 +102,20 @@
       <span class="truncate flex-1" title={active.path}>{active.path}</span>
       <!-- Reveal, not open: `opener:allow-open-path` is not among the app's
            capabilities, and handing the OS an arbitrary path to run its default
-           handler on is a wider door than a preview button needs. -->
-      <button
-        type="button"
-        class="rounded p-1 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground"
-        onclick={() => active && void revealItemInDir(active.path)}
-        title={t("explorer.revealInFileManager")}
-        aria-label={t("explorer.revealInFileManager")}
-      >
-        <FolderOpen class="size-3.5" />
-      </button>
+           handler on is a wider door than a preview button needs.
+           Absent off this machine: the file manager is the local one and the
+           path would be the boite's. -->
+      {#if canRevealItem(active.path)}
+        <button
+          type="button"
+          class="rounded p-1 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground"
+          onclick={() => active && void revealItemInDir(active.path)}
+          title={t("explorer.revealInFileManager")}
+          aria-label={t("explorer.revealInFileManager")}
+        >
+          <FolderOpen class="size-3.5" />
+        </button>
+      {/if}
     </div>
     {#if active.media === "pdf"}
       <PdfView bytes={active.bytes} name={active.displayName} />

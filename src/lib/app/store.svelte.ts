@@ -300,9 +300,14 @@ export class AppState {
     await Promise.all([settings.init(), platform.init()]);
 
     if (settings.state.defaultShellId === null && platform.shells.length > 0) {
-      const preferred = platform.isWindows
-        ? ["pwsh", "powershell", "git-bash", "cmd"]
-        : ["zsh", "bash", "fish", "sh"];
+      // The order belongs to the OS that produced the list. A host that never
+      // answered gets no order at all rather than the POSIX one, which used to
+      // be applied to a Windows shell list whenever the probe had failed.
+      const preferred = !platform.hostKnown
+        ? []
+        : platform.isHostWindows
+          ? ["pwsh", "powershell", "git-bash", "cmd"]
+          : ["zsh", "bash", "fish", "sh"];
       const pick =
         preferred
           .map((id) => platform.shells.find((s) => s.id === id))
