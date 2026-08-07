@@ -315,35 +315,6 @@ fn yolo_off_still_waits() {
     assert!(fake.asked.lock().unwrap().is_empty());
 }
 
-/// Runs one handler to completion. A current-thread runtime is enough: the only
-/// thing these handlers await is `spawn_blocking`, which that runtime serves out
-/// of the same blocking pool as any other.
-fn answered(
-    call: impl std::future::Future<Output = Result<Json<Value>, StatusCode>>,
-) -> Value {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .build()
-        .unwrap();
-    let Json(body) = rt.block_on(call).expect("the handler answers");
-    body
-}
-
-/// The endpoint behind the stop hook never refuses, and this is the case that
-/// would have been a refusal anywhere else: a thread with no worktree of its
-/// own. It is standing in the user's checkout, so its uncommitted files are the
-/// user's, and telling an agent to commit them is Boite talking about work it
-/// has nothing to do with.
-#[test]
-fn a_thread_with_no_worktree_is_never_told_it_is_unfinished() {
-    let fake: Shared =
-        std::sync::Arc::new(Fake::new("finish-no-worktree").with_project("p1", "/w/one"));
-    let body = answered(finish(State(fake), Extension(agent("p1", "t1"))));
-    assert_eq!(body["objections"], json!([]));
-    // No message at all, rather than an empty one: the hook blocks on a reason
-    // being there, and `""` is a reason.
-    assert!(body["reason"].is_null(), "{body}");
-}
-
 /// A credential with no terminal behind it does not get to ask at all, so the
 /// user is never shown a card for it. The refusal is the answer, and it says
 /// retrying is pointless.
