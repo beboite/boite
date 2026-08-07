@@ -30,8 +30,8 @@ export type ThreadVisualState =
   | "sleeping"
   | "failed";
 
-/** Which of the palette's four status colours the row is painted in. */
-export type ThreadTone = "warning" | "success" | "danger" | "awake" | "neutral";
+/** Which of the palette's status colours the row is painted in. */
+export type ThreadTone = "warning" | "success" | "danger" | "awake" | "dormant";
 
 export interface ThreadVisual {
   state: ThreadVisualState;
@@ -48,21 +48,25 @@ export interface ThreadVisualInput {
 }
 
 /**
- * `neutral` is the muted text colour rather than the strong border one, and the
- * difference is the whole quiet end of the scale.
+ * `dormant` is a dark green rather than a grey, and the quiet end of the scale
+ * is the whole reason.
  *
- * A border colour is a hairline against a surface it is already almost the same
- * as: painted at the third of its strength a dormant row is worth, it is the
- * background. On a sidebar where five rows in twelve are asleep, that is a
- * column with holes in it, and a hole reads as a row that failed to draw rather
- * than as a row with nothing to say.
+ * Grey is what this app has nothing to say in, and it was carrying two things
+ * that are not nothing: a thread that was killed, and a thread that came back
+ * from a restart. On a sidebar where five rows in twelve are asleep, a grey
+ * column reads as rows that failed to draw rather than as rows at rest. The
+ * hue says "this is a thread"; the darkness is what keeps it from competing
+ * with the one that actually finished, which keeps the bright success green.
+ *
+ * It replaced the muted text colour, which had itself replaced the strong
+ * border colour for the same reason one step earlier.
  */
 export const TONE_COLOR: Record<ThreadTone, string> = {
   warning: "var(--color-warning)",
   success: "var(--color-success)",
   danger: "var(--color-danger)",
   awake: "var(--color-awake)",
-  neutral: "var(--color-muted-foreground)",
+  dormant: "var(--color-dormant)",
 };
 
 /**
@@ -84,9 +88,10 @@ export function threadVisual(input: ThreadVisualInput): ThreadVisual {
     case "exited":
     case "error":
       return { state: "failed", tone: "danger" };
-    // Killed rather than ended. Nothing was completed, so nothing is green.
+    // Killed rather than ended. Nothing was completed, so it does not get the
+    // green that means it was: it gets the dark one that means it is asleep.
     case "stopped":
-      return { state: "sleeping", tone: "neutral" };
+      return { state: "sleeping", tone: "dormant" };
     // A thread that finished and was then parked by the idle timer keeps the
     // colour it earned. What it loses is the brightness: `sleeping` is graded at
     // half of `finished`, so the row still answers "this one is done" to a
@@ -101,10 +106,12 @@ export function threadVisual(input: ThreadVisualInput): ThreadVisual {
       return { state: "ready", tone: keepAwake ? "awake" : "success" };
     default:
       // `idle` is a row with no process behind it, which after a restart is
-      // every row: they are asleep in the sense that matters here. Grey rather
-      // than green, because a thread that ended in a previous session left no
-      // word on how it ended and green would be a guess.
-      return { state: "sleeping", tone: "neutral" };
+      // every row: they are asleep in the sense that matters here. Dormant
+      // rather than grey. It was grey on the reasoning that a thread from a
+      // previous session left no word on how it ended, and the bright green
+      // would be a guess — but that argues against `success`, not against
+      // colour. Grey made the sidebar open with every row looking unpainted.
+      return { state: "sleeping", tone: "dormant" };
   }
 }
 
