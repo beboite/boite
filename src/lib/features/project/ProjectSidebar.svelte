@@ -1790,7 +1790,8 @@ import { projectDisplayName } from "$lib/shared/project-label";
      share a colour: a thread that finished and was then parked by the idle timer
      keeps its green and reads as the same fact an hour later, quieter. The tone
      is what separates it from a thread that was killed or that came back from a
-     restart with nothing to say, and those stay grey.
+     restart with nothing to say, and those take the dark green of `dormant`
+     rather than a grey.
      Half, not off: a column where one row in six has no outline at all reads as
      a row that failed to draw. */
   .thread-card.glow[data-state="sleeping"] {
