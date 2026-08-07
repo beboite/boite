@@ -22,12 +22,20 @@
   --color-danger: #f87171;
   --color-awake: #a855f7;
 
-  /* A sleeping row that has nothing to report: killed, or back from a restart.
-     The success hue taken dark and desaturated, so it still reads as a thread
+  /* A thread the idle timer put to sleep during this run of the app. The
+     success hue taken dark and desaturated, so it still reads as a thread
      rather than as chrome, and still loses to the mint green of one that
      actually finished. Light enough to survive `--lit: 0.4`, which is where the
      sleeping state sits: a forest green any darker is the card. */
   --color-dormant: #35916a;
+
+  /* The other sleeping rows: killed by hand, or back from a restart. They are
+     asleep as well, and nothing recorded how they got there — `autoSlept` lives
+     in memory, so only a sleep this run of the app watched can be claimed. A
+     step further down the same hue rather than a grey: grey is what this app
+     has nothing to say in, and a launch where every row is one of these read as
+     a column that had failed to draw. */
+  --color-parked: #3d6b57;
 
   /* Stacked surfaces (each ~3% lighter). */
   --color-titlebar: #060606;

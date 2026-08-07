@@ -16,6 +16,18 @@ describe("threadVisual", () => {
     expect(threadVisual({ ...base, status: "stopped" }).state).toBe("sleeping");
   });
 
+  it("gives the idle timer's sleep its own green, and only for this session", () => {
+    // Put to sleep by the timer, here and now.
+    expect(threadVisual({ ...base, status: "stopped", asleep: true }).tone).toBe(
+      "dormant",
+    );
+    // Killed by hand, which is not falling asleep.
+    expect(threadVisual({ ...base, status: "stopped" }).tone).toBe("parked");
+    // Back from a previous run: `asleep` lives in memory, so it is false and the
+    // row cannot claim a sleep this run never watched.
+    expect(threadVisual({ ...base, status: "idle" }).tone).toBe("parked");
+  });
+
   it("keeps the amber of a turn in flight whatever keep-awake says", () => {
     for (const status of ["running", "waiting"] as const) {
       expect(threadVisual({ ...base, status, keepAwake: true }).tone).toBe("warning");
@@ -43,17 +55,17 @@ describe("threadVisual", () => {
     });
   });
 
-  // Dormant for both, `idle` included: after a restart every row is idle, and a
+  // Parked for both, `idle` included: after a restart every row is idle, and a
   // thread that ended in a previous session left no word on how it ended.
-  // `stopped` is a thread that was killed, which completed nothing. Neither
-  // earns the success green, and neither is grey: grey read as a row that had
-  // failed to draw, on a launch where every row is one of these two.
-  it("paints a sleeping thread that never reported an ending dormant, not grey", () => {
+  // `stopped` without the flag is a thread that was killed, which completed
+  // nothing. Neither earns the success green, and neither is grey: grey read as
+  // a row that had failed to draw, on a launch where every row is one of these.
+  it("paints a sleeping thread that never reported an ending green, not grey", () => {
     for (const input of [
       { ...base, status: "stopped" },
       { ...base, status: "idle" },
     ] as const) {
-      expect(threadVisual(input)).toEqual({ state: "sleeping", tone: "dormant" });
+      expect(threadVisual(input)).toEqual({ state: "sleeping", tone: "parked" });
     }
   });
 

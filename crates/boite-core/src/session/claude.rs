@@ -361,12 +361,19 @@ pub fn find_claude_session_blocking(
     // fails: two claude in one directory write their transcripts at the same
     // moments, so neither is attributable by timestamp and neither ever binds.
     // A pid settles it, however many neighbours there are.
-    let own_session: Option<String> = own_pid.and_then(|pid| {
-        registry
-            .iter()
-            .find(|s| s.pid == pid)
-            .map(|s| s.id.clone())
-    });
+    //
+    // "Ours" is the whole process tree under the PTY, never the one pid it
+    // spawned. A launcher is not the agent: `fastpick` resolves a harness and
+    // then runs claude, so the pid in the registry is a child of the pid the PTY
+    // reports, and a wrap shell adds another level. Compared as equals, a
+    // fastpick thread was never named by the registry, so it fell back to the
+    // guess below and its own live session was skipped by the filter after it.
+    let tree = own_pid.map(ProcessTree::rooted_at);
+    let ours = |pid: u32| tree.as_ref().is_some_and(|t| t.contains(pid));
+    let own_session: Option<String> = registry
+        .iter()
+        .find(|s| ours(s.pid))
+        .map(|s| s.id.clone());
 
     // A session held by our own PTY's process is not a reason to skip: it is
     // the thread's session, and the whole point of the scan is to bind it.
@@ -376,7 +383,7 @@ pub fn find_claude_session_blocking(
     // re-asked at launch by buildResumeArgsAsync.
     let live: HashSet<String> = registry
         .into_iter()
-        .filter(|s| own_pid.is_none_or(|p| s.pid != p))
+        .filter(|s| !ours(s.pid))
         .map(|s| s.id)
         .collect();
 

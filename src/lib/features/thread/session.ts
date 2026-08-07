@@ -6,7 +6,21 @@ import { logger } from "$lib/shared/services/logger.svelte";
 import { settings } from "$lib/features/settings/store.svelte";
 import { mcpArgsFor } from "./agentMcp";
 import { stageTypedPrompt } from "./typedPrompt";
+import {
+  agentsViewArgv,
+  joinArgv,
+  resumeArgv,
+  withMcpArgs,
+  withPromptArg,
+  withoutAgentFlag,
+  type AgentArgv,
+} from "./resume-args";
 import type { IconKey, Thread } from "$lib/types";
+
+// The pure half of resuming lives in `resume-args.ts`. Re-exported so callers
+// keep asking the session module, which is where the question belongs.
+export { takesOpeningPrompt } from "./resume-args";
+export type { ResumeBuilder } from "./resume-args";
 
 // mtimeMs is the session file's last-write time when the backend can provide
 // it; the monitor uses it to attribute the file to the thread whose PTY was
@@ -66,129 +80,6 @@ export function getDetector(thread: Thread): SessionDetector | null {
   if (!key) return null;
   return detectors[key] ?? null;
 }
-
-export type ResumeBuilder = (
-  args: string[],
-  sessionId: string,
-) => string[];
-
-const CODEX_NO_ALT_SCREEN = "--no-alt-screen";
-
-function stripFlag(args: string[], flags: string[], takesValue: boolean): string[] {
-  const out: string[] = [];
-  let skipNext = false;
-  for (const a of args) {
-    if (skipNext) {
-      skipNext = false;
-      continue;
-    }
-    if (flags.includes(a)) {
-      if (takesValue) skipNext = true;
-      continue;
-    }
-    if (flags.some((f) => a.startsWith(`${f}=`))) continue;
-    out.push(a);
-  }
-  return out;
-}
-
-function withCodexNoAltScreen(args: string[]): string[] {
-  if (args.includes(CODEX_NO_ALT_SCREEN)) return args;
-  return [CODEX_NO_ALT_SCREEN, ...args];
-}
-
-function withGrokContinue(args: string[]): string[] {
-  if (
-    args.includes("--continue") ||
-    args.includes("-c") ||
-    args.includes("--resume") ||
-    args.includes("-r")
-  ) {
-    return args;
-  }
-  return [...args, "--continue"];
-}
-
-function withOpencodeContinue(args: string[]): string[] {
-  if (
-    args.includes("--continue") ||
-    args.includes("-c") ||
-    args.includes("--session") ||
-    args.includes("-s")
-  ) {
-    return args;
-  }
-  return [...args, "--continue"];
-}
-
-function withAntigravityContinue(args: string[]): string[] {
-  if (
-    args.includes("--continue") ||
-    args.includes("-c") ||
-    args.includes("--conversation")
-  ) {
-    return args;
-  }
-  return [...args, "--continue"];
-}
-
-const builders: Partial<Record<NonNullable<IconKey>, ResumeBuilder>> = {
-  // claude --resume <id> picks a specific session.
-  claude: (args, sessionId) => {
-    const filtered = stripFlag(args, ["--resume", "-r"], true);
-    return [...filtered, "--resume", sessionId];
-  },
-  // codex resume <id> subcommand-form.
-  codex: (args, sessionId) => {
-    const stripped = args.filter(
-      (a) =>
-        a !== "resume" && a !== sessionId && a !== CODEX_NO_ALT_SCREEN,
-    );
-    return [CODEX_NO_ALT_SCREEN, ...stripped, "resume", sessionId];
-  },
-  // Current opencode uses --session <id>; strip legacy resume args too.
-  opencode: (args, sessionId) => {
-    const withoutContinue = stripFlag(args, ["--continue", "-c"], false);
-    const filtered = stripFlag(
-      withoutContinue,
-      ["--session", "-s", "--resume", "-r"],
-      true,
-    );
-    return [...filtered, "--session", sessionId];
-  },
-  // cursor-agent --resume <chat-id> picks a specific session.
-  cursor: (args, sessionId) => {
-    const filtered = stripFlag(args, ["--resume", "--continue"], true);
-    return [...filtered, "--resume", sessionId];
-  },
-  // agy --conversation <UUID> picks a specific conversation.
-  antigravity: (args, sessionId) => {
-    const withoutContinue = stripFlag(args, ["--continue", "-c"], false);
-    const filtered = stripFlag(withoutContinue, ["--conversation"], true);
-    return [...filtered, "--conversation", sessionId];
-  },
-  // `-r, --resume[=value]`: the value is optional, so it only attaches with an
-  // `=`. Space-separated, the flag opens the picker and the id falls through as
-  // a positional — which copilot then looks up as a session *name* and rejects:
-  // "No session, task, or name matched '<uuid>'". The id was never the problem.
-  copilot: (args, sessionId) => {
-    const filtered = stripFlag(args, ["--resume", "-r"], true);
-    return [...filtered, `--resume=${sessionId}`];
-  },
-  // grok --resume <id> picks a specific session; -c continues the latest
-  // session of the current directory.
-  grok: (args, sessionId) => {
-    const withoutContinue = stripFlag(args, ["--continue", "-c"], false);
-    const filtered = stripFlag(withoutContinue, ["--resume", "-r"], true);
-    return [...filtered, "--resume", sessionId];
-  },
-  // hermes --resume <id|title> picks a specific session.
-  hermes: (args, sessionId) => {
-    const withoutContinue = stripFlag(args, ["--continue", "-c"], false);
-    const filtered = stripFlag(withoutContinue, ["--resume", "-r"], true);
-    return [...filtered, "--resume", sessionId];
-  },
-};
 
 /**
  * Claude refuses `--resume` for a session it still has open: "That session is
@@ -275,103 +166,63 @@ async function liveClaudeSession(sessionId: string, cwd: string) {
 }
 
 /**
- * How this CLI takes an opening prompt, or null when it takes none.
- *
- * `claude [options] [prompt]` always does, resume included — but only behind a
- * `--`. Its `--mcp-config <configs...>` is variadic, so a bare positional after
- * it is read as a second config file and the launch dies on
- * "MCP config file not found: <the first word of the sentence>".
- *
- * `codex [options] [prompt]` takes one plainly (nothing in its argument list is
- * variadic), but only for a fresh session: its resume is the subcommand `codex
- * resume <id>`, which occupies the same position.
- *
- * Nothing else is listed. A guess here does not misfire quietly — it costs the
- * thread its whole launch — and the cost of being wrong the other way is one
- * agent that comes back up without being told why its folder changed.
- */
-function promptSeparator(key: IconKey, args: string[]): string[] | null {
-  if (key === "claude") return ["--"];
-  if (key === "codex") return args.includes("resume") ? null : [];
-  return null;
-}
-
-/**
- * Whether a thread started on this CLI would be handed an opening instruction.
- *
- * Asked before the launch, by `thread_spawn`: a new terminal that silently
- * drops the prompt it was opened for is a half-success dressed as a success —
- * the calling agent is told the work was handed off, and the thread it opened
- * sits at a bare prompt knowing nothing.
- */
-export function takesOpeningPrompt(key: IconKey): boolean {
-  // A fresh thread never carries a resume, which is the only thing that makes
-  // the positional ambiguous.
-  return promptSeparator(key, []) !== null;
-}
-
-/**
  * A line queued for this launch, appended last so it is what the agent opens
- * on. Consumed here rather than at the call site: `buildResumeArgs` owns the
+ * on. Consumed here rather than at the call site: `buildResumeArgv` owns the
  * first-spawn latch and both have to be read exactly once per spawn.
  */
-function withPendingPrompt(thread: Thread, key: IconKey, args: string[]): string[] {
+function withPendingPrompt(thread: Thread, key: IconKey, argv: AgentArgv): AgentArgv {
   const prompt = app.consumePendingPrompt(thread.id);
-  if (!prompt) return args;
-  const separator = promptSeparator(key, args);
-  if (separator === null) {
+  if (!prompt) return argv;
+  const next = withPromptArg(argv, key, prompt);
+  if (next.typed) {
     // Typed into the PTY once the terminal is up instead. Worse than a
     // positional — it races the CLI's own startup — but a thread that was
     // opened for something specific and never told what is worse still.
     stageTypedPrompt(thread.id, prompt);
-    return args;
   }
-  // Any newline would end the prompt and start typing the rest as a second
-  // one, so the whole briefing arrives as a single line.
-  return [...args, ...separator, prompt.replace(/\s*[\r\n]+\s*/g, " ").trim()];
+  return next.argv;
 }
 
 export async function buildResumeArgsAsync(thread: Thread, cwd: string): Promise<string[]> {
-  // Let the existing logic decide first — it owns the first-spawn latch, which
+  // Let the pure decision run first — it goes with the first-spawn latch, which
   // is consumed on read and must not be probed twice — then intervene only on
   // what it actually produced.
-  const base = buildResumeArgs(thread);
+  let argv = buildResumeArgv(thread);
   const key = resolveKey(thread);
   // Every agent that can take it gets todo access, resume or not: the endpoint
   // serves the project, and a fresh thread wants it as much as a resumed one.
   const mcp = await mcpArgsFor(key, settings.state.agentTodoAccess, cwd);
-  // Last, so the prompt stays a positional: an mcp flag appended after it would
-  // be read as part of the sentence.
-  const args = withPendingPrompt(thread, key, mcp.length > 0 ? [...base, ...mcp] : base);
+  argv = withMcpArgs(argv, mcp);
+  argv = withPendingPrompt(thread, key, argv);
 
   // A session copilot opened and never used is refused by id, and threads that
   // captured one before that was known still carry it. Replaying it costs the
   // launch and gains nothing; dropping the flag starts a session that can be
   // captured properly on the next scan.
   if (key === "copilot") {
-    const flag = args.find((a) => a.startsWith("--resume="));
-    if (!flag) return args;
+    const flag = argv.agent.find((a) => a.startsWith("--resume="));
+    if (!flag) return joinArgv(argv);
     const id = flag.slice("--resume=".length);
     const ok = await backendForPath(cwd)
       .session.copilotResumable(id)
       .catch(() => true);
-    if (ok) return args;
+    if (ok) return joinArgv(argv);
     logger.info(
       "resume",
       `${thread.id} (copilot): ${id} holds nothing to resume, starting fresh`,
       { cmd: thread.cmd },
     );
-    return args.filter((a) => a !== flag);
+    return joinArgv(withoutAgentFlag(argv, flag));
   }
 
-  if (key !== "claude") return args;
+  if (key !== "claude") return joinArgv(argv);
 
-  const at = args.indexOf("--resume");
-  const id = at >= 0 ? args[at + 1] : null;
-  if (!id) return args;
+  const at = argv.agent.indexOf("--resume");
+  const id = at >= 0 ? argv.agent[at + 1] : null;
+  if (!id) return joinArgv(argv);
 
   const live = await liveClaudeSession(id, cwd);
-  if (live === null) return args;
+  if (live === null) return joinArgv(argv);
 
   // Only a background session is reachable this way: `claude agents --cwd`
   // lists background sessions, so sending an interactive one there would open
@@ -384,7 +235,7 @@ export async function buildResumeArgsAsync(thread: Thread, cwd: string): Promise
       `${thread.id} (claude): session ${id} is live in another terminal, nothing to attach to`,
       { cmd: thread.cmd, kind: live.kind },
     );
-    return args;
+    return joinArgv(argv);
   }
 
   // An idle agent is holding the session without doing anything with it, and
@@ -401,7 +252,7 @@ export async function buildResumeArgsAsync(thread: Thread, cwd: string): Promise
         `${thread.id} (claude): released idle agent ${id}, resuming in place`,
         { cmd: thread.cmd },
       );
-      return args;
+      return joinArgv(argv);
     }
   }
 
@@ -416,79 +267,57 @@ export async function buildResumeArgsAsync(thread: Thread, cwd: string): Promise
   // Driving the picker with synthetic keystrokes was the alternative and is
   // not worth it: row order is not contractual, and a mistimed Enter would
   // dispatch something the user never asked for.
-  return ["agents", "--cwd", cwd];
+  return joinArgv(agentsViewArgv(argv, cwd));
 }
 
-function buildResumeArgs(thread: Thread): string[] {
+/**
+ * The two argument regions this thread comes back on, and one line in the log
+ * saying why. The decision itself is in `resume-args.ts`; what stays here is
+ * the latch, the store and the words.
+ */
+function buildResumeArgv(thread: Thread): AgentArgv {
   const key = resolveKey(thread);
-  if (!key) {
-    logger.debug("resume", `${thread.id}: no iconKey, skip`, {
-      cmd: thread.cmd,
-      label: thread.label,
-    });
-    return thread.args;
-  }
-  const builder = builders[key];
-  if (!builder) {
-    logger.debug("resume", `${thread.id}: no builder for ${key}`, {});
-    return thread.args;
-  }
-  const args = key === "codex" ? withCodexNoAltScreen(thread.args) : thread.args;
-  const isFreshFirstSpawn = app.consumeFresh(thread.id);
-  if (isFreshFirstSpawn) {
-    logger.info(
-      "resume",
-      `${thread.id} (${key}): first spawn, no resume`,
-      { cmd: thread.cmd },
-    );
-    return args;
-  }
-
-  if (!thread.sessionId) {
-    if (key === "opencode") {
-      const out = withOpencodeContinue(args);
+  const sessionId = thread.sessionId ?? null;
+  const { argv, outcome } = resumeArgv({
+    cmd: thread.cmd,
+    args: thread.args,
+    key,
+    sessionId,
+    fresh: app.consumeFresh(thread.id),
+  });
+  switch (outcome) {
+    case "no-builder":
+      logger.debug("resume", `${thread.id}: nothing resumes ${key ?? "this"}`, {
+        cmd: thread.cmd,
+        label: thread.label,
+      });
+      break;
+    case "fresh":
+      logger.info("resume", `${thread.id} (${key}): first spawn, no resume`, {
+        cmd: thread.cmd,
+      });
+      break;
+    case "continue-latest":
       logger.info(
         "resume",
         `${thread.id} (${key}): no captured session, continue latest`,
-        { cmd: thread.cmd, args: out },
+        { cmd: thread.cmd, args: argv.agent },
       );
-      return out;
-    }
-    // grok -c is scoped to the current directory, so continuing the latest
-    // session is safe even without a captured id. hermes -c is global (last
-    // session of any project), so it gets no fallback: wrong-project resumes
-    // are worse than a fresh session.
-    if (key === "grok") {
-      const out = withGrokContinue(args);
+      break;
+    case "no-session":
       logger.info(
         "resume",
-        `${thread.id} (${key}): no captured session, continue latest`,
-        { cmd: thread.cmd, args: out },
+        `${thread.id} (${key}): no captured session, spawn original command`,
+        { cmd: thread.cmd },
       );
-      return out;
-    }
-    if (key === "antigravity") {
-      const out = withAntigravityContinue(args);
+      break;
+    case "resumed":
       logger.info(
         "resume",
-        `${thread.id} (${key}): no captured session, continue latest`,
-        { cmd: thread.cmd, args: out },
+        `${thread.id} (${key}): respawn → ${thread.cmd} ${joinArgv(argv).join(" ")}`,
+        { sessionId, exitCode: thread.exitCode },
       );
-      return out;
-    }
-    logger.info(
-      "resume",
-      `${thread.id} (${key}): no captured session, spawn original command`,
-      { cmd: thread.cmd },
-    );
-    return args;
+      break;
   }
-
-  const out = builder(args, thread.sessionId);
-  logger.info(
-    "resume",
-    `${thread.id} (${key}): respawn → ${thread.cmd} ${out.join(" ")}`,
-    { sessionId: thread.sessionId, exitCode: thread.exitCode },
-  );
-  return out;
+  return argv;
 }
