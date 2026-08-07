@@ -282,12 +282,12 @@ impl PtyManager {
         if self.which_cache.lock().contains_key(cmd) {
             return true;
         }
-        match which::which(cmd) {
-            Ok(path) => {
+        match crate::shell::resolve_command(cmd) {
+            Some(path) => {
                 self.which_cache.lock().insert(cmd.to_string(), path);
                 true
             }
-            Err(_) => false,
+            None => false,
         }
     }
 
@@ -337,17 +337,22 @@ impl PtyManager {
             .unwrap_or_default()
     }
 
+    /// The absolute path behind `cmd`, or `cmd` itself when nothing answers.
+    ///
+    /// Same resolver as `is_on_path` and as `shell::command_exists`, which is
+    /// the point: a name one of them finds and another does not is a spawn that
+    /// contradicts the check that permitted it.
     fn resolve_cmd(&self, cmd: &str) -> String {
         if let Some(hit) = self.which_cache.lock().get(cmd) {
             return hit.to_string_lossy().into_owned();
         }
-        match which::which(cmd) {
-            Ok(path) => {
+        match crate::shell::resolve_command(cmd) {
+            Some(path) => {
                 let resolved = path.to_string_lossy().into_owned();
                 self.which_cache.lock().insert(cmd.to_string(), path);
                 resolved
             }
-            Err(_) => cmd.to_string(),
+            None => cmd.to_string(),
         }
     }
 
@@ -395,7 +400,8 @@ impl PtyManager {
         // First, so both the terminal defaults and the caller still win over
         // it: a profile that exports TERM does not get to tell xterm.js what
         // it is.
-        for (k, v) in self.profile_env(&spec) {
+        let profile = self.profile_env(&spec);
+        for (k, v) in &profile {
             command.env(k, v);
         }
         // Before the caller's own env, so a spec that sets TERM still wins.
@@ -406,6 +412,31 @@ impl PtyManager {
             for (k, v) in env {
                 command.env(k, v);
             }
+        }
+        // Last, because it reads back whichever PATH the layers above settled
+        // on and hands the child that one with the per-user bin directories on
+        // the end. Resolving the command was only half of it: `cargo` found in
+        // `~/.cargo/bin` still spawns children that look for `rustc` beside it,
+        // and a wrapped command is looked up by a shell that inherits this.
+        let base_path = spec
+            .env
+            .as_ref()
+            .and_then(|env| env.get("PATH"))
+            .or_else(|| profile.get("PATH"));
+        // Only ever an edit of a PATH something above already decided, never a
+        // PATH invented here. On Windows `CommandBuilder` builds the child's
+        // base environment out of the registry rather than out of this process,
+        // merging the machine and the user keys, and that is a *better* PATH
+        // than the one boite was started with: writing this process's over it
+        // would drop everything installed since login, which is the same class
+        // of failure this whole resolution change is about. Everywhere else the
+        // base is this process's own environment, so appending loses nothing.
+        let augment = base_path.is_some() || !cfg!(windows);
+        let grown = augment
+            .then(|| crate::shell::path_with_user_bins(base_path.map(String::as_str)))
+            .flatten();
+        if let Some(path) = grown {
+            command.env("PATH", path);
         }
 
         let mut child = pair

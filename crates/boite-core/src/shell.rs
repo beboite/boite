@@ -42,7 +42,13 @@ pub fn login_args_for(cmd: &str) -> Vec<String> {
 /// rather than to the machine PATH. A GUI process never sources that profile,
 /// so on macOS and Linux every tool installed this way looks absent even though
 /// it runs fine in the user's terminal.
-fn user_bin_dirs() -> Vec<std::path::PathBuf> {
+///
+/// Windows has the same hole through a different door: `rustup-init` appends
+/// `%USERPROFILE%\.cargo\bin` to the user PATH in the registry, and a process
+/// that was already running when that happened keeps the environment block it
+/// was born with until someone restarts it. A boite left open across a Rust
+/// install is exactly that process.
+pub fn user_bin_dirs() -> Vec<std::path::PathBuf> {
     let home = std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
         .map(std::path::PathBuf::from);
@@ -56,7 +62,7 @@ fn user_bin_dirs() -> Vec<std::path::PathBuf> {
         .collect()
 }
 
-/// Whether `name` resolves to something runnable on this machine.
+/// Where `name` actually is on this machine, or `None`.
 ///
 /// Takes an executable name or path, never a command line: splitting a line on
 /// whitespace here would cut `C:\Program Files\...\pwsh.exe` in half. Callers
@@ -64,19 +70,76 @@ fn user_bin_dirs() -> Vec<std::path::PathBuf> {
 ///
 /// `which` already knows PATHEXT on Windows and the executable bit elsewhere,
 /// so a hand-rolled PATH walk only gets to be wrong in new ways.
-pub fn command_exists(name: &str) -> bool {
+///
+/// **One resolver, because two of them disagreeing is worse than either being
+/// wrong.** This search knew the per-user bin directories and the PTY runner's
+/// did not, so a `cargo` installed by rustup answered "present" to the settings
+/// panel, which then offered the install button, and "absent" to the spawn,
+/// which wrapped it in a shell that had never heard of it either. What the user
+/// saw was `cargo: The term 'cargo' is not recognized`, from PowerShell, out of
+/// a button whose entire job was to have checked first.
+pub fn resolve_command(name: &str) -> Option<std::path::PathBuf> {
     if name.trim().is_empty() {
-        return false;
+        return None;
     }
-    if which::which(name).is_ok() {
-        return true;
+    if let Ok(path) = which::which(name) {
+        return Some(path);
     }
     let extra = user_bin_dirs();
     if extra.is_empty() {
-        return false;
+        return None;
     }
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-    which::which_in(name, Some(std::env::join_paths(extra).unwrap_or_default()), cwd).is_ok()
+    which::which_in(name, std::env::join_paths(extra).ok(), cwd).ok()
+}
+
+/// Whether `name` resolves to something runnable on this machine.
+pub fn command_exists(name: &str) -> bool {
+    resolve_command(name).is_some()
+}
+
+/// `base` with the per-user bin directories appended, or `None` when it already
+/// names all of them and there is nothing to hand the child.
+///
+/// Appended rather than prepended: a directory the machine PATH already names
+/// keeps its position, so this only ever adds a resolution and never changes one
+/// that worked. Resolving the command itself is not enough on its own, because a
+/// tool installed this way shells out to its neighbours in the same directory,
+/// and `cargo` asking for `rustc` is the first case of it.
+pub fn path_with_user_bins(base: Option<&str>) -> Option<String> {
+    let extra = user_bin_dirs();
+    if extra.is_empty() {
+        return None;
+    }
+    let separator = if cfg!(windows) { ';' } else { ':' };
+    // Windows spells one directory several ways and means the same one; every
+    // other platform means what it says.
+    let key = |entry: &str| {
+        let trimmed = entry.trim_end_matches(['/', '\\']);
+        if cfg!(windows) {
+            trimmed.to_ascii_lowercase()
+        } else {
+            trimmed.to_string()
+        }
+    };
+    let mut out = match base {
+        Some(value) => value.to_string(),
+        None => std::env::var("PATH").unwrap_or_default(),
+    };
+    let already: std::collections::HashSet<String> = out.split(separator).map(key).collect();
+    let mut added = false;
+    for dir in extra {
+        let text = dir.to_string_lossy().into_owned();
+        if already.contains(&key(&text)) {
+            continue;
+        }
+        if !out.is_empty() {
+            out.push(separator);
+        }
+        out.push_str(&text);
+        added = true;
+    }
+    added.then_some(out)
 }
 
 pub fn fallback_shell() -> String {
@@ -459,6 +522,43 @@ mod tests {
         let shell = default_shell_blocking();
         assert!(command_exists(&shell));
         assert!(!command_exists(&format!("{shell} --version")));
+    }
+
+    /// The asymmetry this pair exists to prevent: anything asking whether a
+    /// command is there and anything asking where it is have to walk the same
+    /// directories, or the spawn contradicts the check that allowed it.
+    #[test]
+    fn command_exists_is_exactly_a_successful_resolve() {
+        let shell = default_shell_blocking();
+        assert_eq!(command_exists(&shell), resolve_command(&shell).is_some());
+        assert!(resolve_command(&shell).is_some());
+        assert!(resolve_command("definitely-not-a-real-binary-xyz").is_none());
+        assert!(resolve_command("").is_none());
+        assert!(resolve_command("   ").is_none());
+    }
+
+    #[test]
+    fn path_with_user_bins_adds_each_directory_once() {
+        // A machine with none of them has nothing to say, and that is the whole
+        // assertion available there.
+        let Some(grown) = path_with_user_bins(Some("")) else {
+            assert!(user_bin_dirs().is_empty());
+            return;
+        };
+        assert!(!grown.is_empty());
+        // Handed back its own answer it adds nothing, so a respawn cannot grow
+        // the child's PATH by one copy of every directory per launch.
+        assert!(path_with_user_bins(Some(&grown)).is_none());
+    }
+
+    #[test]
+    fn path_with_user_bins_keeps_what_was_already_there() {
+        let base = if cfg!(windows) { "C:\\Windows" } else { "/usr/bin" };
+        let Some(grown) = path_with_user_bins(Some(base)) else {
+            assert!(user_bin_dirs().is_empty());
+            return;
+        };
+        assert!(grown.starts_with(base));
     }
 
     /// The probe is memoized for the life of the process, which in
