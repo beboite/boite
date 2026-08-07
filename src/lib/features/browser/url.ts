@@ -26,12 +26,37 @@ const LOCAL_HOSTS = ["localhost", "127.0.0.1", "[::1]", "0.0.0.0"];
 /** The ports the app itself is served from in a dev build. */
 const APP_PORTS = ["1420", "1430"];
 
+/**
+ * Whether a host names the machine resolving it.
+ *
+ * Exported because the answer depends on who is asking: the same four spellings
+ * mean the boite when the boite says them and this device when this device
+ * does, and the caller is the only one that knows which.
+ */
+export function isLoopbackHost(host: string): boolean {
+  return LOCAL_HOSTS.includes(host.toLowerCase());
+}
+
 export type BrowserRefusal =
   | "notAUrl"
   | "scheme"
   | "credentials"
   | "appOrigin"
+  | "otherMachine"
   | "cleartext";
+
+export interface BrowserSource {
+  /**
+   * Whether loopback in this address means the machine the window is on.
+   *
+   * False for a `pane.open` that arrived from a boite: the agent that wrote
+   * `http://localhost:5173` meant the server's port, and this device resolving
+   * it reaches its own, which is a different dev server or nothing at all.
+   * Defaults to true, which is every address this window's own agents and its
+   * own user produce.
+   */
+  requesterIsThisMachine?: boolean;
+}
 
 export type BrowserTarget =
   | {
@@ -43,7 +68,7 @@ export type BrowserTarget =
     }
   | { ok: false; reason: BrowserRefusal };
 
-export function classifyBrowserUrl(raw: string): BrowserTarget {
+export function classifyBrowserUrl(raw: string, source: BrowserSource = {}): BrowserTarget {
   let parsed: URL;
   try {
     parsed = new URL(raw.trim());
@@ -63,10 +88,19 @@ export function classifyBrowserUrl(raw: string): BrowserTarget {
   // a port on loopback. Framing either is framing the app's own origin, which
   // hands the page `window.parent` and the IPC behind it.
   if (host.endsWith(".localhost")) return { ok: false, reason: "appOrigin" };
-  const local = LOCAL_HOSTS.includes(host);
-  if (local && APP_PORTS.includes(parsed.port)) {
+  const loopback = isLoopbackHost(host);
+  if (loopback && APP_PORTS.includes(parsed.port)) {
     return { ok: false, reason: "appOrigin" };
   }
+  // Loopback written by another machine addresses that machine, and nothing on
+  // this one can stand in for it. Refused rather than reinterpreted: framing
+  // this device's own port would show an unrelated dev server under the name of
+  // the one the agent meant, and it used to be waved through as "already the
+  // user's own code" on a premise about a machine the user is not on.
+  if (loopback && source.requesterIsThisMachine === false) {
+    return { ok: false, reason: "otherMachine" };
+  }
+  const local = loopback;
   // A local dev server is the case this feature exists for. Plain http to
   // anywhere else is a document the network gets to write, and the shipped CSP
   // frames no such thing either.

@@ -17,7 +17,7 @@ import { agentTurns } from "./agent-turns";
 import { turnIsActive } from "./agent-registry";
 import { threadCwd } from "./cwd";
 import { detectWorkingOnScreen, LIVE_ROW_COUNT } from "./working-detect";
-import type { IconKey, Thread } from "$lib/types";
+import type { IconKey, Thread, ThreadStatus } from "$lib/types";
 
 /**
  * Who is working, recomputed from scratch twice a second.
@@ -126,6 +126,53 @@ function forgetThread(threadId: string) {
  */
 export function waitingReasonFor(threadId: string): string | null {
   return waitingReason.get(threadId) ?? null;
+}
+
+// Which workspace `prevStatus` describes. A switch replaces every thread and
+// every backend under them, so the first status seen after one is this
+// workspace's first reading rather than a transition out of the last one's. The
+// local half already got there through the `{#key}` remount, which unmounts
+// every Terminal and forgets its thread; a server-owned thread has no Terminal
+// to unmount, so nothing would ever have cleared it.
+let workspaceEpoch = workspace.epoch;
+
+function dropStaleWorkspace() {
+  if (workspace.epoch === workspaceEpoch) return;
+  workspaceEpoch = workspace.epoch;
+  prevStatus.clear();
+}
+
+/**
+ * Raises whatever a status transition is worth telling the user, and records
+ * what this thread now reads.
+ *
+ * Two different pieces of news, and telling them apart is the point. One is
+ * "your agent is done", the other is "your agent cannot continue without you".
+ * Reaching `waiting` from anywhere is worth saying; reaching `ready` only is
+ * when a turn actually ended.
+ *
+ * Neither is said the first time a thread is seen. `before` is undefined after
+ * a mount, a workspace switch or a `forget`, and a prompt that was already on
+ * screen is not news: without the guard, every app start and every pane remount
+ * notified for every thread sitting on an unanswered dialog. The `ready` arm
+ * needs no guard of its own, since it only ever fires out of `running`.
+ *
+ * Exported because a server-owned thread never reaches the sweep below: the
+ * boite decides its status and pushes it, and `applyControlEvent` is the only
+ * place that ever sees the transition. A desktop driving a boite got neither
+ * this notification nor a web push, since it has no web push at all, in exactly
+ * the mode where the window is most likely to be behind something else.
+ */
+export function announceStatus(thread: Thread, next: ThreadStatus) {
+  dropStaleWorkspace();
+  const before = prevStatus.get(thread.id);
+  const name = thread.title ?? thread.label;
+  if (before !== undefined && next === "waiting" && before !== "waiting") {
+    void notifyWhenUnfocused(name, translate("notification.waitingForYou"));
+  } else if (next === "ready" && before === "running") {
+    void notifyWhenUnfocused(name, translate("notification.readyForInput"));
+  }
+  prevStatus.set(thread.id, next);
 }
 
 function maybeAutoClose(threadId: string, iconKey: string | null | undefined) {
@@ -287,6 +334,9 @@ export function settleUnread(
 
 function tick() {
   const now = Date.now();
+  // Before anything writes into `prevStatus`, so a pass that follows a switch
+  // starts with nothing to compare against rather than clearing halfway.
+  dropStaleWorkspace();
   const visible = visibleThreadIds();
   // The one backend whose threads are judged here, handed to the poll so it asks
   // the machine the agents are actually running on, along with exactly which
@@ -344,29 +394,9 @@ function tick() {
       if (t.status !== next) {
         app.setThreadStatus(t.id, next);
       }
-      const before = prevStatus.get(t.id);
-      // Two different pieces of news, and telling them apart is the point. One is
-      // "your agent is done", the other is "your agent cannot continue without
-      // you". Reaching `waiting` from anywhere is worth saying; reaching `ready`
-      // only is when a turn actually ended.
-      //
-      // Neither is said on the first pass. `before` is undefined after a mount, a
-      // workspace switch or a `forget`, and a prompt that was already on screen is
-      // not news: without the guard, every app start and every pane remount
-      // notified for every thread sitting on an unanswered dialog. The `ready`
-      // arm needs no guard of its own, since it only ever fires out of `running`.
-      if (before !== undefined && next === "waiting" && before !== "waiting") {
-        void notifyWhenUnfocused(
-          t.title ?? t.label,
-          translate("notification.waitingForYou"),
-        );
-      } else if (next === "ready" && before === "running") {
-        void notifyWhenUnfocused(
-          t.title ?? t.label,
-          translate("notification.readyForInput"),
-        );
-      }
-      prevStatus.set(t.id, next);
+      // The same call the control-event path makes for a thread this sweep is
+      // not allowed to judge, so the two say the same things on the same terms.
+      announceStatus(t, next);
     } else {
       // Nothing answered: no emulator holds this thread's rows and its agent
       // declares nothing. Left as it was, a `running` thread here would never be

@@ -1,5 +1,5 @@
 import { app } from "$lib/app/store.svelte";
-import { backendForPath, workspace } from "$lib/backend";
+import { backendForPath } from "$lib/backend";
 import { ptyKill } from "$lib/storage/pty";
 import { getDefaultShell } from "$lib/storage/shell";
 import { saveThread } from "$lib/storage/db";
@@ -543,6 +543,18 @@ export async function launchShell(
 ): Promise<Thread | null> {
   const project = requireProject(projectId);
   if (!project) return null;
+  // The menu draws one machine's shells, and a launch off it can still land on
+  // the other one: shift-click and the launch-target menu both aim at Scratch,
+  // which is always local. A shell the target machine does not have is not a
+  // command there, so it takes that machine's own default instead of a path it
+  // has never had.
+  if (!platform.shellsFor(project.origin).some((s) => s.id === shell.id)) {
+    logger.info(
+      "shell",
+      `${shell.id} is not on the machine ${project.name} runs on, taking its default`,
+    );
+    return launchBlankTerminal(projectId);
+  }
   return createThread(project, shell.cmd, [...shell.args], shell.label, "terminal");
 }
 
@@ -556,13 +568,16 @@ export async function launchBlankTerminal(
   let args: string[] = [];
   let label = "Terminal";
 
-  // A remote project in dynamic mode runs on the boite: the locally-configured
-  // shell doesn't exist there, so always take the server's default.
-  const crossRemote = workspace.isDynamic && project.origin === "remote";
-  const preferred =
-    !crossRemote && settings.state.defaultShellId
-      ? platform.shells.find((s) => s.id === settings.state.defaultShellId)
-      : null;
+  // The preferred shell is one id held against one machine's list, so it is
+  // looked for in the list of the machine this project runs on. In dynamic mode
+  // a remote project runs on the boite, where a locally-configured shell does
+  // not exist; this used to refuse every remote launch outright, which also
+  // threw away an id the boite does have.
+  const preferred = settings.state.defaultShellId
+    ? platform
+        .shellsFor(project.origin)
+        .find((s) => s.id === settings.state.defaultShellId)
+    : null;
   if (preferred) {
     cmd = preferred.cmd;
     args = [...preferred.args];

@@ -1,5 +1,5 @@
 import { app } from "$lib/app/store.svelte";
-import { backend } from "$lib/backend";
+import { backend, backendFor, workspace } from "$lib/backend";
 import { notifications } from "$lib/features/notifications/store.svelte";
 import { uuid } from "$lib/shared/utils/uuid";
 import { logger } from "$lib/shared/services/logger.svelte";
@@ -7,6 +7,24 @@ import { t } from "$lib/i18n/index.svelte";
 import type { TodoItem, TodoState } from "$lib/types";
 import { diffTodos } from "./diff";
 import { todoAnnouncer } from "./announce.svelte";
+
+/**
+ * Which host holds a project's todos.
+ *
+ * The row does not say: a todo names a project, a project names a machine, and
+ * that is the whole chain. Every call here went through `backend()` instead,
+ * which is the local desktop in dynamic mode whatever the card belonged to, so
+ * a todo written on a boite project's panel landed in the local SQLite where
+ * the agent it was written for could never see it.
+ */
+function hostOf(projectId: string) {
+  return backendFor(app.projectById(projectId)?.origin);
+}
+
+/** What a failed load says, as the panel prints it. */
+function reason(err: unknown): string {
+  return String(err).replace(/^Error:\s*/i, "").trim() || "load failed";
+}
 
 /**
  * Todos are the one table an outside process also writes: an agent reaches it
@@ -38,6 +56,13 @@ class TodoStore {
    * happens: a caller joining is a caller who wants the news.
    */
   private announce = false;
+  /**
+   * Why one half of a two-host load came back empty, or null.
+   *
+   * Kept apart from the throw below because the other half still answered: the
+   * panel prints this over the rows it did get, rather than instead of them.
+   */
+  private partial: string | null = null;
 
   forProject(projectId: string | null): TodoItem[] {
     if (!projectId) return [];
@@ -81,7 +106,7 @@ class TodoStore {
         const before = $state.snapshot(this.items) as TodoItem[];
         do {
           this.stale = false;
-          this.items = await backend().db.loadTodos();
+          this.items = await this.loadEverywhere();
         } while (this.stale);
         // Not on the first load: every row is new to an empty list, and a boot
         // with eight open todos would queue eight announcements.
@@ -98,16 +123,47 @@ class TodoStore {
           );
         }
         this.loaded = true;
-        this.loadError = null;
+        this.loadError = this.partial;
       } catch (err) {
         logger.error("todo", "loadTodos failed", err);
-        this.loadError = String(err).replace(/^Error:\s*/i, "").trim() || "load failed";
+        this.loadError = reason(err);
       } finally {
         this.loading = false;
         this.inFlight = null;
       }
     })();
     return this.inFlight;
+  }
+
+  /**
+   * Every open host's rows, in one list.
+   *
+   * Two databases in dynamic mode, merged the way boot merges projects and
+   * threads (`app/hydrate.ts`). Reading the local one alone is why a boite
+   * project's panel was empty whatever its agents had written, with nothing on
+   * screen saying so. Nothing is tagged on the way in: a row carries its
+   * project and the project carries the machine, which is also what routes the
+   * writes below.
+   *
+   * A boite that is down costs the user the boite's rows and not the panel,
+   * like the boot merge, and it says so: an empty list and an unreachable host
+   * look identical on screen.
+   */
+  private async loadEverywhere(): Promise<TodoItem[]> {
+    this.partial = null;
+    if (!workspace.isDynamic) return backend().db.loadTodos();
+    const remote = workspace.remoteBackend;
+    const [here, boite] = await Promise.all([
+      workspace.backendFor("local").db.loadTodos(),
+      remote
+        ? remote.db.loadTodos().catch((err) => {
+            logger.error("todo", "loadTodos (remote) failed", err);
+            this.partial = reason(err);
+            return [] as TodoItem[];
+          })
+        : Promise.resolve([] as TodoItem[]),
+    ]);
+    return [...here, ...boite];
   }
 
   /**
@@ -148,7 +204,7 @@ class TodoStore {
 
   private async write(item: TodoItem): Promise<void> {
     try {
-      await backend().db.saveTodo(item);
+      await hostOf(item.projectId).db.saveTodo(item);
     } catch (err) {
       logger.error("todo", "saveTodo failed", err);
       notifications.error(t("todo.saveFailed"));
@@ -257,9 +313,14 @@ class TodoStore {
   }
 
   async remove(id: string): Promise<void> {
+    // Read before the row leaves the list: its project is the only thing that
+    // says which database the id belongs to, and a delete sent to the other one
+    // silently removes nothing while the card is already gone from the panel.
+    const doomed = this.items.find((t) => t.id === id);
+    if (!doomed) return;
     this.items = this.items.filter((t) => t.id !== id);
     try {
-      await backend().db.deleteTodo(id);
+      await hostOf(doomed.projectId).db.deleteTodo(id);
     } catch (err) {
       logger.error("todo", "deleteTodo failed", err);
       notifications.error(t("todo.removeFailed"));
@@ -272,8 +333,11 @@ class TodoStore {
     if (doomed.length === 0) return;
     const ids = new Set(doomed.map((t) => t.id));
     this.items = this.items.filter((t) => !ids.has(t.id));
+    // One host for the lot: they are one project's rows, and a project sits on
+    // one machine.
+    const db = hostOf(projectId).db;
     const results = await Promise.allSettled(
-      doomed.map((item) => backend().db.deleteTodo(item.id)),
+      doomed.map((item) => db.deleteTodo(item.id)),
     );
     const failed = results.filter((r) => r.status === "rejected");
     if (failed.length > 0) {

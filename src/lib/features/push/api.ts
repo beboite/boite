@@ -1,4 +1,4 @@
-import { backend } from "$lib/backend";
+import { backend, workspace } from "$lib/backend";
 import { logger } from "$lib/shared/services/logger.svelte";
 import { hasTauri } from "$lib/backend/env";
 
@@ -39,7 +39,12 @@ export function pushPermission(): NotificationPermission | "unsupported" {
 // exists.
 export async function registerPush(): Promise<void> {
   if (!pushSupported()) return;
-  const push = backend().push;
+  // The boite is what sends the push, so the subscription is registered on the
+  // boite's connection rather than through `backend()`: in dynamic mode that is
+  // the local desktop, which has no push API, and the whole call would return
+  // having done nothing. Same reason `fetchAndApplyMeta` asks the remote
+  // directly.
+  const push = workspace.remoteBackend?.push ?? backend().push;
   if (!push) return;
 
   try {

@@ -99,6 +99,16 @@ validated as a hex string), and the server broadcasts a `workspace.info`
 control event so the other devices update live. It is purely cosmetic: the
 client maps it to the workspace picker label and the connection outline color.
 
+The build and the machine are the other half of that, and nobody types them in.
+`hello`, the first RPC of a connection, answers `ok` and `protocol` (`1`) plus
+three fields describing the server that replied: `version`, the `boite-server`
+crate version the running binary was built from; `platform`, one of `windows`,
+`macos`, `linux`, `unknown`; and `host`, the machine's own name, `null` when it
+has none to give. A server built before these answered the protocol alone, so a
+missing field means "it did not say" and is never filled in from the client
+side: the settings panel used to print the version of the bundle the browser
+had downloaded one row above a line saying the workspace was somewhere else.
+
 ## Build without Docker
 
 ```bash

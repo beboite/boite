@@ -8,6 +8,7 @@
 
 <script lang="ts">
   import { app } from "$lib/app/store.svelte";
+  import { workspace } from "$lib/backend";
   import { settings } from "$lib/features/settings/store.svelte";
   import { platform } from "$lib/storage/platform.svelte";
   import {
@@ -34,6 +35,15 @@
   // is showing none. Holding a row down is the phone's right-click: it opens
   // the same menu, which is the only way here to ask for Scratch while a
   // project is up.
+  //
+  // Which machine the shells come from follows that same target. A shell list
+  // belongs to one machine and dynamic mode has two, so the sheet used to list
+  // this device's shells for a project running on the boite. Scratch is always
+  // local, hence the fallback.
+  const targetOrigin = $derived(app.projectById(app.currentProjectId)?.origin);
+  const shells = $derived(platform.shellsFor(targetOrigin));
+  const onBoite = $derived(platform.shellsOnBoite(targetOrigin));
+
   function goTerminal() {
     onClose();
     app.mobileTab = "terminal";
@@ -92,8 +102,17 @@
     </div>
   {/if}
 
-  <div class="mt-3 mb-1 px-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-    {t("mobile.shells")}
+  <div
+    class="mt-3 mb-1 flex items-center gap-2 px-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+  >
+    <span>{t("mobile.shells")}</span>
+    {#if onBoite}
+      <!-- The list changed machine when the project did, and nothing else on
+           screen says which one these shells belong to. -->
+      <span class="ml-auto normal-case tracking-normal text-muted-foreground/70">
+        {t("sidebar.onBoite", { name: workspace.info.name || "boite" })}
+      </span>
+    {/if}
   </div>
   <div class="flex flex-col gap-1.5">
     <button
@@ -107,7 +126,7 @@
       <TerminalIcon class="size-5 text-muted-foreground" />
       <span class="font-medium">{t("mobile.defaultShell")}</span>
     </button>
-    {#each platform.shells as shell (shell.id)}
+    {#each shells as shell (shell.id)}
       <button
         type="button"
         class="flex items-center justify-between gap-3 rounded-xl border border-border bg-[var(--color-surface-2)] px-3 py-3 text-left text-sm text-foreground/90 transition active:scale-[0.98] active:bg-[var(--color-surface-3)] disabled:opacity-40"

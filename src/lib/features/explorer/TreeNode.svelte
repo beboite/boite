@@ -41,7 +41,7 @@
   import { t, type MessageKey } from "$lib/i18n/index.svelte";
   import { threadCwd } from "$lib/features/thread/cwd";
   import { treeMenu } from "./treeMenu.svelte";
-  import { revealItemInDir } from "$lib/platform/opener";
+  import { canRevealItem, revealItemInDir } from "$lib/platform/opener";
   import { writeText } from "$lib/platform/clipboard";
   import { longPress } from "$lib/shared/actions/longPress";
   import { logger } from "$lib/shared/services/logger.svelte";
@@ -175,11 +175,15 @@
       });
       items.push({ separator: true });
     }
-    items.push({
-      label: t("explorer.revealInFileManager"),
-      action: () => void reveal(),
-    });
-    items.push({ separator: true });
+    // Left out entirely off this machine: the file manager it would open is
+    // the local one, and the path it would be handed is the boite's.
+    if (canRevealItem(entry.path)) {
+      items.push({
+        label: t("explorer.revealInFileManager"),
+        action: () => void reveal(),
+      });
+      items.push({ separator: true });
+    }
     items.push({
       label: t("explorer.copyPath"),
       action: () => void copyPath(toNative(entry.path)),

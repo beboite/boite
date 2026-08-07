@@ -42,7 +42,7 @@
   import { keyIntent } from "./key-intent";
   import { claimTypedPrompt } from "$lib/features/thread/typedPrompt";
   import { parsePromotion, PROMOTE_OSC } from "$lib/features/thread/promote";
-  import { platform } from "$lib/storage/platform.svelte";
+  import { isDeviceMacOS } from "$lib/storage/platform.svelte";
   import {
     startSessionMonitor,
     type SessionMonitor,
@@ -1054,7 +1054,7 @@
       // copies or interrupts reachable by a test at all.
       const intent = keyIntent(
         e,
-        { isMacOS: platform.isMacOS, hasSelection: () => !!term?.getSelection() },
+        { isMacOS: isDeviceMacOS, hasSelection: () => !!term?.getSelection() },
         shouldSendLineFeed(e, e.code),
       );
       switch (intent) {

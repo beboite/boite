@@ -25,6 +25,53 @@ fn u16_param(params: &Value, key: &str) -> Result<u16, String> {
         .ok_or_else(|| format!("missing param: {key}"))
 }
 
+/// Which OS the threads run on.
+///
+/// Decided at compile time rather than probed: this binary was built for one
+/// target and cannot be running on another, so there is nothing here that can
+/// disagree with the machine underneath it.
+fn os_name() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "windows"
+    } else if cfg!(target_os = "macos") {
+        "macos"
+    } else if cfg!(target_os = "linux") {
+        "linux"
+    } else {
+        "unknown"
+    }
+}
+
+fn non_empty(s: &str) -> Option<String> {
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+/// What this machine calls itself, out of what it was already told.
+///
+/// A container carries `HOSTNAME` in its environment, Windows sets
+/// `COMPUTERNAME`, and the rest keep it in a file. No process is spawned to ask:
+/// a name on a settings card is not worth a fork, and shelling out for one is
+/// how a server ends up running `hostname` on every reconnect.
+///
+/// None of the three is guaranteed, and `None` is the answer when none of them
+/// is there. A placeholder would be a machine name that names no machine, which
+/// is worse on that card than an empty row.
+fn host_name() -> Option<String> {
+    ["HOSTNAME", "COMPUTERNAME"]
+        .into_iter()
+        .find_map(|key| std::env::var(key).ok().and_then(|v| non_empty(&v)))
+        .or_else(|| {
+            std::fs::read_to_string("/etc/hostname")
+                .ok()
+                .and_then(|s| non_empty(&s))
+        })
+}
+
 async fn blocking<F, T>(f: F) -> Result<T, String>
 where
     F: FnOnce() -> T + Send + 'static,
@@ -54,7 +101,26 @@ async fn on_bus(state: &AppState, method: &str, params: &Value) -> Result<Value,
 // binary input frames are handled in ws.rs (they need the socket writer).
 pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<Value, String> {
     match method {
-        "hello" => Ok(json!({ "ok": true, "protocol": 1 })),
+        // Who answered, not just that something did. The protocol number keeps
+        // its place at the front; the three beside it are here because a
+        // connected client had no way at all to name the machine it was driving.
+        // The settings panel printed `__APP_VERSION__`, a constant Vite bakes
+        // into the bundle the browser downloaded, one row above a line saying
+        // the workspace was somewhere else: never a wrong number, always about
+        // the wrong machine.
+        //
+        // `version` is this crate's, resolved at compile time, so it describes
+        // the binary that is running rather than a manifest sitting next to it.
+        // A client older than this ignores the extra fields; a newer one against
+        // a server older than this gets none of them and draws that as "it did
+        // not say", which is why nothing here is defaulted.
+        "hello" => Ok(json!({
+            "ok": true,
+            "protocol": 1,
+            "version": env!("CARGO_PKG_VERSION"),
+            "platform": os_name(),
+            "host": host_name(),
+        })),
 
         // The rows come from the bus; what this host adds is which of them has a
         // process behind it right now. Kept as two steps rather than folded into
@@ -338,18 +404,7 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
         // this out for itself: a browser has no way to ask, and a Windows
         // desktop driving this boite would answer for its own machine and then
         // pick a Windows shell out of a Linux list.
-        "system.platform" => {
-            let os = if cfg!(target_os = "windows") {
-                "windows"
-            } else if cfg!(target_os = "macos") {
-                "macos"
-            } else if cfg!(target_os = "linux") {
-                "linux"
-            } else {
-                "unknown"
-            };
-            Ok(json!({ "platform": os }))
-        }
+        "system.platform" => Ok(json!({ "platform": os_name() })),
 
         // Warms the server's own function/alias list. The client cannot answer
         // this for a remote boite: the profile that matters is the server's.
@@ -540,6 +595,30 @@ mod tests {
             call(&state, "thread.explode", json!({})).await.unwrap_err(),
             "unknown method: thread.explode"
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The handshake names the machine that answered it. A client cannot work
+    /// any of this out for itself: its own version describes the bundle it
+    /// downloaded, and its own OS is the one the user is sitting at.
+    #[tokio::test]
+    async fn the_handshake_says_which_build_answered_it() {
+        let dir = scratch("hello");
+        let state = state_for_test(&dir);
+        let hello = call(&state, "hello", json!({})).await.unwrap();
+        assert_eq!(hello["protocol"], json!(1));
+        assert_eq!(hello["version"], json!(env!("CARGO_PKG_VERSION")));
+        // Whichever of the three this test is running on, never the empty
+        // string: a platform nobody can act on is the one thing worse than
+        // saying nothing.
+        let os = hello["platform"].as_str().unwrap();
+        assert!(
+            ["windows", "macos", "linux", "unknown"].contains(&os),
+            "{os}"
+        );
+        // The host is allowed to be absent. It is not allowed to be present and
+        // empty, which is what a trimmed `/etc/hostname` used to leave behind.
+        assert!(hello["host"].is_null() || !hello["host"].as_str().unwrap().is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

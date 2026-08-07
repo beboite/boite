@@ -40,8 +40,25 @@
     // The OS-window close lifecycle only exists in the desktop shell. In a
     // browser/PWA getCurrentWindow() dereferences window.__TAURI_INTERNALS__,
     // which is undefined, and the throw aborts the boot effect flush (the app
-    // stays stuck on "Loading…"). The browser handles its own tab close.
-    if (!hasTauri()) return;
+    // stays stuck on "Loading…").
+    //
+    // "The browser handles its own tab close" was not true of anything: nothing
+    // registered a `beforeunload`, so closing the tab took unsaved edits with
+    // it in silence. Only the dirty buffers are worth a prompt there. The
+    // threads are the server's processes and outlive the tab, which is the
+    // whole point of a boite, so counting them would warn about a loss that
+    // does not happen.
+    if (!hasTauri()) {
+      const onBeforeUnload = (event: BeforeUnloadEvent) => {
+        if (dirtyCount === 0) return;
+        // The text is the browser's, not ours: every engine replaced it with a
+        // generic sentence years ago. `preventDefault` is what raises it at all.
+        event.preventDefault();
+        event.returnValue = "";
+      };
+      window.addEventListener("beforeunload", onBeforeUnload);
+      return () => window.removeEventListener("beforeunload", onBeforeUnload);
+    }
     const win = getCurrentWindow();
     const unlisten = win.onCloseRequested((event) => {
       if (allowClose) return;

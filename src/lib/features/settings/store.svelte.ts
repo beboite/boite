@@ -236,9 +236,21 @@ export function parseCommand(input: string): { cmd: string; args: string[] } {
   return { cmd: tokens[0] ?? "", args: tokens.slice(1) };
 }
 
-// Layout/device-scoped fields: per-machine, never stored in a workspace DB.
-// They live in localStorage so switching to a remote workspace keeps your
-// sidebar width and zoom while shortcuts/shells come from the server.
+// Device-scoped fields: per-machine, never stored in a workspace DB. They live
+// in localStorage so switching to a remote workspace keeps your sidebar width
+// and zoom while shortcuts/shells come from the server.
+//
+// The test is what the value describes, not where it was first stored. A field
+// belongs here when it describes the glass the user is looking at: the geometry
+// of this window, the motion this OS asked for, what this sidebar draws, what
+// this client confirms before acting. It stays in the workspace blob when it
+// describes the machine the threads run on (shells, launch flags, worktrees),
+// what agents there are allowed to do, or how that workspace's own entities are
+// named and ordered.
+//
+// The three sidebar cosmetics were on the wrong side of that line: toggling the
+// thread glow on a phone repainted the desktop sitting next to it, because both
+// were reading one row in the boite's database.
 const DEVICE_KEY = "boite.layout";
 const DEVICE_FIELDS = [
   "sidebarWidth",
@@ -252,16 +264,61 @@ const DEVICE_FIELDS = [
   "layoutPinned",
   "motionMode",
   "locale",
+  "colorByModel",
+  "sidebarDesign",
+  "sidebarHarnessLogos",
+  "confirmCloseThread",
 ] as const;
 
-function loadDeviceOverrides(): Partial<Settings> | null {
+// Stamped on the blob so an absent key can be told apart from a key that had
+// not been promoted yet. Bump it whenever a field joins DEVICE_FIELDS, and list
+// the newcomers in PROMOTED_TO_DEVICE so they migrate once.
+const DEVICE_BLOB_VERSION = 1;
+
+// Moved out of the workspace blob in the version that introduced `v`. A device
+// blob written before that has no key for them and the workspace value is the
+// right one-shot seed. Once `v` is on the blob, an absent key means the default
+// and never the boite's value: falling through to the workspace blob is how
+// `motionMode`, `locale` and `layoutPinned` used to leak in from the server on
+// any device whose localStorage predated them joining the list.
+const PROMOTED_TO_DEVICE: readonly string[] = [
+  "colorByModel",
+  "sidebarDesign",
+  "sidebarHarnessLogos",
+  "confirmCloseThread",
+];
+
+type DeviceBlob = Partial<Settings> & { v?: number };
+
+function loadDeviceOverrides(): DeviceBlob | null {
   if (typeof localStorage === "undefined") return null;
   try {
     const raw = localStorage.getItem(DEVICE_KEY);
-    return raw ? (JSON.parse(raw) as Partial<Settings>) : null;
+    return raw ? (JSON.parse(raw) as DeviceBlob) : null;
   } catch {
     return null;
   }
+}
+
+/** Lays the device blob over a freshly hydrated state. */
+function applyDeviceOverrides(state: Settings, dev: DeviceBlob): void {
+  const target = state as unknown as Record<string, unknown>;
+  const legacyBlob = typeof dev.v !== "number";
+  for (const k of DEVICE_FIELDS) {
+    if (dev[k] !== undefined) {
+      target[k] = dev[k];
+      continue;
+    }
+    // Left alone on a legacy blob: whatever is in `target` came from the
+    // workspace and is the migration source for exactly one load.
+    if (legacyBlob && PROMOTED_TO_DEVICE.includes(k)) continue;
+    target[k] = structuredClone(DEFAULTS[k]);
+  }
+  state.rightPanelByProject = readRightPanelMap(state.rightPanelByProject);
+  // The stored width was chosen in whatever window was open at the time, and
+  // this one may be smaller. Clamped on the way in rather than only in the
+  // setter, which a boot never calls.
+  state.rightPanelWidth = clampRightPanelWidth(state.rightPanelWidth);
 }
 
 class SettingsStore {
@@ -408,17 +465,7 @@ class SettingsStore {
       // migration from the old whole-blob persistence).
       const dev = loadDeviceOverrides();
       if (dev) {
-        const target = this.state as unknown as Record<string, unknown>;
-        for (const k of DEVICE_FIELDS) {
-          if (dev[k] !== undefined) target[k] = dev[k];
-        }
-        this.state.rightPanelByProject = readRightPanelMap(
-          this.state.rightPanelByProject,
-        );
-        // The stored width was chosen in whatever window was open at the time,
-        // and this one may be smaller. Clamped on the way in rather than only in
-        // the setter, which a boot never calls.
-        this.state.rightPanelWidth = clampRightPanelWidth(this.state.rightPanelWidth);
+        applyDeviceOverrides(this.state, dev);
         // Device blobs written before 0.7.1 have no mobileLayout key, so a
         // phone that used an earlier build would stay on the PC layout. Seed it
         // from the form factor (a no-op on desktops) and persist so the choice
@@ -426,6 +473,10 @@ class SettingsStore {
         if (dev.mobileLayout === undefined) {
           this.state.mobileLayout = detectMobileDefault();
           this.state.layoutPinned = false;
+          this.persistDeviceNow();
+        } else if (typeof dev.v !== "number") {
+          // Stamp the version and write the promoted keys down, so this load is
+          // the only one that reads them off the workspace.
           this.persistDeviceNow();
         }
       } else {
@@ -447,15 +498,24 @@ class SettingsStore {
     this.ready = true;
   }
 
-  // A workspace switch re-hydrates settings from the new backend.
+  // A workspace switch re-hydrates the workspace half from the new backend. The
+  // device half does not change: the machine the user is sitting at is the one
+  // constant across a switch.
   reset() {
-    // Cancel queued debounced writes: a slider drag right before a switch
+    // Cancel the queued workspace write: a slider drag right before a switch
     // would otherwise flush ~250ms later against the swapped backend (backend()
     // resolves lazily), writing one workspace's settings into the other's DB.
+    // The device write is deliberately left alone. It lands in localStorage,
+    // which no switch can put out of reach, and cancelling it discarded a
+    // sidebar drag or a zoom made in the 250ms before the switch.
     this.persistSoon.cancel();
-    this.persistDeviceSoon.cancel();
+    const dev = loadDeviceOverrides();
     this.state = structuredClone(DEFAULTS);
-    applyLocale(DEFAULTS.locale);
+    // Re-applied here rather than left to init(), which cannot run until the
+    // new backend answers. Resetting to the defaults in between flipped the UI
+    // to the browser's language and the default zoom on every boite switch.
+    if (dev) applyDeviceOverrides(this.state, dev);
+    applyLocale(this.state.locale);
     this.ready = false;
   }
 
@@ -475,7 +535,7 @@ class SettingsStore {
 
   private persistDeviceNow() {
     if (typeof localStorage === "undefined") return;
-    const d: Record<string, unknown> = {};
+    const d: Record<string, unknown> = { v: DEVICE_BLOB_VERSION };
     for (const k of DEVICE_FIELDS) d[k] = this.state[k];
     try {
       localStorage.setItem(DEVICE_KEY, JSON.stringify(d));
@@ -631,29 +691,33 @@ class SettingsStore {
     await this.persist();
   }
 
-  async setColorByModel(value: boolean) {
+  setColorByModel(value: boolean) {
     if (this.state.colorByModel === value) return;
     this.state.colorByModel = value;
-    await this.persist();
+    this.persistDeviceNow();
   }
 
-  async setSidebarDesign(value: SidebarDesign) {
+  setSidebarDesign(value: SidebarDesign) {
     if (this.state.sidebarDesign === value) return;
     this.state.sidebarDesign = value;
-    await this.persist();
+    this.persistDeviceNow();
   }
 
-  async setSidebarHarnessLogos(value: boolean) {
+  setSidebarHarnessLogos(value: boolean) {
     if (this.state.sidebarHarnessLogos === value) return;
     this.state.sidebarHarnessLogos = value;
-    await this.persist();
+    this.persistDeviceNow();
   }
 
-  async setLocale(value: LocaleSetting) {
+  // `persist()` strips every device field before it writes, so a setter that
+  // only calls it stores the value nowhere at all. That is what this one did:
+  // the language survived in memory until the next reload and then reverted,
+  // unless an unrelated device write happened to flush the blob in between.
+  setLocale(value: LocaleSetting) {
     if (this.state.locale === value) return;
     this.state.locale = value;
     applyLocale(value);
-    await this.persist();
+    this.persistDeviceNow();
   }
 
   setUiScalePercent(percent: number) {
@@ -760,9 +824,10 @@ class SettingsStore {
     await this.persist();
   }
 
-  async setConfirmCloseThread(value: boolean) {
+  setConfirmCloseThread(value: boolean) {
+    if (this.state.confirmCloseThread === value) return;
     this.state.confirmCloseThread = value;
-    await this.persist();
+    this.persistDeviceNow();
   }
 
   // The app-wide default behind Project > Worktrees. It was hydrated, read by

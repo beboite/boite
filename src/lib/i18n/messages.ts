@@ -39,6 +39,21 @@ export const EN_MESSAGES = {
   "about.workspaceLocal": "This machine",
   "about.workspaceRemote": "Remote boite",
   "about.source": "Source",
+  // Two machines, two builds. The unqualified "Version" above stays for the
+  // case where there is only one; these replace it the moment a boite is
+  // answering, because the bundle's version says nothing about the server's.
+  "about.versionHere": "Version, this device",
+  "about.versionBoite": "Version, the boite",
+  "about.boitePlatform": "The boite runs on",
+  "about.boiteHost": "The boite is called",
+  // The boite answered and is none of the three, against a boite that never
+  // said. Kept apart on purpose: one is a fact about the machine, the other is
+  // a server too old to have been asked.
+  "about.osWindows": "Windows",
+  "about.osMacos": "macOS",
+  "about.osLinux": "Linux",
+  "about.osUnknown": "Something else",
+  "about.boiteSilent": "Did not say",
 
   // The app's own project row. Named in the app's language rather than the
   // database's, since nobody chose the name.
@@ -232,6 +247,7 @@ export const EN_MESSAGES = {
   "todo.sendLabel": "Send to the active terminal",
   "todo.gitNoCommit": "no commit reported",
   "todo.gitUnknownCommit": "commit not found",
+  "todo.gitUnreachable": "could not check",
   "todo.gitPushed": "pushed",
   "todo.gitLocal": "local only",
   "todo.gitPr": "PR {number}",
@@ -251,6 +267,11 @@ export const EN_MESSAGES = {
   "todo.agentEndpointDown": "The endpoint is not serving — agents cannot reach the list.",
   "todo.agentOff": "Agent access is off in settings.",
   "todo.agentUnavailable": "The bundled shim is missing from this build.",
+  // Reached before the line above, which is now only ever about a Tauri build
+  // with no compiled sidecar. What an agent can reach is a property of the
+  // machine that spawns it, and none of the three answers below is this one's.
+  "todo.agentOnBoite":
+    "These agents run on {name}. Its shim, its credentials and its endpoint are on that machine, not this one.",
 
   "todo.agentNone": "No known agent runs in this project yet. Point yours at the bundled server:",
   "todo.agentCopyPath": "Copy the MCP server path",
@@ -283,6 +304,8 @@ export const EN_MESSAGES = {
   "project.tokens": "Tokens",
   "project.tokensRange": "last 12 months",
   "project.tokensNone": "No agent transcript for this project yet.",
+  "project.tokensUnreachable": "The transcripts could not be read.",
+  "project.tokensUnreachableHint": "Unknown, not zero. Read again once the boite answers.",
   "project.tokensOnly": "Only claude and codex record what they spend.",
   "project.tokensMissing": "{agents} keeps no record on this machine.",
   "project.tokensSessions": "{count} sessions",
@@ -449,6 +472,16 @@ export const EN_MESSAGES = {
   "mobile.shells": "Shells",
   "mobile.defaultShell": "Default shell",
   "mobile.newTerminal": "New terminal",
+  // A switch closes every open buffer, and it cannot save them on the way out:
+  // by the time the stores are reset the transport already answers as the
+  // machine being switched TO, so a flush would write one machine's bytes to
+  // the other's disk. The only safe place to stop is before the switch starts.
+  "workspace.leaveDirtyTitle": "Unsaved edits",
+  "workspace.leaveDirtyOne":
+    "One open file has unsaved edits. Switching workspace closes it and the edits are gone.",
+  "workspace.leaveDirtyMany":
+    "{count} open files have unsaved edits. Switching workspace closes them and the edits are gone.",
+  "workspace.leaveDirtyConfirm": "Switch anyway",
   "workspace.title": "Workspaces",
   "workspace.local": "Local",
   "workspace.remote": "Remote",
@@ -706,6 +739,12 @@ export const EN_MESSAGES = {
   "connection.retry": "Reconnect now",
   "connection.offline": "Cannot reach {name}",
   "connection.offlineDesc": "The boite did not answer. It may be asleep, or off the network.",
+  // The one failure that is not about reachability, and the one the banner used
+  // to draw as "may be asleep". The boite answered, said no, and stopped
+  // retrying, so a message about waiting for it to come back was a lie twice
+  // over.
+  "connection.refused": "{name} refused the token",
+  "connection.refusedDesc": "It was changed or revoked, and reconnecting will not get you back in. Enter the new one from the workspace picker.",
   "general.pushTitle": "Push notifications",
   "general.pushDesc": "Be told an agent needs you, even with the app closed.",
   "general.pushEnable": "Enable notifications",
@@ -722,6 +761,19 @@ export const EN_MESSAGES = {
   "editor.reloadFailed": "Reload failed: {error}",
   "editor.readOnlyError": "File is read-only",
   "editor.saved": "Saved {name}",
+  // The editor's three dialogs. They were the only user-facing strings in the
+  // app still written in English at the call site, so a French window asked
+  // three questions in the wrong language at the worst possible moment.
+  "editor.reloadTitle": "Reload from disk?",
+  "editor.reloadMessage": "{name} has unsaved changes. Reloading will discard them.",
+  "editor.reloadConfirm": "Reload",
+  "editor.externalTitle": "File changed on disk",
+  "editor.externalMessage":
+    "{name} was modified outside the editor. Saving will overwrite those changes.",
+  "editor.externalConfirm": "Overwrite",
+  "editor.discardTitle": "Discard unsaved changes?",
+  "editor.discardMessage": "{name} has unsaved changes.",
+  "editor.discardConfirm": "Discard",
   "editor.saveFailed": "Save failed: {error}",
   "editor.backToTerminal": "Back to terminal",
   "editor.staleWarning":
@@ -733,6 +785,8 @@ export const EN_MESSAGES = {
   "editor.terminal": "Terminal",
   "fastpick.addProjectFirst": "Add a project first",
   "project.pickerFailed": "Could not open folder picker",
+  "project.dropIsOnThisMachine":
+    "That folder is on this machine, and the workspace is the boite. Add it from the boite's own folder browser.",
   "project.addFailed": "Failed to add project",
   "project.added": "Added {name}",
   "project.created": "Created {name}",
@@ -844,6 +898,8 @@ export const EN_MESSAGES = {
   "browser.refuse.credentials":
     "That address carries a username, which hides where it really goes.",
   "browser.refuse.appOrigin": "That address is Boite itself, not a page.",
+  "browser.refuse.otherMachine":
+    "That address is on the boite, and localhost here is this machine.",
   "browser.refuse.cleartext":
     "Plain http:// stops at this machine. Use https:// for anywhere else.",
 

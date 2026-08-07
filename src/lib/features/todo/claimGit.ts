@@ -1,9 +1,16 @@
 import { gitCommitState, gitPullRequest } from "$lib/features/git/api";
-import type { CommitState, PrLookup } from "$lib/features/git/api";
+import type { PrLookup } from "$lib/features/git/api";
+import type { CommitStateAnswer } from "$lib/backend/types";
 
-/** What a claimed item's commit turned out to be, once git and gh had answered. */
+/**
+ * What a claimed item's commit turned out to be, once git and gh had answered.
+ *
+ * `CommitStateAnswer` rather than `CommitState`: whether the repository was
+ * reached is part of what this turned out to be, and typing the field to the
+ * narrower shape dropped the flag one level below the strip that draws it.
+ */
 export interface ClaimGit {
-  commit: CommitState;
+  commit: CommitStateAnswer;
   pr: PrLookup;
 }
 
@@ -29,12 +36,17 @@ export function claimGitState(root: string, sha: string): Promise<ClaimGit> {
     const commit = await gitCommitState(root, sha).catch(() => null);
     if (!commit || !commit.known) {
       return {
+        // A rejected lookup carries no answer, only a shape the strip needs to
+        // render at all. It used to be filled in with `known: false` alone,
+        // which is git stating it has never seen the sha, so a clone nobody
+        // managed to ask was drawn as a clone that denied the commit.
         commit: commit ?? {
           known: false,
           pushed: false,
           short: sha.slice(0, 7),
           subject: null,
           branch: null,
+          unreachable: true,
         },
         pr: { kind: "unavailable" },
       };

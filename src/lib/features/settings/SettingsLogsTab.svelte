@@ -9,7 +9,8 @@
   import { t, type MessageKey } from "$lib/i18n/index.svelte";
   import { debounce } from "$lib/shared/utils/debounce";
   import { confirmDialog } from "$lib/shared/components/confirm.svelte";
-  import { backend } from "$lib/backend";
+  import { localBackend } from "$lib/backend";
+  import { hasTauri } from "$lib/backend/env";
 
   type Scope = "current" | "previous";
 
@@ -34,10 +35,16 @@
   ];
 
   let scope = $state<Scope>("current");
-  // The log file belongs to the machine running Boite, so a remote workspace has
-  // nothing to read: the remote backend stubs the whole capability. Saying so
-  // beats an empty list, which reads as a bug in the logger.
-  const deviceLocal = $derived(!backend().caps.appLogs);
+  // What the logger reads is this device's own file, so the question is about the
+  // local backend and never about the active one. Asking `backend()` collapsed
+  // the tab to the notice below on a desktop whose file was right there, for as
+  // long as a boite was connected.
+  //
+  // Two halves, because caps alone cannot answer it: the local backend is a
+  // `TauriBackend` in every build, `appLogs: true` and all, and in a PWA there is
+  // no host behind it to invoke. Saying so beats an empty list, which reads as a
+  // bug in the logger.
+  const deviceLocal = !hasTauri() || !localBackend().caps.appLogs;
   let entries = $state<LogEntry[]>([]);
   let loading = $state(false);
   let levelFilter = $state<string>("all");
@@ -139,6 +146,9 @@
   });
 
   onMount(() => {
+    // Nothing to ask when there is no file: the call would reject and leave
+    // `logPath` empty, which is what already hides the path line below.
+    if (deviceLocal) return;
     void logger
       .filePath()
       .then((p) => (logPath = p))

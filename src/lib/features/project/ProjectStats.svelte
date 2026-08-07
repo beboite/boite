@@ -36,14 +36,29 @@
     return acc;
   });
 
+  // The transcripts were never read, so the two rows that come out of them
+  // have no number behind them. `0` is what they used to show, which reads as
+  // an agent count that was measured; the dash is the same nothing this card
+  // already draws for a commit count it does not have.
+  const unread = $derived(report?.unreachable === true);
+  const unreadHint = $derived(unread ? t("project.tokensUnreachable") : null);
+
   // Two groups, because they answer different questions: what the project is,
   // and what its agents have burned reading it.
   const rows = $derived([
-    { label: t("stats.threads"), value: String(threads.length) },
-    { label: t("stats.openTodos"), value: String(openTodos) },
-    { label: t("stats.commits"), value: commits > 0 ? String(commits) : "—" },
-    { label: t("stats.sessions"), value: String(report?.sessions ?? 0) },
-    { label: t("stats.models"), value: String(report?.models.length ?? 0) },
+    { label: t("stats.threads"), value: String(threads.length), hint: null },
+    { label: t("stats.openTodos"), value: String(openTodos), hint: null },
+    { label: t("stats.commits"), value: commits > 0 ? String(commits) : "—", hint: null },
+    {
+      label: t("stats.sessions"),
+      value: unread ? "—" : String(report?.sessions ?? 0),
+      hint: unreadHint,
+    },
+    {
+      label: t("stats.models"),
+      value: unread ? "—" : String(report?.models.length ?? 0),
+      hint: unreadHint,
+    },
   ]);
 
   // Cache reads sit beside input rather than inside it. Folded in they are most
@@ -66,7 +81,12 @@
         class="flex items-baseline justify-between gap-3 border-b border-border/60 py-1 last:border-0"
       >
         <dt class="truncate text-sm text-muted-foreground">{row.label}</dt>
-        <dd class="shrink-0 font-mono text-base text-foreground/90">{row.value}</dd>
+        <!-- The hint is only ever on a dash, and only when the dash stands for
+             a read that never happened. Absent otherwise, so nothing here
+             grows a tooltip that says what the number already says. -->
+        <dd class="shrink-0 font-mono text-base text-foreground/90" title={row.hint}>
+          {row.value}
+        </dd>
       </div>
     {/each}
   </dl>
