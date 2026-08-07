@@ -43,6 +43,9 @@ harness = false
 windows-sys = { version = "0.60", features = [
     "Win32_Foundation",
     "Win32_Security",
+    # A PTY's agent may be a grandchild (a launcher, a wrap shell), so session
+    # ownership is decided on the process tree. ToolHelp is the pid-to-parent map.
+    "Win32_System_Diagnostics_ToolHelp",
     "Win32_System_JobObjects",
     "Win32_System_Threading",
 ] }

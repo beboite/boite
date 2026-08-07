@@ -103,6 +103,144 @@ fn pid_alive(pid: u32) -> bool {
     }
 }
 
+/// Every process on the machine mapped to its parent, read once.
+///
+/// One pass rather than one lookup per hop: the answer is only ever used to walk
+/// a handful of chains, and each of the three platforms pays for the enumeration
+/// and not for the walk.
+#[cfg(windows)]
+fn process_parents() -> std::collections::HashMap<u32, u32> {
+    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+        TH32CS_SNAPPROCESS,
+    };
+    let mut out = std::collections::HashMap::new();
+    unsafe {
+        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if snapshot.is_null() || snapshot == INVALID_HANDLE_VALUE {
+            return out;
+        }
+        let mut entry: PROCESSENTRY32W = std::mem::zeroed();
+        entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+        if Process32FirstW(snapshot, &mut entry) != 0 {
+            loop {
+                out.insert(entry.th32ProcessID, entry.th32ParentProcessID);
+                if Process32NextW(snapshot, &mut entry) == 0 {
+                    break;
+                }
+            }
+        }
+        CloseHandle(snapshot);
+    }
+    out
+}
+
+#[cfg(target_os = "linux")]
+fn process_parents() -> std::collections::HashMap<u32, u32> {
+    let mut out = std::collections::HashMap::new();
+    let Ok(entries) = fs::read_dir("/proc") else {
+        return out;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(pid) = name.to_str().and_then(|s| s.parse::<u32>().ok()) else {
+            continue;
+        };
+        let Ok(stat) = fs::read_to_string(entry.path().join("stat")) else {
+            continue;
+        };
+        // The command name sits in parentheses and may itself contain spaces and
+        // parentheses, so the fields are counted from the last `)` rather than
+        // from the start: state, then ppid.
+        let Some((_, rest)) = stat.rsplit_once(')') else {
+            continue;
+        };
+        let mut fields = rest.split_whitespace();
+        let _state = fields.next();
+        if let Some(ppid) = fields.next().and_then(|s| s.parse::<u32>().ok()) {
+            out.insert(pid, ppid);
+        }
+    }
+    out
+}
+
+#[cfg(all(unix, not(target_os = "linux")))]
+fn process_parents() -> std::collections::HashMap<u32, u32> {
+    let mut out = std::collections::HashMap::new();
+    // No /proc on macOS, and the sysctl form needs a per-process call anyway.
+    // One `ps` is the cheaper of the two and needs no unsafe block.
+    let Ok(output) = std::process::Command::new("ps")
+        .args(["-axo", "pid=,ppid="])
+        .output()
+    else {
+        return out;
+    };
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let mut fields = line.split_whitespace();
+        if let (Some(pid), Some(ppid)) = (fields.next(), fields.next()) {
+            if let (Ok(pid), Ok(ppid)) = (pid.parse::<u32>(), ppid.parse::<u32>()) {
+                out.insert(pid, ppid);
+            }
+        }
+    }
+    out
+}
+
+/// The processes a PTY is responsible for: the one it spawned, and everything
+/// that one started.
+///
+/// A thread's agent is not always the process the PTY spawned. `fastpick` picks
+/// a harness and then *runs* it, so a fastpick thread's claude is a grandchild;
+/// a wrap shell adds another level. Comparing pids alone therefore answered "not
+/// ours" for every launcher-started agent, and the one place that matters is
+/// session capture: the thread's own live session was filtered out as somebody
+/// else's, never captured, and the relaunch had no id to resume. Every fastpick
+/// thread in the database had an empty `session_id`, which is what that looks
+/// like from the outside.
+pub(super) struct ProcessTree {
+    root: u32,
+    parents: std::collections::HashMap<u32, u32>,
+}
+
+impl ProcessTree {
+    pub(super) fn rooted_at(root: u32) -> Self {
+        Self {
+            root,
+            parents: process_parents(),
+        }
+    }
+
+    /// Whether `pid` is the root or one of its descendants.
+    ///
+    /// Bounded: a parent map read while processes come and go can name a pid
+    /// that has already been recycled onto a different one, and an unbounded
+    /// walk over a cycle built that way would never return.
+    pub(super) fn contains(&self, pid: u32) -> bool {
+        let mut current = pid;
+        for _ in 0..16 {
+            if current == self.root {
+                return true;
+            }
+            match self.parents.get(&current) {
+                // pid 0 is the idle process on Windows and the reaper's parent
+                // on unix: either way it is the top, not another hop.
+                Some(&parent) if parent != 0 && parent != current => current = parent,
+                _ => return false,
+            }
+        }
+        false
+    }
+
+    #[cfg(test)]
+    fn from_parents(root: u32, parents: &[(u32, u32)]) -> Self {
+        Self {
+            root,
+            parents: parents.iter().copied().collect(),
+        }
+    }
+}
+
 #[cfg(unix)]
 fn terminate(pid: u32) -> bool {
     unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) == 0 }
@@ -589,6 +727,39 @@ mod tests {
                 "{junk}"
             );
         }
+    }
+
+    /// The launcher case, which is what a fastpick thread is: the PTY spawned
+    /// the shell, the shell spawned fastpick, fastpick spawned claude, and the
+    /// session in the registry belongs to the last of the four.
+    #[test]
+    fn a_session_started_by_a_launcher_still_belongs_to_the_pty() {
+        let tree = ProcessTree::from_parents(100, &[(200, 100), (300, 200), (400, 300)]);
+        assert!(tree.contains(100), "the pty's own child");
+        assert!(tree.contains(400), "claude, three hops down");
+        // A claude in someone else's terminal is still someone else's.
+        assert!(!tree.contains(999));
+    }
+
+    /// A parent map is read while processes come and go, so it can name a pid
+    /// that has been recycled onto one of its own descendants. Walking that
+    /// without a bound would never return, freezing every session scan.
+    #[test]
+    fn a_cycle_in_the_parent_map_does_not_hang_the_walk() {
+        let tree = ProcessTree::from_parents(1, &[(10, 11), (11, 10)]);
+        assert!(!tree.contains(10));
+        // Its own parent, which is the shortest cycle there is.
+        let tree = ProcessTree::from_parents(1, &[(10, 10)]);
+        assert!(!tree.contains(10));
+    }
+
+    /// pid 0 is the idle process on Windows and the top of the chain on unix.
+    /// Treating it as another hop would walk into whatever the map says about
+    /// it, and a root of 0 would then own the entire machine.
+    #[test]
+    fn the_walk_stops_at_pid_zero() {
+        let tree = ProcessTree::from_parents(0, &[(10, 0)]);
+        assert!(!tree.contains(10));
     }
 
     /// The liveness rule is only worth anything if a dead pid reads as dead:
