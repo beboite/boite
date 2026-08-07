@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { app } from "$lib/app/store.svelte";
+  import { workspace } from "$lib/backend";
   import { platform } from "$lib/storage/platform.svelte";
   import type { ShellOption } from "$lib/storage/platform.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
@@ -88,9 +89,19 @@
     settings.state.fastpickEnabled && fastpick.installed !== false,
   );
 
+  // Which machine the shell pane is about. A shell list belongs to one machine
+  // and dynamic mode has two, so the rows come from the one the launch would
+  // land on: this pane used to offer the local machine's shells for a project
+  // running on the boite, and picking one sent a Windows shell path there.
+  const targetOrigin = $derived(
+    app.projectById(projectId ?? app.currentProjectId)?.origin,
+  );
+  const shells = $derived(platform.shellsFor(targetOrigin));
+  const onBoite = $derived(platform.shellsOnBoite(targetOrigin));
+
   const defaultShell = $derived(
     settings.state.defaultShellId
-      ? platform.shells.find((s) => s.id === settings.state.defaultShellId) ?? null
+      ? shells.find((s) => s.id === settings.state.defaultShellId) ?? null
       : null,
   );
 
@@ -164,14 +175,21 @@
         <ChevronLeft class="size-3.5" />
       </button>
       <span class="truncate font-medium">{t("shell.pick")}</span>
+      {#if onBoite}
+        <!-- The list changed machine when the project did, and nothing else on
+             screen says which one these shells belong to. -->
+        <span class="ml-auto shrink-0 text-2xs text-muted-foreground/70">
+          {t("sidebar.onBoite", { name: workspace.info.name || "boite" })}
+        </span>
+      {/if}
     </div>
     <div class="flex min-h-0 flex-col overflow-y-auto p-1.5">
-      {#if platform.shells.length === 0}
+      {#if shells.length === 0}
         <div class="px-2 py-1.5 text-xs text-muted-foreground">
           {t("shell.noneDetected")}
         </div>
       {/if}
-      {#each platform.shells as shell (shell.id)}
+      {#each shells as shell (shell.id)}
         <button type="button" class={rowClass} onclick={(e) => void pickShell(shell, e.shiftKey)}>
           <span class="min-w-0 truncate font-medium">{shell.label}</span>
           <span class="ml-auto shrink-0 font-mono text-2xs text-muted-foreground/70">
@@ -266,7 +284,7 @@
           <button
             type="button"
             class="flex shrink-0 items-center rounded-r-md border-l border-border/60 px-1.5 text-muted-foreground/70 transition hover:bg-[var(--color-surface-3)] hover:text-foreground focus-visible:bg-[var(--color-surface-3)] focus-visible:text-foreground focus-visible:outline-none group-hover:text-foreground/70 disabled:cursor-not-allowed disabled:opacity-40"
-            disabled={platform.shells.length === 0}
+            disabled={shells.length === 0}
             onclick={() => (pane = "shell")}
             aria-label={t("shell.pick")}
             title={t("shell.pick")}

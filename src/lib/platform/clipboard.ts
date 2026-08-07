@@ -16,7 +16,13 @@ export async function writeText(text: string): Promise<void> {
   }
   if (typeof navigator !== "undefined" && navigator.clipboard) {
     await navigator.clipboard.writeText(text);
+    return;
   }
+  // The Async Clipboard API is absent outside a secure context, which is the
+  // normal case for a boite reached over plain http on a LAN. Resolving here
+  // was the swallow this file says it does not do: the caller went on to raise
+  // its "copied" toast for a string that never left the page.
+  throw new Error("no clipboard on this platform");
 }
 
 // "" only where there is no clipboard to read at all, which is not a failure:

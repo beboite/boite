@@ -118,6 +118,13 @@ class ExplorerStore {
   private visibility = new Map<string, boolean>();
   private searchToken = 0;
   private debounceHandle: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * Bumped by `reset`. A directory read or a git status in flight when the
+   * workspace switches is an answer about the machine being left, and landing
+   * after the reset put that machine's listing straight back into a store that
+   * had just been emptied — the same stale tree, one tick later.
+   */
+  private generation = 0;
 
   // These records are $state proxies, so writing and deleting a single key is
   // already reactive. The old spread-clone per write replaced the whole record
@@ -127,9 +134,11 @@ class ExplorerStore {
     const key = normalizePath(path);
     if (!force && this.entriesByPath[key]) return;
     if (this.loading[key]) return;
+    const gen = this.generation;
     this.loading[key] = true;
     try {
       const entries = (await readDir(key)).filter((e) => e.name !== ".git");
+      if (gen !== this.generation) return;
       if (!sameEntries(this.entriesByPath[key], entries)) {
         this.entriesByPath[key] = entries;
       }
@@ -137,9 +146,9 @@ class ExplorerStore {
     } catch (err) {
       const msg = String(err);
       logger.warn("explorer", `read_dir failed for ${key}`, msg);
-      this.errorByPath[key] = msg;
+      if (gen === this.generation) this.errorByPath[key] = msg;
     } finally {
-      delete this.loading[key];
+      if (gen === this.generation) delete this.loading[key];
     }
   }
 
@@ -303,8 +312,10 @@ class ExplorerStore {
   }
 
   async loadGitStatus(cwd: string): Promise<void> {
+    const gen = this.generation;
     try {
       const rows = await gitChangedPaths(normalizePath(cwd));
+      if (gen !== this.generation) return;
       const byPath: Record<string, string> = {};
       const folderStatus: Record<string, string> = {};
       const cwdNorm = normalizePath(cwd);
@@ -330,6 +341,44 @@ class ExplorerStore {
       // commit) should not blank the whole tree.
       logger.warn("explorer", `git_changed_paths failed for ${cwd}`, String(err));
     }
+  }
+
+  /**
+   * Drop every cached listing so a switch reads the new machine's directories.
+   *
+   * `load` early-returns on a path it already holds, and a path that exists on
+   * both machines lands under the same key, so a folder cached on one boite
+   * stayed on screen while the next one answered: its entries, its expansion
+   * state and its git badges, all describing files nobody was connected to.
+   *
+   * `MAX_CACHED_DIRS` eviction is no help here. It only fires past 400 keys and
+   * only spares the tree currently on screen, which is exactly the listing a
+   * switch has to invalidate.
+   */
+  reset(): void {
+    // Two counters and a timer, because three different kinds of stale answer
+    // can still be coming: a read already sent, a search already sent, and a
+    // search that has not been sent yet.
+    this.generation++;
+    this.searchToken++;
+    if (this.debounceHandle !== null) {
+      clearTimeout(this.debounceHandle);
+      this.debounceHandle = null;
+    }
+    this.entriesByPath = {};
+    this.expanded = {};
+    this.loading = {};
+    this.errorByPath = {};
+    this.statusByPath = {};
+    this.folderStatusByPath = {};
+    this.filterText = "";
+    this.searchHits = [];
+    this.searching = false;
+    this.searchTruncated = false;
+    this.hitPathSet = {};
+    this.ancestorPathSet = {};
+    this.dirHitPrefixes = [];
+    this.visibility.clear();
   }
 
   statusFor(path: string, isDir: boolean): string | null {

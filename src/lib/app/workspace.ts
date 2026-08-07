@@ -9,7 +9,12 @@ import { resetShellCache } from "$lib/storage/shell";
 import { gitStore } from "$lib/features/git/store.svelte";
 import { todos } from "$lib/features/todo/store.svelte";
 import { approvals } from "$lib/features/approvals/store.svelte";
+import { editorStore } from "$lib/features/editor/store.svelte";
+import { explorerStore } from "$lib/features/explorer/store.svelte";
+import { paneStore } from "$lib/features/panes/store.svelte";
 import { notifications } from "$lib/features/notifications/store.svelte";
+import { confirmDialog } from "$lib/shared/components/confirm.svelte";
+import { t } from "$lib/i18n/index.svelte";
 import { logger } from "$lib/shared/services/logger.svelte";
 import { device, type BoiteEntry } from "$lib/features/settings/device.svelte";
 import { registerPush } from "$lib/features/push/api";
@@ -24,6 +29,16 @@ export function defaultRemoteWsUrl(): string {
 
 // Drop every workspace-scoped store so init() re-hydrates from the new backend
 // instead of mixing two workspaces.
+//
+// The last three were missing from this list, and all three are keyed by paths
+// and ids the new machine does not share: an open buffer saved after the switch
+// wrote the previous machine's bytes to that path on this one, a cached listing
+// described a folder nobody was connected to any more, and a panel pane kept a
+// projectId out of a project list that no longer exists.
+//
+// Ordered before app.reset() because that one empties the project list these
+// stores are read against; a reset that has to ask which project owns a path
+// has to run while there is still an answer.
 function resetStores() {
   settings.reset();
   todos.reset();
@@ -31,6 +46,9 @@ function resetStores() {
   platform.reset();
   resetShellCache();
   gitStore.reset();
+  editorStore.reset();
+  explorerStore.reset();
+  paneStore.reset();
   app.reset();
 }
 
@@ -67,11 +85,31 @@ async function fetchAndApplyMeta() {
   }
 }
 
-// Leaving the local workspace is non-destructive now: local PTYs are detached
-// (kept alive + buffering) on the switch and reattach when you come back, so
-// there is nothing to warn about.
-async function confirmLeaveLocal(): Promise<boolean> {
-  return true;
+/**
+ * The one place a switch can still be called off.
+ *
+ * PTYs are not the reason any more: local ones are detached, kept alive and
+ * buffering, and reattach on the way back. Open buffers are. `resetStores()`
+ * drops every one of them, and it cannot flush them first: `connectBoite`
+ * awaits `createRemote()` before `adoptRemote()`, so by the time the reset runs
+ * `backendForPath()` already answers as the machine being switched TO, and a
+ * save would write one machine's bytes to the other's disk. That is the
+ * overwrite `editorStore.reset()` exists to prevent, so the only safe place to
+ * stop is here, before any of it starts.
+ *
+ * Silent when nothing is dirty, which is the normal switch.
+ */
+async function confirmLeaveWorkspace(): Promise<boolean> {
+  const dirty = editorStore.buffers.filter((b) => editorStore.isDirty(b)).length;
+  if (dirty === 0) return true;
+  return confirmDialog.ask({
+    title: t("workspace.leaveDirtyTitle"),
+    message:
+      dirty === 1
+        ? t("workspace.leaveDirtyOne")
+        : t("workspace.leaveDirtyMany", { count: dirty }),
+    confirmLabel: t("workspace.leaveDirtyConfirm"),
+  });
 }
 
 /**
@@ -92,6 +130,12 @@ export interface ConnectAttempt {
 // at boot, where nothing is initialized yet. `mode` picks how the connection
 // lands: "remote" replaces the workspace (classic switch), "dynamic" grafts
 // the boite onto the local one (the picker still shows "Local").
+//
+// That skip is load-bearing rather than an economy: paneStore.reset() removes
+// the saved layout, so a boot that reset first would delete the very tree
+// syncWithThreads is about to restore. `app.ready` is the flag on every switch
+// path and is false until init() has run, which is what keeps the three boot
+// callers below passing a literal false.
 async function connectBoite(
   entry: BoiteEntry,
   reset: boolean,
@@ -261,6 +305,12 @@ async function graftRemote(entry: BoiteEntry): Promise<void> {
 // alone — the preference kicks in on the next return to local.
 export async function setDynamicMode(on: boolean): Promise<void> {
   if (device.dynamicMode === on) return;
+  // Grafting or ungrafting the boite re-inits the local side, which resets the
+  // stores: the toggle costs the open buffers as surely as the picker does.
+  // Asked before the preference is written, so a refusal leaves the switch off.
+  if (hasTauri() && workspace.mode !== "remote" && app.ready) {
+    if (!(await confirmLeaveWorkspace())) return;
+  }
   device.setDynamicMode(on);
   if (!hasTauri()) return;
   if (workspace.mode === "remote") return;
@@ -277,6 +327,9 @@ export async function switchToLocal(): Promise<boolean> {
   if (!hasTauri()) return false;
   // Dynamic counts as the local side: the picker's "Local" row is a no-op.
   if (workspace.mode !== "remote") return true;
+  // Leaving a boite drops its open buffers exactly as leaving local does. The
+  // guard used to be on one direction only, back when it was about local PTYs.
+  if (!(await confirmLeaveWorkspace())) return false;
   await initLocalSide(true);
   notifications.success("Back to local workspace");
   return true;
@@ -304,7 +357,7 @@ export async function switchToBoite(id: string): Promise<boolean> {
   ) {
     return true;
   }
-  if (!(await confirmLeaveLocal())) return false;
+  if (!(await confirmLeaveWorkspace())) return false;
   return (await connectBoite(entry, app.ready, "remote")).outcome === "ok";
 }
 
@@ -380,7 +433,7 @@ export async function connectAndInitDetailed(
   url: string,
   token: string,
 ): Promise<ConnectAttempt> {
-  if (!(await confirmLeaveLocal())) return { outcome: "unreachable", detail: "" };
+  if (!(await confirmLeaveWorkspace())) return { outcome: "unreachable", detail: "" };
   // Whether this URL was already known decides what a failure costs. A brand new
   // one that never connected is rolled back out of the list: it used to be saved
   // before the dial and left marked active with its token, and on a PWA the only

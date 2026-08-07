@@ -5,6 +5,9 @@
   import { getCurrentWebview } from "@tauri-apps/api/webview";
   import { app } from "$lib/app/store.svelte";
   import { hasTauri } from "$lib/backend/env";
+  import { workspace } from "$lib/backend";
+  import { notifications } from "$lib/features/notifications/store.svelte";
+  import { t } from "$lib/i18n/index.svelte";
   import { bootDesktopWorkspace, bootRemoteWorkspace } from "$lib/app/workspace";
   import { reinspectMissingIcons } from "$lib/features/project/api";
   import { settings } from "$lib/features/settings/store.svelte";
@@ -24,7 +27,7 @@
   import { paneStore, threadLeavesOf } from "$lib/features/panes/store.svelte";
   import { splitFocused } from "$lib/features/panes/open";
   import { palette } from "$lib/features/palette/store.svelte";
-  import { platform } from "$lib/storage/platform.svelte";
+  import { isDeviceMacOS, platform } from "$lib/storage/platform.svelte";
   import { updater } from "$lib/features/updater/store.svelte";
   import { resumeAfterUpdate } from "$lib/features/updater/restart";
   import { todos } from "$lib/features/todo/store.svelte";
@@ -280,7 +283,10 @@
   const keyboard = createKeyboardController({
     bindings: shortcuts,
     getScope: currentScope,
-    isMac: () => platform.isMacOS,
+    // The keyboard under the user's hands, never the boite's. This read is why
+    // the two are named apart: it was `platform.isMacOS` and a Mac driving a
+    // Linux boite lost Cmd for every binding in the app.
+    isMac: () => isDeviceMacOS,
   });
 
   // Its own onMount: the boot one below returns early on the PWA path, and
@@ -326,7 +332,19 @@
       if (typeof navigator !== "undefined" && "serviceWorker" in navigator) {
         void navigator.serviceWorker.register("/service-worker.js").catch(() => {});
       }
-      return;
+      // Both watches belong on this path too, and neither was here. The dock is
+      // mounted below on every platform, so a phone drew it and nothing ever
+      // fed it: an agent's permission request reached no device that could
+      // answer, and a todo an agent wrote never refreshed the panel. Both
+      // arrive as control events on the boite socket, which is the only backend
+      // there is here.
+      const stopPwaTodoWatch = todos.watch();
+      const stopPwaApprovalWatch = approvals.watch();
+      void approvals.reload();
+      return () => {
+        stopPwaTodoWatch();
+        stopPwaApprovalWatch();
+      };
     }
 
     void bootDesktopWorkspace().then(() => {
@@ -357,8 +375,17 @@
       .onDragDropEvent(async (event) => {
         if (event.payload.type !== "drop") return;
         const paths = event.payload.paths ?? [];
+        // The webview drops paths off this machine's file manager, always. Sent
+        // with no origin they went to `current()`, so a folder dragged in while
+        // a boite was active was inspected on the server: a "not a folder" toast
+        // for a folder in plain sight, or a project silently pointed at a
+        // same-named directory over there.
+        if (workspace.isRemote) {
+          notifications.error(t("project.dropIsOnThisMachine"));
+          return;
+        }
         for (const p of paths) {
-          await addProjectByPath(p);
+          await addProjectByPath(p, workspace.isDynamic ? "local" : undefined);
         }
       })
       .then((u) => (unlisten = u));

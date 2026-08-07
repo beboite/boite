@@ -42,6 +42,21 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "about.workspaceLocal": "Cette machine",
   "about.workspaceRemote": "Boite distante",
   "about.source": "Code source",
+  // Deux machines, deux builds. Le « Version » sans qualificatif ci-dessus reste
+  // pour le cas où il n'y en a qu'une ; celles-ci le remplacent dès qu'une boite
+  // répond, la version du bundle ne disant rien de celle du serveur.
+  "about.versionHere": "Version, cet appareil",
+  "about.versionBoite": "Version, la boite",
+  "about.boitePlatform": "La boite tourne sur",
+  "about.boiteHost": "La boite s'appelle",
+  // La boite a répondu et n'est aucun des trois, face à une boite qui n'a rien
+  // dit. Distingués volontairement : l'un est un fait sur la machine, l'autre un
+  // serveur trop ancien pour avoir été interrogé.
+  "about.osWindows": "Windows",
+  "about.osMacos": "macOS",
+  "about.osLinux": "Linux",
+  "about.osUnknown": "Autre chose",
+  "about.boiteSilent": "Non communiqué",
 
   "project.scratch": "Brouillon",
 
@@ -242,6 +257,7 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "todo.sendLabel": "Envoyer au terminal actif",
   "todo.gitNoCommit": "aucun commit signalé",
   "todo.gitUnknownCommit": "commit introuvable",
+  "todo.gitUnreachable": "vérification impossible",
   "todo.gitPushed": "poussé",
   "todo.gitLocal": "local",
   "todo.gitPr": "PR {number}",
@@ -261,6 +277,8 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "todo.agentEndpointDown": "L'endpoint ne répond pas — les agents ne peuvent pas atteindre la liste.",
   "todo.agentOff": "L'accès agent est désactivé dans les réglages.",
   "todo.agentUnavailable": "Le shim embarqué est absent de cette build.",
+  "todo.agentOnBoite":
+    "Ces agents tournent sur {name}. Son shim, ses identifiants et son point d'accès sont sur cette machine-là, pas sur celle-ci.",
 
   "todo.agentNone": "Aucun agent connu ne tourne encore sur ce projet. Pointe le tien sur le serveur embarqué :",
   "todo.agentCopyPath": "Copier le chemin du serveur MCP",
@@ -293,6 +311,8 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "project.tokens": "Tokens",
   "project.tokensRange": "12 derniers mois",
   "project.tokensNone": "Aucune transcription d'agent pour ce projet.",
+  "project.tokensUnreachable": "Les transcriptions n'ont pas pu être lues.",
+  "project.tokensUnreachableHint": "Inconnu, pas zéro. À relire quand la boite répondra.",
   "project.tokensOnly": "Seuls claude et codex notent ce qu'ils dépensent.",
   "project.tokensMissing": "{agents} ne tient aucun registre sur cette machine.",
   "project.tokensSessions": "{count} sessions",
@@ -449,6 +469,12 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "mobile.shells": "Shells",
   "mobile.defaultShell": "Shell par défaut",
   "mobile.newTerminal": "Nouveau terminal",
+  "workspace.leaveDirtyTitle": "Modifications non enregistrées",
+  "workspace.leaveDirtyOne":
+    "Un fichier ouvert a des modifications non enregistrées. Changer d'espace de travail le ferme et les perd.",
+  "workspace.leaveDirtyMany":
+    "{count} fichiers ouverts ont des modifications non enregistrées. Changer d'espace de travail les ferme et les perd.",
+  "workspace.leaveDirtyConfirm": "Changer quand même",
   "workspace.title": "Espaces de travail",
   "workspace.local": "Local",
   "workspace.remote": "Distant",
@@ -706,6 +732,12 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "connection.retry": "Reconnecter maintenant",
   "connection.offline": "{name} est injoignable",
   "connection.offlineDesc": "La boite n'a pas répondu. Elle est peut-être en veille, ou hors du réseau.",
+  // Le seul échec qui ne parle pas d'accessibilité, et celui que la bannière
+  // affichait comme « peut-être en veille ». La boite a répondu, a dit non, et a
+  // cessé de réessayer : un message invitant à attendre son retour se trompait
+  // deux fois.
+  "connection.refused": "{name} a refusé le jeton",
+  "connection.refusedDesc": "Il a été modifié ou révoqué, et se reconnecter ne vous fera pas rentrer. Saisissez le nouveau depuis le sélecteur d'espace de travail.",
   "general.pushTitle": "Notifications push",
   "general.pushDesc": "Être prévenu qu'un agent a besoin de vous, même application fermée.",
   "general.pushEnable": "Activer les notifications",
@@ -722,6 +754,17 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "editor.reloadFailed": "Rechargement échoué : {error}",
   "editor.readOnlyError": "Fichier en lecture seule",
   "editor.saved": "{name} enregistré",
+  "editor.reloadTitle": "Recharger depuis le disque ?",
+  "editor.reloadMessage":
+    "{name} a des modifications non enregistrées. Recharger les abandonnera.",
+  "editor.reloadConfirm": "Recharger",
+  "editor.externalTitle": "Fichier modifié sur le disque",
+  "editor.externalMessage":
+    "{name} a été modifié en dehors de l'éditeur. Enregistrer écrasera ces modifications.",
+  "editor.externalConfirm": "Écraser",
+  "editor.discardTitle": "Abandonner les modifications ?",
+  "editor.discardMessage": "{name} a des modifications non enregistrées.",
+  "editor.discardConfirm": "Abandonner",
   "editor.saveFailed": "Enregistrement échoué : {error}",
   "editor.backToTerminal": "Retour au terminal",
   "editor.staleWarning":
@@ -733,6 +776,8 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "editor.terminal": "Terminal",
   "fastpick.addProjectFirst": "Ajoutez d'abord un projet",
   "project.pickerFailed": "Impossible d'ouvrir le sélecteur de dossier",
+  "project.dropIsOnThisMachine":
+    "Ce dossier est sur cette machine, et l'espace de travail est la boite. À ajouter depuis le navigateur de dossiers de la boite.",
   "project.addFailed": "Impossible d'ajouter le projet",
   "project.added": "{name} ajouté",
   "project.created": "{name} créé",
@@ -845,6 +890,8 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "browser.refuse.credentials":
     "Cette adresse contient un identifiant, ce qui masque sa vraie destination.",
   "browser.refuse.appOrigin": "Cette adresse est Boite elle-même, pas une page.",
+  "browser.refuse.otherMachine":
+    "Cette adresse est sur la boite, et localhost ici désigne cette machine.",
   "browser.refuse.cleartext":
     "Le http:// simple s'arrête à cette machine. Utilisez https:// pour le reste.",
 

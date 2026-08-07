@@ -60,15 +60,43 @@
       t("workspace.remote"),
   );
 
-  // Three states worth telling apart. A dial in flight is not a failure. A link
+  // Four states worth telling apart. A dial in flight is not a failure. A link
   // that answered once and went away is a loss, and what was typed since is gone
   // with it. One that never answered at all is a boite that may simply be asleep,
   // and saying "lost" about it would be a lie.
-  type LinkState = "reconnecting" | "lost" | "unreached";
+  //
+  // `refused` is the fourth and was the missing one. A revoked or rotated token
+  // is the only failure the boite itself decides, the only one waiting cannot
+  // fix, and the only one that had nothing anywhere asking for a new credential:
+  // the socket stops its backoff loop the moment it is refused, so the banner was
+  // offering to keep trying something that had already given up, under a sentence
+  // guessing the machine might be asleep.
+  type LinkState = "reconnecting" | "lost" | "unreached" | "refused";
   const link = $derived.by<LinkState>(() => {
-    if (workspace.connection === "connecting") return "reconnecting";
+    // Read first and deliberately. `authRejected` is a plain field on the socket
+    // and cannot be depended on; the connection state is the rune, and the socket
+    // sets the flag before the close that publishes "disconnected", so this
+    // recomputes at the right moment without either of them being reactive.
+    const state = workspace.connection;
+    if (workspace.remoteBackend?.authRejected) return "refused";
+    if (state === "connecting") return "reconnecting";
     return workspace.linkEstablished ? "lost" : "unreached";
   });
+
+  // A retry dials the same token, and that token is the thing the boite refused.
+  // Nothing to shorten mid-dial either: the socket is already doing what the
+  // button asks for.
+  const canRetry = $derived(link !== "reconnecting" && link !== "refused");
+
+  // Danger rather than warning for a refused token: the other three come back on
+  // their own once the network does, and this one never does. Written out in
+  // full rather than assembled, because Tailwind reads this file as text and a
+  // class it cannot see spelled here is a class it never emits.
+  const tone = $derived(
+    link === "refused"
+      ? { border: "border-[var(--color-danger)]/50", dot: "bg-[var(--color-danger)]" }
+      : { border: "border-[var(--color-warning)]/40", dot: "bg-[var(--color-warning)]" },
+  );
 
   async function retry() {
     if (retrying) return;
@@ -86,29 +114,28 @@
        the screen reader is already on. -->
   <div class="conn-banner" class:conn-banner-mobile={mobile} role="status" aria-live="polite">
     <div
-      class="flex items-center gap-3 rounded-lg border border-[var(--color-warning)]/40 bg-[var(--color-surface-2)] px-3 py-2 shadow-lg"
+      class="flex items-center gap-3 rounded-lg border {tone.border} bg-[var(--color-surface-2)] px-3 py-2 shadow-lg"
     >
       <span
-        class="size-2 shrink-0 rounded-full bg-[var(--color-warning)]"
+        class="size-2 shrink-0 rounded-full {tone.dot}"
         class:animate-pulse={link === "reconnecting"}
       ></span>
       <div class="min-w-0">
         <p class="text-sm font-medium text-foreground">
-          {link === "reconnecting"
-            ? t("connection.reconnecting", { name })
-            : link === "lost"
-              ? t("connection.lost", { name })
-              : t("connection.offline", { name })}
+          {#if link === "reconnecting"}{t("connection.reconnecting", { name })}
+          {:else if link === "lost"}{t("connection.lost", { name })}
+          {:else if link === "refused"}{t("connection.refused", { name })}
+          {:else}{t("connection.offline", { name })}{/if}
         </p>
         {#if link === "lost"}
           <p class="text-xs text-muted-foreground/80">{t("connection.lostDesc")}</p>
         {:else if link === "unreached"}
           <p class="text-xs text-muted-foreground/80">{t("connection.offlineDesc")}</p>
+        {:else if link === "refused"}
+          <p class="text-xs text-muted-foreground/80">{t("connection.refusedDesc")}</p>
         {/if}
       </div>
-      <!-- No button mid-dial: there is nothing to shorten, and the socket is
-           already doing the thing the button asks for. -->
-      {#if link !== "reconnecting"}
+      {#if canRetry}
         <button
           type="button"
           disabled={retrying}

@@ -17,7 +17,8 @@ import {
   threadLeavesOf,
   findSplit,
 } from "./tree";
-import { PANES_KEY, loadSavedGroups } from "./layout";
+import { loadSavedGroups, panesKey } from "./layout";
+import { workspace } from "$lib/backend";
 import { sameRect, unmeasuredRect, type PaneRect, type Viewport } from "./rect";
 import { uuid } from "$lib/shared/utils/uuid";
 
@@ -127,10 +128,14 @@ class PaneStore {
   private saveSoon() {
     if (typeof localStorage === "undefined") return;
     if (this.saveTimer !== null) clearTimeout(this.saveTimer);
+    // Captured when the write is armed, never resolved inside the timeout: a
+    // switch lands well within 250ms, and a key read late would file the
+    // outgoing workspace's tree under the incoming one's name.
+    const key = panesKey(workspace.mode, workspace.activeBoiteId);
     this.saveTimer = setTimeout(() => {
       this.saveTimer = null;
       try {
-        localStorage.setItem(PANES_KEY, JSON.stringify($state.snapshot(this.groups)));
+        localStorage.setItem(key, JSON.stringify($state.snapshot(this.groups)));
       } catch {
         // A layout is not worth failing over: a full quota just means the next
         // start rebuilds one leaf per thread, which is where this began.
@@ -145,7 +150,7 @@ class PaneStore {
     // one-per-thread pass below and overwrite the layout it was meant to restore.
     if (!this.hydrated) {
       this.hydrated = true;
-      const saved = loadSavedGroups();
+      const saved = loadSavedGroups(panesKey(workspace.mode, workspace.activeBoiteId));
       if (saved.length > 0 && this.groups.length === 0) this.groups = saved;
     }
     const valid = new Map(app.threads.map((t) => [t.id, t]));
@@ -198,6 +203,44 @@ class PaneStore {
       this.dropPreview = null;
     }
     this.saveSoon();
+  }
+
+  /**
+   * Drop the tree so a switch does not keep the previous machine's panes.
+   *
+   * `syncWithThreads` prunes against the live thread list, and that reaches the
+   * terminals only: a git, explorer, editor, todo or browser pane is not backed
+   * by a row anyone else can delete, so a panel-only group survived the switch
+   * still carrying a `projectId` from a project list the new machine has never
+   * heard of.
+   *
+   * The saved blob stays, and stays where it was: `panesKey` gives each
+   * workspace its own, so the arrangement a machine had is still there when the
+   * user comes back to it. Only the tree in memory is dropped. This used to
+   * delete the blob outright, which was the price of a single global key —
+   * every machine lost its layout to stop them from mixing.
+   *
+   * `viewport` stays. It measures the window this app is drawn in, which is the
+   * one thing a switch does not change.
+   */
+  reset() {
+    // The debounce holds up to 250ms of the outgoing layout. Left armed it
+    // fires after the wipe and writes an empty tree over that workspace's blob.
+    // The key it captured is the right one; the groups it would snapshot are
+    // not, since they are cleared two lines down.
+    if (this.saveTimer !== null) {
+      clearTimeout(this.saveTimer);
+      this.saveTimer = null;
+    }
+    this.groups = [];
+    this.rects = {};
+    this.hoveredThreadId = null;
+    this.draggingThreadId = null;
+    this.dropPreview = null;
+    // Back to false, deliberately: the next syncWithThreads has to read the
+    // incoming workspace's own blob. Under the old global key that re-read was
+    // the stale tree, which is why this was pinned true.
+    this.hydrated = false;
   }
 
   setFocused(groupId: string, paneId: string) {

@@ -204,6 +204,17 @@
 
   {#if !report}
     <p class="text-sm text-muted-foreground">{t("common.loading")}</p>
+  {:else if report.unreachable}
+    <!-- Ahead of the empty case, which it is indistinguishable from by the
+         numbers and the opposite of by meaning: no days and no models is a
+         project that has spent nothing, and this is a project nobody managed
+         to ask. Neither the calendar nor the model rows are drawn, because a
+         year of the lightest square is an assertion about every one of those
+         days. The refresh in the header is the way out and is already there. -->
+    <p class="text-sm text-muted-foreground">{t("project.tokensUnreachable")}</p>
+    <p class="mt-1 text-xs text-muted-foreground/70">
+      {t("project.tokensUnreachableHint")}
+    </p>
   {:else if total === 0}
     <p class="text-sm text-muted-foreground">{t("project.tokensNone")}</p>
     <p class="mt-1 text-xs text-muted-foreground/70">

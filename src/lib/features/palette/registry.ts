@@ -12,7 +12,7 @@ import { openProjectDashboard } from "$lib/features/project/dashboard";
 import { resolveIconKey } from "$lib/shared/icons/detect";
 import { t } from "$lib/i18n/index.svelte";
 import type { MessageKey } from "$lib/i18n/index.svelte";
-import { platform } from "$lib/storage/platform.svelte";
+import { isDeviceMacOS } from "$lib/storage/platform.svelte";
 import { anchorPaneId, openPane } from "$lib/features/panes/open";
 import { paneStore } from "$lib/features/panes/store.svelte";
 import { classifyBrowserUrl } from "$lib/features/browser/url";
@@ -70,7 +70,7 @@ export function formatChord(combo: string): string {
   const parts = combo.split("+");
   const key = parts.pop() ?? "";
   const label = key.length === 1 ? key.toUpperCase() : key;
-  if (platform.isMacOS) {
+  if (isDeviceMacOS) {
     let out = "";
     if (parts.includes("alt")) out += "⌥";
     if (parts.includes("shift")) out += "⇧";

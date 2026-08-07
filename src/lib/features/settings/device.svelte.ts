@@ -1,5 +1,6 @@
 import { uuid } from "$lib/shared/utils/uuid";
 import { logger } from "$lib/shared/services/logger.svelte";
+import { forgetPanesOf } from "$lib/features/panes/layout";
 
 // Device-scoped settings: per-machine, never synced to a workspace. Holds the
 // registry of saved boites (remote servers). Tokens are secrets and inherently
@@ -187,6 +188,10 @@ class DeviceSettings {
       this.state.activeBoiteId = this.state.boites[0]?.id ?? null;
     }
     delete this.state.remoteProjects[id];
+    // The pane layouts are keyed by boite id and live under their own keys, so
+    // forgetting the boite has to reach them: nothing else ever will, and they
+    // name projects in a database this device can no longer open.
+    forgetPanesOf(id);
     this.#persist();
   }
 

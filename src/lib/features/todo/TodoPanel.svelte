@@ -630,6 +630,21 @@
                   <code class="px-1 font-mono text-muted-foreground/70">
                     {item.commitSha.slice(0, 7)}
                   </code>
+                {:else if g.commit.unreachable}
+                  <!-- The repository was never reached, so nothing below this
+                       line has been checked. Ahead of the `known` test because
+                       an unreached clone answers `known: false` too, and that
+                       used to draw "commit not found" over work that is there.
+                       Muted, not warning: git has contradicted nothing. -->
+                  <button
+                    type="button"
+                    class="group/tip relative text-muted-foreground/70 {CHIP}"
+                    aria-expanded={openTip === `${item.id}:sha`}
+                    onclick={() => toggleTip(`${item.id}:sha`)}
+                  >
+                    {t("todo.gitUnreachable")}
+                    {@render tip(item.commitSha, `${item.id}:sha`)}
+                  </button>
                 {:else if !g.commit.known}
                   <!-- Reported a sha the repository has never heard of. Said
                        plainly: this is the one claim git can flatly contradict. -->

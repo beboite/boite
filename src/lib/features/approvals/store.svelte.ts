@@ -1,7 +1,8 @@
-import { backend } from "$lib/backend";
+import { backend, backendFor, workspace, type Backend } from "$lib/backend";
 import { logger } from "$lib/shared/services/logger.svelte";
 import { uuid } from "$lib/shared/utils/uuid";
 import type { PendingApproval } from "$lib/backend/types";
+import type { WorkspaceOrigin } from "$lib/types";
 
 /**
  * Questions the user has to answer, from wherever they come.
@@ -57,6 +58,37 @@ export type ApprovalItem =
   | { id: string; source: "local"; ask: ApprovalAsk };
 
 /**
+ * A row and the host that is holding the agent behind it.
+ *
+ * The tag is a client-side routing concern, like the one on projects and
+ * threads: it is never persisted and never sent back. In dynamic mode both
+ * databases have a dock's worth of rows and an id only names something on the
+ * host that opened it, so answering one means answering it there.
+ * Undefined outside dynamic mode, where a single backend owns everything.
+ */
+type PendingRow = PendingApproval & { origin?: WorkspaceOrigin };
+
+/**
+ * One host's rows, tagged with which one.
+ *
+ * A workspace with no endpoint running has no approvals to show, which is not
+ * the same as an error worth a toast, and in dynamic mode one host being down
+ * is not a reason to empty the dock of the other's.
+ */
+async function listFrom(
+  be: Backend,
+  origin: WorkspaceOrigin | undefined,
+): Promise<PendingRow[]> {
+  try {
+    const rows = await be.approvals.list();
+    return rows.map((row) => ({ ...row, origin }));
+  } catch (err) {
+    logger.warn("approvals", "list failed", String(err));
+    return [];
+  }
+}
+
+/**
  * Past this many the dock stops drawing cards and says how many are left.
  *
  * A loop in an agent can open one of these per turn, and a column of forty
@@ -67,7 +99,7 @@ export const MAX_VISIBLE = 3;
 
 class ApprovalStore {
   /** Rows the endpoint opened, as the host reports them. */
-  pending = $state<PendingApproval[]>([]);
+  pending = $state<PendingRow[]>([]);
   /** Questions this window asked itself, oldest first. */
   local = $state<LocalAsk[]>([]);
   /** Ids being answered right now, so a double click does not send twice. */
@@ -79,15 +111,29 @@ class ApprovalStore {
     ...this.local.map((ask): ApprovalItem => ({ id: ask.id, source: "local", ask })),
   ]);
 
+  /**
+   * Everything waiting, from every host in play.
+   *
+   * In dynamic mode that is two, merged the way boot merges projects and
+   * threads (`app/hydrate.ts`). Asking `backend()` asked the local machine
+   * alone, and the notice that a row exists arrives on the boite's control
+   * plane: the one event that fires reliably was the one this could not answer,
+   * so a boite agent's permission request never reached the dock and the agent
+   * waited for good.
+   */
   async reload(): Promise<void> {
-    try {
-      this.pending = await backend().approvals.list();
-    } catch (err) {
-      // A workspace with no endpoint running has no approvals to show, which
-      // is not the same as an error worth a toast.
-      logger.warn("approvals", "list failed", String(err));
-      this.pending = [];
+    if (!workspace.isDynamic) {
+      this.pending = await listFrom(backend(), undefined);
+      return;
     }
+    const remote = workspace.remoteBackend;
+    const [here, boite] = await Promise.all([
+      listFrom(workspace.backendFor("local"), "local"),
+      // Never `backendFor("remote")`: with no socket it falls back to local,
+      // and the local rows would come back a second time wearing the wrong tag.
+      remote ? listFrom(remote, "remote") : Promise.resolve([] as PendingRow[]),
+    ]);
+    this.pending = [...here, ...boite];
   }
 
   /**
@@ -112,9 +158,16 @@ class ApprovalStore {
       asked.settle(allow);
       return;
     }
+    const row = this.pending.find((p) => p.id === id);
+    // An id no row carries is an id no host can be asked about. A reload
+    // between the click and here is the ordinary way to get one, and sending it
+    // to whichever backend happened to be current would either answer nothing
+    // or answer on the wrong machine, which reads as "another device got there
+    // first" and drops a card whose agent is still blocked.
+    if (!row) return;
     this.deciding = [...this.deciding, id];
     try {
-      await backend().approvals.decide(id, allow);
+      await backendFor(row.origin).approvals.decide(id, allow);
       // Dropped locally rather than waiting for the reload: the answer is
       // final either way, and a card that lingers invites a second click.
       this.pending = this.pending.filter((p) => p.id !== id);

@@ -1,8 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { hasTauri } from "$lib/backend/env";
-import { backend, backendForPath } from "$lib/backend";
+import { backendFor, localBackend } from "$lib/backend";
 import { logger } from "$lib/shared/services/logger.svelte";
-import type { IconKey } from "$lib/types";
+import type { IconKey, WorkspaceOrigin } from "$lib/types";
 
 /**
  * Pointing an agent at Boite's todo endpoint without anyone installing
@@ -128,8 +128,29 @@ export function agentSetupTarget(key: IconKey): string | null {
   }
 }
 
-export async function agentCredentialsPath(projectId: string): Promise<string | null> {
-  if (!hasTauri()) return null;
+/**
+ * Which machine spawns this project's agents, as far as this window can tell.
+ *
+ * What an agent can reach is a property of the machine that spawns it: the shim
+ * binary, the credentials file it is handed and the endpoint it calls are three
+ * files on one machine. `invoke` reaches this one and nothing else, and no arm
+ * of the transport carries any of the three, so a project whose threads run on
+ * a boite gets `"boite"` and no local answer at all. It used to get every local
+ * answer instead: this device's shim path, this device's credentials file and
+ * this device's endpoint health, shown under a remote project's name, beside a
+ * copy-paste line naming a binary the boite's agents cannot open.
+ */
+export type AgentHost = "here" | "boite";
+
+export function agentHostFor(origin: WorkspaceOrigin | undefined): AgentHost {
+  return hasTauri() && backendFor(origin) === localBackend() ? "here" : "boite";
+}
+
+export async function agentCredentialsPath(
+  projectId: string,
+  origin: WorkspaceOrigin | undefined,
+): Promise<string | null> {
+  if (agentHostFor(origin) !== "here") return null;
   try {
     return await invoke<string>("agent_mcp_project_path", { projectId });
   } catch {
@@ -151,8 +172,12 @@ export async function agentRegistration(
   key: IconKey,
   projectId: string,
   cwd: string | null,
+  origin: WorkspaceOrigin | undefined,
 ): Promise<McpRegistration> {
-  if (!key || !hasTauri()) return "none";
+  // The config files this reads are the agent's own, on the machine the agent
+  // runs on. A boite's are not reachable, and this device's say nothing about
+  // them.
+  if (!key || agentHostFor(origin) !== "here") return "none";
   try {
     return await invoke<McpRegistration>("agent_mcp_registration", {
       key,
@@ -176,19 +201,35 @@ export function agentRegisterCli(key: IconKey): string | null {
  * Asked through the backend rather than by name: the probe was calling a
  * command that had been renamed, every answer was the thrown error caught as
  * `false`, and the panel listed no agent at all on any platform.
+ *
+ * The only one of these a boite can answer, since PATH is what it is on the
+ * machine that spawns. Routed by origin rather than through `backend()`, which
+ * is the local device in dynamic mode and would have answered for the wrong
+ * PATH, and no longer gated on a Tauri runtime: a window with neither runtime
+ * nor socket throws and is caught below.
  */
-export async function agentIsInstalled(cmd: string): Promise<boolean> {
-  if (!hasTauri()) return false;
+export async function agentIsInstalled(
+  cmd: string,
+  origin: WorkspaceOrigin | undefined,
+): Promise<boolean> {
   try {
-    return await backend().shell.commandExists(cmd);
+    return await backendFor(origin).shell.commandExists(cmd);
   } catch {
     return false;
   }
 }
 
-/** Whether the endpoint an injected agent would call is actually serving. */
-export async function agentApiReady(): Promise<boolean> {
-  if (!hasTauri()) return false;
+/**
+ * Whether the endpoint an injected agent would call is actually serving.
+ *
+ * This device's endpoint. A boite runs one of its own and nothing here can ask
+ * it, so `false` there would read as "the door is shut" when the truth is that
+ * nobody knocked.
+ */
+export async function agentApiReady(
+  origin: WorkspaceOrigin | undefined,
+): Promise<boolean> {
+  if (agentHostFor(origin) !== "here") return false;
   try {
     return await invoke<boolean>("agent_api_ready");
   } catch {
@@ -206,12 +247,22 @@ let failed = false;
 
 /**
  * Where the generated server definition lives, or null when there is none to
- * offer — a browser workspace, or a dev build whose sidecar was never compiled.
- * Failure is remembered so a launch never pays for the same missing file twice.
+ * offer: a browser workspace, a dev build whose sidecar was never compiled, or
+ * a machine that is not this one. Failure is remembered so a launch never pays
+ * for the same missing file twice.
+ *
+ * These are three paths on this device's disk. A thread that spawns on a boite
+ * cannot open any of them, and handing them over as launch flags pointed an
+ * agent at a config file that is not there.
+ *
+ * One cache, not one per origin: only this device ever answers.
  */
-export async function mcpPaths(): Promise<McpPaths | null> {
+export async function mcpPaths(
+  origin?: WorkspaceOrigin,
+): Promise<McpPaths | null> {
+  if (agentHostFor(origin) !== "here") return null;
   if (cached) return cached;
-  if (failed || !hasTauri()) return null;
+  if (failed) return null;
   try {
     cached = await invoke<McpPaths>("agent_mcp_config");
     return cached;
@@ -222,9 +273,18 @@ export async function mcpPaths(): Promise<McpPaths | null> {
   }
 }
 
-/** Runs the agent's own `mcp add`. Returns what it said, or throws its error. */
-export async function registerAgentMcp(cli: string): Promise<string> {
-  const paths = await mcpPaths();
+/**
+ * Runs the agent's own `mcp add`. Returns what it said, or throws its error.
+ *
+ * Spawns a process on this device, so it only ever applies to agents that run
+ * here: the origin decides whether there is anything to register rather than
+ * being carried to another machine.
+ */
+export async function registerAgentMcp(
+  cli: string,
+  origin: WorkspaceOrigin | undefined,
+): Promise<string> {
+  const paths = await mcpPaths(origin);
   if (!paths) throw new Error("no shim available");
   return invoke<string>("register_agent_mcp", {
     cli,
@@ -237,25 +297,24 @@ export async function registerAgentMcp(cli: string): Promise<string> {
  * or nothing when the agent cannot take them, access is switched off, or the
  * shim is missing.
  *
- * `cwd` decides which machine is about to run the command, and that is the
- * question these paths answer badly. They name a shim and two generated files
- * on THIS device; a thread whose PTY is spawned by a boite-server runs on
- * another one, where those paths mean nothing or, worse, name something else.
- * A remote launch therefore gets no flags rather than flags pointing into a
- * filesystem it cannot see. What it would take to give a remote agent the
- * endpoint is the server shipping the shim and answering for it, which is a
- * capability that does not exist yet, not a path this can guess.
+ * The origin is the machine that will run the command line, not the one the
+ * menu was drawn on. Without it this asked the workspace-global backend, which
+ * in dynamic mode is this device: a thread spawning on the boite had this
+ * machine's `--mcp-config` and `--settings` paths appended to a command the
+ * boite then ran, naming files it has no way to open. A remote launch gets no
+ * flags at all rather than flags pointing into a filesystem it cannot see;
+ * giving a remote agent the endpoint takes the server shipping the shim and
+ * answering for it, which is a capability that does not exist yet.
  */
 export async function mcpArgsFor(
   key: IconKey,
   enabled: boolean,
-  cwd: string,
+  origin: WorkspaceOrigin | undefined,
 ): Promise<string[]> {
   if (!enabled) return [];
   const injector = key ? INJECTORS[key] : undefined;
   if (!injector) return [];
-  if (backendForPath(cwd).kind !== "tauri") return [];
-  const paths = await mcpPaths();
+  const paths = await mcpPaths(origin);
   if (!paths) return [];
   return injector(paths);
 }

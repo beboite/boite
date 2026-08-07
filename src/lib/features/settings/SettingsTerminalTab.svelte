@@ -78,7 +78,7 @@
   </div>
 </SettingsCard>
 
-{#if platform.isWindows}
+{#if platform.isHostWindows}
   <SettingsCard
     title={t("terminalTab.windowsTweaks")}
     description={t("terminalTab.windowsTweaksDesc")}

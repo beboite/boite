@@ -22,7 +22,8 @@
   const shown = $derived(approvals.items.slice(0, MAX_VISIBLE));
   const hidden = $derived(Math.max(0, approvals.items.length - shown.length));
 
-  const projectName = (id: string) => app.projects.find((p) => p.id === id)?.name ?? id;
+  // Through the index, never `projects.find`. See `.claude/rules/performance.md`.
+  const projectName = (id: string) => app.projectById(id)?.name ?? id;
 
   const threadName = (id: string) => {
     const thread = app.threadById(id);

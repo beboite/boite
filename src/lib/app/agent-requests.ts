@@ -32,7 +32,7 @@ import { takesOpeningPrompt } from "$lib/features/thread/session";
 import { launchAgent } from "$lib/features/thread/api";
 import { anchorProjectId, openPane } from "$lib/features/panes/open";
 import { paneStore } from "$lib/features/panes/store.svelte";
-import { classifyBrowserUrl } from "$lib/features/browser/url";
+import { classifyBrowserUrl, isLoopbackHost } from "$lib/features/browser/url";
 import { confirmDialog } from "$lib/shared/components/confirm.svelte";
 import type { DropSide, PaneContent } from "$lib/features/panes/types";
 import type { IconKey } from "$lib/types";
@@ -85,6 +85,33 @@ type AgentRequest =
   | CreateRequest
   | SpawnRequest
   | PaneOpenRequest;
+
+/**
+ * Which machine's process wrote the request.
+ *
+ * "boite" is the control plane: another machine's agent, whose idea of a path,
+ * a port or loopback is not this window's. Carried rather than inferred from
+ * `workspace.mode`, because in dynamic mode both arrive at the same handler.
+ */
+type RequestSource = "device" | "boite";
+
+/**
+ * Whether an address in the request was written on the machine reading it.
+ *
+ * A boite reachable at a loopback host is running here after all, so its
+ * agents' `http://localhost:5173` means the same port this window would reach
+ * and stays usable. Anything else is a second machine.
+ */
+function writtenOnThisMachine(from: RequestSource): boolean {
+  if (from === "device") return true;
+  const url = workspace.remoteUrl;
+  if (!url) return false;
+  try {
+    return isLoopbackHost(new URL(url).hostname);
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Which command to start, from whatever the agent called it.
@@ -236,7 +263,7 @@ async function handleSpawn(req: SpawnRequest) {
  * the conversation it belongs to rather than next to whichever terminal the
  * user last clicked.
  */
-async function handlePaneOpen(req: PaneOpenRequest) {
+async function handlePaneOpen(req: PaneOpenRequest, from: RequestSource) {
   const caller = req.callerThreadId;
   if (caller && app.hasThread(caller)) {
     const group = paneStore.groupOf(caller);
@@ -258,7 +285,7 @@ async function handlePaneOpen(req: PaneOpenRequest) {
     );
     return;
   }
-  const content = await paneContentOf(req);
+  const content = await paneContentOf(req, from);
   if (!content) return;
   // Half the width for a browser, a third for a panel: a page needs room to be
   // a page, and a file tree does not.
@@ -275,13 +302,17 @@ async function handlePaneOpen(req: PaneOpenRequest) {
  * which never went through that endpoint. Anything off this machine is the
  * user's call — the agent chose the page, and it is not the agent's window.
  */
-async function paneContentOf(req: PaneOpenRequest): Promise<PaneContent | null> {
+async function paneContentOf(
+  req: PaneOpenRequest,
+  from: RequestSource,
+): Promise<PaneContent | null> {
   if (req.pane !== "browser") return { kind: req.pane } as PaneContent;
   if (!req.url) {
     logger.warn("agent-request", "browser pane with no url, dropping it");
     return null;
   }
-  const target = classifyBrowserUrl(req.url);
+  const thisMachine = writtenOnThisMachine(from);
+  const target = classifyBrowserUrl(req.url, { requesterIsThisMachine: thisMachine });
   if (!target.ok) {
     logger.warn("agent-request", "browser pane refused", {
       url: req.url,
@@ -303,7 +334,7 @@ async function paneContentOf(req: PaneOpenRequest): Promise<PaneContent | null> 
   return { kind: "browser", url: target.url };
 }
 
-async function handle(req: AgentRequest) {
+async function handle(req: AgentRequest, from: RequestSource) {
   logger.info("agent-request", req.kind, req as unknown as Record<string, unknown>);
   switch (req.kind) {
     case "thread.move":
@@ -313,7 +344,7 @@ async function handle(req: AgentRequest) {
     case "thread.spawn":
       return handleSpawn(req);
     case "pane.open":
-      return handlePaneOpen(req);
+      return handlePaneOpen(req, from);
   }
 }
 
@@ -345,7 +376,7 @@ export async function handleRemoteAgentRequest(data: unknown) {
     // unsafe to do.
     .catch(() => false);
   if (!mine) return;
-  await handle(req);
+  await handle(req, "boite");
 }
 
 /**
@@ -359,7 +390,7 @@ export function watchAgentRequests(): () => void {
   void import("@tauri-apps/api/event")
     .then(({ listen }) =>
       listen<AgentRequest>(AGENT_REQUEST, (e) => {
-        void handle(e.payload).catch((err) => {
+        void handle(e.payload, "device").catch((err) => {
           logger.error("agent-request", "failed", String(err));
         });
       }),

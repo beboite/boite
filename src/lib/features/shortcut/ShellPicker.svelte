@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from "svelte";
   import { scale } from "svelte/transition";
+  import { app } from "$lib/app/store.svelte";
+  import { workspace } from "$lib/backend";
   import { platform } from "$lib/storage/platform.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
   import {
@@ -39,9 +41,21 @@
   let menuPos = $state({ x: 0, y: 0 });
   const EDGE_GAP = 4;
 
+  // Which machine this menu is about. A shell list belongs to one machine and
+  // dynamic mode has two, so the rows come from the one the launch would land
+  // on rather than from whichever list the store loaded first: the menu used to
+  // offer this device's shells for a project running on the boite, and handing
+  // one over sent a Windows shell path to a Linux machine. Resolved here rather
+  // than at the click, because a menu is read before it is used.
+  const targetOrigin = $derived(
+    app.projectById(projectId ?? app.currentProjectId)?.origin,
+  );
+  const shells = $derived(platform.shellsFor(targetOrigin));
+  const onBoite = $derived(platform.shellsOnBoite(targetOrigin));
+
   const defaultShell = $derived(
     settings.state.defaultShellId
-      ? platform.shells.find((s) => s.id === settings.state.defaultShellId) ?? null
+      ? shells.find((s) => s.id === settings.state.defaultShellId) ?? null
       : null,
   );
 
@@ -226,7 +240,7 @@
   <button
     type="button"
     class="flex shrink-0 items-center justify-center rounded-r-md border border-dashed border-border px-1.5 py-1 text-muted-foreground transition hover:border-foreground/30 hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-    disabled={platform.shells.length === 0}
+    disabled={shells.length === 0}
     onclick={toggle}
     aria-haspopup="menu"
     aria-expanded={open}
@@ -248,12 +262,19 @@
       onkeydown={handleMenuKeydown}
       transition:scale={{ duration: 90, start: 0.96 }}
     >
-      {#if platform.shells.length === 0}
+      {#if onBoite}
+        <!-- The list changed machine when the project did, and nothing else on
+             screen says which one these shells belong to. -->
+        <div class="px-2 py-1 text-2xs text-muted-foreground/70">
+          {t("sidebar.onBoite", { name: workspace.info.name || "boite" })}
+        </div>
+      {/if}
+      {#if shells.length === 0}
         <div class="px-2 py-1.5 text-xs text-muted-foreground">
           {t("shell.noneDetected")}
         </div>
       {/if}
-      {#each platform.shells as shell (shell.id)}
+      {#each shells as shell (shell.id)}
         <button
           type="button"
           role="menuitem"

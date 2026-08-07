@@ -2,5 +2,11 @@
 // switchable workspace store lives in active.svelte.ts (runes need a .svelte.ts
 // file). Façades call backend() at use time, so a workspace switch is picked up
 // without any of them changing.
-export { backend, backendFor, backendForPath, workspace } from "./active.svelte";
+export {
+  backend,
+  backendFor,
+  backendForPath,
+  localBackend,
+  workspace,
+} from "./active.svelte";
 export type { Backend } from "./types";

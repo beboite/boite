@@ -293,9 +293,9 @@ class EditorStore {
     if (!b || b.kind !== "file") return;
     if (this.isDirty(b)) {
       const ok = await confirmDialog.ask({
-        title: "Reload from disk?",
-        message: `${b.displayName} has unsaved changes. Reloading will discard them.`,
-        confirmLabel: "Reload",
+        title: t("editor.reloadTitle"),
+        message: t("editor.reloadMessage", { name: b.displayName }),
+        confirmLabel: t("editor.reloadConfirm"),
         danger: true,
       });
       if (!ok) return;
@@ -418,9 +418,9 @@ class EditorStore {
         const disk = await readTextFile(b.path);
         if (disk.content !== b.savedContent) {
           const ok = await confirmDialog.ask({
-            title: "File changed on disk",
-            message: `${b.displayName} was modified outside the editor. Saving will overwrite those changes.`,
-            confirmLabel: "Overwrite",
+            title: t("editor.externalTitle"),
+            message: t("editor.externalMessage", { name: b.displayName }),
+            confirmLabel: t("editor.externalConfirm"),
             danger: true,
           });
           if (!ok) {
@@ -455,9 +455,9 @@ class EditorStore {
     if (!b) return true;
     if (!force && this.isDirty(b)) {
       const ok = await confirmDialog.ask({
-        title: "Discard unsaved changes?",
-        message: `${b.displayName} has unsaved changes.`,
-        confirmLabel: "Discard",
+        title: t("editor.discardTitle"),
+        message: t("editor.discardMessage", { name: b.displayName }),
+        confirmLabel: t("editor.discardConfirm"),
         danger: true,
       });
       if (!ok) return false;
@@ -469,6 +469,41 @@ class EditorStore {
       this.activeId = next?.id ?? null;
     }
     return true;
+  }
+
+  /**
+   * Drop every buffer, so a switch cannot write one machine's bytes onto
+   * another.
+   *
+   * A buffer holds an absolute path and whatever was read at that path on the
+   * machine that answered at the time, while `save` resolves its destination
+   * through `backendForPath` against the project list of whatever answers now.
+   * Left open across a switch, a file read on one boite and saved after landing
+   * on the next overwrote that path on the new machine, with nothing on screen
+   * saying which machine was being written to.
+   *
+   * Unsaved edits go with them, and flushing them to disk first is not the
+   * cheaper answer it looks like: `connectBoite` calls `createRemote` before
+   * `adoptRemote`, and that disposes the previous socket and installs the new
+   * one while the mode is still `remote`, so on a boite-to-boite switch
+   * `backend()` already answers as the machine being switched TO by the time
+   * this runs. A flush there would commit the exact overwrite this drop exists
+   * to prevent, without a keystroke. The loss is written to the log rather than
+   * raised on screen because saying it needs a sentence in every dictionary,
+   * and the repo's two existing guards for this event (`CloseGuard`,
+   * `prepareForInstall`) each own their own wording rather than borrowing one.
+   */
+  reset() {
+    const dirty = this.buffers.filter((b) => this.isDirty(b));
+    if (dirty.length > 0) {
+      logger.error(
+        "editor",
+        `workspace switch discarded ${dirty.length} unsaved buffer(s)`,
+        dirty.map((b) => b.path).join(", "),
+      );
+    }
+    this.buffers = [];
+    this.activeId = null;
   }
 
   /**

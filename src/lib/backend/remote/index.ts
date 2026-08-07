@@ -2,6 +2,7 @@ import type {
   ApprovalsApi,
   Backend,
   BackendCaps,
+  CommitStateAnswer,
   ControlEvent,
   DbApi,
   EditorApi,
@@ -19,6 +20,7 @@ import type {
   PtyApi,
   PushApi,
   ScopeApi,
+  ServerIdentity,
   SessionApi,
   SessionHit,
   ShellApi,
@@ -236,25 +238,33 @@ export class RemoteBackend implements Backend {
       status: (path) => rpc("git.status", { path }).then((r) => r.entries),
       log: (path, limit, skip) =>
         rpc("git.log", { path, limit, skip }).then((r) => r.commits),
-      // An older server answers with an error for either of these. Unknown and
-      // no-pull-request are what the panel would draw anyway, so a failure
-      // costs a chip rather than a row.
+      // A failure here used to borrow `known: false`, which is the repository
+      // saying it has never seen the sha, and the chip drew "not pushed" over a
+      // commit that was on the remote. The shape is still filled in, since the
+      // caller needs a `short` to render at all, but it carries the reason with
+      // it, and `known: false` goes back to meaning what git means by it.
       commitState: (path, sha) =>
         rpc("git.commitState", { path, sha })
           .then((r) => r.state as CommitState)
-          .catch(() => ({
-            known: false,
-            pushed: false,
-            short: sha.slice(0, 7),
-            subject: null,
-            branch: null,
-          })),
+          .catch(
+            (): CommitStateAnswer => ({
+              known: false,
+              pushed: false,
+              short: sha.slice(0, 7),
+              subject: null,
+              branch: null,
+              unreachable: true,
+            }),
+          ),
+      // `unavailable` is no gh and no GitHub remote: nothing to report and
+      // nothing to fix. A transport that never asked has both still to find
+      // out, and `failed` is the kind that already exists for it.
       pullRequest: (path, branch) =>
         rpc("git.pullRequest", { path, branch })
           .then((r) => (r.lookup ?? { kind: "unavailable" }) as PrLookup)
-          // An older server has no answer at all, which is exactly what
-          // "nothing to report" means here.
-          .catch(() => ({ kind: "unavailable" }) as PrLookup),
+          .catch(
+            (err): PrLookup => ({ kind: "failed", auth: false, detail: String(err) }),
+          ),
       stage: (path, files) => rpc("git.stage", { path, files }).then(() => {}),
       unstage: (path, files) => rpc("git.unstage", { path, files }).then(() => {}),
       discard: (path, files, untracked) =>
@@ -320,19 +330,19 @@ export class RemoteBackend implements Backend {
       createFolder: (path) => rpc("project.createFolder", { path }).then(() => undefined),
     };
 
-    // The boite's OS, not the phone's. An older server has no arm for this, and
-    // "unknown" is the honest answer then: the caller keeps whatever it already
-    // had rather than picking a shell list for a machine it guessed at.
+    // The boite's OS, not the phone's. "unknown" is the boite answering and
+    // being none of the three. A call that got no answer rejects: it used to
+    // resolve "unknown" as well, so a dropped frame and a machine nobody
+    // recognises arrived as the same word, and `hostKnown` could not tell the
+    // caller which of the two it was holding.
     this.system = {
       platform: () =>
-        rpc("system.platform")
-          .then((r) => {
-            const os = r.platform as string;
-            return os === "windows" || os === "macos" || os === "linux"
-              ? (os as Platform)
-              : ("unknown" as Platform);
-          })
-          .catch(() => "unknown" as Platform),
+        rpc("system.platform").then((r) => {
+          const os = r.platform as string;
+          return os === "windows" || os === "macos" || os === "linux"
+            ? (os as Platform)
+            : ("unknown" as Platform);
+        }),
     };
 
     this.shell = {
@@ -376,12 +386,23 @@ export class RemoteBackend implements Backend {
 
     this.session = {
       // The transcripts are on the boite, not on the phone reading them. An
-      // older server has no answer, and an empty report is the honest one: the
-      // card then says nothing was found rather than inventing a total.
+      // empty report used to stand in for a read that never happened, and the
+      // calendar drew a full year of empty squares as though the machine had
+      // never run anything. The empty report is still what comes back, because
+      // the caller's own catch would flatten a rejection into one anyway, but
+      // it now says which of the two it is.
       usage: (cwds, days) =>
         rpc("session.usage", { cwds, days })
           .then((r) => r as unknown as UsageReport)
-          .catch(() => ({ models: [], days: [], sessions: 0, missing: [] })),
+          .catch(
+            (): UsageReport => ({
+              models: [],
+              days: [],
+              sessions: 0,
+              missing: [],
+              unreachable: true,
+            }),
+          ),
       // ptyId names a PTY the server owns, so it resolves the pid on its side.
       // An older server ignores the extra param and keeps skipping every live
       // session, which is the behaviour it had before.
@@ -390,37 +411,36 @@ export class RemoteBackend implements Backend {
           (r) => normalizeSession(r.session),
         ),
       // The agents run on the server, so that is where the registry lives. An
-      // older server answers with an error; an empty list then reads as
-      // "nothing is live", which is exactly the behaviour from before.
+      // empty list is a machine with nothing open; a call that failed rejects,
+      // and the caller writes a line about the check it did not get rather than
+      // launching on an answer nobody gave.
       liveClaude: () =>
-        rpc("session.liveClaude")
-          .then((r) => (r.sessions ?? []) as LiveClaudeSession[])
-          .catch(() => []),
-      // Same reasoning: the agents run on the server, so it is the only machine
-      // that can read what they say about themselves. An older server answers
-      // with an error, and an empty list reads as "nobody said anything", which
-      // leaves the boite's threads on the status it derives for itself.
+        rpc("session.liveClaude").then((r) => (r.sessions ?? []) as LiveClaudeSession[]),
+      // The worst of them. `[]` is every agent on the machine having been asked
+      // and having said nothing, which is what a status pass demotes on. One
+      // dropped frame therefore reported an entire boite as idle. The poll
+      // already keeps its last answer through a rejection, so this only had to
+      // stop pretending.
       agentTurns: (queries) =>
-        rpc("session.agentTurns", { queries })
-          .then((r) => (r.turns ?? []) as AgentTurn[])
-          .catch(() => []),
+        rpc("session.agentTurns", { queries }).then((r) => (r.turns ?? []) as AgentTurn[]),
+      // `false` is a session nothing was holding. A stop that never reached the
+      // boite is not that, and the caller is the one that gets to decide what
+      // an unanswered stop costs the launch behind it.
       stopClaude: (sessionId) =>
-        rpc("session.stopClaude", { sessionId })
-          .then((r) => Boolean(r.stopped))
-          .catch(() => false),
-      // An older server has no answer for this; `true` replays the id exactly
-      // as before rather than dropping a resume on a guess.
+        rpc("session.stopClaude", { sessionId }).then((r) => Boolean(r.stopped)),
+      // `true` replays the id, which is still what the caller does with a
+      // rejection. The difference is that the guess is now made in the open,
+      // one level up, instead of being dressed as copilot's own answer.
       copilotResumable: (sessionId) =>
-        rpc("session.copilotResumable", { sessionId })
-          .then((r) => r.resumable !== false)
-          .catch(() => true),
+        rpc("session.copilotResumable", { sessionId }).then((r) => r.resumable !== false),
       // The transcripts live next to the agents, so the server does the copy.
-      // An older one has no answer, and `false` reads as "nothing was carried"
-      // — the move still happens, the conversation just starts fresh there.
+      // `false` is a copy that was attempted and did not carry; a copy that was
+      // never attempted rejects, and the move reports that the agent is coming
+      // back without its conversation instead of doing it silently.
       migrate: (kind, sessionId, fromCwd, toCwd) =>
-        rpc("session.migrate", { kind, sessionId, fromCwd, toCwd })
-          .then((r) => Boolean(r.migrated))
-          .catch(() => false),
+        rpc("session.migrate", { kind, sessionId, fromCwd, toCwd }).then((r) =>
+          Boolean(r.migrated),
+        ),
     };
 
     // App-event logging is a device-local concern (the desktop writes a log
@@ -471,6 +491,14 @@ export class RemoteBackend implements Backend {
   // has to ask for a new one.
   get authRejected(): boolean {
     return this.#socket.authRejected;
+  }
+
+  // Which build is running over there, and on what. Read during the handshake,
+  // so it is in place before `connectionState` says "connected" and a reader
+  // keyed on that flag never sees a connected boite with no identity. Null
+  // until the first handshake completes, and again if `hello` failed.
+  get serverIdentity(): ServerIdentity | null {
+    return this.#socket.serverIdentity;
   }
 
   // Jump the backoff queue. Driven by the retry button in the connection banner.

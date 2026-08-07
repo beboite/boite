@@ -103,6 +103,20 @@ export interface DbApi {
   deleteTodo(id: string): Promise<void>;
 }
 
+/**
+ * What a repository said about a sha, and whether it was the repository that
+ * said it.
+ *
+ * `known: false` is an answer: this clone has never heard of that commit. A
+ * transport that never reached the clone has no answer at all, and borrowing
+ * `known: false` for it painted "not pushed" on a commit that was pushed. The
+ * flag is how the two are told apart; a backend that reaches the repository
+ * directly never sets it, so absence keeps meaning "this is what git said".
+ */
+export interface CommitStateAnswer extends CommitState {
+  unreachable?: boolean;
+}
+
 export interface GitApi {
   repoInfo(path: string): Promise<RepoInfo>;
   findRepos(path: string): Promise<string[]>;
@@ -116,7 +130,7 @@ export interface GitApi {
    * with `known: false` rather than as an error — being unable to find it is
    * the answer, not a failure to get one.
    */
-  commitState(path: string, sha: string): Promise<CommitState>;
+  commitState(path: string, sha: string): Promise<CommitStateAnswer>;
   /**
    * What `gh` says about a branch. Not an option: a `gh` that is there and
    * refusing is worth telling the user about, and a missing one is not.
@@ -334,7 +348,12 @@ export interface SystemApi {
    * UI. A phone has no Tauri runtime to ask and would answer "unknown", and a
    * Windows desktop driving a Linux boite would answer for itself: both leave
    * the shell list, the default shell and the path separators keyed to the wrong
-   * machine. "unknown" only when the backend genuinely cannot say.
+   * machine.
+   *
+   * "unknown" is a machine that answered and is none of the three. A backend
+   * that never got an answer rejects, so `hostKnown` stays false and the caller
+   * keeps whatever it already had rather than being told the boite is nothing
+   * in particular.
    */
   platform(): Promise<Platform>;
 }
@@ -571,6 +590,17 @@ export interface UsageReport {
   sessions: number;
   /** Agents whose store is not on this machine at all, by icon key. */
   missing: string[];
+  /**
+   * Nothing above was read. The stores were not consulted and this side has no
+   * idea what is in them.
+   *
+   * A report with no days in it and no flag is a machine that has spent
+   * nothing, which is a fact worth drawing. An unreached boite drew the same
+   * empty year, so a calendar the caller could not fill read as a calendar
+   * with nothing to fill it. Set by the remote transport alone: a local read
+   * that fails rejects, because there is a caller there to hear it.
+   */
+  unreachable?: boolean;
 }
 
 export interface SessionApi {
@@ -583,6 +613,10 @@ export interface SessionApi {
    *
    * Only claude and codex answer. The other CLIs keep no per-turn accounting
    * this can read, and an invented number is worse than an absent one.
+   *
+   * A read that never happened comes back as `unreachable` rather than as a
+   * rejection: the caller's own catch flattens a rejection into an empty
+   * report, so the reason has to travel inside the answer to survive it.
    */
   usage(cwds: string[], days: number): Promise<UsageReport>;
   /**
@@ -601,8 +635,10 @@ export interface SessionApi {
   /**
    * Session ids claude currently has open, of any kind. `--resume` refuses
    * every one of them, so a captured id has to be checked before it is
-   * replayed. Backends that cannot answer return an empty list, which reads as
-   * "nothing is live" and preserves the old behaviour.
+   * replayed.
+   *
+   * An empty list is a machine with nothing open. A backend that could not ask
+   * rejects instead, and the caller decides what an unanswered check costs it.
    */
   liveClaude(): Promise<LiveClaudeSession[]>;
   /**
@@ -611,9 +647,13 @@ export interface SessionApi {
    *
    * Scoped to the threads the caller has, because reading these stores is not
    * free: claude's is a directory of small files, codex's is a SQLite index plus
-   * the tail of a transcript, opencode's is a SQLite query. Backends that cannot
-   * answer return an empty list, which reads as "nobody said anything" and leaves
-   * the caller on whatever it could work out for itself.
+   * the tail of a transcript, opencode's is a SQLite query.
+   *
+   * An empty list means every agent asked was asked and said nothing, which is
+   * what demotes a thread. A backend that could not ask rejects, and the poll
+   * keeps its last answer: a read that failed is not evidence a turn ended, and
+   * a transport that handed back `[]` for one dropped frame reported every
+   * agent on that machine as finished.
    */
   agentTurns(queries: AgentTurnQuery[]): Promise<AgentTurn[]>;
   /**
@@ -626,8 +666,11 @@ export interface SessionApi {
   /**
    * Whether copilot would take this session back. Sessions it opened but never
    * used are refused by id, and threads captured before that was known still
-   * carry one. Backends that cannot answer say `true`, which replays the id as
-   * before rather than dropping a conversation on a guess.
+   * carry one.
+   *
+   * A backend that could not ask rejects rather than answering `true`. The
+   * caller still replays the id on a rejection, which is the same launch. The
+   * difference is that the guess is now made where it can be written down.
    */
   copilotResumable(sessionId: string): Promise<boolean>;
   /**
@@ -717,6 +760,29 @@ export type WorkspaceMetaPatch = Partial<Pick<WorkspaceMeta, "name" | "color">>;
 export interface WorkspaceMetaApi {
   get(): Promise<WorkspaceMeta>;
   set(patch: WorkspaceMetaPatch): Promise<WorkspaceMeta>;
+}
+
+/**
+ * What the boite says it is, read once per connection from `hello`.
+ *
+ * Not cosmetic, unlike `WorkspaceMeta`: this is the build and the machine, and
+ * nobody types it in. Its whole reason to exist is that the settings panel had
+ * one version number on it, `__APP_VERSION__`, a Vite constant baked into the
+ * bundle the browser downloaded, printed beside a row saying the workspace was
+ * somewhere else. The number was never wrong, it was about a different machine.
+ *
+ * Every field but `protocol` is nullable, because a server built before this
+ * answered `hello` with the protocol alone. Null is "it did not say", which is
+ * what gets drawn; none of the three is ever guessed at from this side.
+ */
+export interface ServerIdentity {
+  protocol: number;
+  /** The `boite-server` crate version, as the running binary was built. */
+  version: string | null;
+  /** The OS the threads run on, in the same words `SystemApi.platform` uses. */
+  platform: Platform | null;
+  /** What the machine calls itself, when it was told. */
+  host: string | null;
 }
 
 /**

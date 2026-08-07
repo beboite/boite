@@ -1,4 +1,5 @@
-import { backend } from "$lib/backend";
+import { localBackend } from "$lib/backend";
+import { hasTauri } from "$lib/backend/env";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
@@ -38,6 +39,14 @@ function serializeDetails(value: unknown): string {
  */
 const DEBUG_ENABLED = import.meta.env.DEV;
 
+/**
+ * The log is written by this window, about this window, so it never follows the
+ * workspace: every call below goes to `localBackend()` rather than `backend()`.
+ * Routed through the active transport, a connected boite put the whole thing on
+ * `RemoteBackend`'s stub, where an event resolves into nothing: the desktop's own
+ * log file stopped recording, `captureWindowErrors` included, for as long as the
+ * link was up.
+ */
 class Logger {
   private send(level: LogLevel, scope: string, message: string, data?: unknown) {
     const tag = `[${scope}]`;
@@ -46,7 +55,12 @@ class Logger {
     else if (level === "debug") console.debug(tag, message, data ?? "");
     else console.log(tag, message, data ?? "");
 
-    void backend()
+    // The local transport is a `TauriBackend` in every build, so on a PWA there
+    // is no IPC behind it and the console line above is the whole log. Gated
+    // rather than left to the catch: an invoke that throws on every line is a
+    // rejected promise per log call, forever, for a file that cannot exist.
+    if (!hasTauri()) return;
+    void localBackend()
       .log.event(level, scope, message, data == null ? null : serializeDetails(data))
       .catch(() => {});
   }
@@ -66,15 +80,15 @@ class Logger {
   }
 
   read(scope: "current" | "previous" = "current"): Promise<LogEntry[]> {
-    return backend().log.read(scope);
+    return localBackend().log.read(scope);
   }
 
   clear(): Promise<void> {
-    return backend().log.clear();
+    return localBackend().log.clear();
   }
 
   filePath(): Promise<string> {
-    return backend().log.filePath();
+    return localBackend().log.filePath();
   }
 }
 
