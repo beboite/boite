@@ -217,20 +217,15 @@ export class AppState {
   /**
    * The project a launch would land in, or null when the user is on none.
    *
-   * No fallback to the first row: "on no project" has to be a state the user
-   * can actually be in, because that is what sends a shortcut to Scratch. Boot
-   * picks the first project once (see `init`), so the empty state is only ever
-   * reached by clicking the sidebar's empty space or by having no projects.
+   * No fallback to the first row: "on no project" stays a state this can
+   * report. Boot picks the first project once (see `init`), so it is now
+   * reached only by having no projects at all. The sidebar's empty space used
+   * to be the other way in, and it cost more than it bought: a click on
+   * nothing closed the open thread, and Scratch is a row in that list anyway.
    */
   get currentProjectId(): string | null {
     if (this.selectedProjectId) return this.selectedProjectId;
     return this.activeThread?.projectId ?? null;
-  }
-
-  /** Leaves the user on no project, which is what aims a launch at Scratch. */
-  clearSelection() {
-    this.selectedProjectId = null;
-    this.activeThreadId = null;
   }
 
   // Both of these return the index's own arrays. Callers iterate and map, they
