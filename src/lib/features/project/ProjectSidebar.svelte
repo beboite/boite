@@ -1052,18 +1052,17 @@ import { projectDisplayName } from "$lib/shared/project-label";
     </div>
   </header>
 
-  <!-- The empty space below the rows is how the user gets onto no project at
-       all, which is what sends the next launch to Scratch. Only the container
-       itself: a click that reached a row is that row's. -->
+  <!-- The empty space below the rows is empty space. It used to clear the
+       selection, on the reasoning that being on no project is what aims the
+       next launch at Scratch, and it read as the app throwing the open thread
+       away for a miss: the terminal went, nothing came, and the gesture that
+       did it was a click on nothing. Scratch is a row in this list like any
+       other, so it is still one click away by being clicked. -->
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-  <!-- svelte-ignore a11y_click_events_have_key_events -->
   <div
     class="flex-1 overflow-y-auto px-2 pb-2"
     role="list"
     onkeydown={onListKeydown}
-    onclick={(e) => {
-      if (e.target === e.currentTarget) app.clearSelection();
-    }}
   >
     {#if showArchived && visibleProjects.length === 0}
       <div
