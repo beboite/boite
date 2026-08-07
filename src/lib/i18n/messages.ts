@@ -440,6 +440,8 @@ export const EN_MESSAGES = {
   "fastpick.systemPrompt": "System prompt",
   "fastpick.launch": "Launch",
   "fastpick.noKey": "Key file missing",
+  "fastpick.search": "Type to search",
+  "fastpick.noMatch": "No model matches.",
   "fastpick.noHarness": "None of the agents in fastpick's config is installed here.",
   "fastpick.sourceLive": "Fetched just now",
   "fastpick.sourceCache": "From the cache",
