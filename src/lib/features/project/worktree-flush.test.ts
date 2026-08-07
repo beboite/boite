@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   formatBytes,
+  heldKeys,
   isReclaimable,
   reclaimable,
   reclaimableBytes,
@@ -40,7 +41,25 @@ describe("isReclaimable", () => {
 
   it("refuses a directory a thread is running in", () => {
     // Empty right now, and the agent in it is one command away from filling it.
-    expect(isReclaimable(entry(), new Set(["/w/one"]))).toBe(false);
+    expect(isReclaimable(entry(), heldKeys(["/w/one"]))).toBe(false);
+  });
+
+  it("refuses it whichever way the two sides spell it", () => {
+    // What this is really about, and it only ever went wrong on Windows: the
+    // thread's path was written by this app and the entry's was printed by
+    // `git worktree list`, so one is backslashed and the other is not. Compared
+    // raw they never matched, and the sweep took a checkout an agent was in.
+    const held = heldKeys(["D:\\repo\\.boite\\worktrees\\a1f0"]);
+    expect(isReclaimable(entry({ path: "D:/repo/.boite/worktrees/a1f0" }), held)).toBe(
+      false,
+    );
+    expect(isReclaimable(entry({ path: "d:/REPO/.boite/worktrees/a1f0/" }), held)).toBe(
+      false,
+    );
+    // A neighbour with a name that starts the same is still fair game.
+    expect(isReclaimable(entry({ path: "D:/repo/.boite/worktrees/a1f00" }), held)).toBe(
+      true,
+    );
   });
 
   it("takes a spare and a directory git has already lost", () => {

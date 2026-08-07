@@ -12,7 +12,8 @@
   import ToggleSetting from "$lib/shared/components/ToggleSetting.svelte";
   import AgentAccess from "$lib/features/todo/AgentAccess.svelte";
   import DashboardCard from "./DashboardCard.svelte";
-  import { formatBytes, reclaimable, reclaimableBytes } from "./worktree-flush";
+  import { formatBytes, heldKeys, reclaimable, reclaimableBytes } from "./worktree-flush";
+  import { pathKey } from "./path";
   import { basename } from "$lib/shared/utils/path";
   import { t } from "$lib/i18n/index.svelte";
   import FolderGit2 from "@lucide/svelte/icons/folder-git-2";
@@ -68,11 +69,15 @@
   const repo = $derived(project.gitRoot ?? project.cwd);
   // Which thread is standing in which directory, so a row can say who is using
   // it before anyone is asked whether it can go.
+  //
+  // Keyed rather than kept as the thread wrote it: a row's path comes back from
+  // git, which spells the same Windows directory with forward slashes, and a
+  // lookup on the raw string missed every time. See `heldKeys`.
   const holders = $derived.by(() => {
     const map = new Map<string, { label: string; iconKey: IconKey }>();
     for (const thread of app.threads) {
       if (thread.worktreePath) {
-        map.set(thread.worktreePath, {
+        map.set(pathKey(thread.worktreePath), {
           label: thread.title ?? thread.label,
           iconKey: thread.iconKey,
         });
@@ -81,7 +86,7 @@
     return map;
   });
 
-  const heldPaths = $derived(new Set(holders.keys()));
+  const heldPaths = $derived(heldKeys(holders.keys()));
   const dirtyCount = $derived(entries.filter((w) => !w.main && holdsWork(w)).length);
   const sweepable = $derived(reclaimable(entries, heldPaths));
   const sweepableBytes = $derived(reclaimableBytes(sweepable, sizes));
@@ -171,7 +176,7 @@
    * cleanup safe, so a panel that always forced would quietly undo that.
    */
   async function remove(w: WorktreeEntry) {
-    const holder = holders.get(w.path);
+    const holder = holders.get(pathKey(w.path));
     const detail = w.dirty && w.orphanCommits
       ? t("worktree.holdsBoth")
       : w.dirty
@@ -364,7 +369,7 @@
            them off the screen. -->
       <ul class="max-h-64 divide-y divide-border overflow-y-auto">
         {#each entries as w (w.path)}
-          {@const holder = holders.get(w.path)}
+          {@const holder = holders.get(pathKey(w.path))}
           {@const size = sizes[w.path] ?? 0}
           <li
             class="flex items-start gap-2.5 px-3.5 py-2 transition-opacity"
