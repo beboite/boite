@@ -10,6 +10,7 @@
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
   import { fastpick } from "./store.svelte";
   import { iconKeyForKind, modelLabels, type FastpickCombo } from "./combo";
+  import { filterModels } from "./model-search";
   import type { FastpickHarness, FastpickModel } from "$lib/backend/types";
   import ChevronLeft from "@lucide/svelte/icons/chevron-left";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
@@ -57,6 +58,8 @@
   let prompts = $state<string[] | undefined>(undefined);
 
   let root: HTMLDivElement | null = $state(null);
+  let search: HTMLInputElement | null = $state(null);
+  let query = $state("");
 
   const harness = $derived<FastpickHarness | null>(
     fastpick.harnesses.find((h) => h.id === harnessId) ?? null,
@@ -82,6 +85,8 @@
     return labels.get(m.id) ?? m.label ?? m.id;
   }
 
+  const shown = $derived(filterModels(models?.items ?? [], query, nameOf));
+
   $effect(() => {
     void pane;
     void models;
@@ -98,6 +103,12 @@
     let cancelled = false;
     void tick().then(() => {
       if (cancelled) return;
+      // The model pane opens on its search box, so the first letter typed is already
+      // a search and never a lost keystroke.
+      if (pane === "model" && search) {
+        search.focus();
+        return;
+      }
       (rows()[0] ?? root)?.focus();
     });
     return () => {
@@ -123,6 +134,7 @@
   function pickProvider(id: string) {
     providerId = id;
     pane = "model";
+    query = "";
     void fastpick.loadModels(id);
   }
 
@@ -159,8 +171,10 @@
 
   function back() {
     if (pane === "options") pane = "model";
-    else if (pane === "model") pane = "provider";
-    else if (pane === "provider") pane = "harness";
+    else if (pane === "model") {
+      query = "";
+      pane = "provider";
+    } else if (pane === "provider") pane = "harness";
     else onExit?.();
   }
 
@@ -200,13 +214,39 @@
   // Escape is handled by whoever owns the surface, and it runs before the global
   // shortcut dispatcher; everything here needs focus to be inside the menu.
   function handleKeydown(e: KeyboardEvent) {
-    if (e.key === "ArrowLeft") {
+    const items = rows();
+    const active = document.activeElement as HTMLElement | null;
+    // Left, Home and End are caret moves while the box has the keyboard, so the walk
+    // only claims them elsewhere.
+    const typing = active === search && search !== null;
+
+    if (e.key === "ArrowLeft" && !typing) {
       e.preventDefault();
       back();
       return;
     }
-    const items = rows();
-    const active = document.activeElement as HTMLElement | null;
+    if (typing && e.key === "Enter") {
+      e.preventDefault();
+      const first = shown[0];
+      if (first) pickModel(first, e.shiftKey);
+      return;
+    }
+    // A letter typed on a row goes to the box rather than nowhere, which is what makes
+    // this a search you can start without aiming at anything. Space is left alone: it
+    // is how a focused row is pressed.
+    if (
+      !typing &&
+      pane === "model" &&
+      !e.ctrlKey &&
+      !e.metaKey &&
+      !e.altKey &&
+      (e.key === "Backspace" || (e.key.length === 1 && e.key !== " "))
+    ) {
+      e.preventDefault();
+      query = e.key === "Backspace" ? query.slice(0, -1) : query + e.key;
+      search?.focus();
+      return;
+    }
 
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
@@ -218,7 +258,7 @@
       else items[(idx + (down ? 1 : -1) + items.length) % items.length].focus();
       return;
     }
-    if (e.key === "Home" || e.key === "End") {
+    if ((e.key === "Home" || e.key === "End") && !typing) {
       e.preventDefault();
       if (items.length === 0) return;
       items[e.key === "Home" ? 0 : items.length - 1].focus();
@@ -290,6 +330,21 @@
     {/if}
   </div>
 
+  {#if pane === "model" && models && fastpick.loadingModels !== providerId}
+    <div class="border-b border-border px-2 py-1.5">
+      <input
+        bind:this={search}
+        bind:value={query}
+        type="text"
+        autocomplete="off"
+        spellcheck="false"
+        class="w-full bg-transparent text-xs text-foreground placeholder:text-muted-foreground/70 focus:outline-none"
+        placeholder={t("fastpick.search")}
+        aria-label={t("fastpick.search")}
+      />
+    </div>
+  {/if}
+
   <div class="flex min-h-0 flex-col overflow-y-auto p-1">
     {#if fastpick.loading}
       <div class="px-2 py-1.5 text-xs text-muted-foreground">{t("common.loading")}</div>
@@ -338,9 +393,16 @@
         </div>
       {:else if models}
         <div class="px-2 pb-1 text-2xs text-muted-foreground/70">
-          {sourceLabel(models.source)}
+          {sourceLabel(models.source)}{query
+            ? ` · ${shown.length}/${models.items.length}`
+            : ""}
         </div>
-        {#each models.items as m (m.id)}
+        {#if shown.length === 0}
+          <div class="px-2 py-1.5 text-xs text-muted-foreground">
+            {t("fastpick.noMatch")}
+          </div>
+        {/if}
+        {#each shown as m (m.id)}
           {@const hasOptions =
             (harness?.supportsEffort && m.effort.length > 0) ||
             (harness?.supportsSystemPrompts && m.prompts.length > 0)}

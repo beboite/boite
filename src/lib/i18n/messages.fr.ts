@@ -437,6 +437,8 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "fastpick.systemPrompt": "Prompt système",
   "fastpick.launch": "Lancer",
   "fastpick.noKey": "Fichier de clé absent",
+  "fastpick.search": "Tapez pour chercher",
+  "fastpick.noMatch": "Aucun modèle ne correspond.",
   "fastpick.noHarness": "Aucun des agents déclarés dans la config de fastpick n'est installé ici.",
   "fastpick.sourceLive": "Récupéré à l'instant",
   "fastpick.sourceCache": "Depuis le cache",
