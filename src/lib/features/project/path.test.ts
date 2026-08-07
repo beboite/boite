@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { folderNameFor, joinPath, samePath } from "./path";
+import { folderNameFor, joinPath, pathKey, samePath } from "./path";
 
 describe("folderNameFor", () => {
   it("turns a spoken project name into a path segment", () => {
@@ -50,5 +50,23 @@ describe("samePath", () => {
     expect(samePath("D:\\Dev\\boite", "d:/dev/boite")).toBe(true);
     expect(samePath("/home/me/x/", "/home/me/x")).toBe(true);
     expect(samePath("/home/me/x", "/home/me/y")).toBe(false);
+  });
+});
+
+describe("pathKey", () => {
+  it("lands both spellings of one directory on the same key", () => {
+    expect(pathKey("D:\\repo\\.boite\\worktrees\\a1f0")).toBe(
+      pathKey("D:/repo/.boite/worktrees/a1f0"),
+    );
+    expect(pathKey("/home/me/x/")).toBe(pathKey("/home/me/x"));
+  });
+
+  it("keeps directories that only look alike apart", () => {
+    expect(pathKey("/w/a1f0")).not.toBe(pathKey("/w/a1f00"));
+  });
+
+  it("is idempotent, so keying a key is not a second answer", () => {
+    const once = pathKey("D:\\repo\\Worktrees\\A1F0\\");
+    expect(pathKey(once)).toBe(once);
   });
 });
