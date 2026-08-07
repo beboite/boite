@@ -39,8 +39,24 @@ export function joinPath(parent: string, child: string): string {
   return `${parent.replace(/[/\\]+$/, "")}${sep}${child}`;
 }
 
+/**
+ * A path reduced to what two spellings of the same folder have in common:
+ * separators, a trailing one, and case.
+ *
+ * Never stored and never handed back to the backend — lowercasing a path is
+ * only safe as a key, and on Linux the folder it names may not exist. What it
+ * is for is comparing paths that came from different places, which on Windows
+ * means different spellings of one directory: the database keeps
+ * `D:\repo\.boite\worktrees\x` because that is what `git worktree add` was
+ * given, and `git worktree list --porcelain` answers `D:/repo/.boite/...`.
+ * Compared raw, those two never match, and every comparison built on that
+ * quietly reads as "different directory".
+ */
+export function pathKey(p: string): string {
+  return p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+}
+
 /** Whether two paths name the same folder, separators and case aside. */
 export function samePath(a: string, b: string): boolean {
-  const norm = (p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
-  return norm(a) === norm(b);
+  return pathKey(a) === pathKey(b);
 }

@@ -3,6 +3,7 @@
   import { app } from "$lib/app/store.svelte";
   import DashboardCard from "./DashboardCard.svelte";
   import { formatTokens as fmt, projectUsage } from "./usage.svelte";
+  import { pathKey } from "./path";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import Coins from "@lucide/svelte/icons/coins";
@@ -40,12 +41,19 @@
    * alone would report zero for a project that had burned millions.
    */
   const cwds = $derived.by(() => {
-    const out = new Set<string>([project.cwd]);
-    if (project.gitRoot) out.add(project.gitRoot);
+    // Deduplicated on the key and collected as they were written: two spellings
+    // of one directory would have every transcript in it counted twice, and a
+    // key is not a path the scan could be pointed at.
+    const out = new Map<string, string>();
+    const add = (path: string) => {
+      if (!out.has(pathKey(path))) out.set(pathKey(path), path);
+    };
+    add(project.cwd);
+    if (project.gitRoot) add(project.gitRoot);
     for (const thread of app.threadsByProject(project.id)) {
-      if (thread.worktreePath) out.add(thread.worktreePath);
+      if (thread.worktreePath) add(thread.worktreePath);
     }
-    return [...out];
+    return [...out.values()];
   });
 
   function load() {
