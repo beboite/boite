@@ -73,6 +73,33 @@ The one thing decided at launch instead is the colour inside Claude Code: it
 comes from `/color`, passed as the launch prompt through fastpick's passthrough,
 and a process already running cannot be repainted from outside.
 
+## A launcher is not the agent, at relaunch either
+
+A fastpick thread has two argument regions with two owners, split at the first
+`--`, and `thread/resume-args.ts` is where that split is respected: fastpick
+reads what is in front, the agent gets what is behind, and every resume flag,
+MCP flag and opening prompt is written behind it. Appending to one flat list
+worked by luck. It survived for as long as no flag's name collided with one
+fastpick claims for itself, and `-c mcp_servers.boite.command=...` for codex is
+exactly that collision: it read as fastpick's own `--config`, and the launch died
+on a file that does not exist. `parseCombo` stops at the same separator, so an
+agent flag behind it can never rename the combo the sidebar reads.
+
+Codex reads `--model` on its root only, and its resume is the subcommand `codex
+resume <id>`, so the model fastpick puts on the root does not reach a resumed
+session. The combo already says which model the thread is, so a fastpick codex
+resume names it again on the subcommand.
+
+**The agent whose session a thread holds is not always the process the PTY
+spawned.** fastpick resolves a harness and then runs it, so claude's pid is a
+child of the pid the PTY reports, and a wrap shell adds another level. Session
+capture used to compare the two as equals: a fastpick thread's own live session
+read as a stranger's, was skipped by the liveness filter on every scan, and the
+relaunch it was for had no id to replay. Every fastpick row in the database had
+an empty `session_id`, which is all that failure ever looked like from outside.
+`session::ProcessTree` walks the parent chain instead, bounded at sixteen hops
+because a pid map read while processes come and go can name a cycle.
+
 ## Status is measured, never latched
 
 Every pass of `thread/statusEngine.ts` decides running-or-ready from scratch, and

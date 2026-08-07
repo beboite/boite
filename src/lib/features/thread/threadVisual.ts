@@ -31,7 +31,13 @@ export type ThreadVisualState =
   | "failed";
 
 /** Which of the palette's status colours the row is painted in. */
-export type ThreadTone = "warning" | "success" | "danger" | "awake" | "dormant";
+export type ThreadTone =
+  | "warning"
+  | "success"
+  | "danger"
+  | "awake"
+  | "dormant"
+  | "parked";
 
 export interface ThreadVisual {
   state: ThreadVisualState;
@@ -48,18 +54,20 @@ export interface ThreadVisualInput {
 }
 
 /**
- * `dormant` is a dark green rather than a grey, and the quiet end of the scale
- * is the whole reason.
+ * The two quiet tones are both dark greens rather than a grey, and the quiet end
+ * of the scale is the whole reason.
  *
- * Grey is what this app has nothing to say in, and it was carrying two things
- * that are not nothing: a thread that was killed, and a thread that came back
- * from a restart. On a sidebar where five rows in twelve are asleep, a grey
- * column reads as rows that failed to draw rather than as rows at rest. The
- * hue says "this is a thread"; the darkness is what keeps it from competing
- * with the one that actually finished, which keeps the bright success green.
+ * Grey is what this app has nothing to say in, and it was carrying things that
+ * are not nothing: a thread the idle timer put to sleep, one that was killed,
+ * one that came back from a restart. On a sidebar where five rows in twelve are
+ * asleep, a grey column reads as rows that failed to draw rather than as rows at
+ * rest. The hue says "this is a thread"; the darkness is what keeps it from
+ * competing with the one that actually finished, which keeps the bright success
+ * green.
  *
- * It replaced the muted text colour, which had itself replaced the strong
- * border colour for the same reason one step earlier.
+ * `dormant` and `parked` are one step apart in that darkness, and the step is
+ * what this run of the app watched happen: only `dormant` is a sleep Boite saw
+ * the timer take.
  */
 export const TONE_COLOR: Record<ThreadTone, string> = {
   warning: "var(--color-warning)",
@@ -67,6 +75,7 @@ export const TONE_COLOR: Record<ThreadTone, string> = {
   danger: "var(--color-danger)",
   awake: "var(--color-awake)",
   dormant: "var(--color-dormant)",
+  parked: "var(--color-parked)",
 };
 
 /**
@@ -89,14 +98,17 @@ export function threadVisual(input: ThreadVisualInput): ThreadVisual {
     case "error":
       return { state: "failed", tone: "danger" };
     // Killed rather than ended. Nothing was completed, so it does not get the
-    // green that means it was: it gets the dark one that means it is asleep.
+    // green that means it was. Which of the two dark greens it gets is whether
+    // the idle timer is what stopped it: `asleep` is in memory and never
+    // persisted, so it is true of a sleep this run of the app watched happen and
+    // false of every other way a row ends up parked.
     case "stopped":
-      return { state: "sleeping", tone: "dormant" };
+      return { state: "sleeping", tone: asleep ? "dormant" : "parked" };
     // A thread that finished and was then parked by the idle timer keeps the
     // colour it earned. What it loses is the brightness: `sleeping` is graded at
     // half of `finished`, so the row still answers "this one is done" to a
     // glance that arrives an hour late without competing with the one that
-    // finished a minute ago. The tone alone is the difference between a dormant
+    // finished a minute ago. The tone alone is the difference between a sleeping
     // thread that did its work and one that was cut off.
     case "done":
       return asleep
@@ -106,12 +118,13 @@ export function threadVisual(input: ThreadVisualInput): ThreadVisual {
       return { state: "ready", tone: keepAwake ? "awake" : "success" };
     default:
       // `idle` is a row with no process behind it, which after a restart is
-      // every row: they are asleep in the sense that matters here. Dormant
-      // rather than grey. It was grey on the reasoning that a thread from a
-      // previous session left no word on how it ended, and the bright green
-      // would be a guess — but that argues against `success`, not against
-      // colour. Grey made the sidebar open with every row looking unpainted.
-      return { state: "sleeping", tone: "dormant" };
+      // every row: they are asleep in the sense that matters here, and parked
+      // rather than dormant, since a run that never saw them sleep cannot claim
+      // it did. Green rather than grey. It was grey on the reasoning that a
+      // thread from a previous session left no word on how it ended, and the
+      // bright green would be a guess — but that argues against `success`, not
+      // against colour. Grey made the sidebar open with every row unpainted.
+      return { state: "sleeping", tone: "parked" };
   }
 }
 

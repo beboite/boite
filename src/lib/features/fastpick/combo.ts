@@ -81,6 +81,11 @@ export function parseCombo(cmd: string, args: readonly string[]): FastpickCombo 
 
   for (let i = 0; i < args.length; i++) {
     const value = args[i + 1];
+    // Everything past the separator belongs to the agent fastpick launches, and
+    // reading it here would let one of its flags rename the combo: a resumed
+    // codex thread carries `-m <model>` of its own, and a hand-typed passthrough
+    // carries whatever the user wrote. fastpick stops at the same place.
+    if (args[i] === "--") break;
     switch (args[i]) {
       case "--harness":
         harness = value ?? null;
