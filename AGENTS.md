@@ -69,9 +69,14 @@ would miss a thread a process promoted itself. The same holds for the combo:
 them, which is why a hand-typed `fastpick --harness ...` is described like one the
 menu launched.
 
-The one thing decided at launch instead is the colour inside Claude Code: it
-comes from `/color`, passed as the launch prompt through fastpick's passthrough,
-and a process already running cannot be repainted from outside.
+Nothing is decided at launch any more. The colour inside Claude Code used to be:
+a `/color <name>` passed as the opening prompt through fastpick's passthrough,
+which could not be taken back from a process already running. It also ran a
+slash command and printed an answer at the top of every single launch, for a
+strip of colour the sidebar was already showing, so it is gone. Rows created
+before that still carry it, and `withoutBarColor` drops it as the argv goes past
+rather than rewriting the row: a thread's command line is the user's to read and
+edit, and quietly editing it is the more surprising of the two.
 
 ## A launcher is not the agent, at relaunch either
 
