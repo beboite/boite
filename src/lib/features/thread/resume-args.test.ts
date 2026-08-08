@@ -37,6 +37,35 @@ describe("splitArgv", () => {
     expect(joinArgv(argv)).toEqual(["--dangerously-skip-permissions"]);
   });
 
+  // The menu writes `fastpick`, a shortcut carries what the user typed, and a
+  // promotion whatever the process printed. Reading only the first as the
+  // launcher left the other two with no separator, which is where codex's
+  // `-c mcp_servers…` went in front of it and fastpick took it for a config
+  // file path.
+  it.each([
+    ["fastpick.exe", "the Windows spelling of a hand-typed shortcut"],
+    ["C:\\Users\\x\\.cargo\\bin\\fastpick.exe", "a full Windows path"],
+    ["/home/x/.cargo/bin/fastpick", "a full POSIX path"],
+    ["FastPick.EXE", "a case Windows does not distinguish"],
+  ])("reads %s as the launcher it is (%s)", (cmd) => {
+    const argv = splitArgv(cmd, ["--harness", "codex"]);
+    expect(argv.viaFastpick).toBe(true);
+    expect(argv.own).toEqual(["--harness", "codex"]);
+    expect(joinArgv(withMcpArgs(argv, ["-c", 'mcp_servers.boite.command="C:\\x.exe"']))).toEqual([
+      "--harness",
+      "codex",
+      "--",
+      "-c",
+      'mcp_servers.boite.command="C:\\x.exe"',
+    ]);
+  });
+
+  it("does not mistake a different program for the launcher", () => {
+    for (const cmd of ["myfastpick", "fastpick-shim", "notfastpick.exe", "claude"]) {
+      expect(splitArgv(cmd, ["-c", "x"]).viaFastpick).toBe(false);
+    }
+  });
+
   it("splits a fastpick launch where fastpick itself stops reading", () => {
     const argv = splitArgv("fastpick", FASTPICK_CLAUDE);
     expect(argv.own).toEqual(FASTPICK_CLAUDE.slice(0, 6));

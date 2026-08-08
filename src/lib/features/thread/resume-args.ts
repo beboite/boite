@@ -1,5 +1,5 @@
 import type { IconKey } from "$lib/types";
-import { FASTPICK_CMD, parseCombo } from "$lib/features/fastpick/combo";
+import { isFastpick, parseCombo } from "$lib/features/fastpick/combo";
 
 /**
  * What to relaunch a thread with, decided without touching a store or a clock.
@@ -40,7 +40,11 @@ export interface AgentArgv {
 const CODEX_NO_ALT_SCREEN = "--no-alt-screen";
 
 export function splitArgv(cmd: string, args: readonly string[]): AgentArgv {
-  if (cmd !== FASTPICK_CMD) {
+  // By binary name, never by the whole string: a thread launched as
+  // `fastpick.exe` or by full path is the same launcher with the same two
+  // regions, and calling it a direct launch is what drops the separator that
+  // keeps `-c mcp_servers…` out of fastpick's own hands. See `isFastpick`.
+  if (!isFastpick(cmd)) {
     return { own: [], agent: [...args], viaFastpick: false };
   }
   const at = args.indexOf("--");

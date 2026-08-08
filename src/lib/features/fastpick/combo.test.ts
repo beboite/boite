@@ -52,6 +52,26 @@ describe("parseCombo", () => {
     expect(parseCombo("claude", ["--harness", "h", "--provider", "p", "--model", "m"])).toBeNull();
   });
 
+  it("recognises the launcher however the thread spells it", () => {
+    const args = ["--harness", "h", "--provider", "p", "--model", "m"];
+    const combo = { harness: "h", provider: "p", model: "m", effort: null, prompts: undefined };
+    for (const cmd of [
+      "fastpick.exe",
+      "C:\\Users\\x\\.cargo\\bin\\fastpick.exe",
+      "/home/x/.cargo/bin/fastpick",
+      "FastPick.EXE",
+    ]) {
+      expect(parseCombo(cmd, args)).toEqual(combo);
+    }
+  });
+
+  it("stops at the name, so a neighbour is not the launcher", () => {
+    const args = ["--harness", "h", "--provider", "p", "--model", "m"];
+    for (const cmd of ["myfastpick", "fastpick-shim", "notfastpick.exe"]) {
+      expect(parseCombo(cmd, args)).toBeNull();
+    }
+  });
+
   it("refuses a partial combo, which still opens a menu", () => {
     expect(parseCombo("fastpick", ["--harness", "claude-code"])).toBeNull();
     expect(parseCombo("fastpick", [])).toBeNull();
