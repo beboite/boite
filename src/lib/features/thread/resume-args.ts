@@ -74,6 +74,29 @@ function withAgent(argv: AgentArgv, agent: string[]): AgentArgv {
   return { ...argv, agent };
 }
 
+/** The eight names Claude Code's `/color` took, and nothing else. */
+const BAR_COLOR_PROMPT = /^\/color (?:red|blue|green|yellow|purple|orange|pink|cyan)$/;
+
+/**
+ * Drops the `/color <name>` an older Boite put in front of the agent.
+ *
+ * It painted Claude Code's prompt bar to match the icon, and it cost a slash
+ * command running and an answer printed at the top of every launch, for a strip
+ * of colour the sidebar was already showing. Threads created back then still
+ * carry it in their stored args, and a relaunch replays what is stored.
+ *
+ * Dropped on the way through rather than migrated out of the rows: a thread's
+ * command line is what the user sees and can edit, and rewriting it underneath
+ * them to remove an argument Boite put there itself is the more surprising of
+ * the two. Only on the passthrough of a fastpick launch, which is the only
+ * place Boite ever wrote it, so a `/color` somebody typed themselves stays.
+ */
+function withoutBarColor(argv: AgentArgv): AgentArgv {
+  if (!argv.viaFastpick) return argv;
+  const agent = argv.agent.filter((a) => !BAR_COLOR_PROMPT.test(a));
+  return agent.length === argv.agent.length ? argv : { ...argv, agent };
+}
+
 function stripFlag(args: string[], flags: string[], takesValue: boolean): string[] {
   const out: string[] = [];
   let skipNext = false;
@@ -238,7 +261,7 @@ export function resumeArgv(input: ResumeInput): {
   argv: AgentArgv;
   outcome: ResumeOutcome;
 } {
-  const argv = splitArgv(input.cmd, input.args);
+  const argv = withoutBarColor(splitArgv(input.cmd, input.args));
   const { key, sessionId } = input;
   if (!key) return { argv, outcome: "no-builder" };
   const builder = builders[key];

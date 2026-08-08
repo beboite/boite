@@ -96,14 +96,30 @@ describe("resumeArgv", () => {
     // still reads as the model it was launched on.
     expect(argv.own).toEqual(FASTPICK_CLAUDE.slice(0, 6));
     expect(parseCombo("fastpick", joinArgv(argv))?.model).toBe("claude-opus-5");
-    // One separator, and the resume is behind it.
+    // One separator, and the resume is behind it. The `/color purple` the row
+    // still carries is gone: it is what an older Boite wrote there, and every
+    // relaunch used to replay it.
     const out = joinArgv(argv);
     expect(out.filter((a) => a === "--")).toHaveLength(1);
-    expect(out.slice(out.indexOf("--") + 1)).toEqual([
-      "/color purple",
-      "--resume",
-      SESSION,
-    ]);
+    expect(out.slice(out.indexOf("--") + 1)).toEqual(["--resume", SESSION]);
+  });
+
+  it("drops the bar colour an older Boite wrote, wherever the row carries it", () => {
+    for (const colour of ["red", "blue", "green", "yellow", "purple", "orange", "pink", "cyan"]) {
+      const args = ["--harness", "claude-code", "--provider", "c", "--model", "m", "--", `/color ${colour}`];
+      const { argv } = relaunch("fastpick", args, "claude");
+      expect(argv.agent).not.toContain(`/color ${colour}`);
+    }
+  });
+
+  it("leaves a prompt the user typed themselves alone", () => {
+    // Boite only ever wrote it on a fastpick passthrough, so a direct launch
+    // keeps whatever its owner put there.
+    const { argv } = relaunch("claude", ["--", "/color purple"], "claude");
+    expect(argv.agent).toContain("/color purple");
+    // And a sentence that merely starts the same way is not the flag.
+    const typed = ["--harness", "claude-code", "--provider", "c", "--model", "m", "--", "/color purple please"];
+    expect(relaunch("fastpick", typed, "claude").argv.agent).toContain("/color purple please");
   });
 
   it("opens the separator for a fastpick launch that had none", () => {
@@ -164,7 +180,10 @@ describe("resumeArgv", () => {
       fresh: true,
     });
     expect(outcome).toBe("fresh");
-    expect(joinArgv(argv)).toEqual(FASTPICK_CLAUDE);
+    // The combo, and nothing behind the separator: the row's `/color purple` is
+    // dropped on a first spawn too, so there is no passthrough left to open one
+    // for.
+    expect(joinArgv(argv)).toEqual(FASTPICK_CLAUDE.slice(0, 6));
   });
 
   it("leaves an agent nothing resumes exactly as it was launched", () => {
