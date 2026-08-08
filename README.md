@@ -129,14 +129,14 @@ the phone never sees a key.
 
 Because the icon stays the agent's, it is tinted with what is actually
 answering: yellow for a Claude served by someone else, white for a GPT, green
-for a model on that machine, and the vendor's own endpoint left alone. Claude
-Code gets the same colour on the inside, passed as a `/color` launch prompt, so
-the TUI agrees with the sidebar. One toggle in Appearance covers both.
+for a model on that machine, and the vendor's own endpoint left alone. One
+toggle in Appearance covers it, and since the tint is computed rather than
+stored, turning it off reaches every thread and not only the next one.
 
-The Fastpick tab in the settings installs and removes it, as a thread you can
-watch rather than a spinner. Removing it leaves the config alone: that is where
-the providers and the paths to the key files are declared. The menu hides itself
-when fastpick is absent.
+The Fastpick tab in the settings installs and removes it, in the panel itself:
+the build reports as it goes, stops when you say so, and says whether it worked.
+Removing it leaves the config alone: that is where the providers and the paths
+to the key files are declared. The menu hides itself when fastpick is absent.
 
 ### A process can rewrite its own thread
 

@@ -19,7 +19,6 @@ import {
   FASTPICK_CMD,
   type FastpickCombo,
 } from "$lib/features/fastpick/combo";
-import { barColorArgs } from "$lib/features/fastpick/threadAccent";
 import { samePromotion, type Promotion } from "./promote";
 import { releaseClaudeSession } from "./session";
 import type { IconKey, Project, Shortcut, Thread } from "$lib/types";
@@ -492,7 +491,7 @@ export async function launchFastpick(
   return createThread(
     project,
     FASTPICK_CMD,
-    [...comboArgs(combo), ...barColorArgs(combo, harness.kind)],
+    comboArgs(combo),
     harness.name,
     iconKeyForKind(harness.kind),
     { fresh: true },
