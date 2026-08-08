@@ -23,6 +23,30 @@ export interface FastpickCombo {
 
 export const FASTPICK_CMD = "fastpick";
 
+/**
+ * Whether this command is fastpick, however it happens to be spelled.
+ *
+ * On the binary name rather than on the whole string, because the three things
+ * that decide a thread's `cmd` do not agree on how to write it: the menu writes
+ * `fastpick`, a shortcut carries whatever the user typed, which on Windows is
+ * routinely `fastpick.exe` or a full path, and a process promoting its own
+ * thread writes whatever it printed.
+ *
+ * **An exact match called two of those three a different program, and that was
+ * not a cosmetic failure.** `splitArgv` reads this to decide whether a thread
+ * has two argument regions, so a thread launched as `fastpick.exe` got no `--`
+ * written, and codex's `-c mcp_servers.boite.command=…` landed in front of it,
+ * where fastpick claims `-c` for its own `--config`. The launch then died
+ * trying to create a file named after a TOML assignment, which on Windows is
+ * `os error 123`: the quote and the equals sign are not allowed in a filename.
+ */
+export function isFastpick(cmd: string): boolean {
+  const last = cmd.trim().split(/[/\\]/).pop() ?? "";
+  const dot = last.lastIndexOf(".");
+  const stem = dot > 0 ? last.slice(0, dot) : last;
+  return stem.toLowerCase() === FASTPICK_CMD;
+}
+
 /** Which agent a harness kind is, for the icon and everything else keyed on it. */
 export function iconKeyForKind(kind: string): IconKey {
   switch (kind) {
@@ -71,7 +95,7 @@ export function comboArgs(combo: FastpickCombo): string[] {
  * sequence, are then described exactly like one the picker launched.
  */
 export function parseCombo(cmd: string, args: readonly string[]): FastpickCombo | null {
-  if (cmd !== FASTPICK_CMD) return null;
+  if (!isFastpick(cmd)) return null;
 
   let harness: string | null = null;
   let provider: string | null = null;
