@@ -14,6 +14,10 @@ const RULES: DetectionRule[] = [
   { key: "copilot", patterns: [/\bcopilot\b/i, /\bgh\s+copilot\b/i] },
   { key: "grok", patterns: [/\bgrok\b/i, /\bxai\b/i] },
   { key: "hermes", patterns: [/\bhermes\b/i, /\bnous[- ]?research\b/i] },
+  // `pi` is two letters, so it is matched as a whole word only: `pip`, `api`
+  // and `mpi` are not it. `pi-coding-agent` is, the hyphen being a boundary.
+  { key: "pi", patterns: [/\bpi\b/i, /\bpi-coding-agent\b/i] },
+  { key: "muse", patterns: [/\bmuse\b/i, /\bmuse[- ]?spark\b/i] },
   { key: "bun", patterns: [/\bbun\b/i] },
   {
     key: "terminal",

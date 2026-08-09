@@ -2,7 +2,7 @@
 //!
 //! Every coding agent keeps its own record of a conversation somewhere on the
 //! machine, in its own format, under its own idea of where a project lives.
-//! Boite reads eight of them so a terminal can come back on the session it was
+//! Boite reads nine of them so a terminal can come back on the session it was
 //! on, and so the sidebar can say what each agent is doing right now.
 //!
 //! One file per store, because they have nothing in common but the questions
@@ -13,10 +13,10 @@
 //!   be carried to a new folder.
 //! - [`codex`] keeps a rollout log, which is what its turn state is read from.
 //! - [`opencode`] keeps a sqlite database of messages.
-//! - [`editors`] is the five that Boite can only ever read: copilot, cursor,
-//!   antigravity, grok and hermes. Each one is "open a store and find the newest
-//!   session in this directory", and none of them says whether a turn is in
-//!   flight.
+//! - [`editors`] is the six that Boite can only ever read: copilot, cursor,
+//!   antigravity, grok, hermes and pi. Each one is "open a store and find the
+//!   newest session in this directory", and none of them says whether a turn is
+//!   in flight.
 //!
 //! What stays here is what more than one of them needs, and the vocabulary they
 //! all answer in: [`SessionHit`], [`AgentTurn`], [`TurnQuery`],
@@ -41,7 +41,7 @@ pub use codex::{find_codex_session_blocking, CodexSessionHit};
 pub use editors::{
     copilot_session_resumable, find_antigravity_session_blocking,
     find_copilot_session_blocking, find_cursor_session_blocking,
-    find_grok_session_blocking, find_hermes_session_blocking,
+    find_grok_session_blocking, find_hermes_session_blocking, find_pi_session_blocking,
 };
 pub use opencode::find_opencode_session_blocking;
 
@@ -443,12 +443,12 @@ fn collect_files(root: &Path, out: &mut Vec<(PathBuf, i64)>, depth: usize, max_d
 
 /// Whether this CLI files its transcripts under the directory it ran in.
 ///
-/// Only claude does. The others key their store by time (codex), by an internal
+/// Claude and pi do. The others key their store by time (codex), by an internal
 /// database (cursor, antigravity) or by a flat session list (opencode, copilot,
 /// grok, hermes), so a session of theirs resumes from anywhere and a move has
 /// nothing to carry.
 pub fn session_store_is_cwd_scoped(kind: &str) -> bool {
-    kind == "claude"
+    matches!(kind, "claude" | "pi")
 }
 
 /// Carries a transcript to the directory the thread is moving to, and answers
@@ -489,6 +489,9 @@ pub fn migrate_session_blocking(
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
     {
         return Err("not a session id".into());
+    }
+    if kind == "pi" {
+        return editors::migrate_pi_transcript(session_id, from_cwd, to_cwd);
     }
     let home = dirs::home_dir().ok_or("no home directory")?;
     claude::migrate_claude_transcript(

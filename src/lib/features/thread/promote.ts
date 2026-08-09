@@ -42,6 +42,8 @@ const ICON_KEYS: readonly IconKey[] = [
   "opencode",
   "grok",
   "hermes",
+  "pi",
+  "muse",
   "bun",
   "terminal",
 ];

@@ -112,8 +112,8 @@ pub async fn thread_transcript(
 
 /// The session an agent opened in this directory.
 ///
-/// Eight commands, one per agent, each a codec onto the same command. They were
-/// eight copies of the same four lines on this side and one `kind` switch on the
+/// Nine commands, one per agent, each a codec onto the same command. They were
+/// nine copies of the same four lines on this side and one `kind` switch on the
 /// server; the names stay because the frontend calls them, the behaviour does
 /// not because there is only one of it now.
 ///
@@ -155,3 +155,4 @@ session_finder!(find_antigravity_session, "antigravity");
 session_finder!(find_copilot_session, "copilot");
 session_finder!(find_grok_session, "grok");
 session_finder!(find_hermes_session, "hermes");
+session_finder!(find_pi_session, "pi");

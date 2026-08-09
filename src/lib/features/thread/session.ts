@@ -55,6 +55,7 @@ const detectors: Partial<Record<NonNullable<IconKey>, SessionDetector>> = {
   copilot: makeDetector("copilot", "copilot"),
   grok: makeDetector("grok", "grok"),
   hermes: makeDetector("hermes", "hermes"),
+  pi: makeDetector("pi", "pi"),
 };
 
 /**
