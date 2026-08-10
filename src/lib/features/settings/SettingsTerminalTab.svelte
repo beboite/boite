@@ -31,6 +31,8 @@
     { iconKey: "copilot", label: "Copilot" },
     { iconKey: "grok", label: "Grok" },
     { iconKey: "hermes", label: "Hermes" },
+    { iconKey: "pi", label: "Pi" },
+    { iconKey: "muse", label: "Muse" },
   ];
 </script>
 

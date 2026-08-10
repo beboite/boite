@@ -74,6 +74,8 @@ export type IconKey =
   | "opencode"
   | "grok"
   | "hermes"
+  | "pi"
+  | "muse"
   | "bun"
   | "terminal"
   | null;

@@ -186,6 +186,47 @@ describe("resumeArgv", () => {
     expect(joinArgv(argv)).toEqual(FASTPICK_CLAUDE.slice(0, 6));
   });
 
+  it("resumes pi on --session and drops the picker it was launched with", () => {
+    // `-r` opens pi's session picker and takes no value of its own, so leaving
+    // it in place would bring the picker back up on top of the resume.
+    const { argv, outcome } = relaunch("pi", ["-r", "--thinking", "high"], "pi");
+    expect(outcome).toBe("resumed");
+    expect(joinArgv(argv)).toEqual(["--thinking", "high", "--session", SESSION]);
+  });
+
+  it("continues the latest pi session of this folder when nothing was captured", () => {
+    // `pi -c` is continueRecent(cwd), so it cannot reach another project's
+    // conversation the way hermes' global `-c` can.
+    const { argv, outcome } = resumeArgv({
+      cmd: "pi",
+      args: [],
+      key: "pi",
+      sessionId: null,
+      fresh: false,
+    });
+    expect(outcome).toBe("continue-latest");
+    expect(joinArgv(argv)).toEqual(["--continue"]);
+  });
+
+  it("resumes muse on its subcommand, replacing the one it carried", () => {
+    const { argv } = relaunch("muse", ["resume", "--last"], "muse");
+    expect(joinArgv(argv)).toEqual(["resume", SESSION]);
+  });
+
+  it("starts muse fresh rather than guessing at its last session", () => {
+    // `muse resume --last` is not documented as scoped to a directory, and a
+    // wrong-project resume is worse than a fresh conversation.
+    const { argv, outcome } = resumeArgv({
+      cmd: "muse",
+      args: [],
+      key: "muse",
+      sessionId: null,
+      fresh: false,
+    });
+    expect(outcome).toBe("no-session");
+    expect(joinArgv(argv)).toEqual([]);
+  });
+
   it("leaves an agent nothing resumes exactly as it was launched", () => {
     const { argv, outcome } = relaunch("lazygit", ["--path", "."], null);
     expect(outcome).toBe("no-builder");
@@ -209,9 +250,18 @@ describe("the opening prompt", () => {
     expect(next.argv.agent).toEqual(argv.agent);
   });
 
+  it("is a bare positional for pi, resume included", () => {
+    const { argv } = relaunch("pi", [], "pi");
+    const next = withPromptArg(argv, "pi", "read the docs");
+    expect(next.typed).toBe(false);
+    expect(next.argv.agent).toEqual(["--session", SESSION, "read the docs"]);
+  });
+
   it("says which agents can be handed one at all", () => {
     expect(takesOpeningPrompt("claude")).toBe(true);
     expect(takesOpeningPrompt("codex")).toBe(true);
+    expect(takesOpeningPrompt("pi")).toBe(true);
+    expect(takesOpeningPrompt("muse")).toBe(false);
     expect(takesOpeningPrompt("opencode")).toBe(false);
     expect(takesOpeningPrompt(null)).toBe(false);
   });

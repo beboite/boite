@@ -32,12 +32,14 @@ export const PRESET_SHORTCUTS: Shortcut[] = [
   { id: "copilot", label: "Copilot", command: "gh copilot", iconKey: "copilot" },
   { id: "grok", label: "Grok", command: "grok", iconKey: "grok" },
   { id: "hermes", label: "Hermes", command: "hermes", iconKey: "hermes" },
+  { id: "pi", label: "Pi", command: "pi", iconKey: "pi" },
+  { id: "muse", label: "Muse", command: "muse", iconKey: "muse" },
 ];
 
 // Presets introduced after the initial release: backfilled into existing
 // installs exactly once, then recorded in `seededPresets` so a user deleting
 // one doesn't get it back on the next launch.
-const BACKFILL_PRESET_IDS = ["antigravity", "grok", "hermes"];
+const BACKFILL_PRESET_IDS = ["antigravity", "grok", "hermes", "pi", "muse"];
 
 function migrateShortcuts(
   raw: unknown,
@@ -144,6 +146,8 @@ const DEFAULTS: Settings = {
     copilot: true,
     grok: true,
     hermes: true,
+    pi: true,
+    muse: true,
   },
   confirmCloseThread: true,
   rightPanel: null,

@@ -144,6 +144,23 @@ function withOpencodeContinue(args: string[]): string[] {
   return [...args, "--continue"];
 }
 
+// `pi -c` is `SessionManager.continueRecent(cwd)`: the most recent session of
+// this directory, not of the machine. Scoped like grok's, so it is a safe
+// fallback for a thread whose id has not been captured yet.
+function withPiContinue(args: string[]): string[] {
+  if (
+    args.includes("--continue") ||
+    args.includes("-c") ||
+    args.includes("--resume") ||
+    args.includes("-r") ||
+    args.includes("--session") ||
+    args.includes("--session-id")
+  ) {
+    return args;
+  }
+  return [...args, "--continue"];
+}
+
 function withAntigravityContinue(args: string[]): string[] {
   if (
     args.includes("--continue") ||
@@ -212,6 +229,26 @@ const builders: Partial<Record<NonNullable<IconKey>, ResumeBuilder>> = {
     const filtered = stripFlag(withoutContinue, ["--resume", "-r"], true);
     return [...filtered, "--resume", sessionId];
   },
+  // pi --session <path|id> takes a session file or a UUID; `-r` is the picker
+  // and takes no value, so it goes with the value-less strip.
+  pi: (args, sessionId) => {
+    const withoutPicker = stripFlag(args, ["--continue", "-c", "--resume", "-r"], false);
+    const filtered = stripFlag(
+      withoutPicker,
+      ["--session", "--session-id", "--fork"],
+      true,
+    );
+    return [...filtered, "--session", sessionId];
+  },
+  // `muse resume <uuid>` is a subcommand, codex-shaped, and `--last` is its
+  // "whatever was open" form. Unverified against a running muse: there is no
+  // build of it for this platform, so this is read off its documented CLI.
+  muse: (args, sessionId) => {
+    const stripped = args.filter(
+      (a) => a !== "resume" && a !== "--last" && a !== sessionId,
+    );
+    return [...stripped, "resume", sessionId];
+  },
 };
 
 /**
@@ -271,10 +308,11 @@ export function resumeArgv(input: ResumeInput): {
   if (input.fresh) return { argv: withAgent(argv, agent), outcome: "fresh" };
 
   if (!sessionId) {
-    // grok -c is scoped to the current directory, so continuing the latest
-    // session is safe even without a captured id. hermes -c is global (last
-    // session of any project), so it gets no fallback: wrong-project resumes
-    // are worse than a fresh session.
+    // grok -c and pi -c are scoped to the current directory, so continuing the
+    // latest session is safe even without a captured id. hermes -c is global
+    // (last session of any project), so it gets no fallback: wrong-project
+    // resumes are worse than a fresh session. muse's `resume --last` is not
+    // documented as scoped either way, so it gets none for the same reason.
     const continued =
       key === "opencode"
         ? withOpencodeContinue(agent)
@@ -282,7 +320,9 @@ export function resumeArgv(input: ResumeInput): {
           ? withGrokContinue(agent)
           : key === "antigravity"
             ? withAntigravityContinue(agent)
-            : null;
+            : key === "pi"
+              ? withPiContinue(agent)
+              : null;
     return continued
       ? { argv: withAgent(argv, continued), outcome: "continue-latest" }
       : { argv: withAgent(argv, agent), outcome: "no-session" };
@@ -305,6 +345,11 @@ export function resumeArgv(input: ResumeInput): {
  * variadic), but only for a fresh session: its resume is the subcommand `codex
  * resume <id>`, which occupies the same position.
  *
+ * `pi [options] [@files…] [messages…]` takes one too, resume included: its
+ * documented examples put a sentence after flags that take a value
+ * (`pi --name "CI audit" -p "…"`), and nothing in its argument list is
+ * variadic, so the positional cannot be swallowed by the flag before it.
+ *
  * Nothing else is listed. A guess here does not misfire quietly — it costs the
  * thread its whole launch — and the cost of being wrong the other way is one
  * agent that comes back up without being told why its folder changed.
@@ -312,6 +357,7 @@ export function resumeArgv(input: ResumeInput): {
 function promptSeparator(key: IconKey, agent: string[]): string[] | null {
   if (key === "claude") return ["--"];
   if (key === "codex") return agent.includes("resume") ? null : [];
+  if (key === "pi") return [];
   return null;
 }
 

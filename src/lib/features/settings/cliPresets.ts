@@ -74,4 +74,20 @@ export const CLI_PRESETS: CliPreset[] = [
     executable: "hermes",
     docUrl: "https://github.com/NousResearch/hermes-agent#installation",
   },
+  {
+    id: "pi",
+    label: "Pi",
+    command: "pi",
+    iconKey: "pi",
+    executable: "pi",
+    docUrl: "https://pi.dev/",
+  },
+  {
+    id: "muse",
+    label: "Muse",
+    command: "muse",
+    iconKey: "muse",
+    executable: "muse",
+    docUrl: "https://dev.meta.ai/docs/muse-code",
+  },
 ];

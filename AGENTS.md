@@ -169,7 +169,7 @@ five-row window, so a working agent read as finished.
 When neither source answers there is nothing to measure, and that is the one
 place a clock still decides anything. A thread whose pane is gone has no emulator
 holding its rows (a `Terminal` unmounts with the PTY alive whenever the thread
-leaves a group, loses its `rect` or `group`, or flips its respawn key), and five
+leaves a group, loses its `rect` or `group`, or flips its respawn key), and seven
 of the agents declare nothing, so the pair answers nothing at all. It keeps its
 status until every activity stamp has aged out and then drops to `ready`
 (`UNREAD_TTL_MS`, two seconds, mirroring the server's `WORKING_TTL` and the
@@ -247,7 +247,7 @@ registry entry naming that pid is the answer outright. Nothing else outranks it,
 neither a newer transcript nor an id another thread already claimed, and the hit
 says so with `ownPid` so the window knows it was told rather than having guessed.
 
-Everything else is the guess, and it stays for the seven agents that keep no such
+Everything else is the guess, and it stays for the nine agents that keep no such
 registry: the newest unclaimed transcript in the directory, accepted only when
 its mtime lines up with this pty's own activity and with no sibling's
 (`attributedToSelf`). What that cannot settle is two agents of one kind busy in
@@ -278,8 +278,12 @@ title and a 2s TTL. Both sides read the same files, so their rules are mirrored
 deliberately and tested in both languages (`agent-registry.test.ts`,
 `session.rs::turn_tests`).
 
-The five remaining agents (cursor, antigravity, copilot, grok, hermes) declare
-nothing that can be polled from outside, and get the screen rows alone.
+The seven remaining agents (cursor, antigravity, copilot, grok, hermes, pi,
+muse) declare nothing that can be polled from outside, and get the screen rows
+alone. Pi still has a session to find — one JSONL file per conversation under an
+encoded cwd, the same shape as claude's store without the live registry — while
+muse has no build for this platform, so nothing reads its store at all and its
+row exists to be launched and resumed by hand.
 
 ## Checking your work in the running app
 
