@@ -57,6 +57,13 @@ async fn main() {
             std::process::exit(1);
         }
     };
+    // Before anything can read a row. Every PTY this process will own is one it
+    // spawns itself, so a row still naming a process names one of the last
+    // server's, and a client connecting now has to be told that thread was cut
+    // off rather than that it never started.
+    if let Err(e) = store.settle_last_run() {
+        tracing::warn!("settling the last run's thread statuses failed: {e}");
+    }
     let store = Arc::new(store);
 
     let (events, _) = broadcast::channel::<AppEvent>(EVENT_CHANNEL_CAP);
@@ -265,10 +272,26 @@ fn make_event_emitter(
                 status,
                 exit_code,
             } => {
-                if let Err(e) =
-                    store.update_thread_field(thread_id, ThreadCol::Status, ColVal::Text(status.clone()))
-                {
-                    tracing::warn!("failed to persist thread status: {e}");
+                // What the row keeps is how the run ended, or that there was one.
+                // `running`, `ready` and `waiting` all say the same thing to a
+                // later boot — this thread was on — so they store the one word,
+                // and `stopped` stores nothing at all: an auto-sleep is this
+                // run's own bookkeeping, and writing it would make
+                // `settle_last_run` decay the mark one restart early, which is a
+                // thread that was on last session drawn as one that never ran.
+                let stored = match status.as_str() {
+                    "running" | "ready" | "waiting" => Some("running"),
+                    "done" | "exited" | "error" => Some(status.as_str()),
+                    _ => None,
+                };
+                if let Some(stored) = stored {
+                    if let Err(e) = store.update_thread_field(
+                        thread_id,
+                        ThreadCol::Status,
+                        ColVal::Text(stored.to_string()),
+                    ) {
+                        tracing::warn!("failed to persist thread status: {e}");
+                    }
                 }
                 if let Some(c) = exit_code {
                     if let Err(e) =

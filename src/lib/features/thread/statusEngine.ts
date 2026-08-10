@@ -223,7 +223,9 @@ function maybeAutoClose(threadId: string, iconKey: string | null | undefined) {
   if (idleMs < timeoutMs) return;
   const pid = t.ptyId;
   app.setThreadPtyId(t.id, null);
-  // setThreadStatus persists terminal statuses; no second hand-built save.
+  // In memory only, and deliberately: the row already carries the mark of this
+  // run, and a sleep written down would have the next boot read it as the run
+  // before this one and draw the thread as one that never started.
   app.setThreadStatus(t.id, "stopped", null);
   app.setThreadAutoSlept(t.id, true);
   void ptyKill(pid, false).catch((err) => {

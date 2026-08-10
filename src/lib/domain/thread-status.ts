@@ -50,17 +50,6 @@ export function isParked(status: ThreadStatus): boolean {
 }
 
 /**
- * Worth writing back to the database.
- *
- * A status that will still be true after a restart. `running` and `ready` are
- * statements about a process that will not exist, so persisting them means a
- * row that claims to be busy with nothing behind it.
- */
-export function isDurable(status: ThreadStatus): boolean {
-  return status === "idle" || isFinished(status);
-}
-
-/**
  * What the dot should say, which is not always what the row stores.
  *
  * A thread parked by a workspace switch keeps its PTY alive while its status

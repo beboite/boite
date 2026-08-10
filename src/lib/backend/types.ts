@@ -90,6 +90,18 @@ export interface DbApi {
   loadThreads(): Promise<Thread[]>;
   saveThread(thread: Thread): Promise<void>;
   updateThreadTitle(id: string, title: string | null): Promise<void>;
+  /**
+   * Writes down that a process is behind this thread now, and clears the exit
+   * code the last run left.
+   *
+   * The only status the window persists. `running`, `ready` and `waiting` come
+   * and go several times a turn and none of them is worth a write; what the row
+   * has to carry is that the thread was on during this run of the app, because
+   * that is the only thing a later launch can tell apart from a thread nobody
+   * has ever started. Drawing those two the same way is what put a sleeping
+   * badge on every row in the sidebar on every boot.
+   */
+  markThreadStarted(id: string): Promise<void>;
   deleteThread(id: string): Promise<void>;
   loadSettings(): Promise<Partial<Settings>>;
   saveSettings(settings: Settings): Promise<void>;

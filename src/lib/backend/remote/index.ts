@@ -211,6 +211,10 @@ export class RemoteBackend implements Backend {
       saveThread: (t) => rpc("thread.create", { thread: t }).then(() => {}),
       updateThreadTitle: (id, title) =>
         rpc("thread.update", { threadId: id, title }).then(() => {}),
+      // Reachable, and unused on this path: the server watches its own PTYs and
+      // writes the mark itself. A client that called it would be claiming
+      // runtime state it does not own.
+      markThreadStarted: (id) => rpc("thread.started", { threadId: id }).then(() => {}),
       deleteThread: (id) => rpc("thread.delete", { threadId: id }).then(() => {}),
       loadSettings: () =>
         rpc("settings.get").then((r) => (r.settings ?? {}) as Partial<Settings>),

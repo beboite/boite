@@ -35,6 +35,7 @@ pub const ALL_METHODS: &[&str] = &[
     "thread.list",
     "thread.create",
     "thread.update",
+    "thread.started",
     "thread.delete",
     "todo.list",
     "todo.save",
@@ -152,15 +153,32 @@ pub enum Records {
     /// process. So an existing row keeps its persisted ending, and only a
     /// genuinely new one starts `idle`.
     ///
-    /// `Store::thread_status` is what "persisted" means: anything that is not a
-    /// terminal status collapses to `idle`, because a row saying `running`
-    /// describes a process that stopped existing when the last host did.
+    /// `Store::thread_status` is what "persisted" means, raw: how the run ended,
+    /// or the mark [`Records::ThreadStarted`] left on it. The answer is what that
+    /// mark *means* (`boite_core::store::display_status`), so the window is told
+    /// `stopped` about a row that still names a process.
     ThreadCreate {
         thread: Box<Thread>,
     },
     ThreadUpdate {
         id: String,
         patch: ThreadPatch,
+    },
+    /// A process is behind this thread now.
+    ///
+    /// The one status write the window is allowed, and it is not a claim about
+    /// the present: `running`, `ready` and `waiting` come and go several times a
+    /// turn and none of them is worth a write. What the row records is that the
+    /// thread was on during this run of the app, which is the only way a later
+    /// launch can tell a thread that was cut off from one that has never been
+    /// started — and drawing those two the same way is what made every row on
+    /// screen asleep on every boot.
+    ///
+    /// The exit code goes with it: it belongs to the run that ended, and a
+    /// relaunched thread carrying the last one is a row that reports a failure it
+    /// has already been forgiven for.
+    ThreadStarted {
+        id: String,
     },
     /// Removes the row and the key bound to it.
     ///
@@ -234,6 +252,9 @@ impl Records {
                 id: str_param(params, "threadId")?,
                 patch: ThreadPatch::read(params),
             },
+            "thread.started" => Records::ThreadStarted {
+                id: str_param(params, "threadId")?,
+            },
             "thread.delete" => Records::ThreadDelete {
                 id: str_param(params, "threadId")?,
             },
@@ -268,6 +289,7 @@ impl Records {
             Records::ThreadList => "thread.list",
             Records::ThreadCreate { .. } => "thread.create",
             Records::ThreadUpdate { .. } => "thread.update",
+            Records::ThreadStarted { .. } => "thread.started",
             Records::ThreadDelete { .. } => "thread.delete",
             Records::TodoList => "todo.list",
             Records::TodoSave { .. } => "todo.save",
@@ -294,6 +316,7 @@ impl Records {
             Records::ProjectArchive { .. }
             | Records::ProjectDelete { .. }
             | Records::ThreadUpdate { .. }
+            | Records::ThreadStarted { .. }
             | Records::ThreadDelete { .. }
             | Records::TodoSave { .. }
             | Records::TodoDelete { .. }
@@ -325,6 +348,7 @@ impl Records {
             Records::ProjectArchive { .. }
             | Records::ThreadCreate { .. }
             | Records::ThreadUpdate { .. }
+            | Records::ThreadStarted { .. }
             | Records::TodoSave { .. }
             | Records::TodoDelete { .. }
             | Records::SettingsSet { .. }
@@ -390,12 +414,25 @@ impl Records {
                     }
                 }
                 store.save_thread(&thread)?;
+                // The row keeps the mark of its last run; the caller is told what
+                // that mark means, which for a row still naming a process is
+                // `stopped` rather than the word itself.
+                thread.status = crate::store::display_status(Some(&thread.status));
                 value_of(thread)
             }
             Records::ThreadUpdate { id, patch } => {
                 for (col, val) in patch.columns() {
                     store.update_thread_field(&id, col, val)?;
                 }
+                json!(null)
+            }
+            Records::ThreadStarted { id } => {
+                store.update_thread_field(
+                    &id,
+                    ThreadCol::Status,
+                    ColVal::Text("running".to_string()),
+                )?;
+                store.update_thread_field(&id, ThreadCol::ExitCode, ColVal::Null)?;
                 json!(null)
             }
             Records::ThreadDelete { id } => {
@@ -561,6 +598,32 @@ mod tests {
         let resaved = ask(&host, "thread.create", row("running", json!(null))).unwrap();
         assert_eq!(resaved["status"], json!("exited"), "a stale snapshot revived a dead thread");
         assert_eq!(resaved["exitCode"], json!(3));
+    }
+
+    /// The one status the window writes, and what a re-save does to it.
+    ///
+    /// The mark has to survive everything the window writes about a thread while
+    /// it runs, because a session id captured a second after launch is a re-save
+    /// — and a re-save that stored what the row *reads as* would turn the mark
+    /// into `stopped`, which the next boot would then decay to nothing. The
+    /// thread would have been on and would come back drawn as one that never ran.
+    #[test]
+    fn a_launch_is_written_down_and_a_resave_keeps_it() {
+        let host = Rows::new("started");
+        let row = json!({ "thread": { "id": "t", "projectId": "p", "label": "l",
+                                      "cmd": "c", "args": [] } });
+        let created = ask(&host, "thread.create", row.clone()).unwrap();
+        assert_eq!(created["status"], json!("idle"), "nothing has run yet");
+
+        ask(&host, "thread.started", json!({ "threadId": "t" })).unwrap();
+        let threads = ask(&host, "thread.list", json!({})).unwrap();
+        assert_eq!(threads[0]["status"], json!("stopped"), "a run this host did not spawn");
+
+        // What the table holds is the mark itself, so the re-save writes back a
+        // launch rather than a sleep.
+        assert_eq!(host.store.thread_status("t").unwrap().0, "running");
+        ask(&host, "thread.create", row).unwrap();
+        assert_eq!(host.store.thread_status("t").unwrap().0, "running");
     }
 
     /// An absent field leaves a column alone; an explicit null clears it. A patch
