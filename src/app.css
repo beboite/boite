@@ -29,12 +29,13 @@
      sleeping state sits: a forest green any darker is the card. */
   --color-dormant: #35916a;
 
-  /* The other sleeping rows: killed by hand, or back from a restart. They are
-     asleep as well, and nothing recorded how they got there — `autoSlept` lives
-     in memory, so only a sleep this run of the app watched can be claimed. A
-     step further down the same hue rather than a grey: grey is what this app
-     has nothing to say in, and a launch where every row is one of these read as
-     a column that had failed to draw. */
+  /* The other sleeping rows: killed by hand, or cut off by the app closing on
+     them. They are asleep as well, and nothing recorded how they got there —
+     `autoSlept` lives in memory, so only a sleep this run of the app watched can
+     be claimed. A step further down the same hue rather than a grey: grey is
+     what this app has nothing to say in, and these rows have something to say.
+     A row that has nothing draws no tone at all (`cold`), which is what a launch
+     opens on. */
   --color-parked: #3d6b57;
 
   /* Stacked surfaces (each ~3% lighter). */

@@ -556,6 +556,7 @@ mod tests {
             ("thread.list", ReadProject),
             ("thread.create", MutateProject),
             ("thread.update", MutateProject),
+            ("thread.started", MutateProject),
             ("thread.delete", MutateAcross),
             ("todo.list", ReadProject),
             ("todo.save", MutateProject),
@@ -585,7 +586,7 @@ mod tests {
             "git.fetch", "git.push", "git.pull", "git.init", "file.write",
             "project.createFolder", "session.stopClaude", "session.migrate",
             "project.create", "project.archive", "project.delete",
-            "thread.create", "thread.update", "thread.delete",
+            "thread.create", "thread.update", "thread.started", "thread.delete",
             "todo.save", "todo.delete", "settings.set", "workspace.setInfo",
         ] {
             let command = every_command()

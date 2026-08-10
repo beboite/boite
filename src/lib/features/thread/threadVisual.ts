@@ -14,13 +14,19 @@
 import type { ThreadStatus } from "$lib/types";
 
 /**
- * The six situations a row can be in.
+ * The seven situations a row can be in.
  *
  * `finished` and `sleeping` are deliberately separate, and they can hold the same
  * tone. A thread that just ended is news and gets the bright end of the scale;
  * one that ended a while ago and had its PTY reaped keeps the colour and loses
  * the brightness, because furniture that still claims to be news is how a sidebar
  * stops meaning anything.
+ *
+ * `cold` is the end of that same argument: a row nothing has happened to draws
+ * nothing. It used to be `sleeping`, and since a restart left every row saying
+ * `idle`, every launch opened on a column of sleeping badges — a state that
+ * describes all of them describes none of them. Sleeping is a thread that was on
+ * and got cut off, and only the rows that carry a run say it now.
  */
 export type ThreadVisualState =
   | "working"
@@ -28,6 +34,7 @@ export type ThreadVisualState =
   | "finished"
   | "ready"
   | "sleeping"
+  | "cold"
   | "failed";
 
 /** Which of the palette's status colours the row is painted in. */
@@ -117,14 +124,16 @@ export function threadVisual(input: ThreadVisualInput): ThreadVisual {
     case "ready":
       return { state: "ready", tone: keepAwake ? "awake" : "success" };
     default:
-      // `idle` is a row with no process behind it, which after a restart is
-      // every row: they are asleep in the sense that matters here, and parked
-      // rather than dormant, since a run that never saw them sleep cannot claim
-      // it did. Green rather than grey. It was grey on the reasoning that a
-      // thread from a previous session left no word on how it ended, and the
-      // bright green would be a guess — but that argues against `success`, not
-      // against colour. Grey made the sidebar open with every row unpainted.
-      return { state: "sleeping", tone: "parked" };
+      // `idle` is a row nothing has run behind, and that is now a statement
+      // rather than the absence of one: the table keeps a mark for a thread that
+      // was launched, so a row still saying `idle` at boot is one nobody has
+      // ever started. It draws nothing — no colour, no badge, the agent's logo
+      // and its name. It used to draw as sleeping, on the reasoning that a
+      // restart leaves nothing behind, which was true of the storage and not of
+      // the thread: the sidebar opened with every row wearing a `z`, including
+      // the twenty that had never been run, and a badge every row wears is one
+      // no row is read for.
+      return { state: "cold", tone: "parked" };
   }
 }
 
@@ -141,15 +150,23 @@ export function threadVisual(input: ThreadVisualInput): ThreadVisual {
  */
 export type ThreadToken = "dot" | "ask" | "check" | "ring" | "zed" | "bang";
 
-const TOKENS: Record<ThreadVisualState, ThreadToken> = {
+/**
+ * `cold` has none, and that is the answer rather than a gap.
+ *
+ * Every other state has something to say about a run. A row that has never been
+ * started has not earned a mark, so the glyph slot falls back to the agent's
+ * logo — which is the one thing about that row worth reading.
+ */
+const TOKENS: Record<ThreadVisualState, ThreadToken | null> = {
   working: "dot",
   waiting: "ask",
   finished: "check",
   ready: "ring",
   sleeping: "zed",
+  cold: null,
   failed: "bang",
 };
 
-export function stateTokenOf(state: ThreadVisualState): ThreadToken {
+export function stateTokenOf(state: ThreadVisualState): ThreadToken | null {
   return TOKENS[state];
 }

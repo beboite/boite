@@ -21,11 +21,9 @@ describe("threadVisual", () => {
     expect(threadVisual({ ...base, status: "stopped", asleep: true }).tone).toBe(
       "dormant",
     );
-    // Killed by hand, which is not falling asleep.
+    // Killed by hand, or back from a previous run: `asleep` lives in memory, so
+    // it is false and the row cannot claim a sleep this run never watched.
     expect(threadVisual({ ...base, status: "stopped" }).tone).toBe("parked");
-    // Back from a previous run: `asleep` lives in memory, so it is false and the
-    // row cannot claim a sleep this run never watched.
-    expect(threadVisual({ ...base, status: "idle" }).tone).toBe("parked");
   });
 
   it("keeps the amber of a turn in flight whatever keep-awake says", () => {
@@ -55,18 +53,24 @@ describe("threadVisual", () => {
     });
   });
 
-  // Parked for both, `idle` included: after a restart every row is idle, and a
-  // thread that ended in a previous session left no word on how it ended.
-  // `stopped` without the flag is a thread that was killed, which completed
-  // nothing. Neither earns the success green, and neither is grey: grey read as
-  // a row that had failed to draw, on a launch where every row is one of these.
+  // `stopped` without the flag is a thread that was killed, or one the last run
+  // of the app was cut off with. It completed nothing, so it does not earn the
+  // success green, and it is not grey either: grey read as a row that had failed
+  // to draw.
   it("paints a sleeping thread that never reported an ending green, not grey", () => {
-    for (const input of [
-      { ...base, status: "stopped" },
-      { ...base, status: "idle" },
-    ] as const) {
-      expect(threadVisual(input)).toEqual({ state: "sleeping", tone: "parked" });
-    }
+    expect(threadVisual({ ...base, status: "stopped" })).toEqual({
+      state: "sleeping",
+      tone: "parked",
+    });
+  });
+
+  // The rule the sidebar opens on. A row nothing has run behind says nothing at
+  // all, which is only an answer because the table now marks a thread that was
+  // launched: `idle` at boot means never started, where it used to mean "the app
+  // restarted" and put a sleeping badge on every row on screen.
+  it("draws a thread that has never run as nothing", () => {
+    expect(threadVisual({ ...base, status: "idle" }).state).toBe("cold");
+    expect(stateTokenOf("cold")).toBe(null);
   });
 
   // The one sleeping row that keeps the bright colour. It is dimmed by `--lit`
@@ -82,7 +86,9 @@ describe("threadVisual", () => {
     ).toEqual({ state: "sleeping", tone: "awake" });
   });
 
-  it("gives every state a token, so hiding the logos never empties the glyph", () => {
+  // `cold` is the exception and is tested above: it has nothing to say, so the
+  // glyph falls back to the agent's logo rather than to an empty circle.
+  it("gives every state that has one a token, so hiding the logos never empties the glyph", () => {
     const states: ThreadVisualState[] = [
       "working",
       "waiting",

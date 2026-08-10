@@ -656,14 +656,59 @@ impl Store {
 
     /// Persisted (status, exit_code) for a thread, or None if the row is absent.
     /// Lets thread.create preserve server-authoritative runtime state on re-save.
+    ///
+    /// Raw, where the two `load_` readers answer with [`display_status`]. A
+    /// re-save writes what this returns back onto the row, so translating here
+    /// would turn the mark of a live run into `stopped` the next time the window
+    /// captured a session id — and the row would then have said "asleep" about a
+    /// thread that was working, one restart later.
     pub fn thread_status(&self, id: &str) -> Option<(String, Option<i32>)> {
         let conn = self.conn.lock();
         conn.query_row(
             "SELECT status, exit_code FROM threads WHERE id = ?1",
             [id],
-            |r| Ok((normalize_status(r.get::<_, Option<String>>(0)?), r.get::<_, Option<i32>>(1)?)),
+            |r| {
+                Ok((
+                    r.get::<_, Option<String>>(0)?.unwrap_or_else(|| "idle".to_string()),
+                    r.get::<_, Option<i32>>(1)?,
+                ))
+            },
         )
         .ok()
+    }
+
+    /// Settles what the last run of this host left on the rows. Once, at start.
+    ///
+    /// Two writes, in this order, and nowhere else. A row still naming a process
+    /// becomes `stopped`: that thread was on when the host went away, which is a
+    /// thread that was cut off rather than one that never started. A row that was
+    /// already `stopped` when this host started was on during the run *before*
+    /// this one and has not been touched since, so it stops being news and goes
+    /// back to `idle`, which draws nothing.
+    ///
+    /// The second write is what keeps the first from filling the sidebar back up
+    /// one restart at a time. Without it, a thread launched once a month ago
+    /// would still be reported asleep today, which is the state this whole rule
+    /// exists to stop being the default.
+    ///
+    /// Run before anything reads the table: on the desktop that is where the
+    /// store is attached, on the server where it is opened.
+    pub fn settle_last_run(&self) -> Result<(), String> {
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
+        tx.execute("UPDATE threads SET status = 'idle' WHERE status = 'stopped'", [])
+            .map_err(|e| e.to_string())?;
+        let live = LIVE_STATUSES
+            .iter()
+            .map(|s| format!("'{s}'"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        tx.execute(
+            &format!("UPDATE threads SET status = 'stopped' WHERE status IN ({live})"),
+            [],
+        )
+        .map_err(|e| e.to_string())?;
+        tx.commit().map_err(|e| e.to_string())
     }
 
     pub fn save_thread(&self, t: &Thread) -> Result<(), String> {
@@ -880,13 +925,36 @@ impl ThreadCol {
     }
 }
 
+/// How a run ended, which is still true after a restart.
 const TERMINAL_STATUSES: &[&str] = &["done", "exited", "error", "stopped"];
 
-fn normalize_status(raw: Option<String>) -> String {
+/// A process, which no restart survives. Stored all the same: the row saying one
+/// of these is the only record that the thread was on when the host went away.
+const LIVE_STATUSES: &[&str] = &["running", "ready", "waiting"];
+
+/// What a stored status means to whoever reads the row.
+///
+/// A row naming a process describes one that stopped existing when the host that
+/// spawned it did, so it never reads back as itself. It used to read as `idle`,
+/// which is what a row that has never been started says, and the sidebar then
+/// drew every thread asleep on every launch. It reads as `stopped` instead — the
+/// same word an auto-sleep leaves — because a thread cut off by the app closing
+/// was cut off. `idle` is left to the rows that have nothing to say, and those
+/// draw nothing at all.
+///
+/// What is stored stays stored: [`Store::settle_last_run`] is the one place that
+/// rewrites it, once per host, and it is what keeps a mark from meaning "asleep"
+/// forever.
+pub fn display_status(raw: Option<&str>) -> String {
     match raw {
-        Some(s) if TERMINAL_STATUSES.contains(&s.as_str()) => s,
+        Some(s) if TERMINAL_STATUSES.contains(&s) => s.to_string(),
+        Some(s) if LIVE_STATUSES.contains(&s) => "stopped".to_string(),
         _ => "idle".to_string(),
     }
+}
+
+fn normalize_status(raw: Option<String>) -> String {
+    display_status(raw.as_deref())
 }
 
 /// The three states a todo can be in, and what anything else reads as.
@@ -1031,6 +1099,57 @@ mod tests {
             .decide_approval("never", approval::Verdict::Allowed, 22)
             .unwrap()
             .is_none());
+    }
+
+    /// The rule the sidebar is drawn from: a launch is remembered for exactly
+    /// one restart.
+    ///
+    /// Three rows and three boots. What separates them is the second write in
+    /// `settle_last_run`: without it the thread launched in the first run would
+    /// still be reported asleep after the third, and a week of those is the
+    /// column of sleeping rows this replaced.
+    #[test]
+    fn a_run_is_remembered_for_one_restart_and_no_more() {
+        let (store, _dir) = scratch_store("settle");
+        let insert = |id: &str, status: &str| {
+            store
+                .conn
+                .lock()
+                .execute(
+                    "INSERT INTO threads (id, project_id, label, cmd, args, status, created_at)
+                     VALUES (?1, 'p1', 'a', 'sh', '[]', ?2, 0)",
+                    rusqlite::params![id, status],
+                )
+                .unwrap();
+        };
+        let status_of = |id: &str| {
+            store
+                .load_threads()
+                .unwrap()
+                .into_iter()
+                .find(|t| t.id == id)
+                .unwrap()
+                .status
+        };
+
+        insert("live", "running");
+        insert("never", "idle");
+        insert("ended", "exited");
+
+        // A row still naming a process is read as cut off before anything has
+        // been settled: the process died with the host that spawned it.
+        assert_eq!(status_of("live"), "stopped");
+
+        // First boot after that run. The mark is written down as what it means.
+        store.settle_last_run().unwrap();
+        assert_eq!(status_of("live"), "stopped");
+        assert_eq!(status_of("never"), "idle");
+        assert_eq!(status_of("ended"), "exited");
+
+        // A run in which nobody touched it. It stops being news.
+        store.settle_last_run().unwrap();
+        assert_eq!(status_of("live"), "idle");
+        assert_eq!(status_of("ended"), "exited", "how a run ended is not news to decay");
     }
 
     /// A migrated database in its own directory, removed when the guard drops.

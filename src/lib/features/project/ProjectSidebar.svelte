@@ -1798,6 +1798,18 @@ import { projectDisplayName } from "$lib/shared/project-label";
     --wash: 8%;
   }
 
+  /* Never run. Unlit, and the one state that is: the card is its label, its logo
+     and the hover, with nothing painted over them. Half of `sleeping` would have
+     been the pattern the other states follow, and it is wrong here — the rule
+     "no row is unpainted" was written when every row after a restart landed in
+     this state, which is exactly what stopped being true. A quiet row among lit
+     ones reads as a row at rest; a column of them reads as the list this app
+     opens on, which is what it is. */
+  .thread-card.glow[data-state="cold"] {
+    --lit: 0;
+    --wash: 0%;
+  }
+
   /* Ended badly. Steady, never breathing: a crash is not urgent, it is over, and
      a red light that moves reads as something still going wrong. */
   .thread-card.glow[data-state="failed"] {

@@ -1,11 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ThreadStatus } from "$lib/types";
-import {
-  hasNoProcess,
-  isDurable,
-  isFinished,
-  isParked,
-} from "./thread-status";
+import { hasNoProcess, isFinished, isParked } from "./thread-status";
 
 const ALL: ThreadStatus[] = [
   "idle",
@@ -31,7 +26,6 @@ describe("thread status", () => {
     for (const status of ["running", "ready", "waiting"] as ThreadStatus[]) {
       expect(isFinished(status)).toBe(false);
       expect(hasNoProcess(status)).toBe(false);
-      expect(isDurable(status)).toBe(false);
     }
   });
 
@@ -44,13 +38,4 @@ describe("thread status", () => {
     expect(ALL.filter(isParked)).toEqual(["idle", "stopped"]);
   });
 
-  it("persists exactly what stays true across a restart", () => {
-    expect(ALL.filter(isDurable)).toEqual([
-      "idle",
-      "done",
-      "exited",
-      "error",
-      "stopped",
-    ]);
-  });
 });
