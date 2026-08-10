@@ -309,6 +309,11 @@ impl Sessions {
                         after_unix_ms,
                         &exclude,
                     )),
+                    "pi" => value_of(session::find_pi_session_blocking(
+                        cwd,
+                        after_unix_ms,
+                        &exclude,
+                    )),
                     // An agent nothing detects has no session, which is the same
                     // answer as an agent that has not started one.
                     _ => Value::Null,

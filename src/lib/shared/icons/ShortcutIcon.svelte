@@ -23,6 +23,8 @@
     opencode: "/icons/opencode.svg",
     grok: "/icons/grok.svg",
     hermes: "/icons/hermes.svg",
+    pi: "/icons/pi.svg",
+    muse: "/icons/muse.svg",
   };
   const asset = $derived(iconKey ? ASSET_BY_KEY[iconKey] : null);
 </script>

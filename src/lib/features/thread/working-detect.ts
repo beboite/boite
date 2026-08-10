@@ -89,6 +89,29 @@ const WORKING_BY_KEY: Partial<Record<NonNullable<IconKey>, RegExp[]>> = {
     /\bworking\b/i,
     /\bgenerating\b/i,
   ],
+  // Pi's status row is a braille frame plus one of its own messages, each
+  // carrying its own hint: `Working... (esc to interrupt)`, `Running... (esc to
+  // cancel)` for a bash tool, `Retrying (1/3) in 4s...`, and the two summary
+  // rows. Taken from its `status-indicator` component rather than from a screen.
+  pi: [
+    /esc\s+to\s+(?:interrupt|cancel|stop)/i,
+    /\bworking\b/i,
+    /\brunning\b/i,
+    /\bretrying\b/i,
+    /\bcompacting\b/i,
+    /\bsummarizing\b/i,
+    /\bthinking\b/i,
+  ],
+  // Muse has no build for this platform yet, so nothing here was read off a
+  // running one: the interrupt hint is what every one of these CLIs prints, and
+  // the words are the ordinary ones. A row it turns out to phrase differently
+  // costs a thread its dot, never its launch.
+  muse: [
+    /esc\s+to\s+(?:interrupt|cancel|stop)/i,
+    /\bworking\b/i,
+    /\bthinking\b/i,
+    /\bgenerating\b/i,
+  ],
 };
 
 // Frames that are pure animation: nothing leaves one of these on screen once a

@@ -1,12 +1,12 @@
-//! The five stores Boite can only read.
+//! The six stores Boite can only read.
 //!
-//! Copilot, cursor, antigravity, grok and hermes. Grouped because they are the
-//! same shape of answer: open whatever the editor keeps, find the newest
+//! Copilot, cursor, antigravity, grok, hermes and pi. Grouped because they are
+//! the same shape of answer: open whatever the editor keeps, find the newest
 //! session recorded for this directory, hand back an id and when it was last
 //! touched. None of them says whether a turn is in flight, so none of them
 //! contributes to the sidebar's activity dot.
 //!
-//! Four are sqlite and one is a directory of files, and that is the whole
+//! Four are sqlite and two are directories of files, and that is the whole
 //! variation. What differs beyond it is where the store lives per platform,
 //! which is the first function in each pair.
 
@@ -384,6 +384,215 @@ pub fn find_hermes_session_blocking(
     None
 }
 
+/// Where pi files its sessions. Two overrides, in the order pi reads them:
+/// `PI_CODING_AGENT_SESSION_DIR` replaces the directory outright (flat, no
+/// per-project subdirectory), `PI_CODING_AGENT_DIR` moves the whole config tree
+/// and keeps the layout. The bool says which of the two shapes came back.
+fn pi_sessions_root() -> Option<(PathBuf, bool)> {
+    if let Ok(dir) = env::var("PI_CODING_AGENT_SESSION_DIR") {
+        if !dir.trim().is_empty() {
+            return Some((PathBuf::from(dir), true));
+        }
+    }
+    if let Ok(dir) = env::var("PI_CODING_AGENT_DIR") {
+        if !dir.trim().is_empty() {
+            return Some((PathBuf::from(dir).join("sessions"), false));
+        }
+    }
+    Some((
+        dirs::home_dir()?.join(".pi").join("agent").join("sessions"),
+        false,
+    ))
+}
+
+/// The directory name pi builds for a working directory: one leading separator
+/// dropped, then every `/`, `\` and `:` turned into `-`, wrapped in `--`. So
+/// `D:\Dev\boite` is `--D--Dev-boite--`, the drive's colon and its separator
+/// each contributing a dash.
+fn pi_dir_name(cwd: &str) -> String {
+    let trimmed = cwd
+        .strip_prefix('/')
+        .or_else(|| cwd.strip_prefix('\\'))
+        .unwrap_or(cwd);
+    let body: String = trimmed
+        .chars()
+        .map(|c| if c == '/' || c == '\\' || c == ':' { '-' } else { c })
+        .collect();
+    format!("--{body}--")
+}
+
+/// The `cwd` pi recorded on this session file, read off its header.
+///
+/// The header is the first line and carries `{"type":"session",…,"cwd":…}`, so
+/// one line is read rather than a transcript that runs to megabytes.
+fn pi_session_header(path: &Path) -> Option<(String, String)> {
+    let file = fs::File::open(path).ok()?;
+    let mut line = String::new();
+    BufReader::new(file).read_line(&mut line).ok()?;
+    let parsed: serde_json::Value = serde_json::from_str(line.trim()).ok()?;
+    let id = parsed.get("id")?.as_str()?.to_string();
+    let cwd = parsed.get("cwd")?.as_str().unwrap_or_default().to_string();
+    Some((id, cwd))
+}
+
+/// The directory pi would file this cwd's sessions in, when one already exists.
+/// Matched case-insensitively for the same reason the finder does it.
+fn pi_dir_for(root: &Path, cwd: &str) -> Option<PathBuf> {
+    let want = pi_dir_name(cwd);
+    for entry in fs::read_dir(root).ok()?.flatten() {
+        if entry.file_type().ok()?.is_dir()
+            && entry
+                .file_name()
+                .to_string_lossy()
+                .eq_ignore_ascii_case(&want)
+        {
+            return Some(entry.path());
+        }
+    }
+    None
+}
+
+/// Carries a pi transcript to the folder a thread is moving to.
+///
+/// Same rule as claude's, one shape down: pi files by encoded cwd too, so a
+/// thread that changes project changes the directory `/resume` and `--session`
+/// look in. The file name is `<timestamp>_<uuid>.jsonl` rather than the id
+/// alone, so the source is found by suffix and copied under the name it already
+/// has — a session pi lists by its header id either way.
+///
+/// Answers reachability, not "did I copy something": `false` means replaying
+/// the id over there would find nothing, and the thread should start fresh.
+pub(super) fn migrate_pi_transcript(
+    session_id: &str,
+    from_cwd: &str,
+    to_cwd: &str,
+) -> Result<bool, String> {
+    if normalize(from_cwd) == normalize(to_cwd) {
+        return Ok(true);
+    }
+    let Some((root, flat)) = pi_sessions_root() else {
+        return Ok(false);
+    };
+    // One flat directory serves every project, so nothing moves and nothing
+    // becomes unreachable.
+    if flat {
+        return Ok(true);
+    }
+    let suffix = format!("_{session_id}.jsonl");
+    let source = pi_dir_for(&root, from_cwd).and_then(|dir| {
+        fs::read_dir(dir).ok()?.flatten().find_map(|e| {
+            e.file_name()
+                .to_string_lossy()
+                .ends_with(&suffix)
+                .then(|| e.path())
+        })
+    });
+    let target_dir = root.join(pi_dir_name(to_cwd));
+    let Some(source) = source else {
+        // Never written here, or already carried over by an earlier move.
+        return Ok(pi_dir_for(&root, to_cwd)
+            .and_then(|dir| {
+                fs::read_dir(dir).ok().map(|files| {
+                    files
+                        .flatten()
+                        .any(|e| e.file_name().to_string_lossy().ends_with(&suffix))
+                })
+            })
+            .unwrap_or(false));
+    };
+    fs::create_dir_all(&target_dir).map_err(|e| format!("cannot open the target folder: {e}"))?;
+    let Some(name) = source.file_name() else {
+        return Ok(false);
+    };
+    let target = target_dir.join(name);
+    // Already there: the same thread moved back, or two threads share a cwd.
+    // Overwriting would replace a transcript with an older copy of itself.
+    if target.is_file() {
+        return Ok(true);
+    }
+    fs::copy(&source, &target).map_err(|e| format!("cannot copy the transcript: {e}"))?;
+    Ok(true)
+}
+
+/// Pi keeps one JSONL file per session under
+/// `~/.pi/agent/sessions/--<encoded cwd>--/<timestamp>_<uuid>.jsonl`.
+///
+/// The encoded directory is a narrowing step and not the answer: pi encodes the
+/// path as it was given, so a thread whose cwd differs only in the case of the
+/// drive letter would miss its own folder. The name is matched case-insensitively
+/// and then every candidate's header is read, which is what actually decides —
+/// the same field pi itself resumes on, rather than a name derived twice.
+pub fn find_pi_session_blocking(
+    cwd: String,
+    after_unix_ms: i64,
+    exclude: &HashSet<String>,
+) -> Option<SessionHit> {
+    let (root, flat) = pi_sessions_root()?;
+    if !root.is_dir() {
+        return None;
+    }
+
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    if flat {
+        dirs.push(root);
+    } else {
+        let want = pi_dir_name(&cwd);
+        for entry in fs::read_dir(&root).ok()?.flatten() {
+            let Ok(t) = entry.file_type() else { continue };
+            if !t.is_dir() {
+                continue;
+            }
+            if entry
+                .file_name()
+                .to_string_lossy()
+                .eq_ignore_ascii_case(&want)
+            {
+                dirs.push(entry.path());
+            }
+        }
+    }
+
+    let target = normalize(&cwd);
+    let mut best: Option<(String, i64)> = None;
+    for dir in dirs {
+        let Ok(files) = fs::read_dir(&dir) else {
+            continue;
+        };
+        for file in files.flatten() {
+            let path = file.path();
+            if path.extension() != Some(OsStr::new("jsonl")) {
+                continue;
+            }
+            let Ok(mtime) = file.metadata().and_then(|m| m.modified()) else {
+                continue;
+            };
+            let mtime = ms_since_epoch(mtime);
+            if mtime < after_unix_ms {
+                continue;
+            }
+            if best.as_ref().is_some_and(|(_, t)| mtime <= *t) {
+                continue;
+            }
+            let Some((id, session_cwd)) = pi_session_header(&path) else {
+                continue;
+            };
+            if normalize(&session_cwd) != target {
+                continue;
+            }
+            if exclude.contains(&id) {
+                continue;
+            }
+            best = Some((id, mtime));
+        }
+    }
+    // The mtime is the transcript's own, so it is always known here: a file
+    // whose metadata could not be read was skipped above.
+    best.map(|(id, modified_ms)| SessionHit {
+        id,
+        modified_ms: Some(modified_ms),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -456,5 +665,17 @@ mod tests {
         );
         let taken: HashSet<String> = ["ours".to_string()].into_iter().collect();
         assert_eq!(find_copilot_session_in(&conn, "/proj", 0, &taken), None);
+    }
+
+    /// Pi's own encoding, which decides which directory is even opened. A drive
+    /// letter spends two characters — the colon and the separator after it — so
+    /// a single-dash guess would look in a folder that does not exist.
+    #[test]
+    fn pi_encodes_a_cwd_the_way_pi_does() {
+        assert_eq!(pi_dir_name("/home/u/proj"), "--home-u-proj--");
+        assert_eq!(pi_dir_name(r"D:\Dev\boite"), "--D--Dev-boite--");
+        // Exactly one leading separator is dropped, as in pi's own regex: the
+        // second one stays and becomes a dash like any other.
+        assert_eq!(pi_dir_name("//srv/share"), "---srv-share--");
     }
 }

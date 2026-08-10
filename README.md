@@ -1,5 +1,5 @@
 <h1 align="center">Boite</h1>
-<p align="center">A lightweight multi-agent terminal multiplexer. Run Claude Code, Codex, Opencode, Cursor, Antigravity, Copilot, Grok and Hermes side by side, grouped by project.</p>
+<p align="center">A lightweight multi-agent terminal multiplexer. Run Claude Code, Codex, Opencode, Cursor, Antigravity, Copilot, Grok, Hermes, Pi and Muse Code side by side, grouped by project.</p>
 
 <p align="center">
   <img src="./static/icons/icon-512.png" alt="Boite logo" width="140" />
@@ -67,19 +67,24 @@ won't get status or resume detection.
 | GitHub Copilot | `gh copilot`            | ✅          | `--resume=<id>`   | ❌            | ❌         |
 | Grok           | `grok`                  | ✅          | `--resume <id>`   | ❌            | ❌         |
 | Hermes         | `hermes`                | ✅          | `--resume <id>`   | ❌            | ❌         |
+| Pi             | `pi`                    | ✅          | `--session <id>`  | ✅            | ❌         |
+| Muse Code      | `muse`                  | ✅          | `resume <id>`     | ❌            | ❌         |
 | Plain shell    | your default shell      | n/a         | n/a               | n/a           | n/a        |
 
 - **Live status** is the working/ready dot. Claude, Codex and Opencode each
   record what they are doing in a store of their own, and Boite reads all three
-  back as one answer; the other five declare nothing from outside, so their dot
+  back as one answer; the other seven declare nothing from outside, so their dot
   comes from the shape of the terminal's bottom rows. Neither source is a
   timestamp that expires, so a finished turn reads as finished rather than as
   the absence of noise.
 - **Resume flag** is what Boite appends once it has found the conversation
-  matching the thread's cwd. Only Claude files its transcript by directory, so
-  it is also the only one whose transcript has to travel when a thread moves.
+  matching the thread's cwd. Claude and Pi file their transcripts by directory,
+  so theirs are the two that have to travel when a thread moves. Muse has no
+  build for Windows yet, so its row is read off its documented CLI rather than
+  off a running one, and it has no session detection: the flag is what Boite
+  would replay once an id is captured.
 - **Endpoint swap** is fastpick pointing the agent at another provider. The
-  three marked here keep their icon, status and resume through it; the others
+  four marked here keep their icon, status and resume through it; the others
   still launch, without the agent-specific handling.
 - **Prompt bar** is the model colour painted inside the TUI, which only Claude
   Code exposes a command for.

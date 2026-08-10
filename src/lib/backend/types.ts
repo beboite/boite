@@ -488,7 +488,8 @@ export type SessionKind =
   | "antigravity"
   | "copilot"
   | "grok"
-  | "hermes";
+  | "hermes"
+  | "pi";
 
 export interface SessionHit {
   id: string;

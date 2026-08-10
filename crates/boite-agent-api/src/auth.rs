@@ -245,7 +245,7 @@ fn issued(workspace: &dyn crate::Workspace, headers: &HeaderMap) -> Result<Calle
 /// then in an `<img>` path, and an unrecognised one would at best be a badge
 /// nobody knows.
 pub fn known_agent(value: &str) -> Option<String> {
-    const KNOWN: [&str; 8] = [
+    const KNOWN: [&str; 10] = [
         "claude",
         "codex",
         "antigravity",
@@ -254,6 +254,8 @@ pub fn known_agent(value: &str) -> Option<String> {
         "opencode",
         "grok",
         "hermes",
+        "pi",
+        "muse",
     ];
     let value = value.trim().to_ascii_lowercase();
     KNOWN.contains(&value.as_str()).then_some(value)

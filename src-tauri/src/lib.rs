@@ -376,6 +376,7 @@ pub fn run() {
             commands::sessions::find_copilot_session,
             commands::sessions::find_grok_session,
             commands::sessions::find_hermes_session,
+            commands::sessions::find_pi_session,
             commands::git::git_repo_info,
             commands::git::git_find_repos,
             commands::git::git_branches,
