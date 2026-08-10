@@ -56,6 +56,13 @@ impl Rows {
             .map_err(|e| format!("app_config_dir: {e}"))?
             .join("boite.db");
         let store = Arc::new(Store::attach(&path)?);
+        // First attach is once per app start, and it is before the window has
+        // read a single row: exactly where the last run's marks have to be
+        // settled, or the boot that reads them would draw a thread that was
+        // working when the app closed the same as one that has never run.
+        if let Err(e) = store.settle_last_run() {
+            eprintln!("[boite/records] settling the last run's thread statuses failed: {e}");
+        }
         *held = Some(store.clone());
         Ok(store)
     }
@@ -106,6 +113,7 @@ record_command!(records_project_archive, "project.archive");
 record_command!(records_thread_list, "thread.list");
 record_command!(records_thread_create, "thread.create");
 record_command!(records_thread_update, "thread.update");
+record_command!(records_thread_started, "thread.started");
 record_command!(records_todo_list, "todo.list");
 record_command!(records_todo_save, "todo.save");
 record_command!(records_todo_delete, "todo.delete");

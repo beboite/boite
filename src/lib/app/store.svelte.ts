@@ -9,12 +9,12 @@ import type {
 import {
   saveThread,
   updateThreadTitle,
+  markThreadStarted,
   deleteThread as dbDeleteThread,
 } from "$lib/storage/db";
 import { settings } from "$lib/features/settings/store.svelte";
 import { device } from "$lib/features/settings/device.svelte";
 import { logger } from "$lib/shared/services/logger.svelte";
-import { isDurable } from "$lib/domain/thread-status";
 import { t } from "$lib/i18n/index.svelte";
 import { platform } from "$lib/storage/platform.svelte";
 import {
@@ -517,12 +517,12 @@ export class AppState {
       // write — is the whole reason a woken thread stops animating.
       this.setThreadAutoSlept(id, false);
     }
-    // Remote: the server persists runtime state and pushes it back; a client
-    // write would clobber it. Only the local backend persists status here.
-    if (!workspace.backendFor(t.origin).caps.clientStatus) return;
-    if (isDurable(status)) {
-      void saveThread($state.snapshot(t) as Thread);
-    }
+    // Nothing is written here, and that is the change. A status is a statement
+    // about a process, and every one of them stops being true when the app
+    // closes; what the row keeps is that there *was* a run, written once by
+    // `setThreadPtyId`. The five writes this used to make per turn also went
+    // nowhere: `thread.create` keeps the persisted status by design, so a
+    // whole-row save could never carry one.
   }
 
   setThreadAutoSlept(id: string, value: boolean) {
@@ -585,6 +585,15 @@ export class AppState {
     const t = this.threadById(id);
     if (!t || t.ptyId === ptyId) return;
     t.ptyId = ptyId;
+    if (!ptyId) return;
+    // The one thing about a run that outlives it. A row with this mark comes
+    // back from a restart drawn as a thread that was cut off; a row without it
+    // draws nothing at all, which is what a thread nobody has started looks
+    // like. Remote rows are the server's to mark: it watches the PTYs it owns.
+    if (!workspace.backendFor(t.origin).caps.clientStatus) return;
+    void markThreadStarted(id, t.origin).catch((err) => {
+      logger.warn("app", `could not mark thread ${id} as started`, String(err));
+    });
   }
 
   // ------------------------------------------------------------- projects

@@ -211,6 +211,33 @@ needs the session to have recorded a directory of its own: normalising strips a
 trailing slash, so a thread at the root of a drive would otherwise match every
 session that recorded nothing.
 
+## What a launch opens on
+
+A restart is not evidence of anything, so a row that was never run draws nothing:
+no colour, no badge, its logo and its name (`cold` in `threadVisual.ts`). Only a
+thread that was on when the app went away comes back asleep. The two used to be
+one state, because a status is a statement about a process and nothing survived
+the process, so every row read `idle` and the sidebar opened on a column of `z`
+badges — twenty of them on threads nobody had ever started, which is a badge that
+says nothing by saying it about everything.
+
+What survives is one mark. `thread.started` writes `running` on the row when a
+PTY comes up, and that is the only status the window persists: `running`,
+`ready` and `waiting` come and go several times a turn, and `thread.create`
+keeps the persisted status by design, so the whole-row saves this used to make
+were writing nothing. `display_status` reads that mark back as `stopped`, and
+`Store::settle_last_run` — once per host, before anything reads the table — turns
+it into a real `stopped` and turns the previous run's `stopped` back into `idle`.
+That second write is the half that is easy to drop and is the point: without it a
+thread launched once a month ago is still reported asleep today, and the column
+of sleeping rows grows back one restart at a time.
+
+The server persists the same one word for the same reason (`make_event_emitter`),
+and deliberately does **not** persist `stopped`: an auto-sleep is that run's own
+bookkeeping, and writing it would have the next boot decay the mark one restart
+early — a thread that was working last night, drawn this morning as one that has
+never run.
+
 ## Which conversation a thread is bound to
 
 A thread with no `sessionId` relaunches into a blank agent, so binding one is not

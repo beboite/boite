@@ -701,14 +701,16 @@ mod tests {
         assert_eq!(again["thread"]["status"], json!("exited"));
         assert_eq!(again["thread"]["exitCode"], json!(3));
 
-        // And a stored `running` reads back as idle: the process it named is
-        // gone, so keeping the word would be a thread that is busy with nothing.
+        // And a stored `running` reads back as stopped: the process it named is
+        // gone, so keeping the word would be a thread that is busy with nothing —
+        // and answering `idle` would be a thread that was working when the last
+        // server went away drawn like one nobody has ever started.
         state
             .store
             .update_thread_field("t1", ThreadCol::Status, ColVal::Text("running".into()))
             .unwrap();
         let restarted = call(&state, "thread.create", row("running")).await.unwrap();
-        assert_eq!(restarted["thread"]["status"], json!("idle"));
+        assert_eq!(restarted["thread"]["status"], json!("stopped"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

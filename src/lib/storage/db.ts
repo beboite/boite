@@ -63,6 +63,10 @@ export function updateThreadTitle(
   return backendFor(origin).db.updateThreadTitle(id, title);
 }
 
+export function markThreadStarted(id: string, origin?: WorkspaceOrigin): Promise<void> {
+  return backendFor(origin).db.markThreadStarted(id);
+}
+
 export function deleteThread(id: string, origin?: WorkspaceOrigin): Promise<void> {
   return backendFor(origin).db.deleteThread(id);
 }

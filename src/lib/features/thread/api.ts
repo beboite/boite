@@ -678,7 +678,8 @@ export async function stopThread(threadId: string) {
   const previousPtyId = thread.ptyId;
   app.setThreadPtyId(thread.id, null);
   parkedLocal.delete(thread.id);
-  // setThreadStatus persists terminal statuses itself.
+  // In memory, like every other status: what the row keeps is the mark of the
+  // run, written when the PTY came up.
   app.setThreadStatus(thread.id, "stopped", null);
 
   if (previousPtyId) {
