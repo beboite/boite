@@ -47,7 +47,7 @@
   {/snippet}
 
   <div class="flex items-center gap-3">
-    <span class="w-9 font-mono text-2xs text-muted-foreground/70">75%</span>
+    <span class="w-9 tabular-nums text-2xs text-muted-foreground/70">75%</span>
     <input
       type="range"
       min="75"
@@ -58,7 +58,7 @@
       class="ui-slider min-w-0 flex-1"
       aria-label={t("appearance.uiScale")}
     />
-    <span class="w-12 text-right font-mono text-xs font-semibold text-foreground">
+    <span class="w-12 text-right tabular-nums text-xs font-semibold text-foreground">
       {settings.state.uiScalePercent}%
     </span>
   </div>

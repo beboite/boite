@@ -627,7 +627,7 @@
                   <!-- Nowhere to look it up: no project folder to run git in.
                        Shown bare rather than judged — not finding a repository
                        is not the same as not finding the commit. -->
-                  <code class="px-1 font-mono text-muted-foreground/70">
+                  <code class="px-1 tabular-nums text-muted-foreground/70">
                     {item.commitSha.slice(0, 7)}
                   </code>
                 {:else if g.commit.unreachable}

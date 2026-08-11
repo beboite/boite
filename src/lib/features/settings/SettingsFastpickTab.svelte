@@ -106,7 +106,7 @@
     {:else if installed}
       <span class="text-foreground">{t("fastpick.installed")}</span>
       {#if fastpick.version}
-        <span class="font-mono text-xs text-muted-foreground/70">v{fastpick.version}</span>
+        <span class="tabular-nums text-xs text-muted-foreground/70">v{fastpick.version}</span>
       {/if}
     {:else}
       <span class="text-muted-foreground">{t("fastpick.notInstalled")}</span>
@@ -211,7 +211,7 @@
       {t("fastpick.needsCargoHelp")}
     </p>
   {/if}
-  <p class="pt-0.5 font-mono text-xs text-muted-foreground/60">{FASTPICK_REPO}</p>
+  <p class="pt-0.5 text-xs text-muted-foreground/60">{FASTPICK_REPO}</p>
 </SettingsCard>
 
 <ToggleSetting

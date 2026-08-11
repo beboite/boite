@@ -89,7 +89,7 @@
       </h2>
       <p class="mt-1.5 text-xs leading-relaxed text-muted-foreground">
         {creating ? t("branchDialog.descriptionCreating") : t("branchDialog.descriptionSwitching")}
-        <span class="font-mono text-foreground/90">{branch}</span> {t("branchDialog.descriptionSuffix")}
+        <span class="font-medium text-foreground/90">{branch}</span> {t("branchDialog.descriptionSuffix")}
       </p>
 
       <div class="mt-4 grid gap-2">

@@ -446,7 +446,7 @@
         placeholder={t("shortcuts.commandPlaceholder")}
         onchange={(e) =>
           onUpdate(shortcut.id, { command: (e.currentTarget as HTMLInputElement).value })}
-        class="rounded-md border border-transparent bg-transparent px-2 py-1 font-mono text-sm text-foreground outline-none transition focus:border-border focus:bg-[var(--color-surface)]"
+        class="rounded-md border border-transparent bg-transparent px-2 py-1 text-sm text-foreground outline-none transition focus:border-border focus:bg-[var(--color-surface)]"
       />
       <button
         type="button"
@@ -513,7 +513,7 @@
                 </span>
               </span>
             {:else}
-              <span class="mt-0.5 truncate font-mono text-2xs text-muted-foreground/70">
+              <span class="mt-0.5 truncate text-2xs text-muted-foreground/70">
                 {preset.command}
               </span>
             {/if}

@@ -454,7 +454,7 @@
                     title={branch.name}
                   >
                     <Check class="size-3.5 shrink-0 {branch.current ? 'opacity-100' : 'opacity-0'}" />
-                    <span class="min-w-0 flex-1 truncate font-mono text-xs">{branch.name}</span>
+                    <span class="min-w-0 flex-1 truncate text-xs">{branch.name}</span>
                   </button>
                 {/each}
               {/if}
@@ -902,7 +902,7 @@
             {/if}
           </div>
           <span
-            class="w-3 shrink-0 text-center font-mono text-xs {statusColor(
+            class="w-3 shrink-0 text-center font-bold text-xs {statusColor(
               entry.status,
             )}"
           >

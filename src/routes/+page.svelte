@@ -417,7 +417,7 @@
     <main class="relative flex min-w-0 flex-1 flex-col" use:toastArea>
       {#if !app.ready}
         <div class="flex h-full items-center justify-center">
-          <p class="font-mono text-xs text-muted-foreground/60">{t("common.loading")}</p>
+          <p class="text-xs text-muted-foreground/60">{t("common.loading")}</p>
         </div>
       {:else}
         <div

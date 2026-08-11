@@ -16,7 +16,7 @@ function reader() {
 export function xtermFontFamily(): string {
   return reader()(
     "--font-mono",
-    '"JetBrains Mono", "SF Mono", "Cascadia Code", Consolas, "Liberation Mono", Menlo, monospace',
+    '"Geist Mono", "JetBrains Mono", "SF Mono", "Cascadia Code", Consolas, "Liberation Mono", Menlo, monospace',
   );
 }
 

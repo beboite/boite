@@ -48,7 +48,7 @@
     <h2 class="section-label truncate">{title}</h2>
     {#if badge !== null && badge !== ""}
       <span
-        class="shrink-0 rounded-full bg-[var(--color-surface-2)] px-1.5 py-px font-mono text-2xs text-muted-foreground"
+        class="shrink-0 rounded-full bg-[var(--color-surface-2)] px-1.5 py-px tabular-nums text-2xs font-medium text-muted-foreground"
       >
         {badge}
       </span>

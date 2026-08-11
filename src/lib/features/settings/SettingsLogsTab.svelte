@@ -275,7 +275,7 @@
         title={t("logs.copyPath")}
       >
         <FolderOpen class="size-3" />
-        <span class="truncate font-mono">{logPath}</span>
+        <span class="truncate">{logPath}</span>
       </button>
     {/if}
   </div>

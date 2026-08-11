@@ -351,7 +351,7 @@
            them look like the same one. -->
       <div class="px-3.5 pb-4 text-center" role="status">
         <p class="text-sm text-muted-foreground">{t("worktree.unreadable")}</p>
-        <p class="mt-1 break-words font-mono text-xs leading-snug text-muted-foreground/70">
+        <p class="mt-1 break-words text-xs leading-snug text-muted-foreground/70">
           {failed}
         </p>
       </div>
@@ -402,11 +402,11 @@
               </div>
 
               <div class="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
-                <span class="font-mono text-muted-foreground">
+                <span class="text-muted-foreground">
                   {w.branch ?? t("worktree.detachedAt", { head: w.head.slice(0, 7) })}
                 </span>
                 {#if size > 0}
-                  <span class="font-mono text-muted-foreground/70" in:fade={{ duration: DUR.fast }}>
+                  <span class="tabular-nums text-muted-foreground/70" in:fade={{ duration: DUR.fast }}>
                     {formatBytes(size)}
                   </span>
                 {/if}

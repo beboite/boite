@@ -74,7 +74,7 @@
       <dt class="text-muted-foreground">
         {server ? t("about.versionHere") : t("about.version")}
       </dt>
-      <dd class="justify-self-end font-mono text-foreground">v{__APP_VERSION__}</dd>
+      <dd class="justify-self-end tabular-nums text-foreground">v{__APP_VERSION__}</dd>
 
       <dt class="text-muted-foreground">{t("about.platform")}</dt>
       <dd class="justify-self-end text-foreground/90">
@@ -83,13 +83,13 @@
 
       {#if server}
         <dt class="text-muted-foreground">{t("about.versionBoite")}</dt>
-        <dd class="justify-self-end font-mono text-foreground">{boiteVersion}</dd>
+        <dd class="justify-self-end tabular-nums text-foreground">{boiteVersion}</dd>
 
         <dt class="text-muted-foreground">{t("about.boitePlatform")}</dt>
         <dd class="justify-self-end text-foreground/90">{boiteOs}</dd>
 
         <dt class="text-muted-foreground">{t("about.boiteHost")}</dt>
-        <dd class="min-w-0 justify-self-end truncate font-mono text-foreground/90">
+        <dd class="min-w-0 justify-self-end truncate text-foreground/90">
           {boiteHost}
         </dd>
       {/if}
@@ -105,7 +105,7 @@
              link navigates the app window itself, and there is no way back. -->
         <button
           type="button"
-          class="truncate font-mono text-foreground/90 underline decoration-border underline-offset-2 transition hover:decoration-foreground"
+          class="truncate text-foreground/90 underline decoration-border underline-offset-2 transition hover:decoration-foreground"
           onclick={() => void openUrl(REPO_URL)}
         >
           beboite/boite

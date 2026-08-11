@@ -227,11 +227,11 @@
          one short number next to eight rows left a third of the card empty and
          put the headline figure at the bottom of the hole. -->
     <div class="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
-      <p class="font-mono text-2xl leading-none text-foreground">{fmt(total)}</p>
+      <p class="font-semibold tabular-nums text-2xl leading-none text-foreground">{fmt(total)}</p>
       <p class="text-xs text-muted-foreground/70">{t("project.tokensRange")}</p>
       <span class="flex-1"></span>
       {#if report.sessions > 0}
-        <p class="font-mono text-xs text-muted-foreground/70">
+        <p class="tabular-nums text-xs text-muted-foreground/70">
           {t("project.tokensSessions", { count: report.sessions })}
         </p>
       {/if}
@@ -268,7 +268,7 @@
               style:width="{Math.max(2, Math.round((model.total / total) * 100))}%"
             ></span>
           </span>
-          <span class="w-11 shrink-0 text-right font-mono text-xs text-muted-foreground">
+          <span class="w-11 shrink-0 text-right tabular-nums text-xs text-muted-foreground">
             {fmt(model.total)}
           </span>
         </li>
