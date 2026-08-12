@@ -1302,8 +1302,9 @@ import { projectDisplayName } from "$lib/shared/project-label";
                      with the actions as siblings painting over it. -->
                 <div
                   class="thread-card relative flex cursor-pointer items-center gap-2 rounded-sm px-1.5 py-1 transition {isActive
-                    ? 'bg-accent text-foreground'
+                    ? 'text-foreground'
                     : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground'}"
+                  class:selected={isActive}
                   class:just-finished={fresh && !glowDesign}
                   class:mcp-touch={mcpPulse.has(thread.id)}
                   class:glow={glowDesign}
@@ -1654,6 +1655,33 @@ import { projectDisplayName } from "$lib/shared/project-label";
   .project-block.drop-target {
     outline: 2px dashed var(--color-foreground);
     outline-offset: 2px;
+  }
+
+  /* The thread that is open. A white line around the card and the bloom that
+     goes with it, where there used to be a filled background — under the glow
+     design the card's area is already the state's, and "this thread is open"
+     written on the background was the same property saying two things at once.
+     A line is free of that: no state draws one in white.
+
+     Its own layer for two reasons. The card's own box-shadow is animated by
+     `mcp-touch` and `just-finished`, which would blow the selection away for a
+     second and a half; and ::before belongs to the state halo, which sets it
+     per state. That leaves ::after, which paints over the label rather than
+     under it — fine for a one-pixel perimeter, and it is also what keeps the
+     white line above the tone line the two rules both draw at `inset 0 0 0 1px`.
+
+     -4px on the spread, tighter than the halo's -2px: the classic design stacks
+     rows a single pixel apart, and a white bloom at the halo's reach would land
+     on the two neighbours hard enough to read as three selected rows. */
+  .thread-card.selected::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    box-shadow:
+      inset 0 0 0 1px color-mix(in srgb, var(--color-foreground) 85%, transparent),
+      0 0 12px -4px color-mix(in srgb, var(--color-foreground) 60%, transparent);
   }
 
   /* A thread that has just finished. Green drains out of the card over six
