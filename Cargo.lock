@@ -641,7 +641,7 @@ version = "1.0.5"
 dependencies = [
  "ed25519-compact",
  "hex",
- "hmac 0.12.1",
+ "hmac 0.13.0",
  "sha2 0.10.9",
 ]
 

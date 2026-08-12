@@ -14,5 +14,5 @@ doctest = false
 # have brought curve25519-dalek and its build machinery for the same 64 bytes.
 ed25519-compact = "2"
 sha2 = "0.10"
-hmac = "0.12"
+hmac = "0.13"
 hex = "0.4"
