@@ -13,6 +13,6 @@ doctest = false
 # per agent terminal and had two crates in it before this; ed25519-dalek would
 # have brought curve25519-dalek and its build machinery for the same 64 bytes.
 ed25519-compact = "2"
-sha2 = "0.10"
+sha2 = "0.11"
 hmac = "0.12"
 hex = "0.4"

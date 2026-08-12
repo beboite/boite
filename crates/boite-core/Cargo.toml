@@ -24,7 +24,7 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 url = "2"
 # SHA-256 for the event journal's hash chain, and SHA-384 in one test, which is
 # the digest sqlx keys its migration ledger on.
-sha2 = "0.10"
+sha2 = "0.11"
 
 # kill(pid, 0) to tell a live claude session from a registry entry left behind
 # by one that died. Windows uses OpenProcess from windows-sys below.
