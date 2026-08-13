@@ -416,6 +416,8 @@ pub fn run() {
             commands::records::records_thread_create,
             commands::records::records_thread_update,
             commands::records::records_thread_started,
+            commands::records::records_thread_age,
+            commands::records::records_thread_pin_order,
             commands::records::records_thread_delete,
             commands::records::records_todo_list,
             commands::records::records_todo_save,
