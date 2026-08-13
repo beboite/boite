@@ -240,7 +240,7 @@
     <span class="truncate">{entry.name}</span>
     {#if status}
       <span
-        class="ml-auto pl-1 font-mono text-2xs leading-none tabular-nums"
+        class="ml-auto pl-1 text-2xs font-semibold leading-none tabular-nums"
         style:color={statusColor(status)}
         aria-label={statusAria(status)}
       >

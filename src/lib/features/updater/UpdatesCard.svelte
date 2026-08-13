@@ -73,7 +73,7 @@
   <div class="rounded-lg border border-border bg-[var(--color-surface-2)] px-3 py-2">
     <div class="flex items-baseline justify-between gap-3">
       <span class="text-xs text-foreground">{t("updater.installed")}</span>
-      <span class="font-mono text-xs text-muted-foreground">v{__APP_VERSION__}</span>
+      <span class="tabular-nums text-xs text-muted-foreground">v{__APP_VERSION__}</span>
     </div>
 
     <p class="mt-1 text-sm leading-snug text-muted-foreground/80">
@@ -133,7 +133,7 @@
 
     {#if status.kind === "ready" && status.notes}
       <pre
-        class="mt-2 max-h-32 overflow-y-auto whitespace-pre-wrap rounded-md bg-[var(--color-surface-3)] p-2 font-mono text-xs leading-relaxed text-muted-foreground">{status.notes}</pre>
+        class="mt-2 max-h-32 overflow-y-auto whitespace-pre-wrap rounded-md bg-[var(--color-surface-3)] p-2 text-xs leading-relaxed text-muted-foreground">{status.notes}</pre>
     {/if}
   </div>
 </SettingsCard>

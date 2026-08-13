@@ -415,7 +415,7 @@
             >
               <span class="min-w-0 truncate font-medium">{nameOf(m)}</span>
               {#if m.contextWindow}
-                <span class="shrink-0 font-mono text-2xs text-muted-foreground/70">
+                <span class="shrink-0 tabular-nums text-2xs font-medium text-muted-foreground/70">
                   {Math.round(m.contextWindow / 1000)}K
                 </span>
               {/if}
@@ -488,7 +488,7 @@
                 <Check class="size-2.5 text-[var(--color-surface-2)]" strokeWidth={3} />
               {/if}
             </span>
-            <span class="min-w-0 truncate font-mono text-xs">{stem}</span>
+            <span class="min-w-0 truncate text-xs">{stem}</span>
           </button>
         {/each}
       {/if}

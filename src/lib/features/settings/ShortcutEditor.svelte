@@ -513,7 +513,7 @@
                 </span>
               </span>
             {:else}
-              <span class="mt-0.5 truncate font-mono text-2xs text-muted-foreground/70">
+              <span class="mt-0.5 truncate text-2xs text-muted-foreground/70">
                 {preset.command}
               </span>
             {/if}

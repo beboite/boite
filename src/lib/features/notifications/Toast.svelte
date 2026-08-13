@@ -56,8 +56,7 @@
   <span class="dot" aria-hidden="true"></span>
   <div class="lines">
     <span class="message">{message}</span>
-    <!-- Paths, branch names, git output: monospace, because that is what it is
-         and because it keeps the specifics from competing with the sentence. -->
+    <!-- Secondary detail: smaller and muted to keep from competing with the main message. -->
     {#if detail}
       <span class="detail">{detail}</span>
     {/if}
@@ -141,7 +140,6 @@
     overflow-wrap: anywhere;
   }
   .detail {
-    font-family: var(--font-mono);
     font-size: var(--text-2xs);
     line-height: 1.5;
     color: var(--color-muted-foreground);
