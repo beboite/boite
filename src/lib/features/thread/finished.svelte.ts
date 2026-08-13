@@ -2,6 +2,7 @@ import type { ThreadStatus } from "$lib/types";
 import { isFinished } from "$lib/domain/thread-status";
 import { TransientMark } from "$lib/shared/utils/transientMark.svelte";
 import { noteThreadActivity, resetThreadActivity } from "./activity.svelte";
+import { noteUnread, resetUnread } from "./unread.svelte";
 
 // Long enough that a glance a few seconds after the agent stopped still catches
 // it, short enough that a row is never still claiming to be fresh news by the
@@ -34,6 +35,14 @@ export function noteStatusChange(
   // moment it started as much as "idle for 2 h" needs the moment it stopped,
   // and this is the one call both the local and the remote path make.
   noteThreadActivity(threadId);
+  // Two transitions are news, and they are the two the user would want to be
+  // told about from another window: a turn that ended, and a dialog that went
+  // up and is holding the agent still. `noteUnread` drops it on the floor if
+  // the thread is on screen, so this stays a statement about the transition
+  // rather than about who was looking.
+  if (next === "waiting" || (!isFinished(previous) && isFinished(next))) {
+    noteUnread(threadId);
+  }
   if (isFinished(previous) || !isFinished(next)) return;
   marks.mark(threadId);
 }
@@ -52,4 +61,5 @@ export function clearFinished(threadId: string) {
 export function resetFinished() {
   marks.reset();
   resetThreadActivity();
+  resetUnread();
 }

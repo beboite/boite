@@ -29,6 +29,7 @@ import { projectDisplayName } from "$lib/shared/project-label";
     clearFinished,
     justFinished,
   } from "$lib/features/thread/finished.svelte";
+  import { isThreadUnread } from "$lib/features/thread/unread.svelte";
   import { mcpPulse } from "$lib/features/thread/agentActivity.svelte";
   import { waitingReasonFor } from "$lib/features/thread/statusEngine";
   import { threadIconColor } from "$lib/features/fastpick/threadAccent";
@@ -1284,6 +1285,7 @@ import { projectDisplayName } from "$lib/shared/project-label";
                 keepAwake,
               })}
               {@const fresh = justFinished(thread.id)}
+              {@const unseen = isThreadUnread(thread.id)}
               <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
               <li
                 class="thread-row group/thread"
@@ -1399,6 +1401,24 @@ import { projectDisplayName } from "$lib/shared/project-label";
                       aria-hidden="true"
                     >
                       {thread.title ?? thread.label}
+                    </span>
+                  {/if}
+                  <!-- What happened while the user was elsewhere: a turn that
+                       ended, or a dialog that went up and is holding the agent
+                       still. The row's own dot says what the thread is doing
+                       now, and that is a different question. A thread that
+                       finished twenty minutes ago has looked exactly like one
+                       that finished twenty seconds ago ever since the six-second
+                       flash ran out.
+                       Hidden on hover, because the close button lands here and
+                       two marks in one slot is one too many. Inert to the
+                       cursor so the row underneath still takes the click. -->
+                  {#if unseen}
+                    <span
+                      class="pointer-events-none relative size-1.5 shrink-0 rounded-full bg-foreground/80 transition-opacity group-hover/thread:opacity-0"
+                      title={t("sidebar.threadUnread")}
+                    >
+                      <span class="sr-only">{t("sidebar.threadUnread")}</span>
                     </span>
                   {/if}
                   <!-- The logo used to live here, opposite the status dot, and

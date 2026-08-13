@@ -24,6 +24,7 @@ import {
   pruneRenamed,
 } from "$lib/features/thread/renamed";
 import { noteStatusChange, resetFinished } from "$lib/features/thread/finished.svelte";
+import { forgetUnread } from "$lib/features/thread/unread.svelte";
 import {
   forgetThreadActivity,
   threadActivitySince,
@@ -551,6 +552,7 @@ export class AppState {
     }
     clearRenamed(id);
     forgetThreadActivity(id);
+    forgetUnread(id);
     try {
       await dbDeleteThread(id, removed?.origin);
     } catch (err) {

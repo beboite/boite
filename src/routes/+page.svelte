@@ -26,6 +26,10 @@
   import { panePresence } from "$lib/features/panes/open";
   import { logger } from "$lib/shared/services/logger.svelte";
   import { statusEngine } from "$lib/features/thread/statusEngine";
+  import {
+    markThreadRead,
+    setUnreadWatcher,
+  } from "$lib/features/thread/unread.svelte";
   import PaneShell from "$lib/features/panes/PaneShell.svelte";
   import SidePanel from "$lib/features/panes/SidePanel.svelte";
   import ProjectInfoBox from "$lib/features/infobox/ProjectInfoBox.svelte";
@@ -237,6 +241,50 @@
     for (const leafId of paneStore.visibleThreads(activeGroupId)) {
       if (app.hasThread(leafId)) markActivated(leafId);
     }
+  });
+
+  /**
+   * Which threads the user can actually see, for the unread marks.
+   *
+   * Every pane of the group on screen counts, not only the focused one: the
+   * whole point of a split is watching four agents at once, and a dot on a
+   * terminal the user is looking straight at is noise. A hidden window sees
+   * nothing, whatever its layout says.
+   */
+  function threadOnScreen(threadId: string): boolean {
+    if (!terminalActive) return false;
+    if (typeof document !== "undefined" && document.hidden) return false;
+    return paneStore.visibleThreads(activeGroupId).has(threadId);
+  }
+
+  $effect(() => setUnreadWatcher(threadOnScreen));
+
+  // Reading is looking, so the marks clear as panes come into view rather than
+  // on the click that brought them there: Ctrl+Tab, Ctrl+1..9, a split and the
+  // sidebar all end up here.
+  $effect(() => {
+    if (!terminalActive) return;
+    for (const leafId of paneStore.visibleThreads(activeGroupId)) {
+      markThreadRead(leafId);
+    }
+  });
+
+  // Coming back to the window is looking too. The effect above cannot notice
+  // it: nothing in the layout moved while the app was in the background, which
+  // is exactly when the marks were laid.
+  onMount(() => {
+    const catchUp = () => {
+      if (document.hidden || !terminalActive) return;
+      for (const leafId of paneStore.visibleThreads(activeGroupId)) {
+        markThreadRead(leafId);
+      }
+    };
+    window.addEventListener("focus", catchUp);
+    document.addEventListener("visibilitychange", catchUp);
+    return () => {
+      window.removeEventListener("focus", catchUp);
+      document.removeEventListener("visibilitychange", catchUp);
+    };
   });
 
   // Mounting a Terminal is what spawns its PTY, so the post-update resume asks
