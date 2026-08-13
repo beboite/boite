@@ -23,6 +23,7 @@
   import Check from "@lucide/svelte/icons/check";
   import Undo2 from "@lucide/svelte/icons/undo-2";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import Plus from "@lucide/svelte/icons/plus";
   import Bot from "@lucide/svelte/icons/bot";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
 
@@ -33,10 +34,9 @@
   // The two column verbs, passed only by SidePanel: see PanelDockActions.
   type Props = {
     projectId?: string | null;
-    onDetach?: () => void;
     onClose?: () => void;
   };
-  let { projectId: paneProjectId = null, onDetach, onClose }: Props = $props();
+  let { projectId: paneProjectId = null, onClose }: Props = $props();
 
   const projectId = $derived(paneProjectId ?? app.currentProjectId);
   const project = $derived(
@@ -426,8 +426,8 @@
     >
       <Eraser class="size-3.5" />
     </button>
-    {#if onDetach && onClose}
-      <PanelDockActions {onDetach} {onClose} />
+    {#if onClose}
+      <PanelDockActions {onClose} />
     {/if}
   </header>
 
@@ -747,6 +747,23 @@
       {/if}
     </div>
 
+    <!-- Right under the list it appends to, not below the agent section: the
+         input parked at the very bottom of the panel read as chrome, and
+         "where do I add one" was the panel's most asked question. -->
+    <form
+      class="flex shrink-0 items-center gap-1.5 border-t border-border p-2"
+      onsubmit={submitDraft}
+    >
+      <Plus class="size-3.5 shrink-0 text-muted-foreground/70" />
+      <input
+        type="text"
+        bind:value={draft}
+        placeholder={t("todo.newItem")}
+        aria-label={t("todo.newItem")}
+        class="min-w-0 flex-1 rounded-md border border-border bg-[var(--color-surface-2)] px-2 py-1 text-sm text-foreground outline-none transition placeholder:text-muted-foreground/60 focus:border-foreground/30"
+      />
+    </form>
+
     <section class="shrink-0 border-t border-border">
       <button
         type="button"
@@ -779,15 +796,6 @@
         </div>
       {/if}
     </section>
-
-    <form class="shrink-0 border-t border-border p-2" onsubmit={submitDraft}>
-      <input
-        type="text"
-        bind:value={draft}
-        placeholder={t("todo.newItem")}
-        class="w-full rounded-md border border-border bg-[var(--color-surface-2)] px-2 py-1 text-sm text-foreground outline-none transition placeholder:text-muted-foreground/60 focus:border-foreground/30"
-      />
-    </form>
   {/if}
 </div>
 

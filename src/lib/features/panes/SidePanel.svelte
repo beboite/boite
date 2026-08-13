@@ -2,7 +2,6 @@
   import { app } from "$lib/app/store.svelte";
   import { settings, clampRightPanelWidth } from "$lib/features/settings/store.svelte";
   import { resizeHandle } from "$lib/shared/actions/resizeHandle";
-  import { openPane } from "./open";
   import GitPanel from "$lib/features/git/GitPanel.svelte";
   import ExplorerPanel from "$lib/features/explorer/ExplorerPanel.svelte";
   import TodoPanel from "$lib/features/todo/TodoPanel.svelte";
@@ -25,13 +24,10 @@
    * This column draws no chrome of its own. It used to carry a header naming
    * the panel and holding the two verbs, above the panel's own header naming
    * the project and holding its actions: two bars, eight pixels apart, saying
-   * different halves of one thing. The panel keeps its header — it is the one
-   * that survives being detached — and is handed the two verbs to put at the end
+   * different halves of one thing. The panel keeps its header and is handed its
+   * close action to put at the end
    * of it.
    *
-   * The pane is not gone, it is a deliberate act now: detaching hands the panel
-   * to the pane tree, which is the one thing this column cannot do — sit beside
-   * one particular terminal rather than beside all of them.
    */
 
   let panelEl: HTMLElement | null = $state(null);
@@ -58,14 +54,6 @@
     settings.setRightPanel(app.currentProjectId, null);
   }
 
-  // Detaching closes the column: the same panel docked and floating at once is
-  // two views of one thing fighting over which is the real one.
-  function detach() {
-    const kind = current;
-    if (!kind) return;
-    close();
-    openPane({ kind });
-  }
 </script>
 
 <svelte:window bind:innerWidth={viewportWidth} />
@@ -78,11 +66,11 @@
 >
   <div class="min-h-0 min-w-0 flex-1">
     {#if current === "git"}
-      <GitPanel onDetach={detach} onClose={close} />
+      <GitPanel onClose={close} />
     {:else if current === "explorer"}
-      <ExplorerPanel onDetach={detach} onClose={close} />
+      <ExplorerPanel onClose={close} />
     {:else if current === "todo"}
-      <TodoPanel onDetach={detach} onClose={close} />
+      <TodoPanel onClose={close} />
     {/if}
   </div>
 

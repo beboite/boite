@@ -24,7 +24,10 @@ import {
   pruneRenamed,
 } from "$lib/features/thread/renamed";
 import { noteStatusChange, resetFinished } from "$lib/features/thread/finished.svelte";
-import { forgetThreadActivity } from "$lib/features/thread/activity.svelte";
+import {
+  forgetThreadActivity,
+  threadActivitySince,
+} from "$lib/features/thread/activity.svelte";
 import { SCRATCH_PROJECT_ID } from "$lib/domain/project";
 import { notifications } from "$lib/features/notifications/store.svelte";
 import { backend, workspace } from "$lib/backend";
@@ -137,10 +140,46 @@ export class AppState {
     return grouped;
   });
 
+  /**
+   * What the smart-sort experiment asks for, or null while the sidebar is the
+   * user's own order — which is both the toggle being off and the toggle being
+   * on with `manual` still selected, so arming the experiment moves nothing.
+   */
+  #smartSort(): { by: "activity" | "alphabetical"; dir: 1 | -1 } | null {
+    if (!settings.state.experimentSmartSort) return null;
+    const by = settings.state.smartSortBy;
+    if (by === "manual") return null;
+    return { by, dir: settings.state.smartSortDirection === "asc" ? 1 : -1 };
+  }
+
+  /**
+   * When this thread last changed what it was doing, for ranking.
+   *
+   * The activity registry is in-memory and knows nothing after a restart, so a
+   * thread it has not seen ranks by its row's age rather than as never.
+   */
+  #threadActivity(thread: Thread): number {
+    return threadActivitySince(thread.id) ?? thread.createdAt;
+  }
+
   #threadsByProjectSortedIndex: Map<string, Thread[]> = $derived.by(() => {
     const orderByProject = settings.state.threadOrderByProject ?? {};
+    const smart = this.#smartSort();
     const sorted = new Map<string, Thread[]>();
     for (const [projectId, list] of this.#threadsByProject) {
+      // Alphabetical is about project names and says nothing about threads, so
+      // only the activity order replaces the dragged one here.
+      if (smart?.by === "activity") {
+        sorted.set(
+          projectId,
+          [...list].sort(
+            (a, b) =>
+              (this.#threadActivity(a) - this.#threadActivity(b)) * smart.dir ||
+              a.createdAt - b.createdAt,
+          ),
+        );
+        continue;
+      }
       const order = orderByProject[projectId] ?? [];
       const idx = new Map(order.map((id, i) => [id, i]));
       sorted.set(
@@ -257,6 +296,14 @@ export class AppState {
   sortedProjects: Project[] = $derived.by(() => {
     const order = settings.state.projectOrder ?? [];
     const idx = new Map(order.map((id, i) => [id, i]));
+    const smart = this.#smartSort();
+    // A project ranks by its most recently active thread. Zero for a project
+    // with none, which parks the empty ones together at the quiet end.
+    const activityOf = (p: Project): number => {
+      const threads = this.#threadsByProject.get(p.id);
+      if (!threads || threads.length === 0) return 0;
+      return Math.max(...threads.map((t) => this.#threadActivity(t)));
+    };
     return this.projects
       .filter((p) => !p.archived && !this.#hiddenRemote(p))
       // Scratch stays listed even with nothing in it. It was hidden while empty,
@@ -265,12 +312,20 @@ export class AppState {
       // the card removed the only way to start a thread with no project at all,
       // and the door was shut from the outside.
       .sort((a, b) => {
-        // Scratch sits last whatever the manual order says. It is where work
-        // starts, not one of the things being worked on, and drifting into the
-        // middle of the real projects is the one place it does not belong.
+        // Scratch sits last whatever any order says. It is where work starts,
+        // not one of the things being worked on, and drifting into the middle
+        // of the real projects is the one place it does not belong.
         const as = a.id === SCRATCH_PROJECT_ID ? 1 : 0;
         const bs = b.id === SCRATCH_PROJECT_ID ? 1 : 0;
         if (as !== bs) return as - bs;
+        if (smart) {
+          const cmp =
+            smart.by === "activity"
+              ? (activityOf(a) - activityOf(b)) * smart.dir
+              : a.name.localeCompare(b.name) * smart.dir;
+          if (cmp !== 0) return cmp;
+          return a.name.localeCompare(b.name);
+        }
         const ai = idx.get(a.id) ?? Number.MAX_SAFE_INTEGER;
         const bi = idx.get(b.id) ?? Number.MAX_SAFE_INTEGER;
         if (ai !== bi) return ai - bi;

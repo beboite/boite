@@ -11,6 +11,8 @@ import type {
   Settings,
   Shortcut,
   SidebarDesign,
+  SmartSortBy,
+  SortDirection,
 } from "$lib/types";
 import {
   clampRightPanelWidth,
@@ -165,12 +167,24 @@ const DEFAULTS: Settings = {
   colorByModel: true,
   sidebarDesign: "classic",
   sidebarHarnessLogos: true,
+  experimentInfoBox: false,
+  experimentSmartSort: false,
+  smartSortBy: "manual",
+  smartSortDirection: "desc",
 };
 
 // First-run guess: touch-primary, narrow screens (a phone TWA/PWA) default to
 // the mobile layout. The toggle in Appearance overrides it permanently after.
 function isMotionMode(value: unknown): value is Settings["motionMode"] {
   return value === "system" || value === "on" || value === "off";
+}
+
+function isSmartSortBy(value: unknown): value is SmartSortBy {
+  return value === "manual" || value === "activity" || value === "alphabetical";
+}
+
+function isSortDirection(value: unknown): value is SortDirection {
+  return value === "asc" || value === "desc";
 }
 
 /**
@@ -271,6 +285,10 @@ const DEVICE_FIELDS = [
   "colorByModel",
   "sidebarDesign",
   "sidebarHarnessLogos",
+  "experimentInfoBox",
+  "experimentSmartSort",
+  "smartSortBy",
+  "smartSortDirection",
   "confirmCloseThread",
 ] as const;
 
@@ -444,6 +462,20 @@ class SettingsStore {
           typeof stored.sidebarHarnessLogos === "boolean"
             ? stored.sidebarHarnessLogos
             : DEFAULTS.sidebarHarnessLogos,
+        experimentInfoBox:
+          typeof stored.experimentInfoBox === "boolean"
+            ? stored.experimentInfoBox
+            : DEFAULTS.experimentInfoBox,
+        experimentSmartSort:
+          typeof stored.experimentSmartSort === "boolean"
+            ? stored.experimentSmartSort
+            : DEFAULTS.experimentSmartSort,
+        smartSortBy: isSmartSortBy(stored.smartSortBy)
+          ? stored.smartSortBy
+          : DEFAULTS.smartSortBy,
+        smartSortDirection: isSortDirection(stored.smartSortDirection)
+          ? stored.smartSortDirection
+          : DEFAULTS.smartSortDirection,
         // A settings row written before the wizard existed carries no flag.
         // Its owner already has a shortcut list, and finishing the wizard
         // replaces that list wholesale, so an existing install counts as
@@ -710,6 +742,30 @@ class SettingsStore {
   setSidebarHarnessLogos(value: boolean) {
     if (this.state.sidebarHarnessLogos === value) return;
     this.state.sidebarHarnessLogos = value;
+    this.persistDeviceNow();
+  }
+
+  setExperimentInfoBox(value: boolean) {
+    if (this.state.experimentInfoBox === value) return;
+    this.state.experimentInfoBox = value;
+    this.persistDeviceNow();
+  }
+
+  setExperimentSmartSort(value: boolean) {
+    if (this.state.experimentSmartSort === value) return;
+    this.state.experimentSmartSort = value;
+    this.persistDeviceNow();
+  }
+
+  setSmartSortBy(value: SmartSortBy) {
+    if (this.state.smartSortBy === value) return;
+    this.state.smartSortBy = value;
+    this.persistDeviceNow();
+  }
+
+  setSmartSortDirection(value: SortDirection) {
+    if (this.state.smartSortDirection === value) return;
+    this.state.smartSortDirection = value;
     this.persistDeviceNow();
   }
 

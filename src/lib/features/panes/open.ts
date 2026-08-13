@@ -118,7 +118,7 @@ export function panePresence(kind: PaneKind): string | null {
 }
 
 /**
- * Close a detached panel, wherever in the tree it ended up.
+ * Close an agent-opened panel, wherever in the tree it ended up.
  *
  * The docked column is the normal home for these three, so this is only about
  * the copy someone detached: the titlebar button reads the column, and a panel
