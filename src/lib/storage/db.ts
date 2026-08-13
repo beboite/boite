@@ -1,6 +1,12 @@
 import { backend, backendFor } from "$lib/backend";
 import { logger } from "$lib/shared/services/logger.svelte";
-import type { Project, Settings, Thread, WorkspaceOrigin } from "$lib/types";
+import type {
+  Project,
+  Settings,
+  Thread,
+  ThreadStatus,
+  WorkspaceOrigin,
+} from "$lib/types";
 import { redactArgs } from "$lib/shared/utils/redact";
 
 // The origin tag is a client-side routing concern: strip it before a row hits
@@ -65,6 +71,24 @@ export function updateThreadTitle(
 
 export function markThreadStarted(id: string, origin?: WorkspaceOrigin): Promise<void> {
   return backendFor(origin).db.markThreadStarted(id);
+}
+
+export function setThreadAgeing(
+  id: string,
+  status: ThreadStatus,
+  patch: { settled?: boolean; snoozeUntil?: number | null },
+  origin?: WorkspaceOrigin,
+): Promise<void> {
+  return backendFor(origin).db.setThreadAgeing(id, status, patch);
+}
+
+// The order is one list per boite, so it goes to the backend that owns the
+// threads in it rather than to whichever one a single thread came from.
+export function setPinnedOrder(
+  ids: string[],
+  origin?: WorkspaceOrigin,
+): Promise<void> {
+  return backendFor(origin).db.setPinnedOrder(ids);
 }
 
 export function deleteThread(id: string, origin?: WorkspaceOrigin): Promise<void> {

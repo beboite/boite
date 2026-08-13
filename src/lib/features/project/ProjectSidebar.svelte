@@ -58,6 +58,14 @@ import { projectDisplayName } from "$lib/shared/project-label";
   // archive button drawn with one read as a Boite button rather than a place
   // projects are put away. What is archived here is projects, which are folders.
   import FolderArchive from "@lucide/svelte/icons/folder-archive";
+  import Inbox from "@lucide/svelte/icons/inbox";
+  import PinnedThreads from "./PinnedThreads.svelte";
+  import {
+    canFileAway,
+    isFiled,
+    isPinned,
+    isSnoozed,
+  } from "$lib/domain/thread-ageing";
   import FolderUp from "@lucide/svelte/icons/folder-up";
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
   import ShortcutBar from "$lib/features/shortcut/ShortcutBar.svelte";
@@ -77,6 +85,9 @@ import { projectDisplayName } from "$lib/shared/project-label";
   }
 
   let showArchived = $state(false);
+  // Session-scoped on purpose: revealing what was filed away is a look, not a
+  // preference, and one that persisted would quietly undo the filing.
+  let showFiled = $state(false);
   let remotePicker = $state(false);
 
   /**
@@ -668,6 +679,71 @@ import { projectDisplayName } from "$lib/shared/project-label";
     open();
   }
 
+  const HOUR_MS = 3_600_000;
+
+  /**
+   * Pin, settle and snooze, and every one of them with its way back out.
+   *
+   * The put-away half is disabled rather than hidden while the thread is
+   * working or has a dialog up, with the reason in the tooltip: the boite
+   * refuses it anyway, and an action that vanishes teaches nobody why.
+   */
+  function ageingMenuItems(thread: Thread): ContextMenuItem[] {
+    const now = Date.now();
+    const filed = isFiled(thread, now);
+    const busy = !canFileAway(displayThreadStatus(thread));
+    const items: ContextMenuItem[] = [];
+
+    items.push({
+      label: isPinned(thread) ? t("sidebar.unpinThread") : t("sidebar.pinThread"),
+      action: () => app.toggleThreadPinned(thread.id),
+    });
+    if (isPinned(thread)) {
+      const order = app.pinnedThreads;
+      const at = order.findIndex((t) => t.id === thread.id);
+      items.push({
+        label: t("sidebar.movePinUp"),
+        action: () => void app.movePinnedThread(thread.id, -1),
+        disabled: at <= 0,
+      });
+      items.push({
+        label: t("sidebar.movePinDown"),
+        action: () => void app.movePinnedThread(thread.id, 1),
+        disabled: at < 0 || at >= order.length - 1,
+      });
+    }
+
+    if (filed) {
+      items.push({
+        label: isSnoozed(thread, now)
+          ? t("sidebar.unsnoozeThread")
+          : t("sidebar.unsettleThread"),
+        action: () => void app.fileThread(thread.id, { settled: false, snoozeUntil: null }),
+      });
+      return items;
+    }
+
+    items.push({
+      label: t("sidebar.settleThread"),
+      action: () => void app.fileThread(thread.id, { settled: true }),
+      disabled: busy,
+      title: busy ? t("sidebar.busyCannotFile") : undefined,
+    });
+    for (const [key, ms] of [
+      ["sidebar.snoozeHour", HOUR_MS],
+      ["sidebar.snoozeUntilTomorrow", 24 * HOUR_MS],
+      ["sidebar.snoozeWeek", 7 * 24 * HOUR_MS],
+    ] as const) {
+      items.push({
+        label: t(key),
+        action: () => void app.fileThread(thread.id, { snoozeUntil: Date.now() + ms }),
+        disabled: busy,
+        title: busy ? t("sidebar.busyCannotFile") : undefined,
+      });
+    }
+    return items;
+  }
+
   function openThreadMenuAt(thread: Thread, x: number, y: number) {
     const group = paneStore.groupOf(thread.id);
     const inMultiPane = !!group && countLeaves(group.root) > 1;
@@ -677,6 +753,8 @@ import { projectDisplayName } from "$lib/shared/project-label";
       action: () =>
         startRename("thread", thread.id, thread.title ?? thread.label),
     });
+    items.push({ separator: true });
+    items.push(...ageingMenuItems(thread));
     items.push({ separator: true });
     if (inMultiPane) {
       items.push({
@@ -948,12 +1026,42 @@ import { projectDisplayName } from "$lib/shared/project-label";
     showArchived ? app.archivedProjects : app.sortedProjects,
   );
 
+  /**
+   * What each project draws, once the pinned and the filed have been taken out.
+   *
+   * Pinned rows move to their own section rather than appearing twice, and a
+   * filed one is out of the way until `showFiled` asks for it. `filedNow` is
+   * read once per rebuild instead of per row, so a list cannot disagree with
+   * itself about whether a snooze has just ended.
+   */
   const threadsByProject = $derived.by(() => {
+    const filedNow = Date.now();
     const map = new Map<string, Thread[]>();
     for (const p of visibleProjects) {
-      map.set(p.id, app.threadsByProjectSorted(p.id));
+      const all = app.threadsByProjectSorted(p.id);
+      map.set(
+        p.id,
+        all.filter(
+          (thread) =>
+            !isPinned(thread) && (showFiled || !isFiled(thread, filedNow)),
+        ),
+      );
     }
     return map;
+  });
+
+  /**
+   * How many rows the filter is currently hiding, for the toggle that reveals
+   * them. Pinned ones are not counted: they are on screen, just higher up.
+   */
+  const filedCount = $derived.by(() => {
+    if (showFiled) return 0;
+    const now = Date.now();
+    let n = 0;
+    for (const thread of app.threads) {
+      if (!isPinned(thread) && isFiled(thread, now)) n += 1;
+    }
+    return n;
   });
 
   const projectSourceIdx = $derived(
@@ -1018,6 +1126,23 @@ import { projectDisplayName } from "$lib/shared/project-label";
       </span>
     {/if}
     <div class="flex items-center gap-0.5">
+      <!-- Only offered when something is actually filed, and it stays offered
+           while it is on so the way back is where the way in was. -->
+      {#if !showArchived && (filedCount > 0 || showFiled)}
+        <button
+          type="button"
+          class="rounded-md p-1 text-muted-foreground transition hover:bg-accent hover:text-foreground {showFiled
+            ? 'bg-accent text-foreground'
+            : ''}"
+          onclick={() => (showFiled = !showFiled)}
+          aria-label={showFiled ? t("sidebar.hideFiled") : t("sidebar.showFiled")}
+          title={showFiled
+            ? t("sidebar.hideFiled")
+            : t("sidebar.filedCount", { count: String(filedCount) })}
+        >
+          <Inbox class="size-4" />
+        </button>
+      {/if}
       <button
         type="button"
         class="rounded-md p-1 text-muted-foreground transition hover:bg-accent hover:text-foreground {showArchived
@@ -1092,6 +1217,10 @@ import { projectDisplayName } from "$lib/shared/project-label";
         <FolderOpen class="size-5 opacity-70" />
         <span>{t("sidebar.pickFolder")}</span>
       </button>
+    {/if}
+
+    {#if !showArchived}
+      <PinnedThreads {onActivateThread} onContext={openThreadContextMenu} />
     {/if}
 
     {#each visibleProjects as project, projectIdx (project.id)}

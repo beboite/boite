@@ -10,8 +10,17 @@ import {
   saveThread,
   updateThreadTitle,
   markThreadStarted,
+  setThreadAgeing,
+  setPinnedOrder,
   deleteThread as dbDeleteThread,
 } from "$lib/storage/db";
+import {
+  canFileAway,
+  isFiled,
+  isPinned,
+  movePinned,
+  pinnedInOrder,
+} from "$lib/domain/thread-ageing";
 import { settings } from "$lib/features/settings/store.svelte";
 import { device } from "$lib/features/settings/device.svelte";
 import { logger } from "$lib/shared/services/logger.svelte";
@@ -194,6 +203,16 @@ export class AppState {
     }
     return sorted;
   });
+
+  /**
+   * The pinned section, in the order the user put it in.
+   *
+   * One list for the whole sidebar rather than one per project: what is pinned
+   * is what is being worked on right now, and which folder each one belongs to
+   * is what the row already says. Rebuilt only when the thread set or a
+   * `pinOrder` moves, and pinning is a gesture rather than something on a timer.
+   */
+  pinnedThreads: Thread[] = $derived.by(() => pinnedInOrder(this.threads));
 
   // Ids the index did not know about while `threads` did. Bounded, because it
   // grows on a failure that repeats: without a cap a stuck index would add one
@@ -564,6 +583,10 @@ export class AppState {
     if (!t) return;
     if (t.status === status && t.exitCode === exitCode) return;
     noteStatusChange(id, t.status, status);
+    // A thread that starts a turn, or puts a dialog up, is not finished business
+    // and stops being filed. Reaching `ready` is not enough: an idle agent is
+    // exactly what a settled thread looks like when its PTY is warm.
+    if (!canFileAway(status)) this.unfileThread(id);
     t.status = status;
     t.exitCode = exitCode;
     if (status !== "stopped" && t.autoSlept) {
@@ -578,6 +601,105 @@ export class AppState {
     // `setThreadPtyId`. The five writes this used to make per turn also went
     // nowhere: `thread.create` keeps the persisted status by design, so a
     // whole-row save could never carry one.
+  }
+
+  /**
+   * Files a thread away, or brings it back.
+   *
+   * Optimistic like every other mutator here, and the one that genuinely has to
+   * roll back: the boite refuses to settle or snooze a thread that is working or
+   * has a dialog up, and it is the only party that answers for a remote row. So
+   * the refusal is checked here too — the menu should never have offered it —
+   * and the write is undone if the boite disagrees anyway.
+   *
+   * Returns whether it went through, so a caller can say so.
+   */
+  async fileThread(
+    id: string,
+    patch: { settled?: boolean; snoozeUntil?: number | null },
+  ): Promise<boolean> {
+    const thread = this.threadById(id);
+    if (!thread) return false;
+    const putsAway = patch.settled === true || (patch.snoozeUntil ?? null) !== null;
+    if (putsAway && !canFileAway(thread.status)) return false;
+
+    const before = { settledAt: thread.settledAt, snoozedUntil: thread.snoozedUntil };
+    const now = Date.now();
+    if (patch.settled !== undefined) thread.settledAt = patch.settled ? now : null;
+    if (patch.snoozeUntil !== undefined) thread.snoozedUntil = patch.snoozeUntil;
+    try {
+      await setThreadAgeing(id, thread.status, patch, thread.origin);
+      return true;
+    } catch (err) {
+      logger.error("app", "setThreadAgeing failed", err);
+      const live = this.threadById(id);
+      if (live) {
+        live.settledAt = before.settledAt;
+        live.snoozedUntil = before.snoozedUntil;
+      }
+      notifications.error(t("sidebar.fileThreadFailed"));
+      return false;
+    }
+  }
+
+  /**
+   * Brings a thread back because something happened on it.
+   *
+   * The way out that does not need a gesture: a settled thread whose agent
+   * starts a turn is not finished business any more, and one the user opens is
+   * being worked on again. Cheap enough to sit on the status path — the guard is
+   * two null checks on rows that carry no filing at all, which is all of them
+   * until somebody files one.
+   */
+  unfileThread(id: string) {
+    const thread = this.threadById(id);
+    if (!thread || !isFiled(thread, Date.now())) return;
+    void this.fileThread(id, { settled: false, snoozeUntil: null });
+  }
+
+  /** Pins a thread at the end of the order, or unpins it. */
+  async setThreadPinned(id: string, pinned: boolean) {
+    const thread = this.threadById(id);
+    if (!thread || isPinned(thread) === pinned) return;
+    const ids = this.pinnedThreads.map((t) => t.id);
+    await this.#writePinnedOrder(
+      pinned ? [...ids, id] : ids.filter((x) => x !== id),
+      thread.origin,
+    );
+  }
+
+  toggleThreadPinned(id: string) {
+    const thread = this.threadById(id);
+    if (!thread) return;
+    void this.setThreadPinned(id, !isPinned(thread));
+  }
+
+  /** Moves a pinned thread one place up (-1) or down (+1). */
+  async movePinnedThread(id: string, delta: number) {
+    const ids = movePinned(this.pinnedThreads, id, delta);
+    if (!ids) return;
+    await this.#writePinnedOrder(ids, this.threadById(id)?.origin);
+  }
+
+  /**
+   * The whole order, optimistically and then durably.
+   *
+   * Positions are written onto the rows here rather than waiting for the round
+   * trip, because the pinned section reorders under the pointer and a list that
+   * settles half a second later reads as a click that missed.
+   */
+  async #writePinnedOrder(ids: string[], origin: WorkspaceOrigin | undefined) {
+    const rank = new Map(ids.map((id, i) => [id, i]));
+    for (const thread of this.threads) {
+      const next = rank.get(thread.id) ?? null;
+      if ((thread.pinOrder ?? null) !== next) thread.pinOrder = next;
+    }
+    try {
+      await setPinnedOrder(ids, origin);
+    } catch (err) {
+      logger.error("app", "setPinnedOrder failed", err);
+      notifications.error(t("sidebar.pinThreadFailed"));
+    }
   }
 
   setThreadAutoSlept(id: string, value: boolean) {

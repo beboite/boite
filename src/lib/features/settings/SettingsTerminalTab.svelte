@@ -219,6 +219,36 @@
 </SettingsCard>
 
 <SettingsCard
+  title={t("terminalTab.autoSettle")}
+  description={t("terminalTab.autoSettleDesc")}
+>
+  <div class="flex items-center gap-3">
+    <label
+      for="auto-settle-days"
+      class="min-w-[140px] text-xs font-medium text-foreground"
+    >
+      {t("terminalTab.autoSettleAfter")}
+    </label>
+    <input
+      id="auto-settle-days"
+      type="range"
+      min="0"
+      max="90"
+      step="1"
+      value={settings.state.autoSettleDays}
+      oninput={(e) =>
+        settings.setAutoSettleDays(Number((e.currentTarget as HTMLInputElement).value))}
+      class="flex-1 accent-foreground"
+    />
+    <span class="min-w-[56px] text-right tabular-nums text-xs text-muted-foreground">
+      {settings.state.autoSettleDays === 0
+        ? t("common.off")
+        : t("terminalTab.days", { count: settings.state.autoSettleDays })}
+    </span>
+  </div>
+</SettingsCard>
+
+<SettingsCard
   title={t("terminalTab.idleAutoClose")}
   description={t("terminalTab.idleAutoCloseDesc")}
 >

@@ -5,6 +5,8 @@
     separator?: boolean;
     danger?: boolean;
     disabled?: boolean;
+    /** Why an item is disabled. A greyed action that says nothing teaches nothing. */
+    title?: string;
   }
 
 </script>
@@ -173,6 +175,7 @@
         class="item"
         class:danger={item.danger}
         disabled={item.disabled}
+        title={item.title}
         role="menuitem"
         onmousedown={(e) => e.preventDefault()}
         onclick={() => {
