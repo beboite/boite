@@ -105,12 +105,12 @@ describe("openPane", () => {
   it("puts the second panel of a threadless project beside the first", () => {
     app.selectedProjectId = "p";
     openPane({ kind: "git" });
-    openPane({ kind: "explorer" });
+    openPane({ kind: "todo" });
 
     expect(paneStore.groups.length).toBe(1);
     expect(leafNodesOf(paneStore.groups[0].root).map((l) => l.content.kind)).toEqual([
       "git",
-      "explorer",
+      "todo",
     ]);
   });
 
@@ -123,7 +123,8 @@ describe("openPane", () => {
   it("says the group is full rather than failing quietly", () => {
     threads(["t1", "p"]);
     app.activeThreadId = "t1";
-    for (const kind of ["git", "explorer", "todo"] as const) openPane({ kind });
+    for (const kind of ["git", "todo"] as const) openPane({ kind });
+    openPane({ kind: "browser", url: "http://localhost:1/" });
     expect(errors).toEqual([]);
 
     expect(openPane({ kind: "dashboard" })).toBe(null);
@@ -181,7 +182,7 @@ describe("anchorProjectId", () => {
 });
 
 describe("panePresence and closePanelPane", () => {
-  it("closes a detached panel and leaves its neighbour alone", () => {
+  it("closes an agent-opened panel and leaves its neighbour alone", () => {
     threads(["t1", "p"]);
     app.activeThreadId = "t1";
 
@@ -203,10 +204,10 @@ describe("panePresence and closePanelPane", () => {
 
   it("takes the group with it on a project with no terminal", () => {
     app.selectedProjectId = "p";
-    openPane({ kind: "explorer" });
+    openPane({ kind: "todo" });
     expect(paneStore.groups.length).toBe(1);
 
-    expect(closePanelPane("explorer")).toBe(true);
+    expect(closePanelPane("todo")).toBe(true);
     expect(paneStore.groups).toEqual([]);
   });
 
@@ -219,14 +220,6 @@ describe("panePresence and closePanelPane", () => {
     expect(panePresence("todo")).toBe(null);
   });
 
-  /** The editor asks the same question before covering the window with itself. */
-  it("answers for the editor, not only the three panels", () => {
-    threads(["t1", "p"]);
-    app.activeThreadId = "t1";
-    expect(panePresence("editor")).toBe(null);
-    const paneId = openPane({ kind: "editor" });
-    expect(panePresence("editor")).toBe(paneId);
-  });
 });
 
 describe("panelRatio", () => {

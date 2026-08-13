@@ -25,12 +25,15 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "tabs.fastpick": "Fastpick",
   "tabs.logs": "Journaux",
   "tabs.about": "À propos",
+  "tabs.experiments": "Expérimentations",
   "tabs.generalHint": "Notifications, et les raccourcis proposés par le lanceur.",
   "tabs.terminalHint": "Comment un terminal démarre, et quand il est mis en veille.",
   "tabs.appearanceHint": "Échelle, disposition, animations et langue.",
   "tabs.fastpickHint": "À quel endpoint parle vraiment un agent que vous lancez.",
   "tabs.logsHint": "Ce que l'app a enregistré sur cette session.",
   "tabs.aboutHint": "Quelle build tourne, et s'il en existe une plus récente.",
+  "tabs.experimentsHint":
+    "Les grandes refontes, à activer avant qu'elles ne deviennent la norme.",
 
   "about.title": "Cette version",
   "about.description": "Quelle Boite tourne, et d'où elle vient.",
@@ -102,16 +105,6 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "appearance.accentGpt": "GPT",
   "appearance.accentLocal": "Tourne sur cette machine",
   "appearance.accentOther": "Autre chose",
-  "appearance.sidebarDesign": "Lignes de thread",
-  "appearance.sidebarDesignDesc":
-    "Classique entoure le logo de l'agent avec l'état du thread. Lumineux allume toute la ligne avec, et y fait traverser une lumière pendant qu'un agent travaille.",
-  "appearance.designClassic": "Classique",
-  "appearance.designGlow": "Lumineux",
-  "appearance.harnessLogos": "Afficher les logos des agents",
-  "appearance.harnessLogosDesc":
-    "Désactivé, chaque ligne porte une marque de ce que fait son thread, et survoler une ligne y ramène son logo.",
-  "appearance.harnessLogosClassic":
-    "Le design classique n'a rien à mettre à la place du logo, il en affiche donc toujours un.",
   "appearance.animations": "Animations",
   "appearance.animationsDesc": "Système suit le réglage de réduction des mouvements du système.",
   "appearance.motionSystem": "Système",
@@ -122,6 +115,38 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "appearance.langSystem": "Système",
   "appearance.langFr": "Français",
   "appearance.langEn": "English",
+
+  "experiments.intro":
+    "Chacune remplace un pan entier de l'interface. On peut revenir en arrière sans risque.",
+  "experiments.sidebarDesign": "Lignes de thread",
+  "experiments.sidebarDesignDesc":
+    "Classique entoure le logo de l'agent avec l'état du thread. Lumineux allume toute la ligne avec, et y fait traverser une lumière pendant qu'un agent travaille.",
+  "experiments.designClassic": "Classique",
+  "experiments.designGlow": "Lumineux",
+  "experiments.harnessLogos": "Afficher les logos des agents",
+  "experiments.harnessLogosDesc":
+    "Désactivé, chaque ligne porte une marque de ce que fait son thread, et survoler une ligne y ramène son logo.",
+  "experiments.harnessLogosClassic":
+    "Le design classique n'a rien à mettre à la place du logo, il en affiche donc toujours un.",
+  "experiments.infoBox": "Boîte d'infos du projet",
+  "experiments.infoBoxDesc":
+    "Remplace les onglets du panneau latéral par une boîte au-dessus des terminaux : la branche courante, le todo qu'un agent s'est attribué, le dernier commit — et les dix derniers au survol.",
+
+  "infoBox.label": "Infos du projet",
+  "infoBox.claimedTitle": "Attribué à {agent}",
+  "infoBox.moreClaimed": "+{count}",
+
+  "experiments.smartSort": "Rangement intelligent",
+  "experiments.smartSortDesc":
+    "La barre latérale ordonne projets et threads elle-même. Cocher ne déplace rien : les lignes ne bougent pas tant qu'un ordre n'est pas choisi ci-dessous.",
+  "experiments.smartSortOrder": "Trier par",
+  "experiments.smartSortManual": "Manuel",
+  "experiments.smartSortActivity": "Activité des threads",
+  "experiments.smartSortAlpha": "Nom du projet",
+  "experiments.smartSortDirection": "Direction",
+  "experiments.smartSortAsc": "Croissant",
+  "experiments.smartSortDescending": "Décroissant",
+  "experiments.smartSortDirManual": "La direction s'applique une fois un ordre choisi.",
 
   "welcome.pickFolder": "Choisissez un dossier pour créer votre premier projet.",
   "welcome.tapToOpen": "Appuyez sur + pour ouvrir un terminal.",
@@ -303,6 +328,7 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "project.aheadBehind": "{ahead} en avance, {behind} en retard",
   "project.todos": "Todos",
   "project.noTodos": "Rien sur la liste.",
+  "project.addTodo": "Ajouter un todo…",
   "project.awaitingYou": "{count} en attente de votre confirmation",
   "project.andMore": "et {count} de plus",
   "project.repoAt": "dépôt dans {path}",
@@ -886,7 +912,6 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "editor.zoomOut": "Réduire",
   "panel.close": "Fermer le panneau",
   "panel.resize": "Redimensionner le panneau",
-  "panel.detach": "Détacher dans un pane",
   "project.tokensCalendar": "Tokens par jour, 12 derniers mois",
   "explorer.fileTree": "Arborescence des fichiers",
   "explorer.pickProject": "Choisissez un projet.",

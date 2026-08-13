@@ -94,36 +94,6 @@
   </div>
 {/if}
 
-<ToggleSetting
-  label={t("appearance.sidebarDesign")}
-  description={t("appearance.sidebarDesignDesc")}
-  enabled={settings.state.sidebarDesign === "glow"}
-  onLabel={t("appearance.designGlow")}
-  offLabel={t("appearance.designClassic")}
-  onToggle={() =>
-    settings.setSidebarDesign(
-      settings.state.sidebarDesign === "glow" ? "classic" : "glow",
-    )}
-/>
-
-<!-- Rendered in both designs, and disabled rather than hidden under the classic
-     one. A row that vanishes with the setting above it reads as a setting that
-     was lost, and the classic ring has nothing to put in the logo's place. -->
-<div class="pl-3" class:opacity-50={settings.state.sidebarDesign !== "glow"}>
-  <ToggleSetting
-    label={t("appearance.harnessLogos")}
-    description={settings.state.sidebarDesign === "glow"
-      ? t("appearance.harnessLogosDesc")
-      : t("appearance.harnessLogosClassic")}
-    enabled={settings.state.sidebarDesign !== "glow" ||
-      settings.state.sidebarHarnessLogos}
-    onToggle={() => {
-      if (settings.state.sidebarDesign !== "glow") return;
-      settings.setSidebarHarnessLogos(!settings.state.sidebarHarnessLogos);
-    }}
-  />
-</div>
-
 <SettingsCard title={t("appearance.animations")} description={t("appearance.animationsDesc")}>
   <div class="flex gap-1.5" role="radiogroup" aria-label={t("appearance.animations")}>
     {#each MOTION_MODES as mode (mode.id)}
