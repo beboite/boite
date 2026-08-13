@@ -554,6 +554,18 @@
                     {focused}
                     offline={boiteDown && thread.origin === "remote"}
                   />
+                  <!-- The experiment that replaces the column, one per
+                       terminal: in split view each pane runs its own worktree,
+                       so a single box over the whole area could only ever
+                       describe one of them. After the pane overlay in the DOM
+                       and at the same z, so it draws over the ring rather than
+                       under it. Panes too narrow to hold it (it would cover
+                       the terminal it describes) get none. -->
+                  {#if !mobile && settings.state.experimentInfoBox && rect.w >= 420}
+                    <div class="absolute right-3 top-3 z-[5] max-w-[calc(100%-1.5rem)]">
+                      <ProjectInfoBox {thread} {visible} />
+                    </div>
+                  {/if}
                 </div>
               {/if}
             {/each}
@@ -631,14 +643,6 @@
            the whole app, this one belongs to the pane area. -->
       <TodoAchievement />
 
-      <!-- The experiment that replaces the column: anchored over the pane
-           area's top-right corner, under the z-10 view overlays so the project
-           page and the settings cover it like they cover the terminals. -->
-      {#if !mobile && app.ready && settings.state.experimentInfoBox}
-        <div class="absolute right-3 top-3 z-[5]">
-          <ProjectInfoBox />
-        </div>
-      {/if}
     </main>
 
     <!-- Outside <main>, beside it: the column describes the project rather than
