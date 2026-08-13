@@ -386,7 +386,10 @@ mod tests {
                 actual_description, *description,
                 "version {version} changed identity"
             );
-            let digest = format!("{:x}", Sha384::digest(sql.as_bytes()));
+            let digest: String = Sha384::digest(sql.as_bytes())
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect();
             assert_eq!(
                 &digest, expected,
                 "version {version} ({description}) no longer hashes to what shipped. \
