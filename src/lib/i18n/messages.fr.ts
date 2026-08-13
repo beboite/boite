@@ -148,6 +148,12 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "experiments.smartSortDescending": "Décroissant",
   "experiments.smartSortDirManual": "La direction s'applique une fois un ordre choisi.",
 
+  "experiments.whip": "Fouet",
+  "experiments.whipDesc":
+    "Met un fouet dans la barre de titre. On le lance, on le claque, un clic le lâche. Il claque et il fait du bruit, et il n'atteint aucun terminal : rien n'est envoyé, rien n'est interrompu.",
+  "titlebar.whip": "Claquer le fouet",
+  "titlebar.whipDrop": "Lâcher le fouet",
+
   "welcome.pickFolder": "Choisissez un dossier pour créer votre premier projet.",
   "welcome.tapToOpen": "Appuyez sur + pour ouvrir un terminal.",
   "welcome.clickShortcut": "Cliquez sur un raccourci ci-dessus pour lancer un terminal.",

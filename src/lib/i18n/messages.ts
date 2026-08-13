@@ -146,6 +146,12 @@ export const EN_MESSAGES = {
   "experiments.smartSortDescending": "Descending",
   "experiments.smartSortDirManual": "Direction applies once an order is picked.",
 
+  "experiments.whip": "Whip",
+  "experiments.whipDesc":
+    "Puts a whip in the titlebar. Throw it, flick it, click to let go. It cracks and it makes a noise, and it reaches no terminal: nothing is sent, nothing is interrupted.",
+  "titlebar.whip": "Crack the whip",
+  "titlebar.whipDrop": "Drop the whip",
+
   "welcome.pickFolder": "Pick a folder to create your first project.",
   "welcome.tapToOpen": "Tap + to open a terminal.",
   "welcome.clickShortcut": "Click a shortcut above to launch a terminal.",

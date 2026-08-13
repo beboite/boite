@@ -78,6 +78,11 @@
   const ProjectView = lazyComponent(
     () => import("$lib/features/project/ProjectPage.svelte"),
   );
+  // A canvas and a rope simulation, for an experiment that is off by default.
+  // Behind import(), a boot that never switches it on never fetches it.
+  const WhipView = lazyComponent(
+    () => import("$lib/features/whip/WhipOverlay.svelte"),
+  );
 
   let activated = $state<Record<string, true>>({});
 
@@ -344,6 +349,13 @@
     if (app.ready && !settings.state.setupCompleted) {
       void SetupView.ensure();
     }
+  });
+
+  // Fetched when the experiment is armed rather than when the button is
+  // pressed: the chunk has to be mounted and listening for the pointer before
+  // the first throw, or the rope spawns wherever the pointer was at boot.
+  $effect(() => {
+    if (settings.state.experimentWhip) void WhipView.ensure();
   });
 
   // Opening the Files or Git panel is the strongest signal that a file or a
@@ -665,6 +677,14 @@
   <!-- The outline is 1.5px of colour and says nothing about what to do. This
        carries the state and the retry. -->
   <ConnectionBanner />
+
+  <!-- Over the whole window, login screen and setup wizard included: the whip
+       belongs to the app rather than to a view. Cosmetic in full — it sends
+       nothing to any terminal. -->
+  {#if settings.state.experimentWhip && WhipView.current}
+    {@const WhipComp = WhipView.current}
+    <WhipComp />
+  {/if}
 </div>
 
 <style>

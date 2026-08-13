@@ -12,9 +12,15 @@
     "",
     "The gap between the first two is what the lazy imports are worth: 4.8 MB the",
     "window does not fetch before it can paint, most of it the PDF worker. That is",
-    "the measurement those imports never had attached to them."
+    "the measurement those imports never had attached to them.",
+    "",
+    "2026-08-13, whip experiment: the eager graph had crept to 747.0 KB and the",
+    "titlebar button plus its store put it at 749.4 KB, 0.6 KB under a ceiling that",
+    "the next unrelated commit would have broken. Raised to 768 KB, which is the",
+    "same rounding as the first pass. The rope and its canvas are behind import()",
+    "and account for the 11 KB the shipped total grew by."
   ],
-  "eagerBytes": 768000,
+  "eagerBytes": 786432,
   "totalBytes": 6144000,
   "largestEagerChunkBytes": 256000
 }

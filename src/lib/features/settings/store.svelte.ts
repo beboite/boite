@@ -169,6 +169,7 @@ const DEFAULTS: Settings = {
   sidebarHarnessLogos: true,
   experimentInfoBox: false,
   experimentSmartSort: false,
+  experimentWhip: false,
   smartSortBy: "manual",
   smartSortDirection: "desc",
 };
@@ -287,6 +288,7 @@ const DEVICE_FIELDS = [
   "sidebarHarnessLogos",
   "experimentInfoBox",
   "experimentSmartSort",
+  "experimentWhip",
   "smartSortBy",
   "smartSortDirection",
   "confirmCloseThread",
@@ -470,6 +472,10 @@ class SettingsStore {
           typeof stored.experimentSmartSort === "boolean"
             ? stored.experimentSmartSort
             : DEFAULTS.experimentSmartSort,
+        experimentWhip:
+          typeof stored.experimentWhip === "boolean"
+            ? stored.experimentWhip
+            : DEFAULTS.experimentWhip,
         smartSortBy: isSmartSortBy(stored.smartSortBy)
           ? stored.smartSortBy
           : DEFAULTS.smartSortBy,
@@ -754,6 +760,12 @@ class SettingsStore {
   setExperimentSmartSort(value: boolean) {
     if (this.state.experimentSmartSort === value) return;
     this.state.experimentSmartSort = value;
+    this.persistDeviceNow();
+  }
+
+  setExperimentWhip(value: boolean) {
+    if (this.state.experimentWhip === value) return;
+    this.state.experimentWhip = value;
     this.persistDeviceNow();
   }
 
