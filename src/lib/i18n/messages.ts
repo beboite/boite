@@ -95,6 +95,7 @@ export const EN_MESSAGES = {
   "appearance.resetScale": "Reset to 100%",
   "appearance.layout": "Layout",
   "appearance.layoutDesc": "Mobile: full-width pages and a bottom bar. PC: sidebar and panels.",
+  "appearance.layoutAuto": "Automatic",
   "appearance.mobile": "Mobile",
   "appearance.pc": "PC",
   "appearance.colorByModel": "Colour by model",
