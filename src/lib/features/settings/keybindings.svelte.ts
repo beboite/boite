@@ -50,8 +50,29 @@ class KeybindingStore {
    */
   recording = $state<string | null>(null);
 
-  readonly all = $derived(settings.state.keybindings);
-  readonly rules = $derived.by(() => compile(settings.state.keybindings));
+  get all(): Keybinding[] {
+    return settings.state.keybindings;
+  }
+
+  #compiledFrom: Keybinding[] | null = null;
+  #compiled: CompiledRule[] = [];
+
+  /**
+   * The compiled rules, memoized against the array they came from.
+   *
+   * A plain identity check rather than a `$derived`, because this getter is
+   * read from the keydown listener rather than from the reactive graph, and an
+   * unowned derived's caching is not a promise the hot path should be resting
+   * on. The setter always writes a new array, so the reference is the signal.
+   */
+  get rules(): CompiledRule[] {
+    const source = settings.state.keybindings;
+    if (source !== this.#compiledFrom) {
+      this.#compiledFrom = source;
+      this.#compiled = compile(source);
+    }
+    return this.#compiled;
+  }
 
   readonly byCommand = $derived.by(() => {
     const map: Record<string, Keybinding[]> = {};
