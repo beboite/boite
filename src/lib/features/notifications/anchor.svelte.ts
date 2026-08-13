@@ -12,6 +12,13 @@
 class ToastAnchor {
   box = $state<{ top: number; right: number } | null>(null);
 
+  /**
+   * Height already taken in that corner by something the toasts must not cover,
+   * the info box experiment being the only claimant today. Zero whenever it is
+   * off, which is the layout the toaster has always had.
+   */
+  inset = $state(0);
+
   set(top: number, right: number) {
     const prev = this.box;
     if (prev && prev.top === top && prev.right === right) return;
@@ -20,6 +27,11 @@ class ToastAnchor {
 
   clear() {
     this.box = null;
+  }
+
+  setInset(px: number) {
+    if (this.inset === px) return;
+    this.inset = px;
   }
 }
 
@@ -52,6 +64,27 @@ export function toastArea(el: HTMLElement) {
     destroy() {
       observer.disconnect();
       toastAnchor.clear();
+    },
+  };
+}
+
+/**
+ * Action for an element that owns the top-right corner before the toasts do.
+ *
+ * Measures the folded height only: the info box unfolds its log on hover, and
+ * a stack that slid down every time the pointer crossed the box would be
+ * chasing the mouse. So this goes on the rows that are always drawn, never on
+ * the card around them, and the two border pixels of that card are added back.
+ */
+export function toastInset(el: HTMLElement) {
+  const read = () => toastAnchor.setInset(el.getBoundingClientRect().height + 2);
+  const observer = new ResizeObserver(read);
+  observer.observe(el);
+  read();
+  return {
+    destroy() {
+      observer.disconnect();
+      toastAnchor.setInset(0);
     },
   };
 }
