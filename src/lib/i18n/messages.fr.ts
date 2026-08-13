@@ -23,6 +23,7 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "tabs.terminal": "Terminal",
   "tabs.appearance": "Apparence",
   "tabs.fastpick": "Fastpick",
+  "tabs.keyboard": "Clavier",
   "tabs.logs": "Journaux",
   "tabs.about": "À propos",
   "tabs.experiments": "Expérimentations",
@@ -30,6 +31,8 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "tabs.terminalHint": "Comment un terminal démarre, et quand il est mis en veille.",
   "tabs.appearanceHint": "Échelle, disposition, animations et langue.",
   "tabs.fastpickHint": "À quel endpoint parle vraiment un agent que vous lancez.",
+  "tabs.keyboardHint":
+    "À quoi chaque raccourci est associé, et comment le réassocier.",
   "tabs.logsHint": "Ce que l'app a enregistré sur cette session.",
   "tabs.aboutHint": "Quelle build tourne, et s'il en existe une plus récente.",
   "tabs.experimentsHint":
@@ -933,5 +936,43 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
     "Cette adresse est sur la boite, et localhost ici désigne cette machine.",
   "browser.refuse.cleartext":
     "Le http:// simple s'arrête à cette machine. Utilisez https:// pour le reste.",
+
+  "keybindings.intro":
+    "Cliquez sur un raccourci, puis pressez la combinaison voulue. Les règles sont lues de la fin au début, donc la vôtre l'emporte sur celle livrée avec Boite.",
+  "keybindings.groupView": "Application",
+  "keybindings.groupThread": "Terminaux",
+  "keybindings.groupPane": "Panes",
+  "keybindings.record": "Réassocier",
+  "keybindings.recording": "Pressez une combinaison…",
+  "keybindings.recordCancel": "Annuler l'enregistrement",
+  "keybindings.unbound": "Non associé",
+  "keybindings.resetOne": "Revenir au raccourci par défaut",
+  "keybindings.resetAll": "Réinitialiser tous les raccourcis",
+  "keybindings.resetAllDone": "Tous les raccourcis sont revenus à leur valeur par défaut.",
+  "keybindings.changed": "Modifié",
+  "keybindings.conflict": "Partage cette touche avec {other}",
+  "keybindings.conflictShadowed": "{other} occupe cette touche et l'emporte",
+  "keybindings.invalid":
+    "La condition de cette règle ne s'analyse pas, donc elle ne se déclenche jamais.",
+  "keybindings.when": "quand {clause}",
+  "keybindings.whenAlways": "partout",
+
+  "keybindings.cmd.backToTerminal": "Revenir au terminal",
+  "keybindings.cmd.toggleSettings": "Ouvrir ou fermer les réglages",
+  "keybindings.cmd.toggleSidebar": "Afficher ou masquer la barre latérale",
+  "keybindings.cmd.closeFrontMost": "Fermer l'onglet, le panneau ou le terminal au premier plan",
+  "keybindings.cmd.zoomIn": "Agrandir",
+  "keybindings.cmd.zoomOut": "Réduire",
+  "keybindings.cmd.zoomReset": "Réinitialiser le zoom",
+  "keybindings.cmd.palette": "Palette de commandes",
+  "keybindings.cmd.newThread": "Nouveau terminal",
+  "keybindings.cmd.nextThread": "Terminal suivant",
+  "keybindings.cmd.previousThread": "Terminal précédent",
+  "keybindings.cmd.restoreThread": "Rouvrir le dernier terminal fermé",
+  "keybindings.cmd.jumpToThread": "Aller au terminal {n} de ce projet",
+  "keybindings.cmd.splitRight": "Diviser à droite",
+  "keybindings.cmd.splitDown": "Diviser en bas",
+  "keybindings.cmd.nextPane": "Pane suivant",
+  "keybindings.cmd.previousPane": "Pane précédent",
 
 };
