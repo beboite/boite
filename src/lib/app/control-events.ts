@@ -26,8 +26,22 @@ import type { AppState } from "./store.svelte";
  * for the local path and has to be repeated here, or a boite's threads would
  * never glow when they finish.
  */
-export function applyControlEvent(app: AppState, ev: ControlEvent) {
+export function applyControlEvent(app: AppState, ev: ControlEvent, envId?: string) {
   const data = ev.data as Record<string, unknown> | null;
+  // With several boites pushing at once, a bare `thread.status` names a row id
+  // that exists on more than one of them. The rows in `app` belong to the
+  // active workspace alone, so an event from any other environment is patched
+  // into that environment's own projection (`EnvironmentRuntime`) and must not
+  // reach here — except for the one thing that is not about rows.
+  if (envId && envId !== "remote" && envId !== workspace.activeBoiteId) {
+    if (ev.event === "workspace.info") {
+      device.updateBoite(envId, {
+        name: typeof data?.name === "string" ? data.name : "",
+        color: typeof data?.color === "string" ? data.color : "",
+      });
+    }
+    return;
+  }
   switch (ev.event) {
     case "thread.status": {
       const id = data?.threadId as string | undefined;

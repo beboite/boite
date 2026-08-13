@@ -20,6 +20,8 @@ import type {
   PtyApi,
   PushApi,
   ScopeApi,
+  WorkspaceHit,
+  WorkspaceSearchApi,
   ServerIdentity,
   SessionApi,
   SessionHit,
@@ -33,7 +35,7 @@ import type {
 import type { Project, Settings, Thread, TodoItem } from "$lib/types";
 import type { CommitState, PrLookup } from "$lib/features/git/api";
 import type { Platform, ShellOption } from "$lib/storage/platform.svelte";
-import { Socket, type ConnState } from "./socket";
+import { Socket, type ConnState, type SocketOptions } from "./socket";
 
 interface RawSession {
   id: string;
@@ -78,6 +80,7 @@ export class RemoteBackend implements Backend {
   readonly session: SessionApi;
   readonly log: LogApi;
   readonly approvals: ApprovalsApi;
+  readonly search: WorkspaceSearchApi;
   readonly push: PushApi;
   readonly meta: WorkspaceMetaApi;
 
@@ -92,8 +95,9 @@ export class RemoteBackend implements Backend {
     token: string,
     onState: (s: ConnState) => void = () => {},
     onAuthRejected: () => void = () => {},
+    options: SocketOptions = {},
   ) {
-    const socket = new Socket(url, token, onState, onAuthRejected);
+    const socket = new Socket(url, token, onState, onAuthRejected, options);
     this.#socket = socket;
     const rpc = (m: string, p?: unknown) => socket.rpc(m, p);
     const keyToThread = this.#keyToThread;
@@ -457,6 +461,16 @@ export class RemoteBackend implements Backend {
       filePath: () => Promise.resolve(""),
     };
 
+    // Failures answer empty rather than rejecting: this is fanned out over
+    // every connected environment, and one boite being down must not cost the
+    // caller the hits the others found.
+    this.search = {
+      query: (q, limit = 20) =>
+        rpc("search.query", { q, limit })
+          .then((r) => (r.hits ?? []) as WorkspaceHit[])
+          .catch(() => [] as WorkspaceHit[]),
+    };
+
     this.push = {
       publicKey: () => rpc("push.publicKey").then((r) => (r.key as string) ?? null),
       subscribe: (sub) => rpc("push.subscribe", sub).then(() => {}),
@@ -508,6 +522,18 @@ export class RemoteBackend implements Backend {
   // Jump the backoff queue. Driven by the retry button in the connection banner.
   retryNow(): void {
     this.#socket.retryNow();
+  }
+
+  /**
+   * Ask a socket believed to be live whether it still is.
+   *
+   * `hello` and not a ping: it is the same round trip the handshake makes, it
+   * carries the short ceiling, and an answer proves the boite is serving rather
+   * than merely holding a TCP connection open. What a foregrounded app runs
+   * before deciding it needs a new session.
+   */
+  probe(): Promise<ServerIdentity | null> {
+    return this.#socket.rpc("hello").then(() => this.#socket.serverIdentity);
   }
 
   subscribe(cb: (event: ControlEvent) => void): () => void {

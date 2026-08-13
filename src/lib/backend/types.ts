@@ -835,6 +835,36 @@ export interface ApprovalsApi {
   decide(id: string, allow: boolean): Promise<PendingApproval | null>;
 }
 
+/** What a hit is about, mirroring `boite_core::search::Kind`. */
+export type WorkspaceHitKind = "todo" | "event" | "transcript";
+
+/**
+ * A hit in a workspace's journal, todos or transcripts.
+ *
+ * Named apart from the explorer's `SearchHit`, which is a path on a disk: these
+ * two answer different questions and one of them travels between machines.
+ */
+export interface WorkspaceHit {
+  kind: WorkspaceHitKind;
+  /** Empty for a transcript, whose thread names the project instead. */
+  projectId: string;
+  /** The todo id, the event's object, or the thread id. */
+  refId: string;
+  /** One line of context with the match in it. */
+  excerpt: string;
+}
+
+/**
+ * The journal, the todos and what the terminals printed, in one question.
+ *
+ * Optional because only a boite answers it today: `search.query` is a server
+ * RPC and the desktop has no Tauri command over `boite_core::search` yet. A
+ * backend without it is skipped by the fan-out rather than failing it.
+ */
+export interface WorkspaceSearchApi {
+  query(q: string, limit?: number): Promise<WorkspaceHit[]>;
+}
+
 export interface Backend {
   readonly kind: "tauri" | "remote";
   readonly caps: BackendCaps;
@@ -855,6 +885,7 @@ export interface Backend {
   readonly session: SessionApi;
   readonly log: LogApi;
   readonly approvals: ApprovalsApi;
+  readonly search?: WorkspaceSearchApi;
   // Web Push registration. Present only on remote (web/PWA); undefined on
   // desktop, which notifies through the OS directly.
   readonly push?: PushApi;

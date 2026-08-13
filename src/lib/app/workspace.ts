@@ -19,6 +19,27 @@ import { logger } from "$lib/shared/services/logger.svelte";
 import { device, type BoiteEntry } from "$lib/features/settings/device.svelte";
 import { registerPush } from "$lib/features/push/api";
 import { parkedLocal } from "$lib/backend/tauri/parked";
+import { environments } from "$lib/backend/environment/registry.svelte";
+import { applyControlEvent } from "./control-events";
+
+/**
+ * Bring up every environment this device keeps connected beside the workspace
+ * on screen, and give the registry somewhere to deliver what they push.
+ *
+ * Called from both boots and again after anything that moves the active boite:
+ * the registry excludes whichever environment is the active workspace, since
+ * that one is owned here.
+ */
+function superviseEnvironments(): void {
+  environments.onControl = (envId, ev) => applyControlEvent(app, ev, envId);
+  environments.start();
+  environments.reconcile();
+}
+
+/** The picker toggled an environment, or one was added or removed. */
+export function refreshEnvironments(): void {
+  environments.reconcile();
+}
 
 // In a browser/PWA the only backend is the server that served this page.
 export function defaultRemoteWsUrl(): string {
@@ -197,6 +218,7 @@ async function adoptRemote(
   // Fire-and-forget: this only subscribes an already-granted permission, so it
   // costs nothing and prompts for nothing.
   void registerPush();
+  superviseEnvironments();
 }
 
 // Land on the local side, grafting the active boite onto it when the dynamic
@@ -222,6 +244,7 @@ async function initLocalSide(reset: boolean): Promise<void> {
     workspace.activateDynamic();
     await app.init();
     restoreParkedStatuses();
+    superviseEnvironments();
     return;
   }
   if (reset) {
@@ -231,6 +254,7 @@ async function initLocalSide(reset: boolean): Promise<void> {
   workspace.activateLocal();
   await app.init();
   restoreParkedStatuses();
+  superviseEnvironments();
   if (wantsGraft && device.active) void dialAndGraft(device.active);
 }
 
@@ -298,6 +322,7 @@ async function graftRemote(entry: BoiteEntry): Promise<void> {
   // Fire-and-forget: this only subscribes an already-granted permission, so it
   // costs nothing and prompts for nothing.
   void registerPush();
+  superviseEnvironments();
 }
 
 // Flip the dynamic-mode preference. Applies immediately when sitting on the
@@ -387,6 +412,7 @@ export async function bootRemoteWorkspace(): Promise<boolean> {
     version: entry.version || null,
   };
   device.setActive(entry.id);
+  superviseEnvironments();
   finishBootWhenReachable(entry);
   return false;
 }
