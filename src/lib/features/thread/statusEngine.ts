@@ -17,6 +17,7 @@ import { agentTurns } from "./agent-turns";
 import { turnIsActive } from "./agent-registry";
 import { threadCwd } from "./cwd";
 import { detectWorkingOnScreen, LIVE_ROW_COUNT } from "./working-detect";
+import { detectWaitingOnScreen } from "./waiting-detect";
 import type { IconKey, Thread, ThreadStatus } from "$lib/types";
 
 /**
@@ -122,7 +123,8 @@ function forgetThread(threadId: string) {
  *
  * "Waiting" alone does not say whether the agent wants a permission, a plan
  * approved or an answer to a question, and those are three different amounts of
- * urgency. Claude is the only agent that says which.
+ * urgency. Claude names it in its registry; for every other agent it is the row
+ * that asked, read off the dialog by `waiting-detect`.
  */
 export function waitingReasonFor(threadId: string): string | null {
   return waitingReason.get(threadId) ?? null;
@@ -258,7 +260,7 @@ function visibleThreadIds(): Set<string> {
 type Reading = {
   status: "running" | "waiting" | "ready";
   active: boolean;
-  /** Only ever set alongside `waiting`, and only by claude. */
+  /** Only ever set alongside `waiting`: claude's own label, or the row that asked. */
   waitingFor?: string | null;
 };
 
@@ -271,6 +273,13 @@ type Reading = {
  * no emulator ever held its rows, leaves the previous status alone.
  */
 function read(t: Thread, iconKey: IconKey): Reading | null {
+  // The rows first, and only for the question they may be holding. Read once and
+  // handed to both paths below: a dialog outranks whatever else is on the screen,
+  // and it outranks an agent's own `idle` too, since the agents that ask this way
+  // are exactly the ones whose registry never mentions it.
+  const term = liveTerminal(t.id);
+  const rows = term ? terminalScreenRows(term, LIVE_ROW_COUNT) : null;
+  const question = rows ? detectWaitingOnScreen(rows, iconKey) : null;
   // The agent's own answer first, where it has one. Three of them do, each in a
   // different place (see `agent-registry.ts`), and all three state that a turn
   // ended rather than merely stopping to say it continues. That is what stays
@@ -297,19 +306,23 @@ function read(t: Thread, iconKey: IconKey): Reading | null {
           return { status: "waiting", active, waitingFor: turn.waitingFor ?? null };
         // The agent takes input again, so the dot is `ready`, but a command it
         // started is still running and killing the PTY would take that with it.
+        // Both mean the agent takes input again as far as its own registry knows,
+        // and a dialog on the screen says otherwise. Codex and opencode ask for a
+        // permission without their entry ever leaving `idle`, so trusting it here
+        // is what called a blocked agent finished, green dot and all, and let
+        // auto-sleep count it down with the question still up.
         case "shell":
-          return { status: "ready", active };
         case "idle":
+          if (question !== null) return { status: "waiting", active: true, waitingFor: question };
           return { status: "ready", active };
       }
     }
   }
   // Otherwise the rows the agent is repainting. Level, not latched: the footer is
-  // on screen or it is not. Nothing here can tell a question apart from a
-  // finished turn, so this path only ever answers running or ready.
-  const term = liveTerminal(t.id);
-  if (!term) return null;
-  const working = detectWorkingOnScreen(terminalScreenRows(term, LIVE_ROW_COUNT), iconKey);
+  // on screen or it is not.
+  if (!rows) return null;
+  if (question !== null) return { status: "waiting", active: true, waitingFor: question };
+  const working = detectWorkingOnScreen(rows, iconKey);
   return { status: working ? "running" : "ready", active: working };
 }
 

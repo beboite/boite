@@ -153,7 +153,10 @@ pub enum ThreadStatus {
     /// Blocked on the user. Distinct from Ready, which means the agent has nothing
     /// left to do: this one has a turn in flight that only an answer will finish,
     /// so it is never a candidate for auto-sleep and it is worth telling the user
-    /// about. Only claude declares it (`waiting` in its session registry).
+    /// about. Claude declares it (`waiting` in its session registry); for every
+    /// other agent the client reads the dialog off the screen instead
+    /// (`waiting-detect.ts`), which this loop cannot do: it has the OSC title and
+    /// the registries, never the rows.
     Waiting,
     Ready,
     Done,

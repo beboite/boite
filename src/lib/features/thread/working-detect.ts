@@ -169,7 +169,7 @@ function isLiveStatusRow(line: string): boolean {
  * printed earlier, and stopping there is what keeps a finished turn's own
  * transcript from being read as evidence that it is still going.
  */
-function liveRows(lines: string[]): string[] {
+export function liveRows(lines: string[]): string[] {
   const rows = [...lines];
   while (rows.length > 0 && rows[rows.length - 1].trim() === "") rows.pop();
   let start = rows.length;
