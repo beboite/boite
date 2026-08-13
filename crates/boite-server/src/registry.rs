@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 use parking_lot::Mutex;
 use tokio::sync::broadcast;
 
+use boite_core::checkpoint::{self, Edge};
 use boite_core::pty::{EventSink, PtyEvent, PtyManager, PtySpawnArgs};
 use boite_core::session::{self, AgentTurn, DeclaredTurn, TurnQuery};
 use boite_core::status::{self, ThreadStatus};
@@ -43,6 +44,11 @@ pub type IdentityLookup = Arc<dyn Fn(&str) -> Option<ThreadIdentity> + Send + Sy
 struct StatusState {
     status: ThreadStatus,
     last_working: Option<Instant>,
+    /// Whether a turn is open, in the agent's own vocabulary rather than the
+    /// thread status beside it. The two are not the same question: `shell` and
+    /// `waiting` both read as Ready and neither ends a turn, so a checkpoint
+    /// driven off `status` would cut a turn in half at every permission prompt.
+    turn_open: bool,
 }
 
 pub struct LiveThread {
@@ -208,6 +214,7 @@ impl Registry {
             status: Mutex::new(StatusState {
                 status: ThreadStatus::Running,
                 last_working: Some(Instant::now()),
+                turn_open: false,
             }),
             size: Mutex::new((spec.cols.max(1), spec.rows.max(1))),
             cwd: spec.cwd.clone(),
@@ -529,6 +536,7 @@ fn spawn_ticker(shared: Arc<Shared>) {
             }
 
             let mut changed = Vec::new();
+            let mut edges = Vec::new();
             for lt in live_threads {
                 // Scoped by agent: two of them in one directory is ordinary, and a
                 // codex thread has no business being handed a claude answer.
@@ -555,6 +563,14 @@ fn spawn_ticker(shared: Arc<Shared>) {
                 if declared.is_active() {
                     st.last_working = Some(now);
                 }
+                // Before the early return below, because a turn can open and
+                // close without the thread's status changing at all: a turn
+                // short enough to land inside one tick leaves `next_status`
+                // with nothing to say and still has two ends worth keeping.
+                if let Some(edge) = turn_edge(st.turn_open, declared) {
+                    st.turn_open = edge == Edge::Start;
+                    edges.push((lt.thread_id.clone(), lt.cwd.clone(), edge));
+                }
                 let Some(next) = next_status(st.status, st.last_working, declared, now) else {
                     continue;
                 };
@@ -570,8 +586,34 @@ fn spawn_ticker(shared: Arc<Shared>) {
                     exit_code: None,
                 });
             }
+
+            for (id, cwd, edge) in edges {
+                // Detached and never awaited. A capture walks a whole worktree,
+                // so awaiting it here would put the length of a `git add -A`
+                // between a turn ending and the next tick noticing anything —
+                // and a checkpoint is never allowed to hold a turn up.
+                tokio::task::spawn_blocking(move || {
+                    if let Err(err) = checkpoint::capture_blocking(&cwd, &id, edge) {
+                        eprintln!("[boite/checkpoint] {id}: {err}");
+                    }
+                });
+            }
         }
     });
+}
+
+/// Which end of a turn just happened, if either.
+///
+/// Only `busy` opens one and only `idle` closes one. `waiting` is a turn still
+/// in flight behind a prompt and `shell` is a command the agent launched, so
+/// neither is an edge — and `unknown` is the absence of an answer, which must
+/// not be read as the end of anything.
+fn turn_edge(open: bool, declared: DeclaredTurn) -> Option<Edge> {
+    match declared {
+        DeclaredTurn::Busy if !open => Some(Edge::Start),
+        DeclaredTurn::Idle if open => Some(Edge::End),
+        _ => None,
+    }
 }
 
 
@@ -582,6 +624,26 @@ mod status_tests {
 
     fn ago(d: Duration) -> Option<Instant> {
         Instant::now().checked_sub(d)
+    }
+
+    /// A permission prompt in the middle of a turn is still the same turn, and a
+    /// shell the agent launched is not a turn at all. Getting this wrong is a
+    /// checkpoint per dialog, which is the whole list made useless.
+    #[test]
+    fn only_busy_opens_a_turn_and_only_idle_closes_one() {
+        assert_eq!(turn_edge(false, DeclaredTurn::Busy), Some(Edge::Start));
+        assert_eq!(turn_edge(true, DeclaredTurn::Busy), None);
+        assert_eq!(turn_edge(true, DeclaredTurn::Idle), Some(Edge::End));
+        assert_eq!(turn_edge(false, DeclaredTurn::Idle), None);
+        for open in [true, false] {
+            for declared in [
+                DeclaredTurn::Waiting,
+                DeclaredTurn::Shell,
+                DeclaredTurn::Unknown,
+            ] {
+                assert_eq!(turn_edge(open, declared), None, "{declared:?} open={open}");
+            }
+        }
     }
 
     #[test]
@@ -670,6 +732,7 @@ mod sink_tests {
             status: Mutex::new(StatusState {
                 status: ThreadStatus::Running,
                 last_working: Some(Instant::now()),
+                turn_open: false,
             }),
             size: Mutex::new((80, 24)),
             cwd: String::new(),

@@ -1,6 +1,7 @@
 pub mod approval;
 pub mod browser;
 pub mod capability;
+pub mod checkpoint;
 pub mod command;
 pub mod editor;
 pub mod env;

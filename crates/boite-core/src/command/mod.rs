@@ -38,11 +38,13 @@ use crate::capability::{Capability, Grant};
 use crate::scope::ProjectRoots;
 use crate::store::Store;
 
+pub mod checkpoint;
 pub mod files;
 pub mod git;
 pub mod records;
 pub mod sessions;
 
+pub use checkpoint::Checkpoints;
 pub use files::Files;
 pub use git::Git;
 pub use records::{Records, ThreadPatch};
@@ -159,6 +161,7 @@ pub fn methods() -> impl Iterator<Item = &'static str> {
         .chain(files::ALL_METHODS)
         .chain(sessions::ALL_METHODS)
         .chain(records::ALL_METHODS)
+        .chain(checkpoint::ALL_METHODS)
         .copied()
 }
 
@@ -173,10 +176,17 @@ pub fn handles(method: &str) -> bool {
 /// this one stays a table of contents.
 #[derive(Debug, Clone)]
 pub enum Command {
+    Checkpoints(Checkpoints),
     Files(Files),
     Git(Git),
     Records(Records),
     Sessions(Sessions),
+}
+
+impl From<Checkpoints> for Command {
+    fn from(checkpoints: Checkpoints) -> Self {
+        Command::Checkpoints(checkpoints)
+    }
 }
 
 impl From<Git> for Command {
@@ -228,12 +238,16 @@ impl Command {
         if records::ALL_METHODS.contains(&method) {
             return Records::decode(method, params).map(Command::Records);
         }
+        if checkpoint::ALL_METHODS.contains(&method) {
+            return Checkpoints::decode(method, params).map(Command::Checkpoints);
+        }
         Err(format!("unknown method: {method}"))
     }
 
     /// The wire name this command answers to. Round-trips with [`Command::decode`].
     pub fn name(&self) -> &'static str {
         match self {
+            Command::Checkpoints(c) => c.name(),
             Command::Files(f) => f.name(),
             Command::Git(g) => g.name(),
             Command::Records(r) => r.name(),
@@ -244,6 +258,7 @@ impl Command {
     /// How the WebSocket protocol wraps this command's answer. See [`Wire`].
     pub fn wire(&self) -> Wire {
         match self {
+            Command::Checkpoints(c) => c.wire(),
             Command::Files(f) => f.wire(),
             Command::Git(g) => g.wire(),
             Command::Records(r) => r.wire(),
@@ -259,6 +274,7 @@ impl Command {
     /// [`Ready`] without going through the check.
     pub fn capability(&self) -> Capability {
         match self {
+            Command::Checkpoints(c) => c.capability(),
             Command::Files(f) => f.capability(),
             Command::Git(g) => g.capability(),
             Command::Records(r) => r.capability(),
@@ -279,6 +295,7 @@ impl Command {
     pub fn prepare(self, host: &dyn Host, grant: Grant) -> Result<Ready, String> {
         grant.ensure(self.capability())?;
         match self {
+            Command::Checkpoints(c) => c.prepare(host),
             Command::Files(f) => f.prepare(host),
             Command::Git(g) => g.prepare(host),
             Command::Records(r) => r.prepare(host),
@@ -312,6 +329,7 @@ impl Ready {
     pub fn run(self) -> Result<Value, String> {
         match self {
             Ready::Settled(value) => Ok(value),
+            Ready::Work(Command::Checkpoints(c)) => c.run(),
             Ready::Work(Command::Files(f)) => f.run(),
             Ready::Work(Command::Git(g)) => g.run(),
             Ready::Work(Command::Sessions(s)) => s.run(),
@@ -565,6 +583,12 @@ mod tests {
             ("settings.set", MutateProject),
             ("workspace.info", ReadProject),
             ("workspace.setInfo", MutateProject),
+            ("checkpoint.capture", MutateProject),
+            ("checkpoint.list", ReadProject),
+            ("checkpoint.diff", ReadProject),
+            ("checkpoint.fileVersions", ReadProject),
+            ("checkpoint.restore", MutateProject),
+            ("checkpoint.forget", MutateProject),
         ];
         let actual: Vec<(&str, Capability)> = every_command()
             .iter()
@@ -588,6 +612,7 @@ mod tests {
             "project.create", "project.archive", "project.delete",
             "thread.create", "thread.update", "thread.started", "thread.delete",
             "todo.save", "todo.delete", "settings.set", "workspace.setInfo",
+            "checkpoint.capture", "checkpoint.restore", "checkpoint.forget",
         ] {
             let command = every_command()
                 .into_iter()
@@ -657,6 +682,7 @@ mod tests {
             "todo": { "id": "d", "projectId": "p", "title": "t", "state": "open",
                       "createdAt": 0, "updatedAt": 0 },
             "id": "p", "todoId": "d", "settings": {},
+            "edge": "start", "to": "0",
         });
         methods()
             .map(|method| {
