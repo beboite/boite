@@ -6,6 +6,7 @@
   import { WebLinksAddon } from "@xterm/addon-web-links";
   import { Unicode11Addon } from "@xterm/addon-unicode11";
   import { xtermFontFamily, xtermTheme } from "./theme";
+  import { terminalRenderBudget, type RenderSlot } from "./render-budget";
   import { encodeBarKey, encodeText, isLineFeed, wheelLines, type Press } from "./keys";
   import { installMobileInput } from "./mobile-input";
   import { Touches } from "./touch";
@@ -342,8 +343,22 @@
     });
   }
 
-  // Whether the WebGL renderer is on, or has been given up on.
-  let webglSettled = false;
+  // The context this pane currently holds, and its slot in the shared budget.
+  // Held rather than settled: a hidden pane gives its context back and takes
+  // another when it is shown again (see render-budget.ts).
+  let webgl: WebglAddon | null = null;
+  // Claimed at init rather than on mount: the effect below drives it from a
+  // prop, and a prop can change before the mount has run.
+  const renderSlot: RenderSlot = terminalRenderBudget.claim({
+    grant: () => loadWebgl(),
+    revoke: () => unloadWebgl(),
+  });
+  // WebGL is not coming back on this machine: the constructor threw, or the
+  // context was lost enough times that asking again is a loop. Distinct from
+  // "not granted", which is the normal state of a pane nobody is looking at.
+  let webglImpossible = false;
+  let contextLosses = 0;
+  const CONTEXT_LOSS_GIVE_UP = 3;
 
   /**
    * Hands rendering to the GPU, but only once the cell has a measured size.
@@ -365,7 +380,8 @@
    * renderer, which needs no atlas and shows its text.
    */
   function loadWebgl() {
-    if (webglSettled || !term) return;
+    if (webgl || webglImpossible || !term) return;
+    if (!renderSlot.granted()) return;
     let measured = false;
     try {
       measured = !!fit?.proposeDimensions();
@@ -374,14 +390,39 @@
     }
     if (!measured) return;
     try {
-      const webgl = new WebglAddon();
-      webgl.onContextLoss(() => webgl.dispose());
-      term.loadAddon(webgl);
+      const addon = new WebglAddon();
+      // A loss is the browser reclaiming the context, which is what happens
+      // when something outside the budget takes one. Dispose so xterm falls
+      // back to the DOM renderer, and let the next fit ask again — the pane
+      // used to keep the dead addon and never draw on the GPU again, for the
+      // life of the window.
+      addon.onContextLoss(() => {
+        contextLosses++;
+        if (webgl === addon) webgl = null;
+        addon.dispose();
+        if (contextLosses >= CONTEXT_LOSS_GIVE_UP) {
+          webglImpossible = true;
+          renderSlot.want(false);
+          logger.warn(
+            "terminal",
+            `${thread.label}: giving up on the GPU renderer after ${contextLosses} context losses`,
+          );
+        }
+      });
+      term.loadAddon(addon);
+      webgl = addon;
     } catch {
       // WebGL unavailable (e.g. webkit2gtk without GPU). Fall back to DOM
-      // renderer, and stop asking: it will not appear later.
+      // renderer, and stop asking: it will not appear later, and holding a slot
+      // for it would starve a pane that can use one.
+      webglImpossible = true;
+      renderSlot.want(false);
     }
-    webglSettled = true;
+  }
+
+  function unloadWebgl() {
+    webgl?.dispose();
+    webgl = null;
   }
 
   // Coalescing to one fit per frame is not enough for a splitter drag: the
@@ -1201,6 +1242,20 @@
     respawnInPlace();
   });
 
+  // What the pane asks the render budget for. Only a pane on screen asks, which
+  // is what keeps the window under the browser's context ceiling however many
+  // threads are open: a hidden terminal stays mounted, keeps its PTY and its
+  // scrollback, and draws with the DOM renderer nobody is looking at.
+  $effect(() => {
+    renderSlot.want(visible && !webglImpossible);
+  });
+
+  // Focus does not ask for anything, it reorders: the pane being typed in is
+  // the last one an eviction takes.
+  $effect(() => {
+    if (focused) renderSlot.touch();
+  });
+
   $effect(() => {
     if (visible && term) {
       queueMicrotask(() => {
@@ -1308,6 +1363,11 @@
     container?.removeEventListener("touchcancel", onTouchEnd);
     window.visualViewport?.removeEventListener("resize", onViewportResize);
     unregisterTerminal(thread.id);
+    // Before term.dispose(), and out of the budget in the same breath: the
+    // context has to be handed back to whoever is waiting for one, and a slot
+    // left behind would hold a share of the ceiling for a pane that is gone.
+    unloadWebgl();
+    renderSlot.dispose();
     term?.dispose();
     term = null;
     fit = null;
