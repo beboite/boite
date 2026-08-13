@@ -657,6 +657,7 @@ export const EN_MESSAGES = {
   "palette.noMatch": "No matching command",
   "palette.sectionActions": "Actions",
   "palette.launchShortcut": "Launch {label}",
+  "palette.runScript": "Run {name}",
   "palette.restoreThread": "Restore last closed thread",
   "palette.closeActiveThread": "Close active thread",
   "palette.openSettings": "Open settings",

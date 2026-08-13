@@ -2,6 +2,8 @@
   import { fade, scale } from "svelte/transition";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
   import { palette } from "./store.svelte";
+  import { app } from "$lib/app/store.svelte";
+  import { projectScripts } from "$lib/features/project/scripts.svelte";
   import { fuzzyScore } from "./fuzzy";
   import { t } from "$lib/i18n/index.svelte";
   import {
@@ -40,6 +42,19 @@
       debouncedQuery = raw;
     }, SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(timer);
+  });
+
+  // Read on open, not on boot: it is a readDir plus a file read per project,
+  // and the list is only ever looked at from in here. Re-read every time, so a
+  // script added while the app was running is offered rather than a cached
+  // answer from whenever the project was first selected.
+  $effect(() => {
+    if (!palette.open) return;
+    const folder =
+      app.projects.find((p) => p.id === app.currentProjectId)?.cwd ?? null;
+    void projectScripts.ensure(folder, true).then(() => {
+      if (palette.open) commands = buildPaletteCommands();
+    });
   });
 
   $effect(() => {

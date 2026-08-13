@@ -9,6 +9,7 @@ import {
   restoreLastClosedThread,
 } from "$lib/features/thread/api";
 import { openProjectDashboard } from "$lib/features/project/dashboard";
+import { projectScripts } from "$lib/features/project/scripts.svelte";
 import { resolveIconKey } from "$lib/shared/icons/detect";
 import { t } from "$lib/i18n/index.svelte";
 import type { MessageKey } from "$lib/i18n/index.svelte";
@@ -187,6 +188,36 @@ export function buildPaletteCommands(): PaletteCommand[] {
       app.mobileTab = "settings";
     },
   });
+
+  // What the project itself says it can run. The list is read when the palette
+  // opens, so a script added to package.json five minutes ago is offered
+  // without restarting anything. Threads rather than a side process: a script
+  // is a long-running command with output somebody wants to read, which is what
+  // a thread already is, and it inherits the project's worktree the way every
+  // other launch does.
+  const scriptProject = app.projects.find((p) => p.id === app.currentProjectId);
+  if (scriptProject) {
+    for (const script of projectScripts.forFolder(scriptProject.cwd)) {
+      commands.push({
+        id: `action:script:${script.name}`,
+        section: "actions",
+        labelKey: "palette.runScript",
+        labelParams: { name: script.name },
+        hint: script.body,
+        icon: { key: "terminal", color: null },
+        run: () =>
+          launchShortcut(
+            {
+              id: `script:${script.name}`,
+              label: script.command,
+              command: script.command,
+              iconKey: "terminal",
+            },
+            scriptProject.id,
+          ),
+      });
+    }
+  }
 
   if (app.currentProjectId) {
     commands.push({
