@@ -215,7 +215,33 @@ export interface Settings {
    * classic design has one thing to put in the glyph and ignores this.
    */
   sidebarHarnessLogos: boolean;
+  /**
+   * Experiment: replace the side panel's three tabs with one anchored info box
+   * over the terminals — current branch, the todo an agent claimed, the last
+   * commit, and up to ten of them on hover. Off draws the classic column.
+   */
+  experimentInfoBox: boolean;
+  /**
+   * Experiment: let the sidebar order itself instead of following the dragged
+   * order. Arming it moves nothing on its own — `smartSortBy` starts at
+   * `manual`, so the rows hold still until an order is actually picked.
+   */
+  experimentSmartSort: boolean;
+  smartSortBy: SmartSortBy;
+  smartSortDirection: SortDirection;
 }
+
+/**
+ * What the smart-sort experiment orders the sidebar by.
+ *
+ * `manual` is the dragged order and the state the toggle arms into. `activity`
+ * follows the threads: a project ranks by its most recently active one, and the
+ * threads inside it rank the same way. `alphabetical` reads the project names
+ * and leaves each project's threads where the user dragged them.
+ */
+export type SmartSortBy = "manual" | "activity" | "alphabetical";
+
+export type SortDirection = "asc" | "desc";
 
 /**
  * The sidebar's two thread-row designs.

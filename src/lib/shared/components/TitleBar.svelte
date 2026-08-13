@@ -171,10 +171,8 @@
   /**
    * One button per panel, answering "is this on screen anywhere".
    *
-   * A panel normally lives in the docked column, but it can be detached into a
-   * pane, and the button has to mean the same thing either way — otherwise the
-   * one panel you detached is the one whose button lies. So: lit when it is up
-   * in either place, and a click puts it away wherever it is.
+   * A panel may be docked or opened by an agent in a pane, so the button answers
+   * for either location and closes whichever one is open.
    */
   function panelShowing(kind: PanelKind): boolean {
     return (
@@ -351,25 +349,29 @@
         <span class="text-[11px] tabular-nums">{openHere}</span>
       </button>
     {/if}
-    {#each PANEL_BUTTONS as panel (panel.kind)}
-      {@const open = panelShowing(panel.kind)}
-      {@const Icon = panel.icon}
-      {@const pulsing = panel.surface !== undefined && mcpPulse.surface(panel.surface)}
-      <button
-        type="button"
-        class="flex h-7 items-center justify-center rounded-md px-2 transition {open
-          ? 'bg-accent text-foreground'
-          : 'text-muted-foreground hover:bg-accent hover:text-foreground'}"
-        class:mcp-touch={pulsing}
-        onclick={() => togglePanel(panel.kind)}
-        oncontextmenu={openPanelMenu}
-        title={t(panel.key)}
-        aria-label={t(panel.key)}
-        aria-pressed={open}
-      >
-        <Icon class="size-[15px]" />
-      </button>
-    {/each}
+    <!-- The info-box experiment replaces the docked column, so the buttons
+         that toggle it would toggle a thing that is not there. -->
+    {#if !settings.state.experimentInfoBox}
+      {#each PANEL_BUTTONS as panel (panel.kind)}
+        {@const open = panelShowing(panel.kind)}
+        {@const Icon = panel.icon}
+        {@const pulsing = panel.surface !== undefined && mcpPulse.surface(panel.surface)}
+        <button
+          type="button"
+          class="flex h-7 items-center justify-center rounded-md px-2 transition {open
+            ? 'bg-accent text-foreground'
+            : 'text-muted-foreground hover:bg-accent hover:text-foreground'}"
+          class:mcp-touch={pulsing}
+          onclick={() => togglePanel(panel.kind)}
+          oncontextmenu={openPanelMenu}
+          title={t(panel.key)}
+          aria-label={t(panel.key)}
+          aria-pressed={open}
+        >
+          <Icon class="size-[15px]" />
+        </button>
+      {/each}
+    {/if}
   </div>
 
   {#if isTauri && !isMacOS}

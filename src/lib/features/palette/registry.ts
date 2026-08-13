@@ -199,21 +199,23 @@ export function buildPaletteCommands(): PaletteCommand[] {
 
   // Git, files and the todo list show in the docked column, which is where they
   // live: asking for git from the palette means the same thing as clicking git
-  // in the titlebar, and neither should rearrange the panes. The pane is still
-  // reachable — the column's own detach button — but it is a deliberate act
-  // rather than what the obvious command does.
-  const panelCommands: [PanelKind, MessageKey][] = [
-    ["git", "panes.openGit"],
-    ["explorer", "panes.openExplorer"],
-    ["todo", "panes.openTodo"],
-  ];
-  for (const [kind, labelKey] of panelCommands) {
-    commands.push({
-      id: `panel:${kind}`,
-      section: "panes",
-      labelKey,
-      run: () => settings.setRightPanel(app.currentProjectId, kind),
-    });
+  // in the titlebar, and neither should rearrange the panes. The info-box
+  // experiment replaces that column, so while it is on these commands would
+  // set a panel nothing renders — same reason the titlebar hides its buttons.
+  if (!settings.state.experimentInfoBox) {
+    const panelCommands: [PanelKind, MessageKey][] = [
+      ["git", "panes.openGit"],
+      ["explorer", "panes.openExplorer"],
+      ["todo", "panes.openTodo"],
+    ];
+    for (const [kind, labelKey] of panelCommands) {
+      commands.push({
+        id: `panel:${kind}`,
+        section: "panes",
+        labelKey,
+        run: () => settings.setRightPanel(app.currentProjectId, kind),
+      });
+    }
   }
 
   // Panes. Until now the only way to make one was to drag a thread row onto a

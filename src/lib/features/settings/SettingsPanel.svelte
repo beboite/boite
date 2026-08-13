@@ -5,6 +5,7 @@
   import SettingsAppearanceTab from "./SettingsAppearanceTab.svelte";
   import SettingsFastpickTab from "./SettingsFastpickTab.svelte";
   import SettingsLogsTab from "./SettingsLogsTab.svelte";
+  import SettingsExperimentsTab from "./SettingsExperimentsTab.svelte";
   import SettingsAboutTab from "./SettingsAboutTab.svelte";
   import { updater } from "$lib/features/updater/store.svelte";
   import X from "@lucide/svelte/icons/x";
@@ -13,6 +14,7 @@
   import Palette from "@lucide/svelte/icons/palette";
   import Zap from "@lucide/svelte/icons/zap";
   import ScrollText from "@lucide/svelte/icons/scroll-text";
+  import FlaskConical from "@lucide/svelte/icons/flask-conical";
   import Info from "@lucide/svelte/icons/info";
   import type { Component } from "svelte";
   import { t, type MessageKey } from "$lib/i18n/index.svelte";
@@ -29,7 +31,14 @@
    * The strip survives under the rail's breakpoint, where a phone has no width
    * to spend on it.
    */
-  type TabId = "general" | "terminal" | "appearance" | "fastpick" | "logs" | "about";
+  type TabId =
+    | "general"
+    | "terminal"
+    | "appearance"
+    | "fastpick"
+    | "logs"
+    | "experiments"
+    | "about";
 
   const TABS: {
     id: TabId;
@@ -57,6 +66,12 @@
     },
     { id: "fastpick", labelKey: "tabs.fastpick", hintKey: "tabs.fastpickHint", icon: Zap },
     { id: "logs", labelKey: "tabs.logs", hintKey: "tabs.logsHint", icon: ScrollText },
+    {
+      id: "experiments",
+      labelKey: "tabs.experiments",
+      hintKey: "tabs.experimentsHint",
+      icon: FlaskConical,
+    },
     { id: "about", labelKey: "tabs.about", hintKey: "tabs.aboutHint", icon: Info },
   ];
 
@@ -80,9 +95,9 @@
   }
 
   const tabId = (id: TabId, place: "rail" | "strip") => `settings-tab-${place}-${id}`;
-  // One panel element for the six tabs, because that is what the DOM does: the
-  // container stays and its contents are swapped. Six ids would mean five
-  // aria-controls pointing at nothing.
+  // One panel element for all the tabs, because that is what the DOM does: the
+  // container stays and its contents are swapped. One id per tab would mean
+  // every other aria-controls pointing at nothing.
   const PANEL_ID = "settings-panel";
 
   // Selection follows focus: every panel is a plain form, so arriving on a tab
@@ -133,7 +148,7 @@
     </button>
   </header>
 
-  <!-- Under the rail's breakpoint: the same six, across, scrolling. -->
+  <!-- Under the rail's breakpoint: the same tabs, across, scrolling. -->
   <div class="shrink-0 border-b border-border bg-[var(--color-surface)] px-3 md:hidden">
     <div
       bind:this={stripEl}
@@ -222,6 +237,8 @@
           <SettingsFastpickTab />
         {:else if activeTab === "logs"}
           <SettingsLogsTab />
+        {:else if activeTab === "experiments"}
+          <SettingsExperimentsTab />
         {:else if activeTab === "about"}
           <SettingsAboutTab />
         {/if}

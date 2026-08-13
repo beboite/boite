@@ -22,12 +22,14 @@ export const EN_MESSAGES = {
   "tabs.fastpick": "Fastpick",
   "tabs.logs": "Logs",
   "tabs.about": "About",
+  "tabs.experiments": "Experiments",
   "tabs.generalHint": "Notifications, and the shortcuts the launcher offers.",
   "tabs.terminalHint": "How a terminal starts, and when it is put to sleep.",
   "tabs.appearanceHint": "Scale, layout, motion and language.",
   "tabs.fastpickHint": "Which endpoint an agent you launch actually talks to.",
   "tabs.logsHint": "What the app recorded about this session.",
   "tabs.aboutHint": "Which build is running, and whether there is a newer one.",
+  "tabs.experimentsHint": "Big redesigns you can switch on before they become the default.",
 
   "about.title": "This build",
   "about.description": "Which Boite is running, and where it came from.",
@@ -101,16 +103,6 @@ export const EN_MESSAGES = {
   "appearance.accentGpt": "GPT",
   "appearance.accentLocal": "Running on this machine",
   "appearance.accentOther": "Something else",
-  "appearance.sidebarDesign": "Thread rows",
-  "appearance.sidebarDesignDesc":
-    "Classic rings the agent's logo with the thread's state. Glow lights the whole row with it, and runs a light across the row while an agent works.",
-  "appearance.designClassic": "Classic",
-  "appearance.designGlow": "Glow",
-  "appearance.harnessLogos": "Show agent logos",
-  "appearance.harnessLogosDesc":
-    "Off, each row shows a mark for what its thread is doing, and hovering a row brings its logo back.",
-  "appearance.harnessLogosClassic":
-    "The classic design has nothing to put in the logo's place, so it always shows one.",
   "appearance.animations": "Animations",
   "appearance.animationsDesc": "System follows the OS reduced-motion setting.",
   "appearance.motionSystem": "System",
@@ -121,6 +113,38 @@ export const EN_MESSAGES = {
   "appearance.langSystem": "System",
   "appearance.langFr": "Français",
   "appearance.langEn": "English",
+
+  "experiments.intro":
+    "Each of these replaces a whole piece of the interface. They are safe to flip back.",
+  "experiments.sidebarDesign": "Thread rows",
+  "experiments.sidebarDesignDesc":
+    "Classic rings the agent's logo with the thread's state. Glow lights the whole row with it, and runs a light across the row while an agent works.",
+  "experiments.designClassic": "Classic",
+  "experiments.designGlow": "Glow",
+  "experiments.harnessLogos": "Show agent logos",
+  "experiments.harnessLogosDesc":
+    "Off, each row shows a mark for what its thread is doing, and hovering a row brings its logo back.",
+  "experiments.harnessLogosClassic":
+    "The classic design has nothing to put in the logo's place, so it always shows one.",
+  "experiments.infoBox": "Project info box",
+  "experiments.infoBoxDesc":
+    "Replaces the side panel's tabs with one box over the terminals: the branch you are on, the todo an agent claimed, the latest commit — and the last ten when you hover it.",
+
+  "infoBox.label": "Project info",
+  "infoBox.claimedTitle": "Claimed by {agent}",
+  "infoBox.moreClaimed": "+{count}",
+
+  "experiments.smartSort": "Smart ordering",
+  "experiments.smartSortDesc":
+    "The sidebar orders projects and threads itself. Arming this moves nothing: the rows hold still until you pick an order below.",
+  "experiments.smartSortOrder": "Order by",
+  "experiments.smartSortManual": "Manual",
+  "experiments.smartSortActivity": "Thread activity",
+  "experiments.smartSortAlpha": "Project name",
+  "experiments.smartSortDirection": "Direction",
+  "experiments.smartSortAsc": "Ascending",
+  "experiments.smartSortDescending": "Descending",
+  "experiments.smartSortDirManual": "Direction applies once an order is picked.",
 
   "welcome.pickFolder": "Pick a folder to create your first project.",
   "welcome.tapToOpen": "Tap + to open a terminal.",
@@ -296,6 +320,7 @@ export const EN_MESSAGES = {
   "project.aheadBehind": "{ahead} ahead, {behind} behind",
   "project.todos": "Todos",
   "project.noTodos": "Nothing on the list.",
+  "project.addTodo": "Add a todo…",
   "project.awaitingYou": "{count} waiting for you to confirm",
   "project.andMore": "and {count} more",
   "project.repoAt": "repository at {path}",
@@ -894,7 +919,6 @@ export const EN_MESSAGES = {
   "editor.zoomOut": "Zoom out",
   "panel.close": "Close the panel",
   "panel.resize": "Resize the panel",
-  "panel.detach": "Detach into a pane",
   "project.tokensCalendar": "Daily tokens, last 12 months",
   "explorer.fileTree": "File tree",
   "explorer.pickProject": "Pick a project.",

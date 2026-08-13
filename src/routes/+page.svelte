@@ -28,6 +28,7 @@
   import { statusEngine } from "$lib/features/thread/statusEngine";
   import PaneShell from "$lib/features/panes/PaneShell.svelte";
   import SidePanel from "$lib/features/panes/SidePanel.svelte";
+  import ProjectInfoBox from "$lib/features/infobox/ProjectInfoBox.svelte";
   import PaneOverlay from "$lib/features/panes/PaneOverlay.svelte";
   import PaneDropOverlay from "$lib/features/panes/PaneDropOverlay.svelte";
   import GitPanel from "$lib/features/git/GitPanel.svelte";
@@ -360,6 +361,7 @@
       prefetchWhenIdle(EditorView);
     }
   });
+
 </script>
 
 <!-- h-dvh, not h-screen: on a phone `100vh` is the large viewport, so with the
@@ -585,7 +587,7 @@
               <EditorComp />
             {:else}
               <div class="flex h-full items-center justify-center text-xs text-muted-foreground/70">
-                Loading…
+                {t("common.loading")}
               </div>
             {/if}
           </div>
@@ -593,6 +595,7 @@
 
         <!-- Tab pages sit under the editor/settings overlays: a diff opened
              from git sets view=editor and must win over the git page. -->
+
         {#if mobile && app.view === "terminal" && app.mobileTab === "git"}
           <div class="absolute inset-0 z-10 bg-[var(--color-background)]">
             <GitPanel />
@@ -604,6 +607,7 @@
             <ExplorerPanel />
           </div>
         {/if}
+
 
         <!-- No `projectId` prop: with no pane around it the page follows the
              project the bottom bar is showing, which is what the panel already
@@ -626,12 +630,20 @@
            could move out of <main> without this following them: they belong to
            the whole app, this one belongs to the pane area. -->
       <TodoAchievement />
+
+      <!-- The experiment that replaces the column: anchored over the pane
+           area's top-right corner, under the z-10 view overlays so the project
+           page and the settings cover it like they cover the terminals. -->
+      {#if !mobile && app.ready && settings.state.experimentInfoBox}
+        <div class="absolute right-3 top-3 z-[5]">
+          <ProjectInfoBox />
+        </div>
+      {/if}
     </main>
 
     <!-- Outside <main>, beside it: the column describes the project rather than
-         whatever view is up, so it stays put across the terminal, the project
-         page and the editor instead of being something each one has to draw. -->
-    {#if !mobile && app.ready && settings.rightPanelFor(app.currentProjectId)}
+         whatever view is up. -->
+    {#if !mobile && app.ready && !settings.state.experimentInfoBox && settings.rightPanelFor(app.currentProjectId)}
       <SidePanel />
     {/if}
   </div>

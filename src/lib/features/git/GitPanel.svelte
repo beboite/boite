@@ -51,10 +51,9 @@
   // The two column verbs, passed only by SidePanel: see PanelDockActions.
   type Props = {
     projectId?: string | null;
-    onDetach?: () => void;
     onClose?: () => void;
   };
-  let { projectId = null, onDetach, onClose }: Props = $props();
+  let { projectId = null, onClose }: Props = $props();
 
   const project = $derived.by(() => {
     const id = projectId ?? app.currentProjectId;
@@ -370,6 +369,7 @@
     });
     revealEditor();
   }
+
 </script>
 
 <svelte:window onpointerdown={closeBranchMenuOnOutsideClick} />
@@ -523,8 +523,8 @@
       >
         <CloudDownload class="size-3.5 {gs?.fetching ? 'animate-pulse' : ''}" />
       </button>
-      {#if onDetach && onClose}
-        <PanelDockActions {onDetach} {onClose} />
+      {#if onClose}
+        <PanelDockActions {onClose} />
       {/if}
     </div>
   </header>

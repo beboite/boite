@@ -21,13 +21,12 @@
 
   // The pane's project when it has one, the selected project otherwise: the
   // mobile tab has no pane around it.
-  // The two column verbs, passed only by SidePanel: see PanelDockActions.
+  // The column's close action, passed only by SidePanel: see PanelDockActions.
   type Props = {
     projectId?: string | null;
-    onDetach?: () => void;
     onClose?: () => void;
   };
-  let { projectId = null, onDetach, onClose }: Props = $props();
+  let { projectId = null, onClose }: Props = $props();
 
   const project = $derived.by(() => {
     const id = projectId ?? app.currentProjectId;
@@ -326,8 +325,8 @@
     >
       <RefreshCw class="size-3.5 {manualRefreshing ? 'animate-spin' : ''}" />
     </button>
-    {#if onDetach && onClose}
-      <PanelDockActions {onDetach} {onClose} />
+    {#if onClose}
+      <PanelDockActions {onClose} />
     {/if}
   </header>
 

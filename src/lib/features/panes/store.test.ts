@@ -162,8 +162,13 @@ describe("openBeside", () => {
 
   it("refuses past the pane cap rather than splitting forever", () => {
     threads(["t1", "p"]);
-    const kinds = ["git", "explorer", "todo"] as const;
-    for (const kind of kinds) expect(paneStore.openBeside("t1", { kind })).toBeTruthy();
+    // Two panels plus a browser pane: three distinct contents beside the
+    // thread, which is the cap.
+    expect(paneStore.openBeside("t1", { kind: "git" })).toBeTruthy();
+    expect(paneStore.openBeside("t1", { kind: "todo" })).toBeTruthy();
+    expect(
+      paneStore.openBeside("t1", { kind: "browser", url: "http://localhost:1/" }),
+    ).toBeTruthy();
     expect(countLeaves(paneStore.groupOf("t1")!.root)).toBe(MAX_LEAVES);
     expect(paneStore.openBeside("t1", { kind: "dashboard" })).toBe(null);
   });
@@ -175,14 +180,14 @@ describe("openBeside", () => {
   it("names a thread pane after its thread and anything else uniquely", () => {
     threads(["t1", "p"], ["t2", "p"]);
     expect(paneStore.openBeside("t1", { kind: "thread", threadId: "t2" })).toBe("t2");
-    const panel = paneStore.openBeside("t1", { kind: "editor" })!;
+    const panel = paneStore.openBeside("t1", { kind: "browser", url: "http://localhost" })!;
     expect(panel.startsWith("pane-")).toBe(true);
   });
 });
 
 describe("openGroup", () => {
   it("seeds a group of one panel for a project with no terminal", () => {
-    const paneId = paneStore.openGroup("p", { kind: "explorer" })!;
+    const paneId = paneStore.openGroup("p", { kind: "todo" })!;
     expect(paneStore.groups.length).toBe(1);
     expect(paneStore.groups[0].projectId).toBe("p");
     expect(paneStore.groupOf(paneId)?.focusedPaneId).toBe(paneId);
@@ -281,9 +286,10 @@ describe("splitInto", () => {
 
   it("refuses a group that is already full", () => {
     threads(["t1", "p"], ["t2", "p"]);
-    for (const kind of ["git", "explorer", "todo"] as const) {
+    for (const kind of ["git", "todo"] as const) {
       paneStore.openBeside("t1", { kind });
     }
+    paneStore.openBeside("t1", { kind: "browser", url: "http://localhost:1/" });
     expect(paneStore.splitInto("t1", "t2", "right")).toBe(false);
     // And the thread it refused is still where it was.
     expect(paneStore.groupOf("t2")).toBeTruthy();
