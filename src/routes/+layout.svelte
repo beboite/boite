@@ -35,6 +35,7 @@
   import ApprovalDock from "$lib/features/approvals/ApprovalDock.svelte";
   import CommandPalette from "$lib/features/palette/CommandPalette.svelte";
   import { createKeyboardController } from "$lib/shared/keyboard/controller";
+  import { jumpModifier } from "$lib/shared/keyboard/held.svelte";
   import type { KeyScope, ShortcutBinding } from "$lib/shared/keyboard/types";
 
   let { children } = $props();
@@ -292,6 +293,12 @@
   // Its own onMount: the boot one below returns early on the PWA path, and
   // shortcuts have to work there too.
   onMount(() => keyboard.attach());
+
+  // What lights the position numbers in the sidebar while the jump modifier is
+  // down. Beside the dispatcher because it is the same keyboard, and separate
+  // from it because a binding fires on a chord while this has to know about a
+  // modifier held on its own.
+  onMount(() => jumpModifier.watch());
 
   // The layout guess is only a guess until the user overrides it, and a tablet
   // can cross the threshold by being rotated.
