@@ -179,6 +179,7 @@ export const EN_MESSAGES = {
   "sidebar.noArchived": "No archived projects",
   "sidebar.pickFolder": "Pick a folder",
   "sidebar.backToProjects": "Back to projects",
+  "sidebar.filterThreads": "Filter threads",
   "sidebar.showArchived": "Show archived projects",
   "sidebar.archivedProjects": "Archived projects",
   "sidebar.addProject": "Add project",
