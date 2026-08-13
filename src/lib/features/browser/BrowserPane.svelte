@@ -71,7 +71,7 @@
     class="flex h-7 shrink-0 items-center gap-1.5 border-b border-border px-2"
   >
     <span
-      class="min-w-0 flex-1 truncate font-mono text-2xs text-muted-foreground"
+      class="min-w-0 flex-1 truncate text-2xs text-muted-foreground"
       title={url}
     >
       {url}

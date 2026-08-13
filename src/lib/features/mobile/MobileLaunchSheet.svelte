@@ -137,7 +137,7 @@
         }}
       >
         <span class="min-w-0 flex-1 truncate font-medium">{shell.label}</span>
-        <span class="shrink-0 font-mono text-xs text-muted-foreground/70">{shell.id}</span>
+        <span class="shrink-0 text-xs text-muted-foreground/70">{shell.id}</span>
       </button>
     {/each}
   </div>

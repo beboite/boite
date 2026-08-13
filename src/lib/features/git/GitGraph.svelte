@@ -692,7 +692,7 @@
         </span>
         {#each row.refBadges as badge (badge.ref)}
           <span
-            class="shrink-0 rounded px-1 py-px font-mono text-2xs {badge.isHead
+            class="shrink-0 rounded px-1.5 py-px text-2xs font-medium {badge.isHead
               ? 'bg-[var(--color-success)]/15 text-[var(--color-success)]'
               : 'bg-[var(--color-surface-3)] text-muted-foreground'}"
           >
@@ -700,12 +700,12 @@
           </span>
         {/each}
         {#if row.hiddenRefs > 0}
-          <span class="shrink-0 rounded bg-[var(--color-surface-3)] px-1 py-px font-mono text-2xs text-muted-foreground/70">
+          <span class="shrink-0 rounded bg-[var(--color-surface-3)] px-1.5 py-px tabular-nums text-2xs font-medium text-muted-foreground/70">
             +{row.hiddenRefs}
           </span>
         {/if}
         <span
-          class="shrink-0 font-mono text-2xs text-muted-foreground/55"
+          class="shrink-0 tabular-nums text-2xs text-muted-foreground/55"
         >
           {relTime(row.commit.time)}
         </span>
@@ -734,17 +734,17 @@
       {c.summary}
     </div>
     <div class="mt-2 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
-      <span class="font-mono text-foreground/75">{c.shortSha}</span>
+      <span class="tabular-nums font-medium text-foreground/75">{c.shortSha}</span>
       <span class="text-muted-foreground/40">·</span>
       <span class="text-muted-foreground/85">{c.author}</span>
       {#if c.email}
-        <span class="font-mono text-muted-foreground/55">&lt;{c.email}&gt;</span>
+        <span class="text-muted-foreground/55">&lt;{c.email}&gt;</span>
       {/if}
     </div>
     <div class="mt-1 text-xs text-muted-foreground/65">
       {fmtTime(c.time)}
     </div>
-    <div class="mt-2 flex items-center gap-2 font-mono text-xs">
+    <div class="mt-2 flex items-center gap-2 tabular-nums text-xs font-medium">
       <span class={c.additions > 0 ? "text-[var(--color-success)]" : "text-muted-foreground/45"}>
         +{c.additions}
       </span>
@@ -764,7 +764,7 @@
           {@const clean = r.replace(/^HEAD -> /, "")}
           {@const isHead = r.startsWith("HEAD")}
           <span
-            class="rounded px-1 py-px font-mono text-2xs {isHead
+            class="rounded px-1.5 py-px text-2xs font-medium {isHead
               ? 'bg-[var(--color-success)]/15 text-[var(--color-success)]'
               : 'bg-[var(--color-surface-3)] text-muted-foreground'}"
           >

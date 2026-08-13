@@ -87,7 +87,7 @@
       {t("workspace.token")}
       <input
         bind:this={tokenInput}
-        class="rounded-md border border-border bg-[var(--color-surface)] px-3 py-2 font-mono text-sm text-foreground outline-none focus:border-[var(--color-success)]"
+        class="rounded-md border border-border bg-[var(--color-surface)] px-3 py-2 text-sm text-foreground outline-none focus:border-[var(--color-success)]"
         type="password"
         bind:value={token}
         autocomplete="off"
@@ -98,7 +98,7 @@
       <div class="flex flex-col gap-1">
         <p class="text-xs text-danger">{failMessage}</p>
         {#if attempt?.detail}
-          <p class="font-mono text-xs text-muted-foreground/70">{attempt.detail}</p>
+          <p class="text-xs text-muted-foreground/70">{attempt.detail}</p>
         {/if}
       </div>
     {/if}

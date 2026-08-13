@@ -65,7 +65,7 @@
       >
         <div class="min-w-0">
           <div class="text-xs font-medium text-foreground">{shell.label}</div>
-          <div class="truncate font-mono text-xs text-muted-foreground">
+          <div class="truncate text-xs text-muted-foreground">
             {shell.cmd}
             {#if shell.args.length > 0}
               <span class="text-muted-foreground/70">{" " + shell.args.join(" ")}</span>
@@ -148,7 +148,7 @@
         setAutoFetchSeconds(Number((e.currentTarget as HTMLInputElement).value))}
       class="flex-1 accent-foreground"
     />
-    <span class="min-w-[56px] text-right font-mono text-xs text-muted-foreground">
+    <span class="min-w-[56px] text-right tabular-nums text-xs text-muted-foreground">
       {settings.state.gitAutoFetchSeconds < 60
         ? t("terminalTab.seconds", { count: settings.state.gitAutoFetchSeconds })
         : t("terminalTab.minutes", {
@@ -239,7 +239,7 @@
       oninput={(e) => setIdle(Number((e.currentTarget as HTMLInputElement).value))}
       class="flex-1 accent-foreground"
     />
-    <span class="min-w-[56px] text-right font-mono text-xs text-muted-foreground">
+    <span class="min-w-[56px] text-right tabular-nums text-xs text-muted-foreground">
       {settings.state.idleTimeoutMinutes === 0
         ? t("common.off")
         : t("terminalTab.minutes", { count: settings.state.idleTimeoutMinutes })}

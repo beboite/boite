@@ -176,7 +176,7 @@
               <span class="block truncate text-base leading-tight text-foreground">
                 {projectDisplayName(project)}
               </span>
-              <span class="block truncate font-mono text-2xs text-muted-foreground/70">
+              <span class="block truncate text-2xs text-muted-foreground/70">
                 {project.cwd}
               </span>
             </span>

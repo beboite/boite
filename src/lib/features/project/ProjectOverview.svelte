@@ -160,7 +160,7 @@
     {:else}
       <div class="flex items-baseline gap-2">
         <p
-          class="min-w-0 flex-1 truncate font-mono text-md text-foreground"
+          class="min-w-0 flex-1 truncate font-medium text-md text-foreground"
           title={git.branch ?? ""}
         >
           {git.branch ?? t("project.detached")}
@@ -188,7 +188,7 @@
               </span>
               <!-- The one thing the sha never said. A dashboard is read for
                    "when did anything last happen here". -->
-              <span class="shrink-0 font-mono text-xs text-muted-foreground/70">
+              <span class="shrink-0 text-xs text-muted-foreground/70">
                 {formatAgo(relativeClock.now - commit.time * 1000)}
               </span>
             </li>
@@ -252,7 +252,7 @@
        that never changes, and a card's worth of chrome around two static
        strings was room the rest of the page wanted. -->
   <p
-    class="truncate px-1 font-mono text-xs text-muted-foreground/70 lg:col-span-3"
+    class="truncate px-1 text-xs text-muted-foreground/70 lg:col-span-3"
     title={project.cwd}
   >
     {project.cwd}{#if project.gitRoot && project.gitRoot !== project.cwd}

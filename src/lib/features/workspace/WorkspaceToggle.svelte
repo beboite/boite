@@ -347,7 +347,7 @@
         <!-- The build every row below is compared against, spelled out rather
              than left implicit: "behind" is only meaningful next to it. -->
         <span
-          class="shrink-0 font-mono text-2xs text-muted-foreground"
+          class="shrink-0 tabular-nums text-2xs text-muted-foreground"
           title={t("workspace.versionThis")}
         >
           v{__APP_VERSION__}
@@ -413,7 +413,7 @@
                    showing a blank, which reads as "up to date". -->
               {#if version}
                 <span
-                  class={`shrink-0 font-mono text-2xs ${behind ? "rounded bg-warning/15 px-1 text-warning" : "text-muted-foreground/70"}`}
+                  class={`shrink-0 tabular-nums text-2xs ${behind ? "rounded bg-warning/15 px-1 font-medium text-warning" : "text-muted-foreground/70"}`}
                   title={behind
                     ? t("workspace.versionBehind", {
                         version,
@@ -527,7 +527,7 @@
             placeholder="••••••••"
             spellcheck="false"
             autocomplete="off"
-            class="w-full rounded-md border border-border bg-[var(--color-background)] px-3 py-2.5 font-mono text-sm normal-case tracking-normal text-foreground outline-none focus:border-foreground/40"
+            class="w-full rounded-md border border-border bg-[var(--color-background)] px-3 py-2.5 text-sm normal-case tracking-normal text-foreground outline-none focus:border-foreground/40"
           />
         </label>
 

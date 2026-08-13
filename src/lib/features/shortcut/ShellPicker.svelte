@@ -282,7 +282,7 @@
           onclick={(e) => void pick(shell, e.shiftKey)}
         >
           <span class="font-medium">{shell.label}</span>
-          <span class="font-mono text-2xs text-muted-foreground/70">{shell.id}</span>
+          <span class="text-2xs text-muted-foreground/70">{shell.id}</span>
         </button>
       {/each}
     </div>

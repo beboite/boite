@@ -177,7 +177,7 @@
             onclick={up}
             disabled={path === root}>↑ {t("folderBrowser.up")}</button
           >
-          <span class="truncate font-mono text-xs text-muted-foreground">{path}</span>
+          <span class="truncate text-xs text-muted-foreground">{path}</span>
         </div>
 
         <div class="min-h-0 flex-1 overflow-auto p-1">
