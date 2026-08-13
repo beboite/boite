@@ -37,7 +37,7 @@ describe("the settings catalogue matches the pages", () => {
   });
 
   it("leaves no anchored control out of the catalogue", () => {
-    const listed = new Set(SETTINGS_CATALOGUE.map((e) => e.key));
+    const listed = new Set<string>(SETTINGS_CATALOGUE.map((e) => e.key));
     for (const [tab, source] of pages) {
       for (const m of source.matchAll(/anchor="([^"]+)"/g)) {
         expect(listed.has(m[1]), `${tab}: ${m[1]}`).toBe(true);
