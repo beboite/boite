@@ -2,6 +2,10 @@ import { invoke } from "./ipc";
 import type {
   ApprovalsApi,
   PendingApproval,
+  Checkpoint,
+  CheckpointApi,
+  CheckpointDiff,
+  CheckpointFileVersions,
   EditorApi,
   ExplorerApi,
   FastpickApi,
@@ -88,6 +92,18 @@ export const tauriEditor: EditorApi = {
   fileVersions: (path, file, headFile) =>
     invoke<FileVersions>("git_file_versions", { path, file, headFile }),
   readBase64: (path) => invoke<string>("read_file_base64", { path }),
+};
+
+export const tauriCheckpoints: CheckpointApi = {
+  capture: (repo, threadId, edge) =>
+    invoke<Checkpoint | null>("checkpoint_capture", { repo, threadId, edgeName: edge }),
+  list: (repo, threadId) => invoke<Checkpoint[]>("checkpoint_list", { repo, threadId }),
+  diff: (repo, from, to, patch) =>
+    invoke<CheckpointDiff>("checkpoint_diff", { repo, from, to, patch }),
+  fileVersions: (repo, from, to, file) =>
+    invoke<CheckpointFileVersions>("checkpoint_file_versions", { repo, from, to, file }),
+  restore: (repo, sha) => invoke<void>("checkpoint_restore", { repo, sha }),
+  forget: (repo, threadId) => invoke<void>("checkpoint_forget", { repo, threadId }),
 };
 
 export const tauriProject: ProjectApi = {

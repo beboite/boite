@@ -331,6 +331,65 @@ export interface EditorApi {
   readBase64(path: string): Promise<string>;
 }
 
+/** Which end of an agent's turn a checkpoint was taken at. */
+export type CheckpointEdge = "start" | "end";
+
+/**
+ * What a worktree looked like at one end of a turn, as a ref nothing else reads.
+ *
+ * `files`, `additions` and `deletions` are measured against the checkpoint
+ * before this one and recorded when it is written, so a list of them costs one
+ * call rather than one diff per row.
+ */
+export interface Checkpoint {
+  index: number;
+  sha: string;
+  edge: CheckpointEdge;
+  at: number;
+  files: number;
+  additions: number;
+  deletions: number;
+}
+
+export interface CheckpointFile {
+  path: string;
+  /** `A`, `M`, `D`, `R` or `T`, as git reports it. */
+  status: string;
+  origPath: string | null;
+  additions: number;
+  deletions: number;
+  binary: boolean;
+}
+
+export interface CheckpointDiff {
+  files: CheckpointFile[];
+  /** Empty unless `patch` was asked for. */
+  patch: string;
+  truncated: boolean;
+}
+
+export interface CheckpointFileVersions {
+  before: string | null;
+  after: string | null;
+  binary: boolean;
+}
+
+export interface CheckpointApi {
+  /** Null when the thread is not running in a git repository. */
+  capture(repo: string, threadId: string, edge: CheckpointEdge): Promise<Checkpoint | null>;
+  list(repo: string, threadId: string): Promise<Checkpoint[]>;
+  diff(repo: string, from: string, to: string, patch: boolean): Promise<CheckpointDiff>;
+  fileVersions(
+    repo: string,
+    from: string,
+    to: string,
+    file: string,
+  ): Promise<CheckpointFileVersions>;
+  /** Restores the files and nothing else. Never the agent's conversation. */
+  restore(repo: string, sha: string): Promise<void>;
+  forget(repo: string, threadId: string): Promise<void>;
+}
+
 /** What is already sitting where a new project wants to go. */
 export type FolderState = "missing" | "empty" | "occupied";
 
@@ -847,6 +906,7 @@ export interface Backend {
   readonly worktree: WorktreeApi;
   readonly explorer: ExplorerApi;
   readonly editor: EditorApi;
+  readonly checkpoints: CheckpointApi;
   readonly project: ProjectApi;
   readonly system: SystemApi;
   readonly shell: ShellApi;

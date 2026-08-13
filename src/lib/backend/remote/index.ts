@@ -5,6 +5,10 @@ import type {
   CommitStateAnswer,
   ControlEvent,
   DbApi,
+  Checkpoint,
+  CheckpointApi,
+  CheckpointDiff,
+  CheckpointFileVersions,
   EditorApi,
   ExplorerApi,
   FastpickApi,
@@ -70,6 +74,7 @@ export class RemoteBackend implements Backend {
   readonly worktree: WorktreeApi;
   readonly explorer: ExplorerApi;
   readonly editor: EditorApi;
+  readonly checkpoints: CheckpointApi;
   readonly project: ProjectApi;
   readonly system: SystemApi;
   readonly shell: ShellApi;
@@ -324,6 +329,26 @@ export class RemoteBackend implements Backend {
       // image in a pane on a remote workspace stopped being a blank frame the
       // moment the server grew the same command.
       readBase64: (path) => rpc("file.readBase64", { path }).then((r) => r.base64 as string),
+    };
+
+    this.checkpoints = {
+      capture: (repo, threadId, edge) =>
+        rpc("checkpoint.capture", { repo, threadId, edge }).then(
+          (r) => r as unknown as Checkpoint | null,
+        ),
+      list: (repo, threadId) =>
+        rpc("checkpoint.list", { repo, threadId }).then((r) => r.checkpoints as Checkpoint[]),
+      diff: (repo, from, to, patch) =>
+        rpc("checkpoint.diff", { repo, from, to, patch }).then(
+          (r) => r as unknown as CheckpointDiff,
+        ),
+      fileVersions: (repo, from, to, file) =>
+        rpc("checkpoint.fileVersions", { repo, from, to, file }).then(
+          (r) => r as unknown as CheckpointFileVersions,
+        ),
+      restore: (repo, sha) => rpc("checkpoint.restore", { repo, sha }).then(() => {}),
+      forget: (repo, threadId) =>
+        rpc("checkpoint.forget", { repo, threadId }).then(() => {}),
     };
 
     this.project = {

@@ -516,7 +516,7 @@ fn numstat(repo: &Path, from: &str, to: &str) -> Result<Counts, String> {
     let mut counts = Counts::new();
     // With `-z` a numstat record is `add\tdel\t` then the path as its own
     // NUL-terminated field, and a rename sends the old path and the new one.
-    let mut fields = text.split('\0').filter(|f| !f.is_empty()).peekable();
+    let mut fields = text.split('\0').filter(|f| !f.is_empty());
     while let Some(record) = fields.next() {
         let mut parts = record.split('\t');
         let add = parts.next().unwrap_or_default();
