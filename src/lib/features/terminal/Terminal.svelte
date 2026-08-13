@@ -393,7 +393,7 @@
       const addon = new WebglAddon();
       // A loss is the browser reclaiming the context, which is what happens
       // when something outside the budget takes one. Dispose so xterm falls
-      // back to the DOM renderer, and let the next fit ask again — the pane
+      // back to the DOM renderer, and let the next fit ask again. The pane
       // used to keep the dead addon and never draw on the GPU again, for the
       // life of the window.
       addon.onContextLoss(() => {

@@ -1,7 +1,7 @@
 /**
  * Who gets a GPU context, and who waits for one.
  *
- * A browser keeps a small number of WebGL contexts alive at once — sixteen in
+ * A browser keeps a small number of WebGL contexts alive at once, sixteen in
  * Chromium, which is the webview on two platforms of three. Boite mounts one
  * terminal per activated thread and never unmounts it while the thread lives,
  * so the seventeenth thread opened in a session takes a context away from the
@@ -23,8 +23,8 @@
  */
 
 /**
- * Twelve, not sixteen. Contexts are not freed the instant an addon disposes —
- * the browser reclaims them on its own schedule — so a budget sitting on the
+ * Twelve, not sixteen. Contexts are not freed the instant an addon disposes,
+ * the browser reclaims them on its own schedule, so a budget sitting on the
  * hard limit still loses the race whenever a pane is granted in the same frame
  * another was revoked. Four spare is the margin, and a window showing more than
  * twelve terminals at once has cells too small to read anyway.
