@@ -29,7 +29,7 @@
 //! it and cannot afford to link sqlite, a PTY layer and a git driver to do it.
 
 use ed25519_compact::{KeyPair, PublicKey, Seed, Signature};
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use sha2::{Digest, Sha256};
 
 /// Named in the signed string, so a future scheme cannot be confused with this
