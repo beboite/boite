@@ -25,8 +25,12 @@ tested natively on `linux/arm64` (Orange Pi); `docker buildx` is not required if
 you build on the target arch.
 
 ```bash
-# 1. Pick a token (this is the only credential; treat it like a root password).
+# 1. Pick a bootstrap token. It pairs devices and opens nothing else, but
+#    pairing a device is granting one, so treat it like a root password.
 echo "BOITE_TOKEN=$(openssl rand -hex 32)" > .env
+# The name this boite is reached by from outside, so a pairing link points
+# somewhere. Behind a reverse proxy the server cannot work this out itself.
+echo "BOITE_PUBLIC_URL=https://boite.example" >> .env
 # optional mobile notifications:
 # echo "BOITE_WEBHOOK_URL=https://ntfy.sh/your-private-topic" >> .env
 # echo "BOITE_WEBHOOK_FORMAT=ntfy" >> .env
@@ -39,18 +43,55 @@ docker exec -it boite claude
 #   ... or set ANTHROPIC_API_KEY in the environment instead of OAuth.
 
 # 4. Put repos to work on under ./workspace (mounted at /workspace).
+
+# 5. Invite the first device. Prints a QR and a link, good once and for ten
+#    minutes; open it on the phone or laptop you are adding.
+docker exec boite boite-server pair --label "my phone" --kind phone
 ```
 
-Then add it from the desktop app's workspace picker (titlebar) as
-`ws://<host>:7337/ws` with the token, or open `http://<host>:7337/` in a
-browser / install the PWA. The picker holds several boites; give each a name
-and color (synced to every connected device) to tell them apart.
+The picker holds several boites; give each a name and color (synced to every
+connected device) to tell them apart.
+
+## Pairing a device
+
+Every device holds its own credential, so one can be revoked without touching
+any other. There is no workspace-wide password any more.
+
+```bash
+boite-server pair [--label L] [--kind K] [--scopes ...] [--minutes N] [--url BASE]
+boite-server devices          # what is paired, with scopes and last seen
+boite-server revoke <id>      # shut one out, at once
+```
+
+These talk to the database rather than to the running server, so they work
+whether or not it is up. From a device already paired with `admin`, the same
+three live in Settings -> Devices.
+
+Opening the printed link on the new device pairs it: the one-time token rides
+in the URL's **hash fragment**, so it reaches no access log, no proxy log and no
+`Referer` header. It is spent on first use.
+
+Scopes, and what each one is:
+
+| Scope | Grants |
+|---|---|
+| `read` | look at the workspace: rows, git status, file contents, search, the timeline |
+| `write` | change something inside a project: commit, write a file, save a todo |
+| `terminal` | open, drive, resize and kill a PTY |
+| `approve` | answer what an agent put in front of the user |
+| `admin` | reach past a project, and pair or revoke devices |
+
+`admin` covers `write` covers `read`. Nothing implies `terminal` or `approve`:
+a PTY is arbitrary code on the machine rather than a change to a project, so a
+device paired to rename projects does not come away with a shell. The default
+grant is everything except `admin`.
 
 ## Configuration (env)
 
 | Var | Default | Meaning |
 |-----|---------|---------|
-| `BOITE_TOKEN` | generated | Bearer token; sent as the first WS frame. If unset, a 32-byte hex token is generated and written to `$BOITE_DATA_DIR/token` (chmod 600). |
+| `BOITE_TOKEN` | generated | **Bootstrap** credential. It opens `POST /api/pairings` and nothing else: it cannot open a socket, call an RPC or mint a ticket. If unset, a 32-byte hex token is generated and written to `$BOITE_DATA_DIR/token` (chmod 600). |
+| `BOITE_PUBLIC_URL` | _(none)_ | What this boite is reached by from outside, used only to build the text of a pairing link. Behind a reverse proxy the server cannot work it out: the `Host` header is whatever the caller sent. |
 | `BOITE_BIND` | `127.0.0.1:7337` | Listen address. The Docker image sets `0.0.0.0:7337`. |
 | `BOITE_DATA_DIR` | `./boite-data` | SQLite DB + token file. |
 | `BOITE_STATIC_DIR` | _(none)_ | Directory of the built SvelteKit SPA to serve. The image sets `/app/web`. |
@@ -63,18 +104,38 @@ and color (synced to every connected device) to tell them apart.
 
 ## Security
 
-The token is a **remote shell**: an authenticated client can spawn arbitrary
+A device paired with `terminal` holds a **remote shell**: it can spawn arbitrary
 processes (`thread.spawn` runs any command in any cwd) and read/write files
-under the project roots. Treat the token like an SSH key.
+under the project roots. Pair with the scopes a device actually needs.
 
+Three credentials, and none of them converts into another:
+
+| | Bootstrap token | Device credential | Socket ticket |
+|---|---|---|---|
+| Who holds it | the operator, in the environment | one paired device | one socket, once |
+| Lives | as long as the deployment | until revoked | five minutes |
+| Opens | `POST /api/pairings`, nothing else | `POST /api/ticket`, nothing else | one WebSocket |
+
+The long-lived credential never travels in a URL and never opens a socket: it
+buys a ticket over authenticated HTTP, and the ticket is worth nothing once
+spent. An upgrade request carrying `?token=` or `?ticket=` is refused outright,
+because a query string reaches the access log of whatever proxy is in front.
+
+- Revoking a device takes effect immediately, including on a socket it is
+  already holding: the connection is hung up and the pairing row is re-read on
+  every call.
+- The database holds a SHA-256 of each secret and never the secret, so a dump of
+  it opens nothing. Every comparison is constant time.
 - The server binds loopback by default. When you bind a routable interface it
-  warns that the token crosses the wire in clear text on plain `ws://`.
+  warns that credentials cross the wire in clear text on plain `http://` and
+  `ws://`.
 - **Always** terminate TLS in front of it (a reverse proxy) or tunnel it
   (WireGuard / Tailscale / SSH). The PWA also requires a secure context
   (HTTPS or `localhost`) to install and run its service worker; Tailscale
   Serve or Caddy with a real cert is the blessed path.
-- Auth is a constant-time compare with a per-IP lockout (5 failures -> 60s, the
-  count persists across lockouts so a repeat offender stays throttled).
+- Every door shares one per-IP lockout (5 failures -> 60s, the count persists
+  across lockouts so a repeat offender stays throttled), so guesses cannot be
+  spread across them for three times the tries.
 
 ## Mobile notifications
 
@@ -115,4 +176,7 @@ had downloaded one row above a line saying the workspace was somewhere else.
 cargo build -p boite-server --release   # boite-core only, not src-tauri
 bun run build                           # SPA -> ./build
 BOITE_TOKEN=dev BOITE_STATIC_DIR=./build ./target/release/boite-server
+
+# In another shell: invite this machine's browser.
+BOITE_TOKEN=dev ./target/release/boite-server pair --url http://127.0.0.1:7337
 ```
