@@ -1,6 +1,6 @@
 [package]
 name = "boite-identity"
-version = "1.0.5"
+version = "1.0.6"
 description = "Who a Boite request is from, proved rather than presented"
 edition = "2021"
 
