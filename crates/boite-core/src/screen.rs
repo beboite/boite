@@ -50,6 +50,12 @@ impl Rect {
 }
 
 /// One pane, as the window has it laid out.
+///
+/// The three browser fields carry `#[serde(default)]` and the others do not,
+/// which is not tidiness: a boite serves its own SPA and a device can be running
+/// a cached older build of it. A field added without a default turns that
+/// device's whole description into a deserialize error, so the window stops
+/// answering the moment it has something new to say.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Pane {
@@ -61,9 +67,50 @@ pub struct Pane {
     /// The terminal in it, for a pane that holds one. This is what joins a pane
     /// to a thread row, to a live PTY and to a transcript.
     pub thread_id: Option<String>,
+    /// The page in it, for a pane that holds one. What `thread_id` is to a
+    /// terminal: the only thing that joins the rectangle to what is in it.
+    ///
+    /// It is the address the app framed, never the address the frame is on now.
+    /// The two part company the moment anything inside the page navigates, and
+    /// nothing on this side can tell: see [`PAGE_IS_OPAQUE`].
+    #[serde(default)]
+    pub url: Option<String>,
+    /// What the frame's own `load` event said. One of [`PAGE_STATES`].
+    ///
+    /// The whole of what the container observes about a page. `stalled` is not
+    /// "failed": a frame that never fires `load` is either slow or refused by
+    /// `X-Frame-Options`, and the error goes to the console of a document the
+    /// app is not allowed to touch.
+    #[serde(default)]
+    pub page: Option<String>,
+    /// The thread whose agent is pointing this pane, until the user takes it
+    /// back. `None` is a pane the user owns, and an agent's calls at one are
+    /// refused rather than queued.
+    #[serde(default)]
+    pub driven_by: Option<String>,
     pub rect: Rect,
     pub focused: bool,
 }
+
+/// What the window can say about a page, and the whole of it.
+pub const PAGE_STATES: [&str; 3] = ["loading", "loaded", "stalled"];
+
+/// Why nothing here describes what is *in* a page.
+///
+/// The browser pane is a sandboxed cross-origin `<iframe>`, and both halves of
+/// that are load bearing. `crate::browser::classify` refuses Boite's own origin
+/// outright, so the frame is never same-origin with the window; and everything
+/// that is not a dev server on this machine also loses `allow-same-origin`, so
+/// it lands in an opaque origin. Reading the document, querying a selector in it
+/// or synthesising a click on an element inside it are not missing features —
+/// they are the thing the boundary exists to prevent, and a tool claiming to do
+/// one would be reporting a result it invented.
+///
+/// Spelled once, here, because it is the sentence every browser tool has to say
+/// to an agent that was about to ask for one of those.
+pub const PAGE_IS_OPAQUE: &str = "the page is a sandboxed cross-origin frame: Boite can point it, \
+                                  reload it and say whether it loaded, and can read nothing inside \
+                                  it";
 
 /// The window itself.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -103,6 +150,9 @@ pub struct Screen {
 /// arriving as an answer nothing can hold.
 pub const MAX_PANES: usize = 32;
 pub const MAX_OVERLAYS: usize = 16;
+/// Long enough for a real address with a query on it, short enough that a
+/// window sending thirty-two of them cannot fill an answer on its own.
+pub const MAX_URL: usize = 300;
 
 impl Screen {
     /// Trims whatever the window sent to something worth keeping.
@@ -117,8 +167,22 @@ impl Screen {
             if pane.title.chars().count() > 120 {
                 pane.title = pane.title.chars().take(120).collect();
             }
+            if pane.url.as_ref().is_some_and(|u| u.chars().count() > MAX_URL) {
+                pane.url = pane.url.as_ref().map(|u| u.chars().take(MAX_URL).collect());
+            }
+            // A word this does not know is dropped rather than passed on. An
+            // agent reading an unlisted state has no way to act on it, and
+            // "nothing was said" is the answer it already handles.
+            if pane.page.as_deref().is_some_and(|p| !PAGE_STATES.contains(&p)) {
+                pane.page = None;
+            }
         }
         self
+    }
+
+    /// The browser panes, in reading order. What every browser tool asks first.
+    pub fn browsers(&self) -> Vec<&Pane> {
+        self.panes.iter().filter(|p| p.kind == "browser").collect()
     }
 
     /// One line per pane, for a reader that has no window of its own.
@@ -130,7 +194,7 @@ impl Screen {
             .iter()
             .map(|p| {
                 format!(
-                    "{}{} {} at {}x{} ({},{}){}",
+                    "{}{} {} at {}x{} ({},{}){}{}",
                     if p.focused { "* " } else { "  " },
                     p.kind,
                     p.title,
@@ -142,6 +206,14 @@ impl Screen {
                         ""
                     } else {
                         " -- laid out but not visible"
+                    },
+                    // The address belongs on the line for the same reason the
+                    // size does: "a browser pane is open" and "it is open on
+                    // the page you meant" are different answers.
+                    match (&p.url, &p.page) {
+                        (Some(url), Some(state)) => format!(" -- {state} {url}"),
+                        (Some(url), None) => format!(" -- {url}"),
+                        _ => String::new(),
                     },
                 )
             })
@@ -166,6 +238,18 @@ mod tests {
                 h: 600.0,
             },
             focused,
+            url: None,
+            page: None,
+            driven_by: None,
+        }
+    }
+
+    fn browser(id: &str, url: &str, page: Option<&str>) -> Pane {
+        Pane {
+            kind: "browser".into(),
+            url: Some(url.into()),
+            page: page.map(str::to_string),
+            ..pane(id, 640.0, false)
         }
     }
 
@@ -208,6 +292,42 @@ mod tests {
         assert_eq!(s.panes.len(), MAX_PANES);
         assert_eq!(s.overlays.len(), MAX_OVERLAYS);
         assert_eq!(s.panes[0].title.chars().count(), 120);
+    }
+
+    /// "A browser pane is open" and "it is open on the page you meant" are two
+    /// answers, and only the second one is worth reading.
+    #[test]
+    fn a_browser_pane_says_where_it_points_and_how_it_went() {
+        let s = screen(vec![browser("b1", "http://localhost:5173/", Some("loaded"))]);
+        assert!(s.lines()[0].ends_with(" -- loaded http://localhost:5173/"), "{:?}", s.lines()[0]);
+        assert_eq!(s.browsers().len(), 1);
+        assert!(screen(vec![pane("a", 10.0, false)]).browsers().is_empty());
+    }
+
+    /// The window is the half that may be misbehaving, and a state nothing can
+    /// act on is worse than no state at all.
+    #[test]
+    fn a_page_state_this_does_not_know_is_dropped() {
+        let s = screen(vec![
+            browser("b1", "http://localhost:1/", Some("on fire")),
+            browser("b2", &format!("http://localhost:2/?q={}", "x".repeat(500)), Some("loaded")),
+        ])
+        .trimmed();
+        assert_eq!(s.panes[0].page, None);
+        assert_eq!(s.panes[1].page.as_deref(), Some("loaded"));
+        assert_eq!(s.panes[1].url.as_ref().unwrap().chars().count(), MAX_URL);
+    }
+
+    /// A device can be running a cached older build of the SPA, and its
+    /// description has to stay readable rather than becoming a parse error.
+    #[test]
+    fn a_window_that_never_heard_of_browser_panes_still_describes_itself() {
+        let older = r#"{"id":"a","kind":"git","title":"Git","threadId":null,
+            "rect":{"x":0,"y":0,"w":100,"h":100},"focused":false}"#;
+        let back: Pane = serde_json::from_str(older).unwrap();
+        assert_eq!(back.url, None);
+        assert_eq!(back.page, None);
+        assert_eq!(back.driven_by, None);
     }
 
     #[test]

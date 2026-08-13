@@ -19,6 +19,7 @@ serde_json = "1"
 subtle = "2"
 uuid = { version = "1", features = ["v4"] }
 dirs = "6"
-# Only `spawn_blocking`: both hosts already run on a tokio runtime, and the git
-# calls here spawn processes that must not sit on it.
-tokio = { version = "1", features = ["rt"] }
+# `spawn_blocking` for the git calls, which spawn processes that must not sit on
+# the runtime, and `time` for the one route that waits on a page: both hosts
+# already run a tokio runtime with a timer under axum.
+tokio = { version = "1", features = ["rt", "time"] }

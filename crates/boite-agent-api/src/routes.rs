@@ -56,6 +56,11 @@ pub fn router(workspace: Shared) -> Router {
         .route("/v1/thread/move", post(thread_move))
         .route("/v1/threads", post(thread_spawn))
         .route("/v1/pane/open", post(pane_open))
+        .route("/v1/browser", get(browser_status))
+        .route("/v1/browser/wait", get(browser_wait))
+        .route("/v1/browser/navigate", post(browser_navigate))
+        .route("/v1/browser/reload", post(browser_reload))
+        .route("/v1/browser/close", post(browser_close))
         .route("/v1/snapshot", get(snapshot))
         .route("/v1/transcript", get(transcript))
         .route("/v1/search", get(search))
@@ -1049,6 +1054,344 @@ async fn pane_open(
             .with("url", url.unwrap_or_default()),
     );
     Ok(Json(json!({ "ok": true })))
+}
+
+// ------------------------------------------------------------ the browser pane
+
+/// What a browser tool is told when this host cannot see a window.
+///
+/// The server has none, and a desktop whose webview has not described itself yet
+/// is the same answer. Said in full rather than as an empty list, because "no
+/// browser pane is open" and "I cannot see whether one is" send an agent to two
+/// different places — the same reason `transcripts_dir` answers `None` instead
+/// of pretending.
+const NO_WINDOW_TO_LOOK_AT: &str = "this Boite has no window of its own to look at, so it cannot \
+                                    say what is on the pane. The device drawing it can: navigate, \
+                                    reload and close still reach it, they just cannot be checked \
+                                    from here first.";
+
+/// What an agent is told when it reaches for a pane it is not driving.
+const NOT_YOURS: &str = "the user has taken that pane back, so it is theirs to point now. Open one \
+                         of your own with pane_open kind=browser.";
+
+/// The window's description, or the sentence saying why there is none to read.
+///
+/// The project check is the same rule the device applies to `pane.open`: a
+/// window is showing one project's group at a time, and an agent in another one
+/// asking about "the browser pane" is asking about somebody else's screen.
+fn window_showing(
+    workspace: &dyn Workspace,
+    caller: &Caller,
+) -> Result<boite_core::screen::Screen, String> {
+    let screen = workspace.on_screen().ok_or(NO_WINDOW_TO_LOOK_AT)?;
+    if screen.project_id != caller.project_id {
+        return Err(
+            "the window is showing another project right now, so none of your panes are on it"
+                .to_string(),
+        );
+    }
+    Ok(screen)
+}
+
+/// Which pane the call meant, settled against what the window says is on it.
+///
+/// Three refusals rather than one, because an agent acts on each differently:
+/// nothing to point, an id that is not there, and one it is not allowed to
+/// point. All three are sentences: this runs while the agent is still alive to
+/// read one.
+fn which_pane(
+    screen: &boite_core::screen::Screen,
+    caller: &Caller,
+    asked: Option<&str>,
+) -> Result<String, String> {
+    let panes = screen.browsers();
+    if panes.is_empty() {
+        return Err(
+            "no browser pane is open; pane_open kind=browser url=<address> opens one".to_string(),
+        );
+    }
+    let mine = caller.thread_or_empty();
+    let pane = match asked.filter(|id| !id.is_empty()) {
+        Some(id) => panes
+            .iter()
+            .find(|p| p.id == id)
+            .ok_or_else(|| format!("no browser pane called '{id}'; browser_status lists them"))?,
+        None if panes.len() == 1 => panes[0],
+        // Picking one would be picking the user's screen for them, and the two
+        // panes are usually a dev server and a docs page.
+        None => {
+            return Err(format!(
+                "{} browser panes are open; say which with paneId, from browser_status",
+                panes.len()
+            ))
+        }
+    };
+    // An empty thread id is a credentials file: no terminal behind it, and
+    // nothing it opened, so it drives nothing. Written as its own case because
+    // `"" == ""` would otherwise hand it every pane the user owns.
+    if mine.is_empty() || pane.driven_by.as_deref() != Some(mine) {
+        return Err(NOT_YOURS.to_string());
+    }
+    Ok(pane.id.clone())
+}
+
+/// The browser panes on the window, and what the window can honestly say about
+/// them.
+///
+/// Read off the window's own description rather than asked for: see
+/// `boite_core::screen` for why the window pushes. That description is also the
+/// whole of what this endpoint can know about a page, which is why there are
+/// five browser routes and not fourteen — `screen::PAGE_IS_OPAQUE` is the
+/// reason, and it goes out with every answer so an agent never has to guess at
+/// it.
+async fn browser_status(
+    State(workspace): State<Shared>,
+    Extension(caller): Extension<Caller>,
+) -> Result<Json<Value>, StatusCode> {
+    let screen = match window_showing(&*workspace, &caller) {
+        Ok(screen) => screen,
+        Err(reason) => return Ok(refused(reason)),
+    };
+    Ok(Json(json!({
+        "panes": describe(&screen, &caller),
+        "describedAt": screen.at,
+        "opaque": boite_core::screen::PAGE_IS_OPAQUE,
+    })))
+}
+
+fn describe(screen: &boite_core::screen::Screen, caller: &Caller) -> Vec<Value> {
+    let mine = caller.thread_or_empty();
+    screen
+        .browsers()
+        .iter()
+        .map(|p| {
+            json!({
+                "paneId": p.id,
+                "url": p.url,
+                "page": p.page,
+                // Whose it is, rather than which thread id it names: the id
+                // means nothing to an agent that is not that thread.
+                "yours": !mine.is_empty() && p.driven_by.as_deref() == Some(mine),
+                "focused": p.focused,
+                "width": p.rect.w.round(),
+                "height": p.rect.h.round(),
+                // A pane laid out at no width is open and not on the screen,
+                // which is a difference a list of open panes cannot show.
+                "visible": p.rect.shows(),
+            })
+        })
+        .collect()
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WaitIn {
+    pane_id: Option<String>,
+    timeout_ms: Option<u64>,
+}
+
+/// How long a wait may run.
+///
+/// Under the shim's own 20 s socket timeout, so a wait that runs out comes back
+/// as an answer the agent can read rather than as a dead connection it has to
+/// interpret.
+const MAX_WAIT_MS: u64 = 12_000;
+/// The window describes itself on a five second beat, so a page that settles
+/// just after one is seen at the next. Polling faster costs nothing and is not
+/// the bound here; that is worth knowing before anyone tunes this.
+const POLL_MS: u64 = 250;
+
+/// Waits for the page to stop loading, and says which way it went.
+///
+/// `loaded` is the frame's own `load` event. `stalled` is the honest name for
+/// the other outcome: a frame that never fires one is either slow or refused by
+/// `X-Frame-Options`, and the error is delivered to the console of a document
+/// nothing on this side may touch. An agent that started a dev server and wants
+/// to know whether it is up reads the first; one that framed a public site and
+/// got the second should open it outside.
+async fn browser_wait(
+    State(workspace): State<Shared>,
+    Extension(caller): Extension<Caller>,
+    axum::extract::Query(query): axum::extract::Query<WaitIn>,
+) -> Result<Json<Value>, StatusCode> {
+    let budget = query.timeout_ms.unwrap_or(MAX_WAIT_MS).min(MAX_WAIT_MS);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(budget);
+    // Settled once, before the loop: an agent that named a pane it does not
+    // drive should be told so now, not in twelve seconds.
+    let pane_id = match window_showing(&*workspace, &caller)
+        .and_then(|s| which_pane(&s, &caller, query.pane_id.as_deref()))
+    {
+        Ok(id) => id,
+        Err(reason) => return Ok(refused(reason)),
+    };
+    loop {
+        // One read per turn round the loop, so "still loading" and "gone" are
+        // decided from the same description rather than from two.
+        let screen = workspace.on_screen();
+        let pane = screen
+            .as_ref()
+            .and_then(|s| s.browsers().into_iter().find(|p| p.id == pane_id).cloned());
+        match pane {
+            Some(pane) => {
+                if let Some(state) = pane.page.filter(|s| s != "loading") {
+                    return Ok(Json(json!({
+                        "paneId": pane_id,
+                        "page": state,
+                        "opaque": boite_core::screen::PAGE_IS_OPAQUE,
+                    })));
+                }
+            }
+            // The pane went away while waiting, which is an answer. Only when
+            // the window did speak: a description that stopped arriving is not
+            // a pane that closed.
+            None if screen.is_some() => {
+                return Ok(refused("that pane closed while you were waiting for it"))
+            }
+            None => {}
+        }
+        if std::time::Instant::now() >= deadline {
+            return Ok(Json(json!({
+                "paneId": pane_id,
+                "page": "loading",
+                "timedOut": true,
+                "opaque": boite_core::screen::PAGE_IS_OPAQUE,
+            })));
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(POLL_MS)).await;
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NavigateIn {
+    url: String,
+    pane_id: Option<String>,
+}
+
+/// Points a browser pane the agent is already driving at another address.
+///
+/// It exists because `pane_open` cannot do this: two browser panes are told
+/// apart by their address (`features/panes/types.ts`), so opening the same pane
+/// at a second url opens a second pane, and an agent following a dev server
+/// through three routes would leave three frames behind on the user's screen.
+///
+/// The address goes through `boite_core::browser::classify`, the same call
+/// `pane_open` makes and the only rule there is. The device classifies it again
+/// on its side, which is not a duplicate: this request also reaches a device
+/// from a remote boite whose loopback is not the device's.
+async fn browser_navigate(
+    State(workspace): State<Shared>,
+    Extension(caller): Extension<Caller>,
+    Json(body): Json<NavigateIn>,
+) -> Result<Json<Value>, StatusCode> {
+    let target = match boite_core::browser::classify(body.url.trim()) {
+        Ok(target) => target,
+        Err(reason) => return Ok(refused(reason)),
+    };
+    drive(
+        &workspace,
+        &caller,
+        "navigate",
+        body.pane_id.as_deref(),
+        json!({ "url": target.url, "external": target.external }),
+    )
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PaneIn {
+    pane_id: Option<String>,
+}
+
+/// Fetches the page again, for an agent that just restarted what serves it.
+async fn browser_reload(
+    State(workspace): State<Shared>,
+    Extension(caller): Extension<Caller>,
+    Json(body): Json<PaneIn>,
+) -> Result<Json<Value>, StatusCode> {
+    drive(&workspace, &caller, "reload", body.pane_id.as_deref(), json!({}))
+}
+
+/// Takes the pane back off the user's screen once it has served its purpose.
+///
+/// Only a pane the agent is driving, which is the point: an agent tidying up
+/// after itself is housekeeping, and an agent closing a pane the user opened is
+/// taking something away from them.
+async fn browser_close(
+    State(workspace): State<Shared>,
+    Extension(caller): Extension<Caller>,
+    Json(body): Json<PaneIn>,
+) -> Result<Json<Value>, StatusCode> {
+    drive(&workspace, &caller, "close", body.pane_id.as_deref(), json!({}))
+}
+
+/// The half the three of them share: settle what can be settled here, hand the
+/// rest to whoever is drawing the pane, and write down either way.
+///
+/// The pane is resolved here **when the window can be seen**, and dispatched
+/// unresolved when it cannot. That is not a gap left open — the device applies
+/// the same three checks before it touches anything, so a host with no window
+/// costs a round trip and never a wrong pane. Sending it anyway is what keeps
+/// these usable on a headless boite, where the pane is on somebody's phone.
+fn drive(
+    workspace: &Shared,
+    caller: &Caller,
+    what: &str,
+    asked: Option<&str>,
+    detail: Value,
+) -> Result<Json<Value>, StatusCode> {
+    let project_id = caller.project_id.clone();
+    let mut request = json!({
+        "kind": format!("browser.{what}"),
+        "projectId": project_id,
+        "callerThreadId": caller.thread_id.clone().filter(|id| !id.is_empty()),
+        "paneId": asked,
+    });
+    if let (Some(base), Some(extra)) = (request.as_object_mut(), detail.as_object()) {
+        for (key, value) in extra {
+            base.insert(key.clone(), value.clone());
+        }
+    }
+
+    let seen = workspace.on_screen().is_some();
+    if seen {
+        match window_showing(&**workspace, caller).and_then(|s| which_pane(&s, caller, asked)) {
+            Ok(pane_id) => request["paneId"] = json!(pane_id),
+            Err(reason) => {
+                return Ok(deny(
+                    &**workspace,
+                    caller,
+                    &project_id,
+                    &format!("browser.{what}"),
+                    asked.unwrap_or_default(),
+                    &reason,
+                ))
+            }
+        }
+    }
+    if let Err(reason) = workspace.ask(request) {
+        return Ok(deny(
+            &**workspace,
+            caller,
+            &project_id,
+            &format!("browser.{what}"),
+            asked.unwrap_or_default(),
+            &reason,
+        ));
+    }
+    record(
+        &**workspace,
+        Entry::new(&project_id, actor(caller), Action::BrowserDriven)
+            .about(what)
+            .with("url", detail.get("url").and_then(|v| v.as_str()).unwrap_or_default()),
+    );
+    Ok(Json(json!({
+        "ok": true,
+        // A device that has not described itself is the one case where this
+        // answer is an intention rather than an outcome, and an agent that
+        // knows which it is asks browser_status instead of assuming.
+        "checked": seen,
+    })))
 }
 
 /// Runs something that spawns processes or touches the disk, off the runtime.

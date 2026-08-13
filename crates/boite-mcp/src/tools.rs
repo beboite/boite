@@ -58,6 +58,18 @@ head and closing the thread throws it away. Do this before you finish, not after
 rather than a note in your answer, which nobody reads again.
 - Something the user should look at, a diff, a dev server, a file: pane_open puts \
 it beside this terminal. Printing a path only works if they are reading this one.
+- A page you opened and are now working on: browser_wait_for says whether it came \
+up, browser_navigate moves the same pane to the next route rather than leaving a \
+second frame behind, browser_reload picks up a dev server you just restarted, and \
+browser_close tidies it away. browser_status is what they all take a paneId from.
+- What none of those do: the pane is a sandboxed cross-origin frame, so Boite can \
+point it, reload it and say whether it loaded, and can read nothing inside it. \
+There is no page text, no element tree, no clicking and no typing, and no tool \
+here will pretend otherwise. To check what a page renders, fetch it yourself or \
+drive a real browser. The pane is for the user's eyes.
+- The pane is theirs, not yours: it carries a mark saying you are driving it and \
+a button that takes it back, and after they press it your calls at that pane are \
+refused. That is the user deciding, not a fault to work around.
 - Independent work that should run at the same time: thread_spawn. It gets its \
 own terminal and worktree, does not report back, and knows only the prompt you \
 give it.
@@ -285,7 +297,8 @@ fn common_tools() -> Value {
     ])
 }
 
-/// All three act: they move this process, or start another one.
+/// They act on this terminal's own workspace: they move this process, start
+/// another one, or put something on the screen beside it.
 fn thread_tools() -> Value {
     json!([
         {
@@ -387,6 +400,80 @@ fn thread_tools() -> Value {
                 "additionalProperties": false
             },
             "annotations": { "title": "Open pane", "readOnlyHint": true, "destructiveHint": false, "openWorldHint": false }
+        },
+        {
+            "name": "browser_status",
+            "description": "The browser panes on the user's window: which pane, what address, and \
+                            whether the page loaded, refused to be framed or is still coming. Call \
+                            it before browser_navigate to learn a paneId, and after opening one to \
+                            find out whether the address was any good. Boite cannot read inside the \
+                            page — it is a sandboxed cross-origin frame — so there is no text, no \
+                            DOM and no clicking; this is the whole of what it can see.",
+            "inputSchema": { "type": "object" },
+            "annotations": { "title": "Browser panes", "readOnlyHint": true, "idempotentHint": true, "openWorldHint": false }
+        },
+        {
+            "name": "browser_navigate",
+            "description": "Point a browser pane you opened at another address, instead of leaving \
+                            a second frame behind. Panes are told apart by their address, so \
+                            pane_open with a new url opens another pane and this one replaces what \
+                            is in the pane you already have. Same address rules as pane_open. Only \
+                            a pane you opened: once the user takes it back it is theirs.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "url": { "type": "string", "description": "Where to point it. http:// reaches this machine only; everywhere else needs https://." },
+                    "paneId": { "type": "string", "description": "From browser_status. Only needed when you are driving more than one." }
+                },
+                "required": ["url"],
+                "additionalProperties": false
+            },
+            "annotations": { "title": "Navigate pane", "destructiveHint": false, "openWorldHint": true }
+        },
+        {
+            "name": "browser_reload",
+            "description": "Fetch the page again in a pane you opened. What to call after \
+                            restarting the dev server behind it; the pane does not notice on its \
+                            own.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "paneId": { "type": "string", "description": "From browser_status. Only needed when you are driving more than one." }
+                },
+                "additionalProperties": false
+            },
+            "annotations": { "title": "Reload pane", "destructiveHint": false, "openWorldHint": true }
+        },
+        {
+            "name": "browser_wait_for",
+            "description": "Wait for a pane you opened to stop loading, up to twelve seconds. \
+                            Answers `loaded` when the page came up, `stalled` when it did not — \
+                            which means slow or refusing to be framed, and nothing on this side can \
+                            tell those apart. Use it after opening a dev server rather than \
+                            polling browser_status.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "paneId": { "type": "string", "description": "From browser_status. Only needed when you are driving more than one." },
+                    "timeoutMs": { "type": "integer", "description": "Up to 12000, which is also the default." }
+                },
+                "additionalProperties": false
+            },
+            "annotations": { "title": "Wait for page", "readOnlyHint": true, "openWorldHint": false }
+        },
+        {
+            "name": "browser_close",
+            "description": "Take a pane you opened back off the user's screen once it has served \
+                            its purpose. Only your own: a pane the user took back is theirs to \
+                            close.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "paneId": { "type": "string", "description": "From browser_status. Only needed when you are driving more than one." }
+                },
+                "additionalProperties": false
+            },
+            "annotations": { "title": "Close pane", "destructiveHint": true, "openWorldHint": false }
         }
     ])
 }

@@ -338,6 +338,89 @@ pub(crate) fn format_hits(out: &Value) -> String {
     w.into_string()
 }
 
+/// The browser panes on the user's window.
+///
+/// The `opaque` sentence rides on every one of these rather than being said once
+/// in a tool description, because the tool list is read at the start of a session
+/// and this is read at the moment an agent is deciding what to do next. It is
+/// also the answer to the question the shape of this table invites: there is no
+/// text column because there is no text to put in one.
+pub(crate) fn format_browser_panes(out: &Value) -> String {
+    let panes = out.get("panes").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    let mut w = Toon::new();
+    let rows: Vec<Vec<String>> = panes
+        .iter()
+        .map(|pane| {
+            let at = |key: &str| pane.get(key).and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let flag = |key: &str| pane.get(key).and_then(|v| v.as_bool()).unwrap_or(false);
+            let size = |key: &str| {
+                pane.get(key)
+                    .and_then(|v| v.as_f64())
+                    .map(|n| n.round() as i64)
+                    .unwrap_or(0)
+            };
+            vec![
+                at("paneId"),
+                clip(&at("url"), MAX_CELL),
+                at("page"),
+                flag("yours").to_string(),
+                // The one measurement worth a column: a pane laid out at no
+                // width is open and showing the user nothing.
+                if flag("visible") {
+                    format!("{}x{}", size("width"), size("height"))
+                } else {
+                    "hidden".to_string()
+                },
+            ]
+        })
+        .collect();
+    w.table("panes", &["paneId", "url", "page", "yours", "size"], &rows);
+    if let Some(note) = out.get("opaque").and_then(|v| v.as_str()) {
+        w.hint(note);
+    }
+    if rows.is_empty() {
+        w.hint("pane_open kind=browser url=<address> opens one");
+    }
+    w.into_string()
+}
+
+/// Whether the page came up, for an agent that is about to say it did.
+pub(crate) fn format_page_settled(out: &Value) -> String {
+    let state = out.get("page").and_then(|v| v.as_str()).unwrap_or("loading");
+    let timed_out = out.get("timedOut").and_then(|v| v.as_bool()).unwrap_or(false);
+    let mut w = Toon::new();
+    w.field("paneId", out.get("paneId").and_then(|v| v.as_str()).unwrap_or(""))
+        .field("page", state);
+    match state {
+        // Two causes, one observation, and saying so is the whole point: an
+        // agent told "failed" goes and debugs a server that is fine.
+        "stalled" => w.hint(
+            "it did not load: either it is slow, or the site refuses to be framed. Nothing on this \
+             side can tell which, and the user has a button to open it outside",
+        ),
+        _ if timed_out => w.hint("still loading when the wait ran out; ask again or leave it"),
+        _ => w.hint("the page came up; you still cannot read what is in it"),
+    };
+    w.into_string()
+}
+
+/// One browser pane driven, and whether the answer is an outcome or an errand.
+pub(crate) fn format_drove(out: &Value, done: &str, url: Option<&str>) -> String {
+    let mut w = Toon::new();
+    w.field("pane", done);
+    if let Some(url) = url {
+        w.field("url", url);
+    }
+    // `checked: false` is a boite with no window of its own: the request is on
+    // its way to whichever device is drawing the pane, and nothing here saw the
+    // pane before sending it. An agent that treats that as done is the bug this
+    // field exists to stop.
+    if out.get("checked").and_then(|v| v.as_bool()) == Some(false) {
+        w.hint("sent to the device drawing the pane; this boite has no window, so browser_status here says nothing");
+    }
+    w.into_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

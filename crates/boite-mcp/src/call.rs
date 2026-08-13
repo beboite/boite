@@ -9,7 +9,8 @@ use serde_json::{json, Value};
 
 use crate::host::Host;
 use crate::render::{
-    format_artifacts, format_hits, format_moments, format_projects, format_todos, format_worktree, prefix,
+    format_artifacts, format_browser_panes, format_drove, format_hits, format_moments,
+    format_page_settled, format_projects, format_todos, format_worktree, prefix,
 };
 use crate::toon::Toon;
 use crate::{encode_query, MAX_BRANCHES};
@@ -235,6 +236,53 @@ pub(crate) fn call_tool(host: &Host, name: &str, args: &Value) -> Result<String,
             }
             w.hint("the user sees it now; you cannot read what is in it, and a page off this machine waits on them agreeing to it");
             Ok(w.into_string())
+        }
+        "browser_status" => {
+            let out = host.send("GET", "/v1/browser", None)?;
+            if let Some(error) = out.get("error").and_then(|v| v.as_str()) {
+                return Err(error.to_string());
+            }
+            Ok(format_browser_panes(&out))
+        }
+        "browser_wait_for" => {
+            let mut path = String::from("/v1/browser/wait?");
+            if let Some(ms) = args.get("timeoutMs").and_then(|v| v.as_u64()) {
+                path.push_str(&format!("timeoutMs={ms}&"));
+            }
+            if let Some(id) = args.get("paneId").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+                path.push_str("paneId=");
+                path.push_str(&encode_query(id));
+            }
+            let out = host.send("GET", &path, None)?;
+            if let Some(error) = out.get("error").and_then(|v| v.as_str()) {
+                return Err(error.to_string());
+            }
+            Ok(format_page_settled(&out))
+        }
+        "browser_navigate" => {
+            let url = args
+                .get("url")
+                .and_then(|v| v.as_str())
+                .ok_or("browser_navigate needs a url")?;
+            let mut body = json!({ "url": url });
+            if let Some(id) = args.get("paneId").and_then(|v| v.as_str()) {
+                body["paneId"] = json!(id);
+            }
+            let out = refusable(host, "/v1/browser/navigate", body)?;
+            Ok(format_drove(&out, "pointed", Some(url)))
+        }
+        "browser_reload" | "browser_close" => {
+            let (path, done) = if name == "browser_reload" {
+                ("/v1/browser/reload", "reloading")
+            } else {
+                ("/v1/browser/close", "closed")
+            };
+            let mut body = json!({});
+            if let Some(id) = args.get("paneId").and_then(|v| v.as_str()) {
+                body["paneId"] = json!(id);
+            }
+            let out = refusable(host, path, body)?;
+            Ok(format_drove(&out, done, None))
         }
         other => Err(format!("unknown tool: {other}")),
     }

@@ -30,9 +30,10 @@ import { createProject } from "$lib/features/project/api";
 import { moveThreadToProject } from "$lib/features/thread/move";
 import { takesOpeningPrompt } from "$lib/features/thread/session";
 import { launchAgent } from "$lib/features/thread/api";
-import { anchorProjectId, openPane } from "$lib/features/panes/open";
-import { paneStore } from "$lib/features/panes/store.svelte";
+import { anchorPaneId, anchorProjectId, openPane } from "$lib/features/panes/open";
+import { leafNodesOf, paneStore } from "$lib/features/panes/store.svelte";
 import { classifyBrowserUrl, isLoopbackHost } from "$lib/features/browser/url";
+import { browserPanes } from "$lib/features/browser/state.svelte";
 import { confirmDialog } from "$lib/shared/components/confirm.svelte";
 import type { DropSide, PaneContent } from "$lib/features/panes/types";
 import type { IconKey } from "$lib/types";
@@ -80,11 +81,35 @@ interface PaneOpenRequest {
   side?: DropSide | null;
 }
 
+/**
+ * An agent driving a browser pane it already opened.
+ *
+ * Three verbs and one shape, because they differ only in what they do once the
+ * pane is found and every check before that is the same one. The endpoint has
+ * usually run those checks already, off the window's own description; this runs
+ * them again because the endpoint cannot see a window it does not have — a
+ * headless boite dispatches these blind, and the device is the only side that
+ * knows which panes exist. Same reasoning as `paneContentOf`: the frame is
+ * created here, so the last word belongs here.
+ */
+interface BrowserDriveRequest {
+  kind: "browser.navigate" | "browser.reload" | "browser.close";
+  projectId: string;
+  /** The thread that asked. It has to match the pane's mark or nothing moves. */
+  callerThreadId?: string | null;
+  /** Which pane, when the agent is driving more than one. */
+  paneId?: string | null;
+  url?: string | null;
+  /** The endpoint's reading of the address: off this machine, so ask first. */
+  external?: boolean | null;
+}
+
 type AgentRequest =
   | MoveRequest
   | CreateRequest
   | SpawnRequest
-  | PaneOpenRequest;
+  | PaneOpenRequest
+  | BrowserDriveRequest;
 
 /**
  * Which machine's process wrote the request.
@@ -331,7 +356,97 @@ async function paneContentOf(
     });
     if (!ok) return null;
   }
-  return { kind: "browser", url: target.url };
+  // The pane is marked as the caller's from the moment it exists, which is what
+  // every later call checks against and what the pane's own header shows.
+  return { kind: "browser", url: target.url, drivenBy: req.callerThreadId ?? null };
+}
+
+/**
+ * The browser panes of the group the page is drawing.
+ *
+ * The same set the window describes to the endpoint, read the same way: panes
+ * in another group are not on screen, and a pane the user cannot see is not one
+ * an agent should be moving.
+ */
+function browserLeaves(): { paneId: string; url: string; drivenBy: string | null }[] {
+  const anchor = anchorPaneId();
+  const group = anchor ? paneStore.groupOf(anchor) : null;
+  if (!group) return [];
+  return leafNodesOf(group.root).flatMap((leaf) =>
+    leaf.content.kind === "browser"
+      ? [{ paneId: leaf.paneId, url: leaf.content.url, drivenBy: leaf.content.drivenBy ?? null }]
+      : [],
+  );
+}
+
+/**
+ * Point, reload or close a pane the agent is already driving.
+ *
+ * Every refusal here is silent to the user and loud in the log. The agent was
+ * told why at the endpoint, and a toast for each one would put an agent's
+ * mistakes on the screen of the person it is working for.
+ */
+async function handleBrowserDrive(req: BrowserDriveRequest, from: RequestSource) {
+  if (anchorProjectId() !== req.projectId) {
+    logger.warn("agent-request", "browser call for a project that is not on screen, dropping it", {
+      asked: req.projectId,
+    });
+    return;
+  }
+  const panes = browserLeaves();
+  const caller = req.callerThreadId ?? "";
+  const pane = req.paneId
+    ? panes.find((p) => p.paneId === req.paneId)
+    : panes.length === 1
+      ? panes[0]
+      : undefined;
+  if (!pane) {
+    logger.warn("agent-request", "no browser pane to drive, dropping it", {
+      asked: req.paneId ?? "",
+      open: panes.length,
+    });
+    return;
+  }
+  // The hand-back, enforced. A pane with no mark is the user's, and an agent
+  // whose thread is not the mark is driving somebody else's.
+  if (!caller || pane.drivenBy !== caller) {
+    logger.warn("agent-request", "that browser pane is not the caller's, dropping it", {
+      pane: pane.paneId,
+    });
+    return;
+  }
+
+  if (req.kind === "browser.reload") {
+    browserPanes.reload(pane.paneId);
+    return;
+  }
+  if (req.kind === "browser.close") {
+    paneStore.closePane(pane.paneId);
+    return;
+  }
+  if (!req.url) {
+    logger.warn("agent-request", "browser navigate with no url, dropping it");
+    return;
+  }
+  const target = classifyBrowserUrl(req.url, {
+    requesterIsThisMachine: writtenOnThisMachine(from),
+  });
+  if (!target.ok) {
+    logger.warn("agent-request", "browser navigate refused", { url: req.url, reason: target.reason });
+    notifications.error(t(`browser.refuse.${target.reason}`));
+    return;
+  }
+  // Same rule as opening one: the agent chose the page, and it is not the
+  // agent's window. A missing `external` is not a no.
+  if (!target.local || req.external !== false) {
+    const ok = await confirmDialog.ask({
+      title: t("browser.confirmExternalTitle"),
+      message: t("browser.confirmExternal", { url: target.url }),
+      confirmLabel: t("browser.confirmExternalOpen"),
+    });
+    if (!ok) return;
+  }
+  paneStore.setBrowser(pane.paneId, { url: target.url });
 }
 
 async function handle(req: AgentRequest, from: RequestSource) {
@@ -345,6 +460,10 @@ async function handle(req: AgentRequest, from: RequestSource) {
       return handleSpawn(req);
     case "pane.open":
       return handlePaneOpen(req, from);
+    case "browser.navigate":
+    case "browser.reload":
+    case "browser.close":
+      return handleBrowserDrive(req, from);
   }
 }
 

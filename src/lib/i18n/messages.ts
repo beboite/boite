@@ -940,6 +940,9 @@ export const EN_MESSAGES = {
     "That address is on the boite, and localhost here is this machine.",
   "browser.refuse.cleartext":
     "Plain http:// stops at this machine. Use https:// for anywhere else.",
+  "browser.drivenByAgent": "Agent",
+  "browser.drivenByTitle": "{agent} is pointing this pane. Take it back to make it yours.",
+  "browser.reclaim": "Take this pane back from the agent",
 
 } as const;
 

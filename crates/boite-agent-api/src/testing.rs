@@ -25,6 +25,9 @@ pub struct Fake {
     pub asked: Mutex<Vec<Value>>,
     pub announced: Mutex<Vec<Change>>,
     pub touched: Mutex<Vec<(String, String)>>,
+    /// What the window says is on it. `None` is the headless case, which is a
+    /// real host rather than an unset field: the server has no window.
+    pub screen: Mutex<Option<boite_core::screen::Screen>>,
     dir: PathBuf,
 }
 
@@ -43,6 +46,7 @@ impl Fake {
             asked: Mutex::new(Vec::new()),
             announced: Mutex::new(Vec::new()),
             touched: Mutex::new(Vec::new()),
+            screen: Mutex::new(None),
             dir,
         }
     }
@@ -128,6 +132,10 @@ impl Workspace for Fake {
 
     fn announce(&self, change: Change) {
         self.announced.lock().unwrap().push(change);
+    }
+
+    fn on_screen(&self) -> Option<boite_core::screen::Screen> {
+        self.screen.lock().unwrap().clone()
     }
 
     fn touched(&self, thread_id: &str, surface: &str) {
