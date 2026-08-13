@@ -12,9 +12,13 @@
     "",
     "The gap between the first two is what the lazy imports are worth: 4.8 MB the",
     "window does not fetch before it can paint, most of it the PDF worker. That is",
-    "the measurement those imports never had attached to them."
+    "the measurement those imports never had attached to them.",
+    "",
+    "The eager ceiling moved once, to 770048, when a browser pane gained the mark",
+    "saying an agent is driving it. The mark rides on the pane's own content, so it",
+    "is read wherever a pane is drawn, which is before first paint."
   ],
-  "eagerBytes": 768000,
+  "eagerBytes": 770048,
   "totalBytes": 6144000,
   "largestEagerChunkBytes": 256000
 }
