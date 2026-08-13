@@ -176,6 +176,15 @@
       description: "Command palette",
       run: () => palette.toggle(),
     },
+    // The chord an editor puts file opening on, and it was free here. Boite
+    // ships an editor, a tab strip and a diff viewer, and until now the only
+    // way to open a file was to open a panel and aim at it with a mouse.
+    {
+      combo: "mod+p",
+      scopes: ["app", "settings", "editor", "project", "palette"],
+      description: "Go to file",
+      run: () => palette.toggle("files"),
+    },
     {
       combo: "mod+b",
       scopes: ["app", "settings", "editor", "project"],

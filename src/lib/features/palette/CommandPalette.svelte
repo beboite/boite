@@ -3,7 +3,7 @@
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
   import { palette } from "./store.svelte";
   import { fuzzyScore } from "./fuzzy";
-  import { t } from "$lib/i18n/index.svelte";
+  import { t, type MessageKey } from "$lib/i18n/index.svelte";
   import {
     buildPaletteCommands,
     commandHint,
@@ -13,6 +13,14 @@
     type PaletteCommand,
     type PaletteSection,
   } from "./registry";
+  import {
+    FILE_SEARCH_MIN,
+    modeQueriesBackend,
+    parsePaletteQuery,
+    type PaletteMode,
+  } from "./modes";
+  import { searchFileCommands } from "./files";
+  import { openBrowserPane } from "./open-url";
 
   // Same order as SECTION_BIAS. "panes" has to be listed or the pane commands
   // exist only for a typed query: the empty-query list is built from this array.
@@ -28,6 +36,23 @@
   let inputEl: HTMLInputElement | null = $state(null);
   let listEl: HTMLDivElement | null = $state(null);
   let commands = $state<PaletteCommand[]>([]);
+  let fileRows = $state<PaletteCommand[]>([]);
+  // Which search the rows in `fileRows` answer. A slow one landing after a
+  // newer term was typed is dropped rather than shown, which is the whole
+  // difference between a file list and a file list that flickers backwards.
+  let fileGeneration = 0;
+
+  const parsed = $derived(parsePaletteQuery(debouncedQuery, palette.mode));
+  // The mode as the box is being typed in, which the debounce must not lag:
+  // the placeholder and the prompt glyph have to change on the keystroke that
+  // switched the mode, not 80ms later.
+  const liveMode = $derived(parsePaletteQuery(query, palette.mode).mode);
+
+  const PLACEHOLDER: Record<PaletteMode, MessageKey> = {
+    commands: "palette.placeholder",
+    files: "palette.placeholderFiles",
+    url: "palette.placeholderUrl",
+  };
 
   // A fast typist pays the filter once, not per character; clearing is instant.
   $effect(() => {
@@ -45,10 +70,32 @@
   $effect(() => {
     if (!palette.open) return;
     commands = buildPaletteCommands();
+    fileRows = [];
+    fileGeneration++;
+    // A palette opened straight into a mode carries no prefix: the mode is
+    // already on the store, and a `/` the user did not type would be one more
+    // character to delete before searching.
     query = "";
     debouncedQuery = "";
     activeIndex = 0;
     queueMicrotask(() => inputEl?.focus());
+  });
+
+  // The one mode whose answers are on the other side of the backend. Guarded on
+  // the palette being open so a search does not land into a closed box, and
+  // generation-checked so an older, slower answer never replaces a newer one.
+  $effect(() => {
+    if (!palette.open || parsed.mode !== "files") return;
+    const term = parsed.term.trim();
+    const generation = ++fileGeneration;
+    if (term.length < FILE_SEARCH_MIN) {
+      fileRows = [];
+      return;
+    }
+    void searchFileCommands(term).then((rows) => {
+      if (generation !== fileGeneration) return;
+      fileRows = rows;
+    });
   });
 
   // Resolved at render, not while the list is built: a fixed command carries a
@@ -57,8 +104,15 @@
     commands.map((c) => ({ c, label: commandLabel(c), hint: commandHint(c) })),
   );
 
-  const visible = $derived.by(() => {
-    const q = debouncedQuery.trim();
+  const visible = $derived.by<PaletteRow[]>(() => {
+    // Never re-scored here: the backend already decided what matches and in
+    // which order, and a second matcher over its answer drops hits it found by
+    // a rule this one does not have.
+    if (modeQueriesBackend(parsed.mode)) {
+      return fileRows.map((c) => ({ c, label: commandLabel(c), hint: commandHint(c) }));
+    }
+    if (parsed.mode === "url") return [];
+    const q = parsed.term.trim();
     if (!q) {
       return SECTIONS.flatMap((s) => rows.filter((r) => r.c.section === s));
     }
@@ -89,8 +143,26 @@
   }
 
   function runCommand(c: PaletteCommand) {
+    // A command that asks for one more piece of typing keeps the box, and puts
+    // the caret back in it. The mode is on the store, so the parse below reads
+    // the new one on the next keystroke as well as on this render.
+    if (c.mode) {
+      palette.mode = c.mode;
+      query = "";
+      debouncedQuery = "";
+      activeIndex = 0;
+      queueMicrotask(() => inputEl?.focus());
+      return;
+    }
     palette.hide();
-    void c.run();
+    void c.run?.();
+  }
+
+  // Enter in url mode. The address stays in the box when it is refused, which
+  // is the one thing the OS prompt this replaces could not do: it closed on
+  // every answer, right or wrong, and the retry started from an empty field.
+  function submitUrl() {
+    if (openBrowserPane(query)) palette.hide();
   }
 
   function moveActive(delta: number) {
@@ -129,6 +201,10 @@
     }
     if (e.key === "Enter") {
       e.preventDefault();
+      if (liveMode === "url") {
+        submitUrl();
+        return;
+      }
       const row = visible[activeIndex];
       if (row) runCommand(row.c);
     }
@@ -160,7 +236,7 @@
         bind:this={inputEl}
         bind:value={query}
         type="text"
-        placeholder={t("palette.placeholder")}
+        placeholder={t(PLACEHOLDER[liveMode])}
         spellcheck="false"
         autocomplete="off"
         class="w-full border-b border-border bg-transparent px-4 py-3 text-sm text-foreground outline-none placeholder:text-muted-foreground/60"
@@ -175,9 +251,15 @@
         role="listbox"
         class="overflow-y-auto py-1"
       >
-        {#if visible.length === 0}
+        {#if liveMode === "url"}
           <p class="px-4 py-6 text-center text-xs text-muted-foreground">
-            {t("palette.noMatch")}
+            {t("palette.urlHint")}
+          </p>
+        {:else if visible.length === 0}
+          <p class="px-4 py-6 text-center text-xs text-muted-foreground">
+            {liveMode === "files" && parsed.term.trim().length < FILE_SEARCH_MIN
+              ? t("palette.filesHint")
+              : t("palette.noMatch")}
           </p>
         {/if}
         {#each visible as row, i (row.c.id)}
