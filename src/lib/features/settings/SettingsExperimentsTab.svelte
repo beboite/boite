@@ -26,14 +26,14 @@
 <p class="px-3 text-sm text-muted-foreground">{t("experiments.intro")}</p>
 
 <ToggleSetting
-  label={t("experiments.infoBox")}
+  label={t("experiments.infoBox")} anchor="experiments.infoBox"
   description={t("experiments.infoBoxDesc")}
   enabled={settings.state.experimentInfoBox}
   onToggle={() => settings.setExperimentInfoBox(!settings.state.experimentInfoBox)}
 />
 
 <ToggleSetting
-  label={t("experiments.smartSort")}
+  label={t("experiments.smartSort")} anchor="experiments.smartSort"
   description={t("experiments.smartSortDesc")}
   enabled={settings.state.experimentSmartSort}
   onToggle={() =>

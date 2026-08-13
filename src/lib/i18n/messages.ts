@@ -61,6 +61,9 @@ export const EN_MESSAGES = {
   // database's, since nobody chose the name.
   "project.scratch": "Scratch",
 
+  "settings.searchPlaceholder": "Search settings",
+  "settings.searchResults": "{count} matching",
+  "settings.searchNoMatch": "Nothing matches.",
   "shortcuts.title": "Shortcuts",
   "shortcuts.description": "Drag to reorder. Edit a command to add arguments.",
   "shortcuts.resetTitle": "Reset to default presets",

@@ -33,7 +33,7 @@
   }
 </script>
 
-<SettingsCard title={t("appearance.uiScale")} description={t("appearance.uiScaleDesc")}>
+<SettingsCard title={t("appearance.uiScale")} anchor="appearance.uiScale" description={t("appearance.uiScaleDesc")}>
   {#snippet actions()}
     <button
       type="button"
@@ -65,7 +65,7 @@
 </SettingsCard>
 
 <ToggleSetting
-  label={t("appearance.layout")}
+  label={t("appearance.layout")} anchor="appearance.layout"
   description={t("appearance.layoutDesc")}
   enabled={settings.state.mobileLayout}
   onLabel={t("appearance.mobile")}
@@ -74,7 +74,7 @@
 />
 
 <ToggleSetting
-  label={t("appearance.colorByModel")}
+  label={t("appearance.colorByModel")} anchor="appearance.colorByModel"
   description={t("appearance.colorByModelDesc")}
   enabled={settings.state.colorByModel}
   onToggle={() => settings.setColorByModel(!settings.state.colorByModel)}
@@ -94,7 +94,7 @@
   </div>
 {/if}
 
-<SettingsCard title={t("appearance.animations")} description={t("appearance.animationsDesc")}>
+<SettingsCard title={t("appearance.animations")} anchor="appearance.animations" description={t("appearance.animationsDesc")}>
   <div class="flex gap-1.5" role="radiogroup" aria-label={t("appearance.animations")}>
     {#each MOTION_MODES as mode (mode.id)}
       <button
@@ -113,7 +113,7 @@
   </div>
 </SettingsCard>
 
-<SettingsCard title={t("appearance.language")} description={t("appearance.languageDesc")}>
+<SettingsCard title={t("appearance.language")} anchor="appearance.language" description={t("appearance.languageDesc")}>
   <div class="flex gap-1.5" role="radiogroup" aria-label={t("appearance.language")}>
     {#each LOCALE_OPTIONS as option (option.id)}
       <button

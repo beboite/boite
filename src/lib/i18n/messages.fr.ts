@@ -63,6 +63,9 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
 
   "project.scratch": "Brouillon",
 
+  "settings.searchPlaceholder": "Rechercher un réglage",
+  "settings.searchResults": "{count} résultat(s)",
+  "settings.searchNoMatch": "Aucun résultat.",
   "shortcuts.title": "Raccourcis",
   "shortcuts.description": "Glissez pour réordonner. Modifiez une commande pour ajouter des arguments.",
   "shortcuts.resetTitle": "Réinitialiser aux raccourcis par défaut",
