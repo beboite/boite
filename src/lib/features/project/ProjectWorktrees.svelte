@@ -351,7 +351,7 @@
            them look like the same one. -->
       <div class="px-3.5 pb-4 text-center" role="status">
         <p class="text-sm text-muted-foreground">{t("worktree.unreadable")}</p>
-        <p class="mt-1 break-words text-xs leading-snug text-muted-foreground/70">
+        <p class="mt-1 break-words font-mono text-xs leading-snug text-muted-foreground/70">
           {failed}
         </p>
       </div>

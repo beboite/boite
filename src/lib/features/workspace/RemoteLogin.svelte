@@ -72,7 +72,7 @@
            first layer. -->
       <input
         bind:this={urlInput}
-        class="rounded-md border border-border bg-[var(--color-surface)] px-3 py-2 text-sm text-foreground outline-none focus:border-[var(--color-success)]"
+        class="rounded-md border border-border bg-[var(--color-surface)] px-3 py-2 font-mono text-sm text-foreground outline-none focus:border-[var(--color-success)]"
         type="url"
         inputmode="url"
         bind:value={url}

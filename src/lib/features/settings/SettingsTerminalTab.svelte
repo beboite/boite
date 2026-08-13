@@ -204,7 +204,7 @@
       value={settings.state.todoPromptTemplate}
       onchange={(e) =>
         void settings.setTodoPromptTemplate((e.currentTarget as HTMLTextAreaElement).value)}
-      class="w-full resize-y rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-2 text-sm leading-relaxed text-foreground outline-none focus:border-foreground/40 disabled:cursor-not-allowed"
+      class="w-full resize-y rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-2 font-mono text-sm leading-relaxed text-foreground outline-none focus:border-foreground/40 disabled:cursor-not-allowed"
     ></textarea>
     <button
       type="button"

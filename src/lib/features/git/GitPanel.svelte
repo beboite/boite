@@ -902,7 +902,7 @@
             {/if}
           </div>
           <span
-            class="w-3 shrink-0 text-center font-bold text-xs {statusColor(
+            class="w-4 shrink-0 text-center font-bold text-xs {statusColor(
               entry.status,
             )}"
           >

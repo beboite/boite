@@ -343,6 +343,9 @@ kbd.kbd {
      hair off the surface rather than floating over it. The doubled bottom
      border alone was a key drawn flat. */
   box-shadow: var(--shadow-e1);
+  /* Preflight gives every kbd the mono stack; without this the sans move
+     stops at this element and it keeps mono at weight 500. */
+  font-family: inherit;
   font-size: var(--text-2xs);
   font-weight: 500;
   color: var(--color-muted-foreground);

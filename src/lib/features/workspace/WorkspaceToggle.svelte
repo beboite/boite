@@ -516,7 +516,7 @@
             spellcheck="false"
             autocapitalize="off"
             autocomplete="off"
-            class="w-full rounded-md border border-border bg-[var(--color-background)] px-3 py-2.5 text-sm normal-case tracking-normal text-foreground outline-none focus:border-foreground/40"
+            class="w-full rounded-md border border-border bg-[var(--color-background)] px-3 py-2.5 font-mono text-sm normal-case tracking-normal text-foreground outline-none focus:border-foreground/40"
           />
         </label>
         <label class="flex flex-col gap-1 text-2xs uppercase tracking-wide text-muted-foreground">
