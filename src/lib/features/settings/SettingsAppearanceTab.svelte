@@ -7,6 +7,13 @@
   import { LOCALE_OPTIONS, t } from "$lib/i18n/index.svelte";
   import type { MotionMode } from "$lib/types";
   import { ACCENT_COLOR, type ModelAccent } from "$lib/features/fastpick/accent";
+  import {
+    availableFonts,
+    MONO_CANDIDATES,
+    SANS_CANDIDATES,
+    TERMINAL_SCALE_MAX,
+    TERMINAL_SCALE_MIN,
+  } from "$lib/theme/fonts";
 
   const MOTION_MODES: { id: MotionMode; labelKey: MessageKey }[] = [
     { id: "system", labelKey: "appearance.motionSystem" },
@@ -30,6 +37,18 @@
 
   function reset() {
     settings.setUiScalePercent(100);
+  }
+
+  // Probed once, when the tab mounts. `document.fonts` answers about system
+  // faces as well as loaded ones, and the answer cannot change while the app is
+  // open without the user installing a font behind it.
+  const monoFonts = availableFonts(MONO_CANDIDATES);
+  const sansFonts = availableFonts(SANS_CANDIDATES);
+
+  function onTerminalScale(e: Event) {
+    settings.setTerminalFontScalePercent(
+      Number((e.currentTarget as HTMLInputElement).value),
+    );
   }
 </script>
 
@@ -60,6 +79,86 @@
     />
     <span class="w-12 text-right tabular-nums text-xs font-semibold text-foreground">
       {settings.state.uiScalePercent}%
+    </span>
+  </div>
+</SettingsCard>
+
+<SettingsCard title={t("appearance.fonts")} description={t("appearance.fontsDesc")}>
+  <div class="flex flex-col gap-2.5">
+    <label class="flex items-center gap-3 text-xs text-muted-foreground">
+      <span class="w-24 shrink-0">{t("appearance.fontUi")}</span>
+      <select
+        class="font-select min-w-0 flex-1"
+        value={settings.state.uiFontFamily ?? ""}
+        onchange={(e) => settings.setUiFontFamily(e.currentTarget.value || null)}
+      >
+        <option value="">{t("appearance.fontDefault")}</option>
+        {#each sansFonts as family (family)}
+          <option value={family}>{family}</option>
+        {/each}
+      </select>
+    </label>
+
+    <label class="flex items-center gap-3 text-xs text-muted-foreground">
+      <span class="w-24 shrink-0">{t("appearance.fontTerminal")}</span>
+      <select
+        class="font-select min-w-0 flex-1"
+        value={settings.state.terminalFontFamily ?? ""}
+        onchange={(e) =>
+          settings.setTerminalFontFamily(e.currentTarget.value || null)}
+      >
+        <option value="">{t("appearance.fontDefault")}</option>
+        {#each monoFonts as family (family)}
+          <option value={family}>{family}</option>
+        {/each}
+      </select>
+    </label>
+
+    <!-- The sample is set in whatever the terminal is set in, at the size the
+         terminal will be: a font list whose entries are all drawn in the UI
+         font tells you nothing about the one thing you are picking it for. -->
+    <p
+      class="truncate rounded-md border border-border bg-[var(--color-background)] px-2.5 py-1.5 text-term-foreground"
+      style:font-family="var(--font-mono)"
+      style:font-size="{(13 * settings.state.terminalFontScalePercent) / 100}px"
+    >
+      {t("appearance.fontSample")}
+    </p>
+  </div>
+</SettingsCard>
+
+<SettingsCard
+  title={t("appearance.terminalSize")}
+  description={t("appearance.terminalSizeDesc")}
+>
+  {#snippet actions()}
+    <button
+      type="button"
+      class="flex items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-1 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
+      onclick={() => settings.setTerminalFontScalePercent(100)}
+      title={t("appearance.resetTerminalSize")}
+    >
+      <RotateCcw class="size-3" />
+      {t("common.reset")}
+    </button>
+  {/snippet}
+
+  <div class="flex items-center gap-3">
+    <span class="w-9 tabular-nums text-2xs text-muted-foreground/70">
+      {TERMINAL_SCALE_MIN}%
+    </span>
+    <input
+      type="range"
+      min={TERMINAL_SCALE_MIN}
+      max={TERMINAL_SCALE_MAX}
+      step="5"
+      value={settings.state.terminalFontScalePercent}
+      oninput={onTerminalScale}
+      class="ui-slider min-w-0 flex-1"
+      aria-label={t("appearance.terminalSize")}
+    />
+    <span class="w-12 text-right tabular-nums text-xs font-semibold text-foreground">
+      {settings.state.terminalFontScalePercent}%
     </span>
   </div>
 </SettingsCard>
@@ -133,6 +232,19 @@
 </SettingsCard>
 
 <style>
+  .font-select {
+    appearance: none;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-surface-2);
+    color: var(--color-foreground);
+    padding: 3px 8px;
+    font-size: var(--text-xs);
+    font-family: inherit;
+  }
+  .font-select:hover {
+    border-color: color-mix(in srgb, var(--color-foreground) 30%, transparent);
+  }
   .ui-slider {
     appearance: none;
     background: transparent;

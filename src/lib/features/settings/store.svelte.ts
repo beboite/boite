@@ -4,6 +4,7 @@ import { notifications } from "$lib/features/notifications/store.svelte";
 import { isLocaleSetting, setLocale as applyLocale, t } from "$lib/i18n/index.svelte";
 import { logger } from "$lib/shared/services/logger.svelte";
 import { debounce } from "$lib/shared/utils/debounce";
+import { clampTerminalScale } from "$lib/theme/fonts";
 import { uuid } from "$lib/shared/utils/uuid";
 import type {
   LocaleSetting,
@@ -161,6 +162,9 @@ const DEFAULTS: Settings = {
   mobileLayout: false,
   layoutPinned: false,
   motionMode: "system",
+  uiFontFamily: null,
+  terminalFontFamily: null,
+  terminalFontScalePercent: 100,
   locale: "system",
   setupCompleted: false,
   fastpickEnabled: true,
@@ -177,6 +181,13 @@ const DEFAULTS: Settings = {
 // the mobile layout. The toggle in Appearance overrides it permanently after.
 function isMotionMode(value: unknown): value is Settings["motionMode"] {
   return value === "system" || value === "on" || value === "off";
+}
+
+// A family the machine no longer has is kept rather than dropped: the stack
+// falls through to the shipped one on its own, and clearing the row would lose
+// the choice for good the first time the app opened on a second machine.
+function readFamily(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
 function isSmartSortBy(value: unknown): value is SmartSortBy {
@@ -281,6 +292,9 @@ const DEVICE_FIELDS = [
   "mobileLayout",
   "layoutPinned",
   "motionMode",
+  "uiFontFamily",
+  "terminalFontFamily",
+  "terminalFontScalePercent",
   "locale",
   "colorByModel",
   "sidebarDesign",
@@ -490,6 +504,12 @@ class SettingsStore {
         motionMode: isMotionMode(stored.motionMode)
           ? stored.motionMode
           : DEFAULTS.motionMode,
+        uiFontFamily: readFamily(stored.uiFontFamily),
+        terminalFontFamily: readFamily(stored.terminalFontFamily),
+        terminalFontScalePercent:
+          typeof stored.terminalFontScalePercent === "number"
+            ? clampTerminalScale(stored.terminalFontScalePercent)
+            : DEFAULTS.terminalFontScalePercent,
         locale: isLocaleSetting(stored.locale) ? stored.locale : DEFAULTS.locale,
         layoutPinned:
           typeof stored.layoutPinned === "boolean"
@@ -719,6 +739,27 @@ class SettingsStore {
   setMotionMode(value: Settings["motionMode"]) {
     if (this.state.motionMode === value) return;
     this.state.motionMode = value;
+    this.persistDeviceNow();
+  }
+
+  setUiFontFamily(value: string | null) {
+    const next = readFamily(value);
+    if (this.state.uiFontFamily === next) return;
+    this.state.uiFontFamily = next;
+    this.persistDeviceNow();
+  }
+
+  setTerminalFontFamily(value: string | null) {
+    const next = readFamily(value);
+    if (this.state.terminalFontFamily === next) return;
+    this.state.terminalFontFamily = next;
+    this.persistDeviceNow();
+  }
+
+  setTerminalFontScalePercent(value: number) {
+    const next = clampTerminalScale(value);
+    if (this.state.terminalFontScalePercent === next) return;
+    this.state.terminalFontScalePercent = next;
     this.persistDeviceNow();
   }
   async setFastpickEnabled(value: boolean) {

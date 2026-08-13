@@ -142,10 +142,19 @@
       FONT_MIN,
       Math.min(
         FONT_MAX,
-        Math.round((FONT_BASE * settings.state.uiScalePercent * pinchFactor) / 100),
+        Math.round(
+          (FONT_BASE *
+            settings.state.uiScalePercent *
+            settings.state.terminalFontScalePercent *
+            pinchFactor) /
+            10_000,
+        ),
       ),
     ),
   );
+  // The family, rebuilt from the chosen one rather than read off the root: the
+  // same effect that writes --font-mono is the one this would be racing.
+  const fontFamily = $derived(xtermFontFamily(settings.state.terminalFontFamily));
   let scrollLastY = 0;
   let scrollAccum = 0;
 
@@ -1021,7 +1030,7 @@
       cursorBlink: true,
       cursorStyle: "bar",
       fontSize,
-      fontFamily: xtermFontFamily(),
+      fontFamily,
       lineHeight: 1.25,
       letterSpacing: 0,
       scrollback: 10_000,
@@ -1264,6 +1273,16 @@
     const next = fontSize;
     if (term && term.options.fontSize !== next) {
       term.options.fontSize = next;
+      scheduleFit();
+    }
+  });
+
+  // Same reason, same refit: a family change moves the cell as surely as a size
+  // change does, and the column count with it.
+  $effect(() => {
+    const next = fontFamily;
+    if (term && term.options.fontFamily !== next) {
+      term.options.fontFamily = next;
       scheduleFit();
     }
   });
