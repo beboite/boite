@@ -56,12 +56,15 @@
     void gitStore.refresh(registered).then(() => gitStore.autoFetch(registered));
   });
 
-  // The slow safety net, same period and same offline guard as the git panel:
-  // a remote workspace that is not connected has nobody to ask.
+  // The slow safety net, same period, same hidden-window and offline guards as
+  // the git panel — this box is always mounted, so without the hidden guard a
+  // minimised window would keep spawning git processes for the life of the app.
+  // Gated on isRepo: a folder the first refresh found bare has nothing to poll.
   $effect(() => {
     const id = scope;
-    if (!id) return;
-    const tick = () => {
+    if (!id || !isRepo) return;
+    const poke = () => {
+      if (document.hidden) return;
       const remoteScoped =
         workspace.mode === "remote" ||
         (workspace.isDynamic && project?.origin === "remote");
@@ -69,8 +72,16 @@
       void gitStore.refresh(id);
       void gitStore.autoFetch(id);
     };
-    const timer = setInterval(tick, AUTO_REFRESH_MS);
-    return () => clearInterval(timer);
+    // Focus/visibility pokes give the instant refresh when the user comes back,
+    // instead of waiting out whatever is left of the interval.
+    const timer = setInterval(poke, AUTO_REFRESH_MS);
+    window.addEventListener("focus", poke);
+    document.addEventListener("visibilitychange", poke);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("focus", poke);
+      document.removeEventListener("visibilitychange", poke);
+    };
   });
 
   $effect(() => {
@@ -104,13 +115,15 @@
 </script>
 
 {#if visible}
-  <!-- role=status: it narrates state and takes no verbs. The tabindex is what
-       makes the hover expansion reachable from a keyboard (focus-within), which
-       is exactly the combination the a11y rule cannot see. -->
+  <!-- role=group, not status: status is a live region, and a box that refreshes
+       every ten seconds would re-announce itself to a screen reader on every
+       branch or commit change, unprompted. The tabindex is what makes the hover
+       expansion reachable from a keyboard (focus-within), which is exactly the
+       combination the a11y rule cannot see. -->
   <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
   <div
     class="group w-80 max-w-[40vw] select-none outline-none"
-    role="status"
+    role="group"
     aria-label={t("infoBox.label")}
     tabindex="0"
   >

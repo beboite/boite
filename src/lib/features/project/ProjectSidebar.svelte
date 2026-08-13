@@ -516,8 +516,19 @@ import { projectDisplayName } from "$lib/shared/project-label";
     paneStore.dropPreview = null;
   }
 
+  // While smart sort is armed, the rendered order IS the smart order, so
+  // persisting it through setProjectOrder/setThreadOrder would overwrite the
+  // hand-made order with a computed one — silently, since the visible list is
+  // re-sorted right back. The experiment is device-scoped and the orders are
+  // workspace-scoped, so one device would clobber every other's arrangement.
+  function smartSortArmed(): boolean {
+    return (
+      settings.state.experimentSmartSort && settings.state.smartSortBy !== "manual"
+    );
+  }
+
   function commitProjectDrag(drag: DragState) {
-    if (drag.slotIndex === null) return;
+    if (drag.slotIndex === null || smartSortArmed()) return;
     const next = reordered(app.sortedProjects.map((p) => p.id), drag.id, drag.slotIndex);
     if (next) void settings.setProjectOrder(next);
   }
@@ -543,6 +554,7 @@ import { projectDisplayName } from "$lib/shared/project-label";
     }
 
     if (drag.slotIndex !== null) {
+      if (smartSortArmed()) return;
       const ids = app.threadsByProjectSorted(drag.projectId).map((t) => t.id);
       const next = reordered(ids, drag.id, drag.slotIndex);
       if (next) void settings.setThreadOrder(drag.projectId, next);
