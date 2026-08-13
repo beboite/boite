@@ -1,6 +1,7 @@
 import { Channel } from "@tauri-apps/api/core";
 import { invoke } from "./ipc";
 import type { PtyApi, PtyEvent, PtyOpenArgs } from "../types";
+import type { ThreadReply } from "$lib/domain/awareness";
 
 // The Rust side base64-encodes output: a byte array would arrive as a JSON
 // number array, ~4x the payload and an expensive parse for every chunk. We
@@ -64,5 +65,11 @@ export const tauriPty: PtyApi = {
   // alive); a later pty_open reattaches. Explicit close still calls kill().
   async release(key: string): Promise<void> {
     await invoke("pty_detach", { id: key });
+  },
+
+  // Thread id, not a PTY key: the desktop resolves it through LocalSessions, and
+  // the answer is parsed against the closed vocabulary on the Rust side.
+  async reply(threadId: string, answer: ThreadReply): Promise<void> {
+    await invoke("thread_reply", { threadId, answer });
   },
 };

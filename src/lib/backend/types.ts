@@ -25,6 +25,7 @@ import type {
   SearchHit,
 } from "$lib/features/explorer/api";
 import type { FileVersions, TextFile } from "$lib/features/editor/api";
+import type { ThreadReply } from "$lib/domain/awareness";
 import type { Platform, ShellOption } from "$lib/storage/platform.svelte";
 import type { LogEntry, LogLevel } from "$lib/shared/services/logger.svelte";
 
@@ -80,6 +81,20 @@ export interface PtyApi {
   // Detach this client without terminating. Local has no detached PTYs yet so
   // it kills; remote detaches and the server keeps the process running.
   release(key: string): Promise<void>;
+  /**
+   * One keystroke into a thread that is blocked on the user.
+   *
+   * Keyed by thread rather than by the live key every other method here takes,
+   * because the caller is a device answering a notification: a phone that has
+   * never attached to that terminal holds no key for it.
+   *
+   * Deliberately not `write` with a smaller argument. What may be sent is a
+   * closed vocabulary (`boite_core::reply`), checked on the machine that owns
+   * the PTY and not here, because a bound enforced by the caller is not a bound.
+   * Writing bytes into a terminal is a remote code execution primitive and this
+   * is the version of it a lock screen may reach.
+   */
+  reply(threadId: string, answer: ThreadReply): Promise<void>;
 }
 
 export interface DbApi {

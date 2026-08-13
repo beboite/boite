@@ -12,9 +12,13 @@
     "",
     "The gap between the first two is what the lazy imports are worth: 4.8 MB the",
     "window does not fetch before it can paint, most of it the PDF worker. That is",
-    "the measurement those imports never had attached to them."
+    "the measurement those imports never had attached to them.",
+    "",
+    "eagerBytes moved 750 -> 760 KB for the reply bar a waiting thread offers. It",
+    "is not lazy on purpose: it exists so a blocked terminal can be answered in one",
+    "tap, and a chunk fetched on the tap is the one thing that would take that away."
   ],
-  "eagerBytes": 768000,
+  "eagerBytes": 778240,
   "totalBytes": 6144000,
   "largestEagerChunkBytes": 256000
 }
