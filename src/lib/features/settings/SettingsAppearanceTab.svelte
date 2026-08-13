@@ -5,8 +5,21 @@
   import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
   import type { MessageKey } from "$lib/i18n/index.svelte";
   import { LOCALE_OPTIONS, t } from "$lib/i18n/index.svelte";
-  import type { MotionMode } from "$lib/types";
+  import type { MotionMode, ThemeMode } from "$lib/types";
   import { ACCENT_COLOR, type ModelAccent } from "$lib/features/fastpick/accent";
+  import Monitor from "@lucide/svelte/icons/monitor";
+  import Moon from "@lucide/svelte/icons/moon";
+  import Sun from "@lucide/svelte/icons/sun";
+
+  const THEME_MODES: {
+    id: ThemeMode;
+    labelKey: MessageKey;
+    icon: typeof Monitor;
+  }[] = [
+    { id: "system", labelKey: "appearance.themeSystem", icon: Monitor },
+    { id: "dark", labelKey: "appearance.themeDark", icon: Moon },
+    { id: "light", labelKey: "appearance.themeLight", icon: Sun },
+  ];
 
   const MOTION_MODES: { id: MotionMode; labelKey: MessageKey }[] = [
     { id: "system", labelKey: "appearance.motionSystem" },
@@ -32,6 +45,26 @@
     settings.setUiScalePercent(100);
   }
 </script>
+
+<SettingsCard title={t("appearance.theme")} description={t("appearance.themeDesc")}>
+  <div class="flex gap-1.5" role="radiogroup" aria-label={t("appearance.theme")}>
+    {#each THEME_MODES as mode (mode.id)}
+      <button
+        type="button"
+        role="radio"
+        aria-checked={settings.state.themeMode === mode.id}
+        class="flex items-center gap-1.5 rounded-md border px-3 py-1 text-xs transition
+          {settings.state.themeMode === mode.id
+            ? 'border-foreground/40 bg-[var(--color-surface-3)] text-foreground'
+            : 'border-border bg-[var(--color-surface-2)] text-muted-foreground hover:border-foreground/30 hover:text-foreground'}"
+        onclick={() => settings.setThemeMode(mode.id)}
+      >
+        <mode.icon class="size-3.5" />
+        {t(mode.labelKey)}
+      </button>
+    {/each}
+  </div>
+</SettingsCard>
 
 <SettingsCard title={t("appearance.uiScale")} description={t("appearance.uiScaleDesc")}>
   {#snippet actions()}

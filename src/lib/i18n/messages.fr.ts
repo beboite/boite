@@ -92,6 +92,11 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "shortcuts.checking": "Vérification…",
   "shortcuts.recheck": "Revérifier",
 
+  "appearance.theme": "Thème",
+  "appearance.themeDesc": "Système suit le réglage clair ou sombre de votre OS.",
+  "appearance.themeSystem": "Système",
+  "appearance.themeDark": "Sombre",
+  "appearance.themeLight": "Clair",
   "appearance.uiScale": "Échelle de l'interface",
   "appearance.uiScaleDesc": "Ctrl + molette, ou Ctrl + + / − / 0.",
   "appearance.resetScale": "Réinitialiser à 100 %",

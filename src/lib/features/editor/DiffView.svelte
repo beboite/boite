@@ -4,6 +4,7 @@
   import { EditorView, lineNumbers, highlightSpecialChars } from "@codemirror/view";
   import { MergeView } from "@codemirror/merge";
   import { boiteHighlight, boiteTheme } from "./theme";
+  import { currentTheme } from "$lib/theme/current.svelte";
   import { loadLanguageExtension } from "./languages";
 
   interface Props {
@@ -26,15 +27,19 @@
   let merge: MergeView | null = null;
   let langA = new Compartment();
   let langB = new Compartment();
+  // One per side: a compartment belongs to the state it was configured in, and
+  // a MergeView is two states.
+  let themeA = new Compartment();
+  let themeB = new Compartment();
   // Language loading is async; a second filename change must not be overtaken
   // by the first import resolving late.
   let langGeneration = 0;
 
-  function baseExt() {
+  function baseExt(theme: Compartment) {
     return [
       lineNumbers(),
       highlightSpecialChars(),
-      boiteTheme,
+      theme.of(boiteTheme(currentTheme.name)),
       boiteHighlight,
       EditorView.editable.of(false),
       EditorState.readOnly.of(true),
@@ -45,8 +50,8 @@
   onMount(() => {
     if (!host) return;
     merge = new MergeView({
-      a: { doc: leftContent, extensions: [...baseExt(), langA.of([])] },
-      b: { doc: rightContent, extensions: [...baseExt(), langB.of([])] },
+      a: { doc: leftContent, extensions: [...baseExt(themeA), langA.of([])] },
+      b: { doc: rightContent, extensions: [...baseExt(themeB), langB.of([])] },
       parent: host,
       revertControls: undefined,
       collapseUnchanged: { margin: 3, minSize: 6 },
@@ -80,6 +85,12 @@
 
   $effect(() => {
     if (filename && merge) void applyLanguage(filename);
+  });
+
+  $effect(() => {
+    const next = boiteTheme(currentTheme.name);
+    merge?.a.dispatch({ effects: themeA.reconfigure(next) });
+    merge?.b.dispatch({ effects: themeB.reconfigure(next) });
   });
 
   async function applyLanguage(name: string) {

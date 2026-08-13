@@ -10,11 +10,16 @@
     "  everything shipped    5500.6 KB  173 files",
     "  largest eager chunk    216.2 KB   the main route",
     "",
+    "eagerBytes moved on 2026-08-13, from 750 KB to 781 KB: the second palette",
+    "and the theme gate cost 4.4 KB, and the graph had grown to 747 KB in the",
+    "meantime, so it no longer fitted. The 30 KB of new headroom is deliberate:",
+    "at 3 KB spare, the ceiling was failing the next commit whatever it was.",
+    "",
     "The gap between the first two is what the lazy imports are worth: 4.8 MB the",
     "window does not fetch before it can paint, most of it the PDF worker. That is",
     "the measurement those imports never had attached to them."
   ],
-  "eagerBytes": 768000,
+  "eagerBytes": 800000,
   "totalBytes": 6144000,
   "largestEagerChunkBytes": 256000
 }

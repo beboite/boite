@@ -219,16 +219,109 @@
   --dur-3: 220ms;
   --dur-4: 380ms;
   --dur-5: 620ms;
+
+  /* What the engine is told the app is, so native widgets follow: without it a
+     <select> drew a white Windows dropdown over a dark app and autofill painted
+     its own background over the fields. A custom property rather than a literal
+     because it is now two answers, and `html` below reads whichever is set. */
+  --app-color-scheme: dark;
+}
+
+/* ---- The light palette -------------------------------------------------
+   Every colour role above, restated. The block is unlayered, and Tailwind's
+   `@theme` emits its properties inside the `theme` layer, so these win on
+   cascade order rather than on specificity.
+
+   Only roles are here. The icon tints the shortcut picker offers are absent on
+   purpose: they are stored as plain hex on a shortcut row, so a palette moving
+   them would repaint rows the user picked by eye. `appearance.ts` names them,
+   and `appearance.test.ts` fails on any other role that has no twin here,
+   which is what stops a colour added to the dark palette from reaching the
+   light one as a black-on-black surprise months later. */
+:root[data-theme="light"] {
+  --app-color-scheme: light;
+
+  --color-background: #fbfbfc;
+  --color-foreground: #18181b;
+  --color-muted: #f1f1f4;
+  --color-muted-foreground: #63636e;
+  --color-border: #e3e3e8;
+  --color-accent: #ececf0;
+  --color-border-strong: #c4c4cd;
+
+  /* Darkened until they carry on white: the dark ramp's mint and butter are
+     pastels chosen against #0a0a0a, and every one of them reads as a highlight
+     rather than as a state on a light surface. */
+  --color-success: #16a34a;
+  --color-warning: #b45309;
+  --color-danger: #dc2626;
+  --color-awake: #7c3aed;
+  --color-dormant: #2f7d5c;
+  --color-parked: #4f7d69;
+
+  /* The stack inverts: surfaces get lighter as they rise on dark, and darker as
+     they rise on light, so a popover still separates from what is under it. */
+  --color-titlebar: #f0f0f3;
+  --color-surface: #ffffff;
+  --color-surface-2: #f6f6f8;
+  --color-surface-3: #ececf0;
+
+  --color-selection: rgba(24, 24, 27, 0.14);
+  --color-scrim: rgba(24, 24, 27, 0.32);
+
+  /* Elevation is a shadow and a light edge on dark; on light it is a shadow and
+     a darker hairline, because a white inset highlight over white is nothing. */
+  --shadow-e1: 0 1px 2px rgb(24 24 27 / 0.08), 0 0 0 1px rgb(24 24 27 / 0.04);
+  --shadow-e2:
+    0 4px 12px -2px rgb(24 24 27 / 0.12), 0 0 0 1px rgb(24 24 27 / 0.07);
+  --shadow-e3:
+    0 12px 32px -6px rgb(24 24 27 / 0.16), 0 0 0 1px rgb(24 24 27 / 0.08);
+  --shadow-e4:
+    0 24px 64px -12px rgb(24 24 27 / 0.2), 0 0 0 1px rgb(24 24 27 / 0.09);
+
+  --color-syntax-comment: #6b7280;
+  --color-syntax-number: #b45309;
+
+  /* Lanes keep their hues and lose their pastel: the graph's job is one
+     recognisable colour per branch, and eight pastels on white are one colour. */
+  --color-lane-remote: #0284c7;
+  --color-lane-1: #db2777;
+  --color-lane-2: #15803d;
+  --color-lane-3: #7c3aed;
+  --color-lane-4: #e11d48;
+  --color-lane-5: #0d9488;
+  --color-lane-6: #ea580c;
+  --color-lane-7: #2563eb;
+  --color-lane-8: #9333ea;
+
+  /* The terminal's sixteen, restated for a light background. Not the dark set
+     darkened one by one: the ANSI slots have to stay apart from each other as
+     well as from the page, which is what the bright half is for. */
+  --color-term-foreground: #24292f;
+  --color-term-cursor: #24292f;
+  --color-term-black: #24292f;
+  --color-term-red: #cf222e;
+  --color-term-green: #1a7f37;
+  --color-term-yellow: #9a6700;
+  --color-term-blue: #0969da;
+  --color-term-magenta: #8250df;
+  --color-term-cyan: #1b7c83;
+  --color-term-white: #6e7781;
+  --color-term-bright-black: #57606a;
+  --color-term-bright-red: #a40e26;
+  --color-term-bright-green: #116329;
+  --color-term-bright-yellow: #7d4e00;
+  --color-term-bright-blue: #0550ae;
+  --color-term-bright-magenta: #6639ba;
+  --color-term-bright-cyan: #3192aa;
+  --color-term-bright-white: #24292f;
 }
 
 html,
 body {
   height: 100%;
   margin: 0;
-  /* Tells the engine the app is dark, which is what makes native widgets follow:
-     without it a <select> drew a white Windows dropdown and autofill painted its
-     own light background over the fields. */
-  color-scheme: dark;
+  color-scheme: var(--app-color-scheme);
   background: transparent;
   color: var(--color-foreground);
   font-family:

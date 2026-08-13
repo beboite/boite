@@ -161,6 +161,7 @@ const DEFAULTS: Settings = {
   mobileLayout: false,
   layoutPinned: false,
   motionMode: "system",
+  themeMode: "system",
   locale: "system",
   setupCompleted: false,
   fastpickEnabled: true,
@@ -177,6 +178,10 @@ const DEFAULTS: Settings = {
 // the mobile layout. The toggle in Appearance overrides it permanently after.
 function isMotionMode(value: unknown): value is Settings["motionMode"] {
   return value === "system" || value === "on" || value === "off";
+}
+
+function isThemeMode(value: unknown): value is Settings["themeMode"] {
+  return value === "system" || value === "dark" || value === "light";
 }
 
 function isSmartSortBy(value: unknown): value is SmartSortBy {
@@ -281,6 +286,7 @@ const DEVICE_FIELDS = [
   "mobileLayout",
   "layoutPinned",
   "motionMode",
+  "themeMode",
   "locale",
   "colorByModel",
   "sidebarDesign",
@@ -490,6 +496,9 @@ class SettingsStore {
         motionMode: isMotionMode(stored.motionMode)
           ? stored.motionMode
           : DEFAULTS.motionMode,
+        themeMode: isThemeMode(stored.themeMode)
+          ? stored.themeMode
+          : DEFAULTS.themeMode,
         locale: isLocaleSetting(stored.locale) ? stored.locale : DEFAULTS.locale,
         layoutPinned:
           typeof stored.layoutPinned === "boolean"
@@ -719,6 +728,12 @@ class SettingsStore {
   setMotionMode(value: Settings["motionMode"]) {
     if (this.state.motionMode === value) return;
     this.state.motionMode = value;
+    this.persistDeviceNow();
+  }
+
+  setThemeMode(value: Settings["themeMode"]) {
+    if (this.state.themeMode === value) return;
+    this.state.themeMode = value;
     this.persistDeviceNow();
   }
   async setFastpickEnabled(value: boolean) {

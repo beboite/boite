@@ -182,6 +182,7 @@ export interface Settings {
   gitAutoFetchSeconds: number;
   mobileLayout: boolean;
   motionMode: MotionMode;
+  themeMode: ThemeMode;
   locale: LocaleSetting;
   setupCompleted?: boolean;
   /**
@@ -255,6 +256,17 @@ export type SidebarDesign = "classic" | "glow";
 // Animation preference: "system" follows prefers-reduced-motion, "on"/"off"
 // override the OS either way.
 export type MotionMode = "system" | "on" | "off";
+
+/**
+ * Which palette the window draws in. "system" follows prefers-color-scheme,
+ * the other two override the OS either way.
+ *
+ * A palette rather than a boolean, for the same reason `SidebarDesign` is:
+ * a `darkMode: boolean` cannot spell "follow the OS" and cannot be extended to
+ * a third palette without renaming every call site. `theme/appearance.ts`
+ * resolves it, `app.css` holds what each one is.
+ */
+export type ThemeMode = "system" | "dark" | "light";
 
 /**
  * Which tab the side panel is on, or null when it is closed.
