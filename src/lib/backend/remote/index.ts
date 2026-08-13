@@ -20,11 +20,13 @@ import type {
   PtyApi,
   PushApi,
   ScopeApi,
+  SearchApi,
   ServerIdentity,
   SessionApi,
   SessionHit,
   ShellApi,
   SystemApi,
+  WorkspaceHit,
   WorkspaceMetaApi,
   WorktreeApi,
   WorktreeEntry,
@@ -76,6 +78,7 @@ export class RemoteBackend implements Backend {
   readonly fastpick: FastpickApi;
   readonly scope: ScopeApi;
   readonly session: SessionApi;
+  readonly search: SearchApi;
   readonly log: LogApi;
   readonly approvals: ApprovalsApi;
   readonly push: PushApi;
@@ -444,6 +447,13 @@ export class RemoteBackend implements Backend {
       migrate: (kind, sessionId, fromCwd, toCwd) =>
         rpc("session.migrate", { kind, sessionId, fromCwd, toCwd }).then((r) =>
           Boolean(r.migrated),
+        ),
+    };
+
+    this.search = {
+      query: (text, limit) =>
+        rpc("search.query", { q: text, limit }).then(
+          (r) => (r.hits ?? []) as WorkspaceHit[],
         ),
     };
 
