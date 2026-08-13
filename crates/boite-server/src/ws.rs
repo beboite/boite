@@ -12,6 +12,9 @@ use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
+use crate::auth::Session;
+use crate::authz::Authorized;
+use crate::events::AppEvent;
 use crate::protocol::{self, Event, Request, Response};
 use crate::rpc;
 use crate::state::AppState;
@@ -22,6 +25,12 @@ const AUTH_TIMEOUT: Duration = Duration::from_secs(5);
 enum WsOut {
     Text(String),
     Binary(Vec<u8>),
+    /// Hang up, from this side.
+    ///
+    /// The one thing a task holding only the writer channel cannot otherwise
+    /// do. A revoked device has to stop *now*, and a connection that merely
+    /// refuses every call is one the user watches sit there looking connected.
+    Close,
 }
 
 // Decrements the live-connection counter however handle_socket returns.
@@ -41,6 +50,10 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<AppState>, addr: Socket
             let msg = match out {
                 WsOut::Text(s) => Message::Text(s.into()),
                 WsOut::Binary(b) => Message::Binary(b.into()),
+                WsOut::Close => {
+                    let _ = sink.send(Message::Close(None)).await;
+                    break;
+                }
             };
             if sink.send(msg).await.is_err() {
                 break;
@@ -58,22 +71,46 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<AppState>, addr: Socket
         return;
     }
 
-    if !authenticate(&mut stream, &state, addr, &tx).await {
+    let Some(session) = authenticate(&mut stream, &state, addr, &tx).await else {
         writer.abort();
         return;
-    }
+    };
     // Past this point the client receives control events, so it is one of the
     // devices that can carry out an agent request. The agent endpoint refuses
     // to promise anything when this reaches zero.
     state.devices.fetch_add(1, Ordering::Relaxed);
     let _device = ConnGuard(&state.devices);
 
+    // Set by the control task the moment this pairing is revoked, and read by
+    // the binary frame path. An RPC asks the database instead (see
+    // `authz::Authorized::check`), which is the answer that does not depend on
+    // a broadcast having been delivered; this is what reaches a socket that is
+    // only carrying keystrokes.
+    let revoked = Arc::new(std::sync::atomic::AtomicBool::new(false));
+
     // Fan control-plane events out to this client.
     let mut events_rx = state.events.subscribe();
     let tx_ctrl = tx.clone();
+    let my_pairing = session.pairing_id().to_string();
+    let revoked_ctrl = revoked.clone();
     let control = tokio::spawn(async move {
         loop {
             match events_rx.recv().await {
+                Ok(AppEvent::PairingRevoked { pairing_id }) if pairing_id == my_pairing => {
+                    // This connection is over. Said once so the client can put
+                    // the login gate up rather than reconnect into a refusal,
+                    // then hung up: a socket that merely refuses every call is
+                    // one the user watches sit there looking connected.
+                    revoked_ctrl.store(true, Ordering::Relaxed);
+                    let _ = tx_ctrl
+                        .send(WsOut::Text(json_str(&Response::err(
+                            0,
+                            crate::authz::REVOKED.to_string(),
+                        ))))
+                        .await;
+                    let _ = tx_ctrl.send(WsOut::Close).await;
+                    break;
+                }
                 Ok(ev) => {
                     if let Ok(s) = serde_json::to_string(&ev.to_event()) {
                         if tx_ctrl.send(WsOut::Text(s)).await.is_err() {
@@ -82,7 +119,9 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<AppState>, addr: Socket
                     }
                 }
                 // Dropped control events leave the client with stale thread
-                // state; tell it to refetch rather than silently diverge.
+                // state; tell it to refetch rather than silently diverge. A
+                // revocation can be among what was dropped, which is why it is
+                // not the only thing enforcing one.
                 Err(RecvError::Lagged(_)) => {
                     if let Ok(s) = serde_json::to_string(&Event::new("resync", json!({}))) {
                         if tx_ctrl.send(WsOut::Text(s)).await.is_err() {
@@ -105,17 +144,37 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<AppState>, addr: Socket
                     Err(_) => continue,
                 };
                 let id = req.id.unwrap_or(0);
-                match req.method.as_str() {
+                // One gate, before the arms rather than inside them. The two
+                // methods this file serves itself go through it too: attaching
+                // to a PTY is the single thing a read-only device must not
+                // reach, and a check written per arm is a check the next arm
+                // forgets. `Authorized` cannot be built any other way.
+                let request =
+                    match Authorized::check(&state.store, &session, &req.method, req.params) {
+                        Ok(request) => request,
+                        Err(e) => {
+                            let _ = tx.send(WsOut::Text(json_str(&Response::err(id, e)))).await;
+                            continue;
+                        }
+                    };
+                match request.method() {
+                    // The handshake happened, and it is not repeatable. A
+                    // second one on a live socket would be a way to change who
+                    // a connection belongs to after it was let in.
                     "auth" => {
                         let _ = tx
-                            .send(WsOut::Text(json_str(&Response::ok(id, json!({ "ok": true })))))
+                            .send(WsOut::Text(json_str(&Response::err(
+                                id,
+                                "this socket is already authenticated".into(),
+                            ))))
                             .await;
                     }
                     "thread.attach" => {
-                        handle_attach(&state, &req.params, id, &tx, &mut attached).await;
+                        handle_attach(&state, request.params(), id, &tx, &mut attached).await;
                     }
                     "thread.detach" => {
-                        if let Some(tid) = req.params.get("threadId").and_then(|v| v.as_str()) {
+                        if let Some(tid) = request.params().get("threadId").and_then(|v| v.as_str())
+                        {
                             if let Some(h) = attached.remove(tid) {
                                 h.abort();
                             }
@@ -125,7 +184,7 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<AppState>, addr: Socket
                             .await;
                     }
                     _ => {
-                        let resp = match rpc::dispatch(&state, &req.method, req.params).await {
+                        let resp = match rpc::dispatch(&state, request).await {
                             Ok(v) => Response::ok(id, v),
                             Err(e) => Response::err(id, e),
                         };
@@ -134,10 +193,18 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<AppState>, addr: Socket
                 }
             }
             Message::Binary(bytes) => {
+                // A revoked device stops typing into a terminal at once, which
+                // is the case a check at the next RPC would miss entirely: a
+                // socket carrying only keystrokes makes no RPCs.
+                if revoked.load(Ordering::Relaxed) {
+                    break;
+                }
                 if let Some((op, tid, payload)) = protocol::parse_frame(&bytes) {
                     // Only accept input for threads THIS socket attached to:
                     // a known UUID alone must not let one client inject
-                    // keystrokes into another's PTY.
+                    // keystrokes into another's PTY. Attaching is gated on the
+                    // terminal scope, so this set is empty for a device that
+                    // does not hold one.
                     if op == protocol::FRAME_INPUT && attached.contains_key(&tid.to_string()) {
                         let _ = state.registry.write(&tid.to_string(), payload);
                     }
@@ -281,20 +348,29 @@ async fn handle_attach(
     }
 }
 
+/// What the first frame has to carry, and what it may not.
+///
+/// **A ticket, never the device's own credential.** The ticket was bought over
+/// authenticated HTTP seconds ago (`http::ticket`), is good for one connection
+/// and expires in five minutes, so what travels through this frame — and
+/// through whatever proxy is in front of it — is worth nothing by the time
+/// anybody could replay it. A long-lived credential presented here is refused
+/// like any other wrong secret, on purpose: accepting both would leave the old
+/// shape working under a new name.
 async fn authenticate(
     stream: &mut SplitStream<WebSocket>,
     state: &Arc<AppState>,
     addr: SocketAddr,
     tx: &mpsc::Sender<WsOut>,
-) -> bool {
+) -> Option<Session> {
     let ip = addr.ip();
     if state.auth.is_locked(ip) {
-        return false;
+        return None;
     }
     let first = tokio::time::timeout(AUTH_TIMEOUT, stream.next()).await;
     // A frame that is not a well-formed auth request still has to reach
-    // auth.verify: routing malformed or wrong-method first frames around it
-    // left the per-IP lockout untrippable by exactly the traffic a prober
+    // auth.spend_ticket: routing malformed or wrong-method first frames around
+    // it left the per-IP lockout untrippable by exactly the traffic a prober
     // sends. Timeouts and closes are NOT counted — a client that hangs up
     // before authenticating (tab closed, network blip) is not an attempt, and
     // counting it would lock out a legitimate device after five reconnects.
@@ -307,14 +383,17 @@ async fn authenticate(
                     (
                         req.id.unwrap_or(0),
                         req.params
-                            .get("token")
+                            .get("ticket")
                             .and_then(|v| v.as_str())
                             .unwrap_or("")
                             .to_string(),
                     )
                 })
                 // A text frame that is not a usable auth request is still an
-                // attempt: that is what a prober sends.
+                // attempt: that is what a prober sends. So is one carrying
+                // `token` instead of `ticket`, which is what a client built
+                // before this sends — it reads the empty string and is refused,
+                // rather than being quietly accepted on the old path.
                 .unwrap_or((0, String::new())),
         ),
         Ok(Some(Ok(Message::Binary(_)))) => Some((0, String::new())),
@@ -325,21 +404,25 @@ async fn authenticate(
         _ => None,
     };
 
-    if let Some((id, token)) = attempt {
-        if state.auth.verify(ip, &token) {
+    if let Some((id, ticket)) = attempt {
+        if let Some(session) = state.auth.spend_ticket(ip, &state.store, &ticket) {
             let _ = tx
                 .send(WsOut::Text(json_str(&Response::ok(
                     id,
-                    json!({ "ok": true }),
+                    json!({
+                        "ok": true,
+                        "scopes": session.scopes(),
+                        "label": session.label(),
+                    }),
                 ))))
                 .await;
-            return true;
+            return Some(session);
         }
     }
     let _ = tx
         .send(WsOut::Text(json_str(&Response::err(0, "auth failed".into()))))
         .await;
-    false
+    None
 }
 
 fn json_str<T: serde::Serialize>(value: &T) -> String {

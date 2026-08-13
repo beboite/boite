@@ -1,8 +1,12 @@
 mod agent_api;
 mod auth;
+mod authz;
+mod cli;
 mod config;
 mod events;
+mod http;
 mod notify;
+mod pairing_link;
 mod protocol;
 mod push;
 mod registry;
@@ -14,9 +18,9 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::extract::connect_info::ConnectInfo;
-use axum::extract::{State, WebSocketUpgrade};
+use axum::extract::{RawQuery, State, WebSocketUpgrade};
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::Router;
 use tokio::sync::broadcast;
 use tokio::sync::broadcast::error::RecvError;
@@ -40,6 +44,15 @@ async fn main() {
                 .unwrap_or_else(|_| "boite_server=info".into()),
         )
         .init();
+
+    // A headless box with nothing paired to it has no screen to pair the first
+    // device from. These verbs are that screen; they touch the database and
+    // exit without ever binding a port, so they work whether or not a server is
+    // already running on this data directory.
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if cli::is_command(&args) {
+        std::process::exit(cli::run(&args));
+    }
 
     let config = match Config::from_env() {
         Ok(c) => c,
@@ -122,7 +135,7 @@ async fn main() {
         store,
         agent_api,
         registry,
-        auth: Auth::new(config.token.clone()),
+        auth: Auth::new(config.bootstrap_token.clone()),
         roots,
         events: events.clone(),
         notifier,
@@ -133,6 +146,7 @@ async fn main() {
         devices,
         workspace_dir: config.workspace_dir,
         data_dir: config.data_dir,
+        public_url: config.public_url,
         claimed_requests: Default::default(),
     });
 
@@ -153,12 +167,33 @@ async fn main() {
     // Never log the token itself: logs land in journald/docker/CI where the
     // on-disk token file's 0600 protection does not apply. The operator reads
     // it from the data dir (or sets BOITE_TOKEN).
-    tracing::info!("auth token loaded ({} chars)", config.token.len());
+    tracing::info!(
+        "bootstrap token loaded ({} chars); it pairs devices and opens nothing else",
+        config.bootstrap_token.len()
+    );
+    match state.store.list_pairings() {
+        Ok(rows) => {
+            let live = rows.iter().filter(|r| !r.revoked()).count();
+            if live == 0 {
+                // Not a warning, because it is also what a fresh install looks
+                // like. It is the one sentence that turns "nothing connects any
+                // more" into a next step.
+                tracing::info!(
+                    "no device is paired with this boite yet. `boite-server pair` invites one, \
+                     or POST /api/pairings with the bootstrap token"
+                );
+            } else {
+                tracing::info!("{live} device(s) paired");
+            }
+        }
+        Err(e) => tracing::warn!("could not read the pairing list: {e}"),
+    }
     tracing::info!("listening on {}", config.bind);
     if !config.bind.starts_with("127.") && !config.bind.starts_with("[::1]") {
         tracing::warn!(
-            "bound to a routable interface ({}); the token is sent over plain ws:// \
-             unless you front it with TLS (reverse proxy) or a tunnel (WireGuard/SSH)",
+            "bound to a routable interface ({}); credentials are sent over plain http:// \
+             and ws:// unless you front it with TLS (reverse proxy) or a tunnel \
+             (WireGuard/SSH)",
             config.bind
         );
     }
@@ -166,6 +201,12 @@ async fn main() {
     let mut app = Router::new()
         .route("/api/health", get(health))
         .route("/.well-known/assetlinks.json", get(assetlinks))
+        // The three doors that are not the socket. See `crate::http`: each one
+        // takes its credential in a header or a body, so none of them can leave
+        // a secret in a reverse proxy's access log.
+        .route("/api/pairings", post(http::mint_pairing))
+        .route("/api/pair", post(http::pair))
+        .route("/api/ticket", post(http::ticket))
         .route("/ws", get(ws_upgrade));
 
     if let Some(dir) = &config.static_dir {
@@ -249,11 +290,35 @@ async fn assetlinks(State(state): State<Arc<AppState>>) -> Response {
     }
 }
 
+/// Upgrades to the socket, and refuses one that carries a secret in its URL.
+///
+/// The query string of an upgrade request reaches the access log of whatever
+/// reverse proxy is in front, and nobody rotates those. Nothing here has ever
+/// read one — the credential arrives in the first frame — so a request carrying
+/// `?token=` or `?ticket=` is either a client built against a design this
+/// server does not have or somebody trying the shape on. Both get the same
+/// answer, and it is a refusal rather than a silently ignored parameter: a
+/// client that thinks it authenticated in the URL should find out here rather
+/// than at a five-second timeout.
 async fn ws_upgrade(
     ws: WebSocketUpgrade,
     State(state): State<Arc<AppState>>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    RawQuery(query): RawQuery,
 ) -> Response {
+    if let Some(query) = query {
+        let smells_of_a_secret = query
+            .split('&')
+            .filter_map(|pair| pair.split('=').next())
+            .any(|key| matches!(key, "token" | "ticket" | "auth" | "credential"));
+        if smells_of_a_secret {
+            return (
+                axum::http::StatusCode::BAD_REQUEST,
+                "a credential does not travel in a URL; present a ticket in the first frame",
+            )
+                .into_response();
+        }
+    }
     ws.on_upgrade(move |socket| ws::handle_socket(socket, state, addr))
         .into_response()
 }

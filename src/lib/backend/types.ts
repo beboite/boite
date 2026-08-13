@@ -835,6 +835,53 @@ export interface ApprovalsApi {
   decide(id: string, allow: boolean): Promise<PendingApproval | null>;
 }
 
+/**
+ * One device paired with a boite, as the devices screen draws it.
+ *
+ * No secret in here and there never will be: the server keeps a hash of what it
+ * issued, so there is nothing on this side to leak. A revoked row stays in the
+ * list rather than disappearing, because "when did that phone last reach this
+ * workspace" is the question a compromised device raises.
+ */
+export interface PairedDevice {
+  id: string;
+  label: string;
+  kind: string;
+  scopes: string[];
+  createdAt: number;
+  lastSeenAt: number | null;
+  revokedAt: number | null;
+}
+
+/** A one-time invitation, drawn once and never fetched again. */
+export interface PairingInvite {
+  /** The token itself. Shown only as part of `url`, never on its own. */
+  token: string;
+  /** Where the new device goes. The token is in the fragment. */
+  url: string;
+  expiresAt: number;
+  scopes: string[];
+  /** `null` when the link is too long for any QR symbol. */
+  qr: { size: number; rows: string[] } | null;
+}
+
+/**
+ * Managing which devices may reach this boite. Remote only: a desktop window is
+ * one of the devices, not a host that pairs them.
+ */
+export interface PairingApi {
+  list(): Promise<PairedDevice[]>;
+  invite(options: {
+    label: string;
+    kind: string;
+    scopes: string[];
+    /** This device's own origin, for a server behind a proxy that does not know its public name. */
+    base: string;
+  }): Promise<PairingInvite>;
+  /** False means it was already revoked, or was never a device here. */
+  revoke(id: string): Promise<boolean>;
+}
+
 export interface Backend {
   readonly kind: "tauri" | "remote";
   readonly caps: BackendCaps;
@@ -861,6 +908,9 @@ export interface Backend {
   // Cosmetic workspace identity (name/color). Remote only; the local desktop
   // workspace is always labeled "Local".
   readonly meta?: WorkspaceMetaApi;
+  // Which devices may reach this boite. Remote only, and every call on it needs
+  // the `admin` scope server-side.
+  readonly pairing?: PairingApi;
   /**
    * Whether this device is the one to carry out an agent request.
    *

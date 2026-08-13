@@ -4,7 +4,7 @@ use parking_lot::Mutex;
 use rusqlite::Connection;
 
 use crate::model::{Project, Thread, Todo};
-use crate::{approval, journal, migrations, search, timeline};
+use crate::{approval, journal, migrations, pairing, search, timeline};
 
 pub struct Store {
     conn: Mutex<Connection>,
@@ -865,6 +865,196 @@ impl Store {
         .map_err(|e| e.to_string())?;
         Ok(())
     }
+
+    /// Writes a paired device down. The secret is already a hash by the time it
+    /// reaches here; nothing in this file has ever seen the value it covers.
+    pub fn add_pairing(&self, pairing: &pairing::Pairing, secret_hash: &str) -> Result<(), String> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "INSERT INTO pairings
+             (id, label, kind, scopes, secret_hash, created_at, last_seen_at, revoked_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, NULL)",
+            rusqlite::params![
+                pairing.id,
+                pairing.label,
+                pairing.kind,
+                pairing.scopes.to_text(),
+                secret_hash,
+                pairing.created_at,
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    /// Every pairing, revoked ones included.
+    ///
+    /// A revoked row stays and is shown struck through rather than deleted: the
+    /// question a compromised phone raises is *when did that device last reach
+    /// this workspace*, and a deleted row answers nothing.
+    pub fn list_pairings(&self) -> Result<Vec<pairing::Pairing>, String> {
+        let conn = self.conn.lock();
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, label, kind, scopes, created_at, last_seen_at, revoked_at
+                 FROM pairings ORDER BY created_at ASC",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(pairing::Pairing {
+                    id: r.get(0)?,
+                    label: r.get(1)?,
+                    kind: r.get(2)?,
+                    scopes: pairing::ScopeSet::parse(&r.get::<_, String>(3)?),
+                    created_at: r.get(4)?,
+                    last_seen_at: r.get(5)?,
+                    revoked_at: r.get(6)?,
+                })
+            })
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    }
+
+    /// One pairing and the hash it is proved against.
+    ///
+    /// Found by id, which is the half of the credential that is not secret, so
+    /// this is an indexed read rather than a scan comparing every stored secret
+    /// against the one presented.
+    pub fn pairing(&self, id: &str) -> Option<(pairing::Pairing, String)> {
+        let conn = self.conn.lock();
+        conn.query_row(
+            "SELECT id, label, kind, scopes, created_at, last_seen_at, revoked_at, secret_hash
+             FROM pairings WHERE id = ?1",
+            [id],
+            |r| {
+                Ok((
+                    pairing::Pairing {
+                        id: r.get(0)?,
+                        label: r.get(1)?,
+                        kind: r.get(2)?,
+                        scopes: pairing::ScopeSet::parse(&r.get::<_, String>(3)?),
+                        created_at: r.get(4)?,
+                        last_seen_at: r.get(5)?,
+                        revoked_at: r.get(6)?,
+                    },
+                    r.get(7)?,
+                ))
+            },
+        )
+        .ok()
+    }
+
+    /// Whether this pairing is still allowed to do anything.
+    ///
+    /// The question a socket that is already open asks, so it stays one indexed
+    /// read of one column: revoking a device has to reach the connection it is
+    /// holding, not only the next handshake it attempts.
+    pub fn pairing_is_live(&self, id: &str) -> bool {
+        let conn = self.conn.lock();
+        conn.query_row(
+            "SELECT revoked_at FROM pairings WHERE id = ?1",
+            [id],
+            |r| r.get::<_, Option<i64>>(0),
+        )
+        .map(|revoked| revoked.is_none())
+        .unwrap_or(false)
+    }
+
+    /// Shuts one device out. False means there was nothing open to shut.
+    pub fn revoke_pairing(&self, id: &str, at: i64) -> Result<bool, String> {
+        let conn = self.conn.lock();
+        let changed = conn
+            .execute(
+                "UPDATE pairings SET revoked_at = ?2 WHERE id = ?1 AND revoked_at IS NULL",
+                rusqlite::params![id, at],
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(changed > 0)
+    }
+
+    pub fn touch_pairing(&self, id: &str, at: i64) -> Result<(), String> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "UPDATE pairings SET last_seen_at = ?2 WHERE id = ?1",
+            rusqlite::params![id, at],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub fn add_pairing_token(&self, pending: &pairing::PendingPairing) -> Result<(), String> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "INSERT INTO pairing_tokens
+             (id, label, kind, scopes, secret_hash, created_at, expires_at, used_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL)",
+            rusqlite::params![
+                pending.id,
+                pending.label,
+                pending.kind,
+                pending.scopes.to_text(),
+                pending.secret_hash,
+                pending.created_at,
+                pending.expires_at,
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub fn pairing_token(&self, id: &str) -> Option<pairing::PendingPairing> {
+        let conn = self.conn.lock();
+        conn.query_row(
+            "SELECT id, label, kind, scopes, secret_hash, created_at, expires_at, used_at
+             FROM pairing_tokens WHERE id = ?1",
+            [id],
+            |r| {
+                Ok(pairing::PendingPairing {
+                    id: r.get(0)?,
+                    label: r.get(1)?,
+                    kind: r.get(2)?,
+                    scopes: pairing::ScopeSet::parse(&r.get::<_, String>(3)?),
+                    secret_hash: r.get(4)?,
+                    created_at: r.get(5)?,
+                    expires_at: r.get(6)?,
+                    used_at: r.get(7)?,
+                })
+            },
+        )
+        .ok()
+    }
+
+    /// Spends a pairing token, once.
+    ///
+    /// The `used_at IS NULL AND expires_at > now` lives in the SQL rather than
+    /// in a read followed by a write, so two devices presenting the same token
+    /// in the same breath produce one pairing and the loser gets `false`. The
+    /// same shape as `decide_approval`, for the same reason.
+    pub fn spend_pairing_token(&self, id: &str, now: i64) -> Result<bool, String> {
+        let conn = self.conn.lock();
+        let changed = conn
+            .execute(
+                "UPDATE pairing_tokens SET used_at = ?2
+                 WHERE id = ?1 AND used_at IS NULL AND expires_at > ?2",
+                rusqlite::params![id, now],
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(changed > 0)
+    }
+
+    /// Drops tokens nobody can spend any more.
+    ///
+    /// Spent and expired both: what is left is only ever what is still offered,
+    /// so a long-lived server does not accumulate a table of dead invitations.
+    pub fn sweep_pairing_tokens(&self, now: i64) -> Result<usize, String> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "DELETE FROM pairing_tokens WHERE used_at IS NOT NULL OR expires_at <= ?1",
+            [now],
+        )
+        .map_err(|e| e.to_string())
+    }
 }
 
 /// One journal entry flattened into the words it could be found by.
@@ -1150,6 +1340,101 @@ mod tests {
         store.settle_last_run().unwrap();
         assert_eq!(status_of("live"), "idle");
         assert_eq!(status_of("ended"), "exited", "how a run ended is not news to decay");
+    }
+
+    fn a_pairing(id: &str, scopes: pairing::ScopeSet) -> pairing::Pairing {
+        pairing::Pairing {
+            id: id.into(),
+            label: "a phone".into(),
+            kind: "phone".into(),
+            scopes,
+            created_at: 1,
+            last_seen_at: None,
+            revoked_at: None,
+        }
+    }
+
+    /// Revoking one device leaves every other one alone. That is the whole
+    /// point: the only revocation before this was rotating the secret that
+    /// every device held.
+    #[test]
+    fn a_revoked_pairing_stops_and_its_neighbours_do_not() {
+        let (store, _dir) = scratch_store("pairings");
+        store
+            .add_pairing(&a_pairing("aa", pairing::ScopeSet::standard()), "hash-a")
+            .unwrap();
+        store
+            .add_pairing(&a_pairing("bb", pairing::ScopeSet::full()), "hash-b")
+            .unwrap();
+
+        assert!(store.pairing_is_live("aa"));
+        assert!(store.revoke_pairing("aa", 99).unwrap());
+        assert!(!store.pairing_is_live("aa"));
+        assert!(store.pairing_is_live("bb"));
+
+        // Revoking twice is not a second event, and a row nobody has is not one
+        // either. Both answer false rather than erroring, so a device that got
+        // there first does not turn the second click into a failure.
+        assert!(!store.revoke_pairing("aa", 100).unwrap());
+        assert!(!store.revoke_pairing("nobody", 100).unwrap());
+        assert!(!store.pairing_is_live("nobody"));
+
+        // The row stays, struck through: "when did that phone last reach this
+        // workspace" is the question a compromised device raises, and a deleted
+        // row answers nothing.
+        let listed = store.list_pairings().unwrap();
+        assert_eq!(listed.len(), 2);
+        assert_eq!(listed[0].revoked_at, Some(99));
+        assert!(listed[0].revoked());
+
+        // The stored hash comes back beside the row and never inside it.
+        let (row, hash) = store.pairing("bb").unwrap();
+        assert_eq!(hash, "hash-b");
+        assert!(!serde_json::to_string(&row).unwrap().contains("hash-b"));
+    }
+
+    /// Once, and only while it is offered. Two devices racing on one link
+    /// produce one pairing, the same way two devices answering one approval
+    /// produce one verdict.
+    #[test]
+    fn a_pairing_token_is_spent_exactly_once() {
+        let (store, _dir) = scratch_store("tokens");
+        let pending = pairing::PendingPairing {
+            id: "tok".into(),
+            secret_hash: "h".into(),
+            label: "new phone".into(),
+            kind: "phone".into(),
+            scopes: pairing::ScopeSet::standard(),
+            created_at: 10,
+            expires_at: 100,
+            used_at: None,
+        };
+        store.add_pairing_token(&pending).unwrap();
+        assert_eq!(store.pairing_token("tok").unwrap().secret_hash, "h");
+
+        assert!(store.spend_pairing_token("tok", 50).unwrap());
+        assert!(!store.spend_pairing_token("tok", 50).unwrap(), "replayed");
+        assert_eq!(store.pairing_token("tok").unwrap().used_at, Some(50));
+
+        // Past its expiry it is not offered at all, spent or not.
+        let later = pairing::PendingPairing {
+            id: "old".into(),
+            ..pending.clone()
+        };
+        store.add_pairing_token(&later).unwrap();
+        assert!(!store.spend_pairing_token("old", 200).unwrap());
+
+        // And the sweep leaves only what is still offered.
+        let fresh = pairing::PendingPairing {
+            id: "live".into(),
+            expires_at: 10_000,
+            ..pending
+        };
+        store.add_pairing_token(&fresh).unwrap();
+        store.sweep_pairing_tokens(200).unwrap();
+        assert!(store.pairing_token("tok").is_none());
+        assert!(store.pairing_token("old").is_none());
+        assert!(store.pairing_token("live").is_some());
     }
 
     /// A migrated database in its own directory, removed when the guard drops.

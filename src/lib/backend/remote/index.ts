@@ -16,6 +16,9 @@ import type {
   UsageReport,
   LogApi,
   PendingApproval,
+  PairedDevice,
+  PairingApi,
+  PairingInvite,
   ProjectApi,
   PtyApi,
   PushApi,
@@ -80,6 +83,7 @@ export class RemoteBackend implements Backend {
   readonly approvals: ApprovalsApi;
   readonly push: PushApi;
   readonly meta: WorkspaceMetaApi;
+  readonly pairing: PairingApi;
 
   #socket: Socket;
   #keyToThread = new Map<string, string>();
@@ -474,6 +478,12 @@ export class RemoteBackend implements Backend {
     this.meta = {
       get: () => rpc("workspace.info").then(readMeta),
       set: (patch) => rpc("workspace.setInfo", patch).then(readMeta),
+    };
+
+    this.pairing = {
+      list: () => rpc("pairing.list").then((r) => (r.pairings ?? []) as PairedDevice[]),
+      invite: (options) => rpc("pairing.create", options).then((r) => r as PairingInvite),
+      revoke: (id) => rpc("pairing.revoke", { id }).then((r) => r.revoked === true),
     };
   }
 

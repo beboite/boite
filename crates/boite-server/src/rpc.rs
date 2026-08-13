@@ -2,8 +2,10 @@ use serde_json::{json, Value};
 
 use boite_core::capability::Grant;
 use boite_core::command::{self, Command};
+use boite_core::pairing::ScopeSet;
 use boite_core::pty::PtySpawnArgs;
 
+use crate::authz::Authorized;
 use crate::events::AppEvent;
 use crate::state::AppState;
 use boite_core::model::Thread;
@@ -99,8 +101,15 @@ async fn on_bus(state: &AppState, method: &str, params: &Value) -> Result<Value,
 
 // Dispatch every non-streaming method. thread.attach / thread.detach and
 // binary input frames are handled in ws.rs (they need the socket writer).
-pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<Value, String> {
-    match method {
+//
+// The argument is an `Authorized` rather than a method and its parameters,
+// which is what makes the scope check unskippable: there is no other way to
+// build one, so no arm below can be reached by a device that was not paired for
+// it. See `crate::authz`.
+pub async fn dispatch(state: &AppState, request: Authorized) -> Result<Value, String> {
+    let method = request.method().to_string();
+    let params = request.into_params();
+    match method.as_str() {
         // Who answered, not just that something did. The protocol number keeps
         // its place at the front; the three beside it are here because a
         // connected client had no way at all to name the machine it was driving.
@@ -550,6 +559,74 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
             Ok(json!({ "ok": true }))
         }
 
+        // Every device that has ever been paired, revoked ones included. A
+        // revoked row is struck through rather than deleted: the question a
+        // compromised phone raises is when it last reached this workspace, and a
+        // deleted row answers nothing.
+        "pairing.list" => Ok(json!({ "pairings": state.store.list_pairings()? })),
+
+        // Invites one device. What comes back is the only copy of the token —
+        // the table keeps a hash — so it is drawn once, as a link and a QR, and
+        // never fetched again.
+        //
+        // `base` is the client's own origin, because a server behind a reverse
+        // proxy does not know the name it is reached by. It decides what the
+        // link *says*, never what the token opens, and a configured
+        // `BOITE_PUBLIC_URL` wins over it.
+        "pairing.create" => {
+            let label = params.get("label").and_then(|v| v.as_str()).unwrap_or("");
+            let kind = params.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+            let scopes: ScopeSet = params
+                .get("scopes")
+                .and_then(|v| serde_json::from_value(v.clone()).ok())
+                .unwrap_or_else(ScopeSet::standard);
+            if scopes.is_empty() {
+                return Err("a pairing with no scopes could do nothing".into());
+            }
+            let ttl_ms = params
+                .get("ttlMs")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(crate::pairing_link::DEFAULT_TTL_MS)
+                .clamp(60_000, 24 * 3_600_000);
+            let now = now_ms();
+            let token = crate::auth::mint_pairing_token(
+                &state.store, label, kind, scopes, now, ttl_ms,
+            )?;
+            let base = state
+                .public_url
+                .clone()
+                .or_else(|| {
+                    params
+                        .get("base")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                })
+                .unwrap_or_default();
+            let url = boite_core::pairing::pairing_url(&base, &token);
+            Ok(json!({
+                "token": token,
+                "url": url,
+                "expiresAt": now + ttl_ms,
+                "scopes": scopes,
+                "qr": crate::pairing_link::qr_matrix(&url),
+            }))
+        }
+
+        // The way out for the way in. A revoked pairing stops at once: its
+        // unspent tickets are dropped, every socket holding it is told to go,
+        // and the next call it makes reads the row rather than what its
+        // handshake decided.
+        "pairing.revoke" => {
+            let id = str_param(&params, "id")?;
+            let revoked = state.store.revoke_pairing(&id, now_ms())?;
+            if revoked {
+                state.auth.drop_tickets_of(&id);
+                let _ = state.events.send(AppEvent::PairingRevoked { pairing_id: id });
+            }
+            Ok(json!({ "revoked": revoked }))
+        }
+
         // Every domain the desktop serves too — git, worktrees, the
         // filesystem, the editor, the folders a project lives in — is one bus
         // in `boite_core::command` rather than a list of arms here. What is
@@ -583,8 +660,16 @@ mod tests {
         std::fs::canonicalize(&dir).unwrap()
     }
 
+    /// Through the gate, not around it.
+    ///
+    /// `dispatch` takes an `Authorized`, so a test cannot reach an arm any way a
+    /// socket could not either. The session holds every scope; the checks that
+    /// a narrower one is refused live in `crate::authz`, against the same
+    /// constructor.
     async fn call(state: &AppState, method: &str, params: Value) -> Result<Value, String> {
-        dispatch(state, method, params).await
+        let session = crate::auth::Session::for_test(ScopeSet::full());
+        let request = Authorized::check(&state.store, &session, method, params)?;
+        dispatch(state, request).await
     }
 
     #[tokio::test]

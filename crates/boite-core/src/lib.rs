@@ -10,6 +10,7 @@ pub mod git;
 pub mod journal;
 pub mod migrations;
 pub mod model;
+pub mod pairing;
 pub mod project;
 pub mod pty;
 pub mod scope;

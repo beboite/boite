@@ -36,3 +36,9 @@ flate2 = "1"
 dirs = "6"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# A pairing link nobody can type is a pairing flow nobody uses, so it is drawn:
+# a QR in the terminal for a headless box, and a matrix on the wire for the
+# devices screen. `default-features = false` drops `image` and `svg`, which
+# would pull a graphics stack into a server binary; what is left has no
+# dependencies at all.
+qrcode = { version = "0.14", default-features = false }

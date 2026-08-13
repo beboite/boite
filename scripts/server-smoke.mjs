@@ -2,20 +2,73 @@
 //   docker cp scripts/server-smoke.mjs boite:/app/ && \
 //   docker exec -e BOITE_TOKEN=$BOITE_TOKEN boite node /app/server-smoke.mjs
 // Pure Node (>= 22, global WebSocket + crypto.randomUUID), no dependencies.
-// Exercises: auth, project/shell RPC, the git command bus and its trust
-// boundary, spawn + live output, multi-device attach (second client sees
-// replay), detach -> output keeps buffering -> reattach replays it, live
-// status, webhook test, kill. Nothing here writes to the repository it is
-// pointed at.
+// Exercises: device pairing and the socket ticket, per-method scopes, revoking
+// one device while others carry on, project/shell RPC, the git command bus and
+// its trust boundary, spawn + live output, multi-device attach (second client
+// sees replay), detach -> output keeps buffering -> reattach replays it, live
+// status, the agent endpoint, webhook test, kill. Nothing here writes to the
+// repository it is pointed at.
+//
+// It pairs devices of its own and revokes every one of them on the way out, so
+// a boite it has been pointed at does not accumulate one per run.
 
 import { readFile } from "node:fs/promises";
 import { createPrivateKey, sign as signBytes, createHash } from "node:crypto";
 
-const URL = process.env.SMOKE_URL || "ws://127.0.0.1:7337/ws";
-const TOKEN = process.env.BOITE_TOKEN || "test";
+const WS_URL = process.env.SMOKE_URL || "ws://127.0.0.1:7337/ws";
+// The HTTP half of the same boite: `POST /api/ticket` and the two pairing
+// routes live there. A boite behind a proxy can be served under a prefix, so the
+// socket's own `/ws` is stripped rather than the whole path replaced.
+const HTTP_BASE = WS_URL.replace(/^ws/, "http").replace(/\/ws\/?$/, "");
+// `BOITE_TOKEN` is the BOOTSTRAP credential now, not a session one. It opens
+// `POST /api/pairings` and nothing else: it cannot open a socket, call an RPC
+// or mint a ticket, and this script checks all three.
+const BOOTSTRAP = process.env.BOITE_TOKEN || "test";
 const CWD = process.env.SMOKE_CWD || "/workspace";
 const dec = new TextDecoder();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+const FULL_SCOPES = ["read", "write", "terminal", "approve", "admin"];
+
+// **The per-IP lockout is five failures, and every check below that expects a
+// refusal spends one of them.** A success clears the count, so the negative
+// checks are interleaved with real connections on purpose: four in a row is the
+// most this script ever does. Adding a fifth beside them locks this address out
+// for a minute and every check after it fails for the wrong reason.
+async function mintInvite(scopes, label) {
+  const res = await fetch(`${HTTP_BASE}/api/pairings`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${BOOTSTRAP}`, "content-type": "application/json" },
+    body: JSON.stringify({ label, kind: "cli", scopes }),
+  });
+  if (!res.ok) throw new Error(`could not mint a pairing token: ${res.status}`);
+  return (await res.json()).token;
+}
+
+// A device of this workspace's own, with its own credential. One per role the
+// script needs, which is the whole point of the feature: they are revocable
+// apart.
+async function pairDevice(scopes, label) {
+  const token = await mintInvite(scopes, label);
+  const res = await fetch(`${HTTP_BASE}/api/pair`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ token, label, kind: "cli" }),
+  });
+  if (!res.ok) throw new Error(`pairing refused: ${res.status}`);
+  const body = await res.json();
+  return { token, credential: body.credential, pairing: body.pairing };
+}
+
+// Buys one socket. `null` is a refusal, which several checks below want.
+async function getTicket(credential) {
+  const res = await fetch(`${HTTP_BASE}/api/ticket`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${credential}` },
+  });
+  if (!res.ok) return null;
+  return (await res.json()).ticket;
+}
 
 let fail = false;
 function check(label, ok, extra = "") {
@@ -79,8 +132,8 @@ function inputFrame(threadId, text) {
 }
 
 class Client {
-  constructor() {
-    this.ws = new WebSocket(URL);
+  constructor(url = WS_URL) {
+    this.ws = new WebSocket(url);
     this.ws.binaryType = "arraybuffer";
     this.id = 1;
     this.pending = new Map();
@@ -91,6 +144,13 @@ class Client {
     return new Promise((resolve, reject) => {
       this.ws.onopen = () => resolve();
       this.ws.onerror = (e) => reject(new Error("ws error: " + (e?.message ?? e)));
+      // A revoked device is hung up on by the server, and a call in flight has
+      // to learn that now rather than at the fifteen-second ceiling.
+      this.ws.onclose = () => {
+        reject(new Error("socket closed"));
+        for (const p of this.pending.values()) p.reject(new Error("socket closed"));
+        this.pending.clear();
+      };
     });
   }
   onMessage(ev) {
@@ -135,11 +195,59 @@ class Client {
   close() {
     this.ws.close();
   }
+  // What the socket takes: a ticket, never the long-lived credential. Resolves
+  // to the client on success and to null on a refusal.
+  static async connect(credential) {
+    const ticket = await getTicket(credential);
+    if (!ticket) return null;
+    const client = new Client();
+    await client.open();
+    try {
+      await client.rpc("auth", { ticket });
+    } catch {
+      client.close();
+      return null;
+    }
+    return client;
+  }
+  // One frame, one answer, no ticket bought for it. For the checks that present
+  // something the socket must refuse.
+  static async refuses(params) {
+    const client = new Client();
+    await client.open();
+    try {
+      await client.rpc("auth", params);
+      client.close();
+      return false;
+    } catch {
+      client.close();
+      return true;
+    }
+  }
 }
 
-const c = new Client();
-await c.open();
-await c.rpc("auth", { token: TOKEN });
+// The bootstrap token pairs a device; the device holds its own credential; the
+// credential buys a ticket; the ticket opens one socket. Four steps, and the
+// first three happen over HTTP so nothing long-lived ever reaches a frame.
+const main = await pairDevice(FULL_SCOPES, "smoke main");
+check("a bootstrap token pairs a device", typeof main.credential === "string" && main.credential.includes("."));
+check(
+  "a pairing token is spent once",
+  await (async () => {
+    const again = await fetch(`${HTTP_BASE}/api/pair`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token: main.token, label: "replay", kind: "cli" }),
+    });
+    return again.status === 401;
+  })(),
+);
+
+const c = await Client.connect(main.credential);
+if (!c) {
+  console.log("FAIL could not open a socket with a freshly paired device");
+  process.exit(1);
+}
 check("auth", true);
 
 const hello = await c.rpc("hello");
@@ -215,9 +323,8 @@ await sleep(900);
 check("live output", c.out(threadId).includes("SMOKEMARK"), `(${c.out(threadId).length}b)`);
 
 // Second device on the same thread: gets the scrollback replay.
-const c2 = new Client();
-await c2.open();
-await c2.rpc("auth", { token: TOKEN });
+const c2 = await Client.connect(main.credential);
+check("a second ticket opens a second socket", !!c2);
 await c2.rpc("thread.attach", { threadId, cols: 80, rows: 24 });
 await sleep(500);
 check("multi-device replay", c2.out(threadId).includes("SMOKEMARK"));
@@ -294,10 +401,19 @@ if (agentUrl && keyFile) {
   const stranger = await ask(signedHeaders(key, crypto.randomUUID(), "GET", "/v1/todos", ""));
   check("a thread this workspace does not have reaches nothing", stranger.status === 401, `status=${stranger.status}`);
 
-  // The workspace token drives devices. It was never an agent credential and is
-  // not one now, whatever thread it is presented with.
-  const device = await ask({ authorization: `Bearer ${TOKEN}`, "x-boite-project": "smoke" });
-  check("the device token is not an agent credential", device.status === 401, `status=${device.status}`);
+  // A device credential drives a socket. It was never an agent credential and is
+  // not one now, whatever thread it is presented with. Nor is the bootstrap
+  // token, which is not even a device credential.
+  const asDevice = await ask({
+    authorization: `Bearer ${main.credential}`,
+    "x-boite-project": "smoke",
+  });
+  check("a device credential is not an agent credential", asDevice.status === 401, `status=${asDevice.status}`);
+  const asBootstrap = await ask({
+    authorization: `Bearer ${BOOTSTRAP}`,
+    "x-boite-project": "smoke",
+  });
+  check("the bootstrap token is not an agent credential", asBootstrap.status === 401, `status=${asBootstrap.status}`);
 
   // A call that reaches past the project the agent is in. It used to be handed
   // to a device and answered "moving to <project>"; it waits for the user now,
@@ -428,7 +544,12 @@ if (agentUrl && keyFile) {
   );
   // Whatever else it holds, it must not hold a credential.
   const asText = JSON.stringify(state ?? {});
-  check("the snapshot carries no credential", !asText.includes(seed) && !asText.includes(TOKEN));
+  check(
+    "the snapshot carries no credential",
+    !asText.includes(seed) &&
+      !asText.includes(BOOTSTRAP) &&
+      !asText.includes(main.credential),
+  );
 }
 try {
   await c.rpc("thread.kill", { threadId: probeId, wait: false });
@@ -471,6 +592,131 @@ await c.rpc("workspace.setInfo", { name: null, color: null });
 const nt = await c.rpc("notify.test", { title: "Smoke", body: "ping" });
 check("notify.test responds", nt?.ok === true, `webhook_enabled=${nt?.enabled}`);
 
+
+// ---------------------------------------------------------------------------
+// Device auth: what a credential opens, and what it must not.
+//
+// Ordering is load-bearing. The per-IP lockout is five failures and a success
+// clears the count, so every group below spends at most three refusals before a
+// real connection resets it. Inserting another refusal into one of these groups
+// locks this address out for a minute and reports every later check as a
+// failure for the wrong reason.
+// ---------------------------------------------------------------------------
+
+// A credential in the URL never reaches the handshake at all. The query string
+// of an upgrade lands in the access log of whatever proxy is in front, and
+// nobody rotates those, so the upgrade itself is refused. It costs no attempt
+// against the lockout because no socket is ever opened.
+const inUrl = new Client(`${WS_URL}?token=${encodeURIComponent(main.credential)}`);
+let urlRefused = false;
+try {
+  await inUrl.open();
+} catch {
+  urlRefused = true;
+}
+inUrl.close();
+check("a credential in the socket URL is refused", urlRefused);
+
+// Three shapes the first frame must not accept. The middle one is the point of
+// the ticket: the long-lived credential opens the ticket endpoint and nothing
+// else.
+check("the old token frame no longer authenticates", await Client.refuses({ token: main.credential }));
+check("a long-lived credential does not open a socket", await Client.refuses({ ticket: main.credential }));
+check("the bootstrap token does not open a socket", await Client.refuses({ ticket: BOOTSTRAP }));
+
+// A ticket is for one connection. The first use is a success, which is also
+// what clears the count the three refusals above spent.
+const once = await getTicket(main.credential);
+const first = new Client();
+await first.open();
+await first.rpc("auth", { ticket: once });
+check("a ticket opens a socket", true);
+first.close();
+check("a ticket cannot be replayed", await Client.refuses({ ticket: once }));
+check("the bootstrap token buys no ticket", (await getTicket(BOOTSTRAP)) === null);
+
+// Scopes. A device paired to look at the workspace can look at it and can do
+// nothing else — the line the whole feature exists for is that it cannot open a
+// terminal, which is arbitrary code on the machine.
+const readonly = await pairDevice(["read"], "smoke read-only");
+const ro = await Client.connect(readonly.credential);
+check("a read-only device connects", !!ro);
+if (ro) {
+  const refuses = async (label, method, params = {}) => {
+    try {
+      await ro.rpc(method, params);
+      check(label, false, "it was allowed");
+    } catch (e) {
+      const said = String(e?.message ?? e);
+      check(label, said.includes("not paired for"), said);
+    }
+  };
+  const info = await ro.rpc("git.repoInfo", { path: CWD });
+  check("a read-only device still reads", typeof info?.isRepo === "boolean");
+  await refuses("a read-only device cannot open a terminal", "thread.spawn", {
+    thread: { id: crypto.randomUUID(), projectId: "smoke", label: "nope", cmd: "bash", args: [] },
+    cwd: CWD,
+    cols: 80,
+    rows: 24,
+  });
+  await refuses("a read-only device cannot attach to one", "thread.attach", {
+    threadId,
+    cols: 80,
+    rows: 24,
+  });
+  await refuses("a read-only device cannot write a row", "todo.save", {
+    todo: {
+      id: "nope",
+      projectId: "smoke",
+      title: "should never land",
+      state: "open",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    },
+  });
+  await refuses("a read-only device cannot pair another", "pairing.list");
+  ro.close();
+}
+
+// Revocation, on a socket that is already open. This is what one static token
+// could never do: the throwaway below goes, and every other device carries on.
+const doomed = await pairDevice(FULL_SCOPES, "smoke doomed");
+const dc = await Client.connect(doomed.credential);
+check("a second device connects on its own credential", !!dc);
+if (dc) {
+  check("and works", (await dc.rpc("hello"))?.protocol === 1);
+  const gone = await c.rpc("pairing.revoke", { id: doomed.pairing.id });
+  check("revoking answers once", gone?.revoked === true);
+  await sleep(400);
+  check("a revoked device's open socket is hung up on", dc.ws.readyState >= WebSocket.CLOSING, `readyState=${dc.ws.readyState}`);
+  let stillWorks = true;
+  try {
+    await dc.rpc("hello");
+  } catch {
+    stillWorks = false;
+  }
+  check("a revoked device gets nothing on the socket it was holding", !stillWorks);
+  dc.close();
+  check("a revoked device buys no new ticket", (await getTicket(doomed.credential)) === null);
+  // And the rest of the house is untouched, which is the whole argument for a
+  // row per device.
+  check("every other device carries on", (await c.rpc("hello"))?.protocol === 1);
+}
+
+// The list, and the way out of it. A revoked row stays: "when did that device
+// last reach this workspace" is the question a compromised one raises.
+const paired = await c.rpc("pairing.list");
+const rows = paired?.pairings ?? [];
+const doomedRow = rows.find((p) => p.id === doomed.pairing.id);
+check("the devices list carries the revoked one, struck through", !!doomedRow?.revokedAt);
+const readonlyRow = rows.find((p) => p.id === readonly.pairing.id);
+check("and shows what each one was paired for", JSON.stringify(readonlyRow?.scopes) === '["read"]', JSON.stringify(readonlyRow?.scopes));
+check("no credential is anywhere in the list", !JSON.stringify(rows).includes(main.credential));
+
+// This script's own devices go the way the doomed one did, so a boite it has
+// been pointed at does not accumulate a paired device per run.
+await c.rpc("pairing.revoke", { id: readonly.pairing.id });
+
 // A refused kill is a result, not a reason to stop: the checks after it still
 // say something, and an uncaught rejection here reported the whole run as a
 // crash with no summary line.
@@ -487,8 +733,10 @@ check("killed thread no longer running", !t2 || t2.status !== "running", `status
 
 await c.rpc("thread.delete", { threadId });
 await c.rpc("project.delete", { id: "smoke" });
+// Last, because it is the credential holding this socket open.
+await c.rpc("pairing.revoke", { id: main.pairing.id });
 c.close();
-c2.close();
+c2?.close();
 
 console.log(fail ? "\nSERVER SMOKE FAIL" : "\nSERVER SMOKE PASS");
 process.exit(fail ? 1 : 0);

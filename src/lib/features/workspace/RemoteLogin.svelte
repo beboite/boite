@@ -6,27 +6,43 @@
     type ConnectAttempt,
   } from "$lib/app/workspace";
   import { device } from "$lib/features/settings/device.svelte";
+  import { redeemPairing, takePairingTokenFromHash } from "./pairing";
   import { t } from "$lib/i18n/index.svelte";
   import BoiteLogo from "$lib/shared/components/BoiteLogo.svelte";
 
   // PWA / browser entry: there is no local backend, so the app gates here
   // until it can reach a boite-server. URL defaults to the last-saved boite,
   // else the serving origin.
+  //
+  // What is typed here is a *pairing token*, not a workspace secret. It is spent
+  // once, in exchange for a credential this device alone holds, which is what
+  // makes revoking one phone possible without touching any other device. A
+  // device already holding a credential never sees this screen.
   let url = $state(device.active?.url || defaultRemoteWsUrl());
-  let token = $state(device.active?.token || "");
+  let token = $state("");
   let busy = $state(false);
   // The outcome rather than a rendered message, so the text follows a locale
   // change instead of freezing whatever language was active when the attempt
   // failed. `detail` is the transport's own words and is shown as data.
   let attempt = $state<ConnectAttempt | null>(null);
+  // A refusal from the pairing exchange, which happens before there is a
+  // connection to have an outcome about.
+  let pairError = $state("");
 
   let urlInput = $state<HTMLInputElement | null>(null);
   let tokenInput = $state<HTMLInputElement | null>(null);
 
-  // This is the whole app in a browser, so something has to hold the caret. The
-  // token is the field that is usually empty; the URL comes prefilled from the
-  // serving origin or the last boite.
+  // A link scanned off a QR lands here with its token in the fragment. Read and
+  // stripped on mount, before anything can put it in a history entry that
+  // survives a reload, then spent straight away: making the user press a button
+  // after following a link is a step with nothing in it.
   onMount(() => {
+    const fromLink = takePairingTokenFromHash();
+    if (fromLink) {
+      token = fromLink;
+      void submit();
+      return;
+    }
     (url && !token ? tokenInput : urlInput)?.focus();
   });
 
@@ -47,14 +63,25 @@
     return t("workspace.loginUnreachable");
   });
 
-  async function submit(e: Event) {
-    e.preventDefault();
+  async function submit(e?: Event) {
+    e?.preventDefault();
     if (busy || !token.trim()) return;
     attempt = null;
+    pairError = "";
     busy = true;
-    const res = await connectAndInitDetailed(url.trim(), token.trim());
-    busy = false;
-    if (res.outcome !== "ok") attempt = res;
+    try {
+      // Two steps, and only the first one is spendable. The invitation buys a
+      // credential; the credential is what is saved and what every later
+      // connection uses.
+      const paired = await redeemPairing(url.trim(), token.trim());
+      token = "";
+      const res = await connectAndInitDetailed(url.trim(), paired.credential);
+      if (res.outcome !== "ok") attempt = res;
+    } catch (err) {
+      pairError = err instanceof Error ? err.message : String(err);
+    } finally {
+      busy = false;
+    }
   }
 </script>
 
@@ -84,7 +111,7 @@
     </label>
 
     <label class="flex flex-col gap-1 text-xs text-muted-foreground">
-      {t("workspace.token")}
+      {t("workspace.pairingToken")}
       <input
         bind:this={tokenInput}
         class="rounded-md border border-border bg-[var(--color-surface)] px-3 py-2 text-sm text-foreground outline-none focus:border-[var(--color-success)]"
@@ -92,9 +119,12 @@
         bind:value={token}
         autocomplete="off"
       />
+      <span class="text-[11px] text-muted-foreground/70">{t("workspace.pairingHint")}</span>
     </label>
 
-    {#if failMessage}
+    {#if pairError}
+      <p class="text-xs text-danger">{pairError}</p>
+    {:else if failMessage}
       <div class="flex flex-col gap-1">
         <p class="text-xs text-danger">{failMessage}</p>
         {#if attempt?.detail}
@@ -108,7 +138,7 @@
       disabled={busy || !token.trim()}
       class="rounded-md border border-border bg-[var(--color-surface-2)] px-3 py-2 text-sm text-foreground transition hover:bg-[var(--color-surface-3)] disabled:opacity-50"
     >
-      {busy ? t("workspace.connecting") : t("workspace.connect")}
+      {busy ? t("workspace.connecting") : t("workspace.pairThisDevice")}
     </button>
   </form>
 </div>
