@@ -19,53 +19,21 @@ import {
   isRightPanelTab,
   readRightPanelMap,
 } from "./right-panel";
+import { cliDetection } from "./cliDetection.svelte";
+import { CLI_PRESETS, type CliPreset } from "./cliPresets";
 
-export const PRESET_SHORTCUTS: Shortcut[] = [
-  { id: "claude", label: "Claude", command: "claude", iconKey: "claude" },
-  {
-    id: "codex",
-    label: "Codex",
-    command: "codex --no-alt-screen",
-    iconKey: "codex",
-  },
-  { id: "opencode", label: "Opencode", command: "opencode", iconKey: "opencode" },
-  { id: "cursor", label: "Cursor Agent", command: "cursor-agent", iconKey: "cursor" },
-  { id: "antigravity", label: "Antigravity", command: "agy", iconKey: "antigravity" },
-  { id: "copilot", label: "Copilot", command: "gh copilot", iconKey: "copilot" },
-  { id: "grok", label: "Grok", command: "grok", iconKey: "grok" },
-  { id: "hermes", label: "Hermes", command: "hermes", iconKey: "hermes" },
-  { id: "pi", label: "Pi", command: "pi", iconKey: "pi" },
-  { id: "muse", label: "Muse", command: "muse", iconKey: "muse" },
-];
-
-// Presets introduced after the initial release: backfilled into existing
-// installs exactly once, then recorded in `seededPresets` so a user deleting
-// one doesn't get it back on the next launch.
-const BACKFILL_PRESET_IDS = ["antigravity", "grok", "hermes", "pi", "muse"];
-
-function migrateShortcuts(
-  raw: unknown,
-  seededRaw: unknown,
-): { shortcuts: Shortcut[]; seededPresets: string[]; changed: boolean } {
+// The shortcut list is the user's, and only the first run fills it: the setup
+// wizard seeds whatever `cliDetection` finds on the machine, and everything
+// after that is an add or a remove in Settings. A preset shipped later is
+// offered in the shortcut editor, never pushed into an install that never
+// asked for it — that backfill handed people agents whose binary they do not
+// have.
+function migrateShortcuts(raw: unknown): { shortcuts: Shortcut[]; changed: boolean } {
   if (!Array.isArray(raw)) {
-    return {
-      shortcuts: structuredClone(DEFAULTS.shortcuts),
-      seededPresets: [...BACKFILL_PRESET_IDS],
-      changed: false,
-    };
+    return { shortcuts: [], changed: false };
   }
 
-  // A blob predating this key comes from a build that already backfilled on
-  // every load, so any missing preset was deleted on purpose: mark them seeded
-  // instead of re-adding them one last time.
-  const legacyBlob = !Array.isArray(seededRaw);
-  const seeded = new Set(
-    legacyBlob
-      ? BACKFILL_PRESET_IDS
-      : (seededRaw as unknown[]).filter((id): id is string => typeof id === "string"),
-  );
-
-  let changed = legacyBlob;
+  let changed = false;
   const filtered = raw.filter((shortcut): shortcut is Shortcut => {
     return (
       shortcut &&
@@ -99,17 +67,25 @@ function migrateShortcuts(
     return shortcut;
   });
 
-  for (const presetId of BACKFILL_PRESET_IDS) {
-    if (seeded.has(presetId)) continue;
-    seeded.add(presetId);
-    changed = true;
-    const preset = PRESET_SHORTCUTS.find((s) => s.id === presetId);
-    if (preset && !shortcuts.some((s) => s.id === presetId)) {
-      shortcuts.push(structuredClone(preset));
-    }
-  }
+  return { shortcuts, changed };
+}
 
-  return { shortcuts, seededPresets: [...seeded], changed };
+/** The shortcut a preset becomes, with an id of its own so two rows can share a command. */
+export function shortcutFromPreset(preset: CliPreset): Shortcut {
+  return {
+    id: uuid(),
+    label: preset.label,
+    command: preset.command,
+    iconKey: preset.iconKey,
+  };
+}
+
+/** Every preset whose executable the active backend just answered for. */
+async function detectedShortcuts(): Promise<Shortcut[]> {
+  await cliDetection.refreshAll();
+  return CLI_PRESETS.filter((preset) => cliDetection.found[preset.executable]).map(
+    shortcutFromPreset,
+  );
 }
 
 // Handing a terse note straight to an agent wastes the first turn on it asking
@@ -124,8 +100,9 @@ Before changing anything: restate what you understand, name the files involved, 
 You are working in your own detached worktree of this project, so nothing you do disturbs the other terminals. It is on no branch: if this turns into work worth keeping, call worktree_branch with a name that matches the repository's existing convention, or worktree_reserve to continue a branch that already exists. Do it once you know, not up front — a worktree nobody claimed is discarded when the thread closes, which is the right ending for a question you only answered.`;
 
 const DEFAULTS: Settings = {
-  shortcuts: PRESET_SHORTCUTS,
-  seededPresets: BACKFILL_PRESET_IDS,
+  // Empty on purpose: an install with no shortcuts has not run the wizard yet,
+  // and the wizard fills this with what the machine actually has.
+  shortcuts: [],
   powershellNewline: true,
   powershellNoProfile: false,
   threadWorktrees: true,
@@ -352,14 +329,13 @@ class SettingsStore {
     try {
       const stored = await loadSettings();
       const raw = stored as unknown as Record<string, unknown>;
-      const migratedShortcuts = migrateShortcuts(stored.shortcuts, raw.seededPresets);
+      const migratedShortcuts = migrateShortcuts(stored.shortcuts);
       const inheritedSetup =
         Array.isArray(stored.shortcuts) && stored.shortcuts.length > 0;
       const backfilledSetup =
         typeof stored.setupCompleted !== "boolean" && inheritedSetup;
       this.state = {
         shortcuts: migratedShortcuts.shortcuts,
-        seededPresets: migratedShortcuts.seededPresets,
         powershellNewline:
           typeof stored.powershellNewline === "boolean"
             ? stored.powershellNewline
@@ -862,9 +838,11 @@ class SettingsStore {
     await this.persist();
   }
 
+  /// Same answer as the first run: the agents this machine has, in catalogue
+  /// order. Restoring a fixed list instead would put back the ones whose binary
+  /// is missing, which is the whole reason this list is detected and not shipped.
   async resetShortcutsToPresets() {
-    this.state.shortcuts = structuredClone(PRESET_SHORTCUTS);
-    this.state.seededPresets = [...BACKFILL_PRESET_IDS];
+    this.state.shortcuts = await detectedShortcuts();
     await this.persist();
     notifications.success(t("settings.shortcutsReset"));
   }

@@ -63,7 +63,7 @@ export const EN_MESSAGES = {
 
   "shortcuts.title": "Shortcuts",
   "shortcuts.description": "Drag to reorder. Edit a command to add arguments.",
-  "shortcuts.resetTitle": "Reset to default presets",
+  "shortcuts.resetTitle": "Detect the installed agents again and rebuild the list",
   "shortcuts.new": "New",
   "shortcuts.launchIn": "Launch in {project}",
   "shortcuts.rightClickHint": "Right-click or hold: pick where it opens",
@@ -844,7 +844,7 @@ export const EN_MESSAGES = {
   "settings.shortcutSaved": "Shortcut saved",
   "settings.shortcutRemoved": "Removed {label}",
   "settings.shortcutRemovedUnnamed": "Removed shortcut",
-  "settings.shortcutsReset": "Shortcuts reset to defaults",
+  "settings.shortcutsReset": "Shortcuts rebuilt from the agents detected",
   "terminal.pasteFailed": "Paste failed",
   "terminal.copyFailed": "Copy failed",
   "terminal.keyboardLabel": "Keyboard (long-press for key bar)",

@@ -65,7 +65,7 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
 
   "shortcuts.title": "Raccourcis",
   "shortcuts.description": "Glissez pour réordonner. Modifiez une commande pour ajouter des arguments.",
-  "shortcuts.resetTitle": "Réinitialiser aux raccourcis par défaut",
+  "shortcuts.resetTitle": "Redétecter les agents installés et reconstruire la liste",
   "shortcuts.new": "Nouveau",
   "shortcuts.launchIn": "Lancer dans {project}",
   "shortcuts.rightClickHint": "Clic droit ou appui long : choisir où ça s'ouvre",
@@ -836,7 +836,7 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "settings.shortcutSaved": "Raccourci enregistré",
   "settings.shortcutRemoved": "{label} supprimé",
   "settings.shortcutRemovedUnnamed": "Raccourci supprimé",
-  "settings.shortcutsReset": "Raccourcis réinitialisés aux valeurs par défaut",
+  "settings.shortcutsReset": "Raccourcis reconstruits à partir des agents détectés",
   "terminal.pasteFailed": "Collage échoué",
   "terminal.copyFailed": "Copie échouée",
   "terminal.keyboardLabel": "Clavier (appui long pour la barre de touches)",
