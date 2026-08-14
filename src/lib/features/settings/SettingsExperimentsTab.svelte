@@ -94,7 +94,7 @@
 {/if}
 
 <ToggleSetting
-  label={t("experiments.sidebarDesign")}
+  label={t("experiments.sidebarDesign")} anchor="experiments.sidebarDesign"
   description={t("experiments.sidebarDesignDesc")}
   enabled={settings.state.sidebarDesign === "glow"}
   onLabel={t("experiments.designGlow")}
@@ -110,7 +110,7 @@
      was lost, and the classic ring has nothing to put in the logo's place. -->
 <div class="pl-3" class:opacity-50={settings.state.sidebarDesign !== "glow"}>
   <ToggleSetting
-    label={t("experiments.harnessLogos")}
+    label={t("experiments.harnessLogos")} anchor="experiments.harnessLogos"
     description={settings.state.sidebarDesign === "glow"
       ? t("experiments.harnessLogosDesc")
       : t("experiments.harnessLogosClassic")}

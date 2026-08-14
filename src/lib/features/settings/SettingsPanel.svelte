@@ -16,13 +16,16 @@
   import ScrollText from "@lucide/svelte/icons/scroll-text";
   import FlaskConical from "@lucide/svelte/icons/flask-conical";
   import Info from "@lucide/svelte/icons/info";
-  import type { Component } from "svelte";
+  import { onDestroy, tick, type Component } from "svelte";
   import { t, type MessageKey } from "$lib/i18n/index.svelte";
   import Search from "@lucide/svelte/icons/search";
   import { fuzzyScore } from "$lib/features/palette/fuzzy";
+  import { pushSupported } from "$lib/features/push/api";
+  import { platform } from "$lib/storage/platform.svelte";
   import {
     SETTINGS_CATALOGUE,
     settingAnchorId,
+    type SettingCondition,
     type SettingsTabId,
   } from "./catalogue";
 
@@ -82,8 +85,35 @@
   // The control a result just jumped to, so it can be pointed at for a second.
   // A page that scrolls to the right place and highlights nothing leaves the
   // user reading four cards to find which one they asked for.
-  let landedOn = $state<string | null>(null);
+  //
+  // A fresh object per landing rather than the id on its own: clicking the same
+  // result twice inside the second and a half writes the same string, `$state`
+  // sees no change and the effect never re-runs, so the ring the user is
+  // chasing never comes back while the timer that hides it restarts anyway.
+  let landed = $state.raw<{ id: string } | null>(null);
   let landedTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * What has to be true for a page to draw a catalogue entry's control.
+   *
+   * The catalogue names its condition rather than holding a function, so the
+   * answers live here where the stores already are. Without this, "powershell"
+   * on a Linux desktop answered with three hits that changed page and
+   * highlighted nothing, because the card they name is inside an `{#if}`.
+   */
+  const CONDITIONS: Record<SettingCondition, () => boolean> = {
+    push: pushSupported,
+    windowsHost: () => platform.isHostWindows,
+  };
+
+  /**
+   * The app's own animation switch rather than the OS one: `motion.ts` folds
+   * the two into `data-motion`, and an in-app choice of "off" wins over an OS
+   * that never asked for it.
+   */
+  function motionReduced() {
+    return document.documentElement.dataset.motion === "reduced";
+  }
 
   const TAB_LABELS: Record<TabId, MessageKey> = Object.fromEntries(
     TABS.map((tab) => [tab.id, tab.labelKey]),
@@ -101,6 +131,9 @@
     if (!q) return [];
     const scored: { entry: (typeof SETTINGS_CATALOGUE)[number]; label: string; desc: string; score: number }[] = [];
     for (const entry of SETTINGS_CATALOGUE) {
+      // A control this build never draws is not a result: a hit that jumps to a
+      // page and points at nothing is worse than one hit fewer.
+      if (entry.when && !CONDITIONS[entry.when]()) continue;
       const label = t(entry.key);
       const desc = entry.descKey ? t(entry.descKey) : "";
       const tab = t(TAB_LABELS[entry.tab]);
@@ -113,23 +146,46 @@
     return scored;
   });
 
-  function goToSetting(tab: TabId, key: string) {
-    activeTab = tab;
+  /**
+   * Picking a page is asking to see it, so the search box lets go of it.
+   *
+   * The results replace the page rather than sitting over it, so a rail click
+   * that only moved the highlight left the content on the result list: the
+   * whole rail, and the arrow keys with it, read as dead until the box was
+   * emptied by hand.
+   */
+  function showTab(id: TabId) {
+    activeTab = id;
     query = "";
+  }
+
+  async function goToSetting(tab: TabId, key: string) {
+    showTab(tab);
     const id = settingAnchorId(key);
-    landedOn = id;
+    landed = { id };
     if (landedTimer) clearTimeout(landedTimer);
-    landedTimer = setTimeout(() => (landedOn = null), 1600);
+    landedTimer = setTimeout(() => (landed = null), 1600);
     // After the tab has rendered: the element does not exist until the page it
-    // is on is the page being drawn.
-    queueMicrotask(() => {
-      const el = document.getElementById(id);
-      el?.scrollIntoView({ block: "center", behavior: "smooth" });
+    // is on is the page being drawn. `tick()` is the promise that says so; a
+    // microtask only ever worked because Svelte happened to have queued its
+    // flush first, which is true today and is not a contract.
+    await tick();
+    document.getElementById(id)?.scrollIntoView({
+      block: "center",
+      // A jump the user asked for is still a jump: reduced motion gets the
+      // position without the travel.
+      behavior: motionReduced() ? "auto" : "smooth",
     });
   }
 
+  // The timer outlives the panel otherwise, and fires into a component that is
+  // no longer on screen.
+  onDestroy(() => {
+    if (landedTimer) clearTimeout(landedTimer);
+  });
+
   $effect(() => {
-    const id = landedOn;
+    const id = landed?.id;
     if (!id) return;
     const el = document.getElementById(id);
     if (!el) return;
@@ -165,7 +221,7 @@
   // controls rather than back into the navigation.
   function moveTo(index: number, place: "rail" | "strip") {
     const next = TABS[(index + TABS.length) % TABS.length];
-    activeTab = next.id;
+    showTab(next.id);
     const host = place === "rail" ? railEl : stripEl;
     host?.querySelector<HTMLElement>(`#${tabId(next.id, place)}`)?.focus();
   }
@@ -219,7 +275,7 @@
           }
           if (e.key === "Enter" && results.length > 0) {
             e.preventDefault();
-            goToSetting(results[0].entry.tab, results[0].entry.key);
+            void goToSetting(results[0].entry.tab, results[0].entry.key);
           }
         }}
       />
@@ -256,7 +312,7 @@
           tab.id
             ? 'border-foreground text-foreground'
             : 'border-transparent text-muted-foreground hover:text-foreground'}"
-          onclick={() => (activeTab = tab.id)}
+          onclick={() => showTab(tab.id)}
           onkeydown={(e) => onKeydown(e, "strip")}
         >
           {t(tab.labelKey)}
@@ -288,7 +344,7 @@
           tab.id
             ? 'bg-[var(--color-surface-3)] text-foreground'
             : 'text-muted-foreground hover:bg-accent hover:text-foreground'}"
-          onclick={() => (activeTab = tab.id)}
+          onclick={() => showTab(tab.id)}
           onkeydown={(e) => onKeydown(e, "rail")}
         >
           <TabIcon class="size-3.5 shrink-0" />
@@ -321,7 +377,7 @@
             <button
               type="button"
               class="flex w-full flex-col items-start gap-0.5 rounded-lg border border-border bg-[var(--color-surface)] px-3 py-2 text-left transition hover:border-foreground/25"
-              onclick={() => goToSetting(hit.entry.tab, hit.entry.key)}
+              onclick={() => void goToSetting(hit.entry.tab, hit.entry.key)}
             >
               <span class="flex w-full items-baseline gap-2">
                 <span class="min-w-0 truncate text-xs font-medium text-foreground">
@@ -387,5 +443,16 @@
     100% {
       box-shadow: 0 0 0 2px transparent;
     }
+  }
+
+  /* The same ring, standing still. `app.css` clamps every animation to 0.01ms
+     under the app's own reduced-motion mode, so the keyframes above ran to
+     their transparent last frame before anything was on screen: the user was
+     scrolled to the right place and shown nothing, which is the exact failure
+     this ring exists to prevent. It is removed with `data-landed`, so it lasts
+     the same second and a half without a frame of animation. */
+  :global(html[data-motion="reduced"] [data-landed="true"]) {
+    animation: none;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-foreground) 45%, transparent);
   }
 </style>
