@@ -237,7 +237,7 @@ describe("notifications", () => {
     h.turn = { state: "waiting" };
     vi.advanceTimersByTime(TICK_MS);
     expect(t.status).toBe("waiting");
-    expect(h.notified).toEqual(["notification.waitingForYou"]);
+    expect(h.notified).toEqual(["awareness.detail.waitingForInput"]);
   });
 
   it("reports a turn that actually ended", () => {
@@ -251,6 +251,6 @@ describe("notifications", () => {
     h.turn = { state: "idle" };
     vi.advanceTimersByTime(TICK_MS);
     expect(t.status).toBe("ready");
-    expect(h.notified).toEqual(["notification.readyForInput"]);
+    expect(h.notified).toEqual(["awareness.detail.completed"]);
   });
 });

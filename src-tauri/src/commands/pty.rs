@@ -133,6 +133,27 @@ pub fn pty_write(manager: State<'_, PtyManager>, request: Request<'_>) -> Result
     manager.write(id, bytes)
 }
 
+/// One keystroke into a terminal that is waiting on a person, keyed by thread.
+///
+/// Keyed by thread and not by PTY on purpose: the caller is a device answering a
+/// notification, and a phone that has never attached to that terminal holds no
+/// PTY id. The bound on what it may send is `boite_core::reply` — a closed
+/// vocabulary of single keystrokes — and this is the desktop half of the same
+/// door the server exposes as the `thread.reply` RPC. Neither is on the command
+/// bus and neither has a route on the agent endpoint: answering a dialog is the
+/// user's move.
+#[tauri::command]
+pub fn thread_reply(
+    manager: State<'_, PtyManager>,
+    sessions: State<'_, LocalSessions>,
+    thread_id: String,
+    answer: String,
+) -> Result<(), String> {
+    let reply = boite_core::reply::Reply::parse(&answer)?;
+    let (pty_id, _) = sessions.get(&thread_id).ok_or("thread not live")?;
+    manager.write(&pty_id, reply.bytes())
+}
+
 #[tauri::command]
 pub fn pty_resize(
     manager: State<'_, PtyManager>,

@@ -41,6 +41,7 @@
   import { decideSpawn, launchPlan } from "./launch";
   import { keyIntent } from "./key-intent";
   import { claimTypedPrompt } from "$lib/features/thread/typedPrompt";
+  import { noteUserInput } from "$lib/features/thread/user-activity.svelte";
   import { parsePromotion, PROMOTE_OSC } from "$lib/features/thread/promote";
   import { isDeviceMacOS } from "$lib/storage/platform.svelte";
   import {
@@ -184,6 +185,10 @@
   function rawWrite(s: string) {
     if (!shouldUsePty(ptyId)) return;
     lastInputAt = Date.now();
+    // The one funnel every keystroke passes through, xterm's onData and the
+    // phone's key bar alike, which is why the "what was I last on" order is
+    // stamped here rather than anywhere that also sees the agent's own output.
+    noteUserInput(thread.id, lastInputAt);
     void ptyWrite(ptyId, encoder.encode(s));
   }
 
@@ -590,7 +595,10 @@
   function sendLineFeed(e: KeyboardEvent): boolean {
     e.preventDefault();
     e.stopPropagation();
-    if (ptyId) void ptyWrite(ptyId, LF);
+    if (ptyId) {
+      noteUserInput(thread.id);
+      void ptyWrite(ptyId, LF);
+    }
     queueMicrotask(() => term?.focus());
     return false;
   }
@@ -942,6 +950,10 @@
         if (!reattaching) {
           const opening = claimTypedPrompt(thread.id);
           if (opening && ptyId) {
+            // The user's own words, so it stamps the order like anything else
+            // they type. The spawn itself does not: a respawn the app decided on
+            // is not the user coming back to this thread.
+            noteUserInput(thread.id);
             void ptyWrite(ptyId, encoder.encode(opening)).catch((err) => {
               logger.warn("spawn", `could not type the opening prompt`, String(err));
             });

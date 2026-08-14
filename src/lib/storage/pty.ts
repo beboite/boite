@@ -1,5 +1,6 @@
 import { backend, backendFor } from "$lib/backend";
 import type { PtyEvent, PtyOpenArgs } from "$lib/backend/types";
+import type { ThreadReply } from "$lib/domain/awareness";
 import type { WorkspaceOrigin } from "$lib/types";
 
 export type { PtyEvent, PtySpawnArgs } from "$lib/backend/types";
@@ -45,6 +46,22 @@ export async function ptyKill(key: string, wait = true): Promise<void> {
   } finally {
     keyOrigin.delete(key);
   }
+}
+
+/**
+ * Answer a dialog that is up in a thread.
+ *
+ * Routed by the thread's `origin` rather than by a PTY key, because the caller
+ * may never have attached to it: in dynamic mode the terminal being answered can
+ * live on the boite while the window is standing in the local workspace, and
+ * `keyOrigin` only knows about keys this window was handed.
+ */
+export function threadReply(
+  threadId: string,
+  answer: ThreadReply,
+  origin?: WorkspaceOrigin,
+): Promise<void> {
+  return backendFor(origin).pty.reply(threadId, answer);
 }
 
 export async function ptyRelease(key: string): Promise<void> {

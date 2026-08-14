@@ -2,16 +2,13 @@
   import { fade, scale } from "svelte/transition";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
   import { palette } from "./store.svelte";
-  import { fuzzyScore } from "./fuzzy";
   import { t, type MessageKey } from "$lib/i18n/index.svelte";
   import {
+    buildContentCommands,
     buildPaletteCommands,
     commandHint,
     commandLabel,
-    SECTION_BIAS,
-    SECTION_TITLE_KEYS,
     type PaletteCommand,
-    type PaletteSection,
   } from "./registry";
   import {
     FILE_SEARCH_MIN,
@@ -21,14 +18,13 @@
   } from "./modes";
   import { searchFileCommands } from "./files";
   import { openBrowserPane } from "./open-url";
+  import { rankRows, sectionTitleKeyAt, type PaletteRow } from "./rank";
+  import { paletteSearch } from "./search.svelte";
 
-  // Same order as SECTION_BIAS. "panes" has to be listed or the pane commands
-  // exist only for a typed query: the empty-query list is built from this array.
-  const SECTIONS: PaletteSection[] = ["threads", "actions", "panes", "projects"];
-  const SEARCH_DEBOUNCE_MS = 80;
-
-  /** A command with its text resolved: what the row shows and what search matches. */
-  type PaletteRow = { c: PaletteCommand; label: string; hint: string | null };
+  // The local filter alone. The workspace query has its own, longer one in
+  // `content.ts`: a fuzzy match over a few hundred strings is a frame, a round
+  // trip that reads the tail of every transcript is not.
+  const FILTER_DEBOUNCE_MS = 80;
 
   let query = $state("");
   let debouncedQuery = $state("");
@@ -63,12 +59,25 @@
     }
     const timer = setTimeout(() => {
       debouncedQuery = raw;
-    }, SEARCH_DEBOUNCE_MS);
+    }, FILTER_DEBOUNCE_MS);
     return () => clearTimeout(timer);
   });
 
+  // The backend query is driven by the raw text, not by the filtered one: it
+  // carries its own timer, and stacking the two would put a third of a second
+  // between the last keystroke and the request.
   $effect(() => {
     if (!palette.open) return;
+    paletteSearch.query(query);
+  });
+
+  $effect(() => {
+    if (!palette.open) {
+      // Nothing in flight may land on the next open, and the hits on screen are
+      // about a query nobody is typing any more.
+      paletteSearch.clear();
+      return;
+    }
     commands = buildPaletteCommands();
     fileRows = [];
     fileGeneration++;
@@ -100,46 +109,40 @@
 
   // Resolved at render, not while the list is built: a fixed command carries a
   // dictionary key, so switching language re-renders instead of going stale.
-  const rows = $derived.by<PaletteRow[]>(() =>
-    commands.map((c) => ({ c, label: commandLabel(c), hint: commandHint(c) })),
-  );
+  const rows = $derived.by<PaletteRow[]>(() => {
+    const all = [...commands, ...buildContentCommands(paletteSearch.hits)];
+    return all.map((c) => ({ c, label: commandLabel(c), hint: commandHint(c) }));
+  });
 
   const visible = $derived.by<PaletteRow[]>(() => {
-    // Never re-scored here: the backend already decided what matches and in
-    // which order, and a second matcher over its answer drops hits it found by
-    // a rule this one does not have.
+    // A mode that asks the backend is never re-scored here: it already decided
+    // what matches and in which order, and a second matcher over its answer
+    // drops hits it found by a rule this one does not have. Same reasoning
+    // `rank.ts` applies to a content hit, one level up.
     if (modeQueriesBackend(parsed.mode)) {
       return fileRows.map((c) => ({ c, label: commandLabel(c), hint: commandHint(c) }));
     }
     if (parsed.mode === "url") return [];
-    const q = parsed.term.trim();
-    if (!q) {
-      return SECTIONS.flatMap((s) => rows.filter((r) => r.c.section === s));
-    }
-    const scored: { r: PaletteRow; score: number }[] = [];
-    for (const r of rows) {
-      const target = r.hint ? `${r.label} ${r.hint}` : r.label;
-      const score = fuzzyScore(q, target);
-      if (score !== null) {
-        scored.push({ r, score: score + SECTION_BIAS[r.c.section] });
-      }
-    }
-    scored.sort((a, b) => b.score - a.score);
-    return scored.map((x) => x.r);
+    return rankRows(rows, parsed.term);
   });
 
+  // A new query starts at the top. Keyed on the text rather than on the list,
+  // because content hits land a moment after the commands do and a cursor that
+  // jumped back to the top when they arrived would move under the user.
   $effect(() => {
-    void visible;
+    void debouncedQuery;
     activeIndex = 0;
   });
 
+  // Hits that went away can leave the cursor past the end of the list.
+  $effect(() => {
+    const last = visible.length - 1;
+    if (activeIndex > last) activeIndex = Math.max(0, last);
+  });
+
   function sectionTitleAt(index: number): string | null {
-    const item = visible[index];
-    if (!item) return null;
-    if (index === 0 || visible[index - 1].c.section !== item.c.section) {
-      return t(SECTION_TITLE_KEYS[item.c.section]);
-    }
-    return null;
+    const key = sectionTitleKeyAt(visible, index);
+    return key ? t(key) : null;
   }
 
   function runCommand(c: PaletteCommand) {
@@ -288,11 +291,26 @@
                 <ShortcutIcon iconKey={row.c.icon.key} size={14} color={row.c.icon.color} />
               {/if}
             </span>
-            <span class="min-w-0 truncate">{row.label}</span>
-            {#if row.hint}
-              <span class="min-w-0 flex-1 truncate text-xs text-muted-foreground/70">
-                {row.hint}
+            <!-- A content hit is a sentence out of the workspace rather than a
+                 command's name, so the excerpt takes the room and the badge
+                 says which of the three places it came from. -->
+            {#if row.c.badgeKey}
+              <span class="shrink-0 text-2xs font-semibold tracking-wider text-muted-foreground/60 uppercase">
+                {t(row.c.badgeKey)}
               </span>
+              <span class="min-w-0 flex-1 truncate text-sm">{row.label}</span>
+              {#if row.hint}
+                <span class="max-w-[40%] shrink-0 truncate text-xs text-muted-foreground/70">
+                  {row.hint}
+                </span>
+              {/if}
+            {:else}
+              <span class="min-w-0 truncate">{row.label}</span>
+              {#if row.hint}
+                <span class="min-w-0 flex-1 truncate text-xs text-muted-foreground/70">
+                  {row.hint}
+                </span>
+              {/if}
             {/if}
           </button>
         {/each}
