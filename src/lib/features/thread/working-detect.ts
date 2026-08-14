@@ -192,8 +192,7 @@ export function liveRows(lines: string[]): string[] {
 export function detectWorkingOnScreen(lines: string[], iconKey: IconKey): boolean {
   const rows = liveRows(lines);
   if (rows.length === 0) return false;
-  const isKnownAgent = !!iconKey && iconKey in WORKING_BY_KEY;
-  if (isKnownAgent && rows.some(isLiveStatusRow)) return true;
+  if (isKnownAgent(iconKey) && rows.some(isLiveStatusRow)) return true;
   const text = rows.join("\n");
   if (!HAS_LETTER.test(text)) return false;
   const patterns = (iconKey && WORKING_BY_KEY[iconKey]) || COMMON_PATTERNS;
@@ -205,3 +204,14 @@ export function detectWorkingOnScreen(lines: string[], iconKey: IconKey): boolea
 
 /** Exported for the tests; the detector slices the window itself. */
 export const LIVE_ROW_COUNT = LIVE_ROWS;
+
+/**
+ * The agents this file knows the shape of.
+ *
+ * Exported so the waiting detector judges against the same set. `iconKey` is
+ * wider than the agent list — `bun` and `node` are icons too — so "not the
+ * terminal icon" is not the same question.
+ */
+export function isKnownAgent(iconKey: IconKey): boolean {
+  return !!iconKey && iconKey in WORKING_BY_KEY;
+}

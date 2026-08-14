@@ -845,6 +845,8 @@ export const EN_MESSAGES = {
   "settings.shortcutRemoved": "Removed {label}",
   "settings.shortcutRemovedUnnamed": "Removed shortcut",
   "settings.shortcutsReset": "Shortcuts rebuilt from the agents detected",
+  "settings.shortcutsResetFoundNothing":
+    "No agent was detected, so your bar was left alone. Check that the boite is reachable and that the agents are on its PATH.",
   "terminal.pasteFailed": "Paste failed",
   "terminal.copyFailed": "Copy failed",
   "terminal.keyboardLabel": "Keyboard (long-press for key bar)",
@@ -878,7 +880,7 @@ export const EN_MESSAGES = {
   "shortcuts.removeConfirmTitle": "Remove this shortcut?",
   "shortcuts.removeConfirmMessage": "Removes {label} from the bar. Terminals it already opened are untouched.",
   "shortcuts.resetConfirmTitle": "Reset every shortcut?",
-  "shortcuts.resetConfirmMessage": "Replaces your whole bar with the default presets. Shortcuts you added or edited are lost.",
+  "shortcuts.resetConfirmMessage": "Rebuilds your whole bar from the agents detected on this machine. Shortcuts you added or edited are lost.",
   "updater.restartConfirmTitle": "Restart to apply the update?",
   "updater.restartConfirmDirty": "{count} file(s) have unsaved changes and will be lost. Running terminals are restarted afterwards.",
   "updater.restartConfirmAction": "Restart now",

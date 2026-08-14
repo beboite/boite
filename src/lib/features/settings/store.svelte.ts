@@ -842,7 +842,17 @@ class SettingsStore {
   /// order. Restoring a fixed list instead would put back the ones whose binary
   /// is missing, which is the whole reason this list is detected and not shipped.
   async resetShortcutsToPresets() {
-    this.state.shortcuts = await detectedShortcuts();
+    const detected = await detectedShortcuts();
+    // Detection answering nothing is not the same as this machine having no
+    // agents: a probe fails wholesale when the backend transport is down, or
+    // when a GUI launch left PATH without the shell's own additions. Persisting
+    // that as an empty bar throws away every row the user built, with no undo
+    // and a success toast on top.
+    if (detected.length === 0) {
+      notifications.error(t("settings.shortcutsResetFoundNothing"));
+      return;
+    }
+    this.state.shortcuts = detected;
     await this.persist();
     notifications.success(t("settings.shortcutsReset"));
   }

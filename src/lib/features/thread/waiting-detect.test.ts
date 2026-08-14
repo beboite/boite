@@ -76,12 +76,38 @@ describe("detectWaitingOnScreen", () => {
     expect(detectWaitingOnScreen(hermes, "claude")).toBeNull();
   });
 
-  it("stays out of plain terminals", () => {
+  it("stays out of anything that is not an agent, not just the terminal icon", () => {
     // git, npm and apt ask this all day, and a shell thread has no turn for the
-    // question to belong to.
+    // question to belong to. `bun` is an icon too and is no more an agent than
+    // the terminal is, which "not the terminal icon" would have let through.
     const shell = ["Remove untracked files? [y/n]"];
     expect(detectWaitingOnScreen(shell, "terminal")).toBeNull();
     expect(detectWaitingOnScreen(shell, null)).toBeNull();
+    expect(detectWaitingOnScreen(shell, "bun")).toBeNull();
+  });
+
+  it("does not read an agent's own tool lines as a dialog", () => {
+    // Claude draws its calls with the same bullet a selector uses, and `edit` is
+    // an answer word. A turn that ends on a question in prose is not a dialog:
+    // there is nothing on screen to answer with.
+    const transcript = [
+      "● Edit(src/main.rs)",
+      "  ⎿ Updated 3 lines",
+      "● Done. Want me to run the tests?",
+    ];
+    expect(detectWaitingOnScreen(transcript, "claude")).toBeNull();
+  });
+
+  it("does not read a markdown bullet as a selector", () => {
+    const prose = ["- Never mind that", "│ > should I ship this? │"];
+    expect(detectWaitingOnScreen(prose, "claude")).toBeNull();
+  });
+
+  it("wants the y/n footer where a prompt puts it, not inside printed code", () => {
+    // A program stopped on the keypress has nothing left to say after it. A diff
+    // an agent is showing does.
+    const diff = ["▌ +  if (confirm(\"delete? [y/N]\")) {", "▌ ", "▌ > "];
+    expect(detectWaitingOnScreen(diff, "codex")).toBeNull();
   });
 
   it("stops at the gap, like the working detector", () => {

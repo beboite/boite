@@ -1,5 +1,5 @@
 import type { IconKey } from "$lib/types";
-import { liveRows } from "./working-detect";
+import { isKnownAgent, liveRows } from "./working-detect";
 
 /**
  * Whether an agent has stopped on a question, read off the rows it is repainting.
@@ -33,7 +33,11 @@ const BOX_EDGE = /^[\s│┃┆┇┊┋┆|▌▏╎╏]+|[\s│┃┆┇┊┋
 // The glyph a TUI draws against the option the arrow keys are on. Stripped
 // before an option row is judged, never evidence on its own: `❯` is also every
 // one of these agents' empty input prompt.
-const CHOICE_CURSOR = /^[❯➜▶►▸›>●◉○*+-]\s*/;
+//
+// `*`, `+` and `-` are not in here: they are markdown bullets, which agents
+// print in prose all day, and an answer word behind one ("- Never mind that")
+// is a sentence rather than an option row.
+const CHOICE_CURSOR = /^[❯➜▶►▸›>●◉○]\s*/;
 
 const NUMBERED_OPTION = /^\d+\s*[.)]\s*\S/;
 
@@ -41,13 +45,18 @@ const NUMBERED_OPTION = /^\d+\s*[.)]\s*\S/;
 // and `don't ask again` are the third option claude and codex both offer, and
 // they are what tells their dialog apart from a sentence that merely opens with
 // "no".
+// The trailing `(?!\()` is what keeps claude's own tool lines out: it draws
+// `● Edit(src/main.rs)` with the same bullet a selector uses, and `edit` is an
+// answer word. An option is never a call.
 const ANSWER_WORD =
-  /^(?:yes|yeah|no|nope|allow|approve|accept|deny|reject|cancel|always|never|don['’]t ask(?: again)?|skip|edit)\b/i;
+  /^(?:yes|yeah|no|nope|allow|approve|accept|deny|reject|cancel|always|never|don['’]t ask(?: again)?|skip|edit)\b(?!\()/i;
 
 // A y/n footer, which is the other shape: no menu, one keypress. Strong enough
 // on its own, since nothing prints it except a program that has stopped for an
-// answer.
-const YES_NO_FOOTER = /[[(]\s*y(?:es)?\s*\/\s*n(?:o)?\s*[\])]/i;
+// answer — as long as it is where a prompt puts it. Anchored to the end of the
+// row, because a program waiting on the keypress has nothing left to say after
+// it, while `if (confirm("delete? [y/N]")) {` in a printed diff does.
+const YES_NO_FOOTER = /[[(]\s*y(?:es)?\s*\/\s*n(?:o)?\s*[\])][\s:>❯]*$/i;
 
 // Asked without a question mark. Kept to the phrasings that only ever introduce
 // a prompt: "waiting for" and "press enter" are said by progress output too, so
@@ -88,7 +97,7 @@ function label(line: string): string {
  * terminal thread has no turn for the question to belong to.
  */
 export function detectWaitingOnScreen(lines: string[], iconKey: IconKey): string | null {
-  if (!iconKey || iconKey === "terminal") return null;
+  if (!isKnownAgent(iconKey)) return null;
   const rows = liveRows(lines);
   if (rows.length === 0) return null;
 
