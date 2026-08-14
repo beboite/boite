@@ -1,18 +1,15 @@
-//! What this shim is, and how it proves it.
+//! What the stdio shim is, and how it proves it.
 //!
 //! Two credentials and nothing else. A terminal Boite opened holds a key of its
 //! own and signs every request; an agent wired from a credentials file presents
 //! a token derived for one project. Neither can be turned into the other, and
 //! `resolve` picks whichever one the process was actually given.
 
-use std::cell::RefCell;
-use std::collections::HashMap;
-
 use serde_json::Value;
 
+use crate::backend::{refusal_for, Backend, IdCache};
 use crate::http::Endpoint;
 use crate::now_ms;
-use crate::render::index_todos;
 
 /// What this shim proves itself with. Exactly one of the two.
 pub(crate) enum Credential {
@@ -26,7 +23,7 @@ pub(crate) enum Credential {
     Project { id: String, token: String },
 }
 
-pub(crate) struct Host {
+pub struct Host {
     endpoint: Endpoint,
     credential: Credential,
     /// Which agent this is, when the registration said so. Only ever used to
@@ -34,8 +31,8 @@ pub(crate) struct Host {
     agent: Option<String>,
     /// Short id to full id, filled by every listing. The process lives as long
     /// as the agent does, so a claim can quote the eight characters it was
-    /// shown instead of a full uuid. Single-threaded loop, hence `RefCell`.
-    ids: RefCell<HashMap<String, String>>,
+    /// shown instead of a full uuid.
+    ids: IdCache,
 }
 
 #[derive(serde::Deserialize)]
@@ -54,7 +51,7 @@ impl Host {
     /// sign. The file exists for agents that hand a server process nothing but
     /// PATH, where the environment can never arrive; it names a project instead,
     /// which is the unit the list belongs to anyway.
-    pub(crate) fn resolve() -> Result<Host, String> {
+    pub fn resolve() -> Result<Host, String> {
         if let (Ok(url), Some(seed)) = (
             std::env::var(boite_identity::env::URL),
             Self::key_from_env(),
@@ -72,7 +69,7 @@ impl Host {
                     // The thread names the agent better than any argument could:
                     // Boite launched it and knows what it is.
                     agent: None,
-                    ids: RefCell::new(HashMap::new()),
+                    ids: IdCache::new(),
                 });
             }
         }
@@ -97,7 +94,7 @@ impl Host {
                 token: creds.token,
             },
             agent,
-            ids: RefCell::new(HashMap::new()),
+            ids: IdCache::new(),
         })
     }
 
@@ -118,8 +115,10 @@ impl Host {
             .map(|t| t.trim().to_string())
             .filter(|t| !t.is_empty())
     }
+}
 
-    pub(crate) fn send(&self, method: &str, path: &str, body: Option<Value>) -> Result<Value, String> {
+impl Backend for Host {
+    fn send(&self, method: &str, path: &str, body: Option<Value>) -> Result<Value, String> {
         let body = body.map(|b| b.to_string().into_bytes());
         // Bound before the header list, so they outlive the borrows in it.
         let (auth, stamp, signature);
@@ -149,55 +148,18 @@ impl Host {
             headers.push((boite_identity::header::AGENT, agent));
         }
         let res = self.endpoint.send(method, path, &headers, body)?;
-        let status = res.status;
-        if status == 409 {
-            // The endpoint refuses without saying which reason applied; say the
-            // same here rather than inventing a diagnosis. The two routes mean
-            // different things by it, and telling an agent its todo is closed
-            // when the real answer is "you have no worktree" sends it looking
-            // in the wrong place entirely.
-            return Err(if path.starts_with("/v1/worktree") {
-                "this terminal has no worktree: it runs directly in the project folder, \
-                 so branches here are the user's to make"
-                    .into()
-            } else {
-                "that item is not open, or does not belong to this project".to_string()
-            });
-        }
-        if !(200..300).contains(&status) {
-            return Err(format!("boite refused the call ({status})"));
+        if !(200..300).contains(&res.status) {
+            return Err(refusal_for(path, res.status));
         }
         serde_json::from_slice(&res.body).map_err(|e| format!("bad response: {e}"))
     }
 
-    pub(crate) fn remember(&self, short: &str, full: &str) {
-        self.ids
-            .borrow_mut()
-            .insert(short.to_string(), full.to_string());
+    fn remember(&self, short: &str, full: &str) {
+        self.ids.remember(short, full);
     }
 
-    /// The full id behind whatever the agent quoted.
-    ///
-    /// A short id it saw in a listing this process made resolves from memory. A
-    /// short id it saw before a restart does not, so the list is fetched once
-    /// and asked again — one extra round trip on a path that would otherwise
-    /// fail with a refusal the agent cannot act on. Anything else goes through
-    /// untouched: a full uuid out of a task prompt is already the answer.
-    pub(crate) fn full_id(&self, given: &str) -> String {
-        if let Some(full) = self.ids.borrow().get(given) {
-            return full.clone();
-        }
-        if given.len() >= 32 {
-            return given.to_string();
-        }
-        if let Ok(out) = self.send("GET", "/v1/todos", None) {
-            index_todos(self, &out);
-        }
-        self.ids
-            .borrow()
-            .get(given)
-            .cloned()
-            .unwrap_or_else(|| given.to_string())
+    fn full_id(&self, given: &str) -> String {
+        self.ids.resolve(self, given)
     }
 }
 
@@ -216,7 +178,7 @@ impl Host {
                 key: boite_identity::ThreadKey::mint(),
             },
             agent: None,
-            ids: RefCell::new(HashMap::new()),
+            ids: IdCache::new(),
         }
     }
 }

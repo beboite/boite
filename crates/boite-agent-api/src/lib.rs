@@ -27,6 +27,7 @@ use boite_core::store::Store;
 
 mod auth;
 pub mod keys;
+mod mcp;
 mod routes;
 #[cfg(test)]
 mod testing;

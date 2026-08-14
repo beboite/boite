@@ -7,7 +7,7 @@
 
 use serde_json::{json, Value};
 
-use crate::host::Host;
+use crate::backend::Backend;
 use crate::render::{
     format_acted, format_artifacts, format_browser_panes, format_drove, format_hits,
     format_moments, format_page_settled, format_projects, format_snapshot, format_todos,
@@ -16,7 +16,7 @@ use crate::render::{
 use crate::toon::Toon;
 use crate::{encode_query, MAX_BRANCHES};
 
-pub(crate) fn call_tool(host: &Host, name: &str, args: &Value) -> Result<String, String> {
+pub fn call_tool<B: Backend>(host: &B, name: &str, args: &Value) -> Result<String, String> {
     match name {
         "todo_list" => {
             let out = host.send("GET", "/v1/todos", None)?;
@@ -339,10 +339,14 @@ pub(crate) fn call_tool(host: &Host, name: &str, args: &Value) -> Result<String,
 /// The one tool whose answer is not text.
 ///
 /// Kept out of [`call_tool`] so the text tools stay a `String` pipeline;
-/// `main.rs` asks here first and falls through. `Some(Ok(...))` is a content
-/// array ready to go out as-is: a caption, then the PNG as an MCP image
-/// block, which is what a vision-capable agent renders and reads.
-pub(crate) fn call_blocks(host: &Host, name: &str, args: &Value) -> Option<Result<Value, String>> {
+/// [`crate::rpc::answer`] asks here first and falls through. `Some(Ok(...))` is
+/// a content array ready to go out as-is: a caption, then the PNG as an MCP
+/// image block, which is what a vision-capable agent renders and reads.
+pub fn call_blocks<B: Backend>(
+    host: &B,
+    name: &str,
+    args: &Value,
+) -> Option<Result<Value, String>> {
     if name != "browser_screenshot" {
         return None;
     }
@@ -404,7 +408,7 @@ fn awaiting(out: &Value) -> Option<String> {
 /// The endpoint answers that way whenever the reason is the agent's to act on —
 /// a project that does not exist, a name that matches two of them. A transport
 /// failure is something else and stays a transport failure.
-fn refusable(host: &Host, path: &str, body: Value) -> Result<Value, String> {
+fn refusable<B: Backend>(host: &B, path: &str, body: Value) -> Result<Value, String> {
     let out = host.send("POST", path, Some(body))?;
     if let Some(err) = out.get("error").and_then(|v| v.as_str()) {
         return Err(err.to_string());
@@ -414,7 +418,7 @@ fn refusable(host: &Host, path: &str, body: Value) -> Result<Value, String> {
 
 /// Both branch tools take one name and answer the same three ways: it worked,
 /// git would not, or this terminal has no worktree to put a branch on.
-fn branch_call(host: &Host, args: &Value, path: &str, tool: &str) -> Result<String, String> {
+fn branch_call<B: Backend>(host: &B, args: &Value, path: &str, tool: &str) -> Result<String, String> {
     let name = args
         .get("name")
         .and_then(|v| v.as_str())
