@@ -46,6 +46,12 @@
     return () => window.removeEventListener("keydown", onKey, { capture: true });
   });
 
+  // A stale `recording` keeps the dispatcher suspended for the whole session,
+  // so leaving the tab mid-recording must clear it.
+  $effect(() => () => {
+    keybindings.recording = null;
+  });
+
   function resetAll() {
     keybindings.resetAll();
     keybindings.recording = null;
