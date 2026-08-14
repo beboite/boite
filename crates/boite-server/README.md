@@ -99,8 +99,9 @@ grant is everything except `admin`.
 | `BOITE_SCROLLBACK_BYTES` | `1048576` | Per-thread replay ring size. |
 | `BOITE_MAX_THREADS` | `200` | Max concurrent live PTYs. |
 | `BOITE_MAX_CONNECTIONS` | `64` | Max concurrent WebSocket connections. |
-| `BOITE_WEBHOOK_URL` | _(none)_ | Notification webhook fired on a thread going ready / exiting. |
+| `BOITE_WEBHOOK_URL` | _(none)_ | Notification webhook fired on a thread going ready / waiting / exiting. Must be `http(s)`. |
 | `BOITE_WEBHOOK_FORMAT` | `json` | `ntfy`, `discord`, or `json`. |
+| `BOITE_PUBLIC_URL` | _(none)_ | Where this workspace answers from on the internet, e.g. `https://boite.example.com`. Turns the deep link a notification carries into one a phone can open. Without it the ntfy `Click` header and the Discord embed link are omitted, since a relative one resolves against nothing in those clients. |
 
 ## Security
 
@@ -149,15 +150,43 @@ because a query string reaches the access log of whatever proxy is in front.
 
 Set `BOITE_WEBHOOK_URL` to an [ntfy](https://ntfy.sh) topic (or a Discord /
 Gotify webhook). The server POSTs when a thread finishes a turn (running ->
-ready) or its process exits, so an ntfy app on the phone delivers a native
-push even with the app closed. `notify.test` (RPC) fires a test notification.
+ready), when one blocks on the user, and when a process exits, so an ntfy app on
+the phone delivers a native push even with the app closed. `notify.test` (RPC)
+fires a test notification, and takes an optional `threadId` so the test carries a
+real link.
 
 Native PWA Web Push (VAPID, RFC 8291) is also wired in: the server generates a
 keypair on first run, the PWA subscribes its browser push endpoint, and the
-server pushes on a thread going ready or exiting. It uses `web-push-native`
-(pure RustCrypto: aes-gcm + hkdf + p256), so there is no OpenSSL/C dependency
-and it cross-compiles cleanly. The webhook above is the complementary path for
-non-PWA targets (ntfy/Discord/Gotify).
+server pushes down the same transitions. It uses `web-push-native` (pure
+RustCrypto: aes-gcm + hkdf + p256), so there is no OpenSSL/C dependency and it
+cross-compiles cleanly. The webhook above is the complementary path for non-PWA
+targets (ntfy/Discord/Gotify).
+
+Both are built from one value, `boite_core::awareness`: a phase
+(`starting | running | waiting_for_approval | waiting_for_input | completed |
+failed | stale`), a headline, a detail, the project and thread it belongs to, and
+a deep link. What differs per transport is the envelope and nothing else — ntfy
+gets `Title`/`Tags`/`Priority`/`Click`, Discord gets an embed with the phase's
+colour, the generic JSON keeps `title`/`body`/`tag` for consumers written against
+the old shape and carries the whole value beside them under `awareness`. Web Push
+sends `{title, body, tag, url, phase, threadId}`; the service worker resolves
+`url` against its own origin, so the server never has to guess the address a
+browser reached it at.
+
+### Answering from the notification
+
+A thread that is `waiting` has a dialog up and nothing moves until somebody
+answers. `thread.reply` writes one keystroke into it — `{threadId, answer}` where
+`answer` is one of `yes | no | enter | escape | 1..9` and nothing else. The
+vocabulary is `boite_core::reply` and it is closed: every arm is a compile-time
+constant of one byte, and no answer but `enter` submits a line.
+
+It is a device call, not an agent one. It is on this RPC surface, which is reached
+only after the token check, and it is deliberately absent from the command bus and
+from the agent endpoint: an agent that could answer its own permission prompts
+would not have permission prompts. Unlike the binary input frame it does not
+require the socket to have attached to the thread, because the caller this exists
+for is a phone that has never opened it.
 
 ## Workspace identity
 

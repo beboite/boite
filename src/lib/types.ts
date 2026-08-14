@@ -1,3 +1,7 @@
+import type { Keybinding } from "$lib/shared/keyboard/types";
+
+export type { Keybinding };
+
 // Which transport owns an entity in dynamic mode: the local desktop backend or
 // the connected boite. Runtime-only tag — never persisted (each store only
 // holds its own rows) and stripped before any RPC. Undefined outside dynamic
@@ -62,6 +66,20 @@ export interface Thread {
   // explorer, the PTY and the Claude session lookup all resolve through
   // `threadCwd()` rather than reading `project.cwd` directly.
   worktreePath?: string | null;
+  /**
+   * Position in the workspace-wide pinned order, or null/undefined for a thread
+   * that is not pinned.
+   *
+   * Server-side rather than in this device's localStorage, because the order is
+   * the part worth syncing: a phone and a laptop showing the same five threads
+   * in two different sequences is the sidebar disagreeing with itself. Written
+   * only by `setPinnedOrder`, which rewrites the whole order at once.
+   */
+  pinOrder?: number | null;
+  /** When this thread was filed away as finished, or null while it is live. */
+  settledAt?: number | null;
+  /** When a snoozed thread comes back, or null while it is not snoozed. */
+  snoozedUntil?: number | null;
   origin?: WorkspaceOrigin;
 }
 
@@ -93,6 +111,15 @@ export type LocaleSetting = "system" | "en" | "fr";
 
 export interface Settings {
   shortcuts: Shortcut[];
+  /**
+   * Global keyboard rules, `{key, command, when}`, last match winning.
+   *
+   * They live in this blob rather than in a `keybindings.json` beside the app
+   * because the blob is the one store both front doors already read, so a phone
+   * on the PWA gets the same keyboard as the desktop and no new bus capability
+   * is needed to carry it.
+   */
+  keybindings: Keybinding[];
   // Preset shortcut ids already backfilled once. Without this, deleting a
   // late-added preset would see it re-seeded on every launch.
   seededPresets: string[];
@@ -149,6 +176,18 @@ export interface Settings {
    */
   mcpYolo: boolean;
   idleTimeoutMinutes: number;
+  /**
+   * File a thread away by itself after this many days with nothing happening on
+   * it. Zero is off, and off is the default.
+   *
+   * A thread in Boite is a row that survives its process: an `idle` one from
+   * last month is still one click from a relaunch with the command it was born
+   * with. So a sidebar that empties itself on a clock nobody set is a surprise
+   * removal of exactly the rows people keep on purpose, and the ones that
+   * genuinely are finished have `settle` a right-click away. Whoever wants the
+   * clock turns it on and picks the number.
+   */
+  autoSettleDays: number;
   idleAutocloseByIcon: Record<string, boolean>;
   confirmCloseThread: boolean;
   /**

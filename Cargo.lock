@@ -606,11 +606,13 @@ dependencies = [
  "axum",
  "boite-core",
  "boite-identity",
+ "boite-mcp",
  "dirs",
  "serde",
  "serde_json",
  "subtle",
  "tokio",
+ "tower",
  "uuid",
 ]
 

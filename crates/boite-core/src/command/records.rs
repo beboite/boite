@@ -13,15 +13,23 @@
 //! the problem — `updateThreadTitle` exists precisely because a whole-row
 //! `REPLACE` clobbers concurrent writes — and had solved it for one column.
 //!
+//! Reading across those rows lives here too. [`Records::Search`] answers over
+//! the todos and the journal at once, and the store is what it needs; that it
+//! also scans the transcripts is a second source on the same answer rather than
+//! a reason for a domain of its own.
+//!
 //! What is deliberately *not* here: the side effects each host wraps around
 //! these. The server broadcasts an `AppEvent`, refreshes its roots and kills a
 //! PTY; the desktop removes a key file. Those are things a host does about a
 //! row changing, not the row changing, and a bus that owned them would need a
 //! `Host` method per host quirk.
 
+use std::path::PathBuf;
+
 use serde_json::{json, Value};
 
-use super::{str_param, value_of, Host, Ready, Wire};
+use super::{str_param, u32_param, value_of, Host, Ready, Wire};
+use crate::ageing;
 use crate::capability::Capability;
 use crate::model::{Project, Thread, Todo};
 use crate::store::{ColVal, Store, ThreadCol};
@@ -36,6 +44,8 @@ pub const ALL_METHODS: &[&str] = &[
     "thread.create",
     "thread.update",
     "thread.started",
+    "thread.age",
+    "thread.pinOrder",
     "thread.delete",
     "todo.list",
     "todo.save",
@@ -44,7 +54,17 @@ pub const ALL_METHODS: &[&str] = &[
     "settings.set",
     "workspace.info",
     "workspace.setInfo",
+    "search.query",
 ];
+
+/// How many hits one query may answer with, and what it answers with when the
+/// caller says nothing.
+///
+/// The cap is the transcripts' rather than the rows': the row half is an index
+/// lookup, the other half reads the tail of every transcript in the workspace,
+/// and a caller asking for a thousand would be asking for all of them.
+const SEARCH_LIMIT_DEFAULT: u32 = 20;
+const SEARCH_LIMIT_MAX: u32 = 100;
 
 /// The longest a workspace name or colour is kept.
 ///
@@ -118,6 +138,53 @@ impl ThreadPatch {
     }
 }
 
+/// Which of the two filing states a caller asked to change.
+///
+/// Same absent-versus-null rule as [`ThreadPatch`]: leaving `settled` out keeps
+/// whatever the row says, and a thread being unsnoozed while it is settled is a
+/// real request rather than a contradiction.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AgePatch {
+    pub settled: Option<bool>,
+    /// `Some(None)` unsnoozes, `Some(Some(t))` snoozes until `t`.
+    pub snooze_until: Option<Option<i64>>,
+}
+
+impl AgePatch {
+    fn read(params: &Value) -> Self {
+        AgePatch {
+            settled: params.get("settled").and_then(|v| v.as_bool()),
+            snooze_until: params
+                .get("snoozeUntil")
+                .map(|v| v.as_i64().filter(|ms| *ms > 0)),
+        }
+    }
+
+    /// Whether this patch would put the thread away, which is the half the
+    /// refusal rule applies to. Bringing one back is always allowed: a thread
+    /// that started working while it was filed is exactly the one to un-file.
+    fn files_away(&self) -> bool {
+        self.settled == Some(true) || matches!(self.snooze_until, Some(Some(_)))
+    }
+
+    fn columns(self, now: i64) -> Vec<(ThreadCol, ColVal)> {
+        let mut out = Vec::new();
+        if let Some(settled) = self.settled {
+            out.push((
+                ThreadCol::SettledAt,
+                if settled { ColVal::Int(now) } else { ColVal::Null },
+            ));
+        }
+        if let Some(until) = self.snooze_until {
+            out.push((
+                ThreadCol::SnoozedUntil,
+                until.map(ColVal::Int).unwrap_or(ColVal::Null),
+            ));
+        }
+        out
+    }
+}
+
 /// No `PartialEq`: the row types it carries are what the database and the wire
 /// agree on, and giving them an equality would invite a comparison that means
 /// "same row" in one place and "same contents" in another.
@@ -180,6 +247,30 @@ pub enum Records {
     ThreadStarted {
         id: String,
     },
+    /// Files a thread away, or brings it back.
+    ///
+    /// `status` is the caller's own live reading, and it is a parameter rather
+    /// than something read off the row because the row does not hold it: what a
+    /// `threads` row records is that there *was* a run, and the desktop derives
+    /// the live answer in the window from the agent's session files and the
+    /// emulator. So the caller states it and the bus refuses on it, which is
+    /// what keeps a working thread and a thread with a dialog up out of the
+    /// filed pile from every front door at once instead of from each screen that
+    /// draws a menu.
+    ThreadAge {
+        id: String,
+        status: String,
+        patch: AgePatch,
+    },
+    /// The whole pinned order, in one write.
+    ///
+    /// Pin, unpin and reorder are the same call: anything not in the list is
+    /// unpinned. A per-thread boolean plus a separate order would be two writes
+    /// that can disagree, and the order is what has to survive reaching a second
+    /// device.
+    ThreadPinOrder {
+        ids: Vec<String>,
+    },
     /// Removes the row and the key bound to it.
     ///
     /// The public key is looked up on the row, so the identity grants nothing
@@ -208,6 +299,17 @@ pub enum Records {
         /// Absent leaves it, present-and-blank clears the override.
         name: Option<Option<String>>,
         color: Option<Option<String>>,
+    },
+    /// Where something is, across the todos, the journal and what the terminals
+    /// printed. See [`crate::search`].
+    ///
+    /// `transcripts` is the host's answer, resolved in `prepare`, for the same
+    /// reason `session.transcript` resolves its own: a caller naming a directory
+    /// would be a caller reading any file on the machine.
+    Search {
+        needle: String,
+        limit: usize,
+        transcripts: Option<PathBuf>,
     },
 }
 
@@ -255,6 +357,23 @@ impl Records {
             "thread.started" => Records::ThreadStarted {
                 id: str_param(params, "threadId")?,
             },
+            "thread.age" => Records::ThreadAge {
+                id: str_param(params, "threadId")?,
+                status: str_param(params, "status")?,
+                patch: AgePatch::read(params),
+            },
+            "thread.pinOrder" => Records::ThreadPinOrder {
+                ids: params
+                    .get("ids")
+                    .and_then(|v| v.as_array())
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|v| v.as_str())
+                            .map(|s| s.to_string())
+                            .collect()
+                    })
+                    .ok_or("missing param: ids")?,
+            },
             "thread.delete" => Records::ThreadDelete {
                 id: str_param(params, "threadId")?,
             },
@@ -276,6 +395,12 @@ impl Records {
                 name: nullable("name"),
                 color: nullable("color"),
             },
+            "search.query" => Records::Search {
+                needle: str_param(params, "q")?,
+                limit: u32_param(params, "limit", SEARCH_LIMIT_DEFAULT)
+                    .clamp(1, SEARCH_LIMIT_MAX) as usize,
+                transcripts: None,
+            },
             other => return Err(format!("unknown method: {other}")),
         })
     }
@@ -290,6 +415,8 @@ impl Records {
             Records::ThreadCreate { .. } => "thread.create",
             Records::ThreadUpdate { .. } => "thread.update",
             Records::ThreadStarted { .. } => "thread.started",
+            Records::ThreadAge { .. } => "thread.age",
+            Records::ThreadPinOrder { .. } => "thread.pinOrder",
             Records::ThreadDelete { .. } => "thread.delete",
             Records::TodoList => "todo.list",
             Records::TodoSave { .. } => "todo.save",
@@ -298,6 +425,7 @@ impl Records {
             Records::SettingsSet { .. } => "settings.set",
             Records::WorkspaceInfo => "workspace.info",
             Records::WorkspaceSetInfo { .. } => "workspace.setInfo",
+            Records::Search { .. } => "search.query",
         }
     }
 
@@ -309,6 +437,7 @@ impl Records {
             Records::ThreadCreate { .. } => Wire::Key("thread"),
             Records::TodoList => Wire::Key("todos"),
             Records::SettingsGet => Wire::Key("settings"),
+            Records::Search { .. } => Wire::Key("hits"),
             // Both halves of the answer are already named, so wrapping it again
             // would give a remote client `{"info":{"name":...}}` where the
             // desktop reads `{"name":...}`.
@@ -317,6 +446,8 @@ impl Records {
             | Records::ProjectDelete { .. }
             | Records::ThreadUpdate { .. }
             | Records::ThreadStarted { .. }
+            | Records::ThreadAge { .. }
+            | Records::ThreadPinOrder { .. }
             | Records::ThreadDelete { .. }
             | Records::TodoSave { .. }
             | Records::TodoDelete { .. }
@@ -343,12 +474,15 @@ impl Records {
             | Records::ThreadList
             | Records::TodoList
             | Records::SettingsGet
-            | Records::WorkspaceInfo => Capability::ReadProject,
+            | Records::WorkspaceInfo
+            | Records::Search { .. } => Capability::ReadProject,
 
             Records::ProjectArchive { .. }
             | Records::ThreadCreate { .. }
             | Records::ThreadUpdate { .. }
             | Records::ThreadStarted { .. }
+            | Records::ThreadAge { .. }
+            | Records::ThreadPinOrder { .. }
             | Records::TodoSave { .. }
             | Records::TodoDelete { .. }
             | Records::SettingsSet { .. }
@@ -366,13 +500,16 @@ impl Records {
     /// A host with no records says so instead of answering with nothing: "there
     /// are no projects" and "this Boite keeps no rows" send whoever is reading
     /// to two different places. A test host is the honest case of the second.
-    pub(super) fn prepare(self, host: &dyn Host) -> Result<Ready, String> {
+    pub(super) fn prepare(mut self, host: &dyn Host) -> Result<Ready, String> {
         // Where a project may go is the one boundary a record command has, and
         // it is the same one `project.createFolder` answers to. Not an
         // existence check: this doubles as a re-save, and a project on a drive
         // that is unplugged today is still a project.
         if let Records::ProjectCreate { project } = &self {
             host.ensure_new_project_path(&project.cwd)?;
+        }
+        if let Records::Search { transcripts, .. } = &mut self {
+            *transcripts = host.transcripts_dir();
         }
         let store = host
             .store()
@@ -413,6 +550,14 @@ impl Records {
                         thread.exit_code = None;
                     }
                 }
+                // Where the sidebar keeps it is the row's answer for the same
+                // reason its ending is: a re-save is built from a snapshot, and
+                // another device may have pinned or snoozed since. A new row has
+                // no filing at all, which is what an ordinary live thread is.
+                let filed = store.thread_ageing(&thread.id).unwrap_or_default();
+                thread.pin_order = filed.pin_order;
+                thread.settled_at = filed.settled_at;
+                thread.snoozed_until = filed.snoozed_until;
                 store.save_thread(&thread)?;
                 // The row keeps the mark of its last run; the caller is told what
                 // that mark means, which for a row still naming a process is
@@ -433,6 +578,20 @@ impl Records {
                     ColVal::Text("running".to_string()),
                 )?;
                 store.update_thread_field(&id, ThreadCol::ExitCode, ColVal::Null)?;
+                json!(null)
+            }
+            Records::ThreadAge { id, status, patch } => {
+                if patch.files_away() && !ageing::can_file_away(&status) {
+                    return Err(ageing::refusal(&status));
+                }
+                let now = crate::now_ms();
+                for (col, val) in patch.columns(now) {
+                    store.update_thread_field(&id, col, val)?;
+                }
+                json!(null)
+            }
+            Records::ThreadPinOrder { ids } => {
+                store.set_pin_order(&ids)?;
                 json!(null)
             }
             Records::ThreadDelete { id } => {
@@ -492,6 +651,25 @@ impl Records {
                 }
                 store.save_workspace_meta(&meta)?;
                 json!(null)
+            }
+            Records::Search {
+                needle,
+                limit,
+                transcripts,
+            } => {
+                let mut hits = store.search(&needle, limit);
+                // The rows first and the transcripts with whatever budget is
+                // left: an index lookup ranks, a substring scan does not, so a
+                // shared cap spent on transcripts would push the ranked half
+                // out of an answer it was ordered for.
+                if let Some(dir) = transcripts {
+                    hits.extend(crate::search::transcripts(
+                        &dir,
+                        &needle,
+                        limit.saturating_sub(hits.len()),
+                    ));
+                }
+                value_of(hits)
             }
         })
     }
@@ -556,7 +734,8 @@ mod tests {
             "thread": { "id": "t", "projectId": "p", "label": "l", "cmd": "c" },
             "todo": { "id": "d", "projectId": "p", "title": "t", "state": "open",
                       "createdAt": 0, "updatedAt": 0 },
-            "id": "p", "threadId": "t", "todoId": "d", "settings": {},
+            "id": "p", "threadId": "t", "todoId": "d", "settings": {}, "q": "anything",
+            "status": "idle", "ids": [],
         });
         for method in ALL_METHODS {
             let command = Command::decode(method, &params)
@@ -692,12 +871,177 @@ mod tests {
                 "thread": { "id": "t", "projectId": "p", "label": "l", "cmd": "c" },
                 "todo": { "id": "d", "projectId": "p", "title": "t", "state": "open",
                           "createdAt": 0, "updatedAt": 0 },
-                "id": "p", "threadId": "t", "todoId": "d", "settings": {},
+                "id": "p", "threadId": "t", "todoId": "d", "settings": {}, "q": "anything",
+                "status": "idle", "ids": [],
             }))
             .err()
             .unwrap_or_else(|| panic!("{method} answered on a host with no store"));
             assert!(err.contains("keeps no records"), "{method}: {err}");
         }
+    }
+
+    /// The rule that makes filing safe, at the door every front door shares.
+    ///
+    /// A turn in flight and a dialog waiting for an answer are both work the
+    /// sidebar has to keep showing. Coming back is never refused: a thread that
+    /// started working while it was filed away is exactly the one to un-file.
+    #[test]
+    fn a_working_or_waiting_thread_refuses_to_be_filed_away() {
+        let host = Rows::new("age-refusal");
+        ask(
+            &host,
+            "thread.create",
+            json!({ "thread": { "id": "t", "projectId": "p", "label": "l", "cmd": "c", "args": [] } }),
+        )
+        .unwrap();
+        let wake = crate::now_ms() + 3_600_000;
+
+        for status in ["running", "waiting"] {
+            for put_away in [
+                json!({ "threadId": "t", "status": status, "settled": true }),
+                json!({ "threadId": "t", "status": status, "snoozeUntil": wake }),
+            ] {
+                let err = ask(&host, "thread.age", put_away)
+                    .err()
+                    .unwrap_or_else(|| panic!("{status} was filed away"));
+                assert!(err.contains(status), "{err}");
+            }
+            // The row is untouched, not merely the answer refused.
+            let filed = host.store.thread_ageing("t").unwrap();
+            assert_eq!(filed, crate::store::Ageing::default());
+
+            // Un-filing is always allowed, whatever the thread is doing.
+            ask(
+                &host,
+                "thread.age",
+                json!({ "threadId": "t", "status": status, "settled": false, "snoozeUntil": null }),
+            )
+            .unwrap();
+        }
+
+        // A finished turn files away, and the columns say when.
+        ask(&host, "thread.age", json!({ "threadId": "t", "status": "idle", "settled": true }))
+            .unwrap();
+        assert!(host.store.thread_ageing("t").unwrap().settled_at.is_some());
+        ask(
+            &host,
+            "thread.age",
+            json!({ "threadId": "t", "status": "ready", "snoozeUntil": wake }),
+        )
+        .unwrap();
+        assert_eq!(host.store.thread_ageing("t").unwrap().snoozed_until, Some(wake));
+    }
+
+    /// One call answers pin, unpin and reorder, and what it leaves behind is a
+    /// dense order rather than a set of booleans that can disagree.
+    #[test]
+    fn the_pinned_order_is_rewritten_whole_and_survives_a_resave() {
+        let host = Rows::new("pin-order");
+        let row = |id: &str| {
+            json!({ "thread": { "id": id, "projectId": "p", "label": "l", "cmd": "c", "args": [] } })
+        };
+        for id in ["a", "b", "c"] {
+            ask(&host, "thread.create", row(id)).unwrap();
+        }
+        let order_of = |host: &Rows| -> Vec<(String, Option<i64>)> {
+            let mut rows: Vec<_> = host
+                .store
+                .load_threads()
+                .unwrap()
+                .into_iter()
+                .map(|t| (t.id, t.pin_order))
+                .collect();
+            rows.sort();
+            rows
+        };
+
+        ask(&host, "thread.pinOrder", json!({ "ids": ["c", "a"] })).unwrap();
+        assert_eq!(
+            order_of(&host),
+            vec![("a".into(), Some(1)), ("b".into(), None), ("c".into(), Some(0))]
+        );
+
+        // Reordering is the same call, and it renumbers rather than appending.
+        ask(&host, "thread.pinOrder", json!({ "ids": ["a", "c"] })).unwrap();
+        assert_eq!(
+            order_of(&host),
+            vec![("a".into(), Some(0)), ("b".into(), None), ("c".into(), Some(1))]
+        );
+
+        // A re-save built from a window's snapshot cannot unpin anything: the
+        // row owns the order, the same way it owns how the run ended.
+        ask(&host, "thread.create", row("a")).unwrap();
+        assert_eq!(order_of(&host)[0], ("a".into(), Some(0)));
+
+        // An id nothing backs is dropped by the write rather than refused, so a
+        // stale order from a device that has not seen a close still converges.
+        ask(&host, "thread.pinOrder", json!({ "ids": ["gone", "b"] })).unwrap();
+        assert_eq!(
+            order_of(&host),
+            vec![("a".into(), None), ("b".into(), Some(1)), ("c".into(), None)]
+        );
+    }
+
+    /// A thread filed away keeps its filing across everything the window writes
+    /// about it while it runs, which is the bug `thread.create` already had once
+    /// for the status column.
+    #[test]
+    fn a_resave_cannot_unfile_a_settled_thread() {
+        let host = Rows::new("age-resave");
+        let row = json!({ "thread": { "id": "t", "projectId": "p", "label": "l",
+                                      "cmd": "c", "args": [] } });
+        ask(&host, "thread.create", row.clone()).unwrap();
+        ask(&host, "thread.age", json!({ "threadId": "t", "status": "idle", "settled": true }))
+            .unwrap();
+        let settled = host.store.thread_ageing("t").unwrap().settled_at;
+        assert!(settled.is_some());
+
+        let answer = ask(&host, "thread.create", row).unwrap();
+        assert_eq!(host.store.thread_ageing("t").unwrap().settled_at, settled);
+        assert_eq!(answer["settledAt"], json!(settled));
+    }
+
+    /// A todo is findable through the bus the moment it is written through it,
+    /// which is the whole reason the index is kept at write time.
+    ///
+    /// This host keeps no transcripts, so it also pins the half of the answer
+    /// that degrades: the rows still come back rather than the command
+    /// refusing.
+    #[test]
+    fn what_was_written_through_the_bus_is_findable_through_it() {
+        let host = Rows::new("search");
+        ask(
+            &host,
+            "todo.save",
+            json!({ "todo": { "id": "d", "projectId": "p", "title": "rewrite the worktree pool",
+                              "state": "open", "createdAt": 0, "updatedAt": 0 } }),
+        )
+        .unwrap();
+
+        let hits = ask(&host, "search.query", json!({ "q": "worktree" })).unwrap();
+        assert_eq!(hits.as_array().unwrap().len(), 1);
+        assert_eq!(hits[0]["kind"], json!("todo"));
+        assert_eq!(hits[0]["refId"], json!("d"));
+        assert_eq!(hits[0]["projectId"], json!("p"));
+
+        // A word nobody wrote is an empty answer, not a refusal.
+        let none = ask(&host, "search.query", json!({ "q": "zzzznothing" })).unwrap();
+        assert!(none.as_array().unwrap().is_empty());
+    }
+
+    /// The cap is applied where it is decoded, so a caller cannot ask a host to
+    /// read the tail of every transcript it has by sending a large enough
+    /// number.
+    #[test]
+    fn a_query_cannot_ask_for_more_than_the_cap() {
+        let read = |limit: Value| match Command::decode("search.query", &json!({ "q": "x", "limit": limit })) {
+            Ok(Command::Records(Records::Search { limit, .. })) => limit,
+            other => panic!("search.query did not decode: {other:?}"),
+        };
+        assert_eq!(read(json!(5)), 5);
+        assert_eq!(read(json!(100_000)), SEARCH_LIMIT_MAX as usize);
+        assert_eq!(read(json!(0)), 1);
+        assert_eq!(read(Value::Null), SEARCH_LIMIT_DEFAULT as usize);
     }
 
     /// Deleting a thread takes its identity with it. The row is what a public key

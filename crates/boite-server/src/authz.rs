@@ -68,6 +68,10 @@ const NON_BUS: &[(&str, Option<Scope>)] = &[
     ("thread.spawn", Some(Scope::Terminal)),
     ("thread.resize", Some(Scope::Terminal)),
     ("thread.kill", Some(Scope::Terminal)),
+    // A keystroke written into a live PTY, so it needs what a keystroke needs.
+    // The vocabulary is closed on the way in, but the scope is what says a
+    // read-only device cannot answer a dialog on somebody's machine.
+    ("thread.reply", Some(Scope::Terminal)),
     ("shell.warm", Some(Scope::Terminal)),
     ("agent.claimRequest", Some(Scope::Approve)),
     ("approval.list", Some(Scope::Read)),
@@ -76,7 +80,6 @@ const NON_BUS: &[(&str, Option<Scope>)] = &[
     ("system.snapshot", Some(Scope::Read)),
     ("system.platform", Some(Scope::Read)),
     ("fs.workspaceRoot", Some(Scope::Read)),
-    ("search.query", Some(Scope::Read)),
     ("timeline.read", Some(Scope::Read)),
     ("push.publicKey", Some(Scope::Read)),
     ("push.subscribe", Some(Scope::Write)),

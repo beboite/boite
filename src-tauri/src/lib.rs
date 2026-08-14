@@ -333,6 +333,7 @@ pub fn run() {
             commands::pty::pty_detach,
             commands::pty::pty_write,
             commands::pty::pty_resize,
+            commands::pty::thread_reply,
             commands::pty::pty_kill,
             commands::app::finish_boot,
             commands::app::log_app_event,
@@ -405,6 +406,12 @@ pub fn run() {
             commands::git::git_pull,
             commands::git::git_init,
             commands::git::git_file_versions,
+            commands::checkpoint::checkpoint_capture,
+            commands::checkpoint::checkpoint_list,
+            commands::checkpoint::checkpoint_diff,
+            commands::checkpoint::checkpoint_file_versions,
+            commands::checkpoint::checkpoint_restore,
+            commands::checkpoint::checkpoint_forget,
             commands::app::command_exists,
             commands::app::fastpick_list,
             commands::app::fastpick_version,
@@ -416,6 +423,8 @@ pub fn run() {
             commands::records::records_thread_create,
             commands::records::records_thread_update,
             commands::records::records_thread_started,
+            commands::records::records_thread_age,
+            commands::records::records_thread_pin_order,
             commands::records::records_thread_delete,
             commands::records::records_todo_list,
             commands::records::records_todo_save,
@@ -424,6 +433,7 @@ pub fn run() {
             commands::records::records_settings_set,
             commands::records::records_workspace_info,
             commands::records::records_workspace_set_info,
+            commands::records::records_search,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

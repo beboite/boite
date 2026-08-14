@@ -393,6 +393,17 @@ fn approval_sentence(action: &str, detail: &str) -> String {
     }
 }
 
+/// Everything a device is told about a thread, in one value.
+///
+/// Both paths take the same `Awareness`, so ntfy, Discord, a generic JSON
+/// consumer and the PWA cannot say four different things about one event. What
+/// they still differ in is the envelope, which is the only thing that is
+/// genuinely per-transport.
+async fn announce(state: &AppState, a: &boite_core::awareness::Awareness) {
+    state.notifier.send(a).await;
+    state.push.notify_all(&state.store, a).await;
+}
+
 // Fire a webhook on meaningful thread transitions: a turn finishing
 // (running -> ready, claude awaiting input) and process exit. Tracks the last
 // status per thread so a status that did not actually cross an edge is silent.
@@ -402,6 +413,8 @@ fn approval_sentence(action: &str, detail: &str) -> String {
 // answer is a phone with the app closed. The socket event alone only reaches a
 // client that is already connected and looking.
 fn spawn_notifier_task(state: Arc<AppState>, mut rx: broadcast::Receiver<AppEvent>) {
+    use boite_core::awareness::{self, Facts};
+    use boite_core::status::ThreadStatus;
     use std::collections::{HashMap, HashSet};
     tokio::spawn(async move {
         let mut last: HashMap<String, String> = HashMap::new();
@@ -418,7 +431,9 @@ fn spawn_notifier_task(state: Arc<AppState>, mut rx: broadcast::Receiver<AppEven
         loop {
             match rx.recv().await {
                 Ok(AppEvent::ThreadStatus {
-                    thread_id, status, ..
+                    thread_id,
+                    status,
+                    exit_code,
                 }) => {
                     let prev = last.insert(thread_id.clone(), status.clone());
                     if prev.as_deref() == Some(status.as_str()) {
@@ -437,30 +452,42 @@ fn spawn_notifier_task(state: Arc<AppState>, mut rx: broadcast::Receiver<AppEven
                     if !fire {
                         continue;
                     }
-                    let label = state
-                        .store
-                        .thread_label(&thread_id)
-                        .unwrap_or_else(|| "thread".to_string());
-                    let (title, body, tag) = match status.as_str() {
-                        "ready" => (format!("{label}: ready"), "Awaiting input".to_string(), "bell"),
-                        "waiting" => (
-                            format!("{label}: needs you"),
-                            "Waiting for your answer".to_string(),
-                            "bell",
-                        ),
-                        "done" => (
-                            format!("{label}: done"),
-                            "Process finished".to_string(),
-                            "white_check_mark",
-                        ),
-                        _ => (
-                            format!("{label}: {status}"),
-                            "Process exited".to_string(),
-                            "x",
-                        ),
+                    let Some(parsed) = ThreadStatus::parse(&status) else {
+                        continue;
                     };
-                    state.notifier.send(&title, &body, tag).await;
-                    state.push.notify_all(&state.store, &title, &body, tag).await;
+                    let who = state.store.thread_context(&thread_id);
+                    // Read off the registry rather than off the event, because
+                    // the difference between the two is what tells a turn that
+                    // ended from a row left behind by a process that is gone.
+                    // `exited` and friends arrive precisely as the entry is
+                    // dropped, so they answer false and are meant to.
+                    let has_process = state.registry.live(&thread_id).is_some();
+                    // Only the phase that has one. A thread can be `waiting` on
+                    // a dialog its agent drew, which is not a row anywhere, and
+                    // asking the table on every transition would be a query per
+                    // event to answer "no" almost every time.
+                    let approval = if parsed == ThreadStatus::Waiting {
+                        state
+                            .store
+                            .open_approvals()
+                            .unwrap_or_default()
+                            .into_iter()
+                            .find(|p| p.thread_id == thread_id)
+                            .map(|p| approval_sentence(&p.action, &p.detail))
+                    } else {
+                        None
+                    };
+                    let aware = awareness::derive(&Facts {
+                        thread_id: &thread_id,
+                        label: who.as_ref().map(|w| w.label.as_str()).unwrap_or("thread"),
+                        project_id: who.as_ref().and_then(|w| w.project_id.as_deref()),
+                        project: who.as_ref().and_then(|w| w.project.as_deref()),
+                        status: parsed,
+                        exit_code,
+                        has_process,
+                        approval: approval.as_deref(),
+                    });
+                    announce(&state, &aware).await;
                 }
                 // The event carries nothing, so the table answers what changed.
                 // Ids rather than a count: answering one and opening another in
@@ -479,24 +506,39 @@ fn spawn_notifier_task(state: Arc<AppState>, mut rx: broadcast::Receiver<AppEven
                         announced = next;
                         continue;
                     }
-                    let (title, body) = if let [only] = fresh.as_slice() {
-                        let who = state
-                            .store
-                            .thread_label(&only.thread_id)
-                            .unwrap_or_else(|| "An agent".to_string());
-                        (
-                            format!("{who}: needs your approval"),
-                            approval_sentence(&only.action, &only.detail),
-                        )
+                    // One request gets the thread's own card, with a link to the
+                    // terminal that asked. Several get a count and a link to
+                    // none of them: opening one of four arbitrarily is worse
+                    // than opening the app, and the dock lists them all anyway.
+                    let aware = if let [only] = fresh.as_slice() {
+                        let who = state.store.thread_context(&only.thread_id);
+                        awareness::derive(&Facts {
+                            thread_id: &only.thread_id,
+                            label: who
+                                .as_ref()
+                                .map(|w| w.label.as_str())
+                                .unwrap_or("An agent"),
+                            project_id: who.as_ref().and_then(|w| w.project_id.as_deref()),
+                            project: who.as_ref().and_then(|w| w.project.as_deref()),
+                            status: ThreadStatus::Waiting,
+                            exit_code: None,
+                            has_process: state.registry.live(&only.thread_id).is_some(),
+                            approval: Some(&approval_sentence(&only.action, &only.detail)),
+                        })
                     } else {
-                        (
-                            "Boite: approvals waiting".to_string(),
-                            format!("{} requests need an answer", fresh.len()),
-                        )
+                        awareness::Awareness {
+                            phase: awareness::Phase::WaitingForApproval.as_str(),
+                            headline: "Boite needs your approval".to_string(),
+                            detail: format!("{} requests need an answer", fresh.len()),
+                            thread_id: String::new(),
+                            thread: "Boite".to_string(),
+                            project_id: None,
+                            project: None,
+                            link: "/".to_string(),
+                        }
                     };
                     announced = next;
-                    state.notifier.send(&title, &body, "lock").await;
-                    state.push.notify_all(&state.store, &title, &body, "lock").await;
+                    announce(&state, &aware).await;
                 }
                 Ok(_) => {}
                 Err(RecvError::Lagged(_)) => continue,

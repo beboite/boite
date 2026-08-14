@@ -88,6 +88,20 @@ pub struct Thread {
     /// Directory the thread runs in when it is not the project's own.
     #[serde(default)]
     pub worktree_path: Option<String>,
+    /// Position in the workspace-wide pinned order, or None for unpinned.
+    ///
+    /// Written only by `thread.pinOrder`, which rewrites the whole order in one
+    /// call, so the positions are always dense and always agree with each other.
+    /// A whole-row save never carries it: the window's copy of the order is a
+    /// snapshot, and another device may have reordered since.
+    #[serde(default)]
+    pub pin_order: Option<i64>,
+    /// When this thread was filed away as finished, or None while it is live.
+    #[serde(default)]
+    pub settled_at: Option<i64>,
+    /// When a snoozed thread comes back, or None while it is not snoozed.
+    #[serde(default)]
+    pub snoozed_until: Option<i64>,
 }
 
 fn default_status() -> String {

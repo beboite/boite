@@ -26,6 +26,10 @@ services:
       # Optional mobile notifications (ntfy/Discord/Gotify).
       - BOITE_WEBHOOK_URL=${BOITE_WEBHOOK_URL:-}
       - BOITE_WEBHOOK_FORMAT=${BOITE_WEBHOOK_FORMAT:-ntfy}
+      # Where this workspace answers from on the internet. Only used to turn the
+      # deep link in a notification into one a phone can open; the server is
+      # behind a proxy and cannot work it out for itself.
+      - BOITE_PUBLIC_URL=${BOITE_PUBLIC_URL:-}
     volumes:
       - ./data:/data # SQLite DB + token
       - ./workspace:/workspace # repos boite operates on

@@ -589,7 +589,7 @@ check("a workspace colour that is not one is dropped", meta?.color === "#0a0", `
 check("and the name beside it survived", meta?.name === "smoke boite", `name=${meta?.name}`);
 await c.rpc("workspace.setInfo", { name: null, color: null });
 
-const nt = await c.rpc("notify.test", { title: "Smoke", body: "ping" });
+const nt = await c.rpc("notify.test", { threadId });
 check("notify.test responds", nt?.ok === true, `webhook_enabled=${nt?.enabled}`);
 
 
@@ -716,6 +716,28 @@ check("no credential is anywhere in the list", !JSON.stringify(rows).includes(ma
 // This script's own devices go the way the doomed one did, so a boite it has
 // been pointed at does not accumulate a paired device per run.
 await c.rpc("pairing.revoke", { id: readonly.pairing.id });
+// Answering a dialog from a device. The vocabulary is closed on the server
+// (`boite_core::reply`), so what matters here is that the refusals are real:
+// this is a write into a live terminal, and a hole in it is arbitrary code on
+// the machine hosting the workspace.
+const replied = await c.rpc("thread.reply", { threadId, answer: "escape" });
+check("thread.reply accepts an answer from the vocabulary", replied?.ok === true);
+for (const answer of ["", "Y", "yes\r", "0", "rm -rf /", "[A", "enter "]) {
+  let refused = false;
+  try {
+    await c.rpc("thread.reply", { threadId, answer });
+  } catch {
+    refused = true;
+  }
+  check(`thread.reply refuses ${JSON.stringify(answer)}`, refused);
+}
+let noThread = false;
+try {
+  await c.rpc("thread.reply", { threadId: "nobody", answer: "enter" });
+} catch {
+  noThread = true;
+}
+check("thread.reply refuses a thread that is not live", noThread);
 
 // A refused kill is a result, not a reason to stop: the checks after it still
 // say something, and an uncaught rejection here reported the whole run as a

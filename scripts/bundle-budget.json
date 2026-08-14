@@ -14,11 +14,20 @@
     "window does not fetch before it can paint, most of it the PDF worker. That is",
     "the measurement those imports never had attached to them.",
     "",
-    "The eager ceiling moved once, to 771072, when the shared token was replaced by",
-    "per-device pairings. Buying a socket ticket happens before anything is drawn,",
-    "so the client half of that exchange is on the boot path by construction."
+    "Every move of the eager ceiling, and what bought it. Each of these is code",
+    "the layout itself reaches, so none of them could be put behind an import:",
+    "774000, the palette asking `search.query` about what is being typed.",
+    "784240, the keybinding table and its parser, read on the first keystroke.",
+    "794480, the reply bar a waiting thread offers, which exists to be answered",
+    "in one tap and so cannot be a chunk fetched on that tap.",
+    "800624, the turn list a thread keeps and the checkpoint calls behind it.",
+    "808816, the filing rule behind pin, settle and snooze, plus the pinned",
+    "section and the clock that wakes it: the sidebar decides where every row",
+    "belongs before it draws one.",
+    "811888, the client half of the socket-ticket exchange that replaced the",
+    "shared token: a ticket is bought before anything is drawn."
   ],
-  "eagerBytes": 771072,
+  "eagerBytes": 811888,
   "totalBytes": 6144000,
   "largestEagerChunkBytes": 256000
 }

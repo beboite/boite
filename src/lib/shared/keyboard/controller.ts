@@ -1,109 +1,65 @@
-import type { KeyScope, ParsedCombo, ShortcutBinding } from "./types";
+import { isEditableTarget, matchesCombo } from "./combo";
+import type { CompiledRule, KeyCommandRun, KeyContext } from "./types";
 
 /**
  * One capture-phase window listener arbitrates every global shortcut.
  *
  * The alternative — a handler per feature — is what produces the classic
  * double-fire bugs: Escape closing a dialog *and* the panel behind it, two
- * components both claiming Ctrl+W. Here the first binding whose scope and
- * combo match wins, and the event stops there. Capture phase means this runs
- * before any component-level `svelte:window` handler, so it can decide.
+ * components both claiming Ctrl+W. Capture phase means this runs before any
+ * component-level `svelte:window` handler, so it can decide.
+ *
+ * **The last matching rule wins**, which is the inverse of what this dispatcher
+ * used to do and the whole reason a user rule can override a shipped one: the
+ * user's set is the defaults with their own rules appended, so position is what
+ * says whose Ctrl+T it is. A rule declining with `false` sends the search on to
+ * the rules in front of it, so the key is never merely swallowed.
+ *
+ * Nothing here parses anything. Combos and clauses arrive compiled, because
+ * this runs on every keystroke the terminal is also about to receive.
  */
 
-export function parseCombo(combo: string): ParsedCombo {
-  const parts = combo.toLowerCase().split("+");
-  const key = parts.pop() ?? "";
-  return {
-    key,
-    mod: parts.includes("mod"),
-    shift: parts.includes("shift"),
-    alt: parts.includes("alt"),
-  };
-}
-
-// Duck-typed rather than `instanceof HTMLElement`: an element that came from
-// another realm (an iframe, a webview) fails that check even though it is very
-// much a text field, and this way the dispatcher stays testable without a DOM.
-export function isEditableTarget(target: EventTarget | null): boolean {
-  if (!target || typeof target !== "object") return false;
-  const el = target as { tagName?: unknown; isContentEditable?: unknown };
-  if (el.isContentEditable === true) return true;
-  const tag = typeof el.tagName === "string" ? el.tagName.toUpperCase() : "";
-  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
-}
-
-// Layout-independent aliases. `digit1` matches the physical key so a French
-// AZERTY (where 1 is Shift+&) still jumps to thread 1, and `plus`/`minus`
-// accept both the main row and the numpad.
-//
-// There is no alias for the backslash, and there cannot be a working one: on
-// fr-AZERTY that character is AltGr+8, so the event arrives as `code: "Digit8"`
-// with `altKey` set, which `matchesCombo` refuses on the alt modifier alone.
-// `code: "Backslash"` on that layout is the `*`/`µ` key, an entirely different
-// character. Splitting uses Ctrl+Shift+E and Ctrl+Shift+O instead, letters that
-// sit in the same place on both layouts.
-function matchesKey(combo: string, event: KeyboardEvent): boolean {
-  const key = event.key.toLowerCase();
-  const code = event.code;
-
-  if (combo.startsWith("digit")) {
-    const digit = combo.slice(5);
-    return code === `Digit${digit}` || code === `Numpad${digit}` || key === digit;
-  }
-  if (combo === "plus") {
-    return key === "+" || key === "=" || code === "Equal" || code === "NumpadAdd";
-  }
-  if (combo === "minus") {
-    return key === "-" || key === "_" || code === "Minus" || code === "NumpadSubtract";
-  }
-  return key === combo;
-}
-
-export function matchesCombo(
-  parsed: ParsedCombo,
-  event: KeyboardEvent,
-  isMac: boolean,
-): boolean {
-  const modDown = isMac ? event.metaKey : event.ctrlKey;
-  // A stray modifier disqualifies the match. Without this, Ctrl+K on macOS
-  // (a readline "kill line" the shell needs) would open the palette, and
-  // Ctrl+Shift+T would also fire the plain Ctrl+T binding.
-  const strayMod = isMac ? event.ctrlKey : event.metaKey;
-  if (parsed.mod !== modDown) return false;
-  if (strayMod) return false;
-  if (parsed.shift !== event.shiftKey) return false;
-  if (parsed.alt !== event.altKey) return false;
-  return matchesKey(parsed.key, event);
-}
-
 export interface KeyboardControllerOptions {
-  bindings: ShortcutBinding[];
-  getScope: () => KeyScope;
+  rules: () => CompiledRule[];
+  /** Read lazily: it probes the DOM, and most keystrokes match no combo. */
+  context: () => KeyContext;
+  handlers: () => Record<string, KeyCommandRun | undefined>;
   isMac: () => boolean;
+  /**
+   * Hand the keyboard back while the settings editor is recording a combo.
+   *
+   * A flag rather than a listener the recorder registers first: listeners on
+   * one target in one phase run in registration order, and this one is attached
+   * at boot, so nothing mounted later can get in front of it.
+   */
+  suspended?: () => boolean;
 }
 
 export function createKeyboardController(opts: KeyboardControllerOptions) {
-  // Parsed once at construction, not per keystroke.
-  const parsed = opts.bindings.map((binding) => ({
-    binding,
-    combo: parseCombo(binding.combo),
-  }));
-
   function handleKeydown(event: KeyboardEvent) {
-    const scope = opts.getScope();
+    if (opts.suspended?.()) return;
+    const rules = opts.rules();
+    if (rules.length === 0) return;
     const isMac = opts.isMac();
     const editable = isEditableTarget(event.target);
+    let ctx: KeyContext | null = null;
+    let handlers: Record<string, KeyCommandRun | undefined> | null = null;
 
-    for (const { binding, combo } of parsed) {
-      if (!binding.scopes.includes("*") && !binding.scopes.includes(scope)) {
-        continue;
-      }
+    for (let i = rules.length - 1; i >= 0; i -= 1) {
+      const rule = rules[i];
+      if (!rule.valid) continue;
+      if (!matchesCombo(rule.combo, event, isMac)) continue;
       // Modifier combos are safe inside inputs; bare keys are not.
-      const bare = !combo.mod && !combo.alt;
-      if (editable && bare && !binding.allowInInput) continue;
-      if (!matchesCombo(combo, event, isMac)) continue;
-
-      if (binding.run(event) === false) continue;
+      const bare = !rule.combo.mod && !rule.combo.alt;
+      if (editable && bare && !rule.allowInInput) continue;
+      ctx ??= opts.context();
+      if (!rule.test(ctx)) continue;
+      handlers ??= opts.handlers();
+      // A rule naming a command this build does not have is inert rather than
+      // fatal: an older Boite reading a set a newer one wrote must still boot.
+      const run = handlers[rule.binding.command];
+      if (!run) continue;
+      if (run(event) === false) continue;
       event.preventDefault();
       event.stopPropagation();
       return;

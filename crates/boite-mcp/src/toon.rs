@@ -22,6 +22,12 @@ pub struct Toon {
     buf: String,
 }
 
+impl Default for Toon {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Toon {
     pub fn new() -> Self {
         Self { buf: String::new() }

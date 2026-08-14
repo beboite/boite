@@ -1,6 +1,9 @@
+pub mod ageing;
 pub mod approval;
+pub mod awareness;
 pub mod browser;
 pub mod capability;
+pub mod checkpoint;
 pub mod command;
 pub mod editor;
 pub mod env;
@@ -13,6 +16,7 @@ pub mod model;
 pub mod pairing;
 pub mod project;
 pub mod pty;
+pub mod reply;
 pub mod scope;
 pub mod screen;
 pub mod search;

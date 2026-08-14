@@ -277,6 +277,19 @@ pub const ALL: &[Migration] = &[
         CREATE INDEX IF NOT EXISTS idx_approvals_open
             ON approvals (verdict, created_at);",
     ),
+    // Where a thread sits once the sidebar holds more of them than a screen. All
+    // three nullable, and all three null is an ordinary live thread, which is
+    // what every row predating them already is. `pin_order` is a position in one
+    // workspace-wide order rather than a boolean, so the order itself reaches
+    // every device instead of only the one that pinned; `settled_at` and
+    // `snoozed_until` say *when* rather than whether, so "put away in March" and
+    // "back on Monday" are answerable without a second column each.
+    both(
+        "add_thread_ageing",
+        "ALTER TABLE threads ADD COLUMN pin_order INTEGER;\
+                  ALTER TABLE threads ADD COLUMN settled_at INTEGER;\
+                  ALTER TABLE threads ADD COLUMN snoozed_until INTEGER;",
+    ),
     // One row per paired device, and the one-time tokens that produce them.
     //
     // Server only, for the same reason `push_subscriptions` is: the thing being
@@ -348,7 +361,7 @@ mod tests {
     #[test]
     fn the_shipped_order_is_preserved_on_both_sides() {
         let desktop = desktop();
-        assert_eq!(desktop.len(), 21);
+        assert_eq!(desktop.len(), 22);
         assert_eq!(desktop[0], (1, "create_projects", ALL[0].sql));
         assert_eq!(desktop[4].1, "add_thread_session_and_icon");
         assert_eq!(desktop[8].1, "add_project_git_root", "no push table here");
@@ -358,9 +371,10 @@ mod tests {
         assert_eq!(desktop[18].1, "create_events");
         assert_eq!(desktop[19].1, "create_thread_keys");
         assert_eq!(desktop[20].1, "create_approvals");
+        assert_eq!(desktop[21].1, "add_thread_ageing");
 
         let server = server();
-        assert_eq!(server.len(), 21);
+        assert_eq!(server.len(), 22);
         assert_eq!(server[8].description, "create_push_subscriptions");
         assert_eq!(server[9].description, "add_project_git_root");
         assert_eq!(
@@ -371,7 +385,8 @@ mod tests {
         assert_eq!(server[17].description, "create_events");
         assert_eq!(server[18].description, "create_thread_keys");
         assert_eq!(server[19].description, "create_approvals");
-        assert_eq!(server[20].description, "create_pairings");
+        assert_eq!(server[20].description, "add_thread_ageing");
+        assert_eq!(server[21].description, "create_pairings");
         assert!(
             !server.iter().any(|m| m.description.contains("chat")),
             "no chat migration ever ran on a server"
@@ -463,7 +478,7 @@ mod tests {
         );
         assert_eq!(
             columns(&conn, "threads"),
-            ["id", "project_id", "label", "title", "cmd", "args", "exit_code", "created_at", "session_id", "icon_key", "status", "auto_slept", "keep_awake", "icon_color", "worktree_path"]
+            ["id", "project_id", "label", "title", "cmd", "args", "exit_code", "created_at", "session_id", "icon_key", "status", "auto_slept", "keep_awake", "icon_color", "worktree_path", "pin_order", "settled_at", "snoozed_until"]
         );
         assert_eq!(
             columns(&conn, "todos"),
@@ -503,6 +518,9 @@ mod tests {
         // boite and nowhere else.
         for column in ["commit_sha", "claimed_by", "description"] {
             assert!(columns(&conn, "todos").contains(&column.to_string()), "{column}");
+        }
+        for column in ["pin_order", "settled_at", "snoozed_until"] {
+            assert!(columns(&conn, "threads").contains(&column.to_string()), "{column}");
         }
         assert_eq!(
             columns(&conn, "pairings"),

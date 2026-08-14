@@ -69,6 +69,10 @@ impl Rows {
 }
 
 /// Puts a record command through the bus with this app's store behind it.
+///
+/// The transcripts directory travels too, for `search.query` alone: it reads
+/// the rows and what the terminals printed in one answer, and a host that
+/// declared only half of that would answer half the question.
 async fn on_rows(
     app: &AppHandle,
     scope: &ProjectRoots,
@@ -76,7 +80,11 @@ async fn on_rows(
     command: Records,
 ) -> Result<Value, String> {
     let store = rows.get(app)?;
-    through(DesktopHost::new(scope).with_store(store), command.into()).await
+    through(
+        DesktopHost::new(scope).with_store(store).with_transcripts(app),
+        command.into(),
+    )
+    .await
 }
 
 /// Reads a wire-shaped call into a command.
@@ -114,6 +122,8 @@ record_command!(records_thread_list, "thread.list");
 record_command!(records_thread_create, "thread.create");
 record_command!(records_thread_update, "thread.update");
 record_command!(records_thread_started, "thread.started");
+record_command!(records_thread_age, "thread.age");
+record_command!(records_thread_pin_order, "thread.pinOrder");
 record_command!(records_todo_list, "todo.list");
 record_command!(records_todo_save, "todo.save");
 record_command!(records_todo_delete, "todo.delete");
@@ -121,6 +131,7 @@ record_command!(records_settings_get, "settings.get");
 record_command!(records_settings_set, "settings.set");
 record_command!(records_workspace_info, "workspace.info");
 record_command!(records_workspace_set_info, "workspace.setInfo");
+record_command!(records_search, "search.query");
 
 /// Deletes a project row.
 ///
