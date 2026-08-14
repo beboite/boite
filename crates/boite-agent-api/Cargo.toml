@@ -11,7 +11,13 @@ doctest = false
 [dependencies]
 boite-core = { path = "../boite-core" }
 boite-identity = { path = "../boite-identity" }
+# The MCP engine and tool surface, shared with the stdio shim so the `/mcp`
+# route and the sidecar binary cannot drift apart.
+boite-mcp = { path = "../boite-mcp" }
 axum = "0.8"
+# `ServiceExt::oneshot`, for the `/mcp` route dispatching into this crate's own
+# handlers in-process. Already in the tree through axum.
+tower = { version = "0.5", features = ["util"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Constant-time token comparison. A local process can call this endpoint in a
@@ -22,3 +28,8 @@ dirs = "6"
 # Only `spawn_blocking`: both hosts already run on a tokio runtime, and the git
 # calls here spawn processes that must not sit on it.
 tokio = { version = "1", features = ["rt"] }
+
+[dev-dependencies]
+# The `/mcp` tests drive the async endpoint whole, which needs a runtime of
+# their own; the crate itself still borrows whichever host it runs in.
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
