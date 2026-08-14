@@ -179,6 +179,24 @@ impl ThreadStatus {
         }
     }
 
+    /// The inverse of [`ThreadStatus::as_str`], for the paths that carry a
+    /// status as the string a row or an event holds. `None` for anything else,
+    /// which is a client or a database from a build that knows a status this one
+    /// does not.
+    pub fn parse(s: &str) -> Option<ThreadStatus> {
+        match s {
+            "idle" => Some(ThreadStatus::Idle),
+            "running" => Some(ThreadStatus::Running),
+            "waiting" => Some(ThreadStatus::Waiting),
+            "ready" => Some(ThreadStatus::Ready),
+            "done" => Some(ThreadStatus::Done),
+            "exited" => Some(ThreadStatus::Exited),
+            "error" => Some(ThreadStatus::Error),
+            "stopped" => Some(ThreadStatus::Stopped),
+            _ => None,
+        }
+    }
+
     /// Map a PTY exit code to a terminal status.
     pub fn from_exit_code(code: Option<i32>) -> ThreadStatus {
         match code {
@@ -298,5 +316,24 @@ mod tests {
         assert_eq!(ThreadStatus::Exited.as_str(), "exited");
         assert_eq!(ThreadStatus::Error.as_str(), "error");
         assert_eq!(ThreadStatus::Stopped.as_str(), "stopped");
+    }
+
+    #[test]
+    fn every_status_parses_back_out_of_its_own_string() {
+        for status in [
+            ThreadStatus::Idle,
+            ThreadStatus::Running,
+            ThreadStatus::Waiting,
+            ThreadStatus::Ready,
+            ThreadStatus::Done,
+            ThreadStatus::Exited,
+            ThreadStatus::Error,
+            ThreadStatus::Stopped,
+        ] {
+            assert_eq!(ThreadStatus::parse(status.as_str()), Some(status));
+        }
+        assert_eq!(ThreadStatus::parse("sleeping"), None);
+        assert_eq!(ThreadStatus::parse("Running"), None);
+        assert_eq!(ThreadStatus::parse(""), None);
     }
 }

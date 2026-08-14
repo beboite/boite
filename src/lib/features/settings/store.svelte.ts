@@ -6,6 +6,7 @@ import { logger } from "$lib/shared/services/logger.svelte";
 import { debounce } from "$lib/shared/utils/debounce";
 import { uuid } from "$lib/shared/utils/uuid";
 import type {
+  Keybinding,
   LocaleSetting,
   RightPanelTab,
   Settings,
@@ -14,6 +15,11 @@ import type {
   SmartSortBy,
   SortDirection,
 } from "$lib/types";
+import { DEFAULT_KEYBINDINGS } from "$lib/shared/keyboard/defaults";
+import {
+  mergeDefaultKeybindings,
+  sanitizeKeybindings,
+} from "$lib/shared/keyboard/merge";
 import {
   clampRightPanelWidth,
   isRightPanelTab,
@@ -103,6 +109,7 @@ const DEFAULTS: Settings = {
   // Empty on purpose: an install with no shortcuts has not run the wizard yet,
   // and the wizard fills this with what the machine actually has.
   shortcuts: [],
+  keybindings: DEFAULT_KEYBINDINGS,
   powershellNewline: true,
   powershellNoProfile: false,
   threadWorktrees: true,
@@ -146,6 +153,7 @@ const DEFAULTS: Settings = {
   sidebarHarnessLogos: true,
   experimentInfoBox: false,
   experimentSmartSort: false,
+  experimentWhip: false,
   smartSortBy: "manual",
   smartSortDirection: "desc",
 };
@@ -264,6 +272,7 @@ const DEVICE_FIELDS = [
   "sidebarHarnessLogos",
   "experimentInfoBox",
   "experimentSmartSort",
+  "experimentWhip",
   "smartSortBy",
   "smartSortDirection",
   "confirmCloseThread",
@@ -330,12 +339,17 @@ class SettingsStore {
       const stored = await loadSettings();
       const raw = stored as unknown as Record<string, unknown>;
       const migratedShortcuts = migrateShortcuts(stored.shortcuts);
+      // Non-destructive on purpose: a default only lands where the user has
+      // claimed neither its command nor its key, so shipping a new shortcut
+      // never rewrites a keyboard somebody has already made their own.
+      const mergedKeys = mergeDefaultKeybindings(sanitizeKeybindings(raw.keybindings));
       const inheritedSetup =
         Array.isArray(stored.shortcuts) && stored.shortcuts.length > 0;
       const backfilledSetup =
         typeof stored.setupCompleted !== "boolean" && inheritedSetup;
       this.state = {
         shortcuts: migratedShortcuts.shortcuts,
+        keybindings: mergedKeys.bindings,
         powershellNewline:
           typeof stored.powershellNewline === "boolean"
             ? stored.powershellNewline
@@ -446,6 +460,10 @@ class SettingsStore {
           typeof stored.experimentSmartSort === "boolean"
             ? stored.experimentSmartSort
             : DEFAULTS.experimentSmartSort,
+        experimentWhip:
+          typeof stored.experimentWhip === "boolean"
+            ? stored.experimentWhip
+            : DEFAULTS.experimentWhip,
         smartSortBy: isSmartSortBy(stored.smartSortBy)
           ? stored.smartSortBy
           : DEFAULTS.smartSortBy,
@@ -498,7 +516,7 @@ class SettingsStore {
         this.state.layoutPinned = false;
         this.persistDeviceNow();
       }
-      if (migratedShortcuts.changed || backfilledSetup) {
+      if (migratedShortcuts.changed || backfilledSetup || mergedKeys.changed) {
         await this.persist();
       }
     } catch (err) {
@@ -563,6 +581,13 @@ class SettingsStore {
   private persistDeviceSoon = debounce(() => {
     this.persistDeviceNow();
   }, 250);
+
+  // A whole new array rather than a mutation: the compiled rules hang off this
+  // reference, and an in-place edit would leave the dispatcher on the old ones.
+  async setKeybindings(next: Keybinding[]) {
+    this.state.keybindings = next;
+    await this.persist();
+  }
 
   async setPowershellNewline(value: boolean) {
     this.state.powershellNewline = value;
@@ -671,6 +696,24 @@ class SettingsStore {
   }
 
   /**
+   * Hands the layout back to the device.
+   *
+   * The pin was a one-way door: `setMobileLayout` sets it and nothing cleared
+   * it, so one tap on the toggle meant a tablet stopped following its own
+   * rotation for the life of the install, with nothing on screen saying the
+   * choice had been made or how to take it back. Re-reads the form factor here
+   * rather than waiting for the next media-query change, because the query only
+   * fires when it crosses the threshold and a device sitting on the wrong side
+   * of it would keep the pinned answer until it was rotated.
+   */
+  unpinLayout() {
+    if (!this.state.layoutPinned) return;
+    this.state.layoutPinned = false;
+    this.state.mobileLayout = detectMobileDefault();
+    this.persistDeviceNow();
+  }
+
+  /**
    * Keep an unpinned layout following the device.
    *
    * The form factor used to be read once, on the very first run, and written
@@ -730,6 +773,12 @@ class SettingsStore {
   setExperimentSmartSort(value: boolean) {
     if (this.state.experimentSmartSort === value) return;
     this.state.experimentSmartSort = value;
+    this.persistDeviceNow();
+  }
+
+  setExperimentWhip(value: boolean) {
+    if (this.state.experimentWhip === value) return;
+    this.state.experimentWhip = value;
     this.persistDeviceNow();
   }
 

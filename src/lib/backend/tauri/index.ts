@@ -3,6 +3,7 @@ import { tauriPty } from "./pty";
 import { tauriDb, tauriWorkspaceMeta } from "./db";
 import {
   tauriApprovals,
+  tauriCheckpoints,
   tauriEditor,
   tauriExplorer,
   tauriFastpick,
@@ -10,6 +11,7 @@ import {
   tauriLog,
   tauriProject,
   tauriScope,
+  tauriSearch,
   tauriSession,
   tauriShell,
   tauriSystem,
@@ -25,12 +27,14 @@ export class TauriBackend implements Backend {
   readonly worktree = tauriWorktree;
   readonly explorer = tauriExplorer;
   readonly editor = tauriEditor;
+  readonly checkpoints = tauriCheckpoints;
   readonly project = tauriProject;
   readonly system = tauriSystem;
   readonly shell = tauriShell;
   readonly fastpick = tauriFastpick;
   readonly scope = tauriScope;
   readonly session = tauriSession;
+  readonly search = tauriSearch;
   readonly log = tauriLog;
   readonly approvals = tauriApprovals;
   readonly meta = tauriWorkspaceMeta;

@@ -19,6 +19,7 @@ import {
   FASTPICK_CMD,
   type FastpickCombo,
 } from "$lib/features/fastpick/combo";
+import { dropThreadCheckpoints } from "./checkpoints.svelte";
 import { samePromotion, type Promotion } from "./promote";
 import { releaseClaudeSession } from "./session";
 import type { IconKey, Project, Shortcut, Thread } from "$lib/types";
@@ -647,6 +648,10 @@ export async function closeThread(threadId: string) {
     : Promise.resolve();
   await app.removeThread(threadId);
   await kill;
+  // Before the worktree goes: the refs live in the repository the worktree was
+  // cut from, so they outlive the directory, and the path they are reached
+  // through is the directory that is about to be deleted.
+  if (thread) await dropThreadCheckpoints(thread);
   // After the PTY is gone: git reads a worktree whose process still holds
   // files open as busy on Windows, and the removal would fail for a reason
   // that has nothing to do with whether there is work in it.
