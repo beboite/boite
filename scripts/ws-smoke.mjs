@@ -1,9 +1,15 @@
 // Phase 2 gate: spawn a PTY thread, write input, detach, reattach, verify the
 // scrollback replay still carries earlier output. Run against a boite-server
 // started with BOITE_TOKEN=test on 127.0.0.1:7399.
+//
+// `BOITE_TOKEN` is the bootstrap credential: it pairs a device and opens
+// nothing else. So this pairs a throwaway one over HTTP, buys it a socket
+// ticket, and revokes it on the way out. `scripts/server-smoke.mjs` is the
+// suite that actually exercises that machinery; this stays a PTY gate.
 
 const URL = "ws://127.0.0.1:7399/ws";
-const TOKEN = "test";
+const HTTP = URL.replace(/^ws/, "http").replace(/\/ws\/?$/, "");
+const BOOTSTRAP = process.env.BOITE_TOKEN || "test";
 const THREAD_ID = crypto.randomUUID();
 const MARK = "BOITEMARK_" + Math.floor(performance.now());
 
@@ -22,6 +28,28 @@ function inputFrame(threadId, text) {
   frame.set(payload, 17);
   return frame;
 }
+
+const post = async (path, body, headers = {}) => {
+  const res = await fetch(`${HTTP}${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...headers },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    console.error(`${path} refused (${res.status})`);
+    process.exit(1);
+  }
+  return res.json();
+};
+
+const invite = await post(
+  "/api/pairings",
+  // `admin` is in there only so this can revoke itself on the way out.
+  { label: "ws-smoke", kind: "cli", scopes: ["read", "write", "terminal", "approve", "admin"] },
+  { authorization: `Bearer ${BOOTSTRAP}` },
+);
+const PAIRED = await post("/api/pair", { token: invite.token, label: "ws-smoke", kind: "cli" });
+const TICKET = (await post("/api/ticket", {}, { authorization: `Bearer ${PAIRED.credential}` })).ticket;
 
 const ws = new WebSocket(URL);
 ws.binaryType = "arraybuffer";
@@ -67,7 +95,9 @@ ws.onmessage = (ev) => {
 ws.onerror = (e) => { console.error("ws error", e.message ?? e); process.exit(1); };
 
 ws.onopen = async () => {
-  let r = await rpc("auth", { token: TOKEN });
+  // A ticket, never the device's own credential: the long-lived one buys this
+  // over HTTP and never touches a frame or a URL.
+  let r = await rpc("auth", { ticket: TICKET });
   console.log("auth:", r.ok);
   if (!r.ok) process.exit(1);
 
@@ -119,6 +149,9 @@ ws.onopen = async () => {
 
   const pass = idleCreateOk && sawLive && replaySawMark && t?.ptyId;
   console.log(pass ? "\nSMOKE PASS" : "\nSMOKE FAIL");
+  // The device this run paired for itself, so a boite it is pointed at does not
+  // collect one per run.
+  await rpc("pairing.revoke", { id: PAIRED.pairing.id });
   ws.close();
   process.exit(pass ? 0 : 1);
 };

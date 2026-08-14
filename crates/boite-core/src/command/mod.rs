@@ -170,6 +170,63 @@ pub fn handles(method: &str) -> bool {
     methods().any(|m| m == method)
 }
 
+/// What each method needs, by name, without decoding a real call.
+///
+/// A caller that has to answer "may this device ask for `git.commit`" before it
+/// has parameters in hand — a scope check on a front door — cannot build a
+/// [`Command`] to ask. Rather than a second hand-kept table, which is the exact
+/// failure this module exists to end, the map is built once by decoding every
+/// method in [`methods`] against parameters that satisfy all of them and reading
+/// [`Command::capability`] off the result. It is therefore the same table the
+/// pinning test asserts, and a new command joins it the moment its name is in
+/// its domain's `ALL_METHODS`.
+///
+/// A method that will not decode maps to [`Capability::MutateAcross`], the
+/// narrowest grant, so the failure direction is a call refused rather than a
+/// call waved through. `every_method_declares_what_it_needs` asserts none does.
+pub fn capabilities() -> &'static std::collections::BTreeMap<&'static str, Capability> {
+    use std::sync::OnceLock;
+    static MAP: OnceLock<std::collections::BTreeMap<&'static str, Capability>> = OnceLock::new();
+    MAP.get_or_init(|| {
+        let params = probe_params();
+        methods()
+            .map(|method| {
+                let capability = Command::decode(method, &params)
+                    .map(|c| c.capability())
+                    .unwrap_or(Capability::MutateAcross);
+                (method, capability)
+            })
+            .collect()
+    })
+}
+
+/// What each method needs, or `None` for a method the bus does not serve.
+pub fn capability_of(method: &str) -> Option<Capability> {
+    capabilities().get(method).copied()
+}
+
+/// Parameters every method decodes from, used only to read a command's shape.
+///
+/// Nothing here is run: `decode` builds the value, and the capability is a
+/// property of the variant rather than of what it was handed.
+fn probe_params() -> Value {
+    serde_json::json!({
+        "path": ".", "repo": ".", "from": ".", "cwd": ".", "cwds": ["."],
+        "threadId": "t", "name": "b", "sha": "0", "branch": "b", "message": "m",
+        "file": "a", "files": [], "untracked": [], "query": "q",
+        "content": "", "kind": "claude", "sessionId": "s", "cmd": "git",
+        "fromCwd": ".", "toCwd": ".", "queries": [], "limit": 1, "skip": 0, "days": 1,
+        "bytes": 16,
+        "project": { "id": "p", "name": "n", "cwd": ".", "icon": null },
+        "thread": { "id": "t", "projectId": "p", "label": "l", "cmd": "c" },
+        "todo": { "id": "d", "projectId": "p", "title": "t", "state": "open",
+                  "createdAt": 0, "updatedAt": 0 },
+        "id": "p", "todoId": "d", "settings": {}, "q": "q",
+        "edge": "start", "to": "0",
+        "status": "idle", "ids": [],
+    })
+}
+
 /// A capability, named and carrying its arguments.
 ///
 /// One variant per method the front doors accept. Domains are separate enums so
@@ -671,23 +728,31 @@ mod tests {
         }
     }
 
+    /// The name-only table a front door reads is the same one every other test
+    /// on this page asserts, and it covers the whole surface.
+    ///
+    /// It is built by decoding, and a method that will not decode falls back to
+    /// the narrowest grant rather than the widest. That fallback must never be
+    /// what anything actually uses, so this asserts each entry against the
+    /// decoded command it describes.
+    #[test]
+    fn every_method_declares_what_it_needs() {
+        let table = capabilities();
+        assert_eq!(table.len(), methods().count());
+        for command in every_command() {
+            assert_eq!(
+                capability_of(command.name()),
+                Some(command.capability()),
+                "{} does not match the name-only table",
+                command.name()
+            );
+        }
+        assert_eq!(capability_of("thread.spawn"), None, "not a bus method");
+    }
+
     /// One decoded command per method, with every parameter any of them reads.
     fn every_command() -> Vec<Command> {
-        let params = serde_json::json!({
-            "path": ".", "repo": ".", "from": ".", "cwd": ".", "cwds": ["."],
-            "threadId": "t", "name": "b", "sha": "0", "branch": "b", "message": "m",
-            "file": "a", "files": [], "untracked": [], "query": "q",
-            "content": "", "kind": "claude", "sessionId": "s", "cmd": "git",
-            "fromCwd": ".", "toCwd": ".", "queries": [], "limit": 1, "skip": 0, "days": 1,
-            "bytes": 16,
-            "project": { "id": "p", "name": "n", "cwd": ".", "icon": null },
-            "thread": { "id": "t", "projectId": "p", "label": "l", "cmd": "c" },
-            "todo": { "id": "d", "projectId": "p", "title": "t", "state": "open",
-                      "createdAt": 0, "updatedAt": 0 },
-            "id": "p", "todoId": "d", "settings": {}, "q": "q",
-            "edge": "start", "to": "0",
-            "status": "idle", "ids": [],
-        });
+        let params = probe_params();
         methods()
             .map(|method| {
                 Command::decode(method, &params)

@@ -43,6 +43,21 @@ pub enum AppEvent {
     /// `agent.claimRequest` before acting. Two devices running the same move
     /// would kill one PTY twice and open two worktrees for one thread.
     AgentRequest(serde_json::Value),
+    /// A device joined or was renamed. Every open devices screen reloads; the
+    /// row is not carried, because the writer may be a phone that has just
+    /// finished pairing and holds no socket yet.
+    PairingsChanged,
+    /// One device is out, as of now.
+    ///
+    /// Broadcast rather than left to the next call, and this is the half that
+    /// reaches a socket sitting idle with a terminal attached: the connection
+    /// holding this pairing drops the moment it reads this, so a revoked phone
+    /// stops seeing output rather than stopping at its next RPC. The per-call
+    /// database check in `authz` is the other half, for a socket whose control
+    /// task fell behind and missed this.
+    PairingRevoked {
+        pairing_id: String,
+    },
 }
 
 impl AppEvent {
@@ -78,6 +93,14 @@ impl AppEvent {
                 serde_json::json!({ "name": name, "color": color }),
             ),
             AppEvent::AgentRequest(request) => Event::new("agent.request", request.clone()),
+            AppEvent::PairingsChanged => Event::new("pairings.changed", serde_json::json!({})),
+            // Named on the wire so every *other* device can refresh its list.
+            // The one being revoked never reads it: its socket is closed by the
+            // task that received it.
+            AppEvent::PairingRevoked { pairing_id } => Event::new(
+                "pairing.revoked",
+                serde_json::json!({ "pairingId": pairing_id }),
+            ),
         }
     }
 }

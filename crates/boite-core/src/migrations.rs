@@ -290,6 +290,44 @@ pub const ALL: &[Migration] = &[
                   ALTER TABLE threads ADD COLUMN settled_at INTEGER;\
                   ALTER TABLE threads ADD COLUMN snoozed_until INTEGER;",
     ),
+    // One row per paired device, and the one-time tokens that produce them.
+    //
+    // Server only, for the same reason `push_subscriptions` is: the thing being
+    // paired is a browser or a phone reaching a headless boite over a socket,
+    // and a desktop window is one of those devices rather than a host for them.
+    // Appended last, so the desktop's list does not move a single position and
+    // no sqlx digest is disturbed.
+    //
+    // Neither table holds a secret. `secret_hash` is a SHA-256 of what was
+    // issued, so a dump of this file opens nothing; see `crate::pairing`.
+    // `scopes` is the granted set as text rather than bits, because a column a
+    // person can read in a sqlite shell is worth more than four bytes, and a
+    // bit that shifts meaning between versions is a grant that silently
+    // changes.
+    Migration {
+        description: "create_pairings",
+        sql: "CREATE TABLE IF NOT EXISTS pairings (
+            id TEXT PRIMARY KEY,
+            label TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            scopes TEXT NOT NULL,
+            secret_hash TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            last_seen_at INTEGER,
+            revoked_at INTEGER
+        );
+        CREATE TABLE IF NOT EXISTS pairing_tokens (
+            id TEXT PRIMARY KEY,
+            label TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            scopes TEXT NOT NULL,
+            secret_hash TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            expires_at INTEGER NOT NULL,
+            used_at INTEGER
+        );",
+        applies: Applies::ServerOnly,
+    },
 ];
 
 /// The desktop's list: `(version, description, sql)`, versions from 1.
@@ -336,7 +374,7 @@ mod tests {
         assert_eq!(desktop[21].1, "add_thread_ageing");
 
         let server = server();
-        assert_eq!(server.len(), 21);
+        assert_eq!(server.len(), 22);
         assert_eq!(server[8].description, "create_push_subscriptions");
         assert_eq!(server[9].description, "add_project_git_root");
         assert_eq!(
@@ -348,6 +386,7 @@ mod tests {
         assert_eq!(server[18].description, "create_thread_keys");
         assert_eq!(server[19].description, "create_approvals");
         assert_eq!(server[20].description, "add_thread_ageing");
+        assert_eq!(server[21].description, "create_pairings");
         assert!(
             !server.iter().any(|m| m.description.contains("chat")),
             "no chat migration ever ran on a server"
@@ -457,6 +496,10 @@ mod tests {
             columns(&conn, "push_subscriptions").is_empty(),
             "a browser holds these, not a desktop window"
         );
+        assert!(
+            columns(&conn, "pairings").is_empty(),
+            "a desktop window is a device, not a host that pairs them"
+        );
     }
 
     #[test]
@@ -479,6 +522,16 @@ mod tests {
         for column in ["pin_order", "settled_at", "snoozed_until"] {
             assert!(columns(&conn, "threads").contains(&column.to_string()), "{column}");
         }
+        assert_eq!(
+            columns(&conn, "pairings"),
+            ["id", "label", "kind", "scopes", "secret_hash", "created_at", "last_seen_at",
+             "revoked_at"]
+        );
+        assert_eq!(
+            columns(&conn, "pairing_tokens"),
+            ["id", "label", "kind", "scopes", "secret_hash", "created_at", "expires_at",
+             "used_at"]
+        );
         assert!(columns(&conn, "chats").is_empty());
     }
 

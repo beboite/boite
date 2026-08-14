@@ -36,8 +36,69 @@ const FRAME_INPUT = 0x02;
 const FRAME_OUTPUT_GZIP = 0x03;
 const RPC_TIMEOUT = 20_000;
 const CONNECT_TIMEOUT = 12_000;
+const TICKET_TIMEOUT = 10_000;
 const BACKOFF_MIN = 500;
 const BACKOFF_MAX = 30_000;
+
+/**
+ * The HTTP origin behind a `ws://` URL, with the socket's own path taken off.
+ *
+ * A boite is not always at the root: a reverse proxy serving it under `/boite`
+ * gives `wss://host/boite/ws`, and the ticket endpoint is then
+ * `https://host/boite/api/ticket`. Stripping the trailing `/ws` rather than
+ * replacing the whole path is what keeps that working.
+ */
+export function httpBase(wsUrl: string): string {
+  const u = new URL(wsUrl);
+  u.protocol = u.protocol === "wss:" ? "https:" : "http:";
+  u.search = "";
+  u.hash = "";
+  u.pathname = u.pathname.replace(/\/ws\/?$/, "");
+  return u.toString().replace(/\/$/, "");
+}
+
+/**
+ * Buys a ticket for one socket.
+ *
+ * This is the only place the long-lived credential is presented, and it is
+ * presented in a header over HTTP: the WebSocket handshake's URL would reach a
+ * reverse proxy's access log, and nobody rotates those. What comes back is
+ * single-use and expires in five minutes, so the frame that carries it through
+ * the same proxy is worth nothing by the time anybody reads it back.
+ *
+ * A `401` is the one failure the login form can fix, so it is the only one that
+ * raises the gate. Anything else is a boite that was not reached.
+ */
+async function buyTicket(wsUrl: string, credential: string): Promise<string> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TICKET_TIMEOUT);
+  let res: Response;
+  try {
+    res = await fetch(`${httpBase(wsUrl)}/api/ticket`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${credential}` },
+      signal: controller.signal,
+    });
+  } catch (e) {
+    throw new ConnectError(
+      controller.signal.aborted ? "timeout" : "unreachable",
+      e instanceof Error ? e.message : "could not reach the boite",
+    );
+  } finally {
+    clearTimeout(timer);
+  }
+  if (res.status === 401) {
+    throw new ConnectError("auth", "this device is not paired with that boite");
+  }
+  if (!res.ok) {
+    throw new ConnectError("unreachable", `ticket refused (${res.status})`);
+  }
+  const body = (await res.json().catch(() => null)) as { ticket?: unknown } | null;
+  if (typeof body?.ticket !== "string" || !body.ticket) {
+    throw new ConnectError("unreachable", "the boite issued no ticket");
+  }
+  return body.ticket;
+}
 
 /**
  * The calls twenty seconds is the wrong number for, and what each one is
@@ -169,9 +230,18 @@ export interface SocketOptions {
 // Writes are dropped while disconnected: replaying stale keystrokes into a live
 // agent is worse than losing them. What the state callback drives has to make
 // that loss visible, because this side cannot.
+//
+// Every dial is two steps now: an HTTP round trip that turns this device's
+// long-lived credential into a five-minute single-use ticket, then the socket,
+// which sees only the ticket. The credential never reaches a frame and never
+// reaches a URL.
 export class Socket {
   #url: string;
   #token: string;
+  // A dial is in flight but no socket exists yet: the ticket is still being
+  // bought. `#ws` is null for that whole window, so without this a manual retry
+  // lands on top of an attempt already running.
+  #dialing = false;
   #ws: WebSocket | null = null;
   #state: ConnState = "disconnected";
   #stateCb: (s: ConnState) => void;
@@ -244,8 +314,9 @@ export class Socket {
       clearTimeout(this.#reconnectTimer);
       this.#reconnectTimer = null;
     }
-    // A dial is already in flight (#ws lives from construction to onclose).
-    if (this.#ws) return;
+    // A dial is already in flight (#ws lives from construction to onclose, and
+    // #dialing covers the ticket round trip before it).
+    if (this.#ws || this.#dialing) return;
     this.#closed = false;
     this.#authRejected = false;
     this.#backoff = BACKOFF_MIN;
@@ -351,9 +422,32 @@ export class Socket {
     return () => this.#control.delete(cb);
   }
 
-  #open(): Promise<void> {
+  async #open(): Promise<void> {
+    this.#setState("connecting");
+    this.#dialing = true;
+    let ticket: string;
+    try {
+      ticket = await buyTicket(this.#url, this.#token);
+    } catch (e) {
+      this.#dialing = false;
+      this.#setState("disconnected");
+      if (e instanceof ConnectError && e.reason === "auth") {
+        this.#authRejected = true;
+        this.#authRejectedCb();
+      } else if (!this.#closed) {
+        this.#scheduleReconnect();
+      }
+      throw e;
+    }
+    try {
+      return await this.#openWith(ticket);
+    } finally {
+      this.#dialing = false;
+    }
+  }
+
+  #openWith(ticket: string): Promise<void> {
     return new Promise((resolve, reject) => {
-      this.#setState("connecting");
       let settled = false;
       let ws: WebSocket;
       // `new WebSocket` throws synchronously when CSP blocks the URL or it is
@@ -388,7 +482,10 @@ export class Socket {
       }, CONNECT_TIMEOUT);
 
       ws.onopen = () => {
-        this.rpc("auth", { token: this.#token })
+        // The ticket, and nothing else. A device credential presented here is
+        // refused by the server on purpose: accepting both would leave the
+        // shape this replaced working under a new name.
+        this.rpc("auth", { ticket })
           .then(async () => {
             this.#backoff = BACKOFF_MIN;
             // Asked here rather than by a caller, and asked again on every
@@ -433,21 +530,21 @@ export class Socket {
             }
           })
           .catch((e) => {
-            // A JSON error reply is the server refusing the token. Anything else
-            // (socket died mid-handshake, RPC timeout) means no answer came, and
-            // treating that as bad credentials is what dumped a PWA with no
-            // network onto the login form.
-            const refused = e instanceof RpcError;
-            if (refused) {
-              this.#authRejected = true;
-              this.#authRejectedCb();
-            }
+            // A ticket refused here is NOT a refused credential, and latching
+            // the login gate on it is the bug this used to have in another
+            // shape. The credential was already accepted seconds ago, at the
+            // ticket door; what failed is a ticket that expired, raced with a
+            // revocation, or never reached the server. So this reconnects,
+            // which buys a fresh one, and the `401` there is the one answer
+            // that raises the gate. A socket that died mid-handshake reads the
+            // same way, which is what kept a PWA with no network off the login
+            // form.
             if (!settled) {
               settled = true;
               clearTimeout(connectTimer);
               reject(
                 new ConnectError(
-                  refused ? "auth" : "unreachable",
+                  "unreachable",
                   e instanceof Error ? e.message : "auth failed",
                 ),
               );

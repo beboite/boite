@@ -5,6 +5,7 @@
   import SettingsAppearanceTab from "./SettingsAppearanceTab.svelte";
   import SettingsFastpickTab from "./SettingsFastpickTab.svelte";
   import SettingsKeyboardTab from "./SettingsKeyboardTab.svelte";
+  import SettingsDevicesTab from "./SettingsDevicesTab.svelte";
   import SettingsLogsTab from "./SettingsLogsTab.svelte";
   import SettingsExperimentsTab from "./SettingsExperimentsTab.svelte";
   import SettingsAboutTab from "./SettingsAboutTab.svelte";
@@ -16,6 +17,7 @@
   import Zap from "@lucide/svelte/icons/zap";
   import Keyboard from "@lucide/svelte/icons/keyboard";
   import ScrollText from "@lucide/svelte/icons/scroll-text";
+  import Smartphone from "@lucide/svelte/icons/smartphone";
   import FlaskConical from "@lucide/svelte/icons/flask-conical";
   import Info from "@lucide/svelte/icons/info";
   import { onDestroy, tick, type Component } from "svelte";
@@ -75,6 +77,12 @@
       labelKey: "tabs.keyboard",
       hintKey: "tabs.keyboardHint",
       icon: Keyboard,
+    },
+    {
+      id: "devices",
+      labelKey: "tabs.devices",
+      hintKey: "tabs.devicesHint",
+      icon: Smartphone,
     },
     { id: "logs", labelKey: "tabs.logs", hintKey: "tabs.logsHint", icon: ScrollText },
     {
@@ -424,6 +432,8 @@
           <SettingsFastpickTab />
         {:else if activeTab === "keyboard"}
           <SettingsKeyboardTab />
+        {:else if activeTab === "devices"}
+          <SettingsDevicesTab />
         {:else if activeTab === "logs"}
           <SettingsLogsTab />
         {:else if activeTab === "experiments"}
