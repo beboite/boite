@@ -20,8 +20,8 @@
    * the selected project instead, so a git panel sitting beside a terminal in
    * one project described whichever project the sidebar was pointing at.
    */
-  type Props = { content: PaneContent; projectId: string };
-  let { content, projectId }: Props = $props();
+  type Props = { content: PaneContent; projectId: string; paneId: string };
+  let { content, projectId, paneId }: Props = $props();
 
   // CodeMirror is ~600 KB and the overview pulls in the usage charts; neither
   // belongs in the entry graph just because a pane kind exists.
@@ -53,7 +53,7 @@
   {:else if content.kind === "todo"}
     <TodoPanel {projectId} />
   {:else if content.kind === "browser"}
-    <BrowserPane url={content.url} />
+    <BrowserPane url={content.url} {paneId} drivenBy={content.drivenBy ?? null} />
   {:else if content.kind === "editor"}
     {#if EditorView.current}
       {@const EditorComp = EditorView.current}

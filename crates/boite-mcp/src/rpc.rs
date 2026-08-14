@@ -43,12 +43,22 @@ pub const METHOD_NOT_FOUND: i64 = -32601;
 /// and short enough that a shipped update is seen the same day.
 const TOOLS_TTL_MS: u64 = 3_600_000;
 
+/// A call answering content blocks: `None` when the tool is not one of them,
+/// and otherwise the array as it goes out or the sentence saying why not.
+pub type BlocksCall<'a> = &'a dyn Fn(&str, &Value) -> Option<Result<Value, String>>;
+
 /// What the engine serves: the tools, and the workspace call behind them.
 ///
 /// `call` answers TOON text or the sentence saying why not. Everything else a
 /// door might do differently, it does before or after [`answer`].
+///
+/// `blocks` is the exception the screenshot forced: its answer is a content
+/// array, an image among them, and there is no honest `String` for that. A door
+/// that can reach the browser tools passes one and `tools/call` asks it first;
+/// a door that cannot passes `None` and the text pipeline is all there is.
 pub struct Service<'a> {
     pub call: &'a dyn Fn(&str, &Value) -> Result<String, String>,
+    pub blocks: Option<BlocksCall<'a>>,
     pub tools: Value,
     pub instructions: &'a str,
 }
@@ -166,9 +176,25 @@ pub fn answer(service: &Service, msg: &Value) -> Option<Value> {
         "tools/call" => {
             let name = params.get("name").and_then(|v| v.as_str()).unwrap_or("");
             let args = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
-            let body = match (service.call)(name, &args) {
-                Ok(text) => json!({ "content": [{ "type": "text", "text": text }] }),
-                Err(e) => json!({ "content": [{ "type": "text", "text": e }], "isError": true }),
+            // The blocks hook owns the few tools whose answer is not text, and
+            // says so by answering `Some`. Everything else, itself included
+            // when it has nothing to say, falls through to the text pipeline,
+            // and both eras dress the result the same way afterwards.
+            let answered = service
+                .blocks
+                .and_then(|blocks| blocks(name, &args))
+                .map(|out| out.map(|content| json!({ "content": content })));
+            let body = match answered {
+                Some(Ok(body)) => body,
+                Some(Err(e)) => {
+                    json!({ "content": [{ "type": "text", "text": e }], "isError": true })
+                }
+                None => match (service.call)(name, &args) {
+                    Ok(text) => json!({ "content": [{ "type": "text", "text": text }] }),
+                    Err(e) => {
+                        json!({ "content": [{ "type": "text", "text": e }], "isError": true })
+                    }
+                },
             };
             result(&id, if modern { modernize(body, false) } else { body })
         }
@@ -184,14 +210,37 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    fn call(name: &str, _args: &Value) -> Result<String, String> {
+        match name {
+            "works" => Ok("done".into()),
+            other => Err(format!("unknown tool: {other}")),
+        }
+    }
+
     fn service(tools: &'static Value) -> Service<'static> {
-        fn call(name: &str, _args: &Value) -> Result<String, String> {
+        Service {
+            call: &call,
+            blocks: None,
+            tools: tools.clone(),
+            instructions: "use the tools",
+        }
+    }
+
+    /// A door that can answer in blocks, for the tool that does.
+    fn service_with_blocks(tools: &'static Value) -> Service<'static> {
+        fn blocks(name: &str, _args: &Value) -> Option<Result<Value, String>> {
             match name {
-                "works" => Ok("done".into()),
-                other => Err(format!("unknown tool: {other}")),
+                "shot" => Some(Ok(json!([{ "type": "image", "data": "iVBOR" }]))),
+                "broken_shot" => Some(Err("the device answered without an image".into())),
+                _ => None,
             }
         }
-        Service { call: &call, tools: tools.clone(), instructions: "use the tools" }
+        Service {
+            call: &call,
+            blocks: Some(&blocks),
+            tools: tools.clone(),
+            instructions: "use the tools",
+        }
     }
 
     fn tools() -> &'static Value {
@@ -284,6 +333,27 @@ mod tests {
 
         let ok = answer(&svc, &modern("tools/call", json!({ "name": "works" }))).unwrap();
         assert_eq!(ok["result"]["content"][0]["text"], "done");
+    }
+
+    /// The screenshot answers content blocks rather than text, and everything
+    /// the blocks hook has nothing to say about still falls through to the
+    /// text pipeline. A modern result is dressed the same either way.
+    #[test]
+    fn a_blocks_answer_goes_out_whole_and_the_rest_falls_through() {
+        let svc = service_with_blocks(tools());
+
+        let shot = answer(&svc, &modern("tools/call", json!({ "name": "shot" }))).unwrap();
+        assert_eq!(shot["result"]["content"][0]["type"], "image");
+        assert!(shot["result"].get("isError").is_none());
+        assert_eq!(shot["result"]["resultType"], "complete");
+
+        let broken =
+            answer(&svc, &modern("tools/call", json!({ "name": "broken_shot" }))).unwrap();
+        assert_eq!(broken["result"]["isError"], true);
+        assert_eq!(broken["result"]["resultType"], "complete");
+
+        let text = answer(&svc, &modern("tools/call", json!({ "name": "works" }))).unwrap();
+        assert_eq!(text["result"]["content"][0]["text"], "done");
     }
 
     /// Notifications carry no id and expect no answer.

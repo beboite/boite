@@ -31,7 +31,20 @@ export type PaneContent =
    * switches its tab, which is what an editor group does everywhere else.
    */
   | { kind: "editor" }
-  | { kind: "browser"; url: string };
+  /**
+   * A page, and the agent pointing it.
+   *
+   * `drivenBy` rides on the pane rather than in a store beside it, and that is
+   * what makes the hand-over hold: the mark is created, moved, saved and thrown
+   * away with the pane it belongs to, so it survives a group switch and a
+   * reload, and it cannot outlive a pane that has been closed. A map keyed by
+   * pane id would have needed a sweep to stay true, and a sweep that is one
+   * release late is an agent still steering something the user took back.
+   *
+   * `null` means the pane is the user's: one they opened, or one they took
+   * back. Agent calls at it are refused, never queued.
+   */
+  | { kind: "browser"; url: string; drivenBy?: string | null };
 
 export type PaneKind = PaneContent["kind"];
 

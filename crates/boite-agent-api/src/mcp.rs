@@ -91,8 +91,14 @@ pub(crate) async fn endpoint(
             ids: IdCache::new(),
         };
         let call = |name: &str, args: &Value| boite_mcp::call_tool(&door, name, args);
+        // `/v1/browser/screenshot` is on this router like every other tool
+        // route, so the door that answers in content blocks is wired here too:
+        // an agent reaching the workspace over HTTP gets the same image the
+        // stdio shim would have handed it.
+        let blocks = |name: &str, args: &Value| boite_mcp::call_blocks(&door, name, args);
         let service = rpc::Service {
             call: &call,
+            blocks: Some(&blocks),
             tools: boite_mcp::tools(),
             instructions: boite_mcp::INSTRUCTIONS,
         };

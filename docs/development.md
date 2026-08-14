@@ -88,34 +88,35 @@ The rules themselves:
 A URL with a userinfo segment (`http://evil.com@localhost`) is refused in all
 cases: it exists only to make the host read as something it is not.
 
-That much is a floor, not a ceiling, and the ceiling is worth naming because the
-shape of the fix is already decided:
+That much is a floor. One ceiling remains, and one was removed:
 
-- **A site can refuse to be framed.** `X-Frame-Options: DENY` or a
+- **A site can still refuse to be framed.** `X-Frame-Options: DENY` or a
   `frame-ancestors` CSP and the pane stays blank; the component offers "open
   outside" once enough time has passed to rule out slow. Localhost dev servers,
   which is the case this exists for, send neither.
-- **An agent cannot drive it.** Cross-origin means no DOM access from the app's
-  own webview, so there is no snapshot, no click, no fill.
+- **An agent can now read and drive the page, on a desktop window.** Not by
+  reaching across the origin boundary — the app's own scripts still cannot —
+  but from inside it: the main webview is built with an initialization script
+  injected into **every frame** (`src-tauri/scripts/pane-driver.js`, attached
+  in `lib.rs` where the window is created, which is why the window is built in
+  code rather than declared in `tauri.conf.json`). The script wires up only at
+  frame depth one (`parent === top`), so a frame nested inside a page never
+  answers its parent page's messages; that single guard is what keeps the
+  driver from breaking the web's own frame isolation for the sites a pane
+  shows.
 
-The way out is a Tauri child webview positioned over the pane rect, exactly as
-the terminals already are — same measured rectangle, same absolute overlay, and
-`PaneShell` already publishes the rect for every pane whether or not anything
-is drawn in it. Two things fall out of that:
-
-- WebView2 takes `--remote-debugging-port` through
-  `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`, so a child webview can expose CDP.
-  The driver then already exists — `chrome-devtools-axi` attaches over CDP and
-  is the token-shaped verb surface an agent wants (`snapshot` returning `@uid`s,
-  `click @uid`, combined navigate-and-capture). Boite would be the viewport and
-  would not need a driver of its own.
-- Failing that, a child webview accepts an initialization script, which runs in
-  every frame on any origin and can post back over the Tauri IPC. That is full
-  DOM access without CDP, at the cost of writing the snapshot and uid protocol
-  by hand.
-
-The first is less code and reuses a tool that is already installed. Neither is
-started.
+The pieces, end to end: `browser_snapshot` (elements with stable `uid`s, or
+`mode=text` prose, or `mode=diff` since the last look), `browser_click`,
+`browser_type`, `browser_press`, `browser_scroll`, `browser_screenshot`. A
+question rides `Workspace::ask_for_answer` to the webview
+(`boite://agent-request` with a `requestId`), `agent-requests.ts` re-checks the
+pane and the `drivenBy` mark, `features/browser/driver.ts` posts into the
+frame and matches the answer by source, and the `agent_answer` command
+resolves the HTTP handler still holding the agent's call. The server host has
+no such path — its panes are drawn by browsers and phones with no injected
+script — so its `ask_for_answer` refuses with the sentence the agent reads.
+`browser_screenshot` is `PrintWindow` cropped to the pane rect
+(`commands/capture.rs`), Windows only today, capped at a 1568px long edge.
 
 ## window.\_\_boite
 

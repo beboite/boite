@@ -6,6 +6,7 @@
   import { WebLinksAddon } from "@xterm/addon-web-links";
   import { Unicode11Addon } from "@xterm/addon-unicode11";
   import { xtermFontFamily, xtermTheme } from "./theme";
+  import { terminalFontSize } from "$lib/theme/fonts";
   import { terminalRenderBudget, type RenderSlot } from "./render-budget";
   import { encodeBarKey, encodeText, isLineFeed, wheelLines, type Press } from "./keys";
   import { installMobileInput } from "./mobile-input";
@@ -126,28 +127,24 @@
   // keeps the textarea focusable (key routing, hardware keyboards) but stops
   // the virtual keyboard; the floating button flips it on demand.
   let keyboardOpen = $state(false);
-  const FONT_MIN = 8;
-  const FONT_MAX = 32;
-  // What 100% zoom means. The UI scale is applied as a root font-size, which a
-  // canvas-drawn terminal cannot inherit, so the multiplication happens here:
-  // the slider used to grow every box around the terminal and leave the text
-  // inside it exactly where it was.
-  const FONT_BASE = 13;
   let touchMode: "none" | "pinch" | "scroll" = "none";
   let pinchStartDist = 0;
   // Pinch rides on top of the UI scale rather than replacing it, so a pinched
   // pane still follows a later move of the slider.
   let pinchFactor = $state(1);
   let pinchStartFactor = 1;
+  // The size and its clamp live in theme/fonts.ts, so the appearance preview can
+  // show the number this terminal will actually be drawn at.
   const fontSize = $derived(
-    Math.max(
-      FONT_MIN,
-      Math.min(
-        FONT_MAX,
-        Math.round((FONT_BASE * settings.state.uiScalePercent * pinchFactor) / 100),
-      ),
+    terminalFontSize(
+      settings.state.uiScalePercent,
+      settings.state.terminalFontScalePercent,
+      pinchFactor,
     ),
   );
+  // The family, rebuilt from the chosen one rather than read off the root: the
+  // same effect that writes --font-mono is the one this would be racing.
+  const fontFamily = $derived(xtermFontFamily(settings.state.terminalFontFamily));
   let scrollLastY = 0;
   let scrollAccum = 0;
 
@@ -792,8 +789,8 @@
     if (touches.mode === "pinch") e.preventDefault();
     const gesture = touches.move(e.touches, fontSize * 1.25);
     if (gesture.kind === "zoom") {
-      // Only the factor moves; `fontSize` clamps it against FONT_MIN/FONT_MAX
-      // and the effect below applies the result and refits.
+      // Only the factor moves; `fontSize` clamps it against the terminal's own
+      // px range and the effect below applies the result and refits.
       pinchFactor = Math.max(0.25, Math.min(4, gesture.factor));
       return;
     }
@@ -1142,7 +1139,7 @@
       cursorBlink: true,
       cursorStyle: "bar",
       fontSize,
-      fontFamily: xtermFontFamily(),
+      fontFamily,
       lineHeight: 1.25,
       letterSpacing: 0,
       scrollback: 10_000,
@@ -1403,6 +1400,16 @@
     const next = fontSize;
     if (term && term.options.fontSize !== next) {
       term.options.fontSize = next;
+      scheduleFit();
+    }
+  });
+
+  // Same reason, same refit: a family change moves the cell as surely as a size
+  // change does, and the column count with it.
+  $effect(() => {
+    const next = fontFamily;
+    if (term && term.options.fontFamily !== next) {
+      term.options.fontFamily = next;
       scheduleFit();
     }
   });
