@@ -2,6 +2,7 @@ pub mod approval;
 pub mod awareness;
 pub mod browser;
 pub mod capability;
+pub mod checkpoint;
 pub mod command;
 pub mod editor;
 pub mod env;
