@@ -225,6 +225,7 @@ export const EN_MESSAGES = {
   "sidebar.keepAwakeOn": "Keep-awake on — click to allow auto-sleep",
   "sidebar.keepAwakeOff": "Click to keep awake",
   "sidebar.toggleKeepAwake": "Toggle keep awake",
+  "sidebar.threadUnread": "Something happened here while you were away",
   "sidebar.closeThread": "Close thread",
   "sidebar.resizeSidebar": "Resize sidebar",
 

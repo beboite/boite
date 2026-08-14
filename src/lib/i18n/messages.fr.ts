@@ -226,6 +226,7 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "sidebar.keepAwakeOn": "Mode veille empêché — cliquer pour autoriser la veille",
   "sidebar.keepAwakeOff": "Cliquer pour empêcher la veille",
   "sidebar.toggleKeepAwake": "Basculer l'inactivité",
+  "sidebar.threadUnread": "Il s'est passé quelque chose ici en votre absence",
   "sidebar.closeThread": "Fermer le terminal",
   "sidebar.resizeSidebar": "Redimensionner la barre latérale",
 
