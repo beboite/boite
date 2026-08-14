@@ -44,7 +44,7 @@ wrapped, and a blank shell is one keystroke away.
 - **Split panes.** Split horizontally or vertically, drag threads between panes, resize with the mouse.
 - **Git panel.** Staged/unstaged/conflict sections, commit, fetch/pull/push, branches, auto-fetch and a commit graph. Nested repos are found three levels deep.
 - **File explorer and editor.** A CodeMirror 6 editor with syntax highlighting, tabs, and a side-by-side diff from the git panel.
-- **Command palette.** `Ctrl+K` over threads, projects, shortcuts and actions, each row wearing its own icon.
+- **Command palette.** `Ctrl+K` over threads, projects, shortcuts and actions, each row wearing its own icon. Past two characters it also searches what the workspace wrote down — the todos, the journal and what the terminals printed — and activating a hit goes there.
 - **First run.** A two-screen wizard picks the interface language (English or French) and puts the agents it finds on the machine straight into the shortcut bar.
 - **Remote workspaces.** Point the desktop app or a phone at a headless `boite-server`; threads survive the client closing.
 - **Mobile layout.** Bottom tab bar, pinch-to-resize terminal font, drag-to-scroll, on-demand keyboard, every context menu on a long press.
@@ -405,6 +405,14 @@ On Windows and Linux it sits beside the installed `boite` executable; running
 from source, use `target/release/boite-mcp` after `bun run build:sidecar`. No
 `env` block is needed, the shim inherits the terminal's. Launched anywhere else
 it exits rather than starting unauthenticated.
+
+The same endpoint also speaks MCP directly over HTTP at `/mcp`, one POST per
+request, for clients that take a URL instead of a command. Both protocol eras
+are served on it and on the shim: the stateless revision `2026-07-28`, where
+every request carries its version in `_meta` and `server/discover` answers the
+probe, and the `initialize` handshake for every client from before it. The
+credentials are the same ones the routes above take, and the endpoint stays on
+loopback: a caller that can present them is already on the machine.
 
 It is spawned once per agent terminal, so it carries nothing it does not need:
 `serde_json` and a hundred lines of HTTP/1.1 over a loopback socket, 380 KB

@@ -14,13 +14,17 @@
     "window does not fetch before it can paint, most of it the PDF worker. That is",
     "the measurement those imports never had attached to them.",
     "",
-    "2026-08-13, whip experiment: the eager graph had crept to 747.0 KB and the",
-    "titlebar button plus its store put it at 749.4 KB, 0.6 KB under a ceiling that",
-    "the next unrelated commit would have broken. Raised to 768 KB, which is the",
-    "same rounding as the first pass. The rope and its canvas are behind import()",
-    "and account for the 11 KB the shipped total grew by."
+    "The eager ceiling moved three times. To 774000, when the palette started",
+    "asking `search.query` about what is being typed: the palette is drawn by the",
+    "layout and cannot be lazy, so its ranking, its debounced query and the hits",
+    "it turns into rows are 3.8 KB the window fetches before it paints. To 784240,",
+    "for the keybinding table and its parser, which the dispatcher reads on the",
+    "first keystroke and so cannot be deferred either. Then to 794480, for the",
+    "reply bar a waiting thread offers: it exists so a blocked terminal can be",
+    "answered in one tap, and a chunk fetched on the tap is the one thing that",
+    "would take that away."
   ],
-  "eagerBytes": 786432,
+  "eagerBytes": 794480,
   "totalBytes": 6144000,
   "largestEagerChunkBytes": 256000
 }

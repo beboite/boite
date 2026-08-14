@@ -30,6 +30,8 @@
   import SidePanel from "$lib/features/panes/SidePanel.svelte";
   import ProjectInfoBox from "$lib/features/infobox/ProjectInfoBox.svelte";
   import PaneOverlay from "$lib/features/panes/PaneOverlay.svelte";
+  import ReplyBar from "$lib/features/thread/ReplyBar.svelte";
+  import { parseThreadLink } from "$lib/domain/awareness";
   import PaneDropOverlay from "$lib/features/panes/PaneDropOverlay.svelte";
   import GitPanel from "$lib/features/git/GitPanel.svelte";
   import ExplorerPanel from "$lib/features/explorer/ExplorerPanel.svelte";
@@ -316,6 +318,42 @@
 
   onMount(() => prefetchWhenIdle(TerminalView));
 
+  /**
+   * The thread a notification was about, if the window was opened by one.
+   *
+   * `boite_core::awareness` writes one format and both hosts resolve it here.
+   * The PWA arrives with it in the query, put there by the service worker
+   * opening the push payload's `url`; the desktop has no origin for a URL to
+   * resolve against, so it only ever sees one when something in-process sets it.
+   * Same parser either way, which is why the format has one owner.
+   *
+   * Read once and cleared, so a refresh does not re-open what the user has
+   * since navigated away from.
+   */
+  let pendingLink = $state<{ threadId: string } | null>(null);
+
+  onMount(() => {
+    const link = parseThreadLink(window.location.search);
+    if (!link) return;
+    pendingLink = { threadId: link.threadId };
+    window.history.replaceState(window.history.state, "", window.location.pathname);
+  });
+
+  // Waits for the row rather than for `ready`: a workspace finishes hydrating
+  // before its threads land on a remote boite, and a link consumed against an
+  // empty store would be spent on a thread the app has not heard of yet.
+  // `activateThread` moves the sidebar to the thread's own project, so the
+  // `project` the link carries is for whoever renders it, not for this.
+  $effect(() => {
+    const link = pendingLink;
+    if (!link || !app.ready || !app.hasThread(link.threadId)) return;
+    untrack(() => {
+      activateThread(link.threadId);
+      app.mobileTab = "terminal";
+      pendingLink = null;
+    });
+  });
+
   // The status sweep belongs to the window, not to whichever pane happens to be
   // mounted. It used to be started and stopped by the Terminal components
   // themselves, so with no local pane open (the project page, the dashboard, a
@@ -566,6 +604,31 @@
                     {focused}
                     offline={boiteDown && thread.origin === "remote"}
                   />
+                  <!-- Top of the pane, not the bottom: the dialog it answers is
+                       drawn at the bottom of the terminal, and on the phone the
+                       bottom is the keyboard button. Inside the pane wrapper so
+                       it is scoped to the thread it speaks for, which is the
+                       whole difference from a window-wide tray. -->
+                  {#if visible && thread.status === "waiting"}
+                    <div class="pointer-events-auto absolute left-2 right-2 top-2 z-[var(--z-pane-overlay)] flex justify-center">
+                      <ReplyBar {thread} />
+                    </div>
+                  {/if}
+                  <!-- The experiment that replaces the column, one per
+                       terminal: in split view each pane runs its own worktree,
+                       so a single box over the whole area could only ever
+                       describe one of them. After the pane overlay in the DOM
+                       and at the same z, so it draws over the ring rather than
+                       under it. Panes too narrow to hold it (it would cover
+                       the terminal it describes) get none.
+                       Below the reply bar in the DOM but anchored right, so a
+                       thread that is both waiting and showing the box draws the
+                       bar centred across the top and the box beside it. -->
+                  {#if !mobile && settings.state.experimentInfoBox && rect.w >= 420}
+                    <div class="absolute right-3 top-3 z-[5] max-w-[calc(100%-1.5rem)]">
+                      <ProjectInfoBox {thread} {visible} />
+                    </div>
+                  {/if}
                 </div>
               {/if}
             {/each}
@@ -643,14 +706,6 @@
            the whole app, this one belongs to the pane area. -->
       <TodoAchievement />
 
-      <!-- The experiment that replaces the column: anchored over the pane
-           area's top-right corner, under the z-10 view overlays so the project
-           page and the settings cover it like they cover the terminals. -->
-      {#if !mobile && app.ready && settings.state.experimentInfoBox}
-        <div class="absolute right-3 top-3 z-[5]">
-          <ProjectInfoBox />
-        </div>
-      {/if}
     </main>
 
     <!-- Outside <main>, beside it: the column describes the project rather than
