@@ -575,6 +575,8 @@ mod tests {
             ("thread.create", MutateProject),
             ("thread.update", MutateProject),
             ("thread.started", MutateProject),
+            ("thread.age", MutateProject),
+            ("thread.pinOrder", MutateProject),
             ("thread.delete", MutateAcross),
             ("todo.list", ReadProject),
             ("todo.save", MutateProject),
@@ -684,6 +686,7 @@ mod tests {
                       "createdAt": 0, "updatedAt": 0 },
             "id": "p", "todoId": "d", "settings": {}, "q": "q",
             "edge": "start", "to": "0",
+            "status": "idle", "ids": [],
         });
         methods()
             .map(|method| {
