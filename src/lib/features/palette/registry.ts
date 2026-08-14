@@ -18,13 +18,12 @@ import { formatCombo } from "$lib/shared/keyboard/combo";
 import { keybindings } from "$lib/features/settings/keybindings.svelte";
 import { anchorPaneId, openPane } from "$lib/features/panes/open";
 import { paneStore } from "$lib/features/panes/store.svelte";
-import { classifyBrowserUrl } from "$lib/features/browser/url";
-import { notifications } from "$lib/features/notifications/store.svelte";
 import { openTodo } from "$lib/features/todo/open";
 import { contentRowId } from "./content";
 import type { WorkspaceHit } from "$lib/backend/types";
 import type { PaneContent, PanelKind } from "$lib/features/panes/types";
 import type { IconKey } from "$lib/types";
+import type { PaletteMode } from "./modes";
 
 import type { PaletteSection } from "./sections";
 
@@ -59,7 +58,15 @@ export interface PaletteCommand {
   chord?: string;
   /** Same glyph the sidebar row wears, so a thread is recognised before it is read. */
   icon?: { key: IconKey; color: string | null };
-  run: () => void | Promise<unknown>;
+  /**
+   * Switches the palette into another mode instead of running and closing.
+   *
+   * A command that needs one more piece of typing is still one command, and
+   * this is what keeps it inside the box the user is already typing in. Exactly
+   * one of `mode` and `run` is set.
+   */
+  mode?: PaletteMode;
+  run?: () => void | Promise<unknown>;
 }
 
 // The chord the keyboard controller actually listens for, spelled the way the
@@ -274,21 +281,12 @@ export function buildPaletteCommands(): PaletteCommand[] {
     id: "pane:browser",
     section: "panes",
     labelKey: "panes.openBrowser",
-    run: () => {
-      // A prompt rather than a form: the palette closes on run, and a second
-      // modal to type a URL into is a lot of machinery for the rare case. The
-      // common case is an agent calling this with the URL already known.
-      const typed = window.prompt(t("panes.browserPrompt"), "http://localhost:");
-      if (!typed?.trim()) return;
-      // Typing it is consent to see the page, not consent to frame the app's
-      // own origin inside itself. Same rules the agent's request goes through.
-      const target = classifyBrowserUrl(typed);
-      if (!target.ok) {
-        notifications.error(t(`browser.refuse.${target.reason}`));
-        return;
-      }
-      openPane({ kind: "browser", url: target.url });
-    },
+    // Keeps the palette open and turns it into an address box, rather than
+    // closing it and raising `window.prompt`: that prompt is an OS box drawn in
+    // the OS language, with the OS palette, outside every keyboard scope this
+    // app models, and Escape in it did not mean what Escape means anywhere else
+    // in the window.
+    mode: "url",
   });
 
   for (const project of app.sortedProjects) {

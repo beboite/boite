@@ -10,18 +10,7 @@
     "frontendDist": "../build"
   },
   "app": {
-    "windows": [
-      {
-        "title": "Boite",
-        "width": 1280,
-        "height": 800,
-        "minWidth": 720,
-        "minHeight": 480,
-        "decorations": false,
-        "transparent": true,
-        "visible": false
-      }
-    ],
+    "windows": [],
     "security": {
       "capabilities": ["default"],
       "csp": "default-src 'self' ipc: http://ipc.localhost; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost ws: wss:; worker-src 'self' blob:; base-uri 'self'; object-src 'none'; frame-src http://localhost:* http://127.0.0.1:* http://[::1]:* http://0.0.0.0:* https:"

@@ -162,6 +162,9 @@ fn screen_trimmed(c: &mut Criterion) {
         thread_id: Some(format!("thread-{i}")),
         rect: Rect { x: 0.0, y: 0.0, w: 640.0, h: 480.0 },
         focused: i == 0,
+        url: None,
+        page: None,
+        driven_by: None,
     };
     // Deliberately over both caps, because trimming is what is being measured
     // and a screen already inside them does nothing.

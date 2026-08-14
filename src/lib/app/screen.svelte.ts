@@ -5,6 +5,7 @@ import { approvals } from "$lib/features/approvals/store.svelte";
 import { paneLabel } from "$lib/features/panes/label";
 import { paneStore } from "$lib/features/panes/store.svelte";
 import { palette } from "$lib/features/palette/store.svelte";
+import { browserPanes, type PageState } from "$lib/features/browser/state.svelte";
 
 /**
  * The window describing what is on it, so nobody has to be asked.
@@ -33,6 +34,10 @@ export interface ScreenPane {
   kind: string;
   title: string;
   threadId: string | null;
+  /** The page in a browser pane, and the whole of what the frame gives back. */
+  url: string | null;
+  page: PageState | null;
+  drivenBy: string | null;
   rect: ScreenRect;
   focused: boolean;
 }
@@ -72,6 +77,7 @@ function panesOnScreen(): ScreenPane[] {
     const id = el.dataset.paneLeaf ?? "";
     const content = paneStore.contentOf(id);
     const box = el.getBoundingClientRect();
+    const browser = content?.kind === "browser" ? content : null;
     return {
       id,
       // A leaf the store no longer knows is worth reporting as it is: it means
@@ -79,6 +85,12 @@ function panesOnScreen(): ScreenPane[] {
       kind: content?.kind ?? "unknown",
       title: content ? paneLabel(content) : "",
       threadId: content?.kind === "thread" ? content.threadId : null,
+      // The address, how the frame's `load` went, and whose pane it is. This is
+      // every browser tool's only source: nothing else on this side can see a
+      // cross-origin frame, so what is not here is not knowable.
+      url: browser?.url ?? null,
+      page: browser ? browserPanes.pageOf(id) : null,
+      drivenBy: browser?.drivenBy ?? null,
       rect: { x: box.x, y: box.y, w: box.width, h: box.height },
       focused: paneStore.groupOf(id)?.focusedPaneId === id,
     };
