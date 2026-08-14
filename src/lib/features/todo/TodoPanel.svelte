@@ -6,6 +6,7 @@
   import { notifications } from "$lib/features/notifications/store.svelte";
   import { logger } from "$lib/shared/services/logger.svelte";
   import { todos } from "./store.svelte";
+  import { todoFocus } from "./focus.svelte";
   import { confirmDialog } from "$lib/shared/components/confirm.svelte";
   import { registerEscape } from "$lib/shared/keyboard/overlay";
   import { t } from "$lib/i18n/index.svelte";
@@ -96,6 +97,25 @@
     projectId;
     openId = null;
     openTip = null;
+  });
+
+  // Something outside the panel named one card: the palette's content search.
+  // The request is consumed rather than watched, so asking for the same id
+  // again opens it again after the user has closed it — and a request that
+  // arrives before the list has loaded is honoured when it does, because this
+  // reads `items` too.
+  $effect(() => {
+    const wanted = todoFocus.requested;
+    if (!wanted || !items.some((item) => item.id === wanted)) return;
+    todoFocus.take();
+    openId = wanted;
+    // After the card has been drawn open: opening one changes its height, so
+    // scrolling before that lands on the row's old box.
+    queueMicrotask(() => {
+      document
+        .querySelector(`[data-todo-row="${wanted}"]`)
+        ?.scrollIntoView({ block: "nearest" });
+    });
   });
 
   /**

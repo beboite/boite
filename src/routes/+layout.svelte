@@ -35,7 +35,10 @@
   import ApprovalDock from "$lib/features/approvals/ApprovalDock.svelte";
   import CommandPalette from "$lib/features/palette/CommandPalette.svelte";
   import { createKeyboardController } from "$lib/shared/keyboard/controller";
-  import type { KeyScope, ShortcutBinding } from "$lib/shared/keyboard/types";
+  import { jumpModifier } from "$lib/shared/keyboard/held.svelte";
+  import { isEditableTarget } from "$lib/shared/keyboard/combo";
+  import { keybindings } from "$lib/features/settings/keybindings.svelte";
+  import type { KeyCommandRun, KeyContext } from "$lib/shared/keyboard/types";
 
   let { children } = $props();
 
@@ -118,180 +121,90 @@
     return true;
   }
 
-  // Resolved top-down: the front-most layer wins. `modal` owns the keyboard
-  // outright, which is what stops Escape from closing the dialog and the panel
-  // behind it in the same keystroke.
+  // What a rule's `when` clause is asking about. Read only once a combo has
+  // already matched, which is what keeps the DOM probe off the hot path.
   //
-  // The palette is checked first even though it is also a role="dialog": it is
-  // a layer we model, so it keeps its own bindings (Ctrl+K has to close what
-  // Ctrl+K opened). The DOM probe below is the fallback for the dialogs we do
-  // not model, like the confirm prompt.
-  function currentScope(): KeyScope {
-    if (palette.open) return "palette";
-    if (isModalOpen()) return "modal";
-    if (app.view === "settings") return "settings";
-    if (app.view === "editor") return "editor";
-    if (app.view === "project") return "project";
-    return "app";
+  // The palette is excluded from `modalOpen` even though it is also a
+  // role="dialog": it is a layer we model, so it keeps its own keys and Ctrl+K
+  // can close what Ctrl+K opened. The probe is the fallback for the dialogs we
+  // do not model, like the confirm prompt.
+  function keyboardContext(): KeyContext {
+    const paletteOpen = palette.open;
+    const modalOpen = !paletteOpen && isModalOpen();
+    return {
+      paletteOpen,
+      modalOpen,
+      overlayOpen: paletteOpen || modalOpen,
+      terminalFocus: app.view === "terminal",
+      settingsOpen: app.view === "settings",
+      editorFocus: app.view === "editor",
+      projectFocus: app.view === "project",
+      inputFocus:
+        typeof document !== "undefined" && isEditableTarget(document.activeElement),
+      hasThread: app.activeThreadId !== null,
+    };
   }
 
-  const shortcuts: ShortcutBinding[] = [
-    {
-      combo: "escape",
-      scopes: ["settings", "editor", "project"],
-      description: "Back to the terminal",
-      run: () => {
-        app.view = "terminal";
-      },
+  // A rule names a command; this is where a command names behaviour. The two
+  // are apart because a rule crosses a socket and a database, so nothing on it
+  // can be a function.
+  //
+  // Splitting lands on the project overview because there is no obvious second
+  // thing to show; the palette's Panes section picks a specific one, and
+  // dragging a sidebar row onto a live terminal still does the arbitrary case.
+  const handlers: Record<string, KeyCommandRun> = {
+    "view.backToTerminal": () => {
+      app.view = "terminal";
     },
-    {
-      combo: "mod+plus",
-      scopes: ["app", "settings", "editor", "project"],
-      description: "Zoom in",
-      run: () => settings.setUiScalePercent(settings.state.uiScalePercent + 5),
+    "view.zoomIn": () => settings.setUiScalePercent(settings.state.uiScalePercent + 5),
+    "view.zoomOut": () => settings.setUiScalePercent(settings.state.uiScalePercent - 5),
+    "view.zoomReset": () => settings.setUiScalePercent(100),
+    "palette.toggle": () => palette.toggle(),
+    "view.toggleSidebar": () => settings.toggleSidebar(),
+    "view.toggleSettings": () => {
+      app.view = app.view === "settings" ? "terminal" : "settings";
     },
-    {
-      combo: "mod+minus",
-      scopes: ["app", "settings", "editor", "project"],
-      description: "Zoom out",
-      run: () => settings.setUiScalePercent(settings.state.uiScalePercent - 5),
+    "view.closeFrontMost": () => closeFrontMost(),
+    "thread.next": () => cycleThread(1),
+    "thread.previous": () => cycleThread(-1),
+    "thread.new": () => void launchBlankTerminalHere(),
+    "thread.restoreClosed": () => void restoreLastClosedThread(),
+    "pane.splitRight": () => {
+      splitFocused("right");
     },
-    {
-      combo: "mod+digit0",
-      scopes: ["app", "settings", "editor", "project"],
-      description: "Reset zoom",
-      run: () => settings.setUiScalePercent(100),
+    "pane.splitDown": () => {
+      splitFocused("bottom");
     },
-    // On macOS this is Cmd+K only: Ctrl+K is readline's kill-line and the
-    // shell needs it. The dispatcher drops a match with a stray Ctrl there.
-    {
-      combo: "mod+k",
-      scopes: ["app", "settings", "editor", "project", "palette"],
-      description: "Command palette",
-      run: () => palette.toggle(),
-    },
-    {
-      combo: "mod+shift+p",
-      scopes: ["app", "settings", "editor", "project", "palette"],
-      description: "Command palette",
-      run: () => palette.toggle(),
-    },
-    {
-      combo: "mod+b",
-      scopes: ["app", "settings", "editor", "project"],
-      description: "Toggle sidebar",
-      run: () => settings.toggleSidebar(),
-    },
-    {
-      combo: "mod+,",
-      scopes: ["app", "settings", "editor", "project"],
-      description: "Settings",
-      run: () => {
-        app.view = app.view === "settings" ? "terminal" : "settings";
-      },
-    },
-    {
-      combo: "mod+tab",
-      scopes: ["app", "settings", "editor", "project"],
-      description: "Next thread",
-      run: () => cycleThread(1),
-    },
-    {
-      combo: "mod+shift+tab",
-      scopes: ["app", "settings", "editor", "project"],
-      description: "Previous thread",
-      run: () => cycleThread(-1),
-    },
-    // Splitting had no shortcut at all: the only way to make a pane was a drag
-    // from the sidebar onto a live terminal. These land on the project overview
-    // because there is no obvious second thing to show; the palette's Panes
-    // section picks a specific one, and dragging still does the arbitrary case.
-    //
-    // Ctrl+Shift+E and Ctrl+Shift+O rather than the editor world's Ctrl+\ for
-    // two reasons, both of which the backslash fails on. Ctrl+\ is SIGQUIT: a
-    // capture-phase listener that swallows it takes away the only way to quit a
-    // wedged process in a terminal, which is not a trade a multiplexer gets to
-    // make. And on a French AZERTY the backslash is AltGr+8, so the event
-    // carries `code: "Digit8"` with `altKey` set and no binding on it can ever
-    // fire. These two are what GNOME Terminal, Terminator and Tilix already
-    // use for the same gesture, on a letter that sits in the same place on
-    // both layouts.
-    {
-      combo: "mod+shift+e",
-      scopes: ["app"],
-      description: "Split right",
-      run: () => {
-        splitFocused("right");
-      },
-    },
-    {
-      combo: "mod+shift+o",
-      scopes: ["app"],
-      description: "Split down",
-      run: () => {
-        splitFocused("bottom");
-      },
-    },
-    {
-      combo: "mod+alt+arrowright",
-      scopes: ["app"],
-      description: "Next pane",
-      run: () => cyclePaneInGroup(1),
-    },
-    {
-      combo: "mod+alt+arrowdown",
-      scopes: ["app"],
-      run: () => cyclePaneInGroup(1),
-    },
-    {
-      combo: "mod+alt+arrowleft",
-      scopes: ["app"],
-      description: "Previous pane",
-      run: () => cyclePaneInGroup(-1),
-    },
-    {
-      combo: "mod+alt+arrowup",
-      scopes: ["app"],
-      run: () => cyclePaneInGroup(-1),
-    },
-    {
-      combo: "mod+shift+t",
-      scopes: ["app", "settings", "editor", "project"],
-      description: "Reopen the last closed thread",
-      run: () => void restoreLastClosedThread(),
-    },
-    {
-      combo: "mod+t",
-      scopes: ["app", "settings", "editor", "project"],
-      description: "New terminal",
-      run: () => void launchBlankTerminalHere(),
-    },
-    {
-      combo: "mod+w",
-      scopes: ["app", "settings", "editor", "project"],
-      description: "Close the front-most tab, panel or thread",
-      run: () => closeFrontMost(),
-    },
-    ...([1, 2, 3, 4, 5, 6, 7, 8, 9] as const).map((n) => ({
-      combo: `mod+digit${n}`,
-      scopes: ["app", "settings", "editor", "project"] as KeyScope[],
-      description: n === 1 ? "Jump to thread 1-9 in this project" : undefined,
-      run: () => jumpToThreadN(n),
-    })),
-  ];
+    "pane.next": () => cyclePaneInGroup(1),
+    "pane.previous": () => cyclePaneInGroup(-1),
+    ...Object.fromEntries(
+      ([1, 2, 3, 4, 5, 6, 7, 8, 9] as const).map((n) => [
+        `thread.jump${n}`,
+        () => jumpToThreadN(n),
+      ]),
+    ),
+  };
 
   const keyboard = createKeyboardController({
-    bindings: shortcuts,
-    getScope: currentScope,
+    rules: () => keybindings.rules,
+    context: keyboardContext,
+    handlers: () => handlers,
     // The keyboard under the user's hands, never the boite's. This read is why
     // the two are named apart: it was `platform.isMacOS` and a Mac driving a
     // Linux boite lost Cmd for every binding in the app.
     isMac: () => isDeviceMacOS,
+    suspended: () => keybindings.recording !== null,
   });
 
   // Its own onMount: the boot one below returns early on the PWA path, and
   // shortcuts have to work there too.
   onMount(() => keyboard.attach());
+
+  // What lights the position numbers in the sidebar while the jump modifier is
+  // down. Beside the dispatcher because it is the same keyboard, and separate
+  // from it because a binding fires on a chord while this has to know about a
+  // modifier held on its own.
+  onMount(() => jumpModifier.watch());
 
   // The layout guess is only a guess until the user overrides it, and a tablet
   // can cross the threshold by being rotated.

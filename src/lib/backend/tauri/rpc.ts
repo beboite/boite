@@ -14,11 +14,13 @@ import type {
   LogApi,
   ProjectApi,
   ScopeApi,
+  SearchApi,
   SessionApi,
   SessionHit,
   SessionKind,
   ShellApi,
   SystemApi,
+  WorkspaceHit,
   WorktreeApi,
   WorktreeEntry,
   WorktreeHold,
@@ -216,6 +218,13 @@ export const tauriSession: SessionApi = {
 export const tauriApprovals: ApprovalsApi = {
   list: () => invoke<PendingApproval[]>("approvals_open"),
   decide: (id, allow) => invoke<PendingApproval | null>("approval_decide", { id, allow }),
+};
+
+// Same bus command the remote asks for as `search.query`. The desktop reads the
+// answer bare; the `hits` envelope is the WebSocket protocol's.
+export const tauriSearch: SearchApi = {
+  query: (text, limit) =>
+    invoke<WorkspaceHit[]>("records_search", { params: { q: text, limit } }),
 };
 
 export const tauriLog: LogApi = {
