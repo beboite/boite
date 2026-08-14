@@ -18,6 +18,7 @@ use super::{
 };
 use crate::capability::Capability;
 use crate::git;
+use crate::session;
 
 /// Every method in this domain, in the order they appear below.
 ///
@@ -521,9 +522,14 @@ impl Git {
 
             Git::WorktreeOpen { repo, thread_id } => {
                 let base = worktree_base(&repo);
-                value_of(git::open_worktree_if_eligible_blocking(
-                    &repo, &base, &thread_id,
-                )?)
+                let opening = git::open_worktree_if_eligible_blocking(&repo, &base, &thread_id)?;
+                if let Some(path) = opening.path.as_deref() {
+                    // Here rather than inside the git call: which conversations
+                    // a directory can resume is not a property of a checkout,
+                    // and the pool is the repository the worktree was cut from.
+                    session::share_session_stores(&repo, path);
+                }
+                value_of(opening)
             }
             Git::WorktreeWarm { repo } => {
                 let base = worktree_base(&repo);
@@ -545,6 +551,21 @@ impl Git {
                     .to_string_lossy()
                     .to_string();
                 let landed = git::migrate_worktree_blocking(&repo, &from, &to)?;
+                // A link is named after the directory it stands for, so one
+                // that moves leaves its old name behind and takes a new one.
+                // This also runs once per thread at boot, over a directory that
+                // is already where it belongs, which is how a worktree made
+                // before the pool existed gets its own store folded into it.
+                match landed.as_deref() {
+                    Some(path) => {
+                        if path != from {
+                            session::unshare_session_stores(&from);
+                        }
+                        session::share_session_stores(&repo, path);
+                    }
+                    // Gone: the link names a directory that is not there.
+                    None => session::unshare_session_stores(&from),
+                }
                 // No path and nothing left to move: the directory is gone, and
                 // the thread has to stop pointing at it rather than retry every
                 // start.
@@ -565,7 +586,19 @@ impl Git {
             }
             Git::WorktreeHold { path } => value_of(git::worktree_hold_blocking(&path)?),
             Git::WorktreeRemove { repo, path, force } => {
-                git::remove_worktree_blocking(&repo, &path, force)?;
+                // Before git touches the directory, like the shared artifacts
+                // are unlinked before it: on Windows a delete that meets a
+                // junction walks into it and empties the target, and this one
+                // points at every conversation the project has ever had.
+                session::unshare_session_stores(&path);
+                if let Err(err) = git::remove_worktree_blocking(&repo, &path, force) {
+                    // A refusal leaves the worktree in use, and a worktree in
+                    // use keeps its pool: without this the directory that was
+                    // spared would quietly start filing its conversations
+                    // somewhere only it can see.
+                    session::share_session_stores(&repo, &path);
+                    return Err(err);
+                }
                 Value::Null
             }
             Git::WorktreeSizes { paths } => value_of(git::worktree_sizes_blocking(&paths)),

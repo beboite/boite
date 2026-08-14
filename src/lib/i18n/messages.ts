@@ -987,6 +987,10 @@ export const EN_MESSAGES = {
   "thread.notSavedOrphan":
     "Failed to save the thread: it will be gone on restart, leaving {path} with no owner",
   "thread.restored": "Restored {name}",
+  "thread.restoredNewWorktree":
+    "{name} was away long enough for its worktree to be given back, so it comes back in a new one",
+  "thread.restoredNoWorktree":
+    "{name} comes back without a worktree: its own was given back and no new one could be opened",
   "thread.noClosedThread": "No closed thread to restore",
   "thread.moveFailed": "Could not move the thread: {error}",
   "thread.movedTo": "Moved {name} to {project}",

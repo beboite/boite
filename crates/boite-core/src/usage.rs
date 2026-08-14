@@ -732,7 +732,18 @@ pub fn collect_usage_blocking(cwds: Vec<String>, days: u32) -> UsageReport {
         let encoded: HashSet<String> = targets.iter().map(|c| encode_claude_project_dir(c)).collect();
         let mut files = Vec::new();
         for entry in fs::read_dir(&claude_root).into_iter().flatten().flatten() {
-            if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            let Ok(kind) = entry.file_type() else { continue };
+            if !kind.is_dir() {
+                continue;
+            }
+            // A worktree's store is a link onto its project's
+            // (`session::shared`), and the project's own folder is in `targets`
+            // too, so every transcript under a link is already walked under its
+            // real name. Reading it again is the same file parsed once per open
+            // thread, and `shortlist` drops the repeats only after paying for
+            // them. On Windows a junction reports itself as a directory, so
+            // this is the test that sees it.
+            if kind.is_symlink() {
                 continue;
             }
             if !encoded.contains(&entry.file_name().to_string_lossy().to_lowercase()) {
@@ -873,6 +884,15 @@ mod tests {
 
     /// A second read of an unchanged file hands back the same allocation rather
     /// than a second parse, and rewriting the file drops it.
+    ///
+    /// The rewrite below is a byte longer than the original, which is not
+    /// decoration. The key is the pair (size, mtime), and the two writes land
+    /// within the same tick of a filesystem whose mtime is coarser than they
+    /// are: an edit that kept the length read as the same version, the entry
+    /// was handed back, and the assertion failed on a CI runner roughly one run
+    /// in three while passing on every machine it was written on. A transcript
+    /// in the wild is appended to, so growing is also what the case being
+    /// tested actually looks like.
     #[test]
     fn an_unchanged_transcript_is_parsed_once() {
         let path = write(
@@ -885,11 +905,11 @@ mod tests {
 
         let rewritten = write(
             "cache-hit",
-            &[r#"{"timestamp":"2026-07-28T10:00:00.000Z","message":{"id":"m1","model":"claude-opus-5","usage":{"input_tokens":7,"output_tokens":9,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}"#],
+            &[r#"{"timestamp":"2026-07-28T10:00:00.000Z","message":{"id":"m1","model":"claude-opus-5","usage":{"input_tokens":7,"output_tokens":90,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}"#],
         );
         let third = cached_usage(&candidate(&rewritten), parse_claude_file);
         assert!(!Arc::ptr_eq(&first, &third), "a rewritten file was not re-read");
-        assert_eq!(third.models[0].1.total, 16);
+        assert_eq!(third.models[0].1.total, 97);
     }
 
     /// Going over the limit drops the half nobody asked for, and keeps the

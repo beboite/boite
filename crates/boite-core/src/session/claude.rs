@@ -201,11 +201,23 @@ pub(super) fn claude_turn(s: LiveClaudeSession) -> Option<AgentTurn> {
     })
 }
 
-fn encode_claude_project_dir(p: &str) -> String {
+/// The directory claude files this cwd's transcripts in, spelled the way claude
+/// spells it: every character that is not a letter or a digit becomes a dash,
+/// and the case is left alone.
+///
+/// Case is the whole difference from [`encode_claude_project_dir`], which folds
+/// it so that two spellings of one path still compare equal. A name being
+/// *created* cannot be folded: it has to be the name claude will go looking
+/// for. NTFS and APFS forgive that, ext4 does not, and a shared store spelled
+/// in lower case would simply never be found on Linux.
+pub(super) fn claude_project_dir_name(p: &str) -> String {
     p.chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-        .collect::<String>()
-        .to_lowercase()
+        .collect()
+}
+
+pub(super) fn encode_claude_project_dir(p: &str) -> String {
+    claude_project_dir_name(p).to_lowercase()
 }
 
 fn read_claude_session_meta(path: &Path) -> Option<ClaudeSessionMeta> {
@@ -319,6 +331,16 @@ pub fn find_claude_session_blocking(
         if !file_type.is_dir() {
             continue;
         }
+        // A worktree's store is a link onto its project's (`session::shared`),
+        // so walking one reads the pool a second time under a second name. Every
+        // transcript in there is already reached through the real directory, and
+        // reading it twice is two opens for one answer. On Windows a junction
+        // even reports itself as a directory, so this is the only thing keeping
+        // a project with ten open threads from opening every transcript eleven
+        // times per scan.
+        if file_type.is_symlink() {
+            continue;
+        }
         let dir_name_lower = project_entry
             .file_name()
             .to_string_lossy()
@@ -391,6 +413,18 @@ pub fn find_claude_session_blocking(
     // session of our own to look for, the first one that matches ends the walk
     // exactly as it did before.
     let matching = candidates.into_iter().filter_map(|cand| {
+        // A transcript is named after its session, so this costs nothing and is
+        // asked before either placement test. The registry naming our own
+        // process is a fact, and a fact does not have to be placed: a
+        // conversation reached through the project's shared store sits in the
+        // project's directory rather than any thread's, and carries the cwd of
+        // the worktree it was *started* in, which need not be the one asking.
+        // Both tests below answer no for it, and the pid answer was thrown away
+        // before it could be read.
+        if let Some(id) = named_by_registry(&cand.path, own_session.as_deref()) {
+            return Some((id, cand.modified_ms));
+        }
+
         // Exact match only. A substring test let short project dir names
         // match unrelated cwds, attaching the wrong session to a thread; the
         // cwd read from the jsonl below remains the robust fallback.
@@ -422,6 +456,23 @@ pub fn find_claude_session_blocking(
     });
 
     choose_claude_hit(matching, own_session.as_deref(), exclude, &live)
+}
+
+/// This transcript's id when the live registry has already tied it to the
+/// caller's own process, and nothing otherwise.
+///
+/// Free to ask, which is why it is asked before either placement test: a claude
+/// transcript is named after its session, so the file name answers it without
+/// an open. And it has to be asked first, because a fact does not need placing.
+/// A conversation reached through the project's shared session store sits in the
+/// project's directory rather than in any thread's, and carries the cwd of the
+/// worktree it was *started* in, which is not the worktree asking once a thread
+/// has been restored, or a session resumed from a sibling. Placed by neither
+/// test, the pid's answer was dropped before [`choose_claude_hit`] could see it,
+/// and the thread bound nothing at all.
+fn named_by_registry(path: &Path, own_session: Option<&str>) -> Option<String> {
+    let named = path.file_stem().and_then(|s| s.to_str())?;
+    (Some(named) == own_session).then(|| named.to_string())
 }
 
 /// Which transcript of this directory is the caller's, given newest first.
@@ -663,6 +714,44 @@ mod tests {
             .expect("the other one is unclaimed");
         assert_eq!(hit.id, "other");
         assert!(!hit.own_pid);
+    }
+
+    /// The shared store's whole consequence for binding: the file is in the
+    /// project's folder and its head names the worktree it was started in, so
+    /// neither placement test can claim it. The registry can, and does.
+    #[test]
+    fn our_own_session_is_taken_wherever_it_is_filed() {
+        let elsewhere = Path::new("/anywhere/at/all/sess-9.jsonl");
+        assert_eq!(
+            named_by_registry(elsewhere, Some("sess-9")).as_deref(),
+            Some("sess-9")
+        );
+    }
+
+    /// A link into the shared store is created under the name claude will go
+    /// looking for, and claude keeps the case. Folded, the store would be found
+    /// on NTFS and APFS by luck and never on ext4.
+    #[test]
+    fn a_store_directory_is_named_the_way_claude_names_it() {
+        assert_eq!(
+            claude_project_dir_name("D:\\Dev\\Collab\\boite\\.boite\\worktrees\\abc"),
+            "D--Dev-Collab-boite--boite-worktrees-abc"
+        );
+        assert_eq!(
+            encode_claude_project_dir("D:\\Dev"),
+            "d--dev",
+            "comparing still folds, so two spellings of one path still match"
+        );
+    }
+
+    /// Nine agents have no registry, and every claude thread has none until its
+    /// process is found. The guess below is the only answer then, so this must
+    /// not hand one out.
+    #[test]
+    fn a_transcript_no_registry_names_is_left_to_the_guess() {
+        let path = Path::new("/anywhere/at/all/sess-9.jsonl");
+        assert_eq!(named_by_registry(path, None), None);
+        assert_eq!(named_by_registry(path, Some("sess-8")), None);
     }
 
     #[test]
