@@ -1,17 +1,26 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
 
+  import { settingAnchorId } from "$lib/features/settings/catalogue";
+
   type Props = {
     title: string;
     description?: string;
+    /**
+     * The MessageKey this card is titled with, when settings search has to be
+     * able to land on it. The id is derived from the key rather than written
+     * out, so the catalogue and the page cannot name two different anchors.
+     */
+    anchor?: string;
     actions?: Snippet;
     children: Snippet;
   };
-  let { title, description = "", actions, children }: Props = $props();
+  let { title, description = "", anchor, actions, children }: Props = $props();
 </script>
 
 <section
-  class="rounded-lg border border-border bg-[var(--color-surface)] p-3"
+  id={anchor ? settingAnchorId(anchor) : undefined}
+  class="scroll-mt-4 rounded-lg border border-border bg-[var(--color-surface)] p-3"
 >
   <header class="mb-2.5 flex items-start justify-between gap-3">
     <div class="min-w-0">

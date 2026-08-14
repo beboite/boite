@@ -66,6 +66,9 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
 
   "project.scratch": "Brouillon",
 
+  "settings.searchPlaceholder": "Rechercher un réglage",
+  "settings.searchResults": "{count} résultat(s)",
+  "settings.searchNoMatch": "Aucun résultat.",
   "shortcuts.title": "Raccourcis",
   "shortcuts.description": "Glissez pour réordonner. Modifiez une commande pour ajouter des arguments.",
   "shortcuts.resetTitle": "Redétecter les agents installés et reconstruire la liste",
@@ -597,6 +600,10 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "workspace.dynamicDesc": "Les projets de la boite dans Local",
   "workspace.dynamicTooltip": "Afficher les projets de la boite dans l'espace de travail Local",
   "workspace.connStateConnected": "connecté",
+  "workspace.connStateBlocked": "bloqué",
+  "workspace.keepConnected": "Garder connectée",
+  "workspace.keepConnectedOn": "Connectée en arrière-plan. Ses threads, sa recherche et son usage répondent sans y basculer.",
+  "workspace.keepConnectedOff": "Connectée seulement quand tu es dessus",
   "workspace.connStateConnecting": "connexion",
   "workspace.connStateDisconnected": "déconnecté",
   "workspace.versionThis": "La version que cette application exécute",
@@ -739,6 +746,7 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "palette.hitJournal": "Journal",
   "palette.hitTerminal": "Terminal",
   "palette.launchShortcut": "Lancer {label}",
+  "palette.runScript": "Lancer {name}",
   "palette.restoreThread": "Restaurer le dernier terminal fermé",
   "palette.closeActiveThread": "Fermer le terminal actif",
   "palette.openSettings": "Ouvrir les paramètres",

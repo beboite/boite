@@ -26,14 +26,14 @@
 <p class="px-3 text-sm text-muted-foreground">{t("experiments.intro")}</p>
 
 <ToggleSetting
-  label={t("experiments.infoBox")}
+  label={t("experiments.infoBox")} anchor="experiments.infoBox"
   description={t("experiments.infoBoxDesc")}
   enabled={settings.state.experimentInfoBox}
   onToggle={() => settings.setExperimentInfoBox(!settings.state.experimentInfoBox)}
 />
 
 <ToggleSetting
-  label={t("experiments.smartSort")}
+  label={t("experiments.smartSort")} anchor="experiments.smartSort"
   description={t("experiments.smartSortDesc")}
   enabled={settings.state.experimentSmartSort}
   onToggle={() =>
@@ -94,14 +94,14 @@
 {/if}
 
 <ToggleSetting
-  label={t("experiments.whip")}
+  label={t("experiments.whip")} anchor="experiments.whip"
   description={t("experiments.whipDesc")}
   enabled={settings.state.experimentWhip}
   onToggle={() => settings.setExperimentWhip(!settings.state.experimentWhip)}
 />
 
 <ToggleSetting
-  label={t("experiments.sidebarDesign")}
+  label={t("experiments.sidebarDesign")} anchor="experiments.sidebarDesign"
   description={t("experiments.sidebarDesignDesc")}
   enabled={settings.state.sidebarDesign === "glow"}
   onLabel={t("experiments.designGlow")}
@@ -117,7 +117,7 @@
      was lost, and the classic ring has nothing to put in the logo's place. -->
 <div class="pl-3" class:opacity-50={settings.state.sidebarDesign !== "glow"}>
   <ToggleSetting
-    label={t("experiments.harnessLogos")}
+    label={t("experiments.harnessLogos")} anchor="experiments.harnessLogos"
     description={settings.state.sidebarDesign === "glow"
       ? t("experiments.harnessLogosDesc")
       : t("experiments.harnessLogosClassic")}

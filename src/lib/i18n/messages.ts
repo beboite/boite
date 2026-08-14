@@ -63,6 +63,9 @@ export const EN_MESSAGES = {
   // database's, since nobody chose the name.
   "project.scratch": "Scratch",
 
+  "settings.searchPlaceholder": "Search settings",
+  "settings.searchResults": "{count} matching",
+  "settings.searchNoMatch": "Nothing matches.",
   "shortcuts.title": "Shortcuts",
   "shortcuts.description": "Drag to reorder. Edit a command to add arguments.",
   "shortcuts.resetTitle": "Detect the installed agents again and rebuild the list",
@@ -604,6 +607,10 @@ export const EN_MESSAGES = {
   "workspace.dynamicDesc": "Boite projects inside Local",
   "workspace.dynamicTooltip": "Show the boite's projects inside the Local workspace",
   "workspace.connStateConnected": "connected",
+  "workspace.connStateBlocked": "blocked",
+  "workspace.keepConnected": "Keep connected",
+  "workspace.keepConnectedOn": "Connected in the background. Its threads, its search and its usage answer without switching to it.",
+  "workspace.keepConnectedOff": "Only connected while you are standing on it",
   "workspace.connStateConnecting": "connecting",
   "workspace.connStateDisconnected": "disconnected",
   "workspace.versionThis": "The version this app is running",
@@ -746,6 +753,7 @@ export const EN_MESSAGES = {
   "palette.hitJournal": "Journal",
   "palette.hitTerminal": "Terminal",
   "palette.launchShortcut": "Launch {label}",
+  "palette.runScript": "Run {name}",
   "palette.restoreThread": "Restore last closed thread",
   "palette.closeActiveThread": "Close active thread",
   "palette.openSettings": "Open settings",

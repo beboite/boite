@@ -38,11 +38,35 @@ class Workspace {
   // Bumping this remounts the terminal tree ({#key}), so every Terminal
   // releases its PTY before the transport swaps under it.
   epoch = $state(0);
+  /**
+   * The same guarantee, per environment.
+   *
+   * `epoch` was written when one transport served everything, so the only safe
+   * thing to do before swapping it was to remount every Terminal in the window.
+   * With several transports live that is both too much and not enough: too
+   * much, because a boite going down would tear down the local terminals it has
+   * nothing to do with, and not enough, because it says nothing about *which*
+   * transport moved.
+   *
+   * What actually has to hold is narrower. A PTY handle is only ever valid
+   * against the backend instance that issued it — `RemoteBackend` keys its
+   * `ptyId` map per instance and `Socket` keys its attachments per socket — so
+   * the terminals that must release before a disposal are exactly the ones
+   * whose handles came from the instance being disposed. That is one
+   * environment's terminals, and keying each Terminal on its own environment's
+   * counter is therefore both necessary and sufficient.
+   */
+  environmentEpochs = $state<Record<string, number>>({});
 
   // Installed by the app layer (it owns the project list): maps a filesystem
   // path to the origin of the project that contains it. Lets path-scoped
   // façades (git/explorer/editor/session) route without signature changes.
   pathOriginResolver: ((path: string) => WorkspaceOrigin) | null = null;
+
+  // Installed by the environment registry, which owns every connection that is
+  // not the active workspace. Kept as a hook rather than an import so this
+  // module stays free of the registry and its device-settings dependencies.
+  environmentResolver: ((envId: string) => Backend | null) | null = null;
 
   // Whether this boite ever answered on the current socket. Tells "lost the
   // connection" apart from "never reached it", which are different sentences and
@@ -95,7 +119,15 @@ class Workspace {
 
   // Route by an entity's origin tag. Outside dynamic mode this is current(),
   // so untagged entities (the classic single-backend world) behave as before.
-  backendFor(origin: WorkspaceOrigin | undefined): Backend {
+  // An environment id is accepted here as well as the two origin words: rows
+  // that know which boite they came from route to it, rows that only know they
+  // are not local keep the classic behaviour of following the active one.
+  backendFor(origin: WorkspaceOrigin | string | undefined): Backend {
+    if (origin && origin !== "local" && origin !== "remote") {
+      if (origin === this.activeBoiteId && this.#remote) return this.#remote;
+      const env = this.environmentResolver?.(origin);
+      if (env) return env;
+    }
     if (this.mode !== "dynamic") return this.current();
     return origin === "remote" && this.#remote ? this.#remote : this.#local;
   }
@@ -213,6 +245,27 @@ class Workspace {
     this.epoch++;
   }
 
+  bumpEpochOf(envId: string): void {
+    // Written key by key: a spread would invalidate every environment's
+    // terminals each time any one of them moved. See rules/performance.md.
+    this.environmentEpochs[envId] = (this.environmentEpochs[envId] ?? 0) + 1;
+  }
+
+  /**
+   * The remount key for a terminal of `origin`. The workspace-wide epoch is
+   * summed in because a full workspace switch resets the stores under every
+   * terminal, whichever environment it belongs to.
+   */
+  epochOf(origin: WorkspaceOrigin | string | undefined): number {
+    if (!origin || origin === "local" || origin === "remote") return this.epoch;
+    return this.epoch + (this.environmentEpochs[origin] ?? 0);
+  }
+
+  /** The connection behind an environment id, if the registry holds one. */
+  environmentBackend(envId: string): Backend | null {
+    return this.environmentResolver?.(envId) ?? null;
+  }
+
   #disposeRemote(): void {
     this.#remote?.dispose();
     this.#remote = null;
@@ -232,7 +285,7 @@ export function localBackend(): Backend {
   return workspace.local();
 }
 
-export function backendFor(origin: WorkspaceOrigin | undefined): Backend {
+export function backendFor(origin: WorkspaceOrigin | string | undefined): Backend {
   return workspace.backendFor(origin);
 }
 

@@ -31,7 +31,7 @@
 </script>
 
 {#if showPush}
-  <SettingsCard title={t("general.pushTitle")} description={t("general.pushDesc")}>
+  <SettingsCard title={t("general.pushTitle")} anchor="general.pushTitle" description={t("general.pushDesc")}>
     {#if permission === "granted"}
       <p class="text-sm text-[var(--color-success)]">{t("general.pushEnabled")}</p>
     {:else if permission === "denied"}
@@ -54,6 +54,6 @@
   </SettingsCard>
 {/if}
 
-<SettingsCard title={t("shortcuts.title")} description={t("shortcuts.description")}>
+<SettingsCard title={t("shortcuts.title")} anchor="shortcuts.title" description={t("shortcuts.description")}>
   <ShortcutEditor />
 </SettingsCard>

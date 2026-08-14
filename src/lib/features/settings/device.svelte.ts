@@ -1,6 +1,7 @@
 import { uuid } from "$lib/shared/utils/uuid";
 import { logger } from "$lib/shared/services/logger.svelte";
 import { forgetPanesOf } from "$lib/features/panes/layout";
+import { forgetProjection } from "$lib/backend/environment/cache";
 
 // Device-scoped settings: per-machine, never synced to a workspace. Holds the
 // registry of saved boites (remote servers). Tokens are secrets and inherently
@@ -22,6 +23,17 @@ export interface BoiteEntry {
   // has to say something about a boite it is not connected to, and the version
   // is the one thing there that says "this one is behind" before you switch.
   version: string;
+  /**
+   * Whether this device keeps a connection to that boite open even when it is
+   * not the active workspace.
+   *
+   * Opt-in, and per device on purpose: a phone on mobile data and a desktop on
+   * a LAN want different answers about the same boite, and a connection nobody
+   * asked for costs a socket, a supervisor and a projection in the background.
+   * What it buys is the palette, the usage view and that machine's thread
+   * states without switching to it.
+   */
+  enabled: boolean;
 }
 
 interface DeviceState {
@@ -77,6 +89,7 @@ function normalizeEntry(raw: unknown): BoiteEntry | null {
     name: typeof r.name === "string" ? r.name : "",
     color: typeof r.color === "string" ? r.color : "",
     version: typeof r.version === "string" ? r.version : "",
+    enabled: r.enabled === true,
   };
 }
 
@@ -124,6 +137,7 @@ function load(): DeviceState {
         name: "",
         color: "",
         version: "",
+        enabled: false,
       };
       return {
         boites: [entry],
@@ -164,7 +178,15 @@ class DeviceSettings {
       this.#persist();
       return existing;
     }
-    const entry: BoiteEntry = { id: uuid(), url, token, name: "", color: "", version: "" };
+    const entry: BoiteEntry = {
+      id: uuid(),
+      url,
+      token,
+      name: "",
+      color: "",
+      version: "",
+      enabled: false,
+    };
     this.state.boites.push(entry);
     this.state.activeBoiteId = entry.id;
     this.#persist();
@@ -179,6 +201,19 @@ class DeviceSettings {
     if (patch.name !== undefined) b.name = patch.name;
     if (patch.color !== undefined) b.color = patch.color;
     if (patch.version !== undefined) b.version = patch.version;
+    if (patch.enabled !== undefined) b.enabled = patch.enabled;
+    this.#persist();
+  }
+
+  /** The boites this device keeps connected beside whichever one is active. */
+  get enabledBoites(): BoiteEntry[] {
+    return this.state.boites.filter((b) => b.enabled);
+  }
+
+  setBoiteEnabled(id: string, on: boolean): void {
+    const b = this.state.boites.find((x) => x.id === id);
+    if (!b || b.enabled === on) return;
+    b.enabled = on;
     this.#persist();
   }
 
@@ -188,6 +223,10 @@ class DeviceSettings {
       this.state.activeBoiteId = this.state.boites[0]?.id ?? null;
     }
     delete this.state.remoteProjects[id];
+    // The registration, the credential and the caches go together. A projection
+    // describing a boite this device can no longer open is rows nothing will
+    // ever correct.
+    forgetProjection(id);
     // The pane layouts are keyed by boite id and live under their own keys, so
     // forgetting the boite has to reach them: nothing else ever will, and they
     // name projects in a database this device can no longer open.
