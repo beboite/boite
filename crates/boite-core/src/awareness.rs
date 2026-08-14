@@ -33,9 +33,10 @@ pub enum Phase {
     /// Blocked on the user, and the question is on the terminal rather than in a
     /// row: a permission prompt, a plan to accept, any dialog the agent drew.
     WaitingForInput,
-    /// The turn ended.
+    /// The turn ended, and the terminal takes input again.
     Completed,
-    /// The process is gone and did not leave cleanly.
+    /// The process is gone, cleanly or not. Either way the terminal takes no
+    /// input, which is what separates it from `Completed`.
     Failed,
     /// The row claims something the machine cannot back up: a live status with
     /// no process behind it, or a terminal that was put to sleep.
@@ -160,8 +161,11 @@ pub fn phase(status: ThreadStatus, has_process: bool, approval: bool) -> Phase {
         ThreadStatus::Running | ThreadStatus::Waiting if !has_process => Phase::Stale,
         ThreadStatus::Waiting => Phase::WaitingForInput,
         ThreadStatus::Running => Phase::Running,
-        ThreadStatus::Ready | ThreadStatus::Done => Phase::Completed,
-        ThreadStatus::Exited | ThreadStatus::Error => Phase::Failed,
+        ThreadStatus::Ready => Phase::Completed,
+        // `Done` is a clean exit: the process is gone, so announcing the
+        // terminal as ready for input would be a lie. It sits with the other
+        // dead-process statuses; the detail keeps exit code 0 out of the text.
+        ThreadStatus::Done | ThreadStatus::Exited | ThreadStatus::Error => Phase::Failed,
         // Parked, not gone. Neither has a turn behind it and neither is worth
         // waking somebody for, which is the only distinction this value draws.
         ThreadStatus::Idle => Phase::Starting,
@@ -381,7 +385,12 @@ mod tests {
     #[test]
     fn a_finished_turn_and_a_finished_process_are_different_phases() {
         assert_eq!(derive(&facts(ThreadStatus::Ready, true)).phase, "completed");
-        assert_eq!(derive(&facts(ThreadStatus::Done, false)).phase, "completed");
+        // A clean exit is still a dead process: never announced as ready.
+        let mut done = facts(ThreadStatus::Done, false);
+        done.exit_code = Some(0);
+        let done = derive(&done);
+        assert_eq!(done.phase, "failed");
+        assert_eq!(done.detail, "The process is gone — boite");
         let mut f = facts(ThreadStatus::Exited, false);
         f.exit_code = Some(137);
         let a = derive(&f);

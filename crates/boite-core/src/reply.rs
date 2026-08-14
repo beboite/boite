@@ -67,7 +67,9 @@ impl Reply {
             Reply::No => "no",
             Reply::Enter => "enter",
             Reply::Escape => "escape",
-            Reply::Choice(n) => TOKENS[(n as usize) + 3],
+            // `Choice` is a public variant, so the payload is not guaranteed to
+            // have come through `parse`; clamp rather than index out of bounds.
+            Reply::Choice(n) => TOKENS[(n.clamp(1, 9) as usize) + 3],
         }
     }
 

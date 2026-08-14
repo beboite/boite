@@ -5,7 +5,7 @@
     "running": "running",
     "waiting": "waiting_for_input",
     "ready": "completed",
-    "done": "completed",
+    "done": "failed",
     "exited": "failed",
     "error": "failed",
     "stopped": "stale"

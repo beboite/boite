@@ -73,7 +73,8 @@ describe("phaseOf", () => {
 
   it("tells a turn ending from a process ending", () => {
     expect(phaseOf("ready", true)).toBe("completed");
-    expect(phaseOf("done", false)).toBe("completed");
+    // A clean exit is still a dead process: never announced as ready.
+    expect(phaseOf("done", false)).toBe("failed");
     expect(phaseOf("exited", false)).toBe("failed");
     expect(phaseOf("error", false)).toBe("failed");
   });

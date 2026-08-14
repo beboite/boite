@@ -32,7 +32,13 @@ self.addEventListener("push", (event) => {
   } catch {
     if (event.data) payload.body = event.data.text();
   }
-  const url = new URL(payload.url || "/", self.location.origin).href;
+  // The payload is only as trusted as whoever can post to the subscription:
+  // an absolute cross-origin `url` must not survive into the tap target.
+  const resolved = new URL(payload.url || "/", self.location.origin);
+  const url =
+    resolved.origin === self.location.origin
+      ? resolved.href
+      : new URL("/", self.location.origin).href;
   event.waitUntil(
     self.registration.showNotification(payload.title, {
       body: payload.body,
