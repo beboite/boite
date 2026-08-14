@@ -428,18 +428,57 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
         // to the remote backend's capability surface first). Kept because the
         // smoke script is how a fresh deployment gets checked.
         "notify.test" => {
-            let title = params
-                .get("title")
+            let thread_id = params
+                .get("threadId")
                 .and_then(|v| v.as_str())
-                .unwrap_or("Boite")
+                .unwrap_or("test")
                 .to_string();
-            let body = params
-                .get("body")
-                .and_then(|v| v.as_str())
-                .unwrap_or("Test notification")
-                .to_string();
-            state.notifier.send(&title, &body, "test").await;
+            let who = state.store.thread_context(&thread_id);
+            // A real awareness value rather than a hand-made pair of strings, so
+            // what a fresh deployment receives is shaped exactly like what it
+            // will receive in anger — the link included, which is the half most
+            // likely to be misconfigured.
+            let aware = boite_core::awareness::derive(&boite_core::awareness::Facts {
+                thread_id: &thread_id,
+                label: who
+                    .as_ref()
+                    .map(|w| w.label.as_str())
+                    .unwrap_or("Test terminal"),
+                project_id: who.as_ref().and_then(|w| w.project_id.as_deref()),
+                project: who.as_ref().and_then(|w| w.project.as_deref()),
+                status: boite_core::status::ThreadStatus::Waiting,
+                exit_code: None,
+                has_process: true,
+                approval: None,
+            });
+            state.notifier.send(&aware).await;
             Ok(json!({ "ok": true, "enabled": state.notifier.enabled() }))
+        }
+
+        // Answering a dialog that is up in a terminal, from wherever the user
+        // happens to be. The bound is `boite_core::reply`: a closed vocabulary
+        // of single keystrokes, nothing that can carry a payload.
+        //
+        // This arm is why the capability is here rather than on the command bus.
+        // `dispatch` is reached only after `ws::authenticate`, so the caller is a
+        // device holding the workspace token, which is the user; an agent reaches
+        // the bus through its own endpoint with a narrower grant, and there is
+        // deliberately no route on that endpoint for this. An agent able to
+        // answer its own permission prompts has no permission prompts.
+        //
+        // It does **not** require the socket to have attached to the thread, and
+        // the binary input frame in `ws.rs` does. That is not an oversight and
+        // the two rules are answering different questions: attachment is what
+        // stops a client streaming keystrokes into a terminal it is not looking
+        // at, and the whole point of this call is a phone that has never opened
+        // this terminal answering the notification that woke it. What replaces
+        // attachment as the bound is the vocabulary, which is why it is a parsed
+        // token here and raw bytes there.
+        "thread.reply" => {
+            let thread_id = str_param(&params, "threadId")?;
+            let reply = boite_core::reply::Reply::parse(&str_param(&params, "answer")?)?;
+            state.registry.write(&thread_id, reply.bytes())?;
+            Ok(json!({ "ok": true }))
         }
 
         // Web Push: the PWA fetches the VAPID public key, subscribes its browser
@@ -598,6 +637,50 @@ mod tests {
         // The host is allowed to be absent. It is not allowed to be present and
         // empty, which is what a trimmed `/etc/hostname` used to leave behind.
         assert!(hello["host"].is_null() || !hello["host"].as_str().unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The bound on the one call that writes into a live terminal, checked
+    /// where it is actually enforced rather than in the enum that defines it.
+    ///
+    /// Every refusal below reaches the PTY layer with nothing at all, which is
+    /// the property: an answer this dispatcher accepts is one keystroke from a
+    /// closed set, and everything else stops here. A hole in this arm is
+    /// arbitrary code on the machine hosting the workspace.
+    #[tokio::test]
+    async fn only_a_bounded_answer_reaches_a_terminal() {
+        let dir = scratch("reply");
+        let state = state_for_test(&dir);
+        for answer in [
+            json!(""),
+            json!("Y"),
+            json!("yes\r"),
+            json!("0"),
+            json!("10"),
+            json!("rm -rf /"),
+            json!("\u{1b}[A"),
+            json!("enter "),
+            json!(1),
+            json!(null),
+        ] {
+            let err = call(&state, "thread.reply", json!({ "threadId": "t", "answer": answer }))
+                .await
+                .unwrap_err();
+            assert!(
+                err.contains("not an answer") || err.contains("missing param"),
+                "{answer} was refused for the wrong reason: {err}"
+            );
+        }
+        // A token from the vocabulary gets past the parse and is then refused by
+        // the registry, which is the only thing left between it and a PTY.
+        let err = call(
+            &state,
+            "thread.reply",
+            json!({ "threadId": "nobody", "answer": "enter" }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err, "thread not live");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
