@@ -425,6 +425,7 @@ pub fn run() {
             commands::records::records_settings_set,
             commands::records::records_workspace_info,
             commands::records::records_workspace_set_info,
+            commands::records::records_search,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
