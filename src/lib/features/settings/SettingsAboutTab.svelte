@@ -65,7 +65,7 @@
   const boiteHost = $derived(server?.host ?? t("about.boiteSilent"));
 </script>
 
-<SettingsCard title={t("about.title")} description={t("about.description")}>
+<SettingsCard title={t("about.title")} anchor="about.title" description={t("about.description")}>
   <div class="flex items-center gap-3 rounded-lg border border-border bg-[var(--color-surface-2)] px-3 py-2.5">
     <span class="shrink-0 text-muted-foreground/50"><BoiteLogo size={32} /></span>
     <dl class="grid min-w-0 flex-1 grid-cols-[auto_1fr] items-baseline gap-x-3 gap-y-1 text-xs">

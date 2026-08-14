@@ -1,9 +1,12 @@
 <script lang="ts">
   import { t } from "$lib/i18n/index.svelte";
+  import { settingAnchorId } from "$lib/features/settings/catalogue";
 
   type Props = {
     label: string;
     description?: string;
+    /** See SettingsCard: the key this is labelled with, for settings search. */
+    anchor?: string;
     enabled: boolean;
     onLabel?: string;
     offLabel?: string;
@@ -12,6 +15,7 @@
   let {
     label,
     description = "",
+    anchor,
     enabled,
     onLabel = t("common.on"),
     offLabel = t("common.off"),
@@ -24,8 +28,9 @@
 <button
   type="button"
   role="switch"
+  id={anchor ? settingAnchorId(anchor) : undefined}
   aria-checked={enabled}
-  class="group flex w-full items-center justify-between gap-3 rounded-lg border border-border bg-[var(--color-surface)] px-3 py-2.5 text-left transition hover:border-foreground/25"
+  class="group scroll-mt-4 flex w-full items-center justify-between gap-3 rounded-lg border border-border bg-[var(--color-surface)] px-3 py-2.5 text-left transition hover:border-foreground/25"
   onclick={onToggle}
 >
   <div class="min-w-0 flex-1">
