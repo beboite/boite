@@ -17,6 +17,14 @@
  * process and its size, and draws with the DOM renderer until it is granted
  * again.
  *
+ * Asking to stop is not the same as giving back, though, and that distinction is
+ * the whole difference between a budget and a churn machine. A hidden pane that
+ * dropped its context every time would pay a teardown and a rebuild for nothing
+ * while the window is nowhere near the ceiling, and `visible` is per group here,
+ * so one group switch flips a dozen panes at once. A holder that stopped wanting
+ * therefore keeps what it has and simply moves to the front of the eviction
+ * queue: it only loses the context when a wanter actually needs the slot.
+ *
  * The bookkeeping is deliberately free of anything WebGL: it hands out slots
  * and calls back, which is what makes the eviction order testable without a
  * canvas.
@@ -31,6 +39,19 @@
  */
 export const DEFAULT_RENDER_BUDGET = 12;
 
+/**
+ * How long a revocation waits for the rest of its batch.
+ *
+ * A pane is shown or hidden with its whole group, as a burst of independent
+ * effects in no guaranteed order, so the queue mid-burst says things that are
+ * true for a microtask: every pane of the arriving group asking before a single
+ * one of the leaving group has stopped. Revoking on that reading and granting it
+ * back a tick later is a GPU context destroyed and rebuilt per pane for a
+ * decision that never held. Only the destructive edge waits; a grant that costs
+ * nobody anything is immediate, because there is nothing for it to wait for.
+ */
+export const REVOKE_SETTLE_MS = 150;
+
 export type RenderSlotHandlers = {
   /**
    * The slot is yours. Called at most once per grant, never re-entrantly, and
@@ -43,8 +64,9 @@ export type RenderSlotHandlers = {
 
 export type RenderSlot = {
   /**
-   * Whether this pane wants a context at all. A hidden pane wants none, and
-   * that is the whole point of the budget: panes off screen pay nothing.
+   * Whether this pane wants a context at all. A hidden pane wants none, which
+   * puts it at the head of the eviction queue rather than taking anything from
+   * it: off screen is what makes a pane cheap to evict, not what evicts it.
    */
   want(on: boolean): void;
   /**
@@ -53,7 +75,11 @@ export type RenderSlot = {
    */
   touch(): void;
   granted(): boolean;
-  /** Leaves the budget for good, returning whatever it held. */
+  /**
+   * Leaves the budget for good, freeing whatever it held for the others. No
+   * `revoke` comes back for it: a caller disposing its slot is tearing its own
+   * renderer down anyway, so releasing the context is its job, not ours.
+   */
   dispose(): void;
 };
 
@@ -72,15 +98,31 @@ type Entry = {
   live: boolean;
 };
 
-export function createRenderBudget(limit = DEFAULT_RENDER_BUDGET): RenderBudget {
+export function createRenderBudget(
+  limit = DEFAULT_RENDER_BUDGET,
+  settleMs = REVOKE_SETTLE_MS,
+): RenderBudget {
   const entries = new Set<Entry>();
   let seq = 0;
+  let settleTimer: ReturnType<typeof setTimeout> | null = null;
 
-  function rebalance() {
-    const wanters = [...entries].filter((e) => e.live && e.wants);
-    wanters.sort((a, b) => b.seq - a.seq);
-    const keep = new Set(wanters.slice(0, limit));
+  /**
+   * Who should be holding a context once the dust settles: the panes asking,
+   * most recently shown first, and then the panes still holding one without
+   * asking any more, in the same order.
+   *
+   * That second half is what keeps a hidden pane's context in place. It sits
+   * below every wanter, so it is spent the moment one needs a slot and never
+   * before, and among themselves the oldest hidden pane is spent first.
+   */
+  function plan(): Set<Entry> {
+    const recentFirst = (a: Entry, b: Entry) => b.seq - a.seq;
+    const wanters = [...entries].filter((e) => e.live && e.wants).sort(recentFirst);
+    const idle = [...entries].filter((e) => e.live && e.granted && !e.wants).sort(recentFirst);
+    return new Set([...wanters, ...idle].slice(0, limit));
+  }
 
+  function apply(keep: Set<Entry>) {
     // Revoke before granting, in that order and in two passes: a grant issued
     // while the context it is paid for is still held is exactly the race the
     // budget exists to avoid.
@@ -91,11 +133,36 @@ export function createRenderBudget(limit = DEFAULT_RENDER_BUDGET): RenderBudget 
       }
     }
     for (const entry of keep) {
-      if (!entry.granted) {
+      if (!entry.granted && entry.wants) {
         entry.granted = true;
         entry.handlers.grant();
       }
     }
+  }
+
+  function rebalance() {
+    const keep = plan();
+    const pressure = [...entries].some((e) => e.granted && !keep.has(e));
+    if (!pressure) {
+      // Room for everyone, so there is nothing to take and nothing to wait for.
+      // Any pass that was waiting to take something is answering a queue this
+      // one has already replaced.
+      if (settleTimer !== null) {
+        clearTimeout(settleTimer);
+        settleTimer = null;
+      }
+      apply(keep);
+      return;
+    }
+    // Over the ceiling, so every grant this plan is holding is paid for by one
+    // of its revocations and none of it can be split off and done now. Let the
+    // burst finish and plan again from what it settled on, which more often than
+    // not is a queue that needs no revocation at all.
+    if (settleTimer !== null) clearTimeout(settleTimer);
+    settleTimer = setTimeout(() => {
+      settleTimer = null;
+      apply(plan());
+    }, settleMs);
   }
 
   return {

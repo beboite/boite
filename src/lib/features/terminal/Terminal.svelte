@@ -359,6 +359,16 @@
   let webglImpossible = false;
   let contextLosses = 0;
   const CONTEXT_LOSS_GIVE_UP = 3;
+  /** When the context this pane is drawing with was handed over. */
+  let webglLoadedAt = 0;
+  /**
+   * Past this, a context has been doing its job and whatever killed it was an
+   * event, not a pattern. A driver reset fires a loss on every live context at
+   * once, and a tally that only ever goes up turns three of those, spread over
+   * an afternoon, into a pane stuck on the DOM renderer for the life of the
+   * window. Only losses that come back to back mean asking again is a loop.
+   */
+  const CONTEXT_LOSS_FRESH_MS = 30_000;
 
   /**
    * Hands rendering to the GPU, but only once the cell has a measured size.
@@ -393,36 +403,94 @@
       const addon = new WebglAddon();
       // A loss is the browser reclaiming the context, which is what happens
       // when something outside the budget takes one. Dispose so xterm falls
-      // back to the DOM renderer, and let the next fit ask again. The pane
-      // used to keep the dead addon and never draw on the GPU again, for the
-      // life of the window.
+      // back to the DOM renderer, and ask for it again. The pane used to keep
+      // the dead addon and never draw on the GPU again, for the life of the
+      // window.
       addon.onContextLoss(() => {
+        // Identity first, the tally included: an addon this pane has already
+        // replaced is free to lose whatever it likes, and counting that against
+        // the live one is how a single teardown reads as a failing GPU.
+        if (webgl !== addon) {
+          addon.dispose();
+          return;
+        }
+        webgl = null;
+        if (performance.now() - webglLoadedAt > CONTEXT_LOSS_FRESH_MS) contextLosses = 0;
         contextLosses++;
-        if (webgl === addon) webgl = null;
         addon.dispose();
         if (contextLosses >= CONTEXT_LOSS_GIVE_UP) {
-          webglImpossible = true;
-          renderSlot.want(false);
+          giveUpOnWebgl();
           logger.warn(
             "terminal",
             `${thread.label}: giving up on the GPU renderer after ${contextLosses} context losses`,
           );
+          return;
         }
+        // Nothing about a lost context resizes anything, so leaving the retry to
+        // the next fit leaves an idle pane holding a granted slot with no context
+        // in it until someone happens to drag a splitter. Ask for the fit here.
+        scheduleFit();
       });
       term.loadAddon(addon);
       webgl = addon;
+      webglLoadedAt = performance.now();
     } catch {
       // WebGL unavailable (e.g. webkit2gtk without GPU). Fall back to DOM
-      // renderer, and stop asking: it will not appear later, and holding a slot
-      // for it would starve a pane that can use one.
-      webglImpossible = true;
-      renderSlot.want(false);
+      // renderer, and stop asking: it will not appear later.
+      giveUpOnWebgl();
     }
   }
 
+  /**
+   * Out of the budget, not merely quiet in it. A slot only stops asking when its
+   * pane is hidden, which is temporary and keeps the context in place until
+   * someone needs it; this is permanent, and a pane that can never use a context
+   * must not sit on a share of the ceiling that a pane which can is waiting for.
+   */
+  function giveUpOnWebgl() {
+    webglImpossible = true;
+    renderSlot.dispose();
+  }
+
+  /**
+   * Hands the context back, for real.
+   *
+   * Disposing the addon detaches the canvas and drops xterm's atlas cache entry,
+   * but it never calls `loseContext()`, so the context itself lives until the
+   * canvas is collected. A revoked slot that leaves a live context behind is not
+   * a budget, it is a delay: the window drifts past the browser's ceiling anyway,
+   * the browser reclaims on its own terms, and what lands on the panes still
+   * drawing is the very `webglcontextlost` this whole thing exists to avoid.
+   *
+   * The extension is taken before `dispose()`, because the renderer holding it is
+   * what dispose tears down, and `loseContext()` is called after, once xterm has
+   * stopped listening: otherwise our own release comes back as a context loss and
+   * counts against the pane.
+   */
   function unloadWebgl() {
-    webgl?.dispose();
+    const addon = webgl;
     webgl = null;
+    if (!addon) return;
+    const lose = webglLoseContext(addon);
+    addon.dispose();
+    lose?.loseContext();
+  }
+
+  /**
+   * The context an addon is drawing with, reached through two private fields:
+   * `@xterm/addon-webgl` publishes its texture atlas and nothing else, and there
+   * is no public route to the render canvas. Probed rather than typed, so an
+   * upgrade that renames either one costs a context that dies at GC, which is
+   * where this started, instead of throwing on every pane teardown.
+   */
+  function webglLoseContext(addon: WebglAddon): WEBGL_lose_context | null {
+    try {
+      const gl = (addon as unknown as { _renderer?: { _gl?: WebGL2RenderingContext } })._renderer
+        ?._gl;
+      return gl?.getExtension("WEBGL_lose_context") ?? null;
+    } catch {
+      return null;
+    }
   }
 
   // Coalescing to one fit per frame is not enough for a splitter drag: the
@@ -1246,6 +1314,10 @@
   // is what keeps the window under the browser's context ceiling however many
   // threads are open: a hidden terminal stays mounted, keeps its PTY and its
   // scrollback, and draws with the DOM renderer nobody is looking at.
+  //
+  // `visible` is per group, so this fires for every pane of two groups on one
+  // switch. Nothing is torn down on that alone: hiding only offers the context
+  // up, and the budget takes it when a pane on screen actually needs it.
   $effect(() => {
     renderSlot.want(visible && !webglImpossible);
   });
