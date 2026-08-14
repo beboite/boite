@@ -223,6 +223,12 @@ link onto the project's instead, created when the worktree is handed out
 directory, for the same reason the shared artifacts are unlinked there: on
 Windows a delete that meets a junction walks into it).
 
+The boot pass is what reaches the worktrees that already existed: `repair`
+asks `worktree.migrate` about every thread that has one, and a directory
+already where it belongs answers itself, so the same arm folds that worktree's
+own store into the pool. Nothing is overwritten on the way in, and a store
+holding a session id the pool already has keeps both and stays its own.
+
 Two consequences, both load-bearing. **Every scan of those stores skips the
 links** (`find_claude_session_blocking`, `collect_usage_blocking`): a transcript
 reached through two names is one transcript, and a project with ten open threads

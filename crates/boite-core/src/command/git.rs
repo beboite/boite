@@ -550,14 +550,21 @@ impl Git {
                 let to = git::scoped_dir_for(&base, &thread_id)
                     .to_string_lossy()
                     .to_string();
-                // The link is named after the directory, so a directory that
-                // moves takes its old name out of the store and puts the new
-                // one in. Skipping the first half would leave a link pointing
-                // at the project's pool from a path that no longer exists.
-                session::unshare_session_stores(&from);
                 let landed = git::migrate_worktree_blocking(&repo, &from, &to)?;
-                if let Some(path) = landed.as_deref() {
-                    session::share_session_stores(&repo, path);
+                // A link is named after the directory it stands for, so one
+                // that moves leaves its old name behind and takes a new one.
+                // This also runs once per thread at boot, over a directory that
+                // is already where it belongs, which is how a worktree made
+                // before the pool existed gets its own store folded into it.
+                match landed.as_deref() {
+                    Some(path) => {
+                        if path != from {
+                            session::unshare_session_stores(&from);
+                        }
+                        session::share_session_stores(&repo, path);
+                    }
+                    // Gone: the link names a directory that is not there.
+                    None => session::unshare_session_stores(&from),
                 }
                 // No path and nothing left to move: the directory is gone, and
                 // the thread has to stop pointing at it rather than retry every
