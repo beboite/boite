@@ -6,6 +6,7 @@
   import { todos } from "$lib/features/todo/store.svelte";
   import { ownsPoll, releasePoll } from "./poll-owner";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
+  import { toastInset } from "$lib/features/notifications/anchor.svelte";
   import { relativeClock } from "$lib/shared/utils/clock.svelte";
   import { formatAgo } from "$lib/shared/utils/relative-time";
   import { t } from "$lib/i18n/index.svelte";
@@ -147,8 +148,14 @@
     aria-label={t("infoBox.label")}
     tabindex="0"
   >
+    <!-- use:toastInset: the toast stack lands in this same corner, and this is
+         what sends it below the box instead of on top of it. On the card, so
+         the unfolded log is measured too: it grows into exactly the room the
+         stack was pushed into and draws under it, so a stack that stayed put
+         would hide rows two to ten behind opaque toasts. -->
     <div
       class="overflow-hidden rounded-lg border border-border bg-[var(--color-surface)]/95 shadow-md backdrop-blur transition group-hover:shadow-lg"
+      use:toastInset
     >
       {#if isRepo}
         <div class="flex items-center gap-1.5 px-2.5 pt-1.5 pb-1 text-xs">

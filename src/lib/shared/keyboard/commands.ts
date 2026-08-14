@@ -34,6 +34,7 @@ export const KEY_COMMANDS: KeyCommandDef[] = [
   { id: "view.zoomOut", group: "view", labelKey: "keybindings.cmd.zoomOut" },
   { id: "view.zoomReset", group: "view", labelKey: "keybindings.cmd.zoomReset" },
   { id: "palette.toggle", group: "view", labelKey: "keybindings.cmd.palette" },
+  { id: "palette.files", group: "view", labelKey: "keybindings.cmd.goToFile" },
   { id: "thread.new", group: "thread", labelKey: "keybindings.cmd.newThread" },
   { id: "thread.next", group: "thread", labelKey: "keybindings.cmd.nextThread" },
   { id: "thread.previous", group: "thread", labelKey: "keybindings.cmd.previousThread" },

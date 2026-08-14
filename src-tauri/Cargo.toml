@@ -27,13 +27,16 @@ tauri-plugin-window-state = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-single-instance = "2"
 base64 = "0.23"
+# Encodes what `capture_pane` photographed. Pure Rust and pulls nothing else
+# in; the `image` crate would bring twelve codecs for the one this writes.
+png = "0.18"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Agent-facing todo endpoint. Loopback only, and deliberately not the dev
 # mcp-bridge: that one answers execute_js, this one answers three verbs on one
 # table.
 axum = "0.8"
-tokio = { version = "1", features = ["rt-multi-thread", "net"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "sync"] }
 rand = "0.10"
 # A browser pane's address is a document the app is about to host in its own
 # window, so it is parsed rather than prefix-matched: `http://evil.com@localhost`
@@ -84,6 +87,9 @@ windows = { version = "0.61", features = [
   "Win32_Foundation",
   "Win32_Graphics_Gdi",
   "Win32_UI_WindowsAndMessaging",
+  # PrintWindow, which the pane screenshot paints through, is filed under XPS
+  # of all places.
+  "Win32_Storage_Xps",
 ] }
 
 # AppKit posts the only fullscreen signal that arrives when the transition
