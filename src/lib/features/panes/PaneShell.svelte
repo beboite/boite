@@ -151,7 +151,11 @@
            and this rectangle is the only thing that tells it where to go. -->
       <div class="pane-body" use:measure={node.paneId}>
         {#if !isThread}
-          <PaneContentView content={node.content} projectId={group.projectId} />
+          <PaneContentView
+            content={node.content}
+            projectId={group.projectId}
+            paneId={node.paneId}
+          />
         {/if}
       </div>
     </div>

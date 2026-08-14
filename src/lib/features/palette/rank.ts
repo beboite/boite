@@ -34,7 +34,10 @@ export function rankRows(rows: PaletteRow[], query: string): PaletteRow[] {
   const content: PaletteRow[] = [];
   for (const r of rows) {
     const section = r.c.section;
-    if (section === "content") {
+    // `files` joins `content` here rather than being scored: file mode draws its
+    // own list from the backend and never reaches this function, so a file row
+    // arriving in a command-mode list is one that has no ranking to compute.
+    if (section === "content" || section === "files") {
       content.push(r);
       continue;
     }

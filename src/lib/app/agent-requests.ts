@@ -30,9 +30,12 @@ import { createProject } from "$lib/features/project/api";
 import { moveThreadToProject } from "$lib/features/thread/move";
 import { takesOpeningPrompt } from "$lib/features/thread/session";
 import { launchAgent } from "$lib/features/thread/api";
-import { anchorProjectId, openPane } from "$lib/features/panes/open";
-import { paneStore } from "$lib/features/panes/store.svelte";
+import { anchorPaneId, anchorProjectId, openPane } from "$lib/features/panes/open";
+import { leafNodesOf, paneStore } from "$lib/features/panes/store.svelte";
 import { classifyBrowserUrl, isLoopbackHost } from "$lib/features/browser/url";
+import { browserPanes } from "$lib/features/browser/state.svelte";
+import { paneDriver } from "$lib/features/browser/driver";
+import { backend } from "$lib/backend/active.svelte";
 import { confirmDialog } from "$lib/shared/components/confirm.svelte";
 import type { DropSide, PaneContent } from "$lib/features/panes/types";
 import type { IconKey } from "$lib/types";
@@ -80,11 +83,67 @@ interface PaneOpenRequest {
   side?: DropSide | null;
 }
 
+/**
+ * An agent driving a browser pane it already opened.
+ *
+ * Three verbs and one shape, because they differ only in what they do once the
+ * pane is found and every check before that is the same one. The endpoint has
+ * usually run those checks already, off the window's own description; this runs
+ * them again because the endpoint cannot see a window it does not have — a
+ * headless boite dispatches these blind, and the device is the only side that
+ * knows which panes exist. Same reasoning as `paneContentOf`: the frame is
+ * created here, so the last word belongs here.
+ */
+interface BrowserDriveRequest {
+  kind: "browser.navigate" | "browser.reload" | "browser.close";
+  projectId: string;
+  /** The thread that asked. It has to match the pane's mark or nothing moves. */
+  callerThreadId?: string | null;
+  /** Which pane, when the agent is driving more than one. */
+  paneId?: string | null;
+  url?: string | null;
+  /** The endpoint's reading of the address: off this machine, so ask first. */
+  external?: boolean | null;
+}
+
+/**
+ * An agent asking what is in the page, or acting on one element of it.
+ *
+ * Unlike the drive verbs these carry a `requestId` and OWE an answer: the
+ * host keeps the asking HTTP handler on the line until the webview resolves
+ * it through `backend().answerAgentRequest`. Every refusal therefore answers
+ * too — a dropped question here is an agent staring at a timeout.
+ */
+interface BrowserAskRequest {
+  kind:
+    | "browser.snapshot"
+    | "browser.screenshot"
+    | "browser.click"
+    | "browser.type"
+    | "browser.press"
+    | "browser.scroll";
+  requestId: string;
+  projectId: string;
+  callerThreadId?: string | null;
+  paneId?: string | null;
+  mode?: string | null;
+  maxChars?: number | null;
+  uid?: string | null;
+  double?: boolean | null;
+  text?: string | null;
+  clear?: boolean | null;
+  submit?: boolean | null;
+  key?: string | null;
+  dy?: number | null;
+}
+
 type AgentRequest =
   | MoveRequest
   | CreateRequest
   | SpawnRequest
-  | PaneOpenRequest;
+  | PaneOpenRequest
+  | BrowserDriveRequest
+  | BrowserAskRequest;
 
 /**
  * Which machine's process wrote the request.
@@ -331,7 +390,202 @@ async function paneContentOf(
     });
     if (!ok) return null;
   }
-  return { kind: "browser", url: target.url };
+  // The pane is marked as the caller's from the moment it exists, which is what
+  // every later call checks against and what the pane's own header shows.
+  return { kind: "browser", url: target.url, drivenBy: req.callerThreadId ?? null };
+}
+
+/**
+ * The browser panes of the group the page is drawing.
+ *
+ * The same set the window describes to the endpoint, read the same way: panes
+ * in another group are not on screen, and a pane the user cannot see is not one
+ * an agent should be moving.
+ */
+function browserLeaves(): { paneId: string; url: string; drivenBy: string | null }[] {
+  const anchor = anchorPaneId();
+  const group = anchor ? paneStore.groupOf(anchor) : null;
+  if (!group) return [];
+  return leafNodesOf(group.root).flatMap((leaf) =>
+    leaf.content.kind === "browser"
+      ? [{ paneId: leaf.paneId, url: leaf.content.url, drivenBy: leaf.content.drivenBy ?? null }]
+      : [],
+  );
+}
+
+/**
+ * Point, reload or close a pane the agent is already driving.
+ *
+ * Every refusal here is silent to the user and loud in the log. The agent was
+ * told why at the endpoint, and a toast for each one would put an agent's
+ * mistakes on the screen of the person it is working for.
+ */
+async function handleBrowserDrive(req: BrowserDriveRequest, from: RequestSource) {
+  if (anchorProjectId() !== req.projectId) {
+    logger.warn("agent-request", "browser call for a project that is not on screen, dropping it", {
+      asked: req.projectId,
+    });
+    return;
+  }
+  const panes = browserLeaves();
+  const caller = req.callerThreadId ?? "";
+  const pane = req.paneId
+    ? panes.find((p) => p.paneId === req.paneId)
+    : panes.length === 1
+      ? panes[0]
+      : undefined;
+  if (!pane) {
+    logger.warn("agent-request", "no browser pane to drive, dropping it", {
+      asked: req.paneId ?? "",
+      open: panes.length,
+    });
+    return;
+  }
+  // The hand-back, enforced. A pane with no mark is the user's, and an agent
+  // whose thread is not the mark is driving somebody else's.
+  if (!caller || pane.drivenBy !== caller) {
+    logger.warn("agent-request", "that browser pane is not the caller's, dropping it", {
+      pane: pane.paneId,
+    });
+    return;
+  }
+
+  if (req.kind === "browser.reload") {
+    browserPanes.reload(pane.paneId);
+    return;
+  }
+  if (req.kind === "browser.close") {
+    paneStore.closePane(pane.paneId);
+    return;
+  }
+  if (!req.url) {
+    logger.warn("agent-request", "browser navigate with no url, dropping it");
+    return;
+  }
+  const target = classifyBrowserUrl(req.url, {
+    requesterIsThisMachine: writtenOnThisMachine(from),
+  });
+  if (!target.ok) {
+    logger.warn("agent-request", "browser navigate refused", { url: req.url, reason: target.reason });
+    notifications.error(t(`browser.refuse.${target.reason}`));
+    return;
+  }
+  // Same rule as opening one: the agent chose the page, and it is not the
+  // agent's window. A missing `external` is not a no.
+  if (!target.local || req.external !== false) {
+    const ok = await confirmDialog.ask({
+      title: t("browser.confirmExternalTitle"),
+      message: t("browser.confirmExternal", { url: target.url }),
+      confirmLabel: t("browser.confirmExternalOpen"),
+    });
+    if (!ok) return;
+  }
+  paneStore.setBrowser(pane.paneId, { url: target.url });
+}
+
+/**
+ * Answer a page question: find the pane, ask the driver in its frame, hand
+ * whatever came back to the host that is holding the agent's call open.
+ *
+ * The endpoint already ran these checks against the window's description;
+ * they run again here because the description it read may be five seconds
+ * old, and the pane store is the present tense. A refusal is an answer like
+ * any other: the agent reads the sentence instead of waiting out a timeout.
+ */
+async function handleBrowserAsk(req: BrowserAskRequest) {
+  const answer = (payload: Record<string, unknown>) => {
+    const be = backend();
+    if (!be.answerAgentRequest) {
+      logger.warn("agent-request", "a page question landed on a device with no answer channel", {
+        kind: req.kind,
+      });
+      return;
+    }
+    be.answerAgentRequest(req.requestId, payload).catch((e) =>
+      logger.warn("agent-request", "could not hand the answer back", { error: String(e) }),
+    );
+  };
+
+  if (anchorProjectId() !== req.projectId) {
+    answer({ error: "the window moved to another project while you were asking" });
+    return;
+  }
+  const panes = browserLeaves();
+  const caller = req.callerThreadId ?? "";
+  const pane = req.paneId
+    ? panes.find((p) => p.paneId === req.paneId)
+    : panes.length === 1
+      ? panes[0]
+      : undefined;
+  if (!pane) {
+    answer({ error: "that browser pane is not on the screen any more" });
+    return;
+  }
+  if (!caller || pane.drivenBy !== caller) {
+    answer({ error: "the user has taken that pane back, so it is theirs to read now" });
+    return;
+  }
+
+  const verb = req.kind.slice("browser.".length);
+
+  // The screenshot is the one question the frame cannot answer about itself:
+  // pixels of a cross-origin document are exactly what the web refuses to
+  // hand to a page. The OS paints them instead, through the backend, and the
+  // driver only contributes the crop rectangle when one element was asked.
+  if (verb === "screenshot") {
+    const be = backend();
+    if (!be.capturePane) {
+      answer({
+        error:
+          "this device cannot photograph the pane; browser_snapshot reads it as elements and text",
+      });
+      return;
+    }
+    const box = paneDriver.frameBox(pane.paneId);
+    if (!box) {
+      answer({ error: "that pane is not drawn right now" });
+      return;
+    }
+    let crop = { x: box.x, y: box.y, w: box.width, h: box.height };
+    if (req.uid) {
+      const located = await paneDriver.ask(pane.paneId, "locate", { uid: req.uid });
+      if (located.error) {
+        answer(located);
+        return;
+      }
+      const r = located.rect as { x: number; y: number; w: number; h: number };
+      // A little context around the element: a bare button with no
+      // surroundings answers fewer questions than it raises.
+      const pad = 8;
+      const rx = Math.max(0, r.x - pad);
+      const ry = Math.max(0, r.y - pad);
+      crop = {
+        x: box.x + rx,
+        y: box.y + ry,
+        w: Math.min(box.width - rx, r.w + pad * 2),
+        h: Math.min(box.height - ry, r.h + pad * 2),
+      };
+    }
+    const dpr = window.devicePixelRatio || 1;
+    try {
+      const shot = await be.capturePane({
+        x: crop.x * dpr,
+        y: crop.y * dpr,
+        w: crop.w * dpr,
+        h: crop.h * dpr,
+      });
+      answer({ image: shot.image, width: shot.width, height: shot.height });
+    } catch (e) {
+      answer({ error: String(e) });
+    }
+    return;
+  }
+
+  const args: Record<string, unknown> = {};
+  for (const key of ["mode", "maxChars", "uid", "double", "text", "clear", "submit", "key", "dy"] as const) {
+    if (req[key] !== undefined && req[key] !== null) args[key] = req[key];
+  }
+  answer(await paneDriver.ask(pane.paneId, verb, args));
 }
 
 async function handle(req: AgentRequest, from: RequestSource) {
@@ -345,6 +599,17 @@ async function handle(req: AgentRequest, from: RequestSource) {
       return handleSpawn(req);
     case "pane.open":
       return handlePaneOpen(req, from);
+    case "browser.navigate":
+    case "browser.reload":
+    case "browser.close":
+      return handleBrowserDrive(req, from);
+    case "browser.snapshot":
+    case "browser.screenshot":
+    case "browser.click":
+    case "browser.type":
+    case "browser.press":
+    case "browser.scroll":
+      return handleBrowserAsk(req);
   }
 }
 
