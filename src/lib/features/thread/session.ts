@@ -3,6 +3,8 @@ import type { LiveClaudeSession, SessionHit, SessionKind } from "$lib/backend/ty
 import { app } from "$lib/app/store.svelte";
 import { detectIconKey } from "$lib/shared/icons/detect";
 import { logger } from "$lib/shared/services/logger.svelte";
+import { notifications } from "$lib/features/notifications/store.svelte";
+import { t } from "$lib/i18n/index.svelte";
 import { settings } from "$lib/features/settings/store.svelte";
 import { mcpArgsFor } from "./agentMcp";
 import { stageTypedPrompt } from "./typedPrompt";
@@ -158,6 +160,51 @@ export async function releaseClaudeSession(
     return false;
   } finally {
     liveClaudeCache.clear();
+  }
+}
+
+/**
+ * Takes the conversation to a new folder, and says whether it can still be
+ * resumed there.
+ *
+ * Two callers, one rule: a thread that changes project, and a thread restored
+ * into a worktree that is not the one it was closed in. Claude and pi look a
+ * session up under the directory the CLI ran in, so the transcript has to be
+ * where the agent will be.
+ *
+ * Best effort on purpose, but a `false` here has to be acted on rather than
+ * logged. Relaunching with `--resume` pointed at a transcript that is not in
+ * the new folder does not degrade to a fresh session: claude refuses the id
+ * outright and the thread lands on an error instead of a prompt.
+ */
+export async function carryTranscript(
+  thread: Thread,
+  fromCwd: string,
+  toCwd: string,
+): Promise<boolean> {
+  const kind = sessionKindOf(thread);
+  if (!kind || !thread.sessionId) return true;
+  try {
+    const resumable = await backendForPath(toCwd).session.migrate(
+      kind,
+      thread.sessionId,
+      fromCwd,
+      toCwd,
+    );
+    logger.info(
+      "session",
+      `${thread.id} (${kind}): conversation ${resumable ? "reachable over there" : "did not follow"}`,
+      { sessionId: thread.sessionId, fromCwd, toCwd },
+    );
+    return resumable;
+  } catch (err) {
+    logger.warn(
+      "session",
+      `${thread.id} (${kind}): the transcript stayed behind, the agent comes back without it`,
+      String(err),
+    );
+    notifications.error(t("thread.moveTranscriptFailed", { error: String(err) }));
+    return false;
   }
 }
 

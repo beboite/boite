@@ -707,7 +707,7 @@ fn hardlink_build_output(
 }
 
 #[cfg(windows)]
-pub(super) fn link_dir(src: &Path, dst: &Path) -> std::io::Result<()> {
+pub(crate) fn link_dir(src: &Path, dst: &Path) -> std::io::Result<()> {
     // A junction rather than a symlink: symlink creation needs either developer
     // mode or elevation on Windows, junctions need neither.
     use std::os::windows::process::CommandExt;
@@ -728,12 +728,13 @@ pub(super) fn link_dir(src: &Path, dst: &Path) -> std::io::Result<()> {
     }
 }
 
-// Both arms are `pub(super)`, and that is not decoration: `worktree.rs` reaches
-// this from a test, so an arm left private compiles on the platform whose twin
-// is public and nowhere else. The split raised one and missed the other, and it
-// took a Linux runner to say so.
+// Both arms are `pub(crate)`, and that is not decoration: `worktree.rs` reaches
+// this from a test and `session::shared` points a store at another one with it,
+// so an arm left private compiles on the platform whose twin is public and
+// nowhere else. The split raised one and missed the other, and it took a Linux
+// runner to say so.
 #[cfg(not(windows))]
-pub(super) fn link_dir(src: &Path, dst: &Path) -> std::io::Result<()> {
+pub(crate) fn link_dir(src: &Path, dst: &Path) -> std::io::Result<()> {
     std::os::unix::fs::symlink(src, dst)
 }
 

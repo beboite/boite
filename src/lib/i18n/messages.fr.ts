@@ -980,6 +980,10 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "thread.notSavedOrphan":
     "Impossible d'enregistrer le terminal : il aura disparu au prochain démarrage, laissant {path} sans propriétaire",
   "thread.restored": "{name} restauré",
+  "thread.restoredNewWorktree":
+    "{name} est resté fermé assez longtemps pour que son worktree soit rendu : il revient dans un nouveau",
+  "thread.restoredNoWorktree":
+    "{name} revient sans worktree : le sien a été rendu et aucun nouveau n'a pu être ouvert",
   "thread.noClosedThread": "Aucun terminal fermé à restaurer",
   "thread.moveFailed": "Impossible de déplacer le terminal : {error}",
   "thread.movedTo": "{name} déplacé vers {project}",

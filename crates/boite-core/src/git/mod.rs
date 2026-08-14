@@ -8,7 +8,7 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
-mod artifacts;
+pub(crate) mod artifacts;
 mod forge;
 mod worktree;
 
