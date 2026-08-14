@@ -1,4 +1,5 @@
 import { isFinished } from "$lib/domain/thread-status";
+import { phraseKeys, type AwarenessPhase } from "$lib/domain/awareness";
 import { app } from "$lib/app/store.svelte";
 import { workspace } from "$lib/backend";
 import type { Backend } from "$lib/backend";
@@ -162,15 +163,28 @@ function dropStaleWorkspace() {
  * place that ever sees the transition. A desktop driving a boite got neither
  * this notification nor a web push, since it has no web push at all, in exactly
  * the mode where the window is most likely to be behind something else.
+ *
+ * The words are the awareness phrase table's, not this file's. A window and a
+ * phone reporting the same transition in two different sentences is the same
+ * drift the phase itself was pulled into one place to stop; the phase per arm is
+ * a constant here rather than a second derivation, since the arm the transition
+ * already picked is what names it.
  */
 export function announceStatus(thread: Thread, next: ThreadStatus) {
   dropStaleWorkspace();
   const before = prevStatus.get(thread.id);
   const name = thread.title ?? thread.label;
+  const say = (phase: AwarenessPhase) => {
+    const keys = phraseKeys(phase);
+    void notifyWhenUnfocused(
+      translate(keys.headline, { thread: name }),
+      translate(keys.detail),
+    );
+  };
   if (before !== undefined && next === "waiting" && before !== "waiting") {
-    void notifyWhenUnfocused(name, translate("notification.waitingForYou"));
+    say("waiting_for_input");
   } else if (next === "ready" && before === "running") {
-    void notifyWhenUnfocused(name, translate("notification.readyForInput"));
+    say("completed");
   }
   prevStatus.set(thread.id, next);
 }

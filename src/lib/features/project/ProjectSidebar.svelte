@@ -24,12 +24,15 @@
   import { openProjectDashboard } from "$lib/features/project/dashboard";
   import { isScratch } from "$lib/domain/project";
 import { projectDisplayName } from "$lib/shared/project-label";
+  import { filterSidebar, normaliseTerm } from "./sidebar-filter";
+  import SearchIcon from "@lucide/svelte/icons/search";
   import ThreadGlyph from "$lib/features/thread/ThreadGlyph.svelte";
   import {
     clearFinished,
     justFinished,
   } from "$lib/features/thread/finished.svelte";
   import { mcpPulse } from "$lib/features/thread/agentActivity.svelte";
+  import { jumpDigit, jumpModifier } from "$lib/shared/keyboard/held.svelte";
   import { waitingReasonFor } from "$lib/features/thread/statusEngine";
   import { threadIconColor } from "$lib/features/fastpick/threadAccent";
   import { TONE_COLOR, threadVisual } from "$lib/features/thread/threadVisual";
@@ -77,6 +80,12 @@ import { projectDisplayName } from "$lib/shared/project-label";
   }
 
   let showArchived = $state(false);
+  // Opt-in, so it costs no vertical space in a sidebar whose whole job is to
+  // hold rows. Cleared when it closes: a hidden filter still filtering is a
+  // sidebar that has lost half its threads for no reason anybody can see.
+  let filterOpen = $state(false);
+  let filterTerm = $state("");
+  let filterEl: HTMLInputElement | null = $state(null);
   let remotePicker = $state(false);
 
   /**
@@ -196,6 +205,11 @@ import { projectDisplayName } from "$lib/shared/project-label";
   function threadPointerDown(thread: Thread, e: PointerEvent) {
     if (e.button === 1) e.preventDefault();
     if (e.button !== 0 || isDragBlocked(e.target as HTMLElement)) return;
+    // Reordering is positional: the drop slot is an index into the list on
+    // screen, and while rows are hidden that index is not the one the stored
+    // order is written in. A filtered sidebar clicks and scrolls, it does not
+    // reorder.
+    if (filtering) return;
     e.stopPropagation();
     dragCaptureEl = e.currentTarget as HTMLElement;
     startPointerDrag({
@@ -240,7 +254,7 @@ import { projectDisplayName } from "$lib/shared/project-label";
   }
 
   function projectPointerDown(projectId: string, e: PointerEvent) {
-    if (showArchived) return;
+    if (showArchived || filtering) return;
     if (e.button !== 0 || isDragBlocked(e.target as HTMLElement)) return;
     const project = app.projects.find((p) => p.id === projectId);
     if (!project) return;
@@ -944,17 +958,22 @@ import { projectDisplayName } from "$lib/shared/project-label";
     launcher = null;
   }
 
-  const visibleProjects = $derived(
-    showArchived ? app.archivedProjects : app.sortedProjects,
+  // Narrowed in place, keeping the shape: same projects, same order, same
+  // cards, fewer rows. The palette answers "take me to X" by taking the screen;
+  // this answers "which of these forty is the one about the migration", which
+  // is asked while looking at the list and has to leave the list where it is.
+  const filtered = $derived(
+    filterSidebar(
+      showArchived ? app.archivedProjects : app.sortedProjects,
+      (id: string) => app.threadsByProjectSorted(id),
+      projectDisplayName,
+      filterTerm,
+    ),
   );
 
-  const threadsByProject = $derived.by(() => {
-    const map = new Map<string, Thread[]>();
-    for (const p of visibleProjects) {
-      map.set(p.id, app.threadsByProjectSorted(p.id));
-    }
-    return map;
-  });
+  const visibleProjects = $derived(filtered.projects);
+  const threadsByProject = $derived(filtered.threads);
+  const filtering = $derived(normaliseTerm(filterTerm).length > 0);
 
   const projectSourceIdx = $derived(
     liveDrag && liveDrag.kind === "project"
@@ -1020,6 +1039,21 @@ import { projectDisplayName } from "$lib/shared/project-label";
     <div class="flex items-center gap-0.5">
       <button
         type="button"
+        class="rounded-md p-1 text-muted-foreground transition hover:bg-accent hover:text-foreground {filterOpen
+          ? 'bg-accent text-foreground'
+          : ''}"
+        onclick={() => {
+          filterOpen = !filterOpen;
+          if (!filterOpen) filterTerm = "";
+          else queueMicrotask(() => filterEl?.focus());
+        }}
+        aria-label={t("sidebar.filterThreads")}
+        title={t("sidebar.filterThreads")}
+      >
+        <SearchIcon class="size-4" />
+      </button>
+      <button
+        type="button"
         class="rounded-md p-1 text-muted-foreground transition hover:bg-accent hover:text-foreground {showArchived
           ? 'bg-accent text-foreground'
           : ''}"
@@ -1063,6 +1097,30 @@ import { projectDisplayName } from "$lib/shared/project-label";
       {/if}
     </div>
   </header>
+
+  {#if filterOpen}
+    <div class="px-2 pb-1.5">
+      <input
+        bind:this={filterEl}
+        bind:value={filterTerm}
+        type="search"
+        spellcheck="false"
+        autocomplete="off"
+        placeholder={t("sidebar.filterThreads")}
+        aria-label={t("sidebar.filterThreads")}
+        class="w-full rounded-md border border-border bg-[var(--color-surface-2)] px-2 py-1 text-xs text-foreground outline-none transition placeholder:text-muted-foreground/60 focus:border-foreground/30"
+        onkeydown={(e) => {
+          if (e.key !== "Escape") return;
+          e.stopPropagation();
+          if (filterTerm) {
+            filterTerm = "";
+            return;
+          }
+          filterOpen = false;
+        }}
+      />
+    </div>
+  {/if}
 
   <!-- The empty space below the rows is empty space. It used to clear the
        selection, on the reasoning that being on no project is what aims the
@@ -1284,6 +1342,14 @@ import { projectDisplayName } from "$lib/shared/project-label";
                 keepAwake,
               })}
               {@const fresh = justFinished(thread.id)}
+              <!-- Ctrl+1..9 only ever meant the current project's threads, so
+                   that is the only list numbered. Numbering every project would
+                   put four rows labelled 1 on screen at once, three of which do
+                   nothing. -->
+              {@const digit =
+                jumpModifier.down && project.id === app.currentProjectId
+                  ? jumpDigit(threadIdx)
+                  : null}
               <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
               <li
                 class="thread-row group/thread"
@@ -1357,6 +1423,18 @@ import { projectDisplayName } from "$lib/shared/project-label";
                        beside the row button rather than inside it. Its own CSS
                        is position:relative, which is what keeps it above the
                        overlay that fills the card. -->
+                  {#if digit !== null}
+                    <!-- Over the glyph rather than beside it: a number that
+                         takes its own column reflows every row in the sidebar
+                         the moment the modifier goes down, and a list that
+                         jumps under a held key is worse than no hint. -->
+                    <span
+                      class="pointer-events-none absolute left-1.5 z-[var(--z-chrome)] flex size-4 items-center justify-center rounded-xs bg-[var(--color-surface-3)] text-2xs font-semibold tabular-nums text-foreground shadow-e1"
+                      aria-hidden="true"
+                    >
+                      {digit}
+                    </span>
+                  {/if}
                   <ThreadGlyph
                     status={displayThreadStatus(thread)}
                     iconKey={thread.iconKey}

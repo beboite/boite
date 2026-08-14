@@ -565,6 +565,7 @@ mod tests {
             ("settings.set", MutateProject),
             ("workspace.info", ReadProject),
             ("workspace.setInfo", MutateProject),
+            ("search.query", ReadProject),
         ];
         let actual: Vec<(&str, Capability)> = every_command()
             .iter()
@@ -656,7 +657,7 @@ mod tests {
             "thread": { "id": "t", "projectId": "p", "label": "l", "cmd": "c" },
             "todo": { "id": "d", "projectId": "p", "title": "t", "state": "open",
                       "createdAt": 0, "updatedAt": 0 },
-            "id": "p", "todoId": "d", "settings": {},
+            "id": "p", "todoId": "d", "settings": {}, "q": "q",
         });
         methods()
             .map(|method| {

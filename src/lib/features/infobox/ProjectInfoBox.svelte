@@ -4,12 +4,13 @@
   import { threadGitRoot } from "$lib/features/thread/cwd";
   import { gitStore, gitScope } from "$lib/features/git/store.svelte";
   import { todos } from "$lib/features/todo/store.svelte";
+  import { ownsPoll, releasePoll } from "./poll-owner";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
   import { toastInset } from "$lib/features/notifications/anchor.svelte";
   import { relativeClock } from "$lib/shared/utils/clock.svelte";
   import { formatAgo } from "$lib/shared/utils/relative-time";
   import { t } from "$lib/i18n/index.svelte";
-  import type { IconKey } from "$lib/types";
+  import type { IconKey, Thread } from "$lib/types";
   import GitBranch from "@lucide/svelte/icons/git-branch";
   import GitCommitHorizontal from "@lucide/svelte/icons/git-commit-horizontal";
   import ArrowUp from "@lucide/svelte/icons/arrow-up";
@@ -26,25 +27,38 @@
    * it back.
    *
    * It reads the same stores the panels read, scoped the same way GitPanel is:
-   * the active thread's worktree when it has one, so an agent committing in its
-   * own checkout is what the box describes, not the project folder it forked
-   * from.
+   * the thread's worktree when it has one, so an agent committing in its own
+   * checkout is what the box describes, not the project folder it forked from.
+   *
+   * `thread` is what makes it a per-pane box: split view mounts one over every
+   * terminal, each describing the checkout that terminal actually runs in.
+   * Without it the box falls back to the selected project and its active
+   * thread, which is what a single mount over the whole pane area wants.
    */
 
   const AUTO_REFRESH_MS = 10_000;
   const HOVER_LOG = 10;
 
+  /**
+   * `visible` is false for a box whose pane is off screen — another group, or
+   * a view drawn over the terminals. Those panes stay mounted, so without it
+   * every thread in the window would poll git for a pane nobody is looking at.
+   */
+  type Props = { thread?: Thread | null; visible?: boolean };
+  let { thread = null, visible = true }: Props = $props();
+
   const project = $derived.by(() => {
-    const id = app.currentProjectId;
+    const id = thread?.projectId ?? app.currentProjectId;
     return id ? app.projects.find((p) => p.id === id) ?? null : null;
   });
 
-  // Only a thread of the project on screen: the active thread can live in
-  // another project while this box describes the selected one.
+  // Unpinned, only a thread of the project on screen: the active thread can
+  // live in another project while this box describes the selected one.
   const threadHere = $derived(
-    app.activeThread && app.activeThread.projectId === project?.id
-      ? app.activeThread
-      : null,
+    thread ??
+      (app.activeThread && app.activeThread.projectId === project?.id
+        ? app.activeThread
+        : null),
   );
 
   const gitRoot = $derived(project ? threadGitRoot(threadHere, project) : null);
@@ -52,7 +66,7 @@
   const gs = $derived(gitStore.get(scope));
 
   $effect(() => {
-    if (!project || !gitRoot) return;
+    if (!project || !gitRoot || !visible) return;
     const registered = gitStore.ensure(project.id, gitRoot);
     void gitStore.refresh(registered).then(() => gitStore.autoFetch(registered));
   });
@@ -61,11 +75,16 @@
   // the git panel — this box is always mounted, so without the hidden guard a
   // minimised window would keep spawning git processes for the life of the app.
   // Gated on isRepo: a folder the first refresh found bare has nothing to poll.
+  const pollToken = Symbol("infobox-poll");
+
   $effect(() => {
     const id = scope;
-    if (!id || !isRepo) return;
+    if (!id || !isRepo || !visible) return;
     const poke = () => {
       if (document.hidden) return;
+      // Asked every time, not once: whoever owns this repository's poll may
+      // have unmounted since the last tick, and then this box inherits it.
+      if (!ownsPoll(id, pollToken)) return;
       const remoteScoped =
         workspace.mode === "remote" ||
         (workspace.isDynamic && project?.origin === "remote");
@@ -82,6 +101,7 @@
       clearInterval(timer);
       window.removeEventListener("focus", poke);
       document.removeEventListener("visibilitychange", poke);
+      releasePoll(id, pollToken);
     };
   });
 
@@ -103,7 +123,7 @@
 
   // Nothing to say, no box: a project with no repository and no claimed work
   // would be a frame around two empty lines.
-  const visible = $derived(isRepo || claimed.length > 0);
+  const hasContent = $derived(isRepo || claimed.length > 0);
 
   // Same clock as the dashboard rows, so "2 h" reads the same in both and
   // stops ticking while the window is hidden.
@@ -115,7 +135,7 @@
   }
 </script>
 
-{#if visible}
+{#if hasContent}
   <!-- role=group, not status: status is a live region, and a box that refreshes
        every ten seconds would re-announce itself to a screen reader on every
        branch or commit change, unprompted. The tabindex is what makes the hover
@@ -123,7 +143,7 @@
        combination the a11y rule cannot see. -->
   <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
   <div
-    class="group w-80 max-w-[40vw] select-none outline-none"
+    class="group w-80 max-w-full select-none outline-none"
     role="group"
     aria-label={t("infoBox.label")}
     tabindex="0"

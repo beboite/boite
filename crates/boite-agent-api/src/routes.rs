@@ -37,14 +37,13 @@ use crate::{Change, Shared, Workspace, WRONG_PLACE_FOR_A_PROJECT};
 #[cfg(test)]
 mod tests;
 
-/// Every route an agent has. Bound by each host to its own listener: the two
-/// differ in how they take a port and what they write beside it, and in nothing
-/// else.
+/// The verb-and-route pairs themselves, with no identity attached yet.
 ///
-/// The identity check is a layer rather than a line in each handler: eleven
-/// handlers each beginning with the same call is eleven chances for the twelfth
-/// to be written without it.
-pub fn router(workspace: Shared) -> Router {
+/// Split out of [`router`] because the `/mcp` endpoint dispatches into these
+/// same handlers in-process: its caller proved itself once at `/mcp`, and
+/// running the proof again on a request this process wrote to itself would
+/// need a signature nobody holds the key for.
+fn verbs() -> Router<Shared> {
     Router::new()
         .route("/v1/todos", get(list).post(add))
         .route("/v1/todos/claim", post(claim))
@@ -60,11 +59,30 @@ pub fn router(workspace: Shared) -> Router {
         .route("/v1/transcript", get(transcript))
         .route("/v1/search", get(search))
         .route("/v1/timeline", get(timeline))
+}
+
+/// Every route an agent has. Bound by each host to its own listener: the two
+/// differ in how they take a port and what they write beside it, and in nothing
+/// else.
+///
+/// The identity check is a layer rather than a line in each handler: eleven
+/// handlers each beginning with the same call is eleven chances for the twelfth
+/// to be written without it. `/mcp` sits under the same layer: it is the same
+/// door for a caller that speaks MCP over HTTP instead of running the stdio
+/// shim.
+pub fn router(workspace: Shared) -> Router {
+    verbs()
+        .route("/mcp", post(crate::mcp::endpoint))
         .layer(axum::middleware::from_fn_with_state(
             workspace.clone(),
             crate::auth::identify,
         ))
         .with_state(workspace)
+}
+
+/// The same handlers with the caller already settled, for in-process dispatch.
+pub(crate) fn open(workspace: Shared) -> Router {
+    verbs().with_state(workspace)
 }
 
 fn now_ms() -> i64 {
