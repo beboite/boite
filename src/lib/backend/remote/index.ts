@@ -24,11 +24,13 @@ import type {
   PtyApi,
   PushApi,
   ScopeApi,
+  SearchApi,
   ServerIdentity,
   SessionApi,
   SessionHit,
   ShellApi,
   SystemApi,
+  WorkspaceHit,
   WorkspaceMetaApi,
   WorktreeApi,
   WorktreeEntry,
@@ -81,6 +83,7 @@ export class RemoteBackend implements Backend {
   readonly fastpick: FastpickApi;
   readonly scope: ScopeApi;
   readonly session: SessionApi;
+  readonly search: SearchApi;
   readonly log: LogApi;
   readonly approvals: ApprovalsApi;
   readonly push: PushApi;
@@ -202,6 +205,13 @@ export class RemoteBackend implements Backend {
         keyToThread.delete(key);
         return socket.detach(tid);
       },
+      // Its own RPC rather than `sendInput`, and that is the point rather than a
+      // detail: the input frame carries arbitrary bytes, this carries a token
+      // the server parses against a closed vocabulary before anything reaches a
+      // PTY. It also takes a thread id directly, so a device that never attached
+      // to this terminal can still answer its dialog.
+      reply: (threadId, answer) =>
+        rpc("thread.reply", { threadId, answer }).then(() => {}),
     };
 
     this.db = {
@@ -470,6 +480,13 @@ export class RemoteBackend implements Backend {
       migrate: (kind, sessionId, fromCwd, toCwd) =>
         rpc("session.migrate", { kind, sessionId, fromCwd, toCwd }).then((r) =>
           Boolean(r.migrated),
+        ),
+    };
+
+    this.search = {
+      query: (text, limit) =>
+        rpc("search.query", { q: text, limit }).then(
+          (r) => (r.hits ?? []) as WorkspaceHit[],
         ),
     };
 

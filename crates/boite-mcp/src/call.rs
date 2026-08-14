@@ -7,14 +7,14 @@
 
 use serde_json::{json, Value};
 
-use crate::host::Host;
+use crate::backend::Backend;
 use crate::render::{
     format_artifacts, format_hits, format_moments, format_projects, format_todos, format_worktree, prefix,
 };
 use crate::toon::Toon;
 use crate::{encode_query, MAX_BRANCHES};
 
-pub(crate) fn call_tool(host: &Host, name: &str, args: &Value) -> Result<String, String> {
+pub fn call_tool<B: Backend>(host: &B, name: &str, args: &Value) -> Result<String, String> {
     match name {
         "todo_list" => {
             let out = host.send("GET", "/v1/todos", None)?;
@@ -270,7 +270,7 @@ fn awaiting(out: &Value) -> Option<String> {
 /// The endpoint answers that way whenever the reason is the agent's to act on —
 /// a project that does not exist, a name that matches two of them. A transport
 /// failure is something else and stays a transport failure.
-fn refusable(host: &Host, path: &str, body: Value) -> Result<Value, String> {
+fn refusable<B: Backend>(host: &B, path: &str, body: Value) -> Result<Value, String> {
     let out = host.send("POST", path, Some(body))?;
     if let Some(err) = out.get("error").and_then(|v| v.as_str()) {
         return Err(err.to_string());
@@ -280,7 +280,7 @@ fn refusable(host: &Host, path: &str, body: Value) -> Result<Value, String> {
 
 /// Both branch tools take one name and answer the same three ways: it worked,
 /// git would not, or this terminal has no worktree to put a branch on.
-fn branch_call(host: &Host, args: &Value, path: &str, tool: &str) -> Result<String, String> {
+fn branch_call<B: Backend>(host: &B, args: &Value, path: &str, tool: &str) -> Result<String, String> {
     let name = args
         .get("name")
         .and_then(|v| v.as_str())

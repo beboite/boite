@@ -1,4 +1,5 @@
 pub mod approval;
+pub mod awareness;
 pub mod browser;
 pub mod capability;
 pub mod checkpoint;
@@ -13,6 +14,7 @@ pub mod migrations;
 pub mod model;
 pub mod project;
 pub mod pty;
+pub mod reply;
 pub mod scope;
 pub mod screen;
 pub mod search;

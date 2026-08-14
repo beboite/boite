@@ -333,6 +333,7 @@ pub fn run() {
             commands::pty::pty_detach,
             commands::pty::pty_write,
             commands::pty::pty_resize,
+            commands::pty::thread_reply,
             commands::pty::pty_kill,
             commands::app::finish_boot,
             commands::app::log_app_event,
@@ -430,6 +431,7 @@ pub fn run() {
             commands::records::records_settings_set,
             commands::records::records_workspace_info,
             commands::records::records_workspace_set_info,
+            commands::records::records_search,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

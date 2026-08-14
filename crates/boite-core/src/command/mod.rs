@@ -583,6 +583,7 @@ mod tests {
             ("settings.set", MutateProject),
             ("workspace.info", ReadProject),
             ("workspace.setInfo", MutateProject),
+            ("search.query", ReadProject),
             ("checkpoint.capture", MutateProject),
             ("checkpoint.list", ReadProject),
             ("checkpoint.diff", ReadProject),
@@ -681,7 +682,7 @@ mod tests {
             "thread": { "id": "t", "projectId": "p", "label": "l", "cmd": "c" },
             "todo": { "id": "d", "projectId": "p", "title": "t", "state": "open",
                       "createdAt": 0, "updatedAt": 0 },
-            "id": "p", "todoId": "d", "settings": {},
+            "id": "p", "todoId": "d", "settings": {}, "q": "q",
             "edge": "start", "to": "0",
         });
         methods()

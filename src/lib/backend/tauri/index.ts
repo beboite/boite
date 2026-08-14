@@ -11,6 +11,7 @@ import {
   tauriLog,
   tauriProject,
   tauriScope,
+  tauriSearch,
   tauriSession,
   tauriShell,
   tauriSystem,
@@ -33,6 +34,7 @@ export class TauriBackend implements Backend {
   readonly fastpick = tauriFastpick;
   readonly scope = tauriScope;
   readonly session = tauriSession;
+  readonly search = tauriSearch;
   readonly log = tauriLog;
   readonly approvals = tauriApprovals;
   readonly meta = tauriWorkspaceMeta;
