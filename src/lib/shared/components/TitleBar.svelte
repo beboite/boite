@@ -34,6 +34,8 @@
   import { editorStore } from "$lib/features/editor/store.svelte";
   import { revealEditor } from "$lib/features/editor/reveal";
   import FileCode from "@lucide/svelte/icons/file-code";
+  import Spline from "@lucide/svelte/icons/spline";
+  import { whip } from "$lib/features/whip/store.svelte";
   import type { MessageKey } from "$lib/i18n/messages";
   import {
     mcpPulse,
@@ -371,6 +373,23 @@
           <Icon class="size-[15px]" />
         </button>
       {/each}
+    {/if}
+    <!-- The whip experiment's only handle. Last in the row, and drawn only
+         while the experiment is on: it is the one button here that does
+         nothing to the app. -->
+    {#if settings.state.experimentWhip}
+      <button
+        type="button"
+        class="flex h-7 items-center justify-center rounded-md px-2 transition {whip.active
+          ? 'bg-accent text-foreground'
+          : 'text-muted-foreground hover:bg-accent hover:text-foreground'}"
+        onclick={() => whip.toggle()}
+        title={whip.active ? t("titlebar.whipDrop") : t("titlebar.whip")}
+        aria-label={whip.active ? t("titlebar.whipDrop") : t("titlebar.whip")}
+        aria-pressed={whip.active}
+      >
+        <Spline class="size-[15px]" />
+      </button>
     {/if}
   </div>
 

@@ -240,6 +240,12 @@ export interface Settings {
    * `manual`, so the rows hold still until an order is actually picked.
    */
   experimentSmartSort: boolean;
+  /**
+   * Experiment: a whip over the whole window, thrown from a titlebar button.
+   * Purely cosmetic — it cracks, it makes a noise, and it reaches no terminal:
+   * no interrupt, no keystroke, no prompt.
+   */
+  experimentWhip: boolean;
   smartSortBy: SmartSortBy;
   smartSortDirection: SortDirection;
 }
