@@ -4,6 +4,7 @@
   import SettingsTerminalTab from "./SettingsTerminalTab.svelte";
   import SettingsAppearanceTab from "./SettingsAppearanceTab.svelte";
   import SettingsFastpickTab from "./SettingsFastpickTab.svelte";
+  import SettingsKeyboardTab from "./SettingsKeyboardTab.svelte";
   import SettingsLogsTab from "./SettingsLogsTab.svelte";
   import SettingsExperimentsTab from "./SettingsExperimentsTab.svelte";
   import SettingsAboutTab from "./SettingsAboutTab.svelte";
@@ -13,6 +14,7 @@
   import TerminalIcon from "@lucide/svelte/icons/terminal";
   import Palette from "@lucide/svelte/icons/palette";
   import Zap from "@lucide/svelte/icons/zap";
+  import Keyboard from "@lucide/svelte/icons/keyboard";
   import ScrollText from "@lucide/svelte/icons/scroll-text";
   import FlaskConical from "@lucide/svelte/icons/flask-conical";
   import Info from "@lucide/svelte/icons/info";
@@ -36,6 +38,7 @@
     | "terminal"
     | "appearance"
     | "fastpick"
+    | "keyboard"
     | "logs"
     | "experiments"
     | "about";
@@ -65,6 +68,12 @@
       icon: Palette,
     },
     { id: "fastpick", labelKey: "tabs.fastpick", hintKey: "tabs.fastpickHint", icon: Zap },
+    {
+      id: "keyboard",
+      labelKey: "tabs.keyboard",
+      hintKey: "tabs.keyboardHint",
+      icon: Keyboard,
+    },
     { id: "logs", labelKey: "tabs.logs", hintKey: "tabs.logsHint", icon: ScrollText },
     {
       id: "experiments",
@@ -235,6 +244,8 @@
           <SettingsAppearanceTab />
         {:else if activeTab === "fastpick"}
           <SettingsFastpickTab />
+        {:else if activeTab === "keyboard"}
+          <SettingsKeyboardTab />
         {:else if activeTab === "logs"}
           <SettingsLogsTab />
         {:else if activeTab === "experiments"}

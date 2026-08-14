@@ -6,6 +6,7 @@ import { logger } from "$lib/shared/services/logger.svelte";
 import { debounce } from "$lib/shared/utils/debounce";
 import { uuid } from "$lib/shared/utils/uuid";
 import type {
+  Keybinding,
   LocaleSetting,
   RightPanelTab,
   Settings,
@@ -14,6 +15,11 @@ import type {
   SmartSortBy,
   SortDirection,
 } from "$lib/types";
+import { DEFAULT_KEYBINDINGS } from "$lib/shared/keyboard/defaults";
+import {
+  mergeDefaultKeybindings,
+  sanitizeKeybindings,
+} from "$lib/shared/keyboard/merge";
 import {
   clampRightPanelWidth,
   isRightPanelTab,
@@ -125,6 +131,7 @@ You are working in your own detached worktree of this project, so nothing you do
 
 const DEFAULTS: Settings = {
   shortcuts: PRESET_SHORTCUTS,
+  keybindings: DEFAULT_KEYBINDINGS,
   seededPresets: BACKFILL_PRESET_IDS,
   powershellNewline: true,
   powershellNoProfile: false,
@@ -353,12 +360,17 @@ class SettingsStore {
       const stored = await loadSettings();
       const raw = stored as unknown as Record<string, unknown>;
       const migratedShortcuts = migrateShortcuts(stored.shortcuts, raw.seededPresets);
+      // Non-destructive on purpose: a default only lands where the user has
+      // claimed neither its command nor its key, so shipping a new shortcut
+      // never rewrites a keyboard somebody has already made their own.
+      const mergedKeys = mergeDefaultKeybindings(sanitizeKeybindings(raw.keybindings));
       const inheritedSetup =
         Array.isArray(stored.shortcuts) && stored.shortcuts.length > 0;
       const backfilledSetup =
         typeof stored.setupCompleted !== "boolean" && inheritedSetup;
       this.state = {
         shortcuts: migratedShortcuts.shortcuts,
+        keybindings: mergedKeys.bindings,
         seededPresets: migratedShortcuts.seededPresets,
         powershellNewline:
           typeof stored.powershellNewline === "boolean"
@@ -522,7 +534,7 @@ class SettingsStore {
         this.state.layoutPinned = false;
         this.persistDeviceNow();
       }
-      if (migratedShortcuts.changed || backfilledSetup) {
+      if (migratedShortcuts.changed || backfilledSetup || mergedKeys.changed) {
         await this.persist();
       }
     } catch (err) {
@@ -587,6 +599,13 @@ class SettingsStore {
   private persistDeviceSoon = debounce(() => {
     this.persistDeviceNow();
   }, 250);
+
+  // A whole new array rather than a mutation: the compiled rules hang off this
+  // reference, and an in-place edit would leave the dispatcher on the old ones.
+  async setKeybindings(next: Keybinding[]) {
+    this.state.keybindings = next;
+    await this.persist();
+  }
 
   async setPowershellNewline(value: boolean) {
     this.state.powershellNewline = value;
