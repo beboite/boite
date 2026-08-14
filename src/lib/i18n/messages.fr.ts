@@ -68,7 +68,7 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
 
   "shortcuts.title": "Raccourcis",
   "shortcuts.description": "Glissez pour réordonner. Modifiez une commande pour ajouter des arguments.",
-  "shortcuts.resetTitle": "Réinitialiser aux raccourcis par défaut",
+  "shortcuts.resetTitle": "Redétecter les agents installés et reconstruire la liste",
   "shortcuts.new": "Nouveau",
   "shortcuts.launchIn": "Lancer dans {project}",
   "shortcuts.rightClickHint": "Clic droit ou appui long : choisir où ça s'ouvre",
@@ -884,7 +884,9 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "settings.shortcutSaved": "Raccourci enregistré",
   "settings.shortcutRemoved": "{label} supprimé",
   "settings.shortcutRemovedUnnamed": "Raccourci supprimé",
-  "settings.shortcutsReset": "Raccourcis réinitialisés aux valeurs par défaut",
+  "settings.shortcutsReset": "Raccourcis reconstruits à partir des agents détectés",
+  "settings.shortcutsResetFoundNothing":
+    "Aucun agent détecté, votre barre est restée intacte. Vérifiez que la boite est joignable et que les agents sont dans son PATH.",
   "terminal.pasteFailed": "Collage échoué",
   "terminal.copyFailed": "Copie échouée",
   "terminal.keyboardLabel": "Clavier (appui long pour la barre de touches)",
@@ -934,7 +936,7 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "shortcuts.removeConfirmTitle": "Supprimer ce raccourci ?",
   "shortcuts.removeConfirmMessage": "Retire {label} de la barre. Les terminaux déjà ouverts par lui ne sont pas touchés.",
   "shortcuts.resetConfirmTitle": "Réinitialiser tous les raccourcis ?",
-  "shortcuts.resetConfirmMessage": "Remplace toute votre barre par les préréglages par défaut. Les raccourcis ajoutés ou modifiés sont perdus.",
+  "shortcuts.resetConfirmMessage": "Reconstruit toute votre barre à partir des agents détectés sur cette machine. Les raccourcis ajoutés ou modifiés sont perdus.",
   "updater.restartConfirmTitle": "Redémarrer pour appliquer la mise à jour ?",
   "updater.restartConfirmDirty": "{count} fichier(s) ont des modifications non enregistrées et seront perdues. Les terminaux en cours sont relancés ensuite.",
   "updater.restartConfirmAction": "Redémarrer maintenant",
