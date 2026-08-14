@@ -33,5 +33,5 @@
   ],
   "eagerBytes": 831488,
   "totalBytes": 6144000,
-  "largestEagerChunkBytes": 256000
+  "largestEagerChunkBytes": 262144
 }
