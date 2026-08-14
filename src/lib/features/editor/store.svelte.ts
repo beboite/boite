@@ -1,4 +1,10 @@
-import { readTextFile, writeTextFile, gitFileVersions, readBase64 } from "./api";
+import {
+  readTextFile,
+  writeTextFile,
+  gitFileVersions,
+  turnFileVersions,
+  readBase64,
+} from "./api";
 import { notifications } from "$lib/features/notifications/store.svelte";
 import { confirmDialog } from "$lib/shared/components/confirm.svelte";
 import { logger } from "$lib/shared/services/logger.svelte";
@@ -6,7 +12,14 @@ import { t } from "$lib/i18n/index.svelte";
 import { basename } from "$lib/shared/utils/path";
 import { projectOwning } from "./owner";
 
-export type DiffMode = "staged" | "unstaged";
+/**
+ * Which two versions of a file a diff buffer holds.
+ *
+ * `turn` is the odd one and says why the others are named after git's own
+ * nouns: it compares two checkpoints, neither of which is HEAD, the index or
+ * the working tree.
+ */
+export type DiffMode = "staged" | "unstaged" | "turn";
 
 export type Buffer = FileBuffer | DiffBuffer | PreviewBuffer;
 
@@ -53,6 +66,8 @@ export interface DiffBuffer extends BaseBuffer {
   leftContent: string;
   rightContent: string;
   binary: boolean;
+  /** The two checkpoints a `turn` diff spans. Null for the other modes. */
+  range: { from: string; to: string } | null;
 }
 
 /**
@@ -129,8 +144,16 @@ function fileBufferId(path: string): string {
   return `file:${path}`;
 }
 
-function diffBufferId(repoPath: string, file: string, mode: DiffMode): string {
-  return `diff:${mode}:${repoPath}::${file}`;
+function diffBufferId(
+  repoPath: string,
+  file: string,
+  mode: DiffMode,
+  range?: { from: string; to: string },
+): string {
+  // The range is in the id for `turn`, or two turns touching the same file
+  // would be one tab that keeps replacing itself.
+  const span = range ? `${range.from}..${range.to}:` : "";
+  return `diff:${mode}:${span}${repoPath}::${file}`;
 }
 
 class EditorStore {
@@ -320,8 +343,9 @@ class EditorStore {
     file: string;
     mode: DiffMode;
     headFile?: string;
+    range?: { from: string; to: string };
   }): Promise<string> {
-    const id = diffBufferId(args.repoPath, args.file, args.mode);
+    const id = diffBufferId(args.repoPath, args.file, args.mode, args.range);
     const fullPath = joinPath(args.repoPath, args.file);
     const existing = this.buffers.find((b) => b.id === id);
     if (existing) {
@@ -348,6 +372,7 @@ class EditorStore {
       leftContent: "",
       rightContent: "",
       binary: false,
+      range: args.range ?? null,
     };
     this.buffers = [...this.buffers, buf];
     this.activeId = id;
@@ -360,15 +385,31 @@ class EditorStore {
     if (!b || b.kind !== "diff") return;
     this.patch(id, { loading: true, error: null });
     try {
-      const v = await gitFileVersions(
-        b.repoPath,
-        relativeTo(b.repoPath, b.path),
-        b.headFile ?? undefined,
-      );
+      const file = relativeTo(b.repoPath, b.path);
       let leftLabel: string;
       let rightLabel: string;
       let leftContent: string;
       let rightContent: string;
+      let binary: boolean;
+      if (b.mode === "turn" && b.range) {
+        const v = await turnFileVersions(b.repoPath, b.range.from, b.range.to, file);
+        leftLabel = t("turns.before");
+        rightLabel = t("turns.after");
+        leftContent = v.before ?? "";
+        rightContent = v.after ?? "";
+        binary = v.binary;
+        this.patch(id, {
+          loading: false,
+          leftLabel,
+          rightLabel,
+          leftContent,
+          rightContent,
+          binary,
+        });
+        return;
+      }
+      const v = await gitFileVersions(b.repoPath, file, b.headFile ?? undefined);
+      binary = v.binary;
       if (b.mode === "staged") {
         leftLabel = "HEAD";
         rightLabel = "Index";
@@ -386,7 +427,7 @@ class EditorStore {
         rightLabel,
         leftContent,
         rightContent,
-        binary: v.binary,
+        binary,
       });
     } catch (err) {
       const msg = String(err);

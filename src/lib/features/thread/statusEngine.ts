@@ -16,6 +16,8 @@ import { ptyKill } from "$lib/storage/pty";
 import { logger } from "$lib/shared/services/logger.svelte";
 import { agentTurns } from "./agent-turns";
 import { turnIsActive } from "./agent-registry";
+import type { AgentTurn } from "./agent-registry";
+import { noteDeclaredTurn } from "./checkpoints.svelte";
 import { threadCwd } from "./cwd";
 import { detectWorkingOnScreen, LIVE_ROW_COUNT } from "./working-detect";
 import type { IconKey, Thread, ThreadStatus } from "$lib/types";
@@ -274,6 +276,16 @@ type Reading = {
   active: boolean;
   /** Only ever set alongside `waiting`, and only by claude. */
   waitingFor?: string | null;
+  /**
+   * The agent's own word for its turn, where it said one.
+   *
+   * Carried up rather than re-derived from `status`, because the projection
+   * below is lossy in exactly the place a turn boundary lives: `shell` and
+   * `idle` both read as `ready` and only one of them ends a turn. Absent for a
+   * thread read off the screen, which is why only an agent that declares its own
+   * turns gets checkpoints.
+   */
+  declared?: AgentTurn["state"];
 };
 
 /**
@@ -300,21 +312,22 @@ function read(t: Thread, iconKey: IconKey): Reading | null {
       // One definition of "mid-something", shared with the server's mirror of
       // this logic rather than re-derived per arm below.
       const active = turnIsActive(turn);
+      const declared = turn.state;
       switch (turn.state) {
         case "busy":
-          return { status: "running", active };
+          return { status: "running", active, declared };
         // A dialog is up and nothing moves until it is answered. Its own status,
         // never `ready`: the turn is still in flight, and the whole reason this
         // exists is that calling it finished both showed the wrong thing and let
         // auto-sleep kill a thread mid-question. Claude alone says this.
         case "waiting":
-          return { status: "waiting", active, waitingFor: turn.waitingFor ?? null };
+          return { status: "waiting", active, declared, waitingFor: turn.waitingFor ?? null };
         // The agent takes input again, so the dot is `ready`, but a command it
         // started is still running and killing the PTY would take that with it.
         case "shell":
-          return { status: "ready", active };
+          return { status: "ready", active, declared };
         case "idle":
-          return { status: "ready", active };
+          return { status: "ready", active, declared };
       }
     }
   }
@@ -399,6 +412,10 @@ function tick() {
     }
     const reading = read(t, iconKey);
     if (reading) {
+      // Before the status is applied, so a turn short enough to open and close
+      // between two ticks still gets both of its ends: the dot may never have
+      // moved, and the checkpoints are what the diff is made of.
+      noteDeclaredTurn(t, backend, reading.declared);
       // Stamped from `active`, not from the dot: a thread waiting on a prompt, or
       // one whose agent finished while its shell runs on, is doing something even
       // though it is not the agent thinking. This stamp is what auto-sleep reads.

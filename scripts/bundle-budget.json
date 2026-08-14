@@ -22,9 +22,10 @@
     "first keystroke and so cannot be deferred either. Then to 794480, for the",
     "reply bar a waiting thread offers: it exists so a blocked terminal can be",
     "answered in one tap, and a chunk fetched on the tap is the one thing that",
-    "would take that away."
+    "would take that away. Then to 800624, for the turn list a thread keeps and",
+    "the checkpoint calls behind it, which the thread panel reads on open."
   ],
-  "eagerBytes": 794480,
+  "eagerBytes": 800624,
   "totalBytes": 6144000,
   "largestEagerChunkBytes": 256000
 }
