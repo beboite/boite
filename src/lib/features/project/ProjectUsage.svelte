@@ -4,10 +4,11 @@
   import DashboardCard from "./DashboardCard.svelte";
   import { formatTokens as fmt, projectUsage } from "./usage.svelte";
   import { pathKey } from "./path";
+  import { registerEscape } from "$lib/shared/keyboard/overlay";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import Coins from "@lucide/svelte/icons/coins";
-  import { t } from "$lib/i18n/index.svelte";
+  import { activeLocale, t } from "$lib/i18n/index.svelte";
   import type { IconKey, Project } from "$lib/types";
 
   /**
@@ -28,6 +29,7 @@
   let { project }: Props = $props();
 
   const WEEKS = 53;
+  const DAY_MS = 86_400_000;
 
   const report = $derived(projectUsage.report(project.id));
   const loading = $derived(projectUsage.loading(project.id));
@@ -89,38 +91,69 @@
     return provider === "codex" ? "codex" : provider === "claude" ? "claude" : null;
   }
 
-  const dayTotals = $derived.by(() => {
-    const map = new Map<string, number>();
-    for (const d of report?.days ?? []) map.set(d.day, d.total);
-    return map;
-  });
+  /** Four filled levels on a log scale, as a background. Linear, a single
+      overnight run makes every other day on the calendar the same empty square
+      — token days differ by orders of magnitude, not by percentages. */
+  function shade(step: number): string {
+    if (step <= 0) return "var(--color-surface-3)";
+    return `color-mix(in srgb, var(--color-foreground) ${step * 22}%, var(--color-surface-3))`;
+  }
+
+  type Cell = {
+    /** `YYYY-MM-DD`, UTC, and the key of the each block. */
+    day: string;
+    at: number;
+    total: number;
+    /** Past the end of the current week: drawn to keep the grid square, and
+        never lit or hoverable. */
+    future: boolean;
+    today: boolean;
+    color: string;
+  };
 
   /**
-   * The grid, as whole weeks ending on the one we are in.
+   * The whole year, as one flat list in the order the grid fills.
+   *
+   * Flat and precomputed, both for the same reason: this is 371 cells, and
+   * anything left as an expression on the cell is 371 calls every time
+   * something on this card moves. The colour was one, and the tooltip text was
+   * two more — a `t()` lookup and an interpolation per square, eagerly, for the
+   * one square the cursor was over.
    *
    * Built in UTC because the backend buckets in UTC: it takes the date off the
    * transcript's own ISO timestamp rather than converting it, and a grid built
    * in local time would look up days that store never wrote.
    */
-  const weeks = $derived.by(() => {
+  const cells = $derived.by(() => {
+    const totals = new Map<string, number>();
+    let peak = 1;
+    for (const d of report?.days ?? []) {
+      totals.set(d.day, d.total);
+      if (d.total > peak) peak = d.total;
+    }
+    const ceiling = Math.log10(1 + peak);
     const now = new Date();
     const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
-    const DAY = 86_400_000;
     // The last column is the week we are in, whole. Anchoring the span on today
     // and only then backing up to a Sunday dropped the rest of the current week
     // off the right edge, so on a Tuesday the calendar stopped four days ago and
     // today's own square was not on it.
-    const endSaturday = today + (6 - new Date(today).getUTCDay()) * DAY;
-    const startSunday = endSaturday - (WEEKS * 7 - 1) * DAY;
-    const out: { day: string; total: number; future: boolean; at: number }[][] = [];
-    for (let w = 0; w < WEEKS; w++) {
-      const col: { day: string; total: number; future: boolean; at: number }[] = [];
-      for (let d = 0; d < 7; d++) {
-        const at = startSunday + (w * 7 + d) * DAY;
-        const day = new Date(at).toISOString().slice(0, 10);
-        col.push({ day, total: dayTotals.get(day) ?? 0, future: at > today, at });
-      }
-      out.push(col);
+    const endSaturday = today + (6 - new Date(today).getUTCDay()) * DAY_MS;
+    const start = endSaturday - (WEEKS * 7 - 1) * DAY_MS;
+    const out: Cell[] = [];
+    for (let i = 0; i < WEEKS * 7; i++) {
+      const at = start + i * DAY_MS;
+      const day = new Date(at).toISOString().slice(0, 10);
+      const value = totals.get(day) ?? 0;
+      const step = value <= 0 ? 0 : Math.min(4, Math.max(1, Math.ceil((Math.log10(1 + value) / ceiling) * 4)));
+      out.push({
+        day,
+        at,
+        total: value,
+        future: at > today,
+        today: at === today,
+        color: shade(step),
+      });
     }
     return out;
   });
@@ -133,18 +166,32 @@
   const monthMarks = $derived.by(() => {
     const out: (string | null)[] = [];
     let previous = -1;
-    for (const week of weeks) {
-      const month = new Date(week[0].at).getUTCMonth();
+    for (let w = 0; w < WEEKS; w++) {
+      const at = cells[w * 7].at;
+      const month = new Date(at).getUTCMonth();
       // Skipped for the first column: a label there is half a month's worth of
       // days claiming the whole column.
-      out.push(month !== previous && out.length > 0 ? monthName(week[0].at) : null);
+      out.push(month !== previous && w > 0 ? stamp(at, { month: "short" }) : null);
       previous = month;
     }
     return out;
   });
 
-  function monthName(at: number): string {
-    return new Date(at).toLocaleDateString(undefined, { month: "short", timeZone: "UTC" });
+  /**
+   * Monday, Wednesday and Friday down the left edge.
+   *
+   * Three rather than seven, because seven labels in rows nine pixels apart is
+   * a wall of text beside the picture it is meant to be indexing. The dates are
+   * a week in 2026 that starts on a Sunday, so the row order matches the grid's.
+   */
+  const weekdayMarks = $derived(
+    [0, 1, 2, 3, 4, 5, 6].map((row) =>
+      row % 2 === 1 ? stamp(Date.UTC(2026, 0, 4 + row), { weekday: "short" }) : null,
+    ),
+  );
+
+  function stamp(at: number, options: Intl.DateTimeFormatOptions): string {
+    return new Date(at).toLocaleDateString(activeLocale(), { ...options, timeZone: "UTC" });
   }
 
   /**
@@ -154,36 +201,128 @@
    * Only the days that carry usage: an empty square says nothing a missing row
    * does not, and 371 "nothing on" rows would bury the handful that matter.
    */
-  const activeDays = $derived.by(() => {
-    const out: { day: string; total: number }[] = [];
-    for (const week of weeks) {
-      for (const cell of week) {
-        if (!cell.future && cell.total > 0) out.push({ day: cell.day, total: cell.total });
-      }
-    }
-    return out;
-  });
-
-  const peak = $derived(Math.max(1, ...(report?.days ?? []).map((d) => d.total)));
-
-  /**
-   * Four filled levels on a log scale. Linear, a single overnight run makes
-   * every other day on the calendar the same empty square — token days differ
-   * by orders of magnitude, not by percentages.
-   */
-  function level(value: number): number {
-    if (value <= 0) return 0;
-    const ratio = Math.log10(1 + value) / Math.log10(1 + peak);
-    return Math.min(4, Math.max(1, Math.ceil(ratio * 4)));
-  }
-
-  function cellColor(total: number): string {
-    if (total === 0) return "var(--color-surface-3)";
-    return `color-mix(in srgb, var(--color-foreground) ${level(total) * 22}%, var(--color-surface-3))`;
-  }
+  const activeDays = $derived(cells.filter((c) => !c.future && c.total > 0));
 
   const missingLabel = $derived(
     (report?.missing ?? []).map((m) => m.charAt(0).toUpperCase() + m.slice(1)).join(", "),
+  );
+
+  // ------------------------------------------------------------ the hover card
+
+  /**
+   * Which square the cursor is on, and where that square is.
+   *
+   * This used to be the browser's own `title` tooltip, which is the one popup
+   * on screen nothing here could do anything about: it appears when the OS says
+   * so — the better part of a second — it is styled by the OS and not by this
+   * app, and it cannot show the day and the figure as two lines. It also cost
+   * 371 interpolated strings on every render to describe the one square being
+   * pointed at.
+   */
+  type Hover = { cell: Cell; rect: DOMRect };
+  let hovered = $state<Hover | null>(null);
+  let cardEl = $state<HTMLElement | null>(null);
+  let cardW = $state(150);
+  let cardH = $state(48);
+  let openTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * Long enough not to fire on a cursor crossing the calendar on its way
+   * somewhere else, short enough to read as no delay at all — and paid once.
+   * Moving from square to square inside the grid re-aims a card that is already
+   * up, which is the motion this thing is actually used with: a heat map is
+   * read by sweeping it, and re-arming a timer per square is what made the
+   * native tooltip unusable for that.
+   */
+  const OPEN_DELAY_MS = 90;
+  const GAP = 6;
+  const EDGE = 8;
+
+  const open = $derived(hovered !== null);
+
+  function aim(target: HTMLElement, cell: Cell) {
+    hovered = { cell, rect: target.getBoundingClientRect() };
+  }
+
+  function point(event: PointerEvent) {
+    const target = (event.target as HTMLElement | null)?.closest<HTMLElement>(".cal-cell");
+    // The 2px gutters between squares are the grid itself. Crossing one is not
+    // leaving the calendar, so it must not close what is open.
+    if (!target) return;
+    const cell = cells[Number(target.dataset.i)];
+    if (!cell || cell.future) return;
+    if (hovered?.cell.day === cell.day) return;
+    if (hovered) {
+      aim(target, cell);
+      return;
+    }
+    if (openTimer) clearTimeout(openTimer);
+    openTimer = setTimeout(() => {
+      openTimer = null;
+      aim(target, cell);
+    }, OPEN_DELAY_MS);
+  }
+
+  function hide() {
+    if (openTimer) {
+      clearTimeout(openTimer);
+      openTimer = null;
+    }
+    hovered = null;
+  }
+
+  $effect(() => {
+    void hovered;
+    if (!cardEl) return;
+    cardW = cardEl.offsetWidth;
+    cardH = cardEl.offsetHeight;
+  });
+
+  // A pending open outlives the pane it was armed in otherwise: leaving the
+  // project page mid-sweep left a timer that fired into a component nobody was
+  // looking at.
+  $effect(() => () => {
+    if (openTimer) clearTimeout(openTimer);
+  });
+
+  // The card is positioned against a rectangle read when the cursor arrived, so
+  // anything that moves the page underneath it makes that rectangle a lie.
+  // Closing is the honest answer: the cursor is still over a square and the
+  // next move re-aims immediately.
+  $effect(() => {
+    if (!open) return;
+    window.addEventListener("scroll", hide, true);
+    window.addEventListener("resize", hide);
+    return () => {
+      window.removeEventListener("scroll", hide, true);
+      window.removeEventListener("resize", hide);
+    };
+  });
+
+  // Through the app's one Escape stack, so a menu over this card still gets the
+  // key first.
+  $effect(() => {
+    if (!open) return;
+    return registerEscape(hide);
+  });
+
+  /** Above the square, and below it when there is no room above. */
+  const cardTop = $derived.by(() => {
+    if (!hovered) return 0;
+    const above = hovered.rect.top - cardH - GAP;
+    return above < EDGE ? hovered.rect.bottom + GAP : above;
+  });
+
+  const cardLeft = $derived.by(() => {
+    if (!hovered) return 0;
+    const centred = hovered.rect.left + hovered.rect.width / 2 - cardW / 2;
+    return Math.max(EDGE, Math.min(centred, window.innerWidth - cardW - EDGE));
+  });
+
+  const cardDay = $derived(
+    hovered
+      ? stamp(hovered.cell.at, { weekday: "short", day: "numeric", month: "short", year: "numeric" })
+      : "",
   );
 </script>
 
@@ -198,7 +337,7 @@
       title={t("project.tokensRefresh")}
       aria-label={t("project.tokensRefresh")}
     >
-      <RefreshCw class="size-3.5 {loading ? 'animate-spin' : ''}" />
+      <RefreshCw class={["size-3.5", loading && "animate-spin"]} />
     </button>
   {/snippet}
 
@@ -286,38 +425,51 @@
 
     <!-- Sized by the card, not by the year: every column is a fraction of the
          width, so the calendar ends where the card does. -->
-    <div class="mt-3" aria-hidden="true">
-      <div class="cal-months mb-1">
+    <div class="cal mt-3" aria-hidden="true">
+      <span></span>
+      <div class="cal-months">
         {#each monthMarks as label, w (w)}
-          <span class="text-2xs whitespace-nowrap text-muted-foreground/60">
-            {label ?? ""}
-          </span>
+          <span class="text-2xs whitespace-nowrap text-muted-foreground/60">{label ?? ""}</span>
         {/each}
       </div>
-      <div class="cal-grid">
-        {#each weeks as week, w (w)}
-          {#each week as cell (cell.day)}
-            <span
-              class="cal-cell"
-              class:invisible={cell.future}
-              style:background-color={cellColor(cell.total)}
-              title={cell.total === 0
-                ? t("project.tokensNothingOn", { day: cell.day })
-                : t("project.tokensDay", { total: fmt(cell.total), day: cell.day })}
-            ></span>
-          {/each}
+      <div class="cal-weekdays">
+        {#each weekdayMarks as label, row (row)}
+          <span class="text-2xs leading-none text-muted-foreground/60">{label ?? ""}</span>
         {/each}
       </div>
-      <div class="mt-1.5 flex items-center justify-end gap-1 text-2xs text-muted-foreground/70">
-        <span>{t("project.tokensLess")}</span>
-        {#each [0, 1, 2, 3, 4] as step (step)}
-          <span class="size-[9px] rounded-[2px]" style:background-color={step === 0
-            ? "var(--color-surface-3)"
-            : `color-mix(in srgb, var(--color-foreground) ${step * 22}%, var(--color-surface-3))`}
+      <!-- One listener for the year rather than 371. `pointerover` fires once
+           per square entered, which is the event this needs; a move handler
+           would fire per pixel for the same answer. -->
+      <div
+        class="cal-grid"
+        role="presentation"
+        onpointerover={point}
+        onpointerleave={hide}
+        onpointerdown={hide}
+      >
+        {#each cells as cell, i (cell.day)}
+          <span
+            class={[
+              "cal-cell",
+              cell.future && "invisible",
+              cell.today && "cal-today",
+              hovered?.cell.day === cell.day && "cal-on",
+            ]}
+            data-i={i}
+            style:background-color={cell.color}
           ></span>
         {/each}
-        <span>{t("project.tokensMore")}</span>
       </div>
+    </div>
+    <div
+      class="mt-1.5 flex items-center justify-end gap-1 text-2xs text-muted-foreground/70"
+      aria-hidden="true"
+    >
+      <span>{t("project.tokensLess")}</span>
+      {#each [0, 1, 2, 3, 4] as step (step)}
+        <span class="size-[9px] rounded-[2px]" style:background-color={shade(step)}></span>
+      {/each}
+      <span>{t("project.tokensMore")}</span>
     </div>
     {#if missingLabel}
       <p class="mt-1 text-xs text-muted-foreground/70">
@@ -327,7 +479,34 @@
   {/if}
 </DashboardCard>
 
+{#if hovered}
+  <!-- Outside the card, because the card is inside a scroller and a popup
+       clipped by the thing it hangs off is worse than no popup. -->
+  <div
+    bind:this={cardEl}
+    role="tooltip"
+    class="surface-popover pointer-events-none fixed z-[var(--z-popover)] px-2.5 py-1.5"
+    style:top="{cardTop}px"
+    style:left="{cardLeft}px"
+  >
+    <p class="whitespace-nowrap text-2xs text-muted-foreground">{cardDay}</p>
+    <p class="whitespace-nowrap tabular-nums text-sm font-medium text-foreground">
+      {hovered.cell.total > 0
+        ? t("project.tokensSpent", { total: fmt(hovered.cell.total) })
+        : t("project.tokensQuiet")}
+    </p>
+  </div>
+{/if}
+
 <style>
+  /* The gutter of weekday names, then everything that spans the year. Both rows
+     share one column track, so a month name and a square in the same week line
+     up without either of them knowing the gutter's width. */
+  .cal {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 4px 5px;
+  }
   /* One column per week, each a share of whatever the card is wide, and square
      cells derived from that. The old grid was 53 fixed 9px columns, so on a
      card wider than 636px it stopped and left a gap the size of the shortfall. */
@@ -342,6 +521,15 @@
     aspect-ratio: 1;
     border-radius: 2px;
     min-width: 0;
+    /* Only the ring moves, so pointing at a square never reflows the grid. */
+    box-shadow: 0 0 0 0 transparent;
+    transition: box-shadow 80ms ease-out;
+  }
+  .cal-today {
+    box-shadow: 0 0 0 1px var(--color-muted-foreground);
+  }
+  .cal-on {
+    box-shadow: 0 0 0 1.5px var(--color-foreground);
   }
   /* The same columns as the grid below, so a month name sits over the week it
      opens. Labels are wider than a column and spill to the right on purpose. */
@@ -351,5 +539,13 @@
     grid-auto-columns: minmax(0, 1fr);
     gap: 2px;
     overflow: hidden;
+  }
+  /* The same seven rows as the grid, so a name sits on the row it names. */
+  .cal-weekdays {
+    display: grid;
+    grid-template-rows: repeat(7, minmax(0, 1fr));
+    gap: 2px;
+    align-items: center;
+    justify-items: end;
   }
 </style>
