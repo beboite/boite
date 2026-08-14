@@ -11,6 +11,7 @@
     availableFonts,
     MONO_CANDIDATES,
     SANS_CANDIDATES,
+    terminalFontSize,
     TERMINAL_SCALE_MAX,
     TERMINAL_SCALE_MIN,
   } from "$lib/theme/fonts";
@@ -39,11 +40,38 @@
     settings.setUiScalePercent(100);
   }
 
-  // Probed once, when the tab mounts. `document.fonts` answers about system
-  // faces as well as loaded ones, and the answer cannot change while the app is
-  // open without the user installing a font behind it.
+  // Probed once, when the tab mounts: the probe measures a string per candidate
+  // per generic, and the answer cannot change while the app is open without the
+  // user installing a font behind it.
   const monoFonts = availableFonts(MONO_CANDIDATES);
   const sansFonts = availableFonts(SANS_CANDIDATES);
+
+  // A family stored on a machine that does not have it is deliberately kept by
+  // the store, so the select has to be able to show a name that is not in the
+  // list. Without an option carrying it, the box falls back to "Default" and
+  // reports no choice while the family is still stored and still in front of
+  // the stack. Disabled, because it is a state to see, not one to pick.
+  const missingSans = $derived(
+    settings.state.uiFontFamily && !sansFonts.includes(settings.state.uiFontFamily)
+      ? settings.state.uiFontFamily
+      : null,
+  );
+  const missingMono = $derived(
+    settings.state.terminalFontFamily &&
+      !monoFonts.includes(settings.state.terminalFontFamily)
+      ? settings.state.terminalFontFamily
+      : null,
+  );
+
+  // The same call the terminals make, so the sample is the size they will be
+  // rather than the size they would be at 100% zoom. Pinch is left at 1: it is
+  // per-pane and transient, and no pane is on screen to read it from.
+  const sampleSize = $derived(
+    terminalFontSize(
+      settings.state.uiScalePercent,
+      settings.state.terminalFontScalePercent,
+    ),
+  );
 
   function onTerminalScale(e: Event) {
     settings.setTerminalFontScalePercent(
@@ -93,6 +121,9 @@
         onchange={(e) => settings.setUiFontFamily(e.currentTarget.value || null)}
       >
         <option value="">{t("appearance.fontDefault")}</option>
+        {#if missingSans}
+          <option value={missingSans} disabled>{missingSans} ({t("appearance.fontMissing")})</option>
+        {/if}
         {#each sansFonts as family (family)}
           <option value={family}>{family}</option>
         {/each}
@@ -108,6 +139,9 @@
           settings.setTerminalFontFamily(e.currentTarget.value || null)}
       >
         <option value="">{t("appearance.fontDefault")}</option>
+        {#if missingMono}
+          <option value={missingMono} disabled>{missingMono} ({t("appearance.fontMissing")})</option>
+        {/if}
         {#each monoFonts as family (family)}
           <option value={family}>{family}</option>
         {/each}
@@ -120,7 +154,7 @@
     <p
       class="truncate rounded-md border border-border bg-[var(--color-background)] px-2.5 py-1.5 text-term-foreground"
       style:font-family="var(--font-mono)"
-      style:font-size="{(13 * settings.state.terminalFontScalePercent) / 100}px"
+      style:font-size="{sampleSize}px"
     >
       {t("appearance.fontSample")}
     </p>

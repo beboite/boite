@@ -7,6 +7,10 @@ import {
   DEFAULT_MONO_STACK,
   DEFAULT_SANS_STACK,
   fontStack,
+  TERMINAL_FONT_BASE,
+  TERMINAL_FONT_MAX,
+  TERMINAL_FONT_MIN,
+  terminalFontSize,
   TERMINAL_SCALE_MAX,
   TERMINAL_SCALE_MIN,
 } from "./fonts";
@@ -70,36 +74,89 @@ describe("building a stack around a chosen family", () => {
   });
 });
 
+/**
+ * `document.fonts.check` cannot answer this question: it walks the faces CSS
+ * connected, and this app ships no `@font-face`, so it used to say yes to every
+ * name and the filter was inert in the shipping build. What is asserted here is
+ * the measurement that replaced it, against a canvas that resolves a stack the
+ * way a real one does.
+ */
 describe("probing what the machine has", () => {
-  const doc = (answer: (family: string) => boolean) =>
-    ({ fonts: { check: (spec: string) => answer(spec) } }) as unknown as Document;
+  /** The generic defaults of the imaginary machine every case below runs on. */
+  const GENERIC_WIDTHS: Record<string, number> = {
+    monospace: 100,
+    "sans-serif": 110,
+    serif: 120,
+  };
 
-  it("keeps the ones the browser confirms, in the order given", () => {
-    const has = doc((spec) => spec.includes("Hack") || spec.includes("Menlo"));
-    expect(availableFonts(["Hack", "Nope", "Menlo"], has)).toEqual([
+  /**
+   * A canvas that measures whichever family in the stack the machine has, and
+   * that ignores a `font` it cannot parse, which is what a real one does.
+   */
+  function canvas(
+    widths: Record<string, number>,
+    unparseable: readonly string[] = [],
+  ): Document {
+    const known = { ...GENERIC_WIDTHS, ...widths };
+    let font = "";
+    const ctx = {
+      get font() {
+        return font;
+      },
+      set font(spec: string) {
+        if (!unparseable.some((bad) => spec.includes(bad))) font = spec;
+      },
+      measureText: () => {
+        const families = font
+          .replace(/^\S+\s+/, "")
+          .split(",")
+          .map((f) => f.trim().replace(/^"|"$/g, ""));
+        const hit = families.find((f) => known[f] !== undefined);
+        return { width: hit ? known[hit] : 0 };
+      },
+    };
+    return {
+      createElement: () => ({ getContext: () => ctx }),
+    } as unknown as Document;
+  }
+
+  it("keeps the families that measure apart from the generics, in order", () => {
+    const machine = canvas({ Hack: 90, Menlo: 95 });
+    expect(availableFonts(["Hack", "Nope", "Menlo"], machine)).toEqual([
       "Hack",
       "Menlo",
     ]);
   });
 
   /**
-   * Offering a font that turns out to fall back is a smaller failure than
-   * offering an empty list, so a browser with no font API answers everything.
+   * A family the machine has falls through to the generic in every stack it is
+   * put in front of, and so measures exactly like it. One generic would call
+   * that missing, which is why three are tried.
    */
-  it("offers the whole list when it cannot be asked", () => {
-    const blind = {} as unknown as Document;
-    expect(availableFonts(["Hack", "Menlo"], blind)).toEqual(["Hack", "Menlo"]);
+  it("keeps a family that is the machine's own default for one generic", () => {
+    const windows = canvas({ Consolas: GENERIC_WIDTHS.monospace });
+    expect(availableFonts(["Consolas"], windows)).toEqual(["Consolas"]);
   });
 
-  it("drops a family the browser throws on", () => {
-    const angry = {
-      fonts: {
-        check: () => {
-          throw new Error("bad font spec");
-        },
-      },
+  it("drops a name the browser cannot parse into a font shorthand", () => {
+    // `font` keeps its previous value on a bad spec, and the previous value is
+    // the generic's own baseline, so the widths match and the name drops out.
+    const machine = canvas({ "Bad Name": 90 }, ["Bad Name"]);
+    expect(availableFonts(["Bad Name"], machine)).toEqual([]);
+  });
+
+  /**
+   * Offering a font that turns out to fall back is a smaller failure than
+   * offering an empty list, so a browser with no 2D canvas answers everything.
+   */
+  it("offers the whole list when it cannot measure", () => {
+    const blind = {
+      createElement: () => ({ getContext: () => null }),
     } as unknown as Document;
-    expect(availableFonts(["Hack"], angry)).toEqual([]);
+    expect(availableFonts(["Hack", "Menlo"], blind)).toEqual(["Hack", "Menlo"]);
+
+    const bare = {} as unknown as Document;
+    expect(availableFonts(["Hack", "Menlo"], bare)).toEqual(["Hack", "Menlo"]);
   });
 });
 
@@ -113,5 +170,35 @@ describe("the terminal scale", () => {
   it("falls back to 100 on a value that is not a number", () => {
     expect(clampTerminalScale(Number.NaN)).toBe(100);
     expect(clampTerminalScale(Number.POSITIVE_INFINITY)).toBe(100);
+  });
+});
+
+/**
+ * The size the terminals are drawn at is also what the appearance preview
+ * renders its sample in, and a preview that is not the size it previews has no
+ * job left. Both call this, so the two cannot disagree.
+ */
+describe("the terminal font size", () => {
+  it("is the base at 100% of both scales", () => {
+    expect(terminalFontSize(100, 100)).toBe(TERMINAL_FONT_BASE);
+  });
+
+  it("multiplies the two scales rather than picking one", () => {
+    expect(terminalFontSize(150, 200)).toBe(
+      Math.min(TERMINAL_FONT_MAX, Math.round((13 * 150 * 200) / 10_000)),
+    );
+    // The UI scale alone moves it, which is what the preview used to miss.
+    expect(terminalFontSize(150, 100)).not.toBe(terminalFontSize(100, 100));
+  });
+
+  it("stays inside the px range xterm is given", () => {
+    expect(terminalFontSize(75, TERMINAL_SCALE_MIN, 0.25)).toBe(
+      TERMINAL_FONT_MIN,
+    );
+    expect(terminalFontSize(150, TERMINAL_SCALE_MAX, 4)).toBe(TERMINAL_FONT_MAX);
+  });
+
+  it("rides pinch on top of both scales", () => {
+    expect(terminalFontSize(100, 100, 2)).toBe(26);
   });
 });

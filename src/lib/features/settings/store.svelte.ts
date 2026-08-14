@@ -756,11 +756,13 @@ class SettingsStore {
     this.persistDeviceNow();
   }
 
+  // Debounced like the other sliders: this arrives on every `oninput` of a
+  // range, so a single drag is dozens of localStorage writes otherwise.
   setTerminalFontScalePercent(value: number) {
     const next = clampTerminalScale(value);
     if (this.state.terminalFontScalePercent === next) return;
     this.state.terminalFontScalePercent = next;
-    this.persistDeviceNow();
+    this.persistDeviceSoon();
   }
   async setFastpickEnabled(value: boolean) {
     if (this.state.fastpickEnabled === value) return;

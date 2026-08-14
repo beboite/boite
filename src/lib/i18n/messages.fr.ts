@@ -100,6 +100,7 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "appearance.fontUi": "Interface",
   "appearance.fontTerminal": "Terminal et code",
   "appearance.fontDefault": "Par défaut",
+  "appearance.fontMissing": "absente de cette machine",
   "appearance.fontSample": "const path = \"~/dev\"; // 0O1lI il1 {}[]()",
   "appearance.terminalSize": "Taille du texte des terminaux",
   "appearance.terminalSizeDesc": "En plus de l'échelle globale : grossir la sortie d'un agent sans grossir l'app.",

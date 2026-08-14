@@ -98,6 +98,9 @@ export const EN_MESSAGES = {
   "appearance.fontUi": "Interface",
   "appearance.fontTerminal": "Terminal and code",
   "appearance.fontDefault": "Default",
+  // Shown on the entry for a family stored on another machine: the choice is
+  // kept, it simply cannot be drawn here.
+  "appearance.fontMissing": "not on this machine",
   "appearance.fontSample": "const path = \"~/dev\"; // 0O1lI il1 {}[]()",
   "appearance.terminalSize": "Terminal text size",
   "appearance.terminalSizeDesc": "On top of the UI scale: grow an agent's output without growing the app.",

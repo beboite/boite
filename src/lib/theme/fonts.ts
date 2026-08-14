@@ -78,27 +78,71 @@ export function fontStack(family: string | null, fallback: string): string {
 }
 
 /**
+ * A string whose width says which face drew it.
+ *
+ * Latin letters, digits and ASCII punctuation only: a glyph the candidate has
+ * no coverage for is drawn by the fallback in both measurements, which would
+ * hide the very difference this is looking for. Repeated because a fraction of
+ * a pixel per glyph only adds up to a readable difference over a long run.
+ */
+const PROBE = "mmmmmmmmmmlliWWWWWW0O1@#%iIl1|oO";
+
+/** Large enough that two faces one hinting step apart still measure apart. */
+const PROBE_SIZE = "72px";
+
+/**
+ * The generics a candidate is measured against.
+ *
+ * Three, not one, because a family that IS the machine's own default for a
+ * generic (Consolas for `monospace` on Windows, Arial for `sans-serif`)
+ * measures identically against that one and differently against the others.
+ */
+const GENERICS = ["monospace", "sans-serif", "serif"] as const;
+
+function probeContext(doc: Document): CanvasRenderingContext2D | null {
+  try {
+    return doc.createElement?.("canvas")?.getContext?.("2d") ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * The candidates this machine can actually draw, in the order given.
  *
- * `document.fonts.check` answers for system faces as well as loaded ones,
- * which is what makes this possible at all: a webview cannot enumerate
- * installed fonts, it can only be asked about a name it is given. A browser
- * with no font API answers the whole list, because offering a font that turns
- * out to fall back is a smaller failure than offering nothing.
+ * A webview cannot enumerate installed fonts, and `document.fonts.check` does
+ * not answer the question either: Blink walks the `FontFaceCache`, which only
+ * holds CSS-connected faces, so an app shipping no `@font-face` gets `true` for
+ * every name it asks about and the list comes back unfiltered. That filter read
+ * like detection and was inert, which is worse than none: a Windows box was
+ * offered `SF Mono` and `Menlo`, and picking one silently fell back.
+ *
+ * So the faces are measured instead. A probe is drawn in a generic family, then
+ * in the candidate with that same generic behind it: a family the machine does
+ * not have falls through to the generic and measures to the pixel identically,
+ * one it does have essentially never does. A machine with no 2D canvas is
+ * offered the whole list, because a font that turns out to fall back is a
+ * smaller failure than an empty menu.
  */
 export function availableFonts(
   candidates: readonly string[],
   doc: Document = document,
 ): string[] {
-  const fonts = doc.fonts;
-  if (!fonts?.check) return [...candidates];
-  return candidates.filter((family) => {
-    try {
-      return fonts.check(`12px "${family}"`);
-    } catch {
-      return false;
-    }
-  });
+  const ctx = probeContext(doc);
+  if (!ctx?.measureText) return [...candidates];
+  return candidates.filter((family) =>
+    GENERICS.some((generic) => {
+      ctx.font = `${PROBE_SIZE} ${generic}`;
+      const fallback = ctx.measureText(PROBE).width;
+      // The generic is measured again right before each candidate rather than
+      // once up front, because a spec the browser cannot parse leaves `font`
+      // untouched: on this ordering that leftover value is the generic itself,
+      // so a name that breaks the shorthand measures equal and drops out on its
+      // own instead of being read as a difference.
+      ctx.font = `${PROBE_SIZE} ${fontStack(family, generic)}`;
+      return ctx.measureText(PROBE).width !== fallback;
+    }),
+  );
 }
 
 /**
@@ -118,5 +162,44 @@ export function clampTerminalScale(percent: number): number {
   return Math.min(
     TERMINAL_SCALE_MAX,
     Math.max(TERMINAL_SCALE_MIN, Math.round(percent)),
+  );
+}
+
+/** What 100% zoom at 100% terminal scale means, in px. */
+export const TERMINAL_FONT_BASE = 13;
+export const TERMINAL_FONT_MIN = 8;
+export const TERMINAL_FONT_MAX = 32;
+
+/**
+ * The px a terminal is actually drawn at.
+ *
+ * Lives here rather than in Terminal.svelte because the appearance preview has
+ * to be able to say the same number, and the copy it started with dropped the
+ * UI scale: the sample was the size the terminal would be at 100% zoom and no
+ * other, which is the one thing a preview may not get wrong.
+ *
+ * Two percentages divide by 10 000. The UI scale reaches the chrome as a root
+ * font-size, which a canvas-drawn terminal cannot inherit, so it is multiplied
+ * in here instead: the zoom slider used to grow every box around a terminal and
+ * leave the text inside it exactly where it was. Pinch rides on top of both, so
+ * a pinched pane still follows a later move of either slider.
+ */
+export function terminalFontSize(
+  uiScalePercent: number,
+  terminalScalePercent: number,
+  pinchFactor = 1,
+): number {
+  return Math.max(
+    TERMINAL_FONT_MIN,
+    Math.min(
+      TERMINAL_FONT_MAX,
+      Math.round(
+        (TERMINAL_FONT_BASE *
+          uiScalePercent *
+          terminalScalePercent *
+          pinchFactor) /
+          10_000,
+      ),
+    ),
   );
 }
