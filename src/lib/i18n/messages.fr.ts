@@ -97,6 +97,7 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "appearance.resetScale": "Réinitialiser à 100 %",
   "appearance.layout": "Disposition",
   "appearance.layoutDesc": "Mobile : pages pleine largeur et barre en bas. PC : barre latérale et panneaux.",
+  "appearance.layoutAuto": "Automatique",
   "appearance.mobile": "Mobile",
   "appearance.pc": "PC",
   "appearance.colorByModel": "Couleur selon le modèle",
