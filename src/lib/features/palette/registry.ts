@@ -17,16 +17,30 @@ import { anchorPaneId, openPane } from "$lib/features/panes/open";
 import { paneStore } from "$lib/features/panes/store.svelte";
 import { classifyBrowserUrl } from "$lib/features/browser/url";
 import { notifications } from "$lib/features/notifications/store.svelte";
+import { openTodo } from "$lib/features/todo/open";
+import { contentRowId } from "./content";
+import type { WorkspaceHit } from "$lib/backend/types";
 import type { PaneContent, PanelKind } from "$lib/features/panes/types";
 import type { IconKey } from "$lib/types";
 
-export type PaletteSection = "threads" | "actions" | "panes" | "projects";
+import type { PaletteSection } from "./sections";
+
+export type { PaletteSection, ScoredSection } from "./sections";
+export { SECTION_BIAS, SECTION_ORDER, SECTION_TITLE_KEYS } from "./sections";
 
 export interface PaletteCommand {
   id: string;
   section: PaletteSection;
   /** Text straight out of user data: a thread title, a project name. Never translated. */
   label?: string;
+  /**
+   * A short word for what a row *is*, when its label does not say.
+   *
+   * Only content hits carry one: an excerpt is a sentence out of a todo, a
+   * journal entry or a terminal, and which of the three it came from decides
+   * where activating it lands.
+   */
+  badgeKey?: MessageKey;
   /**
    * A fixed command's wording, held as a dictionary key and resolved at render.
    * Resolving here instead would freeze the language the list was built in.
@@ -44,24 +58,6 @@ export interface PaletteCommand {
   icon?: { key: IconKey; color: string | null };
   run: () => void | Promise<unknown>;
 }
-
-// Ranking bias when a query is active: a thread you can jump to beats an
-// action of the same textual score, which beats selecting a project.
-export const SECTION_BIAS: Record<PaletteSection, number> = {
-  threads: 6,
-  actions: 3,
-  panes: 2,
-  projects: 0,
-};
-
-// Keys rather than strings: the section headers are drawn by a component that
-// only knows the section, so the literal has to live on the data.
-export const SECTION_TITLE_KEYS: Record<PaletteSection, MessageKey> = {
-  threads: "project.threads",
-  actions: "palette.sectionActions",
-  panes: "palette.panes",
-  projects: "sidebar.projects",
-};
 
 // The chord the keyboard controller actually listens for, spelled the way the
 // platform spells it. A mac user reading "Ctrl+T" is being told about a chord
@@ -95,7 +91,7 @@ export function commandHint(c: PaletteCommand): string | null {
   return c.hint ?? null;
 }
 
-function goToThread(threadId: string, projectId: string) {
+export function goToThread(threadId: string, projectId: string) {
   app.activeThreadId = threadId;
   app.selectedProjectId = projectId;
   app.view = "terminal";
@@ -285,4 +281,70 @@ export function buildPaletteCommands(): PaletteCommand[] {
   }
 
   return commands;
+}
+
+/**
+ * What the workspace wrote down, as rows the palette can draw.
+ *
+ * Built per answer rather than per open, and separately from everything above:
+ * these arrive from `search.query` after a round trip, and the command list must
+ * never be waiting on one.
+ *
+ * A hit whose project or thread is gone is dropped. Its excerpt is still true
+ * and there is nowhere to go from it, and a row that does nothing when it is
+ * activated is worse in a palette than a row that is not there.
+ */
+export function buildContentCommands(hits: WorkspaceHit[]): PaletteCommand[] {
+  const commands: PaletteCommand[] = [];
+  for (const [index, hit] of hits.entries()) {
+    const row = contentRow(hit, index);
+    if (row) commands.push(row);
+  }
+  return commands;
+}
+
+function contentRow(hit: WorkspaceHit, index: number): PaletteCommand | null {
+  const id = contentRowId(hit, index);
+  if (hit.kind === "transcript") {
+    // A transcript names its thread and nothing else: the file is on disk under
+    // the thread id, and which project that belongs to is the row's to say.
+    const thread = app.threadById(hit.refId);
+    if (!thread) return null;
+    const project = app.projectById(thread.projectId);
+    return {
+      id,
+      section: "content",
+      badgeKey: "palette.hitTerminal",
+      label: hit.excerpt,
+      hint: project
+        ? `${thread.title ?? thread.label} / ${projectDisplayName(project)}`
+        : (thread.title ?? thread.label),
+      icon: { key: thread.iconKey, color: thread.iconColor ?? null },
+      run: () => goToThread(thread.id, thread.projectId),
+    };
+  }
+
+  const project = app.projectById(hit.projectId);
+  if (!project) return null;
+  if (hit.kind === "todo") {
+    return {
+      id,
+      section: "content",
+      badgeKey: "palette.hitTodo",
+      label: hit.excerpt,
+      hint: projectDisplayName(project),
+      run: () => openTodo(project.id, hit.refId),
+    };
+  }
+  // A journal entry. Nothing in Boite draws one, so the closest true
+  // destination is the project it happened in; inventing a viewer for it is a
+  // feature, not a navigation target.
+  return {
+    id,
+    section: "content",
+    badgeKey: "palette.hitJournal",
+    label: hit.excerpt,
+    hint: projectDisplayName(project),
+    run: () => openProjectDashboard(project.id),
+  };
 }

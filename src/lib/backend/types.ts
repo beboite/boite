@@ -835,6 +835,44 @@ export interface ApprovalsApi {
   decide(id: string, allow: boolean): Promise<PendingApproval | null>;
 }
 
+/** Mirrors `boite_core::search::Kind`. */
+export type WorkspaceHitKind = "todo" | "event" | "transcript";
+
+/**
+ * One thing found somewhere in the workspace. Mirrors `boite_core::search::Hit`.
+ *
+ * Two mechanisms answer into the same shape: the todos and the journal come out
+ * of an FTS5 index written when the row is, and the transcripts are scanned at
+ * query time. Whoever reads a hit does not have to know which.
+ */
+export interface WorkspaceHit {
+  kind: WorkspaceHitKind;
+  /**
+   * Empty for a transcript: the thread names its project, the file does not.
+   * The caller resolves it from `refId` when it needs one.
+   */
+  projectId: string;
+  /**
+   * The todo id, `<projectId>#<seq>` for a journal entry, the thread id for a
+   * transcript.
+   */
+  refId: string;
+  excerpt: string;
+}
+
+export interface SearchApi {
+  /**
+   * Where something is, across the todos, the journal and what the terminals
+   * printed.
+   *
+   * `limit` is the whole answer rather than a per-source cap, and the host
+   * spends it on the rows first: an index lookup ranks and a substring scan
+   * does not, so a transcript with forty matching lines would otherwise push
+   * every ranked hit out.
+   */
+  query(text: string, limit: number): Promise<WorkspaceHit[]>;
+}
+
 export interface Backend {
   readonly kind: "tauri" | "remote";
   readonly caps: BackendCaps;
@@ -855,6 +893,7 @@ export interface Backend {
   readonly session: SessionApi;
   readonly log: LogApi;
   readonly approvals: ApprovalsApi;
+  readonly search: SearchApi;
   // Web Push registration. Present only on remote (web/PWA); undefined on
   // desktop, which notifies through the OS directly.
   readonly push?: PushApi;
