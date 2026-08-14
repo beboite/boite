@@ -191,8 +191,13 @@ export class EnvironmentRuntime {
   #release(): void {
     this.#unsubscribe?.();
     this.#unsubscribe = null;
-    this.#backend?.dispose();
+    // Null before dispose: dispose() closes the socket, whose state callback
+    // fires synchronously, and its `#backend !== backend` guard must already
+    // see null or a deliberate release re-enters `connectionLost()` and leaves
+    // a stray retry timer that later dials over a live connection.
+    const backend = this.#backend;
     this.#backend = null;
+    backend?.dispose();
     // The handles every Terminal of this environment is holding were issued by
     // the instance just disposed. Bumping this environment's key is what makes
     // them release before anything reattaches; no other environment's terminals

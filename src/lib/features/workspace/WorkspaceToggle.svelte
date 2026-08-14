@@ -297,7 +297,9 @@
       confirmLabel: t("workspace.removeConfirmAction"),
       danger: true,
     });
-    if (ok) device.removeBoite(entry.id);
+    // Through the registry, not `device.removeBoite` directly: the runtime
+    // holds an authenticated socket that must close with the credential.
+    if (ok) environments.remove(entry.id);
   }
   async function commitName() {
     const name = nameDraft.trim();
