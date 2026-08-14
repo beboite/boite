@@ -94,6 +94,13 @@
 {/if}
 
 <ToggleSetting
+  label={t("experiments.whip")} anchor="experiments.whip"
+  description={t("experiments.whipDesc")}
+  enabled={settings.state.experimentWhip}
+  onToggle={() => settings.setExperimentWhip(!settings.state.experimentWhip)}
+/>
+
+<ToggleSetting
   label={t("experiments.sidebarDesign")} anchor="experiments.sidebarDesign"
   description={t("experiments.sidebarDesignDesc")}
   enabled={settings.state.sidebarDesign === "glow"}

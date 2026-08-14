@@ -2,6 +2,10 @@ import { invoke } from "./ipc";
 import type {
   ApprovalsApi,
   PendingApproval,
+  Checkpoint,
+  CheckpointApi,
+  CheckpointDiff,
+  CheckpointFileVersions,
   EditorApi,
   ExplorerApi,
   FastpickApi,
@@ -14,11 +18,13 @@ import type {
   LogApi,
   ProjectApi,
   ScopeApi,
+  SearchApi,
   SessionApi,
   SessionHit,
   SessionKind,
   ShellApi,
   SystemApi,
+  WorkspaceHit,
   WorktreeApi,
   WorktreeEntry,
   WorktreeHold,
@@ -88,6 +94,19 @@ export const tauriEditor: EditorApi = {
   fileVersions: (path, file, headFile) =>
     invoke<FileVersions>("git_file_versions", { path, file, headFile }),
   readBase64: (path) => invoke<string>("read_file_base64", { path }),
+};
+
+export const tauriCheckpoints: CheckpointApi = {
+  capture: (repo, threadId, edge) =>
+    invoke<Checkpoint | null>("checkpoint_capture", { repo, threadId, edgeName: edge }),
+  list: (repo, threadId) => invoke<Checkpoint[]>("checkpoint_list", { repo, threadId }),
+  diff: (repo, from, to, patch) =>
+    invoke<CheckpointDiff>("checkpoint_diff", { repo, from, to, patch }),
+  fileVersions: (repo, from, to, file) =>
+    invoke<CheckpointFileVersions>("checkpoint_file_versions", { repo, from, to, file }),
+  restore: (repo, threadId, sha) =>
+    invoke<void>("checkpoint_restore", { repo, threadId, sha }),
+  forget: (repo, threadId) => invoke<void>("checkpoint_forget", { repo, threadId }),
 };
 
 export const tauriProject: ProjectApi = {
@@ -216,6 +235,13 @@ export const tauriSession: SessionApi = {
 export const tauriApprovals: ApprovalsApi = {
   list: () => invoke<PendingApproval[]>("approvals_open"),
   decide: (id, allow) => invoke<PendingApproval | null>("approval_decide", { id, allow }),
+};
+
+// Same bus command the remote asks for as `search.query`. The desktop reads the
+// answer bare; the `hits` envelope is the WebSocket protocol's.
+export const tauriSearch: SearchApi = {
+  query: (text, limit) =>
+    invoke<WorkspaceHit[]>("records_search", { params: { q: text, limit } }),
 };
 
 export const tauriLog: LogApi = {
