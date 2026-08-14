@@ -211,6 +211,18 @@ interface PendingReplay {
   offset: number;
 }
 
+export interface SocketOptions {
+  /**
+   * Whether the socket schedules its own reconnects.
+   *
+   * False hands that job to an `EnvironmentSupervisor`, which is the only retry
+   * owner once several environments are live: two backoff loops on one link
+   * dial twice as often as either was written to, and neither can see the other
+   * to stop.
+   */
+  autoReconnect?: boolean;
+}
+
 // One multiplexed WebSocket per remote workspace: JSON control plane (auth,
 // RPC request/response, server events) plus binary frames for PTY I/O
 // ([opcode][16-byte thread uuid][payload]). Reconnects with exponential
@@ -258,17 +270,20 @@ export class Socket {
   #closed = false;
   #backoff = BACKOFF_MIN;
   #reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  #autoReconnect: boolean;
 
   constructor(
     url: string,
     token: string,
     onState: (s: ConnState) => void,
     onAuthRejected: () => void = () => {},
+    options: SocketOptions = {},
   ) {
     this.#url = url;
     this.#token = token;
     this.#stateCb = onState;
     this.#authRejectedCb = onAuthRejected;
+    this.#autoReconnect = options.autoReconnect !== false;
   }
 
   get state(): ConnState {
@@ -642,6 +657,7 @@ export class Socket {
   }
 
   #scheduleReconnect(): void {
+    if (!this.#autoReconnect) return;
     if (this.#closed || this.#authRejected || this.#reconnectTimer) return;
     const base = Math.min(this.#backoff, BACKOFF_MAX);
     const delay = base * (0.5 + Math.random() * 0.5);

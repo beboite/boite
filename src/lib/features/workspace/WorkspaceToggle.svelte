@@ -16,11 +16,14 @@
     setActiveBoiteInfo,
     setDynamicMode,
     defaultRemoteWsUrl,
+    refreshEnvironments,
   } from "$lib/app/workspace";
+  import { environments } from "$lib/backend/environment/registry.svelte";
   import { isBehind } from "./version";
   import MobileSheet from "$lib/features/mobile/MobileSheet.svelte";
   import Plus from "@lucide/svelte/icons/plus";
   import Trash2 from "@lucide/svelte/icons/trash-2";
+  import Radio from "@lucide/svelte/icons/radio";
   import Check from "@lucide/svelte/icons/check";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
@@ -239,6 +242,26 @@
       close();
     }
   }
+  /**
+   * Hold a connection to a boite this device is not standing on, or drop it.
+   *
+   * The menu is where it belongs rather than the settings panel: this is the
+   * list of boites, and what the switch changes is whether one of them answers
+   * without being switched to.
+   */
+  function toggleKeepConnected(entry: BoiteEntry) {
+    device.setBoiteEnabled(entry.id, !entry.enabled);
+    refreshEnvironments();
+  }
+
+  function environmentPhase(id: string): string {
+    const runtime = environments.get(id);
+    if (!runtime) return t("workspace.connStateDisconnected");
+    if (runtime.phase === "connected") return t("workspace.connStateConnected");
+    if (runtime.phase === "blocked") return t("workspace.connStateBlocked");
+    return t("workspace.connStateConnecting");
+  }
+
   async function pickBoite(id: string) {
     if (busy) return;
     busy = true;
@@ -274,7 +297,9 @@
       confirmLabel: t("workspace.removeConfirmAction"),
       danger: true,
     });
-    if (ok) device.removeBoite(entry.id);
+    // Through the registry, not `device.removeBoite` directly: the runtime
+    // holds an authenticated socket that must close with the credential.
+    if (ok) environments.remove(entry.id);
   }
   async function commitName() {
     const name = nameDraft.trim();
@@ -440,9 +465,26 @@
                 {t("workspace.connStateDisconnected")}
               {/if}
             </span>
+          {:else if b.enabled}
+            <!-- The state of a connection this device holds without standing on
+                 it, which is the only place that answers for one. -->
+            <span class="shrink-0 text-2xs uppercase tracking-wide text-muted-foreground">
+              {environmentPhase(b.id)}
+            </span>
           {/if}
         </button>
         {#if !active}
+          <button
+            type="button"
+            class={`flex shrink-0 items-center justify-center rounded-lg transition hover:bg-accent ${mobile ? "w-11" : "w-9"} ${b.enabled ? "text-foreground" : "text-muted-foreground/50"}`}
+            onclick={() => toggleKeepConnected(b)}
+            aria-label={t("workspace.keepConnected")}
+            title={b.enabled
+              ? t("workspace.keepConnectedOn")
+              : t("workspace.keepConnectedOff")}
+          >
+            <Radio class="size-4" />
+          </button>
           <button
             type="button"
             class={`flex shrink-0 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-danger/20 hover:text-danger ${mobile ? "w-11" : "w-9"}`}

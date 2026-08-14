@@ -101,12 +101,17 @@
   }
 </script>
 
-{#if !pairing}
-  <SettingsCard title={t("devices.title")} description={t("devices.localOnly")}>
+<!-- One card, not one per branch: a local workspace and a boite are two things
+     this list can say, not two settings. Two cards would also mean the same
+     anchor drawn twice, which is what search resolves a hit against. -->
+<SettingsCard
+  title={t("devices.title")}
+  anchor="devices.title"
+  description={pairing ? t("devices.description") : t("devices.localOnly")}
+>
+  {#if !pairing}
     <p class="text-sm text-muted-foreground/80">{t("devices.localOnlyDetail")}</p>
-  </SettingsCard>
-{:else}
-  <SettingsCard title={t("devices.title")} description={t("devices.description")}>
+  {:else}
     {#if loading}
       <p class="text-sm text-muted-foreground/80">{t("common.loading")}</p>
     {:else if devices.length === 0}
@@ -153,9 +158,15 @@
     {#if error}
       <p class="text-sm text-danger">{error}</p>
     {/if}
-  </SettingsCard>
+  {/if}
+</SettingsCard>
 
-  <SettingsCard title={t("devices.inviteTitle")} description={t("devices.inviteDesc")}>
+{#if pairing}
+  <SettingsCard
+    title={t("devices.inviteTitle")}
+    anchor="devices.inviteTitle"
+    description={t("devices.inviteDesc")}
+  >
     <label class="flex flex-col gap-1 text-xs text-muted-foreground">
       {t("devices.inviteLabel")}
       <input

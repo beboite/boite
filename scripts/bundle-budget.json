@@ -27,11 +27,22 @@
     "808816, for the mark saying an agent is driving a browser pane and the",
     "handler answering its page questions: the mark rides on the pane's own",
     "content, so both are read wherever a pane is drawn, before first paint.",
-    "Then to 831488, for the client half of the socket-ticket exchange that",
+    "Then to 826368, for the filing rule behind pin, settle and snooze, plus the",
+    "pinned section and the clock that wakes it: the sidebar decides where every",
+    "row belongs before it draws one. Measured at 800.9 KB, so this leaves 6.1 KB.",
+    "Then to 838656, for the environment registry and its supervisor: a window",
+    "that can hold several boites at once decides which ones to dial before it",
+    "draws anything, so the state machine and the projection cache are both on",
+    "the boot path. Measured at 812.9 KB, so this leaves 6.1 KB.",
+    "Then to 846848, for the client half of the socket-ticket exchange that",
     "replaced the shared token: a ticket is bought before anything is drawn.",
-    "Measured at 805.8 KB, so this leaves 6.2 KB."
+    "Measured at 820.1 KB, so this leaves 7.0 KB.",
+    "",
+    "largestEagerChunkBytes moved with it, 256000 -> 262144. The main route is",
+    "the chunk in question and it had 0.2 KB left, which is a ceiling that fails",
+    "the next commit whatever the next commit is."
   ],
-  "eagerBytes": 831488,
+  "eagerBytes": 846848,
   "totalBytes": 6144000,
   "largestEagerChunkBytes": 262144
 }

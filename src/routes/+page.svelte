@@ -638,10 +638,19 @@
                        reload therefore threw away xterm and its WebGL context
                        to build both again; the terminal relaunches in place and
                        watches the nonce itself. -->
-                  {#if TerminalView.current}
-                    {@const TerminalComp = TerminalView.current}
-                    <TerminalComp {thread} {visible} {focused} />
-                  {/if}
+                  <!-- Keyed on this thread's own environment, not on the
+                       workspace. A PTY handle is only valid against the backend
+                       instance that issued it, so the terminals that have to
+                       release before a transport is disposed are exactly the
+                       ones whose handles came from it: one environment's. A
+                       boite going down no longer tears down the local terminals
+                       it has nothing to do with. -->
+                  {#key workspace.epochOf(thread.origin)}
+                    {#if TerminalView.current}
+                      {@const TerminalComp = TerminalView.current}
+                      <TerminalComp {thread} {visible} {focused} />
+                    {/if}
+                  {/key}
                   <!-- A thread that lives on the dropped boite: what is typed
                        into it is going nowhere, and the pane is the only place
                        that can say so about this thread rather than about the

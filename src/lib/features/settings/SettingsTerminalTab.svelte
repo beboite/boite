@@ -52,7 +52,7 @@
 </script>
 
 <SettingsCard
-  title={t("terminalTab.defaultShell")}
+  title={t("terminalTab.defaultShell")} anchor="terminalTab.defaultShell"
   description={t("terminalTab.defaultShellDesc")}
 >
   <div class="overflow-hidden rounded-lg border border-border bg-[var(--color-surface-2)]">
@@ -97,18 +97,18 @@
 
 {#if platform.isHostWindows}
   <SettingsCard
-    title={t("terminalTab.windowsTweaks")}
+    title={t("terminalTab.windowsTweaks")} anchor="terminalTab.windowsTweaks"
     description={t("terminalTab.windowsTweaksDesc")}
   >
     <ToggleSetting
-      label={t("terminalTab.psNewline")}
+      label={t("terminalTab.psNewline")} anchor="terminalTab.psNewline"
       description={t("terminalTab.psNewlineDesc")}
       enabled={settings.state.powershellNewline}
       onToggle={() =>
         settings.setPowershellNewline(!settings.state.powershellNewline)}
     />
     <ToggleSetting
-      label={t("terminalTab.psNoProfile")}
+      label={t("terminalTab.psNoProfile")} anchor="terminalTab.psNoProfile"
       description={t("terminalTab.psNoProfileDesc")}
       enabled={settings.state.powershellNoProfile}
       onToggle={() =>
@@ -118,11 +118,11 @@
 {/if}
 
 <SettingsCard
-  title={t("terminalTab.threadClose")}
+  title={t("terminalTab.threadClose")} anchor="terminalTab.threadClose"
   description={t("terminalTab.threadCloseDesc")}
 >
   <ToggleSetting
-    label={t("terminalTab.confirmClose")}
+    label={t("terminalTab.confirmClose")} anchor="terminalTab.confirmClose"
     description={t("terminalTab.confirmCloseDesc")}
     enabled={settings.state.confirmCloseThread}
     onToggle={() =>
@@ -131,11 +131,11 @@
 </SettingsCard>
 
 <SettingsCard
-  title={t("terminalTab.gitAutoFetch")}
+  title={t("terminalTab.gitAutoFetch")} anchor="terminalTab.gitAutoFetch"
   description={t("terminalTab.gitAutoFetchDesc")}
 >
   <ToggleSetting
-    label={t("terminalTab.autoFetch")}
+    label={t("terminalTab.autoFetch")} anchor="terminalTab.autoFetch"
     description={t("terminalTab.autoFetchDesc")}
     enabled={settings.state.gitAutoFetch}
     onToggle={() => settings.setGitAutoFetch(!settings.state.gitAutoFetch)}
@@ -177,23 +177,23 @@
      thread launch, hydrated from storage, and pinned to their default because
      nothing ever called their setter. -->
 <SettingsCard
-  title={t("terminalTab.agentLaunch")}
+  title={t("terminalTab.agentLaunch")} anchor="terminalTab.agentLaunch"
   description={t("terminalTab.agentLaunchDesc")}
 >
   <ToggleSetting
-    label={t("terminalTab.threadWorktrees")}
+    label={t("terminalTab.threadWorktrees")} anchor="terminalTab.threadWorktrees"
     description={t("terminalTab.threadWorktreesDesc")}
     enabled={settings.state.threadWorktrees}
     onToggle={() => void settings.setThreadWorktrees(!settings.state.threadWorktrees)}
   />
   <ToggleSetting
-    label={t("terminalTab.agentTodoAccess")}
+    label={t("terminalTab.agentTodoAccess")} anchor="terminalTab.agentTodoAccess"
     description={t("terminalTab.agentTodoAccessDesc")}
     enabled={settings.state.agentTodoAccess}
     onToggle={() => void settings.setAgentTodoAccess(!settings.state.agentTodoAccess)}
   />
   <ToggleSetting
-    label={t("terminalTab.mcpYolo")}
+    label={t("terminalTab.mcpYolo")} anchor="terminalTab.mcpYolo"
     description={t("terminalTab.mcpYoloDesc")}
     enabled={settings.state.mcpYolo}
     onToggle={() => void settings.setMcpYolo(!settings.state.mcpYolo)}
@@ -234,7 +234,7 @@
 </SettingsCard>
 
 <SettingsCard
-  title={t("terminalTab.autoSettle")}
+  title={t("terminalTab.autoSettle")} anchor="terminalTab.autoSettle"
   description={t("terminalTab.autoSettleDesc")}
 >
   <div class="flex items-center gap-3">
@@ -264,7 +264,7 @@
 </SettingsCard>
 
 <SettingsCard
-  title={t("terminalTab.idleAutoClose")}
+  title={t("terminalTab.idleAutoClose")} anchor="terminalTab.idleAutoClose"
   description={t("terminalTab.idleAutoCloseDesc")}
 >
   <div class="flex items-center gap-3">
