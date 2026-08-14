@@ -1,7 +1,7 @@
-//! Numbers for the four claims that had none attached.
+//! Numbers for the claims that had none attached.
 //!
 //! Boite's rule for the whole repair is that an optimisation with no
-//! measurement attached is removed. Four places in `boite-core` carry a comment
+//! measurement attached is removed. Five places in `boite-core` carry a comment
 //! asserting a cost, and each of them is a decision somebody would otherwise
 //! have to relitigate from intuition:
 //!
@@ -15,6 +15,9 @@
 //!   argument that "twenty live terminals is a couple of megabytes read once".
 //! - `screen::Screen::trimmed` bounds what the window may push, and it runs on
 //!   the receiving side of a heartbeat.
+//! - `usage::collect_usage_blocking` walks a year of two transcript stores every
+//!   time a project page is opened, and its whole design is a cache and a
+//!   parallel read that were asserted rather than measured.
 //!
 //! Run: `cargo bench -p boite-core`. Not in CI, and that is deliberate — a
 //! benchmark on a shared runner measures the runner. What CI does do is compile
@@ -44,6 +47,38 @@
 //! it is now a number rather than a suspicion, and `POLL_DEADLINE_MS` is
 //! abandoning a read that normally lands in ten milliseconds rather than one
 //! that normally lands in a hundred microseconds.
+//!
+//! # What the usage scan cost before it was repaired
+//!
+//! Same machine, 1542 claude transcripts over 169 project folders and 144 codex
+//! rollouts, 1.8 GB of JSONL between them. `usage::collect` is this bench;
+//! "one project" is a real project folder with 47 transcripts and 52 MB behind
+//! it, timed outside criterion because a cold scan only happens once per process
+//! and criterion reports the warm mean.
+//!
+//! ```text
+//!                              before      after
+//! usage::collect  warm         6.07 ms    1.31 ms
+//! usage::collect  no match     5.95 ms    1.35 ms
+//! one project     cold        ~90    ms  ~23    ms
+//! one project     warm         ~7.0  ms   ~1.4  ms
+//! ```
+//!
+//! Attribution, because the four-times figure is three separate things. Reading
+//! into one buffer instead of a `String` per line, skipping a codex line on a
+//! substring test rather than a `serde_json::Value`, taking the version stamp off
+//! the directory walk instead of a second `metadata` call, and handing back an
+//! `Arc` instead of cloning the parse — those alone took the cold scan to ~57 ms
+//! and the warm one to ~1.7 ms. The four-way read ([`boite_core`]'s
+//! `usage::SCAN_THREADS`) took the cold half from ~57 ms to ~23 ms and did
+//! nothing for the warm one, which is why only the misses are handed to it.
+//!
+//! None of that is the worst case, and the worst case is the one with no number
+//! here: the cache used to be emptied whole the moment it held more entries than
+//! its limit, so a machine past that limit re-read **every** transcript on
+//! **every** visit to **every** project. This machine sits under it at 1686
+//! files, which is exactly why the bug survived — `usage::tests` covers the
+//! eviction instead.
 
 use std::hint::black_box;
 use std::io::Write;
@@ -178,11 +213,41 @@ fn screen_trimmed(c: &mut Criterion) {
     });
 }
 
+/// What opening a project page costs, over and over.
+///
+/// Against the real stores, for the same reason `agent_turns` is: the cost here
+/// is a directory walk over a year of somebody's actual history, and a fixture
+/// would measure the fixture. The first iteration fills the cache and every one
+/// after it is the warm path — which is the honest thing to measure, because the
+/// card is read far more often than a transcript changes.
+///
+/// Two directories, and the difference between them is the point. One is this
+/// checkout, which claude has a folder for; the other is a path no agent has
+/// ever run in, so every codex rollout on the machine has to be ruled out and
+/// nothing at all is parsed. That second number is what the codex store costs
+/// on its own, and it used to be paid in file opens on every single visit.
+fn usage_scan(c: &mut Criterion) {
+    let here = std::env::current_dir()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| ".".to_string());
+    let nowhere = vec!["/boite/bench/no-agent-ever-ran-here".to_string()];
+
+    let mut group = c.benchmark_group("usage::collect");
+    group.bench_function("this checkout, warm", |b| {
+        b.iter(|| boite_core::usage::collect_usage_blocking(black_box(vec![here.clone()]), 371))
+    });
+    group.bench_function("no match, warm", |b| {
+        b.iter(|| boite_core::usage::collect_usage_blocking(black_box(nowhere.clone()), 371))
+    });
+    group.finish();
+}
+
 criterion_group!(
     benches,
     transcript_plain,
     search_transcripts,
     agent_turns,
-    screen_trimmed
+    screen_trimmed,
+    usage_scan
 );
 criterion_main!(benches);

@@ -58,9 +58,11 @@ const RPC_TIMEOUTS: Record<string, number> = {
   // the handshake waits for it, so a server that will not answer must cost the
   // connection a few seconds rather than the flat ceiling.
   hello: 5_000,
-  // A year of transcripts, per directory: a directory walk, a SQLite open each
-  // for codex and opencode, and up to a 256 KiB read per session. `USAGE_DAYS`
-  // is 371, and a boite that has been worked in all year has thousands.
+  // A year of transcripts, per directory: two directory walks and a JSON parse
+  // per session that has moved since it was last read. `USAGE_DAYS` is 371, and
+  // a boite that has been worked in all year has thousands of them — a warm
+  // scan answers in milliseconds, but the first one on a cold cache reads the
+  // whole year off the disk and that is what this ceiling is for.
   "session.usage": 180_000,
   // Objects over whatever link the boite has to the forge. Nothing bounds this
   // but the size of what is being sent.
