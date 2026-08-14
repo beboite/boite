@@ -27,6 +27,7 @@
   import { searchKeymap, highlightSelectionMatches } from "@codemirror/search";
   import { closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
   import { boiteHighlight, boiteTheme } from "./theme";
+  import { currentTheme } from "$lib/theme/current.svelte";
   import { loadLanguageExtension } from "./languages";
 
   interface Props {
@@ -49,6 +50,11 @@
   let view: EditorView | null = null;
   let langCompartment = new Compartment();
   let readonlyCompartment = new Compartment();
+  // Only the palette flag lives in here: every colour the theme sets is a
+  // var(), so a swap repaints the editor with no reconfigure at all. What has
+  // to be handed over is CodeMirror's own `dark`, which decides the chrome the
+  // theme does not override.
+  let themeCompartment = new Compartment();
   // Mirror of the doc as a string, seeded with the initial doc and kept in step
   // by the update listener below. The parent feeds our own edits straight back
   // in as `value`, so this lets the sync effect recognise the echo without
@@ -89,7 +95,7 @@
           },
         },
       ]),
-      boiteTheme,
+      themeCompartment.of(boiteTheme(currentTheme.name)),
       boiteHighlight,
       EditorView.lineWrapping,
       EditorView.updateListener.of((u) => {
@@ -118,6 +124,13 @@
   onDestroy(() => {
     view?.destroy();
     view = null;
+  });
+
+  $effect(() => {
+    const theme = currentTheme.name;
+    view?.dispatch({
+      effects: themeCompartment.reconfigure(boiteTheme(theme)),
+    });
   });
 
   $effect(() => {

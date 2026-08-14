@@ -12,6 +12,9 @@
   import { reinspectMissingIcons } from "$lib/features/project/api";
   import { settings } from "$lib/features/settings/store.svelte";
   import { applyMotionPreference } from "$lib/theme/motion";
+  import { applyThemePreference } from "$lib/theme/appearance";
+  import { currentTheme } from "$lib/theme/current.svelte";
+  import { repaintTerminals } from "$lib/features/terminal/theme";
   import {
     DEFAULT_MONO_STACK,
     DEFAULT_SANS_STACK,
@@ -56,6 +59,17 @@
   $effect(() => {
     if (typeof document === "undefined") return;
     return applyMotionPreference(settings.state.motionMode);
+  });
+
+  // The palette. Everything drawn in CSS follows the attribute on its own; the
+  // terminals are told, because they draw to a canvas from colours they read
+  // once when they were built.
+  $effect(() => {
+    if (typeof document === "undefined") return;
+    return applyThemePreference(settings.state.themeMode, document, (theme) => {
+      currentTheme.name = theme;
+      repaintTerminals();
+    });
   });
 
   // The two stacks, rebuilt around whatever families were picked. Written onto

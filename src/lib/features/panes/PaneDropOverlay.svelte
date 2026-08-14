@@ -67,13 +67,16 @@
     z-index: var(--z-drop);
     pointer-events: none;
     border-radius: 8px;
-    border: 1px solid rgba(250, 250, 250, 0.55);
-    background: color-mix(in srgb, var(--color-foreground, #fafafa) 14%, transparent);
+    /* Mixed off --color-foreground rather than written out: the preview is a
+       pane-shaped hole of the opposite tone, and a fixed near-white is a white
+       rectangle on a white background under the light palette. */
+    border: 1px solid color-mix(in srgb, var(--color-foreground) 55%, transparent);
+    background: color-mix(in srgb, var(--color-foreground) 14%, transparent);
     backdrop-filter: blur(14px) saturate(1.05);
     -webkit-backdrop-filter: blur(14px) saturate(1.05);
     box-shadow:
-      inset 0 0 0 1px rgba(255, 255, 255, 0.08),
-      0 14px 32px rgba(0, 0, 0, 0.36);
+      inset 0 0 0 1px color-mix(in srgb, var(--color-foreground) 8%, transparent),
+      var(--shadow-e3);
     transition:
       left 160ms cubic-bezier(0.22, 1, 0.36, 1),
       top 160ms cubic-bezier(0.22, 1, 0.36, 1),
@@ -86,16 +89,16 @@
     justify-content: center;
   }
   .snap-preview.refused {
-    border-color: rgba(248, 113, 113, 0.7);
-    background: color-mix(in srgb, var(--color-danger, #f87171) 16%, transparent);
+    border-color: color-mix(in srgb, var(--color-danger) 70%, transparent);
+    background: color-mix(in srgb, var(--color-danger) 16%, transparent);
   }
   .refused-label {
     border-radius: 6px;
-    border: 1px solid rgba(248, 113, 113, 0.5);
-    background: rgba(10, 10, 10, 0.7);
+    border: 1px solid color-mix(in srgb, var(--color-danger) 50%, transparent);
+    background: color-mix(in srgb, var(--color-background) 70%, transparent);
     padding: 5px 10px;
     font-size: 11px;
     font-weight: 600;
-    color: var(--color-danger, #f87171);
+    color: var(--color-danger);
   }
 </style>
