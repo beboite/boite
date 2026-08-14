@@ -106,9 +106,6 @@ export interface Settings {
    * is needed to carry it.
    */
   keybindings: Keybinding[];
-  // Preset shortcut ids already backfilled once. Without this, deleting a
-  // late-added preset would see it re-seeded on every launch.
-  seededPresets: string[];
   powershellNewline: boolean;
   powershellNoProfile: boolean;
   /**
