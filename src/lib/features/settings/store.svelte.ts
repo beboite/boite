@@ -714,6 +714,24 @@ class SettingsStore {
   }
 
   /**
+   * Hands the layout back to the device.
+   *
+   * The pin was a one-way door: `setMobileLayout` sets it and nothing cleared
+   * it, so one tap on the toggle meant a tablet stopped following its own
+   * rotation for the life of the install, with nothing on screen saying the
+   * choice had been made or how to take it back. Re-reads the form factor here
+   * rather than waiting for the next media-query change, because the query only
+   * fires when it crosses the threshold and a device sitting on the wrong side
+   * of it would keep the pinned answer until it was rotated.
+   */
+  unpinLayout() {
+    if (!this.state.layoutPinned) return;
+    this.state.layoutPinned = false;
+    this.state.mobileLayout = detectMobileDefault();
+    this.persistDeviceNow();
+  }
+
+  /**
    * Keep an unpinned layout following the device.
    *
    * The form factor used to be read once, on the very first run, and written
