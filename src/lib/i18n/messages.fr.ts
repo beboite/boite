@@ -995,6 +995,9 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
     "Cette adresse est sur la boite, et localhost ici désigne cette machine.",
   "browser.refuse.cleartext":
     "Le http:// simple s'arrête à cette machine. Utilisez https:// pour le reste.",
+  "browser.drivenByAgent": "Agent",
+  "browser.drivenByTitle": "{agent} dirige ce pane. Reprenez-le pour en garder la main.",
+  "browser.reclaim": "Reprendre ce pane à l'agent",
 
   "keybindings.intro":
     "Cliquez sur un raccourci, puis pressez la combinaison voulue. Les règles sont lues de la fin au début, donc la vôtre l'emporte sur celle livrée avec Boite.",

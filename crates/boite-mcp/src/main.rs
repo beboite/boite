@@ -27,7 +27,7 @@ use std::io::BufRead;
 use serde_json::Value;
 
 use boite_mcp::host::Host;
-use boite_mcp::{call_tool, rpc, tools, write_line, INSTRUCTIONS};
+use boite_mcp::{call_blocks, call_tool, rpc, tools, write_line, INSTRUCTIONS};
 
 fn main() {
     // This binary answers no lifecycle hook. The guard stays because settings
@@ -50,8 +50,17 @@ fn main() {
         Ok(h) => call_tool(h, name, args),
         Err(e) => Err(e.clone()),
     };
+    // The screenshot answers content blocks, an image among them, which is why
+    // it cannot ride the `String` pipeline above. With no host there is nothing
+    // to photograph: answering `None` drops the call through to `call`, which
+    // says why in the one sentence the agent should read.
+    let blocks = |name: &str, args: &Value| match &host {
+        Ok(h) => call_blocks(h, name, args),
+        Err(_) => None,
+    };
     let service = rpc::Service {
         call: &call,
+        blocks: Some(&blocks),
         tools: tools(),
         instructions: INSTRUCTIONS,
     };

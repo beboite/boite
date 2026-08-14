@@ -68,6 +68,10 @@ pub enum Action {
     WorktreeBranchClaimed,
     WorktreeReserved,
     PaneOpened,
+    /// A browser pane pointed, reloaded or closed by an agent. One case for the
+    /// three, with which one in the detail: they are the same thought, and the
+    /// vocabulary of the log is worth keeping short.
+    BrowserDriven,
     ArtifactsSet,
     /// Asked for, and refused. The reason is in the detail.
     Denied,
@@ -88,6 +92,7 @@ impl Action {
             Action::WorktreeBranchClaimed => "worktree.branch_claimed",
             Action::WorktreeReserved => "worktree.reserved",
             Action::PaneOpened => "pane.opened",
+            Action::BrowserDriven => "browser.driven",
             Action::ArtifactsSet => "artifacts.set",
             Action::Denied => "denied",
             Action::ApprovalOpened => "approval.opened",
