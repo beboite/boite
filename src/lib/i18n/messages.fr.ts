@@ -734,6 +734,7 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "palette.hitJournal": "Journal",
   "palette.hitTerminal": "Terminal",
   "palette.launchShortcut": "Lancer {label}",
+  "palette.runScript": "Lancer {name}",
   "palette.restoreThread": "Restaurer le dernier terminal fermé",
   "palette.closeActiveThread": "Fermer le terminal actif",
   "palette.openSettings": "Ouvrir les paramètres",

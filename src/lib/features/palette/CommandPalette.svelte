@@ -2,6 +2,8 @@
   import { fade, scale } from "svelte/transition";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
   import { palette } from "./store.svelte";
+  import { app } from "$lib/app/store.svelte";
+  import { projectScripts } from "$lib/features/project/scripts.svelte";
   import { t, type MessageKey } from "$lib/i18n/index.svelte";
   import {
     buildContentCommands,
@@ -63,6 +65,17 @@
     return () => clearTimeout(timer);
   });
 
+  // Read on open, not on boot: it is a readDir plus a file read per project,
+  // and the list is only ever looked at from in here. Re-read every time, so a
+  // script added while the app was running is offered rather than a cached
+  // answer from whenever the project was first selected.
+  $effect(() => {
+    if (!palette.open) return;
+    const folder =
+      app.projects.find((p) => p.id === app.currentProjectId)?.cwd ?? null;
+    void projectScripts.ensure(folder, true);
+  });
+
   // The backend query is driven by the raw text, not by the filtered one: it
   // carries its own timer, and stacking the two would put a third of a second
   // between the last keystroke and the request.
@@ -78,12 +91,27 @@
       paletteSearch.clear();
       return;
     }
+    // Rebuilds whenever anything it is built from moves, the script list landing
+    // included: `forFolder` is read from in here, so no callback is needed.
+    // Nothing but `commands` is assigned, and that is the point: the script read
+    // above takes tens of milliseconds locally and a full round trip against a
+    // remote boite, so anything else this touched would be undone under a user
+    // who started typing the moment the palette appeared.
     commands = buildPaletteCommands();
+  });
+
+  // Opening is what clears the field, so this reads `palette.open` and nothing
+  // else. Kept apart from the rebuild above for that one reason: the rebuild
+  // re-runs when the script read lands, and everything below would then be
+  // undone under a user who started typing the moment the palette appeared.
+  //
+  // A palette opened straight into a mode carries no prefix: the mode is
+  // already on the store, and a `/` the user did not type would be one more
+  // character to delete before searching.
+  $effect(() => {
+    if (!palette.open) return;
     fileRows = [];
     fileGeneration++;
-    // A palette opened straight into a mode carries no prefix: the mode is
-    // already on the store, and a `/` the user did not type would be one more
-    // character to delete before searching.
     query = "";
     debouncedQuery = "";
     activeIndex = 0;

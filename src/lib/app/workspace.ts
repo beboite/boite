@@ -12,6 +12,7 @@ import { approvals } from "$lib/features/approvals/store.svelte";
 import { editorStore } from "$lib/features/editor/store.svelte";
 import { explorerStore } from "$lib/features/explorer/store.svelte";
 import { paneStore } from "$lib/features/panes/store.svelte";
+import { projectScripts } from "$lib/features/project/scripts.svelte";
 import { notifications } from "$lib/features/notifications/store.svelte";
 import { confirmDialog } from "$lib/shared/components/confirm.svelte";
 import { t } from "$lib/i18n/index.svelte";
@@ -49,6 +50,11 @@ function resetStores() {
   editorStore.reset();
   explorerStore.reset();
   paneStore.reset();
+  // Cached package.json scripts, keyed by absolute path. Two machines spell
+  // `/home/me/repo` the same way and mean different checkouts by it, so a map
+  // that survived the switch would offer the previous boite's scripts for a
+  // folder on this one, and it only ever grows since nothing else drops it.
+  projectScripts.reset();
   app.reset();
 }
 
