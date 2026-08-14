@@ -82,7 +82,7 @@
   });
 </script>
 
-<SettingsCard title={t("fastpick.settingsTitle")} description={t("fastpick.settingsDesc")}>
+<SettingsCard title={t("fastpick.settingsTitle")} anchor="fastpick.settingsTitle" description={t("fastpick.settingsDesc")}>
   {#snippet actions()}
     <button
       type="button"
@@ -215,7 +215,7 @@
 </SettingsCard>
 
 <ToggleSetting
-  label={t("fastpick.enable")}
+  label={t("fastpick.enable")} anchor="fastpick.enable"
   description={t("fastpick.enableDesc")}
   enabled={settings.state.fastpickEnabled}
   onToggle={() => settings.setFastpickEnabled(!settings.state.fastpickEnabled)}
