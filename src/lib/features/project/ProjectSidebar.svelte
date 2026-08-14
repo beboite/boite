@@ -32,6 +32,7 @@ import { projectDisplayName } from "$lib/shared/project-label";
     justFinished,
   } from "$lib/features/thread/finished.svelte";
   import { mcpPulse } from "$lib/features/thread/agentActivity.svelte";
+  import { jumpDigit, jumpModifier } from "$lib/shared/keyboard/held.svelte";
   import { waitingReasonFor } from "$lib/features/thread/statusEngine";
   import { threadIconColor } from "$lib/features/fastpick/threadAccent";
   import { TONE_COLOR, threadVisual } from "$lib/features/thread/threadVisual";
@@ -1341,6 +1342,14 @@ import { projectDisplayName } from "$lib/shared/project-label";
                 keepAwake,
               })}
               {@const fresh = justFinished(thread.id)}
+              <!-- Ctrl+1..9 only ever meant the current project's threads, so
+                   that is the only list numbered. Numbering every project would
+                   put four rows labelled 1 on screen at once, three of which do
+                   nothing. -->
+              {@const digit =
+                jumpModifier.down && project.id === app.currentProjectId
+                  ? jumpDigit(threadIdx)
+                  : null}
               <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
               <li
                 class="thread-row group/thread"
@@ -1414,6 +1423,18 @@ import { projectDisplayName } from "$lib/shared/project-label";
                        beside the row button rather than inside it. Its own CSS
                        is position:relative, which is what keeps it above the
                        overlay that fills the card. -->
+                  {#if digit !== null}
+                    <!-- Over the glyph rather than beside it: a number that
+                         takes its own column reflows every row in the sidebar
+                         the moment the modifier goes down, and a list that
+                         jumps under a held key is worse than no hint. -->
+                    <span
+                      class="pointer-events-none absolute left-1.5 z-[var(--z-chrome)] flex size-4 items-center justify-center rounded-xs bg-[var(--color-surface-3)] text-2xs font-semibold tabular-nums text-foreground shadow-e1"
+                      aria-hidden="true"
+                    >
+                      {digit}
+                    </span>
+                  {/if}
                   <ThreadGlyph
                     status={displayThreadStatus(thread)}
                     iconKey={thread.iconKey}
