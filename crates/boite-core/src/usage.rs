@@ -884,6 +884,15 @@ mod tests {
 
     /// A second read of an unchanged file hands back the same allocation rather
     /// than a second parse, and rewriting the file drops it.
+    ///
+    /// The rewrite below is a byte longer than the original, which is not
+    /// decoration. The key is the pair (size, mtime), and the two writes land
+    /// within the same tick of a filesystem whose mtime is coarser than they
+    /// are: an edit that kept the length read as the same version, the entry
+    /// was handed back, and the assertion failed on a CI runner roughly one run
+    /// in three while passing on every machine it was written on. A transcript
+    /// in the wild is appended to, so growing is also what the case being
+    /// tested actually looks like.
     #[test]
     fn an_unchanged_transcript_is_parsed_once() {
         let path = write(
@@ -896,11 +905,11 @@ mod tests {
 
         let rewritten = write(
             "cache-hit",
-            &[r#"{"timestamp":"2026-07-28T10:00:00.000Z","message":{"id":"m1","model":"claude-opus-5","usage":{"input_tokens":7,"output_tokens":9,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}"#],
+            &[r#"{"timestamp":"2026-07-28T10:00:00.000Z","message":{"id":"m1","model":"claude-opus-5","usage":{"input_tokens":7,"output_tokens":90,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}"#],
         );
         let third = cached_usage(&candidate(&rewritten), parse_claude_file);
         assert!(!Arc::ptr_eq(&first, &third), "a rewritten file was not re-read");
-        assert_eq!(third.models[0].1.total, 16);
+        assert_eq!(third.models[0].1.total, 97);
     }
 
     /// Going over the limit drops the half nobody asked for, and keeps the
