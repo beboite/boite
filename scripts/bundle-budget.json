@@ -27,12 +27,19 @@
     "808816, for the mark saying an agent is driving a browser pane and the",
     "handler answering its page questions: the mark rides on the pane's own",
     "content, so both are read wherever a pane is drawn, before first paint.",
-    "Then to 829440, for the environment registry and its supervisor: a window",
+    "Then to 826368, for the filing rule behind pin, settle and snooze, plus the",
+    "pinned section and the clock that wakes it: the sidebar decides where every",
+    "row belongs before it draws one. Measured at 800.9 KB, so this leaves 6.1 KB.",
+    "Then to 838656, for the environment registry and its supervisor: a window",
     "that can hold several boites at once decides which ones to dial before it",
     "draws anything, so the state machine and the projection cache are both on",
-    "the boot path. Measured at 803.8 KB, so this leaves 6.2 KB."
+    "the boot path. Measured at 812.9 KB, so this leaves 6.1 KB.",
+    "",
+    "largestEagerChunkBytes moved with it, 256000 -> 262144. The main route is",
+    "the chunk in question and it had 0.2 KB left, which is a ceiling that fails",
+    "the next commit whatever the next commit is."
   ],
-  "eagerBytes": 829440,
+  "eagerBytes": 838656,
   "totalBytes": 6144000,
-  "largestEagerChunkBytes": 256000
+  "largestEagerChunkBytes": 262144
 }
