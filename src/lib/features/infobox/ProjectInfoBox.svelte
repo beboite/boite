@@ -128,65 +128,65 @@
     aria-label={t("infoBox.label")}
     tabindex="0"
   >
+    <!-- use:toastInset: the toast stack lands in this same corner, and this is
+         what sends it below the box instead of on top of it. On the card, so
+         the unfolded log is measured too: it grows into exactly the room the
+         stack was pushed into and draws under it, so a stack that stayed put
+         would hide rows two to ten behind opaque toasts. -->
     <div
       class="overflow-hidden rounded-lg border border-border bg-[var(--color-surface)]/95 shadow-md backdrop-blur transition group-hover:shadow-lg"
+      use:toastInset
     >
-      <!-- use:toastInset: the toast stack lands in this same corner, and this
-           is what sends it below the box instead of on top of it. On the folded
-           rows rather than the card, so unfolding the log does not push the
-           stack around. -->
-      <div use:toastInset>
-        {#if isRepo}
-          <div class="flex items-center gap-1.5 px-2.5 pt-1.5 pb-1 text-xs">
-            <GitBranch class="size-3.5 shrink-0 text-muted-foreground" />
-            <span class="truncate font-medium text-foreground">
-              {gs?.branch ?? t("git.detached")}
+      {#if isRepo}
+        <div class="flex items-center gap-1.5 px-2.5 pt-1.5 pb-1 text-xs">
+          <GitBranch class="size-3.5 shrink-0 text-muted-foreground" />
+          <span class="truncate font-medium text-foreground">
+            {gs?.branch ?? t("git.detached")}
+          </span>
+          {#if (gs?.ahead ?? 0) > 0}
+            <span class="flex shrink-0 items-center text-2xs text-muted-foreground">
+              <ArrowUp class="size-3" />{gs?.ahead}
             </span>
-            {#if (gs?.ahead ?? 0) > 0}
-              <span class="flex shrink-0 items-center text-2xs text-muted-foreground">
-                <ArrowUp class="size-3" />{gs?.ahead}
-              </span>
-            {/if}
-            {#if (gs?.behind ?? 0) > 0}
-              <span class="flex shrink-0 items-center text-2xs text-muted-foreground">
-                <ArrowDown class="size-3" />{gs?.behind}
-              </span>
-            {/if}
-          </div>
-        {/if}
+          {/if}
+          {#if (gs?.behind ?? 0) > 0}
+            <span class="flex shrink-0 items-center text-2xs text-muted-foreground">
+              <ArrowDown class="size-3" />{gs?.behind}
+            </span>
+          {/if}
+        </div>
+      {/if}
 
-        {#if claimed.length > 0}
-          <div
-            class="flex items-center gap-1.5 px-2.5 py-1 text-xs"
-            title={t("infoBox.claimedTitle", { agent: claimed[0].claimedBy ?? "" })}
-          >
-            <span class="relative flex size-3.5 shrink-0 items-center justify-center">
-              <ShortcutIcon iconKey={claimed[0].claimedBy as IconKey} size={14} />
+      {#if claimed.length > 0}
+        <div
+          class="flex items-center gap-1.5 px-2.5 py-1 text-xs"
+          title={t("infoBox.claimedTitle", { agent: claimed[0].claimedBy ?? "" })}
+        >
+          <span class="relative flex size-3.5 shrink-0 items-center justify-center">
+            <ShortcutIcon iconKey={claimed[0].claimedBy as IconKey} size={14} />
+          </span>
+          <span class="truncate text-foreground/90">{claimed[0].title}</span>
+          {#if claimed.length > 1}
+            <span class="shrink-0 rounded bg-[var(--color-surface-3)] px-1 text-2xs text-muted-foreground">
+              {t("infoBox.moreClaimed", { count: claimed.length - 1 })}
             </span>
-            <span class="truncate text-foreground/90">{claimed[0].title}</span>
-            {#if claimed.length > 1}
-              <span class="shrink-0 rounded bg-[var(--color-surface-3)] px-1 text-2xs text-muted-foreground">
-                {t("infoBox.moreClaimed", { count: claimed.length - 1 })}
-              </span>
-            {/if}
-          </div>
-        {/if}
+          {/if}
+        </div>
+      {/if}
 
-        {#if commits.length > 0}
-          <div class="flex items-center gap-1.5 px-2.5 py-1 text-xs">
-            <GitCommitHorizontal class="size-3.5 shrink-0 text-muted-foreground" />
-            <span class="shrink-0 font-mono text-2xs text-muted-foreground">
-              {commits[0].shortSha}
-            </span>
-            <span class="min-w-0 flex-1 truncate text-foreground/90">
-              {commits[0].summary}
-            </span>
-            <span class="shrink-0 text-2xs text-muted-foreground/70">
-              {ago(commits[0].time)}
-            </span>
-          </div>
-        {/if}
-      </div>
+      {#if commits.length > 0}
+        <div class="flex items-center gap-1.5 px-2.5 py-1 text-xs">
+          <GitCommitHorizontal class="size-3.5 shrink-0 text-muted-foreground" />
+          <span class="shrink-0 font-mono text-2xs text-muted-foreground">
+            {commits[0].shortSha}
+          </span>
+          <span class="min-w-0 flex-1 truncate text-foreground/90">
+            {commits[0].summary}
+          </span>
+          <span class="shrink-0 text-2xs text-muted-foreground/70">
+            {ago(commits[0].time)}
+          </span>
+        </div>
+      {/if}
 
       <!-- The unfold: rows two to ten of the log, plus the rest of the claimed
            work. A grid row going 0fr to 1fr animates height without measuring
