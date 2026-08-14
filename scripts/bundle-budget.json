@@ -12,9 +12,20 @@
     "",
     "The gap between the first two is what the lazy imports are worth: 4.8 MB the",
     "window does not fetch before it can paint, most of it the PDF worker. That is",
-    "the measurement those imports never had attached to them."
+    "the measurement those imports never had attached to them.",
+    "",
+    "The eager ceiling moved three times. To 774000, when the palette started",
+    "asking `search.query` about what is being typed: the palette is drawn by the",
+    "layout and cannot be lazy, so its ranking, its debounced query and the hits",
+    "it turns into rows are 3.8 KB the window fetches before it paints. To 784240,",
+    "for the keybinding table and its parser, which the dispatcher reads on the",
+    "first keystroke and so cannot be deferred either. Then to 794480, for the",
+    "reply bar a waiting thread offers: it exists so a blocked terminal can be",
+    "answered in one tap, and a chunk fetched on the tap is the one thing that",
+    "would take that away. Then to 800624, for the turn list a thread keeps and",
+    "the checkpoint calls behind it, which the thread panel reads on open."
   ],
-  "eagerBytes": 768000,
+  "eagerBytes": 800624,
   "totalBytes": 6144000,
   "largestEagerChunkBytes": 256000
 }

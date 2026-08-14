@@ -8,6 +8,14 @@
   import type { MotionMode } from "$lib/types";
   import { ACCENT_COLOR, type ModelAccent } from "$lib/features/fastpick/accent";
 
+  // Three, not two. The pin was a one-way door: one tap and the layout stopped
+  // following the device for the life of the install, with nothing saying so.
+  const LAYOUT_MODES: { id: "auto" | "mobile" | "pc"; labelKey: MessageKey }[] = [
+    { id: "auto", labelKey: "appearance.layoutAuto" },
+    { id: "mobile", labelKey: "appearance.mobile" },
+    { id: "pc", labelKey: "appearance.pc" },
+  ];
+
   const MOTION_MODES: { id: MotionMode; labelKey: MessageKey }[] = [
     { id: "system", labelKey: "appearance.motionSystem" },
     { id: "on", labelKey: "appearance.motionOn" },
@@ -64,14 +72,32 @@
   </div>
 </SettingsCard>
 
-<ToggleSetting
-  label={t("appearance.layout")}
-  description={t("appearance.layoutDesc")}
-  enabled={settings.state.mobileLayout}
-  onLabel={t("appearance.mobile")}
-  offLabel={t("appearance.pc")}
-  onToggle={() => settings.setMobileLayout(!settings.state.mobileLayout)}
-/>
+<SettingsCard title={t("appearance.layout")} description={t("appearance.layoutDesc")}>
+  <div class="flex gap-1.5" role="radiogroup" aria-label={t("appearance.layout")}>
+    {#each LAYOUT_MODES as mode (mode.id)}
+      {@const on =
+        mode.id === "auto"
+          ? !settings.state.layoutPinned
+          : settings.state.layoutPinned &&
+            settings.state.mobileLayout === (mode.id === "mobile")}
+      <button
+        type="button"
+        role="radio"
+        aria-checked={on}
+        class="rounded-md border px-3 py-1 text-xs transition
+          {on
+            ? 'border-foreground/40 bg-[var(--color-surface-3)] text-foreground'
+            : 'border-border bg-[var(--color-surface-2)] text-muted-foreground hover:border-foreground/30 hover:text-foreground'}"
+        onclick={() => {
+          if (mode.id === "auto") settings.unpinLayout();
+          else settings.setMobileLayout(mode.id === "mobile");
+        }}
+      >
+        {t(mode.labelKey)}
+      </button>
+    {/each}
+  </div>
+</SettingsCard>
 
 <ToggleSetting
   label={t("appearance.colorByModel")}
