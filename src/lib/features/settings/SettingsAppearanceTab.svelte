@@ -119,7 +119,11 @@
   </div>
 </SettingsCard>
 
-<SettingsCard title={t("appearance.fonts")} description={t("appearance.fontsDesc")}>
+<SettingsCard
+  title={t("appearance.fonts")}
+  anchor="appearance.fonts"
+  description={t("appearance.fontsDesc")}
+>
   <div class="flex flex-col gap-2.5">
     <label class="flex items-center gap-3 text-xs text-muted-foreground">
       <span class="w-24 shrink-0">{t("appearance.fontUi")}</span>
@@ -171,6 +175,7 @@
 
 <SettingsCard
   title={t("appearance.terminalSize")}
+  anchor="appearance.terminalSize"
   description={t("appearance.terminalSizeDesc")}
 >
   {#snippet actions()}
