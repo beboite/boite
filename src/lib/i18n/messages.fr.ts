@@ -181,6 +181,7 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "sidebar.noArchived": "Aucun projet archivé",
   "sidebar.pickFolder": "Choisir un dossier",
   "sidebar.backToProjects": "Retour aux projets",
+  "sidebar.filterThreads": "Filtrer les terminaux",
   "sidebar.showArchived": "Afficher les projets archivés",
   "sidebar.archivedProjects": "Projets archivés",
   "sidebar.addProject": "Ajouter un projet",
