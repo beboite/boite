@@ -388,7 +388,7 @@ pub fn find_hermes_session_blocking(
 /// `PI_CODING_AGENT_SESSION_DIR` replaces the directory outright (flat, no
 /// per-project subdirectory), `PI_CODING_AGENT_DIR` moves the whole config tree
 /// and keeps the layout. The bool says which of the two shapes came back.
-fn pi_sessions_root() -> Option<(PathBuf, bool)> {
+pub(super) fn pi_sessions_root() -> Option<(PathBuf, bool)> {
     if let Ok(dir) = env::var("PI_CODING_AGENT_SESSION_DIR") {
         if !dir.trim().is_empty() {
             return Some((PathBuf::from(dir), true));
@@ -409,7 +409,7 @@ fn pi_sessions_root() -> Option<(PathBuf, bool)> {
 /// dropped, then every `/`, `\` and `:` turned into `-`, wrapped in `--`. So
 /// `D:\Dev\boite` is `--D--Dev-boite--`, the drive's colon and its separator
 /// each contributing a dash.
-fn pi_dir_name(cwd: &str) -> String {
+pub(super) fn pi_dir_name(cwd: &str) -> String {
     let trimmed = cwd
         .strip_prefix('/')
         .or_else(|| cwd.strip_prefix('\\'))

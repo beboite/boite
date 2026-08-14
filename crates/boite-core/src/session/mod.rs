@@ -32,6 +32,7 @@ pub mod claude;
 mod codex;
 mod editors;
 mod opencode;
+mod shared;
 
 pub use claude::{
     find_claude_session_blocking, live_claude_sessions, stop_claude_session,
@@ -44,6 +45,7 @@ pub use editors::{
     find_grok_session_blocking, find_hermes_session_blocking, find_pi_session_blocking,
 };
 pub use opencode::find_opencode_session_blocking;
+pub use shared::{share_session_stores, unshare_session_stores};
 
 use std::collections::HashSet;
 

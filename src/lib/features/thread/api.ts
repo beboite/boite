@@ -19,9 +19,10 @@ import {
   FASTPICK_CMD,
   type FastpickCombo,
 } from "$lib/features/fastpick/combo";
-import { dropThreadCheckpoints } from "./checkpoints.svelte";
+import { dropThreadCheckpoints, forgetThreadTurns } from "./checkpoints.svelte";
 import { samePromotion, type Promotion } from "./promote";
-import { releaseClaudeSession } from "./session";
+import { carryTranscript, releaseClaudeSession } from "./session";
+import { cancelRelease, releaseAfterGrace } from "./worktree-grace";
 import type { IconKey, Project, Shortcut, Thread } from "$lib/types";
 import type { ShellOption } from "$lib/storage/platform.svelte";
 
@@ -648,14 +649,37 @@ export async function closeThread(threadId: string) {
     : Promise.resolve();
   await app.removeThread(threadId);
   await kill;
-  // Before the worktree goes: the refs live in the repository the worktree was
-  // cut from, so they outlive the directory, and the path they are reached
-  // through is the directory that is about to be deleted.
-  if (thread) await dropThreadCheckpoints(thread);
-  // After the PTY is gone: git reads a worktree whose process still holds
-  // files open as busy on Windows, and the removal would fail for a reason
-  // that has nothing to do with whether there is work in it.
-  if (thread) await releaseWorktree(thread);
+  // The bookkeeping goes now: the thread is out of the sidebar and nothing
+  // should still be scoring its turns. What the refs and the directory are
+  // waiting for is [`releaseAfterGrace`]: they are the half that cannot be
+  // taken back, and a close is undoable for as long as they are there.
+  if (thread) {
+    forgetThreadTurns(thread.id);
+    // A snapshot, not the row: the row is out of the store and what the release
+    // needs from it is read minutes later.
+    const closed = snapshotThread(thread);
+    releaseAfterGrace(closed.id, () => releaseClosedThread(closed));
+  }
+}
+
+/**
+ * Everything a closed thread stops being able to come back from.
+ *
+ * Runs once the grace has passed, in the order it always ran in: the checkpoint
+ * refs live in the repository the worktree was cut from, so they outlive the
+ * directory, but the path they are reached through is the directory that is
+ * about to go. Both are long past the PTY dying, which is the other order that
+ * mattered, since git reads a worktree whose process still holds files open as busy
+ * on Windows, and the removal would fail for a reason that has nothing to do
+ * with whether there is work in it.
+ *
+ * Nothing here runs if the app is closed first. The directory it would have
+ * taken is empty by definition and shows up in the project's Worktrees tab,
+ * where one button gives back every checkout no thread is standing in.
+ */
+async function releaseClosedThread(thread: Thread) {
+  await dropThreadCheckpoints(thread);
+  await releaseWorktree(thread);
 }
 
 // One close path for every entry point (sidebar X, context menu, Ctrl+W) so
@@ -696,15 +720,65 @@ export async function stopThread(threadId: string) {
   }
 }
 
+/**
+ * The directory a restored thread comes back to.
+ *
+ * Inside the grace the checkout was never touched, so the row's own path is
+ * still there and this costs one `adopt`. Past it, or across a restart, the
+ * directory is gone while the row goes on naming it, and a thread pointed at a
+ * directory that is not there does not degrade to anything. It fails at
+ * `spawn failed: this directory is not there`, on every launch, for as long as
+ * the thread exists. That is the state the undo used to put threads back into.
+ *
+ * So a worktree that cannot be found is replaced rather than dropped, and the
+ * conversation is carried into the new one. Coming back with no worktree at all
+ * would put an agent to work in the user's own checkout without ever saying so.
+ */
+async function withWorktree(thread: Thread, project: Project): Promise<Thread> {
+  if (!thread.worktreePath) return thread;
+  const repo = project.gitRoot ?? project.cwd;
+  let adopted: string | null = null;
+  try {
+    adopted = await backendForPath(project.cwd).worktree.adopt(repo, thread.id);
+  } catch (err) {
+    logger.warn("worktree", `${thread.id}: could not ask for its worktree`, String(err));
+  }
+  if (adopted) return { ...thread, worktreePath: adopted };
+
+  const fresh = await openWorktreeFor(project, thread.id, thread.iconKey).catch((err) => {
+    logger.warn("worktree", `${thread.id}: no worktree to come back to`, String(err));
+    return null;
+  });
+  // Asked either way. A conversation the agent cannot reach from where it wakes
+  // up is worse than none: claude refuses an id it cannot find and the thread
+  // lands on an error rather than a prompt.
+  const resumable = await carryTranscript(thread, thread.worktreePath, fresh ?? project.cwd);
+  notifications.info(
+    t(fresh ? "thread.restoredNewWorktree" : "thread.restoredNoWorktree", {
+      name: thread.title ?? thread.label,
+    }),
+    8000,
+  );
+  return {
+    ...thread,
+    worktreePath: fresh,
+    sessionId: resumable ? thread.sessionId : null,
+  };
+}
+
 export async function restoreLastClosedThread(): Promise<Thread | null> {
   while (closedThreads.length > 0) {
     const thread = closedThreads.pop();
     if (!thread) break;
-    if (!app.projects.some((p) => p.id === thread.projectId)) {
+    const project = app.projects.find((p) => p.id === thread.projectId);
+    if (!project) {
       continue;
     }
 
-    const restored = snapshotThread(thread);
+    // Whatever else happens, the release must not fire on a thread that is
+    // open again.
+    cancelRelease(thread.id);
+    const restored = await withWorktree(snapshotThread(thread), project);
     // Same as a launch: the row is in the store already, so nothing the user is
     // about to look at is waiting on the write.
     void app.upsertThread(restored).catch((err) => recordUnsavedThread(restored, err));

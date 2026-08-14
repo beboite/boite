@@ -211,6 +211,53 @@ needs the session to have recorded a directory of its own: normalising strips a
 trailing slash, so a thread at the root of a drive would otherwise match every
 session that recorded nothing.
 
+## One pool of conversations per project
+
+Claude and pi file a transcript under the directory the CLI ran in, and every
+agent thread runs in a worktree of its own. So `/resume` typed inside a thread
+listed that thread's conversations and nothing else: the thread beside it, the
+user's own checkout and yesterday's closed thread are three other directories
+and therefore three other stores. `session/shared.rs` makes a worktree's store a
+link onto the project's instead, created when the worktree is handed out
+(`worktree.open`) and removed with it (`worktree.remove`, before git touches the
+directory, for the same reason the shared artifacts are unlinked there: on
+Windows a delete that meets a junction walks into it).
+
+Two consequences, both load-bearing. **Every scan of those stores skips the
+links** (`find_claude_session_blocking`, `collect_usage_blocking`): a transcript
+reached through two names is one transcript, and a project with ten open threads
+would otherwise open every file eleven times per pass. And **binding asks the
+registry before it asks about directories** (`named_by_registry`). A conversation
+in the pool sits in the project's folder rather than any thread's, and its head
+names the worktree it was started in, which is not the worktree asking once a
+thread has been restored. Both placement tests answer no for it, so a pid's
+answer that used to survive them was being dropped before `choose_claude_hit`
+could see it.
+
+## Closing a thread is not a deletion
+
+The X on a sidebar row used to kill the process, drop the row and delete the
+checkout in one go, so a misclick was final: the undo brought the row back, the
+directory it named was gone, and every launch from then on answered `spawn
+failed: this directory is not there`. The confirm dialog is not an answer to
+that, since it is off by default and a dialog answered by reflex is the
+misclick.
+
+So the parts that cannot be taken back wait (`worktree-grace.ts`): the process
+still dies at once and the row still leaves the sidebar, while the checkpoint
+refs and the worktree are given back ten minutes later, and restoring the thread
+inside that window cancels it. What is kept is empty by definition, because a
+worktree holding work refuses to be removed at the end of the wait exactly as it
+did at the start.
+
+Past the window the directory is gone and the row still names it, so a restore
+adopts the checkout when it is still there and opens a fresh one when it is not,
+carrying the transcript into it (`withWorktree`). Coming back with no worktree at
+all would put an agent to work in the user's own checkout without saying so. The
+app closing during the window is the one case nothing cleans up: the directory
+is left behind, and the project's Worktrees tab gives back every checkout no
+thread is standing in.
+
 ## What a launch opens on
 
 A restart is not evidence of anything, so a row that was never run draws nothing:

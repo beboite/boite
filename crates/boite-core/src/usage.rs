@@ -732,7 +732,18 @@ pub fn collect_usage_blocking(cwds: Vec<String>, days: u32) -> UsageReport {
         let encoded: HashSet<String> = targets.iter().map(|c| encode_claude_project_dir(c)).collect();
         let mut files = Vec::new();
         for entry in fs::read_dir(&claude_root).into_iter().flatten().flatten() {
-            if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            let Ok(kind) = entry.file_type() else { continue };
+            if !kind.is_dir() {
+                continue;
+            }
+            // A worktree's store is a link onto its project's
+            // (`session::shared`), and the project's own folder is in `targets`
+            // too, so every transcript under a link is already walked under its
+            // real name. Reading it again is the same file parsed once per open
+            // thread, and `shortlist` drops the repeats only after paying for
+            // them. On Windows a junction reports itself as a directory, so
+            // this is the test that sees it.
+            if kind.is_symlink() {
                 continue;
             }
             if !encoded.contains(&entry.file_name().to_string_lossy().to_lowercase()) {

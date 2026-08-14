@@ -23,7 +23,7 @@ import { t } from "$lib/i18n/index.svelte";
 import { paneStore } from "$lib/features/panes/store.svelte";
 import { parkedLocal } from "$lib/backend/tauri/parked";
 import { openWorktreeFor } from "./api";
-import { releaseClaudeSession, sessionKindOf } from "./session";
+import { carryTranscript, releaseClaudeSession } from "./session";
 import { threadCwd } from "./cwd";
 import type { Project, Thread } from "$lib/types";
 
@@ -60,53 +60,6 @@ async function releaseSourceWorktree(
   } catch (err) {
     logger.info("move", `kept ${thread.worktreePath}`, String(err));
     return thread.worktreePath;
-  }
-}
-
-/**
- * Takes the conversation to the new folder, and says whether it can still be
- * resumed there.
- *
- * Best effort on purpose: a transcript that cannot be carried costs the agent
- * its memory of the conversation, which is a bad outcome — but refusing the
- * move instead leaves the thread wedged in a project the user has already
- * decided it does not belong to, which is worse and harder to get out of.
- *
- * A `false` here has to be acted on rather than logged. Relaunching with
- * `--resume` pointed at a transcript that is not in the new folder does not
- * degrade to a fresh session: claude refuses the id outright and the thread
- * lands on an error instead of a prompt.
- */
-async function carryTranscript(
-  thread: Thread,
-  fromCwd: string,
-  toCwd: string,
-): Promise<boolean> {
-  const kind = sessionKindOf(thread);
-  if (!kind || !thread.sessionId) return true;
-  try {
-    const resumable = await backendForPath(toCwd).session.migrate(
-      kind,
-      thread.sessionId,
-      fromCwd,
-      toCwd,
-    );
-    logger.info(
-      "move",
-      `${thread.id} (${kind}): conversation ${resumable ? "reachable over there" : "did not follow"}`,
-      { sessionId: thread.sessionId, fromCwd, toCwd },
-    );
-    return resumable;
-  } catch (err) {
-    logger.warn(
-      "move",
-      `${thread.id} (${kind}): the transcript stayed behind, the agent comes back without it`,
-      String(err),
-    );
-    notifications.error(
-      t("thread.moveTranscriptFailed", { error: String(err) }),
-    );
-    return false;
   }
 }
 
