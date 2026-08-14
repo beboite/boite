@@ -13,6 +13,8 @@ import { resolveIconKey } from "$lib/shared/icons/detect";
 import { t } from "$lib/i18n/index.svelte";
 import type { MessageKey } from "$lib/i18n/index.svelte";
 import { isDeviceMacOS } from "$lib/storage/platform.svelte";
+import { formatCombo } from "$lib/shared/keyboard/combo";
+import { keybindings } from "$lib/features/settings/keybindings.svelte";
 import { anchorPaneId, openPane } from "$lib/features/panes/open";
 import { paneStore } from "$lib/features/panes/store.svelte";
 import { classifyBrowserUrl } from "$lib/features/browser/url";
@@ -63,22 +65,13 @@ export interface PaletteCommand {
 // platform spells it. A mac user reading "Ctrl+T" is being told about a chord
 // that does nothing there.
 export function formatChord(combo: string): string {
-  const parts = combo.split("+");
-  const key = parts.pop() ?? "";
-  const label = key.length === 1 ? key.toUpperCase() : key;
-  if (isDeviceMacOS) {
-    let out = "";
-    if (parts.includes("alt")) out += "⌥";
-    if (parts.includes("shift")) out += "⇧";
-    if (parts.includes("mod")) out += "⌘";
-    return out + label;
-  }
-  const chunks: string[] = [];
-  if (parts.includes("mod")) chunks.push("Ctrl");
-  if (parts.includes("shift")) chunks.push("Shift");
-  if (parts.includes("alt")) chunks.push("Alt");
-  chunks.push(label);
-  return chunks.join("+");
+  return formatCombo(combo, isDeviceMacOS);
+}
+
+// Read out of the user's rules rather than written here: a hardcoded chord goes
+// on lying the moment somebody rebinds the command.
+function chordFor(command: string): string | undefined {
+  return keybindings.byCommand[command]?.[0]?.key;
 }
 
 /** Both resolvers run at render time, never while the list is being built. */
@@ -124,7 +117,7 @@ export function buildPaletteCommands(): PaletteCommand[] {
     id: "action:new-terminal",
     section: "actions",
     labelKey: "welcome.newTerminal",
-    chord: "mod+t",
+    chord: chordFor("thread.new"),
     run: () => launchBlankTerminalHere(),
   });
   for (const shortcut of settings.state.shortcuts) {
@@ -148,7 +141,7 @@ export function buildPaletteCommands(): PaletteCommand[] {
     id: "action:restore-thread",
     section: "actions",
     labelKey: "palette.restoreThread",
-    chord: "mod+shift+t",
+    chord: chordFor("thread.restoreClosed"),
     run: () => restoreLastClosedThread(),
   });
   if (app.activeThreadId) {
@@ -157,7 +150,7 @@ export function buildPaletteCommands(): PaletteCommand[] {
       id: "action:close-thread",
       section: "actions",
       labelKey: "palette.closeActiveThread",
-      chord: "mod+w",
+      chord: chordFor("view.closeFrontMost"),
       run: () => closeThreadWithConfirm(id),
     });
   }
@@ -169,7 +162,7 @@ export function buildPaletteCommands(): PaletteCommand[] {
       id: "action:toggle-sidebar",
       section: "actions",
       labelKey: "titlebar.toggleSidebar",
-      chord: "mod+b",
+      chord: chordFor("view.toggleSidebar"),
       run: () => settings.toggleSidebar(),
     });
   }
@@ -177,7 +170,7 @@ export function buildPaletteCommands(): PaletteCommand[] {
     id: "action:settings",
     section: "actions",
     labelKey: "palette.openSettings",
-    chord: "mod+,",
+    chord: chordFor("view.toggleSettings"),
     run: () => {
       app.view = "settings";
       app.mobileTab = "settings";
