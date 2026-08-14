@@ -1,3 +1,7 @@
+import type { Keybinding } from "$lib/shared/keyboard/types";
+
+export type { Keybinding };
+
 // Which transport owns an entity in dynamic mode: the local desktop backend or
 // the connected boite. Runtime-only tag — never persisted (each store only
 // holds its own rows) and stripped before any RPC. Undefined outside dynamic
@@ -93,6 +97,15 @@ export type LocaleSetting = "system" | "en" | "fr";
 
 export interface Settings {
   shortcuts: Shortcut[];
+  /**
+   * Global keyboard rules, `{key, command, when}`, last match winning.
+   *
+   * They live in this blob rather than in a `keybindings.json` beside the app
+   * because the blob is the one store both front doors already read, so a phone
+   * on the PWA gets the same keyboard as the desktop and no new bus capability
+   * is needed to carry it.
+   */
+  keybindings: Keybinding[];
   // Preset shortcut ids already backfilled once. Without this, deleting a
   // late-added preset would see it re-seeded on every launch.
   seededPresets: string[];
@@ -244,6 +257,12 @@ export interface Settings {
    * `manual`, so the rows hold still until an order is actually picked.
    */
   experimentSmartSort: boolean;
+  /**
+   * Experiment: a whip over the whole window, thrown from a titlebar button.
+   * Purely cosmetic — it cracks, it makes a noise, and it reaches no terminal:
+   * no interrupt, no keystroke, no prompt.
+   */
+  experimentWhip: boolean;
   smartSortBy: SmartSortBy;
   smartSortDirection: SortDirection;
 }

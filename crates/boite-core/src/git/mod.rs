@@ -70,7 +70,7 @@ pub struct BranchChangeResult {
     pub stashed: bool,
 }
 
-fn git(path: &Path) -> Command {
+pub(crate) fn git(path: &Path) -> Command {
     let mut cmd = Command::new("git");
     cmd.current_dir(path);
     cmd.env("GIT_OPTIONAL_LOCKS", "0");
@@ -92,7 +92,7 @@ fn git(path: &Path) -> Command {
     cmd
 }
 
-fn run(mut cmd: Command) -> Result<Vec<u8>, String> {
+pub(crate) fn run(mut cmd: Command) -> Result<Vec<u8>, String> {
     let out = cmd
         .output()
         .map_err(|e| format!("git not found or failed to start: {e}"))?;
@@ -1021,7 +1021,7 @@ pub struct FileVersions {
 // `Path::join` — where an absolute path DISCARDS the repo prefix entirely and
 // `..` walks out of it. Either one turns "read a file in this repo" into an
 // arbitrary filesystem read, so repo-relative is the only accepted shape.
-fn repo_relative(rel: &str) -> Result<(), String> {
+pub(crate) fn repo_relative(rel: &str) -> Result<(), String> {
     let p = Path::new(rel);
     if p.is_absolute() {
         return Err("file must be repo-relative".into());
@@ -1089,7 +1089,7 @@ pub fn file_versions_blocking(
 
 // (content, is_binary) — binary blobs return (None, true) so the caller can
 // tell "binary" apart from "absent at this revision".
-fn git_show(repo: &Path, spec: &str) -> (Option<String>, bool) {
+pub(crate) fn git_show(repo: &Path, spec: &str) -> (Option<String>, bool) {
     let mut cmd = git(repo);
     cmd.args(["show", spec]);
     match cmd.output() {

@@ -13,20 +13,35 @@ import { resolveIconKey } from "$lib/shared/icons/detect";
 import { t } from "$lib/i18n/index.svelte";
 import type { MessageKey } from "$lib/i18n/index.svelte";
 import { isDeviceMacOS } from "$lib/storage/platform.svelte";
+import { formatCombo } from "$lib/shared/keyboard/combo";
+import { keybindings } from "$lib/features/settings/keybindings.svelte";
 import { anchorPaneId, openPane } from "$lib/features/panes/open";
 import { paneStore } from "$lib/features/panes/store.svelte";
-import { classifyBrowserUrl } from "$lib/features/browser/url";
-import { notifications } from "$lib/features/notifications/store.svelte";
+import { openTodo } from "$lib/features/todo/open";
+import { contentRowId } from "./content";
+import type { WorkspaceHit } from "$lib/backend/types";
 import type { PaneContent, PanelKind } from "$lib/features/panes/types";
 import type { IconKey } from "$lib/types";
+import type { PaletteMode } from "./modes";
 
-export type PaletteSection = "threads" | "actions" | "panes" | "projects";
+import type { PaletteSection } from "./sections";
+
+export type { PaletteSection, ScoredSection } from "./sections";
+export { SECTION_BIAS, SECTION_ORDER, SECTION_TITLE_KEYS } from "./sections";
 
 export interface PaletteCommand {
   id: string;
   section: PaletteSection;
   /** Text straight out of user data: a thread title, a project name. Never translated. */
   label?: string;
+  /**
+   * A short word for what a row *is*, when its label does not say.
+   *
+   * Only content hits carry one: an excerpt is a sentence out of a todo, a
+   * journal entry or a terminal, and which of the three it came from decides
+   * where activating it lands.
+   */
+  badgeKey?: MessageKey;
   /**
    * A fixed command's wording, held as a dictionary key and resolved at render.
    * Resolving here instead would freeze the language the list was built in.
@@ -42,47 +57,28 @@ export interface PaletteCommand {
   chord?: string;
   /** Same glyph the sidebar row wears, so a thread is recognised before it is read. */
   icon?: { key: IconKey; color: string | null };
-  run: () => void | Promise<unknown>;
+  /**
+   * Switches the palette into another mode instead of running and closing.
+   *
+   * A command that needs one more piece of typing is still one command, and
+   * this is what keeps it inside the box the user is already typing in. Exactly
+   * one of `mode` and `run` is set.
+   */
+  mode?: PaletteMode;
+  run?: () => void | Promise<unknown>;
 }
-
-// Ranking bias when a query is active: a thread you can jump to beats an
-// action of the same textual score, which beats selecting a project.
-export const SECTION_BIAS: Record<PaletteSection, number> = {
-  threads: 6,
-  actions: 3,
-  panes: 2,
-  projects: 0,
-};
-
-// Keys rather than strings: the section headers are drawn by a component that
-// only knows the section, so the literal has to live on the data.
-export const SECTION_TITLE_KEYS: Record<PaletteSection, MessageKey> = {
-  threads: "project.threads",
-  actions: "palette.sectionActions",
-  panes: "palette.panes",
-  projects: "sidebar.projects",
-};
 
 // The chord the keyboard controller actually listens for, spelled the way the
 // platform spells it. A mac user reading "Ctrl+T" is being told about a chord
 // that does nothing there.
 export function formatChord(combo: string): string {
-  const parts = combo.split("+");
-  const key = parts.pop() ?? "";
-  const label = key.length === 1 ? key.toUpperCase() : key;
-  if (isDeviceMacOS) {
-    let out = "";
-    if (parts.includes("alt")) out += "⌥";
-    if (parts.includes("shift")) out += "⇧";
-    if (parts.includes("mod")) out += "⌘";
-    return out + label;
-  }
-  const chunks: string[] = [];
-  if (parts.includes("mod")) chunks.push("Ctrl");
-  if (parts.includes("shift")) chunks.push("Shift");
-  if (parts.includes("alt")) chunks.push("Alt");
-  chunks.push(label);
-  return chunks.join("+");
+  return formatCombo(combo, isDeviceMacOS);
+}
+
+// Read out of the user's rules rather than written here: a hardcoded chord goes
+// on lying the moment somebody rebinds the command.
+function chordFor(command: string): string | undefined {
+  return keybindings.byCommand[command]?.[0]?.key;
 }
 
 /** Both resolvers run at render time, never while the list is being built. */
@@ -95,7 +91,7 @@ export function commandHint(c: PaletteCommand): string | null {
   return c.hint ?? null;
 }
 
-function goToThread(threadId: string, projectId: string) {
+export function goToThread(threadId: string, projectId: string) {
   app.activeThreadId = threadId;
   app.selectedProjectId = projectId;
   app.view = "terminal";
@@ -128,7 +124,7 @@ export function buildPaletteCommands(): PaletteCommand[] {
     id: "action:new-terminal",
     section: "actions",
     labelKey: "welcome.newTerminal",
-    chord: "mod+t",
+    chord: chordFor("thread.new"),
     run: () => launchBlankTerminalHere(),
   });
   for (const shortcut of settings.state.shortcuts) {
@@ -152,7 +148,7 @@ export function buildPaletteCommands(): PaletteCommand[] {
     id: "action:restore-thread",
     section: "actions",
     labelKey: "palette.restoreThread",
-    chord: "mod+shift+t",
+    chord: chordFor("thread.restoreClosed"),
     run: () => restoreLastClosedThread(),
   });
   if (app.activeThreadId) {
@@ -161,7 +157,7 @@ export function buildPaletteCommands(): PaletteCommand[] {
       id: "action:close-thread",
       section: "actions",
       labelKey: "palette.closeActiveThread",
-      chord: "mod+w",
+      chord: chordFor("view.closeFrontMost"),
       run: () => closeThreadWithConfirm(id),
     });
   }
@@ -173,7 +169,7 @@ export function buildPaletteCommands(): PaletteCommand[] {
       id: "action:toggle-sidebar",
       section: "actions",
       labelKey: "titlebar.toggleSidebar",
-      chord: "mod+b",
+      chord: chordFor("view.toggleSidebar"),
       run: () => settings.toggleSidebar(),
     });
   }
@@ -181,7 +177,7 @@ export function buildPaletteCommands(): PaletteCommand[] {
     id: "action:settings",
     section: "actions",
     labelKey: "palette.openSettings",
-    chord: "mod+,",
+    chord: chordFor("view.toggleSettings"),
     run: () => {
       app.view = "settings";
       app.mobileTab = "settings";
@@ -254,21 +250,12 @@ export function buildPaletteCommands(): PaletteCommand[] {
     id: "pane:browser",
     section: "panes",
     labelKey: "panes.openBrowser",
-    run: () => {
-      // A prompt rather than a form: the palette closes on run, and a second
-      // modal to type a URL into is a lot of machinery for the rare case. The
-      // common case is an agent calling this with the URL already known.
-      const typed = window.prompt(t("panes.browserPrompt"), "http://localhost:");
-      if (!typed?.trim()) return;
-      // Typing it is consent to see the page, not consent to frame the app's
-      // own origin inside itself. Same rules the agent's request goes through.
-      const target = classifyBrowserUrl(typed);
-      if (!target.ok) {
-        notifications.error(t(`browser.refuse.${target.reason}`));
-        return;
-      }
-      openPane({ kind: "browser", url: target.url });
-    },
+    // Keeps the palette open and turns it into an address box, rather than
+    // closing it and raising `window.prompt`: that prompt is an OS box drawn in
+    // the OS language, with the OS palette, outside every keyboard scope this
+    // app models, and Escape in it did not mean what Escape means anywhere else
+    // in the window.
+    mode: "url",
   });
 
   for (const project of app.sortedProjects) {
@@ -285,4 +272,70 @@ export function buildPaletteCommands(): PaletteCommand[] {
   }
 
   return commands;
+}
+
+/**
+ * What the workspace wrote down, as rows the palette can draw.
+ *
+ * Built per answer rather than per open, and separately from everything above:
+ * these arrive from `search.query` after a round trip, and the command list must
+ * never be waiting on one.
+ *
+ * A hit whose project or thread is gone is dropped. Its excerpt is still true
+ * and there is nowhere to go from it, and a row that does nothing when it is
+ * activated is worse in a palette than a row that is not there.
+ */
+export function buildContentCommands(hits: WorkspaceHit[]): PaletteCommand[] {
+  const commands: PaletteCommand[] = [];
+  for (const [index, hit] of hits.entries()) {
+    const row = contentRow(hit, index);
+    if (row) commands.push(row);
+  }
+  return commands;
+}
+
+function contentRow(hit: WorkspaceHit, index: number): PaletteCommand | null {
+  const id = contentRowId(hit, index);
+  if (hit.kind === "transcript") {
+    // A transcript names its thread and nothing else: the file is on disk under
+    // the thread id, and which project that belongs to is the row's to say.
+    const thread = app.threadById(hit.refId);
+    if (!thread) return null;
+    const project = app.projectById(thread.projectId);
+    return {
+      id,
+      section: "content",
+      badgeKey: "palette.hitTerminal",
+      label: hit.excerpt,
+      hint: project
+        ? `${thread.title ?? thread.label} / ${projectDisplayName(project)}`
+        : (thread.title ?? thread.label),
+      icon: { key: thread.iconKey, color: thread.iconColor ?? null },
+      run: () => goToThread(thread.id, thread.projectId),
+    };
+  }
+
+  const project = app.projectById(hit.projectId);
+  if (!project) return null;
+  if (hit.kind === "todo") {
+    return {
+      id,
+      section: "content",
+      badgeKey: "palette.hitTodo",
+      label: hit.excerpt,
+      hint: projectDisplayName(project),
+      run: () => openTodo(project.id, hit.refId),
+    };
+  }
+  // A journal entry. Nothing in Boite draws one, so the closest true
+  // destination is the project it happened in; inventing a viewer for it is a
+  // feature, not a navigation target.
+  return {
+    id,
+    section: "content",
+    badgeKey: "palette.hitJournal",
+    label: hit.excerpt,
+    hint: projectDisplayName(project),
+    run: () => openProjectDashboard(project.id),
+  };
 }

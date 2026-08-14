@@ -1,11 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-  createKeyboardController,
-  isEditableTarget,
-  matchesCombo,
-  parseCombo,
-} from "./controller";
-import type { KeyScope, ShortcutBinding } from "./types";
+import { parseCombo } from "./combo";
+import { createKeyboardController } from "./controller";
+import { compileWhen, type KeyContext } from "./when";
+import type { CompiledRule, Keybinding, KeyCommandRun } from "./types";
 
 interface FakeKeyInit {
   key?: string;
@@ -31,210 +28,154 @@ function key(init: FakeKeyInit): KeyboardEvent {
   } as unknown as KeyboardEvent;
 }
 
-describe("parseCombo", () => {
-  it("splits modifiers from the key", () => {
-    expect(parseCombo("mod+shift+t")).toEqual({
-      key: "t",
-      mod: true,
-      shift: true,
-      alt: false,
-    });
+function compile(bindings: Keybinding[], allowInInput: string[] = []): CompiledRule[] {
+  return bindings.map((binding) => {
+    const clause = compileWhen(binding.when);
+    return {
+      binding,
+      combo: parseCombo(binding.key),
+      test: clause.test,
+      valid: clause.ok,
+      allowInInput: allowInInput.includes(binding.command),
+    };
   });
+}
 
-  it("handles a bare key", () => {
-    expect(parseCombo("escape")).toEqual({
-      key: "escape",
-      mod: false,
-      shift: false,
-      alt: false,
-    });
+function build(
+  bindings: Keybinding[],
+  handlers: Record<string, KeyCommandRun>,
+  ctx: KeyContext = {},
+  allowInInput: string[] = [],
+) {
+  const rules = compile(bindings, allowInInput);
+  return createKeyboardController({
+    rules: () => rules,
+    context: () => ctx,
+    handlers: () => handlers,
+    isMac: () => false,
   });
-});
-
-describe("matchesCombo", () => {
-  const combo = (s: string) => parseCombo(s);
-
-  it("maps mod to Ctrl off macOS and Cmd on it", () => {
-    expect(matchesCombo(combo("mod+k"), key({ key: "k", ctrl: true }), false)).toBe(true);
-    expect(matchesCombo(combo("mod+k"), key({ key: "k", meta: true }), true)).toBe(true);
-  });
-
-  it("refuses Ctrl+K on macOS so the shell keeps readline kill-line", () => {
-    expect(matchesCombo(combo("mod+k"), key({ key: "k", ctrl: true }), true)).toBe(false);
-  });
-
-  it("refuses a stray opposite modifier", () => {
-    // Cmd+Ctrl+K is not the palette shortcut on either platform.
-    expect(
-      matchesCombo(combo("mod+k"), key({ key: "k", ctrl: true, meta: true }), false),
-    ).toBe(false);
-  });
-
-  it("does not let a shifted combo fire its unshifted binding", () => {
-    // Regression: Ctrl+Shift+T used to also trigger the plain Ctrl+T handler,
-    // opening a new terminal on top of the restored one.
-    expect(
-      matchesCombo(combo("mod+t"), key({ key: "T", ctrl: true, shift: true }), false),
-    ).toBe(false);
-    expect(
-      matchesCombo(combo("mod+shift+t"), key({ key: "T", ctrl: true, shift: true }), false),
-    ).toBe(true);
-  });
-
-  it("is case-insensitive on the key", () => {
-    expect(matchesCombo(combo("mod+b"), key({ key: "B", ctrl: true }), false)).toBe(true);
-  });
-
-  it("matches digits by physical key so shifted layouts still work", () => {
-    // On AZERTY the digit row needs Shift, so e.key is "&" and only the code
-    // identifies the key.
-    expect(
-      matchesCombo(combo("mod+digit1"), key({ key: "&", code: "Digit1", ctrl: true }), false),
-    ).toBe(true);
-    expect(
-      matchesCombo(combo("mod+digit1"), key({ key: "1", ctrl: true }), false),
-    ).toBe(true);
-    expect(
-      matchesCombo(combo("mod+digit1"), key({ key: "1", code: "Numpad1", ctrl: true }), false),
-    ).toBe(true);
-  });
-
-  it("matches the split keys on both layouts and leaves Ctrl+backslash alone", () => {
-    // E and O sit in the same place on QWERTY and AZERTY, so the character the
-    // key produces identifies it on either.
-    expect(
-      matchesCombo(combo("mod+shift+e"), key({ key: "E", code: "KeyE", ctrl: true, shift: true }), false),
-    ).toBe(true);
-    expect(
-      matchesCombo(combo("mod+shift+o"), key({ key: "O", code: "KeyO", ctrl: true, shift: true }), false),
-    ).toBe(true);
-    // Ctrl+\ is SIGQUIT and belongs to whatever is running in the terminal.
-    // Nothing may claim it, and there is no alias that could: on fr-AZERTY the
-    // backslash is AltGr+8, which arrives as Digit8 with altKey set.
-    for (const e of [
-      key({ key: "\\", code: "Backslash", ctrl: true }),
-      key({ key: "\\", code: "Digit8", ctrl: true, alt: true }),
-    ]) {
-      expect(matchesCombo(combo("mod+shift+e"), e, false)).toBe(false);
-      expect(matchesCombo(combo("mod+shift+o"), e, false)).toBe(false);
-    }
-  });
-
-  it("accepts both spellings of zoom in and out", () => {
-    for (const k of ["+", "="]) {
-      expect(matchesCombo(combo("mod+plus"), key({ key: k, ctrl: true }), false)).toBe(true);
-    }
-    for (const k of ["-", "_"]) {
-      expect(matchesCombo(combo("mod+minus"), key({ key: k, ctrl: true }), false)).toBe(true);
-    }
-    expect(
-      matchesCombo(combo("mod+plus"), key({ key: "a", code: "NumpadAdd", ctrl: true }), false),
-    ).toBe(true);
-  });
-
-  it("requires the alt modifier when the combo declares it", () => {
-    expect(
-      matchesCombo(combo("mod+alt+arrowleft"), key({ key: "ArrowLeft", ctrl: true }), false),
-    ).toBe(false);
-    expect(
-      matchesCombo(
-        combo("mod+alt+arrowleft"),
-        key({ key: "ArrowLeft", ctrl: true, alt: true }),
-        false,
-      ),
-    ).toBe(true);
-  });
-});
-
-describe("isEditableTarget", () => {
-  it("is false for a plain element and true for form fields", () => {
-    // Plain objects on purpose: isEditableTarget duck-types, so these are
-    // exactly what a cross-realm element looks like to it.
-    const el = (tag: string, editable = false) =>
-      ({ tagName: tag, isContentEditable: editable }) as unknown as EventTarget;
-    expect(isEditableTarget(el("DIV"))).toBe(false);
-    expect(isEditableTarget(el("INPUT"))).toBe(true);
-    expect(isEditableTarget(el("TEXTAREA"))).toBe(true);
-    expect(isEditableTarget(el("SELECT"))).toBe(true);
-    expect(isEditableTarget(el("DIV", true))).toBe(true);
-    expect(isEditableTarget(null)).toBe(false);
-  });
-});
+}
 
 describe("createKeyboardController", () => {
-  function build(bindings: ShortcutBinding[], scope: KeyScope = "app") {
-    return createKeyboardController({
-      bindings,
-      getScope: () => scope,
-      isMac: () => false,
-    });
-  }
-
-  it("runs the first matching binding and stops the event", () => {
+  it("runs the LAST matching rule and stops the event", () => {
+    // The inverse of what this dispatcher used to do, and the whole of what
+    // makes a user override work: their rule is appended behind the default.
     const first = vi.fn();
     const second = vi.fn();
-    const c = build([
-      { combo: "mod+t", scopes: ["*"], run: first },
-      { combo: "mod+t", scopes: ["*"], run: second },
-    ]);
+    const c = build(
+      [
+        { key: "mod+t", command: "a" },
+        { key: "mod+t", command: "b" },
+      ],
+      { a: first, b: second },
+    );
     const e = key({ key: "t", ctrl: true });
     c.handleKeydown(e);
-    expect(first).toHaveBeenCalledOnce();
-    expect(second).not.toHaveBeenCalled();
+    expect(second).toHaveBeenCalledOnce();
+    expect(first).not.toHaveBeenCalled();
     expect(e.preventDefault).toHaveBeenCalledOnce();
     expect(e.stopPropagation).toHaveBeenCalledOnce();
   });
 
-  it("falls through to the next binding when run() returns false", () => {
+  it("lets a later rule beat an earlier one on a different command", () => {
+    const shipped = vi.fn();
+    const mine = vi.fn();
+    const c = build(
+      [
+        { key: "mod+t", command: "thread.new" },
+        { key: "mod+t", command: "view.toggleSidebar" },
+      ],
+      { "thread.new": shipped, "view.toggleSidebar": mine },
+    );
+    c.handleKeydown(key({ key: "t", ctrl: true }));
+    expect(mine).toHaveBeenCalledOnce();
+    expect(shipped).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the rule in front when run() returns false", () => {
     // This is what lets "close the front-most thing" decline when there is
     // nothing to close, instead of swallowing the key.
     const declined = vi.fn(() => false);
     const taken = vi.fn();
-    const c = build([
-      { combo: "mod+w", scopes: ["*"], run: declined },
-      { combo: "mod+w", scopes: ["*"], run: taken },
-    ]);
+    const c = build(
+      [
+        { key: "mod+w", command: "a" },
+        { key: "mod+w", command: "b" },
+      ],
+      { a: taken, b: declined },
+    );
     const e = key({ key: "w", ctrl: true });
     c.handleKeydown(e);
     expect(declined).toHaveBeenCalledOnce();
     expect(taken).toHaveBeenCalledOnce();
+    expect(e.preventDefault).toHaveBeenCalledOnce();
+  });
+
+  it("leaves the event untouched when every matching rule declines", () => {
+    const c = build([{ key: "mod+w", command: "a" }], { a: () => false });
+    const e = key({ key: "w", ctrl: true });
+    c.handleKeydown(e);
+    expect(e.preventDefault).not.toHaveBeenCalled();
   });
 
   it("leaves the event untouched when nothing matches", () => {
-    const c = build([{ combo: "mod+t", scopes: ["*"], run: vi.fn() }]);
+    const c = build([{ key: "mod+t", command: "a" }], { a: vi.fn() });
     const e = key({ key: "q", ctrl: true });
     c.handleKeydown(e);
     expect(e.preventDefault).not.toHaveBeenCalled();
   });
 
-  it("skips bindings that are out of scope", () => {
+  it("skips a rule whose clause is false", () => {
     const run = vi.fn();
-    const c = build([{ combo: "escape", scopes: ["editor"], run }], "modal");
+    const c = build([{ key: "escape", command: "a", when: "editorFocus" }], { a: run }, {
+      editorFocus: false,
+    });
     c.handleKeydown(key({ key: "Escape" }));
     expect(run).not.toHaveBeenCalled();
   });
 
-  it("a modal scope silences app bindings, so Escape closes one layer", () => {
+  it("silences the rules behind an overlay, so Escape closes one layer", () => {
     const closePanel = vi.fn();
-    const c = build([{ combo: "escape", scopes: ["app"], run: closePanel }], "modal");
+    const c = build([{ key: "escape", command: "a", when: "!overlayOpen" }], { a: closePanel }, {
+      overlayOpen: true,
+    });
     c.handleKeydown(key({ key: "Escape" }));
     expect(closePanel).not.toHaveBeenCalled();
+  });
+
+  it("skips a rule whose clause did not parse", () => {
+    const run = vi.fn();
+    const c = build([{ key: "mod+t", command: "a", when: "editorFocus &&" }], { a: run });
+    c.handleKeydown(key({ key: "t", ctrl: true }));
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it("skips a rule naming a command this build does not have", () => {
+    // An older Boite reading a set a newer one wrote still has to boot.
+    const fallback = vi.fn();
+    const c = build(
+      [
+        { key: "mod+t", command: "known" },
+        { key: "mod+t", command: "from.the.future" },
+      ],
+      { known: fallback },
+    );
+    c.handleKeydown(key({ key: "t", ctrl: true }));
+    expect(fallback).toHaveBeenCalledOnce();
   });
 
   it("does not fire bare keys while a text field has focus", () => {
     const run = vi.fn();
     const input = { tagName: "INPUT", isContentEditable: false } as unknown as EventTarget;
-    const c = build([{ combo: "escape", scopes: ["*"], run }]);
+    const c = build([{ key: "escape", command: "a" }], { a: run });
     c.handleKeydown(key({ key: "Escape", target: input }));
     expect(run).not.toHaveBeenCalled();
   });
 
-  it("still fires bare keys in a text field when the binding opts in", () => {
+  it("still fires bare keys in a text field when the command opts in", () => {
     const run = vi.fn();
     const input = { tagName: "INPUT", isContentEditable: false } as unknown as EventTarget;
-    const c = build([
-      { combo: "escape", scopes: ["*"], allowInInput: true, run },
-    ]);
+    const c = build([{ key: "escape", command: "a" }], { a: run }, {}, ["a"]);
     c.handleKeydown(key({ key: "Escape", target: input }));
     expect(run).toHaveBeenCalledOnce();
   });
@@ -243,8 +184,25 @@ describe("createKeyboardController", () => {
     // The user cannot have meant to type Ctrl+W into the box.
     const run = vi.fn();
     const input = { tagName: "INPUT", isContentEditable: false } as unknown as EventTarget;
-    const c = build([{ combo: "mod+w", scopes: ["*"], run }]);
+    const c = build([{ key: "mod+w", command: "a" }], { a: run });
     c.handleKeydown(key({ key: "w", ctrl: true, target: input }));
     expect(run).toHaveBeenCalledOnce();
+  });
+
+  it("does not read the context for a keystroke no combo claims", () => {
+    // The clause context probes the DOM, and this runs on every key the
+    // terminal is also about to receive.
+    const context = vi.fn(() => ({}));
+    const rules = compile([{ key: "mod+t", command: "a" }]);
+    const c = createKeyboardController({
+      rules: () => rules,
+      context,
+      handlers: () => ({ a: vi.fn() }),
+      isMac: () => false,
+    });
+    c.handleKeydown(key({ key: "z" }));
+    expect(context).not.toHaveBeenCalled();
+    c.handleKeydown(key({ key: "t", ctrl: true }));
+    expect(context).toHaveBeenCalledOnce();
   });
 });

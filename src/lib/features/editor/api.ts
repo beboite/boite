@@ -35,3 +35,19 @@ export function gitFileVersions(
 ): Promise<FileVersions> {
   return backendForPath(repoPath).editor.fileVersions(repoPath, file, headFile ?? null);
 }
+
+/**
+ * One file at both ends of an agent's turn.
+ *
+ * The same shape as `gitFileVersions` and a different question: those three
+ * versions are all relative to HEAD, and a turn is bracketed by two checkpoints
+ * that have nothing to do with HEAD.
+ */
+export function turnFileVersions(
+  repoPath: string,
+  from: string,
+  to: string,
+  file: string,
+): Promise<{ before: string | null; after: string | null; binary: boolean }> {
+  return backendForPath(repoPath).checkpoints.fileVersions(repoPath, from, to, file);
+}
