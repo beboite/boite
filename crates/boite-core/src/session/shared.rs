@@ -23,9 +23,17 @@ use std::path::Path;
 
 use crate::git::artifacts::link_dir;
 
-use super::claude::encode_claude_project_dir;
+use super::claude::claude_project_dir_name;
 use super::editors::{pi_dir_name, pi_sessions_root};
-use super::normalize;
+
+/// The cwd as the CLI itself sees it. A trailing separator is dropped, because
+/// a path spelled with one and a path spelled without it are one directory and
+/// would otherwise be two stores; nothing else is touched. In particular the
+/// case is left alone: this feeds directory names that have to match what the
+/// CLI will look for, not a comparison.
+fn as_given(cwd: &str) -> &str {
+    cwd.trim_end_matches(['/', '\\'])
+}
 
 /// Points this worktree's stores at the project's, for every CLI that files by
 /// directory.
@@ -38,15 +46,19 @@ pub fn share_session_stores(project_cwd: &str, worktree_cwd: &str) {
     if let Some(home) = dirs::home_dir() {
         share(
             &home.join(".claude").join("projects"),
-            &encode_claude_project_dir(&normalize(project_cwd)),
-            &encode_claude_project_dir(&normalize(worktree_cwd)),
+            &claude_project_dir_name(as_given(project_cwd)),
+            &claude_project_dir_name(as_given(worktree_cwd)),
         );
     }
     // Pi's flat shape serves every directory from one folder already, so there
     // is nothing to point anywhere.
     if let Some((root, flat)) = pi_sessions_root() {
         if !flat {
-            share(&root, &pi_dir_name(project_cwd), &pi_dir_name(worktree_cwd));
+            share(
+                &root,
+                &pi_dir_name(as_given(project_cwd)),
+                &pi_dir_name(as_given(worktree_cwd)),
+            );
         }
     }
 }
@@ -61,12 +73,12 @@ pub fn unshare_session_stores(worktree_cwd: &str) {
     if let Some(home) = dirs::home_dir() {
         unshare(
             &home.join(".claude").join("projects"),
-            &encode_claude_project_dir(&normalize(worktree_cwd)),
+            &claude_project_dir_name(as_given(worktree_cwd)),
         );
     }
     if let Some((root, flat)) = pi_sessions_root() {
         if !flat {
-            unshare(&root, &pi_dir_name(worktree_cwd));
+            unshare(&root, &pi_dir_name(as_given(worktree_cwd)));
         }
     }
 }

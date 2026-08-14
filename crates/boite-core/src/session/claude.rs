@@ -201,11 +201,23 @@ pub(super) fn claude_turn(s: LiveClaudeSession) -> Option<AgentTurn> {
     })
 }
 
-pub(super) fn encode_claude_project_dir(p: &str) -> String {
+/// The directory claude files this cwd's transcripts in, spelled the way claude
+/// spells it: every character that is not a letter or a digit becomes a dash,
+/// and the case is left alone.
+///
+/// Case is the whole difference from [`encode_claude_project_dir`], which folds
+/// it so that two spellings of one path still compare equal. A name being
+/// *created* cannot be folded: it has to be the name claude will go looking
+/// for. NTFS and APFS forgive that, ext4 does not, and a shared store spelled
+/// in lower case would simply never be found on Linux.
+pub(super) fn claude_project_dir_name(p: &str) -> String {
     p.chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-        .collect::<String>()
-        .to_lowercase()
+        .collect()
+}
+
+pub(super) fn encode_claude_project_dir(p: &str) -> String {
+    claude_project_dir_name(p).to_lowercase()
 }
 
 fn read_claude_session_meta(path: &Path) -> Option<ClaudeSessionMeta> {
@@ -713,6 +725,22 @@ mod tests {
         assert_eq!(
             named_by_registry(elsewhere, Some("sess-9")).as_deref(),
             Some("sess-9")
+        );
+    }
+
+    /// A link into the shared store is created under the name claude will go
+    /// looking for, and claude keeps the case. Folded, the store would be found
+    /// on NTFS and APFS by luck and never on ext4.
+    #[test]
+    fn a_store_directory_is_named_the_way_claude_names_it() {
+        assert_eq!(
+            claude_project_dir_name("D:\\Dev\\Collab\\boite\\.boite\\worktrees\\abc"),
+            "D--Dev-Collab-boite--boite-worktrees-abc"
+        );
+        assert_eq!(
+            encode_claude_project_dir("D:\\Dev"),
+            "d--dev",
+            "comparing still folds, so two spellings of one path still match"
         );
     }
 
