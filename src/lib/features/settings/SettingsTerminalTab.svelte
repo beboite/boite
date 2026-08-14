@@ -1,5 +1,6 @@
 <script lang="ts">
   import { settings } from "$lib/features/settings/store.svelte";
+  import { rearmThreadAgeing } from "$lib/features/thread/ageing.svelte";
   import { platform } from "$lib/storage/platform.svelte";
   import SettingsCard from "$lib/shared/components/SettingsCard.svelte";
   import ToggleSetting from "$lib/shared/components/ToggleSetting.svelte";
@@ -13,6 +14,20 @@
 
   function setIdle(value: number) {
     settings.setIdleTimeoutMinutes(value);
+  }
+
+  /**
+   * The clock is told, because it cannot notice on its own.
+   *
+   * It arms one timer for the list as it stands, and with auto-settle off and
+   * nothing snoozed it arms none at all, which is the state this slider is
+   * being moved out of. Rearmed here rather than inside the setter so the
+   * settings store keeps knowing nothing about the sidebar, and the pass it runs
+   * files away what is already old instead of waiting an hour to notice.
+   */
+  function setAutoSettleDays(value: number) {
+    settings.setAutoSettleDays(value);
+    rearmThreadAgeing();
   }
 
   function setAutoFetchSeconds(value: number) {
@@ -215,6 +230,36 @@
     >
       {t("common.reset")}
     </button>
+  </div>
+</SettingsCard>
+
+<SettingsCard
+  title={t("terminalTab.autoSettle")} anchor="terminalTab.autoSettle"
+  description={t("terminalTab.autoSettleDesc")}
+>
+  <div class="flex items-center gap-3">
+    <label
+      for="auto-settle-days"
+      class="min-w-[140px] text-xs font-medium text-foreground"
+    >
+      {t("terminalTab.autoSettleAfter")}
+    </label>
+    <input
+      id="auto-settle-days"
+      type="range"
+      min="0"
+      max="90"
+      step="1"
+      value={settings.state.autoSettleDays}
+      oninput={(e) =>
+        setAutoSettleDays(Number((e.currentTarget as HTMLInputElement).value))}
+      class="flex-1 accent-foreground"
+    />
+    <span class="min-w-[56px] text-right tabular-nums text-xs text-muted-foreground">
+      {settings.state.autoSettleDays === 0
+        ? t("common.off")
+        : t("terminalTab.days", { count: settings.state.autoSettleDays })}
+    </span>
   </div>
 </SettingsCard>
 

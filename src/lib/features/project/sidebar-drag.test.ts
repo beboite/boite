@@ -4,6 +4,7 @@ import {
   dropIntent,
   hasBecomeADrag,
   reordered,
+  reorderedAmongVisible,
   rowShift,
   sideFromRect,
   slotIndexAt,
@@ -173,5 +174,41 @@ describe("committing the order", () => {
     // back, so an unchanged list would be fine and a list with the dragged row
     // quietly missing would not.
     expect(reordered(["a", "b"], "zzz", 0)).toBeNull();
+  });
+});
+
+describe("committing the order of a list that hides rows", () => {
+  /// The bug this exists for: the slot counts drawn rows, and "p" is pinned into
+  /// its own section, so applying the slot to the saved list landed the drop one
+  /// place too high. Dropping "a" between "b" and "c" has to end up between them.
+  it("counts the slot in drawn rows, not in saved ones", () => {
+    expect(
+      reorderedAmongVisible(["a", "p", "b", "c"], ["a", "b", "c"], "a", 1),
+    ).toEqual(["p", "b", "a", "c"]);
+    // What it used to do with the same numbers, and what the sidebar drew.
+    expect(reordered(["a", "p", "b", "c"], "a", 1)).toEqual(["p", "a", "b", "c"]);
+  });
+
+  it("keeps a hidden row where it was", () => {
+    // A filed thread has a place in the order and comes back to it. Saving only
+    // what is on screen would drop it to the end of the list on its way back.
+    expect(
+      reorderedAmongVisible(["a", "b", "f", "c"], ["a", "b", "c"], "a", 2),
+    ).toEqual(["b", "f", "c", "a"]);
+  });
+
+  it("lands past the last drawn row, not past the last saved one", () => {
+    expect(
+      reorderedAmongVisible(["a", "b", "c", "f"], ["a", "b", "c"], "a", 2),
+    ).toEqual(["b", "c", "a", "f"]);
+  });
+
+  it("changes nothing when the dragged row is the only one drawn", () => {
+    expect(reorderedAmongVisible(["p", "a"], ["a"], "a", 0)).toEqual(["p", "a"]);
+  });
+
+  it("refuses when the two lists disagree about what exists", () => {
+    expect(reorderedAmongVisible(["a", "b"], ["a", "b"], "zzz", 0)).toBeNull();
+    expect(reorderedAmongVisible(["a", "b"], ["a", "ghost"], "a", 1)).toBeNull();
   });
 });
