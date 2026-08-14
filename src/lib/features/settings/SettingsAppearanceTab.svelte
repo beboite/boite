@@ -7,6 +7,14 @@
   import { LOCALE_OPTIONS, t } from "$lib/i18n/index.svelte";
   import type { MotionMode } from "$lib/types";
   import { ACCENT_COLOR, type ModelAccent } from "$lib/features/fastpick/accent";
+  import {
+    availableFonts,
+    MONO_CANDIDATES,
+    SANS_CANDIDATES,
+    terminalFontSize,
+    TERMINAL_SCALE_MAX,
+    TERMINAL_SCALE_MIN,
+  } from "$lib/theme/fonts";
 
   // Three, not two. The pin was a one-way door: one tap and the layout stopped
   // following the device for the life of the install, with nothing saying so.
@@ -38,6 +46,45 @@
 
   function reset() {
     settings.setUiScalePercent(100);
+  }
+
+  // Probed once, when the tab mounts: the probe measures a string per candidate
+  // per generic, and the answer cannot change while the app is open without the
+  // user installing a font behind it.
+  const monoFonts = availableFonts(MONO_CANDIDATES);
+  const sansFonts = availableFonts(SANS_CANDIDATES);
+
+  // A family stored on a machine that does not have it is deliberately kept by
+  // the store, so the select has to be able to show a name that is not in the
+  // list. Without an option carrying it, the box falls back to "Default" and
+  // reports no choice while the family is still stored and still in front of
+  // the stack. Disabled, because it is a state to see, not one to pick.
+  const missingSans = $derived(
+    settings.state.uiFontFamily && !sansFonts.includes(settings.state.uiFontFamily)
+      ? settings.state.uiFontFamily
+      : null,
+  );
+  const missingMono = $derived(
+    settings.state.terminalFontFamily &&
+      !monoFonts.includes(settings.state.terminalFontFamily)
+      ? settings.state.terminalFontFamily
+      : null,
+  );
+
+  // The same call the terminals make, so the sample is the size they will be
+  // rather than the size they would be at 100% zoom. Pinch is left at 1: it is
+  // per-pane and transient, and no pane is on screen to read it from.
+  const sampleSize = $derived(
+    terminalFontSize(
+      settings.state.uiScalePercent,
+      settings.state.terminalFontScalePercent,
+    ),
+  );
+
+  function onTerminalScale(e: Event) {
+    settings.setTerminalFontScalePercent(
+      Number((e.currentTarget as HTMLInputElement).value),
+    );
   }
 </script>
 
@@ -72,6 +119,100 @@
   </div>
 </SettingsCard>
 
+<SettingsCard title={t("appearance.fonts")} description={t("appearance.fontsDesc")}>
+  <div class="flex flex-col gap-2.5">
+    <label class="flex items-center gap-3 text-xs text-muted-foreground">
+      <span class="w-24 shrink-0">{t("appearance.fontUi")}</span>
+      <select
+        class="font-select min-w-0 flex-1"
+        value={settings.state.uiFontFamily ?? ""}
+        onchange={(e) => settings.setUiFontFamily(e.currentTarget.value || null)}
+      >
+        <option value="">{t("appearance.fontDefault")}</option>
+        {#if missingSans}
+          <option value={missingSans} disabled>{missingSans} ({t("appearance.fontMissing")})</option>
+        {/if}
+        {#each sansFonts as family (family)}
+          <option value={family}>{family}</option>
+        {/each}
+      </select>
+    </label>
+
+    <label class="flex items-center gap-3 text-xs text-muted-foreground">
+      <span class="w-24 shrink-0">{t("appearance.fontTerminal")}</span>
+      <select
+        class="font-select min-w-0 flex-1"
+        value={settings.state.terminalFontFamily ?? ""}
+        onchange={(e) =>
+          settings.setTerminalFontFamily(e.currentTarget.value || null)}
+      >
+        <option value="">{t("appearance.fontDefault")}</option>
+        {#if missingMono}
+          <option value={missingMono} disabled>{missingMono} ({t("appearance.fontMissing")})</option>
+        {/if}
+        {#each monoFonts as family (family)}
+          <option value={family}>{family}</option>
+        {/each}
+      </select>
+    </label>
+
+    <!-- The sample is set in whatever the terminal is set in, at the size the
+         terminal will be: a font list whose entries are all drawn in the UI
+         font tells you nothing about the one thing you are picking it for. -->
+    <p
+      class="truncate rounded-md border border-border bg-[var(--color-background)] px-2.5 py-1.5 text-term-foreground"
+      style:font-family="var(--font-mono)"
+      style:font-size="{sampleSize}px"
+    >
+      {t("appearance.fontSample")}
+    </p>
+  </div>
+</SettingsCard>
+
+<SettingsCard
+  title={t("appearance.terminalSize")}
+  description={t("appearance.terminalSizeDesc")}
+>
+  {#snippet actions()}
+    <button
+      type="button"
+      class="flex items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-1 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
+      onclick={() => settings.setTerminalFontScalePercent(100)}
+      title={t("appearance.resetTerminalSize")}
+    >
+      <RotateCcw class="size-3" />
+      {t("common.reset")}
+    </button>
+  {/snippet}
+
+  <div class="flex items-center gap-3">
+    <span class="w-9 tabular-nums text-2xs text-muted-foreground/70">
+      {TERMINAL_SCALE_MIN}%
+    </span>
+    <input
+      type="range"
+      min={TERMINAL_SCALE_MIN}
+      max={TERMINAL_SCALE_MAX}
+      step="5"
+      value={settings.state.terminalFontScalePercent}
+      oninput={onTerminalScale}
+      class="ui-slider min-w-0 flex-1"
+      aria-label={t("appearance.terminalSize")}
+    />
+    <span class="w-12 text-right tabular-nums text-xs font-semibold text-foreground">
+      {settings.state.terminalFontScalePercent}%
+    </span>
+  </div>
+</SettingsCard>
+
+<ToggleSetting
+  label={t("appearance.layout")}
+  description={t("appearance.layoutDesc")}
+  enabled={settings.state.mobileLayout}
+  onLabel={t("appearance.mobile")}
+  offLabel={t("appearance.pc")}
+  onToggle={() => settings.setMobileLayout(!settings.state.mobileLayout)}
+/>
 <SettingsCard title={t("appearance.layout")} description={t("appearance.layoutDesc")}>
   <div class="flex gap-1.5" role="radiogroup" aria-label={t("appearance.layout")}>
     {#each LAYOUT_MODES as mode (mode.id)}
@@ -159,6 +300,19 @@
 </SettingsCard>
 
 <style>
+  .font-select {
+    appearance: none;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-surface-2);
+    color: var(--color-foreground);
+    padding: 3px 8px;
+    font-size: var(--text-xs);
+    font-family: inherit;
+  }
+  .font-select:hover {
+    border-color: color-mix(in srgb, var(--color-foreground) 30%, transparent);
+  }
   .ui-slider {
     appearance: none;
     background: transparent;

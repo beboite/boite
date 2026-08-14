@@ -9,7 +9,7 @@ use serde_json::Value;
 
 use crate::backend::Backend;
 use crate::toon::{clip, Toon};
-use crate::{MAX_BRANCHES, MAX_CELL};
+use crate::{MAX_BRANCHES, MAX_CELL, MAX_PAGE_ELEMENTS, MAX_PAGE_TEXT};
 
 /// The shortest prefix that still tells these ids apart. Uuids collide at eight
 /// characters about as often as they collide outright, but a list is small and
@@ -335,6 +335,206 @@ pub(crate) fn format_hits(out: &Value) -> String {
     let mut w = Toon::new();
     w.table("hits", &["kind", "ref", "text"], &rows);
     w.hint("a transcript ref is a thread id: terminal_transcript threadId=<ref> reads more of it");
+    w.into_string()
+}
+
+/// The browser panes on the user's window.
+///
+/// The `opaque` sentence rides on every one of these rather than being said once
+/// in a tool description, because the tool list is read at the start of a session
+/// and this is read at the moment an agent is deciding what to do next. It is
+/// also the answer to the question the shape of this table invites: there is no
+/// text column because there is no text to put in one.
+pub(crate) fn format_browser_panes(out: &Value) -> String {
+    let panes = out.get("panes").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    let mut w = Toon::new();
+    let rows: Vec<Vec<String>> = panes
+        .iter()
+        .map(|pane| {
+            let at = |key: &str| pane.get(key).and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let flag = |key: &str| pane.get(key).and_then(|v| v.as_bool()).unwrap_or(false);
+            let size = |key: &str| {
+                pane.get(key)
+                    .and_then(|v| v.as_f64())
+                    .map(|n| n.round() as i64)
+                    .unwrap_or(0)
+            };
+            vec![
+                at("paneId"),
+                clip(&at("url"), MAX_CELL),
+                at("page"),
+                flag("yours").to_string(),
+                // The one measurement worth a column: a pane laid out at no
+                // width is open and showing the user nothing.
+                if flag("visible") {
+                    format!("{}x{}", size("width"), size("height"))
+                } else {
+                    "hidden".to_string()
+                },
+            ]
+        })
+        .collect();
+    w.table("panes", &["paneId", "url", "page", "yours", "size"], &rows);
+    if let Some(note) = out.get("opaque").and_then(|v| v.as_str()) {
+        w.hint(note);
+    }
+    if rows.is_empty() {
+        w.hint("pane_open kind=browser url=<address> opens one");
+    }
+    w.into_string()
+}
+
+/// Whether the page came up, for an agent that is about to say it did.
+pub(crate) fn format_page_settled(out: &Value) -> String {
+    let state = out.get("page").and_then(|v| v.as_str()).unwrap_or("loading");
+    let timed_out = out.get("timedOut").and_then(|v| v.as_bool()).unwrap_or(false);
+    let mut w = Toon::new();
+    w.field("paneId", out.get("paneId").and_then(|v| v.as_str()).unwrap_or(""))
+        .field("page", state);
+    match state {
+        // Two causes, one observation, and saying so is the whole point: an
+        // agent told "failed" goes and debugs a server that is fine.
+        "stalled" => w.hint(
+            "it did not load: either it is slow, or the site refuses to be framed. Nothing on this \
+             side can tell which, and the user has a button to open it outside",
+        ),
+        _ if timed_out => w.hint("still loading when the wait ran out; ask again or leave it"),
+        _ => w.hint("the page came up; you still cannot read what is in it"),
+    };
+    w.into_string()
+}
+
+/// One line saying where the frame is, shared by every answer that reads it.
+///
+/// The driver reports `location.href` rather than the address the container
+/// framed, because the two part company the moment anything inside the page
+/// navigates. It is still the page's own account of itself: the driver shares
+/// that page's JS realm and runs after its scripts, so every field here is
+/// data a hostile page can shape, this address included.
+fn page_line(w: &mut Toon, out: &Value) {
+    let title = out.get("title").and_then(|v| v.as_str()).unwrap_or("");
+    let url = out.get("url").and_then(|v| v.as_str()).unwrap_or("");
+    if !title.is_empty() || !url.is_empty() {
+        w.field("page", &format!("{} {}", clip(title, 80), clip(url, MAX_CELL)));
+    }
+}
+
+/// One element as a row: uid, role, name, value, and whatever else is worth a
+/// cell. The driver sends single-letter keys because every key is paid for
+/// once per element, per snapshot, per read of the answer.
+fn element_row(e: &Value) -> Vec<String> {
+    let at = |key: &str| e.get(key).and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let mut note = e
+        .get("s")
+        .and_then(|v| v.as_array())
+        .map(|flags| {
+            flags
+                .iter()
+                .filter_map(|f| f.as_str())
+                .collect::<Vec<_>>()
+                .join(",")
+        })
+        .unwrap_or_default();
+    let href = at("h");
+    if !href.is_empty() {
+        if !note.is_empty() {
+            note.push(' ');
+        }
+        note.push_str(&clip(&href, 60));
+    }
+    vec![at("u"), at("r"), clip(&at("n"), 100), clip(&at("v"), 60), note]
+}
+
+const ELEMENT_COLS: [&str; 5] = ["uid", "role", "name", "value", "note"];
+
+fn element_rows(out: &Value, key: &str) -> Vec<Vec<String>> {
+    out.get(key)
+        .and_then(|v| v.as_array())
+        .map(|els| els.iter().take(MAX_PAGE_ELEMENTS).map(element_row).collect())
+        .unwrap_or_default()
+}
+
+/// What the driver read out of the page, in the shape the mode asked for.
+pub(crate) fn format_snapshot(out: &Value) -> String {
+    // Prose is prose: TOON around a page's text is one more thing between the
+    // agent and the sentence it is looking for.
+    if let Some(text) = out.get("text").and_then(|v| v.as_str()) {
+        let mut head = Toon::new();
+        page_line(&mut head, out);
+        let mut answer = head.into_string();
+        let cut = text.len() > MAX_PAGE_TEXT;
+        if text.is_empty() {
+            answer.push_str("(no readable text)");
+        } else {
+            answer.push_str(&clip(text, MAX_PAGE_TEXT));
+        }
+        if cut || out.get("truncated").and_then(|v| v.as_bool()) == Some(true) {
+            answer.push_str("\n[cut here; maxChars raises the budget]");
+        }
+        return answer;
+    }
+
+    let mut w = Toon::new();
+    page_line(&mut w, out);
+    if out.get("mode").and_then(|v| v.as_str()) == Some("diff") {
+        let added = element_rows(out, "added");
+        let changed = element_rows(out, "changed");
+        let removed: Vec<String> = out
+            .get("removed")
+            .and_then(|v| v.as_array())
+            .map(|ids| ids.iter().filter_map(|v| v.as_str()).map(str::to_string).collect())
+            .unwrap_or_default();
+        if added.is_empty() && changed.is_empty() && removed.is_empty() {
+            w.field("diff", "nothing changed since the last snapshot");
+            return w.into_string();
+        }
+        if !added.is_empty() {
+            w.table("added", &ELEMENT_COLS, &added);
+        }
+        if !changed.is_empty() {
+            w.table("changed", &ELEMENT_COLS, &changed);
+        }
+        if !removed.is_empty() {
+            w.inline("removed", &removed, MAX_BRANCHES);
+        }
+        return w.into_string();
+    }
+
+    let rows = element_rows(out, "elements");
+    w.table("elements", &ELEMENT_COLS, &rows);
+    if let Some(more) = out.get("dropped").and_then(|v| v.as_u64()).filter(|n| *n > 0) {
+        w.hint(&format!(
+            "{more} more elements were not worth carrying; browser_scroll moves the page and \
+             mode=text reads the prose"
+        ));
+    }
+    w.hint("browser_click uid=<uid> acts on a row; after acting, mode=diff costs less than looking again");
+    w.into_string()
+}
+
+/// One action landed in the page, and where the page is now.
+pub(crate) fn format_acted(out: &Value, did: &str) -> String {
+    let mut w = Toon::new();
+    w.field("did", did);
+    page_line(&mut w, out);
+    w.hint("browser_snapshot mode=diff shows what it changed");
+    w.into_string()
+}
+
+/// One browser pane driven, and whether the answer is an outcome or an errand.
+pub(crate) fn format_drove(out: &Value, done: &str, url: Option<&str>) -> String {
+    let mut w = Toon::new();
+    w.field("pane", done);
+    if let Some(url) = url {
+        w.field("url", url);
+    }
+    // `checked: false` is a boite with no window of its own: the request is on
+    // its way to whichever device is drawing the pane, and nothing here saw the
+    // pane before sending it. An agent that treats that as done is the bug this
+    // field exists to stop.
+    if out.get("checked").and_then(|v| v.as_bool()) == Some(false) {
+        w.hint("sent to the device drawing the pane; this boite has no window, so browser_status here says nothing");
+    }
     w.into_string()
 }
 

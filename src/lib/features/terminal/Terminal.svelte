@@ -6,6 +6,8 @@
   import { WebLinksAddon } from "@xterm/addon-web-links";
   import { Unicode11Addon } from "@xterm/addon-unicode11";
   import { xtermFontFamily, xtermTheme } from "./theme";
+  import { terminalFontSize } from "$lib/theme/fonts";
+  import { terminalRenderBudget, type RenderSlot } from "./render-budget";
   import { encodeBarKey, encodeText, isLineFeed, wheelLines, type Press } from "./keys";
   import { installMobileInput } from "./mobile-input";
   import { Touches } from "./touch";
@@ -125,28 +127,24 @@
   // keeps the textarea focusable (key routing, hardware keyboards) but stops
   // the virtual keyboard; the floating button flips it on demand.
   let keyboardOpen = $state(false);
-  const FONT_MIN = 8;
-  const FONT_MAX = 32;
-  // What 100% zoom means. The UI scale is applied as a root font-size, which a
-  // canvas-drawn terminal cannot inherit, so the multiplication happens here:
-  // the slider used to grow every box around the terminal and leave the text
-  // inside it exactly where it was.
-  const FONT_BASE = 13;
   let touchMode: "none" | "pinch" | "scroll" = "none";
   let pinchStartDist = 0;
   // Pinch rides on top of the UI scale rather than replacing it, so a pinched
   // pane still follows a later move of the slider.
   let pinchFactor = $state(1);
   let pinchStartFactor = 1;
+  // The size and its clamp live in theme/fonts.ts, so the appearance preview can
+  // show the number this terminal will actually be drawn at.
   const fontSize = $derived(
-    Math.max(
-      FONT_MIN,
-      Math.min(
-        FONT_MAX,
-        Math.round((FONT_BASE * settings.state.uiScalePercent * pinchFactor) / 100),
-      ),
+    terminalFontSize(
+      settings.state.uiScalePercent,
+      settings.state.terminalFontScalePercent,
+      pinchFactor,
     ),
   );
+  // The family, rebuilt from the chosen one rather than read off the root: the
+  // same effect that writes --font-mono is the one this would be racing.
+  const fontFamily = $derived(xtermFontFamily(settings.state.terminalFontFamily));
   let scrollLastY = 0;
   let scrollAccum = 0;
 
@@ -347,8 +345,32 @@
     });
   }
 
-  // Whether the WebGL renderer is on, or has been given up on.
-  let webglSettled = false;
+  // The context this pane currently holds, and its slot in the shared budget.
+  // Held rather than settled: a hidden pane gives its context back and takes
+  // another when it is shown again (see render-budget.ts).
+  let webgl: WebglAddon | null = null;
+  // Claimed at init rather than on mount: the effect below drives it from a
+  // prop, and a prop can change before the mount has run.
+  const renderSlot: RenderSlot = terminalRenderBudget.claim({
+    grant: () => loadWebgl(),
+    revoke: () => unloadWebgl(),
+  });
+  // WebGL is not coming back on this machine: the constructor threw, or the
+  // context was lost enough times that asking again is a loop. Distinct from
+  // "not granted", which is the normal state of a pane nobody is looking at.
+  let webglImpossible = false;
+  let contextLosses = 0;
+  const CONTEXT_LOSS_GIVE_UP = 3;
+  /** When the context this pane is drawing with was handed over. */
+  let webglLoadedAt = 0;
+  /**
+   * Past this, a context has been doing its job and whatever killed it was an
+   * event, not a pattern. A driver reset fires a loss on every live context at
+   * once, and a tally that only ever goes up turns three of those, spread over
+   * an afternoon, into a pane stuck on the DOM renderer for the life of the
+   * window. Only losses that come back to back mean asking again is a loop.
+   */
+  const CONTEXT_LOSS_FRESH_MS = 30_000;
 
   /**
    * Hands rendering to the GPU, but only once the cell has a measured size.
@@ -370,7 +392,8 @@
    * renderer, which needs no atlas and shows its text.
    */
   function loadWebgl() {
-    if (webglSettled || !term) return;
+    if (webgl || webglImpossible || !term) return;
+    if (!renderSlot.granted()) return;
     let measured = false;
     try {
       measured = !!fit?.proposeDimensions();
@@ -379,14 +402,97 @@
     }
     if (!measured) return;
     try {
-      const webgl = new WebglAddon();
-      webgl.onContextLoss(() => webgl.dispose());
-      term.loadAddon(webgl);
+      const addon = new WebglAddon();
+      // A loss is the browser reclaiming the context, which is what happens
+      // when something outside the budget takes one. Dispose so xterm falls
+      // back to the DOM renderer, and ask for it again. The pane used to keep
+      // the dead addon and never draw on the GPU again, for the life of the
+      // window.
+      addon.onContextLoss(() => {
+        // Identity first, the tally included: an addon this pane has already
+        // replaced is free to lose whatever it likes, and counting that against
+        // the live one is how a single teardown reads as a failing GPU.
+        if (webgl !== addon) {
+          addon.dispose();
+          return;
+        }
+        webgl = null;
+        if (performance.now() - webglLoadedAt > CONTEXT_LOSS_FRESH_MS) contextLosses = 0;
+        contextLosses++;
+        addon.dispose();
+        if (contextLosses >= CONTEXT_LOSS_GIVE_UP) {
+          giveUpOnWebgl();
+          logger.warn(
+            "terminal",
+            `${thread.label}: giving up on the GPU renderer after ${contextLosses} context losses`,
+          );
+          return;
+        }
+        // Nothing about a lost context resizes anything, so leaving the retry to
+        // the next fit leaves an idle pane holding a granted slot with no context
+        // in it until someone happens to drag a splitter. Ask for the fit here.
+        scheduleFit();
+      });
+      term.loadAddon(addon);
+      webgl = addon;
+      webglLoadedAt = performance.now();
     } catch {
       // WebGL unavailable (e.g. webkit2gtk without GPU). Fall back to DOM
       // renderer, and stop asking: it will not appear later.
+      giveUpOnWebgl();
     }
-    webglSettled = true;
+  }
+
+  /**
+   * Out of the budget, not merely quiet in it. A slot only stops asking when its
+   * pane is hidden, which is temporary and keeps the context in place until
+   * someone needs it; this is permanent, and a pane that can never use a context
+   * must not sit on a share of the ceiling that a pane which can is waiting for.
+   */
+  function giveUpOnWebgl() {
+    webglImpossible = true;
+    renderSlot.dispose();
+  }
+
+  /**
+   * Hands the context back, for real.
+   *
+   * Disposing the addon detaches the canvas and drops xterm's atlas cache entry,
+   * but it never calls `loseContext()`, so the context itself lives until the
+   * canvas is collected. A revoked slot that leaves a live context behind is not
+   * a budget, it is a delay: the window drifts past the browser's ceiling anyway,
+   * the browser reclaims on its own terms, and what lands on the panes still
+   * drawing is the very `webglcontextlost` this whole thing exists to avoid.
+   *
+   * The extension is taken before `dispose()`, because the renderer holding it is
+   * what dispose tears down, and `loseContext()` is called after, once xterm has
+   * stopped listening: otherwise our own release comes back as a context loss and
+   * counts against the pane.
+   */
+  function unloadWebgl() {
+    const addon = webgl;
+    webgl = null;
+    if (!addon) return;
+    const lose = webglLoseContext(addon);
+    addon.dispose();
+    lose?.loseContext();
+  }
+
+  /**
+   * The context an addon is drawing with, reached through two private fields:
+   * `@xterm/addon-webgl` publishes its texture atlas and nothing else, and there
+   * is no public route to the render canvas. Probed rather than typed, so an
+   * upgrade that renames either one costs a context that dies at GC, which is
+   * where this started, instead of throwing on every pane teardown.
+   */
+  function webglLoseContext(addon: WebglAddon): WEBGL_lose_context | null {
+    try {
+      const gl = (addon as unknown as { _renderer?: { _gl?: WebGL2RenderingContext } })._renderer
+        ?._gl;
+      return gl?.getExtension("WEBGL_lose_context") ?? null;
+    } catch {
+      return null;
+    }
   }
 
   // Coalescing to one fit per frame is not enough for a splitter drag: the
@@ -683,8 +789,8 @@
     if (touches.mode === "pinch") e.preventDefault();
     const gesture = touches.move(e.touches, fontSize * 1.25);
     if (gesture.kind === "zoom") {
-      // Only the factor moves; `fontSize` clamps it against FONT_MIN/FONT_MAX
-      // and the effect below applies the result and refits.
+      // Only the factor moves; `fontSize` clamps it against the terminal's own
+      // px range and the effect below applies the result and refits.
       pinchFactor = Math.max(0.25, Math.min(4, gesture.factor));
       return;
     }
@@ -1033,7 +1139,7 @@
       cursorBlink: true,
       cursorStyle: "bar",
       fontSize,
-      fontFamily: xtermFontFamily(),
+      fontFamily,
       lineHeight: 1.25,
       letterSpacing: 0,
       scrollback: 10_000,
@@ -1213,6 +1319,24 @@
     respawnInPlace();
   });
 
+  // What the pane asks the render budget for. Only a pane on screen asks, which
+  // is what keeps the window under the browser's context ceiling however many
+  // threads are open: a hidden terminal stays mounted, keeps its PTY and its
+  // scrollback, and draws with the DOM renderer nobody is looking at.
+  //
+  // `visible` is per group, so this fires for every pane of two groups on one
+  // switch. Nothing is torn down on that alone: hiding only offers the context
+  // up, and the budget takes it when a pane on screen actually needs it.
+  $effect(() => {
+    renderSlot.want(visible && !webglImpossible);
+  });
+
+  // Focus does not ask for anything, it reorders: the pane being typed in is
+  // the last one an eviction takes.
+  $effect(() => {
+    if (focused) renderSlot.touch();
+  });
+
   $effect(() => {
     if (visible && term) {
       queueMicrotask(() => {
@@ -1280,6 +1404,16 @@
     }
   });
 
+  // Same reason, same refit: a family change moves the cell as surely as a size
+  // change does, and the column count with it.
+  $effect(() => {
+    const next = fontFamily;
+    if (term && term.options.fontFamily !== next) {
+      term.options.fontFamily = next;
+      scheduleFit();
+    }
+  });
+
   $effect(() => {
     // Track both so the textarea flips when the layout toggles or the
     // keyboard button is pressed.
@@ -1320,6 +1454,11 @@
     container?.removeEventListener("touchcancel", onTouchEnd);
     window.visualViewport?.removeEventListener("resize", onViewportResize);
     unregisterTerminal(thread.id);
+    // Before term.dispose(), and out of the budget in the same breath: the
+    // context has to be handed back to whoever is waiting for one, and a slot
+    // left behind would hold a share of the ceiling for a pane that is gone.
+    unloadWebgl();
+    renderSlot.dispose();
     term?.dispose();
     term = null;
     fit = null;

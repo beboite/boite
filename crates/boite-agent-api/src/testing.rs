@@ -25,6 +25,12 @@ pub struct Fake {
     pub asked: Mutex<Vec<Value>>,
     pub announced: Mutex<Vec<Change>>,
     pub touched: Mutex<Vec<(String, String)>>,
+    /// What the window says is on it. `None` is the headless case, which is a
+    /// real host rather than an unset field: the server has no window.
+    pub screen: Mutex<Option<boite_core::screen::Screen>>,
+    /// What the device answers a question with. `None` is a host whose devices
+    /// cannot answer, which is the trait's own default.
+    pub answer_with: Mutex<Option<Value>>,
     dir: PathBuf,
 }
 
@@ -43,6 +49,8 @@ impl Fake {
             asked: Mutex::new(Vec::new()),
             announced: Mutex::new(Vec::new()),
             touched: Mutex::new(Vec::new()),
+            screen: Mutex::new(None),
+            answer_with: Mutex::new(None),
             dir,
         }
     }
@@ -133,10 +141,30 @@ impl Workspace for Fake {
         self.announced.lock().unwrap().push(change);
     }
 
+    fn on_screen(&self) -> Option<boite_core::screen::Screen> {
+        self.screen.lock().unwrap().clone()
+    }
+
     fn touched(&self, thread_id: &str, surface: &str) {
         self.touched
             .lock()
             .unwrap()
             .push((thread_id.into(), surface.into()));
+    }
+
+    fn ask_for_answer(
+        &self,
+        request: Value,
+    ) -> Result<tokio::sync::oneshot::Receiver<Value>, String> {
+        let scripted = self.answer_with.lock().unwrap().clone();
+        match scripted {
+            Some(answer) => {
+                self.asked.lock().unwrap().push(request);
+                let (tx, rx) = tokio::sync::oneshot::channel();
+                let _ = tx.send(answer);
+                Ok(rx)
+            }
+            None => Err(crate::DEVICE_CANNOT_ANSWER.to_string()),
+        }
     }
 }

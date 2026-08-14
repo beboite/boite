@@ -15,6 +15,18 @@
   // detached into a pane of the terminal area is not dodged, only the docked
   // column is.
   const anchor = $derived(toastAnchor.box);
+
+  // What the info box experiment takes out of that same corner, zero with the
+  // experiment off. Added to the top so the stack starts below the box rather
+  // than over it, plus half a gap of air between the two.
+  const inset = $derived(toastAnchor.inset);
+  const top = $derived(
+    anchor
+      ? inset > 0
+        ? `calc(${anchor.top}px + 0.75rem + ${inset}px + 0.5rem)`
+        : `calc(${anchor.top}px + 0.75rem)`
+      : null,
+  );
 </script>
 
 <!-- No aria-live on the container. It used to be one polite atomic region, so
@@ -23,7 +35,7 @@
      the rest). -->
 <div
   class="toaster pointer-events-none fixed z-[var(--z-toast)] flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-1.5"
-  style:top={anchor ? `calc(${anchor.top}px + 0.75rem)` : null}
+  style:top={top}
   style:right={anchor ? `calc(${anchor.right}px + 0.75rem)` : null}
 >
   {#each notifications.toasts as toast (toast.id)}

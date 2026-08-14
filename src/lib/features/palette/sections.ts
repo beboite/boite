@@ -6,17 +6,21 @@ export type PaletteSection =
   | "panes"
   | "projects"
   /** Something the workspace wrote down, found by `search.query`. */
-  | "content";
+  | "content"
+  /** A file under the thread's own root, found by the file mode. */
+  | "files";
 
 /** Every section whose rows are scored against the query. See `rank.ts`. */
-export type ScoredSection = Exclude<PaletteSection, "content">;
+export type ScoredSection = Exclude<PaletteSection, "content" | "files">;
 
 // Ranking bias when a query is active: a thread you can jump to beats an
 // action of the same textual score, which beats selecting a project.
 //
-// `content` is absent, and the type says so rather than a comment: a hit is
-// never scored against the query, so a bias for it would be a number nothing
-// reads. `rank.ts` holds why.
+// `content` and `files` are absent, and the type says so rather than a comment:
+// neither is ever scored against the query — a hit is not, and file rows only
+// exist in file mode, where they are the whole list and the backend has already
+// ordered them — so a bias for either would be a number nothing reads.
+// `rank.ts` holds why.
 export const SECTION_BIAS: Record<ScoredSection, number> = {
   threads: 6,
   actions: 3,
@@ -42,4 +46,5 @@ export const SECTION_TITLE_KEYS: Record<PaletteSection, MessageKey> = {
   panes: "palette.panes",
   projects: "sidebar.projects",
   content: "palette.sectionContent",
+  files: "palette.sectionFiles",
 };

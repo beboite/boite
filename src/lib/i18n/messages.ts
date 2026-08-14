@@ -65,7 +65,7 @@ export const EN_MESSAGES = {
 
   "shortcuts.title": "Shortcuts",
   "shortcuts.description": "Drag to reorder. Edit a command to add arguments.",
-  "shortcuts.resetTitle": "Reset to default presets",
+  "shortcuts.resetTitle": "Detect the installed agents again and rebuild the list",
   "shortcuts.new": "New",
   "shortcuts.launchIn": "Launch in {project}",
   "shortcuts.rightClickHint": "Right-click or hold: pick where it opens",
@@ -95,6 +95,18 @@ export const EN_MESSAGES = {
   "appearance.uiScale": "UI scale",
   "appearance.uiScaleDesc": "Ctrl + scroll wheel, or Ctrl + + / − / 0.",
   "appearance.resetScale": "Reset to 100%",
+  "appearance.fonts": "Fonts",
+  "appearance.fontsDesc": "Only the families this machine has are listed.",
+  "appearance.fontUi": "Interface",
+  "appearance.fontTerminal": "Terminal and code",
+  "appearance.fontDefault": "Default",
+  // Shown on the entry for a family stored on another machine: the choice is
+  // kept, it simply cannot be drawn here.
+  "appearance.fontMissing": "not on this machine",
+  "appearance.fontSample": "const path = \"~/dev\"; // 0O1lI il1 {}[]()",
+  "appearance.terminalSize": "Terminal text size",
+  "appearance.terminalSizeDesc": "On top of the UI scale: grow an agent's output without growing the app.",
+  "appearance.resetTerminalSize": "Reset to 100%",
   "appearance.layout": "Layout",
   "appearance.layoutDesc": "Mobile: full-width pages and a bottom bar. PC: sidebar and panels.",
   "appearance.layoutAuto": "Automatic",
@@ -148,6 +160,12 @@ export const EN_MESSAGES = {
   "experiments.smartSortAsc": "Ascending",
   "experiments.smartSortDescending": "Descending",
   "experiments.smartSortDirManual": "Direction applies once an order is picked.",
+
+  "experiments.whip": "Whip",
+  "experiments.whipDesc":
+    "Puts a whip in the titlebar. Throw it, flick it, click to let go. It cracks and it makes a noise, and it reaches no terminal: nothing is sent, nothing is interrupted.",
+  "titlebar.whip": "Crack the whip",
+  "titlebar.whipDrop": "Drop the whip",
 
   "welcome.pickFolder": "Pick a folder to create your first project.",
   "welcome.tapToOpen": "Tap + to open a terminal.",
@@ -227,6 +245,7 @@ export const EN_MESSAGES = {
   "sidebar.keepAwakeOn": "Keep-awake on — click to allow auto-sleep",
   "sidebar.keepAwakeOff": "Click to keep awake",
   "sidebar.toggleKeepAwake": "Toggle keep awake",
+  "sidebar.threadUnread": "Something happened here while you were away",
   "sidebar.closeThread": "Close thread",
   "sidebar.resizeSidebar": "Resize sidebar",
 
@@ -710,6 +729,11 @@ export const EN_MESSAGES = {
   "shell.noneDetected": "No shells detected",
   "palette.title": "Command palette",
   "palette.placeholder": "Search threads, actions, projects, and what was written down…",
+  "palette.sectionFiles": "Files",
+  "palette.placeholderFiles": "Go to file",
+  "palette.placeholderUrl": "Address",
+  "palette.filesHint": "Type part of a file name.",
+  "palette.urlHint": "Enter opens the page in a pane.",
   "palette.noMatch": "No matching command",
   "palette.sectionActions": "Actions",
   "palette.sectionContent": "Found in this workspace",
@@ -904,7 +928,9 @@ export const EN_MESSAGES = {
   "settings.shortcutSaved": "Shortcut saved",
   "settings.shortcutRemoved": "Removed {label}",
   "settings.shortcutRemovedUnnamed": "Removed shortcut",
-  "settings.shortcutsReset": "Shortcuts reset to defaults",
+  "settings.shortcutsReset": "Shortcuts rebuilt from the agents detected",
+  "settings.shortcutsResetFoundNothing":
+    "No agent was detected, so your bar was left alone. Check that the boite is reachable and that the agents are on its PATH.",
   "terminal.pasteFailed": "Paste failed",
   "terminal.copyFailed": "Copy failed",
   "terminal.keyboardLabel": "Keyboard (long-press for key bar)",
@@ -953,7 +979,7 @@ export const EN_MESSAGES = {
   "shortcuts.removeConfirmTitle": "Remove this shortcut?",
   "shortcuts.removeConfirmMessage": "Removes {label} from the bar. Terminals it already opened are untouched.",
   "shortcuts.resetConfirmTitle": "Reset every shortcut?",
-  "shortcuts.resetConfirmMessage": "Replaces your whole bar with the default presets. Shortcuts you added or edited are lost.",
+  "shortcuts.resetConfirmMessage": "Rebuilds your whole bar from the agents detected on this machine. Shortcuts you added or edited are lost.",
   "updater.restartConfirmTitle": "Restart to apply the update?",
   "updater.restartConfirmDirty": "{count} file(s) have unsaved changes and will be lost. Running terminals are restarted afterwards.",
   "updater.restartConfirmAction": "Restart now",
@@ -984,7 +1010,6 @@ export const EN_MESSAGES = {
   "panes.openDashboard": "Open the project overview in a pane",
   "panes.openEditor": "Open the editor in a pane",
   "panes.openBrowser": "Open a page in a pane…",
-  "panes.browserPrompt": "Address to open",
   "titlebar.editor": "Editor ({count} open)",
   "sidebar.launchHere": "Start an agent or a terminal here",
   "project.notAFolder": "{name} is not a folder. A project is a directory.",
@@ -1015,6 +1040,9 @@ export const EN_MESSAGES = {
     "That address is on the boite, and localhost here is this machine.",
   "browser.refuse.cleartext":
     "Plain http:// stops at this machine. Use https:// for anywhere else.",
+  "browser.drivenByAgent": "Agent",
+  "browser.drivenByTitle": "{agent} is pointing this pane. Take it back to make it yours.",
+  "browser.reclaim": "Take this pane back from the agent",
 
   "keybindings.intro":
     "Click a shortcut, then press the combination you want. Rules are read back to front, so yours beats the one Boite ships.",
@@ -1043,6 +1071,7 @@ export const EN_MESSAGES = {
   "keybindings.cmd.zoomOut": "Zoom out",
   "keybindings.cmd.zoomReset": "Reset the zoom",
   "keybindings.cmd.palette": "Command palette",
+  "keybindings.cmd.goToFile": "Go to file",
   "keybindings.cmd.newThread": "New terminal",
   "keybindings.cmd.nextThread": "Next terminal",
   "keybindings.cmd.previousThread": "Previous terminal",

@@ -26,6 +26,11 @@
   import { panePresence } from "$lib/features/panes/open";
   import { logger } from "$lib/shared/services/logger.svelte";
   import { statusEngine } from "$lib/features/thread/statusEngine";
+  import {
+    markThreadRead,
+    setUnreadWatcher,
+  } from "$lib/features/thread/unread.svelte";
+  import { watchWindowFocus, windowFocused } from "$lib/app/focus.svelte";
   import PaneShell from "$lib/features/panes/PaneShell.svelte";
   import SidePanel from "$lib/features/panes/SidePanel.svelte";
   import ProjectInfoBox from "$lib/features/infobox/ProjectInfoBox.svelte";
@@ -79,6 +84,11 @@
   );
   const ProjectView = lazyComponent(
     () => import("$lib/features/project/ProjectPage.svelte"),
+  );
+  // A canvas and a rope simulation, for an experiment that is off by default.
+  // Behind import(), a boot that never switches it on never fetches it.
+  const WhipView = lazyComponent(
+    () => import("$lib/features/whip/WhipOverlay.svelte"),
   );
 
   let activated = $state<Record<string, true>>({});
@@ -241,6 +251,49 @@
     }
   });
 
+  // What "the user is here" means, and the one place it is decided. The mark
+  // path and the clearing path below both ask it, and they used to ask
+  // different questions: the clear waited for a window `focus` while the mark
+  // only looked at `document.hidden`, so boite parked behind another app was
+  // watched enough to suppress a mark and not watched enough to clear one.
+  onMount(() => watchWindowFocus());
+
+  /**
+   * Which threads the user can actually see, for the unread marks.
+   *
+   * Every pane of the group on screen counts, not only the focused one: the
+   * whole point of a split is watching four agents at once, and a dot on a
+   * terminal the user is looking straight at is noise. An unfocused window sees
+   * nothing, whatever its layout says.
+   *
+   * Untracked because of where it is called from: a status transition, which
+   * can happen inside somebody else's effect, and a probe that answers a
+   * question has no business subscribing that effect to the layout and the
+   * focus of the window.
+   */
+  function threadOnScreen(threadId: string): boolean {
+    return untrack(() => {
+      if (!terminalActive) return false;
+      if (!windowFocused()) return false;
+      return paneStore.visibleThreads(activeGroupId).has(threadId);
+    });
+  }
+
+  $effect(() => setUnreadWatcher(threadOnScreen));
+
+  // Reading is looking, so the marks clear as panes come into view rather than
+  // on the click that brought them there: Ctrl+Tab, Ctrl+1..9, a split and the
+  // sidebar all end up here. Focus is tracked rather than listened for, which
+  // is what makes coming back to the window clear them too: nothing in the
+  // layout moves while the app is in the background, and the background is
+  // exactly when the marks are laid.
+  $effect(() => {
+    if (!terminalActive || !windowFocused()) return;
+    for (const leafId of paneStore.visibleThreads(activeGroupId)) {
+      markThreadRead(leafId);
+    }
+  });
+
   // Mounting a Terminal is what spawns its PTY, so the post-update resume asks
   // for its threads here rather than reaching into this component's state.
   $effect(() => {
@@ -382,6 +435,13 @@
     if (app.ready && !settings.state.setupCompleted) {
       void SetupView.ensure();
     }
+  });
+
+  // Fetched when the experiment is armed rather than when the button is
+  // pressed: the chunk has to be mounted and listening for the pointer before
+  // the first throw, or the rope spawns wherever the pointer was at boot.
+  $effect(() => {
+    if (settings.state.experimentWhip) void WhipView.ensure();
   });
 
   // Opening the Files or Git panel is the strongest signal that a file or a
@@ -720,6 +780,14 @@
   <!-- The outline is 1.5px of colour and says nothing about what to do. This
        carries the state and the retry. -->
   <ConnectionBanner />
+
+  <!-- Over the whole window, login screen and setup wizard included: the whip
+       belongs to the app rather than to a view. Cosmetic in full — it sends
+       nothing to any terminal. -->
+  {#if settings.state.experimentWhip && WhipView.current}
+    {@const WhipComp = WhipView.current}
+    <WhipComp />
+  {/if}
 </div>
 
 <style>
