@@ -428,6 +428,8 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "project.tokensRefresh": "Relire les transcriptions",
   "project.tokensDay": "{total} le {day}",
   "project.tokensNothingOn": "rien le {day}",
+  "project.tokensSpent": "{total} tokens",
+  "project.tokensQuiet": "Rien de dépensé",
   "project.tokensLess": "moins",
   "project.tokensMore": "plus",
   "project.threadsRunning": "{count} au travail",

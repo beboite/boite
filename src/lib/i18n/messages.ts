@@ -420,6 +420,8 @@ export const EN_MESSAGES = {
   "project.tokensRefresh": "Read the transcripts again",
   "project.tokensDay": "{total} on {day}",
   "project.tokensNothingOn": "nothing on {day}",
+  "project.tokensSpent": "{total} tokens",
+  "project.tokensQuiet": "Nothing spent",
   "project.tokensLess": "less",
   "project.tokensMore": "more",
   "project.threadsRunning": "{count} working",
