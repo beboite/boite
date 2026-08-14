@@ -62,11 +62,12 @@ it beside this terminal. Printing a path only works if they are reading this one
 up, browser_navigate moves the same pane to the next route rather than leaving a \
 second frame behind, browser_reload picks up a dev server you just restarted, and \
 browser_close tidies it away. browser_status is what they all take a paneId from.
-- What none of those do: the pane is a sandboxed cross-origin frame, so Boite can \
-point it, reload it and say whether it loaded, and can read nothing inside it. \
-There is no page text, no element tree, no clicking and no typing, and no tool \
-here will pretend otherwise. To check what a page renders, fetch it yourself or \
-drive a real browser. The pane is for the user's eyes.
+- Reading and driving the page: browser_snapshot returns the elements as rows \
+with uids (mode=text for the prose, mode=diff for what changed since you last \
+looked), and browser_click, browser_type, browser_press and browser_scroll act \
+on those uids. That works when the pane is on a Boite desktop window, where the \
+webview injects a driver into the frame; a pane drawn by a browser or a phone \
+cannot be reached into, and the tools say so instead of pretending.
 - The pane is theirs, not yours: it carries a mark saying you are driving it and \
 a button that takes it back, and after they press it your calls at that pane are \
 refused. That is the user deciding, not a fault to work around.
@@ -406,11 +407,111 @@ fn thread_tools() -> Value {
             "description": "The browser panes on the user's window: which pane, what address, and \
                             whether the page loaded, refused to be framed or is still coming. Call \
                             it before browser_navigate to learn a paneId, and after opening one to \
-                            find out whether the address was any good. Boite cannot read inside the \
-                            page — it is a sandboxed cross-origin frame — so there is no text, no \
-                            DOM and no clicking; this is the whole of what it can see.",
+                            find out whether the address was any good. To read what is in the page, \
+                            browser_snapshot.",
             "inputSchema": { "type": "object" },
             "annotations": { "title": "Browser panes", "readOnlyHint": true, "idempotentHint": true, "openWorldHint": false }
+        },
+        {
+            "name": "browser_snapshot",
+            "description": "Read the page in a pane you drive, as rows you can act on: uid, role, \
+                            name, value. mode=text is the page's readable prose instead, mode=diff \
+                            only what changed since your last snapshot — cheaper after a click. \
+                            uids stay valid until the page navigates. Works when the pane is on a \
+                            Boite desktop window; one drawn by a browser or phone refuses and says \
+                            why.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "paneId": { "type": "string", "description": "From browser_status. Only needed when you are driving more than one." },
+                    "mode": { "type": "string", "enum": ["elements", "diff", "text"], "description": "Defaults to elements." },
+                    "maxChars": { "type": "integer", "description": "For text: how much prose to carry back. Default 8000." }
+                },
+                "additionalProperties": false
+            },
+            "annotations": { "title": "Read page", "readOnlyHint": true, "openWorldHint": true }
+        },
+        {
+            "name": "browser_screenshot",
+            "description": "The pane as pixels: a PNG of what the user sees, long edge capped at \
+                            1568. uid crops to one element from browser_snapshot, with a little \
+                            context around it. Costs far more tokens than browser_snapshot, so \
+                            reach for it when layout or rendering is the question, not content. \
+                            Desktop on Windows today; elsewhere it answers why not.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "uid": { "type": "string", "description": "Crop to this element from browser_snapshot." },
+                    "paneId": { "type": "string", "description": "Only when driving more than one pane." }
+                },
+                "additionalProperties": false
+            },
+            "annotations": { "title": "Screenshot pane", "readOnlyHint": true, "openWorldHint": false }
+        },
+        {
+            "name": "browser_click",
+            "description": "Click an element in a pane you drive, by its uid from browser_snapshot. \
+                            After it, browser_snapshot mode=diff shows what moved.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "uid": { "type": "string", "description": "From browser_snapshot." },
+                    "double": { "type": "boolean", "description": "Double-click instead." },
+                    "paneId": { "type": "string", "description": "Only when driving more than one pane." }
+                },
+                "required": ["uid"],
+                "additionalProperties": false
+            },
+            "annotations": { "title": "Click element", "destructiveHint": false, "openWorldHint": true }
+        },
+        {
+            "name": "browser_type",
+            "description": "Type into a field in a pane you drive, by uid. Replaces what was there \
+                            unless clear=false; submit=true presses Enter after, for the \
+                            field-and-submit shape.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "uid": { "type": "string", "description": "From browser_snapshot." },
+                    "text": { "type": "string" },
+                    "clear": { "type": "boolean", "description": "Defaults to true." },
+                    "submit": { "type": "boolean", "description": "Press Enter afterwards." },
+                    "paneId": { "type": "string", "description": "Only when driving more than one pane." }
+                },
+                "required": ["uid", "text"],
+                "additionalProperties": false
+            },
+            "annotations": { "title": "Type in field", "destructiveHint": false, "openWorldHint": true }
+        },
+        {
+            "name": "browser_press",
+            "description": "Press one key in the page: Enter, Escape, Tab, ArrowDown and friends. \
+                            It lands on whatever is focused, so click or type first.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "key": { "type": "string", "description": "A KeyboardEvent key name." },
+                    "paneId": { "type": "string", "description": "Only when driving more than one pane." }
+                },
+                "required": ["key"],
+                "additionalProperties": false
+            },
+            "annotations": { "title": "Press key", "destructiveHint": false, "openWorldHint": true }
+        },
+        {
+            "name": "browser_scroll",
+            "description": "Scroll the page: uid brings that element into view, dy scrolls by \
+                            pixels (negative is up).",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "uid": { "type": "string", "description": "From browser_snapshot." },
+                    "dy": { "type": "number" },
+                    "paneId": { "type": "string", "description": "Only when driving more than one pane." }
+                },
+                "additionalProperties": false
+            },
+            "annotations": { "title": "Scroll page", "destructiveHint": false, "openWorldHint": true }
         },
         {
             "name": "browser_navigate",

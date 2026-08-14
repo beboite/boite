@@ -61,6 +61,12 @@ pub fn router(workspace: Shared) -> Router {
         .route("/v1/browser/navigate", post(browser_navigate))
         .route("/v1/browser/reload", post(browser_reload))
         .route("/v1/browser/close", post(browser_close))
+        .route("/v1/browser/snapshot", get(browser_snapshot))
+        .route("/v1/browser/screenshot", get(browser_screenshot))
+        .route("/v1/browser/click", post(browser_click))
+        .route("/v1/browser/type", post(browser_type))
+        .route("/v1/browser/press", post(browser_press))
+        .route("/v1/browser/scroll", post(browser_scroll))
         .route("/v1/snapshot", get(snapshot))
         .route("/v1/transcript", get(transcript))
         .route("/v1/search", get(search))
@@ -1392,6 +1398,283 @@ fn drive(
         // knows which it is asks browser_status instead of assuming.
         "checked": seen,
     })))
+}
+
+// ------------------------------------------------- reading and driving a page
+
+/// How long a page has to describe itself before the agent is told to retry.
+/// Under the shim's 20 s socket timeout, so a slow page comes back as a
+/// sentence rather than as a dead connection.
+const SNAPSHOT_WAIT_MS: u64 = 8_000;
+/// Acting on one element is quicker than walking all of them.
+const ACT_WAIT_MS: u64 = 5_000;
+
+/// Asks the device drawing the pane and waits for what it says.
+///
+/// The strict half of [`drive`]: pointing a pane blind is fine because the
+/// device re-checks everything, but a question dispatched blind has no answer
+/// channel to come back on, so these routes require the window to be visible
+/// from here and refuse with the reason when it is not. The device still
+/// re-checks the pane and the mark; its refusal comes back as the `error`
+/// field and is passed through to the agent verbatim.
+async fn ask_the_pane(
+    workspace: &Shared,
+    caller: &Caller,
+    what: &str,
+    asked: Option<&str>,
+    detail: Value,
+    wait_ms: u64,
+    journaled: bool,
+) -> Result<Json<Value>, StatusCode> {
+    let project_id = caller.project_id.clone();
+    let pane_id = match window_showing(&**workspace, caller)
+        .and_then(|s| which_pane(&s, caller, asked))
+    {
+        Ok(id) => id,
+        Err(reason) => {
+            return Ok(deny(
+                &**workspace,
+                caller,
+                &project_id,
+                &format!("browser.{what}"),
+                asked.unwrap_or_default(),
+                &reason,
+            ))
+        }
+    };
+
+    let mut request = json!({
+        "kind": format!("browser.{what}"),
+        "requestId": uuid::Uuid::new_v4().to_string(),
+        "projectId": project_id,
+        "callerThreadId": caller.thread_id.clone().filter(|id| !id.is_empty()),
+        "paneId": pane_id,
+    });
+    if let (Some(base), Some(extra)) = (request.as_object_mut(), detail.as_object()) {
+        for (key, value) in extra {
+            base.insert(key.clone(), value.clone());
+        }
+    }
+
+    let waiting = match workspace.ask_for_answer(request) {
+        Ok(rx) => rx,
+        Err(reason) => {
+            return Ok(deny(
+                &**workspace,
+                caller,
+                &project_id,
+                &format!("browser.{what}"),
+                &pane_id,
+                &reason,
+            ))
+        }
+    };
+    let answer = match tokio::time::timeout(std::time::Duration::from_millis(wait_ms), waiting)
+        .await
+    {
+        Err(_) => {
+            return Ok(refused(
+                "the device drawing the pane did not answer in time; the page may be busy or \
+                 mid-navigation, and asking again is safe",
+            ))
+        }
+        Ok(Err(_)) => return Ok(refused("the device went away while answering")),
+        Ok(Ok(answer)) => answer,
+    };
+    // The device's own refusal, passed through: it re-ran the checks with a
+    // fresher view of the screen than this side had.
+    if answer.get("error").and_then(|v| v.as_str()).is_some() {
+        return Ok(Json(answer));
+    }
+    if journaled {
+        record(
+            &**workspace,
+            Entry::new(&project_id, actor(caller), Action::BrowserDriven)
+                .about(what)
+                .with("pane", &pane_id),
+        );
+    }
+    let mut out = answer;
+    if let Some(base) = out.as_object_mut() {
+        base.insert("paneId".into(), json!(pane_id));
+    }
+    Ok(Json(out))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SnapshotIn {
+    pane_id: Option<String>,
+    /// `elements` (the default), `diff` for what changed since the last one,
+    /// or `text` for the page's readable prose.
+    mode: Option<String>,
+    /// For `text`: how many characters are worth carrying back.
+    max_chars: Option<u64>,
+}
+
+/// What is in the page, as rows an agent can act on.
+///
+/// Answered by the driver Boite injects into the frame, which is why this
+/// works on a desktop window and nowhere else: a browser-drawn device has no
+/// way in, and says so. Each interactive element carries a `uid` that stays
+/// stable for the life of the document, which is what `browser_click` and
+/// `browser_type` take.
+async fn browser_snapshot(
+    State(workspace): State<Shared>,
+    Extension(caller): Extension<Caller>,
+    axum::extract::Query(query): axum::extract::Query<SnapshotIn>,
+) -> Result<Json<Value>, StatusCode> {
+    let mode = query.mode.as_deref().unwrap_or("elements");
+    if !["elements", "diff", "text"].contains(&mode) {
+        return Ok(refused("mode is elements, diff or text"));
+    }
+    ask_the_pane(
+        &workspace,
+        &caller,
+        "snapshot",
+        query.pane_id.as_deref(),
+        json!({ "mode": mode, "maxChars": query.max_chars }),
+        SNAPSHOT_WAIT_MS,
+        false,
+    )
+    .await
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ScreenshotIn {
+    pane_id: Option<String>,
+    /// Crop to this element from the last snapshot, instead of the whole pane.
+    uid: Option<String>,
+}
+
+/// The pane as pixels, when the host can photograph one.
+///
+/// Today that is the desktop app on Windows; everywhere else the device
+/// answers with the sentence saying so, and `browser_snapshot` remains the
+/// cross-platform way to read a page. Not journaled: it is a look, not a
+/// touch.
+async fn browser_screenshot(
+    State(workspace): State<Shared>,
+    Extension(caller): Extension<Caller>,
+    axum::extract::Query(query): axum::extract::Query<ScreenshotIn>,
+) -> Result<Json<Value>, StatusCode> {
+    ask_the_pane(
+        &workspace,
+        &caller,
+        "screenshot",
+        query.pane_id.as_deref(),
+        json!({ "uid": query.uid }),
+        SNAPSHOT_WAIT_MS,
+        false,
+    )
+    .await
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ClickIn {
+    pane_id: Option<String>,
+    uid: String,
+    double: Option<bool>,
+}
+
+async fn browser_click(
+    State(workspace): State<Shared>,
+    Extension(caller): Extension<Caller>,
+    Json(body): Json<ClickIn>,
+) -> Result<Json<Value>, StatusCode> {
+    ask_the_pane(
+        &workspace,
+        &caller,
+        "click",
+        body.pane_id.as_deref(),
+        json!({ "uid": body.uid, "double": body.double }),
+        ACT_WAIT_MS,
+        true,
+    )
+    .await
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TypeIn {
+    pane_id: Option<String>,
+    uid: String,
+    text: String,
+    /// Replace what is there rather than appending to it. On by default,
+    /// because "type into the search box" almost never means "after whatever
+    /// was left in it".
+    clear: Option<bool>,
+    /// Press Enter afterwards, for the field-and-submit shape.
+    submit: Option<bool>,
+}
+
+async fn browser_type(
+    State(workspace): State<Shared>,
+    Extension(caller): Extension<Caller>,
+    Json(body): Json<TypeIn>,
+) -> Result<Json<Value>, StatusCode> {
+    ask_the_pane(
+        &workspace,
+        &caller,
+        "type",
+        body.pane_id.as_deref(),
+        json!({ "uid": body.uid, "text": body.text, "clear": body.clear, "submit": body.submit }),
+        ACT_WAIT_MS,
+        true,
+    )
+    .await
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PressIn {
+    pane_id: Option<String>,
+    key: String,
+}
+
+async fn browser_press(
+    State(workspace): State<Shared>,
+    Extension(caller): Extension<Caller>,
+    Json(body): Json<PressIn>,
+) -> Result<Json<Value>, StatusCode> {
+    ask_the_pane(
+        &workspace,
+        &caller,
+        "press",
+        body.pane_id.as_deref(),
+        json!({ "key": body.key }),
+        ACT_WAIT_MS,
+        true,
+    )
+    .await
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ScrollIn {
+    pane_id: Option<String>,
+    /// Scroll this element into view; without it the page scrolls by `dy`.
+    uid: Option<String>,
+    dy: Option<f64>,
+}
+
+async fn browser_scroll(
+    State(workspace): State<Shared>,
+    Extension(caller): Extension<Caller>,
+    Json(body): Json<ScrollIn>,
+) -> Result<Json<Value>, StatusCode> {
+    ask_the_pane(
+        &workspace,
+        &caller,
+        "scroll",
+        body.pane_id.as_deref(),
+        json!({ "uid": body.uid, "dy": body.dy }),
+        ACT_WAIT_MS,
+        true,
+    )
+    .await
 }
 
 /// Runs something that spawns processes or touches the disk, off the runtime.

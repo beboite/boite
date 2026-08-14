@@ -142,7 +142,32 @@ pub trait Workspace: Send + Sync + 'static {
     /// The desktop pulses the thread's dot in the sidebar. The server has no
     /// equivalent and does not need one, which is why this has a default.
     fn touched(&self, _thread_id: &str, _what: &str) {}
+
+    /// Hands a request to the device and keeps the line open for its answer.
+    ///
+    /// What [`Workspace::ask`] is for a verb, this is for a question: reading a
+    /// page in a browser pane means asking the webview that is drawing it, and
+    /// the answer has to come back to the very call that asked. The receiver
+    /// resolves when the device answers; the caller owns the timeout, because
+    /// only it knows how long its agent will sit there.
+    ///
+    /// The default is the server's honest answer. Its devices are browsers and
+    /// phones drawing panes this process cannot reach into, and pretending
+    /// otherwise would hand an agent an empty snapshot labelled as the page.
+    fn ask_for_answer(
+        &self,
+        _request: serde_json::Value,
+    ) -> Result<tokio::sync::oneshot::Receiver<serde_json::Value>, String> {
+        Err(DEVICE_CANNOT_ANSWER.to_string())
+    }
 }
+
+/// What an agent is told when it asks a question only a desktop window can
+/// answer, on a host whose devices cannot.
+pub const DEVICE_CANNOT_ANSWER: &str =
+    "this Boite cannot reach inside the pane: the device drawing it is a browser or a phone, \
+     and only a Boite desktop window can read and drive a page. Navigate, reload and close \
+     still work from here.";
 
 /// The concrete state axum carries. A handler never sees anything else.
 pub type Shared = Arc<dyn Workspace>;

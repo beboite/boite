@@ -466,3 +466,93 @@ fn status_says_whose_a_pane_is_rather_than_which_thread_holds_it() {
     );
     assert_eq!(theirs[0]["yours"], json!(false));
 }
+
+/// The question routes are strict where the verbs are lenient: a verb can be
+/// dispatched blind because the device re-checks, but a question needs an
+/// answer channel, so a host whose devices cannot answer says so up front.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_page_question_on_a_deviceless_host_is_refused_with_the_reason() {
+    let fake = Fake::new("browser-no-answers").with_project("p1", "/w/one");
+    *fake.screen.lock().unwrap() =
+        Some(on_screen("p1", vec![framed("pane-a", "http://localhost:1/", Some("t1"))]));
+    let shared: Shared = std::sync::Arc::new(fake);
+
+    let out = browser_snapshot(
+        State(shared),
+        Extension(owner("p1", Some("t1"))),
+        axum::extract::Query(SnapshotIn { pane_id: None, mode: None, max_chars: None }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(out.0["error"], json!(crate::DEVICE_CANNOT_ANSWER));
+}
+
+/// The happy path end to end: the request that reaches the device carries the
+/// verb, the pane and a requestId, and the device's answer comes back to the
+/// very call that asked, stamped with the pane it was about.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_snapshot_rides_out_and_the_answer_rides_back() {
+    let fake = Fake::new("browser-snapshot").with_project("p1", "/w/one");
+    *fake.screen.lock().unwrap() =
+        Some(on_screen("p1", vec![framed("pane-a", "http://localhost:1/", Some("t1"))]));
+    *fake.answer_with.lock().unwrap() = Some(json!({
+        "url": "http://localhost:1/app",
+        "title": "App",
+        "elements": [{ "u": "u1", "r": "button", "n": "Save" }]
+    }));
+    let shared: Shared = std::sync::Arc::new(fake);
+
+    let out = browser_snapshot(
+        State(shared.clone()),
+        Extension(owner("p1", Some("t1"))),
+        axum::extract::Query(SnapshotIn {
+            pane_id: None,
+            mode: Some("elements".into()),
+            max_chars: None,
+        }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(out.0["paneId"], json!("pane-a"));
+    assert_eq!(out.0["url"], json!("http://localhost:1/app"));
+    assert_eq!(out.0["elements"][0]["u"], json!("u1"));
+}
+
+/// The mark still rules: a question at a pane the agent is not driving is the
+/// same refusal as a verb, before anything reaches a device.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_question_at_a_reclaimed_pane_is_not_the_agents_to_ask() {
+    let fake = Fake::new("browser-question-mark").with_project("p1", "/w/one");
+    *fake.screen.lock().unwrap() =
+        Some(on_screen("p1", vec![framed("pane-a", "http://localhost:1/", None)]));
+    *fake.answer_with.lock().unwrap() = Some(json!({ "ok": true }));
+    let shared: Shared = std::sync::Arc::new(fake);
+
+    let out = browser_click(
+        State(shared),
+        Extension(owner("p1", Some("t1"))),
+        Json(ClickIn { pane_id: None, uid: "u1".into(), double: None }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(out.0["error"], json!(NOT_YOURS));
+}
+
+/// A mode this does not know is a sentence, not a guess at what was meant.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_unknown_snapshot_mode_is_refused_by_name() {
+    let fake = Fake::new("browser-mode").with_project("p1", "/w/one");
+    let shared: Shared = std::sync::Arc::new(fake);
+    let out = browser_snapshot(
+        State(shared),
+        Extension(owner("p1", Some("t1"))),
+        axum::extract::Query(SnapshotIn {
+            pane_id: None,
+            mode: Some("screenshotish".into()),
+            max_chars: None,
+        }),
+    )
+    .await
+    .unwrap();
+    assert!(out.0["error"].as_str().unwrap().contains("elements, diff or text"));
+}

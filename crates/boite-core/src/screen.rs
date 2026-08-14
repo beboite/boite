@@ -95,22 +95,26 @@ pub struct Pane {
 /// What the window can say about a page, and the whole of it.
 pub const PAGE_STATES: [&str; 3] = ["loading", "loaded", "stalled"];
 
-/// Why nothing here describes what is *in* a page.
+/// Why nothing *here* describes what is in a page, and where that answer lives.
 ///
 /// The browser pane is a sandboxed cross-origin `<iframe>`, and both halves of
 /// that are load bearing. `crate::browser::classify` refuses Boite's own origin
 /// outright, so the frame is never same-origin with the window; and everything
 /// that is not a dev server on this machine also loses `allow-same-origin`, so
-/// it lands in an opaque origin. Reading the document, querying a selector in it
-/// or synthesising a click on an element inside it are not missing features —
-/// they are the thing the boundary exists to prevent, and a tool claiming to do
-/// one would be reporting a result it invented.
+/// it lands in an opaque origin. The app's own scripts read nothing across that
+/// boundary, which is why this description carries an address and a load state
+/// and no more.
 ///
-/// Spelled once, here, because it is the sentence every browser tool has to say
-/// to an agent that was about to ask for one of those.
-pub const PAGE_IS_OPAQUE: &str = "the page is a sandboxed cross-origin frame: Boite can point it, \
-                                  reload it and say whether it loaded, and can read nothing inside \
-                                  it";
+/// Reading the page is a different door: on a desktop window the webview
+/// itself injects a driver into every frame (an initialization script, below
+/// the page's origin machinery rather than across it), and the snapshot,
+/// click and type tools talk to that. A pane drawn by a plain browser or a
+/// phone has no such door, and the sentence below is what those hosts still
+/// have to say.
+pub const PAGE_IS_OPAQUE: &str = "the page is a sandboxed cross-origin frame: this description \
+                                  carries its address and whether it loaded, nothing more. \
+                                  browser_snapshot reads inside it when the pane is on a Boite \
+                                  desktop window";
 
 /// The window itself.
 #[derive(Debug, Clone, Serialize, Deserialize)]

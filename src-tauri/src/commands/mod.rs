@@ -28,6 +28,7 @@
 pub mod agents;
 pub mod app;
 mod bus;
+pub mod capture;
 pub mod files;
 pub mod git;
 pub mod pty;

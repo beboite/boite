@@ -34,6 +34,8 @@ import { anchorPaneId, anchorProjectId, openPane } from "$lib/features/panes/ope
 import { leafNodesOf, paneStore } from "$lib/features/panes/store.svelte";
 import { classifyBrowserUrl, isLoopbackHost } from "$lib/features/browser/url";
 import { browserPanes } from "$lib/features/browser/state.svelte";
+import { paneDriver } from "$lib/features/browser/driver";
+import { backend } from "$lib/backend/active.svelte";
 import { confirmDialog } from "$lib/shared/components/confirm.svelte";
 import type { DropSide, PaneContent } from "$lib/features/panes/types";
 import type { IconKey } from "$lib/types";
@@ -104,12 +106,44 @@ interface BrowserDriveRequest {
   external?: boolean | null;
 }
 
+/**
+ * An agent asking what is in the page, or acting on one element of it.
+ *
+ * Unlike the drive verbs these carry a `requestId` and OWE an answer: the
+ * host keeps the asking HTTP handler on the line until the webview resolves
+ * it through `backend().answerAgentRequest`. Every refusal therefore answers
+ * too — a dropped question here is an agent staring at a timeout.
+ */
+interface BrowserAskRequest {
+  kind:
+    | "browser.snapshot"
+    | "browser.screenshot"
+    | "browser.click"
+    | "browser.type"
+    | "browser.press"
+    | "browser.scroll";
+  requestId: string;
+  projectId: string;
+  callerThreadId?: string | null;
+  paneId?: string | null;
+  mode?: string | null;
+  maxChars?: number | null;
+  uid?: string | null;
+  double?: boolean | null;
+  text?: string | null;
+  clear?: boolean | null;
+  submit?: boolean | null;
+  key?: string | null;
+  dy?: number | null;
+}
+
 type AgentRequest =
   | MoveRequest
   | CreateRequest
   | SpawnRequest
   | PaneOpenRequest
-  | BrowserDriveRequest;
+  | BrowserDriveRequest
+  | BrowserAskRequest;
 
 /**
  * Which machine's process wrote the request.
@@ -449,6 +483,111 @@ async function handleBrowserDrive(req: BrowserDriveRequest, from: RequestSource)
   paneStore.setBrowser(pane.paneId, { url: target.url });
 }
 
+/**
+ * Answer a page question: find the pane, ask the driver in its frame, hand
+ * whatever came back to the host that is holding the agent's call open.
+ *
+ * The endpoint already ran these checks against the window's description;
+ * they run again here because the description it read may be five seconds
+ * old, and the pane store is the present tense. A refusal is an answer like
+ * any other: the agent reads the sentence instead of waiting out a timeout.
+ */
+async function handleBrowserAsk(req: BrowserAskRequest) {
+  const answer = (payload: Record<string, unknown>) => {
+    const be = backend();
+    if (!be.answerAgentRequest) {
+      logger.warn("agent-request", "a page question landed on a device with no answer channel", {
+        kind: req.kind,
+      });
+      return;
+    }
+    be.answerAgentRequest(req.requestId, payload).catch((e) =>
+      logger.warn("agent-request", "could not hand the answer back", { error: String(e) }),
+    );
+  };
+
+  if (anchorProjectId() !== req.projectId) {
+    answer({ error: "the window moved to another project while you were asking" });
+    return;
+  }
+  const panes = browserLeaves();
+  const caller = req.callerThreadId ?? "";
+  const pane = req.paneId
+    ? panes.find((p) => p.paneId === req.paneId)
+    : panes.length === 1
+      ? panes[0]
+      : undefined;
+  if (!pane) {
+    answer({ error: "that browser pane is not on the screen any more" });
+    return;
+  }
+  if (!caller || pane.drivenBy !== caller) {
+    answer({ error: "the user has taken that pane back, so it is theirs to read now" });
+    return;
+  }
+
+  const verb = req.kind.slice("browser.".length);
+
+  // The screenshot is the one question the frame cannot answer about itself:
+  // pixels of a cross-origin document are exactly what the web refuses to
+  // hand to a page. The OS paints them instead, through the backend, and the
+  // driver only contributes the crop rectangle when one element was asked.
+  if (verb === "screenshot") {
+    const be = backend();
+    if (!be.capturePane) {
+      answer({
+        error:
+          "this device cannot photograph the pane; browser_snapshot reads it as elements and text",
+      });
+      return;
+    }
+    const box = paneDriver.frameBox(pane.paneId);
+    if (!box) {
+      answer({ error: "that pane is not drawn right now" });
+      return;
+    }
+    let crop = { x: box.x, y: box.y, w: box.width, h: box.height };
+    if (req.uid) {
+      const located = await paneDriver.ask(pane.paneId, "locate", { uid: req.uid });
+      if (located.error) {
+        answer(located);
+        return;
+      }
+      const r = located.rect as { x: number; y: number; w: number; h: number };
+      // A little context around the element: a bare button with no
+      // surroundings answers fewer questions than it raises.
+      const pad = 8;
+      const rx = Math.max(0, r.x - pad);
+      const ry = Math.max(0, r.y - pad);
+      crop = {
+        x: box.x + rx,
+        y: box.y + ry,
+        w: Math.min(box.width - rx, r.w + pad * 2),
+        h: Math.min(box.height - ry, r.h + pad * 2),
+      };
+    }
+    const dpr = window.devicePixelRatio || 1;
+    try {
+      const shot = await be.capturePane({
+        x: crop.x * dpr,
+        y: crop.y * dpr,
+        w: crop.w * dpr,
+        h: crop.h * dpr,
+      });
+      answer({ image: shot.image, width: shot.width, height: shot.height });
+    } catch (e) {
+      answer({ error: String(e) });
+    }
+    return;
+  }
+
+  const args: Record<string, unknown> = {};
+  for (const key of ["mode", "maxChars", "uid", "double", "text", "clear", "submit", "key", "dy"] as const) {
+    if (req[key] !== undefined && req[key] !== null) args[key] = req[key];
+  }
+  answer(await paneDriver.ask(pane.paneId, verb, args));
+}
+
 async function handle(req: AgentRequest, from: RequestSource) {
   logger.info("agent-request", req.kind, req as unknown as Record<string, unknown>);
   switch (req.kind) {
@@ -464,6 +603,13 @@ async function handle(req: AgentRequest, from: RequestSource) {
     case "browser.reload":
     case "browser.close":
       return handleBrowserDrive(req, from);
+    case "browser.snapshot":
+    case "browser.screenshot":
+    case "browser.click":
+    case "browser.type":
+    case "browser.press":
+    case "browser.scroll":
+      return handleBrowserAsk(req);
   }
 }
 

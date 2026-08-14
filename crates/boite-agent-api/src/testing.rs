@@ -28,6 +28,9 @@ pub struct Fake {
     /// What the window says is on it. `None` is the headless case, which is a
     /// real host rather than an unset field: the server has no window.
     pub screen: Mutex<Option<boite_core::screen::Screen>>,
+    /// What the device answers a question with. `None` is a host whose devices
+    /// cannot answer, which is the trait's own default.
+    pub answer_with: Mutex<Option<Value>>,
     dir: PathBuf,
 }
 
@@ -47,6 +50,7 @@ impl Fake {
             announced: Mutex::new(Vec::new()),
             touched: Mutex::new(Vec::new()),
             screen: Mutex::new(None),
+            answer_with: Mutex::new(None),
             dir,
         }
     }
@@ -143,5 +147,21 @@ impl Workspace for Fake {
             .lock()
             .unwrap()
             .push((thread_id.into(), surface.into()));
+    }
+
+    fn ask_for_answer(
+        &self,
+        request: Value,
+    ) -> Result<tokio::sync::oneshot::Receiver<Value>, String> {
+        let scripted = self.answer_with.lock().unwrap().clone();
+        match scripted {
+            Some(answer) => {
+                self.asked.lock().unwrap().push(request);
+                let (tx, rx) = tokio::sync::oneshot::channel();
+                let _ = tx.send(answer);
+                Ok(rx)
+            }
+            None => Err(crate::DEVICE_CANNOT_ANSWER.to_string()),
+        }
     }
 }

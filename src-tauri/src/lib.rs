@@ -244,8 +244,34 @@ pub fn run() {
         .manage(BootState::default())
         .manage(ProjectRoots::default())
         .manage(commands::app::LastScreen::default())
+        .manage(agent_api::DeviceAnswers::default())
         .manage(commands::records::Rows::default())
         .setup(|app| {
+            // Built here rather than declared in tauri.conf.json, for exactly
+            // one reason: an initialization script can only be attached to a
+            // webview while it is being built, and the pane driver has to run
+            // in every frame — it is how an agent reads the browser pane, and
+            // an iframe is a frame of this webview, not a webview of its own.
+            // The values mirror what the config used to say; the config's
+            // `windows` array is empty now so nothing is created twice.
+            let main_window = tauri::utils::config::WindowConfig {
+                label: "main".into(),
+                title: "Boite".into(),
+                width: 1280.0,
+                height: 800.0,
+                min_width: Some(720.0),
+                min_height: Some(480.0),
+                decorations: false,
+                transparent: true,
+                visible: false,
+                ..Default::default()
+            };
+            tauri::WebviewWindowBuilder::from_config(app, &main_window)?
+                .initialization_script_for_all_frames(include_str!(
+                    "../scripts/pane-driver.js"
+                ))
+                .build()?;
+
             let setup_handle = app.handle().clone();
             if let Err(e) = logging::begin_log_session(&setup_handle) {
                 eprintln!("[boite/logging] begin_log_session failed: {e}");
@@ -362,6 +388,8 @@ pub fn run() {
             commands::agents::agent_api_ready,
             agent_api::approvals_open,
             agent_api::approval_decide,
+            agent_api::agent_answer,
+            commands::capture::capture_pane,
             commands::agents::agent_mcp_project_path,
             commands::agents::agent_mcp_registration,
             commands::agents::register_agent_mcp,

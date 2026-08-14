@@ -516,6 +516,20 @@ if (agentUrl && keyFile) {
     `status=${waited.status} body=${JSON.stringify(waitBody)}`,
   );
 
+  // A page question on the server: its devices are browsers and phones with
+  // no driver in the frame, so the honest answer is a sentence up front, not
+  // an empty snapshot or a timeout.
+  const snapPath = "/v1/browser/snapshot?mode=elements";
+  const snapped = await fetch(`${agentUrl}${snapPath}`, {
+    headers: signedHeaders(key, probeId, "GET", snapPath, ""),
+  });
+  const snapBody = snapped.status === 200 ? await snapped.json() : null;
+  check(
+    "reading a page on the server answers why it cannot",
+    typeof snapBody?.error === "string" && snapBody.error.includes("no window"),
+    `status=${snapped.status} body=${JSON.stringify(snapBody)}`,
+  );
+
   const reloadBody = JSON.stringify({});
   const reload = await fetch(`${agentUrl}/v1/browser/reload`, {
     method: "POST",

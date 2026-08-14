@@ -2,6 +2,7 @@
   import { openUrl } from "$lib/platform/opener";
   import { isLocalPage } from "./url";
   import { browserPanes } from "./state.svelte";
+  import { paneDriver } from "./driver";
   import { app } from "$lib/app/store.svelte";
   import { paneStore } from "$lib/features/panes/store.svelte";
   import { t } from "$lib/i18n/index.svelte";
@@ -24,15 +25,16 @@
    * page. localhost dev servers, which is the case this exists for, almost never
    * send either.
    *
-   * **The same wall is why the agent tools stop where they do.** The frame is
-   * cross-origin in every case the app allows — `boite_core::browser::classify`
-   * refuses Boite's own origin outright — so nothing here can read the document,
-   * find an element in it or click one. `browser_navigate`, `browser_reload` and
-   * `browser_close` drive the container; there is no tool that touches the page,
-   * because there is no honest way to write one. The upgrade that would change
-   * that is a Tauri child webview positioned over the pane rect, exactly as the
-   * terminals already are — and it is desktop only, so the remote path would
-   * still land back here.
+   * **The frame is cross-origin in every case the app allows** —
+   * `boite_core::browser::classify` refuses Boite's own origin outright — so
+   * nothing in THIS document can read the page, find an element in it or click
+   * one. What can is the driver the webview itself injects into every frame
+   * (`src-tauri/scripts/pane-driver.js`, an initialization script: below the
+   * page's origin machinery rather than across it). This component only hands
+   * the frame element to `driver.ts`, which talks to that script over
+   * postMessage — the sandbox and the origin boundary stay exactly as they
+   * were. Desktop only by construction: a pane drawn by a plain browser or a
+   * phone has no injected script, and the agent tools say so.
    */
   type Props = { url: string; paneId: string; drivenBy?: string | null };
   let { url, paneId, drivenBy = null }: Props = $props();
@@ -67,6 +69,16 @@
   // remounts the frame is held beside the pane rather than in here.
   const nonce = $derived(browserPanes.nonceOf(paneId));
   const driver = $derived(drivenBy ? app.threadById(drivenBy) : null);
+
+  // The frame element, for the pane driver: questions about the page go in
+  // through its contentWindow and answers are matched back against it. Handed
+  // over whenever a (re)mount produces a new element, taken back on unmount.
+  let frame = $state<HTMLIFrameElement | null>(null);
+  $effect(() => {
+    if (!frame) return;
+    paneDriver.attach(paneId, frame);
+    return () => paneDriver.detach(paneId);
+  });
 
   $effect(() => {
     // Re-arm on every navigation and every manual reload.
@@ -159,6 +171,7 @@
   <div class="relative min-h-0 flex-1">
     {#key nonce}
       <iframe
+        bind:this={frame}
         src={url}
         title={url}
         class="size-full border-0 bg-white"

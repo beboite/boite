@@ -218,6 +218,14 @@ export const tauriApprovals: ApprovalsApi = {
   decide: (id, allow) => invoke<PendingApproval | null>("approval_decide", { id, allow }),
 };
 
+/** The webview resolving a browser question the host is holding open. */
+export const tauriAnswerAgentRequest = (requestId: string, payload: Record<string, unknown>) =>
+  invoke<void>("agent_answer", { requestId, payload });
+
+/** The OS photographing a rectangle of this window, for the pane screenshot. */
+export const tauriCapturePane = (rect: { x: number; y: number; w: number; h: number }) =>
+  invoke<{ image: string; width: number; height: number }>("capture_pane", rect);
+
 export const tauriLog: LogApi = {
   event: (level: LogLevel, source, message, details) =>
     invoke("log_app_event", { level, source, message, details }),

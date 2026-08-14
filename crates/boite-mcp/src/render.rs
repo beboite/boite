@@ -404,6 +404,116 @@ pub(crate) fn format_page_settled(out: &Value) -> String {
     w.into_string()
 }
 
+/// One line saying where the frame is, shared by every answer that reads it.
+///
+/// The driver reports `location.href`, which is the frame's real address: the
+/// container only ever knew the address it framed, and the two part company
+/// the moment anything inside the page navigates.
+fn page_line(w: &mut Toon, out: &Value) {
+    let title = out.get("title").and_then(|v| v.as_str()).unwrap_or("");
+    let url = out.get("url").and_then(|v| v.as_str()).unwrap_or("");
+    if !title.is_empty() || !url.is_empty() {
+        w.field("page", &format!("{} {}", clip(title, 80), clip(url, MAX_CELL)));
+    }
+}
+
+/// One element as a row: uid, role, name, value, and whatever else is worth a
+/// cell. The driver sends single-letter keys because every key is paid for
+/// once per element, per snapshot, per read of the answer.
+fn element_row(e: &Value) -> Vec<String> {
+    let at = |key: &str| e.get(key).and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let mut note = e
+        .get("s")
+        .and_then(|v| v.as_array())
+        .map(|flags| {
+            flags
+                .iter()
+                .filter_map(|f| f.as_str())
+                .collect::<Vec<_>>()
+                .join(",")
+        })
+        .unwrap_or_default();
+    let href = at("h");
+    if !href.is_empty() {
+        if !note.is_empty() {
+            note.push(' ');
+        }
+        note.push_str(&clip(&href, 60));
+    }
+    vec![at("u"), at("r"), clip(&at("n"), 100), clip(&at("v"), 60), note]
+}
+
+const ELEMENT_COLS: [&str; 5] = ["uid", "role", "name", "value", "note"];
+
+fn element_rows(out: &Value, key: &str) -> Vec<Vec<String>> {
+    out.get(key)
+        .and_then(|v| v.as_array())
+        .map(|els| els.iter().map(element_row).collect())
+        .unwrap_or_default()
+}
+
+/// What the driver read out of the page, in the shape the mode asked for.
+pub(crate) fn format_snapshot(out: &Value) -> String {
+    // Prose is prose: TOON around a page's text is one more thing between the
+    // agent and the sentence it is looking for.
+    if let Some(text) = out.get("text").and_then(|v| v.as_str()) {
+        let mut head = Toon::new();
+        page_line(&mut head, out);
+        let mut answer = head.into_string();
+        answer.push_str(if text.is_empty() { "(no readable text)" } else { text });
+        if out.get("truncated").and_then(|v| v.as_bool()) == Some(true) {
+            answer.push_str("\n[cut here; maxChars raises the budget]");
+        }
+        return answer;
+    }
+
+    let mut w = Toon::new();
+    page_line(&mut w, out);
+    if out.get("mode").and_then(|v| v.as_str()) == Some("diff") {
+        let added = element_rows(out, "added");
+        let changed = element_rows(out, "changed");
+        let removed: Vec<String> = out
+            .get("removed")
+            .and_then(|v| v.as_array())
+            .map(|ids| ids.iter().filter_map(|v| v.as_str()).map(str::to_string).collect())
+            .unwrap_or_default();
+        if added.is_empty() && changed.is_empty() && removed.is_empty() {
+            w.field("diff", "nothing changed since the last snapshot");
+            return w.into_string();
+        }
+        if !added.is_empty() {
+            w.table("added", &ELEMENT_COLS, &added);
+        }
+        if !changed.is_empty() {
+            w.table("changed", &ELEMENT_COLS, &changed);
+        }
+        if !removed.is_empty() {
+            w.inline("removed", &removed, MAX_BRANCHES);
+        }
+        return w.into_string();
+    }
+
+    let rows = element_rows(out, "elements");
+    w.table("elements", &ELEMENT_COLS, &rows);
+    if let Some(more) = out.get("dropped").and_then(|v| v.as_u64()).filter(|n| *n > 0) {
+        w.hint(&format!(
+            "{more} more elements were not worth carrying; browser_scroll moves the page and \
+             mode=text reads the prose"
+        ));
+    }
+    w.hint("browser_click uid=<uid> acts on a row; after acting, mode=diff costs less than looking again");
+    w.into_string()
+}
+
+/// One action landed in the page, and where the page is now.
+pub(crate) fn format_acted(out: &Value, did: &str) -> String {
+    let mut w = Toon::new();
+    w.field("did", did);
+    page_line(&mut w, out);
+    w.hint("browser_snapshot mode=diff shows what it changed");
+    w.into_string()
+}
+
 /// One browser pane driven, and whether the answer is an outcome or an errand.
 pub(crate) fn format_drove(out: &Value, done: &str, url: Option<&str>) -> String {
     let mut w = Toon::new();

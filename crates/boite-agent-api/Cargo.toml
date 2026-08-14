@@ -20,6 +20,13 @@ subtle = "2"
 uuid = { version = "1", features = ["v4"] }
 dirs = "6"
 # `spawn_blocking` for the git calls, which spawn processes that must not sit on
-# the runtime, and `time` for the one route that waits on a page: both hosts
-# already run a tokio runtime with a timer under axum.
-tokio = { version = "1", features = ["rt", "time"] }
+# the runtime, `time` for the routes that wait on a page, and `sync` for the
+# oneshot a device's answer rides back on: both hosts already run a tokio
+# runtime with a timer under axum.
+tokio = { version = "1", features = ["rt", "time", "sync"] }
+
+[dev-dependencies]
+# The page-question routes are async ends to end, so their tests carry a
+# runtime of their own; the crate itself still borrows whichever host it runs
+# in.
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

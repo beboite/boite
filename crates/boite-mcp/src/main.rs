@@ -37,7 +37,7 @@ use std::io::{BufRead, Write};
 
 use serde_json::{json, Value};
 
-use call::call_tool;
+use call::{call_blocks, call_tool};
 use tools::{tools, INSTRUCTIONS};
 
 /// Percent-encodes a value so it survives as a query parameter.
@@ -162,17 +162,25 @@ fn main() {
                     .get("arguments")
                     .cloned()
                     .unwrap_or_else(|| json!({}));
-                let called = match &host {
-                    Ok(h) => call_tool(h, name, &args),
-                    Err(e) => Err(e.clone()),
-                };
-                match called {
-                    Ok(text) => reply(
-                        &mut stdout,
-                        &id,
-                        json!({ "content": [{ "type": "text", "text": text }] }),
-                    ),
-                    Err(e) => reply_tool_error(&mut stdout, &id, &e),
+                match &host {
+                    Err(e) => reply_tool_error(&mut stdout, &id, e),
+                    // The screenshot answers in content blocks (an image);
+                    // everything else is text. Blocks are asked first and the
+                    // text pipeline is the fall-through.
+                    Ok(h) => match call_blocks(h, name, &args) {
+                        Some(Ok(content)) => {
+                            reply(&mut stdout, &id, json!({ "content": content }))
+                        }
+                        Some(Err(e)) => reply_tool_error(&mut stdout, &id, &e),
+                        None => match call_tool(h, name, &args) {
+                            Ok(text) => reply(
+                                &mut stdout,
+                                &id,
+                                json!({ "content": [{ "type": "text", "text": text }] }),
+                            ),
+                            Err(e) => reply_tool_error(&mut stdout, &id, &e),
+                        },
+                    },
                 }
             }
             "ping" => reply(&mut stdout, &id, json!({})),
