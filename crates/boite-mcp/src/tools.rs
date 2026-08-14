@@ -9,19 +9,16 @@
 
 use serde_json::{json, Value};
 
-use crate::host::Host;
-
 /// The tool list, and the one place this shim spends tokens unconditionally:
 /// every session that connects reads all of it before doing anything. Each
 /// description says what the tool does and, where two tools are confusable,
 /// which one the other case belongs to. Everything a failed call would explain
 /// on its own is left to the failure.
 ///
-/// `host` is unused now that every caller is a thread, and kept because
-/// `tools/list` answers before any credential is needed: a shim with no host was
-/// launched from a config file, and a config file is only ever written for a
-/// project, so the answer is the same set either way.
-/// Read once, at connection, before any tool is called.
+/// Read once, at connection, before any tool is called. The list does not
+/// depend on the caller: a shim with no credential was launched from a config
+/// file, and a config file is only ever written for a project, so the answer
+/// is the same set either way.
 ///
 /// It used to describe the answer format and nothing else, which told an agent
 /// how to read a reply it had no reason to ask for. A tool nobody knows to
@@ -32,7 +29,7 @@ use crate::host::Host;
 ///
 /// Written as moments rather than as a catalogue. The tool list already says
 /// what each one does; what is missing without this is when any of it applies.
-pub(crate) const INSTRUCTIONS: &str = "\
+pub const INSTRUCTIONS: &str = "\
 You are running inside a Boite terminal. Boite is the user's workspace: several \
 agent terminals side by side, one shared todo list per project, and a git \
 worktree per terminal. The tools below reach that workspace, and nothing else \
@@ -65,7 +62,7 @@ give it.
 Answers are TOON: `key: value` for a single record, and `name(N):` followed by a \
 header row then one row per item for a list.";
 
-pub(crate) fn tools(_host: Option<&Host>) -> Value {
+pub fn tools() -> Value {
     let mut list = common_tools();
     if let (Some(all), Value::Array(tail)) = (list.as_array_mut(), thread_tools()) {
         all.extend(tail);
