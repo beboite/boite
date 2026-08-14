@@ -44,7 +44,7 @@ wrapped, and a blank shell is one keystroke away.
 - **Split panes.** Split horizontally or vertically, drag threads between panes, resize with the mouse.
 - **Git panel.** Staged/unstaged/conflict sections, commit, fetch/pull/push, branches, auto-fetch and a commit graph. Nested repos are found three levels deep.
 - **File explorer and editor.** A CodeMirror 6 editor with syntax highlighting, tabs, and a side-by-side diff from the git panel.
-- **Command palette.** `Ctrl+K` over threads, projects, shortcuts and actions, each row wearing its own icon.
+- **Command palette.** `Ctrl+K` over threads, projects, shortcuts and actions, each row wearing its own icon. Past two characters it also searches what the workspace wrote down — the todos, the journal and what the terminals printed — and activating a hit goes there.
 - **First run.** A two-screen wizard picks the interface language (English or French) and puts the agents it finds on the machine straight into the shortcut bar.
 - **Remote workspaces.** Point the desktop app or a phone at a headless `boite-server`; threads survive the client closing.
 - **Mobile layout.** Bottom tab bar, pinch-to-resize terminal font, drag-to-scroll, on-demand keyboard, every context menu on a long press.
