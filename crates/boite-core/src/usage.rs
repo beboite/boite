@@ -12,13 +12,39 @@
 //! the first ten characters of its ISO timestamp. Converting to local time
 //! would mean a calendar and a timezone database for a heat map whose cells are
 //! a day wide; the boundary moves by hours, and no cell changes colour for it.
+//!
+//! # What makes a scan cheap
+//!
+//! A visit to a project page walks a year of two stores, so the shape of the
+//! walk is the whole cost, and three things decide it:
+//!
+//! - **The cache survives.** It is keyed on each file's size and mtime, so only
+//!   a session still being written is ever re-read. It used to be emptied whole
+//!   the moment it held more entries than the limit, which on any machine with
+//!   more than `CACHE_LIMIT` transcripts meant every scan re-read every file
+//!   and then threw the answers away again. It drops the half nobody has asked
+//!   for lately instead.
+//! - **Codex's directory is read once per file, not once per scan.** Codex
+//!   keeps the working directory *inside* the rollout, so there is nothing on
+//!   the path to filter on and the head of every candidate has to be opened.
+//!   That answer is now cached beside the numbers, so a machine with thousands
+//!   of rollouts pays thousands of opens once rather than on every visit to
+//!   every project.
+//! - **The version stamp comes from the walk.** `read_dir` already knows each
+//!   file's size and mtime; asking `fs::metadata` again was a second syscall
+//!   per transcript per scan.
+//!
+//! On top of that the parsing runs a few files at a time ([`SCAN_THREADS`]),
+//! because a transcript is a disk seek with a JSON parse on the end of it and
+//! serially the two take turns idling.
 
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use parking_lot::Mutex;
@@ -67,14 +93,25 @@ pub struct UsageReport {
 }
 
 const MILLIS_PER_DAY: i64 = 86_400_000;
-/// Enough that a returning visit is free, small enough that the map cannot
-/// become the reason the app holds memory. Dropped whole when exceeded: this
-/// is a scan accelerator, and rebuilding it costs one slow refresh.
-const CACHE_LIMIT: usize = 4096;
 
-/// What one transcript is worth, in the shape the report needs. Cached against
-/// the file's size and mtime, so a session that is still being written is the
-/// only one ever re-read.
+/// How many transcripts the cache holds before it starts dropping any.
+///
+/// An entry is a path, four counters per model and one per day the session
+/// touched, so a full map is single-digit megabytes — cheap next to re-reading
+/// a year of JSONL. What matters far more than the number is that going over
+/// it evicts rather than clears: see [`evict`].
+const CACHE_LIMIT: usize = 16_384;
+
+/// How many transcripts are read at once.
+///
+/// A small constant rather than the core count on purpose. This runs on the
+/// machine somebody is working on, and the job is a queue of disk seeks with a
+/// JSON parse on the end of each: four is already past the point where the disk
+/// is what is left to wait for, and a thread per core would take the window's
+/// own CPU to buy nothing.
+const SCAN_THREADS: usize = 4;
+
+/// What one transcript is worth, in the shape the report needs.
 #[derive(Clone, Default)]
 struct FileUsage {
     /// (provider, model) -> totals.
@@ -83,15 +120,62 @@ struct FileUsage {
     counted: bool,
 }
 
-struct CacheEntry {
+/// One transcript on disk, with the version stamp the directory walk already
+/// carried. `read_dir` is told the size and the mtime as it enumerates, so
+/// asking `fs::metadata` again downstream was one syscall per file per scan for
+/// an answer already in hand.
+#[derive(Clone)]
+struct Candidate {
+    path: PathBuf,
     len: u64,
     modified_ms: i64,
-    usage: FileUsage,
 }
 
-fn cache() -> &'static Mutex<HashMap<PathBuf, CacheEntry>> {
-    static CACHE: OnceLock<Mutex<HashMap<PathBuf, CacheEntry>>> = OnceLock::new();
+/// What is known about one version of one transcript.
+///
+/// Both fields are filled lazily and independently, which is the point: a codex
+/// rollout belonging to another project costs its `cwd` and nothing else, and
+/// stays cached at that price for every later scan that has to rule it out
+/// again.
+struct Entry {
+    len: u64,
+    modified_ms: i64,
+    /// The scan clock the last reader stamped. Eviction reads this.
+    used: u64,
+    /// The directory the session recorded, for the store that keeps it inside
+    /// the file rather than in the path. `Some(None)` is "looked, found none",
+    /// which is an answer and must not be looked for a second time.
+    cwd: Option<Option<String>>,
+    /// Filled once something has actually asked for this file's numbers.
+    usage: Option<Arc<FileUsage>>,
+}
+
+impl Entry {
+    fn blank(c: &Candidate) -> Self {
+        Self {
+            len: c.len,
+            modified_ms: c.modified_ms,
+            used: 0,
+            cwd: None,
+            usage: None,
+        }
+    }
+
+    fn is(&self, c: &Candidate) -> bool {
+        self.len == c.len && self.modified_ms == c.modified_ms
+    }
+}
+
+fn cache() -> &'static Mutex<HashMap<PathBuf, Entry>> {
+    static CACHE: OnceLock<Mutex<HashMap<PathBuf, Entry>>> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// A monotonic tick, so "least recently wanted" is an order rather than a
+/// timestamp. A wall clock would tie every entry a single scan touched.
+fn tick() -> u64 {
+    static CLOCK: AtomicU64 = AtomicU64::new(0);
+    CLOCK.fetch_add(1, Ordering::Relaxed) + 1
 }
 
 fn now_ms() -> i64 {
@@ -187,36 +271,182 @@ impl Accumulator {
     }
 }
 
-/// Reads a transcript, or hands back what it was worth last time.
-fn cached_file<F>(path: &Path, parse: F) -> Option<FileUsage>
+// ------------------------------------------------------------------ cache
+
+/// Reads one field off this file's cache line, when there is a line for this
+/// exact version of the file. Bumps the clock, because asking is what keeps an
+/// entry alive.
+fn cached<T>(c: &Candidate, read: impl Fn(&Entry) -> Option<T>) -> Option<T> {
+    let mut map = cache().lock();
+    let entry = map.get_mut(&c.path)?;
+    if !entry.is(c) {
+        return None;
+    }
+    entry.used = tick();
+    read(entry)
+}
+
+/// Fills one field in, opening a line for the file or replacing the one that
+/// described an older version of it.
+fn remember(c: &Candidate, fill: impl FnOnce(&mut Entry)) {
+    let mut map = cache().lock();
+    let entry = map.entry(c.path.clone()).or_insert_with(|| Entry::blank(c));
+    if !entry.is(c) {
+        *entry = Entry::blank(c);
+    }
+    entry.used = tick();
+    fill(entry);
+    evict(&mut map);
+}
+
+/// Drops the half nobody has asked for lately, rather than the whole map.
+///
+/// Clearing it whole is what stopped this from being a cache at all: a machine
+/// holding more transcripts than the limit emptied it on every single scan, so
+/// every scan re-read every file and then threw the work away — the limit was
+/// doing the exact opposite of its job, and the more history a machine had the
+/// worse it got.
+fn evict(map: &mut HashMap<PathBuf, Entry>) {
+    if map.len() < CACHE_LIMIT {
+        return;
+    }
+    let mut stamps: Vec<u64> = map.values().map(|e| e.used).collect();
+    stamps.sort_unstable();
+    let cut = stamps[stamps.len() / 2];
+    map.retain(|_, e| e.used > cut);
+}
+
+/// This transcript's numbers, parsing it only if nothing already holds them.
+fn cached_usage(c: &Candidate, parse: fn(&Path) -> FileUsage) -> Arc<FileUsage> {
+    if let Some(hit) = cached(c, |e| e.usage.clone()) {
+        return hit;
+    }
+    let made = Arc::new(parse(&c.path));
+    remember(c, |e| e.usage = Some(made.clone()));
+    made
+}
+
+/// The directory this codex rollout ran in, read from its head once per version
+/// of the file. Every scan of every project used to pay this for every rollout
+/// on the machine, which is the single most expensive thing this module did.
+fn cached_cwd(c: &Candidate) -> Option<String> {
+    if let Some(hit) = cached(c, |e| e.cwd.clone()) {
+        return hit;
+    }
+    let read = codex_session_cwd(&c.path);
+    remember(c, |e| e.cwd = Some(read.clone()));
+    read
+}
+
+// --------------------------------------------------------------- scanning
+
+/// Runs `work` over these files a few at a time, in no particular order.
+///
+/// Order does not matter because everything downstream of this sums, and not
+/// caring is what lets a worker take the next file the moment it is free rather
+/// than waiting on a chunk boundary — one huge transcript in a batch of small
+/// ones is the normal case.
+fn scan<T, F>(items: &[Candidate], work: F) -> Vec<T>
 where
-    F: FnOnce(&Path) -> FileUsage,
+    T: Send,
+    F: Fn(&Candidate) -> T + Sync,
 {
-    let meta = fs::metadata(path).ok()?;
-    let len = meta.len();
-    let modified_ms = meta.modified().map(ms_since_epoch).unwrap_or(0);
-    {
-        let map = cache().lock();
-        if let Some(hit) = map.get(path) {
-            if hit.len == len && hit.modified_ms == modified_ms {
-                return Some(hit.usage.clone());
-            }
+    let width = SCAN_THREADS.min(items.len());
+    if width <= 1 {
+        return items.iter().map(work).collect();
+    }
+    let next = AtomicUsize::new(0);
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..width)
+            .map(|_| {
+                let next = &next;
+                let work = &work;
+                scope.spawn(move || {
+                    let mut mine = Vec::new();
+                    while let Some(item) = items.get(next.fetch_add(1, Ordering::Relaxed)) {
+                        mine.push(work(item));
+                    }
+                    mine
+                })
+            })
+            .collect();
+        // A worker that panicked has already said why on its way out. Losing
+        // its share under-reports one scan, which the refresh button answers;
+        // propagating it would take the window's command down with it.
+        handles
+            .into_iter()
+            .flat_map(|h| h.join().unwrap_or_default())
+            .collect()
+    })
+}
+
+/// Folds a batch of transcripts into the report, reading only the ones nothing
+/// already holds.
+///
+/// Two passes on purpose. A warm batch is one hash lookup per file, and four
+/// threads cost more than the lookups do: fanning out unconditionally made the
+/// common case — a project reopened a minute after it was last read — measurably
+/// slower than leaving it serial. Only the misses are worth a thread, and they
+/// are the ones that touch the disk.
+fn absorb_all(acc: &mut Accumulator, files: &[Candidate], parse: fn(&Path) -> FileUsage) {
+    let mut cold: Vec<Candidate> = Vec::new();
+    for c in files {
+        match cached(c, |e| e.usage.clone()) {
+            Some(usage) => acc.absorb(&usage),
+            None => cold.push(c.clone()),
         }
     }
-    let usage = parse(path);
-    let mut map = cache().lock();
-    if map.len() >= CACHE_LIMIT {
-        map.clear();
+    for usage in scan(&cold, |c| cached_usage(c, parse)) {
+        acc.absorb(&usage);
     }
-    map.insert(
-        path.to_path_buf(),
-        CacheEntry {
-            len,
-            modified_ms,
-            usage: usage.clone(),
-        },
-    );
-    Some(usage)
+}
+
+/// The directory each of these rollouts ran in, split the same way: the ones
+/// already known cost a lookup, and only a head that has never been read is
+/// worth handing to a thread.
+fn cwds_of(files: &[Candidate]) -> Vec<(Candidate, String)> {
+    let mut out: Vec<(Candidate, String)> = Vec::new();
+    let mut cold: Vec<Candidate> = Vec::new();
+    for c in files {
+        match cached(c, |e| e.cwd.clone()) {
+            Some(Some(cwd)) => out.push((c.clone(), cwd)),
+            // Looked at before and carrying no `session_meta`. An answer, and
+            // not one worth asking the disk for a second time.
+            Some(None) => {}
+            None => cold.push(c.clone()),
+        }
+    }
+    let read = scan(&cold, |c| cached_cwd(c).map(|cwd| (c.clone(), cwd)));
+    out.extend(read.into_iter().flatten());
+    out
+}
+
+/// The files worth opening: inside the window, and not a second copy of a
+/// transcript already counted.
+///
+/// A transcript is counted once per run even when it exists twice on disk:
+/// moving a thread between projects copies the file into the destination, and
+/// both copies are inside this project when the move was between one of its
+/// worktrees and its own folder.
+fn shortlist(
+    files: Vec<Candidate>,
+    cutoff: i64,
+    kind: &str,
+    seen: &mut HashSet<String>,
+) -> Vec<Candidate> {
+    let mut out = Vec::with_capacity(files.len());
+    for c in files {
+        if c.modified_ms < cutoff {
+            continue;
+        }
+        if let Some(stem) = c.path.file_stem().map(|s| s.to_string_lossy().into_owned()) {
+            if !seen.insert(format!("{kind}:{stem}")) {
+                continue;
+            }
+        }
+        out.push(c);
+    }
+    out
 }
 
 fn add(file: &mut FileUsage, provider: &str, model: &str, day: Option<&str>, u: ModelUsage) {
@@ -225,8 +455,15 @@ fn add(file: &mut FileUsage, provider: &str, model: &str, day: Option<&str>, u: 
         return;
     }
     file.counted = true;
-    let key = (provider.to_string(), model.to_string());
-    match file.models.iter_mut().find(|(k, _)| *k == key) {
+    // Matched on the strings rather than on a freshly built key: a transcript
+    // is hundreds of assistant lines and all but the first few name a model
+    // already in the list, so building the key first allocated two Strings per
+    // line to throw both away.
+    match file
+        .models
+        .iter_mut()
+        .find(|((p, m), _)| p == provider && m == model)
+    {
         Some((_, slot)) => {
             slot.input += u.input;
             slot.output += u.output;
@@ -235,7 +472,7 @@ fn add(file: &mut FileUsage, provider: &str, model: &str, day: Option<&str>, u: 
             slot.total += total;
         }
         None => file.models.push((
-            key,
+            (provider.to_string(), model.to_string()),
             ModelUsage {
                 provider: provider.to_string(),
                 model: model.to_string(),
@@ -248,6 +485,27 @@ fn add(file: &mut FileUsage, provider: &str, model: &str, day: Option<&str>, u: 
         match file.days.iter_mut().find(|(d, _)| d == day) {
             Some((_, slot)) => *slot += total,
             None => file.days.push((day.to_string(), total)),
+        }
+    }
+}
+
+/// Reads a transcript line by line into one buffer.
+///
+/// `BufRead::lines` hands back a fresh `String` per line, and a claude
+/// transcript's lines carry whole tool results — an allocation the size of the
+/// largest line, once per line, for a file most of whose lines are discarded on
+/// a substring test. One buffer keeps its capacity across the file.
+fn each_line(path: &Path, mut on_line: impl FnMut(&str)) {
+    let Ok(handle) = fs::File::open(path) else {
+        return;
+    };
+    let mut reader = BufReader::new(handle);
+    let mut line = String::new();
+    loop {
+        line.clear();
+        match reader.read_line(&mut line) {
+            Ok(0) | Err(_) => return,
+            Ok(_) => on_line(&line),
         }
     }
 }
@@ -280,22 +538,19 @@ struct ClaudeUsage {
 /// what keeps a single answer from being counted five times.
 fn parse_claude_file(path: &Path) -> FileUsage {
     let mut out = FileUsage::default();
-    let Ok(handle) = fs::File::open(path) else {
-        return out;
-    };
     let mut seen: HashSet<String> = HashSet::new();
-    for line in BufReader::new(handle).lines().map_while(Result::ok) {
+    each_line(path, |line| {
         if !line.contains("\"usage\"") {
-            continue;
+            return;
         }
-        let Ok(parsed) = serde_json::from_str::<ClaudeLine>(&line) else {
-            continue;
+        let Ok(parsed) = serde_json::from_str::<ClaudeLine>(line) else {
+            return;
         };
-        let Some(message) = parsed.message else { continue };
-        let Some(usage) = message.usage else { continue };
-        if let Some(id) = &message.id {
-            if !seen.insert(id.clone()) {
-                continue;
+        let Some(message) = parsed.message else { return };
+        let Some(usage) = message.usage else { return };
+        if let Some(id) = message.id {
+            if !seen.insert(id) {
+                return;
             }
         }
         let day = parsed.timestamp.as_deref().and_then(iso_day);
@@ -312,7 +567,7 @@ fn parse_claude_file(path: &Path) -> FileUsage {
                 ..Default::default()
             },
         );
-    }
+    });
     out
 }
 
@@ -340,37 +595,42 @@ struct CodexTokens {
 /// rollouts have none — and then only the last one counts.
 fn parse_codex_file(path: &Path) -> FileUsage {
     let mut out = FileUsage::default();
-    let Ok(handle) = fs::File::open(path) else {
-        return out;
-    };
     let mut model = String::new();
     let mut fallback: Option<(String, CodexTokens)> = None;
-    for line in BufReader::new(handle).lines().map_while(Result::ok) {
-        let Ok(parsed) = serde_json::from_str::<CodexLine>(&line) else {
-            continue;
+    each_line(path, |line| {
+        // Most of a rollout is prompts and tool output, and neither carries
+        // either of the two things read here. Both tests are a substring scan;
+        // what they skip is a whole `serde_json::Value` per line.
+        if !line.contains("token_count") && !(model.is_empty() && line.contains("\"model\"")) {
+            return;
+        }
+        let Ok(parsed) = serde_json::from_str::<CodexLine>(line) else {
+            return;
         };
-        let Some(payload) = parsed.payload else { continue };
+        let Some(payload) = parsed.payload else { return };
         if model.is_empty() {
             if let Some(found) = payload.get("model").and_then(|m| m.as_str()) {
                 model = found.to_string();
             }
         }
         if parsed.kind.as_deref() == Some("session_meta") {
-            continue;
+            return;
         }
         if payload.get("type").and_then(|t| t.as_str()) != Some("token_count") {
-            continue;
+            return;
         }
         let day = parsed.timestamp.as_deref().and_then(iso_day);
         let info = payload.get("info").unwrap_or(&payload);
+        // Deserialized off the borrowed value: `from_value` takes ownership, so
+        // reaching it meant cloning the block back out of the payload first.
         if let Some(last) = info.get("last_token_usage") {
-            let t: CodexTokens = serde_json::from_value(last.clone()).unwrap_or_default();
+            let t = CodexTokens::deserialize(last).unwrap_or_default();
             push_codex(&mut out, &model, day.as_deref(), t);
         } else if let Some(total) = info.get("total_token_usage") {
-            let t: CodexTokens = serde_json::from_value(total.clone()).unwrap_or_default();
+            let t = CodexTokens::deserialize(total).unwrap_or_default();
             fallback = Some((day.unwrap_or_default(), t));
         }
-    }
+    });
     if let Some((day, t)) = fallback {
         push_codex(
             &mut out,
@@ -403,7 +663,7 @@ fn push_codex(out: &mut FileUsage, model: &str, day: Option<&str>, t: CodexToken
 
 // ---------------------------------------------------------------- walking
 
-fn collect_jsonl(root: &Path, out: &mut Vec<(PathBuf, i64)>, depth: usize) {
+fn collect_jsonl(root: &Path, out: &mut Vec<Candidate>, depth: usize) {
     if depth > 6 {
         return;
     }
@@ -420,12 +680,15 @@ fn collect_jsonl(root: &Path, out: &mut Vec<(PathBuf, i64)>, depth: usize) {
         if path.extension() != Some(OsStr::new("jsonl")) {
             continue;
         }
-        let modified = entry
-            .metadata()
-            .and_then(|m| m.modified())
-            .map(ms_since_epoch)
-            .unwrap_or(0);
-        out.push((path, modified));
+        // A file whose metadata cannot be read cannot be opened either, and the
+        // size and the mtime are this file's version: without both, nothing
+        // downstream can tell a cached answer from a stale one.
+        let Ok(meta) = entry.metadata() else { continue };
+        out.push(Candidate {
+            path,
+            len: meta.len(),
+            modified_ms: meta.modified().map(ms_since_epoch).unwrap_or(0),
+        });
     }
 }
 
@@ -451,11 +714,6 @@ fn codex_session_cwd(path: &Path) -> Option<String> {
 /// isolation a project's threads run in folders that are not under it, and an
 /// agent's store keys on the directory it ran in. Missing one means the card
 /// under-reports without ever saying so.
-///
-/// A transcript is counted once per run even when it exists twice on disk:
-/// moving a thread between projects copies the file into the destination, and
-/// both copies are inside this project when the move was between one of its
-/// worktrees and its own folder.
 pub fn collect_usage_blocking(cwds: Vec<String>, days: u32) -> UsageReport {
     let mut acc = Accumulator::default();
     let mut missing = Vec::new();
@@ -468,7 +726,11 @@ pub fn collect_usage_blocking(cwds: Vec<String>, days: u32) -> UsageReport {
 
     let claude_root = home.join(".claude").join("projects");
     if claude_root.is_dir() {
+        // Claude encodes the working directory into the folder name, so the
+        // filter is on the path and nothing outside this project is ever
+        // opened.
         let encoded: HashSet<String> = targets.iter().map(|c| encode_claude_project_dir(c)).collect();
+        let mut files = Vec::new();
         for entry in fs::read_dir(&claude_root).into_iter().flatten().flatten() {
             if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
                 continue;
@@ -478,23 +740,10 @@ pub fn collect_usage_blocking(cwds: Vec<String>, days: u32) -> UsageReport {
             }
             // Depth 6 is the recursion limit, so starting there reads this
             // folder and nothing under it. Claude's project folders are flat.
-            let mut files = Vec::new();
             collect_jsonl(&entry.path(), &mut files, 6);
-            for (path, modified) in files {
-                if modified < cutoff {
-                    continue;
-                }
-                let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned());
-                if let Some(stem) = stem {
-                    if !seen_sessions.insert(format!("claude:{stem}")) {
-                        continue;
-                    }
-                }
-                if let Some(usage) = cached_file(&path, parse_claude_file) {
-                    acc.absorb(&usage);
-                }
-            }
         }
+        let wanted = shortlist(files, cutoff, "claude", &mut seen_sessions);
+        absorb_all(&mut acc, &wanted, parse_claude_file);
     } else {
         missing.push("claude".to_string());
     }
@@ -503,28 +752,19 @@ pub fn collect_usage_blocking(cwds: Vec<String>, days: u32) -> UsageReport {
     if codex_root.is_dir() {
         let mut files = Vec::new();
         collect_jsonl(&codex_root, &mut files, 0);
-        for (path, modified) in files {
-            if modified < cutoff {
-                continue;
-            }
-            // The cwd is inside the file, so unlike claude there is no path to
-            // filter on first; the head is read for every candidate and the
-            // rest only for the ones that match.
-            let Some(cwd) = codex_session_cwd(&path) else {
-                continue;
-            };
-            if !targets.contains(&cwd) {
-                continue;
-            }
-            if let Some(stem) = path.file_stem().map(|s| s.to_string_lossy().into_owned()) {
-                if !seen_sessions.insert(format!("codex:{stem}")) {
-                    continue;
-                }
-            }
-            if let Some(usage) = cached_file(&path, parse_codex_file) {
-                acc.absorb(&usage);
-            }
-        }
+        files.retain(|c| c.modified_ms >= cutoff);
+        // The cwd is inside the file, so unlike claude there is no path to
+        // filter on: the head of every rollout in the window has to be read at
+        // least once. Once, and then held — `cached_cwd` keeps the answer
+        // against the file's own version, so ruling a rollout out is free on
+        // every later scan of every project.
+        let mine: Vec<Candidate> = cwds_of(&files)
+            .into_iter()
+            .filter(|(_, cwd)| targets.contains(cwd))
+            .map(|(c, _)| c)
+            .collect();
+        let wanted = shortlist(mine, cutoff, "codex", &mut seen_sessions);
+        absorb_all(&mut acc, &wanted, parse_codex_file);
     } else {
         missing.push("codex".to_string());
     }
@@ -547,6 +787,15 @@ mod tests {
             writeln!(f, "{l}").unwrap();
         }
         path
+    }
+
+    fn candidate(path: &Path) -> Candidate {
+        let meta = fs::metadata(path).unwrap();
+        Candidate {
+            path: path.to_path_buf(),
+            len: meta.len(),
+            modified_ms: meta.modified().map(ms_since_epoch).unwrap_or(0),
+        }
     }
 
     /// The four counters stay apart, and the day comes off the line's own
@@ -620,5 +869,65 @@ mod tests {
         for junk in ["", "yesterday", "2026/07/28", "20260728T10"] {
             assert_eq!(iso_day(junk), None, "{junk}");
         }
+    }
+
+    /// A second read of an unchanged file hands back the same allocation rather
+    /// than a second parse, and rewriting the file drops it.
+    #[test]
+    fn an_unchanged_transcript_is_parsed_once() {
+        let path = write(
+            "cache-hit",
+            &[r#"{"timestamp":"2026-07-28T10:00:00.000Z","message":{"id":"m1","model":"claude-opus-5","usage":{"input_tokens":7,"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}"#],
+        );
+        let first = cached_usage(&candidate(&path), parse_claude_file);
+        let second = cached_usage(&candidate(&path), parse_claude_file);
+        assert!(Arc::ptr_eq(&first, &second), "second read re-parsed the file");
+
+        let rewritten = write(
+            "cache-hit",
+            &[r#"{"timestamp":"2026-07-28T10:00:00.000Z","message":{"id":"m1","model":"claude-opus-5","usage":{"input_tokens":7,"output_tokens":9,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}"#],
+        );
+        let third = cached_usage(&candidate(&rewritten), parse_claude_file);
+        assert!(!Arc::ptr_eq(&first, &third), "a rewritten file was not re-read");
+        assert_eq!(third.models[0].1.total, 16);
+    }
+
+    /// Going over the limit drops the half nobody asked for, and keeps the
+    /// half somebody did. Emptying it whole is what made a machine with more
+    /// transcripts than the limit re-read every file on every scan.
+    #[test]
+    fn a_full_cache_evicts_rather_than_empties() {
+        let mut map: HashMap<PathBuf, Entry> = HashMap::new();
+        for i in 0..CACHE_LIMIT {
+            let c = Candidate {
+                path: PathBuf::from(format!("/tmp/t{i}.jsonl")),
+                len: 1,
+                modified_ms: 1,
+            };
+            let mut entry = Entry::blank(&c);
+            entry.used = i as u64 + 1;
+            map.insert(c.path, entry);
+        }
+        evict(&mut map);
+        assert!(!map.is_empty(), "the map was emptied");
+        assert!(map.len() < CACHE_LIMIT, "nothing was dropped");
+        // The newest stamp survives, the oldest does not.
+        assert!(map.contains_key(&PathBuf::from(format!("/tmp/t{}.jsonl", CACHE_LIMIT - 1))));
+        assert!(!map.contains_key(&PathBuf::from("/tmp/t0.jsonl")));
+    }
+
+    /// The store keeps the working directory inside the rollout, so ruling one
+    /// out costs a file open. It must cost it once.
+    #[test]
+    fn a_rollout_head_is_read_once() {
+        let path = write(
+            "codex-cwd",
+            &[r#"{"timestamp":"2026-07-28T09:00:00.000Z","type":"session_meta","payload":{"id":"s","cwd":"D:\\Dev\\Thing","model":"gpt-5-codex"}}"#],
+        );
+        let c = candidate(&path);
+        assert_eq!(cached_cwd(&c).as_deref(), Some("d:/dev/thing"));
+        // Nothing left to open: the file is gone and the answer still stands.
+        fs::remove_file(&path).unwrap();
+        assert_eq!(cached_cwd(&c).as_deref(), Some("d:/dev/thing"));
     }
 }
