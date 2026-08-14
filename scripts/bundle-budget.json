@@ -28,9 +28,12 @@
     "reply bar a waiting thread offers: it exists so a blocked terminal can be",
     "answered in one tap, and a chunk fetched on the tap is the one thing that",
     "would take that away. Then to 800624, for the turn list a thread keeps and",
-    "the checkpoint calls behind it, which the thread panel reads on open."
+    "the checkpoint calls behind it, which the thread panel reads on open. Then",
+    "to 806912, for the light palette and the theme that follows the OS: both",
+    "palettes and the matchMedia watcher are applied before the first paint, or",
+    "the window opens dark and flips. Measured at 800.2 KB, so this leaves 6.6 KB."
   ],
-  "eagerBytes": 800000,
+  "eagerBytes": 806912,
   "totalBytes": 6144000,
   "largestEagerChunkBytes": 256000
 }
