@@ -52,14 +52,24 @@
     if (!palette.open) return;
     const folder =
       app.projects.find((p) => p.id === app.currentProjectId)?.cwd ?? null;
-    void projectScripts.ensure(folder, true).then(() => {
-      if (palette.open) commands = buildPaletteCommands();
-    });
+    void projectScripts.ensure(folder, true);
   });
 
+  // Rebuilds whenever anything it is built from moves, the script list landing
+  // included: `forFolder` is read from in here, so no callback is needed.
+  // Nothing but `commands` is assigned, and that is the point: the read above
+  // takes tens of milliseconds locally and a full round trip against a remote
+  // boite, so anything else this touched would be undone under a user who
+  // started typing the moment the palette appeared.
   $effect(() => {
     if (!palette.open) return;
     commands = buildPaletteCommands();
+  });
+
+  // Opening is what clears the field, so this reads `palette.open` and nothing
+  // else. Kept apart from the rebuild above for that one reason.
+  $effect(() => {
+    if (!palette.open) return;
     query = "";
     debouncedQuery = "";
     activeIndex = 0;

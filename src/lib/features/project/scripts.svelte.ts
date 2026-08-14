@@ -1,5 +1,6 @@
 import { backendForPath } from "$lib/backend";
 import { logger } from "$lib/shared/services/logger.svelte";
+import { joinPath } from "./path";
 import { detectManager, parsePackageScripts, type ProjectScript } from "./scripts";
 
 /**
@@ -16,7 +17,9 @@ import { detectManager, parsePackageScripts, type ProjectScript } from "./script
  */
 class ProjectScripts {
   private byFolder = $state<Record<string, ProjectScript[]>>({});
-  private inFlight = new Set<string>();
+  // The promise, not just the folder name: a second caller has to be able to
+  // wait for the read that is already running rather than be told it is done.
+  private inFlight = new Map<string, Promise<void>>();
 
   /** What this folder declares, or an empty list until the read lands. */
   forFolder(folder: string | null): ProjectScript[] {
@@ -29,12 +32,36 @@ class ProjectScripts {
    *
    * `force` is for the case the file changed under the app: the palette asks
    * for it on open, which is the moment somebody is about to look at the list.
+   *
+   * A read already running is joined rather than skipped, and a forced call
+   * that lands during one queues its own read behind it. Returning early there
+   * would drop the `force` on the floor: the caller rebuilds its list as soon
+   * as this resolves, so a palette closed and reopened inside one read window
+   * would show the previous answer with nothing scheduled to correct it.
    */
   async ensure(folder: string | null, force = false): Promise<void> {
     if (!folder) return;
-    if (this.inFlight.has(folder)) return;
-    if (!force && this.byFolder[folder] !== undefined) return;
-    this.inFlight.add(folder);
+    const running = this.inFlight.get(folder);
+    if (running) {
+      await running;
+      if (!force) return;
+      // Another forced caller may have queued the re-read while this one
+      // waited. Joining it answers the same thing for one file read.
+      const queued = this.inFlight.get(folder);
+      if (queued) return queued;
+    } else if (!force && this.byFolder[folder] !== undefined) {
+      return;
+    }
+    const read = this.read(folder);
+    this.inFlight.set(folder, read);
+    try {
+      await read;
+    } finally {
+      this.inFlight.delete(folder);
+    }
+  }
+
+  private async read(folder: string): Promise<void> {
     try {
       const backend = backendForPath(folder);
       const entries = await backend.explorer.readDir(folder);
@@ -43,7 +70,10 @@ class ProjectScripts {
         this.byFolder[folder] = [];
         return;
       }
-      const file = await backend.editor.readTextFile(`${folder}/package.json`);
+      // joinPath rather than a literal `/`: a Windows folder keeps its
+      // backslashes, and a path stored with a trailing separator does not turn
+      // into `D:\repo\/package.json` on the way to the backend.
+      const file = await backend.editor.readTextFile(joinPath(folder, "package.json"));
       this.byFolder[folder] = parsePackageScripts(file.content, detectManager(names));
     } catch (err) {
       // A folder that is gone, unreadable or on a boite that just dropped. The
@@ -51,12 +81,16 @@ class ProjectScripts {
       // it did before this existed.
       logger.debug("project", "could not read scripts", err);
       this.byFolder[folder] = [];
-    } finally {
-      this.inFlight.delete(folder);
     }
   }
 
-  /** A workspace switch replaces every project, and every folder with it. */
+  /**
+   * A workspace switch replaces every project, and every folder with it.
+   *
+   * Keyed by absolute path, which is exactly what two machines can spell the
+   * same way and mean different things by, so this has to run on the switch
+   * rather than be left to expire: `resetStores()` in app/workspace.ts calls it.
+   */
   reset(): void {
     this.byFolder = {};
   }
