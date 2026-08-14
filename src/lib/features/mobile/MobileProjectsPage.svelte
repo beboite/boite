@@ -3,6 +3,7 @@
   import { visibleStatus } from "$lib/domain/thread-status";
   import { isScratch } from "$lib/domain/project";
   import { isFiled } from "$lib/domain/thread-ageing";
+  import { ageingNow } from "$lib/features/thread/ageing.svelte";
 import { projectDisplayName } from "$lib/shared/project-label";
   import { pickAndAddProject } from "$lib/features/project/api";
   import { openProjectDashboard } from "$lib/features/project/dashboard";
@@ -25,9 +26,13 @@ import { projectDisplayName } from "$lib/shared/project-label";
    *
    * There is no way to file one from here yet, but a phone that still shows
    * what a laptop put away would make the filing look like it did not take.
+   *
+   * The ageing clock for the same reason the sidebar reads it: this is called
+   * from the markup, so a plain `Date.now()` would leave a thread whose snooze
+   * ended sitting out of the list until something else made the page redraw.
    */
   function liveThreads(projectId: string): Thread[] {
-    const now = Date.now();
+    const now = ageingNow();
     return app.threadsByProjectSorted(projectId).filter((thread) => !isFiled(thread, now));
   }
 

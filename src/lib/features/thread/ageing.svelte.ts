@@ -21,6 +21,28 @@ import type { Thread } from "$lib/types";
 const HOURLY = 3_600_000;
 
 let timer: ReturnType<typeof setTimeout> | null = null;
+// Whether the clock is running, so a rearm asked for after teardown does not
+// leave a timer behind that nothing holds the handle to any more.
+let running = false;
+
+/**
+ * The instant every filed-away list ages against, and why it is state.
+ *
+ * `Date.now()` read inside a `$derived` is not a dependency of it: the number
+ * changes on its own, nothing writes anything Svelte is watching, and the
+ * derived keeps the answer it computed the first time. So the sidebar's filter
+ * used to hold a snoozed thread out of the list until an unrelated mutation
+ * happened to rebuild it: the wake fired and redrew nothing.
+ *
+ * Written by the sweep and nowhere else, because the sweep is armed for exactly
+ * the instants at which the answer can have changed.
+ */
+let tick = $state(Date.now());
+
+/** The instant to age against, for anything that has to redraw when one ends. */
+export function ageingNow(): number {
+  return tick;
+}
 
 /**
  * When a thread was last doing something, for a clock that has to answer for
@@ -37,6 +59,7 @@ function activityOf(thread: Thread): number {
 
 function sweep() {
   const now = Date.now();
+  tick = now;
   const due = dueForAutoSettle(app.threads, {
     now,
     days: settings.state.autoSettleDays,
@@ -69,14 +92,29 @@ function arm(now: number) {
 
 /** Starts the clock, and returns the way to stop it. */
 export function startThreadAgeing(): () => void {
+  running = true;
   sweep();
   return () => {
+    running = false;
     if (timer !== null) clearTimeout(timer);
     timer = null;
   };
 }
 
-/** Re-reads the list, for when a thread was snoozed or the setting changed. */
+/**
+ * Runs the pass again, for when a thread was snoozed or the setting changed.
+ *
+ * Both are moments `arm` could not have known about: it is armed for the list as
+ * it was, and the default boot state (nothing snoozed, auto-settle off) arms no
+ * timer at all, so the first snooze of a session would otherwise never be woken
+ * by anything. A whole pass rather than just a rearm because turning
+ * auto-settle on is a request about the threads that are already old, and an
+ * hour is a long time to look at a list that ignored the setting.
+ *
+ * Not the other way round: the settle writes the pass itself makes do not come
+ * back through here, or every due thread would ask for another pass.
+ */
 export function rearmThreadAgeing() {
-  arm(Date.now());
+  if (!running) return;
+  sweep();
 }

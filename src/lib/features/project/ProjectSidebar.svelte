@@ -44,6 +44,7 @@ import { projectDisplayName } from "$lib/shared/project-label";
     dropIntent,
     hasBecomeADrag,
     reordered,
+    reorderedAmongVisible,
     rowShift,
     sideFromRect,
     slotIndexAt,
@@ -66,6 +67,7 @@ import { projectDisplayName } from "$lib/shared/project-label";
     isPinned,
     isSnoozed,
   } from "$lib/domain/thread-ageing";
+  import { ageingNow } from "$lib/features/thread/ageing.svelte";
   import FolderUp from "@lucide/svelte/icons/folder-up";
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
   import ShortcutBar from "$lib/features/shortcut/ShortcutBar.svelte";
@@ -566,8 +568,13 @@ import { projectDisplayName } from "$lib/shared/project-label";
 
     if (drag.slotIndex !== null) {
       if (smartSortArmed()) return;
+      // Against the rows that were actually drawn, because that is what the slot
+      // counted: `captureSiblings` measures the DOM, and the DOM is this filtered
+      // list. The order that gets saved is still the whole one, see
+      // `reorderedAmongVisible`, so a pinned or filed thread keeps its place.
       const ids = app.threadsByProjectSorted(drag.projectId).map((t) => t.id);
-      const next = reordered(ids, drag.id, drag.slotIndex);
+      const drawn = (threadsByProject.get(drag.projectId) ?? []).map((t) => t.id);
+      const next = reorderedAmongVisible(ids, drawn, drag.id, drag.slotIndex);
       if (next) void settings.setThreadOrder(drag.projectId, next);
       return;
     }
@@ -1033,9 +1040,14 @@ import { projectDisplayName } from "$lib/shared/project-label";
    * filed one is out of the way until `showFiled` asks for it. `filedNow` is
    * read once per rebuild instead of per row, so a list cannot disagree with
    * itself about whether a snooze has just ended.
+   *
+   * From the ageing clock rather than from `Date.now()`, which is the only read
+   * of the two Svelte can see move: a plain clock read is not a dependency, so
+   * this list would keep hiding a thread whose snooze ended until something
+   * unrelated rebuilt it.
    */
   const threadsByProject = $derived.by(() => {
-    const filedNow = Date.now();
+    const filedNow = ageingNow();
     const map = new Map<string, Thread[]>();
     for (const p of visibleProjects) {
       const all = app.threadsByProjectSorted(p.id);
@@ -1053,10 +1065,13 @@ import { projectDisplayName } from "$lib/shared/project-label";
   /**
    * How many rows the filter is currently hiding, for the toggle that reveals
    * them. Pinned ones are not counted: they are on screen, just higher up.
+   *
+   * Same clock as the list it counts against, so the badge and the rows cannot
+   * be answering about two different instants.
    */
   const filedCount = $derived.by(() => {
     if (showFiled) return 0;
-    const now = Date.now();
+    const now = ageingNow();
     let n = 0;
     for (const thread of app.threads) {
       if (!isPinned(thread) && isFiled(thread, now)) n += 1;

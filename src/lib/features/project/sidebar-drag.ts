@@ -172,3 +172,43 @@ export function reordered(
   next.splice(Math.min(slot, next.length), 0, draggedId);
   return next;
 }
+
+/**
+ * The same move, when what is on screen is only part of the list being saved.
+ *
+ * A thread list hides rows: pinned ones are drawn in their own section higher
+ * up, and filed ones are out of the way until the user asks for them. The slot
+ * comes from the rows that were measured, so it counts the visible ones. The
+ * order that gets persisted still has to carry the hidden rows, or a thread
+ * would lose its place while it was pinned. Applying the visible index to the
+ * full list is the bug this replaces: one pinned row above the pointer and every
+ * drop landed a place too high.
+ *
+ * So the slot is resolved against the row it means, the visible row it lands
+ * before, or the last visible row when it lands at the end, and the dragged id
+ * is spliced in beside it, leaving everything hidden where it was. Null when the
+ * two lists disagree about what exists, because a caller that saved that would
+ * write an order with a row silently dropped out of it.
+ */
+export function reorderedAmongVisible(
+  ids: readonly string[],
+  visibleIds: readonly string[],
+  draggedId: string,
+  slot: number,
+): string[] | null {
+  if (!ids.includes(draggedId)) return null;
+  const rest = ids.filter((id) => id !== draggedId);
+  const visibleRest = visibleIds.filter((id) => id !== draggedId);
+  // Nothing visible to land beside: the drop cannot mean a new position, so the
+  // order it would save is the one it already has.
+  if (visibleRest.length === 0) return ids.slice();
+  const anchor =
+    slot >= visibleRest.length
+      ? visibleRest[visibleRest.length - 1]
+      : visibleRest[slot];
+  const at = rest.indexOf(anchor);
+  if (at < 0) return null;
+  const next = rest.slice();
+  next.splice(slot >= visibleRest.length ? at + 1 : at, 0, draggedId);
+  return next;
+}
