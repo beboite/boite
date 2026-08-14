@@ -111,7 +111,8 @@
   }
 
   async function revert(turn: Turn) {
-    if (!repo || reverting) return;
+    const id = thread?.id;
+    if (!repo || !id || reverting) return;
     const ok = await confirmDialog.ask({
       title: t("turns.revertTitle"),
       message: t("turns.revertMessage"),
@@ -122,7 +123,7 @@
     if (!ok) return;
     reverting = true;
     try {
-      await backendForPath(repo).checkpoints.restore(repo, turn.startSha);
+      await backendForPath(repo).checkpoints.restore(repo, id, turn.startSha);
       notifications.success(t("turns.reverted"));
     } catch (err) {
       notifications.error(t("turns.revertFailed", { error: String(err) }));

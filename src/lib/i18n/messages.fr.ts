@@ -869,7 +869,7 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "turns.after": "Après",
   "turns.revert": "Restaurer les fichiers d'avant ce tour",
   "turns.revertTitle": "Restaurer les fichiers d'avant ce tour ?",
-  "turns.revertMessage": "Chaque fichier revient à ce qu'il était avant le tour, y compris ceux que le tour a créés. La conversation de l'agent n'est pas touchée : il continue de croire qu'il a fait ces changements.",
+  "turns.revertMessage": "Tout le répertoire de travail revient à ce qu'il était avant ce tour. Chaque tour suivant, et chaque modification que vous avez faite vous-même depuis, est perdu, fichiers non suivis compris. Les fichiers tels qu'ils sont maintenant sont enregistrés d'abord, ce qui rend cette opération réversible. La conversation de l'agent n'est pas touchée : il continue de croire qu'il a fait ces changements.",
   "turns.revertConfirm": "Restaurer les fichiers",
   "turns.reverted": "Fichiers restaurés à l'état d'avant le tour.",
   "turns.revertFailed": "Restauration échouée : {error}",

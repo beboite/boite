@@ -102,7 +102,8 @@ export const tauriCheckpoints: CheckpointApi = {
     invoke<CheckpointDiff>("checkpoint_diff", { repo, from, to, patch }),
   fileVersions: (repo, from, to, file) =>
     invoke<CheckpointFileVersions>("checkpoint_file_versions", { repo, from, to, file }),
-  restore: (repo, sha) => invoke<void>("checkpoint_restore", { repo, sha }),
+  restore: (repo, threadId, sha) =>
+    invoke<void>("checkpoint_restore", { repo, threadId, sha }),
   forget: (repo, threadId) => invoke<void>("checkpoint_forget", { repo, threadId }),
 };
 

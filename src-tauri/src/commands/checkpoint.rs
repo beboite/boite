@@ -94,9 +94,19 @@ pub async fn checkpoint_file_versions(
 pub async fn checkpoint_restore(
     scope: State<'_, ProjectRoots>,
     repo: String,
+    thread_id: String,
     sha: String,
 ) -> Result<Value, String> {
-    on_bus(scope.inner(), Checkpoints::Restore { repo, sha }.into()).await
+    on_bus(
+        scope.inner(),
+        Checkpoints::Restore {
+            repo,
+            thread_id,
+            sha,
+        }
+        .into(),
+    )
+    .await
 }
 
 #[tauri::command]

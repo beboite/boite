@@ -331,8 +331,17 @@ export interface EditorApi {
   readBase64(path: string): Promise<string>;
 }
 
-/** Which end of an agent's turn a checkpoint was taken at. */
-export type CheckpointEdge = "start" | "end";
+/** Which end of an agent's turn a capture can be asked for. */
+export type TurnEdge = "start" | "end";
+
+/**
+ * What a checkpoint was taken at.
+ *
+ * `restore` is not an end of a turn: it is the tree a revert was about to
+ * overwrite, written by the restore itself so the undo can be undone. Never
+ * asked for, only read back in a list, which is why it is not a [`TurnEdge`].
+ */
+export type CheckpointEdge = TurnEdge | "restore";
 
 /**
  * What a worktree looked like at one end of a turn, as a ref nothing else reads.
@@ -376,7 +385,7 @@ export interface CheckpointFileVersions {
 
 export interface CheckpointApi {
   /** Null when the thread is not running in a git repository. */
-  capture(repo: string, threadId: string, edge: CheckpointEdge): Promise<Checkpoint | null>;
+  capture(repo: string, threadId: string, edge: TurnEdge): Promise<Checkpoint | null>;
   list(repo: string, threadId: string): Promise<Checkpoint[]>;
   diff(repo: string, from: string, to: string, patch: boolean): Promise<CheckpointDiff>;
   fileVersions(
@@ -385,8 +394,13 @@ export interface CheckpointApi {
     to: string,
     file: string,
   ): Promise<CheckpointFileVersions>;
-  /** Restores the files and nothing else. Never the agent's conversation. */
-  restore(repo: string, sha: string): Promise<void>;
+  /**
+   * Restores the files and nothing else. Never the agent's conversation.
+   *
+   * The thread is named because the restore checkpoints what it is about to
+   * overwrite first, and that snapshot lands in this thread's own list.
+   */
+  restore(repo: string, threadId: string, sha: string): Promise<void>;
   forget(repo: string, threadId: string): Promise<void>;
 }
 

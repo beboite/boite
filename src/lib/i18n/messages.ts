@@ -876,7 +876,7 @@ export const EN_MESSAGES = {
   "turns.after": "After",
   "turns.revert": "Restore the files from before this turn",
   "turns.revertTitle": "Restore the files from before this turn?",
-  "turns.revertMessage": "Every file goes back to what it was before the turn ran, including the ones the turn created. The agent's conversation is not touched: it still believes it made those changes.",
+  "turns.revertMessage": "The whole working tree goes back to what it was before this turn ran. Every turn after it, and every edit you made yourself since, is discarded, untracked files included. The files as they are right now are saved first, so this can itself be undone. The agent's conversation is not touched: it still believes it made those changes.",
   "turns.revertConfirm": "Restore files",
   "turns.reverted": "Files restored to before the turn.",
   "turns.revertFailed": "Restore failed: {error}",

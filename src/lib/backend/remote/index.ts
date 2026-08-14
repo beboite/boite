@@ -346,7 +346,8 @@ export class RemoteBackend implements Backend {
         rpc("checkpoint.fileVersions", { repo, from, to, file }).then(
           (r) => r as unknown as CheckpointFileVersions,
         ),
-      restore: (repo, sha) => rpc("checkpoint.restore", { repo, sha }).then(() => {}),
+      restore: (repo, threadId, sha) =>
+        rpc("checkpoint.restore", { repo, threadId, sha }).then(() => {}),
       forget: (repo, threadId) =>
         rpc("checkpoint.forget", { repo, threadId }).then(() => {}),
     };

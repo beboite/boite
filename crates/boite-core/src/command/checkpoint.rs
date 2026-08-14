@@ -55,8 +55,13 @@ pub enum Checkpoints {
     },
     /// Puts the working tree back to a checkpoint. **The tree only** — not the
     /// index, not HEAD, and not the agent's conversation.
+    ///
+    /// The thread is named because the restore checkpoints the tree it is about
+    /// to overwrite, and that snapshot belongs in the same thread's list as the
+    /// turn being reverted: that is where the user goes looking for it.
     Restore {
         repo: String,
+        thread_id: String,
         sha: String,
     },
     /// Drops every checkpoint of a thread. What a deleted thread leaves behind.
@@ -98,6 +103,7 @@ impl Checkpoints {
             },
             "checkpoint.restore" => Checkpoints::Restore {
                 repo: repo()?,
+                thread_id: thread_id()?,
                 sha: str_param(params, "sha")?,
             },
             "checkpoint.forget" => Checkpoints::Forget {
@@ -185,8 +191,12 @@ impl Checkpoints {
                 to,
                 file,
             } => value_of(checkpoint::file_at_edges_blocking(&repo, &from, &to, &file)?),
-            Checkpoints::Restore { repo, sha } => {
-                checkpoint::restore_blocking(&repo, &sha)?;
+            Checkpoints::Restore {
+                repo,
+                thread_id,
+                sha,
+            } => {
+                checkpoint::restore_blocking(&repo, &thread_id, &sha)?;
                 Value::Null
             }
             Checkpoints::Forget { repo, thread_id } => {

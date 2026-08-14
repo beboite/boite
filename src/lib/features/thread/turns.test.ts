@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { Checkpoint } from "$lib/backend/types";
+import type { Checkpoint, CheckpointEdge } from "$lib/backend/types";
 import { pairTurns, turnEdge } from "./turns";
 
-function cp(index: number, edge: "start" | "end", extra: Partial<Checkpoint> = {}): Checkpoint {
+function cp(index: number, edge: CheckpointEdge, extra: Partial<Checkpoint> = {}): Checkpoint {
   return {
     index,
     sha: `sha${index}`,
@@ -79,5 +79,16 @@ describe("pairTurns", () => {
   it("ignores an end with nothing open in front of it", () => {
     expect(pairTurns([cp(1, "end"), cp(2, "end")])).toEqual([]);
     expect(pairTurns([])).toEqual([]);
+  });
+
+  it("does not read the net a revert left behind as the end of a turn", () => {
+    // The user reverted while the agent was still working: the restore's own
+    // checkpoint sits between the start and the real end, and closing the turn
+    // on it would show the revert's tree as what the turn produced.
+    const turns = pairTurns([cp(1, "start"), cp(2, "restore"), cp(3, "end", { files: 2 })]);
+    expect(turns).toHaveLength(1);
+    expect(turns[0]).toMatchObject({ id: 3, startSha: "sha1", endSha: "sha3", files: 2 });
+    // And on its own it is not a row of its own either.
+    expect(pairTurns([cp(1, "restore")])).toEqual([]);
   });
 });

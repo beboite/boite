@@ -59,6 +59,14 @@ pub enum Edge {
     /// The transition into `idle`: what it looked like when the turn ended.
     /// `waiting` and `shell` are not this, because neither is a finished turn.
     End,
+    /// Not an end of anything the agent did: the tree a revert was about to
+    /// overwrite. [`restore_blocking`] takes one before it touches a single
+    /// file, so the undo is itself undoable.
+    ///
+    /// Nothing asks for this edge over the wire, and `checkpoint.capture` still
+    /// takes the two real ends and nothing else: it belongs to the restore that
+    /// writes it, not to a caller watching an agent's turn.
+    Restore,
 }
 
 impl Edge {
@@ -66,6 +74,7 @@ impl Edge {
         match self {
             Edge::Start => "start",
             Edge::End => "end",
+            Edge::Restore => "restore",
         }
     }
 
@@ -73,6 +82,7 @@ impl Edge {
         match raw {
             "start" => Some(Edge::Start),
             "end" => Some(Edge::End),
+            "restore" => Some(Edge::Restore),
             _ => None,
         }
     }
@@ -154,6 +164,27 @@ fn thread_ref_prefix(thread_id: &str) -> Result<String, String> {
     Ok(format!("{REF_PREFIX}/{safe}"))
 }
 
+/// Refuses anything that is not an object name before it reaches git's argv.
+///
+/// `diff`, `show` and `read-tree` all take their revisions as the first
+/// positional tokens, and for those three `--` cannot separate a revision from
+/// an option. So a value shaped like `--output=<path>` is not a bad revision to
+/// git, it is an option, and git honours it: the caller's `repo` was checked
+/// against the registered roots and the file lands somewhere else entirely.
+///
+/// Every one of these values comes from a checkpoint's own sha, so a hex object
+/// name is the only shape that was ever legitimate. Refusing everything else
+/// costs nothing and is the one check that cannot be argued around, which is
+/// not true of quoting or escaping.
+fn checked_rev(rev: &str) -> Result<(), String> {
+    let hex = (7..=64).contains(&rev.len()) && rev.bytes().all(|b| b.is_ascii_hexdigit());
+    if hex {
+        Ok(())
+    } else {
+        Err(format!("{rev} is not a checkpoint id"))
+    }
+}
+
 /// Where git keeps this worktree's own git directory and its own index.
 ///
 /// Asked of git rather than derived from `.git`, because a linked worktree's
@@ -191,8 +222,16 @@ struct TempIndex {
 
 impl TempIndex {
     fn seeded_from(git_dir: &Path, real_index: &Path) -> Result<Self, String> {
+        // The counter is what actually makes the name unique. A pid and a
+        // millisecond do not: two threads sharing one worktree check point
+        // independently, and two captures landing in the same millisecond would
+        // then run `add -A` against the same index file. Each would write a tree
+        // of what the other had staged, and the `Drop` of the first would delete
+        // the file the second is still using.
+        static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let path = git_dir.join(format!(
-            "boite-ckpt-index-{}-{}",
+            "boite-ckpt-index-{}-{}-{seq}",
             std::process::id(),
             crate::now_ms()
         ));
@@ -435,6 +474,10 @@ fn delete_refs(repo: &Path, names: Vec<String>) -> Result<(), String> {
 /// `patch` is only produced when asked for: a panel draws the file list, and the
 /// whole unified diff is what something reading a turn as text wants.
 pub fn diff_blocking(repo: &str, from: &str, to: &str, patch: bool) -> Result<Diff, String> {
+    // Once here, because the three `git diff` runs below and the two helpers
+    // they call are only ever reached through this function.
+    checked_rev(from)?;
+    checked_rev(to)?;
     let path = Path::new(repo);
     let mut files = name_status(path, from, to)?;
     let counts = numstat(path, from, to)?;
@@ -559,6 +602,8 @@ pub fn file_at_edges_blocking(
     to: &str,
     file: &str,
 ) -> Result<FileAtEdges, String> {
+    checked_rev(from)?;
+    checked_rev(to)?;
     let path = Path::new(repo);
     let rel = file.replace('\\', "/");
     repo_relative(&rel)?;
@@ -582,11 +627,25 @@ pub fn file_at_edges_blocking(
 /// directions: a file the turn created is removed, not merely left behind, and a
 /// file it deleted comes back. Doing it against the *real* index instead would
 /// have restored the files and staged the whole thing as a side effect.
-pub fn restore_blocking(repo: &str, sha: &str) -> Result<(), String> {
+///
+/// Exact in both directions is also what makes it dangerous, so it takes a
+/// [`Edge::Restore`] checkpoint of the worktree first and refuses to go on if
+/// that fails. Without it this is the one operation in Boite that destroys work
+/// with no way back: the index it merges against was seeded by `add -A`, so an
+/// untracked file counts as tracked and is deleted rather than left alone, and
+/// what a user did in the hours since the turn ended goes with it. With it, the
+/// state being overwritten is a commit in the repository like any other and the
+/// revert can itself be reverted.
+pub fn restore_blocking(repo: &str, thread_id: &str, sha: &str) -> Result<(), String> {
+    checked_rev(sha)?;
     let path = Path::new(repo);
     if !is_repo(path) {
         return Err("not a git repository".into());
     }
+    // Before anything is touched, and its failure aborts the restore: a safety
+    // net that did not open is worse than not jumping at all.
+    capture_blocking(repo, thread_id, Edge::Restore)?;
+
     let (git_dir, real_index) = git_paths(path)?;
     let temp = TempIndex::seeded_from(&git_dir, &real_index)?;
     let now = write_worktree_tree(path, &temp)?;
@@ -810,7 +869,7 @@ mod tests {
         repo.write("appeared.txt", "new\n");
         fs::remove_file(repo.dir.join("a.txt")).unwrap();
 
-        restore_blocking(repo.path(), &start.sha).unwrap();
+        restore_blocking(repo.path(), "t", &start.sha).unwrap();
 
         assert_eq!(repo.read("stays.txt").as_deref(), Some("before\n"));
         assert_eq!(repo.read("a.txt").as_deref(), Some("one\n"));
@@ -832,13 +891,78 @@ mod tests {
         let before = repo.status();
 
         repo.write("a.txt", "changed\n");
-        restore_blocking(repo.path(), &start.sha).unwrap();
+        restore_blocking(repo.path(), "t", &start.sha).unwrap();
 
         assert_eq!(
             repo.status(),
             before,
             "restoring the tree must not touch what the user had staged"
         );
+    }
+
+    /// The whole point of the safety net: everything the restore is about to
+    /// throw away has to be reachable afterwards, untracked files included,
+    /// since those are exactly what `read-tree -u -m` deletes without asking.
+    #[test]
+    fn a_restore_check_points_what_it_is_about_to_overwrite() {
+        let repo = Repo::with_commit("restore-net");
+        let start = capture_blocking(repo.path(), "t", Edge::Start)
+            .unwrap()
+            .unwrap();
+
+        repo.write("a.txt", "the user's own edit\n");
+        repo.write("never-committed.txt", "an hour of work\n");
+        restore_blocking(repo.path(), "t", &start.sha).unwrap();
+
+        assert_eq!(repo.read("never-committed.txt"), None, "the restore ran");
+
+        let net = list_blocking(repo.path(), "t").unwrap().pop().unwrap();
+        assert_eq!(net.edge, Edge::Restore);
+        let listed = list_ls_tree(&repo.dir, &net.sha);
+        assert!(listed.contains("never-committed.txt"), "{listed}");
+        // And it is a real way back, not just a record that something was lost.
+        restore_blocking(repo.path(), "t", &net.sha).unwrap();
+        assert_eq!(
+            repo.read("never-committed.txt").as_deref(),
+            Some("an hour of work\n")
+        );
+        assert_eq!(repo.read("a.txt").as_deref(), Some("the user's own edit\n"));
+    }
+
+    /// `from`, `to` and `sha` are the first positional tokens of a git command
+    /// that has no `--` to hide behind, so anything option-shaped reaching them
+    /// is git writing where the caller's roots said it could not.
+    #[test]
+    fn a_revision_that_is_not_an_object_name_is_refused() {
+        let repo = Repo::with_commit("argv");
+        let escape = "--output=/tmp/boite-checkpoint-escape";
+        for bad in [escape, "", "abc", "HEAD", "master", &"a".repeat(65), "abcdefg-"] {
+            assert!(
+                diff_blocking(repo.path(), bad, "abcdef1", false).is_err(),
+                "diff took {bad} as a revision"
+            );
+            assert!(
+                diff_blocking(repo.path(), "abcdef1", bad, false).is_err(),
+                "diff took {bad} as a revision"
+            );
+            assert!(
+                file_at_edges_blocking(repo.path(), bad, "abcdef1", "a.txt").is_err(),
+                "fileVersions took {bad} as a revision"
+            );
+            assert!(
+                restore_blocking(repo.path(), "t", bad).is_err(),
+                "restore took {bad} as a revision"
+            );
+        }
+        assert!(
+            !Path::new("/tmp/boite-checkpoint-escape").exists(),
+            "git wrote a file the roots check never saw"
+        );
+        // A real object name still goes through, whether abbreviated or whole.
+        let taken = capture_blocking(repo.path(), "t", Edge::Start)
+            .unwrap()
+            .unwrap();
+        assert!(diff_blocking(repo.path(), &taken.sha[..7], &taken.sha, false).is_ok());
     }
 
     #[test]
@@ -878,6 +1002,28 @@ mod tests {
         );
     }
 
+    /// Two threads in one worktree check point off their own turn boundaries,
+    /// so their captures overlap for real. Sharing a temporary index would make
+    /// each one stage what the other had just added, and whichever finished
+    /// first would delete the file the other was still writing through.
+    #[test]
+    fn captures_at_the_same_moment_do_not_share_a_temporary_index() {
+        let repo = Repo::with_commit("concurrent");
+        repo.write("shared.txt", "x\n");
+        let path = repo.path().to_string();
+        let running: Vec<_> = ["alpha", "beta", "gamma", "delta"]
+            .into_iter()
+            .map(|thread| {
+                let path = path.clone();
+                std::thread::spawn(move || capture_blocking(&path, thread, Edge::Start))
+            })
+            .collect();
+        for handle in running {
+            let taken = handle.join().unwrap().unwrap().unwrap();
+            assert!(list_ls_tree(&repo.dir, &taken.sha).contains("shared.txt"));
+        }
+    }
+
     #[test]
     fn a_thread_id_that_is_not_a_ref_name_still_gets_a_namespace() {
         assert_eq!(
@@ -907,7 +1053,7 @@ mod tests {
 
     #[test]
     fn the_edges_round_trip() {
-        for edge in [Edge::Start, Edge::End] {
+        for edge in [Edge::Start, Edge::End, Edge::Restore] {
             assert_eq!(Edge::parse(edge.as_str()), Some(edge));
         }
         assert_eq!(Edge::parse("waiting"), None);

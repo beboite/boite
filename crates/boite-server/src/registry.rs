@@ -60,6 +60,26 @@ pub struct LiveThread {
     status: Mutex<StatusState>,
     size: Mutex<(u16, u16)>,
     cwd: String,
+    /// Held for the length of one capture, so this thread never has two in
+    /// flight at once.
+    ///
+    /// A capture reads the thread's refs to pick the next index, then writes
+    /// `refs/boite/ckpt/<thread>/<n>`. Two of them overlapping read the same
+    /// list, land on the same `n`, and the second `update-ref` replaces the
+    /// first without a word: one checkpoint gone, and the survivor carries the
+    /// wrong edge, so the pairing downstream brackets a turn with a checkpoint
+    /// from a different one and the revert button offers the wrong tree. The
+    /// overlap is ordinary rather than rare, because a turn short enough to
+    /// open and close inside two ticks queues its second capture while the
+    /// first is still walking the worktree.
+    ///
+    /// Async and per thread: waiting on it must not hold a blocking-pool
+    /// thread, and one thread's slow `add -A` has no business delaying
+    /// another's. Tokio's mutex hands the lock out in the order it was asked
+    /// for, which is what keeps a start from being written after its own end.
+    /// The mirror of `inFlight` in `checkpoints.svelte.ts`, which is the same
+    /// rule for the host that has a window.
+    capture_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl LiveThread {
@@ -218,6 +238,7 @@ impl Registry {
             }),
             size: Mutex::new((spec.cols.max(1), spec.rows.max(1))),
             cwd: spec.cwd.clone(),
+            capture_lock: Arc::new(tokio::sync::Mutex::new(())),
         });
 
         let sink = Arc::new(ThreadSink {
@@ -569,7 +590,12 @@ fn spawn_ticker(shared: Arc<Shared>) {
                 // with nothing to say and still has two ends worth keeping.
                 if let Some(edge) = turn_edge(st.turn_open, declared) {
                     st.turn_open = edge == Edge::Start;
-                    edges.push((lt.thread_id.clone(), lt.cwd.clone(), edge));
+                    edges.push((
+                        lt.thread_id.clone(),
+                        lt.cwd.clone(),
+                        edge,
+                        lt.capture_lock.clone(),
+                    ));
                 }
                 let Some(next) = next_status(st.status, st.last_working, declared, now) else {
                     continue;
@@ -587,14 +613,27 @@ fn spawn_ticker(shared: Arc<Shared>) {
                 });
             }
 
-            for (id, cwd, edge) in edges {
+            for (id, cwd, edge, lock) in edges {
                 // Detached and never awaited. A capture walks a whole worktree,
                 // so awaiting it here would put the length of a `git add -A`
                 // between a turn ending and the next tick noticing anything —
                 // and a checkpoint is never allowed to hold a turn up.
-                tokio::task::spawn_blocking(move || {
-                    if let Err(err) = checkpoint::capture_blocking(&cwd, &id, edge) {
-                        eprintln!("[boite/checkpoint] {id}: {err}");
+                tokio::spawn(async move {
+                    // Queued behind this thread's own previous capture, and
+                    // only that one: see `LiveThread::capture_lock`.
+                    let _queued = lock.lock().await;
+                    let logged = id.clone();
+                    let done = tokio::task::spawn_blocking(move || {
+                        checkpoint::capture_blocking(&cwd, &id, edge)
+                    })
+                    .await;
+                    match done {
+                        Ok(Err(err)) => eprintln!("[boite/checkpoint] {logged}: {err}"),
+                        // The capture panicked, or the runtime is going down
+                        // mid-shutdown. Neither is worth more than a line: the
+                        // turn it belongs to has already happened.
+                        Err(err) => eprintln!("[boite/checkpoint] {logged}: {err}"),
+                        Ok(Ok(_)) => {}
                     }
                 });
             }
@@ -736,6 +775,7 @@ mod sink_tests {
             }),
             size: Mutex::new((80, 24)),
             cwd: String::new(),
+            capture_lock: Arc::new(tokio::sync::Mutex::new(())),
         })
     }
 

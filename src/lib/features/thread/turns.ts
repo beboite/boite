@@ -52,6 +52,10 @@ export function pairTurns(checkpoints: Checkpoint[]): Turn[] {
       open = cp;
       continue;
     }
+    // A `restore` is the net a revert took of the tree it overwrote. It is not
+    // the end of anything the agent did, so it neither becomes a row of its own
+    // nor closes a turn that was still open when the user reverted.
+    if (cp.edge !== "end") continue;
     if (!open) continue;
     turns.push({
       id: cp.index,
