@@ -12,9 +12,16 @@
     "",
     "The gap between the first two is what the lazy imports are worth: 4.8 MB the",
     "window does not fetch before it can paint, most of it the PDF worker. That is",
-    "the measurement those imports never had attached to them."
+    "the measurement those imports never had attached to them.",
+    "",
+    "The eager ceiling moved twice. To 774000, when the palette started asking",
+    "`search.query` about what is being typed: the palette is drawn by the layout",
+    "and cannot be lazy, so its ranking, its debounced query and the hits it turns",
+    "into rows are 3.8 KB the window fetches before it paints. Then to 784240,",
+    "for the keybinding table and its parser, which the dispatcher reads on the",
+    "first keystroke and so cannot be deferred either."
   ],
-  "eagerBytes": 768000,
+  "eagerBytes": 784240,
   "totalBytes": 6144000,
   "largestEagerChunkBytes": 256000
 }
