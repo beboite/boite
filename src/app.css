@@ -139,6 +139,9 @@
   --z-popover: 70;
   --z-toast: 80;
   --z-outline: 90;
+  /* Above everything, the connection outline included: the whip experiment is
+     drawn in front of the window the way a hand holding one would be. */
+  --z-whip: 100;
 
   /* One recipe per floating surface. Menus and popovers had spread to four
      radii, five shadows and three backgrounds for a single role, so a context
