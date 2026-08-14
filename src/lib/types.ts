@@ -192,6 +192,23 @@ export interface Settings {
   gitAutoFetchSeconds: number;
   mobileLayout: boolean;
   motionMode: MotionMode;
+  /**
+   * The family each surface is set in, or null for the stack the app ships.
+   *
+   * One family name, never a stack: `theme/fonts.ts` rebuilds the stack around
+   * it, so a machine that later loses the chosen face falls through to what the
+   * app ships today rather than to what it shipped the day the row was written.
+   */
+  uiFontFamily: string | null;
+  terminalFontFamily: string | null;
+  /**
+   * How much bigger the terminals are than the rest of the app, in percent.
+   *
+   * Rides on top of the UI scale rather than replacing it: growing an agent's
+   * output without growing every box around it is the one thing the zoom slider
+   * cannot do, since it is a root font size and a canvas inherits no rem.
+   */
+  terminalFontScalePercent: number;
   locale: LocaleSetting;
   setupCompleted?: boolean;
   /**

@@ -95,6 +95,18 @@ export const EN_MESSAGES = {
   "appearance.uiScale": "UI scale",
   "appearance.uiScaleDesc": "Ctrl + scroll wheel, or Ctrl + + / − / 0.",
   "appearance.resetScale": "Reset to 100%",
+  "appearance.fonts": "Fonts",
+  "appearance.fontsDesc": "Only the families this machine has are listed.",
+  "appearance.fontUi": "Interface",
+  "appearance.fontTerminal": "Terminal and code",
+  "appearance.fontDefault": "Default",
+  // Shown on the entry for a family stored on another machine: the choice is
+  // kept, it simply cannot be drawn here.
+  "appearance.fontMissing": "not on this machine",
+  "appearance.fontSample": "const path = \"~/dev\"; // 0O1lI il1 {}[]()",
+  "appearance.terminalSize": "Terminal text size",
+  "appearance.terminalSizeDesc": "On top of the UI scale: grow an agent's output without growing the app.",
+  "appearance.resetTerminalSize": "Reset to 100%",
   "appearance.layout": "Layout",
   "appearance.layoutDesc": "Mobile: full-width pages and a bottom bar. PC: sidebar and panels.",
   "appearance.layoutAuto": "Automatic",
