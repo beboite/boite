@@ -1,6 +1,8 @@
 import { EditorView } from "@codemirror/view";
+import type { Extension } from "@codemirror/state";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { tags as t } from "@lezer/highlight";
+import type { ResolvedTheme } from "$lib/theme/appearance";
 
 // The editor palette IS the terminal palette. It used to be a hardcoded Tokyo
 // Night set, so a diff and the shell that produced it agreed on no colour at
@@ -54,7 +56,7 @@ const palette = {
   strong: "var(--color-term-yellow)",
 };
 
-export const boiteTheme = EditorView.theme(
+const spec =
   {
     "&": {
       color: palette.fg,
@@ -123,9 +125,30 @@ export const boiteTheme = EditorView.theme(
     ".cm-selectionMatch": {
       backgroundColor: palette.selectionMatch,
     },
-  },
-  { dark: true },
-);
+  };
+
+/**
+ * The same spec twice, differing only in what CodeMirror is told about it.
+ *
+ * Every colour above is a `var()`, so a palette swap needs no rebuild here,
+ * except for this one flag, which is not a colour. CodeMirror hands `dark` to
+ * its own base theme, and that is what decides the chrome nothing above
+ * overrides: tooltip and autocomplete surfaces, the scroller, the default
+ * selection layer. Left at `true` under the light palette, an editor drawn in
+ * light colours pops a dark completion list over it.
+ *
+ * Built once each, at module load: `EditorView.theme` mints a class name and a
+ * stylesheet per call, so building one per reconfigure would leak a rule set
+ * into the document every time the user toggled the theme.
+ */
+const themes = {
+  dark: EditorView.theme(spec, { dark: true }),
+  light: EditorView.theme(spec, { dark: false }),
+};
+
+export function boiteTheme(theme: ResolvedTheme): Extension {
+  return themes[theme];
+}
 
 const highlight = HighlightStyle.define([
   { tag: t.comment, color: palette.comment, fontStyle: "italic" },

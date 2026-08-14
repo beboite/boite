@@ -78,6 +78,7 @@ export const SETTINGS_CATALOGUE: SettingEntry[] = [
   { tab: "terminal", key: "terminalTab.autoSettle", descKey: "terminalTab.autoSettleDesc" },
   { tab: "terminal", key: "terminalTab.idleAutoClose", descKey: "terminalTab.idleAutoCloseDesc" },
 
+  { tab: "appearance", key: "appearance.theme", descKey: "appearance.themeDesc" },
   { tab: "appearance", key: "appearance.uiScale", descKey: "appearance.uiScaleDesc" },
   { tab: "appearance", key: "appearance.layout", descKey: "appearance.layoutDesc" },
   { tab: "appearance", key: "appearance.colorByModel", descKey: "appearance.colorByModelDesc" },

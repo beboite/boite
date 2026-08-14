@@ -1,4 +1,5 @@
 import type { ITheme } from "@xterm/xterm";
+import { liveTerminal, liveTerminalIds } from "$lib/shared/terminals";
 import { DEFAULT_MONO_STACK, fontStack } from "$lib/theme/fonts";
 
 // Builds the xterm theme from the CSS tokens in app.css so the terminal and
@@ -56,4 +57,24 @@ export function xtermTheme(): ITheme {
     brightCyan: v("--color-term-bright-cyan", "#a3f7ff"),
     brightWhite: v("--color-term-bright-white", "#fafafa"),
   };
+}
+
+/**
+ * Re-reads the palette into every terminal on screen.
+ *
+ * A terminal takes its colours once, at construction, and paints them onto a
+ * canvas: a palette swap that only moves CSS custom properties repaints the
+ * whole app around a row of panes still drawn in the old one. Assigning
+ * `options.theme` is what makes xterm rebuild its glyph atlas, so this is the
+ * whole of the update: scrollback, selection and process are untouched.
+ *
+ * Read once and shared: `getComputedStyle` is the expensive half, and every
+ * terminal is resolving the same twenty properties off the same root.
+ */
+export function repaintTerminals(): void {
+  const theme = xtermTheme();
+  for (const id of liveTerminalIds()) {
+    const term = liveTerminal(id);
+    if (term) term.options.theme = theme;
+  }
 }

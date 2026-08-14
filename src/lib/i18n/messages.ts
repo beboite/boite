@@ -95,6 +95,11 @@ export const EN_MESSAGES = {
   "shortcuts.checking": "Checking…",
   "shortcuts.recheck": "Check again",
 
+  "appearance.theme": "Theme",
+  "appearance.themeDesc": "System follows your OS light or dark setting.",
+  "appearance.themeSystem": "System",
+  "appearance.themeDark": "Dark",
+  "appearance.themeLight": "Light",
   "appearance.uiScale": "UI scale",
   "appearance.uiScaleDesc": "Ctrl + scroll wheel, or Ctrl + + / − / 0.",
   "appearance.resetScale": "Reset to 100%",
