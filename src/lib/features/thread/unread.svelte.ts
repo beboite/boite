@@ -18,6 +18,8 @@
  * as watched, which errs towards a mark rather than towards silence.
  */
 
+import { untrack } from "svelte";
+
 const marks = $state<Record<string, number>>({});
 
 let watching: (threadId: string) => boolean = () => false;
@@ -26,7 +28,11 @@ let watching: (threadId: string) => boolean = () => false;
 export function setUnreadWatcher(probe: (threadId: string) => boolean): () => void {
   watching = probe;
   return () => {
-    watching = () => false;
+    // Only if it is still ours. A remount runs the new effect before the old
+    // one's teardown, so an unconditional reset here has the dying instance
+    // wipe the probe the live one just installed, and every thread on screen
+    // silently goes back to counting as unwatched.
+    if (watching === probe) watching = () => false;
   };
 }
 
@@ -41,9 +47,18 @@ export function noteUnread(threadId: string, at = Date.now()): void {
   marks[threadId] = at;
 }
 
-/** Looking at it is reading it. */
+/**
+ * Looking at it is reading it.
+ *
+ * The read is untracked, and it has to be: the caller is an effect that walks
+ * the panes on screen, so a tracked read made every mark laid anywhere in the
+ * app invalidate it. The effect then re-ran and cleared the pane group it was
+ * looking at, which meant a thread in the active group could never keep a mark
+ * even with the window minimized. This function decides nothing reactive; it
+ * only writes.
+ */
 export function markThreadRead(threadId: string): void {
-  if (marks[threadId] === undefined) return;
+  if (untrack(() => marks[threadId]) === undefined) return;
   delete marks[threadId];
 }
 

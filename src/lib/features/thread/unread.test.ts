@@ -58,7 +58,7 @@ describe("unread marks", () => {
     expect(unreadSince("b")).toBeNull();
   });
 
-  it("keeps the first moment, not the last", () => {
+  it("keeps the last moment, not the first", () => {
     noteUnread("a", 1000);
     noteUnread("a", 2000);
     // The second turn overwrites: what the mark answers is "when did the thing
@@ -95,5 +95,18 @@ describe("unread marks", () => {
     stop();
     noteUnread("a");
     expect(isThreadUnread("a")).toBe(true);
+  });
+
+  /**
+   * A remount installs the new probe before the old instance tears down, so a
+   * cleanup that resets unconditionally wipes a probe it never installed and
+   * every thread on screen quietly goes back to counting as unwatched.
+   */
+  it("ignores the cleanup of a probe that has been replaced", () => {
+    const stopOld = setUnreadWatcher(() => false);
+    setUnreadWatcher((id) => id === "a");
+    stopOld();
+    noteUnread("a");
+    expect(isThreadUnread("a")).toBe(false);
   });
 });

@@ -1,4 +1,7 @@
 import { hasTauri } from "$lib/backend/env";
+// Same question the unread marks ask, and it only ever had one right answer, so
+// it lives in one place now rather than being written out again per caller.
+import { windowIsFocused } from "$lib/app/focus.svelte";
 import { logger } from "$lib/shared/services/logger.svelte";
 
 // Local OS notification when a thread needs attention and the app is not
@@ -48,26 +51,11 @@ async function showWebNotification(title: string, body: string): Promise<void> {
   await reg.showNotification(title, { body });
 }
 
-async function isFocused(): Promise<boolean> {
-  if (hasTauri()) {
-    try {
-      const { getCurrentWindow } = await import("@tauri-apps/api/window");
-      return await getCurrentWindow().isFocused();
-    } catch {
-      return true;
-    }
-  }
-  if (typeof document !== "undefined") {
-    return document.visibilityState === "visible" && document.hasFocus();
-  }
-  return true;
-}
-
 export async function notifyWhenUnfocused(
   title: string,
   body: string,
 ): Promise<void> {
-  if (await isFocused()) return;
+  if (await windowIsFocused()) return;
   if (!(await ensurePermission())) return;
   try {
     if (hasTauri()) {

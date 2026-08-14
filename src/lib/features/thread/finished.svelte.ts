@@ -12,6 +12,32 @@ const FINISH_WINDOW_MS = 6000;
 const marks = new TransientMark(FINISH_WINDOW_MS);
 
 /**
+ * Whether this transition is something the user would want told to them from
+ * another window.
+ *
+ * The headline case is a turn that ended, and in this codebase that transition
+ * is `running -> ready`, which is exactly what `announceStatus` notifies on for
+ * the same reason. It is worth spelling out because the finished statuses are a
+ * trap here: `isFinished` is the PTY process having died, and the read behind
+ * the sweep only ever answers `running`, `waiting` or `ready`, so an agent that
+ * writes its answer and sits back at its prompt, the whole scenario the mark
+ * exists for, never reaches one of them.
+ *
+ * A dialog going up counts from wherever, since it is the agent saying it
+ * cannot continue without you.
+ */
+function worthTelling(previous: ThreadStatus, next: ThreadStatus): boolean {
+  if (next === "waiting") return true;
+  if (next === "ready") return previous === "running";
+  // Not the idle reaper. It only ever sleeps a settled `ready` thread that is
+  // off screen, so this transition would lay a mark every single time and the
+  // dot would be claiming something happened while you were away when the only
+  // thing that happened was the app tidying up after you.
+  if (previous === "ready" && next === "stopped") return false;
+  return !isFinished(previous) && isFinished(next);
+}
+
+/**
  * Record a status change, and say whether it was a thread crossing the finish
  * line.
  *
@@ -24,6 +50,10 @@ const marks = new TransientMark(FINISH_WINDOW_MS);
  * `stopped` counts. A thread put to sleep has ended too, and the row saying so
  * is the same information — the colour is what differs, and that is the caller's
  * business.
+ *
+ * The unread mark asks a narrower question than the flash does, which is why
+ * `worthTelling` is separate: the flash is a row the user is plausibly looking
+ * at right now, and the mark is a claim about something they missed.
  */
 export function noteStatusChange(
   threadId: string,
@@ -35,14 +65,10 @@ export function noteStatusChange(
   // moment it started as much as "idle for 2 h" needs the moment it stopped,
   // and this is the one call both the local and the remote path make.
   noteThreadActivity(threadId);
-  // Two transitions are news, and they are the two the user would want to be
-  // told about from another window: a turn that ended, and a dialog that went
-  // up and is holding the agent still. `noteUnread` drops it on the floor if
-  // the thread is on screen, so this stays a statement about the transition
-  // rather than about who was looking.
-  if (next === "waiting" || (!isFinished(previous) && isFinished(next))) {
-    noteUnread(threadId);
-  }
+  // `noteUnread` drops it on the floor if the thread is on screen, so what is
+  // decided here stays a statement about the transition rather than about who
+  // was looking.
+  if (worthTelling(previous, next)) noteUnread(threadId);
   if (isFinished(previous) || !isFinished(next)) return;
   marks.mark(threadId);
 }
