@@ -139,7 +139,7 @@ export const EN_MESSAGES = {
     "The sidebar orders projects and threads itself. Arming this moves nothing: the rows hold still until you pick an order below.",
   "experiments.smartSortOrder": "Order by",
   "experiments.smartSortManual": "Manual",
-  "experiments.smartSortActivity": "Thread activity",
+  "experiments.smartSortActivity": "Last typed in",
   "experiments.smartSortAlpha": "Project name",
   "experiments.smartSortDirection": "Direction",
   "experiments.smartSortAsc": "Ascending",
