@@ -406,6 +406,14 @@ from source, use `target/release/boite-mcp` after `bun run build:sidecar`. No
 `env` block is needed, the shim inherits the terminal's. Launched anywhere else
 it exits rather than starting unauthenticated.
 
+The same endpoint also speaks MCP directly over HTTP at `/mcp`, one POST per
+request, for clients that take a URL instead of a command. Both protocol eras
+are served on it and on the shim: the stateless revision `2026-07-28`, where
+every request carries its version in `_meta` and `server/discover` answers the
+probe, and the `initialize` handshake for every client from before it. The
+credentials are the same ones the routes above take, and the endpoint stays on
+loopback: a caller that can present them is already on the machine.
+
 It is spawned once per agent terminal, so it carries nothing it does not need:
 `serde_json` and a hundred lines of HTTP/1.1 over a loopback socket, 380 KB
 altogether. No async runtime, and no proxy handling that could send `127.0.0.1`
