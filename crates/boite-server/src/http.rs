@@ -22,6 +22,7 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use axum::body::Bytes;
 use axum::extract::{ConnectInfo, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
@@ -65,11 +66,39 @@ pub struct MintBody {
 /// This is what keeps `BOITE_TOKEN` from being a session credential while
 /// still keeping the operator of a running deployment able to get back in. It
 /// pairs a device; it cannot be one.
+/// The body is taken as bytes and decoded here, rather than as
+/// `Option<Json<MintBody>>`.
+///
+/// axum 0.8's `Json` yields `None` from `OptionalFromRequest` whenever the
+/// content type is not `application/json`, and a `None` here means "no
+/// preference", which means [`ScopeSet::standard`]. So a `POST` carrying
+/// `{"scopes":["read"]}` under a missing or misspelled header silently minted
+/// read **and** write **and** terminal **and** approve: a request the server
+/// could not read widening the grant it asked for. Empty is the only body that
+/// gets a default now; anything else is decoded or refused.
+fn decode_mint(body: &[u8]) -> Result<MintBody, String> {
+    if body.iter().all(u8::is_ascii_whitespace) {
+        return Ok(MintBody::default());
+    }
+    // Through a `Value` first, for the one shape serde would otherwise accept
+    // quietly: a struct also deserializes from a *sequence*, positionally, so
+    // `["read"]` reads as a request whose label is "read" and whose scopes were
+    // not stated. That is a body meaning one thing and being read as another,
+    // on the door that mints grants, which is the whole class of bug this
+    // function exists to remove.
+    let value: serde_json::Value =
+        serde_json::from_slice(body).map_err(|e| format!("this body is not JSON: {e}"))?;
+    if !value.is_object() {
+        return Err("a mint request is a JSON object".into());
+    }
+    serde_json::from_value(value).map_err(|e| format!("this body is not a mint request: {e}"))
+}
+
 pub async fn mint_pairing(
     State(state): State<Arc<AppState>>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
-    body: Option<Json<MintBody>>,
+    body: Bytes,
 ) -> Response {
     let ip = addr.ip();
     if state.auth.is_locked(ip) {
@@ -81,7 +110,13 @@ pub async fn mint_pairing(
     if !state.auth.verify_bootstrap(ip, &presented) {
         return refused();
     }
-    let body = body.map(|Json(b)| b).unwrap_or_default();
+    let body = match decode_mint(&body) {
+        Ok(b) => b,
+        Err(e) => return (StatusCode::BAD_REQUEST, e).into_response(),
+    };
+    // No body at all is the operator minting from a shell with nothing but the
+    // bootstrap token, and it gets what `boite-server pair` gives: everything
+    // but admin. That is a default, not a fallback from something unreadable.
     let scopes = body.scopes.unwrap_or_else(ScopeSet::standard);
     if scopes.is_empty() {
         return (StatusCode::BAD_REQUEST, "a pairing with no scopes could do nothing")
@@ -196,4 +231,36 @@ pub async fn ticket(
         "label": session.label(),
     }))
     .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use boite_core::pairing::Scope;
+
+    /// The fail-open this door used to have. A body the server cannot read is
+    /// refused; it never falls back to a wider grant than the one it names.
+    #[test]
+    fn a_body_that_cannot_be_read_never_widens_the_grant() {
+        // What a client sends with the wrong content type. Under
+        // `Option<Json<_>>` this arrived as `None` and minted the standard set.
+        let asked = decode_mint(br#"{"scopes":["read"]}"#).unwrap();
+        let scopes = asked.scopes.unwrap();
+        assert!(scopes.holds(Scope::Read));
+        assert!(
+            !scopes.holds(Scope::Terminal),
+            "a read-only request came away with a shell"
+        );
+
+        // Unreadable is an error, not a default.
+        assert!(decode_mint(b"scopes=read").is_err());
+        assert!(decode_mint(b"{").is_err());
+        assert!(decode_mint(b"[\"read\"]").is_err());
+
+        // Only an empty body means "no preference", and the caller decides what
+        // that is; nothing here invents scopes.
+        assert!(decode_mint(b"").unwrap().scopes.is_none());
+        assert!(decode_mint(b"  \n").unwrap().scopes.is_none());
+        assert!(decode_mint(b"{}").unwrap().scopes.is_none());
+    }
 }

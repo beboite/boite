@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::stream::{SplitStream, StreamExt};
@@ -21,6 +21,100 @@ use crate::state::AppState;
 
 const WRITER_CAP: usize = 1024;
 const AUTH_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// How stale the PTY paths let their answer to "is this device still paired"
+/// get.
+///
+/// Two seconds, and the number is a compromise with a reason on both sides.
+/// Asking the database per frame is one indexed read per keystroke *and* per
+/// output chunk, and a `cat` of a build log is thousands of chunks a second
+/// through a connection every other terminal in the workspace shares. The lock,
+/// not the read, is what would hurt. Never asking is the hole this constant
+/// exists to close. Two seconds is shorter than it takes to type
+/// anything into a shell you have just been thrown out of.
+const REVOKE_RECHECK: Duration = Duration::from_secs(2);
+
+/// Whether this connection's pairing is still live, asked of the row rather
+/// than of a broadcast.
+///
+/// Text RPCs read the row on every call (`authz::Authorized::check`). The two
+/// paths that carry PTY bytes did not: input frames were gated on an atomic set
+/// only by [`AppEvent::PairingRevoked`], and the attach forward loop re-checked
+/// nothing at all. That leaves one gap wide open: `boite-server revoke` writes
+/// the row from a *second process* (SQLite is in WAL mode, which is what makes
+/// that safe), so this process broadcasts nothing and the atomic never flips.
+/// A device attached to a PTY and sending only keystrokes makes no text RPC, so
+/// it kept full terminal I/O across a revocation that had already been written.
+///
+/// So both paths ask here, and the answer is cached for [`REVOKE_RECHECK`] to
+/// keep a per-frame database hit off the hot path of every terminal.
+struct Liveness {
+    pairing_id: String,
+    /// Monotonic, so a wall clock stepping backwards cannot widen the window.
+    since: Instant,
+    checked_at_ms: AtomicU64,
+    live: AtomicBool,
+}
+
+impl Liveness {
+    fn new(pairing_id: &str) -> Liveness {
+        Liveness {
+            pairing_id: pairing_id.to_string(),
+            since: Instant::now(),
+            // The handshake that just happened is the first check, so the first
+            // read of the row is a whole window away.
+            checked_at_ms: AtomicU64::new(0),
+            live: AtomicBool::new(true),
+        }
+    }
+
+    /// True while this device may still move bytes through a PTY.
+    ///
+    /// Once it has answered false it stays false without touching the database
+    /// again: a revocation is not something the next read can undo, and
+    /// re-pairing is a new pairing on a new socket.
+    fn allows(&self, store: &boite_core::store::Store) -> bool {
+        self.allows_at(self.since.elapsed().as_millis() as u64, store)
+    }
+
+    /// The whole of [`Liveness::allows`] with the clock passed in, so the
+    /// window can be tested without a test that sleeps through it.
+    fn allows_at(&self, now_ms: u64, store: &boite_core::store::Store) -> bool {
+        if !self.live.load(Ordering::Relaxed) {
+            return false;
+        }
+        let last = self.checked_at_ms.load(Ordering::Relaxed);
+        if now_ms.saturating_sub(last) < REVOKE_RECHECK.as_millis() as u64 {
+            return true;
+        }
+        self.checked_at_ms.store(now_ms, Ordering::Relaxed);
+        let live = store.pairing_is_live(&self.pairing_id);
+        self.live.store(live, Ordering::Relaxed);
+        live
+    }
+
+    /// What the control task calls when the broadcast got here first. Nothing
+    /// then waits for the window: revocation from this process is immediate,
+    /// and the re-read is what covers the process that cannot broadcast.
+    fn revoked(&self) {
+        self.live.store(false, Ordering::Relaxed);
+    }
+}
+
+/// Tells the client it is out, then hangs up.
+///
+/// A socket that merely stops carrying bytes is one the user watches sit there
+/// looking connected. Whichever path notices first says it; the writer stops at
+/// the first `Close`, so a second caller is a no-op.
+async fn hang_up(tx: &mpsc::Sender<WsOut>) {
+    let _ = tx
+        .send(WsOut::Text(json_str(&Response::err(
+            0,
+            crate::authz::REVOKED.to_string(),
+        ))))
+        .await;
+    let _ = tx.send(WsOut::Close).await;
+}
 
 enum WsOut {
     Text(String),
@@ -81,18 +175,17 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<AppState>, addr: Socket
     state.devices.fetch_add(1, Ordering::Relaxed);
     let _device = ConnGuard(&state.devices);
 
-    // Set by the control task the moment this pairing is revoked, and read by
-    // the binary frame path. An RPC asks the database instead (see
-    // `authz::Authorized::check`), which is the answer that does not depend on
-    // a broadcast having been delivered; this is what reaches a socket that is
-    // only carrying keystrokes.
-    let revoked = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    // The gate the two PTY paths ask, and the one the control task trips when
+    // the revocation was broadcast by this process. An RPC asks the database on
+    // every call (see `authz::Authorized::check`); a socket carrying only
+    // keystrokes makes no RPC, which is what this is for.
+    let liveness = Arc::new(Liveness::new(session.pairing_id()));
 
     // Fan control-plane events out to this client.
     let mut events_rx = state.events.subscribe();
     let tx_ctrl = tx.clone();
     let my_pairing = session.pairing_id().to_string();
-    let revoked_ctrl = revoked.clone();
+    let liveness_ctrl = liveness.clone();
     let control = tokio::spawn(async move {
         loop {
             match events_rx.recv().await {
@@ -101,14 +194,8 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<AppState>, addr: Socket
                     // the login gate up rather than reconnect into a refusal,
                     // then hung up: a socket that merely refuses every call is
                     // one the user watches sit there looking connected.
-                    revoked_ctrl.store(true, Ordering::Relaxed);
-                    let _ = tx_ctrl
-                        .send(WsOut::Text(json_str(&Response::err(
-                            0,
-                            crate::authz::REVOKED.to_string(),
-                        ))))
-                        .await;
-                    let _ = tx_ctrl.send(WsOut::Close).await;
+                    liveness_ctrl.revoked();
+                    hang_up(&tx_ctrl).await;
                     break;
                 }
                 Ok(ev) => {
@@ -170,7 +257,15 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<AppState>, addr: Socket
                             .await;
                     }
                     "thread.attach" => {
-                        handle_attach(&state, request.params(), id, &tx, &mut attached).await;
+                        handle_attach(
+                            &state,
+                            request.params(),
+                            id,
+                            &tx,
+                            &mut attached,
+                            &liveness,
+                        )
+                        .await;
                     }
                     "thread.detach" => {
                         if let Some(tid) = request.params().get("threadId").and_then(|v| v.as_str())
@@ -195,8 +290,11 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<AppState>, addr: Socket
             Message::Binary(bytes) => {
                 // A revoked device stops typing into a terminal at once, which
                 // is the case a check at the next RPC would miss entirely: a
-                // socket carrying only keystrokes makes no RPCs.
-                if revoked.load(Ordering::Relaxed) {
+                // socket carrying only keystrokes makes no RPCs. The row, not
+                // just the broadcast, because `boite-server revoke` is a second
+                // process and broadcasts nothing.
+                if !liveness.allows(&state.store) {
+                    hang_up(&tx).await;
                     break;
                 }
                 if let Some((op, tid, payload)) = protocol::parse_frame(&bytes) {
@@ -228,6 +326,7 @@ async fn handle_attach(
     id: u64,
     tx: &mpsc::Sender<WsOut>,
     attached: &mut HashMap<String, tokio::task::JoinHandle<()>>,
+    liveness: &Arc<Liveness>,
 ) {
     let thread_id = match params.get("threadId").and_then(|v| v.as_str()) {
         Some(s) => s.to_string(),
@@ -284,9 +383,23 @@ async fn handle_attach(
             let mut rxf = snap.rx;
             let registry = state.registry.clone();
             let replay_id = thread_id.clone();
+            let store = state.store.clone();
+            let live = liveness.clone();
             let h = tokio::spawn(async move {
                 loop {
-                    match rxf.recv().await {
+                    let received = rxf.recv().await;
+                    // Output is the other half of terminal access, and this
+                    // task never re-checked anything: a revoked device that
+                    // stops typing would keep watching the PTY for as long as
+                    // it stayed connected. Between the two branches rather than
+                    // inside one, because the lagged branch resends the entire
+                    // scrollback. Per chunk, answered from cache between reads
+                    // (see `Liveness`).
+                    if !live.allows(&store) {
+                        hang_up(&txf).await;
+                        break;
+                    }
+                    match received {
                         Ok(bytes) => {
                             if txf
                                 .send(WsOut::Binary(protocol::encode_output(&uuid, &bytes)))
@@ -453,4 +566,70 @@ fn gzip_bytes(data: &[u8]) -> Vec<u8> {
         return data.to_vec();
     }
     enc.finish().unwrap_or_else(|_| data.to_vec())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use boite_core::pairing::{Pairing, ScopeSet};
+    use boite_core::store::Store;
+
+    fn store_with_one_pairing(tag: &str) -> (Store, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("boite-ws-{}-{tag}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = Store::open(&dir.join("boite.db")).unwrap();
+        store
+            .add_pairing(
+                &Pairing {
+                    id: "phone".into(),
+                    label: "a phone".into(),
+                    kind: "phone".into(),
+                    scopes: ScopeSet::full(),
+                    created_at: 1,
+                    last_seen_at: None,
+                    revoked_at: None,
+                },
+                "hash",
+            )
+            .unwrap();
+        (store, dir)
+    }
+
+    /// The hole `boite-server revoke` left open. That command is a second
+    /// process, so it broadcasts nothing; a device attached to a PTY and
+    /// sending only keystrokes makes no RPC and was never asked again. The gate
+    /// reads the row, so it closes anyway.
+    #[test]
+    fn a_revocation_nobody_broadcast_still_closes_the_terminal() {
+        let (store, dir) = store_with_one_pairing("revoked-elsewhere");
+        let gate = Liveness::new("phone");
+        assert!(gate.allows_at(0, &store));
+
+        // Written by the other process. No AppEvent, so nothing in here heard.
+        store.revoke_pairing("phone", 2).unwrap();
+
+        // Inside the window the cached answer still stands, which is the price
+        // of not hitting the database per keystroke.
+        assert!(gate.allows_at(REVOKE_RECHECK.as_millis() as u64 - 1, &store));
+        // Past it, the row is read and the terminal is over.
+        assert!(!gate.allows_at(REVOKE_RECHECK.as_millis() as u64, &store));
+        // And it stays over without asking again, whatever the clock says.
+        assert!(!gate.allows_at(0, &store));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A pairing nobody revoked keeps working past any number of windows, and
+    /// the broadcast path shuts one down without waiting for the next read.
+    #[test]
+    fn a_live_pairing_keeps_its_terminal_and_a_broadcast_ends_one_at_once() {
+        let (store, dir) = store_with_one_pairing("still-live");
+        let gate = Liveness::new("phone");
+        for tick in 0..10 {
+            assert!(gate.allows_at(tick * REVOKE_RECHECK.as_millis() as u64, &store));
+        }
+        gate.revoked();
+        assert!(!gate.allows_at(0, &store));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

@@ -13,8 +13,16 @@
 //!
 //! Every one of them talks to the database rather than to the running server,
 //! so they work whether or not it is up. SQLite is in WAL mode, which is what
-//! makes a second writer safe here; a revocation reaches a live socket through
-//! the row that `authz` re-reads on every call, not through this process.
+//! makes a second writer safe here.
+//!
+//! **A revocation written here reaches a live socket through the row, never
+//! through an event.** This is a second process: it cannot broadcast
+//! `AppEvent::PairingRevoked`, so nothing in the running server hears it. What
+//! catches it is that every path carrying authority re-reads the row:
+//! `authz::Authorized::check` per RPC, and `ws::Liveness` on the two paths that
+//! carry PTY bytes. That second half was missing, and without it a device
+//! attached to a terminal and sending only keystrokes kept full shell access
+//! across a revocation this command had already written.
 //!
 //! Hand-rolled argument parsing, and it stays that way: three verbs and six
 //! flags do not justify a dependency in a server binary, and the failure mode

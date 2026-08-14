@@ -108,6 +108,7 @@ async fn on_bus(state: &AppState, method: &str, params: &Value) -> Result<Value,
 // it. See `crate::authz`.
 pub async fn dispatch(state: &AppState, request: Authorized) -> Result<Value, String> {
     let method = request.method().to_string();
+    let caller = request.caller();
     let params = request.into_params();
     match method.as_str() {
         // Who answered, not just that something did. The protocol number keeps
@@ -573,13 +574,33 @@ pub async fn dispatch(state: &AppState, request: Authorized) -> Result<Value, St
         // proxy does not know the name it is reached by. It decides what the
         // link *says*, never what the token opens, and a configured
         // `BOITE_PUBLIC_URL` wins over it.
+        //
+        // Two things this arm may not do, both of which it used to:
+        //
+        // - grant more than the device asking holds. Admin is what opens this
+        //   method, and one paired with admin but no terminal could invite a
+        //   device that had one, redeem the link itself, and be holding a shell
+        //   nobody ever gave it. `clamped_to` is that fix, and the answer names
+        //   the set that was actually minted so the caller is never guessing;
+        // - read a malformed `scopes` as "no preference". `.ok()` on the decode
+        //   turned `{"scopes":"trminal"}`, or any shape that is not a list of
+        //   names, into the standard set, which is wider than what was asked
+        //   for. A request nobody can read is refused instead: widening on
+        //   malformed input is the one direction that cannot be allowed.
+        //
+        // The operator paths (`boite-server pair`, `POST /api/pairings`) are
+        // deliberately not clamped. They present the bootstrap token, which is
+        // the trust root this whole scheme hangs off; there is no wider grant
+        // above them to clamp against.
         "pairing.create" => {
             let label = params.get("label").and_then(|v| v.as_str()).unwrap_or("");
             let kind = params.get("kind").and_then(|v| v.as_str()).unwrap_or("");
-            let scopes: ScopeSet = params
-                .get("scopes")
-                .and_then(|v| serde_json::from_value(v.clone()).ok())
-                .unwrap_or_else(ScopeSet::standard);
+            let asked: ScopeSet = match params.get("scopes") {
+                Some(raw) => serde_json::from_value(raw.clone())
+                    .map_err(|_| "scopes must be a list of scope names".to_string())?,
+                None => ScopeSet::standard(),
+            };
+            let scopes = asked.clamped_to(caller);
             if scopes.is_empty() {
                 return Err("a pairing with no scopes could do nothing".into());
             }
@@ -651,6 +672,7 @@ pub async fn dispatch(state: &AppState, request: Authorized) -> Result<Value, St
 mod tests {
     use super::*;
     use crate::state::state_for_test;
+    use boite_core::pairing::Scope;
     use boite_core::store::{ColVal, ThreadCol};
 
     fn scratch(tag: &str) -> std::path::PathBuf {
@@ -667,9 +689,106 @@ mod tests {
     /// a narrower one is refused live in `crate::authz`, against the same
     /// constructor.
     async fn call(state: &AppState, method: &str, params: Value) -> Result<Value, String> {
-        let session = crate::auth::Session::for_test(ScopeSet::full());
+        call_as(state, ScopeSet::full(), method, params).await
+    }
+
+    /// The same, for the arms whose answer depends on what the caller holds
+    /// rather than only on whether it may call at all.
+    async fn call_as(
+        state: &AppState,
+        scopes: ScopeSet,
+        method: &str,
+        params: Value,
+    ) -> Result<Value, String> {
+        let session = crate::auth::Session::for_test(scopes);
         let request = Authorized::check(&state.store, &session, method, params)?;
         dispatch(state, request).await
+    }
+
+    /// The privilege escalation, walked end to end.
+    ///
+    /// A device paired with admin and deliberately *without* a terminal asks
+    /// for one, redeems its own invitation at the unauthenticated `/api/pair`,
+    /// and has to come away without a shell. Asserting on the answer alone
+    /// would not prove it: the pairing that lands in the table is what a phone
+    /// then connects with, so the token is spent and the row is read.
+    #[tokio::test]
+    async fn an_admin_without_a_terminal_cannot_invite_itself_one() {
+        let dir = scratch("escalate");
+        let state = state_for_test(&dir);
+        let deskless_admin = ScopeSet::empty().with(Scope::Read).with(Scope::Admin);
+
+        let minted = call_as(
+            &state,
+            deskless_admin,
+            "pairing.create",
+            json!({ "label": "a second phone", "scopes": ["read", "terminal"] }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(minted["scopes"], json!(["read"]));
+
+        let token = minted["token"].as_str().unwrap();
+        let paired = crate::auth::redeem_pairing_token(
+            &state.auth,
+            std::net::IpAddr::from([127, 0, 0, 1]),
+            &state.store,
+            token,
+            Some("a second phone"),
+            "phone",
+            now_ms(),
+        )
+        .expect("the invitation should still redeem, just for less");
+        assert!(
+            !paired.pairing.scopes.holds(Scope::Terminal),
+            "an admin-only device paired itself a shell: {}",
+            paired.pairing.scopes.to_text()
+        );
+
+        // A device that holds the terminal hands it on, so the ordinary invite
+        // is untouched.
+        let full = call_as(
+            &state,
+            ScopeSet::full(),
+            "pairing.create",
+            json!({ "scopes": ["read", "terminal"] }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(full["scopes"], json!(["read", "terminal"]));
+
+        // And a request that clamps down to nothing is refused rather than
+        // silently minting an invitation good for nothing.
+        let empty = call_as(
+            &state,
+            ScopeSet::empty().with(Scope::Admin),
+            "pairing.create",
+            json!({ "scopes": ["terminal"] }),
+        )
+        .await
+        .unwrap_err();
+        assert!(empty.contains("no scopes"), "{empty}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Scopes nobody can decode used to read as "no preference", which meant
+    /// the standard set: a malformed request coming away with more than it
+    /// asked for. It is an error now.
+    #[tokio::test]
+    async fn a_scopes_field_that_cannot_be_read_is_refused_rather_than_widened() {
+        let dir = scratch("scopes-malformed");
+        let state = state_for_test(&dir);
+        for bad in [json!(7), json!({ "read": true }), json!(null)] {
+            let err = call(&state, "pairing.create", json!({ "scopes": bad.clone() }))
+                .await
+                .unwrap_err();
+            assert!(err.contains("list of scope names"), "{bad}: {err}");
+        }
+        // No `scopes` at all is still the default, which is a stated choice and
+        // not a fallback from something unreadable.
+        let plain = call(&state, "pairing.create", json!({})).await.unwrap();
+        assert_eq!(plain["scopes"], json!(ScopeSet::standard()));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]

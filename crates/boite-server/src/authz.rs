@@ -31,7 +31,7 @@ use serde_json::Value;
 
 use boite_core::capability::Capability;
 use boite_core::command;
-use boite_core::pairing::Scope;
+use boite_core::pairing::{Scope, ScopeSet};
 use boite_core::store::Store;
 
 use crate::auth::Session;
@@ -53,6 +53,13 @@ use crate::auth::Session;
 ///   cannot act on it has swallowed the request for every other device.
 /// - `notify.test` is [`Scope::Admin`]. It makes this server POST somewhere of
 ///   the operator's choosing, which is not a read.
+///
+/// `pairing.create` is the one entry this table does not finish on its own.
+/// Admin says the device may invite another; it does not say *what* it may
+/// invite it with, and an invitation carrying more than its author holds is a
+/// way to grant yourself a scope. The arm clamps with
+/// [`ScopeSet::clamped_to`] against [`Authorized::caller`], which is why the
+/// call's own grant travels with it.
 const NON_BUS: &[(&str, Option<Scope>)] = &[
     ("hello", None),
     ("auth", None),
@@ -113,6 +120,14 @@ pub fn required(method: &str) -> Result<Option<Scope>, String> {
 pub struct Authorized {
     method: String,
     params: Value,
+    /// What the device that sent this holds, carried alongside the call.
+    ///
+    /// The table above answers "may this method be called at all", which is not
+    /// the whole question for the arms that *hand out* authority: `pairing.create`
+    /// mints a grant, and a grant may not exceed the one it was made from. So
+    /// the caller's own set travels with the call rather than being looked up
+    /// again from a session the dispatcher does not have.
+    caller: ScopeSet,
 }
 
 impl Authorized {
@@ -141,6 +156,7 @@ impl Authorized {
         Ok(Authorized {
             method: method.to_string(),
             params,
+            caller: session.scopes(),
         })
     }
 
@@ -150,6 +166,11 @@ impl Authorized {
 
     pub fn params(&self) -> &Value {
         &self.params
+    }
+
+    /// What the device that sent this call was paired with.
+    pub fn caller(&self) -> ScopeSet {
+        self.caller
     }
 
     pub fn into_params(self) -> Value {
@@ -166,7 +187,6 @@ pub const REVOKED: &str = "this device is no longer paired with this boite";
 #[cfg(test)]
 mod tests {
     use super::*;
-    use boite_core::pairing::ScopeSet;
 
     /// A store holding one live pairing, and a session for it. Nothing is
     /// mocked: the revocation check reads the row this wrote.

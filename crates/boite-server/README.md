@@ -123,7 +123,15 @@ because a query string reaches the access log of whatever proxy is in front.
 
 - Revoking a device takes effect immediately, including on a socket it is
   already holding: the connection is hung up and the pairing row is re-read on
-  every call.
+  every call. `boite-server revoke` is a second process and cannot tell the
+  running server anything, so the two paths carrying terminal bytes re-read the
+  row as well, at most once every two seconds. A device revoked from the command
+  line loses its shell without the server being restarted.
+- A device can never invite another with more than it holds itself. `admin` is
+  what opens `pairing.create`; the scopes it asks for are intersected with the
+  caller's own before the token is minted, and the answer names what was
+  actually granted. The bootstrap paths (`boite-server pair`, `POST
+  /api/pairings`) are not clamped, because they are the trust root.
 - The database holds a SHA-256 of each secret and never the secret, so a dump of
   it opens nothing. Every comparison is constant time.
 - The server binds loopback by default. When you bind a routable interface it

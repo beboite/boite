@@ -143,6 +143,26 @@ impl ScopeSet {
         ScopeSet(self.0 & !scope.bit())
     }
 
+    /// What of this request a device holding `granted` is allowed to hand on.
+    ///
+    /// Pairing a further device is [`Scope::Admin`], and holding admin used to
+    /// be the whole check: a device deliberately paired with admin and *no*
+    /// terminal could invite one that had a terminal, redeem the invitation
+    /// itself, and be holding a shell it was never granted. A grant cannot
+    /// exceed the grant it was made from, so the request is filtered down to it
+    /// here rather than trusted.
+    ///
+    /// Filtered on [`ScopeSet::allows`] rather than on the raw bits, because
+    /// the implication is real in both directions: a device holding only admin
+    /// may already write, so refusing it the ability to pass write on would
+    /// narrow nothing it could not do anyway.
+    pub fn clamped_to(self, granted: ScopeSet) -> ScopeSet {
+        Scope::ALL
+            .into_iter()
+            .filter(|s| self.holds(*s) && granted.allows(*s))
+            .fold(ScopeSet::empty(), ScopeSet::with)
+    }
+
     /// Whether this scope was granted, with nothing read into it.
     pub fn holds(self, scope: Scope) -> bool {
         self.0 & scope.bit() != 0
@@ -410,6 +430,28 @@ mod tests {
             assert!(!none.allows(scope), "{scope:?}");
             assert!(none.ensure(scope).is_err());
         }
+    }
+
+    /// The privilege escalation this exists to close: an invitation cannot
+    /// carry more than the device writing it holds.
+    #[test]
+    fn an_invitation_cannot_grant_what_the_device_writing_it_lacks() {
+        // Admin, deliberately without a terminal. What it invites has none
+        // either, however loudly the request asked.
+        let deskless_admin = ScopeSet::empty().with(Scope::Admin);
+        let asked = ScopeSet::standard().with(Scope::Admin);
+        let granted = asked.clamped_to(deskless_admin);
+        assert_eq!(granted.names(), ["read", "write", "admin"]);
+        assert!(!granted.holds(Scope::Terminal), "a shell was handed on");
+        assert!(!granted.holds(Scope::Approve));
+
+        // A device with everything hands on everything, so the ordinary case
+        // is untouched.
+        assert_eq!(asked.clamped_to(ScopeSet::full()), asked);
+        // And nothing is added: clamping only ever removes.
+        let read_only = ScopeSet::empty().with(Scope::Read);
+        assert_eq!(read_only.clamped_to(ScopeSet::full()), read_only);
+        assert_eq!(ScopeSet::full().clamped_to(read_only).names(), ["read"]);
     }
 
     #[test]
