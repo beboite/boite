@@ -8,6 +8,7 @@ import type {
   Project,
   Settings,
   Thread,
+  ThreadStatus,
   TodoItem,
 } from "$lib/types";
 import type {
@@ -117,6 +118,27 @@ export interface DbApi {
    * badge on every row in the sidebar on every boot.
    */
   markThreadStarted(id: string): Promise<void>;
+  /**
+   * Files a thread away, or brings it back.
+   *
+   * `status` is this client's own live reading, and it is sent rather than read
+   * off the row because the row does not hold it: what a thread row records is
+   * that there *was* a run. The boite refuses the put-away half while that
+   * status is `running` or `waiting`, so the rule holds for a caller that never
+   * drew a menu — and it rejects rather than answering, so the optimistic write
+   * in the store has something to roll back to.
+   */
+  setThreadAgeing(
+    id: string,
+    status: ThreadStatus,
+    patch: { settled?: boolean; snoozeUntil?: number | null },
+  ): Promise<void>;
+  /**
+   * The whole pinned order, in one write. Anything not in the list is unpinned,
+   * so pin, unpin and reorder are the same call and two devices converge on
+   * whichever wrote last instead of interleaving.
+   */
+  setPinnedOrder(ids: string[]): Promise<void>;
   deleteThread(id: string): Promise<void>;
   loadSettings(): Promise<Partial<Settings>>;
   saveSettings(settings: Settings): Promise<void>;
