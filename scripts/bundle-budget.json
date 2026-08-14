@@ -16,9 +16,11 @@
     "",
     "The eager ceiling moved once, to 770048, when a browser pane gained the mark",
     "saying an agent is driving it. The mark rides on the pane's own content, so it",
-    "is read wherever a pane is drawn, which is before first paint."
+    "is read wherever a pane is drawn, which is before first paint. It moved again,",
+    "to 776192, when the pane driver landed: agent-requests answers page questions,",
+    "and that handler lives in the layout's own graph."
   ],
-  "eagerBytes": 770048,
+  "eagerBytes": 776192,
   "totalBytes": 6144000,
   "largestEagerChunkBytes": 256000
 }
