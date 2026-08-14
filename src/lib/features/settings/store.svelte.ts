@@ -124,6 +124,7 @@ const DEFAULTS: Settings = {
   agentTodoAccess: true,
   mcpYolo: false,
   idleTimeoutMinutes: 10,
+  autoSettleDays: 0,
   idleAutocloseByIcon: {
     claude: true,
     codex: true,
@@ -421,6 +422,10 @@ class SettingsStore {
           typeof stored.idleTimeoutMinutes === "number" && stored.idleTimeoutMinutes >= 0
             ? stored.idleTimeoutMinutes
             : DEFAULTS.idleTimeoutMinutes,
+        autoSettleDays:
+          typeof stored.autoSettleDays === "number" && stored.autoSettleDays >= 0
+            ? stored.autoSettleDays
+            : DEFAULTS.autoSettleDays,
         idleAutocloseByIcon:
           stored.idleAutocloseByIcon && typeof stored.idleAutocloseByIcon === "object"
             ? {
@@ -968,6 +973,13 @@ class SettingsStore {
     const clamped = Math.max(0, Math.min(240, Math.round(value)));
     if (this.state.idleTimeoutMinutes === clamped) return;
     this.state.idleTimeoutMinutes = clamped;
+    this.persistSoon();
+  }
+
+  setAutoSettleDays(value: number) {
+    const clamped = Math.max(0, Math.min(365, Math.round(value)));
+    if (this.state.autoSettleDays === clamped) return;
+    this.state.autoSettleDays = clamped;
     this.persistSoon();
   }
 

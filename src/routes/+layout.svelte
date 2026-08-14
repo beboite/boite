@@ -27,6 +27,7 @@
   } from "$lib/features/thread/api";
   import { addProjectByPath } from "$lib/features/project/api";
   import { watchAgentRequests } from "$lib/app/agent-requests";
+  import { startThreadAgeing } from "$lib/features/thread/ageing.svelte";
   import { watchAgentActivity } from "$lib/features/thread/agentActivity.svelte";
   import { watchScreen } from "$lib/app/screen.svelte";
   import { installInspector } from "$lib/features/devtools/inspect";
@@ -248,6 +249,10 @@
   // The layout guess is only a guess until the user overrides it, and a tablet
   // can cross the threshold by being rotated.
   onMount(() => settings.watchFormFactor());
+
+  // Its own too: a snooze that ended while the app was closed has to end on the
+  // first draw, not once boot has finished walking the workspace.
+  onMount(() => startThreadAgeing());
 
   // Also its own: an agent can ask to be moved before boot has finished, and
   // the request would land on nobody.

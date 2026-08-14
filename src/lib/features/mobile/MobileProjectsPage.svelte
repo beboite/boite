@@ -2,6 +2,8 @@
   import { app } from "$lib/app/store.svelte";
   import { visibleStatus } from "$lib/domain/thread-status";
   import { isScratch } from "$lib/domain/project";
+  import { isFiled } from "$lib/domain/thread-ageing";
+  import { ageingNow } from "$lib/features/thread/ageing.svelte";
 import { projectDisplayName } from "$lib/shared/project-label";
   import { pickAndAddProject } from "$lib/features/project/api";
   import { openProjectDashboard } from "$lib/features/project/dashboard";
@@ -18,6 +20,21 @@ import { projectDisplayName } from "$lib/shared/project-label";
   import X from "@lucide/svelte/icons/x";
 
   const projects = $derived(app.sortedProjects);
+
+  /**
+   * The same list the sidebar draws, minus what has been filed away.
+   *
+   * There is no way to file one from here yet, but a phone that still shows
+   * what a laptop put away would make the filing look like it did not take.
+   *
+   * The ageing clock for the same reason the sidebar reads it: this is called
+   * from the markup, so a plain `Date.now()` would leave a thread whose snooze
+   * ended sitting out of the list until something else made the page redraw.
+   */
+  function liveThreads(projectId: string): Thread[] {
+    const now = ageingNow();
+    return app.threadsByProjectSorted(projectId).filter((thread) => !isFiled(thread, now));
+  }
 
   function displayStatus(thread: Thread): ThreadStatus {
     if (app.unboundByDedup.includes(thread.id)) return "error";
@@ -49,7 +66,7 @@ import { projectDisplayName } from "$lib/shared/project-label";
   // user on an empty terminal page).
   function selectProject(id: string) {
     app.selectedProjectId = id;
-    const threads = app.threadsByProjectSorted(id);
+    const threads = liveThreads(id);
     if (threads.length > 0) {
       app.activeThreadId = threads[threads.length - 1].id;
       app.mobileTab = "terminal";
@@ -86,7 +103,7 @@ import { projectDisplayName } from "$lib/shared/project-label";
     {:else}
       <div class="flex flex-col gap-2.5">
         {#each projects as project (project.id)}
-          {@const threads = app.threadsByProjectSorted(project.id)}
+          {@const threads = liveThreads(project.id)}
           {@const isCurrent = app.currentProjectId === project.id}
           <!-- Scratch reads as temporary here the same way it does in the
                sidebar: the whole card faded and hatched, threads included. It
