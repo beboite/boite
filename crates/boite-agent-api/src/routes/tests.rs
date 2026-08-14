@@ -334,3 +334,225 @@ fn a_credentials_file_is_refused_before_anybody_is_asked() {
     assert_eq!(body["retryable"], json!(false));
     assert!(fake.store.open_approvals().unwrap().is_empty());
 }
+
+// ------------------------------------------------------------ the browser pane
+
+use boite_core::screen::{Pane, Rect, Screen, Window};
+
+fn owner(project: &str, thread: Option<&str>) -> Caller {
+    Caller {
+        project_id: project.into(),
+        thread_id: thread.map(str::to_string),
+        grant: boite_core::capability::Grant::Owner,
+        agent: None,
+    }
+}
+
+fn on_screen(project: &str, panes: Vec<Pane>) -> Screen {
+    Screen {
+        at: 1,
+        project_id: project.into(),
+        window: Window { width: 1280.0, height: 720.0, focused: true },
+        panes,
+        overlays: Vec::new(),
+    }
+}
+
+fn framed(id: &str, url: &str, driven_by: Option<&str>) -> Pane {
+    Pane {
+        id: id.into(),
+        kind: "browser".into(),
+        title: "localhost".into(),
+        thread_id: None,
+        url: Some(url.into()),
+        page: Some("loaded".into()),
+        driven_by: driven_by.map(str::to_string),
+        rect: Rect { x: 0.0, y: 0.0, w: 640.0, h: 600.0 },
+        focused: false,
+    }
+}
+
+/// Nothing to point, an id that is not there, and two to choose between are
+/// three different things to do next, so they are three different sentences.
+#[test]
+fn a_browser_call_says_which_of_the_three_ways_it_could_not_find_a_pane() {
+    let caller = owner("p1", Some("t1"));
+
+    let none = on_screen("p1", Vec::new());
+    assert!(which_pane(&none, &caller, None).unwrap_err().contains("no browser pane is open"));
+
+    let one = on_screen("p1", vec![framed("pane-a", "http://localhost:1/", Some("t1"))]);
+    assert!(which_pane(&one, &caller, Some("pane-z")).unwrap_err().contains("no browser pane called"));
+    assert_eq!(which_pane(&one, &caller, None).unwrap(), "pane-a");
+
+    let two = on_screen(
+        "p1",
+        vec![
+            framed("pane-a", "http://localhost:1/", Some("t1")),
+            framed("pane-b", "http://localhost:2/", Some("t1")),
+        ],
+    );
+    assert!(which_pane(&two, &caller, None).unwrap_err().contains("say which"));
+    assert_eq!(which_pane(&two, &caller, Some("pane-b")).unwrap(), "pane-b");
+}
+
+/// The hand-back, which is the whole product answer to "an agent is driving my
+/// pane". Clearing the mark is all the user does, and it is enforced here.
+#[test]
+fn a_pane_the_user_took_back_is_no_longer_the_agents_to_point() {
+    let caller = owner("p1", Some("t1"));
+    let driven = on_screen("p1", vec![framed("pane-a", "http://localhost:1/", Some("t1"))]);
+    assert!(which_pane(&driven, &caller, None).is_ok());
+
+    let reclaimed = on_screen("p1", vec![framed("pane-a", "http://localhost:1/", None)]);
+    assert_eq!(which_pane(&reclaimed, &caller, None).unwrap_err(), NOT_YOURS);
+
+    // And another terminal's pane is not this one's either.
+    let theirs = on_screen("p1", vec![framed("pane-a", "http://localhost:1/", Some("t2"))]);
+    assert_eq!(which_pane(&theirs, &caller, None).unwrap_err(), NOT_YOURS);
+}
+
+/// A credentials file has no terminal behind it, so it opened nothing and
+/// drives nothing. Written as its own case because an empty thread id compared
+/// against an absent mark would otherwise match every pane the user owns.
+#[test]
+fn a_credential_with_no_terminal_drives_no_pane() {
+    let caller = owner("p1", None);
+    let user_owned = on_screen("p1", vec![framed("pane-a", "http://localhost:1/", None)]);
+    assert_eq!(which_pane(&user_owned, &caller, None).unwrap_err(), NOT_YOURS);
+}
+
+/// A window shows one project's group at a time, so an agent in another one
+/// asking about "the browser pane" is asking about somebody else's screen.
+#[test]
+fn the_window_only_answers_for_the_project_it_is_showing() {
+    let fake = Fake::new("browser-project").with_project("p1", "/w/one");
+    *fake.screen.lock().unwrap() = Some(on_screen("p2", vec![framed("pane-a", "http://x/", None)]));
+    let reason = window_showing(&fake, &owner("p1", Some("t1"))).unwrap_err();
+    assert!(reason.contains("another project"), "{reason}");
+
+    *fake.screen.lock().unwrap() = Some(on_screen("p1", vec![framed("pane-a", "http://x/", None)]));
+    assert!(window_showing(&fake, &owner("p1", Some("t1"))).is_ok());
+}
+
+/// A host with no window says so rather than answering an empty list. "No
+/// browser pane is open" and "I cannot see whether one is" send an agent to two
+/// different places, which is the same reason `transcripts_dir` answers `None`.
+#[test]
+fn a_boite_with_no_window_says_so_rather_than_answering_empty() {
+    let fake = Fake::new("browser-headless").with_project("p1", "/w/one");
+    assert_eq!(
+        window_showing(&fake, &owner("p1", Some("t1"))).unwrap_err(),
+        NO_WINDOW_TO_LOOK_AT
+    );
+}
+
+/// The status answer is scoped to the caller: a pane id means nothing to an
+/// agent that is not driving it, so what goes out is whether it is theirs.
+#[test]
+fn status_says_whose_a_pane_is_rather_than_which_thread_holds_it() {
+    let mine = describe(
+        &on_screen("p1", vec![framed("pane-a", "http://localhost:1/", Some("t1"))]),
+        &owner("p1", Some("t1")),
+    );
+    assert_eq!(mine[0]["yours"], json!(true));
+    assert_eq!(mine[0]["url"], json!("http://localhost:1/"));
+    assert_eq!(mine[0]["page"], json!("loaded"));
+    assert!(mine[0].get("drivenBy").is_none());
+
+    let theirs = describe(
+        &on_screen("p1", vec![framed("pane-a", "http://localhost:1/", Some("t2"))]),
+        &owner("p1", Some("t1")),
+    );
+    assert_eq!(theirs[0]["yours"], json!(false));
+}
+
+/// The question routes are strict where the verbs are lenient: a verb can be
+/// dispatched blind because the device re-checks, but a question needs an
+/// answer channel, so a host whose devices cannot answer says so up front.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_page_question_on_a_deviceless_host_is_refused_with_the_reason() {
+    let fake = Fake::new("browser-no-answers").with_project("p1", "/w/one");
+    *fake.screen.lock().unwrap() =
+        Some(on_screen("p1", vec![framed("pane-a", "http://localhost:1/", Some("t1"))]));
+    let shared: Shared = std::sync::Arc::new(fake);
+
+    let out = browser_snapshot(
+        State(shared),
+        Extension(owner("p1", Some("t1"))),
+        axum::extract::Query(SnapshotIn { pane_id: None, mode: None, max_chars: None }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(out.0["error"], json!(crate::DEVICE_CANNOT_ANSWER));
+}
+
+/// The happy path end to end: the request that reaches the device carries the
+/// verb, the pane and a requestId, and the device's answer comes back to the
+/// very call that asked, stamped with the pane it was about.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_snapshot_rides_out_and_the_answer_rides_back() {
+    let fake = Fake::new("browser-snapshot").with_project("p1", "/w/one");
+    *fake.screen.lock().unwrap() =
+        Some(on_screen("p1", vec![framed("pane-a", "http://localhost:1/", Some("t1"))]));
+    *fake.answer_with.lock().unwrap() = Some(json!({
+        "url": "http://localhost:1/app",
+        "title": "App",
+        "elements": [{ "u": "u1", "r": "button", "n": "Save" }]
+    }));
+    let shared: Shared = std::sync::Arc::new(fake);
+
+    let out = browser_snapshot(
+        State(shared.clone()),
+        Extension(owner("p1", Some("t1"))),
+        axum::extract::Query(SnapshotIn {
+            pane_id: None,
+            mode: Some("elements".into()),
+            max_chars: None,
+        }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(out.0["paneId"], json!("pane-a"));
+    assert_eq!(out.0["url"], json!("http://localhost:1/app"));
+    assert_eq!(out.0["elements"][0]["u"], json!("u1"));
+}
+
+/// The mark still rules: a question at a pane the agent is not driving is the
+/// same refusal as a verb, before anything reaches a device.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_question_at_a_reclaimed_pane_is_not_the_agents_to_ask() {
+    let fake = Fake::new("browser-question-mark").with_project("p1", "/w/one");
+    *fake.screen.lock().unwrap() =
+        Some(on_screen("p1", vec![framed("pane-a", "http://localhost:1/", None)]));
+    *fake.answer_with.lock().unwrap() = Some(json!({ "ok": true }));
+    let shared: Shared = std::sync::Arc::new(fake);
+
+    let out = browser_click(
+        State(shared),
+        Extension(owner("p1", Some("t1"))),
+        Json(ClickIn { pane_id: None, uid: "u1".into(), double: None }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(out.0["error"], json!(NOT_YOURS));
+}
+
+/// A mode this does not know is a sentence, not a guess at what was meant.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_unknown_snapshot_mode_is_refused_by_name() {
+    let fake = Fake::new("browser-mode").with_project("p1", "/w/one");
+    let shared: Shared = std::sync::Arc::new(fake);
+    let out = browser_snapshot(
+        State(shared),
+        Extension(owner("p1", Some("t1"))),
+        axum::extract::Query(SnapshotIn {
+            pane_id: None,
+            mode: Some("screenshotish".into()),
+            max_chars: None,
+        }),
+    )
+    .await
+    .unwrap();
+    assert!(out.0["error"].as_str().unwrap().contains("elements, diff or text"));
+}

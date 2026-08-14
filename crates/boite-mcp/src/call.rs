@@ -9,7 +9,9 @@ use serde_json::{json, Value};
 
 use crate::backend::Backend;
 use crate::render::{
-    format_artifacts, format_hits, format_moments, format_projects, format_todos, format_worktree, prefix,
+    format_acted, format_artifacts, format_browser_panes, format_drove, format_hits,
+    format_moments, format_page_settled, format_projects, format_snapshot, format_todos,
+    format_worktree, prefix,
 };
 use crate::toon::Toon;
 use crate::{encode_query, MAX_BRANCHES};
@@ -236,8 +238,144 @@ pub fn call_tool<B: Backend>(host: &B, name: &str, args: &Value) -> Result<Strin
             w.hint("the user sees it now; you cannot read what is in it, and a page off this machine waits on them agreeing to it");
             Ok(w.into_string())
         }
+        "browser_status" => {
+            let out = host.send("GET", "/v1/browser", None)?;
+            if let Some(error) = out.get("error").and_then(|v| v.as_str()) {
+                return Err(error.to_string());
+            }
+            Ok(format_browser_panes(&out))
+        }
+        "browser_wait_for" => {
+            let mut path = String::from("/v1/browser/wait?");
+            if let Some(ms) = args.get("timeoutMs").and_then(|v| v.as_u64()) {
+                path.push_str(&format!("timeoutMs={ms}&"));
+            }
+            if let Some(id) = args.get("paneId").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+                path.push_str("paneId=");
+                path.push_str(&encode_query(id));
+            }
+            let out = host.send("GET", &path, None)?;
+            if let Some(error) = out.get("error").and_then(|v| v.as_str()) {
+                return Err(error.to_string());
+            }
+            Ok(format_page_settled(&out))
+        }
+        "browser_navigate" => {
+            let url = args
+                .get("url")
+                .and_then(|v| v.as_str())
+                .ok_or("browser_navigate needs a url")?;
+            let mut body = json!({ "url": url });
+            if let Some(id) = args.get("paneId").and_then(|v| v.as_str()) {
+                body["paneId"] = json!(id);
+            }
+            let out = refusable(host, "/v1/browser/navigate", body)?;
+            Ok(format_drove(&out, "pointed", Some(url)))
+        }
+        "browser_reload" | "browser_close" => {
+            let (path, done) = if name == "browser_reload" {
+                ("/v1/browser/reload", "reloading")
+            } else {
+                ("/v1/browser/close", "closed")
+            };
+            let mut body = json!({});
+            if let Some(id) = args.get("paneId").and_then(|v| v.as_str()) {
+                body["paneId"] = json!(id);
+            }
+            let out = refusable(host, path, body)?;
+            Ok(format_drove(&out, done, None))
+        }
+        "browser_snapshot" => {
+            let mut path = String::from("/v1/browser/snapshot?");
+            if let Some(mode) = args.get("mode").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+                path.push_str("mode=");
+                path.push_str(&encode_query(mode));
+                path.push('&');
+            }
+            if let Some(n) = args.get("maxChars").and_then(|v| v.as_u64()) {
+                path.push_str(&format!("maxChars={n}&"));
+            }
+            if let Some(id) = args.get("paneId").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+                path.push_str("paneId=");
+                path.push_str(&encode_query(id));
+            }
+            let out = host.send("GET", &path, None)?;
+            if let Some(error) = out.get("error").and_then(|v| v.as_str()) {
+                return Err(error.to_string());
+            }
+            Ok(format_snapshot(&out))
+        }
+        "browser_click" | "browser_type" | "browser_press" | "browser_scroll" => {
+            let path = match name {
+                "browser_click" => "/v1/browser/click",
+                "browser_type" => "/v1/browser/type",
+                "browser_press" => "/v1/browser/press",
+                _ => "/v1/browser/scroll",
+            };
+            // Forwarded field by field rather than wholesale: the endpoint owns
+            // what each verb takes, and a key it never heard of should not ride
+            // along just because a model invented it.
+            let mut body = json!({});
+            for key in ["uid", "text", "key", "paneId"] {
+                if let Some(v) = args.get(key).and_then(|v| v.as_str()) {
+                    body[key] = json!(v);
+                }
+            }
+            for key in ["double", "clear", "submit"] {
+                if let Some(v) = args.get(key).and_then(|v| v.as_bool()) {
+                    body[key] = json!(v);
+                }
+            }
+            if let Some(dy) = args.get("dy").and_then(|v| v.as_f64()) {
+                body["dy"] = json!(dy);
+            }
+            let out = refusable(host, path, body)?;
+            Ok(format_acted(&out, name.trim_start_matches("browser_")))
+        }
         other => Err(format!("unknown tool: {other}")),
     }
+}
+
+/// The one tool whose answer is not text.
+///
+/// Kept out of [`call_tool`] so the text tools stay a `String` pipeline;
+/// [`crate::rpc::answer`] asks here first and falls through. `Some(Ok(...))` is
+/// a content array ready to go out as-is: a caption, then the PNG as an MCP
+/// image block, which is what a vision-capable agent renders and reads.
+pub fn call_blocks<B: Backend>(
+    host: &B,
+    name: &str,
+    args: &Value,
+) -> Option<Result<Value, String>> {
+    if name != "browser_screenshot" {
+        return None;
+    }
+    Some((|| {
+        let mut path = String::from("/v1/browser/screenshot?");
+        if let Some(uid) = args.get("uid").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+            path.push_str("uid=");
+            path.push_str(&encode_query(uid));
+            path.push('&');
+        }
+        if let Some(id) = args.get("paneId").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+            path.push_str("paneId=");
+            path.push_str(&encode_query(id));
+        }
+        let out = host.send("GET", &path, None)?;
+        if let Some(error) = out.get("error").and_then(|v| v.as_str()) {
+            return Err(error.to_string());
+        }
+        let image = out
+            .get("image")
+            .and_then(|v| v.as_str())
+            .ok_or("the device answered without an image")?;
+        let width = out.get("width").and_then(|v| v.as_u64()).unwrap_or(0);
+        let height = out.get("height").and_then(|v| v.as_u64()).unwrap_or(0);
+        Ok(json!([
+            { "type": "text", "text": format!("the pane as drawn, {width}x{height} png") },
+            { "type": "image", "data": image, "mimeType": "image/png" }
+        ]))
+    })())
 }
 
 /// The `status` the endpoint answers with when a call is now the user's to
