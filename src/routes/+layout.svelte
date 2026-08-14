@@ -16,6 +16,11 @@
   import { currentTheme } from "$lib/theme/current.svelte";
   import { repaintTerminals } from "$lib/features/terminal/theme";
   import {
+    DEFAULT_MONO_STACK,
+    DEFAULT_SANS_STACK,
+    fontStack,
+  } from "$lib/theme/fonts";
+  import {
     closeThreadWithConfirm,
     launchBlankTerminalHere,
     restoreLastClosedThread,
@@ -64,6 +69,25 @@
       currentTheme.name = theme;
       repaintTerminals();
     });
+  });
+
+  // The two stacks, rebuilt around whatever families were picked. Written onto
+  // the root rather than into app.css so everything reading --font-sans or
+  // --font-mono follows, the editor included: CodeMirror emits real stylesheets,
+  // so its `var(--font-mono)` resolves at paint. The terminals are the one
+  // exception and build their own stack, since a canvas measures a resolved
+  // string and cannot wait for this effect.
+  $effect(() => {
+    if (typeof document === "undefined") return;
+    const root = document.documentElement;
+    root.style.setProperty(
+      "--font-sans",
+      fontStack(settings.state.uiFontFamily, DEFAULT_SANS_STACK),
+    );
+    root.style.setProperty(
+      "--font-mono",
+      fontStack(settings.state.terminalFontFamily, DEFAULT_MONO_STACK),
+    );
   });
 
   function handleWheel(e: WheelEvent) {
@@ -174,6 +198,7 @@
     "view.zoomOut": () => settings.setUiScalePercent(settings.state.uiScalePercent - 5),
     "view.zoomReset": () => settings.setUiScalePercent(100),
     "palette.toggle": () => palette.toggle(),
+    "palette.files": () => palette.toggle("files"),
     "view.toggleSidebar": () => settings.toggleSidebar(),
     "view.toggleSettings": () => {
       app.view = app.view === "settings" ? "terminal" : "settings";

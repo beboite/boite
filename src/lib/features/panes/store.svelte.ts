@@ -344,6 +344,25 @@ class PaneStore {
     return paneId;
   }
 
+  /**
+   * Point a browser pane somewhere else, or hand it back to the user.
+   *
+   * Navigating replaces what is in the pane rather than opening another one:
+   * two browser panes are told apart by their address (`sameContent`), so an
+   * agent following a dev server through three routes with `openBeside` would
+   * leave three frames on the user's screen.
+   */
+  setBrowser(paneId: string, patch: { url?: string; drivenBy?: string | null }): boolean {
+    const group = this.groupOf(paneId);
+    if (!group) return false;
+    const leaf = leafNodesOf(group.root).find((l) => l.paneId === paneId);
+    if (leaf?.content.kind !== "browser") return false;
+    if (patch.url !== undefined) leaf.content.url = patch.url;
+    if (patch.drivenBy !== undefined) leaf.content.drivenBy = patch.drivenBy;
+    this.saveSoon();
+    return true;
+  }
+
   /** Close a pane. A thread pane goes back to being a group of its own. */
   closePane(paneId: string): boolean {
     const g = this.groupOf(paneId);

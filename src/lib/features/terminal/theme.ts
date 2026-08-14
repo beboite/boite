@@ -1,5 +1,6 @@
 import type { ITheme } from "@xterm/xterm";
 import { liveTerminal, liveTerminalIds } from "$lib/shared/terminals";
+import { DEFAULT_MONO_STACK, fontStack } from "$lib/theme/fonts";
 
 // Builds the xterm theme from the CSS tokens in app.css so the terminal and
 // the chrome can never drift apart. Fallbacks cover the first paint before
@@ -10,15 +11,20 @@ function reader() {
     style.getPropertyValue(name).trim() || fallback;
 }
 
-// xterm measures the cell on a canvas, so it wants a resolved stack rather than
-// a var(): passing one leaves it measuring an invalid font. Read here for the
-// same reason the palette is, because a copy of --font-mono's string in the
-// component silently desynced the terminal every time app.css moved.
-export function xtermFontFamily(): string {
-  return reader()(
-    "--font-mono",
-    '"Geist Mono", "JetBrains Mono", "SF Mono", "Cascadia Code", Consolas, "Liberation Mono", Menlo, monospace',
-  );
+/**
+ * The stack the terminal measures its cell in.
+ *
+ * xterm wants a resolved stack rather than a `var()`: passing one leaves it
+ * measuring an invalid font. Built rather than read back off the root, because
+ * the root property is written by the same settings effect that would be racing
+ * this call, and a terminal that measured its cell one frame early keeps the
+ * wrong cell until something refits it.
+ *
+ * `DEFAULT_MONO_STACK` is app.css's own `--font-mono`, and `fonts.test.ts`
+ * fails if the two ever stop being the same string.
+ */
+export function xtermFontFamily(family: string | null = null): string {
+  return fontStack(family, DEFAULT_MONO_STACK);
 }
 
 export function xtermTheme(): ITheme {

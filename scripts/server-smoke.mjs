@@ -429,6 +429,129 @@ if (agentUrl && keyFile) {
   // Whatever else it holds, it must not hold a credential.
   const asText = JSON.stringify(state ?? {});
   check("the snapshot carries no credential", !asText.includes(seed) && !asText.includes(TOKEN));
+
+  // ---------------------------------------------------------- browser panes
+  //
+  // The pane is a sandboxed cross-origin frame, so the tools drive the
+  // container and never the page. What this proves is the honest half: the
+  // address rule is applied at the route, a host with no window says so instead
+  // of answering an empty list, and a dispatch it could not check says which of
+  // the two it is.
+  const seePanes = await fetch(`${agentUrl}/v1/browser`, {
+    headers: signedHeaders(key, probeId, "GET", "/v1/browser", ""),
+  });
+  const panes = seePanes.status === 200 ? await seePanes.json() : null;
+  check(
+    "a host with no window says so rather than answering no panes",
+    typeof panes?.error === "string" && panes.error.includes("no window"),
+    `status=${seePanes.status} body=${JSON.stringify(panes)}`,
+  );
+  check(
+    "and it is a sentence the agent reads, not a status code",
+    seePanes.status === 200 && panes?.panes === undefined,
+    `status=${seePanes.status}`,
+  );
+
+  // The security boundary, applied at the route rather than on the device: this
+  // is the address `boite_core::browser::classify` exists to refuse, and it must
+  // never reach a window to be decided there.
+  const navigate = async (url) => {
+    const body = JSON.stringify({ url });
+    const res = await fetch(`${agentUrl}/v1/browser/navigate`, {
+      method: "POST",
+      headers: {
+        ...signedHeaders(key, probeId, "POST", "/v1/browser/navigate", body),
+        "content-type": "application/json",
+      },
+      body,
+    });
+    return { status: res.status, body: res.status === 200 ? await res.json() : null };
+  };
+
+  const ownOrigin = await navigate("http://tauri.localhost/index.html");
+  check(
+    "navigating to Boite's own origin is refused at the endpoint",
+    ownOrigin.body?.error?.includes("own origin") === true,
+    `status=${ownOrigin.status} body=${JSON.stringify(ownOrigin.body)}`,
+  );
+  const cleartext = await navigate("http://example.com/");
+  check(
+    "cleartext off this machine is refused at the endpoint",
+    cleartext.body?.error?.includes("https") === true,
+    `body=${JSON.stringify(cleartext.body)}`,
+  );
+  const credentials = await navigate("http://evil.com@localhost:5173/");
+  check(
+    "an address hiding its host behind a username is refused",
+    credentials.body?.error?.includes("username") === true,
+    `body=${JSON.stringify(credentials.body)}`,
+  );
+
+  // A legal address on a host that cannot see its own window: dispatched to
+  // whichever device is drawing the pane, and answered as an errand rather than
+  // as an outcome. An agent reading `ok` alone would report a page it never saw.
+  const legal = await navigate("http://localhost:5173/");
+  check(
+    "a legal address is dispatched to the device drawing the pane",
+    legal.body?.ok === true,
+    `status=${legal.status} body=${JSON.stringify(legal.body)}`,
+  );
+  check(
+    "and a dispatch nothing could check says so rather than claiming it is done",
+    legal.body?.checked === false,
+    `body=${JSON.stringify(legal.body)}`,
+  );
+
+  // The wait is a read of the window, so it refuses on a host that has none.
+  // Also the one browser route with a query on it, which is what the signature
+  // has to cover: a signature over the path alone answers 401 here.
+  const waitPath = "/v1/browser/wait?timeoutMs=250&paneId=pane-nope";
+  const waited = await fetch(`${agentUrl}${waitPath}`, {
+    headers: signedHeaders(key, probeId, "GET", waitPath, ""),
+  });
+  const waitBody = waited.status === 200 ? await waited.json() : null;
+  check(
+    "waiting on a page refuses on a host with no window",
+    typeof waitBody?.error === "string" && waitBody.error.includes("no window"),
+    `status=${waited.status} body=${JSON.stringify(waitBody)}`,
+  );
+
+  // A page question on the server: its devices are browsers and phones with
+  // no driver in the frame, so the honest answer is a sentence up front, not
+  // an empty snapshot or a timeout.
+  const snapPath = "/v1/browser/snapshot?mode=elements";
+  const snapped = await fetch(`${agentUrl}${snapPath}`, {
+    headers: signedHeaders(key, probeId, "GET", snapPath, ""),
+  });
+  const snapBody = snapped.status === 200 ? await snapped.json() : null;
+  check(
+    "reading a page on the server answers why it cannot",
+    typeof snapBody?.error === "string" && snapBody.error.includes("no window"),
+    `status=${snapped.status} body=${JSON.stringify(snapBody)}`,
+  );
+
+  const reloadBody = JSON.stringify({});
+  const reload = await fetch(`${agentUrl}/v1/browser/reload`, {
+    method: "POST",
+    headers: {
+      ...signedHeaders(key, probeId, "POST", "/v1/browser/reload", reloadBody),
+      "content-type": "application/json",
+    },
+    body: reloadBody,
+  });
+  check("reloading a pane reaches the device too", (await reload.json())?.ok === true, `status=${reload.status}`);
+
+  // Every refusal is written down, which is the question a stuck multi-agent
+  // run actually asks: who tried what, and was turned away.
+  const droveLog = await fetch(`${agentUrl}/v1/search?limit=20&q=browser`, {
+    headers: signedHeaders(key, probeId, "GET", "/v1/search?limit=20&q=browser", ""),
+  });
+  const droveHits = droveLog.status === 200 ? await droveLog.json() : null;
+  check(
+    "driving a browser pane is written to the log",
+    (droveHits?.hits ?? []).some((h) => h.kind === "event"),
+    `status=${droveLog.status}`,
+  );
 }
 try {
   await c.rpc("thread.kill", { threadId: probeId, wait: false });

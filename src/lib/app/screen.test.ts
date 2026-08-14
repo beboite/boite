@@ -1,16 +1,23 @@
 import { describe, expect, it } from "vitest";
 import { shape, worthSending, type Screen } from "./screen.svelte";
+import type { PageState } from "$lib/features/browser/state.svelte";
 
-function screen(at: number, panes: Array<{ id: string; w: number }>): Screen {
+function screen(
+  at: number,
+  panes: Array<{ id: string; w: number; url?: string; page?: PageState }>,
+): Screen {
   return {
     at,
     projectId: "p1",
     window: { width: 1280, height: 720, focused: true },
     panes: panes.map((p) => ({
       id: p.id,
-      kind: "thread",
+      kind: p.url ? "browser" : "thread",
       title: p.id,
-      threadId: p.id,
+      threadId: p.url ? null : p.id,
+      url: p.url ?? null,
+      page: p.page ?? null,
+      drivenBy: null,
       rect: { x: 0, y: 0, w: p.w, h: 600 },
       focused: false,
     })),
@@ -54,6 +61,32 @@ describe("what the window bothers to say again", () => {
       worthSending(last, screen(1100, [
         { id: "a", w: 320 },
         { id: "b", w: 320 },
+      ])),
+    ).toBe(true);
+  });
+
+  /**
+   * `browser_wait_for` is a poll of what this pushes, so a page that finished
+   * loading has to count as movement. If it did not, an agent would wait out
+   * its whole budget on a page that came up in a second, and the only thing
+   * that would ever release it is the thirty second heartbeat.
+   */
+  it("says it the moment a page stops loading", () => {
+    const first = screen(1000, [{ id: "b", w: 640, url: "http://localhost:1/", page: "loading" }]);
+    const last = { shape: shape(first), at: first.at };
+    expect(
+      worthSending(last, screen(1100, [
+        { id: "b", w: 640, url: "http://localhost:1/", page: "loaded" },
+      ])),
+    ).toBe(true);
+  });
+
+  it("says it the moment a pane is pointed somewhere else", () => {
+    const first = screen(1000, [{ id: "b", w: 640, url: "http://localhost:1/", page: "loaded" }]);
+    const last = { shape: shape(first), at: first.at };
+    expect(
+      worthSending(last, screen(1100, [
+        { id: "b", w: 640, url: "http://localhost:2/", page: "loaded" },
       ])),
     ).toBe(true);
   });

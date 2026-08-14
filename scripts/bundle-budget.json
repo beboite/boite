@@ -28,12 +28,16 @@
     "reply bar a waiting thread offers: it exists so a blocked terminal can be",
     "answered in one tap, and a chunk fetched on the tap is the one thing that",
     "would take that away. Then to 800624, for the turn list a thread keeps and",
-    "the checkpoint calls behind it, which the thread panel reads on open. Then",
-    "to 806912, for the light palette and the theme that follows the OS: both",
-    "palettes and the matchMedia watcher are applied before the first paint, or",
-    "the window opens dark and flips. Measured at 800.2 KB, so this leaves 6.6 KB."
+    "the checkpoint calls behind it, which the thread panel reads on open. Then to",
+    "808816, for the mark saying an agent is driving a browser pane and the",
+    "handler answering its page questions: the mark rides on the pane's own",
+    "content, so both are read wherever a pane is drawn, before first paint.",
+    "Then to 821760, for the light palette and the theme that follows the OS:",
+    "both palettes and the matchMedia watcher are applied before the first paint,",
+    "or the window opens dark and flips. Measured at 796.3 KB, so this leaves",
+    "6.3 KB."
   ],
-  "eagerBytes": 806912,
+  "eagerBytes": 821760,
   "totalBytes": 6144000,
   "largestEagerChunkBytes": 256000
 }

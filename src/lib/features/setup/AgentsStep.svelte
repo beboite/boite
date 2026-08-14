@@ -2,8 +2,8 @@
   import { onMount } from "svelte";
   import { CLI_PRESETS } from "$lib/features/settings/cliPresets";
   import { cliDetection } from "$lib/features/settings/cliDetection.svelte";
+  import { shortcutFromPreset } from "$lib/features/settings/store.svelte";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
-  import { uuid } from "$lib/shared/utils/uuid";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import Settings2 from "@lucide/svelte/icons/settings-2";
   import { t } from "$lib/i18n/index.svelte";
@@ -18,12 +18,7 @@
   // nothing to order: both are one click away in the settings, and the hint
   // below says so.
   $effect(() => {
-    draft.shortcuts = found.map((preset) => ({
-      id: uuid(),
-      label: preset.label,
-      command: preset.command,
-      iconKey: preset.iconKey as IconKey,
-    }));
+    draft.shortcuts = found.map(shortcutFromPreset);
   });
 
   onMount(() => {

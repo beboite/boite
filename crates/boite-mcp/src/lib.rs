@@ -19,7 +19,7 @@ pub mod rpc;
 pub mod toon;
 mod tools;
 
-pub use call::call_tool;
+pub use call::{call_blocks, call_tool};
 pub use tools::{tools, INSTRUCTIONS};
 
 use std::io::Write;
@@ -57,6 +57,14 @@ pub(crate) const MAX_CELL: usize = 200;
 /// Branch lists grow without bound in a long-lived repository; the agent needs
 /// the naming convention and the few most recent, not all of them.
 pub(crate) const MAX_BRANCHES: usize = 40;
+
+/// What a page is allowed to spend of the agent's context.
+///
+/// The driver caps text and element counts too, but it runs inside the page and
+/// shares its JS realm, so those caps are enforced by the side that would want
+/// to break them. These are the copy on the trusted side of the wire.
+pub(crate) const MAX_PAGE_TEXT: usize = 60_000;
+pub(crate) const MAX_PAGE_ELEMENTS: usize = 400;
 
 /// Writes one JSON-RPC message and flushes it, for the stdio door.
 pub fn write_line(out: &mut impl Write, msg: &Value) {

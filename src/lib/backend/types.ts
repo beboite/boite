@@ -1001,4 +1001,28 @@ export interface Backend {
    * that could have received them.
    */
   claimAgentRequest?(requestId: string): Promise<boolean>;
+  /**
+   * Hand back the answer to a browser question (`browser.snapshot` and its
+   * siblings). The desktop host keeps the asking HTTP handler on the line
+   * under the request id, and this is the webview resolving it.
+   *
+   * Desktop only. A remote host refuses those questions up front — its
+   * devices are browsers and phones with no driver in the frame — so there is
+   * nothing for a remote client to answer and the method is absent there.
+   */
+  answerAgentRequest?(requestId: string, payload: Record<string, unknown>): Promise<void>;
+  /**
+   * Photograph a rectangle of this window, in physical pixels relative to the
+   * client area, and get a PNG back. The OS does the painting, which is the
+   * only honest way to picture a cross-origin frame or a WebGL terminal.
+   *
+   * Desktop only, and Windows only today; absent elsewhere, and the caller
+   * answers the agent with why rather than with a blank image.
+   */
+  capturePane?(rect: {
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+  }): Promise<{ image: string; width: number; height: number }>;
 }

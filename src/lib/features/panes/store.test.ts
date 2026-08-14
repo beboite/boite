@@ -301,3 +301,50 @@ describe("splitInto", () => {
     expect(paneStore.splitInto("t1", "ghost", "right")).toBe(false);
   });
 });
+
+/**
+ * The browser pane's hand-over, which is the whole of what stops an agent
+ * steering something the user has taken back. The mark rides on the pane, so
+ * clearing it is the entire mechanism and there is no second copy to fall out
+ * of step with this one.
+ */
+describe("who is driving a browser pane", () => {
+  beforeEach(() => {
+    threads(["t1", "p"]);
+  });
+
+  it("navigates in place instead of leaving a second frame behind", () => {
+    const pane = paneStore.openBeside("t1", {
+      kind: "browser",
+      url: "http://localhost:1/",
+      drivenBy: "t1",
+    })!;
+    expect(paneStore.setBrowser(pane, { url: "http://localhost:1/next" })).toBe(true);
+    expect(paneStore.contentOf(pane)).toEqual({
+      kind: "browser",
+      url: "http://localhost:1/next",
+      drivenBy: "t1",
+    });
+    expect(countLeaves(paneStore.groupOf("t1")!.root)).toBe(2);
+  });
+
+  it("hands the pane back to the user without closing it", () => {
+    const pane = paneStore.openBeside("t1", {
+      kind: "browser",
+      url: "http://localhost:1/",
+      drivenBy: "t1",
+    })!;
+    paneStore.setBrowser(pane, { drivenBy: null });
+    const content = paneStore.contentOf(pane);
+    expect(content).toEqual({ kind: "browser", url: "http://localhost:1/", drivenBy: null });
+    // Still the same pane, still on the same page. Only the mark went.
+    expect(paneStore.groupOf(pane)).toBeTruthy();
+  });
+
+  it("refuses to point anything that is not a browser pane", () => {
+    const panel = paneStore.openBeside("t1", { kind: "git" })!;
+    expect(paneStore.setBrowser(panel, { url: "http://localhost:1/" })).toBe(false);
+    expect(paneStore.setBrowser("pane-that-never-existed", { drivenBy: null })).toBe(false);
+    expect(paneStore.contentOf(panel)).toEqual({ kind: "git" });
+  });
+});

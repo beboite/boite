@@ -36,6 +36,19 @@ use boite_core::store::Store;
 /// emits, and lets the app do the work.
 const AGENT_REQUEST: &str = "boite://agent-request";
 
+/// The answers the window owes, by request id.
+///
+/// A browser question (`browser.snapshot`, `browser.click`, ...) is emitted to
+/// the webview like any agent request, but its HTTP handler stays on the line:
+/// the sender parked here is that handler's, and `agent_answer` is the webview
+/// handing the result back. Senders whose handler has given up (timeout, agent
+/// gone) are pruned on the next question rather than watched: the map only
+/// ever holds a handful, and a closed sender costs nothing but its entry.
+#[derive(Default)]
+pub struct DeviceAnswers(
+    std::sync::Mutex<std::collections::HashMap<String, tokio::sync::oneshot::Sender<Value>>>,
+);
+
 /// Says an agent just reached into Boite itself, and through which door.
 ///
 /// Everything else an agent does happens inside its terminal, where it can be
@@ -155,6 +168,30 @@ impl Workspace for DesktopWorkspace {
             .and_then(|last| last.take())
     }
 
+    /// The desktop is the one host that can answer a question about a page:
+    /// its own webview draws the pane, and the driver injected into the frame
+    /// reads it. The handler's sender waits under the request id; the webview
+    /// answers through `agent_answer`.
+    fn ask_for_answer(
+        &self,
+        request: Value,
+    ) -> Result<tokio::sync::oneshot::Receiver<Value>, String> {
+        let id = request
+            .get("requestId")
+            .and_then(|v| v.as_str())
+            .ok_or("the question carries no request id")?
+            .to_string();
+        let answers = self.app.state::<DeviceAnswers>();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        {
+            let mut pending = answers.0.lock().unwrap();
+            pending.retain(|_, sender| !sender.is_closed());
+            pending.insert(id, tx);
+        }
+        let _ = self.app.emit(AGENT_REQUEST, request);
+        Ok(rx)
+    }
+
     /// Attribution is best-effort: an agent registered from a credentials file
     /// presents a project rather than a thread, and there is no row to point at.
     /// The surface still pulses; only the "which of these agents" half is lost.
@@ -218,6 +255,21 @@ pub fn approval_decide(
 }
 
 use boite_core::now_ms;
+
+/// The webview handing back the answer to a browser question.
+///
+/// Quiet about an id nobody is waiting on: the handler that asked may have
+/// timed out and told the agent so already, and a second answer has no reader.
+#[tauri::command]
+pub fn agent_answer(app: tauri::AppHandle, request_id: String, payload: Value) {
+    let Some(answers) = app.try_state::<DeviceAnswers>() else {
+        return;
+    };
+    let waiting = answers.0.lock().unwrap().remove(&request_id);
+    if let Some(tx) = waiting {
+        let _ = tx.send(payload);
+    }
+}
 
 /// Removes a deleted thread's key file.
 ///
