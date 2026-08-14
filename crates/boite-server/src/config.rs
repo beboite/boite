@@ -9,7 +9,15 @@ use rand::Rng;
 pub struct Config {
     pub bind: String,
     pub data_dir: PathBuf,
-    pub token: String,
+    /// `BOITE_TOKEN`, or the token file beside the database.
+    ///
+    /// **A bootstrap credential, not a session credential.** Since device
+    /// pairing landed it opens exactly one route, `POST /api/pairings`, and
+    /// pairs a device. It cannot open a socket, call an RPC or mint a ticket.
+    /// It survives at all so that the operator of a running deployment is not
+    /// locked out of their own server by the change that locked out every
+    /// device.
+    pub bootstrap_token: String,
     pub scrollback_bytes: usize,
     /// Directory of the built SvelteKit SPA to serve. None disables static
     /// serving (the WS API still works).
@@ -22,6 +30,10 @@ pub struct Config {
     /// repos dir in Docker). Added as an always-allowed filesystem root so the
     /// web folder picker works before any project exists.
     pub workspace_dir: Option<PathBuf>,
+    /// What this boite is reached by from outside (`BOITE_PUBLIC_URL`), for the
+    /// text of a pairing link. Behind a reverse proxy the server cannot work
+    /// this out: the `Host` header is whatever the caller sent.
+    pub public_url: Option<String>,
 }
 
 const DEFAULT_SCROLLBACK: usize = 1024 * 1024;
@@ -48,7 +60,7 @@ impl Config {
         fs::create_dir_all(&data_dir)
             .map_err(|e| format!("cannot create data dir {}: {e}", data_dir.display()))?;
 
-        let token = resolve_token(&data_dir)?;
+        let bootstrap_token = resolve_token(&data_dir)?;
 
         let scrollback_bytes = std::env::var("BOITE_SCROLLBACK_BYTES")
             .ok()
@@ -63,16 +75,21 @@ impl Config {
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .map(PathBuf::from);
+        let public_url = std::env::var("BOITE_PUBLIC_URL")
+            .ok()
+            .map(|s| s.trim().trim_end_matches('/').to_string())
+            .filter(|s| !s.is_empty());
 
         Ok(Config {
             bind,
             data_dir,
-            token,
+            bootstrap_token,
             scrollback_bytes,
             static_dir,
             max_threads,
             max_connections,
             workspace_dir,
+            public_url,
         })
     }
 }

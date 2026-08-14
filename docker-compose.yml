@@ -9,15 +9,20 @@ services:
     container_name: boite
     restart: unless-stopped
     ports:
-      # Loopback by default, matching the server's own bind default: the token
-      # is a static bearer for host-level RCE and travels over plain ws://.
-      # Publish wider only behind TLS or a tunnel (e.g. "100.64.0.4:7337:7337"
-      # for a Tailscale-only interface).
+      # Loopback by default, matching the server's own bind default: a device
+      # paired with the terminal scope holds host-level RCE, and credentials
+      # travel over plain http:// and ws://. Publish wider only behind TLS or a
+      # tunnel (e.g. "100.64.0.4:7337:7337" for a Tailscale-only interface).
       - "127.0.0.1:7337:7337"
     environment:
-      # Required: the bearer token clients send as the first WS frame.
+      # Required. The BOOTSTRAP credential: it pairs a device and opens nothing
+      # else, so it cannot open a socket or call an RPC. `boite-server pair`
+      # invites the first device; each one then holds its own credential.
       - BOITE_TOKEN=${BOITE_TOKEN:?set BOITE_TOKEN in .env}
       - BOITE_BIND=0.0.0.0:7337
+      # What this boite is reached by from outside, so a pairing link points
+      # somewhere. Behind a proxy the server cannot work this out itself.
+      - BOITE_PUBLIC_URL=${BOITE_PUBLIC_URL:-}
       # Optional mobile notifications (ntfy/Discord/Gotify).
       - BOITE_WEBHOOK_URL=${BOITE_WEBHOOK_URL:-}
       - BOITE_WEBHOOK_FORMAT=${BOITE_WEBHOOK_FORMAT:-ntfy}

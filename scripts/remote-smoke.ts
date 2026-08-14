@@ -2,11 +2,16 @@
 // Type-only imports inside the backend are erased by bun, so this loads the
 // actual Socket + RemoteBackend with no $lib resolution.
 // Start a server first: BOITE_TOKEN=test BOITE_BIND=127.0.0.1:7399 boite-server.
+//
+// `BOITE_TOKEN` is the bootstrap credential and pairs a device; what the backend
+// takes is that device's own credential, which it turns into a socket ticket
+// itself. So this pairs a throwaway device first and revokes it at the end.
 
 import { RemoteBackend } from "../src/lib/backend/remote/index.ts";
 
 const URL = "ws://127.0.0.1:7399/ws";
-const TOKEN = "test";
+const HTTP = URL.replace(/^ws/, "http").replace(/\/ws\/?$/, "");
+const BOOTSTRAP = process.env.BOITE_TOKEN || "test";
 const dec = new TextDecoder();
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -16,7 +21,33 @@ function check(label: string, ok: boolean, extra = "") {
   if (!ok) fail = true;
 }
 
-const rb = new RemoteBackend(URL, TOKEN, (s) => console.log("  conn:", s));
+async function post(path: string, body: unknown, headers: Record<string, string> = {}) {
+  const res = await fetch(`${HTTP}${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...headers },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`${path} refused (${res.status})`);
+  return res.json();
+}
+
+// `admin` is in there only so this can revoke itself on the way out.
+const invite = await post(
+  "/api/pairings",
+  {
+    label: "remote-smoke",
+    kind: "cli",
+    scopes: ["read", "write", "terminal", "approve", "admin"],
+  },
+  { authorization: `Bearer ${BOOTSTRAP}` },
+);
+const paired = await post("/api/pair", {
+  token: invite.token,
+  label: "remote-smoke",
+  kind: "cli",
+});
+
+const rb = new RemoteBackend(URL, paired.credential, (s) => console.log("  conn:", s));
 await rb.connect();
 check("connect", rb.connectionState === "connected");
 
@@ -82,6 +113,9 @@ check("thread.list live", t?.status === "running" && !!t?.ptyId, `status=${t?.st
 
 await rb.pty.kill(key2);
 await sleep(200);
+// The device this run paired for itself, so a boite it is pointed at does not
+// collect one per run.
+await rb.pairing?.revoke(paired.pairing.id);
 rb.dispose();
 
 console.log(fail ? "\nREMOTE SMOKE FAIL" : "\nREMOTE SMOKE PASS");

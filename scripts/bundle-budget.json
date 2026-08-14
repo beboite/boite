@@ -41,14 +41,16 @@
     "the boot path. Measured at 812.9 KB, so this leaves 6.1 KB.",
     "Then to 845824, for the light palette and the theme that follows the OS:",
     "both palettes and the matchMedia watcher are applied before the first paint,",
-    "or the window opens dark and flips. Measured at 819.7 KB, so this leaves",
-    "6.3 KB.",
+    "or the window opens dark and flips. Then to 851968, for the client half of",
+    "the socket-ticket exchange that replaced the shared token: a ticket is",
+    "bought before anything is drawn. Measured at 824.4 KB, so this leaves",
+    "7.6 KB.",
     "",
     "largestEagerChunkBytes moved with it, 256000 -> 262144. The main route is",
     "the chunk in question and it had 0.2 KB left, which is a ceiling that fails",
     "the next commit whatever the next commit is."
   ],
-  "eagerBytes": 845824,
+  "eagerBytes": 851968,
   "totalBytes": 6144000,
   "largestEagerChunkBytes": 262144
 }

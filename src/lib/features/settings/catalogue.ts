@@ -21,6 +21,7 @@ export type SettingsTabId =
   | "appearance"
   | "fastpick"
   | "keyboard"
+  | "devices"
   | "logs"
   | "experiments"
   | "about";
@@ -80,10 +81,19 @@ export const SETTINGS_CATALOGUE: SettingEntry[] = [
 
   { tab: "appearance", key: "appearance.theme", descKey: "appearance.themeDesc" },
   { tab: "appearance", key: "appearance.uiScale", descKey: "appearance.uiScaleDesc" },
+  { tab: "appearance", key: "appearance.fonts", descKey: "appearance.fontsDesc" },
+  {
+    tab: "appearance",
+    key: "appearance.terminalSize",
+    descKey: "appearance.terminalSizeDesc",
+  },
   { tab: "appearance", key: "appearance.layout", descKey: "appearance.layoutDesc" },
   { tab: "appearance", key: "appearance.colorByModel", descKey: "appearance.colorByModelDesc" },
   { tab: "appearance", key: "appearance.animations", descKey: "appearance.animationsDesc" },
   { tab: "appearance", key: "appearance.language", descKey: "appearance.languageDesc" },
+
+  { tab: "devices", key: "devices.title", descKey: "devices.description" },
+  { tab: "devices", key: "devices.inviteTitle", descKey: "devices.inviteDesc" },
 
   { tab: "fastpick", key: "fastpick.settingsTitle", descKey: "fastpick.settingsDesc" },
   { tab: "fastpick", key: "fastpick.enable", descKey: "fastpick.enableDesc" },
@@ -91,12 +101,6 @@ export const SETTINGS_CATALOGUE: SettingEntry[] = [
   { tab: "experiments", key: "experiments.infoBox", descKey: "experiments.infoBoxDesc" },
   { tab: "experiments", key: "experiments.smartSort", descKey: "experiments.smartSortDesc" },
   { tab: "experiments", key: "experiments.whip", descKey: "experiments.whipDesc" },
-  { tab: "appearance", key: "appearance.fonts", descKey: "appearance.fontsDesc" },
-  {
-    tab: "appearance",
-    key: "appearance.terminalSize",
-    descKey: "appearance.terminalSizeDesc",
-  },
   {
     tab: "experiments",
     key: "experiments.sidebarDesign",

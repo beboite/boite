@@ -39,6 +39,15 @@ pub struct AppState {
     /// Persisted data dir, used to serve `/.well-known/assetlinks.json` (the
     /// Android TWA Digital Asset Links file, dropped here after the APK build).
     pub data_dir: PathBuf,
+    /// The name this boite is reached by from outside, when the operator has
+    /// said (`BOITE_PUBLIC_URL`).
+    ///
+    /// Only ever used to build the text of a pairing link. A server behind a
+    /// reverse proxy cannot work its own public name out — the `Host` header is
+    /// whatever the caller sent — so the choice is this or a client-supplied
+    /// origin, and a configured value wins over one. It decides what the link
+    /// says, never what the token opens.
+    pub public_url: Option<String>,
     /// Agent requests already spoken for. An `AgentRequest` reaches every
     /// connected device and exactly one of them may act on it — two clients
     /// running the same move would kill one PTY twice and leave a second
@@ -242,7 +251,7 @@ pub fn state_for_test(dir: &Path) -> AppState {
     // The receiver is dropped on purpose: `send` returning Err with no receiver
     // is the ordinary case here and never a failure.
     let (events, _) = tokio::sync::broadcast::channel::<AppEvent>(64);
-    AppState {
+    let state = AppState {
         store: Arc::new(boite_core::store::Store::open(&dir.join("boite.db")).unwrap()),
         agent_api: None,
         registry: crate::registry::Registry::new_without_ticker(1024, Arc::new(|_| {})),
@@ -257,8 +266,27 @@ pub fn state_for_test(dir: &Path) -> AppState {
         devices: Arc::new(AtomicUsize::new(0)),
         workspace_dir: None,
         data_dir: dir.to_path_buf(),
+        public_url: None,
         claimed_requests: Default::default(),
-    }
+    };
+    // The dispatcher tests drive real calls, and a real call reads the pairing
+    // row behind the session that sent it. `Session::for_test` names this one.
+    state
+        .store
+        .add_pairing(
+            &boite_core::pairing::Pairing {
+                id: "test".into(),
+                label: "test".into(),
+                kind: "cli".into(),
+                scopes: boite_core::pairing::ScopeSet::full(),
+                created_at: 1,
+                last_seen_at: None,
+                revoked_at: None,
+            },
+            "not-a-secret",
+        )
+        .unwrap();
+    state
 }
 
 #[cfg(test)]
@@ -327,6 +355,7 @@ mod tests {
             devices: Arc::new(AtomicUsize::new(0)),
             workspace_dir: None,
             data_dir: dir.clone(),
+            public_url: None,
             claimed_requests: Default::default(),
         };
 
@@ -366,6 +395,7 @@ mod tests {
             devices: Arc::new(AtomicUsize::new(0)),
             workspace_dir: Some(dir.clone()),
             data_dir: dir.clone(),
+            public_url: None,
             claimed_requests: Default::default(),
         };
 
