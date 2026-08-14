@@ -7,8 +7,8 @@
 
 use serde_json::Value;
 
+use crate::backend::Backend;
 use crate::toon::{clip, Toon};
-use crate::host::Host;
 use crate::{MAX_BRANCHES, MAX_CELL};
 
 /// The shortest prefix that still tells these ids apart. Uuids collide at eight
@@ -33,7 +33,7 @@ pub(crate) fn prefix(id: &str, width: usize) -> &str {
 
 /// Record every id in a listing under its short form, so a later claim can
 /// quote what it was shown. Returns the width that was handed out.
-pub(crate) fn index_todos(host: &Host, out: &Value) -> usize {
+pub(crate) fn index_todos(host: &dyn Backend, out: &Value) -> usize {
     let empty = Vec::new();
     let todos = out
         .get("todos")
@@ -50,7 +50,7 @@ pub(crate) fn index_todos(host: &Host, out: &Value) -> usize {
     width
 }
 
-pub(crate) fn format_todos(host: &Host, out: &Value) -> String {
+pub(crate) fn format_todos(host: &dyn Backend, out: &Value) -> String {
     let empty = Vec::new();
     let todos = out
         .get("todos")
@@ -341,6 +341,7 @@ pub(crate) fn format_hits(out: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::host::Host;
     use serde_json::json;
 
     fn host() -> Host {
