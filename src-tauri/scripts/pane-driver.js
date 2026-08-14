@@ -87,7 +87,14 @@
     if (alt) return clip(alt, NAME_MAX);
     const text = clip(el.innerText || el.textContent || "", NAME_MAX);
     if (text) return text;
-    return clip(el.getAttribute("title") || el.value || "", NAME_MAX);
+    const title = el.getAttribute("title");
+    if (title) return clip(title, NAME_MAX);
+    // The value is the last resort for an input nothing else names, and a
+    // password field with no label reaches exactly here. `valueOf` masks it on
+    // the value column; this column has to mask it too, or the bullets next to
+    // a plaintext name are theatre.
+    if (el.type === "password") return el.value ? "•••" : "";
+    return clip(el.value || "", NAME_MAX);
   }
 
   function valueOf(el) {
@@ -212,7 +219,21 @@
       clientY: rect.top + rect.height / 2,
       button: 0,
     };
-    el.dispatchEvent(new MouseEvent(type, Object.assign(at, extra || {})));
+    // Pointer types need a PointerEvent: as a MouseEvent they carry no
+    // `pointerId`, and any handler reaching for `setPointerCapture(e.pointerId)`
+    // throws NotFoundError. That is the common shape in drag and press
+    // primitives, so the click would land on nothing.
+    const init = Object.assign(at, extra || {});
+    if (type.startsWith("pointer")) {
+      el.dispatchEvent(
+        new PointerEvent(
+          type,
+          Object.assign({ pointerId: 1, isPrimary: true, pointerType: "mouse" }, init),
+        ),
+      );
+      return;
+    }
+    el.dispatchEvent(new MouseEvent(type, init));
   }
 
   function click(args) {
@@ -264,9 +285,24 @@
       throw new Error("that uid is not a field; browser_click may be what was meant");
     }
     if (args.submit) {
-      pressOn(el, "Enter");
+      // One submission, not two. The synthetic Enter is untrusted, so it never
+      // triggers the browser's own implicit submission, but a page handling
+      // Enter in JS does submit on it. Firing `requestSubmit` afterwards would
+      // then POST a search or a login twice, so the fallback only runs when the
+      // key was left unhandled.
+      const handled = !el.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          bubbles: true,
+          cancelable: true,
+          composed: true,
+          key: "Enter",
+        }),
+      );
+      el.dispatchEvent(
+        new KeyboardEvent("keyup", { bubbles: true, cancelable: true, composed: true, key: "Enter" }),
+      );
       const form = el.form;
-      if (form && typeof form.requestSubmit === "function") form.requestSubmit();
+      if (!handled && form && typeof form.requestSubmit === "function") form.requestSubmit();
     }
     return meta();
   }

@@ -78,6 +78,14 @@ const MAX_CELL: usize = 200;
 /// the naming convention and the few most recent, not all of them.
 const MAX_BRANCHES: usize = 40;
 
+/// What a page is allowed to spend of the agent's context.
+///
+/// The driver caps text and element counts too, but it runs inside the page and
+/// shares its JS realm, so those caps are enforced by the side that would want
+/// to break them. These are the copy on the trusted side of the wire.
+const MAX_PAGE_TEXT: usize = 60_000;
+const MAX_PAGE_ELEMENTS: usize = 400;
+
 fn reply(out: &mut impl Write, id: &Value, result: Value) {
     let msg = json!({ "jsonrpc": "2.0", "id": id, "result": result });
     let _ = writeln!(out, "{msg}");

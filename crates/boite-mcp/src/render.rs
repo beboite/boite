@@ -9,7 +9,7 @@ use serde_json::Value;
 
 use crate::toon::{clip, Toon};
 use crate::host::Host;
-use crate::{MAX_BRANCHES, MAX_CELL};
+use crate::{MAX_BRANCHES, MAX_CELL, MAX_PAGE_ELEMENTS, MAX_PAGE_TEXT};
 
 /// The shortest prefix that still tells these ids apart. Uuids collide at eight
 /// characters about as often as they collide outright, but a list is small and
@@ -406,9 +406,11 @@ pub(crate) fn format_page_settled(out: &Value) -> String {
 
 /// One line saying where the frame is, shared by every answer that reads it.
 ///
-/// The driver reports `location.href`, which is the frame's real address: the
-/// container only ever knew the address it framed, and the two part company
-/// the moment anything inside the page navigates.
+/// The driver reports `location.href` rather than the address the container
+/// framed, because the two part company the moment anything inside the page
+/// navigates. It is still the page's own account of itself: the driver shares
+/// that page's JS realm and runs after its scripts, so every field here is
+/// data a hostile page can shape, this address included.
 fn page_line(w: &mut Toon, out: &Value) {
     let title = out.get("title").and_then(|v| v.as_str()).unwrap_or("");
     let url = out.get("url").and_then(|v| v.as_str()).unwrap_or("");
@@ -448,7 +450,7 @@ const ELEMENT_COLS: [&str; 5] = ["uid", "role", "name", "value", "note"];
 fn element_rows(out: &Value, key: &str) -> Vec<Vec<String>> {
     out.get(key)
         .and_then(|v| v.as_array())
-        .map(|els| els.iter().map(element_row).collect())
+        .map(|els| els.iter().take(MAX_PAGE_ELEMENTS).map(element_row).collect())
         .unwrap_or_default()
 }
 
@@ -460,8 +462,13 @@ pub(crate) fn format_snapshot(out: &Value) -> String {
         let mut head = Toon::new();
         page_line(&mut head, out);
         let mut answer = head.into_string();
-        answer.push_str(if text.is_empty() { "(no readable text)" } else { text });
-        if out.get("truncated").and_then(|v| v.as_bool()) == Some(true) {
+        let cut = text.len() > MAX_PAGE_TEXT;
+        if text.is_empty() {
+            answer.push_str("(no readable text)");
+        } else {
+            answer.push_str(&clip(text, MAX_PAGE_TEXT));
+        }
+        if cut || out.get("truncated").and_then(|v| v.as_bool()) == Some(true) {
             answer.push_str("\n[cut here; maxChars raises the budget]");
         }
         return answer;
