@@ -25,6 +25,7 @@ import type {
   SearchHit,
 } from "$lib/features/explorer/api";
 import type { FileVersions, TextFile } from "$lib/features/editor/api";
+import type { ThreadReply } from "$lib/domain/awareness";
 import type { Platform, ShellOption } from "$lib/storage/platform.svelte";
 import type { LogEntry, LogLevel } from "$lib/shared/services/logger.svelte";
 
@@ -80,6 +81,20 @@ export interface PtyApi {
   // Detach this client without terminating. Local has no detached PTYs yet so
   // it kills; remote detaches and the server keeps the process running.
   release(key: string): Promise<void>;
+  /**
+   * One keystroke into a thread that is blocked on the user.
+   *
+   * Keyed by thread rather than by the live key every other method here takes,
+   * because the caller is a device answering a notification: a phone that has
+   * never attached to that terminal holds no key for it.
+   *
+   * Deliberately not `write` with a smaller argument. What may be sent is a
+   * closed vocabulary (`boite_core::reply`), checked on the machine that owns
+   * the PTY and not here, because a bound enforced by the caller is not a bound.
+   * Writing bytes into a terminal is a remote code execution primitive and this
+   * is the version of it a lock screen may reach.
+   */
+  reply(threadId: string, answer: ThreadReply): Promise<void>;
 }
 
 export interface DbApi {
@@ -329,6 +344,79 @@ export interface EditorApi {
    * a byte array as JSON numbers, which is six characters per byte.
    */
   readBase64(path: string): Promise<string>;
+}
+
+/** Which end of an agent's turn a capture can be asked for. */
+export type TurnEdge = "start" | "end";
+
+/**
+ * What a checkpoint was taken at.
+ *
+ * `restore` is not an end of a turn: it is the tree a revert was about to
+ * overwrite, written by the restore itself so the undo can be undone. Never
+ * asked for, only read back in a list, which is why it is not a [`TurnEdge`].
+ */
+export type CheckpointEdge = TurnEdge | "restore";
+
+/**
+ * What a worktree looked like at one end of a turn, as a ref nothing else reads.
+ *
+ * `files`, `additions` and `deletions` are measured against the checkpoint
+ * before this one and recorded when it is written, so a list of them costs one
+ * call rather than one diff per row.
+ */
+export interface Checkpoint {
+  index: number;
+  sha: string;
+  edge: CheckpointEdge;
+  at: number;
+  files: number;
+  additions: number;
+  deletions: number;
+}
+
+export interface CheckpointFile {
+  path: string;
+  /** `A`, `M`, `D`, `R` or `T`, as git reports it. */
+  status: string;
+  origPath: string | null;
+  additions: number;
+  deletions: number;
+  binary: boolean;
+}
+
+export interface CheckpointDiff {
+  files: CheckpointFile[];
+  /** Empty unless `patch` was asked for. */
+  patch: string;
+  truncated: boolean;
+}
+
+export interface CheckpointFileVersions {
+  before: string | null;
+  after: string | null;
+  binary: boolean;
+}
+
+export interface CheckpointApi {
+  /** Null when the thread is not running in a git repository. */
+  capture(repo: string, threadId: string, edge: TurnEdge): Promise<Checkpoint | null>;
+  list(repo: string, threadId: string): Promise<Checkpoint[]>;
+  diff(repo: string, from: string, to: string, patch: boolean): Promise<CheckpointDiff>;
+  fileVersions(
+    repo: string,
+    from: string,
+    to: string,
+    file: string,
+  ): Promise<CheckpointFileVersions>;
+  /**
+   * Restores the files and nothing else. Never the agent's conversation.
+   *
+   * The thread is named because the restore checkpoints what it is about to
+   * overwrite first, and that snapshot lands in this thread's own list.
+   */
+  restore(repo: string, threadId: string, sha: string): Promise<void>;
+  forget(repo: string, threadId: string): Promise<void>;
 }
 
 /** What is already sitting where a new project wants to go. */
@@ -835,34 +923,42 @@ export interface ApprovalsApi {
   decide(id: string, allow: boolean): Promise<PendingApproval | null>;
 }
 
-/** What a hit is about, mirroring `boite_core::search::Kind`. */
+/** Mirrors `boite_core::search::Kind`. */
 export type WorkspaceHitKind = "todo" | "event" | "transcript";
 
 /**
- * A hit in a workspace's journal, todos or transcripts.
+ * One thing found somewhere in the workspace. Mirrors `boite_core::search::Hit`.
  *
- * Named apart from the explorer's `SearchHit`, which is a path on a disk: these
- * two answer different questions and one of them travels between machines.
+ * Two mechanisms answer into the same shape: the todos and the journal come out
+ * of an FTS5 index written when the row is, and the transcripts are scanned at
+ * query time. Whoever reads a hit does not have to know which.
  */
 export interface WorkspaceHit {
   kind: WorkspaceHitKind;
-  /** Empty for a transcript, whose thread names the project instead. */
+  /**
+   * Empty for a transcript: the thread names its project, the file does not.
+   * The caller resolves it from `refId` when it needs one.
+   */
   projectId: string;
-  /** The todo id, the event's object, or the thread id. */
+  /**
+   * The todo id, `<projectId>#<seq>` for a journal entry, the thread id for a
+   * transcript.
+   */
   refId: string;
-  /** One line of context with the match in it. */
   excerpt: string;
 }
 
-/**
- * The journal, the todos and what the terminals printed, in one question.
- *
- * Optional because only a boite answers it today: `search.query` is a server
- * RPC and the desktop has no Tauri command over `boite_core::search` yet. A
- * backend without it is skipped by the fan-out rather than failing it.
- */
-export interface WorkspaceSearchApi {
-  query(q: string, limit?: number): Promise<WorkspaceHit[]>;
+export interface SearchApi {
+  /**
+   * Where something is, across the todos, the journal and what the terminals
+   * printed.
+   *
+   * `limit` is the whole answer rather than a per-source cap, and the host
+   * spends it on the rows first: an index lookup ranks and a substring scan
+   * does not, so a transcript with forty matching lines would otherwise push
+   * every ranked hit out.
+   */
+  query(text: string, limit: number): Promise<WorkspaceHit[]>;
 }
 
 export interface Backend {
@@ -877,6 +973,7 @@ export interface Backend {
   readonly worktree: WorktreeApi;
   readonly explorer: ExplorerApi;
   readonly editor: EditorApi;
+  readonly checkpoints: CheckpointApi;
   readonly project: ProjectApi;
   readonly system: SystemApi;
   readonly shell: ShellApi;
@@ -885,7 +982,7 @@ export interface Backend {
   readonly session: SessionApi;
   readonly log: LogApi;
   readonly approvals: ApprovalsApi;
-  readonly search?: WorkspaceSearchApi;
+  readonly search: SearchApi;
   // Web Push registration. Present only on remote (web/PWA); undefined on
   // desktop, which notifies through the OS directly.
   readonly push?: PushApi;

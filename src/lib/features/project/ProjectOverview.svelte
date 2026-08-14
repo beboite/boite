@@ -7,6 +7,7 @@
   import ProjectWorktrees from "./ProjectWorktrees.svelte";
   import ProjectUsage from "./ProjectUsage.svelte";
   import ProjectStats from "./ProjectStats.svelte";
+  import ThreadTurns from "$lib/features/thread/ThreadTurns.svelte";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
   import { threadIconColor } from "$lib/features/fastpick/threadAccent";
   import StatusDot from "$lib/shared/components/StatusDot.svelte";
@@ -264,6 +265,11 @@
       />
     </form>
   </DashboardCard>
+
+  <!-- What the agent did, turn by turn, and the way back out of one. Beside the
+       git card on purpose: they read the same repository and answer the two
+       halves of "what changed here". -->
+  <ThreadTurns {project} />
 
   <!-- Two cards' worth of grid, and each component places itself: the token
        calendar wants the width, the figures beside it do not. -->

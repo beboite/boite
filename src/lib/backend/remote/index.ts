@@ -5,6 +5,10 @@ import type {
   CommitStateAnswer,
   ControlEvent,
   DbApi,
+  Checkpoint,
+  CheckpointApi,
+  CheckpointDiff,
+  CheckpointFileVersions,
   EditorApi,
   ExplorerApi,
   FastpickApi,
@@ -20,13 +24,13 @@ import type {
   PtyApi,
   PushApi,
   ScopeApi,
-  WorkspaceHit,
-  WorkspaceSearchApi,
+  SearchApi,
   ServerIdentity,
   SessionApi,
   SessionHit,
   ShellApi,
   SystemApi,
+  WorkspaceHit,
   WorkspaceMetaApi,
   WorktreeApi,
   WorktreeEntry,
@@ -72,15 +76,16 @@ export class RemoteBackend implements Backend {
   readonly worktree: WorktreeApi;
   readonly explorer: ExplorerApi;
   readonly editor: EditorApi;
+  readonly checkpoints: CheckpointApi;
   readonly project: ProjectApi;
   readonly system: SystemApi;
   readonly shell: ShellApi;
   readonly fastpick: FastpickApi;
   readonly scope: ScopeApi;
   readonly session: SessionApi;
+  readonly search: SearchApi;
   readonly log: LogApi;
   readonly approvals: ApprovalsApi;
-  readonly search: WorkspaceSearchApi;
   readonly push: PushApi;
   readonly meta: WorkspaceMetaApi;
 
@@ -201,6 +206,13 @@ export class RemoteBackend implements Backend {
         keyToThread.delete(key);
         return socket.detach(tid);
       },
+      // Its own RPC rather than `sendInput`, and that is the point rather than a
+      // detail: the input frame carries arbitrary bytes, this carries a token
+      // the server parses against a closed vocabulary before anything reaches a
+      // PTY. It also takes a thread id directly, so a device that never attached
+      // to this terminal can still answer its dialog.
+      reply: (threadId, answer) =>
+        rpc("thread.reply", { threadId, answer }).then(() => {}),
     };
 
     this.db = {
@@ -330,6 +342,27 @@ export class RemoteBackend implements Backend {
       readBase64: (path) => rpc("file.readBase64", { path }).then((r) => r.base64 as string),
     };
 
+    this.checkpoints = {
+      capture: (repo, threadId, edge) =>
+        rpc("checkpoint.capture", { repo, threadId, edge }).then(
+          (r) => r as unknown as Checkpoint | null,
+        ),
+      list: (repo, threadId) =>
+        rpc("checkpoint.list", { repo, threadId }).then((r) => r.checkpoints as Checkpoint[]),
+      diff: (repo, from, to, patch) =>
+        rpc("checkpoint.diff", { repo, from, to, patch }).then(
+          (r) => r as unknown as CheckpointDiff,
+        ),
+      fileVersions: (repo, from, to, file) =>
+        rpc("checkpoint.fileVersions", { repo, from, to, file }).then(
+          (r) => r as unknown as CheckpointFileVersions,
+        ),
+      restore: (repo, threadId, sha) =>
+        rpc("checkpoint.restore", { repo, threadId, sha }).then(() => {}),
+      forget: (repo, threadId) =>
+        rpc("checkpoint.forget", { repo, threadId }).then(() => {}),
+    };
+
     this.project = {
       inspect: (path) => rpc("project.inspect", { path }),
       homeDir: () => rpc("project.homeDir").then((r) => r.path as string),
@@ -448,6 +481,13 @@ export class RemoteBackend implements Backend {
       migrate: (kind, sessionId, fromCwd, toCwd) =>
         rpc("session.migrate", { kind, sessionId, fromCwd, toCwd }).then((r) =>
           Boolean(r.migrated),
+        ),
+    };
+
+    this.search = {
+      query: (text, limit) =>
+        rpc("search.query", { q: text, limit }).then(
+          (r) => (r.hits ?? []) as WorkspaceHit[],
         ),
     };
 

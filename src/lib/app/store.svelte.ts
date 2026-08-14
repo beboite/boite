@@ -24,10 +24,11 @@ import {
   pruneRenamed,
 } from "$lib/features/thread/renamed";
 import { noteStatusChange, resetFinished } from "$lib/features/thread/finished.svelte";
+import { forgetThreadActivity } from "$lib/features/thread/activity.svelte";
 import {
-  forgetThreadActivity,
-  threadActivitySince,
-} from "$lib/features/thread/activity.svelte";
+  forgetUserActivity,
+  userActivitySince,
+} from "$lib/features/thread/user-activity.svelte";
 import { SCRATCH_PROJECT_ID } from "$lib/domain/project";
 import { notifications } from "$lib/features/notifications/store.svelte";
 import { backend, workspace } from "$lib/backend";
@@ -153,13 +154,16 @@ export class AppState {
   }
 
   /**
-   * When this thread last changed what it was doing, for ranking.
+   * When the user last typed into this thread, for ranking.
    *
-   * The activity registry is in-memory and knows nothing after a restart, so a
-   * thread it has not seen ranks by its row's age rather than as never.
+   * Their input, not the thread's activity: an agent starts a turn, finishes
+   * one and gets woken by a poll on its own, so ranking on status changes made
+   * the sidebar rearrange itself around work nobody asked for — including under
+   * the pointer, mid-click. A thread the user has never typed into on this
+   * device ranks by its row's age rather than as never.
    */
   #threadActivity(thread: Thread): number {
-    return threadActivitySince(thread.id) ?? thread.createdAt;
+    return userActivitySince(thread.id) ?? thread.createdAt;
   }
 
   #threadsByProjectSortedIndex: Map<string, Thread[]> = $derived.by(() => {
@@ -551,6 +555,7 @@ export class AppState {
     }
     clearRenamed(id);
     forgetThreadActivity(id);
+    forgetUserActivity(id);
     try {
       await dbDeleteThread(id, removed?.origin);
     } catch (err) {
