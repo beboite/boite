@@ -35,6 +35,11 @@ export const DEFAULT_KEYBINDINGS: Keybinding[] = [
   // Ctrl+K opened.
   { key: "mod+k", command: "palette.toggle", when: "!modalOpen" },
   { key: "mod+shift+p", command: "palette.toggle", when: "!modalOpen" },
+  // The chord an editor puts file opening on, and it was free here. Boite ships
+  // an editor, a tab strip and a diff viewer, and until now the only way to open
+  // a file was to open a panel and aim at it with a mouse. Same `!modalOpen` as
+  // the palette's own keys, so it can retarget a palette that is already up.
+  { key: "mod+p", command: "palette.files", when: "!modalOpen" },
   { key: "mod+b", command: "view.toggleSidebar", when: ANY_VIEW },
   { key: "mod+,", command: "view.toggleSettings", when: ANY_VIEW },
   { key: "mod+tab", command: "thread.next", when: ANY_VIEW },

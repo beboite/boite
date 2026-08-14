@@ -160,6 +160,7 @@
     "view.zoomOut": () => settings.setUiScalePercent(settings.state.uiScalePercent - 5),
     "view.zoomReset": () => settings.setUiScalePercent(100),
     "palette.toggle": () => palette.toggle(),
+    "palette.files": () => palette.toggle("files"),
     "view.toggleSidebar": () => settings.toggleSidebar(),
     "view.toggleSettings": () => {
       app.view = app.view === "settings" ? "terminal" : "settings";
