@@ -147,6 +147,7 @@ const DEFAULTS: Settings = {
   mobileLayout: false,
   layoutPinned: false,
   motionMode: "system",
+  themeMode: "system",
   uiFontFamily: null,
   terminalFontFamily: null,
   terminalFontScalePercent: 100,
@@ -167,6 +168,10 @@ const DEFAULTS: Settings = {
 // the mobile layout. The toggle in Appearance overrides it permanently after.
 function isMotionMode(value: unknown): value is Settings["motionMode"] {
   return value === "system" || value === "on" || value === "off";
+}
+
+function isThemeMode(value: unknown): value is Settings["themeMode"] {
+  return value === "system" || value === "dark" || value === "light";
 }
 
 // A family the machine no longer has is kept rather than dropped: the stack
@@ -278,6 +283,7 @@ const DEVICE_FIELDS = [
   "mobileLayout",
   "layoutPinned",
   "motionMode",
+  "themeMode",
   "uiFontFamily",
   "terminalFontFamily",
   "terminalFontScalePercent",
@@ -503,6 +509,9 @@ class SettingsStore {
         motionMode: isMotionMode(stored.motionMode)
           ? stored.motionMode
           : DEFAULTS.motionMode,
+        themeMode: isThemeMode(stored.themeMode)
+          ? stored.themeMode
+          : DEFAULTS.themeMode,
         uiFontFamily: readFamily(stored.uiFontFamily),
         terminalFontFamily: readFamily(stored.terminalFontFamily),
         terminalFontScalePercent:
@@ -763,6 +772,12 @@ class SettingsStore {
   setMotionMode(value: Settings["motionMode"]) {
     if (this.state.motionMode === value) return;
     this.state.motionMode = value;
+    this.persistDeviceNow();
+  }
+
+  setThemeMode(value: Settings["themeMode"]) {
+    if (this.state.themeMode === value) return;
+    this.state.themeMode = value;
     this.persistDeviceNow();
   }
 
