@@ -6,6 +6,7 @@ use base64::Engine;
 use web_push_native::jwt_simple::algorithms::ES256KeyPair;
 use web_push_native::{Auth, WebPushBuilder};
 
+use boite_core::awareness::Awareness;
 use boite_core::store::{PushSub, Store};
 
 // Native Web Push (VAPID, RFC 8030/8291/8292). Lets the PWA receive a system
@@ -49,7 +50,14 @@ impl PushManager {
     /// Fan a notification out to every stored subscription. Fire-and-forget:
     /// a dead endpoint (404/410) is pruned, any other failure is logged and
     /// skipped so a flaky push service never wedges the event loop.
-    pub async fn notify_all(&self, store: &Store, title: &str, body: &str, tag: &str) {
+    ///
+    /// The payload carries the awareness value's own `link`, as a path rather
+    /// than a URL: the service worker resolves it against the origin it was
+    /// served from, which is the only origin that can answer for this workspace.
+    /// An absolute one built here would be whatever `BOITE_PUBLIC_URL` says,
+    /// which is right for a webhook and wrong for a browser that reached the
+    /// server some other way.
+    pub async fn notify_all(&self, store: &Store, a: &Awareness) {
         let subs = match store.list_push_subscriptions() {
             Ok(s) => s,
             Err(e) => {
@@ -60,7 +68,18 @@ impl PushManager {
         if subs.is_empty() {
             return;
         }
-        let payload = serde_json::json!({ "title": title, "body": body, "tag": tag }).to_string();
+        let payload = serde_json::json!({
+            "title": a.headline,
+            "body": a.detail,
+            // One notification per thread rather than per event: a thread that
+            // starts, finishes and asks a question inside a minute replaces its
+            // own bubble instead of stacking three.
+            "tag": format!("boite:{}", a.thread_id),
+            "url": a.link,
+            "phase": a.phase,
+            "threadId": a.thread_id,
+        })
+        .to_string();
         for sub in subs {
             match self.send_one(&sub, payload.as_bytes()).await {
                 Ok(code) if code == 404 || code == 410 => {

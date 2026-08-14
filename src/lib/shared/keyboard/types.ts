@@ -1,41 +1,20 @@
-/**
- * Which layer currently owns the keyboard. Resolved top-down by priority, so
- * a binding declares where it applies instead of every handler re-deriving
- * "is a dialog open?" for itself.
- */
-export type KeyScope =
-  | "modal"
-  | "palette"
-  | "settings"
-  | "editor"
-  | "project"
-  | "app";
+import type { KeyContext } from "./when";
 
-export interface ShortcutBinding {
-  /** e.g. `mod+shift+t`, `escape`, `mod+digit1`, `mod+alt+arrowleft`. */
-  combo: string;
-  /** Scopes this binding is live in. `*` means every scope. */
-  scopes: (KeyScope | "*")[];
-  /**
-   * Single-key bindings are skipped while an input, textarea or
-   * contenteditable has focus unless this is set. Combos with a modifier
-   * always run: the user cannot have meant to type Ctrl+W.
-   */
-  allowInInput?: boolean;
-  /**
-   * Returning `false` means "not handled here" — the dispatcher keeps looking
-   * at later bindings instead of swallowing the event. Anything else counts
-   * as handled and stops the event.
-   */
-  run: (event: KeyboardEvent) => boolean | void;
-  /**
-   * What this binding does, in one line. Documentation at the declaration site,
-   * and nothing else: there is no shortcuts-help screen. It used to claim to be
-   * "shown in the shortcuts help", which was a promise no consumer kept. The
-   * command palette is where a chord is discoverable, and it renders its own
-   * label from the dictionary.
-   */
-  description?: string;
+export type { KeyContext };
+
+/**
+ * One rule, and the whole of what the user edits.
+ *
+ * `key` is the combo in the notation the dispatcher parses (`mod+shift+t`,
+ * `escape`, `mod+digit1`). `command` is a stable id from the catalogue in
+ * `commands.ts`, never a function: a rule crosses a socket and a database, so
+ * nothing on it may be code. `when` is a boolean expression over context keys,
+ * empty meaning "everywhere".
+ */
+export interface Keybinding {
+  key: string;
+  command: string;
+  when?: string;
 }
 
 export interface ParsedCombo {
@@ -43,4 +22,21 @@ export interface ParsedCombo {
   mod: boolean;
   shift: boolean;
   alt: boolean;
+}
+
+/**
+ * Returning `false` means "not handled here" — the dispatcher keeps looking at
+ * the rules behind this one instead of swallowing the event. Anything else
+ * counts as handled and stops the event.
+ */
+export type KeyCommandRun = (event: KeyboardEvent) => boolean | void;
+
+/** A rule with its combo and its clause already turned into code. */
+export interface CompiledRule {
+  binding: Keybinding;
+  combo: ParsedCombo;
+  test: (ctx: KeyContext) => boolean;
+  /** False when the clause did not parse. Kept so the editor can say so. */
+  valid: boolean;
+  allowInInput: boolean;
 }

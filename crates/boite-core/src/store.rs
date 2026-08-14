@@ -10,6 +10,15 @@ pub struct Store {
     conn: Mutex<Connection>,
 }
 
+/// A thread's display name and where it lives. Feeds `awareness::Facts`.
+pub struct ThreadContext {
+    pub label: String,
+    pub project_id: Option<String>,
+    /// `None` for a thread whose project row is gone, which is a state the
+    /// journal can outlive a project into.
+    pub project: Option<String>,
+}
+
 /// Names itself and stops there.
 ///
 /// `Ready` derives `Debug` and one of its arms carries a store, so this has to
@@ -796,14 +805,29 @@ impl Store {
         Ok(())
     }
 
-    /// Display name for a thread, used by the notifier. Prefers the live OSC
-    /// title over the user label.
-    pub fn thread_label(&self, id: &str) -> Option<String> {
+    /// Where a thread belongs, for whoever has to speak for it out loud.
+    ///
+    /// The display name prefers the live OSC title over the user label, which is
+    /// what an agent renamed the thread to while it worked.
+    ///
+    /// One query rather than three. The notifier runs on a broadcast receiver
+    /// and every status transition in the workspace passes through it, so
+    /// looking up the label, then the project id, then the project name would be
+    /// three round trips per event to build one sentence.
+    pub fn thread_context(&self, id: &str) -> Option<ThreadContext> {
         let conn = self.conn.lock();
         conn.query_row(
-            "SELECT COALESCE(NULLIF(title, ''), label) FROM threads WHERE id = ?1",
+            "SELECT COALESCE(NULLIF(t.title, ''), t.label), t.project_id, p.name
+             FROM threads t LEFT JOIN projects p ON p.id = t.project_id
+             WHERE t.id = ?1",
             [id],
-            |r| r.get::<_, String>(0),
+            |r| {
+                Ok(ThreadContext {
+                    label: r.get(0)?,
+                    project_id: r.get(1)?,
+                    project: r.get(2)?,
+                })
+            },
         )
         .ok()
     }

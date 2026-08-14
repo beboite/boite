@@ -24,6 +24,8 @@
   import { openProjectDashboard } from "$lib/features/project/dashboard";
   import { isScratch } from "$lib/domain/project";
 import { projectDisplayName } from "$lib/shared/project-label";
+  import { filterSidebar, normaliseTerm } from "./sidebar-filter";
+  import SearchIcon from "@lucide/svelte/icons/search";
   import ThreadGlyph from "$lib/features/thread/ThreadGlyph.svelte";
   import {
     clearFinished,
@@ -90,6 +92,12 @@ import { projectDisplayName } from "$lib/shared/project-label";
   // Session-scoped on purpose: revealing what was filed away is a look, not a
   // preference, and one that persisted would quietly undo the filing.
   let showFiled = $state(false);
+  // Opt-in, so it costs no vertical space in a sidebar whose whole job is to
+  // hold rows. Cleared when it closes: a hidden filter still filtering is a
+  // sidebar that has lost half its threads for no reason anybody can see.
+  let filterOpen = $state(false);
+  let filterTerm = $state("");
+  let filterEl: HTMLInputElement | null = $state(null);
   let remotePicker = $state(false);
 
   /**
@@ -209,6 +217,11 @@ import { projectDisplayName } from "$lib/shared/project-label";
   function threadPointerDown(thread: Thread, e: PointerEvent) {
     if (e.button === 1) e.preventDefault();
     if (e.button !== 0 || isDragBlocked(e.target as HTMLElement)) return;
+    // Reordering is positional: the drop slot is an index into the list on
+    // screen, and while rows are hidden that index is not the one the stored
+    // order is written in. A filtered sidebar clicks and scrolls, it does not
+    // reorder.
+    if (filtering) return;
     e.stopPropagation();
     dragCaptureEl = e.currentTarget as HTMLElement;
     startPointerDrag({
@@ -253,7 +266,7 @@ import { projectDisplayName } from "$lib/shared/project-label";
   }
 
   function projectPointerDown(projectId: string, e: PointerEvent) {
-    if (showArchived) return;
+    if (showArchived || filtering) return;
     if (e.button !== 0 || isDragBlocked(e.target as HTMLElement)) return;
     const project = app.projects.find((p) => p.id === projectId);
     if (!project) return;
@@ -1029,12 +1042,28 @@ import { projectDisplayName } from "$lib/shared/project-label";
     launcher = null;
   }
 
-  const visibleProjects = $derived(
-    showArchived ? app.archivedProjects : app.sortedProjects,
+  // Narrowed in place, keeping the shape: same projects, same order, same
+  // cards, fewer rows. The palette answers "take me to X" by taking the screen;
+  // this answers "which of these forty is the one about the migration", which
+  // is asked while looking at the list and has to leave the list where it is.
+  const filtered = $derived(
+    filterSidebar(
+      showArchived ? app.archivedProjects : app.sortedProjects,
+      (id: string) => app.threadsByProjectSorted(id),
+      projectDisplayName,
+      filterTerm,
+    ),
   );
+
+  const visibleProjects = $derived(filtered.projects);
+  const filtering = $derived(normaliseTerm(filterTerm).length > 0);
 
   /**
    * What each project draws, once the pinned and the filed have been taken out.
+   *
+   * Built on top of what the filter left, not beside it: the term narrows which
+   * rows exist at all, and this decides where the survivors go. The other order
+   * would let a filed thread come back because it happened to match.
    *
    * Pinned rows move to their own section rather than appearing twice, and a
    * filed one is out of the way until `showFiled` asks for it. `filedNow` is
@@ -1050,7 +1079,7 @@ import { projectDisplayName } from "$lib/shared/project-label";
     const filedNow = ageingNow();
     const map = new Map<string, Thread[]>();
     for (const p of visibleProjects) {
-      const all = app.threadsByProjectSorted(p.id);
+      const all = filtered.threads.get(p.id) ?? [];
       map.set(
         p.id,
         all.filter(
@@ -1160,6 +1189,21 @@ import { projectDisplayName } from "$lib/shared/project-label";
       {/if}
       <button
         type="button"
+        class="rounded-md p-1 text-muted-foreground transition hover:bg-accent hover:text-foreground {filterOpen
+          ? 'bg-accent text-foreground'
+          : ''}"
+        onclick={() => {
+          filterOpen = !filterOpen;
+          if (!filterOpen) filterTerm = "";
+          else queueMicrotask(() => filterEl?.focus());
+        }}
+        aria-label={t("sidebar.filterThreads")}
+        title={t("sidebar.filterThreads")}
+      >
+        <SearchIcon class="size-4" />
+      </button>
+      <button
+        type="button"
         class="rounded-md p-1 text-muted-foreground transition hover:bg-accent hover:text-foreground {showArchived
           ? 'bg-accent text-foreground'
           : ''}"
@@ -1203,6 +1247,30 @@ import { projectDisplayName } from "$lib/shared/project-label";
       {/if}
     </div>
   </header>
+
+  {#if filterOpen}
+    <div class="px-2 pb-1.5">
+      <input
+        bind:this={filterEl}
+        bind:value={filterTerm}
+        type="search"
+        spellcheck="false"
+        autocomplete="off"
+        placeholder={t("sidebar.filterThreads")}
+        aria-label={t("sidebar.filterThreads")}
+        class="w-full rounded-md border border-border bg-[var(--color-surface-2)] px-2 py-1 text-xs text-foreground outline-none transition placeholder:text-muted-foreground/60 focus:border-foreground/30"
+        onkeydown={(e) => {
+          if (e.key !== "Escape") return;
+          e.stopPropagation();
+          if (filterTerm) {
+            filterTerm = "";
+            return;
+          }
+          filterOpen = false;
+        }}
+      />
+    </div>
+  {/if}
 
   <!-- The empty space below the rows is empty space. It used to clear the
        selection, on the reasoning that being on no project is what aims the
