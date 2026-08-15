@@ -3,7 +3,12 @@
   import { settings } from "$lib/features/settings/store.svelte";
   import { fastpick } from "$lib/features/fastpick/store.svelte";
   import { installer } from "$lib/features/fastpick/installer.svelte";
-  import { FASTPICK_REPO, installCommand, uninstallCommand } from "$lib/features/fastpick/install";
+  import {
+    FASTPICK_REPO,
+    installCommand,
+    uninstallCommand,
+    updateCommand,
+  } from "$lib/features/fastpick/install";
   import { notifications } from "$lib/features/notifications/store.svelte";
   import SettingsCard from "$lib/shared/components/SettingsCard.svelte";
   import ToggleSetting from "$lib/shared/components/ToggleSetting.svelte";
@@ -18,7 +23,12 @@
   const installed = $derived(fastpick.installed === true);
   const cargoMissing = $derived(fastpick.cargoPresent === false);
   const install = installCommand();
+  const update = updateCommand();
   const uninstall = uninstallCommand();
+
+  // Only the first install compiles. Updating is fastpick fetching its own signed
+  // release, so a machine without a toolchain can still take one.
+  const primary = $derived(installed ? update : install);
 
   function line(c: { cmd: string; args: string[] }): string {
     return [c.cmd, ...c.args].join(" ");
@@ -28,17 +38,26 @@
   const verdict = $derived.by(() => {
     switch (installer.status) {
       case "running":
-        return installer.action === "uninstall"
-          ? t("fastpick.runningUninstall")
-          : t("fastpick.runningInstall");
+        switch (installer.action) {
+          case "uninstall":
+            return t("fastpick.runningUninstall");
+          case "update":
+            return t("fastpick.runningUpdate");
+          default:
+            return t("fastpick.runningInstall");
+        }
       case "done":
         return t("fastpick.finished");
       case "cancelled":
         return t("fastpick.cancelled");
-      case "failed":
+      case "failed": {
+        // The command that failed, not the one the button offers now: a failed
+        // update leaves `installed` true and its own name is what the log holds.
+        const cmd = installer.action === "update" ? update.cmd : install.cmd;
         return installer.failure
-          ? t("fastpick.failedToStart", { error: installer.failure })
-          : t("fastpick.failedWithCode", { code: installer.exitCode ?? "?" });
+          ? t("fastpick.failedToStart", { cmd, error: installer.failure })
+          : t("fastpick.failedWithCode", { cmd, code: installer.exitCode ?? "?" });
+      }
       default:
         return null;
     }
@@ -117,9 +136,9 @@
     <button
       type="button"
       class="flex items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-1 text-xs text-foreground transition hover:border-foreground/30 disabled:cursor-not-allowed disabled:opacity-40"
-      onclick={() => installer.install()}
-      disabled={cargoMissing || installer.busy}
-      title={line(install)}
+      onclick={() => (installed ? installer.update() : installer.install())}
+      disabled={(!installed && cargoMissing) || installer.busy}
+      title={line(primary)}
     >
       <Download class="size-3" />
       {installed ? t("fastpick.update") : t("fastpick.install")}
@@ -205,7 +224,9 @@
   <p class="text-xs leading-snug text-muted-foreground/80">
     {t("fastpick.keepsConfig")}
   </p>
-  {#if cargoMissing}
+  <!-- Only the first install and the uninstall are cargo's. Saying a toolchain is
+       missing next to an Update button that does not want one reads as a blocker. -->
+  {#if cargoMissing && !installed}
     <p class="text-xs leading-snug text-[var(--color-warning)]">
       {t("fastpick.needsCargo")}
       {t("fastpick.needsCargoHelp")}
