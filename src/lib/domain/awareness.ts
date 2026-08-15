@@ -115,35 +115,6 @@ export type ThreadReply =
 export const THREAD_REPLIES = table.replies as readonly ThreadReply[];
 
 /**
- * The answers a `waiting` thread is offered, in the order they are drawn.
- *
- * A subset of what the backends accept: nine numbered choices in a row would be
- * a keypad, and the prompts an agent puts up are three options at most. The
- * backend still takes 4 through 9, so widening this is a change to one array.
- */
-export const OFFERED_REPLIES = ["1", "2", "3", "yes", "no", "enter", "escape"] as const;
-
-const REPLY_LABELS: Record<ThreadReply, MessageKey> = {
-  yes: "reply.yes",
-  no: "reply.no",
-  enter: "reply.enter",
-  escape: "reply.escape",
-  "1": "reply.one",
-  "2": "reply.two",
-  "3": "reply.three",
-  "4": "reply.four",
-  "5": "reply.five",
-  "6": "reply.six",
-  "7": "reply.seven",
-  "8": "reply.eight",
-  "9": "reply.nine",
-};
-
-export function replyLabel(answer: ThreadReply): MessageKey {
-  return REPLY_LABELS[answer];
-}
-
-/**
  * Where a thread lives, as a path and query.
  *
  * One format, two resolutions, and neither host can build the other's. The PWA

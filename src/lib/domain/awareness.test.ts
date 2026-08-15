@@ -1,13 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { ThreadStatus } from "$lib/types";
 import {
-  OFFERED_REPLIES,
   THREAD_REPLIES,
   needsAHuman,
   parseThreadLink,
   phaseOf,
   phraseKeys,
-  replyLabel,
   threadLink,
   type AwarenessPhase,
   type ThreadReply,
@@ -122,15 +120,6 @@ describe("the reply vocabulary", () => {
       "9",
     ];
     expect(THREAD_REPLIES).toEqual(union);
-  });
-
-  it("offers a subset of it, and labels everything it accepts", () => {
-    for (const answer of OFFERED_REPLIES) {
-      expect(THREAD_REPLIES).toContain(answer);
-    }
-    for (const answer of THREAD_REPLIES) {
-      expect(replyLabel(answer)).toMatch(/^reply\./);
-    }
   });
 });
 
