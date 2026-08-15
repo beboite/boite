@@ -596,7 +596,7 @@ impl Store {
         let conn = self.conn.lock();
         let mut stmt = conn
             .prepare(
-                "SELECT id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, status, keep_awake, created_at, icon_color, worktree_path
+                "SELECT id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, status, keep_awake, created_at, icon_color, worktree_path, settled_at
                  FROM threads ORDER BY created_at ASC",
             )
             .map_err(|e| e.to_string())?;
@@ -621,6 +621,7 @@ impl Store {
                     auto_slept: false,
                     keep_awake: r.get::<_, i64>(10)? == 1,
                     worktree_path: r.get(13)?,
+                    settled_at: r.get(14)?,
                 })
             })
             .map_err(|e| e.to_string())?;
@@ -630,7 +631,7 @@ impl Store {
     pub fn load_thread(&self, id: &str) -> Result<Option<Thread>, String> {
         let conn = self.conn.lock();
         conn.query_row(
-            "SELECT id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, status, keep_awake, created_at, icon_color, worktree_path
+            "SELECT id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, status, keep_awake, created_at, icon_color, worktree_path, settled_at
              FROM threads WHERE id = ?1",
             [id],
             |r| {
@@ -653,6 +654,7 @@ impl Store {
                     auto_slept: false,
                     keep_awake: r.get::<_, i64>(10)? == 1,
                     worktree_path: r.get(13)?,
+                    settled_at: r.get(14)?,
                 })
             },
         )
@@ -684,6 +686,23 @@ impl Store {
             },
         )
         .ok()
+    }
+
+    /// When this thread was put away, or None while it is live or absent.
+    ///
+    /// Read back on every re-save for the same reason as [`Store::thread_status`]:
+    /// `save_thread` is an `INSERT OR REPLACE`, so a column the caller does not
+    /// carry is a column set to null. A row nobody has put away and a row that is
+    /// not there both answer None, which is what an ordinary live thread is.
+    pub fn thread_settled_at(&self, id: &str) -> Option<i64> {
+        let conn = self.conn.lock();
+        conn.query_row(
+            "SELECT settled_at FROM threads WHERE id = ?1",
+            [id],
+            |r| r.get::<_, Option<i64>>(0),
+        )
+        .ok()
+        .flatten()
     }
 
     /// Settles what the last run of this host left on the rows. Once, at start.
@@ -725,12 +744,12 @@ impl Store {
         let args = serde_json::to_string(&t.args).unwrap_or_else(|_| "[]".to_string());
         conn.execute(
             "INSERT OR REPLACE INTO threads
-             (id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, status, keep_awake, created_at, icon_color, worktree_path)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+             (id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, status, keep_awake, created_at, icon_color, worktree_path, settled_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
             rusqlite::params![
                 t.id, t.project_id, t.label, t.title, t.cmd, args, t.exit_code,
                 t.session_id, t.icon_key, t.status, t.keep_awake as i64, t.created_at,
-                t.icon_color, t.worktree_path,
+                t.icon_color, t.worktree_path, t.settled_at,
             ],
         )
         .map_err(|e| e.to_string())?;
@@ -1123,6 +1142,7 @@ pub enum ThreadCol {
     IconKey,
     SessionId,
     KeepAwake,
+    SettledAt,
 }
 
 impl ThreadCol {
@@ -1135,6 +1155,7 @@ impl ThreadCol {
             ThreadCol::IconKey => "icon_key",
             ThreadCol::SessionId => "session_id",
             ThreadCol::KeepAwake => "keep_awake",
+            ThreadCol::SettledAt => "settled_at",
         }
     }
 }

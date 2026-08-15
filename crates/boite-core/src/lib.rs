@@ -21,6 +21,7 @@ pub mod screen;
 pub mod search;
 pub mod secret_file;
 pub mod session;
+pub mod settle;
 pub mod shell;
 pub mod snapshot;
 pub mod status;

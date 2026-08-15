@@ -66,6 +66,15 @@ export interface Thread {
   // explorer, the PTY and the Claude session lookup all resolve through
   // `threadCwd()` rather than reading `project.cwd` directly.
   worktreePath?: string | null;
+  /**
+   * When this thread was put away as finished, or null while it is live.
+   *
+   * Server-side rather than in this device's localStorage: a phone and a laptop
+   * showing two different sidebars for the same boite is the list disagreeing
+   * with itself. A timestamp rather than a flag, so "put away in March" is
+   * answerable without a second column.
+   */
+  settledAt?: number | null;
   origin?: WorkspaceOrigin;
 }
 

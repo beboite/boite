@@ -10,8 +10,10 @@ import {
   saveThread,
   updateThreadTitle,
   markThreadStarted,
+  setThreadSettled,
   deleteThread as dbDeleteThread,
 } from "$lib/storage/db";
+import { canSettle, isSettled } from "$lib/domain/thread-settle";
 import { settings } from "$lib/features/settings/store.svelte";
 import { device } from "$lib/features/settings/device.svelte";
 import { logger } from "$lib/shared/services/logger.svelte";
@@ -568,6 +570,12 @@ export class AppState {
     const t = this.threadById(id);
     if (!t) return;
     if (t.status === status && t.exitCode === exitCode) return;
+    // A thread that starts a turn, or puts a dialog up, is not finished business
+    // and comes back out of the settled pile. Reaching `ready` is not enough: an
+    // idle agent is exactly what a settled thread looks like when its PTY is
+    // warm. The guard is one null check on rows that carry no settling at all,
+    // which is all of them until somebody puts one away.
+    if (isSettled(t) && !canSettle(status)) void this.settleThread(id, false);
     noteStatusChange(id, t.status, status);
     t.status = status;
     t.exitCode = exitCode;
@@ -592,6 +600,37 @@ export class AppState {
     // Visual-only flag, never persisted. After a restart all threads come
     // back without the zZ animation; clicking re-spawns them like any
     // other stopped thread.
+  }
+
+  /**
+   * Puts a thread away as finished business, or brings it back.
+   *
+   * Optimistic like every other mutator here, and the one that genuinely has to
+   * roll back: the boite refuses to put away a thread that is working or has a
+   * dialog up, and it is the only party that answers for a remote row. So the
+   * refusal is checked here too — the menu should never have offered it — and
+   * the write is undone if the boite disagrees anyway.
+   *
+   * Returns whether it went through, so a caller can say so.
+   */
+  async settleThread(id: string, settled: boolean): Promise<boolean> {
+    const thread = this.threadById(id);
+    if (!thread) return false;
+    if (settled && !canSettle(thread.status)) return false;
+    if (isSettled(thread) === settled) return true;
+
+    const before = thread.settledAt;
+    thread.settledAt = settled ? Date.now() : null;
+    try {
+      await setThreadSettled(id, thread.status, settled, thread.origin);
+      return true;
+    } catch (err) {
+      logger.error("app", "setThreadSettled failed", err);
+      const live = this.threadById(id);
+      if (live) live.settledAt = before;
+      notifications.error(t("sidebar.settleThreadFailed"));
+      return false;
+    }
   }
 
   setThreadKeepAwake(id: string, value: boolean) {

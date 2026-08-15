@@ -88,6 +88,14 @@ pub struct Thread {
     /// Directory the thread runs in when it is not the project's own.
     #[serde(default)]
     pub worktree_path: Option<String>,
+    /// When this thread was put away as finished, or None while it is live.
+    ///
+    /// A whole-row save never carries it: the window's copy is a snapshot, and
+    /// another device may have put the thread away since. `thread.create` reads
+    /// the row's own answer back before it writes, the way it does for the
+    /// status of the last run.
+    #[serde(default)]
+    pub settled_at: Option<i64>,
 }
 
 fn default_status() -> String {

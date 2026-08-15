@@ -235,6 +235,14 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "titlebar.close": "Fermer",
 
   "sidebar.projects": "Projets",
+  "sidebar.settleThread": "Ranger",
+  "sidebar.unsettleThread": "Ressortir",
+  "sidebar.settledCount": "{count} rangé(s)",
+  "sidebar.showSettled": "Voir ce que ce projet a rangé",
+  "sidebar.hideSettled": "Masquer ce que ce projet a rangé",
+  "sidebar.busyCannotSettle":
+    "Ce thread travaille, il reste là où tu peux le voir",
+  "sidebar.settleThreadFailed": "Impossible de ranger ce thread",
   "sidebar.archives": "Archives",
   "sidebar.noArchived": "Aucun projet archivé",
   "sidebar.pickFolder": "Choisir un dossier",
