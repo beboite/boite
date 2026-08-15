@@ -479,11 +479,20 @@
       // this runs on a terminal that already has a screenful of text. xterm only
       // asks a renderer for the rows that changed, and a pane that is idle
       // between two grants has none: what stays on screen is what the DOM
-      // renderer left, at the cell width it measured. The atlas is dropped first
-      // because it is keyed on cell metrics that belonged to the previous
-      // renderer, and drawing the old atlas through the new geometry is what put
-      // the left of each line out past the right of the pane.
-      addon.clearTextureAtlas();
+      // renderer left, at the cell width it measured.
+      //
+      // The repaint is per pane, and it has to stay that way. The obvious
+      // neighbour, `clearTextureAtlas()`, reads like it addresses this terminal
+      // and does not: `acquireTextureAtlas` hands one glyph atlas to every
+      // terminal on the page sharing a font, a size, a theme and a pixel ratio,
+      // which here is all of them. Clearing it empties the pages under all of
+      // them at once, and only the caller rebuilds its model afterwards. Every
+      // other pane keeps quads pointing at slots the next terminal to draw has
+      // refilled with its own glyphs, and repaints them the moment one row
+      // changes: a screen of the right colours in the right places spelling
+      // another thread's output. That is the unreadable text a thread switch
+      // used to come back to, and it stayed unreadable until something dirtied
+      // enough rows to overwrite the lot.
       term.refresh(0, term.rows - 1);
     } catch {
       // WebGL unavailable (e.g. webkit2gtk without GPU). Fall back to DOM
