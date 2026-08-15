@@ -93,6 +93,7 @@ impl Fake {
                 auto_slept: false,
                 keep_awake: false,
                 worktree_path: None,
+                settled_at: None,
             })
             .unwrap();
         self

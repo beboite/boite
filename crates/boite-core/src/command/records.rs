@@ -43,6 +43,7 @@ pub const ALL_METHODS: &[&str] = &[
     "thread.create",
     "thread.update",
     "thread.started",
+    "thread.settle",
     "thread.delete",
     "todo.list",
     "todo.save",
@@ -197,6 +198,23 @@ pub enum Records {
     ThreadStarted {
         id: String,
     },
+    /// Puts a thread away as finished business, or brings it back.
+    ///
+    /// `status` is the caller's own live reading, and it is a parameter rather
+    /// than something read off the row because the row does not hold it: what a
+    /// `threads` row records is that there *was* a run, and the desktop derives
+    /// the live answer in the window from the agent's session files and the
+    /// emulator. So the caller states it and the bus refuses on it, which keeps
+    /// a working thread out of the settled pile from every front door at once
+    /// instead of from each screen that draws a menu.
+    ///
+    /// Bringing one back is never refused: a thread that started working while
+    /// it was put away is exactly the one to bring back.
+    ThreadSettle {
+        id: String,
+        status: String,
+        settled: bool,
+    },
     /// Removes the row and the key bound to it.
     ///
     /// The public key is looked up on the row, so the identity grants nothing
@@ -283,6 +301,14 @@ impl Records {
             "thread.started" => Records::ThreadStarted {
                 id: str_param(params, "threadId")?,
             },
+            "thread.settle" => Records::ThreadSettle {
+                id: str_param(params, "threadId")?,
+                status: str_param(params, "status")?,
+                settled: params
+                    .get("settled")
+                    .and_then(|v| v.as_bool())
+                    .ok_or("missing param: settled")?,
+            },
             "thread.delete" => Records::ThreadDelete {
                 id: str_param(params, "threadId")?,
             },
@@ -324,6 +350,7 @@ impl Records {
             Records::ThreadCreate { .. } => "thread.create",
             Records::ThreadUpdate { .. } => "thread.update",
             Records::ThreadStarted { .. } => "thread.started",
+            Records::ThreadSettle { .. } => "thread.settle",
             Records::ThreadDelete { .. } => "thread.delete",
             Records::TodoList => "todo.list",
             Records::TodoSave { .. } => "todo.save",
@@ -353,6 +380,7 @@ impl Records {
             | Records::ProjectDelete { .. }
             | Records::ThreadUpdate { .. }
             | Records::ThreadStarted { .. }
+            | Records::ThreadSettle { .. }
             | Records::ThreadDelete { .. }
             | Records::TodoSave { .. }
             | Records::TodoDelete { .. }
@@ -386,6 +414,7 @@ impl Records {
             | Records::ThreadCreate { .. }
             | Records::ThreadUpdate { .. }
             | Records::ThreadStarted { .. }
+            | Records::ThreadSettle { .. }
             | Records::TodoSave { .. }
             | Records::TodoDelete { .. }
             | Records::SettingsSet { .. }
@@ -453,6 +482,11 @@ impl Records {
                         thread.exit_code = None;
                     }
                 }
+                // Whether it is put away is the row's answer for the same reason
+                // its ending is: a re-save is built from a window's snapshot, and
+                // another device may have settled it since. A new row has no
+                // answer at all, which is what an ordinary live thread is.
+                thread.settled_at = store.thread_settled_at(&thread.id);
                 store.save_thread(&thread)?;
                 // The row keeps the mark of its last run; the caller is told what
                 // that mark means, which for a row still naming a process is
@@ -473,6 +507,21 @@ impl Records {
                     ColVal::Text("running".to_string()),
                 )?;
                 store.update_thread_field(&id, ThreadCol::ExitCode, ColVal::Null)?;
+                json!(null)
+            }
+            Records::ThreadSettle { id, status, settled } => {
+                if settled && !crate::settle::can_settle(&status) {
+                    return Err(crate::settle::refusal(&status));
+                }
+                store.update_thread_field(
+                    &id,
+                    ThreadCol::SettledAt,
+                    if settled {
+                        ColVal::Int(crate::now_ms())
+                    } else {
+                        ColVal::Null
+                    },
+                )?;
                 json!(null)
             }
             Records::ThreadDelete { id } => {
@@ -616,7 +665,7 @@ mod tests {
             "todo": { "id": "d", "projectId": "p", "title": "t", "state": "open",
                       "createdAt": 0, "updatedAt": 0 },
             "id": "p", "threadId": "t", "todoId": "d", "settings": {}, "q": "anything",
-            "status": "idle", "ids": [],
+            "status": "idle", "ids": [], "settled": true,
         });
         for method in ALL_METHODS {
             let command = Command::decode(method, &params)
@@ -753,7 +802,7 @@ mod tests {
                 "todo": { "id": "d", "projectId": "p", "title": "t", "state": "open",
                           "createdAt": 0, "updatedAt": 0 },
                 "id": "p", "threadId": "t", "todoId": "d", "settings": {}, "q": "anything",
-                "status": "idle", "ids": [],
+                "status": "idle", "ids": [], "settled": true,
             }))
             .err()
             .unwrap_or_else(|| panic!("{method} answered on a host with no store"));
@@ -821,5 +870,65 @@ mod tests {
 
         ask(&host, "thread.delete", json!({ "threadId": "t" })).unwrap();
         assert!(store.public_key_of_thread("t").is_none());
+    }
+
+    /// The rule that makes putting a thread away safe, at the door every front
+    /// door shares.
+    ///
+    /// A turn in flight and a dialog waiting for an answer are both work the
+    /// sidebar has to keep showing. Bringing one back is never refused: a thread
+    /// that started working while it was away is exactly the one to bring back.
+    #[test]
+    fn a_working_or_waiting_thread_refuses_to_be_put_away() {
+        let host = Rows::new("settle-refusal");
+        let row = json!({
+            "thread": { "id": "t", "projectId": "p", "label": "l", "cmd": "c", "args": [] }
+        });
+        ask(&host, "thread.create", row.clone()).unwrap();
+        let store = host.store().unwrap();
+
+        for status in ["running", "waiting"] {
+            let err = ask(
+                &host,
+                "thread.settle",
+                json!({ "threadId": "t", "status": status, "settled": true }),
+            )
+            .err()
+            .unwrap_or_else(|| panic!("{status} was put away"));
+            assert!(err.contains(status), "{err}");
+            // The row is untouched, not merely the answer refused.
+            assert_eq!(store.thread_settled_at("t"), None);
+
+            // Bringing it back is allowed whatever the thread is doing.
+            ask(
+                &host,
+                "thread.settle",
+                json!({ "threadId": "t", "status": status, "settled": false }),
+            )
+            .unwrap();
+        }
+
+        // A finished turn goes away, and the column says when.
+        ask(
+            &host,
+            "thread.settle",
+            json!({ "threadId": "t", "status": "idle", "settled": true }),
+        )
+        .unwrap();
+        let at = store.thread_settled_at("t").expect("settled");
+        assert!(at > 0);
+
+        // A re-save built from a window's snapshot cannot bring it back: the row
+        // owns this the same way it owns how the run ended.
+        ask(&host, "thread.create", row).unwrap();
+        assert_eq!(store.thread_settled_at("t"), Some(at));
+
+        ask(
+            &host,
+            "thread.settle",
+            json!({ "threadId": "t", "status": "idle", "settled": false }),
+        )
+        .unwrap();
+        assert_eq!(store.thread_settled_at("t"), None);
     }
 }

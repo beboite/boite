@@ -1,6 +1,7 @@
 <script lang="ts">
   import { app } from "$lib/app/store.svelte";
   import { visibleStatus } from "$lib/domain/thread-status";
+  import { isSettled } from "$lib/domain/thread-settle";
   import { closeThreadWithConfirm } from "$lib/features/thread/api";
   import { t } from "$lib/i18n/index.svelte";
   import type { Thread, ThreadStatus } from "$lib/types";
@@ -14,8 +15,12 @@
   let { open, onClose }: Props = $props();
 
   const projectId = $derived(app.currentProjectId);
+  // Minus what the project put away: this is the switcher, and a thread that
+  // was put away is not one to switch to.
   const threads = $derived(
-    projectId ? app.threadsByProjectSorted(projectId) : [],
+    projectId
+      ? app.threadsByProjectSorted(projectId).filter((x) => !isSettled(x))
+      : [],
   );
 
   // Same surfacing rule as the sidebar: a live PTY that reads idle/stopped is

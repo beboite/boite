@@ -122,6 +122,7 @@ record_command!(records_thread_list, "thread.list");
 record_command!(records_thread_create, "thread.create");
 record_command!(records_thread_update, "thread.update");
 record_command!(records_thread_started, "thread.started");
+record_command!(records_thread_settle, "thread.settle");
 record_command!(records_todo_list, "todo.list");
 record_command!(records_todo_save, "todo.save");
 record_command!(records_todo_delete, "todo.delete");

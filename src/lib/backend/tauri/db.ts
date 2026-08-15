@@ -55,6 +55,12 @@ export const tauriDb: DbApi = {
     await invoke("records_thread_started", { params: { threadId: id } });
   },
 
+  async setThreadSettled(id, status, settled): Promise<void> {
+    await invoke("records_thread_settle", {
+      params: { threadId: id, status, settled },
+    });
+  },
+
   async deleteThread(id: string): Promise<void> {
     // The key row and the key file go with it, inside the one command. There
     // used to be three calls here, and the third was allowed to fail quietly.

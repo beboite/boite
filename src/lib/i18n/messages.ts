@@ -233,6 +233,14 @@ export const EN_MESSAGES = {
   "titlebar.close": "Close",
 
   "sidebar.projects": "Projects",
+  "sidebar.settleThread": "Put away",
+  "sidebar.unsettleThread": "Bring back",
+  "sidebar.settledCount": "{count} put away",
+  "sidebar.showSettled": "Show what this project put away",
+  "sidebar.hideSettled": "Hide what this project put away",
+  "sidebar.busyCannotSettle":
+    "That thread is working, it stays where you can see it",
+  "sidebar.settleThreadFailed": "Could not put that thread away",
   "sidebar.archives": "Archives",
   "sidebar.noArchived": "No archived projects",
   "sidebar.pickFolder": "Pick a folder",
