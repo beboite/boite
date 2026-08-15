@@ -12,6 +12,7 @@
   import { threadIconColor } from "$lib/features/fastpick/threadAccent";
   import StatusDot from "$lib/shared/components/StatusDot.svelte";
   import { visibleStatus } from "$lib/domain/thread-status";
+  import { isSettled } from "$lib/domain/thread-settle";
   import { threadActivitySince } from "$lib/features/thread/activity.svelte";
   import { relativeClock } from "$lib/shared/utils/clock.svelte";
   import { formatAgo, formatSpan } from "$lib/shared/utils/relative-time";
@@ -41,7 +42,12 @@
   type Props = { project: Project; onOpenThread: (threadId: string) => void };
   let { project, onOpenThread }: Props = $props();
 
-  const threads = $derived(app.threadsByProjectSorted(project.id));
+  // Minus what the project put away. The sidebar's own drawer is the one place
+  // a settled thread shows up, so a card here that still counted them would be
+  // the putting-away looking like it did not take.
+  const threads = $derived(
+    app.threadsByProjectSorted(project.id).filter((x) => !isSettled(x)),
+  );
   const running = $derived(
     threads.filter((x) => x.status === "running" || x.status === "waiting").length,
   );

@@ -223,7 +223,7 @@ fn probe_params() -> Value {
                   "createdAt": 0, "updatedAt": 0 },
         "id": "p", "todoId": "d", "settings": {}, "q": "q",
         "edge": "start", "to": "0",
-        "status": "idle", "ids": [],
+        "status": "idle", "ids": [], "settled": true,
     })
 }
 
@@ -632,6 +632,7 @@ mod tests {
             ("thread.create", MutateProject),
             ("thread.update", MutateProject),
             ("thread.started", MutateProject),
+            ("thread.settle", MutateProject),
             ("thread.delete", MutateAcross),
             ("todo.list", ReadProject),
             ("todo.save", MutateProject),
@@ -668,7 +669,8 @@ mod tests {
             "git.fetch", "git.push", "git.pull", "git.init", "file.write",
             "project.createFolder", "session.stopClaude", "session.migrate",
             "project.create", "project.archive", "project.delete",
-            "thread.create", "thread.update", "thread.started", "thread.delete",
+            "thread.create", "thread.update", "thread.started", "thread.settle",
+            "thread.delete",
             "todo.save", "todo.delete", "settings.set", "workspace.setInfo",
             "checkpoint.capture", "checkpoint.restore", "checkpoint.forget",
         ] {

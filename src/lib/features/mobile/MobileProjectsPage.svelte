@@ -2,6 +2,7 @@
   import { app } from "$lib/app/store.svelte";
   import { visibleStatus } from "$lib/domain/thread-status";
   import { isScratch } from "$lib/domain/project";
+  import { isSettled } from "$lib/domain/thread-settle";
   import { projectDisplayName } from "$lib/shared/project-label";
   import { pickAndAddProject } from "$lib/features/project/api";
   import { openProjectDashboard } from "$lib/features/project/dashboard";
@@ -19,9 +20,16 @@
 
   const projects = $derived(app.sortedProjects);
 
-  /** The same list the sidebar draws, in the same order. */
+  /**
+   * The same list the sidebar draws, in the same order, minus what was put
+   * away.
+   *
+   * There is no way to put one away from here yet, but a phone that still
+   * showed what a laptop put away would make the gesture look like it did not
+   * take.
+   */
   function liveThreads(projectId: string): Thread[] {
-    return app.threadsByProjectSorted(projectId);
+    return app.threadsByProjectSorted(projectId).filter((x) => !isSettled(x));
   }
 
   function displayStatus(thread: Thread): ThreadStatus {

@@ -4,6 +4,7 @@ import type {
   Project,
   Settings,
   Thread,
+  ThreadStatus,
   WorkspaceOrigin,
 } from "$lib/types";
 import { redactArgs } from "$lib/shared/utils/redact";
@@ -70,6 +71,15 @@ export function updateThreadTitle(
 
 export function markThreadStarted(id: string, origin?: WorkspaceOrigin): Promise<void> {
   return backendFor(origin).db.markThreadStarted(id);
+}
+
+export function setThreadSettled(
+  id: string,
+  status: ThreadStatus,
+  settled: boolean,
+  origin?: WorkspaceOrigin,
+): Promise<void> {
+  return backendFor(origin).db.setThreadSettled(id, status, settled);
 }
 
 export function deleteThread(id: string, origin?: WorkspaceOrigin): Promise<void> {

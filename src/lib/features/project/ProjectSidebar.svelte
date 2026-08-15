@@ -64,6 +64,8 @@ import { projectDisplayName } from "$lib/shared/project-label";
   import FolderArchive from "@lucide/svelte/icons/folder-archive";
   import FolderUp from "@lucide/svelte/icons/folder-up";
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
+  import ChevronRight from "@lucide/svelte/icons/chevron-right";
+  import { canSettle, countSettled, isSettled } from "$lib/domain/thread-settle";
   import ShortcutBar from "$lib/features/shortcut/ShortcutBar.svelte";
   import { t } from "$lib/i18n/index.svelte";
 
@@ -81,6 +83,16 @@ import { projectDisplayName } from "$lib/shared/project-label";
   }
 
   let showArchived = $state(false);
+  /**
+   * Which projects are showing what they put away, keyed by project id.
+   *
+   * Session-scoped on purpose: revealing a project's settled threads is a look,
+   * not a preference, and one that persisted would quietly undo the putting
+   * away. Per project rather than one switch over the whole sidebar, because
+   * what stagnates stagnates inside a project and that is the pile being
+   * cleared.
+   */
+  let settledOpen = $state<Record<string, boolean>>({});
   // Session-scoped on purpose: revealing what was filed away is a look, not a
   // preference, and one that persisted would quietly undo the filing.
   // Opt-in, so it costs no vertical space in a sidebar whose whole job is to
@@ -700,6 +712,27 @@ import { projectDisplayName } from "$lib/shared/project-label";
         startRename("thread", thread.id, thread.title ?? thread.label),
     });
     items.push({ separator: true });
+    // The way in and the way out, in the same slot. Disabled rather than hidden
+    // while the thread is working or has a dialog up, with the reason in the
+    // tooltip: the boite refuses it anyway, and an action that vanishes teaches
+    // nobody why. The row leaves the list and the project's own count picks it
+    // up in the same frame, which is where it says the thread went; a thread
+    // that starts a turn comes back on its own.
+    if (isSettled(thread)) {
+      items.push({
+        label: t("sidebar.unsettleThread"),
+        action: () => void app.settleThread(thread.id, false),
+      });
+    } else {
+      const busy = !canSettle(displayThreadStatus(thread));
+      items.push({
+        label: t("sidebar.settleThread"),
+        action: () => void app.settleThread(thread.id, true),
+        disabled: busy,
+        title: busy ? t("sidebar.busyCannotSettle") : undefined,
+      });
+    }
+    items.push({ separator: true });
     if (inMultiPane) {
       items.push({
         label: t("sidebar.detachFromGroup"),
@@ -992,9 +1025,44 @@ import { projectDisplayName } from "$lib/shared/project-label";
   const threadsByProject = $derived.by(() => {
     const map = new Map<string, Thread[]>();
     for (const p of visibleProjects) {
-      map.set(p.id, filtered.threads.get(p.id) ?? []);
+      const all = filtered.threads.get(p.id) ?? [];
+      map.set(
+        p.id,
+        settledOpen[p.id] ? all : all.filter((thread) => !isSettled(thread)),
+      );
     }
     return map;
+  });
+
+  /**
+   * How many rows each project is keeping out of the way, for the toggle that
+   * reveals them.
+   *
+   * Counted against what the filter left rather than against every thread the
+   * project has: a term that matches nothing settled should not offer to show
+   * threads it has already excluded.
+   */
+  const settledByProject = $derived.by(() => {
+    const map = new Map<string, number>();
+    for (const p of visibleProjects) {
+      map.set(p.id, countSettled(filtered.threads.get(p.id) ?? []));
+    }
+    return map;
+  });
+
+  /**
+   * A drawer that has emptied stops being open.
+   *
+   * Without this the flag outlives the last thread in it, and the *next* thread
+   * put away in that project would land in a drawer that is already open —
+   * which is the gesture doing nothing visible, in the one project where the
+   * user had looked inside once. Only projects the sidebar is currently drawing
+   * are pruned, so a term that hides a project does not quietly close it.
+   */
+  $effect(() => {
+    for (const [id, count] of settledByProject) {
+      if (count === 0 && settledOpen[id]) delete settledOpen[id];
+    }
   });
 
   const projectSourceIdx = $derived(
@@ -1375,6 +1443,7 @@ import { projectDisplayName } from "$lib/shared/project-label";
               <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
               <li
                 class="thread-row group/thread"
+                class:settled-away={isSettled(thread)}
                 class:source={isThreadSource}
                 data-thread-row={thread.id}
                 data-thread-id={thread.id}
@@ -1528,6 +1597,37 @@ import { projectDisplayName } from "$lib/shared/project-label";
               </li>
             {/each}
           </ul>
+        {/if}
+
+        <!-- The way to see what was put away, on the card that holds it. Offered
+             only when this project has something settled, and it stays offered
+             while the drawer is open so the way back is where the way in was.
+             A count rather than a list of names: the question it answers is
+             "is there anything still in there", and the names are one click
+             away. -->
+        {#if !showArchived && (settledByProject.get(project.id) ?? 0) > 0}
+          {@const settledCount = settledByProject.get(project.id) ?? 0}
+          {@const open = settledOpen[project.id] === true}
+          <div class="px-1 pb-1">
+            <button
+              type="button"
+              data-drag-block
+              class="flex w-full items-center gap-1 rounded-sm px-1.5 py-0.5 text-2xs text-muted-foreground/70 transition hover:bg-accent/40 hover:text-foreground"
+              class:text-foreground={open}
+              onclick={(e) => {
+                e.stopPropagation();
+                if (open) delete settledOpen[project.id];
+                else settledOpen[project.id] = true;
+              }}
+              aria-expanded={open}
+              title={open ? t("sidebar.hideSettled") : t("sidebar.showSettled")}
+            >
+              <ChevronRight
+                class="size-3 shrink-0 transition-transform {open ? 'rotate-90' : ''}"
+              />
+              {t("sidebar.settledCount", { count: String(settledCount) })}
+            </button>
+          </div>
         {/if}
 
       </div>
@@ -1729,6 +1829,15 @@ import { projectDisplayName } from "$lib/shared/project-label";
   }
   .thread-row {
     transform-origin: left center;
+  }
+  /* Faded rather than restyled: a row in the drawer is the same thread it was,
+     and the drawer it is in already says it was put away. Full opacity back on
+     hover, because reading one is what the drawer is opened for. */
+  .thread-row.settled-away > .thread-card {
+    opacity: 0.55;
+  }
+  .thread-row.settled-away > .thread-card:hover {
+    opacity: 1;
   }
   .project-row,
   .thread-card {
