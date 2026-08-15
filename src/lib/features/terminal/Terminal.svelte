@@ -335,13 +335,31 @@
     return rect.width >= 16 && rect.height >= 16;
   }
 
+  /**
+   * Re-measures the grid, on screen or not.
+   *
+   * A hidden pane is hidden with `visibility`, so it keeps a box and that box
+   * keeps changing size: a splitter drag, the sidebar being widened, the window
+   * being resized. Skipping its fit left the grid on whatever size it had when
+   * it was last shown, and the PTY with it, because the PTY only ever learns a
+   * new size through `onResize`. The agent then kept drawing lines wider than
+   * the grid they landed in, the overflow wrapped, and the next redraw put the
+   * tail of each line where the head of the next one belonged.
+   *
+   * `fit()` is not idempotent-cheap either way: it returns without touching
+   * anything unless the column or row count actually moved, so a pane whose box
+   * did not change pays a `getComputedStyle` and nothing more.
+   *
+   * What has to wait for the pane to be on screen is the GPU context, not the
+   * measure. A box too small to measure is the real reason to skip.
+   */
   function scheduleFit() {
     if (fitRafId !== null) return;
     fitRafId = requestAnimationFrame(() => {
       fitRafId = null;
-      if (!visible) return;
+      if (!hasUsableTerminalSize()) return;
       fit?.fit();
-      loadWebgl();
+      if (visible) loadWebgl();
     });
   }
 
@@ -436,6 +454,18 @@
       term.loadAddon(addon);
       webgl = addon;
       webglLoadedAt = performance.now();
+      // Repaint on the new renderer's own terms.
+      //
+      // A context is handed back and taken again over the life of a pane, so
+      // this runs on a terminal that already has a screenful of text. xterm only
+      // asks a renderer for the rows that changed, and a pane that is idle
+      // between two grants has none: what stays on screen is what the DOM
+      // renderer left, at the cell width it measured. The atlas is dropped first
+      // because it is keyed on cell metrics that belonged to the previous
+      // renderer, and drawing the old atlas through the new geometry is what put
+      // the left of each line out past the right of the pane.
+      addon.clearTextureAtlas();
+      term.refresh(0, term.rows - 1);
     } catch {
       // WebGL unavailable (e.g. webkit2gtk without GPU). Fall back to DOM
       // renderer, and stop asking: it will not appear later.
