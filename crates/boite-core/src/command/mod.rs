@@ -632,8 +632,6 @@ mod tests {
             ("thread.create", MutateProject),
             ("thread.update", MutateProject),
             ("thread.started", MutateProject),
-            ("thread.age", MutateProject),
-            ("thread.pinOrder", MutateProject),
             ("thread.delete", MutateAcross),
             ("todo.list", ReadProject),
             ("todo.save", MutateProject),

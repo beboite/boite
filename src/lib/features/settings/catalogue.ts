@@ -76,7 +76,6 @@ export const SETTINGS_CATALOGUE: SettingEntry[] = [
   { tab: "terminal", key: "terminalTab.threadWorktrees", descKey: "terminalTab.threadWorktreesDesc" },
   { tab: "terminal", key: "terminalTab.agentTodoAccess", descKey: "terminalTab.agentTodoAccessDesc" },
   { tab: "terminal", key: "terminalTab.mcpYolo", descKey: "terminalTab.mcpYoloDesc" },
-  { tab: "terminal", key: "terminalTab.autoSettle", descKey: "terminalTab.autoSettleDesc" },
   { tab: "terminal", key: "terminalTab.idleAutoClose", descKey: "terminalTab.idleAutoCloseDesc" },
 
   { tab: "appearance", key: "appearance.theme", descKey: "appearance.themeDesc" },
