@@ -193,7 +193,7 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
     "La barre latérale ordonne projets et threads elle-même. Cocher ne déplace rien : les lignes ne bougent pas tant qu'un ordre n'est pas choisi ci-dessous.",
   "experiments.smartSortOrder": "Trier par",
   "experiments.smartSortManual": "Manuel",
-  "experiments.smartSortActivity": "Dernier message envoyé",
+  "experiments.smartSortActivity": "Dernière tâche lancée",
   "experiments.smartSortAlpha": "Nom du projet",
   "experiments.smartSortDirection": "Direction",
   "experiments.smartSortAsc": "Croissant",

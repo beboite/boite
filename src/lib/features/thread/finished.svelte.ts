@@ -2,6 +2,7 @@ import type { ThreadStatus } from "$lib/types";
 import { isFinished } from "$lib/domain/thread-status";
 import { TransientMark } from "$lib/shared/utils/transientMark.svelte";
 import { noteThreadActivity, resetThreadActivity } from "./activity.svelte";
+import { noteWorkStarted } from "./work-activity.svelte";
 
 // Long enough that a glance a few seconds after the agent stopped still catches
 // it, short enough that a row is never still claiming to be fresh news by the
@@ -34,6 +35,10 @@ export function noteStatusChange(
   // moment it started as much as "idle for 2 h" needs the moment it stopped,
   // and this is the one call both the local and the remote path make.
   noteThreadActivity(threadId);
+  // An agent picking up a task, which is the one thing the sidebar's order
+  // moves for. A transition by construction: the guard above already turned
+  // away the sweep re-asserting `running` twice a second through a whole turn.
+  if (next === "running") noteWorkStarted(threadId);
   if (isFinished(previous) || !isFinished(next)) return;
   marks.mark(threadId);
 }
