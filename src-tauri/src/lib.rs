@@ -252,11 +252,15 @@ pub fn run() {
             // webview while it is being built, and the pane driver has to run
             // in every frame — it is how an agent reads the browser pane, and
             // an iframe is a frame of this webview, not a webview of its own.
-            // The values mirror what the config used to say; the config's
-            // `windows` array is empty now so nothing is created twice.
-            let main_window = tauri::utils::config::WindowConfig {
+            // The values mirror what the config used to say — including the
+            // per-platform overrides that used to live in tauri.<os>.conf.json.
+            // Those files declared a `main` window of their own, so the config
+            // built one before this hook ran and the second build aborted the
+            // process; every `windows` array is empty now, on every platform.
+            #[allow(unused_mut)]
+            let mut main_window = tauri::utils::config::WindowConfig {
                 label: "main".into(),
-                title: "Boite".into(),
+                title: app.config().product_name.clone().unwrap_or_else(|| "Boite".into()),
                 width: 1280.0,
                 height: 800.0,
                 min_width: Some(720.0),
@@ -266,6 +270,24 @@ pub fn run() {
                 visible: false,
                 ..Default::default()
             };
+            // Native traffic lights over a dark backing: the frame is drawn by
+            // macOS, the title is hidden, and the webview stays opaque so the
+            // launch does not flash white.
+            #[cfg(target_os = "macos")]
+            {
+                main_window.decorations = true;
+                main_window.title_bar_style = tauri::utils::TitleBarStyle::Overlay;
+                main_window.hidden_title = true;
+                main_window.transparent = false;
+                main_window.background_color =
+                    Some(tauri::utils::config::Color(0x0a, 0x0a, 0x0a, 0xff));
+            }
+            // No compositor is guaranteed here, and a transparent window
+            // without one paints garbage.
+            #[cfg(target_os = "linux")]
+            {
+                main_window.transparent = false;
+            }
             tauri::WebviewWindowBuilder::from_config(app, &main_window)?
                 .initialization_script_for_all_frames(include_str!(
                     "../scripts/pane-driver.js"
