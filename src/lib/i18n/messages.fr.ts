@@ -1068,8 +1068,16 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
 
   "browser.reload": "Recharger",
   "browser.openExternal": "Ouvrir dans le navigateur du système",
+  "browser.close": "Fermer l'aperçu",
+  "browser.previewChip": "Aperçu",
+  "browser.explain": "Ce qu'est cet aperçu",
+  "browser.noteTitle": "Un aperçu, pas votre site",
+  "browser.noteBody":
+    "Ce pane affiche une page pour qu'un agent puisse montrer ce qu'il vient de lancer ou d'ouvrir. C'est un bac à sable à la largeur du pane : pas d'extensions, pas d'outils de développement, ni cookies ni stockage en dehors de vos propres serveurs de dev, et beaucoup de sites refusent d'être affichés dans un cadre. Ouvrez la page dans le navigateur du système pour juger du vrai rendu du site.",
+  "browser.noteGotIt": "Compris",
+  "browser.stalledTitle": "Toujours rien à l'écran",
   "browser.mayRefuse":
-    "Toujours rien. Un site peut refuser d'être affiché dans un cadre ; le bouton de droite l'ouvre à l'extérieur.",
+    "Un site peut refuser d'être affiché dans un cadre, et d'ici c'est indiscernable d'une page lente. L'ouvrir à l'extérieur marche toujours.",
   "browser.confirmExternalTitle": "Ouvrir cette page dans un pane ?",
   "browser.confirmExternal":
     "Un agent demande à afficher {url} dans cette fenêtre. Ce n'est pas un serveur de cette machine.",
