@@ -596,7 +596,7 @@ impl Store {
         let conn = self.conn.lock();
         let mut stmt = conn
             .prepare(
-                "SELECT id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, status, keep_awake, created_at, icon_color, worktree_path, pin_order, settled_at, snoozed_until
+                "SELECT id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, status, keep_awake, created_at, icon_color, worktree_path
                  FROM threads ORDER BY created_at ASC",
             )
             .map_err(|e| e.to_string())?;
@@ -621,9 +621,6 @@ impl Store {
                     auto_slept: false,
                     keep_awake: r.get::<_, i64>(10)? == 1,
                     worktree_path: r.get(13)?,
-                    pin_order: r.get(14)?,
-                    settled_at: r.get(15)?,
-                    snoozed_until: r.get(16)?,
                 })
             })
             .map_err(|e| e.to_string())?;
@@ -633,7 +630,7 @@ impl Store {
     pub fn load_thread(&self, id: &str) -> Result<Option<Thread>, String> {
         let conn = self.conn.lock();
         conn.query_row(
-            "SELECT id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, status, keep_awake, created_at, icon_color, worktree_path, pin_order, settled_at, snoozed_until
+            "SELECT id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, status, keep_awake, created_at, icon_color, worktree_path
              FROM threads WHERE id = ?1",
             [id],
             |r| {
@@ -656,9 +653,6 @@ impl Store {
                     auto_slept: false,
                     keep_awake: r.get::<_, i64>(10)? == 1,
                     worktree_path: r.get(13)?,
-                    pin_order: r.get(14)?,
-                    settled_at: r.get(15)?,
-                    snoozed_until: r.get(16)?,
                 })
             },
         )
@@ -690,50 +684,6 @@ impl Store {
             },
         )
         .ok()
-    }
-
-    /// Where the sidebar keeps this thread, as persisted.
-    ///
-    /// Read back on every re-save for the same reason as [`Store::thread_status`]:
-    /// `save_thread` is an `INSERT OR REPLACE`, so a column the caller does not
-    /// carry is a column set to null. The window's copy of the pinned order is a
-    /// snapshot and another device may have reordered since, so the row wins.
-    pub fn thread_ageing(&self, id: &str) -> Option<Ageing> {
-        let conn = self.conn.lock();
-        conn.query_row(
-            "SELECT pin_order, settled_at, snoozed_until FROM threads WHERE id = ?1",
-            [id],
-            |r| {
-                Ok(Ageing {
-                    pin_order: r.get(0)?,
-                    settled_at: r.get(1)?,
-                    snoozed_until: r.get(2)?,
-                })
-            },
-        )
-        .ok()
-    }
-
-    /// Rewrites the whole pinned order, in one transaction.
-    ///
-    /// Every id not in the list is unpinned, which is what makes this one call
-    /// answer pin, unpin and reorder alike: the caller sends the order it wants
-    /// and nothing has to reason about what the previous one was. Positions are
-    /// dense from zero, so two devices that disagree converge on whichever wrote
-    /// last rather than interleaving.
-    pub fn set_pin_order(&self, ids: &[String]) -> Result<(), String> {
-        let mut conn = self.conn.lock();
-        let tx = conn.transaction().map_err(|e| e.to_string())?;
-        tx.execute("UPDATE threads SET pin_order = NULL WHERE pin_order IS NOT NULL", [])
-            .map_err(|e| e.to_string())?;
-        for (position, id) in ids.iter().enumerate() {
-            tx.execute(
-                "UPDATE threads SET pin_order = ?1 WHERE id = ?2",
-                rusqlite::params![position as i64, id],
-            )
-            .map_err(|e| e.to_string())?;
-        }
-        tx.commit().map_err(|e| e.to_string())
     }
 
     /// Settles what the last run of this host left on the rows. Once, at start.
@@ -775,12 +725,12 @@ impl Store {
         let args = serde_json::to_string(&t.args).unwrap_or_else(|_| "[]".to_string());
         conn.execute(
             "INSERT OR REPLACE INTO threads
-             (id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, status, keep_awake, created_at, icon_color, worktree_path, pin_order, settled_at, snoozed_until)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+             (id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, status, keep_awake, created_at, icon_color, worktree_path)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
             rusqlite::params![
                 t.id, t.project_id, t.label, t.title, t.cmd, args, t.exit_code,
                 t.session_id, t.icon_key, t.status, t.keep_awake as i64, t.created_at,
-                t.icon_color, t.worktree_path, t.pin_order, t.settled_at, t.snoozed_until,
+                t.icon_color, t.worktree_path,
             ],
         )
         .map_err(|e| e.to_string())?;
@@ -1161,15 +1111,6 @@ pub enum ColVal {
     Null,
 }
 
-/// Where the sidebar keeps a thread. All three null is an ordinary live thread,
-/// which is what every row written before these columns existed reads as.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct Ageing {
-    pub pin_order: Option<i64>,
-    pub settled_at: Option<i64>,
-    pub snoozed_until: Option<i64>,
-}
-
 /// Updatable `threads` columns. An enum rather than a `&str`, because
 /// update_thread_field interpolates the column into the SQL (it cannot be
 /// bound) — a caller-supplied string there is an injection one refactor away.
@@ -1182,8 +1123,6 @@ pub enum ThreadCol {
     IconKey,
     SessionId,
     KeepAwake,
-    SettledAt,
-    SnoozedUntil,
 }
 
 impl ThreadCol {
@@ -1196,8 +1135,6 @@ impl ThreadCol {
             ThreadCol::IconKey => "icon_key",
             ThreadCol::SessionId => "session_id",
             ThreadCol::KeepAwake => "keep_awake",
-            ThreadCol::SettledAt => "settled_at",
-            ThreadCol::SnoozedUntil => "snoozed_until",
         }
     }
 }

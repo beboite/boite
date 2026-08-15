@@ -235,9 +235,6 @@ export class RemoteBackend implements Backend {
       // writes the mark itself. A client that called it would be claiming
       // runtime state it does not own.
       markThreadStarted: (id) => rpc("thread.started", { threadId: id }).then(() => {}),
-      setThreadAgeing: (id, status, patch) =>
-        rpc("thread.age", { threadId: id, status, ...patch }).then(() => {}),
-      setPinnedOrder: (ids) => rpc("thread.pinOrder", { ids }).then(() => {}),
       deleteThread: (id) => rpc("thread.delete", { threadId: id }).then(() => {}),
       loadSettings: () =>
         rpc("settings.get").then((r) => (r.settings ?? {}) as Partial<Settings>),

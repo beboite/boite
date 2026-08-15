@@ -66,20 +66,6 @@ export interface Thread {
   // explorer, the PTY and the Claude session lookup all resolve through
   // `threadCwd()` rather than reading `project.cwd` directly.
   worktreePath?: string | null;
-  /**
-   * Position in the workspace-wide pinned order, or null/undefined for a thread
-   * that is not pinned.
-   *
-   * Server-side rather than in this device's localStorage, because the order is
-   * the part worth syncing: a phone and a laptop showing the same five threads
-   * in two different sequences is the sidebar disagreeing with itself. Written
-   * only by `setPinnedOrder`, which rewrites the whole order at once.
-   */
-  pinOrder?: number | null;
-  /** When this thread was filed away as finished, or null while it is live. */
-  settledAt?: number | null;
-  /** When a snoozed thread comes back, or null while it is not snoozed. */
-  snoozedUntil?: number | null;
   origin?: WorkspaceOrigin;
 }
 
@@ -173,18 +159,6 @@ export interface Settings {
    */
   mcpYolo: boolean;
   idleTimeoutMinutes: number;
-  /**
-   * File a thread away by itself after this many days with nothing happening on
-   * it. Zero is off, and off is the default.
-   *
-   * A thread in Boite is a row that survives its process: an `idle` one from
-   * last month is still one click from a relaunch with the command it was born
-   * with. So a sidebar that empties itself on a clock nobody set is a surprise
-   * removal of exactly the rows people keep on purpose, and the ones that
-   * genuinely are finished have `settle` a right-click away. Whoever wants the
-   * clock turns it on and picks the number.
-   */
-  autoSettleDays: number;
   idleAutocloseByIcon: Record<string, boolean>;
   confirmCloseThread: boolean;
   /**
