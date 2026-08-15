@@ -183,6 +183,7 @@ export const EN_MESSAGES = {
 
   "infoBox.label": "Project info",
   "infoBox.claimedTitle": "Claimed by {agent}",
+  "infoBox.claimedTag": "to confirm",
   "infoBox.moreClaimed": "+{count}",
 
   "experiments.smartSort": "Smart ordering",
