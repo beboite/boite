@@ -1075,8 +1075,16 @@ export const EN_MESSAGES = {
 
   "browser.reload": "Reload",
   "browser.openExternal": "Open in the system browser",
+  "browser.close": "Close this preview",
+  "browser.previewChip": "Preview",
+  "browser.explain": "What this preview is",
+  "browser.noteTitle": "A preview, not your site",
+  "browser.noteBody":
+    "This pane frames a page so an agent can show what it just started or opened. It is a sandbox the width of the pane: no extensions, no devtools, no cookies or storage outside your own dev servers, and plenty of sites refuse to be framed at all. Open it in the system browser to judge how the site really renders.",
+  "browser.noteGotIt": "Got it",
+  "browser.stalledTitle": "Still nothing on screen",
   "browser.mayRefuse":
-    "Still nothing. A site can refuse to be framed; the button on the right opens it outside.",
+    "A site can refuse to be framed, and from in here that is indistinguishable from a slow page. Opening it outside always works.",
   "browser.confirmExternalTitle": "Open this page in a pane?",
   "browser.confirmExternal":
     "An agent asked to show {url} inside this window. It is not a server on this machine.",

@@ -2,6 +2,7 @@
   import { openUrl } from "$lib/platform/opener";
   import { isLocalPage } from "./url";
   import { browserPanes } from "./state.svelte";
+  import { browserNote } from "./note.svelte";
   import { paneDriver } from "./driver";
   import { app } from "$lib/app/store.svelte";
   import { paneStore } from "$lib/features/panes/store.svelte";
@@ -10,6 +11,8 @@
   import ExternalLink from "@lucide/svelte/icons/external-link";
   import Bot from "@lucide/svelte/icons/bot";
   import Hand from "@lucide/svelte/icons/hand";
+  import Info from "@lucide/svelte/icons/info";
+  import X from "@lucide/svelte/icons/x";
 
   /**
    * A page, in a pane.
@@ -18,6 +21,14 @@
    * the dev server it just started, the docs page it is quoting, the PR it
    * opened — can sit next to the terminal saying it, instead of pulling the user
    * out of the window.
+   *
+   * Which makes the reader someone checking what an agent said, not someone
+   * judging their own site: a frame the width of a split pane, with none of the
+   * extensions, devtools or cookies of a real browser, and half the web refuses
+   * to be framed at all. So the pane says what it is instead of passing for a
+   * browser, keeps the way out to a real one in reach, and closes from its own
+   * corner. `note.svelte.ts` remembers that the explanation has been read; the
+   * `i` button brings it back.
    *
    * An iframe, and it is worth being honest about the ceiling: a site that sends
    * `X-Frame-Options: DENY` or a restrictive `frame-ancestors` will refuse to
@@ -114,6 +125,23 @@
   function reclaim() {
     paneStore.setBrowser(paneId, { drivenBy: null });
   }
+
+  // The host answers "what am I looking at" on its own and the path is detail,
+  // so they are weighted rather than truncated as one grey string. Nothing
+  // unparseable reaches here (`classify` is upstream of every caller); if it did,
+  // the raw address is still the honest thing to show.
+  const address = $derived.by(() => {
+    try {
+      const parsed = new URL(url);
+      const path = parsed.pathname === "/" ? "" : parsed.pathname;
+      return { host: parsed.host, rest: `${path}${parsed.search}${parsed.hash}` };
+    } catch {
+      return { host: url, rest: "" };
+    }
+  });
+
+  const ACTION =
+    "shrink-0 rounded-xs p-1 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground";
 </script>
 
 <div class="flex h-full min-h-0 flex-col bg-[var(--color-surface)]">
@@ -131,16 +159,23 @@
         {driver?.label ?? t("browser.drivenByAgent")}
       </span>
     {/if}
+    <!-- The word, before the address. A pane showing a page looks exactly like
+         a browser showing a page, and the whole difference is what it cannot
+         do; the button beside it spells that out. -->
     <span
-      class="min-w-0 flex-1 truncate text-2xs text-muted-foreground"
-      title={url}
+      class="shrink-0 rounded-xs bg-[var(--color-surface-2)] px-1 py-0.5 text-2xs text-muted-foreground"
     >
-      {url}
+      {t("browser.previewChip")}
+    </span>
+    <span class="min-w-0 flex-1 truncate text-2xs" title={url}>
+      <span class="text-foreground/80">{address.host}</span><span
+        class="text-muted-foreground">{address.rest}</span
+      >
     </span>
     {#if drivenBy}
       <button
         type="button"
-        class="rounded-xs p-1 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground"
+        class={ACTION}
         onclick={reclaim}
         title={t("browser.reclaim")}
         aria-label={t("browser.reclaim")}
@@ -150,7 +185,18 @@
     {/if}
     <button
       type="button"
-      class="rounded-xs p-1 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground"
+      class={ACTION}
+      class:text-foreground={!browserNote.read}
+      onclick={() => browserNote.toggle()}
+      title={t("browser.explain")}
+      aria-label={t("browser.explain")}
+      aria-expanded={!browserNote.read}
+    >
+      <Info class="size-3" />
+    </button>
+    <button
+      type="button"
+      class={ACTION}
       onclick={() => browserPanes.reload(paneId)}
       title={t("browser.reload")}
       aria-label={t("browser.reload")}
@@ -159,14 +205,52 @@
     </button>
     <button
       type="button"
-      class="rounded-xs p-1 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground"
+      class={ACTION}
       onclick={() => void openUrl(url)}
       title={t("browser.openExternal")}
       aria-label={t("browser.openExternal")}
     >
       <ExternalLink class="size-3" />
     </button>
+    <!-- The hairline says what is right of it acts on the pane rather than on
+         the page, as in the docked panels. Closing was a palette command and
+         nothing else, which for a pane an agent opened is no way out at all. -->
+    <span class="ml-0.5 h-4 w-px shrink-0 bg-border" aria-hidden="true"></span>
+    <button
+      type="button"
+      class={ACTION}
+      onclick={() => paneStore.closePane(paneId)}
+      title={t("browser.close")}
+      aria-label={t("browser.close")}
+    >
+      <X class="size-3.5" />
+    </button>
   </div>
+
+  {#if !browserNote.read}
+    <div
+      class="shrink-0 border-b border-border bg-[var(--color-surface-2)] px-2.5 py-2 text-2xs"
+    >
+      <p class="font-medium text-foreground">{t("browser.noteTitle")}</p>
+      <p class="mt-1 text-muted-foreground">{t("browser.noteBody")}</p>
+      <div class="mt-2 flex flex-wrap items-center gap-1.5">
+        <button
+          type="button"
+          class="rounded-md border border-border bg-[var(--color-surface)] px-2 py-1 text-2xs text-foreground transition hover:bg-[var(--color-surface-3)]"
+          onclick={() => void openUrl(url)}
+        >
+          {t("browser.openExternal")}
+        </button>
+        <button
+          type="button"
+          class="rounded-md px-2 py-1 text-2xs text-muted-foreground transition hover:text-foreground"
+          onclick={() => browserNote.markRead()}
+        >
+          {t("browser.noteGotIt")}
+        </button>
+      </div>
+    </div>
+  {/if}
 
   <div class="relative min-h-0 flex-1">
     {#key nonce}
@@ -181,11 +265,48 @@
       ></iframe>
     {/key}
 
+    <!-- Over the frame rather than behind it: an iframe paints white before it
+         has anything, so a message underneath is a message nobody sees, and
+         this way the wait is the app's own surface instead of a white flash. It
+         goes at the deadline whether or not the page answered, since a `load`
+         that never fires is also a page that may well be on screen. -->
+    {#if !settled && !stalled}
+      <div
+        class="absolute inset-0 flex items-center justify-center bg-[var(--color-surface)]"
+      >
+        <p class="text-2xs text-muted-foreground/70">{t("common.loading")}</p>
+      </div>
+    {/if}
+
+    <!-- Offered, not asserted, so whatever is behind it stays readable: the
+         frame may well have rendered without ever saying so. The way out is a
+         button rather than a sentence pointing at one. -->
     {#if stalled && !settled}
       <div
-        class="pointer-events-none absolute inset-x-0 bottom-0 border-t border-border bg-[var(--color-surface)] px-3 py-2 text-2xs text-muted-foreground"
+        class="absolute inset-x-0 bottom-0 border-t border-border bg-[var(--color-surface)]/95 px-3 py-2 backdrop-blur"
       >
-        {t("browser.mayRefuse")}
+        <p class="text-2xs font-medium text-foreground">
+          {t("browser.stalledTitle")}
+        </p>
+        <p class="mt-0.5 text-2xs text-muted-foreground">
+          {t("browser.mayRefuse")}
+        </p>
+        <div class="mt-1.5 flex flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            class="rounded-md border border-border bg-[var(--color-surface-2)] px-2 py-1 text-2xs text-foreground transition hover:bg-[var(--color-surface-3)]"
+            onclick={() => void openUrl(url)}
+          >
+            {t("browser.openExternal")}
+          </button>
+          <button
+            type="button"
+            class="rounded-md px-2 py-1 text-2xs text-muted-foreground transition hover:text-foreground"
+            onclick={() => browserPanes.reload(paneId)}
+          >
+            {t("browser.reload")}
+          </button>
+        </div>
       </div>
     {/if}
   </div>
