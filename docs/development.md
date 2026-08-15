@@ -59,6 +59,15 @@ bridge for what only a real pointer can do.
 point: an agent that has just started a dev server knows what is worth looking
 at, and printing a URL and hoping was the only way to say so.
 
+It is also the one pane the user did not ask for, and it is not a browser: no
+extensions, no devtools, no cookies outside their own dev servers, at whatever
+width the split happens to be. So the pane says as much rather than passing for
+one. It carries the word "preview" before the address, a note spelling out what
+the sandbox costs and pointing at the system browser for the real rendering
+(read once, remembered per device under `boite.browserNoteRead`, and the `i`
+button brings it back), and a close button of its own. Closing used to be a
+palette command and nothing else.
+
 What ships today is an `<iframe>`, and the address in it is the only thing an
 agent hands this app that the app then renders in its own window. Three rules
 hold it, and they are written down in three places that have to agree:
