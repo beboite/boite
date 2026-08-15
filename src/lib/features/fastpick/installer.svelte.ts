@@ -5,7 +5,7 @@ import { settings } from "$lib/features/settings/store.svelte";
 import { logger } from "$lib/shared/services/logger.svelte";
 import { ptyKill, ptyOpen, ptyWrite } from "$lib/storage/pty";
 import { t } from "$lib/i18n/index.svelte";
-import { installCommand, uninstallCommand } from "./install";
+import { installCommand, uninstallCommand, updateCommand } from "./install";
 import { InstallOutput, TerminalQueries } from "./install-output";
 import { fastpick } from "./store.svelte";
 import type { PtyEvent } from "$lib/backend/types";
@@ -21,10 +21,13 @@ import type { Project } from "$lib/types";
  * whether the thing they came to install was now installed. The answer to that
  * question lives in the panel that asked it.
  *
- * Still a real PTY underneath, because the thing being watched is a compiler:
- * it wants a terminal to size its output to, its failures are its own error
- * text and nothing else, and it has to be killable. What changes is only where
- * the bytes are drawn.
+ * Still a real PTY underneath, because the thing being watched may be a
+ * compiler: it wants a terminal to size its output to, its failures are its own
+ * error text and nothing else, and it has to be killable. What changes is only
+ * where the bytes are drawn.
+ *
+ * Only the first install is a compiler now. `update` hands the job to fastpick,
+ * which fetches a signed release, so it is seconds and needs no toolchain.
  */
 
 /**
@@ -51,7 +54,13 @@ const ROWS = 30;
  */
 const REPAINT_MS = 120;
 
-export type InstallAction = "install" | "uninstall";
+export type InstallAction = "install" | "update" | "uninstall";
+
+const COMMANDS: Record<InstallAction, () => { cmd: string; args: string[] }> = {
+  install: installCommand,
+  update: updateCommand,
+  uninstall: uninstallCommand,
+};
 export type InstallStatus = "idle" | "running" | "done" | "failed" | "cancelled";
 
 /**
@@ -126,6 +135,10 @@ class FastpickInstaller {
     return this.#launch("install");
   }
 
+  update(): Promise<void> {
+    return this.#launch("update");
+  }
+
   uninstall(): Promise<void> {
     return this.#launch("uninstall");
   }
@@ -173,7 +186,7 @@ class FastpickInstaller {
       notifications.error(t("fastpick.addProjectFirst"));
       return;
     }
-    const command = action === "install" ? installCommand() : uninstallCommand();
+    const command = COMMANDS[action]();
     // The same plan a thread launch builds, so the decision about whether this
     // needs a shell is the one the runner already makes everywhere else. It
     // only ever offers the shell: the machine owning the PTY decides.
