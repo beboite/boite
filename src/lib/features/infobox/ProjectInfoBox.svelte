@@ -65,10 +65,28 @@
   const scope = $derived(project && gitRoot ? gitScope(project.id, gitRoot) : null);
   const gs = $derived(gitStore.get(scope));
 
+  /**
+   * The last checkout this box has actually read, as opposed to the one it is
+   * pointed at now.
+   *
+   * A thread's worktree is not known the moment its row exists: it is created
+   * around the launch, so the box resolves the project folder first and the
+   * worktree a moment later. The store answers instantly for the folder, which
+   * is the checkout every other thread of the project is describing, so a fresh
+   * thread wore its neighbour's branch and last commit until its own directory
+   * landed. Nothing is drawn for a checkout this box has not been answered
+   * about. Not reset when the pane goes off screen: coming back to the same
+   * directory is the case where showing ten-second-old numbers is the point.
+   */
+  let readScope = $state<string | null>(null);
+
   $effect(() => {
     if (!project || !gitRoot || !visible) return;
     const registered = gitStore.ensure(project.id, gitRoot);
-    void gitStore.refresh(registered).then(() => gitStore.autoFetch(registered));
+    void gitStore.refresh(registered).then(() => {
+      readScope = registered;
+      return gitStore.autoFetch(registered);
+    });
   });
 
   // The slow safety net, same period, same hidden-window and offline guards as
@@ -118,8 +136,9 @@
       .sort((a, b) => b.updatedAt - a.updatedAt),
   );
 
-  const commits = $derived(gs?.log.slice(0, HOVER_LOG) ?? []);
-  const isRepo = $derived(gs?.isRepo ?? false);
+  const mine = $derived(scope !== null && readScope === scope);
+  const commits = $derived(mine ? gs?.log.slice(0, HOVER_LOG) ?? [] : []);
+  const isRepo = $derived(mine && (gs?.isRepo ?? false));
 
   // Nothing to say, no box: a project with no repository and no claimed work
   // would be a frame around two empty lines.
@@ -152,10 +171,12 @@
          what sends it below the box instead of on top of it. On the card, so
          the unfolded log is measured too: it grows into exactly the room the
          stack was pushed into and draws under it, so a stack that stayed put
-         would hide rows two to ten behind opaque toasts. -->
+         would hide rows two to ten behind opaque toasts. Given `visible`
+         because a box in another group is laid out in the same corner and
+         measures the same way while nobody can see it. -->
     <div
       class="overflow-hidden rounded-lg border border-border bg-[var(--color-surface)]/95 shadow-md backdrop-blur transition group-hover:shadow-lg"
-      use:toastInset
+      use:toastInset={visible}
     >
       {#if isRepo}
         <div class="flex items-center gap-1.5 px-2.5 pt-1.5 pb-1 text-xs">
@@ -185,6 +206,15 @@
             <ShortcutIcon iconKey={claimed[0].claimedBy as IconKey} size={14} />
           </span>
           <span class="truncate text-foreground/90">{claimed[0].title}</span>
+          <!-- What this row is. An agent's title can be anything, a test name
+               included, and the agent's own icon beside it says who without
+               ever saying what: the line read as a stray message sitting above
+               the commit. The tag is the one part that cannot truncate. -->
+          <span
+            class="shrink-0 rounded bg-[var(--color-surface-3)] px-1 text-2xs text-muted-foreground"
+          >
+            {t("infoBox.claimedTag")}
+          </span>
           {#if claimed.length > 1}
             <span class="shrink-0 rounded bg-[var(--color-surface-3)] px-1 text-2xs text-muted-foreground">
               {t("infoBox.moreClaimed", { count: claimed.length - 1 })}

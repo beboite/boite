@@ -88,12 +88,13 @@ export function toastArea(el: HTMLElement) {
  *
  * Each box owns exactly one key and can only ever write or drop its own, the
  * same claim-and-release shape the info box uses to elect one git poller per
- * repository. What is resolved out of it is the tallest live claim: the corner
- * has the same coordinates in every group, so several boxes can be standing in
- * it while only one of them is on screen, and being a row lower than that one
- * box strictly needs is invisible where landing on top of it is not.
+ * repository. What is resolved out of it is the tallest claim among the boxes
+ * that say they are on screen: the corner has the same coordinates in every
+ * group, so a box nobody is looking at measures a real height in it, and the
+ * tallest of those pushed the stack a visible row or two below the box it is
+ * meant to sit under.
  */
-const corner = new Map<symbol, { el: HTMLElement; px: number }>();
+const corner = new Map<symbol, { el: HTMLElement; px: number; standing: boolean }>();
 
 /**
  * How close to the anchor's corner a box has to be to count as standing in it.
@@ -137,7 +138,9 @@ function resolveInset() {
  * and a ResizeObserver has nothing to say about an element that only moved.
  */
 function remeasureCorner() {
-  for (const claim of corner.values()) claim.px = measureCorner(claim.el);
+  for (const claim of corner.values()) {
+    claim.px = claim.standing ? measureCorner(claim.el) : 0;
+  }
   resolveInset();
 }
 
@@ -154,14 +157,27 @@ function remeasureCorner() {
  *
  * The corner is claimed, not assumed: split view mounts one of these over
  * every terminal and the toasts only ever land on the box that owns it.
+ *
+ * `standing` is the caller's own answer about whether its box is on screen, and
+ * it is what the geometry cannot give: a pane in another group keeps its box
+ * mounted, hidden with `visibility` and laid out at the same coordinates as the
+ * one being looked at, so it measures a real height in the same corner. The
+ * tallest of those decided the inset, and the stack sat that far below a
+ * visible box that is shorter — the gap between the two.
  */
-export function toastInset(el: HTMLElement) {
+export function toastInset(el: HTMLElement, standing: boolean = true) {
   const token = Symbol("toast-inset");
-  corner.set(token, { el, px: 0 });
+  corner.set(token, { el, px: 0, standing });
   const observer = new ResizeObserver(remeasureCorner);
   observer.observe(el);
   remeasureCorner();
   return {
+    update(next: boolean) {
+      const claim = corner.get(token);
+      if (!claim || claim.standing === next) return;
+      claim.standing = next;
+      remeasureCorner();
+    },
     destroy() {
       observer.disconnect();
       // Its own claim and no more. The other boxes are still on screen, and a

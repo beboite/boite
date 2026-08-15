@@ -435,6 +435,19 @@ html[data-motion="reduced"] *::after {
   }
 }
 
+/* `truncate` clips to the line box, and a row that pins its line-height to keep
+   a label and its rename input the same height therefore cuts whatever the face
+   draws below the baseline: the interface font is a setting, so the descender of
+   a g is only safe for the faces that fit inside 19px. The padding gives the
+   clip room and the negative margin hands the row back the height it took. */
+@utility truncate-safe {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding-block: 3px;
+  margin-block: -3px;
+}
+
 kbd.kbd {
   display: inline-block;
   padding: 1px 5px;

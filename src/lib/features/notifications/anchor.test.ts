@@ -61,8 +61,8 @@ function cornerBox(height: number) {
 
 const mounted: Array<{ destroy(): void }> = [];
 
-function mount(el: HTMLElement) {
-  const handle = toastInset(el);
+function mount(el: HTMLElement, standing = true) {
+  const handle = toastInset(el, standing);
   mounted.push(handle);
   return handle;
 }
@@ -112,6 +112,23 @@ describe("the toast corner and who is standing in it", () => {
     // The offscreen box resizing was what used to overwrite the whole thing.
     offscreen.resizeTo(40);
     expect(toastAnchor.inset).toBe(84);
+  });
+
+  it("takes no room for a box whose group nobody is looking at", () => {
+    // Hidden with `visibility`, so it is laid out in the same corner and
+    // measures a real height. The taller of the two used to set the inset,
+    // which is a stack sitting a row below the box it is meant to touch.
+    mount(cornerBox(84).el);
+    mount(cornerBox(160).el, false);
+    expect(toastAnchor.inset).toBe(84);
+  });
+
+  it("hands the corner over when the group on screen changes", () => {
+    const wasOnScreen = mount(cornerBox(84).el);
+    const comingUp = mount(cornerBox(160).el, false);
+    wasOnScreen.update(false);
+    comingUp.update(true);
+    expect(toastAnchor.inset).toBe(160);
   });
 
   it("keeps the inset when one of several boxes unmounts", () => {
