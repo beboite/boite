@@ -16,11 +16,12 @@ function installStorage(seed: Record<string, string> = {}) {
   return map;
 }
 
-const KEY = "boite.threadUserActivity";
+const KEY = "boite.threadWorkStarted";
+const RETIRED_KEY = "boite.threadUserActivity";
 
 async function load() {
   vi.resetModules();
-  return await import("./user-activity.svelte");
+  return await import("./work-activity.svelte");
 }
 
 beforeEach(() => {
@@ -32,31 +33,31 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("user activity", () => {
-  it("answers with what the user typed, and null for a thread they never did", async () => {
+describe("work activity", () => {
+  it("answers with when work started, and null for a thread none did", async () => {
     installStorage();
     const m = await load();
-    m.noteUserInput("a", 1000);
-    expect(m.userActivitySince("a")).toBe(1000);
-    expect(m.userActivitySince("b")).toBeNull();
+    m.noteWorkStarted("a", 1000);
+    expect(m.workStartedSince("a")).toBe(1000);
+    expect(m.workStartedSince("b")).toBeNull();
   });
 
   it("survives a restart, which is the whole reason it is on disk", async () => {
     const map = installStorage();
     const first = await load();
-    first.noteUserInput("a", 4242);
-    first.flushUserActivity();
+    first.noteWorkStarted("a", 4242);
+    first.flushWorkActivity();
     expect(JSON.parse(map.get(KEY) as string)).toEqual({ a: 4242 });
 
     const second = await load();
-    expect(second.userActivitySince("a")).toBe(4242);
+    expect(second.workStartedSince("a")).toBe(4242);
   });
 
-  it("writes once for a burst of typing rather than once per keystroke", async () => {
+  it("writes once for a burst rather than once per stamp", async () => {
     const map = installStorage();
     const spy = vi.spyOn(globalThis.localStorage, "setItem");
     const m = await load();
-    for (let i = 0; i < 50; i++) m.noteUserInput("a", 1000 + i);
+    for (let i = 0; i < 50; i++) m.noteWorkStarted("a", 1000 + i);
     expect(spy).not.toHaveBeenCalled();
     vi.advanceTimersByTime(10_000);
     expect(spy).toHaveBeenCalledTimes(1);
@@ -67,8 +68,8 @@ describe("user activity", () => {
     const map = installStorage();
     const m = await load();
     // 401 threads, oldest first, so the one that must fall out is `t0`.
-    for (let i = 0; i <= 400; i++) m.noteUserInput(`t${i}`, 1000 + i);
-    m.flushUserActivity();
+    for (let i = 0; i <= 400; i++) m.noteWorkStarted(`t${i}`, 1000 + i);
+    m.flushWorkActivity();
     const written = JSON.parse(map.get(KEY) as string) as Record<string, number>;
     expect(Object.keys(written)).toHaveLength(400);
     expect(written.t0).toBeUndefined();
@@ -78,15 +79,23 @@ describe("user activity", () => {
   it("drops a thread that was closed", async () => {
     installStorage();
     const m = await load();
-    m.noteUserInput("a", 1000);
-    m.forgetUserActivity("a");
-    expect(m.userActivitySince("a")).toBeNull();
+    m.noteWorkStarted("a", 1000);
+    m.forgetWorkStarted("a");
+    expect(m.workStartedSince("a")).toBeNull();
   });
 
   it("ignores a stored blob that is not a map of numbers", async () => {
     installStorage({ [KEY]: JSON.stringify({ a: "nope", b: 7 }) });
     const m = await load();
-    expect(m.userActivitySince("a")).toBeNull();
-    expect(m.userActivitySince("b")).toBe(7);
+    expect(m.workStartedSince("a")).toBeNull();
+    expect(m.workStartedSince("b")).toBe(7);
+  });
+
+  /** The order used to be about typing, and that blob answers a question
+      nothing asks now. */
+  it("drops what the typing-ordered build left behind", async () => {
+    const map = installStorage({ [RETIRED_KEY]: JSON.stringify({ a: 1 }) });
+    await load();
+    expect(map.has(RETIRED_KEY)).toBe(false);
   });
 });

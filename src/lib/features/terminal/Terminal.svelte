@@ -43,7 +43,7 @@
   import { decideSpawn, launchPlan } from "./launch";
   import { keyIntent } from "./key-intent";
   import { claimTypedPrompt } from "$lib/features/thread/typedPrompt";
-  import { noteUserInput } from "$lib/features/thread/user-activity.svelte";
+  import { isTerminalReport } from "./reports";
   import { parsePromotion, PROMOTE_OSC } from "$lib/features/thread/promote";
   import { isDeviceMacOS } from "$lib/storage/platform.svelte";
   import {
@@ -182,11 +182,23 @@
   ];
   function rawWrite(s: string) {
     if (!shouldUsePty(ptyId)) return;
-    lastInputAt = Date.now();
     // The one funnel every keystroke passes through, xterm's onData and the
-    // phone's key bar alike, which is why the "what was I last on" order is
-    // stamped here rather than anywhere that also sees the agent's own output.
-    noteUserInput(thread.id, lastInputAt);
+    // phone's key bar alike. What the terminal answers on its own goes out
+    // through `sendReport` instead, so it never reads as the user being here.
+    lastInputAt = Date.now();
+    void ptyWrite(ptyId, encoder.encode(s));
+  }
+
+  /**
+   * A report the terminal wrote back by itself, on its way to the PTY.
+   *
+   * It still has to be sent: the agent asked for it, or turned the mode on. It
+   * is not the user doing anything, so it leaves no trace on `lastInputAt`,
+   * which is half of what tells a silent thread from a busy one
+   * (`settleUnread`).
+   */
+  function sendReport(s: string) {
+    if (!shouldUsePty(ptyId)) return;
     void ptyWrite(ptyId, encoder.encode(s));
   }
 
@@ -760,7 +772,7 @@
     e.preventDefault();
     e.stopPropagation();
     if (ptyId) {
-      noteUserInput(thread.id);
+      lastInputAt = Date.now();
       void ptyWrite(ptyId, LF);
     }
     queueMicrotask(() => term?.focus());
@@ -1133,10 +1145,6 @@
         if (!reattaching) {
           const opening = claimTypedPrompt(thread.id);
           if (opening && ptyId) {
-            // The user's own words, so it stamps the order like anything else
-            // they type. The spawn itself does not: a respawn the app decided on
-            // is not the user coming back to this thread.
-            noteUserInput(thread.id);
             void ptyWrite(ptyId, encoder.encode(opening)).catch((err) => {
               logger.warn("spawn", `could not type the opening prompt`, String(err));
             });
@@ -1287,6 +1295,14 @@
     term.onData((data) => {
       if (!shouldUsePty(ptyId)) return;
       syncAliveThread();
+      // `onData` is "the terminal has something to send", not "a key was
+      // pressed". Focus reports, mouse reports and every answer to a query the
+      // agent made arrive here too, and they must not consume an armed
+      // modifier or count as the user being at this thread.
+      if (isTerminalReport(data)) {
+        sendReport(data);
+        return;
+      }
       sendInputText(data);
     });
 
