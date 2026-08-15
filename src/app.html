@@ -15,6 +15,16 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Boite" />
     <title>Boite</title>
+    <!-- Blocking, and above the head placeholder on purpose: it writes the
+         palette attribute the stylesheet is about to gate on, so the first
+         frame is already the right theme. static/boot-theme.js says why it
+         duplicates what it duplicates.
+
+         Do not name either placeholder in this comment. They are substituted by
+         plain string replacement, so a mention is an injection point: writing
+         the head one here spliced the whole stylesheet block into the middle of
+         these lines and left the real placeholder untouched. -->
+    <script src="%sveltekit.assets%/boot-theme.js"></script>
     %sveltekit.head%
   </head>
   <body data-sveltekit-preload-data="hover">

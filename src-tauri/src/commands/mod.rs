@@ -17,6 +17,8 @@
 //!   config files on disk rather than anything the bus answers for.
 //! - [`app`] is what only this process can say: its own log, its boot, and the
 //!   snapshot.
+//! - [`window`] is the acrylic themes' native half, and the one command here
+//!   that answers to the palette rather than to a capability.
 //!
 //! `bus` holds the host the four codecs share. It is the whole reason a command
 //! here is three lines: [`bus::DesktopHost`] answers what a command may reach,
@@ -35,6 +37,7 @@ pub mod git;
 pub mod pty;
 pub mod records;
 pub mod sessions;
+pub mod window;
 
 // The one type outside this module that a command's shape is part of: the PTY
 // sink writes it, and the webview's xterm bridge reads it.

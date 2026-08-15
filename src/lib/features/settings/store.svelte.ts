@@ -6,6 +6,7 @@ import { logger } from "$lib/shared/services/logger.svelte";
 import { debounce } from "$lib/shared/utils/debounce";
 import { clampTerminalScale } from "$lib/theme/fonts";
 import { uuid } from "$lib/shared/utils/uuid";
+import { isThemeId } from "$lib/theme/themes";
 import type {
   Keybinding,
   LocaleSetting,
@@ -169,8 +170,10 @@ function isMotionMode(value: unknown): value is Settings["motionMode"] {
   return value === "system" || value === "on" || value === "off";
 }
 
+// Asked of the registry rather than spelled out, so a palette added there is
+// not a palette this rejects on the next start and silently resets to system.
 function isThemeMode(value: unknown): value is Settings["themeMode"] {
-  return value === "system" || value === "dark" || value === "light";
+  return value === "system" || isThemeId(value);
 }
 
 // A family the machine no longer has is kept rather than dropped: the stack

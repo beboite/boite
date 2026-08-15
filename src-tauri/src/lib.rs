@@ -460,6 +460,7 @@ pub fn run() {
             commands::records::records_workspace_info,
             commands::records::records_workspace_set_info,
             commands::records::records_search,
+            commands::window::set_keep_backdrop_active,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

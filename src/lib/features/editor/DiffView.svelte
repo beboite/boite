@@ -39,7 +39,7 @@
     return [
       lineNumbers(),
       highlightSpecialChars(),
-      theme.of(boiteTheme(currentTheme.name)),
+      theme.of(boiteTheme(currentTheme.scheme)),
       boiteHighlight,
       EditorView.editable.of(false),
       EditorState.readOnly.of(true),
@@ -88,7 +88,7 @@
   });
 
   $effect(() => {
-    const next = boiteTheme(currentTheme.name);
+    const next = boiteTheme(currentTheme.scheme);
     merge?.a.dispatch({ effects: themeA.reconfigure(next) });
     merge?.b.dispatch({ effects: themeB.reconfigure(next) });
   });

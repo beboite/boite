@@ -237,6 +237,84 @@
   --app-color-scheme: dark;
 }
 
+/* ---- The dark palette, restated ----------------------------------------
+   The same values `@theme` declares just above, and it is not redundant.
+
+   `@theme` puts them on `:root`, so they reach an element by inheritance, and
+   an element that carries `data-theme="dark"` while the window is light would
+   inherit the light ones and paint light. That element exists: the settings
+   picker draws each swatch by handing it the theme's own attribute, which is
+   what keeps six previews from being six hand-copied palettes going stale one
+   commit at a time.
+
+   `appearance.test.ts` fails on any value here that has drifted from the one
+   above it, so the copy cannot rot. `@theme` stays the source: it is what mints
+   the Tailwind utilities, and it is what paints a document whose attribute was
+   never set.
+
+   Midnight and acrylic black start here and override what they change, the way
+   acrylic white starts from the light block. Every palette states all of its
+   roles somewhere in its own chain, so no theme depends on which one happens to
+   be around it. */
+[data-theme="dark"],
+[data-theme="midnight"],
+[data-theme="acrylic-black"] {
+  --app-color-scheme: dark;
+
+  --color-background: #0a0a0a;
+  --color-foreground: #fafafa;
+  --color-muted: #1f1f1f;
+  --color-muted-foreground: #a1a1aa;
+  --color-border: #27272a;
+  --color-accent: #2a2a2a;
+  --color-border-strong: #3a3a40;
+  --color-success: #4ade80;
+  --color-warning: #facc15;
+  --color-danger: #f87171;
+  --color-awake: #a855f7;
+  --color-dormant: #35916a;
+  --color-parked: #3d6b57;
+  --color-titlebar: #060606;
+  --color-surface: #131313;
+  --color-surface-2: #1a1a1a;
+  --color-surface-3: #232323;
+  --color-selection: rgba(228, 228, 231, 0.18);
+  --color-scrim: rgba(0, 0, 0, 0.6);
+  --shadow-e1: 0 1px 2px rgb(0 0 0 / 0.5), inset 0 1px 0 rgb(255 255 255 / 0.03);
+  --shadow-e2: 0 4px 12px -2px rgb(0 0 0 / 0.65), 0 0 0 1px rgb(255 255 255 / 0.045), inset 0 1px 0 rgb(255 255 255 / 0.04);
+  --shadow-e3: 0 12px 32px -6px rgb(0 0 0 / 0.75), 0 0 0 1px rgb(255 255 255 / 0.06), inset 0 1px 0 rgb(255 255 255 / 0.05);
+  --shadow-e4: 0 24px 64px -12px rgb(0 0 0 / 0.85), 0 0 0 1px rgb(255 255 255 / 0.07), inset 0 1px 0 rgb(255 255 255 / 0.06);
+  --color-syntax-comment: #71717a;
+  --color-syntax-number: #f78c6c;
+  --color-lane-remote: #38bdf8;
+  --color-lane-1: #f472b6;
+  --color-lane-2: #86efac;
+  --color-lane-3: #a78bfa;
+  --color-lane-4: #fb7185;
+  --color-lane-5: #2dd4bf;
+  --color-lane-6: #f97316;
+  --color-lane-7: #60a5fa;
+  --color-lane-8: #c084fc;
+  --color-term-foreground: #e4e4e7;
+  --color-term-cursor: #d4d4d8;
+  --color-term-black: #18181b;
+  --color-term-red: #f07178;
+  --color-term-green: #c3e88d;
+  --color-term-yellow: #ffcb6b;
+  --color-term-blue: #82aaff;
+  --color-term-magenta: #c792ea;
+  --color-term-cyan: #89ddff;
+  --color-term-white: #e4e4e7;
+  --color-term-bright-black: #52525b;
+  --color-term-bright-red: #ff8b92;
+  --color-term-bright-green: #ddffa7;
+  --color-term-bright-yellow: #ffe585;
+  --color-term-bright-blue: #9cc4ff;
+  --color-term-bright-magenta: #e1acff;
+  --color-term-bright-cyan: #a3f7ff;
+  --color-term-bright-white: #fafafa;
+}
+
 /* ---- The light palette -------------------------------------------------
    Every colour role above, restated. The block is unlayered, and Tailwind's
    `@theme` emits its properties inside the `theme` layer, so these win on
@@ -247,8 +325,15 @@
    them would repaint rows the user picked by eye. `appearance.ts` names them,
    and `appearance.test.ts` fails on any other role that has no twin here,
    which is what stops a colour added to the dark palette from reaching the
-   light one as a black-on-black surprise months later. */
-:root[data-theme="light"] {
+   light one as a black-on-black surprise months later.
+
+   Acrylic white shares it. A theme that flips the scheme has to restate all of
+   it or it inherits a dark value into a light window, and there is no version
+   of "the light roles, but for acrylic" that is not this list copied. What
+   acrylic white does differently is the surfaces, and those are further down,
+   as an override rather than a second palette. */
+[data-theme="light"],
+[data-theme="acrylic-white"] {
   --app-color-scheme: light;
 
   --color-background: #fbfbfc;
@@ -325,6 +410,83 @@
   --color-term-bright-magenta: #6639ba;
   --color-term-bright-cyan: #3192aa;
   --color-term-bright-white: #24292f;
+}
+
+/* ---- Midnight ----------------------------------------------------------
+   The dark ramp with a hue. Ported from accshift, which is the same app's
+   design language, so the two products offer the same third palette rather
+   than each inventing a navy.
+
+   Only the neutrals are here. The status colours, the graph lanes and the
+   sixteen ANSI slots stay as `@theme` declared them: they were picked against
+   near-black and they carry against navy, and a second set of them would be
+   twenty values to keep in step for a difference nobody can see at a glance. */
+[data-theme="midnight"] {
+  --color-background: #0a0e1c;
+  --color-foreground: #e4e8f0;
+  --color-muted: #141c30;
+  --color-muted-foreground: #8892a8;
+  --color-border: #1c2744;
+  --color-accent: #1c2744;
+  --color-border-strong: #2d3d5f;
+
+  --color-titlebar: #070b16;
+  --color-surface: #111828;
+  --color-surface-2: #172033;
+  --color-surface-3: #202c46;
+
+  --color-selection: rgba(228, 232, 240, 0.18);
+  --color-scrim: rgba(4, 6, 14, 0.62);
+}
+
+/* ---- The acrylics ------------------------------------------------------
+   Two palettes that are half a material. The window is already
+   `transparent: true` and undecorated, so what these do is stop painting an
+   opaque sheet over what the compositor blurs behind it: `lib/theme/backdrop.ts`
+   asks the OS for the blur, this decides how much of it survives per surface.
+
+   The alphas rise with the stack rather than being one value, and that is the
+   whole readability argument. The titlebar and the window fill are where the
+   material is meant to be seen. A card is a thing to read, a popover is a thing
+   to read over a desktop nobody chose, and a dialog owns the screen: by the top
+   of the ramp the blur is a hint of depth and not a background competing with
+   text. accshift landed on the same shape from the other direction, with the
+   overlays pinned near-opaque.
+
+   Linux gets no blur (no compositor-independent protocol), so these read as
+   plain translucency over the desktop there. That is a weaker look, not a
+   broken one, which is why nothing gates them per platform. */
+[data-theme="acrylic-black"] {
+  --color-background: rgb(6 6 8 / 0.44);
+  --color-titlebar: rgb(0 0 0 / 0.32);
+  --color-surface: rgb(16 16 19 / 0.68);
+  --color-surface-2: rgb(26 26 30 / 0.82);
+  --color-surface-3: rgb(38 38 43 / 0.9);
+  --color-muted: rgb(28 28 32 / 0.72);
+  --color-accent: rgb(38 38 44 / 0.75);
+
+  /* Lifted off the opaque ramp's #27272a: a hairline at 55% of a colour two
+     steps above a translucent surface is a hairline nobody sees, and these
+     palettes have no shadow to fall back on either. */
+  --color-border: rgb(78 78 88 / 0.55);
+  --color-border-strong: rgb(112 112 124 / 0.6);
+
+  --color-scrim: rgba(0, 0, 0, 0.5);
+}
+
+[data-theme="acrylic-white"] {
+  --color-background: rgb(252 252 253 / 0.46);
+  --color-titlebar: rgb(255 255 255 / 0.38);
+  --color-surface: rgb(255 255 255 / 0.7);
+  --color-surface-2: rgb(248 248 250 / 0.84);
+  --color-surface-3: rgb(238 238 242 / 0.9);
+  --color-muted: rgb(241 241 244 / 0.75);
+  --color-accent: rgb(236 236 240 / 0.78);
+
+  --color-border: rgb(150 150 165 / 0.5);
+  --color-border-strong: rgb(110 110 128 / 0.55);
+
+  --color-scrim: rgba(24, 24, 27, 0.28);
 }
 
 html,

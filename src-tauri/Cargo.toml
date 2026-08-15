@@ -86,6 +86,7 @@ mimalloc = { version = "0.1", default-features = false }
 windows = { version = "0.61", features = [
   "Win32_Foundation",
   "Win32_Graphics_Gdi",
+  "Win32_UI_Shell",
   "Win32_UI_WindowsAndMessaging",
   # PrintWindow, which the pane screenshot paints through, is filed under XPS
   # of all places.

@@ -13,6 +13,7 @@
   import { settings } from "$lib/features/settings/store.svelte";
   import { applyMotionPreference } from "$lib/theme/motion";
   import { applyThemePreference } from "$lib/theme/appearance";
+  import { applyWindowBackdrop } from "$lib/theme/backdrop";
   import { currentTheme } from "$lib/theme/current.svelte";
   import { repaintTerminals } from "$lib/features/terminal/theme";
   import {
@@ -62,12 +63,14 @@
 
   // The palette. Everything drawn in CSS follows the attribute on its own; the
   // terminals are told, because they draw to a canvas from colours they read
-  // once when they were built.
+  // once when they were built, and the window is told, because an acrylic
+  // theme is half a material the compositor owns.
   $effect(() => {
     if (typeof document === "undefined") return;
     return applyThemePreference(settings.state.themeMode, document, (theme) => {
-      currentTheme.name = theme;
+      currentTheme.id = theme;
       repaintTerminals();
+      void applyWindowBackdrop(theme);
     });
   });
 
