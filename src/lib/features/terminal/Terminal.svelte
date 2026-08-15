@@ -454,6 +454,25 @@
       term.loadAddon(addon);
       webgl = addon;
       webglLoadedAt = performance.now();
+      // Measure again: the renderer that just took over does not size the cell
+      // the way the one before it did.
+      //
+      // Every caller fits first and loads after, because the addon needs a
+      // measured cell to build its atlas from. Attaching it then moves that
+      // cell. The DOM renderer rounds the character width up and the GPU one
+      // does not, which on a 1870px pane is 8.83px against 8px: a grid fitted at
+      // 210 columns has room for 232 the moment the addon lands. Nothing
+      // recomputed it, so the canvas stayed 210 cells wide and left 190px of
+      // dead pane down the right-hand side, and the process stayed on 210
+      // columns too, `onResize` being the only thing that ever tells the PTY.
+      // Resizing the window was the only way out, because it is the only event
+      // that reaches `fit()` with a column count that differs.
+      //
+      // Before 1.1.0 the addon loaded in the same breath as `term.open()`, so
+      // the first fit already measured through it and this could not happen.
+      // Moving the load after the fit, to give the atlas something to measure,
+      // is what opened it.
+      fit?.fit();
       // Repaint on the new renderer's own terms.
       //
       // A context is handed back and taken again over the life of a pane, so
@@ -1076,6 +1095,25 @@
         spawnRetryCount = 0;
         app.setThreadPtyId(thread.id, ptyId);
         app.setThreadStatus(thread.id, "ready");
+        // The grid the process was told about, against the grid it landed in.
+        //
+        // `cols` and `rows` were read before the resume lookup, and the worktree
+        // wait above them is seconds now rather than the instant a symlink took,
+        // so the pane has time to finish laying out and re-measure while this
+        // launch is still on its way. Every `onResize` firing in that window is
+        // dropped: `shouldUsePty` has no pty id to match yet. Nothing reconciled
+        // afterwards, so the process spent its life drawing to a narrower grid
+        // than the one on screen, and what that looks like is a strip of dead
+        // pane down the right-hand side that only a window resize clears.
+        //
+        // Done here rather than by widening `shouldUsePty`, which guards writes
+        // to a pty this pane may no longer own. This runs on the id it just
+        // installed, on the line that installed it.
+        if (term.cols !== cols || term.rows !== rows) {
+          void ptyResize(nextPtyId, term.cols, term.rows).catch((err) => {
+            logger.warn("spawn", `${thread.label}: could not resize`, String(err));
+          });
+        }
         // A thread whose CLI takes no positional prompt carries its opening line
         // here instead. Typed, never submitted — the same rule the Todo panel
         // follows, and for the same reason: an agent turn is expensive and hard
