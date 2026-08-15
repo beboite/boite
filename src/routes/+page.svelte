@@ -31,7 +31,6 @@
   import SidePanel from "$lib/features/panes/SidePanel.svelte";
   import ProjectInfoBox from "$lib/features/infobox/ProjectInfoBox.svelte";
   import PaneOverlay from "$lib/features/panes/PaneOverlay.svelte";
-  import ReplyBar from "$lib/features/thread/ReplyBar.svelte";
   import { parseThreadLink } from "$lib/domain/awareness";
   import PaneDropOverlay from "$lib/features/panes/PaneDropOverlay.svelte";
   import GitPanel from "$lib/features/git/GitPanel.svelte";
@@ -618,26 +617,13 @@
                     {focused}
                     offline={boiteDown && thread.origin === "remote"}
                   />
-                  <!-- Top of the pane, not the bottom: the dialog it answers is
-                       drawn at the bottom of the terminal, and on the phone the
-                       bottom is the keyboard button. Inside the pane wrapper so
-                       it is scoped to the thread it speaks for, which is the
-                       whole difference from a window-wide tray. -->
-                  {#if visible && thread.status === "waiting"}
-                    <div class="pointer-events-auto absolute left-2 right-2 top-2 z-[var(--z-pane-overlay)] flex justify-center">
-                      <ReplyBar {thread} />
-                    </div>
-                  {/if}
                   <!-- The experiment that replaces the column, one per
                        terminal: in split view each pane runs its own worktree,
                        so a single box over the whole area could only ever
                        describe one of them. After the pane overlay in the DOM
                        and at the same z, so it draws over the ring rather than
                        under it. Panes too narrow to hold it (it would cover
-                       the terminal it describes) get none.
-                       Below the reply bar in the DOM but anchored right, so a
-                       thread that is both waiting and showing the box draws the
-                       bar centred across the top and the box beside it. -->
+                       the terminal it describes) get none. -->
                   {#if !mobile && settings.state.experimentInfoBox && rect.w >= 420}
                     <div class="absolute right-3 top-3 z-[5] max-w-[calc(100%-1.5rem)]">
                       <ProjectInfoBox {thread} {visible} />
