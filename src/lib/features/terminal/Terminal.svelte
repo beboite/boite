@@ -5,7 +5,9 @@
   import { WebglAddon } from "@xterm/addon-webgl";
   import { WebLinksAddon } from "@xterm/addon-web-links";
   import { Unicode11Addon } from "@xterm/addon-unicode11";
-  import { xtermFontFamily, xtermTheme } from "./theme";
+  import { xtermAllowTransparency, xtermFontFamily, xtermTheme } from "./theme";
+  import { currentTheme } from "$lib/theme/current.svelte";
+  import { themeById } from "$lib/theme/themes";
   import { terminalFontSize } from "$lib/theme/fonts";
   import { terminalRenderBudget, type RenderSlot } from "./render-budget";
   import { encodeBarKey, encodeText, isLineFeed, wheelLines, type Press } from "./keys";
@@ -145,6 +147,7 @@
   // The family, rebuilt from the chosen one rather than read off the root: the
   // same effect that writes --font-mono is the one this would be racing.
   const fontFamily = $derived(xtermFontFamily(settings.state.terminalFontFamily));
+  const paneIsAcrylic = $derived(Boolean(themeById(currentTheme.id).acrylic));
   let scrollLastY = 0;
   let scrollAccum = 0;
 
@@ -1223,6 +1226,7 @@
       allowProposedApi: true,
       macOptionIsMeta: true,
       rightClickSelectsWord: false,
+      allowTransparency: xtermAllowTransparency(),
       theme: xtermTheme(),
     });
 
@@ -1542,8 +1546,12 @@
   });
 </script>
 
+<!-- Under an acrylic palette the canvas paints that same translucent background
+     itself, and two sheets of it stack into an opaque one: the pane would be
+     the one rectangle the blur does not reach. -->
 <div
-  class="relative flex h-full w-full flex-col overflow-hidden bg-[var(--color-background)]"
+  class="relative flex h-full w-full flex-col overflow-hidden"
+  style:background-color={paneIsAcrylic ? "transparent" : "var(--color-background)"}
   oncontextmenu={openTerminalContextMenu}
   role="presentation"
 >
