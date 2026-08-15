@@ -1158,7 +1158,7 @@ import { projectDisplayName } from "$lib/shared/project-label";
   >
     {#if showArchived && visibleProjects.length === 0}
       <div
-        class="mx-1 mt-2 flex w-[calc(100%-0.5rem)] flex-col items-center gap-2 rounded-lg border border-dashed border-border bg-transparent px-3 py-7 text-xs text-muted-foreground"
+        class="mx-1 mt-2 mb-2 flex w-[calc(100%-0.5rem)] flex-col items-center gap-2 rounded-lg border border-dashed border-border bg-transparent px-3 py-7 text-xs text-muted-foreground"
       >
         <FolderArchive class="size-5 opacity-70" />
         <span>{t("sidebar.noArchived")}</span>
@@ -1166,7 +1166,7 @@ import { projectDisplayName } from "$lib/shared/project-label";
     {:else if !showArchived && app.projects.every((p) => isScratch(p))}
       <button
         type="button"
-        class="mx-1 mt-2 flex w-[calc(100%-0.5rem)] flex-col items-center gap-2 rounded-lg border border-dashed border-border bg-transparent px-3 py-7 text-xs text-muted-foreground transition hover:border-foreground/30 hover:bg-accent/30 hover:text-foreground"
+        class="mx-1 mt-2 mb-2 flex w-[calc(100%-0.5rem)] flex-col items-center gap-2 rounded-lg border border-dashed border-border bg-transparent px-3 py-7 text-xs text-muted-foreground transition hover:border-foreground/30 hover:bg-accent/30 hover:text-foreground"
         onclick={addProjectClick}
       >
         <FolderOpen class="size-5 opacity-70" />
@@ -1254,7 +1254,7 @@ import { projectDisplayName } from "$lib/shared/project-label";
           </div>
           {#if renaming && renaming.kind === "project" && renaming.id === project.id}
             <input
-              class="min-w-0 flex-1 rounded-sm bg-[var(--color-surface-2)] px-1 py-0 text-base font-medium leading-[19px] text-foreground outline-none ring-1 ring-foreground/25"
+              class="min-w-0 flex-1 rounded-sm bg-[var(--color-surface-2)] px-1 py-[3px] -my-[3px] text-base font-medium leading-[19px] text-foreground outline-none ring-1 ring-foreground/25"
               bind:value={renaming.value}
               use:selectOnMount
               onclick={(e) => e.stopPropagation()}
@@ -1266,7 +1266,7 @@ import { projectDisplayName } from "$lib/shared/project-label";
             <button
               type="button"
               data-nav-row
-              class="min-w-0 flex-1 truncate text-left text-base font-medium leading-[19px] text-foreground/90 transition group-hover/project:text-foreground"
+              class="min-w-0 flex-1 truncate-safe text-left text-base font-medium leading-[19px] text-foreground/90 transition group-hover/project:text-foreground"
               title={project.cwd}
               onclick={() => {
                 if (consumeDragClick(project.id)) return;
@@ -1475,7 +1475,7 @@ import { projectDisplayName } from "$lib/shared/project-label";
                          input that brings its own box metrics makes the row
                          taller than the label it replaced, and the list jumps. -->
                     <input
-                      class="relative min-w-0 flex-1 rounded-sm bg-[var(--color-surface-2)] px-1 py-0 text-base leading-[19px] text-foreground outline-none ring-1 ring-foreground/25"
+                      class="relative min-w-0 flex-1 rounded-sm bg-[var(--color-surface-2)] px-1 py-[3px] -my-[3px] text-base leading-[19px] text-foreground outline-none ring-1 ring-foreground/25"
                       bind:value={renaming.value}
                       use:selectOnMount
                       onclick={(e) => e.stopPropagation()}
@@ -1494,7 +1494,7 @@ import { projectDisplayName } from "$lib/shared/project-label";
                          from assistive tech because the row button already
                          carries this name. -->
                     <span
-                      class="pointer-events-none relative min-w-0 flex-1 truncate text-left text-base leading-[19px]"
+                      class="pointer-events-none relative min-w-0 flex-1 truncate-safe text-left text-base leading-[19px]"
                       title={thread.title ?? thread.label}
                       aria-hidden="true"
                     >
@@ -1597,7 +1597,7 @@ import { projectDisplayName } from "$lib/shared/project-label";
       showLogo={showLogos}
     />
     <span
-      class="min-w-0 flex-1 truncate text-left text-base leading-[19px]"
+      class="min-w-0 flex-1 truncate-safe text-left text-base leading-[19px]"
       title={threadDragGhost.thread.title ?? threadDragGhost.thread.label}
     >
       {threadDragGhost.thread.title ?? threadDragGhost.thread.label}
