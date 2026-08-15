@@ -7,7 +7,6 @@
   import StatusDot from "$lib/shared/components/StatusDot.svelte";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
   import { threadIconColor } from "$lib/features/fastpick/threadAccent";
-  import ReplyBar from "$lib/features/thread/ReplyBar.svelte";
   import MobileSheet from "./MobileSheet.svelte";
   import X from "@lucide/svelte/icons/x";
 
@@ -78,15 +77,6 @@
             <X class="size-4" />
           </button>
         </div>
-        <!-- Under the row rather than inside it: this is the whole mobile case,
-             and it has to be answerable without opening the terminal at all.
-             Reads the row's status directly, not `displayStatus`, which reports
-             a parked PTY as ready and would hide the one thing worth a tap. -->
-        {#if thread.status === "waiting"}
-          <div class="-mt-1 pl-3 pr-1">
-            <ReplyBar {thread} compact />
-          </div>
-        {/if}
       {/each}
     </div>
   {/if}
