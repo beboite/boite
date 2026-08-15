@@ -55,16 +55,6 @@ export const tauriDb: DbApi = {
     await invoke("records_thread_started", { params: { threadId: id } });
   },
 
-  async setThreadAgeing(id, status, patch): Promise<void> {
-    await invoke("records_thread_age", {
-      params: { threadId: id, status, ...patch },
-    });
-  },
-
-  async setPinnedOrder(ids: string[]): Promise<void> {
-    await invoke("records_thread_pin_order", { params: { ids } });
-  },
-
   async deleteThread(id: string): Promise<void> {
     // The key row and the key file go with it, inside the one command. There
     // used to be three calls here, and the third was allowed to fail quietly.

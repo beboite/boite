@@ -98,6 +98,20 @@
   let railEl: HTMLElement | null = $state(null);
   let stripEl: HTMLElement | null = $state(null);
   let query = $state("");
+  let searchEl: HTMLInputElement | null = $state(null);
+
+  /**
+   * The box takes the caret as soon as the panel is drawn.
+   *
+   * Settings is opened to change one thing, and its name is what the user has
+   * in mind rather than which of nine pages it sits on. Focused here rather
+   * than with `autofocus`, which Svelte flags for a11y and which fires before
+   * the element is in the layout the panel mounts into.
+   */
+  $effect(() => {
+    searchEl?.focus();
+  });
+
   // The control a result just jumped to, so it can be pointed at for a second.
   // A page that scrolls to the right place and highlights nothing leaves the
   // user reading four cards to find which one they asked for.
@@ -277,6 +291,7 @@
         class="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/70"
       />
       <input
+        bind:this={searchEl}
         bind:value={query}
         type="search"
         spellcheck="false"
