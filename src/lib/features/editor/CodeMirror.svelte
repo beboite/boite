@@ -95,7 +95,7 @@
           },
         },
       ]),
-      themeCompartment.of(boiteTheme(currentTheme.name)),
+      themeCompartment.of(boiteTheme(currentTheme.scheme)),
       boiteHighlight,
       EditorView.lineWrapping,
       EditorView.updateListener.of((u) => {
@@ -127,7 +127,7 @@
   });
 
   $effect(() => {
-    const theme = currentTheme.name;
+    const theme = currentTheme.scheme;
     view?.dispatch({
       effects: themeCompartment.reconfigure(boiteTheme(theme)),
     });

@@ -300,15 +300,30 @@ export type SidebarDesign = "classic" | "glow";
 export type MotionMode = "system" | "on" | "off";
 
 /**
- * Which palette the window draws in. "system" follows prefers-color-scheme,
- * the other two override the OS either way.
+ * A palette the window can actually draw in.
+ *
+ * The two acrylics are a scheme plus an OS material, not a third and fourth
+ * tone: `acrylic-black` is the dark ramp made translucent, `acrylic-white` the
+ * light one. `theme/themes.ts` is the registry, `app.css` holds what each id
+ * paints, and neither is allowed to know an id the other does not.
+ */
+export type ThemeId =
+  | "dark"
+  | "light"
+  | "midnight"
+  | "acrylic-black"
+  | "acrylic-white";
+
+/**
+ * What the user picked, which is one more thing than a palette: "system"
+ * follows prefers-color-scheme and every other value overrides the OS.
  *
  * A palette rather than a boolean, for the same reason `SidebarDesign` is:
  * a `darkMode: boolean` cannot spell "follow the OS" and cannot be extended to
  * a third palette without renaming every call site. `theme/appearance.ts`
- * resolves it, `app.css` holds what each one is.
+ * resolves it.
  */
-export type ThemeMode = "system" | "dark" | "light";
+export type ThemeMode = "system" | ThemeId;
 
 /**
  * Which tab the side panel is on, or null when it is closed.

@@ -5,21 +5,9 @@
   import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
   import type { MessageKey } from "$lib/i18n/index.svelte";
   import { LOCALE_OPTIONS, t } from "$lib/i18n/index.svelte";
-  import type { MotionMode, ThemeMode } from "$lib/types";
+  import type { MotionMode, ThemeId, ThemeMode } from "$lib/types";
   import { ACCENT_COLOR, type ModelAccent } from "$lib/features/fastpick/accent";
-  import Monitor from "@lucide/svelte/icons/monitor";
-  import Moon from "@lucide/svelte/icons/moon";
-  import Sun from "@lucide/svelte/icons/sun";
-
-  const THEME_MODES: {
-    id: ThemeMode;
-    labelKey: MessageKey;
-    icon: typeof Monitor;
-  }[] = [
-    { id: "system", labelKey: "appearance.themeSystem", icon: Monitor },
-    { id: "dark", labelKey: "appearance.themeDark", icon: Moon },
-    { id: "light", labelKey: "appearance.themeLight", icon: Sun },
-  ];
+  import { THEMES } from "$lib/theme/themes";
   import {
     availableFonts,
     MONO_CANDIDATES,
@@ -28,6 +16,31 @@
     TERMINAL_SCALE_MAX,
     TERMINAL_SCALE_MIN,
   } from "$lib/theme/fonts";
+
+  /**
+   * "System" first, then the registry in its own order.
+   *
+   * `preview` is which palette the swatch paints itself in, and system has
+   * none of its own: it is the two it can resolve to, drawn as one tile split
+   * down the middle, which is the only honest picture of "whichever the OS
+   * says".
+   */
+  const THEME_MODES: {
+    id: ThemeMode;
+    labelKey: MessageKey;
+    preview: ThemeId | "split";
+  }[] = [
+    { id: "system", labelKey: "appearance.themeSystem", preview: "split" },
+    ...THEMES.map((theme) => ({
+      id: theme.id as ThemeMode,
+      labelKey: theme.labelKey,
+      preview: theme.id as ThemeId | "split",
+    })),
+  ];
+
+  const anyAcrylic = $derived(
+    THEMES.some((theme) => theme.acrylic && settings.state.themeMode === theme.id),
+  );
 
   // Three, not two. The pin was a one-way door: one tap and the layout stopped
   // following the device for the life of the install, with nothing saying so.
@@ -101,31 +114,64 @@
   }
 </script>
 
+{#snippet preview(theme: ThemeId)}
+  <!-- The swatch carries the theme's own attribute, so every colour in here is
+       the palette itself rather than a copy of it kept in this component and
+       drifting from app.css one commit at a time. -->
+  <span class="swatch-window" data-theme={theme}>
+    <span class="swatch-titlebar"></span>
+    <span class="swatch-body">
+      <span class="swatch-sidebar"></span>
+      <span class="swatch-main">
+        <span class="swatch-line"></span>
+        <span class="swatch-line short"></span>
+      </span>
+    </span>
+  </span>
+{/snippet}
+
 <SettingsCard
   title={t("appearance.theme")}
   anchor="appearance.theme"
   description={t("appearance.themeDesc")}
 >
-  <div class="flex gap-1.5" role="radiogroup" aria-label={t("appearance.theme")}>
+  <div class="theme-grid" role="radiogroup" aria-label={t("appearance.theme")}>
     {#each THEME_MODES as mode (mode.id)}
       <button
         type="button"
         role="radio"
         aria-checked={settings.state.themeMode === mode.id}
-        class="flex items-center gap-1.5 rounded-md border px-3 py-1 text-xs transition
-          {settings.state.themeMode === mode.id
-            ? 'border-foreground/40 bg-[var(--color-surface-3)] text-foreground'
-            : 'border-border bg-[var(--color-surface-2)] text-muted-foreground hover:border-foreground/30 hover:text-foreground'}"
+        class="theme-swatch {settings.state.themeMode === mode.id ? 'selected' : ''}"
         onclick={() => settings.setThemeMode(mode.id)}
       >
-        <mode.icon class="size-3.5" />
-        {t(mode.labelKey)}
+        <!-- The desk is what an acrylic palette is see-through onto. Opaque
+             themes cover it whole, which is the difference the swatch exists to
+             show. -->
+        <span class="swatch-desk">
+          {#if mode.preview === "split"}
+            <span class="swatch-half">{@render preview("dark")}</span>
+            <span class="swatch-half right">{@render preview("light")}</span>
+          {:else}
+            {@render preview(mode.preview)}
+          {/if}
+        </span>
+        <span class="swatch-label">{t(mode.labelKey)}</span>
       </button>
     {/each}
   </div>
+
+  {#if anyAcrylic}
+    <p class="mt-2 text-2xs leading-relaxed text-muted-foreground">
+      {t("appearance.themeAcrylicNote")}
+    </p>
+  {/if}
 </SettingsCard>
 
-<SettingsCard title={t("appearance.uiScale")} anchor="appearance.uiScale" description={t("appearance.uiScaleDesc")}>
+<SettingsCard
+  title={t("appearance.uiScale")}
+  anchor="appearance.uiScale"
+  description={t("appearance.uiScaleDesc")}
+>
   {#snippet actions()}
     <button
       type="button"
@@ -351,6 +397,105 @@
   .font-select:hover {
     border-color: color-mix(in srgb, var(--color-foreground) 30%, transparent);
   }
+  .theme-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+    gap: 8px;
+  }
+
+  .theme-swatch {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    padding: 4px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-surface-2);
+    text-align: left;
+    transition:
+      border-color var(--dur-2) var(--ease-out-quint),
+      background-color var(--dur-2) var(--ease-out-quint);
+  }
+  .theme-swatch:hover {
+    border-color: color-mix(in srgb, var(--color-foreground) 30%, transparent);
+  }
+  .theme-swatch.selected {
+    border-color: color-mix(in srgb, var(--color-foreground) 45%, transparent);
+    background: var(--color-surface-3);
+  }
+
+  /* Stands in for the desktop, and it is the only fabricated colour in the
+     swatch. A wallpaper is whatever the user has, so this is a neutral gradient
+     with enough contrast across it that a translucent window reads as
+     translucent and not as a slightly-off flat tone. */
+  .swatch-desk {
+    position: relative;
+    display: flex;
+    overflow: hidden;
+    aspect-ratio: 16 / 10;
+    border-radius: var(--radius-xs);
+    background: linear-gradient(135deg, #6d7fa3 0%, #47506b 45%, #8a7f96 100%);
+  }
+
+  .swatch-half {
+    display: flex;
+    width: 50%;
+    overflow: hidden;
+  }
+  .swatch-half :global(.swatch-window) {
+    width: 200%;
+  }
+  .swatch-half.right :global(.swatch-window) {
+    margin-left: -100%;
+  }
+
+  .swatch-window {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-width: 0;
+    background: var(--color-background);
+  }
+  .swatch-titlebar {
+    height: 22%;
+    background: var(--color-titlebar);
+  }
+  .swatch-body {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+  }
+  .swatch-sidebar {
+    width: 32%;
+    background: var(--color-surface);
+  }
+  .swatch-main {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    justify-content: center;
+    gap: 3px;
+    padding: 0 5px;
+  }
+  .swatch-line {
+    height: 2px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--color-foreground) 55%, transparent);
+  }
+  .swatch-line.short {
+    width: 55%;
+    background: color-mix(in srgb, var(--color-foreground) 28%, transparent);
+  }
+
+  .swatch-label {
+    padding: 0 2px 1px;
+    font-size: var(--text-2xs);
+    color: var(--color-muted-foreground);
+  }
+  .theme-swatch.selected .swatch-label {
+    color: var(--color-foreground);
+  }
+
   .ui-slider {
     appearance: none;
     background: transparent;

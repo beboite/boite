@@ -128,6 +128,11 @@ export const EN_MESSAGES = {
   "appearance.themeSystem": "System",
   "appearance.themeDark": "Dark",
   "appearance.themeLight": "Light",
+  "appearance.themeMidnight": "Midnight",
+  "appearance.themeAcrylicBlack": "Acrylic black",
+  "appearance.themeAcrylicWhite": "Acrylic white",
+  "appearance.themeAcrylicNote":
+    "Acrylic themes let the desktop through, blurred by the OS. Linux has no blur to ask for, so they fall back to plain translucency.",
   "appearance.uiScale": "UI scale",
   "appearance.uiScaleDesc": "Ctrl + scroll wheel, or Ctrl + + / − / 0.",
   "appearance.resetScale": "Reset to 100%",
