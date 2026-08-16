@@ -132,6 +132,11 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "appearance.themeSystem": "Système",
   "appearance.themeDark": "Sombre",
   "appearance.themeLight": "Clair",
+  "appearance.themeMidnight": "Minuit",
+  "appearance.themeAcrylicBlack": "Acrylique noir",
+  "appearance.themeAcrylicWhite": "Acrylique blanc",
+  "appearance.themeAcrylicNote":
+    "Les thèmes acryliques laissent passer le bureau, flouté par l'OS. Linux n'a pas de flou à demander, ils retombent sur une simple transparence.",
   "appearance.uiScale": "Échelle de l'interface",
   "appearance.uiScaleDesc": "Ctrl + molette, ou Ctrl + + / − / 0.",
   "appearance.resetScale": "Réinitialiser à 100 %",
