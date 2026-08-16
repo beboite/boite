@@ -1040,6 +1040,7 @@ export const EN_MESSAGES = {
   "panes.kindEditor": "Editor",
   "panes.needProject": "Pick a project first: a pane belongs to one.",
   "panes.groupFull": "This group already holds {count} panes.",
+  "panes.openedOffScreen": "{agent} opened {pane} beside its own terminal",
   "panes.openGit": "Show git",
   "panes.openExplorer": "Show the files",
   "panes.openTodo": "Show the todo list",
