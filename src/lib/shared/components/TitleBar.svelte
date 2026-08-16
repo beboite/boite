@@ -175,16 +175,32 @@
    *
    * A panel may be docked or opened by an agent in a pane, so the button answers
    * for either location and closes whichever one is open.
+   *
+   * The docked half stops counting under the info-box experiment: the column is
+   * not drawn there, but the setting saying which tab it was on survives, so the
+   * button would have been lit for a panel nobody can see and no press could
+   * turn off.
    */
   function panelShowing(kind: PanelKind): boolean {
-    return (
-      settings.rightPanelFor(app.currentProjectId) === kind ||
-      panePresence(kind) !== null
-    );
+    const docked =
+      !settings.state.experimentInfoBox &&
+      settings.rightPanelFor(app.currentProjectId) === kind;
+    return docked || panePresence(kind) !== null;
   }
 
+  /**
+   * The experiment takes the column away, not the panels. These three used to
+   * be hidden along with it, which is how turning it on left the todo list, the
+   * git panel and the files with no button anywhere in the window — the palette
+   * had dropped its three commands for the same reason. A pane is where every
+   * other non-terminal surface goes, so that is where they open instead.
+   */
   function togglePanel(kind: PanelKind) {
     if (closePanelPane(kind)) return;
+    if (settings.state.experimentInfoBox) {
+      openPane({ kind });
+      return;
+    }
     settings.toggleRightPanel(app.currentProjectId, kind);
   }
 
@@ -351,29 +367,27 @@
         <span class="text-[11px] tabular-nums">{openHere}</span>
       </button>
     {/if}
-    <!-- The info-box experiment replaces the docked column, so the buttons
-         that toggle it would toggle a thing that is not there. -->
-    {#if !settings.state.experimentInfoBox}
-      {#each PANEL_BUTTONS as panel (panel.kind)}
-        {@const open = panelShowing(panel.kind)}
-        {@const Icon = panel.icon}
-        {@const pulsing = panel.surface !== undefined && mcpPulse.surface(panel.surface)}
-        <button
-          type="button"
-          class="flex h-7 items-center justify-center rounded-md px-2 transition {open
-            ? 'bg-accent text-foreground'
-            : 'text-muted-foreground hover:bg-accent hover:text-foreground'}"
-          class:mcp-touch={pulsing}
-          onclick={() => togglePanel(panel.kind)}
-          oncontextmenu={openPanelMenu}
-          title={t(panel.key)}
-          aria-label={t(panel.key)}
-          aria-pressed={open}
-        >
-          <Icon class="size-[15px]" />
-        </button>
-      {/each}
-    {/if}
+    <!-- Drawn under the info-box experiment too: it replaces the docked column,
+         and `togglePanel` opens these in a pane while it is on. -->
+    {#each PANEL_BUTTONS as panel (panel.kind)}
+      {@const open = panelShowing(panel.kind)}
+      {@const Icon = panel.icon}
+      {@const pulsing = panel.surface !== undefined && mcpPulse.surface(panel.surface)}
+      <button
+        type="button"
+        class="flex h-7 items-center justify-center rounded-md px-2 transition {open
+          ? 'bg-accent text-foreground'
+          : 'text-muted-foreground hover:bg-accent hover:text-foreground'}"
+        class:mcp-touch={pulsing}
+        onclick={() => togglePanel(panel.kind)}
+        oncontextmenu={openPanelMenu}
+        title={t(panel.key)}
+        aria-label={t(panel.key)}
+        aria-pressed={open}
+      >
+        <Icon class="size-[15px]" />
+      </button>
+    {/each}
     <!-- The whip experiment's only handle. Last in the row, and drawn only
          while the experiment is on: it is the one button here that does
          nothing to the app. -->
