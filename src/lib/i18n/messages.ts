@@ -213,6 +213,11 @@ export const EN_MESSAGES = {
   "experiments.whip": "Whip",
   "experiments.whipDesc":
     "Puts a whip in the titlebar. Throw it, flick it, click to let go. It cracks and it makes a noise, and it reaches no terminal: nothing is sent, nothing is interrupted.",
+  "experiments.whipSound": "Crack",
+  "experiments.whipSoundSynth": "Synth",
+  "experiments.whipSoundMeme": "Sampled",
+  "experiments.whipSoundDesc":
+    "Pick one to hear it. The synth is built on the spot and downloads nothing; the sample is a 27 KB file, fetched the first time you ask for it and never before.",
   "titlebar.whip": "Crack the whip",
   "titlebar.whipDrop": "Drop the whip",
 
