@@ -29,7 +29,6 @@
   import { watchWindowFocus } from "$lib/app/focus.svelte";
   import PaneShell from "$lib/features/panes/PaneShell.svelte";
   import SidePanel from "$lib/features/panes/SidePanel.svelte";
-  import ProjectInfoBox from "$lib/features/infobox/ProjectInfoBox.svelte";
   import PaneOverlay from "$lib/features/panes/PaneOverlay.svelte";
   import { parseThreadLink } from "$lib/domain/awareness";
   import PaneDropOverlay from "$lib/features/panes/PaneDropOverlay.svelte";
@@ -84,6 +83,11 @@
   // Behind import(), a boot that never switches it on never fetches it.
   const WhipView = lazyComponent(
     () => import("$lib/features/whip/WhipOverlay.svelte"),
+  );
+  // The anchored info box, for an experiment that is off by default. Behind
+  // import(), a boot that never switches it on never fetches it.
+  const InfoBoxView = lazyComponent(
+    () => import("$lib/features/infobox/ProjectInfoBox.svelte"),
   );
 
   let activated = $state<Record<string, true>>({});
@@ -398,6 +402,7 @@
   // the first throw, or the rope spawns wherever the pointer was at boot.
   $effect(() => {
     if (settings.state.experimentWhip) void WhipView.ensure();
+    if (settings.state.experimentInfoBox) void InfoBoxView.ensure();
   });
 
   // Opening the Files or Git panel is the strongest signal that a file or a
@@ -624,9 +629,10 @@
                        and at the same z, so it draws over the ring rather than
                        under it. Panes too narrow to hold it (it would cover
                        the terminal it describes) get none. -->
-                  {#if !mobile && settings.state.experimentInfoBox && rect.w >= 420}
+                  {#if !mobile && settings.state.experimentInfoBox && rect.w >= 420 && InfoBoxView.current}
+                    {@const InfoBoxComp = InfoBoxView.current}
                     <div class="absolute right-3 top-3 z-[5] max-w-[calc(100%-1.5rem)]">
-                      <ProjectInfoBox {thread} {visible} />
+                      <InfoBoxComp {thread} {visible} />
                     </div>
                   {/if}
                 </div>

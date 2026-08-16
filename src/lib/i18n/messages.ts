@@ -190,6 +190,13 @@ export const EN_MESSAGES = {
   "infoBox.claimedTitle": "Claimed by {agent}",
   "infoBox.claimedTag": "to confirm",
   "infoBox.moreClaimed": "+{count}",
+  "infoBox.openTag": "to do",
+  "infoBox.worktreeTag": "worktree",
+  "infoBox.conflicts": "{count} conflicts",
+  "infoBox.tokensUsed": "{tokens} tokens",
+  "infoBox.claimedSummary": "in progress",
+  "infoBox.openSummary": "open",
+  "infoBox.doneSummary": "done",
 
   "experiments.smartSort": "Smart ordering",
   "experiments.smartSortDesc":
