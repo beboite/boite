@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { whip } from "$lib/features/whip/store.svelte";
-  import { playCrack, closeCrackAudio } from "$lib/features/whip/crack";
+  import { playCrack, primeCrackSound, closeCrackAudio } from "$lib/features/whip/crack";
+  import { settings } from "$lib/features/settings/store.svelte";
   import { WhipRope, WHIP, segmentBezier, type Point } from "$lib/features/whip/physics";
 
   /**
@@ -56,6 +57,10 @@
     if (asked === seenSpawns) return;
     seenSpawns = asked;
     if (rope) return;
+    // Here rather than on mount: a rope is thrown by a click, and the audio
+    // context this builds wants that gesture behind it. Fetching the sample now
+    // means the first crack of the throw is already the noise that was picked.
+    void primeCrackSound(settings.state.whipSound);
     // Centre is the fallback for a pointer that has not moved since boot,
     // which is every launch driven by the keyboard.
     rope = new WhipRope(
@@ -94,7 +99,7 @@
         carried -= STEP_MS;
         if (current.step(pointerX, pointerY, bounds, now)) cracked = true;
       }
-      if (cracked) playCrack();
+      if (cracked) playCrack(settings.state.whipSound);
 
       if (current.gone(bounds)) {
         rope = null;
