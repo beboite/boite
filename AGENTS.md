@@ -213,7 +213,7 @@ emulator would be. Both sides are tested (`agent-registry.test.ts`,
 
 ## One pool of conversations per project
 
-Claude and pi file a transcript under the directory the CLI ran in, and every
+Claude, grok and pi file a transcript under the directory the CLI ran in, and every
 agent thread runs in a worktree of its own, so `/resume` inside a thread listed
 that thread's conversations and nothing else. `session/shared.rs` makes a
 worktree's store a link onto the project's, created when the worktree is handed

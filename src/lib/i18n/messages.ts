@@ -413,7 +413,7 @@ export const EN_MESSAGES = {
   "project.tokensNone": "No agent transcript for this project yet.",
   "project.tokensUnreachable": "The transcripts could not be read.",
   "project.tokensUnreachableHint": "Unknown, not zero. Read again once the boite answers.",
-  "project.tokensOnly": "Only claude and codex record what they spend.",
+  "project.tokensOnly": "Only claude, codex and grok record what they spend.",
   "project.tokensMissing": "{agents} keeps no record on this machine.",
   "project.tokensSessions": "{count} sessions",
   "project.tokensIn": "in",

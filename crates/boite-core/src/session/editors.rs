@@ -215,13 +215,106 @@ pub fn find_antigravity_session_blocking(
     None
 }
 
-fn grok_sessions_dir() -> Option<PathBuf> {
+pub(crate) fn grok_sessions_dir() -> Option<PathBuf> {
     if let Ok(home) = env::var("GROK_HOME") {
         if !home.trim().is_empty() {
             return Some(PathBuf::from(home).join("sessions"));
         }
     }
     Some(dirs::home_dir()?.join(".grok").join("sessions"))
+}
+
+/// The directory name grok builds for a working directory: the path as given,
+/// trailing separators dropped, then percent-encoded the way a URL encodes a
+/// path segment. Unreserved characters (`A-Z a-z 0-9 - _ . ~`) stay; everything
+/// else becomes `%HH`. `D:\Dev\boite` is `D%3A%5CDev%5Cboite`.
+///
+/// Names longer than 255 bytes are a different shape (slug plus hash, real
+/// path in `.cwd`). This function does not invent that shape: a name grok
+/// would not look for is worse than no name. Callers that need an existing
+/// long group ask [`grok_dir_for`].
+pub(crate) fn grok_dir_name(cwd: &str) -> String {
+    let trimmed = cwd.trim_end_matches(['/', '\\']);
+    let mut out = String::with_capacity(trimmed.len());
+    for &b in trimmed.as_bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char);
+            }
+            _ => {
+                out.push('%');
+                out.push(
+                    char::from_digit((b >> 4) as u32, 16)
+                        .unwrap()
+                        .to_ascii_uppercase(),
+                );
+                out.push(
+                    char::from_digit((b & 0xf) as u32, 16)
+                        .unwrap()
+                        .to_ascii_uppercase(),
+                );
+            }
+        }
+    }
+    out
+}
+
+fn grok_decoded_matches(dir_name: &str, target: &str) -> bool {
+    normalize(&percent_decode(dir_name)) == target
+}
+
+/// The group directory grok uses for this cwd, when one already exists.
+///
+/// A link is an answer: a worktree's store is one, and migrate has to follow
+/// it into the pool rather than report the conversation missing.
+pub(super) fn grok_dir_for(root: &Path, cwd: &str) -> Option<PathBuf> {
+    let want = grok_dir_name(cwd);
+    if !want.is_empty() && want.len() <= 255 {
+        let direct = root.join(&want);
+        if fs::symlink_metadata(&direct).is_ok() {
+            return Some(direct);
+        }
+    }
+    let target = normalize(cwd);
+    for entry in fs::read_dir(root).ok()?.flatten() {
+        let Ok(t) = entry.file_type() else { continue };
+        if !t.is_dir() {
+            continue;
+        }
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if grok_decoded_matches(&name, &target) {
+            return Some(entry.path());
+        }
+        if t.is_symlink() {
+            // `.cwd` lives in the pool. Reading it through another
+            // worktree's link would match the project path against every
+            // sibling, and migrate would pick a random one.
+            continue;
+        }
+        if fs::read_to_string(entry.path().join(".cwd"))
+            .map(|c| normalize(c.trim()) == target)
+            .unwrap_or(false)
+        {
+            return Some(entry.path());
+        }
+    }
+    None
+}
+
+/// Name to give a worktree or pool group. Percent-encoded when that is what
+/// grok will look for; an existing slug+hash group when the encoded name
+/// would overflow 255 bytes. Empty when grok would use a slug we cannot
+/// invent, so share stays silent rather than pointing at a name grok never
+/// opens.
+pub(super) fn grok_group_name(root: &Path, cwd: &str) -> String {
+    let encoded = grok_dir_name(cwd);
+    if encoded.len() <= 255 {
+        return encoded;
+    }
+    grok_dir_for(root, cwd)
+        .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+        .unwrap_or_default()
 }
 
 /// Grok stores sessions under ~/.grok/sessions/<url-encoded-cwd>/<uuid7>/
@@ -236,24 +329,45 @@ pub fn find_grok_session_blocking(
     if !sessions_dir.is_dir() {
         return None;
     }
+    find_grok_session_in(&sessions_dir, &cwd, after_unix_ms, exclude)
+}
 
-    let target = normalize(&cwd);
+fn find_grok_session_in(
+    sessions_dir: &Path,
+    cwd: &str,
+    after_unix_ms: i64,
+    exclude: &HashSet<String>,
+) -> Option<SessionHit> {
+    let target = normalize(cwd);
     let mut best: Option<(String, Option<i64>)> = None;
 
-    for cwd_entry in fs::read_dir(&sessions_dir).ok()?.flatten() {
-        let Ok(t) = cwd_entry.file_type() else { continue };
-        if !t.is_dir() {
+    for cwd_entry in fs::read_dir(sessions_dir).ok()?.flatten() {
+        let Ok(t) = cwd_entry.file_type() else {
             continue;
-        }
-        let dir_name = cwd_entry.file_name().to_string_lossy().into_owned();
-        let decoded_matches = normalize(&percent_decode(&dir_name)) == target;
-        let cwd_file_matches = || {
-            fs::read_to_string(cwd_entry.path().join(".cwd"))
-                .map(|c| normalize(c.trim()) == target)
-                .unwrap_or(false)
         };
-        if !decoded_matches && !cwd_file_matches() {
+        let dir_name = cwd_entry.file_name().to_string_lossy().into_owned();
+        let decoded_matches = grok_decoded_matches(&dir_name, &target);
+        if t.is_symlink() {
+            // This thread's own worktree link: follow it. Another worktree's
+            // link onto the same pool: skip. Matching on `.cwd` is not safe
+            // here, because read follows the link and the pool's `.cwd` is
+            // the project path, which would match every sibling.
+            //
+            // A Windows junction often reports `is_dir() == false`, so the
+            // symlink check has to come first or we never open the one link
+            // this thread is allowed to follow.
+            if !decoded_matches {
+                continue;
+            }
+        } else if !t.is_dir() {
             continue;
+        } else if !decoded_matches {
+            let cwd_file_matches = fs::read_to_string(cwd_entry.path().join(".cwd"))
+                .map(|c| normalize(c.trim()) == target)
+                .unwrap_or(false);
+            if !cwd_file_matches {
+                continue;
+            }
         }
 
         let Ok(sessions) = fs::read_dir(cwd_entry.path()) else {
@@ -280,12 +394,90 @@ pub fn find_grok_session_blocking(
             if mtime.unwrap_or(0) < after_unix_ms {
                 continue;
             }
-            if best.as_ref().is_none_or(|(_, t)| mtime.unwrap_or(0) > t.unwrap_or(0)) {
+            if best
+                .as_ref()
+                .is_none_or(|(_, t)| mtime.unwrap_or(0) > t.unwrap_or(0))
+            {
                 best = Some((id, mtime));
             }
         }
     }
     best.map(|(id, modified_ms)| SessionHit { id, modified_ms })
+}
+
+fn copy_tree(from: &Path, to: &Path) -> Result<(), String> {
+    fs::create_dir_all(to).map_err(|e| format!("cannot open the target folder: {e}"))?;
+    let entries = fs::read_dir(from).map_err(|e| format!("cannot read the session: {e}"))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("cannot read the session: {e}"))?;
+        let src = entry.path();
+        let dst = to.join(entry.file_name());
+        let ft = entry
+            .file_type()
+            .map_err(|e| format!("cannot read the session: {e}"))?;
+        if ft.is_dir() {
+            copy_tree(&src, &dst)?;
+        } else {
+            fs::copy(&src, &dst).map_err(|e| format!("cannot copy the transcript: {e}"))?;
+        }
+    }
+    Ok(())
+}
+
+/// Carries a grok session directory to the folder a thread is moving to.
+///
+/// Same rule as claude's, one shape down: grok files by encoded cwd, so a
+/// thread that changes project changes the directory `--resume` looks in. The
+/// session is a directory of files rather than one jsonl, copied under the
+/// id it already has.
+///
+/// Answers reachability, not "did I copy something": `false` means replaying
+/// the id over there would find nothing, and the thread should start fresh.
+pub(super) fn migrate_grok_transcript(
+    session_id: &str,
+    from_cwd: &str,
+    to_cwd: &str,
+) -> Result<bool, String> {
+    let Some(root) = grok_sessions_dir() else {
+        return Ok(false);
+    };
+    migrate_grok_transcript_in(&root, session_id, from_cwd, to_cwd)
+}
+
+fn migrate_grok_transcript_in(
+    root: &Path,
+    session_id: &str,
+    from_cwd: &str,
+    to_cwd: &str,
+) -> Result<bool, String> {
+    if normalize(from_cwd) == normalize(to_cwd) {
+        return Ok(true);
+    }
+    let source = grok_dir_for(root, from_cwd).map(|dir| dir.join(session_id));
+    let target_dir = {
+        let encoded = grok_dir_name(to_cwd);
+        if !encoded.is_empty() && encoded.len() <= 255 {
+            root.join(encoded)
+        } else {
+            match grok_dir_for(root, to_cwd) {
+                Some(dir) => dir,
+                None => {
+                    return Ok(false);
+                }
+            }
+        }
+    };
+    let Some(source) = source.filter(|p| p.is_dir()) else {
+        return Ok(target_dir.join(session_id).is_dir());
+    };
+    let target = target_dir.join(session_id);
+    // Already there: the same thread moved back, or two threads share a cwd.
+    // Overwriting would replace a transcript with an older copy of itself.
+    if target.is_dir() {
+        return Ok(true);
+    }
+    copy_tree(&source, &target)?;
+    Ok(true)
 }
 
 fn hermes_db_path() -> Option<PathBuf> {
@@ -311,8 +503,9 @@ fn hermes_ts_to_ms(v: rusqlite::types::Value) -> Option<i64> {
     match v {
         Value::Integer(i) => Some(from_num(i)),
         Value::Real(f) => Some(from_num(f as i64)),
-        Value::Text(s) => parse_iso_ms(&s)
-            .or_else(|| s.parse::<f64>().ok().map(|f| from_num(f as i64))),
+        Value::Text(s) => {
+            parse_iso_ms(&s).or_else(|| s.parse::<f64>().ok().map(|f| from_num(f as i64)))
+        }
         _ => None,
     }
 }
@@ -416,7 +609,13 @@ pub(super) fn pi_dir_name(cwd: &str) -> String {
         .unwrap_or(cwd);
     let body: String = trimmed
         .chars()
-        .map(|c| if c == '/' || c == '\\' || c == ':' { '-' } else { c })
+        .map(|c| {
+            if c == '/' || c == '\\' || c == ':' {
+                '-'
+            } else {
+                c
+            }
+        })
         .collect();
     format!("--{body}--")
 }
@@ -596,6 +795,8 @@ pub fn find_pi_session_blocking(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
+    use std::time::{Duration, SystemTime};
 
     /// Copilot's store, cut down to what the query touches.
     fn copilot_fixture(rows: &[(&str, &str, &str, usize)]) -> Connection {
@@ -677,5 +878,118 @@ mod tests {
         // Exactly one leading separator is dropped, as in pi's own regex: the
         // second one stays and becomes a dash like any other.
         assert_eq!(pi_dir_name("//srv/share"), "---srv-share--");
+    }
+
+    /// Grok's own encoding, read off the groups it left on disk: colon and
+    /// backslash become `%3A` / `%5C`, a dot in `.boite` stays a dot.
+    #[test]
+    fn grok_encodes_a_cwd_the_way_grok_does() {
+        assert_eq!(grok_dir_name(r"C:\Users\mtsu"), "C%3A%5CUsers%5Cmtsu");
+        assert_eq!(
+            grok_dir_name(r"D:\Dev\Collab\boite\.boite\worktrees\abc"),
+            "D%3A%5CDev%5CCollab%5Cboite%5C.boite%5Cworktrees%5Cabc"
+        );
+        assert_eq!(grok_dir_name("/home/u/proj"), "%2Fhome%2Fu%2Fproj");
+        assert_eq!(
+            grok_dir_name(r"D:\Dev\boite\"),
+            grok_dir_name(r"D:\Dev\boite")
+        );
+    }
+
+    fn grok_fixture(name: &str) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("boite-grok-store-{}-{name}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn seed_grok(root: &Path, cwd: &str, id: &str, body: &str) -> PathBuf {
+        let dir = root.join(grok_dir_name(cwd)).join(id);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("summary.json"), body).unwrap();
+        dir
+    }
+
+    #[test]
+    fn grok_finds_the_newest_session_of_this_folder() {
+        let root = grok_fixture("newest");
+        seed_grok(&root, "/w/proj", "old", "{}");
+        let newer = seed_grok(&root, "/w/proj", "new", "{}");
+        // Force an mtime order the filesystem would not otherwise guarantee.
+        let later = SystemTime::now() + Duration::from_secs(2);
+        fs::File::options()
+            .write(true)
+            .open(newer.join("summary.json"))
+            .unwrap()
+            .set_modified(later)
+            .unwrap();
+        seed_grok(&root, "/w/other", "elsewhere", "{}");
+
+        let hit = find_grok_session_in(&root, "/w/proj", 0, &HashSet::new());
+        assert_eq!(hit.as_ref().map(|h| h.id.as_str()), Some("new"));
+    }
+
+    #[test]
+    fn grok_follows_this_thread_link_and_skips_a_sibling() {
+        let root = grok_fixture("links");
+        seed_grok(&root, "/w/proj", "sess", "{\"ok\":1}");
+        let pool = root.join(grok_dir_name("/w/proj"));
+        crate::git::artifacts::link_dir(&pool, &root.join(grok_dir_name("/w/one"))).unwrap();
+        crate::git::artifacts::link_dir(&pool, &root.join(grok_dir_name("/w/two"))).unwrap();
+
+        assert_eq!(
+            find_grok_session_in(&root, "/w/one", 0, &HashSet::new())
+                .as_ref()
+                .map(|h| h.id.as_str()),
+            Some("sess")
+        );
+        assert_eq!(
+            find_grok_session_in(&root, "/w/proj", 0, &HashSet::new())
+                .as_ref()
+                .map(|h| h.id.as_str()),
+            Some("sess")
+        );
+        assert_eq!(
+            find_grok_session_in(&root, "/w/two", 0, &HashSet::new())
+                .as_ref()
+                .map(|h| h.id.as_str()),
+            Some("sess")
+        );
+    }
+
+    #[test]
+    fn a_grok_session_follows_the_thread_to_the_new_folder() {
+        let root = grok_fixture("moves");
+        let source = seed_grok(&root, "/w/from", "sess-1", "{\"a\":1}");
+
+        let moved = migrate_grok_transcript_in(&root, "sess-1", "/w/from", "/w/to").unwrap();
+
+        assert!(moved);
+        assert!(source.is_dir(), "the original is kept");
+        let landed = root
+            .join(grok_dir_name("/w/to"))
+            .join("sess-1")
+            .join("summary.json");
+        assert_eq!(fs::read_to_string(landed).unwrap(), "{\"a\":1}");
+    }
+
+    #[test]
+    fn an_existing_grok_session_is_never_overwritten() {
+        let root = grok_fixture("existing");
+        seed_grok(&root, "/w/from", "sess-2", "old");
+        let target = seed_grok(&root, "/w/to", "sess-2", "newer");
+
+        assert!(migrate_grok_transcript_in(&root, "sess-2", "/w/from", "/w/to").unwrap());
+        assert_eq!(
+            fs::read_to_string(target.join("summary.json")).unwrap(),
+            "newer"
+        );
+    }
+
+    #[test]
+    fn nothing_to_carry_for_grok_reads_as_nothing_to_resume() {
+        let root = grok_fixture("empty");
+        assert!(!migrate_grok_transcript_in(&root, "ghost", "/w/from", "/w/to").unwrap());
     }
 }

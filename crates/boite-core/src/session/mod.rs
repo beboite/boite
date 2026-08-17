@@ -46,6 +46,7 @@ pub use editors::{
 };
 pub use opencode::find_opencode_session_blocking;
 pub use shared::{share_session_stores, unshare_session_stores};
+pub(crate) use editors::{grok_dir_name, grok_sessions_dir};
 
 use std::collections::HashSet;
 
@@ -445,21 +446,22 @@ fn collect_files(root: &Path, out: &mut Vec<(PathBuf, i64)>, depth: usize, max_d
 
 /// Whether this CLI files its transcripts under the directory it ran in.
 ///
-/// Claude and pi do. The others key their store by time (codex), by an internal
-/// database (cursor, antigravity) or by a flat session list (opencode, copilot,
-/// grok, hermes), so a session of theirs resumes from anywhere and a move has
-/// nothing to carry.
+/// Claude, grok and pi do. The others key their store by time (codex), by an
+/// internal database (cursor, antigravity) or by a flat session list (opencode,
+/// copilot, hermes), so a session of theirs resumes from anywhere and a move
+/// has nothing to carry.
 pub fn session_store_is_cwd_scoped(kind: &str) -> bool {
-    matches!(kind, "claude" | "pi")
+    matches!(kind, "claude" | "grok" | "pi")
 }
 
 /// Carries a transcript to the directory the thread is moving to, and answers
 /// whether the conversation can be resumed from there.
 ///
-/// Claude looks a session up in `~/.claude/projects/<encoded cwd>/`, so a thread
-/// that changes project changes the directory claude searches and `--resume`
-/// stops finding anything. Copying the file into the destination is what keeps
-/// the conversation reachable from the new folder.
+/// Claude looks a session up in `~/.claude/projects/<encoded cwd>/`, grok in
+/// `~/.grok/sessions/<encoded cwd>/`, pi in its encoded folder, so a thread
+/// that changes project changes the directory those CLIs search and `--resume`
+/// stops finding anything. Copying the transcript into the destination is what
+/// keeps the conversation reachable from the new folder.
 ///
 /// The answer is reachability rather than "did I copy something", because that
 /// is the question the caller has: `false` means replaying the id over there
@@ -494,6 +496,9 @@ pub fn migrate_session_blocking(
     }
     if kind == "pi" {
         return editors::migrate_pi_transcript(session_id, from_cwd, to_cwd);
+    }
+    if kind == "grok" {
+        return editors::migrate_grok_transcript(session_id, from_cwd, to_cwd);
     }
     let home = dirs::home_dir().ok_or("no home directory")?;
     claude::migrate_claude_transcript(
