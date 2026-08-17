@@ -27,15 +27,36 @@ use std::io::BufRead;
 use serde_json::Value;
 
 use boite_mcp::host::Host;
-use boite_mcp::{call_blocks, call_tool, rpc, tools, write_line, INSTRUCTIONS};
+use boite_mcp::backend::Backend;
+use boite_mcp::{call_blocks, call_tool, hook, rpc, tools, write_line, INSTRUCTIONS};
+
+fn run_stop_hook() {
+    if std::env::args().nth(2).as_deref().unwrap_or("stop") != "stop" {
+        return;
+    }
+    let mut input = String::new();
+    let _ = std::io::Read::read_to_string(&mut std::io::stdin(), &mut input);
+    if hook::stop_already_active(&input) {
+        return;
+    }
+    let Ok(host) = Host::resolve() else {
+        return;
+    };
+    let Ok(body) = host.send("GET", "/v1/finish", None) else {
+        return;
+    };
+    if let Some(text) = hook::stop_output(false, &body) {
+        println!("{text}");
+    }
+}
 
 fn main() {
-    // This binary answers no lifecycle hook. The guard stays because settings
-    // files written by older versions still name `--hook stop`, and reaching the
-    // stdio loop below would leave that process waiting for a `jsonrpc` line
-    // that is never coming. Silence and a zero exit is what every hook contract
-    // reads as "nothing to say".
+    // Stop is the one hook this binary answers. Anything else (or a stop we
+    // cannot reach the endpoint for) prints nothing and exits 0: a hook that
+    // errors is a slower way of saying "carry on", and a hook that can fire
+    // twice for the same stop must never block the second pass.
     if std::env::args().nth(1).as_deref() == Some("--hook") {
+        run_stop_hook();
         std::process::exit(0);
     }
 

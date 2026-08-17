@@ -105,6 +105,27 @@ pub trait Workspace: Send + Sync + 'static {
     /// [`NOBODY_TO_CARRY_IT_OUT`] rather than answering success.
     fn ask(&self, request: serde_json::Value) -> Result<(), String>;
 
+    /// Hands a request to a device and keeps the line open for its answer.
+    ///
+    /// What [`Workspace::ask`] is when the agent will not read the result
+    /// (the process is about to die), this is when it will: a same-project
+    /// spawn has to come back with the new thread id, and a request no device
+    /// claims must not read as success. The receiver resolves when the device
+    /// answers; the caller owns the timeout.
+    ///
+    /// The default records the fire-and-forget `ask` and immediately answers
+    /// `ok`, which is honest for a host that has nobody to wait on. Desktop
+    /// and server override it so an unclaimed request stays on the line.
+    fn ask_settled(
+        &self,
+        request: serde_json::Value,
+    ) -> Result<tokio::sync::oneshot::Receiver<serde_json::Value>, String> {
+        self.ask(request)?;
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let _ = tx.send(serde_json::json!({ "ok": true }));
+        Ok(rx)
+    }
+
     /// Something changed that every device should re-read.
     fn announce(&self, change: Change);
 

@@ -590,3 +590,114 @@ async fn an_unknown_snapshot_mode_is_refused_by_name() {
     .unwrap();
     assert!(out.0["error"].as_str().unwrap().contains("elements, diff or text"));
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn spawn_answers_with_the_new_thread_id() {
+    let fake = Fake::new("spawn-id").with_project("p1", "/w/one").with_thread("t1", "p1");
+    *fake.answer_with.lock().unwrap() = Some(json!({ "threadId": "new-1" }));
+    let shared: Shared = std::sync::Arc::new(fake);
+    let out = thread_spawn(
+        State(shared),
+        Extension(agent("p1", "t1")),
+        Json(SpawnIn {
+            agent: Some("claude".into()),
+            project: None,
+            prompt: None,
+        }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(out.0["ok"], json!(true));
+    assert_eq!(out.0["threadId"], json!("new-1"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn spawn_without_a_device_is_not_success() {
+    let fake = Fake::new("spawn-nobody").with_project("p1", "/w/one").with_thread("t1", "p1");
+    let shared: Shared = std::sync::Arc::new(fake);
+    let out = thread_spawn(
+        State(shared),
+        Extension(agent("p1", "t1")),
+        Json(SpawnIn {
+            agent: None,
+            project: None,
+            prompt: None,
+        }),
+    )
+    .await
+    .unwrap();
+    assert!(out.0.get("error").is_some(), "{:?}", out.0);
+    assert_ne!(out.0.get("ok"), Some(&json!(true)));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn pane_open_forwards_the_path() {
+    let fake = std::sync::Arc::new(
+        Fake::new("pane-path").with_project("p1", "/w/one").with_thread("t1", "p1"),
+    );
+    *fake.answer_with.lock().unwrap() = Some(json!({ "ok": true }));
+    let shared: Shared = fake.clone();
+    let out = pane_open(
+        State(shared),
+        Extension(agent("p1", "t1")),
+        Json(PaneOpenIn {
+            kind: "editor".into(),
+            url: None,
+            path: Some("src/lib.rs".into()),
+            side: None,
+        }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(out.0["ok"], json!(true));
+    let asked = fake.asked.lock().unwrap();
+    assert_eq!(asked[0]["path"], json!("src/lib.rs"));
+    assert_eq!(asked[0]["pane"], json!("editor"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn wait_reports_a_known_sibling() {
+    let fake = Fake::new("wait").with_project("p1", "/w/one").with_thread("sib", "p1");
+    let shared: Shared = std::sync::Arc::new(fake);
+    let out = thread_wait(
+        State(shared),
+        Extension(agent("p1", "t1")),
+        axum::extract::Query(ThreadWaitIn {
+            thread_id: "sib".into(),
+            timeout_ms: Some(0),
+        }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(out.0["threadId"], json!("sib"));
+    assert_eq!(out.0["live"], json!(false));
+    assert!(out.0.get("status").is_some(), "{:?}", out.0);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn whereami_names_this_thread_and_project() {
+    let fake = Fake::new("where").with_project("p1", "/w/one").with_thread("t1", "p1");
+    let shared: Shared = std::sync::Arc::new(fake);
+    let out = whereami(State(shared), Extension(agent("p1", "t1")))
+        .await
+        .unwrap();
+    assert_eq!(out.0["thread"], json!("t1"));
+    assert_eq!(out.0["project"], json!("p1"));
+    assert_eq!(out.0["projectId"], json!("p1"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn finish_allows_when_there_is_no_worktree() {
+    let fake = Fake::new("finish").with_project("p1", "/w/one").with_thread("t1", "p1");
+    let shared: Shared = std::sync::Arc::new(fake);
+    let out = finish(
+        State(shared),
+        Extension(agent("p1", "t1")),
+        axum::extract::Query(FinishIn {
+            stop_hook_active: None,
+        }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(out.0["allow"], json!(true));
+}

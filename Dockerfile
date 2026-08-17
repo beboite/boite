@@ -23,8 +23,9 @@ COPY . .
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/app/target \
-    cargo build -p boite-server --release \
-    && cp target/release/boite-server /boite-server
+    cargo build -p boite-server -p boite-mcp --release \
+    && cp target/release/boite-server /boite-server \
+    && cp target/release/boite-mcp /boite-mcp
 
 # ---- rtk (Rust Token Killer): pinned to the same commit as the author's host ----
 # No prebuilt arm64 release exists; build from the exact git rev (rtk-ai/rtk).
@@ -82,6 +83,7 @@ RUN chmod +x /usr/local/bin/stealth-chromium /usr/local/bin/boite-entry
 
 WORKDIR /app
 COPY --from=server /boite-server /usr/local/bin/boite-server
+COPY --from=server /boite-mcp /usr/local/bin/boite-mcp
 COPY --from=web /app/build /app/web
 
 ENV BOITE_BIND=0.0.0.0:7337 \

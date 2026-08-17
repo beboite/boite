@@ -16,6 +16,7 @@
 //! whether it is real.
 
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 use axum::{
     extract::State,
@@ -54,6 +55,9 @@ fn verbs() -> Router<Shared> {
         .route("/v1/projects", get(projects).post(project_create))
         .route("/v1/thread/move", post(thread_move))
         .route("/v1/threads", post(thread_spawn))
+        .route("/v1/thread/wait", get(thread_wait))
+        .route("/v1/whereami", get(whereami))
+        .route("/v1/finish", get(finish))
         .route("/v1/pane/open", post(pane_open))
         .route("/v1/browser", get(browser_status))
         .route("/v1/browser/wait", get(browser_wait))
@@ -101,6 +105,31 @@ fn now_ms() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
+}
+
+/// How long a device has to claim and answer a request the agent will read.
+const SETTLE_MS: u64 = 8_000;
+
+/// Dispatch and wait for the device, so an unclaimed request is not success.
+async fn settle(workspace: &dyn Workspace, request: Value) -> Result<Value, String> {
+    let rx = workspace.ask_settled(request)?;
+    match tokio::time::timeout(Duration::from_millis(SETTLE_MS), rx).await {
+        Ok(Ok(v)) => {
+            if let Some(err) = v
+                .get("error")
+                .and_then(|e| e.as_str())
+                .filter(|s| !s.is_empty())
+            {
+                Err(err.to_string())
+            } else {
+                Ok(v)
+            }
+        }
+        Ok(Err(_)) => Err("the device dropped the request before answering".into()),
+        Err(_) => Err(
+            "no Boite device carried this out in time. Open Boite and ask again.".into(),
+        ),
+    }
 }
 
 /// The actor behind a request, for the log.
@@ -941,10 +970,9 @@ struct SpawnIn {
 
 /// Opens a second agent terminal.
 ///
-/// The caller survives this one, so the answer is real: the request was
-/// understood and a terminal is being opened. The new thread's id is not in it —
-/// that is minted by the side that spawns it, and an agent has nothing to do
-/// with one.
+/// The caller survives this one, so the answer is real and carries the new
+/// thread id: the device mints it, and this waits for that rather than
+/// answering success before anyone has a row to name.
 async fn thread_spawn(
     State(workspace): State<Shared>,
     Extension(caller): Extension<Caller>,
@@ -992,22 +1020,149 @@ async fn thread_spawn(
             request,
         ));
     }
-    if let Err(reason) = workspace.ask(request) {
-        return Ok(deny(
-            &*workspace,
-            &caller,
-            &own_project,
-            "thread.spawn",
-            "",
-            &reason,
-        ));
-    }
+    let out = match settle(&*workspace, request).await {
+        Ok(out) => out,
+        Err(reason) => {
+            return Ok(deny(
+                &*workspace,
+                &caller,
+                &own_project,
+                "thread.spawn",
+                "",
+                &reason,
+            ));
+        }
+    };
     record(
         &*workspace,
         Entry::new(&own_project, actor(&caller), Action::ThreadSpawned).with("into", &project_id),
     );
     workspace.touched(&asking_thread, "thread");
-    Ok(Json(json!({ "ok": true })))
+    let thread_id = out
+        .get("threadId")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    Ok(Json(json!({ "ok": true, "threadId": thread_id })))
+}
+
+#[derive(Deserialize)]
+struct ThreadWaitIn {
+    #[serde(rename = "threadId")]
+    thread_id: String,
+    #[serde(rename = "timeoutMs")]
+    timeout_ms: Option<u64>,
+}
+
+/// A sibling's status, optionally waited on until it is no longer live.
+async fn thread_wait(
+    State(workspace): State<Shared>,
+    Extension(caller): Extension<Caller>,
+    axum::extract::Query(query): axum::extract::Query<ThreadWaitIn>,
+) -> Result<Json<Value>, StatusCode> {
+    let id = query.thread_id.trim().to_string();
+    if id.is_empty() {
+        return Ok(refused("thread_wait needs a threadId"));
+    }
+    let timeout = query.timeout_ms.unwrap_or(0).min(30_000);
+    let started = Instant::now();
+    loop {
+        let thread = workspace
+            .store()
+            .load_thread(&id)
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let Some(thread) = thread else {
+            return Ok(refused(format!("no thread '{id}' in this workspace")));
+        };
+        if thread.project_id != caller.project_id {
+            return Ok(refused("that thread is in another project"));
+        }
+        let live = workspace
+            .live_ptys()
+            .iter()
+            .any(|p| p.thread_id == id);
+        let waited = started.elapsed().as_millis() as u64;
+        let done = !live
+            || matches!(
+                thread.status.as_str(),
+                "ready" | "idle" | "stopped"
+            );
+        if done || waited >= timeout {
+            return Ok(Json(json!({
+                "threadId": id,
+                "status": thread.status,
+                "live": live,
+                "waitedMs": waited,
+            })));
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+}
+
+/// This terminal, this project, this worktree. The cheap first picture.
+async fn whereami(
+    State(workspace): State<Shared>,
+    Extension(caller): Extension<Caller>,
+) -> Result<Json<Value>, StatusCode> {
+    let thread_id = caller.thread_or_empty().to_string();
+    let project = workspace
+        .store()
+        .load_projects()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .into_iter()
+        .find(|p| p.id == caller.project_id);
+    let (name, project_id) = match &project {
+        Some(p) => (p.name.clone(), p.id.clone()),
+        None => ("-".into(), caller.project_id.clone()),
+    };
+    let located = if thread_id.is_empty() {
+        None
+    } else {
+        workspace.store().worktree_of_thread(&thread_id)
+    };
+    let (repo, worktree, branch, detached) = match located {
+        Some((repo, path)) => {
+            let current = blocking({
+                let path = path.clone();
+                move || git::repo_info_blocking(&path).ok().and_then(|i| i.branch)
+            })
+            .await?;
+            (repo, path, current.clone(), current.is_none())
+        }
+        None => (String::from("-"), String::from("-"), None, false),
+    };
+    Ok(Json(json!({
+        "thread": thread_id,
+        "project": name,
+        "projectId": project_id,
+        "worktree": worktree,
+        "repo": repo,
+        "branch": branch,
+        "detached": detached,
+    })))
+}
+
+#[derive(Deserialize)]
+struct FinishIn {
+    #[serde(rename = "stopHookActive")]
+    stop_hook_active: Option<bool>,
+}
+
+/// Whether this turn may stop without throwing the worktree's work away.
+async fn finish(
+    State(workspace): State<Shared>,
+    Extension(caller): Extension<Caller>,
+    axum::extract::Query(query): axum::extract::Query<FinishIn>,
+) -> Result<Json<Value>, StatusCode> {
+    let already = query.stop_hook_active.unwrap_or(false);
+    let worktree = caller
+        .thread()
+        .ok()
+        .and_then(|id| workspace.store().worktree_of_thread(id))
+        .map(|(_, path)| path);
+    let out = blocking(move || boite_core::finish::decide(worktree.as_deref(), already)).await?;
+    Ok(Json(
+        serde_json::to_value(out).unwrap_or_else(|_| json!({ "allow": true })),
+    ))
 }
 
 #[derive(Deserialize)]
@@ -1015,6 +1170,9 @@ struct PaneOpenIn {
     kind: String,
     #[serde(default)]
     url: Option<String>,
+    /// A file or folder to open in the editor or explorer.
+    #[serde(default)]
+    path: Option<String>,
     /// left, right, top or bottom. Defaults to right.
     #[serde(default)]
     side: Option<String>,
@@ -1058,17 +1216,29 @@ async fn pane_open(
         _ => (None, false),
     };
     let asking_thread = caller.thread_or_empty().to_string();
-    if let Err(reason) = workspace.ask(json!({
-        "kind": "pane.open",
-        "projectId": project_id,
-        "callerThreadId": (!asking_thread.is_empty()).then(|| asking_thread.clone()),
-        "pane": kind,
-        "url": url,
-        // Off this machine, so the device asks before framing it. It classifies
-        // the address again on its side rather than trusting this one.
-        "external": external,
-        "side": browser::side_or_right(body.side.as_deref()),
-    })) {
+    let path = body
+        .path
+        .as_deref()
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .map(str::to_string);
+    if let Err(reason) = settle(
+        &*workspace,
+        json!({
+            "kind": "pane.open",
+            "projectId": project_id,
+            "callerThreadId": (!asking_thread.is_empty()).then(|| asking_thread.clone()),
+            "pane": kind,
+            "url": url,
+            "path": path,
+            // Off this machine, so the device asks before framing it. It classifies
+            // the address again on its side rather than trusting this one.
+            "external": external,
+            "side": browser::side_or_right(body.side.as_deref()),
+        }),
+    )
+    .await
+    {
         return Ok(refused(reason));
     }
     record(

@@ -88,15 +88,15 @@ window is built in code rather than declared in `tauri.conf.json`). It wires up
 only at frame depth one (`parent === top`), so a frame nested inside a page
 never answers its parent page's messages.
 
-End to end: `browser_snapshot` (elements with stable `uid`s, `mode=text` prose,
-or `mode=diff` since the last look), `browser_click`, `browser_type`,
-`browser_press`, `browser_scroll`, `browser_screenshot`. A question rides
+End to end: `browser` with `action=snapshot` (elements with stable `uid`s,
+`mode=text` prose, or `mode=diff` since the last look), then
+`action=click|type|press|scroll|screenshot`. A question rides
 `Workspace::ask_for_answer` to the webview (`boite://agent-request` with a
 `requestId`), `agent-requests.ts` re-checks the pane and the `drivenBy` mark,
 `features/browser/driver.ts` posts into the frame and matches the answer by
 source, and `agent_answer` resolves the HTTP handler still holding the call. The
 server host has no injected script, so its `ask_for_answer` refuses with a
-sentence the agent reads. `browser_screenshot` is `PrintWindow` cropped to the
+sentence the agent reads. `action=screenshot` is `PrintWindow` cropped to the
 pane rect (`commands/capture.rs`), Windows only today, capped at 1568px.
 
 ### Where the pane opens, and why nothing else moves

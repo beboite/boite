@@ -8,6 +8,8 @@ pub mod editor;
 pub mod env;
 pub mod explorer;
 pub mod fastpick;
+pub mod finish;
+pub mod mcp_launch;
 pub mod git;
 pub mod journal;
 pub mod migrations;

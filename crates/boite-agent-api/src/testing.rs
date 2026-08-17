@@ -135,6 +135,24 @@ impl Workspace for Fake {
         Ok(())
     }
 
+    fn ask_settled(
+        &self,
+        request: Value,
+    ) -> Result<tokio::sync::oneshot::Receiver<Value>, String> {
+        if let Some(reason) = &self.refuse_with {
+            return Err(reason.clone());
+        }
+        self.asked.lock().unwrap().push(request);
+        match self.answer_with.lock().unwrap().clone() {
+            Some(answer) => {
+                let (tx, rx) = tokio::sync::oneshot::channel();
+                let _ = tx.send(answer);
+                Ok(rx)
+            }
+            None => Err(crate::NOBODY_TO_CARRY_IT_OUT.to_string()),
+        }
+    }
+
     fn announce(&self, change: Change) {
         self.announced.lock().unwrap().push(change);
     }

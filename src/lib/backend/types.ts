@@ -1072,9 +1072,9 @@ export interface Backend {
    * siblings). The desktop host keeps the asking HTTP handler on the line
    * under the request id, and this is the webview resolving it.
    *
-   * Desktop only. A remote host refuses those questions up front — its
-   * devices are browsers and phones with no driver in the frame — so there is
-   * nothing for a remote client to answer and the method is absent there.
+   * Desktop always. Remote when the server is waiting on a spawn or pane
+   * result: the device that claimed the request posts the thread id (or the
+   * error) so the agent is not told success about a request nobody ran.
    */
   answerAgentRequest?(requestId: string, payload: Record<string, unknown>): Promise<void>;
   /**
