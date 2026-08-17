@@ -213,7 +213,7 @@ session that recorded nothing.
 
 ## One pool of conversations per project
 
-Claude and pi file a transcript under the directory the CLI ran in, and every
+Claude, grok and pi file a transcript under the directory the CLI ran in, and every
 agent thread runs in a worktree of its own. So `/resume` typed inside a thread
 listed that thread's conversations and nothing else: the thread beside it, the
 user's own checkout and yesterday's closed thread are three other directories
