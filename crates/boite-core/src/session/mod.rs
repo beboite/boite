@@ -46,6 +46,7 @@ pub use editors::{
 };
 pub use opencode::find_opencode_session_blocking;
 pub use shared::{share_session_stores, unshare_session_stores};
+pub(crate) use editors::{grok_dir_name, grok_sessions_dir};
 
 use std::collections::HashSet;
 

@@ -245,6 +245,7 @@ export async function buildResumeArgsAsync(thread: Thread, cwd: string): Promise
     key,
     settings.state.agentTodoAccess,
     workspace.pathOriginResolver?.(cwd) ?? "local",
+    { cwd, worktree: !!thread.worktreePath },
   );
   argv = withMcpArgs(argv, mcp);
   argv = withPendingPrompt(thread, key, argv);

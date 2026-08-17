@@ -1,12 +1,13 @@
 //! What the agents actually spent, read back out of their own transcripts.
 //!
 //! Nothing in Boite counts tokens: it launches a CLI in a PTY and the CLI keeps
-//! its own record. Two of them keep one this can read — claude writes a
+//! its own record. Three of them keep one this can read — claude writes a
 //! `usage` block on every assistant line of `~/.claude/projects/<cwd>/*.jsonl`,
-//! and codex emits `token_count` events into `~/.codex/sessions/**/*.jsonl`.
-//! The rest either keep no per-turn accounting or bury it in a schema that is
-//! not documented anywhere, and a number invented from one of those is worse
-//! than an absent card.
+//! codex emits `token_count` events into `~/.codex/sessions/**/*.jsonl`, and
+//! grok writes a `usage` object on each `turn_completed` line of
+//! `~/.grok/sessions/<cwd>/<id>/updates.jsonl`. The rest either keep no
+//! per-turn accounting or bury it in a schema that is not documented anywhere,
+//! and a number invented from one of those is worse than an absent card.
 //!
 //! Days are bucketed by the UTC date the transcript itself carries, taken as
 //! the first ten characters of its ISO timestamp. Converting to local time
@@ -15,7 +16,7 @@
 //!
 //! # What makes a scan cheap
 //!
-//! A visit to a project page walks a year of two stores, so the shape of the
+//! A visit to a project page walks a year of three stores, so the shape of the
 //! walk is the whole cost, and three things decide it:
 //!
 //! - **The cache survives.** It is keyed on each file's size and mtime, so only
@@ -50,6 +51,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 
+use crate::session::{grok_dir_name, grok_sessions_dir};
+
 /// One model's share, split the way the two stores split it. Cache reads are
 /// kept apart from input rather than folded into it: on a long agent session
 /// they are most of the volume and none of the price, so a single "input"
@@ -57,8 +60,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Clone, Default, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelUsage {
-    /// The agent's icon key — `claude` or `codex` — so the UI can draw the row
-    /// with the same brand icon the thread has.
+    /// The agent's icon key — `claude`, `codex` or `grok` — so the UI can draw
+    /// the row with the same brand icon the thread has.
     pub provider: String,
     pub model: String,
     pub input: i64,
@@ -642,6 +645,122 @@ fn parse_codex_file(path: &Path) -> FileUsage {
     out
 }
 
+// ------------------------------------------------------------------ grok
+
+#[derive(Deserialize)]
+struct GrokLine {
+    timestamp: Option<i64>,
+    params: Option<GrokParams>,
+}
+
+#[derive(Deserialize)]
+struct GrokParams {
+    update: Option<GrokUpdate>,
+}
+
+#[derive(Deserialize)]
+struct GrokUpdate {
+    #[serde(rename = "sessionUpdate")]
+    session_update: Option<String>,
+    prompt_id: Option<String>,
+    usage: Option<GrokUsage>,
+}
+
+#[derive(Deserialize, Default)]
+struct GrokUsage {
+    #[serde(rename = "inputTokens")]
+    input_tokens: Option<i64>,
+    #[serde(rename = "outputTokens")]
+    output_tokens: Option<i64>,
+    #[serde(rename = "cachedReadTokens")]
+    cached_read_tokens: Option<i64>,
+    #[serde(rename = "cacheCreationTokens")]
+    cache_creation_tokens: Option<i64>,
+    #[serde(rename = "modelUsage")]
+    model_usage: Option<HashMap<String, GrokUsage>>,
+}
+
+/// One `turn_completed` is that turn's own spend, not a running total: a later
+/// turn can be smaller than an earlier one. `inputTokens` includes cache
+/// reads, the way Codex's `input_tokens` does, so they are split back out.
+fn parse_grok_file(path: &Path) -> FileUsage {
+    let mut out = FileUsage::default();
+    let mut seen: HashSet<String> = HashSet::new();
+    each_line(path, |line| {
+        if !line.contains("turn_completed") {
+            return;
+        }
+        let Ok(parsed) = serde_json::from_str::<GrokLine>(line) else {
+            return;
+        };
+        let Some(update) = parsed.params.and_then(|p| p.update) else {
+            return;
+        };
+        if update.session_update.as_deref() != Some("turn_completed") {
+            return;
+        };
+        let Some(usage) = update.usage else { return };
+        if let Some(id) = update.prompt_id {
+            if !seen.insert(id) {
+                return;
+            }
+        }
+        let day = parsed.timestamp.and_then(unix_day);
+        if let Some(models) = usage.model_usage {
+            for (model, u) in models {
+                push_grok(&mut out, &model, day.as_deref(), &u);
+            }
+        } else {
+            push_grok(&mut out, "grok", day.as_deref(), &usage);
+        }
+    });
+    out
+}
+
+fn push_grok(out: &mut FileUsage, model: &str, day: Option<&str>, u: &GrokUsage) {
+    let cached = u.cached_read_tokens.unwrap_or(0);
+    let input = (u.input_tokens.unwrap_or(0) - cached).max(0);
+    add(
+        out,
+        "grok",
+        if model.is_empty() { "grok" } else { model },
+        day,
+        ModelUsage {
+            input,
+            output: u.output_tokens.unwrap_or(0),
+            cache_write: u.cache_creation_tokens.unwrap_or(0),
+            cache_read: cached,
+            ..Default::default()
+        },
+    );
+}
+
+/// UTC calendar day of a unix timestamp in seconds.
+fn unix_day(secs: i64) -> Option<String> {
+    if secs < 0 {
+        return None;
+    }
+    civil_from_unix_days(secs.div_euclid(86_400))
+}
+
+/// Howard Hinnant's `civil_from_days`, unix epoch as day 0.
+fn civil_from_unix_days(days: i64) -> Option<String> {
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 }.div_euclid(146_097);
+    let doe = (z - era * 146_097) as u64;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    if !(0..=9999).contains(&y) {
+        return None;
+    }
+    Some(format!("{y:04}-{m:02}-{d:02}"))
+}
+
 fn push_codex(out: &mut FileUsage, model: &str, day: Option<&str>, t: CodexTokens) {
     // Codex counts cached input inside `input_tokens`; splitting it back out
     // keeps the row comparable with claude's, where the two never overlap.
@@ -718,7 +837,7 @@ pub fn collect_usage_blocking(cwds: Vec<String>, days: u32) -> UsageReport {
     let mut acc = Accumulator::default();
     let mut missing = Vec::new();
     let Some(home) = dirs::home_dir() else {
-        return acc.finish(vec!["claude".into(), "codex".into()]);
+        return acc.finish(vec!["claude".into(), "codex".into(), "grok".into()]);
     };
     let cutoff = now_ms() - (days.max(1) as i64) * MILLIS_PER_DAY;
     let targets: HashSet<String> = cwds.iter().map(|c| normalize(c)).collect();
@@ -778,6 +897,57 @@ pub fn collect_usage_blocking(cwds: Vec<String>, days: u32) -> UsageReport {
         absorb_all(&mut acc, &wanted, parse_codex_file);
     } else {
         missing.push("codex".to_string());
+    }
+
+    if let Some(grok_root) = grok_sessions_dir() {
+        if grok_root.is_dir() {
+            let encoded: HashSet<String> = targets.iter().map(|c| grok_dir_name(c)).collect();
+            let mut files = Vec::new();
+            for entry in fs::read_dir(&grok_root).into_iter().flatten().flatten() {
+                let Ok(kind) = entry.file_type() else { continue };
+                if kind.is_symlink() {
+                    continue;
+                }
+                if !kind.is_dir() {
+                    continue;
+                }
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                let wanted = encoded.contains(name.as_ref())
+                    || fs::read_to_string(entry.path().join(".cwd"))
+                        .map(|c| targets.contains(&normalize(c.trim())))
+                        .unwrap_or(false);
+                if !wanted {
+                    continue;
+                }
+                for session in fs::read_dir(entry.path()).into_iter().flatten().flatten() {
+                    let Ok(kind) = session.file_type() else { continue };
+                    if !kind.is_dir() {
+                        continue;
+                    }
+                    let id = session.file_name().to_string_lossy().into_owned();
+                    if !seen_sessions.insert(format!("grok:{id}")) {
+                        continue;
+                    }
+                    let updates = session.path().join("updates.jsonl");
+                    let Ok(meta) = fs::metadata(&updates) else { continue };
+                    if !meta.is_file() || meta.modified().map(ms_since_epoch).unwrap_or(0) < cutoff
+                    {
+                        continue;
+                    }
+                    files.push(Candidate {
+                        path: updates,
+                        len: meta.len(),
+                        modified_ms: meta.modified().map(ms_since_epoch).unwrap_or(0),
+                    });
+                }
+            }
+            absorb_all(&mut acc, &files, parse_grok_file);
+        } else {
+            missing.push("grok".to_string());
+        }
+    } else {
+        missing.push("grok".to_string());
     }
 
     acc.finish(missing)
@@ -853,6 +1023,53 @@ mod tests {
         // Turn one: 100 input. Turn two: 200 input of which 100 cached.
         assert_eq!((m.input, m.output, m.cache_read), (200, 25, 100));
         assert_eq!(m.total, 325);
+    }
+
+    /// Grok's `inputTokens` includes cache reads. A later turn can spend less
+    /// than an earlier one, so each `turn_completed` is a delta.
+    #[test]
+    fn grok_splits_cache_out_of_input_and_sums_turns() {
+        let turn = |id: &str, ts: i64, input: i64, output: i64, cached: i64| {
+            serde_json::json!({
+                "timestamp": ts,
+                "params": {
+                    "update": {
+                        "sessionUpdate": "turn_completed",
+                        "prompt_id": id,
+                        "usage": {
+                            "inputTokens": input,
+                            "outputTokens": output,
+                            "cachedReadTokens": cached,
+                            "cacheCreationTokens": 0,
+                            "modelUsage": {
+                                "grok-4.6-build": {
+                                    "inputTokens": input,
+                                    "outputTokens": output,
+                                    "cachedReadTokens": cached,
+                                    "cacheCreationTokens": 0
+                                }
+                            }
+                        }
+                    }
+                }
+            })
+            .to_string()
+        };
+        let a = turn("a", 1_786_992_246, 100, 10, 40);
+        let b = turn("b", 1_786_992_246, 50, 5, 10);
+        let path = write("grok-turns", &[&a, &b]);
+        let usage = parse_grok_file(&path);
+        let (key, m) = &usage.models[0];
+        assert_eq!(key.1, "grok-4.6-build");
+        assert_eq!((m.input, m.output, m.cache_read), (100, 15, 50));
+        assert_eq!(m.total, 165);
+        assert_eq!(usage.days, vec![("2026-08-17".to_string(), 165)]);
+    }
+
+    #[test]
+    fn grok_unix_day_is_utc() {
+        assert_eq!(unix_day(1_786_992_246).as_deref(), Some("2026-08-17"));
+        assert_eq!(unix_day(0).as_deref(), Some("1970-01-01"));
     }
 
     /// A rollout old enough to carry no delta still has to report something,

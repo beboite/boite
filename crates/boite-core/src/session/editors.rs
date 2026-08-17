@@ -215,7 +215,7 @@ pub fn find_antigravity_session_blocking(
     None
 }
 
-pub(super) fn grok_sessions_dir() -> Option<PathBuf> {
+pub(crate) fn grok_sessions_dir() -> Option<PathBuf> {
     if let Ok(home) = env::var("GROK_HOME") {
         if !home.trim().is_empty() {
             return Some(PathBuf::from(home).join("sessions"));
@@ -233,7 +233,7 @@ pub(super) fn grok_sessions_dir() -> Option<PathBuf> {
 /// path in `.cwd`). This function does not invent that shape: a name grok
 /// would not look for is worse than no name. Callers that need an existing
 /// long group ask [`grok_dir_for`].
-pub(super) fn grok_dir_name(cwd: &str) -> String {
+pub(crate) fn grok_dir_name(cwd: &str) -> String {
     let trimmed = cwd.trim_end_matches(['/', '\\']);
     let mut out = String::with_capacity(trimmed.len());
     for &b in trimmed.as_bytes() {
