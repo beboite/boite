@@ -120,11 +120,16 @@ fn already_wired(args: &[String]) -> bool {
     })
 }
 
+/// Both separators, on every host. `Path` reads what the host it is compiled
+/// for reads, so a Linux `boite-server` handed `C:\bin\codex.exe` by a Windows
+/// device sees one long file name, matches nothing, and launches that thread
+/// with no MCP flags at all. A command line is the device's, not the server's.
 fn agent_name(cmd: &str) -> &str {
-    let stem = Path::new(cmd)
+    let file = cmd.rsplit(['/', '\\']).next().unwrap_or(cmd);
+    let stem = Path::new(file)
         .file_stem()
         .and_then(|s| s.to_str())
-        .unwrap_or(cmd);
+        .unwrap_or(file);
     if stem.eq_ignore_ascii_case("claude") {
         "claude"
     } else if stem.eq_ignore_ascii_case("codex") {
@@ -207,10 +212,15 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let p = paths(&dir);
-        let flags = flags_for("C:\\bin\\codex.exe", &p);
-        assert_eq!(flags[0], "-c");
-        assert!(flags[1].contains("mcp_servers.boite.command="), "{flags:?}");
-        assert!(flags[1].contains("boite-mcp"), "{flags:?}");
+        // Both spellings from every host: the command line belongs to the
+        // device that made the thread, and a Linux server reads Windows rows.
+        for cmd in ["codex", "C:\\bin\\codex.exe", "/usr/local/bin/codex"] {
+            let flags = flags_for(cmd, &p);
+            assert_eq!(flags.len(), 2, "{cmd}: {flags:?}");
+            assert_eq!(flags[0], "-c");
+            assert!(flags[1].contains("mcp_servers.boite.command="), "{flags:?}");
+            assert!(flags[1].contains("boite-mcp"), "{flags:?}");
+        }
         let _ = fs::remove_dir_all(&dir);
     }
 }
