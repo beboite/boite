@@ -634,15 +634,15 @@
                   <!-- The experiment that replaces the column, one per
                        terminal: in split view each pane runs its own worktree,
                        so a single box over the whole area could only ever
-                       describe one of them. After the pane overlay in the DOM
-                       and at the same z, so it draws over the ring rather than
-                       under it. Panes too narrow to hold it (it would cover
-                       the terminal it describes) get none. -->
+                       describe one of them. The box docks itself inside the
+                       pane (corners and edge midpoints), so it takes the whole
+                       pane area rather than a corner of it. After the pane
+                       overlay in the DOM and at the same z, so it draws over
+                       the ring rather than under it. Panes too narrow to hold
+                       it (it would cover the terminal it describes) get none. -->
                   {#if !mobile && settings.state.experimentInfoBox && rect.w >= 420 && InfoBoxView.current}
                     {@const InfoBoxComp = InfoBoxView.current}
-                    <div class="absolute right-3 top-3 z-[5] max-w-[calc(100%-1.5rem)]">
-                      <InfoBoxComp {thread} {visible} />
-                    </div>
+                    <InfoBoxComp {thread} {visible} {focused} />
                   {/if}
                 </div>
               {/if}

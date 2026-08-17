@@ -190,6 +190,9 @@ export const EN_MESSAGES = {
   "infoBox.claimedTitle": "Claimed by {agent}",
   "infoBox.claimedTag": "to confirm",
   "infoBox.moreClaimed": "+{count}",
+  "infoBox.collapse": "Collapse",
+  "infoBox.expand": "Expand",
+  "infoBox.drag": "Move",
   "infoBox.openTag": "to do",
   "infoBox.worktreeTag": "worktree",
   "infoBox.conflicts": "{count} conflicts",
@@ -197,6 +200,7 @@ export const EN_MESSAGES = {
   "infoBox.claimedSummary": "in progress",
   "infoBox.openSummary": "open",
   "infoBox.doneSummary": "done",
+
 
   "experiments.smartSort": "Smart ordering",
   "experiments.smartSortDesc":

@@ -3,40 +3,57 @@
  *
  * A toast is news about what an agent just did, so it belongs over the agent.
  * Fixed to the window it landed on whatever the user had opened beside the
- * terminal instead — the docked git, files or todo column — and covered the
+ * terminal instead, the docked git, files or todo column, and covered the
  * commit button of a panel the toast had nothing to say about.
  *
  * Client coordinates, because the toaster is `position: fixed`: `right` is the
  * gap from the right edge of the window, which is what CSS wants.
  */
+
+export type ToastStack = "above" | "below";
+export type ToastAlign = "left" | "center" | "right";
+
+export type ToastClaim = {
+  top: number;
+  left: number;
+  right: number;
+  bottom: number;
+  width: number;
+  height: number;
+  stack: ToastStack;
+  align: ToastAlign;
+};
+
 class ToastAnchor {
   box = $state<{ top: number; right: number } | null>(null);
 
   /**
-   * Height already taken in that corner by something the toasts must not cover,
-   * the info box experiment being the only claimant today. Zero whenever it is
-   * off, which is the layout the toaster has always had. Resolved from the
-   * claims below rather than written by whoever moved last.
+   * The standing info box the stack attaches to, or null when none is on
+   * screen. The toaster sits below it, or above it when the box is on a
+   * bottom edge.
    */
-  inset = $state(0);
+  claim = $state<ToastClaim | null>(null);
+
+  /**
+   * Height of that box. Kept so existing readers keep working: it is just
+   * `claim.height`, zero when there is no claim.
+   */
+  get inset(): number {
+    return this.claim?.height ?? 0;
+  }
 
   set(top: number, right: number) {
     const prev = this.box;
     if (prev && prev.top === top && prev.right === right) return;
     this.box = { top, right };
-    // The corner moved, so which box is standing in it is a different answer
-    // now, and a box that only moved never fired its own ResizeObserver.
-    remeasureCorner();
+    // The work area moved, so which box is standing in it is a different
+    // answer now, and a box that only moved never fired its own ResizeObserver.
+    remeasureToastClaims();
   }
 
   clear() {
     this.box = null;
-    remeasureCorner();
-  }
-
-  setInset(px: number) {
-    if (this.inset === px) return;
-    this.inset = px;
+    remeasureToastClaims();
   }
 }
 
@@ -73,119 +90,146 @@ export function toastArea(el: HTMLElement) {
   };
 }
 
-/**
- * Who is standing in the toast corner, one entry per box rather than one
- * number for the window.
- *
- * The info box used to be a single mount over the whole pane area, so a scalar
- * was the whole story. It is one box per terminal now, which means one per
- * thread in every group: the groups nobody is looking at stay mounted and are
- * hidden with `visibility`, and a hidden-but-laid-out element still has a real
- * height and still fires its ResizeObserver. A shared scalar therefore let the
- * last box to resize anywhere in the window, offscreen group included, set the
- * inset for a corner it does not stand in, and let the first box to unmount
- * zero an inset the boxes still on screen were relying on.
- *
- * Each box owns exactly one key and can only ever write or drop its own, the
- * same claim-and-release shape the info box uses to elect one git poller per
- * repository. What is resolved out of it is the tallest claim among the boxes
- * that say they are on screen: the corner has the same coordinates in every
- * group, so a box nobody is looking at measures a real height in it, and the
- * tallest of those pushed the stack a visible row or two below the box it is
- * meant to sit under.
- */
-const corner = new Map<symbol, { el: HTMLElement; px: number; standing: boolean }>();
+export type ToastInsetParams = {
+  standing: boolean;
+  focused?: boolean;
+  stack: ToastStack;
+  align: ToastAlign;
+};
 
 /**
- * How close to the anchor's corner a box has to be to count as standing in it.
+ * Who the toast stack attaches to, one entry per box rather than one number
+ * for the window.
  *
- * The toaster and the box are laid out from the same 0.75rem gutter, so a box
- * in the corner sits exactly one gutter inside it; the UI scale slider is a
- * root font size, which moves that gutter, hence the room. Nothing else comes
- * anywhere near: the closest box that is not in the corner belongs to another
- * pane of a split, half a viewport away.
+ * The info box is one mount per terminal, which means one per thread in every
+ * group: the groups nobody is looking at stay mounted and are hidden with
+ * `visibility`, and a hidden-but-laid-out element still has a real height and
+ * still fires its ResizeObserver. Each box owns exactly one key and can only
+ * ever write or drop its own.
+ *
+ * What is resolved out of it is the focused standing box, or the tallest
+ * standing one when none is focused. A box whose group is off screen never
+ * wins, even if it is taller: it would push the stack off a shorter box the
+ * user can actually see.
  */
-const CORNER_REACH = 32;
+const claims = new Map<
+  symbol,
+  { el: HTMLElement; standing: boolean; focused: boolean; stack: ToastStack; align: ToastAlign }
+>();
 
-/** How much room `el` takes out of the corner, zero if it is not in it. */
-function measureCorner(el: HTMLElement): number {
-  const anchor = toastAnchor.box;
-  if (!anchor) return 0;
+function readRect(el: HTMLElement): ToastClaim | null {
   const rect = el.getBoundingClientRect();
   // A box under `display: none`, which is every pane while a view is drawn
-  // over the terminals, measures zero. Zero is the right answer there: nothing
-  // is standing in the corner, so the stack takes it back.
-  if (rect.width <= 0 || rect.height <= 0) return 0;
-  const fromTop = rect.top - anchor.top;
-  const fromRight = window.innerWidth - anchor.right - rect.right;
-  if (Math.abs(fromTop) > CORNER_REACH || Math.abs(fromRight) > CORNER_REACH) {
-    return 0;
-  }
-  return rect.height;
+  // over the terminals, measures zero. Zero is the right answer there.
+  if (rect.width <= 0 || rect.height <= 0) return null;
+  return {
+    top: rect.top,
+    left: rect.left,
+    right: rect.right,
+    bottom: rect.bottom,
+    width: rect.width,
+    height: rect.height,
+    stack: "below",
+    align: "right",
+  };
 }
 
-function resolveInset() {
-  let px = 0;
-  for (const claim of corner.values()) px = Math.max(px, claim.px);
-  toastAnchor.setInset(px);
+function resolveClaim() {
+  let best: (ToastClaim & { focused: boolean }) | null = null;
+  for (const claim of claims.values()) {
+    if (!claim.standing) continue;
+    const rect = readRect(claim.el);
+    if (!rect) continue;
+    const candidate = {
+      ...rect,
+      stack: claim.stack,
+      align: claim.align,
+      focused: claim.focused,
+    };
+    if (!best) {
+      best = candidate;
+      continue;
+    }
+    if (candidate.focused && !best.focused) {
+      best = candidate;
+      continue;
+    }
+    if (candidate.focused === best.focused && candidate.height > best.height) {
+      best = candidate;
+    }
+  }
+  const next = best
+    ? {
+        top: best.top,
+        left: best.left,
+        right: best.right,
+        bottom: best.bottom,
+        width: best.width,
+        height: best.height,
+        stack: best.stack,
+        align: best.align,
+      }
+    : null;
+  const prev = toastAnchor.claim;
+  if (
+    prev &&
+    next &&
+    prev.top === next.top &&
+    prev.left === next.left &&
+    prev.right === next.right &&
+    prev.bottom === next.bottom &&
+    prev.width === next.width &&
+    prev.height === next.height &&
+    prev.stack === next.stack &&
+    prev.align === next.align
+  ) {
+    return;
+  }
+  toastAnchor.claim = next;
+}
+
+/** Ask every claim again. A drag moves a box without resizing it. */
+export function remeasureToastClaims() {
+  resolveClaim();
 }
 
 /**
- * Ask every claim again.
+ * Action for a box the toasts must not cover.
  *
- * Run from any one box's observer rather than only re-reading that box: a pane
- * closing or a divider moving repositions boxes whose own size never changed,
- * and a ResizeObserver has nothing to say about an element that only moved.
- */
-function remeasureCorner() {
-  for (const claim of corner.values()) {
-    claim.px = claim.standing ? measureCorner(claim.el) : 0;
-  }
-  resolveInset();
-}
-
-/**
- * Action for a box that stands in the top-right corner before the toasts do.
- *
- * Measures the whole card, unfolded log included. Measuring the folded rows
- * alone kept the stack off the collapsed box and nothing else: the log unfolds
- * into exactly the room the stack was pushed into, at z-5 and so under the
- * toasts, and two cards up plus a pointer on the box hid rows two to ten
- * behind opaque toasts. The stack sliding down as the box unfolds is not it
- * chasing the pointer, it is getting out of the way of what the pointer asked
- * to read.
- *
- * The corner is claimed, not assumed: split view mounts one of these over
- * every terminal and the toasts only ever land on the box that owns it.
+ * Measures the whole card, unfolded log included. The stack sits below it, or
+ * above it when the box is docked on a bottom edge.
  *
  * `standing` is the caller's own answer about whether its box is on screen, and
  * it is what the geometry cannot give: a pane in another group keeps its box
  * mounted, hidden with `visibility` and laid out at the same coordinates as the
- * one being looked at, so it measures a real height in the same corner. The
- * tallest of those decided the inset, and the stack sat that far below a
- * visible box that is shorter — the gap between the two.
+ * one being looked at.
  */
-export function toastInset(el: HTMLElement, standing: boolean = true) {
+export function toastInset(el: HTMLElement, params: ToastInsetParams) {
   const token = Symbol("toast-inset");
-  corner.set(token, { el, px: 0, standing });
-  const observer = new ResizeObserver(remeasureCorner);
+  claims.set(token, {
+    el,
+    standing: params.standing,
+    focused: params.focused ?? false,
+    stack: params.stack,
+    align: params.align,
+  });
+  const observer = new ResizeObserver(remeasureToastClaims);
   observer.observe(el);
-  remeasureCorner();
+  remeasureToastClaims();
   return {
-    update(next: boolean) {
-      const claim = corner.get(token);
-      if (!claim || claim.standing === next) return;
-      claim.standing = next;
-      remeasureCorner();
+    update(next: ToastInsetParams) {
+      const claim = claims.get(token);
+      if (!claim) return;
+      claim.standing = next.standing;
+      claim.focused = next.focused ?? false;
+      claim.stack = next.stack;
+      claim.align = next.align;
+      remeasureToastClaims();
     },
     destroy() {
       observer.disconnect();
-      // Its own claim and no more. The other boxes are still on screen, and a
-      // ResizeObserver does not fire again on a box whose size did not change,
-      // so an inset zeroed from here would never be restored: the stack would
-      // sit back on top of a box that is still drawn, for good.
-      corner.delete(token);
-      resolveInset();
+      claims.delete(token);
+      resolveClaim();
     },
   };
 }
