@@ -844,6 +844,7 @@ mod tests {
     fn a_session_that_never_moved_stays_resumable() {
         assert!(migrate_session_blocking("codex", "sess-3", "/w/from", "/w/to").unwrap());
         assert!(migrate_session_blocking("claude", "sess-3", "/w/same", "/w/same").unwrap());
+        assert!(migrate_session_blocking("grok", "sess-3", "/w/same", "/w/same").unwrap());
     }
 
     /// A thread that moved out and came back finds its own copy waiting. The

@@ -350,6 +350,9 @@ export function resumeArgv(input: ResumeInput): {
  * (`pi --name "CI audit" -p "…"`), and nothing in its argument list is
  * variadic, so the positional cannot be swallowed by the flag before it.
  *
+ * `grok [PROMPT]` is the same shape for the interactive TUI (`grok "fix the
+ * bug"`). `-p` is headless and is not what a pane wants.
+ *
  * Nothing else is listed. A guess here does not misfire quietly — it costs the
  * thread its whole launch — and the cost of being wrong the other way is one
  * agent that comes back up without being told why its folder changed.
@@ -357,7 +360,7 @@ export function resumeArgv(input: ResumeInput): {
 function promptSeparator(key: IconKey, agent: string[]): string[] | null {
   if (key === "claude") return ["--"];
   if (key === "codex") return agent.includes("resume") ? null : [];
-  if (key === "pi") return [];
+  if (key === "pi" || key === "grok") return [];
   return null;
 }
 

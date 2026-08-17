@@ -421,7 +421,7 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "project.tokensNone": "Aucune transcription d'agent pour ce projet.",
   "project.tokensUnreachable": "Les transcriptions n'ont pas pu être lues.",
   "project.tokensUnreachableHint": "Inconnu, pas zéro. À relire quand la boite répondra.",
-  "project.tokensOnly": "Seuls claude et codex notent ce qu'ils dépensent.",
+  "project.tokensOnly": "Seuls claude, codex et grok notent ce qu'ils dépensent.",
   "project.tokensMissing": "{agents} ne tient aucun registre sur cette machine.",
   "project.tokensSessions": "{count} sessions",
   "project.tokensIn": "entrée",

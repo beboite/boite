@@ -64,7 +64,7 @@ export const CLI_PRESETS: CliPreset[] = [
     command: "grok",
     iconKey: "grok",
     executable: "grok",
-    docUrl: "https://x.ai/blog/grok-2",
+    docUrl: "https://x.ai/cli",
   },
   {
     id: "hermes",

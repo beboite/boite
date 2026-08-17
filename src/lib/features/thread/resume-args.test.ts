@@ -208,6 +208,24 @@ describe("resumeArgv", () => {
     expect(joinArgv(argv)).toEqual(["--continue"]);
   });
 
+  it("resumes grok on --resume and drops a continue it was launched with", () => {
+    const { argv, outcome } = relaunch("grok", ["-c", "--debug"], "grok");
+    expect(outcome).toBe("resumed");
+    expect(joinArgv(argv)).toEqual(["--debug", "--resume", SESSION]);
+  });
+
+  it("continues the latest grok session of this folder when nothing was captured", () => {
+    const { argv, outcome } = resumeArgv({
+      cmd: "grok",
+      args: [],
+      key: "grok",
+      sessionId: null,
+      fresh: false,
+    });
+    expect(outcome).toBe("continue-latest");
+    expect(joinArgv(argv)).toEqual(["--continue"]);
+  });
+
   it("resumes muse on its subcommand, replacing the one it carried", () => {
     const { argv } = relaunch("muse", ["resume", "--last"], "muse");
     expect(joinArgv(argv)).toEqual(["resume", SESSION]);
@@ -257,10 +275,18 @@ describe("the opening prompt", () => {
     expect(next.argv.agent).toEqual(["--session", SESSION, "read the docs"]);
   });
 
+  it("is a bare positional for grok, resume included", () => {
+    const { argv } = relaunch("grok", [], "grok");
+    const next = withPromptArg(argv, "grok", "read\nthe docs");
+    expect(next.typed).toBe(false);
+    expect(next.argv.agent).toEqual(["--resume", SESSION, "read the docs"]);
+  });
+
   it("says which agents can be handed one at all", () => {
     expect(takesOpeningPrompt("claude")).toBe(true);
     expect(takesOpeningPrompt("codex")).toBe(true);
     expect(takesOpeningPrompt("pi")).toBe(true);
+    expect(takesOpeningPrompt("grok")).toBe(true);
     expect(takesOpeningPrompt("muse")).toBe(false);
     expect(takesOpeningPrompt("opencode")).toBe(false);
     expect(takesOpeningPrompt(null)).toBe(false);

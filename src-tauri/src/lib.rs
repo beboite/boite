@@ -416,6 +416,7 @@ pub fn run() {
             commands::agents::agent_mcp_project_path,
             commands::agents::agent_mcp_registration,
             commands::agents::register_agent_mcp,
+            commands::agents::ensure_grok_mcp,
             commands::sessions::stop_claude_session,
             commands::sessions::migrate_session,
             commands::sessions::thread_transcript,
