@@ -8,6 +8,7 @@ import { clampTerminalScale } from "$lib/theme/fonts";
 import { uuid } from "$lib/shared/utils/uuid";
 import { isThemeId } from "$lib/theme/themes";
 import type {
+  InfoBoxAnchor,
   Keybinding,
   LocaleSetting,
   RightPanelTab,
@@ -18,6 +19,7 @@ import type {
   SortDirection,
   WhipSound,
 } from "$lib/types";
+import { isInfoBoxAnchor } from "$lib/features/infobox/anchor";
 import { DEFAULT_KEYBINDINGS } from "$lib/shared/keyboard/defaults";
 import {
   mergeDefaultKeybindings,
@@ -159,6 +161,8 @@ const DEFAULTS: Settings = {
   sidebarDesign: "classic",
   sidebarHarnessLogos: true,
   experimentInfoBox: false,
+  infoBoxAnchor: "top-right",
+  infoBoxCollapsed: false,
   experimentSmartSort: false,
   experimentWhip: false,
   whipSound: "synth",
@@ -300,6 +304,8 @@ const DEVICE_FIELDS = [
   "sidebarDesign",
   "sidebarHarnessLogos",
   "experimentInfoBox",
+  "infoBoxAnchor",
+  "infoBoxCollapsed",
   "experimentSmartSort",
   "experimentWhip",
   "whipSound",
@@ -357,6 +363,12 @@ function applyDeviceOverrides(state: Settings, dev: DeviceBlob): void {
   // this one may be smaller. Clamped on the way in rather than only in the
   // setter, which a boot never calls.
   state.rightPanelWidth = clampRightPanelWidth(state.rightPanelWidth);
+  if (!isInfoBoxAnchor(state.infoBoxAnchor)) {
+    state.infoBoxAnchor = DEFAULTS.infoBoxAnchor;
+  }
+  if (typeof state.infoBoxCollapsed !== "boolean") {
+    state.infoBoxCollapsed = DEFAULTS.infoBoxCollapsed;
+  }
 }
 
 class SettingsStore {
@@ -486,6 +498,13 @@ class SettingsStore {
           typeof stored.experimentInfoBox === "boolean"
             ? stored.experimentInfoBox
             : DEFAULTS.experimentInfoBox,
+        infoBoxAnchor: isInfoBoxAnchor(stored.infoBoxAnchor)
+          ? stored.infoBoxAnchor
+          : DEFAULTS.infoBoxAnchor,
+        infoBoxCollapsed:
+          typeof stored.infoBoxCollapsed === "boolean"
+            ? stored.infoBoxCollapsed
+            : DEFAULTS.infoBoxCollapsed,
         experimentSmartSort:
           typeof stored.experimentSmartSort === "boolean"
             ? stored.experimentSmartSort
@@ -836,6 +855,18 @@ class SettingsStore {
   setExperimentInfoBox(value: boolean) {
     if (this.state.experimentInfoBox === value) return;
     this.state.experimentInfoBox = value;
+    this.persistDeviceNow();
+  }
+
+  setInfoBoxAnchor(value: InfoBoxAnchor) {
+    if (!isInfoBoxAnchor(value) || this.state.infoBoxAnchor === value) return;
+    this.state.infoBoxAnchor = value;
+    this.persistDeviceNow();
+  }
+
+  setInfoBoxCollapsed(value: boolean) {
+    if (this.state.infoBoxCollapsed === value) return;
+    this.state.infoBoxCollapsed = value;
     this.persistDeviceNow();
   }
 
