@@ -59,6 +59,14 @@ variables per pane:
 { "width": 60, "ascii": false }
 ```
 
+If none of the three answers and stdout happens to be a tty after all, it falls
+back to that tty's own column count; an unknown width is treated as no
+constraint rather than as a narrow pane, so a full-width line is never mutilated
+by a guess. A caller that composes its own line and already knows the geometry
+passes it per invocation instead — `--width 48 --ascii` — which is the shape a
+Boite status-line integration wants: one process, one line, no environment to
+set up.
+
 With a width known it drops, in order, the handle of the returning account, then
 the handle of the current one, keeping the counts and the timer — the part that
 decides whether you switch — down to about 24 columns. `CLAUDE_CC_STATUSLINE_ASCII=1`
