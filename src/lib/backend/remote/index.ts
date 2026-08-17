@@ -13,6 +13,8 @@ import type {
   ExplorerApi,
   FastpickApi,
   FastpickListing,
+  PluginApi,
+  PluginStatus,
   FolderState,
   GitApi,
   LiveClaudeSession,
@@ -84,6 +86,7 @@ export class RemoteBackend implements Backend {
   readonly system: SystemApi;
   readonly shell: ShellApi;
   readonly fastpick: FastpickApi;
+  readonly plugin: PluginApi;
   readonly scope: ScopeApi;
   readonly session: SessionApi;
   readonly search: SearchApi;
@@ -421,6 +424,17 @@ export class RemoteBackend implements Backend {
         ),
       version: () =>
         rpc("fastpick.version", {}).then((r) => (r.version as string | null) ?? null),
+    };
+
+    this.plugin = {
+      status: (kind) =>
+        rpc("plugin.status", { kind }).then((r) => JSON.parse(r.json as string) as PluginStatus),
+      switchTo: (kind, who) =>
+        rpc("plugin.switch", { kind, who: who ?? "next" }).then(
+          (r) => JSON.parse(r.json as string) as PluginStatus,
+        ),
+      version: (kind) =>
+        rpc("plugin.version", { kind }).then((r) => (r.version as string | null) ?? null),
     };
 
     // The server derives its filesystem trust boundary from persisted projects;

@@ -576,6 +576,35 @@ export interface FastpickApi {
   version(): Promise<string | null>;
 }
 
+export type PluginKind = "claude" | "codex";
+
+/**
+ * What a switcher CLI prints for `status --json` / `switch --json`.
+ *
+ * `schema: 1` is the contract. `schema: 0` is a tool that has no `--json` yet:
+ * `text` is whatever it printed, and the panel shows that instead of rows.
+ */
+export interface PluginStatus {
+  schema: number;
+  current?: string | null;
+  accounts?: PluginAccount[];
+  text?: string;
+}
+
+export interface PluginAccount {
+  id: string;
+  label?: string | null;
+  current?: boolean;
+  limited?: boolean;
+  usage?: string | null;
+}
+
+export interface PluginApi {
+  status(kind: PluginKind): Promise<PluginStatus>;
+  switchTo(kind: PluginKind, who?: string): Promise<PluginStatus>;
+  version(kind: PluginKind): Promise<string | null>;
+}
+
 export interface ScopeApi {
   registerProjectRoots(roots: string[]): Promise<void>;
   // The server's browsable base dir for adding projects via the web folder
@@ -1041,6 +1070,7 @@ export interface Backend {
   readonly system: SystemApi;
   readonly shell: ShellApi;
   readonly fastpick: FastpickApi;
+  readonly plugin: PluginApi;
   readonly scope: ScopeApi;
   readonly session: SessionApi;
   readonly log: LogApi;
