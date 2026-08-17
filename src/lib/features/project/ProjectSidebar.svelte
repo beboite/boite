@@ -23,7 +23,7 @@
   import { refreshProjectIcon } from "$lib/features/project/api";
   import { openProjectDashboard } from "$lib/features/project/dashboard";
   import { isScratch } from "$lib/domain/project";
-import { projectDisplayName } from "$lib/shared/project-label";
+  import { projectDisplayName } from "$lib/shared/project-label";
   import { filterSidebar, normaliseTerm } from "./sidebar-filter";
   import SearchIcon from "@lucide/svelte/icons/search";
   import ThreadGlyph from "$lib/features/thread/ThreadGlyph.svelte";
@@ -44,6 +44,7 @@ import { projectDisplayName } from "$lib/shared/project-label";
   import type { ContextMenuItem } from "$lib/shared/components/ContextMenu.svelte";
   import { viewportHeight } from "$lib/shared/keyboard/overlay";
   import {
+    dragShiftStyle,
     dropIntent,
     hasBecomeADrag,
     reordered,
@@ -1258,6 +1259,12 @@ import { projectDisplayName } from "$lib/shared/project-label";
         liveDrag && liveDrag.kind === "project" && liveDrag.slotIndex !== null && projectSourceIdx >= 0
           ? rowShift(projectIdx, projectSourceIdx, liveDrag.slotIndex, liveDrag.sourceHeight)
           : 0}
+      {@const projectSlide = dragShiftStyle(
+        liveDrag?.kind === "project",
+        isProjectSource,
+        projectShiftY,
+        `translate(0px, ${dragOffset}px) scale(1.015)`,
+      )}
       <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
       <div
         class="project-block group/block mb-2"
@@ -1274,10 +1281,8 @@ import { projectDisplayName } from "$lib/shared/project-label";
           ? workspace.info.color || "var(--color-success)"
           : undefined}
         data-project-row={project.id}
-        style:transform={isProjectSource
-          ? `translate(0px, ${dragOffset}px) scale(1.015)`
-          : `translateY(${projectShiftY}px)`}
-        style:transition={isProjectSource ? "none" : "transform 180ms cubic-bezier(0.22, 1, 0.36, 1)"}
+        style:transform={projectSlide.transform}
+        style:transition={projectSlide.transition}
         style:z-index={isProjectSource ? 50 : "auto"}
         onpointerdown={(e) => projectPointerDown(project.id, e)}
         role="listitem"
@@ -1425,6 +1430,12 @@ import { projectDisplayName } from "$lib/shared/project-label";
                 dragInThisProject && liveDrag.slotIndex !== null && threadSourceIdx >= 0
                   ? rowShift(threadIdx, threadSourceIdx, liveDrag.slotIndex, liveDrag.sourceHeight)
                   : 0}
+              {@const threadSlide = dragShiftStyle(
+                dragInThisProject,
+                isThreadSource,
+                shiftY,
+                "none",
+              )}
               {@const keepAwake = (thread.keepAwake ?? false) && !!thread.ptyId}
               {@const visual = threadVisual({
                 status: displayThreadStatus(thread),
@@ -1448,10 +1459,8 @@ import { projectDisplayName } from "$lib/shared/project-label";
                 data-thread-row={thread.id}
                 data-thread-id={thread.id}
                 data-project-id={thread.projectId}
-                style:transform={isThreadSource
-                  ? "none"
-                  : `translateY(${shiftY}px)`}
-                style:transition={isThreadSource ? "none" : "transform 180ms cubic-bezier(0.22, 1, 0.36, 1)"}
+                style:transform={threadSlide.transform}
+                style:transition={threadSlide.transition}
                 style:z-index={isThreadSource ? 50 : "auto"}
                 onpointerdown={(e) => threadPointerDown(thread, e)}
                 onmouseenter={() => threadHoverEnter(thread.id)}
@@ -1809,22 +1818,32 @@ import { projectDisplayName } from "$lib/shared/project-label";
     background: var(--color-surface-2);
   }
 
-  /* Temporary, and it has to look it. Faded so it sits behind the real
-     projects, hatched so a screenshot still says so, and on the block rather
-     than the row so the threads underneath are inside the same crossed-out
-     card. It lifts under the pointer: a row you are about to click has to be
+  /* Temporary, and it has to look it. Hatched so a screenshot still says so,
+     and on the block rather than the row so the threads underneath are inside
+     the same crossed-out card. The fade is on the rows, not the block: opacity
+     on this element made the whole card one compositor layer, and every thread
+     row inside used to carry a rest-state translateY(0) as well. Those nested
+     layers were evicted after the card sat off screen at the bottom of a long
+     sidebar. Scrolling back painted the hatch first and the threads a status
+     tick later.
+
+     It lifts under the pointer: a row you are about to click has to be
      readable, and this is still the way into a scratch terminal. */
   .project-block.scratch-block {
-    opacity: 0.6;
     border-style: dashed;
     background-image: repeating-linear-gradient(
       135deg,
       transparent 0 5px,
       color-mix(in srgb, var(--color-foreground) 7%, transparent) 5px 6px
     );
+  }
+  .project-block.scratch-block .project-row,
+  .project-block.scratch-block .thread-card {
+    opacity: 0.6;
     transition: opacity 140ms ease;
   }
-  .project-block.scratch-block:hover {
+  .project-block.scratch-block:hover .project-row,
+  .project-block.scratch-block:hover .thread-card {
     opacity: 0.9;
   }
   .thread-row {

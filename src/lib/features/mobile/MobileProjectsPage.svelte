@@ -200,15 +200,19 @@
 </div>
 
 <style>
-  /* Same reading as the sidebar's scratch card, at touch size: faded so it
-     sits behind the real projects, hatched so it stays legible as temporary
-     without a badge taking up a line. */
+  /* Same reading as the sidebar's scratch card, at touch size: hatched so it
+     stays legible as temporary without a badge taking up a line. The fade is
+     on the rows, not the section, for the same compositor reason the sidebar
+     card stopped putting opacity on the whole block. */
   .scratch-card {
-    opacity: 0.62;
     background-image: repeating-linear-gradient(
       135deg,
       transparent 0 6px,
       color-mix(in srgb, var(--color-foreground) 7%, transparent) 6px 7px
     );
+  }
+  .scratch-card > :not(ul),
+  .scratch-card li {
+    opacity: 0.62;
   }
 </style>
