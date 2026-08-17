@@ -21,20 +21,18 @@ the Android packaging (icons, splash, manifest, Digital Asset Links).
 
 ## What the phone layout is
 
-The shell is thin, the layout behind it is not. `settings.mobileLayout` (guessed
-from the form factor on first run, pinned for good once toggled) swaps the
-sidebar and the docked column for a top bar and a six-tab bottom bar: Files,
-Git, Terminal, Todo, Projects, Settings. A project's overview is opened from the
-button on its card in Projects, since there is no project row to click.
+`settings.mobileLayout` (guessed from the form factor on first run, pinned once
+toggled) swaps the sidebar and the docked column for a top bar and a six-tab
+bottom bar: Files, Git, Terminal, Todo, Projects, Settings. A project's overview
+opens from the button on its card, since there is no project row to click.
 
-Every one of those goes through the same `backend()` the PC uses, which on a
-phone is always the WebSocket one, so what works here is what the server can
-answer. Two things stay on the PC and are not oversights: the command palette
-(no way to open it without a keyboard) and anything reading the local
-filesystem — the folder picker falls back to the server-side browser, and the
-MCP shim an agent is launched with is a path on the device that spawns the PTY,
-so a launch from the phone gets no `--mcp-config` at all. See
-`src/lib/features/thread/agentMcp.ts`.
+All of it goes through the same `backend()` the PC uses, which on a phone is
+always the WebSocket one, so what works here is what the server can answer. Two
+things stay on the PC and are not oversights: the command palette (no keyboard
+to open it with) and anything reading the local filesystem. The folder picker
+falls back to the server-side browser, and the MCP shim is a path on the device
+that spawns the PTY, so a launch from the phone gets no `--mcp-config`
+(`src/lib/features/thread/agentMcp.ts`).
 
 ## Staying in step with the PWA
 

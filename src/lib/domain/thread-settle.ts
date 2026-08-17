@@ -39,3 +39,24 @@ export function countSettled(threads: Thread[]): number {
   }
   return n;
 }
+
+/**
+ * The two piles a project's card draws, in the order they already had.
+ *
+ * One pass so the live list and the drawer cannot disagree about who is in
+ * which, and so a row cannot appear in both. Order is preserved inside each
+ * pile: the sidebar's sort is the user's, and putting a thread away is not a
+ * reorder.
+ */
+export function splitSettled(threads: Thread[]): {
+  live: Thread[];
+  settled: Thread[];
+} {
+  const live: Thread[] = [];
+  const settled: Thread[] = [];
+  for (const thread of threads) {
+    if (isSettled(thread)) settled.push(thread);
+    else live.push(thread);
+  }
+  return { live, settled };
+}

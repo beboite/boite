@@ -190,6 +190,13 @@ export const EN_MESSAGES = {
   "infoBox.claimedTitle": "Claimed by {agent}",
   "infoBox.claimedTag": "to confirm",
   "infoBox.moreClaimed": "+{count}",
+  "infoBox.openTag": "to do",
+  "infoBox.worktreeTag": "worktree",
+  "infoBox.conflicts": "{count} conflicts",
+  "infoBox.tokensUsed": "{tokens} tokens",
+  "infoBox.claimedSummary": "in progress",
+  "infoBox.openSummary": "open",
+  "infoBox.doneSummary": "done",
 
   "experiments.smartSort": "Smart ordering",
   "experiments.smartSortDesc":
@@ -206,6 +213,11 @@ export const EN_MESSAGES = {
   "experiments.whip": "Whip",
   "experiments.whipDesc":
     "Puts a whip in the titlebar. Throw it, flick it, click to let go. It cracks and it makes a noise, and it reaches no terminal: nothing is sent, nothing is interrupted.",
+  "experiments.whipSound": "Crack",
+  "experiments.whipSoundSynth": "Synth",
+  "experiments.whipSoundMeme": "Sampled",
+  "experiments.whipSoundDesc":
+    "Pick one to hear it. The synth is built on the spot and downloads nothing; the sample is a 27 KB file, fetched the first time you ask for it and never before.",
   "titlebar.whip": "Crack the whip",
   "titlebar.whipDrop": "Drop the whip",
 
@@ -391,10 +403,8 @@ export const EN_MESSAGES = {
   "project.changedFiles": "{count} changed",
   "project.aheadBehind": "{ahead} ahead, {behind} behind",
   "project.todos": "Todos",
-  "project.noTodos": "Nothing on the list.",
   "project.addTodo": "Add a todo…",
   "project.awaitingYou": "{count} waiting for you to confirm",
-  "project.andMore": "and {count} more",
   "project.repoAt": "repository at {path}",
   "project.scratchNotice": "Temporary. Nothing here is a project yet.",
   "project.agents": "Agent access (MCP)",
@@ -1030,6 +1040,7 @@ export const EN_MESSAGES = {
   "panes.kindEditor": "Editor",
   "panes.needProject": "Pick a project first: a pane belongs to one.",
   "panes.groupFull": "This group already holds {count} panes.",
+  "panes.openedOffScreen": "{agent} opened {pane} beside its own terminal",
   "panes.openGit": "Show git",
   "panes.openExplorer": "Show the files",
   "panes.openTodo": "Show the todo list",

@@ -276,12 +276,18 @@ class PaneStore {
    * keyboard, the palette, the pane header's own button, and the MCP verb an
    * agent calls to show what it just did. Returns the new pane's id, or null
    * when the group is full or the target is gone.
+   *
+   * `focus` is what the agent path turns off. A user who opened a pane meant to
+   * work in it; an agent that opened one is showing something to somebody who
+   * is in the middle of a sentence in the terminal beside it, and taking the
+   * keyboard off them to do it is the same theft as switching the view.
    */
   openBeside(
     targetPaneId: string,
     content: PaneContent,
     side: DropSide = "right",
     ratio = 0.35,
+    focus = true,
   ): string | null {
     const group = this.groupOf(targetPaneId);
     if (!group) return null;
@@ -291,7 +297,7 @@ class PaneStore {
     // panels and hit the pane cap.
     const existing = findContent(group.root, (c) => sameContent(c, content));
     if (existing) {
-      group.focusedPaneId = existing.paneId;
+      if (focus) group.focusedPaneId = existing.paneId;
       this.saveSoon();
       return existing.paneId;
     }
@@ -313,7 +319,7 @@ class PaneStore {
     );
     if (!next) return null;
     group.root = next;
-    group.focusedPaneId = paneId;
+    if (focus) group.focusedPaneId = paneId;
     this.saveSoon();
     return paneId;
   }

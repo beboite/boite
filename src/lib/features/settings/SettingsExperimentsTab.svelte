@@ -2,7 +2,7 @@
   import { settings } from "$lib/features/settings/store.svelte";
   import ToggleSetting from "$lib/shared/components/ToggleSetting.svelte";
   import { t, type MessageKey } from "$lib/i18n/index.svelte";
-  import type { SmartSortBy, SortDirection } from "$lib/types";
+  import type { SmartSortBy, SortDirection, WhipSound } from "$lib/types";
 
   const SORT_MODES: { id: SmartSortBy; labelKey: MessageKey }[] = [
     { id: "manual", labelKey: "experiments.smartSortManual" },
@@ -15,12 +15,31 @@
     { id: "desc", labelKey: "experiments.smartSortDescending" },
   ];
 
+  const WHIP_SOUNDS: { id: WhipSound; labelKey: MessageKey }[] = [
+    { id: "synth", labelKey: "experiments.whipSoundSynth" },
+    { id: "meme", labelKey: "experiments.whipSoundMeme" },
+  ];
+
   const RADIO =
     "rounded-md border px-3 py-1 text-xs transition border-border bg-[var(--color-surface-2)] text-muted-foreground hover:border-foreground/30 hover:text-foreground";
   const RADIO_ON =
     "rounded-md border px-3 py-1 text-xs transition border-foreground/40 bg-[var(--color-surface-3)] text-foreground";
 
   const sortManual = $derived(settings.state.smartSortBy === "manual");
+
+  /**
+   * Cracks once so the choice is audible.
+   *
+   * The module is imported here rather than at the top so the settings chunk
+   * does not carry the whip's audio for the pages that never open this row, and
+   * the sample is awaited: previewing `meme` and hearing the synth because the
+   * fetch had not landed is the one thing this button must not do.
+   */
+  async function playPreview(sound: WhipSound) {
+    const { playCrack, primeCrackSound } = await import("$lib/features/whip/crack");
+    await primeCrackSound(sound);
+    playCrack(sound);
+  }
 </script>
 
 <p class="px-3 text-sm text-muted-foreground">{t("experiments.intro")}</p>
@@ -99,6 +118,38 @@
   enabled={settings.state.experimentWhip}
   onToggle={() => settings.setExperimentWhip(!settings.state.experimentWhip)}
 />
+
+{#if settings.state.experimentWhip}
+  <div class="flex flex-col gap-1 pl-3">
+    <div
+      class="flex flex-wrap items-center gap-1.5"
+      role="radiogroup"
+      aria-label={t("experiments.whipSound")}
+    >
+      <span class="w-20 shrink-0 text-xs text-muted-foreground">
+        {t("experiments.whipSound")}
+      </span>
+      {#each WHIP_SOUNDS as sound (sound.id)}
+        <button
+          type="button"
+          role="radio"
+          aria-checked={settings.state.whipSound === sound.id}
+          class={settings.state.whipSound === sound.id ? RADIO_ON : RADIO}
+          onclick={() => {
+            settings.setWhipSound(sound.id);
+            // The click is the gesture that unlocks audio, so picking a noise
+            // is also the only honest way to hear it: a label cannot say what
+            // a crack sounds like.
+            void playPreview(sound.id);
+          }}
+        >
+          {t(sound.labelKey)}
+        </button>
+      {/each}
+    </div>
+    <p class="text-xs text-muted-foreground">{t("experiments.whipSoundDesc")}</p>
+  </div>
+{/if}
 
 <ToggleSetting
   label={t("experiments.sidebarDesign")} anchor="experiments.sidebarDesign"

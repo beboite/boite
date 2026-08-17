@@ -4,7 +4,7 @@ import type { PageState } from "$lib/features/browser/state.svelte";
 
 function screen(
   at: number,
-  panes: Array<{ id: string; w: number; url?: string; page?: PageState }>,
+  panes: Array<{ id: string; w: number; url?: string; page?: PageState; visible?: boolean }>,
 ): Screen {
   return {
     at,
@@ -20,6 +20,7 @@ function screen(
       drivenBy: null,
       rect: { x: 0, y: 0, w: p.w, h: 600 },
       focused: false,
+      visible: p.visible ?? true,
     })),
     overlays: [],
   };
@@ -87,6 +88,21 @@ describe("what the window bothers to say again", () => {
     expect(
       worthSending(last, screen(1100, [
         { id: "b", w: 640, url: "http://localhost:2/", page: "loaded" },
+      ])),
+    ).toBe(true);
+  });
+
+  /**
+   * The user moving to another thread takes an agent's pane off the screen
+   * without changing anything about the pane, and the agent asking for a
+   * screenshot has to be told before it acts on somebody else's pixels.
+   */
+  it("says it when a pane stops being the one on screen", () => {
+    const first = screen(1000, [{ id: "b", w: 640, url: "http://localhost:1/", page: "loaded" }]);
+    const last = { shape: shape(first), at: first.at };
+    expect(
+      worthSending(last, screen(1100, [
+        { id: "b", w: 640, url: "http://localhost:1/", page: "loaded", visible: false },
       ])),
     ).toBe(true);
   });

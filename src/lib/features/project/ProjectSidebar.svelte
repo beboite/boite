@@ -23,7 +23,7 @@
   import { refreshProjectIcon } from "$lib/features/project/api";
   import { openProjectDashboard } from "$lib/features/project/dashboard";
   import { isScratch } from "$lib/domain/project";
-import { projectDisplayName } from "$lib/shared/project-label";
+  import { projectDisplayName } from "$lib/shared/project-label";
   import { filterSidebar, normaliseTerm } from "./sidebar-filter";
   import SearchIcon from "@lucide/svelte/icons/search";
   import ThreadGlyph from "$lib/features/thread/ThreadGlyph.svelte";
@@ -44,6 +44,7 @@ import { projectDisplayName } from "$lib/shared/project-label";
   import type { ContextMenuItem } from "$lib/shared/components/ContextMenu.svelte";
   import { viewportHeight } from "$lib/shared/keyboard/overlay";
   import {
+    dragShiftStyle,
     dropIntent,
     hasBecomeADrag,
     reordered,
@@ -65,7 +66,7 @@ import { projectDisplayName } from "$lib/shared/project-label";
   import FolderUp from "@lucide/svelte/icons/folder-up";
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
-  import { canSettle, countSettled, isSettled } from "$lib/domain/thread-settle";
+  import { canSettle, isSettled, splitSettled } from "$lib/domain/thread-settle";
   import ShortcutBar from "$lib/features/shortcut/ShortcutBar.svelte";
   import { t } from "$lib/i18n/index.svelte";
 
@@ -306,7 +307,10 @@ import { projectDisplayName } from "$lib/shared/project-label";
     const sel =
       drag.kind === "project"
         ? "[data-project-row]"
-        : `[data-thread-row][data-project-id="${drag.projectId}"]`;
+        : // The live list only. The drawer under it draws the same
+          // data-thread-row cards, and counting those would put a reorder
+          // slot in the pile the user has just put away.
+          `[data-thread-list][data-project-id="${drag.projectId}"] [data-thread-row]`;
     const rows = Array.from(document.querySelectorAll<HTMLElement>(sel));
     const snaps: RowSnapshot[] = rows.map((el) => {
       const r = el.getBoundingClientRect();
@@ -1016,36 +1020,41 @@ import { projectDisplayName } from "$lib/shared/project-label";
   const filtering = $derived(normaliseTerm(filterTerm).length > 0);
 
   /**
-   * What each project draws, once the filter has had its say.
+   * What each project draws in its live list, once the filter has had its say.
    *
    * Built on top of what the filter left rather than beside it: the term
    * narrows which rows exist at all, and this hands each project the survivors
-   * that belong to it.
+   * that belong to it. Settled rows stay out of this map even while the drawer
+   * is open, so a reorder slot is an index into the live list alone.
    */
   const threadsByProject = $derived.by(() => {
     const map = new Map<string, Thread[]>();
     for (const p of visibleProjects) {
-      const all = filtered.threads.get(p.id) ?? [];
-      map.set(
-        p.id,
-        settledOpen[p.id] ? all : all.filter((thread) => !isSettled(thread)),
-      );
+      map.set(p.id, splitSettled(filtered.threads.get(p.id) ?? []).live);
     }
     return map;
   });
 
   /**
-   * How many rows each project is keeping out of the way, for the toggle that
-   * reveals them.
+   * The rows each project is keeping out of the way, for the drawer under the
+   * live list.
    *
    * Counted against what the filter left rather than against every thread the
    * project has: a term that matches nothing settled should not offer to show
    * threads it has already excluded.
    */
+  const settledThreadsByProject = $derived.by(() => {
+    const map = new Map<string, Thread[]>();
+    for (const p of visibleProjects) {
+      map.set(p.id, splitSettled(filtered.threads.get(p.id) ?? []).settled);
+    }
+    return map;
+  });
+
   const settledByProject = $derived.by(() => {
     const map = new Map<string, number>();
-    for (const p of visibleProjects) {
-      map.set(p.id, countSettled(filtered.threads.get(p.id) ?? []));
+    for (const [id, list] of settledThreadsByProject) {
+      map.set(id, list.length);
     }
     return map;
   });
@@ -1258,6 +1267,12 @@ import { projectDisplayName } from "$lib/shared/project-label";
         liveDrag && liveDrag.kind === "project" && liveDrag.slotIndex !== null && projectSourceIdx >= 0
           ? rowShift(projectIdx, projectSourceIdx, liveDrag.slotIndex, liveDrag.sourceHeight)
           : 0}
+      {@const projectSlide = dragShiftStyle(
+        liveDrag?.kind === "project",
+        isProjectSource,
+        projectShiftY,
+        `translate(0px, ${dragOffset}px) scale(1.015)`,
+      )}
       <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
       <div
         class="project-block group/block mb-2"
@@ -1274,10 +1289,8 @@ import { projectDisplayName } from "$lib/shared/project-label";
           ? workspace.info.color || "var(--color-success)"
           : undefined}
         data-project-row={project.id}
-        style:transform={isProjectSource
-          ? `translate(0px, ${dragOffset}px) scale(1.015)`
-          : `translateY(${projectShiftY}px)`}
-        style:transition={isProjectSource ? "none" : "transform 180ms cubic-bezier(0.22, 1, 0.36, 1)"}
+        style:transform={projectSlide.transform}
+        style:transition={projectSlide.transition}
         style:z-index={isProjectSource ? 50 : "auto"}
         onpointerdown={(e) => projectPointerDown(project.id, e)}
         role="listitem"
@@ -1399,32 +1412,33 @@ import { projectDisplayName } from "$lib/shared/project-label";
           {/if}
         </div>
 
-        {#if !showArchived && (threadsByProject.get(project.id) ?? []).length > 0}
-          {@const threads = threadsByProject.get(project.id) ?? []}
+        {#if !showArchived}
+          {@const live = threadsByProject.get(project.id) ?? []}
+          {@const settledCount = settledByProject.get(project.id) ?? 0}
+          {@const open = settledOpen[project.id] === true}
+          {@const settled = open
+            ? (settledThreadsByProject.get(project.id) ?? [])
+            : []}
           {@const dragInThisProject =
             liveDrag?.kind === "thread" && liveDrag.projectId === project.id}
-          <!-- No rail down the left any more: the card's own outline is what
-               says these threads belong to this project, and a dashed line
-               inside a box is the same statement made twice. -->
-          <!-- A hairline is enough between flat cards and too little between lit
-               ones: a halo would land on its neighbour and two rows would read
-               as one blur. 4px, not the 6px this design first took: the halo is
-               now `0 0 12px -3px`, which is a nine-pixel bloom rather than a
-               thirteen-pixel one, and every pixel of gap is a thread the
-               sidebar stops showing. -->
-          <ul
-            class="px-1 pb-1 {glowDesign ? 'space-y-1' : 'space-y-px'}"
-            data-thread-list
-            data-project-id={project.id}
-          >
-            {#each threads as thread, threadIdx (thread.id)}
+          {@const rowGapClass = glowDesign ? "space-y-1" : "space-y-px"}
+          <!-- The row used to live inline in the live list. It is a snippet
+               now because the drawer draws the same card under the cut, and
+               two copies of this markup is how they would drift. -->
+          {#snippet threadItem(thread: Thread, threadIdx: number, reorderable: boolean)}
               {@const isThreadSource = liveDrag?.kind === "thread" && liveDrag.id === thread.id}
               {@const isActive =
                 app.activeThreadId === thread.id && app.view === "terminal"}
               {@const shiftY =
-                dragInThisProject && liveDrag.slotIndex !== null && threadSourceIdx >= 0
+                reorderable && dragInThisProject && liveDrag.slotIndex !== null && threadSourceIdx >= 0
                   ? rowShift(threadIdx, threadSourceIdx, liveDrag.slotIndex, liveDrag.sourceHeight)
                   : 0}
+              {@const threadSlide = dragShiftStyle(
+                dragInThisProject,
+                isThreadSource,
+                shiftY,
+                "none",
+              )}
               {@const keepAwake = (thread.keepAwake ?? false) && !!thread.ptyId}
               {@const visual = threadVisual({
                 status: displayThreadStatus(thread),
@@ -1432,26 +1446,22 @@ import { projectDisplayName } from "$lib/shared/project-label";
                 keepAwake,
               })}
               {@const fresh = justFinished(thread.id)}
-              <!-- Ctrl+1..9 only ever meant the current project's threads, so
-                   that is the only list numbered. Numbering every project would
-                   put four rows labelled 1 on screen at once, three of which do
-                   nothing. -->
+              <!-- Ctrl+1..9 only ever meant the current project's live
+                   threads. Numbering the drawer would put two rows labelled 1
+                   on screen, and numbering every project would put four. -->
               {@const digit =
-                jumpModifier.down && project.id === app.currentProjectId
+                reorderable && jumpModifier.down && project.id === app.currentProjectId
                   ? jumpDigit(threadIdx)
                   : null}
               <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
               <li
                 class="thread-row group/thread"
-                class:settled-away={isSettled(thread)}
                 class:source={isThreadSource}
                 data-thread-row={thread.id}
                 data-thread-id={thread.id}
                 data-project-id={thread.projectId}
-                style:transform={isThreadSource
-                  ? "none"
-                  : `translateY(${shiftY}px)`}
-                style:transition={isThreadSource ? "none" : "transform 180ms cubic-bezier(0.22, 1, 0.36, 1)"}
+                style:transform={threadSlide.transform}
+                style:transition={threadSlide.transition}
                 style:z-index={isThreadSource ? 50 : "auto"}
                 onpointerdown={(e) => threadPointerDown(thread, e)}
                 onmouseenter={() => threadHoverEnter(thread.id)}
@@ -1595,39 +1605,70 @@ import { projectDisplayName } from "$lib/shared/project-label";
                   </button>
                 </div>
               </li>
-            {/each}
-          </ul>
-        {/if}
+          {/snippet}
 
-        <!-- The way to see what was put away, on the card that holds it. Offered
-             only when this project has something settled, and it stays offered
-             while the drawer is open so the way back is where the way in was.
-             A count rather than a list of names: the question it answers is
-             "is there anything still in there", and the names are one click
-             away. -->
-        {#if !showArchived && (settledByProject.get(project.id) ?? 0) > 0}
-          {@const settledCount = settledByProject.get(project.id) ?? 0}
-          {@const open = settledOpen[project.id] === true}
-          <div class="px-1 pb-1">
-            <button
-              type="button"
-              data-drag-block
-              class="flex w-full items-center gap-1 rounded-sm px-1.5 py-0.5 text-2xs text-muted-foreground/70 transition hover:bg-accent/40 hover:text-foreground"
-              class:text-foreground={open}
-              onclick={(e) => {
-                e.stopPropagation();
-                if (open) delete settledOpen[project.id];
-                else settledOpen[project.id] = true;
-              }}
-              aria-expanded={open}
-              title={open ? t("sidebar.hideSettled") : t("sidebar.showSettled")}
+          <!-- No rail down the left any more: the card's own outline is what
+               says these threads belong to this project, and a dashed line
+               inside a box is the same statement made twice. -->
+          <!-- A hairline is enough between flat cards and too little between lit
+               ones: a halo would land on its neighbour and two rows would read
+               as one blur. 4px, not the 6px this design first took: the halo is
+               now `0 0 12px -3px`, which is a nine-pixel bloom rather than a
+               thirteen-pixel one, and every pixel of gap is a thread the
+               sidebar stops showing. -->
+          {#if live.length > 0}
+            <ul
+              class="px-1 {settledCount > 0 ? 'pb-0.5' : 'pb-1'} {rowGapClass}"
+              data-thread-list
+              data-project-id={project.id}
             >
-              <ChevronRight
-                class="size-3 shrink-0 transition-transform {open ? 'rotate-90' : ''}"
-              />
-              {t("sidebar.settledCount", { count: String(settledCount) })}
-            </button>
-          </div>
+              {#each live as thread, threadIdx (thread.id)}
+                {@render threadItem(thread, threadIdx, true)}
+              {/each}
+            </ul>
+          {/if}
+
+          <!-- The cut between the two piles. It used to sit under the whole
+               list, so opening the drawer inserted the settled rows above the
+               toggle and the line between live and put-away vanished. The
+               toggle is the cut now, and the names grow under it. Offered
+               only when this project has something settled, and it stays
+               offered while the drawer is open so the way back is where the
+               way in was. -->
+          {#if settledCount > 0}
+            <div
+              class="settled-drawer mx-1 mb-1"
+              class:open
+              id={`settled-${project.id}`}
+            >
+              <button
+                type="button"
+                data-drag-block
+                class="flex w-full items-center gap-1 rounded-sm px-1.5 py-1 text-2xs text-muted-foreground transition hover:bg-accent/40 hover:text-foreground"
+                class:text-foreground={open}
+                onclick={(e) => {
+                  e.stopPropagation();
+                  if (open) delete settledOpen[project.id];
+                  else settledOpen[project.id] = true;
+                }}
+                aria-expanded={open}
+                aria-controls={`settled-${project.id}`}
+                title={open ? t("sidebar.hideSettled") : t("sidebar.showSettled")}
+              >
+                <ChevronRight
+                  class="size-3 shrink-0 transition-transform {open ? 'rotate-90' : ''}"
+                />
+                {t("sidebar.settledCount", { count: String(settledCount) })}
+              </button>
+              {#if open}
+                <ul class="px-0.5 pb-0.5 {rowGapClass}">
+                  {#each settled as thread, threadIdx (thread.id)}
+                    {@render threadItem(thread, threadIdx, false)}
+                  {/each}
+                </ul>
+              {/if}
+            </div>
+          {/if}
         {/if}
 
       </div>
@@ -1809,35 +1850,47 @@ import { projectDisplayName } from "$lib/shared/project-label";
     background: var(--color-surface-2);
   }
 
-  /* Temporary, and it has to look it. Faded so it sits behind the real
-     projects, hatched so a screenshot still says so, and on the block rather
-     than the row so the threads underneath are inside the same crossed-out
-     card. It lifts under the pointer: a row you are about to click has to be
+  /* Temporary, and it has to look it. Hatched so a screenshot still says so,
+     and on the block rather than the row so the threads underneath are inside
+     the same crossed-out card. The fade is on the rows, not the block: opacity
+     on this element made the whole card one compositor layer, and every thread
+     row inside used to carry a rest-state translateY(0) as well. Those nested
+     layers were evicted after the card sat off screen at the bottom of a long
+     sidebar. Scrolling back painted the hatch first and the threads a status
+     tick later.
+
+     It lifts under the pointer: a row you are about to click has to be
      readable, and this is still the way into a scratch terminal. */
   .project-block.scratch-block {
-    opacity: 0.6;
     border-style: dashed;
     background-image: repeating-linear-gradient(
       135deg,
       transparent 0 5px,
       color-mix(in srgb, var(--color-foreground) 7%, transparent) 5px 6px
     );
+  }
+  .project-block.scratch-block .project-row,
+  .project-block.scratch-block .thread-card {
+    opacity: 0.6;
     transition: opacity 140ms ease;
   }
-  .project-block.scratch-block:hover {
+  .project-block.scratch-block:hover .project-row,
+  .project-block.scratch-block:hover .thread-card {
     opacity: 0.9;
   }
   .thread-row {
     transform-origin: left center;
   }
-  /* Faded rather than restyled: a row in the drawer is the same thread it was,
-     and the drawer it is in already says it was put away. Full opacity back on
-     hover, because reading one is what the drawer is opened for. */
-  .thread-row.settled-away > .thread-card {
-    opacity: 0.55;
+  /* A well under the live list, not a faded copy of the same rows. The cut
+     is the well's top edge, so opening grows down from the toggle instead of
+     inserting names above it. */
+  .settled-drawer {
+    border-top: 1px solid var(--color-border);
+    border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+    background: color-mix(in srgb, var(--color-foreground) 5%, transparent);
   }
-  .thread-row.settled-away > .thread-card:hover {
-    opacity: 1;
+  .settled-drawer.open {
+    background: color-mix(in srgb, var(--color-foreground) 7%, transparent);
   }
   .project-row,
   .thread-card {

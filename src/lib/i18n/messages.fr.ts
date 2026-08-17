@@ -192,6 +192,13 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "infoBox.claimedTitle": "Attribué à {agent}",
   "infoBox.claimedTag": "à valider",
   "infoBox.moreClaimed": "+{count}",
+  "infoBox.openTag": "à faire",
+  "infoBox.worktreeTag": "worktree",
+  "infoBox.conflicts": "{count} conflits",
+  "infoBox.tokensUsed": "{tokens} tokens",
+  "infoBox.claimedSummary": "en cours",
+  "infoBox.openSummary": "à faire",
+  "infoBox.doneSummary": "terminées",
 
   "experiments.smartSort": "Rangement intelligent",
   "experiments.smartSortDesc":
@@ -208,6 +215,11 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "experiments.whip": "Fouet",
   "experiments.whipDesc":
     "Met un fouet dans la barre de titre. On le lance, on le claque, un clic le lâche. Il claque et il fait du bruit, et il n'atteint aucun terminal : rien n'est envoyé, rien n'est interrompu.",
+  "experiments.whipSound": "Claquement",
+  "experiments.whipSoundSynth": "Synthèse",
+  "experiments.whipSoundMeme": "Échantillon",
+  "experiments.whipSoundDesc":
+    "Choisissez-en un pour l'entendre. La synthèse est fabriquée à la volée et ne télécharge rien ; l'échantillon est un fichier de 27 Ko, récupéré la première fois que vous le demandez et jamais avant.",
   "titlebar.whip": "Claquer le fouet",
   "titlebar.whipDrop": "Lâcher le fouet",
 
@@ -399,10 +411,8 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "project.changedFiles": "{count} modifiés",
   "project.aheadBehind": "{ahead} en avance, {behind} en retard",
   "project.todos": "Todos",
-  "project.noTodos": "Rien sur la liste.",
   "project.addTodo": "Ajouter un todo…",
   "project.awaitingYou": "{count} en attente de votre confirmation",
-  "project.andMore": "et {count} de plus",
   "project.repoAt": "dépôt dans {path}",
   "project.scratchNotice": "Temporaire. Rien ici n'est encore un projet.",
   "project.agents": "Accès agent (MCP)",
@@ -1022,6 +1032,7 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "panes.kindEditor": "Éditeur",
   "panes.needProject": "Choisissez d'abord un projet : un pane appartient à un projet.",
   "panes.groupFull": "Ce groupe contient déjà {count} panes.",
+  "panes.openedOffScreen": "{agent} a ouvert {pane} à côté de son terminal",
   "panes.openGit": "Afficher git",
   "panes.openExplorer": "Afficher les fichiers",
   "panes.openTodo": "Afficher la liste todo",
