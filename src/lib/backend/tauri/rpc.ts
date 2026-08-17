@@ -10,8 +10,6 @@ import type {
   ExplorerApi,
   FastpickApi,
   FastpickListing,
-  PluginApi,
-  PluginStatus,
   FolderState,
   GitApi,
   LiveClaudeSession,
@@ -167,18 +165,6 @@ export const tauriFastpick: FastpickApi = {
     return JSON.parse(raw) as FastpickListing;
   },
   version: () => invoke<string | null>("fastpick_version"),
-};
-
-export const tauriPlugin: PluginApi = {
-  async status(kind) {
-    const raw = await invoke<string>("plugin_status", { kind });
-    return JSON.parse(raw) as PluginStatus;
-  },
-  async switchTo(kind, who) {
-    const raw = await invoke<string>("plugin_switch", { kind, who: who ?? null });
-    return JSON.parse(raw) as PluginStatus;
-  },
-  version: (kind) => invoke<string | null>("plugin_version", { kind }),
 };
 
 export const tauriScope: ScopeApi = {

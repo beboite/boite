@@ -225,36 +225,3 @@ pub async fn fastpick_list(
 pub async fn fastpick_version(scope: State<'_, ProjectRoots>) -> Result<Value, String> {
     on_bus(scope.inner(), Sessions::FastpickVersion.into()).await
 }
-
-#[tauri::command]
-pub async fn plugin_status(
-    scope: State<'_, ProjectRoots>,
-    kind: String,
-) -> Result<Value, String> {
-    on_bus(scope.inner(), Sessions::PluginStatus { kind }.into()).await
-}
-
-#[tauri::command]
-pub async fn plugin_switch(
-    scope: State<'_, ProjectRoots>,
-    kind: String,
-    who: Option<String>,
-) -> Result<Value, String> {
-    on_bus(
-        scope.inner(),
-        Sessions::PluginSwitch {
-            kind,
-            who: who.unwrap_or_else(|| "next".into()),
-        }
-        .into(),
-    )
-    .await
-}
-
-#[tauri::command]
-pub async fn plugin_version(
-    scope: State<'_, ProjectRoots>,
-    kind: String,
-) -> Result<Value, String> {
-    on_bus(scope.inner(), Sessions::PluginVersion { kind }.into()).await
-}
