@@ -1,6 +1,5 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { settings } from "$lib/features/settings/store.svelte";
   import { fastpick } from "$lib/features/fastpick/store.svelte";
   import { installer } from "$lib/features/fastpick/installer.svelte";
   import {
@@ -11,14 +10,15 @@
   } from "$lib/features/fastpick/install";
   import { notifications } from "$lib/features/notifications/store.svelte";
   import SettingsCard from "$lib/shared/components/SettingsCard.svelte";
-  import ToggleSetting from "$lib/shared/components/ToggleSetting.svelte";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import Download from "@lucide/svelte/icons/download";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import Square from "@lucide/svelte/icons/square";
   import RotateCw from "@lucide/svelte/icons/rotate-cw";
   import Copy from "@lucide/svelte/icons/copy";
-  import { t } from "$lib/i18n/index.svelte";
+  import { t, type MessageKey } from "$lib/i18n/index.svelte";
+
+  let { anchor }: { anchor: MessageKey } = $props();
 
   const installed = $derived(fastpick.installed === true);
   const cargoMissing = $derived(fastpick.cargoPresent === false);
@@ -101,7 +101,7 @@
   });
 </script>
 
-<SettingsCard title={t("fastpick.settingsTitle")} anchor="fastpick.settingsTitle" description={t("fastpick.settingsDesc")}>
+<SettingsCard title={t("fastpick.settingsTitle")} {anchor} description={t("fastpick.settingsDesc")}>
   {#snippet actions()}
     <button
       type="button"
@@ -234,10 +234,3 @@
   {/if}
   <p class="pt-0.5 text-xs text-muted-foreground/60">{FASTPICK_REPO}</p>
 </SettingsCard>
-
-<ToggleSetting
-  label={t("fastpick.enable")} anchor="fastpick.enable"
-  description={t("fastpick.enableDesc")}
-  enabled={settings.state.fastpickEnabled}
-  onToggle={() => settings.setFastpickEnabled(!settings.state.fastpickEnabled)}
-/>
