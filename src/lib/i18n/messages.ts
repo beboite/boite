@@ -190,6 +190,9 @@ export const EN_MESSAGES = {
   "infoBox.claimedTitle": "Claimed by {agent}",
   "infoBox.claimedTag": "to confirm",
   "infoBox.moreClaimed": "+{count}",
+  "infoBox.collapse": "Collapse",
+  "infoBox.expand": "Expand",
+  "infoBox.drag": "Move",
 
   "experiments.smartSort": "Smart ordering",
   "experiments.smartSortDesc":

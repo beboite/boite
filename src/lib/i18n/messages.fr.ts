@@ -192,6 +192,9 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "infoBox.claimedTitle": "Attribué à {agent}",
   "infoBox.claimedTag": "à valider",
   "infoBox.moreClaimed": "+{count}",
+  "infoBox.collapse": "Replier",
+  "infoBox.expand": "Déplier",
+  "infoBox.drag": "Déplacer",
 
   "experiments.smartSort": "Rangement intelligent",
   "experiments.smartSortDesc":
