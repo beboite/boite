@@ -18,7 +18,7 @@ use super::{
     opt_str_param, str_list, str_param, u32_param, value_of, Command, Host, Ready, Wire,
 };
 use crate::capability::Capability;
-use crate::{fastpick, plugin, session, shell, transcript, usage};
+use crate::{fastpick, session, shell, transcript, usage};
 
 /// Every method in this domain, in the order they appear below.
 pub const ALL_METHODS: &[&str] = &[
@@ -34,9 +34,6 @@ pub const ALL_METHODS: &[&str] = &[
     "shell.commandExists",
     "fastpick.list",
     "fastpick.version",
-    "plugin.status",
-    "plugin.switch",
-    "plugin.version",
     "session.transcript",
 ];
 
@@ -106,12 +103,6 @@ pub enum Sessions {
     /// Null means no fastpick here, which is a state the settings panel draws
     /// rather than an error it reports.
     FastpickVersion,
-    /// An account-switcher CLI's `status --json`, passed through as a string.
-    PluginStatus { kind: String },
-    /// Tell that CLI to flip. `who` is `next` or an id the status document named.
-    PluginSwitch { kind: String, who: String },
-    /// Null means that switcher is not on this machine.
-    PluginVersion { kind: String },
     /// What a terminal printed, as text, from the end.
     ///
     /// The question anybody actually has is what it was doing when it stopped,
@@ -176,16 +167,6 @@ impl Sessions {
                 refresh: super::bool_param(params, "refresh", false),
             },
             "fastpick.version" => Sessions::FastpickVersion,
-            "plugin.status" => Sessions::PluginStatus {
-                kind: str_param(params, "kind")?,
-            },
-            "plugin.switch" => Sessions::PluginSwitch {
-                kind: str_param(params, "kind")?,
-                who: opt_str_param(params, "who").unwrap_or_else(|| "next".into()),
-            },
-            "plugin.version" => Sessions::PluginVersion {
-                kind: str_param(params, "kind")?,
-            },
             "session.transcript" => Sessions::Transcript {
                 thread_id: str_param(params, "threadId")?,
                 // A terminal prints more in a minute than anybody reads, and
@@ -211,9 +192,6 @@ impl Sessions {
             Sessions::CommandExists { .. } => "shell.commandExists",
             Sessions::FastpickList { .. } => "fastpick.list",
             Sessions::FastpickVersion => "fastpick.version",
-            Sessions::PluginStatus { .. } => "plugin.status",
-            Sessions::PluginSwitch { .. } => "plugin.switch",
-            Sessions::PluginVersion { .. } => "plugin.version",
             Sessions::Transcript { .. } => "session.transcript",
         }
     }
@@ -232,8 +210,6 @@ impl Sessions {
             Sessions::CommandExists { .. } => Wire::Key("found"),
             Sessions::FastpickList { .. } => Wire::Key("json"),
             Sessions::FastpickVersion => Wire::Key("version"),
-            Sessions::PluginStatus { .. } | Sessions::PluginSwitch { .. } => Wire::Key("json"),
-            Sessions::PluginVersion { .. } => Wire::Key("version"),
             Sessions::Transcript { .. } => Wire::Key("text"),
         }
     }
@@ -256,13 +232,9 @@ impl Sessions {
             | Sessions::CommandExists { .. }
             | Sessions::FastpickList { .. }
             | Sessions::FastpickVersion
-            | Sessions::PluginStatus { .. }
-            | Sessions::PluginVersion { .. }
             | Sessions::Transcript { .. } => Capability::ReadProject,
 
-            Sessions::StopClaude { .. }
-            | Sessions::Migrate { .. }
-            | Sessions::PluginSwitch { .. } => Capability::MutateProject,
+            Sessions::StopClaude { .. } | Sessions::Migrate { .. } => Capability::MutateProject,
         }
     }
 
@@ -379,15 +351,6 @@ impl Sessions {
                 value_of(fastpick::list_blocking(provider, refresh)?)
             }
             Sessions::FastpickVersion => value_of(fastpick::version_blocking()),
-            Sessions::PluginStatus { kind } => {
-                value_of(plugin::status_blocking(plugin::Kind::parse(&kind)?)?)
-            }
-            Sessions::PluginSwitch { kind, who } => {
-                value_of(plugin::switch_blocking(plugin::Kind::parse(&kind)?, &who)?)
-            }
-            Sessions::PluginVersion { kind } => {
-                value_of(plugin::version_blocking(plugin::Kind::parse(&kind)?))
-            }
             Sessions::Transcript {
                 thread_id,
                 bytes,
