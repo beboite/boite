@@ -1032,6 +1032,7 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "panes.kindEditor": "Éditeur",
   "panes.needProject": "Choisissez d'abord un projet : un pane appartient à un projet.",
   "panes.groupFull": "Ce groupe contient déjà {count} panes.",
+  "panes.openedOffScreen": "{agent} a ouvert {pane} à côté de son terminal",
   "panes.openGit": "Afficher git",
   "panes.openExplorer": "Afficher les fichiers",
   "panes.openTodo": "Afficher la liste todo",

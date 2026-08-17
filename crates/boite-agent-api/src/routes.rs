@@ -1100,21 +1100,16 @@ const NOT_YOURS: &str = "the user has taken that pane back, so it is theirs to p
 
 /// The window's description, or the sentence saying why there is none to read.
 ///
-/// The project check is the same rule the device applies to `pane.open`: a
-/// window is showing one project's group at a time, and an agent in another one
-/// asking about "the browser pane" is asking about somebody else's screen.
-fn window_showing(
-    workspace: &dyn Workspace,
-    caller: &Caller,
-) -> Result<boite_core::screen::Screen, String> {
-    let screen = workspace.on_screen().ok_or(NO_WINDOW_TO_LOOK_AT)?;
-    if screen.project_id != caller.project_id {
-        return Err(
-            "the window is showing another project right now, so none of your panes are on it"
-                .to_string(),
-        );
-    }
-    Ok(screen)
+/// **Not scoped to the project the window happens to be showing.** It was, and
+/// that made a pane an agent owned unreachable for as long as the user was
+/// reading another project: every browser tool answered "the window is showing
+/// another project right now", including for the agent that had just opened the
+/// pane. The window mounts every group at once, so that pane is loaded, driven
+/// and answering the whole time. Where the user is looking says nothing about
+/// whose pane it is. [`which_pane`] holds the rule that does: the mark the pane
+/// carries, and nothing else.
+fn window_showing(workspace: &dyn Workspace) -> Result<boite_core::screen::Screen, String> {
+    workspace.on_screen().ok_or(NO_WINDOW_TO_LOOK_AT.to_string())
 }
 
 /// Which pane the call meant, settled against what the window says is on it.
@@ -1123,6 +1118,13 @@ fn window_showing(
 /// nothing to point, an id that is not there, and one it is not allowed to
 /// point. All three are sentences: this runs while the agent is still alive to
 /// read one.
+///
+/// **Naming nothing means the caller's own pane**, not the only pane on the
+/// window. The description carries every group's panes, so an agent working
+/// beside a user who has two other pages framed would otherwise be told to pick
+/// between panes it does not own and cannot touch. It still picks between its
+/// own two, which is a real ambiguity: they are usually a dev server and a docs
+/// page, and guessing is guessing at the user's screen.
 fn which_pane(
     screen: &boite_core::screen::Screen,
     caller: &Caller,
@@ -1134,25 +1136,37 @@ fn which_pane(
             "no browser pane is open; pane_open kind=browser url=<address> opens one".to_string(),
         );
     }
-    let mine = caller.thread_or_empty();
-    let pane = match asked.filter(|id| !id.is_empty()) {
-        Some(id) => panes
-            .iter()
-            .find(|p| p.id == id)
-            .ok_or_else(|| format!("no browser pane called '{id}'; browser_status lists them"))?,
-        None if panes.len() == 1 => panes[0],
-        // Picking one would be picking the user's screen for them, and the two
-        // panes are usually a dev server and a docs page.
-        None => {
-            return Err(format!(
-                "{} browser panes are open; say which with paneId, from browser_status",
-                panes.len()
-            ))
-        }
-    };
     // An empty thread id is a credentials file: no terminal behind it, and
     // nothing it opened, so it drives nothing. Written as its own case because
     // `"" == ""` would otherwise hand it every pane the user owns.
+    let mine = caller.thread_or_empty();
+    let owned: Vec<&boite_core::screen::Pane> = if mine.is_empty() {
+        Vec::new()
+    } else {
+        panes
+            .iter()
+            .copied()
+            .filter(|p| p.driven_by.as_deref() == Some(mine))
+            .collect()
+    };
+    let pane = match asked.filter(|id| !id.is_empty()) {
+        Some(id) => panes
+            .iter()
+            .copied()
+            .find(|p| p.id == id)
+            .ok_or_else(|| format!("no browser pane called '{id}'; browser_status lists them"))?,
+        None => match owned.as_slice() {
+            [only] => *only,
+            [] => return Err(NOT_YOURS.to_string()),
+            many => {
+                return Err(format!(
+                    "{} browser panes of yours are open; say which with paneId, from \
+                     browser_status",
+                    many.len()
+                ))
+            }
+        },
+    };
     if mine.is_empty() || pane.driven_by.as_deref() != Some(mine) {
         return Err(NOT_YOURS.to_string());
     }
@@ -1172,7 +1186,7 @@ async fn browser_status(
     State(workspace): State<Shared>,
     Extension(caller): Extension<Caller>,
 ) -> Result<Json<Value>, StatusCode> {
-    let screen = match window_showing(&*workspace, &caller) {
+    let screen = match window_showing(&*workspace) {
         Ok(screen) => screen,
         Err(reason) => return Ok(refused(reason)),
     };
@@ -1242,7 +1256,7 @@ async fn browser_wait(
     let deadline = std::time::Instant::now() + std::time::Duration::from_millis(budget);
     // Settled once, before the loop: an agent that named a pane it does not
     // drive should be told so now, not in twelve seconds.
-    let pane_id = match window_showing(&*workspace, &caller)
+    let pane_id = match window_showing(&*workspace)
         .and_then(|s| which_pane(&s, &caller, query.pane_id.as_deref()))
     {
         Ok(id) => id,
@@ -1379,7 +1393,7 @@ fn drive(
 
     let seen = workspace.on_screen().is_some();
     if seen {
-        match window_showing(&**workspace, caller).and_then(|s| which_pane(&s, caller, asked)) {
+        match window_showing(&**workspace).and_then(|s| which_pane(&s, caller, asked)) {
             Ok(pane_id) => request["paneId"] = json!(pane_id),
             Err(reason) => {
                 return Ok(deny(
@@ -1445,7 +1459,7 @@ async fn ask_the_pane(
     journaled: bool,
 ) -> Result<Json<Value>, StatusCode> {
     let project_id = caller.project_id.clone();
-    let pane_id = match window_showing(&**workspace, caller)
+    let pane_id = match window_showing(&**workspace)
         .and_then(|s| which_pane(&s, caller, asked))
     {
         Ok(id) => id,

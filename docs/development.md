@@ -127,6 +127,49 @@ script — so its `ask_for_answer` refuses with the sentence the agent reads.
 `browser_screenshot` is `PrintWindow` cropped to the pane rect
 (`commands/capture.rs`), Windows only today, capped at a 1568px long edge.
 
+### Where the pane opens, and why nothing else moves
+
+An agent opening a pane is showing something to somebody who is in the middle of
+a sentence in the terminal beside it. So the pane opens **beside the caller's own
+terminal**, in that thread's group, and nothing else moves: the selected project
+stays the one the user chose, the thread on screen stays the one they were
+reading, and the keyboard stays where it was. `openPane` takes an anchor for
+that, and `paneStore.openBeside` takes a `focus` flag the agent path passes as
+`false`. When the caller's group is not the one being drawn, a toast says what
+was opened and where (`panes.openedOffScreen`), which is the shape `thread_spawn`
+already used for the same problem.
+
+So the group holding that pane is usually hidden, and hidden means
+`visibility: hidden` rather than unmounted: `+page.svelte` mounts every group at
+once. The frame loads, the driver answers and the page keeps running while nobody
+is looking at it. Two things follow, and both are load bearing:
+
+- **No browser tool is scoped to the project on screen.** `window_showing` used
+  to refuse every caller whose project was not the one being drawn, so an agent
+  working while the user read something else was told "the window is showing
+  another project right now" by every browser call, including calls about the
+  pane it had opened a second earlier. `which_pane` holds the only rule that ever
+  mattered: the `drivenBy` mark the pane carries. Naming no `paneId` now means
+  the caller's own pane rather than the only pane on the window, since the
+  description carries every group's panes.
+- **A hidden pane is laid out at the same coordinates as the pane covering it**,
+  so a photograph of its rectangle is a photograph of somebody else's pane. Every
+  pane in the description carries `visible` for that (`Pane::shown()` in
+  `boite_core::screen`, absent from an older build's description and read as
+  visible), and `browser_screenshot` refuses when its pane is not the one on
+  screen. `browser_snapshot` reads the pane wherever it is, which is the answer
+  to give an agent that wanted a look.
+
+One trap lives under all of this. `browserPanes.note()` writes a pane's load
+state and **reads nothing**, which is not a simplification to tidy away: a
+`$state` writer that reads the state it writes subscribes its caller's `$effect`
+to its own output. It used to skip a write when the value was unchanged, so the
+frame's `load` wrote `loaded`, the effect re-ran, armed the stall timer again and
+wrote `loading` back, and four seconds later `stalled`. `browser_wait_for` polls
+what that state pushes, so it timed out on every page that had already loaded.
+Nothing was gained by the guard: a `$state` proxy already ignores a write of the
+value it holds.
+
 ## window.\_\_boite
 
 A screenshot, a DOM read and a way to run JavaScript reach almost nothing that
