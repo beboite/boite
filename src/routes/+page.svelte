@@ -568,8 +568,17 @@
           >
             {#each paneStore.groups as group (group.id)}
               {@const visible = activeGroupId === group.id && terminalActive}
+              <!-- Hidden rather than unmounted, which is what keeps a terminal
+                   alive in the group nobody is looking at, and what lets a
+                   browser pane an agent opened beside its own thread finish
+                   loading and go on answering. The mark is how anything asking
+                   "is this pane on the screen" tells the two apart, since a
+                   hidden group's leaves are laid out at the same rectangles as
+                   the visible one's: see `features/panes/visible.ts`. -->
               <div
                 class="absolute inset-0"
+                data-pane-group={group.id}
+                data-pane-shown={visible ? "true" : "false"}
                 style:visibility={visible ? "visible" : "hidden"}
                 aria-hidden={!visible}
               >

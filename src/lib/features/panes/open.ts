@@ -17,23 +17,32 @@ import { t } from "$lib/i18n/index.svelte";
  * `ratio` is a share of the group, so a caller that wants a column says so with
  * `panelRatio()` rather than a number: 0.35 of a 2560px window is 900px of git
  * panel, where the rail this replaced was 320px whatever the screen.
+ *
+ * `anchor` is for the one caller that knows better than the screen does: an
+ * agent asking for a pane beside its own terminal, which is very often not the
+ * terminal the user is reading. Given one, **nothing here moves the view** —
+ * no active thread, no selected project, no switch away from the project page.
+ * The pane appears where it belongs and waits there, since every group stays
+ * mounted whether or not it is the one being drawn.
  */
 export function openPane(
   content: PaneContent,
   side: DropSide = "right",
   ratio = panelRatio(),
+  anchor?: string | null,
 ): string | null {
+  if (anchor) {
+    return beside(anchor, content, side, ratio, false);
+  }
   // A pane is part of the terminal view; opening one from the project page
   // would otherwise put it behind the page that asked for it.
   app.view = "terminal";
   // Beside the focused pane of the active group, which is the pane the user is
   // looking at. Falling back to the active thread covers the case where the
   // focus is on a panel the group index still knows about.
-  const anchor = anchorPaneId();
-  if (anchor) {
-    const paneId = paneStore.openBeside(anchor, content, side, ratio);
-    if (!paneId) notifications.error(t("panes.groupFull", { count: MAX_LEAVES }));
-    return paneId;
+  const onScreen = anchorPaneId();
+  if (onScreen) {
+    return beside(onScreen, content, side, ratio, true);
   }
   // Nothing open to sit beside. The rail this replaced drew git, files and the
   // todo list whether or not a terminal was running, so refusing here took the
@@ -44,6 +53,19 @@ export function openPane(
     return null;
   }
   return paneStore.openGroup(projectId, content);
+}
+
+/** The half the two anchors share, so the refusal reads the same either way. */
+function beside(
+  anchor: string,
+  content: PaneContent,
+  side: DropSide,
+  ratio: number,
+  focus: boolean,
+): string | null {
+  const paneId = paneStore.openBeside(anchor, content, side, ratio, focus);
+  if (!paneId) notifications.error(t("panes.groupFull", { count: MAX_LEAVES }));
+  return paneId;
 }
 
 /** What the rail was wide, and what a panel opens at. */
