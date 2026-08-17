@@ -95,7 +95,10 @@ added.
 
 An agent's own status line is part of its output, so a split pane is narrower
 than the line was written for. [`docs/status-lines.md`](docs/status-lines.md)
-has what a pane exports, what it does not, and a worked example.
+has what a pane exports, what it does not, and a worked example. The worked
+example ships as [`plugins/claude-account-switcher`](plugins/claude-account-switcher):
+a Claude Code account pool with a status-line segment, quota watching and
+in-place thread restarts.
 
 ## A page per project
 

@@ -1,0 +1,8 @@
+node_modules/
+*.log
+.DS_Store
+# never commit credentials / account stores
+.credentials.json
+.claude/
+.claude-tools/
+.claude-accounts/

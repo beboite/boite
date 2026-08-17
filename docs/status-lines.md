@@ -82,3 +82,23 @@ export COLUMNS=$(tput cols)
 
 That is a snapshot, not a subscription: it stays right until the pane is
 resized, which is why the settings file is the better of the two here.
+
+## The example, in full
+
+The switcher that segment belongs to is vendored under
+[`plugins/claude-account-switcher`](../plugins/claude-account-switcher): a pool
+of Claude Code accounts on one machine, a watcher that notices a quota wall and
+swaps the credentials underneath a running thread, and the status-line renderer
+this page describes (`src/claude-cc-statusline.js`, and the PowerShell twin next
+to it).
+
+It is Windows-first PowerShell, installed by `install.ps1` into
+`~/.claude-tools`, and removed by `uninstall.ps1`. Its slash commands live in
+`src/commands/`: account add, list, remove, switch and auto-switch, plus
+`refresh-t` and `refresh-a`, which end and restart one thread — or every thread
+in the registry — on the same conversation, in the same pane, without closing
+Boite. The registry is written by the wrapper on PATH, so a thread that started
+before the wrapper was installed cannot be refreshed from outside itself.
+
+Nothing here is wired into the app: it is a reference consumer of the pane
+contract above, kept in the tree so the contract has something to break against.
