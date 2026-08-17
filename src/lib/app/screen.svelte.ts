@@ -4,6 +4,7 @@ import { app } from "$lib/app/store.svelte";
 import { approvals } from "$lib/features/approvals/store.svelte";
 import { paneLabel } from "$lib/features/panes/label";
 import { paneStore } from "$lib/features/panes/store.svelte";
+import { shownIn } from "$lib/features/panes/visible";
 import { palette } from "$lib/features/palette/store.svelte";
 import { browserPanes, type PageState } from "$lib/features/browser/state.svelte";
 
@@ -40,6 +41,15 @@ export interface ScreenPane {
   drivenBy: string | null;
   rect: ScreenRect;
   focused: boolean;
+  /**
+   * Whether the user can see it, which the rectangle does not answer.
+   *
+   * Every group of panes is mounted at once and the page hides all but one, so
+   * a pane in a group nobody is looking at is laid out at the same coordinates
+   * as the pane covering it. Without this the description called both of them
+   * visible, and the screenshot took the top one's pixels for the other one's.
+   */
+  visible: boolean;
 }
 
 export interface Screen {
@@ -93,6 +103,7 @@ function panesOnScreen(): ScreenPane[] {
       drivenBy: browser?.drivenBy ?? null,
       rect: { x: box.x, y: box.y, w: box.width, h: box.height },
       focused: paneStore.groupOf(id)?.focusedPaneId === id,
+      visible: shownIn(el),
     };
   });
   // Reading order, which is the order somebody describing their screen would

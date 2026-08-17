@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  DRAG_SHIFT_TRANSITION,
   DRAG_THRESHOLD_PX,
+  dragShiftStyle,
   dropIntent,
   hasBecomeADrag,
   reordered,
@@ -93,6 +95,39 @@ describe("how the other rows get out of the way", () => {
 
   it("a drop back where it started moves nothing", () => {
     for (let i = 0; i < 4; i++) expect(rowShift(i, 1, 1, 40)).toBe(0);
+  });
+});
+
+describe("when a row actually gets a transform", () => {
+  it("writes nothing at rest, even for a zero shift", () => {
+    // translateY(0) plus the 180ms transition is a compositor layer per row.
+    // Scratch's fade used to sit on the same card, so those layers were evicted
+    // after the card sat off screen, and scrolling back drew the hatch first.
+    expect(dragShiftStyle(false, false, 0, "none")).toEqual({});
+    expect(dragShiftStyle(false, false, 40, "none")).toEqual({});
+  });
+
+  it("keeps the carried row on its source transform with no transition", () => {
+    expect(dragShiftStyle(true, true, 0, "none")).toEqual({
+      transform: "none",
+      transition: "none",
+    });
+    expect(
+      dragShiftStyle(true, true, 0, "translate(0px, 12px) scale(1.015)"),
+    ).toEqual({
+      transform: "translate(0px, 12px) scale(1.015)",
+      transition: "none",
+    });
+  });
+
+  it("slides a neighbour only while a drag is on", () => {
+    expect(dragShiftStyle(true, false, -40, "none")).toEqual({
+      transform: "translateY(-40px)",
+      transition: DRAG_SHIFT_TRANSITION,
+    });
+    expect(dragShiftStyle(true, false, 0, "none")).toEqual({
+      transition: DRAG_SHIFT_TRANSITION,
+    });
   });
 });
 

@@ -91,6 +91,32 @@ export function rowShift(
 }
 
 /**
+ * Transform and transition for a row that slides out of a drag's way.
+ *
+ * Empty at rest on purpose. A `translateY(0)` with a 180ms transition on every
+ * row is a compositor layer per card, and Scratch already puts `opacity` on
+ * those same cards. Nested layers that sit off screen at the bottom of a long
+ * sidebar get evicted; scrolling back paints the hatch first and the threads a
+ * status tick later.
+ */
+export const DRAG_SHIFT_TRANSITION =
+  "transform 180ms cubic-bezier(0.22, 1, 0.36, 1)";
+
+export function dragShiftStyle(
+  dragging: boolean,
+  isSource: boolean,
+  shiftY: number,
+  sourceTransform: string,
+): { transform?: string; transition?: string } {
+  if (isSource) return { transform: sourceTransform, transition: "none" };
+  if (!dragging) return {};
+  return {
+    ...(shiftY !== 0 ? { transform: `translateY(${shiftY}px)` } : {}),
+    transition: DRAG_SHIFT_TRANSITION,
+  };
+}
+
+/**
  * Which edge of a pane the pointer is nearest, in the pane's own coordinates.
  *
  * Nearest edge rather than nearest quadrant: a wide short pane is split

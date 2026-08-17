@@ -338,6 +338,33 @@ encoded cwd, the same shape as claude's store without the live registry — whil
 muse has no build for this platform, so nothing reads its store at all and its
 row exists to be launched and resumed by hand.
 
+## An MCP action never takes the screen
+
+A tool call arrives while somebody is typing in a terminal that is not the
+caller's. So nothing an agent asks for moves the view: `pane_open` puts the pane
+beside the **caller's own** thread, in that thread's group, and leaves the
+selected project, the thread on screen and the keyboard focus exactly where the
+user left them (`openPane`'s anchor, and `openBeside(..., focus: false)`). A
+toast says what was opened in a group nobody is looking at, the same way a spawn
+does.
+
+Which means an agent's pane is usually in a hidden group, and hidden is
+`visibility: hidden`, not unmounted: the frame loads and the driver answers the
+whole time. **Nothing on the browser side is scoped to the project on screen.**
+It was, and that made every browser tool answer "the window is showing another
+project right now" to an agent working while the user read something else,
+including about the pane it had just opened. The `drivenBy` mark is the only rule
+(`which_pane`). The one exception is `browser_screenshot`: a hidden pane sits at
+the same coordinates as the one covering it, so it refuses rather than
+photographing somebody else's pane, and `browser_snapshot` reads the page
+wherever it is.
+
+When you write to a `$state` object other code watches, **write without reading**.
+A writer that reads the value it is about to write subscribes its caller's
+`$effect` to its own output. That is what made `browser_wait_for` time out on
+every page: `note()` skipped a same-value write, the frame's `load` retriggered
+the effect that armed the stall timer, and the pane cycled `loading` forever.
+
 ## Checking your work in the running app
 
 A screenshot and a DOM read tell you almost nothing here: **the terminals render

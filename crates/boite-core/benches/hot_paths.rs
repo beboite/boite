@@ -200,6 +200,7 @@ fn screen_trimmed(c: &mut Criterion) {
         url: None,
         page: None,
         driven_by: None,
+        visible: Some(i == 0),
     };
     // Deliberately over both caps, because trimming is what is being measured
     // and a screen already inside them does nothing.

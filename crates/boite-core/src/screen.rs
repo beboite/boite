@@ -90,6 +90,27 @@ pub struct Pane {
     pub driven_by: Option<String>,
     pub rect: Rect,
     pub focused: bool,
+    /// Whether the user can see it, which the rectangle does not answer.
+    ///
+    /// The window mounts every group of panes at once and hides all but the one
+    /// it is drawing, which is what keeps a terminal alive in the background and
+    /// what lets a pane an agent opened beside its own thread go on loading and
+    /// answering while the user reads something else. A hidden group's panes are
+    /// laid out at the same coordinates as the visible one's, so a rectangle
+    /// cannot tell them apart and this says it outright.
+    ///
+    /// `None` from a build that predates the field, and that reads as visible:
+    /// it is what every pane in such a description was taken to be.
+    #[serde(default)]
+    pub visible: Option<bool>,
+}
+
+impl Pane {
+    /// Whether anything of this pane is on the screen: given a size by the
+    /// layout, and in the group the window is drawing.
+    pub fn shown(&self) -> bool {
+        self.rect.shows() && self.visible.unwrap_or(true)
+    }
 }
 
 /// What the window can say about a page, and the whole of it.
@@ -206,7 +227,7 @@ impl Screen {
                     p.rect.h.round(),
                     p.rect.x.round(),
                     p.rect.y.round(),
-                    if p.rect.shows() {
+                    if p.shown() {
                         ""
                     } else {
                         " -- laid out but not visible"
@@ -245,6 +266,7 @@ mod tests {
             url: None,
             page: None,
             driven_by: None,
+            visible: None,
         }
     }
 
@@ -281,6 +303,19 @@ mod tests {
         assert!(lines[0].starts_with("* thread a at 640x600"), "{:?}", lines[0]);
         assert!(lines[1].contains("not visible"), "{:?}", lines[1]);
         assert!(!lines[0].contains("not visible"));
+    }
+
+    /// The other way a pane is not on the screen, and the one a rectangle can
+    /// never show: every group is mounted at once and hides all but the one
+    /// being drawn, so a pane in the group behind is laid out at exactly the
+    /// coordinates of the pane covering it.
+    #[test]
+    fn a_pane_in_the_group_nobody_is_looking_at_is_reported_as_not_visible() {
+        let hidden = Pane { visible: Some(false), ..pane("b", 640.0, false) };
+        let s = screen(vec![pane("a", 640.0, true), hidden]);
+        assert!(s.panes[0].shown());
+        assert!(!s.panes[1].shown());
+        assert!(s.lines()[1].contains("not visible"), "{:?}", s.lines()[1]);
     }
 
     /// The window is the half that may be misbehaving, so what it sends is
@@ -332,6 +367,10 @@ mod tests {
         assert_eq!(back.url, None);
         assert_eq!(back.page, None);
         assert_eq!(back.driven_by, None);
+        // Nothing said is not "hidden": every pane such a build described was
+        // read as on the screen, and it has to stay read that way.
+        assert_eq!(back.visible, None);
+        assert!(back.shown());
     }
 
     #[test]

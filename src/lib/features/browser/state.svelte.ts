@@ -12,6 +12,8 @@
  * the frame goes.
  */
 
+import { untrack } from "svelte";
+
 /**
  * `stalled` is not `failed`.
  *
@@ -30,8 +32,22 @@ class BrowserPanes {
     return this.states[paneId] ?? null;
   }
 
+  /**
+   * **A writer, and it reads nothing.** That is the fix, not a simplification.
+   *
+   * This used to skip an identical write by comparing with the current value,
+   * and `BrowserPane` notes `loading` from the same effect that arms the stall
+   * timer — so that read subscribed the effect to its own output. The frame's
+   * `load` wrote `loaded`, the effect re-ran, put `settled` back to false and
+   * wrote `loading` again, and four seconds later the timer it had just
+   * re-armed wrote `stalled` and started the round over. A page that was up
+   * said `loading` for as long as the pane was open, the overlay never came
+   * off, and every `browser_wait_for` timed out on it.
+   *
+   * Nothing is lost by dropping the guard: a `$state` proxy already ignores a
+   * write of the value it holds, so the same-state case still notifies nobody.
+   */
   note(paneId: string, state: PageState) {
-    if (this.states[paneId] === state) return;
     this.states[paneId] = state;
   }
 
@@ -58,7 +74,10 @@ class BrowserPanes {
   }
 
   reload(paneId: string) {
-    this.nonces[paneId] = this.nonceOf(paneId) + 1;
+    // Untracked for the same reason as `note`: this is called from a button and
+    // from an agent request today, and the day it is called from an effect that
+    // effect would re-arm itself for ever.
+    this.nonces[paneId] = untrack(() => this.nonceOf(paneId)) + 1;
   }
 }
 

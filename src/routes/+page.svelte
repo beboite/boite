@@ -29,7 +29,6 @@
   import { watchWindowFocus } from "$lib/app/focus.svelte";
   import PaneShell from "$lib/features/panes/PaneShell.svelte";
   import SidePanel from "$lib/features/panes/SidePanel.svelte";
-  import ProjectInfoBox from "$lib/features/infobox/ProjectInfoBox.svelte";
   import PaneOverlay from "$lib/features/panes/PaneOverlay.svelte";
   import { parseThreadLink } from "$lib/domain/awareness";
   import PaneDropOverlay from "$lib/features/panes/PaneDropOverlay.svelte";
@@ -84,6 +83,11 @@
   // Behind import(), a boot that never switches it on never fetches it.
   const WhipView = lazyComponent(
     () => import("$lib/features/whip/WhipOverlay.svelte"),
+  );
+  // The anchored info box, for an experiment that is off by default. Behind
+  // import(), a boot that never switches it on never fetches it.
+  const InfoBoxView = lazyComponent(
+    () => import("$lib/features/infobox/ProjectInfoBox.svelte"),
   );
 
   let activated = $state<Record<string, true>>({});
@@ -398,6 +402,7 @@
   // the first throw, or the rope spawns wherever the pointer was at boot.
   $effect(() => {
     if (settings.state.experimentWhip) void WhipView.ensure();
+    if (settings.state.experimentInfoBox) void InfoBoxView.ensure();
   });
 
   // Opening the Files or Git panel is the strongest signal that a file or a
@@ -563,8 +568,17 @@
           >
             {#each paneStore.groups as group (group.id)}
               {@const visible = activeGroupId === group.id && terminalActive}
+              <!-- Hidden rather than unmounted, which is what keeps a terminal
+                   alive in the group nobody is looking at, and what lets a
+                   browser pane an agent opened beside its own thread finish
+                   loading and go on answering. The mark is how anything asking
+                   "is this pane on the screen" tells the two apart, since a
+                   hidden group's leaves are laid out at the same rectangles as
+                   the visible one's: see `features/panes/visible.ts`. -->
               <div
                 class="absolute inset-0"
+                data-pane-group={group.id}
+                data-pane-shown={visible ? "true" : "false"}
                 style:visibility={visible ? "visible" : "hidden"}
                 aria-hidden={!visible}
               >
@@ -621,12 +635,14 @@
                        terminal: in split view each pane runs its own worktree,
                        so a single box over the whole area could only ever
                        describe one of them. The box docks itself inside the
-                       pane (corners and edge midpoints). After the pane overlay
-                       in the DOM and at the same z, so it draws over the ring
-                       rather than under it. Panes too narrow to hold it (it
-                       would cover the terminal it describes) get none. -->
-                  {#if !mobile && settings.state.experimentInfoBox && rect.w >= 420}
-                    <ProjectInfoBox {thread} {visible} {focused} />
+                       pane (corners and edge midpoints), so it takes the whole
+                       pane area rather than a corner of it. After the pane
+                       overlay in the DOM and at the same z, so it draws over
+                       the ring rather than under it. Panes too narrow to hold
+                       it (it would cover the terminal it describes) get none. -->
+                  {#if !mobile && settings.state.experimentInfoBox && rect.w >= 420 && InfoBoxView.current}
+                    {@const InfoBoxComp = InfoBoxView.current}
+                    <InfoBoxComp {thread} {visible} {focused} />
                   {/if}
                 </div>
               {/if}

@@ -279,6 +279,12 @@ export interface Settings {
    * no interrupt, no keystroke, no prompt.
    */
   experimentWhip: boolean;
+  /**
+   * Which noise the whip makes. Only read while `experimentWhip` is on, and
+   * `synth` is the default: the sample is a file the window downloads, and it
+   * only downloads once somebody has actually asked for it.
+   */
+  whipSound: WhipSound;
   smartSortBy: SmartSortBy;
   smartSortDirection: SortDirection;
 }
@@ -292,6 +298,16 @@ export interface Settings {
  * and leaves each project's threads where the user dragged them.
  */
 export type SmartSortBy = "manual" | "activity" | "alphabetical";
+
+/**
+ * What the whip cracks with.
+ *
+ * `synth` is the WebAudio burst `crack.ts` builds, which costs no asset and
+ * varies on its own. `meme` is one sampled crack, `static/sounds/whip-meme.mp3`,
+ * fetched on the first crack after it is picked and never before: a mode nobody
+ * selects costs the same nothing it did before this existed.
+ */
+export type WhipSound = "synth" | "meme";
 
 export type SortDirection = "asc" | "desc";
 

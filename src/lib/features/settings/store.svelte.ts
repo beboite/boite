@@ -17,6 +17,7 @@ import type {
   SidebarDesign,
   SmartSortBy,
   SortDirection,
+  WhipSound,
 } from "$lib/types";
 import { isInfoBoxAnchor } from "$lib/features/infobox/anchor";
 import { DEFAULT_KEYBINDINGS } from "$lib/shared/keyboard/defaults";
@@ -164,6 +165,7 @@ const DEFAULTS: Settings = {
   infoBoxCollapsed: false,
   experimentSmartSort: false,
   experimentWhip: false,
+  whipSound: "synth",
   smartSortBy: "manual",
   smartSortDirection: "desc",
 };
@@ -193,6 +195,10 @@ function isSmartSortBy(value: unknown): value is SmartSortBy {
 
 function isSortDirection(value: unknown): value is SortDirection {
   return value === "asc" || value === "desc";
+}
+
+function isWhipSound(value: unknown): value is WhipSound {
+  return value === "synth" || value === "meme";
 }
 
 /**
@@ -302,6 +308,7 @@ const DEVICE_FIELDS = [
   "infoBoxCollapsed",
   "experimentSmartSort",
   "experimentWhip",
+  "whipSound",
   "smartSortBy",
   "smartSortDirection",
   "confirmCloseThread",
@@ -506,6 +513,7 @@ class SettingsStore {
           typeof stored.experimentWhip === "boolean"
             ? stored.experimentWhip
             : DEFAULTS.experimentWhip,
+        whipSound: isWhipSound(stored.whipSound) ? stored.whipSound : DEFAULTS.whipSound,
         smartSortBy: isSmartSortBy(stored.smartSortBy)
           ? stored.smartSortBy
           : DEFAULTS.smartSortBy,
@@ -871,6 +879,12 @@ class SettingsStore {
   setExperimentWhip(value: boolean) {
     if (this.state.experimentWhip === value) return;
     this.state.experimentWhip = value;
+    this.persistDeviceNow();
+  }
+
+  setWhipSound(value: WhipSound) {
+    if (this.state.whipSound === value) return;
+    this.state.whipSound = value;
     this.persistDeviceNow();
   }
 
