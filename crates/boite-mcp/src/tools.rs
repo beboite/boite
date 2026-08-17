@@ -35,11 +35,9 @@ agent terminals side by side, one shared todo list per project, and a git \
 worktree per terminal. The tools below reach that workspace, and nothing else \
 you have reaches it.
 
-Where you are. This terminal has its own detached worktree of the project: your \
-own checkout, isolated from the user's and from the other terminals, sharing one \
-history. So your edits are invisible in their working tree, and a detached \
-worktree is discarded when the thread closes. Call worktree_status when you need \
-to know where you are working and what branches exist.
+Where you are. Call whereami first: this thread, this project, this worktree, \
+this branch. A detached worktree is discarded when the thread closes. \
+worktree_status adds the branch list when you need to pick a name.
 
 When to reach for these:
 
@@ -54,23 +52,16 @@ head and closing the thread throws it away. Do this before you finish, not after
 - Work that surfaced along the way and does not belong in this turn: todo_add \
 rather than a note in your answer, which nobody reads again.
 - Something the user should look at, a diff, a dev server, a file: pane_open puts \
-it beside this terminal. Printing a path only works if they are reading this one.
-- A page you opened and are now working on: browser_wait_for says whether it came \
-up, browser_navigate moves the same pane to the next route rather than leaving a \
-second frame behind, browser_reload picks up a dev server you just restarted, and \
-browser_close tidies it away. browser_status is what they all take a paneId from.
-- Reading and driving the page: browser_snapshot returns the elements as rows \
-with uids (mode=text for the prose, mode=diff for what changed since you last \
-looked), and browser_click, browser_type, browser_press and browser_scroll act \
-on those uids. That works when the pane is on a Boite desktop window, where the \
-webview injects a driver into the frame; a pane drawn by a browser or a phone \
-cannot be reached into, and the tools say so instead of pretending.
+it beside this terminal. Pass path for editor or explorer. Printing a path only \
+works if they are reading this one.
+- A page you opened: browser action=status|snapshot|click|type|press|scroll|\
+navigate|reload|wait_for|close|screenshot. Desktop window only for read/drive; \
+a pane drawn by a browser or a phone cannot be reached into.
 - The pane is theirs, not yours: it carries a mark saying you are driving it and \
 a button that takes it back, and after they press it your calls at that pane are \
 refused. That is the user deciding, not a fault to work around.
-- Independent work that should run at the same time: thread_spawn. It gets its \
-own terminal and worktree, does not report back, and knows only the prompt you \
-give it.
+- Independent work that should run at the same time: thread_spawn. It answers \
+with the new thread id; terminal_transcript and thread_wait take that id.
 
 Answers are TOON: `key: value` for a single record, and `name(N):` followed by a \
 header row then one row per item for a list.";
@@ -137,6 +128,13 @@ fn common_tools() -> Value {
                 "additionalProperties": false
             },
             "annotations": { "title": "Claim todo", "destructiveHint": false, "openWorldHint": false }
+        },
+        {
+            "name": "whereami",
+            "description": "This terminal, this project, this worktree, this branch. Cheaper than \
+                            workspace_snapshot; call it first. worktree_status adds the branch list.",
+            "inputSchema": { "type": "object" },
+            "annotations": { "title": "Where", "readOnlyHint": true, "idempotentHint": true, "openWorldHint": false }
         },
         {
             "name": "worktree_status",
@@ -350,8 +348,8 @@ fn thread_tools() -> Value {
             "name": "thread_spawn",
             "description": "Open another agent terminal, here or in another project, for work that \
                             should run in parallel in its own worktree — not for a sub-task you \
-                            could do this turn. It is independent: it does not report back and you \
-                            cannot read its output, so the prompt is all it will know. In this \
+                            could do this turn. Answers with its threadId. Read what it printed \
+                            with terminal_transcript, and wait for it with thread_wait. In this \
                             project it opens at once; in another one it is the user's call, and \
                             `state: waiting-on-user` means the call worked and is queued for them, \
                             not that it was refused.",
@@ -388,6 +386,10 @@ fn thread_tools() -> Value {
                         "type": "string",
                         "description": "For kind=browser. A dev server on this machine is the case                                         this exists for: plain http:// reaches localhost, 127.0.0.1,                                         [::1] and 0.0.0.0 and nowhere else, and everywhere else                                         needs https://. Boite's own address is refused, and a page                                         off this machine waits for the user to agree before it is                                         shown. A public site may also refuse to be framed, and the                                         user gets a button to open it outside."
                     },
+                    "path": {
+                        "type": "string",
+                        "description": "For kind=editor or kind=explorer. The file or folder to show."
+                    },
                     "side": {
                         "type": "string",
                         "enum": ["left", "right", "top", "bottom"],
@@ -400,178 +402,90 @@ fn thread_tools() -> Value {
             "annotations": { "title": "Open pane", "readOnlyHint": true, "destructiveHint": false, "openWorldHint": false }
         },
         {
-            "name": "browser_status",
-            "description": "The browser panes on the user's window: which pane, what address, and \
-                            whether the page loaded, refused to be framed or is still coming. Call \
-                            it before browser_navigate to learn a paneId, and after opening one to \
-                            find out whether the address was any good. To read what is in the page, \
-                            browser_snapshot.",
-            "inputSchema": { "type": "object" },
-            "annotations": { "title": "Browser panes", "readOnlyHint": true, "idempotentHint": true, "openWorldHint": false }
-        },
-        {
-            "name": "browser_snapshot",
-            "description": "Read the page in a pane you drive, as rows you can act on: uid, role, \
-                            name, value. mode=text is the page's readable prose instead, mode=diff \
-                            only what changed since your last snapshot — cheaper after a click. \
-                            uids stay valid until the page navigates. Works when the pane is on a \
-                            Boite desktop window; one drawn by a browser or phone refuses and says \
-                            why.",
+            "name": "thread_wait",
+            "description": "A sibling terminal's status. timeoutMs waits until it is no longer live, \
+                            up to 30s. Use the threadId from thread_spawn.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "paneId": { "type": "string", "description": "From browser_status. Only needed when you are driving more than one." },
-                    "mode": { "type": "string", "enum": ["elements", "diff", "text"], "description": "Defaults to elements." },
-                    "maxChars": { "type": "integer", "description": "For text: how much prose to carry back. Default 8000." }
+                    "threadId": { "type": "string" },
+                    "timeoutMs": { "type": "number", "description": "0 (default) answers now; max 30000." }
                 },
+                "required": ["threadId"],
                 "additionalProperties": false
             },
-            "annotations": { "title": "Read page", "readOnlyHint": true, "openWorldHint": true }
+            "annotations": { "title": "Wait for thread", "readOnlyHint": true, "openWorldHint": false }
         },
         {
-            "name": "browser_screenshot",
-            "description": "The pane as pixels: a PNG of what the user sees, long edge capped at \
-                            1568. uid crops to one element from browser_snapshot, with a little \
-                            context around it. Costs far more tokens than browser_snapshot, so \
-                            reach for it when layout or rendering is the question, not content. \
-                            Desktop on Windows today; elsewhere it answers why not.",
+            "name": "browser",
+            "description": "Drive a browser pane you opened. action=status lists panes; snapshot \
+                            reads the page (mode=text|diff|elements); click/type/press/scroll act \
+                            on a uid from snapshot; navigate/reload/wait_for/close/screenshot move \
+                            the pane. Desktop window only for read and drive.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "uid": { "type": "string", "description": "Crop to this element from browser_snapshot." },
-                    "paneId": { "type": "string", "description": "Only when driving more than one pane." }
-                },
-                "additionalProperties": false
-            },
-            "annotations": { "title": "Screenshot pane", "readOnlyHint": true, "openWorldHint": false }
-        },
-        {
-            "name": "browser_click",
-            "description": "Click an element in a pane you drive, by its uid from browser_snapshot. \
-                            After it, browser_snapshot mode=diff shows what moved.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "uid": { "type": "string", "description": "From browser_snapshot." },
-                    "double": { "type": "boolean", "description": "Double-click instead." },
-                    "paneId": { "type": "string", "description": "Only when driving more than one pane." }
-                },
-                "required": ["uid"],
-                "additionalProperties": false
-            },
-            "annotations": { "title": "Click element", "destructiveHint": false, "openWorldHint": true }
-        },
-        {
-            "name": "browser_type",
-            "description": "Type into a field in a pane you drive, by uid. Replaces what was there \
-                            unless clear=false; submit=true presses Enter after, for the \
-                            field-and-submit shape.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "uid": { "type": "string", "description": "From browser_snapshot." },
+                    "action": {
+                        "type": "string",
+                        "enum": ["status", "snapshot", "screenshot", "click", "type", "press",
+                                 "scroll", "navigate", "reload", "wait_for", "close"]
+                    },
+                    "paneId": { "type": "string" },
+                    "url": { "type": "string" },
+                    "uid": { "type": "string" },
                     "text": { "type": "string" },
-                    "clear": { "type": "boolean", "description": "Defaults to true." },
-                    "submit": { "type": "boolean", "description": "Press Enter afterwards." },
-                    "paneId": { "type": "string", "description": "Only when driving more than one pane." }
-                },
-                "required": ["uid", "text"],
-                "additionalProperties": false
-            },
-            "annotations": { "title": "Type in field", "destructiveHint": false, "openWorldHint": true }
-        },
-        {
-            "name": "browser_press",
-            "description": "Press one key in the page: Enter, Escape, Tab, ArrowDown and friends. \
-                            It lands on whatever is focused, so click or type first.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "key": { "type": "string", "description": "A KeyboardEvent key name." },
-                    "paneId": { "type": "string", "description": "Only when driving more than one pane." }
-                },
-                "required": ["key"],
-                "additionalProperties": false
-            },
-            "annotations": { "title": "Press key", "destructiveHint": false, "openWorldHint": true }
-        },
-        {
-            "name": "browser_scroll",
-            "description": "Scroll the page: uid brings that element into view, dy scrolls by \
-                            pixels (negative is up).",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "uid": { "type": "string", "description": "From browser_snapshot." },
+                    "key": { "type": "string" },
+                    "mode": { "type": "string", "enum": ["elements", "diff", "text"] },
+                    "maxChars": { "type": "integer" },
+                    "timeoutMs": { "type": "integer" },
                     "dy": { "type": "number" },
-                    "paneId": { "type": "string", "description": "Only when driving more than one pane." }
+                    "double": { "type": "boolean" },
+                    "clear": { "type": "boolean" },
+                    "submit": { "type": "boolean" }
                 },
+                "required": ["action"],
                 "additionalProperties": false
             },
-            "annotations": { "title": "Scroll page", "destructiveHint": false, "openWorldHint": true }
-        },
-        {
-            "name": "browser_navigate",
-            "description": "Point a browser pane you opened at another address, instead of leaving \
-                            a second frame behind. Panes are told apart by their address, so \
-                            pane_open with a new url opens another pane and this one replaces what \
-                            is in the pane you already have. Same address rules as pane_open. Only \
-                            a pane you opened: once the user takes it back it is theirs.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "url": { "type": "string", "description": "Where to point it. http:// reaches this machine only; everywhere else needs https://." },
-                    "paneId": { "type": "string", "description": "From browser_status. Only needed when you are driving more than one." }
-                },
-                "required": ["url"],
-                "additionalProperties": false
-            },
-            "annotations": { "title": "Navigate pane", "destructiveHint": false, "openWorldHint": true }
-        },
-        {
-            "name": "browser_reload",
-            "description": "Fetch the page again in a pane you opened. What to call after \
-                            restarting the dev server behind it; the pane does not notice on its \
-                            own.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "paneId": { "type": "string", "description": "From browser_status. Only needed when you are driving more than one." }
-                },
-                "additionalProperties": false
-            },
-            "annotations": { "title": "Reload pane", "destructiveHint": false, "openWorldHint": true }
-        },
-        {
-            "name": "browser_wait_for",
-            "description": "Wait for a pane you opened to stop loading, up to twelve seconds. \
-                            Answers `loaded` when the page came up, `stalled` when it did not — \
-                            which means slow or refusing to be framed, and nothing on this side can \
-                            tell those apart. Use it after opening a dev server rather than \
-                            polling browser_status.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "paneId": { "type": "string", "description": "From browser_status. Only needed when you are driving more than one." },
-                    "timeoutMs": { "type": "integer", "description": "Up to 12000, which is also the default." }
-                },
-                "additionalProperties": false
-            },
-            "annotations": { "title": "Wait for page", "readOnlyHint": true, "openWorldHint": false }
-        },
-        {
-            "name": "browser_close",
-            "description": "Take a pane you opened back off the user's screen once it has served \
-                            its purpose. Only your own: a pane the user took back is theirs to \
-                            close.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "paneId": { "type": "string", "description": "From browser_status. Only needed when you are driving more than one." }
-                },
-                "additionalProperties": false
-            },
-            "annotations": { "title": "Close pane", "destructiveHint": true, "openWorldHint": false }
+            "annotations": { "title": "Browser", "openWorldHint": true }
         }
     ])
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn names() -> Vec<String> {
+        tools()
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|t| t.get("name").and_then(|v| v.as_str()).map(str::to_string))
+            .collect()
+    }
+
+    #[test]
+    fn tools_list_has_no_separate_browser_drive_tools() {
+        let names = names();
+        for old in [
+            "browser_status",
+            "browser_snapshot",
+            "browser_screenshot",
+            "browser_click",
+            "browser_type",
+            "browser_press",
+            "browser_scroll",
+            "browser_navigate",
+            "browser_reload",
+            "browser_wait_for",
+            "browser_close",
+        ] {
+            assert!(!names.iter().any(|n| n == old), "{old} still advertised");
+        }
+        assert!(names.iter().any(|n| n == "browser"), "{names:?}");
+        assert!(names.iter().any(|n| n == "whereami"), "{names:?}");
+        assert!(names.iter().any(|n| n == "thread_wait"), "{names:?}");
+        assert_eq!(names.len(), 20, "{names:?}");
+    }
+}
+

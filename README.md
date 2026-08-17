@@ -201,15 +201,15 @@ long press as well as a right-click. For a native Android install,
 
 ## Agent access (MCP)
 
-Twenty-eight tools, in five groups.
+Twenty tools, in five groups.
 
 | Group | Tools | What it is for |
 |---|---|---|
 | Todos | `todo_list`, `todo_add`, `todo_claim` | The project's card list, in the Todo tab. An agent reads it, appends to it and reports an item finished, but never ticks one off: claiming moves a card to *awaiting confirmation*. |
 | Worktree | `worktree_status`, `worktree_branch`, `worktree_reserve`, `artifacts_status`, `artifacts_set` | The checkout the thread runs in, and what a new one gets out of yours rather than building from nothing. A project with an opinion writes its own rule to `.boite/artifacts.json`. |
-| Where the work happens | `projects_list`, `project_create`, `thread_move`, `thread_spawn` | Move the terminal into another project (the transcript follows, so `--resume` still finds it), make a folder for a conversation that has none, open a second agent elsewhere. |
-| What can be asked | `workspace_snapshot`, `workspace_search`, `workspace_timeline`, `terminal_transcript`, `pane_open` | How an agent answers "what is wrong here" without asking you. One snapshot carries every project and thread, the terminals with a live child, and `screen`: each pane, its measured size, focus, what covers the layout. `pane_open` puts a diff, a file or a dev server beside the agent's own terminal. |
-| The browser pane | `browser_status`, `browser_navigate`, `browser_reload`, `browser_wait_for`, `browser_close`, `browser_snapshot`, `browser_screenshot`, `browser_click`, `browser_type`, `browser_press`, `browser_scroll` | A page an agent opened, read back as rows with stable uids and driven from the same side. It opens beside the caller's own terminal and never takes the view off whoever is reading another one. |
+| Where the work happens | `projects_list`, `project_create`, `thread_move`, `thread_spawn`, `thread_wait` | Move the terminal into another project (the transcript follows, so `--resume` still finds it), make a folder for a conversation that has none, open a second agent elsewhere. `thread_spawn` answers with the new thread id; `thread_wait` and `terminal_transcript` take that id. |
+| What can be asked | `whereami`, `workspace_snapshot`, `workspace_search`, `workspace_timeline`, `terminal_transcript`, `pane_open` | How an agent answers "what is wrong here" without asking you. `whereami` is this thread, project, worktree and branch. One snapshot carries every project and thread, the terminals with a live child, and `screen`. `pane_open` puts a diff, a file or a dev server beside the agent's own terminal, and takes a `path` for editor and explorer. |
+| The browser pane | `browser` | One tool, `action=status\|snapshot\|click\|type\|press\|scroll\|navigate\|reload\|wait_for\|close\|screenshot`. A page an agent opened, read back as rows with stable uids and driven from the same side. |
 
 `thread_move` and `project_create` kill the process that called them, so they
 answer before they finish: the reply is written while the agent is still there

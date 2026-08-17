@@ -30,6 +30,7 @@ import { createProject } from "$lib/features/project/api";
 import { moveThreadToProject } from "$lib/features/thread/move";
 import { takesOpeningPrompt } from "$lib/features/thread/session";
 import { launchAgent } from "$lib/features/thread/api";
+import { editorStore } from "$lib/features/editor/store.svelte";
 import { anchorProjectId, openPane } from "$lib/features/panes/open";
 import { leafNodesOf, paneStore } from "$lib/features/panes/store.svelte";
 import { paneIsShown } from "$lib/features/panes/visible";
@@ -66,6 +67,7 @@ interface CreateRequest {
 interface SpawnRequest {
   kind: "thread.spawn";
   projectId: string;
+  requestId?: string;
   /** The thread that asked, when Boite launched it. */
   callerThreadId?: string | null;
   agent?: string | null;
@@ -75,11 +77,13 @@ interface SpawnRequest {
 interface PaneOpenRequest {
   kind: "pane.open";
   projectId: string;
+  requestId?: string;
   /** The thread that asked, so the pane lands beside it rather than beside
       whatever the user happens to be looking at. */
   callerThreadId?: string | null;
   pane: PaneContent["kind"];
   url?: string | null;
+  path?: string | null;
   /** The endpoint's reading of the address: off this machine, so ask first. */
   external?: boolean | null;
   side?: DropSide | null;
@@ -276,10 +280,22 @@ async function handleCreate(req: CreateRequest) {
   }
 }
 
+async function answerRequest(req: { requestId?: string }, payload: Record<string, unknown>) {
+  const id = req.requestId;
+  if (!id) return;
+  const fn =
+    backend().answerAgentRequest ?? workspace.remoteBackend?.answerAgentRequest;
+  if (!fn) return;
+  await fn(id, payload).catch((err) => {
+    logger.warn("agent-request", "could not answer", String(err));
+  });
+}
+
 async function handleSpawn(req: SpawnRequest) {
   const project = app.projects.find((p) => p.id === req.projectId);
   if (!project) {
     notifications.error(t("thread.spawnProjectGone"));
+    await answerRequest(req, { error: "that project is gone" });
     return;
   }
   // The caller, not the thread on screen: an agent that says nothing about
@@ -289,6 +305,7 @@ async function handleSpawn(req: SpawnRequest) {
   const launch = resolveLaunch(req.agent, caller?.iconKey ?? "claude");
   if (!launch) {
     notifications.error(t("thread.spawnNoAgent", { agent: req.agent ?? "" }));
+    await answerRequest(req, { error: "no agent matches that name" });
     return;
   }
   const prompt = req.prompt?.trim();
@@ -296,7 +313,11 @@ async function handleSpawn(req: SpawnRequest) {
   // often in another project, and a spawn they never clicked used to take the
   // screen away mid-sentence. The toast is what says it happened.
   const thread = await launchAgent(project, launch, { focus: false });
-  if (!thread) return;
+  if (!thread) {
+    await answerRequest(req, { error: "the terminal did not open" });
+    return;
+  }
+  await answerRequest(req, { ok: true, threadId: thread.id });
   if (prompt) app.setPendingPrompt(thread.id, prompt);
   notifications.success(
     t("thread.spawnedIn", { label: launch.label, project: project.name }),
@@ -341,21 +362,32 @@ async function handlePaneOpen(req: PaneOpenRequest, from: RequestSource) {
       "pane asked for a project that is not the one on screen, dropping it",
       { asked: req.projectId },
     );
+    await answerRequest(req, { error: "the window is showing another project" });
     return;
   }
   const content = await paneContentOf(req, from);
-  if (!content) return;
+  if (!content) {
+    await answerRequest(req, { error: "the pane was not opened" });
+    return;
+  }
   // Half the width for a browser, a third for a panel: a page needs room to be
   // a page, and a file tree does not.
   const ratio = req.pane === "browser" ? 0.5 : 0.35;
   const paneId = openPane(content, req.side ?? "right", ratio, anchor);
-  if (!paneId || !anchor) return;
+  if (req.pane === "editor" && req.path) {
+    void editorStore.open(req.path);
+  }
+  if (!paneId) {
+    await answerRequest(req, { error: "the pane was not opened" });
+    return;
+  }
+  await answerRequest(req, { ok: true });
   // Said out loud when it landed off the screen, for the same reason a spawn
   // is: the agent has been told its pane is open, and without this the user
   // would find it the next time they happened to click that thread. Read off
   // the caller's own terminal rather than the new pane, which the page has not
   // drawn yet.
-  if (!paneIsShown(anchor)) {
+  if (anchor && !paneIsShown(anchor)) {
     notifications.info(
       t("panes.openedOffScreen", {
         agent: app.threadById(anchor)?.label ?? t("browser.drivenByAgent"),

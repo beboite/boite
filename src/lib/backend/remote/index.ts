@@ -600,4 +600,10 @@ export class RemoteBackend implements Backend {
       .rpc("agent.claimRequest", { requestId })
       .then((r) => Boolean((r as { claimed?: boolean }).claimed));
   }
+
+  answerAgentRequest(requestId: string, payload: Record<string, unknown>): Promise<void> {
+    return this.#socket
+      .rpc("agent.answerRequest", { requestId, payload })
+      .then(() => {});
+  }
 }

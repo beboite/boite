@@ -181,6 +181,13 @@ pub async fn dispatch(state: &AppState, request: Authorized) -> Result<Value, St
                 thread.created_at = now_ms();
             }
             thread.status = "running".to_string();
+            // The sidecar lives on this host. A client on another machine
+            // cannot name it, so the flags are added here, once, in front of
+            // `--` so a Claude prompt is not read as a second config file.
+            if let Some(paths) = state.agent_api.as_ref().and_then(|api| api.mcp.as_ref()) {
+                thread.args =
+                    boite_core::mcp_launch::inject(&thread.cmd, std::mem::take(&mut thread.args), paths);
+            }
             // Before the key is minted: `bind_thread_identity` updates a row,
             // and there is no row until this runs.
             state.store.save_thread(&thread)?;
@@ -377,6 +384,28 @@ pub async fn dispatch(state: &AppState, request: Authorized) -> Result<Value, St
         "agent.claimRequest" => {
             let id = str_param(&params, "requestId")?;
             Ok(json!({ "claimed": state.claim_agent_request(&id) }))
+        }
+
+        "agent.answerRequest" => {
+            let id = str_param(&params, "requestId")?;
+            let payload = params.get("payload").cloned().unwrap_or(json!({}));
+            let answered = state
+                .agent_api
+                .as_ref()
+                .map(|api| api.answer(&id, payload))
+                .unwrap_or(false);
+            Ok(json!({ "answered": answered }))
+        }
+
+        "agent.mcpConfig" => {
+            let Some(paths) = state.agent_api.as_ref().and_then(|api| api.mcp.as_ref()) else {
+                return Err("no MCP shim on this host".into());
+            };
+            Ok(json!({
+                "sidecarPath": paths.sidecar,
+                "configPath": paths.config,
+                "settingsPath": paths.settings,
+            }))
         }
 
         "settings.set" => {

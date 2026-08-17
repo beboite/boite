@@ -163,6 +163,38 @@ pub(crate) fn format_worktree(out: &Value) -> String {
     w.into_string()
 }
 
+pub(crate) fn format_whereami(out: &Value) -> String {
+    let string_at = |key: &str| out.get(key).and_then(|v| v.as_str()).unwrap_or("-");
+    let detached = out
+        .get("detached")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let mut w = Toon::new();
+    w.field("thread", string_at("thread"))
+        .field("project", string_at("project"))
+        .field("worktree", string_at("worktree"))
+        .field("branch", string_at("branch"))
+        .flag("detached", detached);
+    w.into_string()
+}
+
+pub(crate) fn format_wait(out: &Value) -> String {
+    let mut w = Toon::new();
+    w.field(
+        "threadId",
+        out.get("threadId").and_then(|v| v.as_str()).unwrap_or(""),
+    )
+    .field(
+        "status",
+        out.get("status").and_then(|v| v.as_str()).unwrap_or(""),
+    )
+    .flag("live", out.get("live").and_then(|v| v.as_bool()).unwrap_or(false));
+    if let Some(ms) = out.get("waitedMs").and_then(|v| v.as_u64()) {
+        w.field("waitedMs", &ms.to_string());
+    }
+    w.into_string()
+}
+
 /// The sharing rule, one row per directory.
 ///
 /// `source` comes first and is the point of the whole answer: the rows read the
@@ -508,7 +540,7 @@ pub(crate) fn format_snapshot(out: &Value) -> String {
              mode=text reads the prose"
         ));
     }
-    w.hint("browser_click uid=<uid> acts on a row; after acting, mode=diff costs less than looking again");
+    w.hint("browser action=click uid=<uid> acts on a row; after acting, mode=diff costs less than looking again");
     w.into_string()
 }
 
