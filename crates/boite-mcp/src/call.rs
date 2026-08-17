@@ -11,7 +11,7 @@ use crate::backend::Backend;
 use crate::render::{
     format_acted, format_artifacts, format_browser_panes, format_drove, format_hits,
     format_moments, format_page_settled, format_projects, format_snapshot, format_todos,
-    format_worktree, prefix,
+    format_wait, format_whereami, format_worktree, prefix,
 };
 use crate::toon::Toon;
 use crate::{encode_query, MAX_BRANCHES};
@@ -61,6 +61,13 @@ pub fn call_tool<B: Backend>(host: &B, name: &str, args: &Value) -> Result<Strin
             w.field("reported", prefix(&full, 8))
                 .field("state", "awaiting-user");
             Ok(w.into_string())
+        }
+        "whereami" => {
+            let out = host.send("GET", "/v1/whereami", None)?;
+            if let Some(error) = out.get("error").and_then(|v| v.as_str()) {
+                return Err(error.to_string());
+            }
+            Ok(format_whereami(&out))
         }
         "worktree_status" => {
             let out = host.send("GET", "/v1/worktree", None)?;
@@ -217,14 +224,31 @@ pub fn call_tool<B: Backend>(host: &B, name: &str, args: &Value) -> Result<Strin
             if let Some(waiting) = awaiting(&out) {
                 return Ok(waiting);
             }
+            let id = out.get("threadId").and_then(|v| v.as_str()).unwrap_or("");
             let mut w = Toon::new();
             w.field("opened", args.get("agent").and_then(|v| v.as_str()).unwrap_or("agent"))
-                .hint("it runs on its own: no report back, and you cannot read its output");
+                .field("threadId", id)
+                .hint("terminal_transcript threadId=<id> reads what it printed; thread_wait waits for it");
             Ok(w.into_string())
+        }
+        "thread_wait" => {
+            let id = args
+                .get("threadId")
+                .and_then(|v| v.as_str())
+                .ok_or("thread_wait needs a threadId")?;
+            let mut path = format!("/v1/thread/wait?threadId={}", crate::encode_query(id));
+            if let Some(ms) = args.get("timeoutMs").and_then(|v| v.as_u64()) {
+                path.push_str(&format!("&timeoutMs={ms}"));
+            }
+            let out = host.send("GET", &path, None)?;
+            if let Some(error) = out.get("error").and_then(|v| v.as_str()) {
+                return Err(error.to_string());
+            }
+            Ok(format_wait(&out))
         }
         "pane_open" => {
             let mut body = json!({});
-            for key in ["kind", "url", "side"] {
+            for key in ["kind", "url", "side", "path"] {
                 if let Some(v) = args.get(key).and_then(|v| v.as_str()) {
                     body[key] = json!(v);
                 }
@@ -238,6 +262,7 @@ pub fn call_tool<B: Backend>(host: &B, name: &str, args: &Value) -> Result<Strin
             w.hint("the user sees it now; you cannot read what is in it, and a page off this machine waits on them agreeing to it");
             Ok(w.into_string())
         }
+        "browser" => browser_call(host, args),
         "browser_status" => {
             let out = host.send("GET", "/v1/browser", None)?;
             if let Some(error) = out.get("error").and_then(|v| v.as_str()) {
@@ -336,6 +361,30 @@ pub fn call_tool<B: Backend>(host: &B, name: &str, args: &Value) -> Result<Strin
     }
 }
 
+fn browser_call<B: Backend>(host: &B, args: &Value) -> Result<String, String> {
+    let action = args
+        .get("action")
+        .and_then(|v| v.as_str())
+        .ok_or("browser needs an action")?;
+    let name = match action {
+        "status" => "browser_status",
+        "snapshot" => "browser_snapshot",
+        "screenshot" => {
+            return Err("use the image result of action=screenshot; this text path is unused".into())
+        }
+        "click" => "browser_click",
+        "type" => "browser_type",
+        "press" => "browser_press",
+        "scroll" => "browser_scroll",
+        "navigate" => "browser_navigate",
+        "reload" => "browser_reload",
+        "wait_for" => "browser_wait_for",
+        "close" => "browser_close",
+        other => return Err(format!("unknown browser action: {other}")),
+    };
+    call_tool(host, name, args)
+}
+
 /// The one tool whose answer is not text.
 ///
 /// Kept out of [`call_tool`] so the text tools stay a `String` pipeline;
@@ -347,7 +396,10 @@ pub fn call_blocks<B: Backend>(
     name: &str,
     args: &Value,
 ) -> Option<Result<Value, String>> {
-    if name != "browser_screenshot" {
+    let screenshot = name == "browser_screenshot"
+        || (name == "browser"
+            && args.get("action").and_then(|v| v.as_str()) == Some("screenshot"));
+    if !screenshot {
         return None;
     }
     Some((|| {
@@ -433,4 +485,128 @@ fn branch_call<B: Backend>(host: &B, args: &Value, path: &str, tool: &str) -> Re
     let mut w = Toon::new();
     w.field("branch", name).field("terminal", "attached");
     Ok(w.into_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::{Backend, IdCache};
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+
+    struct MapHost {
+        replies: HashMap<String, Value>,
+        posts: RefCell<Vec<(String, Value)>>,
+        ids: IdCache,
+    }
+
+    impl MapHost {
+        fn new(replies: HashMap<String, Value>) -> Self {
+            Self {
+                replies,
+                posts: RefCell::new(Vec::new()),
+                ids: IdCache::new(),
+            }
+        }
+    }
+
+    impl Backend for MapHost {
+        fn send(&self, method: &str, path: &str, body: Option<Value>) -> Result<Value, String> {
+            let key = format!("{method} {path}");
+            if let Some(body) = body {
+                self.posts.borrow_mut().push((path.to_string(), body));
+            }
+            self.replies
+                .get(&key)
+                .cloned()
+                .or_else(|| {
+                    self.replies
+                        .iter()
+                        .find(|(k, _)| path.starts_with(k.trim_start_matches("GET ").trim_start_matches("POST ")))
+                        .map(|(_, v)| v.clone())
+                })
+                .ok_or_else(|| format!("no reply for {key}"))
+        }
+
+        fn remember(&self, short: &str, full: &str) {
+            self.ids.remember(short, full);
+        }
+
+        fn full_id(&self, given: &str) -> String {
+            self.ids.resolve(self, given)
+        }
+    }
+
+    #[test]
+    fn spawn_names_the_thread_and_does_not_say_unread() {
+        let host = MapHost::new(HashMap::from([(
+            "POST /v1/threads".into(),
+            json!({ "ok": true, "threadId": "new-1" }),
+        )]));
+        let text = call_tool(&host, "thread_spawn", &json!({ "agent": "claude" })).unwrap();
+        assert!(text.contains("threadId: new-1"), "{text}");
+        assert!(!text.contains("cannot read its output"), "{text}");
+        assert!(text.contains("terminal_transcript"), "{text}");
+    }
+
+    #[test]
+    fn wait_reports_status() {
+        let host = MapHost::new(HashMap::from([(
+            "/v1/thread/wait".into(),
+            json!({ "threadId": "new-1", "status": "ready", "live": false, "waitedMs": 0 }),
+        )]));
+        let text = call_tool(
+            &host,
+            "thread_wait",
+            &json!({ "threadId": "new-1" }),
+        )
+        .unwrap();
+        assert!(text.contains("status: ready"), "{text}");
+        assert!(text.contains("live: false") || text.contains("live:"), "{text}");
+    }
+
+    #[test]
+    fn whereami_is_toon() {
+        let host = MapHost::new(HashMap::from([(
+            "GET /v1/whereami".into(),
+            json!({
+                "thread": "t1",
+                "project": "boite",
+                "worktree": "/w/t1",
+                "branch": "-",
+                "detached": true
+            }),
+        )]));
+        let text = call_tool(&host, "whereami", &json!({})).unwrap();
+        assert!(text.contains("thread: t1"), "{text}");
+        assert!(text.contains("project: boite"), "{text}");
+        assert!(text.contains("detached: true"), "{text}");
+    }
+
+    #[test]
+    fn pane_open_forwards_path() {
+        let host = MapHost::new(HashMap::from([(
+            "POST /v1/pane/open".into(),
+            json!({ "ok": true }),
+        )]));
+        call_tool(
+            &host,
+            "pane_open",
+            &json!({ "kind": "editor", "path": "src/lib.rs" }),
+        )
+        .unwrap();
+        let posts = host.posts.borrow();
+        assert_eq!(posts[0].1["path"], json!("src/lib.rs"));
+        assert_eq!(posts[0].1["kind"], json!("editor"));
+    }
+
+    #[test]
+    fn unclaimed_spawn_is_not_success() {
+        let host = MapHost::new(HashMap::from([(
+            "POST /v1/threads".into(),
+            json!({ "error": "no Boite device is connected, and the server cannot do this on its own: it means killing a      PTY and rearranging rows a client owns. Open Boite on a device and ask again." }),
+        )]));
+        let err = call_tool(&host, "thread_spawn", &json!({})).unwrap_err();
+        assert!(err.contains("no Boite device"), "{err}");
+    }
 }

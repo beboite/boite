@@ -25,6 +25,8 @@ pub struct AgentMcpConfig {
     pub sidecar_path: String,
     /// Generated file to hand an agent that takes one at launch.
     pub config_path: String,
+    /// Claude `--settings` file that wires the stop hook.
+    pub settings_path: String,
 }
 
 /// Prepares the MCP server definition agents are pointed at, and returns where
@@ -60,23 +62,12 @@ pub async fn agent_mcp_config(app: AppHandle) -> Result<AgentMcpConfig, String> 
         .path()
         .app_config_dir()
         .map_err(|e| format!("app_config_dir: {e}"))?;
-    std::fs::create_dir_all(&config_dir).map_err(|e| format!("create config dir: {e}"))?;
-    let config_path = config_dir.join("mcp-boite.json");
-
-    let body = serde_json::json!({
-        "mcpServers": {
-            "boite": { "command": sidecar.to_string_lossy() }
-        }
-    });
-    std::fs::write(
-        &config_path,
-        serde_json::to_vec_pretty(&body).map_err(|e| format!("serialize: {e}"))?,
-    )
-    .map_err(|e| format!("write mcp config: {e}"))?;
+    let written = boite_core::mcp_launch::write_files(&config_dir, &sidecar)?;
 
     Ok(AgentMcpConfig {
-        sidecar_path: sidecar.to_string_lossy().into_owned(),
-        config_path: config_path.to_string_lossy().into_owned(),
+        sidecar_path: written.sidecar.to_string_lossy().into_owned(),
+        config_path: written.config.to_string_lossy().into_owned(),
+        settings_path: written.settings.to_string_lossy().into_owned(),
     })
 }
 

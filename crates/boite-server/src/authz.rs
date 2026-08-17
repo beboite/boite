@@ -74,6 +74,8 @@ const NON_BUS: &[(&str, Option<Scope>)] = &[
     ("thread.reply", Some(Scope::Terminal)),
     ("shell.warm", Some(Scope::Terminal)),
     ("agent.claimRequest", Some(Scope::Approve)),
+    ("agent.answerRequest", Some(Scope::Approve)),
+    ("agent.mcpConfig", Some(Scope::Read)),
     ("approval.list", Some(Scope::Read)),
     ("approval.decide", Some(Scope::Approve)),
     ("project.homeDir", Some(Scope::Read)),
