@@ -93,6 +93,10 @@ Shortcuts are editable (label, command, icon, color, order), each preset says
 whether its binary was found on the machine, and any custom command can be
 added.
 
+An agent's own status line is part of its output, so a split pane is narrower
+than the line was written for. [`docs/status-lines.md`](docs/status-lines.md)
+has what a pane exports, what it does not, and a worked example.
+
 ## A page per project
 
 Clicking a project opens its page rather than whatever thread happened to be

@@ -2,7 +2,8 @@
 
 The rules that are easy to break without noticing. `README.md` has the stack and
 the build commands, `docs/development.md` the isolated dev window and the MCP
-bridge, `docs/releasing.md` the release process.
+bridge, `docs/releasing.md` the release process, `docs/status-lines.md` what a
+pane exports to a status line a process draws itself.
 
 ## Translations
 
