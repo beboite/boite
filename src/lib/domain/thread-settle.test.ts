@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canSettle, countSettled, isSettled } from "./thread-settle";
+import { canSettle, countSettled, isSettled, splitSettled } from "./thread-settle";
 import type { Thread, ThreadStatus } from "$lib/types";
 
 function thread(over: Partial<Thread> = {}): Thread {
@@ -63,5 +63,22 @@ describe("countSettled", () => {
 
   it("answers zero on an empty list", () => {
     expect(countSettled([])).toBe(0);
+  });
+});
+
+describe("splitSettled", () => {
+  it("keeps each pile in the order the list already had", () => {
+    const a = thread({ id: "a" });
+    const b = thread({ id: "b", settledAt: 1 });
+    const c = thread({ id: "c" });
+    const d = thread({ id: "d", settledAt: 2 });
+    expect(splitSettled([a, b, c, d])).toEqual({
+      live: [a, c],
+      settled: [b, d],
+    });
+  });
+
+  it("answers two empty piles on an empty list", () => {
+    expect(splitSettled([])).toEqual({ live: [], settled: [] });
   });
 });
