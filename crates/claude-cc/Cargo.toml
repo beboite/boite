@@ -14,7 +14,7 @@ serde_json = { version = "1", features = ["preserve_order"] }
 dirs = "6"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 base64 = "0.22"
-rand = "0.9"
+getrandom = "0.3"
 
 # The seal on a saved login. DPAPI does this on Windows and needs no key; these
 # are what stands in for it everywhere else.
@@ -24,12 +24,16 @@ hmac = "0.12"
 
 # The usage endpoints, and nothing else. Blocking: this process exists to answer
 # one question and exit, so an async runtime would only add startup to it.
-ureq = { version = "3", default-features = false, features = ["rustls", "json"] }
-
+# TLS comes from the platform where the platform has one: schannel is already in
+# Windows, so linking rustls and a copy of the root store there is dead weight.
 [target.'cfg(windows)'.dependencies]
+ureq = { version = "3", default-features = false, features = ["native-tls", "json"] }
 windows-sys = { version = "0.60", features = [
     "Win32_Foundation",
     "Win32_Security_Cryptography",
     "Win32_System_Threading",
     "Win32_System_Memory",
 ] }
+
+[target.'cfg(not(windows))'.dependencies]
+ureq = { version = "3", default-features = false, features = ["rustls", "json"] }

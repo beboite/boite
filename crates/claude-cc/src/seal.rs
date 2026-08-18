@@ -46,9 +46,8 @@ fn which(cmd: &str) -> bool {
 }
 
 pub fn random_bytes(count: usize) -> Vec<u8> {
-    use rand::RngCore;
     let mut bytes = vec![0u8; count];
-    rand::rng().fill_bytes(&mut bytes);
+    getrandom::fill(&mut bytes).expect("the OS random source is not optional");
     bytes
 }
 

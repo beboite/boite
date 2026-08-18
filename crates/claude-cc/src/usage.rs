@@ -174,11 +174,20 @@ pub fn access_token(provider: &Provider, creds_raw: Option<&str>) -> Option<Stri
     jsonio::str_of(oauth, "accessToken")
 }
 
+fn agent() -> ureq::Agent {
+    let config =
+        ureq::Agent::config_builder().timeout_global(Some(std::time::Duration::from_secs(8)));
+    #[cfg(windows)]
+    let config = config.tls_config(
+        ureq::tls::TlsConfig::builder()
+            .provider(ureq::tls::TlsProvider::NativeTls)
+            .build(),
+    );
+    config.build().new_agent()
+}
+
 fn get_json(url: &str, headers: &[(&str, &str)]) -> Option<Value> {
-    let agent = ureq::Agent::config_builder()
-        .timeout_global(Some(std::time::Duration::from_secs(8)))
-        .build()
-        .new_agent();
+    let agent = agent();
     let mut request = agent.get(url);
     for (name, value) in headers {
         request = request.header(*name, *value);
