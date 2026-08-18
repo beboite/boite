@@ -30,6 +30,10 @@ function storeDir() {
   return process.env.CLAUDE_CC_ACCOUNTS || path.join(os.homedir(), '.claude-cc-accounts');
 }
 
+function codexStoreDir() {
+  return process.env.CODEX_CC_ACCOUNTS || path.join(os.homedir(), '.codex-cc-accounts');
+}
+
 function readJson(file) {
   try {
     return JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -81,17 +85,17 @@ function waitFor(at) {
   return `${Math.floor(hours / 24)}d${String(hours % 24).padStart(2, '0')}h`;
 }
 
-/** The pool, as {email, usage} pairs. A missing pool is not an empty one. */
-function pool() {
+/** One pool, as {email, usage} pairs. A missing pool is not an empty one. */
+function pool(dir) {
   let names;
   try {
-    names = fs.readdirSync(storeDir()).filter((f) => f.endsWith('.json') && !f.startsWith('.'));
+    names = fs.readdirSync(dir).filter((f) => f.endsWith('.json') && !f.startsWith('.'));
   } catch {
     return null;
   }
   const out = [];
   for (const name of names) {
-    const snapshot = readJson(path.join(storeDir(), name));
+    const snapshot = readJson(path.join(dir, name));
     if (!snapshot) continue;
     out.push({
       email: typeof snapshot.email === 'string' ? snapshot.email.toLowerCase() : null,
@@ -109,7 +113,7 @@ function build(payload) {
   // The live window beats the cache for the account in use: the payload was
   // written by the session this line is being drawn for.
   const live = (payload && payload.rate_limits) || null;
-  const accounts = pool();
+  const accounts = pool(storeDir());
   const mine = accounts && current ? accounts.find((a) => a.email === current) : null;
   const usage = live || (mine && mine.usage) || null;
 
@@ -124,6 +128,13 @@ function build(payload) {
   if (accounts && accounts.length > 1) {
     const free = accounts.filter((a) => a.email !== current && !capped(a.usage)).length;
     parts.push(`${free} free`);
+  }
+
+  // Codex has no status line of its own, and its pool is switched from the same
+  // place, so what is left there is worth one word here.
+  const codex = pool(codexStoreDir());
+  if (codex && codex.length) {
+    parts.push(`codex ${codex.filter((a) => !capped(a.usage)).length} free`);
   }
 
   return parts.join(SEP);

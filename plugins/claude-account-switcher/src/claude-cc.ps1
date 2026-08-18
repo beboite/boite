@@ -52,13 +52,38 @@ if (-not $Scripts.ContainsKey($name)) {
 
 $script = Join-Path $PSScriptRoot $Scripts[$name]
 
+# The remaining arguments, as a hashtable to splat.
+#
+# Splatting an array passes its elements positionally — `-Refresh` would arrive
+# as the value of the first positional parameter rather than as the switch it
+# is — so the flags are turned back into names and values here.
+function ConvertTo-CcParams {
+    param([string[]]$Tokens)
+    $params = @{}
+    for ($i = 0; $i -lt $Tokens.Count; $i++) {
+        $token = $Tokens[$i]
+        if (-not $token.StartsWith('-')) { continue }
+        $key  = $token.TrimStart('-')
+        $next = if ($i + 1 -lt $Tokens.Count) { $Tokens[$i + 1] } else { $null }
+        if ($null -ne $next -and -not $next.StartsWith('-')) {
+            $params[$key] = $next
+            $i++
+        } else {
+            $params[$key] = $true
+        }
+    }
+    return $params
+}
+
+$options = ConvertTo-CcParams $Rest
+
 # `all` is not a provider — it runs the command once per provider. It is caught
 # here, before anything tries to resolve it into a provider spec.
 . (Join-Path $PSScriptRoot 'cc-providers.ps1')
 if (Test-CcAllProviders $Provider) {
     $worst = 0
     foreach ($id in $CcProviderIds) {
-        & $script -Provider $id @Rest
+        & $script -Provider $id @options
         # The loudest child owns the exit code: a setup problem in one provider
         # must not be hidden by a clean run in the other.
         if ($LASTEXITCODE -gt $worst) { $worst = $LASTEXITCODE }
@@ -67,5 +92,5 @@ if (Test-CcAllProviders $Provider) {
     exit $worst
 }
 
-& $script -Provider $Provider @Rest
+& $script -Provider $Provider @options
 exit $LASTEXITCODE

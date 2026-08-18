@@ -53,6 +53,14 @@ if (Test-Path -LiteralPath $commandSource) {
 
 Set-Content -LiteralPath (Join-Path $ToolsDir '.version') -Value $version -NoNewline -Encoding utf8
 
+# The status line is a CommonJS script, and node decides that from the nearest
+# package.json rather than from the file. A `type: module` one further up the
+# home directory would otherwise break it.
+[IO.File]::WriteAllText(
+    (Join-Path $ToolsDir 'package.json'),
+    '{ "type": "commonjs" }',
+    [Text.UTF8Encoding]::new($false))
+
 # `claude-cc` as a shell function rather than a file on the PATH: it is one line
 # to add, it needs no directory of its own, and it works the same on all three
 # platforms.

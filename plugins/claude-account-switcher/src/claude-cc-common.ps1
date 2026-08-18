@@ -311,25 +311,54 @@ function Set-CcLiveIdentity {
     Move-Item -LiteralPath $tmp -Destination $CcConfigFile -Force
 }
 
+$CcBackupDir = Join-Path $CcStore '.backups'
+
+# The credentials that are about to be replaced, kept for the three most recent
+# switches. Sealed the same way a snapshot is, so a pool that is encrypted does
+# not keep plain-text copies of the same tokens beside it.
 function Backup-CcLiveCreds {
     $raw = Get-CcLiveCredsRaw
     if (-not $raw) { return }
-    $dir = Join-Path $CcStore '.backups'
-    if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
-    Protect-CcDirectory $dir
-    $file = Join-Path $dir ('creds-{0}.json' -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
-    [IO.File]::WriteAllText($file, $raw, [Text.UTF8Encoding]::new($false))
+    if (-not (Test-Path -LiteralPath $CcBackupDir)) { New-Item -ItemType Directory -Path $CcBackupDir -Force | Out-Null }
+    Protect-CcDirectory $CcBackupDir
+    $stamp  = Get-Date -Format 'yyyyMMdd-HHmmss'
+    $sealed = Protect-CcText $raw
+    if ($sealed) {
+        $file = Join-Path $CcBackupDir "creds-$stamp.ccx"
+        [IO.File]::WriteAllText($file, $sealed, [Text.UTF8Encoding]::new($false))
+    } else {
+        $file = Join-Path $CcBackupDir "creds-$stamp.json"
+        [IO.File]::WriteAllText($file, $raw, [Text.UTF8Encoding]::new($false))
+    }
     Protect-CcFile $file
-    Get-ChildItem -LiteralPath $dir -Filter 'creds-*.json' |
-        Sort-Object LastWriteTime -Descending |
-        Select-Object -Skip 3 |
-        Remove-Item -Force -ErrorAction Ignore
+    Get-CcBackupFiles | Select-Object -Skip 3 | Remove-Item -Force -ErrorAction Ignore
 }
 
-# A credential swap is several writes that must not interleave with another one.
-function Invoke-CcCredSwapLocked {
-    param([scriptblock]$Body)
-    $mutex = [System.Threading.Mutex]::new($false, 'Global\ClaudeCcCredentialSwap')
+# Newest first. `backup-*` is what earlier versions wrote, and those are still
+# worth rolling back to.
+function Get-CcBackupFiles {
+    if (-not (Test-Path -LiteralPath $CcBackupDir)) { return @() }
+    return @(Get-ChildItem -LiteralPath $CcBackupDir -File -ErrorAction Ignore |
+        Where-Object { $_.Name -like 'creds-*' -or $_.Name -like 'backup-*' } |
+        Sort-Object LastWriteTime -Descending)
+}
+
+# The newest backup, as the raw credentials text, or null when there is none.
+function Get-CcNewestBackup {
+    $file = Get-CcBackupFiles | Select-Object -First 1
+    if (-not $file) { return $null }
+    $text = (Get-Content -LiteralPath $file.FullName -Raw).Trim()
+    # Sealed or not is decided by what is in the file, so a backup written by an
+    # earlier version reads back the same way.
+    if (-not $text.StartsWith('{')) { $text = Unprotect-CcText $text }
+    if (-not $text -or -not $text.StartsWith('{')) { return $null }
+    return [pscustomobject]@{ Raw = $text; File = $file.FullName; At = $file.LastWriteTime }
+}
+
+# Work that must not interleave with the same work in another process.
+function Invoke-CcLocked {
+    param([string]$Name, [scriptblock]$Body)
+    $mutex = [System.Threading.Mutex]::new($false, $Name)
     $held  = $false
     try {
         try { $held = $mutex.WaitOne(15000) }
@@ -342,13 +371,21 @@ function Invoke-CcCredSwapLocked {
     }
 }
 
+# A credential swap is several writes that must not interleave with another one.
+function Invoke-CcCredSwapLocked {
+    param([scriptblock]$Body)
+    return Invoke-CcLocked -Name 'Global\ClaudeCcCredentialSwap' -Body $Body
+}
+
 # --- the pool ----------------------------------------------------------------
 
 function New-CcSnapshotEntry {
-    param([string]$Email, [string]$CredsRaw, $Identity, $UsageCache)
+    param([string]$Email, [string]$CredsRaw, $Identity, $UsageCache, [string]$SavedAt)
     $entry = [ordered]@{
-        email   = $Email
-        savedAt = (Get-Date -Format o)
+        email = $Email
+        # Re-sealing a snapshot rewrites it without it becoming a new one, so the
+        # date it was first saved is carried through when the caller has it.
+        savedAt = $(if ($SavedAt) { $SavedAt } else { (Get-Date -Format o) })
     }
     $sealed = Protect-CcText $CredsRaw
     if ($sealed) { $entry['credentialsProtected'] = $sealed }
@@ -592,17 +629,21 @@ function Test-CcUsageCacheFresh {
 # a number without asking the API again.
 function Save-CcUsageCache {
     param([string]$File, $Usage)
-    $snap = Read-CcJsonFile $File
-    if (-not $snap) { return }
-    $cache = [ordered]@{ checkedAt = (Get-Date).ToUniversalTime().ToString('o') }
-    foreach ($name in @('five_hour', 'seven_day')) {
-        $window = if ($Usage) { $Usage.$name } else { $null }
-        if ($window) {
-            $cache[$name] = [ordered]@{ utilization = $window.utilization; resets_at = $window.resets_at }
+    # Read, change, write: under a lock, or two commands refreshing at once lose
+    # one of the two answers.
+    Invoke-CcLocked -Name 'Global\ClaudeCcUsageCache' -Body {
+        $snap = Read-CcJsonFile $File
+        if (-not $snap) { return }
+        $cache = [ordered]@{ checkedAt = (Get-Date).ToUniversalTime().ToString('o') }
+        foreach ($name in @('five_hour', 'seven_day')) {
+            $window = if ($Usage) { $Usage.$name } else { $null }
+            if ($window) {
+                $cache[$name] = [ordered]@{ utilization = $window.utilization; resets_at = $window.resets_at }
+            }
         }
+        $snap | Add-Member -NotePropertyName usageCache -NotePropertyValue ([pscustomobject]$cache) -Force
+        Write-CcJsonFile $File $snap
     }
-    $snap | Add-Member -NotePropertyName usageCache -NotePropertyValue ([pscustomobject]$cache) -Force
-    Write-CcJsonFile $File $snap
 }
 
 # The usage for one pool entry, from cache while the cache is fresh enough.

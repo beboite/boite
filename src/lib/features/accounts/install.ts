@@ -173,8 +173,13 @@ function session(run: string): InstallScript {
     // Wrapped: a host without a real console — which is what a piped shell is —
     // throws rather than clearing, and would take the install down with it.
     "try { Clear-Host } catch { }",
-    run,
-    "exit $LASTEXITCODE",
+    "$code = 0",
+    // The unpacked copy is scaffolding: the installer has taken what it needs by
+    // the time this runs, and leaving a second copy of the toolkit beside the
+    // installed one only invites the wrong one being read later.
+    `try { ${run}; $code = $LASTEXITCODE } catch { Write-Host $_ -ForegroundColor Red; $code = 1 } ` +
+      "finally { Remove-Item -LiteralPath $pkg -Recurse -Force -ErrorAction Ignore }",
+    "exit $code",
   ];
 
   return { cmd: PWSH_CMD, args: ["-NoProfile", "-NoLogo"], stdin: lines };

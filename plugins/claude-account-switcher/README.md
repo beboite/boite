@@ -18,7 +18,8 @@ is no third-party repository in the trust path.
 - **remove** — forgets a saved login. The live session is untouched.
 - **doctor** — what is installed, what is readable, what the pool thinks of
   itself. `-Protect` re-seals plain-text snapshots, `-Adopt` stamps the ones
-  this machine never registered.
+  this machine never registered, `-Rollback` puts back the credentials from
+  before the last switch, `-Clean` deletes files an earlier version left behind.
 
 Every command takes `-Provider claude`, `-Provider codex`, or `-Provider all`
 to run once per provider.
