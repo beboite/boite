@@ -46,16 +46,40 @@ if (Test-Path -LiteralPath $profilePath) {
     }
 }
 
-# The status line points at a file that no longer exists, so it goes too.
+# The status line and the session hook both point at files that no longer
+# exist, so they go too. A hook left behind is worse than a stale setting: it
+# fails at the start of every session the user opens from here on.
 $settingsPath = Join-Path $claude 'settings.json'
 if (Test-Path -LiteralPath $settingsPath) {
     try {
         $settings = Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json
+        $touched = $false
+
         $line = $settings.PSObject.Properties['statusLine']
         if ($line -and "$($line.Value.command)" -like '*claude-cc-statusline*') {
             $settings.PSObject.Properties.Remove('statusLine')
-            [IO.File]::WriteAllText($settingsPath, ($settings | ConvertTo-Json -Depth 20), [Text.UTF8Encoding]::new($false))
             Say 'Removed the status line from settings.json' Green
+            $touched = $true
+        }
+
+        $hooks = $settings.PSObject.Properties['hooks']
+        if ($hooks -and $hooks.Value.PSObject.Properties['SessionStart']) {
+            $all  = @($hooks.Value.SessionStart)
+            # Both spellings: 4.x goes through the dispatcher, 3.x called the one
+            # script. Whatever else the user put there is left where it is.
+            $kept = @($all | Where-Object {
+                -not (@($_.hooks) | Where-Object { "$($_.command)" -like '*claude-c*auto*' })
+            })
+            if ($kept.Count -ne $all.Count) {
+                if ($kept.Count) { $hooks.Value.SessionStart = $kept }
+                else { $hooks.Value.PSObject.Properties.Remove('SessionStart') }
+                Say 'Removed the session hook from settings.json' Green
+                $touched = $true
+            }
+        }
+
+        if ($touched) {
+            [IO.File]::WriteAllText($settingsPath, ($settings | ConvertTo-Json -Depth 20), [Text.UTF8Encoding]::new($false))
         }
     } catch { }
 }

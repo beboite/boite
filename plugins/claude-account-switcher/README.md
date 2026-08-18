@@ -14,7 +14,8 @@ is no third-party repository in the trust path.
   asks the provider's API; without it the numbers come from the cache.
 - **switch** — puts another saved login in front of the CLI.
 - **auto** — switches only when the one in use is out of quota, and only to one
-  that is not. This is the command worth wiring to a key or a hook.
+  that is not. It does nothing on its own: something has to call it, which is
+  what `install.ps1 -AutoSwitch` sets up.
 - **remove** — forgets a saved login. The live session is untouched.
 - **doctor** — what is installed, what is readable, what the pool thinks of
   itself. `-Protect` re-seals plain-text snapshots, `-Adopt` stamps the ones
@@ -30,8 +31,30 @@ claude-cc auto -Provider claude
 claude-cc switch -Provider codex -Email you@example.com
 ```
 
-The status line reads the Claude Code pool only; Codex has no status line to
-put a segment in.
+## Switching without being asked
+
+`install.ps1 -AutoSwitch all` writes one `SessionStart` hook into
+`~/.claude/settings.json`, so `auto` runs once as each Claude Code session
+starts: a session that would have opened on a capped account opens on a free one
+instead. `-AutoSwitch claude` or `-AutoSwitch codex` narrows it to one pool.
+Installing again replaces that hook rather than adding a second one, and
+`uninstall.ps1` takes it back out. Nothing runs in the background — no watcher,
+no daemon; between two sessions nothing of this is running.
+
+## The status line
+
+`install.ps1 -StatusLine` points Claude Code's status line at
+`claude-cc-statusline.js`. It draws the account in use and its two windows, how
+many saved Claude logins still have room, how many Codex logins do — Codex has
+no status line of its own, and both pools are switched from here — and, when the
+`SessionStart` hook is in place, what the switch is armed for:
+
+```
+you · 5h 43% / 7d 69% · 2 free · codex 1 free · auto all
+```
+
+It never asks the network: the live window comes from the payload Claude Code
+hands it, the rest from the cache the switcher already wrote.
 
 Inside Claude Code the same things are slash commands: `/account-add-claude`,
 `/account-list-all`, `/account-auto-switch-all`, and so on.

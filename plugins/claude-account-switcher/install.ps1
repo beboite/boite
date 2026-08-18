@@ -9,6 +9,10 @@ param(
     # Point Claude Code's status line at the one shipped here. Off by default:
     # it is the only thing an install would change that the user can see.
     [switch]$StatusLine,
+    # Run `auto` once as each session starts, for these pools. Off by default:
+    # it changes which login the next session answers as.
+    [ValidateSet('claude', 'codex', 'all')]
+    [string]$AutoSwitch,
     [switch]$NoProfileEdit
 )
 
@@ -89,26 +93,64 @@ if (-not $NoProfileEdit) {
     }
 }
 
+# settings.json belongs to the user, so it is read, amended and written back
+# whole rather than rebuilt, and a copy is kept the first time this touches it.
+$settingsPath = Join-Path $claude 'settings.json'
+
+function Read-CcSettings {
+    if (-not (Test-Path -LiteralPath $settingsPath)) { return [pscustomobject]@{} }
+    return Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json
+}
+
+function Write-CcSettings {
+    param([psobject]$Settings)
+    if ((Test-Path -LiteralPath $settingsPath) -and -not (Test-Path -LiteralPath "$settingsPath.cc-backup")) {
+        Copy-Item -LiteralPath $settingsPath -Destination "$settingsPath.cc-backup" -Force
+    }
+    [IO.File]::WriteAllText($settingsPath, ($Settings | ConvertTo-Json -Depth 20), [Text.UTF8Encoding]::new($false))
+}
+
 if ($StatusLine) {
     $node = Get-Command node -ErrorAction Ignore
     if (-not $node) {
         Say 'Skipped the status line: node is not on PATH.' Yellow
     } else {
-        $settingsPath = Join-Path $claude 'settings.json'
-        $settings = if (Test-Path -LiteralPath $settingsPath) {
-            Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json
-        } else {
-            [pscustomobject]@{}
-        }
+        $settings = Read-CcSettings
         $line = [pscustomobject]@{
             type    = 'command'
             command = "node `"$(Join-Path $ToolsDir 'claude-cc-statusline.js')`""
         }
         $settings | Add-Member -NotePropertyName statusLine -NotePropertyValue $line -Force
-        $json = $settings | ConvertTo-Json -Depth 20
-        [IO.File]::WriteAllText($settingsPath, $json, [Text.UTF8Encoding]::new($false))
+        Write-CcSettings $settings
         Say "Pointed the Claude Code status line at the switcher ($settingsPath)" Green
     }
+}
+
+if ($AutoSwitch) {
+    $settings = Read-CcSettings
+    $entry = (Join-Path $ToolsDir 'claude-cc.ps1') -replace '\\', '/'
+    # Silent, and always successful. What a SessionStart hook writes to stdout is
+    # fed to the model, and a non-zero exit is shown to the user at every start —
+    # which `auto` returns for a pool too small to switch in, a normal state.
+    $command = "pwsh -NoProfile -Command `"& '$entry' auto -Provider $AutoSwitch -Quiet *> `$null; exit 0`""
+
+    $hooks = if ($settings.PSObject.Properties['hooks']) { $settings.hooks } else { [pscustomobject]@{} }
+    # Anything this installed before is replaced, not stacked: running the
+    # installer twice must leave one hook, and switching scope must not keep the
+    # old scope running beside the new one.
+    $others = @()
+    if ($hooks.PSObject.Properties['SessionStart']) {
+        $others = @($hooks.SessionStart | Where-Object {
+            -not (@($_.hooks) | Where-Object { "$($_.command)" -like '*claude-c*auto*' })
+        })
+    }
+    $group = [pscustomobject]@{
+        hooks = @([pscustomobject]@{ type = 'command'; command = $command; timeout = 25 })
+    }
+    $hooks | Add-Member -NotePropertyName SessionStart -NotePropertyValue ($others + $group) -Force
+    $settings | Add-Member -NotePropertyName hooks -NotePropertyValue $hooks -Force
+    Write-CcSettings $settings
+    Say "Each session will now run: claude-cc auto -Provider $AutoSwitch" Green
 }
 
 Say ''

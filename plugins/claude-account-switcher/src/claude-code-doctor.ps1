@@ -56,6 +56,38 @@ if (Get-CcLiveCredsRaw) {
     Warn "not logged in ($CcCredLabel)"
 }
 
+# What Claude Code itself was told to run. Both of these live in settings.json
+# rather than in the pool, so nothing else here would notice them missing — and a
+# hook left pointing at a script that is gone fails at every session start.
+# Reported once, under the Claude pool: the file is not per-provider.
+if ($CcProviderId -eq 'claude') {
+    $settingsPath = Join-Path $(if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { Join-Path $HOME '.claude' }) 'settings.json'
+    $settings = $null
+    if (Test-Path -LiteralPath $settingsPath) {
+        try { $settings = Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json } catch { Warn "settings.json cannot be read: $($_.Exception.Message)" }
+    }
+
+    $lineCommand = "$($settings.statusLine.command)"
+    if ($lineCommand -like '*claude-cc-statusline*') {
+        $script = [regex]::Match($lineCommand, '[^"'']*claude-cc-statusline\.js').Value
+        if ($script -and -not (Test-Path -LiteralPath $script)) { Bad "the status line points at $script, which is not there" }
+        else { Good 'status line installed' }
+    } else {
+        Say '  status line not installed. Add it with: install.ps1 -StatusLine' DarkGray
+    }
+
+    $autoHooks = @(@($settings.hooks.SessionStart) | ForEach-Object { @($_.hooks) } |
+        Where-Object { "$($_.command)" -like '*claude-c*auto*' })
+    if ($autoHooks.Count -gt 1) {
+        Warn "$($autoHooks.Count) session hooks run auto. Reinstall with -AutoSwitch to leave one."
+    } elseif ($autoHooks.Count -eq 1) {
+        $scope = [regex]::Match("$($autoHooks[0].command)", '-Provider\s+([A-Za-z]+)')
+        Good ('auto runs at every session start, for {0}' -f $(if ($scope.Success) { $scope.Groups[1].Value } else { 'claude' }))
+    } else {
+        Say '  auto does not run on its own. Arm it with: install.ps1 -AutoSwitch all' DarkGray
+    }
+}
+
 if (-not (Test-Path -LiteralPath $CcStore)) {
     Warn 'No pool directory yet. Nothing has been saved.'
     exit $(if ($problems) { 1 } else { 0 })
