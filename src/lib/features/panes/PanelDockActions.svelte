@@ -1,5 +1,6 @@
 <script lang="ts">
   import X from "@lucide/svelte/icons/x";
+  import { tip } from "$lib/shared/actions/tooltip";
   import { t } from "$lib/i18n/index.svelte";
 
   /**
@@ -24,9 +25,9 @@
 <span class="ml-1 h-4 w-px shrink-0 bg-border" aria-hidden="true"></span>
 <button
   type="button"
-  class="shrink-0 rounded p-1 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground"
+  class="press shrink-0 rounded p-1 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground"
   onclick={onClose}
-  title={t("panel.close")}
+  use:tip={t("panel.close")}
   aria-label={t("panel.close")}
 >
   <X class="size-3.5" />

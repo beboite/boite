@@ -1,5 +1,6 @@
 <script lang="ts">
   import { app } from "$lib/app/store.svelte";
+  import { tip } from "$lib/shared/actions/tooltip";
   import { settings, clampRightPanelWidth } from "$lib/features/settings/store.svelte";
   import { resizeHandle } from "$lib/shared/actions/resizeHandle";
   import GitPanel from "$lib/features/git/GitPanel.svelte";
@@ -84,7 +85,7 @@
       onStateChange: (r) => (resizing = r),
     }}
     aria-label={t("panel.resize")}
-    title={t("panel.resize")}
+    use:tip={t("panel.resize")}
     tabindex="-1"
   ></button>
 </aside>

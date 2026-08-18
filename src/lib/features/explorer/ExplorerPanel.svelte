@@ -1,6 +1,8 @@
 <script lang="ts">
   import { app } from "$lib/app/store.svelte";
+  import { tip } from "$lib/shared/actions/tooltip";
   import { t } from "$lib/i18n/index.svelte";
+  import { scrollIntoViewSmooth } from "$lib/theme/motion";
   import { projectDisplayName } from "$lib/shared/project-label";
   import { workspace } from "$lib/backend";
   import { settings } from "$lib/features/settings/store.svelte";
@@ -175,7 +177,7 @@
     const path = row?.dataset.path;
     if (!path) return;
     activePath = path;
-    row.scrollIntoView({ block: "nearest" });
+    scrollIntoViewSmooth(row);
   }
 
   function cursorIndex(rows: HTMLElement[]): number {
@@ -310,7 +312,7 @@
       class="ml-auto rounded p-1 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:opacity-40"
       onclick={collapseAll}
       disabled={!root}
-      title={t("explorer.collapseAll")}
+      use:tip={t("explorer.collapseAll")}
       aria-label={t("explorer.collapseAll")}
     >
       <ChevronsDownUp class="size-3.5" />
@@ -320,7 +322,7 @@
       class="rounded p-1 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:opacity-40"
       onclick={refresh}
       disabled={!root || manualRefreshing}
-      title={t("explorer.refresh")}
+      use:tip={t("explorer.refresh")}
       aria-label={t("explorer.refresh")}
     >
       <RefreshCw class="size-3.5 {manualRefreshing ? 'animate-spin' : ''}" />
@@ -350,7 +352,7 @@
           type="button"
           class="shrink-0 rounded p-0.5 text-muted-foreground/70 transition hover:bg-[var(--color-surface-3)] hover:text-foreground"
           onclick={clearFilter}
-          title={t("explorer.clearFilterTitle")}
+          use:tip={t("explorer.clearFilterTitle")}
           aria-label={t("explorer.clearFilter")}
         >
           <X class="size-3" />

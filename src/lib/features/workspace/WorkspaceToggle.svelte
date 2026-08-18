@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from "svelte";
+  import { tip } from "$lib/shared/actions/tooltip";
   import { scale } from "svelte/transition";
   import { workspace } from "$lib/backend";
   import { confirmDialog } from "$lib/shared/components/confirm.svelte";
@@ -373,7 +374,7 @@
              than left implicit: "behind" is only meaningful next to it. -->
         <span
           class="shrink-0 tabular-nums text-2xs text-muted-foreground"
-          title={t("workspace.versionThis")}
+          use:tip={t("workspace.versionThis")}
         >
           v{__APP_VERSION__}
         </span>
@@ -392,7 +393,7 @@
         class={`flex items-center gap-2.5 rounded-lg text-left transition hover:bg-accent disabled:opacity-50 ${mobile ? "px-3 py-3 text-sm" : "px-2.5 py-2 text-base"}`}
         onclick={toggleDynamic}
         disabled={busy}
-        title={t("workspace.dynamicTooltip")}
+        use:tip={t("workspace.dynamicTooltip")}
       >
         <Layers class="size-4 shrink-0 text-muted-foreground" />
         <span class="flex min-w-0 flex-1 flex-col leading-tight">
@@ -439,7 +440,7 @@
               {#if version}
                 <span
                   class={`shrink-0 tabular-nums text-2xs ${behind ? "rounded bg-warning/15 px-1 font-medium text-warning" : "text-muted-foreground/70"}`}
-                  title={behind
+                  use:tip={behind
                     ? t("workspace.versionBehind", {
                         version,
                         local: __APP_VERSION__,
@@ -479,7 +480,7 @@
             class={`flex shrink-0 items-center justify-center rounded-lg transition hover:bg-accent ${mobile ? "w-11" : "w-9"} ${b.enabled ? "text-foreground" : "text-muted-foreground/50"}`}
             onclick={() => toggleKeepConnected(b)}
             aria-label={t("workspace.keepConnected")}
-            title={b.enabled
+            use:tip={b.enabled
               ? t("workspace.keepConnectedOn")
               : t("workspace.keepConnectedOff")}
           >
@@ -490,7 +491,7 @@
             class={`flex shrink-0 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-danger/20 hover:text-danger ${mobile ? "w-11" : "w-9"}`}
             onclick={() => void remove(b)}
             aria-label={t("workspace.removeBoite")}
-            title={t("shortcuts.remove")}
+            use:tip={t("shortcuts.remove")}
           >
             <Trash2 class="size-4" />
           </button>
@@ -619,7 +620,7 @@
     onclick={toggle}
     aria-haspopup="dialog"
     aria-expanded={open}
-    title={t("workspace.title")}
+    use:tip={t("workspace.title")}
   >
     {#if triggerDot}
       <span
@@ -645,7 +646,7 @@
       role="dialog"
       aria-label={t("workspace.title")}
       tabindex="-1"
-      class="surface-popover fixed z-[var(--z-popover)] max-h-[min(70vh,34rem)] overflow-y-auto p-2"
+      class="surface-popover fixed z-[var(--z-popover)] max-h-[min(70vh,34rem)] scroll-pane overflow-y-auto p-2"
       style:left="{menuPos.x}px"
       style:top="{menuPos.y}px"
       style:width="{MENU_W}px"

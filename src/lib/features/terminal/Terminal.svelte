@@ -1,5 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
+  import { tip } from "$lib/shared/actions/tooltip";
+  import { edgeFade } from "$lib/shared/actions/edgeFade";
   import { Terminal } from "@xterm/xterm";
   import { FitAddon } from "@xterm/addon-fit";
   import { WebglAddon } from "@xterm/addon-webgl";
@@ -1676,7 +1678,7 @@
         onpointercancel={fabCancel}
         onpointerleave={fabCancel}
         aria-label={t("terminal.keyboardLabel")}
-        title={t("terminal.keyboardHint")}
+        use:tip={t("terminal.keyboardHint")}
       >
         <Keyboard class="size-5" />
       </button>
@@ -1688,7 +1690,10 @@
       class="flex shrink-0 items-stretch gap-1 border-t border-border bg-[var(--color-surface)] px-1 py-1"
       style="padding-left: max(env(safe-area-inset-left, 0px), 0.25rem); padding-right: max(env(safe-area-inset-right, 0px), 0.25rem);"
     >
-      <div class="hide-scrollbar flex flex-1 items-stretch gap-1 overflow-x-auto">
+      <div
+        class="edge-fade hide-scrollbar flex flex-1 items-stretch gap-1 overflow-x-auto"
+        use:edgeFade
+      >
         {#each BAR_KEYS as k (k.id)}
           {@const armed =
             k.id === "ctrl" ? ctrlArmed : k.id === "alt" ? altArmed : false}

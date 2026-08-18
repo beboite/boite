@@ -41,7 +41,7 @@
 </script>
 
 <div
-  class="flex min-h-0 flex-1 items-center justify-center overflow-y-auto bg-[var(--color-background)] p-4"
+  class="flex min-h-0 flex-1 items-center justify-center scroll-pane overflow-y-auto bg-[var(--color-background)] p-4"
 >
   <!-- The welcome screen owns the visible title; the steps after it carry their
        own heading, so the dialog names itself there instead of pointing at an id

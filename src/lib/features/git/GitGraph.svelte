@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
+  import { tip } from "$lib/shared/actions/tooltip";
   import { writeText } from "$lib/platform/clipboard";
   import { registerEscape, viewportHeight } from "$lib/shared/keyboard/overlay";
   import { notifications } from "$lib/features/notifications/store.svelte";
@@ -587,7 +588,7 @@
       role="button"
       tabindex={row.commit.sha === tabStopSha ? 0 : -1}
       aria-describedby={hovered?.row.commit.sha === row.commit.sha ? POPUP_ID : undefined}
-      title={t("git.clickToCopy", { sha: row.commit.shortSha })}
+      use:tip={t("git.clickToCopy", { sha: row.commit.shortSha })}
     >
       <svg
         class="shrink-0"

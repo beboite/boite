@@ -17,6 +17,7 @@
     restoreFocus,
     viewportHeight,
   } from "$lib/shared/keyboard/overlay";
+  import { tip } from "$lib/shared/actions/tooltip";
   import { onMount, onDestroy, tick } from "svelte";
   import { settings } from "$lib/features/settings/store.svelte";
 
@@ -175,7 +176,7 @@
         class="item"
         class:danger={item.danger}
         disabled={item.disabled}
-        title={item.title}
+        use:tip={item.title}
         role="menuitem"
         onmousedown={(e) => e.preventDefault()}
         onclick={() => {

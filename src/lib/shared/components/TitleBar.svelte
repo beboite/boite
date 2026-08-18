@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { tip } from "$lib/shared/actions/tooltip";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { listen } from "@tauri-apps/api/event";
   import { invoke } from "@tauri-apps/api/core";
@@ -291,36 +292,36 @@
   <div class="flex items-center gap-0.5 {macLightsGap ? 'pl-[78px]' : 'pl-1.5'}">
     <button
       type="button"
-      class="flex h-7 items-center justify-center rounded-md px-2 transition {app.view ===
+      class="press flex h-7 items-center justify-center rounded-md px-2 transition {app.view ===
       'terminal'
         ? 'bg-accent text-foreground'
         : 'text-muted-foreground hover:bg-accent hover:text-foreground'}"
       onclick={goHome}
-      title={t("titlebar.workspaceTooltip")}
+      use:tip={t("titlebar.workspaceTooltip")}
       aria-label={t("titlebar.workspaceLabel")}
     >
       <BoiteLogo size={17} />
     </button>
     <button
       type="button"
-      class="flex h-7 items-center justify-center rounded-md px-2 transition {app.view ===
+      class="press flex h-7 items-center justify-center rounded-md px-2 transition {app.view ===
       'settings'
         ? 'bg-accent text-foreground'
         : 'text-muted-foreground hover:bg-accent hover:text-foreground'}"
       onclick={showSettings}
-      title={t("titlebar.settingsTooltip")}
+      use:tip={t("titlebar.settingsTooltip")}
       aria-label={t("common.settings")}
     >
       <Settings class="size-[15px]" />
     </button>
     <button
       type="button"
-      class="flex h-7 items-center justify-center rounded-md px-2 transition {!settings.state
+      class="press flex h-7 items-center justify-center rounded-md px-2 transition {!settings.state
         .sidebarCollapsed
         ? 'bg-accent text-foreground'
         : 'text-muted-foreground hover:bg-accent hover:text-foreground'}"
       onclick={() => settings.toggleSidebar()}
-      title={settings.state.sidebarCollapsed
+      use:tip={settings.state.sidebarCollapsed
         ? t("titlebar.showSidebar")
         : t("titlebar.hideSidebar")}
       aria-label={t("titlebar.toggleSidebar")}
@@ -355,11 +356,11 @@
     {#if editorOpen}
       <button
         type="button"
-        class="flex h-7 items-center justify-center gap-1 rounded-md px-2 transition {editorShowing
+        class="press flex h-7 items-center justify-center gap-1 rounded-md px-2 transition {editorShowing
           ? 'bg-accent text-foreground'
           : 'text-muted-foreground hover:bg-accent hover:text-foreground'}"
         onclick={toggleEditor}
-        title={t("titlebar.editor", { count: openHere })}
+        use:tip={t("titlebar.editor", { count: openHere })}
         aria-label={t("titlebar.editor", { count: openHere })}
         aria-pressed={editorShowing}
       >
@@ -375,13 +376,13 @@
       {@const pulsing = panel.surface !== undefined && mcpPulse.surface(panel.surface)}
       <button
         type="button"
-        class="flex h-7 items-center justify-center rounded-md px-2 transition {open
+        class="press flex h-7 items-center justify-center rounded-md px-2 transition {open
           ? 'bg-accent text-foreground'
           : 'text-muted-foreground hover:bg-accent hover:text-foreground'}"
         class:mcp-touch={pulsing}
         onclick={() => togglePanel(panel.kind)}
         oncontextmenu={openPanelMenu}
-        title={t(panel.key)}
+        use:tip={t(panel.key)}
         aria-label={t(panel.key)}
         aria-pressed={open}
       >
@@ -394,11 +395,11 @@
     {#if settings.state.experimentWhip}
       <button
         type="button"
-        class="flex h-7 items-center justify-center rounded-md px-2 transition {whip.active
+        class="press flex h-7 items-center justify-center rounded-md px-2 transition {whip.active
           ? 'bg-accent text-foreground'
           : 'text-muted-foreground hover:bg-accent hover:text-foreground'}"
         onclick={() => whip.toggle()}
-        title={whip.active ? t("titlebar.whipDrop") : t("titlebar.whip")}
+        use:tip={whip.active ? t("titlebar.whipDrop") : t("titlebar.whip")}
         aria-label={whip.active ? t("titlebar.whipDrop") : t("titlebar.whip")}
         aria-pressed={whip.active}
       >
@@ -414,7 +415,7 @@
         class="flex h-full w-11 items-center justify-center text-muted-foreground transition hover:bg-accent hover:text-foreground"
         onclick={minimize}
         aria-label={t("titlebar.minimize")}
-        title={t("titlebar.minimize")}
+        use:tip={t("titlebar.minimize")}
       >
         <Minus class="size-3.5" />
       </button>
@@ -423,7 +424,7 @@
         class="flex h-full w-11 items-center justify-center text-muted-foreground transition hover:bg-accent hover:text-foreground"
         onclick={toggleMax}
         aria-label={isMaximized ? t("titlebar.restore") : t("titlebar.maximize")}
-        title={isMaximized ? t("titlebar.restore") : t("titlebar.maximize")}
+        use:tip={isMaximized ? t("titlebar.restore") : t("titlebar.maximize")}
       >
         {#if isMaximized}
           <Copy class="size-3" />
@@ -436,7 +437,7 @@
         class="flex h-full w-11 items-center justify-center text-muted-foreground transition hover:bg-danger hover:text-white"
         onclick={close}
         aria-label={t("titlebar.close")}
-        title={t("titlebar.close")}
+        use:tip={t("titlebar.close")}
       >
         <X class="size-3.5" />
       </button>
