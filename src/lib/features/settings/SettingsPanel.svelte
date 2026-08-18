@@ -3,7 +3,7 @@
   import SettingsGeneralTab from "./SettingsGeneralTab.svelte";
   import SettingsTerminalTab from "./SettingsTerminalTab.svelte";
   import SettingsAppearanceTab from "./SettingsAppearanceTab.svelte";
-  import SettingsFastpickTab from "./SettingsFastpickTab.svelte";
+  import SettingsPluginsTab from "./SettingsPluginsTab.svelte";
   import SettingsKeyboardTab from "./SettingsKeyboardTab.svelte";
   import SettingsDevicesTab from "./SettingsDevicesTab.svelte";
   import SettingsLogsTab from "./SettingsLogsTab.svelte";
@@ -14,7 +14,7 @@
   import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
   import TerminalIcon from "@lucide/svelte/icons/terminal";
   import Palette from "@lucide/svelte/icons/palette";
-  import Zap from "@lucide/svelte/icons/zap";
+  import Blocks from "@lucide/svelte/icons/blocks";
   import Keyboard from "@lucide/svelte/icons/keyboard";
   import ScrollText from "@lucide/svelte/icons/scroll-text";
   import Smartphone from "@lucide/svelte/icons/smartphone";
@@ -71,7 +71,7 @@
       hintKey: "tabs.appearanceHint",
       icon: Palette,
     },
-    { id: "fastpick", labelKey: "tabs.fastpick", hintKey: "tabs.fastpickHint", icon: Zap },
+    { id: "plugins", labelKey: "tabs.plugins", hintKey: "tabs.pluginsHint", icon: Blocks },
     {
       id: "keyboard",
       labelKey: "tabs.keyboard",
@@ -443,8 +443,8 @@
           <SettingsTerminalTab />
         {:else if activeTab === "appearance"}
           <SettingsAppearanceTab />
-        {:else if activeTab === "fastpick"}
-          <SettingsFastpickTab />
+        {:else if activeTab === "plugins"}
+          <SettingsPluginsTab />
         {:else if activeTab === "keyboard"}
           <SettingsKeyboardTab />
         {:else if activeTab === "devices"}

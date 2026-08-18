@@ -3,6 +3,7 @@
   import { visibleStatus } from "$lib/domain/thread-status";
   import { isScratch } from "$lib/domain/project";
   import { isSettled } from "$lib/domain/thread-settle";
+  import { isDelegated } from "$lib/domain/delegation";
   import { projectDisplayName } from "$lib/shared/project-label";
   import { pickAndAddProject } from "$lib/features/project/api";
   import { openProjectDashboard } from "$lib/features/project/dashboard";
@@ -17,6 +18,7 @@
   import FolderPlus from "@lucide/svelte/icons/folder-plus";
   import LayoutDashboard from "@lucide/svelte/icons/layout-dashboard";
   import X from "@lucide/svelte/icons/x";
+  import Unlink2 from "@lucide/svelte/icons/unlink-2";
 
   const projects = $derived(app.sortedProjects);
 
@@ -180,6 +182,16 @@
                     <!-- Kept a thumb's width clear of the open-thread target next
                          to it, and given the same 44px as everything else here:
                          a mistap on this one kills a running process. -->
+                    {#if isDelegated(thread)}
+                      <button
+                        type="button"
+                        class="flex size-11 shrink-0 items-center justify-center rounded-lg text-muted-foreground/70 transition hover:bg-accent hover:text-foreground active:bg-accent/70"
+                        onclick={() => app.detachDelegation(thread.id)}
+                        aria-label={t("sidebar.detachDelegation")}
+                      >
+                        <Unlink2 class="size-4" />
+                      </button>
+                    {/if}
                     <button
                       type="button"
                       class="ml-2 flex size-11 shrink-0 items-center justify-center rounded-lg border-l border-border/60 text-muted-foreground/70 transition hover:bg-danger/20 hover:text-danger active:bg-danger/30"

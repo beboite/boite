@@ -7,6 +7,7 @@ import {
   takesOpeningPrompt,
   withMcpArgs,
   withPromptArg,
+  withUnattendedArgs,
 } from "./resume-args";
 
 const SESSION = "3f2a1c66-0000-4000-8000-abcdefabcdef";
@@ -282,13 +283,83 @@ describe("the opening prompt", () => {
     expect(next.argv.agent).toEqual(["--resume", SESSION, "read the docs"]);
   });
 
+  // agy takes it behind -i, not as a positional. Before this, an antigravity
+  // thread opened bare and the briefing was only shown to the user to paste.
+  it("rides behind antigravity's -i", () => {
+    const { argv } = relaunch("agy", [], "antigravity");
+    const next = withPromptArg(argv, "antigravity", "read\nthe docs");
+    expect(next.typed).toBe(false);
+    // One line: a newline would end the prompt and type the rest as a second.
+    expect(next.argv.agent).toEqual(["--conversation", SESSION, "-i", "read the docs"]);
+  });
+
+  it("keeps antigravity's own flags in front of the prompt", () => {
+    const { argv } = relaunch("agy", ["--dangerously-skip-permissions"], "antigravity");
+    const next = withPromptArg(argv, "antigravity", "do the thing");
+    expect(next.argv.agent).toEqual([
+      "--dangerously-skip-permissions",
+      "--conversation",
+      SESSION,
+      "-i",
+      "do the thing",
+    ]);
+  });
+
+  it("hands a fresh antigravity thread the prompt without a resume", () => {
+    const { argv } = resumeArgv({
+      cmd: "agy",
+      args: ["--dangerously-skip-permissions"],
+      key: "antigravity",
+      sessionId: null,
+      fresh: true,
+    });
+    const next = withPromptArg(argv, "antigravity", "do the thing");
+    expect(next.argv.agent).toEqual([
+      "--dangerously-skip-permissions",
+      "-i",
+      "do the thing",
+    ]);
+  });
+
   it("says which agents can be handed one at all", () => {
     expect(takesOpeningPrompt("claude")).toBe(true);
     expect(takesOpeningPrompt("codex")).toBe(true);
     expect(takesOpeningPrompt("pi")).toBe(true);
     expect(takesOpeningPrompt("grok")).toBe(true);
+    expect(takesOpeningPrompt("antigravity")).toBe(true);
     expect(takesOpeningPrompt("muse")).toBe(false);
     expect(takesOpeningPrompt("opencode")).toBe(false);
     expect(takesOpeningPrompt(null)).toBe(false);
+  });
+});
+
+describe("unattended spawn flags", () => {
+  it("gives antigravity the flag that stops it waiting for a yes", () => {
+    expect(withUnattendedArgs("agy", [], "antigravity")).toEqual([
+      "--dangerously-skip-permissions",
+    ]);
+  });
+
+  it("does not add it twice", () => {
+    expect(
+      withUnattendedArgs("agy", ["--dangerously-skip-permissions"], "antigravity"),
+    ).toEqual(["--dangerously-skip-permissions"]);
+  });
+
+  it("leaves every other agent alone", () => {
+    expect(withUnattendedArgs("claude", [], "claude")).toEqual([]);
+    expect(withUnattendedArgs("agy", [], "claude")).toEqual([]);
+  });
+
+  it("lands on the agent's side of a fastpick launch", () => {
+    const args = ["--harness", "x", "--model", "y", "--"];
+    expect(withUnattendedArgs("fastpick", args, "antigravity")).toEqual([
+      "--harness",
+      "x",
+      "--model",
+      "y",
+      "--",
+      "--dangerously-skip-permissions",
+    ]);
   });
 });

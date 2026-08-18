@@ -96,15 +96,21 @@ fn unpublished_branch(path: &str) -> Option<Finish> {
     }
     let info = git::repo_info_blocking(path).ok()?;
     let branch = info.branch?;
-    if info.upstream.is_none() || info.ahead > 0 {
-        return Some(Finish::block(
-            &format!(
-                "branch '{branch}' is not on a remote; closing the thread keeps the checkout but nothing else has the commits"
-            ),
-            "worktree_status",
-        ));
-    }
-    None
+    // Two states, and the recovery differs: one wants a first push, the other
+    // wants a push. Saying "not on a remote" for a branch that is on one sends
+    // an agent looking for a remote it already has.
+    let reason = match (&info.upstream, info.ahead) {
+        (None, _) => format!(
+            "branch '{branch}' is not on a remote; closing the thread keeps the checkout but nothing else has the commits"
+        ),
+        (Some(upstream), ahead) if ahead > 0 => format!(
+            "branch '{branch}' is {ahead} {} ahead of {upstream}; closing the thread keeps the checkout but the remote does not have {}",
+            if ahead == 1 { "commit" } else { "commits" },
+            if ahead == 1 { "it" } else { "them" }
+        ),
+        _ => return None,
+    };
+    Some(Finish::block(&reason, "worktree_status"))
 }
 
 fn has_remote(path: &str) -> bool {
@@ -217,6 +223,35 @@ mod tests {
             out.reason.as_deref().unwrap().contains("not on a remote"),
             "{out:?}"
         );
+        let _ = fs::remove_dir_all(&dir);
+        let _ = fs::remove_dir_all(&remote);
+    }
+
+    /// The other half of the same block, and the half whose recovery is a
+    /// plain push: the branch is on the remote, the remote is just behind.
+    #[test]
+    fn a_branch_ahead_of_its_upstream_is_not_called_absent_from_the_remote() {
+        let dir = init_repo("pushed");
+        let remote = scratch("pushed-remote.git");
+        git_ok(&remote, &["init", "--bare", "-b", "master"]);
+        git_ok(&dir, &["remote", "add", "origin", remote.to_str().unwrap()]);
+        git_ok(&dir, &["push", "-u", "origin", "master"]);
+
+        let out = decide(dir.to_str(), false);
+        assert!(out.allow, "a branch level with its upstream should pass: {out:?}");
+
+        fs::write(dir.join("later.txt"), "x\n").unwrap();
+        git_ok(&dir, &["add", "-A"]);
+        git_ok(&dir, &["commit", "-m", "later"]);
+
+        let out = decide(dir.to_str(), false);
+        assert!(!out.allow, "{out:?}");
+        let reason = out.reason.as_deref().unwrap();
+        assert!(
+            !reason.contains("not on a remote"),
+            "the branch is on the remote, so this sends the agent after a remote it has: {reason}"
+        );
+        assert!(reason.contains("ahead of origin/master"), "{reason}");
         let _ = fs::remove_dir_all(&dir);
         let _ = fs::remove_dir_all(&remote);
     }

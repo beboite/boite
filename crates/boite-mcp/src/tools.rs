@@ -52,7 +52,7 @@ head and closing the thread throws it away. Do this before you finish, not after
 - Work that surfaced along the way and does not belong in this turn: todo_add \
 rather than a note in your answer, which nobody reads again.
 - Something the user should look at, a diff, a dev server, a file: pane_open puts \
-it beside this terminal. Pass path for editor or explorer. Printing a path only \
+it beside this terminal. Pass path for editor. Printing a path only \
 works if they are reading this one.
 - A page you opened: browser action=status|snapshot|click|type|press|scroll|\
 navigate|reload|wait_for|close|screenshot. Desktop window only for read/drive; \
@@ -356,7 +356,7 @@ fn thread_tools() -> Value {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "agent": { "type": "string", "description": "claude, codex, opencode, cursor, copilot, grok, hermes, antigravity, pi, muse, or one of the user's shortcut labels. Defaults to yours." },
+                    "agent": { "type": "string", "description": "claude, codex, opencode, cursor, copilot, grok, hermes, antigravity, pi, muse, or one of the user's shortcut labels. For fastpick agents, use the format 'fastpick:provider:model' (e.g., 'fastpick:crof:deepseek-v4-pro'). Defaults to yours." },
                     "project": { "type": "string", "description": "Id, name or folder. Defaults to this project." },
                     "prompt": {
                         "type": "string",
@@ -388,7 +388,7 @@ fn thread_tools() -> Value {
                     },
                     "path": {
                         "type": "string",
-                        "description": "For kind=editor or kind=explorer. The file or folder to show."
+                        "description": "For kind=editor. The file to open. The explorer opens at the thread's own directory and takes no path."
                     },
                     "side": {
                         "type": "string",
