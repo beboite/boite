@@ -1,11 +1,3 @@
-//! The saved logins, and whether each one is a login this machine put there.
-//!
-//! A snapshot is a file in a directory, so anything that can write there can
-//! add one, and switching to it would hand the CLI credentials nobody here
-//! chose. Each entry is therefore stamped with an HMAC over what it claims to
-//! be, under a key only this user can read. A stamp that does not match is not
-//! refused outright — it is reported, and the commands say so before they act.
-
 use crate::jsonio;
 use crate::provider::Provider;
 use crate::seal;
@@ -21,13 +13,9 @@ const POOL_VERSION: u64 = 2;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Trust {
-    /// This machine registered it and nothing about it has changed since.
     Trusted,
-    /// Registered, but the name or the tokens are not the ones stamped.
     Changed,
-    /// Nothing ever registered it.
     Unknown,
-    /// The key is unreadable, so nothing here can be judged either way.
     NoKey,
 }
 
@@ -79,14 +67,10 @@ impl<'a> Pool<'a> {
         self.provider.store.join(".pool.json")
     }
 
-    /// The HMAC key, unwrapped by whatever seals things on this machine.
-    /// `create` writes one the first time an entry is registered.
     pub fn key(&self, create: bool) -> Option<Vec<u8>> {
         let path = self.key_file();
         if path.exists() {
             let wrapped = std::fs::read(&path).ok()?;
-            // Windows wraps the raw key bytes with nothing around them;
-            // everywhere else the file holds the sealed base64 of them.
             if cfg!(windows) {
                 return seal::unwrap_bytes(&wrapped);
             }
@@ -109,8 +93,6 @@ impl<'a> Pool<'a> {
         Some(key)
     }
 
-    /// One entry per saved login, with everything a command needs to show it or
-    /// switch to it.
     pub fn entries(&self) -> Vec<Entry> {
         let key = self.key(false);
         let mut files: Vec<PathBuf> = match std::fs::read_dir(&self.provider.store) {
@@ -153,8 +135,6 @@ impl<'a> Pool<'a> {
         jsonio::read(&self.manifest_file())
     }
 
-    /// Stamps an entry as one this machine put in the pool. False when there is
-    /// no stable account id to stamp, which is the case for a bare API key.
     pub fn register(&self, file_name: &str, snapshot: &Value) -> bool {
         let Some(key) = self.key(true) else {
             return false;
@@ -215,8 +195,6 @@ impl<'a> Pool<'a> {
         let recorded_stamp = jsonio::str_of(entry, "stamp").unwrap_or_default();
         let (uuid, email) = pool_identity(snapshot);
         let uuid = uuid.unwrap_or_default();
-        // The stamp is over what was registered, so the entry has to still say
-        // the same thing: an account renamed in place would otherwise pass.
         if !email.eq_ignore_ascii_case(&recorded_email) {
             return Trust::Changed;
         }
@@ -233,9 +211,6 @@ impl<'a> Pool<'a> {
             return Trust::Trusted;
         }
 
-        // Entries written before the tokens were part of the stamp, and entries
-        // whose tokens the CLI refreshed rather than anything here, are upgraded
-        // in place rather than reported as tampering.
         for legacy in [None, Some("none")] {
             let old = stamp(key, file_name, &recorded_email, &recorded_uuid, legacy);
             if recorded_stamp != old || uuid != recorded_uuid {
@@ -248,7 +223,6 @@ impl<'a> Pool<'a> {
     }
 }
 
-/// The credentials in a snapshot, unsealed, as the text the CLI expects.
 pub fn snapshot_creds(snapshot: &Value) -> Option<String> {
     if let Some(sealed) = jsonio::str_of(snapshot, "credentialsProtected") {
         return seal::unprotect(&sealed);
@@ -259,8 +233,6 @@ pub fn snapshot_creds(snapshot: &Value) -> Option<String> {
     }
 }
 
-/// Older snapshots kept the identity as raw JSON text rather than as an object,
-/// which is what the `Raw` in the field name was about.
 pub fn identity_of(snapshot: &Value) -> Option<Value> {
     match snapshot.get("oauthAccountRaw") {
         Some(Value::String(text)) => serde_json::from_str(text).ok(),
@@ -287,8 +259,6 @@ fn sha256_hex(text: &str) -> String {
     digest.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-/// The tokens themselves, hashed. It is what makes the stamp cover the thing
-/// that would actually be handed to the CLI, rather than only the name on it.
 fn cred_hash(creds_raw: Option<&str>) -> String {
     let Some(raw) = creds_raw else {
         return "none".into();
@@ -332,9 +302,6 @@ fn stamp(key: &[u8], file_name: &str, email: &str, uuid: &str, cred_hash: Option
         .collect()
 }
 
-/// A snapshot as it is written to disk. Rewriting one — re-sealing it, or
-/// saving fresh tokens for an account already in the pool — does not make it a
-/// new saved login, so the caller's date is carried through.
 pub fn new_snapshot(
     email: &str,
     creds_raw: &str,
@@ -376,4 +343,27 @@ pub fn snapshot_files(store: &Path) -> Vec<PathBuf> {
         Ok(dir) => dir.filter_map(|e| e.ok()).map(|e| e.path()).collect(),
         Err(_) => Vec::new(),
     }
+}
+
+pub fn plain_snapshots(store: &Path) -> Option<Vec<(PathBuf, Value)>> {
+    if !store.is_dir() {
+        return None;
+    }
+    let mut files: Vec<PathBuf> = snapshot_files(store)
+        .into_iter()
+        .filter(|file| {
+            let name = file.file_name().unwrap_or_default().to_string_lossy();
+            name.ends_with(".json") && !name.starts_with('.')
+        })
+        .collect();
+    files.sort();
+    Some(
+        files
+            .into_iter()
+            .map(|file| {
+                let snapshot = crate::jsonio::read(&file).unwrap_or(Value::Null);
+                (file, snapshot)
+            })
+            .collect(),
+    )
 }

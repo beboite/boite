@@ -1,12 +1,3 @@
-//! The one entry point. Everything else is reached through it.
-//!
-//!   claude-cc <command> [-Provider claude|codex|all] [options]
-//!
-//! The option names are the ones the PowerShell version took, because the slash
-//! commands, the hooks and the muscle memory of anyone upgrading all spell them
-//! that way. They are matched without regard to case, and `--provider` works as
-//! well as `-Provider`.
-
 mod cmd;
 mod jsonio;
 mod live;
@@ -38,6 +29,9 @@ fn usage_text() {
     println!("  auto        switch only if the one in use is out of quota");
     println!("  doctor      check the install and the pool (-Protect, -Adopt, -Clean to repair, -Rollback to undo a switch)");
     println!("  statusline  the Claude Code status line, from a payload on stdin");
+    println!();
+    println!("  list -Countdown   both quota windows of every saved account, with their resets");
+    println!("  auto -Midtask     auto from a tool-use hook, at most once every few minutes");
 }
 
 fn dispatch(args: &[String]) -> i32 {
@@ -70,8 +64,6 @@ fn dispatch(args: &[String]) -> i32 {
         return 64;
     }
 
-    // The status line is handed a payload rather than options, and reads the
-    // pools of both providers itself.
     if command == "statusline" {
         return cmd::statusline::run();
     }
@@ -84,8 +76,10 @@ fn dispatch(args: &[String]) -> i32 {
         }
     };
 
-    // `all` is not a provider — it runs the command once per provider. It is
-    // caught here, before anything tries to resolve it into a provider spec.
+    if command == "auto" && options.midtask {
+        return cmd::midtask::run(&wanted);
+    }
+
     if provider::is_all(&wanted) {
         let mut worst = 0;
         for (index, id) in [ProviderId::Claude, ProviderId::Codex]
@@ -96,8 +90,6 @@ fn dispatch(args: &[String]) -> i32 {
                 println!();
             }
             let code = run(command, id, &options);
-            // The loudest child owns the exit code: a setup problem in one
-            // provider must not be hidden by a clean run in the other.
             if code > worst {
                 worst = code;
             }
@@ -114,7 +106,6 @@ fn dispatch(args: &[String]) -> i32 {
     }
 }
 
-/// A hook's exit code, which is zero whatever happened underneath.
 fn hushed(code: i32, options: &Options) -> i32 {
     if options.hook {
         0
@@ -127,6 +118,7 @@ fn run(command: &str, id: ProviderId, options: &Options) -> i32 {
     let provider = provider::spec(id);
     match command {
         "add" => cmd::add::run(&provider, options),
+        "list" if options.countdown => cmd::countdown::run(&provider),
         "list" => cmd::list::run(&provider, options),
         "switch" => cmd::switch::run(&provider, options),
         "remove" => cmd::remove::run(&provider, options),
@@ -135,8 +127,6 @@ fn run(command: &str, id: ProviderId, options: &Options) -> i32 {
     }
 }
 
-/// The options, as named flags. A bare word is nobody's option, and taking it
-/// for one would switch to the wrong account: the email goes after `-Email`.
 fn parse(tokens: &[String]) -> Result<(String, Options), String> {
     let mut provider = "claude".to_string();
     let mut options = Options::default();
@@ -162,14 +152,8 @@ fn parse(tokens: &[String]) -> Result<(String, Options), String> {
             "provider" | "p" => {
                 provider = value().ok_or("-Provider needs a name: claude, codex or all.")?
             }
-            // An option that swallowed the next option instead of a value would
-            // go looking for an account named "-Provider".
             "email" | "e" => options.email = Some(value().ok_or("-Email needs an address.")?),
             "quiet" => options.quiet = true,
-            // What a SessionStart hook prints is fed to the model and what it
-            // returns is shown to the user at every start, so a hook says
-            // nothing and always succeeds — including for the exit codes that
-            // mean "there was nothing to do".
             "hook" => {
                 options.quiet = true;
                 options.hook = true;
@@ -180,6 +164,8 @@ fn parse(tokens: &[String]) -> Result<(String, Options), String> {
             "adopt" => options.adopt = true,
             "rollback" => options.rollback = true,
             "clean" => options.clean = true,
+            "countdown" => options.countdown = true,
+            "midtask" => options.midtask = true,
             other => return Err(format!("Unknown option '-{other}'.")),
         }
     }

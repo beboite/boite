@@ -1,9 +1,3 @@
-//! How much of an account's quota is gone, and what to do with the answer.
-//!
-//! Two windows per account, each a percentage and a time it resets. The numbers
-//! come from the provider's own endpoint and are cached back into the snapshot,
-//! so a status line or a second command can read a number without asking again.
-
 use crate::jsonio;
 use crate::lock;
 use crate::pool::Entry;
@@ -12,15 +6,35 @@ use chrono::{DateTime, Utc};
 use serde_json::{json, Value};
 use std::path::Path;
 
-/// The 5-hour window is what stops a session, so it blocks at 99%. The weekly
-/// one goes one step further: a weekly quota parked over usage that never
-/// stopped a session costs days, where the 5-hour one costs hours.
 pub const FIVE_HOUR_CAP: f64 = 99.0;
 pub const SEVEN_DAY_CAP: f64 = 99.8;
 const CACHE_SECONDS: i64 = 60;
 
-/// The two windows, each against its own cap.
-const CAPS: [(&str, f64); 2] = [("five_hour", FIVE_HOUR_CAP), ("seven_day", SEVEN_DAY_CAP)];
+pub fn caps() -> [(&'static str, f64); 2] {
+    [
+        (
+            "five_hour",
+            cap_from_env("CLAUDE_AUTOSWITCH_THRESHOLD", FIVE_HOUR_CAP),
+        ),
+        (
+            "seven_day",
+            cap_from_env("CLAUDE_AUTOSWITCH_WEEKLY_THRESHOLD", SEVEN_DAY_CAP),
+        ),
+    ]
+}
+
+fn cap_from_env(name: &str, fallback: f64) -> f64 {
+    std::env::var(name)
+        .ok()
+        .and_then(|raw| raw.trim().parse::<f64>().ok())
+        .filter(|value| *value > 0.0 && *value <= 100.0)
+        .unwrap_or(fallback)
+}
+
+pub fn at_cap(pct: f64, cap: f64) -> bool {
+    let cap = if pct.fract() == 0.0 { cap.floor() } else { cap };
+    pct >= cap
+}
 
 pub fn now_iso() -> String {
     Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Micros, true)
@@ -38,16 +52,12 @@ pub struct Window {
 }
 
 impl Window {
-    /// When this window comes back, or none when it does not say.
-    fn resets(&self) -> Option<DateTime<Utc>> {
+    pub fn resets(&self) -> Option<DateTime<Utc>> {
         self.resets_at.as_deref().and_then(parse_time)
     }
 
-    /// Whether this window is what stops the account being used. A percentage
-    /// read from a cache written before the window reset is a number about a
-    /// window that no longer exists, so it stops nothing.
-    fn blocking(&self, cap: f64) -> bool {
-        if self.utilization < cap {
+    pub fn blocking(&self, cap: f64) -> bool {
+        if !at_cap(self.utilization, cap) {
             return false;
         }
         self.resets().is_none_or(|at| at > Utc::now())
@@ -55,7 +65,7 @@ impl Window {
 }
 
 impl Usage {
-    fn window(&self, name: &str) -> Option<&Window> {
+    pub fn window(&self, name: &str) -> Option<&Window> {
         match name {
             "five_hour" => self.five_hour.as_ref(),
             _ => self.seven_day.as_ref(),
@@ -66,24 +76,18 @@ impl Usage {
         self.window(name).map(|w| w.utilization)
     }
 
-    /// Usage nobody could read is not usage that says no: an account with no
-    /// numbers is treated as one with room, and the switch says so out loud.
     pub fn usable(&self) -> bool {
-        !CAPS
+        !caps()
             .iter()
             .any(|(name, cap)| self.window(name).is_some_and(|w| w.blocking(*cap)))
     }
 
-    /// When the account comes back, or none when nothing says.
     pub fn ready_at(&self) -> Option<DateTime<Utc>> {
         let mut at: Option<DateTime<Utc>> = None;
-        for (name, cap) in CAPS {
+        for (name, cap) in caps() {
             let Some(window) = self.window(name).filter(|w| w.blocking(cap)) else {
                 continue;
             };
-            // A window that says nothing about its reset cannot be timed. It
-            // still caps the account, so the other window keeps its say rather
-            // than the whole answer being dropped.
             let Some(when) = window.resets() else {
                 continue;
             };
@@ -110,7 +114,6 @@ pub fn parse_time(text: &str) -> Option<DateTime<Utc>> {
         .map(|t| t.with_timezone(&Utc))
 }
 
-/// A hair under the cap still has to read as under the cap, so 99.8 stays 99.8.
 pub fn pct_text(value: Option<f64>) -> String {
     let text = match value {
         None => "?".to_string(),
@@ -139,9 +142,6 @@ pub fn wait_text(at: DateTime<Utc>) -> String {
 
 fn window_from(value: Option<&Value>) -> Option<Window> {
     let value = value.filter(|v| !v.is_null())?;
-    // Three names for one number: the snapshots this toolkit writes carry
-    // "utilization", the provider's own endpoint "used_percent", and the payload
-    // Claude Code hands the status line "used_percentage".
     let pct = ["used_percent", "utilization", "used_percentage"]
         .iter()
         .find_map(|name| value.get(*name).and_then(Value::as_f64))
@@ -162,7 +162,6 @@ fn window_from(value: Option<&Value>) -> Option<Window> {
     })
 }
 
-/// The access token in a set of credentials, whatever shape they came in.
 pub fn access_token(provider: &Provider, creds_raw: Option<&str>) -> Option<String> {
     let creds: Value = serde_json::from_str(creds_raw?).ok()?;
     if provider.is_codex() {
@@ -191,12 +190,9 @@ fn get_json(url: &str, headers: &[(&str, &str)]) -> Option<Value> {
     response.body_mut().read_json::<Value>().ok()
 }
 
-/// What the provider says right now, or none when it says nothing readable.
 pub fn fetch(provider: &Provider, token: Option<&str>) -> Option<Usage> {
     let token = token?;
     if provider.is_codex() {
-        // An `sk-` key is not a ChatGPT session, and the usage endpoint has
-        // nothing to say about one.
         if token.starts_with("sk-") {
             return None;
         }
@@ -242,11 +238,7 @@ fn cache_fresh(cache: Option<&Value>) -> bool {
     (Utc::now() - at).num_seconds() < CACHE_SECONDS
 }
 
-/// Written back into the snapshot, so the status line and the next `auto` can
-/// read a number without asking the API again.
 fn save_cache(file: &Path, usage: &Usage) {
-    // Read, change, write: under a lock, or two commands refreshing at once
-    // lose one of the two answers.
     let _ = lock::locked(lock::USAGE_CACHE, || {
         let Some(mut snapshot) = jsonio::read(file) else {
             return;
@@ -269,7 +261,6 @@ fn save_cache(file: &Path, usage: &Usage) {
     });
 }
 
-/// The usage for one pool entry, from cache while the cache is fresh enough.
 pub fn for_entry(provider: &Provider, entry: &Entry, force: bool) -> Option<Usage> {
     if !force && cache_fresh(entry.cache.as_ref()) {
         return from_cache(entry.cache.as_ref());
