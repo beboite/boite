@@ -57,7 +57,14 @@ impl Window {
     }
 
     pub fn blocking(&self, cap: f64) -> bool {
-        at_cap(self.utilization, cap)
+        if !at_cap(self.utilization, cap) {
+            return false;
+        }
+        self.resets().is_none_or(|at| at > Utc::now())
+    }
+
+    pub fn stale(&self) -> bool {
+        self.resets().is_some_and(|at| at <= Utc::now())
     }
 }
 
@@ -75,6 +82,13 @@ impl Usage {
 
     pub fn known(&self) -> bool {
         self.five_hour.is_some() || self.seven_day.is_some()
+    }
+
+    pub fn stale(&self) -> bool {
+        [&self.five_hour, &self.seven_day]
+            .iter()
+            .filter_map(|window| window.as_ref())
+            .any(|window| window.stale())
     }
 
     pub fn usable(&self) -> bool {
@@ -185,6 +199,7 @@ pub fn agent_with_timeout(seconds: u64) -> ureq::Agent {
     let config = config.tls_config(
         ureq::tls::TlsConfig::builder()
             .provider(ureq::tls::TlsProvider::NativeTls)
+            .root_certs(ureq::tls::RootCerts::PlatformVerifier)
             .build(),
     );
     config.build().new_agent()
@@ -196,11 +211,31 @@ fn get_json(url: &str, headers: &[(&str, &str)]) -> Option<Value> {
     for (name, value) in headers {
         request = request.header(*name, *value);
     }
-    let mut response = request.call().ok()?;
+    let loud = std::env::var_os("KEBACC_SWITCH_DEBUG").is_some();
+    let mut response = match request.call() {
+        Ok(response) => response,
+        Err(problem) => {
+            if loud {
+                eprintln!("[debug] {url} did not answer: {problem}");
+            }
+            return None;
+        }
+    };
     if !response.status().is_success() {
+        if loud {
+            eprintln!("[debug] {url} answered {}", response.status());
+        }
         return None;
     }
-    response.body_mut().read_json::<Value>().ok()
+    match response.body_mut().read_json::<Value>() {
+        Ok(value) => Some(value),
+        Err(problem) => {
+            if loud {
+                eprintln!("[debug] {url} answered something unreadable: {problem}");
+            }
+            None
+        }
+    }
 }
 
 pub fn fetch(provider: &Provider, token: Option<&str>) -> Option<Usage> {
@@ -275,17 +310,42 @@ fn save_cache(file: &Path, usage: &Usage) {
 }
 
 pub fn for_entry(provider: &Provider, entry: &Entry, force: bool) -> Option<Usage> {
-    if !force && cache_fresh(entry.cache.as_ref()) {
-        return from_cache(entry.cache.as_ref());
+    let cached = from_cache(entry.cache.as_ref());
+    let usable_cache =
+        !force && cache_fresh(entry.cache.as_ref()) && !cached.as_ref().is_some_and(Usage::stale);
+    if usable_cache {
+        return cached;
     }
-    let token = access_token(provider, entry.creds.as_deref());
+    let live = live_token(provider, entry);
+    if std::env::var_os("KEBACC_SWITCH_DEBUG").is_some() {
+        eprintln!(
+            "[debug] {}: live token {}, snapshot token {}",
+            entry.email,
+            if live.is_some() { "yes" } else { "no" },
+            if access_token(provider, entry.creds.as_deref()).is_some() {
+                "yes"
+            } else {
+                "no"
+            }
+        );
+    }
+    let token = live.or_else(|| access_token(provider, entry.creds.as_deref()));
     match fetch(provider, token.as_deref()) {
         Some(usage) => {
             save_cache(&entry.file, &usage);
             Some(usage)
         }
-        None => from_cache(entry.cache.as_ref()),
+        None => cached,
     }
+}
+
+fn live_token(provider: &Provider, entry: &Entry) -> Option<String> {
+    let live = crate::live::identity(provider)?;
+    let email = jsonio::str_of(&live, "emailAddress")?.to_lowercase();
+    if email != entry.email.to_lowercase() {
+        return None;
+    }
+    access_token(provider, crate::live::creds_raw(provider).as_deref())
 }
 
 #[cfg(test)]
@@ -305,11 +365,22 @@ mod tests {
     }
 
     #[test]
-    fn a_reading_at_the_cap_blocks_even_when_its_reset_time_has_passed() {
+    fn a_reading_whose_window_already_reset_is_stale_not_blocking() {
         let window = super::Window {
             utilization: 100.0,
             resets_at: Some("2000-01-01T00:00:00Z".into()),
         };
+        assert!(window.stale());
+        assert!(!window.blocking(super::FIVE_HOUR_CAP));
+    }
+
+    #[test]
+    fn a_reading_at_the_cap_with_its_reset_ahead_blocks() {
+        let window = super::Window {
+            utilization: 100.0,
+            resets_at: Some("2099-01-01T00:00:00Z".into()),
+        };
+        assert!(!window.stale());
         assert!(window.blocking(super::FIVE_HOUR_CAP));
     }
 
