@@ -20,7 +20,6 @@ export type SettingsTabId =
   | "terminal"
   | "appearance"
   | "fastpick"
-  | "accounts"
   | "keyboard"
   | "devices"
   | "logs"
@@ -97,8 +96,6 @@ export const SETTINGS_CATALOGUE: SettingEntry[] = [
 
   { tab: "fastpick", key: "fastpick.settingsTitle", descKey: "fastpick.settingsDesc" },
   { tab: "fastpick", key: "fastpick.enable", descKey: "fastpick.enableDesc" },
-
-  { tab: "accounts", key: "accounts.settingsTitle", descKey: "accounts.settingsDesc" },
 
   { tab: "experiments", key: "experiments.infoBox", descKey: "experiments.infoBoxDesc" },
   { tab: "experiments", key: "experiments.smartSort", descKey: "experiments.smartSortDesc" },

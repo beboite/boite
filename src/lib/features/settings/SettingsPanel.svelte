@@ -4,7 +4,6 @@
   import SettingsTerminalTab from "./SettingsTerminalTab.svelte";
   import SettingsAppearanceTab from "./SettingsAppearanceTab.svelte";
   import SettingsFastpickTab from "./SettingsFastpickTab.svelte";
-  import SettingsAccountsTab from "./SettingsAccountsTab.svelte";
   import SettingsKeyboardTab from "./SettingsKeyboardTab.svelte";
   import SettingsDevicesTab from "./SettingsDevicesTab.svelte";
   import SettingsLogsTab from "./SettingsLogsTab.svelte";
@@ -16,7 +15,6 @@
   import TerminalIcon from "@lucide/svelte/icons/terminal";
   import Palette from "@lucide/svelte/icons/palette";
   import Zap from "@lucide/svelte/icons/zap";
-  import UsersRound from "@lucide/svelte/icons/users-round";
   import Keyboard from "@lucide/svelte/icons/keyboard";
   import ScrollText from "@lucide/svelte/icons/scroll-text";
   import Smartphone from "@lucide/svelte/icons/smartphone";
@@ -74,7 +72,6 @@
       icon: Palette,
     },
     { id: "fastpick", labelKey: "tabs.fastpick", hintKey: "tabs.fastpickHint", icon: Zap },
-    { id: "accounts", labelKey: "tabs.accounts", hintKey: "tabs.accountsHint", icon: UsersRound },
     {
       id: "keyboard",
       labelKey: "tabs.keyboard",
@@ -448,8 +445,6 @@
           <SettingsAppearanceTab />
         {:else if activeTab === "fastpick"}
           <SettingsFastpickTab />
-        {:else if activeTab === "accounts"}
-          <SettingsAccountsTab />
         {:else if activeTab === "keyboard"}
           <SettingsKeyboardTab />
         {:else if activeTab === "devices"}
