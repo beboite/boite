@@ -96,7 +96,6 @@ export const SETTINGS_CATALOGUE: SettingEntry[] = [
 
   { tab: "plugins", key: "fastpick.settingsTitle", descKey: "fastpick.settingsDesc" },
   { tab: "plugins", key: "fastpick.enable", descKey: "fastpick.enableDesc" },
-  { tab: "plugins", key: "plugin.claudeTitle", descKey: "plugin.claudeDesc" },
   { tab: "plugins", key: "plugin.codexTitle", descKey: "plugin.codexDesc" },
 
   { tab: "experiments", key: "experiments.infoBox", descKey: "experiments.infoBoxDesc" },

@@ -225,3 +225,30 @@ pub async fn fastpick_list(
 pub async fn fastpick_version(scope: State<'_, ProjectRoots>) -> Result<Value, String> {
     on_bus(scope.inner(), Sessions::FastpickVersion.into()).await
 }
+
+#[tauri::command]
+pub async fn codex_switcher_list(scope: State<'_, ProjectRoots>) -> Result<Value, String> {
+    on_bus(scope.inner(), Sessions::CodexSwitcherList.into()).await
+}
+
+#[tauri::command]
+pub async fn codex_switcher_save(scope: State<'_, ProjectRoots>) -> Result<Value, String> {
+    on_bus(scope.inner(), Sessions::CodexSwitcherSave.into()).await
+}
+
+#[tauri::command]
+pub async fn codex_switcher_activate(
+    scope: State<'_, ProjectRoots>,
+    account_id: String,
+) -> Result<Value, String> {
+    on_bus(
+        scope.inner(),
+        Sessions::CodexSwitcherActivate { account_id }.into(),
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn codex_switcher_version(scope: State<'_, ProjectRoots>) -> Result<Value, String> {
+    on_bus(scope.inner(), Sessions::CodexSwitcherVersion.into()).await
+}
