@@ -2,6 +2,7 @@
   import FastpickSettingsCard from "./FastpickSettingsCard.svelte";
   import CodexSwitcherCard from "$lib/features/plugin/CodexSwitcherCard.svelte";
   import FastMcpSshCard from "$lib/features/plugin/FastMcpSshCard.svelte";
+  import KebaccSwitcherCard from "$lib/features/plugin/KebaccSwitcherCard.svelte";
   import ToggleSetting from "$lib/shared/components/ToggleSetting.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
   import { t } from "$lib/i18n/index.svelte";
@@ -17,3 +18,4 @@
 />
 <CodexSwitcherCard anchor="plugin.codexTitle" />
 <FastMcpSshCard anchor="plugin.fastMcpSshTitle" />
+<KebaccSwitcherCard anchor="plugin.kebaccTitle" />

@@ -14,11 +14,11 @@
 
 use serde_json::Value;
 
-use super::{
-    opt_str_param, str_list, str_param, u32_param, value_of, Command, Host, Ready, Wire,
-};
+use super::{opt_str_param, str_list, str_param, u32_param, value_of, Command, Host, Ready, Wire};
 use crate::capability::Capability;
-use crate::{codex_switcher, fast_mcp_ssh, fastpick, session, shell, transcript, usage};
+use crate::{
+    codex_switcher, fast_mcp_ssh, fastpick, kebacc_switcher, session, shell, transcript, usage,
+};
 
 /// Every method in this domain, in the order they appear below.
 pub const ALL_METHODS: &[&str] = &[
@@ -39,6 +39,11 @@ pub const ALL_METHODS: &[&str] = &[
     "codexSwitcher.activate",
     "codexSwitcher.version",
     "fastMcpSsh.version",
+    "kebaccSwitcher.list",
+    "kebaccSwitcher.add",
+    "kebaccSwitcher.switch",
+    "kebaccSwitcher.auto",
+    "kebaccSwitcher.version",
     "session.transcript",
 ];
 
@@ -77,14 +82,24 @@ pub enum Sessions {
     /// What each named thread's agent is doing, scoped to the threads the caller
     /// actually has. Reading these stores costs a directory walk or a database
     /// open apiece, so nobody enumerates every agent's history on a timer.
-    AgentTurns { queries: Vec<session::TurnQuery> },
+    AgentTurns {
+        queries: Vec<session::TurnQuery>,
+    },
     /// Tokens and money per directory, from the transcripts on this machine.
     /// `orchestrator_sessions` names the session ids whose spend is also
     /// summed apart, so a card can split the conductor from the workers.
-    Usage { cwds: Vec<String>, days: u32, orchestrator_sessions: Vec<String> },
-    StopClaude { session_id: String },
+    Usage {
+        cwds: Vec<String>,
+        days: u32,
+        orchestrator_sessions: Vec<String>,
+    },
+    StopClaude {
+        session_id: String,
+    },
     /// Copilot turns down an id whose session was opened and never used.
-    CopilotResumable { session_id: String },
+    CopilotResumable {
+        session_id: String,
+    },
     /// A thread that changed project changed the folder its agent searches for
     /// transcripts, so the file has to follow it.
     Migrate {
@@ -97,10 +112,14 @@ pub enum Sessions {
     /// `refresh` is how a caller that just watched an install says so: the probe
     /// is cached with a TTL, which is otherwise the only way a newly installed
     /// shell is ever noticed.
-    ShellAvailable { refresh: bool },
+    ShellAvailable {
+        refresh: bool,
+    },
     /// The setup wizard asking whether an agent is installed. This machine's
     /// PATH decides, not the PATH of whatever device is drawing the question.
-    CommandExists { cmd: String },
+    CommandExists {
+        cmd: String,
+    },
     /// fastpick's own JSON, passed through as a string rather than reparsed: the
     /// schema is fastpick's to grow, and the client types what it reads.
     FastpickList {
@@ -115,11 +134,33 @@ pub enum Sessions {
     /// `codex-account-switcher save --json`.
     CodexSwitcherSave,
     /// `codex-account-switcher activate <id> --force --json`.
-    CodexSwitcherActivate { account_id: String },
+    CodexSwitcherActivate {
+        account_id: String,
+    },
     /// Null means the binary is not on this machine.
     CodexSwitcherVersion,
     /// Null means `fast-mcp-ssh` is not on this machine.
     FastMcpSshVersion,
+    /// `kebacc-switch list -Provider <p> -Json`, passed through as a string.
+    KebaccSwitcherList {
+        provider: Option<String>,
+    },
+    /// `kebacc-switch add -Provider <p> -Json`.
+    KebaccSwitcherAdd {
+        provider: String,
+    },
+    /// `kebacc-switch switch -Provider <p> -Email <email> -Yes -Json`.
+    KebaccSwitcherSwitch {
+        provider: String,
+        email: String,
+    },
+    /// `kebacc-switch auto -Provider <p> -Json`. Switches only when the live
+    /// login is out of quota.
+    KebaccSwitcherAuto {
+        provider: Option<String>,
+    },
+    /// Null means the binary is not on this machine.
+    KebaccSwitcherVersion,
     /// What a terminal printed, as text, from the end.
     ///
     /// The question anybody actually has is what it was doing when it stopped,
@@ -192,6 +233,20 @@ impl Sessions {
             },
             "codexSwitcher.version" => Sessions::CodexSwitcherVersion,
             "fastMcpSsh.version" => Sessions::FastMcpSshVersion,
+            "kebaccSwitcher.list" => Sessions::KebaccSwitcherList {
+                provider: opt_str_param(params, "provider"),
+            },
+            "kebaccSwitcher.add" => Sessions::KebaccSwitcherAdd {
+                provider: str_param(params, "provider")?,
+            },
+            "kebaccSwitcher.switch" => Sessions::KebaccSwitcherSwitch {
+                provider: str_param(params, "provider")?,
+                email: str_param(params, "email")?,
+            },
+            "kebaccSwitcher.auto" => Sessions::KebaccSwitcherAuto {
+                provider: opt_str_param(params, "provider"),
+            },
+            "kebaccSwitcher.version" => Sessions::KebaccSwitcherVersion,
             "session.transcript" => Sessions::Transcript {
                 thread_id: str_param(params, "threadId")?,
                 // A terminal prints more in a minute than anybody reads, and
@@ -222,6 +277,11 @@ impl Sessions {
             Sessions::CodexSwitcherActivate { .. } => "codexSwitcher.activate",
             Sessions::CodexSwitcherVersion => "codexSwitcher.version",
             Sessions::FastMcpSshVersion => "fastMcpSsh.version",
+            Sessions::KebaccSwitcherList { .. } => "kebaccSwitcher.list",
+            Sessions::KebaccSwitcherAdd { .. } => "kebaccSwitcher.add",
+            Sessions::KebaccSwitcherSwitch { .. } => "kebaccSwitcher.switch",
+            Sessions::KebaccSwitcherAuto { .. } => "kebaccSwitcher.auto",
+            Sessions::KebaccSwitcherVersion => "kebaccSwitcher.version",
             Sessions::Transcript { .. } => "session.transcript",
         }
     }
@@ -243,7 +303,13 @@ impl Sessions {
             Sessions::CodexSwitcherList
             | Sessions::CodexSwitcherSave
             | Sessions::CodexSwitcherActivate { .. } => Wire::Key("json"),
-            Sessions::CodexSwitcherVersion | Sessions::FastMcpSshVersion => Wire::Key("version"),
+            Sessions::CodexSwitcherVersion
+            | Sessions::FastMcpSshVersion
+            | Sessions::KebaccSwitcherVersion => Wire::Key("version"),
+            Sessions::KebaccSwitcherList { .. }
+            | Sessions::KebaccSwitcherAdd { .. }
+            | Sessions::KebaccSwitcherSwitch { .. }
+            | Sessions::KebaccSwitcherAuto { .. } => Wire::Key("json"),
             Sessions::Transcript { .. } => Wire::Key("text"),
         }
     }
@@ -269,12 +335,17 @@ impl Sessions {
             | Sessions::CodexSwitcherList
             | Sessions::CodexSwitcherVersion
             | Sessions::FastMcpSshVersion
+            | Sessions::KebaccSwitcherList { .. }
+            | Sessions::KebaccSwitcherVersion
             | Sessions::Transcript { .. } => Capability::ReadProject,
 
             Sessions::StopClaude { .. }
             | Sessions::Migrate { .. }
             | Sessions::CodexSwitcherSave
-            | Sessions::CodexSwitcherActivate { .. } => Capability::MutateProject,
+            | Sessions::CodexSwitcherActivate { .. }
+            | Sessions::KebaccSwitcherAdd { .. }
+            | Sessions::KebaccSwitcherSwitch { .. }
+            | Sessions::KebaccSwitcherAuto { .. } => Capability::MutateProject,
         }
     }
 
@@ -361,9 +432,15 @@ impl Sessions {
             }
             Sessions::LiveClaude => value_of(session::live_claude_sessions()),
             Sessions::AgentTurns { queries } => value_of(session::agent_turns(&queries)),
-            Sessions::Usage { cwds, days, orchestrator_sessions } => {
-                value_of(usage::collect_usage_blocking(cwds, days, orchestrator_sessions))
-            }
+            Sessions::Usage {
+                cwds,
+                days,
+                orchestrator_sessions,
+            } => value_of(usage::collect_usage_blocking(
+                cwds,
+                days,
+                orchestrator_sessions,
+            )),
             Sessions::StopClaude { session_id } => {
                 value_of(session::stop_claude_session(&session_id))
             }
@@ -400,14 +477,26 @@ impl Sessions {
             }
             Sessions::CodexSwitcherVersion => value_of(codex_switcher::version_blocking()),
             Sessions::FastMcpSshVersion => value_of(fast_mcp_ssh::version_blocking()),
+            Sessions::KebaccSwitcherList { provider } => {
+                value_of(kebacc_switcher::list_blocking(provider.as_deref())?)
+            }
+            Sessions::KebaccSwitcherAdd { provider } => {
+                value_of(kebacc_switcher::add_blocking(&provider)?)
+            }
+            Sessions::KebaccSwitcherSwitch { provider, email } => {
+                value_of(kebacc_switcher::switch_blocking(&provider, &email)?)
+            }
+            Sessions::KebaccSwitcherAuto { provider } => {
+                value_of(kebacc_switcher::auto_blocking(provider.as_deref())?)
+            }
+            Sessions::KebaccSwitcherVersion => value_of(kebacc_switcher::version_blocking()),
             Sessions::Transcript {
                 thread_id,
                 bytes,
                 dir,
             } => {
-                let dir = dir.ok_or(
-                    "this Boite keeps no transcripts, so there is nothing to read back",
-                )?;
+                let dir =
+                    dir.ok_or("this Boite keeps no transcripts, so there is nothing to read back")?;
                 value_of(transcript::tail(&dir, &thread_id, bytes as usize)?)
             }
         })
@@ -433,6 +522,8 @@ mod tests {
             "cmd": "claude",
             "cwds": ["/w"],
             "threadId": "t1",
+            "provider": "claude",
+            "email": "you@example.com",
         });
         for method in ALL_METHODS {
             let command = Command::decode(method, &params)

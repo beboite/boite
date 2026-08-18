@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { PLUGINS } from "./spec";
 import { CODEX_SWITCHER_CMD, CODEX_SWITCHER_REPO } from "./install";
 import { FAST_MCP_SSH_CMD, FAST_MCP_SSH_REPO } from "./fast-mcp-ssh";
+import { KEBACC_SWITCH_CMD, KEBACC_SWITCH_REPO } from "./install-kebacc";
 
 describe("plugin catalogue", () => {
   it("only lists published tools", () => {
@@ -19,6 +20,12 @@ describe("plugin catalogue", () => {
     const ssh = PLUGINS.find((plugin) => plugin.id === "fast-mcp-ssh");
     expect(ssh?.repo).toBe(FAST_MCP_SSH_REPO);
     expect(FAST_MCP_SSH_CMD).toBe("fast-mcp-ssh");
+  });
+
+  it("names the published kebacc-switch repo", () => {
+    const kebacc = PLUGINS.find((plugin) => plugin.id === "kebacc-switch");
+    expect(kebacc?.repo).toBe(KEBACC_SWITCH_REPO);
+    expect(KEBACC_SWITCH_CMD).toBe("kebacc-switch");
   });
 
   it("gives every plugin its own id", () => {

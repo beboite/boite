@@ -2,6 +2,7 @@ import type { MessageKey } from "$lib/i18n/messages";
 import { FASTPICK_REPO } from "$lib/features/fastpick/install";
 import { CODEX_SWITCHER_REPO } from "./install";
 import { FAST_MCP_SSH_REPO } from "./fast-mcp-ssh";
+import { KEBACC_SWITCH_REPO } from "./install-kebacc";
 
 /**
  * A tool Boite can install from the plugins page, the way it already
@@ -47,5 +48,11 @@ export const PLUGINS: PluginSpec[] = [
     titleKey: "plugin.fastMcpSshTitle",
     descKey: "plugin.fastMcpSshDesc",
     repo: FAST_MCP_SSH_REPO,
+  },
+  {
+    id: "kebacc-switch",
+    titleKey: "plugin.kebaccTitle",
+    descKey: "plugin.kebaccDesc",
+    repo: KEBACC_SWITCH_REPO,
   },
 ];

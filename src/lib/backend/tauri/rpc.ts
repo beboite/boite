@@ -11,6 +11,8 @@ import type {
   CodexSwitcherApi,
   FastMcpSshApi,
   CodexSwitcherList,
+  KebaccSwitcherApi,
+  KebaccSwitcherList,
   FastpickApi,
   FastpickListing,
   FolderState,
@@ -168,6 +170,26 @@ export const tauriFastpick: FastpickApi = {
     return JSON.parse(raw) as FastpickListing;
   },
   version: () => invoke<string | null>("fastpick_version"),
+};
+
+export const tauriKebaccSwitcher: KebaccSwitcherApi = {
+  async list(provider) {
+    const raw = await invoke<string>("kebacc_switcher_list", { provider: provider ?? null });
+    return JSON.parse(raw) as KebaccSwitcherList;
+  },
+  async add(provider) {
+    const raw = await invoke<string>("kebacc_switcher_add", { provider });
+    return JSON.parse(raw) as KebaccSwitcherList;
+  },
+  async switchTo(provider, email) {
+    const raw = await invoke<string>("kebacc_switcher_switch", { provider, email });
+    return JSON.parse(raw) as KebaccSwitcherList;
+  },
+  async auto(provider) {
+    const raw = await invoke<string>("kebacc_switcher_auto", { provider: provider ?? null });
+    return JSON.parse(raw) as KebaccSwitcherList;
+  },
+  version: () => invoke<string | null>("kebacc_switcher_version"),
 };
 
 export const tauriCodexSwitcher: CodexSwitcherApi = {

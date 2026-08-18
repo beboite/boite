@@ -618,6 +618,46 @@ export interface FastMcpSshApi {
   version(): Promise<string | null>;
 }
 
+/**
+ * What `kebacc-switch list -Json` prints. Only the fields the plugins card
+ * reads are typed: the document is that CLI's.
+ */
+export type KebaccProviderId = "claude" | "codex";
+
+export interface KebaccSwitcherList {
+  providers: KebaccSwitcherProvider[];
+}
+
+export interface KebaccSwitcherProvider {
+  provider: KebaccProviderId | string;
+  accounts?: KebaccSwitcherAccount[];
+  email?: string | null;
+  switched?: boolean;
+  saved?: boolean;
+  code?: number;
+  error?: string;
+}
+
+export interface KebaccSwitcherAccount {
+  email: string;
+  active: boolean;
+  usable?: boolean;
+  usage?: {
+    five_hour?: { remaining_percent?: number; used_percent?: number } | null;
+    seven_day?: { remaining_percent?: number; used_percent?: number } | null;
+  } | null;
+  trust?: string;
+  sealed?: boolean;
+}
+
+export interface KebaccSwitcherApi {
+  list(provider?: string): Promise<KebaccSwitcherList>;
+  add(provider: string): Promise<KebaccSwitcherList>;
+  switchTo(provider: string, email: string): Promise<KebaccSwitcherList>;
+  auto(provider?: string): Promise<KebaccSwitcherList>;
+  version(): Promise<string | null>;
+}
+
 export interface ScopeApi {
   registerProjectRoots(roots: string[]): Promise<void>;
   // The server's browsable base dir for adding projects via the web folder
@@ -1217,6 +1257,7 @@ export interface Backend {
   readonly fastpick: FastpickApi;
   readonly codexSwitcher: CodexSwitcherApi;
   readonly fastMcpSsh: FastMcpSshApi;
+  readonly kebaccSwitcher: KebaccSwitcherApi;
   readonly scope: ScopeApi;
   readonly session: SessionApi;
   readonly log: LogApi;

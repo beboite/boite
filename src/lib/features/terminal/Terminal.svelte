@@ -60,6 +60,8 @@
     type SessionMonitor,
   } from "$lib/features/thread/session-monitor.svelte";
   import { notifications } from "$lib/features/notifications/store.svelte";
+  import { kebaccSwitcher } from "$lib/features/plugin/store-kebacc.svelte";
+  import { kebaccProviderOf } from "$lib/features/plugin/restart";
   import { t } from "$lib/i18n/index.svelte";
   import { logger } from "$lib/shared/services/logger.svelte";
   import { isGenericTitle } from "$lib/features/thread/title-filter";
@@ -1049,6 +1051,26 @@
       // likely to grow without anybody noticing, because it grows with the
       // user's history rather than with this code.
       timing.mark("resume");
+
+      // A launch, not a reattach: the process is not running yet, so a quota
+      // flip here is the login the PTY will inherit. Reattaching would swap
+      // credentials under a live agent. Missing binary or a still-usable login
+      // are both a no-op inside `auto`.
+      if (!reattaching) {
+        const provider = kebaccProviderOf(thread);
+        if (provider) {
+          const result = await kebaccSwitcher.auto(provider, thread.id);
+          if (generation !== spawnGeneration) return;
+          for (const sw of result.switches) {
+            notifications.success(
+              t("plugin.autoSwitched", {
+                provider: t(sw.provider === "claude" ? "plugin.claude" : "plugin.codex"),
+                email: sw.email,
+              }),
+            );
+          }
+        }
+      }
 
       const spawnedAt = Date.now();
 

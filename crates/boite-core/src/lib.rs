@@ -19,6 +19,7 @@ pub mod finish;
 pub mod mcp_launch;
 pub mod git;
 pub mod journal;
+pub mod kebacc_switcher;
 pub mod migrations;
 pub mod model;
 pub mod pairing;

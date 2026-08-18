@@ -15,8 +15,14 @@ import {
   uninstallCommand as sshUninstall,
   updateCommand as sshUpdate,
 } from "./fast-mcp-ssh";
+import {
+  kebaccInstallCommand,
+  kebaccUninstallCommand,
+  kebaccUpdateCommand,
+} from "./install-kebacc";
 import { InstallOutput, TerminalQueries } from "$lib/features/fastpick/install-output";
 import { codexSwitcher, fastMcpSsh } from "./store.svelte";
+import { kebaccSwitcher } from "./store-kebacc.svelte";
 import type { PtyEvent } from "$lib/backend/types";
 import type { Project } from "$lib/types";
 
@@ -392,6 +398,16 @@ export const fastMcpSshInstaller = new PluginInstaller(
   "fast-mcp-ssh",
   { install: sshInstall, update: sshUpdate, uninstall: sshUninstall },
   () => void fastMcpSsh.probe(),
+);
+
+export const kebaccInstaller = new PluginInstaller(
+  "kebacc-switch",
+  {
+    install: kebaccInstallCommand,
+    update: kebaccUpdateCommand,
+    uninstall: kebaccUninstallCommand,
+  },
+  () => void kebaccSwitcher.probe(),
 );
 
 export type { PluginInstaller };

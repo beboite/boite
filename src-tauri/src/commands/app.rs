@@ -259,3 +259,45 @@ pub async fn codex_switcher_version(scope: State<'_, ProjectRoots>) -> Result<Va
 pub async fn fast_mcp_ssh_version(scope: State<'_, ProjectRoots>) -> Result<Value, String> {
     on_bus(scope.inner(), Sessions::FastMcpSshVersion.into()).await
 }
+
+#[tauri::command]
+pub async fn kebacc_switcher_list(
+    scope: State<'_, ProjectRoots>,
+    provider: Option<String>,
+) -> Result<Value, String> {
+    on_bus(scope.inner(), Sessions::KebaccSwitcherList { provider }.into()).await
+}
+
+#[tauri::command]
+pub async fn kebacc_switcher_add(
+    scope: State<'_, ProjectRoots>,
+    provider: String,
+) -> Result<Value, String> {
+    on_bus(scope.inner(), Sessions::KebaccSwitcherAdd { provider }.into()).await
+}
+
+#[tauri::command]
+pub async fn kebacc_switcher_switch(
+    scope: State<'_, ProjectRoots>,
+    provider: String,
+    email: String,
+) -> Result<Value, String> {
+    on_bus(
+        scope.inner(),
+        Sessions::KebaccSwitcherSwitch { provider, email }.into(),
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn kebacc_switcher_auto(
+    scope: State<'_, ProjectRoots>,
+    provider: Option<String>,
+) -> Result<Value, String> {
+    on_bus(scope.inner(), Sessions::KebaccSwitcherAuto { provider }.into()).await
+}
+
+#[tauri::command]
+pub async fn kebacc_switcher_version(scope: State<'_, ProjectRoots>) -> Result<Value, String> {
+    on_bus(scope.inner(), Sessions::KebaccSwitcherVersion.into()).await
+}
