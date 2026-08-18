@@ -1,62 +1,56 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { settings } from "$lib/features/settings/store.svelte";
-  import { fastpick } from "$lib/features/fastpick/store.svelte";
-  import { installer } from "$lib/features/fastpick/installer.svelte";
-  import {
-    FASTPICK_REPO,
-    installCommand,
-    uninstallCommand,
-    updateCommand,
-  } from "$lib/features/fastpick/install";
   import { notifications } from "$lib/features/notifications/store.svelte";
   import SettingsCard from "$lib/shared/components/SettingsCard.svelte";
-  import ToggleSetting from "$lib/shared/components/ToggleSetting.svelte";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import Download from "@lucide/svelte/icons/download";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import Square from "@lucide/svelte/icons/square";
   import RotateCw from "@lucide/svelte/icons/rotate-cw";
   import Copy from "@lucide/svelte/icons/copy";
-  import { t } from "$lib/i18n/index.svelte";
+  import { t, type MessageKey } from "$lib/i18n/index.svelte";
+  import {
+    CODEX_SWITCHER_REPO,
+    installCommand,
+    uninstallCommand,
+    updateCommand,
+  } from "./install";
+  import { installer } from "./installer.svelte";
+  import { codexSwitcher } from "./store.svelte";
 
-  const installed = $derived(fastpick.installed === true);
-  const cargoMissing = $derived(fastpick.cargoPresent === false);
+  let { anchor }: { anchor: MessageKey } = $props();
+
+  const installed = $derived(codexSwitcher.installed === true);
+  const cargoMissing = $derived(codexSwitcher.cargoPresent === false);
   const install = installCommand();
   const update = updateCommand();
   const uninstall = uninstallCommand();
-
-  // Only the first install compiles. Updating is fastpick fetching its own signed
-  // release, so a machine without a toolchain can still take one.
   const primary = $derived(installed ? update : install);
 
   function line(c: { cmd: string; args: string[] }): string {
     return [c.cmd, ...c.args].join(" ");
   }
 
-  /** What the run has to say about itself, or null while it has said nothing. */
   const verdict = $derived.by(() => {
     switch (installer.status) {
       case "running":
         switch (installer.action) {
           case "uninstall":
-            return t("fastpick.runningUninstall");
+            return t("plugin.runningUninstall");
           case "update":
-            return t("fastpick.runningUpdate");
+            return t("plugin.runningUpdate");
           default:
-            return t("fastpick.runningInstall");
+            return t("plugin.runningInstall");
         }
       case "done":
-        return t("fastpick.finished");
+        return t("plugin.finished");
       case "cancelled":
-        return t("fastpick.cancelled");
+        return t("plugin.cancelled");
       case "failed": {
-        // The command that failed, not the one the button offers now: a failed
-        // update leaves `installed` true and its own name is what the log holds.
         const cmd = installer.action === "update" ? update.cmd : install.cmd;
         return installer.failure
-          ? t("fastpick.failedToStart", { cmd, error: installer.failure })
-          : t("fastpick.failedWithCode", { cmd, code: installer.exitCode ?? "?" });
+          ? t("plugin.failedToStart", { cmd, error: installer.failure })
+          : t("plugin.failedWithCode", { cmd, code: installer.exitCode ?? "?" });
       }
       default:
         return null;
@@ -71,10 +65,6 @@
         : "text-muted-foreground",
   );
 
-  // The build writes to the bottom, which is the only end anyone reads. Pinned
-  // rather than followed: a user who has scrolled up is reading something, and
-  // yanking them back down every 120ms would make the log unreadable exactly
-  // when it matters.
   let logBox = $state<HTMLDivElement | null>(null);
   let pinned = $state(true);
 
@@ -85,7 +75,6 @@
   }
 
   $effect(() => {
-    // Read so the effect re-runs on each repaint, not only on the first.
     void installer.lines.length;
     if (!logBox || !pinned) return;
     logBox.scrollTop = logBox.scrollHeight;
@@ -93,25 +82,45 @@
 
   function copyLog(): void {
     void navigator.clipboard.writeText(installer.lines.join("\n"));
-    notifications.success(t("fastpick.logCopied"));
+    notifications.success(t("plugin.logCopied"));
+  }
+
+  async function activate(id: string): Promise<void> {
+    const n = await codexSwitcher.activate(id);
+    if (codexSwitcher.error) {
+      notifications.error(t("plugin.switchFailed", { error: codexSwitcher.error }));
+      return;
+    }
+    notifications.success(
+      n === 0 ? t("plugin.switchedNone") : t("plugin.switched", { count: n }),
+    );
+  }
+
+  async function saveCurrent(): Promise<void> {
+    await codexSwitcher.saveCurrent();
+    if (codexSwitcher.error) {
+      notifications.error(t("plugin.saveFailed", { error: codexSwitcher.error }));
+      return;
+    }
+    notifications.success(t("plugin.saved"));
   }
 
   onMount(() => {
-    void fastpick.probe();
+    void codexSwitcher.probe();
   });
 </script>
 
-<SettingsCard title={t("fastpick.settingsTitle")} anchor="fastpick.settingsTitle" description={t("fastpick.settingsDesc")}>
+<SettingsCard title={t("plugin.codexTitle")} {anchor} description={t("plugin.codexDesc")}>
   {#snippet actions()}
     <button
       type="button"
       class="flex items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-1 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground disabled:opacity-50"
-      onclick={() => fastpick.probe()}
-      disabled={fastpick.probing}
-      title={t("fastpick.recheck")}
+      onclick={() => codexSwitcher.probe()}
+      disabled={codexSwitcher.probing || installer.busy}
+      title={t("plugin.recheck")}
     >
-      <RefreshCw class="size-3 {fastpick.probing ? 'animate-spin' : ''}" />
-      {t("fastpick.recheck")}
+      <RefreshCw class="size-3 {codexSwitcher.probing ? 'animate-spin' : ''}" />
+      {t("plugin.recheck")}
     </button>
   {/snippet}
 
@@ -120,15 +129,15 @@
       class="size-1.5 shrink-0 rounded-full"
       style:background-color={installed ? "var(--color-success)" : "var(--color-border)"}
     ></span>
-    {#if fastpick.probing && fastpick.installed === null}
+    {#if codexSwitcher.probing && codexSwitcher.installed === null}
       <span class="text-muted-foreground">{t("common.loading")}</span>
     {:else if installed}
-      <span class="text-foreground">{t("fastpick.installed")}</span>
-      {#if fastpick.version}
-        <span class="tabular-nums text-xs text-muted-foreground/70">v{fastpick.version}</span>
+      <span class="text-foreground">{t("plugin.installed")}</span>
+      {#if codexSwitcher.version}
+        <span class="tabular-nums text-xs text-muted-foreground/70">v{codexSwitcher.version}</span>
       {/if}
     {:else}
-      <span class="text-muted-foreground">{t("fastpick.notInstalled")}</span>
+      <span class="text-muted-foreground">{t("plugin.notInstalled")}</span>
     {/if}
   </div>
 
@@ -141,7 +150,7 @@
       title={line(primary)}
     >
       <Download class="size-3" />
-      {installed ? t("fastpick.update") : t("fastpick.install")}
+      {installed ? t("plugin.update") : t("plugin.install")}
     </button>
     {#if installed}
       <button
@@ -152,7 +161,7 @@
         title={line(uninstall)}
       >
         <Trash2 class="size-3" />
-        {t("fastpick.uninstall")}
+        {t("plugin.uninstall")}
       </button>
     {/if}
     {#if installer.busy}
@@ -162,7 +171,7 @@
         onclick={() => installer.cancel()}
       >
         <Square class="size-3" />
-        {t("fastpick.stop")}
+        {t("plugin.stop")}
       </button>
     {:else if installer.status === "failed" || installer.status === "cancelled"}
       <button
@@ -171,7 +180,7 @@
         onclick={() => installer.retry()}
       >
         <RotateCw class="size-3" />
-        {t("fastpick.retry")}
+        {t("plugin.retry")}
       </button>
     {/if}
   </div>
@@ -187,14 +196,14 @@
             onclick={copyLog}
           >
             <Copy class="size-3" />
-            {t("fastpick.copyLog")}
+            {t("plugin.copyLog")}
           </button>
           <button
             type="button"
             class="text-xs text-muted-foreground/70 transition hover:text-foreground"
             onclick={() => installer.dismiss()}
           >
-            {t("fastpick.clearLog")}
+            {t("plugin.clearLog")}
           </button>
         </div>
       {/if}
@@ -207,37 +216,64 @@
       onscroll={onLogScroll}
       class="max-h-52 min-h-24 overflow-y-auto rounded-md border border-border bg-[var(--color-titlebar)] p-2 font-mono text-xs leading-snug"
     >
-      <!-- Unkeyed on purpose. The tail rolls, so every line's content changes
-           under a fixed position: keying on the text would rebuild the whole
-           box on each repaint, and there is no id to key on that does not. -->
       {#each installer.lines as text}
         <div class="break-words whitespace-pre-wrap text-foreground/80">{text}</div>
       {/each}
     </div>
   {/if}
 
-  <!-- No thread any more: the build is minutes of compiler output, and a panel
-       that can show it is a panel that can also say whether it worked. -->
-  <p class="pt-1 text-xs leading-snug text-muted-foreground/80">
-    {t("fastpick.runsHere")}
-  </p>
-  <p class="text-xs leading-snug text-muted-foreground/80">
-    {t("fastpick.keepsConfig")}
-  </p>
-  <!-- Only the first install and the uninstall are cargo's. Saying a toolchain is
-       missing next to an Update button that does not want one reads as a blocker. -->
   {#if cargoMissing && !installed}
     <p class="text-xs leading-snug text-[var(--color-warning)]">
-      {t("fastpick.needsCargo")}
-      {t("fastpick.needsCargoHelp")}
+      {t("plugin.needsCargo")}
     </p>
   {/if}
-  <p class="pt-0.5 text-xs text-muted-foreground/60">{FASTPICK_REPO}</p>
-</SettingsCard>
 
-<ToggleSetting
-  label={t("fastpick.enable")} anchor="fastpick.enable"
-  description={t("fastpick.enableDesc")}
-  enabled={settings.state.fastpickEnabled}
-  onToggle={() => settings.setFastpickEnabled(!settings.state.fastpickEnabled)}
-/>
+  {#if codexSwitcher.error}
+    <p class="text-xs leading-snug text-[var(--color-danger)]">{codexSwitcher.error}</p>
+  {/if}
+
+  {#if installed}
+    <button
+      type="button"
+      class="rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-1 text-xs text-foreground transition hover:border-foreground/30 disabled:cursor-not-allowed disabled:opacity-40"
+      disabled={codexSwitcher.switching}
+      onclick={() => void saveCurrent()}
+    >
+      {t("plugin.saveCurrent")}
+    </button>
+
+    {#if codexSwitcher.accounts.length === 0}
+      <p class="text-xs text-muted-foreground">{t("plugin.noAccounts")}</p>
+    {:else}
+      <ul class="flex flex-col gap-1">
+        {#each codexSwitcher.accounts as account (account.id)}
+          <li>
+            <button
+              type="button"
+              class="flex w-full items-baseline gap-2 rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-1 text-left text-xs transition hover:border-foreground/30 disabled:opacity-50"
+              disabled={codexSwitcher.switching || account.is_active}
+              onclick={() => void activate(account.id)}
+            >
+              <span class="min-w-0 truncate text-foreground">{account.email}</span>
+              {#if account.is_active}
+                <span class="shrink-0 text-2xs uppercase tracking-wider text-muted-foreground/70">
+                  {t("plugin.current")}
+                </span>
+              {/if}
+              {#if account.plan_label}
+                <span class="shrink-0 text-muted-foreground/70">{account.plan_label}</span>
+              {/if}
+              {#if account.usage?.weekly}
+                <span class="ml-auto shrink-0 tabular-nums text-muted-foreground/70">
+                  {account.usage.weekly.remaining_percent}%
+                </span>
+              {/if}
+            </button>
+          </li>
+        {/each}
+      </ul>
+    {/if}
+  {/if}
+
+  <p class="pt-0.5 text-xs text-muted-foreground/60">{CODEX_SWITCHER_REPO}</p>
+</SettingsCard>
