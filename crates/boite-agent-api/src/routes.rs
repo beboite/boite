@@ -1384,8 +1384,10 @@ fn describe(screen: &boite_core::screen::Screen, caller: &Caller) -> Vec<Value> 
                 "width": p.rect.w.round(),
                 "height": p.rect.h.round(),
                 // A pane laid out at no width is open and not on the screen,
-                // which is a difference a list of open panes cannot show.
-                "visible": p.rect.shows(),
+                // and a pane in a group nobody is looking at is laid out at the
+                // same coordinates as the one covering it: neither difference a
+                // list of open panes can show, and neither a rectangle can tell.
+                "visible": p.shown(),
             })
         })
         .collect()

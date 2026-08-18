@@ -11,6 +11,13 @@ use super::*;
 /// Where a project keeps everything Boite puts on its disk.
 pub const BOITE_DIR: &str = ".boite";
 
+/// Where grok reads a project's MCP servers from.
+///
+/// Boite writes it into a thread's worktree because grok has no launch flag for
+/// a server definition. Named beside `BOITE_DIR` rather than beside its writer
+/// because the exclusion below is what keeps the worktree removable.
+pub const GROK_DIR: &str = ".grok";
+
 /// Where this project's thread worktrees live.
 ///
 /// Inside the project, which reverses the earlier rule, and the reason is that
@@ -32,14 +39,21 @@ pub fn worktree_base_for(repo: &Path) -> PathBuf {
     repo.join(BOITE_DIR).join("worktrees")
 }
 
-/// Keeps `.boite/` out of the main checkout's `git status`.
+/// Keeps what Boite writes into a checkout out of its `git status`.
 ///
-/// `.git/info/exclude` rather than `.gitignore`: the directory is this
+/// `.git/info/exclude` rather than `.gitignore`: the directories are this
 /// machine's business, and a collaborator who never runs Boite should not find
-/// a rule for it in a tracked file. Best-effort, because the cost of failing is
-/// a noisy `git status` rather than anything broken.
+/// a rule for them in a tracked file. `info/` lives in the common directory, so
+/// one write covers the main checkout and every worktree linked to it.
+/// Best-effort, because the cost of failing is a noisy `git status` rather than
+/// anything broken.
 ///
-/// `git clean -xdf` is not a hazard here despite the directory being ignored:
+/// `.grok/` is here for a harder reason than noise. An untracked file makes
+/// `worktree_hold_blocking` call the worktree dirty, and a dirty worktree
+/// refuses the unforced remove that closing a thread asks for, so leaving it
+/// out leaks one worktree per grok thread onto the disk.
+///
+/// `git clean -xdf` is not a hazard here despite the directories being ignored:
 /// git refuses to descend into a nested checkout and prints `Skipping
 /// repository`. Only `-xdff`, which is documented as meaning exactly that,
 /// removes it.
@@ -48,17 +62,25 @@ pub fn ensure_boite_excluded(repo: &Path) {
         return;
     };
     let exclude = git_dir.join("info").join("exclude");
-    let rule = format!("{BOITE_DIR}/");
-    if let Ok(text) = fs::read_to_string(&exclude) {
-        if text.lines().any(|l| l.trim() == rule || l.trim() == BOITE_DIR) {
-            return;
+    let existing = fs::read_to_string(&exclude);
+    let mut text = existing.as_deref().unwrap_or_default().to_string();
+    let mut added = false;
+    for dir in [BOITE_DIR, GROK_DIR] {
+        let rule = format!("{dir}/");
+        if text.lines().any(|l| l.trim() == rule || l.trim() == dir) {
+            continue;
         }
         let sep = if text.ends_with('\n') || text.is_empty() { "" } else { "\n" };
-        let _ = fs::write(&exclude, format!("{text}{sep}{rule}\n"));
+        text = format!("{text}{sep}{rule}\n");
+        added = true;
+    }
+    if !added {
         return;
     }
-    let _ = fs::create_dir_all(exclude.parent().unwrap_or(&exclude));
-    let _ = fs::write(&exclude, format!("{rule}\n"));
+    if existing.is_err() {
+        let _ = fs::create_dir_all(exclude.parent().unwrap_or(&exclude));
+    }
+    let _ = fs::write(&exclude, text);
 }
 
 /// One directory named after an id, directly under `base` and never elsewhere.
@@ -2982,11 +3004,33 @@ mod worktree_tests {
         ensure_boite_excluded(&f.repo);
         ensure_boite_excluded(&f.repo);
         let text = fs::read_to_string(f.repo.join(".git/info/exclude")).unwrap();
-        assert_eq!(
-            text.lines().filter(|l| l.trim() == ".boite/").count(),
-            1,
-            "the rule was appended more than once"
-        );
+        for rule in [".boite/", ".grok/"] {
+            assert_eq!(
+                text.lines().filter(|l| l.trim() == rule).count(),
+                1,
+                "{rule} was appended more than once"
+            );
+        }
+    }
+
+    /// The config Boite itself writes for grok must not be what stops Boite
+    /// from cleaning up after itself: an unexcluded `.grok/` reads as untracked,
+    /// which reads as dirty, which refuses the unforced remove that closing a
+    /// thread asks for, and the worktree stays on the disk forever.
+    #[test]
+    fn a_worktree_carrying_grok_config_is_still_removable_unforced() {
+        let f = Fixture::new();
+        let base = worktree_base_for(&f.repo);
+        let w = scoped_dir_for(&base, "thread-grok");
+        fs::create_dir_all(&base).unwrap();
+        add_detached_worktree_blocking(f.path(), w.to_str().unwrap()).unwrap();
+
+        fs::create_dir_all(w.join(GROK_DIR)).unwrap();
+        fs::write(w.join(GROK_DIR).join("config.toml"), "[mcp_servers.boite]\n").unwrap();
+
+        remove_worktree_blocking(f.path(), w.to_str().unwrap(), false)
+            .expect("the worktree Boite wrote into refused its own cleanup");
+        assert!(!w.exists(), "the worktree was left on the disk");
     }
 
     /// The migration exists to carry work across, so the test is about the
