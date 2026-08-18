@@ -380,12 +380,17 @@ function Invoke-CcCredSwapLocked {
 # --- the pool ----------------------------------------------------------------
 
 function New-CcSnapshotEntry {
-    param([string]$Email, [string]$CredsRaw, $Identity, $UsageCache, [string]$SavedAt)
+    param([string]$Email, [string]$CredsRaw, $Identity, $UsageCache, $SavedAt)
+    # Rewriting a snapshot — re-sealing it, or saving fresh tokens for an account
+    # already in the pool — does not make it a new saved login, so the caller's
+    # date is carried through. ConvertFrom-Json hands back a DateTime rather than
+    # the text that was read, and only 'o' writes that back as it came in.
+    $saved = if ($SavedAt -is [datetime]) { $SavedAt.ToString('o') }
+             elseif ("$SavedAt") { "$SavedAt" }
+             else { (Get-Date -Format o) }
     $entry = [ordered]@{
-        email = $Email
-        # Re-sealing a snapshot rewrites it without it becoming a new one, so the
-        # date it was first saved is carried through when the caller has it.
-        savedAt = $(if ($SavedAt) { $SavedAt } else { (Get-Date -Format o) })
+        email   = $Email
+        savedAt = $saved
     }
     $sealed = Protect-CcText $CredsRaw
     if ($sealed) { $entry['credentialsProtected'] = $sealed }

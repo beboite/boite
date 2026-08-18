@@ -47,6 +47,11 @@ if (Test-Path -LiteralPath $commandSource) {
     # Names from earlier versions, so an update does not leave two of each.
     Get-ChildItem -LiteralPath $commandTarget -Filter 'claude-account-*.md' -File -ErrorAction Ignore | Remove-Item -Force
     Get-ChildItem -LiteralPath $commandTarget -Filter 'account-*.md' -File -ErrorAction Ignore | Remove-Item -Force
+    # Two commands from a version that had a thread relauncher. Nothing answers
+    # them any more, and they still show up in the slash command list.
+    foreach ($dead in @('refresh-a.md', 'refresh-t.md')) {
+        Remove-Item -LiteralPath (Join-Path $commandTarget $dead) -Force -ErrorAction Ignore
+    }
     Copy-Item -Path (Join-Path $commandSource '*.md') -Destination $commandTarget -Force
     Say "Installed the slash commands into $commandTarget" Green
 }

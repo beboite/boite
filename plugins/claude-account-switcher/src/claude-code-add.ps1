@@ -30,8 +30,11 @@ $path     = Get-CcSnapshotPath $Email
 $existed  = Test-Path -LiteralPath $path
 $previous = Read-CcJsonFile $path
 $cache    = if (Test-CcHasProperty $previous 'usageCache') { $previous.usageCache } else { $null }
+# Saving over an account already in the pool refreshes its tokens; it does not
+# make it a new saved login, so the date it was first saved is kept.
+$saved    = if (Test-CcHasProperty $previous 'savedAt') { $previous.savedAt } else { $null }
 
-$snapshot = New-CcSnapshotEntry -Email $Email -CredsRaw $raw -Identity $identity -UsageCache $cache
+$snapshot = New-CcSnapshotEntry -Email $Email -CredsRaw $raw -Identity $identity -UsageCache $cache -SavedAt $saved
 Write-CcJsonFile $path $snapshot
 
 $registered = Register-CcPoolEntry -FileName (Split-Path -Leaf $path) -Snapshot $snapshot

@@ -277,6 +277,9 @@ class AccountsInstaller {
     const BATCH = 8192;
     let pending = "";
     for (const line of lines) {
+      // Escaped, not a real carriage return in the source: a bare CR inside a
+      // template literal is invisible and does not survive line-ending
+      // normalisation, and losing it sends the whole script as one line.
       pending += `${line}`;
       if (pending.length < BATCH) continue;
       if (!(await this.#type(run, pending))) return;

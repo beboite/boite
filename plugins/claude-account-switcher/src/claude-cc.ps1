@@ -38,7 +38,7 @@ function Show-Usage {
     Write-Host '  switch    change which saved login the CLI uses'
     Write-Host '  remove    forget a saved login'
     Write-Host '  auto      switch only if the one in use is out of quota'
-    Write-Host '  doctor    check the install and the pool (-Protect, -Adopt to repair)'
+    Write-Host '  doctor    check the install and the pool (-Protect, -Adopt, -Clean to repair, -Rollback to undo a switch)'
 }
 
 $name = "$Command".ToLowerInvariant()
@@ -60,9 +60,10 @@ $script = Join-Path $PSScriptRoot $Scripts[$name]
 function ConvertTo-CcParams {
     param([string[]]$Tokens)
     $params = @{}
+    $stray  = @()
     for ($i = 0; $i -lt $Tokens.Count; $i++) {
         $token = $Tokens[$i]
-        if (-not $token.StartsWith('-')) { continue }
+        if (-not $token.StartsWith('-')) { $stray += $token; continue }
         $key  = $token.TrimStart('-')
         $next = if ($i + 1 -lt $Tokens.Count) { $Tokens[$i + 1] } else { $null }
         if ($null -ne $next -and -not $next.StartsWith('-')) {
@@ -72,10 +73,18 @@ function ConvertTo-CcParams {
             $params[$key] = $true
         }
     }
-    return $params
+    return @{ Params = $params; Stray = $stray }
 }
 
-$options = ConvertTo-CcParams $Rest
+$parsed = ConvertTo-CcParams $Rest
+
+# A bare word is nobody's parameter, and splatting drops it without a word. The
+# email goes after `-Email`, and saying so beats switching to the wrong account.
+if ($parsed.Stray.Count) {
+    Write-Host ("Unexpected argument '{0}'. Options are named: -Email you@example.com" -f $parsed.Stray[0]) -ForegroundColor Red
+    exit 64
+}
+$options = $parsed.Params
 
 # `all` is not a provider — it runs the command once per provider. It is caught
 # here, before anything tries to resolve it into a provider spec.

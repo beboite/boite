@@ -33,6 +33,14 @@ if ($Rollback) {
     exit 0
 }
 
+# Earlier versions put a `claude.exe` shim on the PATH, in a directory this one
+# does not write and cannot safely delete: while that directory is still on the
+# PATH, `claude` runs the shim rather than the CLI.
+$shim = Join-Path $PSScriptRoot 'shim'
+if (Test-Path -LiteralPath $shim) {
+    Warn "An earlier version left $shim on this machine. Remove it once nothing on your PATH points at it."
+}
+
 $backend = Get-CcSecretBackend
 if ($backend -eq 'none') { Warn 'No OS secret store: snapshots cannot be encrypted on this machine.' }
 else { Good "credentials sealed with $backend" }
@@ -61,7 +69,7 @@ foreach ($entry in @(Get-CcPool)) {
     Say ('  {0}' -f $entry.Email)
 
     if ($Protect -and -not $entry.Protected -and $entry.Creds) {
-        $saved  = $(if (Test-CcHasProperty $entry.Snapshot 'savedAt') { "$($entry.Snapshot.savedAt)" } else { '' })
+        $saved  = $(if (Test-CcHasProperty $entry.Snapshot 'savedAt') { $entry.Snapshot.savedAt } else { $null })
         $sealed = New-CcSnapshotEntry -Email $entry.Email -CredsRaw $entry.Creds -Identity $entry.Identity -UsageCache $entry.Cache -SavedAt $saved
         Write-CcJsonFile $entry.File $sealed
         Register-CcPoolEntry -FileName $name -Snapshot $sealed | Out-Null

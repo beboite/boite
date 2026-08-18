@@ -44,6 +44,11 @@ foreach ($entry in $pool) {
 
     $usage = Get-CcPoolUsage $entry
     if (Test-CcUsable $usage) {
+        # Nothing is asked here — this runs unattended — so an entry this machine
+        # never registered is used, and said out loud.
+        if ($entry.Trust -ne 'trusted') {
+            Note ("{0} is {1}." -f $entry.Email, (Format-CcPoolVerdict $entry.Trust).Text) Yellow
+        }
         Set-CcActiveAccount $entry
         Note ("Switched {0} to {1} ({2})." -f $CcName, $entry.Email, (Format-CcUsagePair $usage)) Green
         exit 10

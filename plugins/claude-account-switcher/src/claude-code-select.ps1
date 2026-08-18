@@ -20,10 +20,16 @@ function Select-CcTarget {
     if ($Wanted) {
         $key = $Wanted.ToLowerInvariant()
         $hit = $Pool | Where-Object { "$($_.Email)".ToLowerInvariant() -eq $key } | Select-Object -First 1
-        if (-not $hit) {
-            $hit = $Pool | Where-Object { "$($_.Email)".ToLowerInvariant().StartsWith($key) } | Select-Object -First 1
+        if ($hit) { return $hit }
+        # A prefix is a convenience, and only while it names one account: this
+        # hands over credentials, so guessing between two of them is not on.
+        $near = @($Pool | Where-Object { "$($_.Email)".ToLowerInvariant().StartsWith($key) })
+        if ($near.Count -eq 1) { return $near[0] }
+        if ($near.Count -gt 1) {
+            Say ("'{0}' matches {1} accounts:" -f $Wanted, $near.Count) Yellow
+            foreach ($one in $near) { Say ('  {0}' -f $one.Email) }
         }
-        return $hit
+        return $null
     }
     if ($Pool.Count -eq 2 -and $current) {
         # Two accounts and one of them is in use: there is only one answer.
