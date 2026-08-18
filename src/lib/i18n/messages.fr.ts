@@ -271,6 +271,9 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "sidebar.filterThreads": "Filtrer les terminaux",
   "sidebar.showArchived": "Afficher les projets archivés",
   "sidebar.archivedProjects": "Projets archivés",
+  "sidebar.delegation": "Délégation",
+  "sidebar.delegationThread": "Thread de délégation",
+
   "sidebar.addProject": "Ajouter un projet",
   "sidebar.addProjectFromFolder": "Ajouter un projet depuis un dossier",
   "sidebar.addProjectOnBoite": "Ajouter un projet sur la boite",

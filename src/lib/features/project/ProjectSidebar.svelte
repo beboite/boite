@@ -1086,6 +1086,31 @@
     return list.findIndex((t) => t.id === liveDrag.id);
   });
 
+  /** Delegation children are drawn under the thread that spawned them, one
+   * indent step per level. A child whose parent is not in the same list — the
+   * parent settled, or it lives in another project — is drawn at the root
+   * rather than dropped, so a delegation never disappears with its parent. */
+  function flattenDelegations(
+    threads: Thread[],
+  ): Array<{ thread: Thread; depth: number }> {
+    const byId = new Map(threads.map((t) => [t.id, t]));
+    const rows: Array<{ thread: Thread; depth: number }> = [];
+    const seen = new Set<string>();
+    const walk = (thread: Thread, depth: number) => {
+      if (seen.has(thread.id)) return;
+      seen.add(thread.id);
+      rows.push({ thread, depth });
+      for (const childId of app.childThreadIds(thread.id)) {
+        const child = byId.get(childId);
+        if (child) walk(child, depth + 1);
+      }
+    };
+    for (const t of threads) {
+      if (!t.parentThreadId || !byId.has(t.parentThreadId)) walk(t, 0);
+    }
+    return rows;
+  }
+
   const threadDragGhost = $derived.by(() => {
     if (!liveDrag || liveDrag.kind !== "thread" || !liveDrag.sourceRect) {
       return null;
@@ -1425,7 +1450,12 @@
           <!-- The row used to live inline in the live list. It is a snippet
                now because the drawer draws the same card under the cut, and
                two copies of this markup is how they would drift. -->
-          {#snippet threadItem(thread: Thread, threadIdx: number, reorderable: boolean)}
+          {#snippet threadItem(
+            thread: Thread,
+            threadIdx: number,
+            reorderable: boolean,
+            depth: number,
+          )}
               {@const isThreadSource = liveDrag?.kind === "thread" && liveDrag.id === thread.id}
               {@const isActive =
                 app.activeThreadId === thread.id && app.view === "terminal"}
@@ -1463,6 +1493,7 @@
                 style:transform={threadSlide.transform}
                 style:transition={threadSlide.transition}
                 style:z-index={isThreadSource ? 50 : "auto"}
+                style:margin-left={depth > 0 ? `${depth * 16}px` : null}
                 onpointerdown={(e) => threadPointerDown(thread, e)}
                 onmouseenter={() => threadHoverEnter(thread.id)}
                 onmouseleave={() => threadHoverLeave(thread.id)}
@@ -1573,11 +1604,23 @@
                          from assistive tech because the row button already
                          carries this name. -->
                     <span
-                      class="pointer-events-none relative min-w-0 flex-1 truncate-safe text-left text-base leading-[19px]"
-                      title={thread.title ?? thread.label}
+                      class="pointer-events-none relative flex min-w-0 flex-1 items-center gap-1.5 text-left text-base leading-[19px]"
                       aria-hidden="true"
                     >
-                      {thread.title ?? thread.label}
+                      {#if depth > 0}
+                        <span class="shrink-0 text-muted-foreground/50">↳</span>
+                      {/if}
+                      <span class="truncate-safe" title={thread.title ?? thread.label}>
+                        {thread.title ?? thread.label}
+                      </span>
+                      {#if thread.delegationMode === "delegation"}
+                        <span
+                          class="shrink-0 rounded-xs bg-primary/10 px-1 py-0.5 text-2xs font-medium text-primary"
+                          title={t("sidebar.delegationThread")}
+                        >
+                          {t("sidebar.delegation")}
+                        </span>
+                      {/if}
                     </span>
                   {/if}
                   <!-- The logo used to live here, opposite the status dot, and
@@ -1622,8 +1665,8 @@
               data-thread-list
               data-project-id={project.id}
             >
-              {#each live as thread, threadIdx (thread.id)}
-                {@render threadItem(thread, threadIdx, true)}
+              {#each flattenDelegations(live) as { thread, depth }, threadIdx (thread.id)}
+                {@render threadItem(thread, threadIdx, true, depth)}
               {/each}
             </ul>
           {/if}
@@ -1663,7 +1706,7 @@
               {#if open}
                 <ul class="px-0.5 pb-0.5 {rowGapClass}">
                   {#each settled as thread, threadIdx (thread.id)}
-                    {@render threadItem(thread, threadIdx, false)}
+                    {@render threadItem(thread, threadIdx, false, 0)}
                   {/each}
                 </ul>
               {/if}

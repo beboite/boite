@@ -1,4 +1,5 @@
 import type {
+  DelegationStatus,
   MobileTab,
   Project,
   Thread,
@@ -51,9 +52,17 @@ import { TitleWrites } from "./title-writes";
 // instead of silently corrupting the index.
 const EMPTY_THREADS = Object.freeze([]) as unknown as Thread[];
 
+/** How long a finished delegation keeps its row before it settles itself.
+ * Long enough for the thread that asked for it to read the outcome, short
+ * enough that a burst of them does not bury the list. */
+const DELEGATION_SETTLE_DELAY_MS = 5000;
+
 export class AppState {
   projects = $state<Project[]>([]);
   threads = $state<Thread[]>([]);
+  /** Pending self-settle timers, by thread id, so a delegation that wakes back
+   * up inside the delay keeps its row instead of vanishing under the user. */
+  #delegationSettleTimers = new Map<string, ReturnType<typeof setTimeout>>();
   activeThreadId = $state<string | null>(null);
   selectedProjectId = $state<string | null>(null);
   view = $state<View>("terminal");
@@ -141,6 +150,18 @@ export class AppState {
       else grouped.set(t.projectId, [t]);
     }
     return grouped;
+  });
+
+  #childrenByParent: Map<string, string[]> = $derived.by(() => {
+    const children = new Map<string, string[]>();
+    for (const t of this.threads) {
+      if (t.parentThreadId) {
+        const list = children.get(t.parentThreadId);
+        if (list) list.push(t.id);
+        else children.set(t.parentThreadId, [t.id]);
+      }
+    }
+    return children;
   });
 
   /**
@@ -249,6 +270,11 @@ export class AppState {
 
   hasThread(id: string): boolean {
     return this.threadById(id) !== null;
+  }
+
+  /** Child thread IDs for delegation hierarchy display. */
+  childThreadIds(parentId: string): string[] {
+    return this.#childrenByParent.get(parentId) ?? [];
   }
 
   /** Indexed for the same reason as `threadById`: the status sweep resolves a
@@ -588,6 +614,51 @@ export class AppState {
       // write — is the whole reason a woken thread stops animating.
       this.setThreadAutoSlept(id, false);
     }
+
+    // A delegation is a thread another thread asked for, and nobody is
+    // watching it: its own row is the only place its outcome shows. The
+    // status here is that outcome, and a finished one settles itself so the
+    // sidebar does not fill with the leftovers of work already reported.
+    if (t.delegationMode === "delegation") {
+      const failed =
+        status === "error" ||
+        (status === "exited" && exitCode !== null && exitCode !== 0);
+      const done =
+        status === "ready" ||
+        status === "stopped" ||
+        (status === "done" && (exitCode === null || exitCode === 0));
+
+      let next: DelegationStatus | null = t.delegationStatus ?? null;
+      if (status === "running" || status === "waiting") next = "running";
+      else if (failed) next = "failed"; // stays on screen: the parent has to see it
+      else if (done) next = "completed";
+
+      // The row is left up for a beat before it goes, long enough for the
+      // parent to read the result off it. A thread that comes back to life in
+      // that window keeps its row: the timer is cleared, not fired.
+      const pending = this.#delegationSettleTimers.get(id);
+      if (pending !== undefined && next !== "completed") {
+        clearTimeout(pending);
+        this.#delegationSettleTimers.delete(id);
+      }
+      if (next === "completed" && pending === undefined) {
+        this.#delegationSettleTimers.set(
+          id,
+          setTimeout(() => {
+            this.#delegationSettleTimers.delete(id);
+            void this.settleThread(id, true);
+          }, DELEGATION_SETTLE_DELAY_MS),
+        );
+      }
+
+      if (next !== t.delegationStatus) {
+        t.delegationStatus = next;
+        void saveThread($state.snapshot(t) as Thread).catch((err) => {
+          logger.error("app", "Failed to save delegation status", err);
+        });
+      }
+    }
+
     // Nothing is written here, and that is the change. A status is a statement
     // about a process, and every one of them stops being true when the app
     // closes; what the row keeps is that there *was* a run, written once by
