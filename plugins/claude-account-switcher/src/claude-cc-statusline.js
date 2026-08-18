@@ -34,6 +34,35 @@ function codexStoreDir() {
   return process.env.CODEX_CC_ACCOUNTS || path.join(os.homedir(), '.codex-cc-accounts');
 }
 
+/**
+ * Which pools a SessionStart hook keeps switched, as a word, or null when none
+ * does. `auto` only ever runs when something calls it, so the hook that calls it
+ * is the whole answer to "is this armed, and for what".
+ */
+function autoScope() {
+  const dir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
+  const found = new Set();
+  for (const name of ['settings.json', 'settings.local.json']) {
+    const settings = readJson(path.join(dir, name));
+    const groups = settings && settings.hooks && settings.hooks.SessionStart;
+    if (!Array.isArray(groups)) continue;
+    for (const group of groups) {
+      for (const hook of (group && group.hooks) || []) {
+        const command = hook && hook.command;
+        if (typeof command !== 'string') continue;
+        // A shell may leave its own quote between the script and the word.
+        if (!/claude-cc(\.ps1)?["']?\s+auto\b/.test(command)) continue;
+        const provider = /-Provider\s+([A-Za-z]+)/.exec(command);
+        found.add(provider ? provider[1].toLowerCase() : 'claude');
+      }
+    }
+  }
+  if (!found.size) return null;
+  // One hook over everything beats naming the pools one by one; two separate
+  // hooks read as what they are.
+  return found.has('all') ? 'all' : Array.from(found).sort().join('+');
+}
+
 function readJson(file) {
   try {
     return JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -136,6 +165,12 @@ function build(payload) {
   if (codex && codex.length) {
     parts.push(`codex ${codex.filter((a) => !capped(a.usage)).length} free`);
   }
+
+  // Last, because it is about the next session rather than this one. Silent
+  // when nothing arms the switch: a line that says "off" on every machine that
+  // never wanted it is noise.
+  const scope = autoScope();
+  if (scope) parts.push(`auto ${scope}`);
 
   return parts.join(SEP);
 }
