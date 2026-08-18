@@ -123,6 +123,16 @@ impl Workspace for DesktopWorkspace {
         Ok(())
     }
 
+    fn ask_settled(
+        &self,
+        mut request: Value,
+    ) -> Result<tokio::sync::oneshot::Receiver<Value>, String> {
+        if request.get("requestId").and_then(|v| v.as_str()).is_none() {
+            request["requestId"] = json!(format!("{:032x}", rand::random::<u128>()));
+        }
+        self.ask_for_answer(request)
+    }
+
     fn announce(&self, change: Change) {
         let _ = self.app.emit(
             match change {

@@ -30,369 +30,298 @@ checking that the four agreed, and every divergence found in the audit was a
 capability that existed on one side only.
 
 `Command::decode` routes on each domain's own method list, not on the wire
-prefix. `project.` means two things: `project.inspect` asks about a folder that
-is not a project yet and belongs to files, `project.list` reads rows. A test
-asserts no two domains claim the same name, because a duplicate would decode
-into the wrong domain with the wrong capability and the wrong envelope rather
-than failing.
+prefix, so `project.inspect` (files, a folder that is not a project yet) and
+`project.list` (records) coexist. A test asserts no two domains claim one name:
+a duplicate decodes into the wrong domain with the wrong envelope rather than
+failing.
 
-**The rows are on it too, and nothing in the webview writes SQL.** Projects,
-threads, todos and settings go through `commands::records`; `db.ts` holds no
-statements. The eight it used to hold were the desktop's half of a schema the
-server read with fifteen hand-written arms, and the two had drifted: a whole-row
-`REPLACE` built from a stale snapshot could put `running` back on a thread whose
-process had ended, and only one side folded an unknown todo state back to
-`open`. A row rule belongs in `boite_core::store` or `command::records`, where
-both hosts get it.
+## A thread's look is derived, never stored
 
-Inside the Tauri backend, the facades import `invoke` from
-`backend/tauri/ipc.ts` rather than from `@tauri-apps/api/core`. That door writes
-a `warn` when a command refuses and re-throws untouched. Importing the real one
-means a refusal that reaches a `catch` somewhere and is never written down.
+The model tint, the icon and the fastpick combo are computed at render from
+`cmd` and `args` (`fastpick/threadAccent.ts`, `parseCombo`). Stored on the row
+they would apply to new threads only, and would miss a thread that renamed
+itself. `withoutBarColor` drops the `/color` argument old rows still carry as the
+argv goes past, rather than rewriting the row: a thread's command line is the
+user's to read and edit.
 
-## A process can rewrite its own thread
+A process can rename itself. `ESC ] 1337 ; boite ; launch = {json} BEL` on its
+own stdout replaces the thread's command, arguments and icon, and that is what a
+reload replays. `thread/promote.ts` checks every field rather than spreading it,
+because a terminal's output is whatever the process printed, including a file
+somebody else wrote. Boite advertises `TERM_PROGRAM=boite` so a tool can stay
+silent in every other terminal.
 
-A launcher is not the thing it launched, so one can say what it became:
-`ESC ] 1337 ; boite ; launch = {json} BEL` on its own stdout replaces the thread's
-command, arguments and icon, and that is what a reload replays.
-`thread/promote.ts` parses it, and everything there is checked rather than
-spread onto the thread. A terminal's output is whatever the process printed,
-including a file someone else wrote. Boite advertises itself as `TERM_PROGRAM=boite`
-so a tool can stay silent in every other terminal.
+## A launcher is not the agent it launched
 
-## What a thread looks like is derived, never stored
+`thread/resume-args.ts` splits argv at the first `--`: fastpick reads what is in
+front, the agent gets everything behind, and every resume flag, MCP flag and
+opening prompt is written behind it. Appending to one flat list holds only until
+an agent flag collides with a name fastpick claims, and codex's
+`-c mcp_servers.boite.command=...` is that collision. `parseCombo` stops at the
+same separator, so a flag behind it can never rename the combo the sidebar reads.
 
-A fastpick thread keeps the agent's icon, so the tint saying which model is
-behind it is computed at render from the command, in `fastpick/threadAccent.ts`.
-Writing it onto the row would make the setting apply to new threads only, and
-would miss a thread a process promoted itself. The same holds for the combo:
-`parseCombo` reads it back out of `cmd` and `args` rather than storing it beside
-them, which is why a hand-typed `fastpick --harness ...` is described like one the
-menu launched.
+Codex reads `--model` on its root only and resumes through the subcommand
+`codex resume <id>`, so a resume has to name the model again there.
 
-Nothing is decided at launch any more. The colour inside Claude Code used to be:
-a `/color <name>` passed as the opening prompt through fastpick's passthrough,
-which could not be taken back from a process already running. It also ran a
-slash command and printed an answer at the top of every single launch, for a
-strip of colour the sidebar was already showing, so it is gone. Rows created
-before that still carry it, and `withoutBarColor` drops it as the argv goes past
-rather than rewriting the row: a thread's command line is the user's to read and
-edit, and quietly editing it is the more surprising of the two.
-
-## A launcher is not the agent, at relaunch either
-
-A fastpick thread has two argument regions with two owners, split at the first
-`--`, and `thread/resume-args.ts` is where that split is respected: fastpick
-reads what is in front, the agent gets what is behind, and every resume flag,
-MCP flag and opening prompt is written behind it. Appending to one flat list
-worked by luck. It survived for as long as no flag's name collided with one
-fastpick claims for itself, and `-c mcp_servers.boite.command=...` for codex is
-exactly that collision: it read as fastpick's own `--config`, and the launch died
-on a file that does not exist. `parseCombo` stops at the same separator, so an
-agent flag behind it can never rename the combo the sidebar reads.
-
-Codex reads `--model` on its root only, and its resume is the subcommand `codex
-resume <id>`, so the model fastpick puts on the root does not reach a resumed
-session. The combo already says which model the thread is, so a fastpick codex
-resume names it again on the subcommand.
-
-**The agent whose session a thread holds is not always the process the PTY
-spawned.** fastpick resolves a harness and then runs it, so claude's pid is a
-child of the pid the PTY reports, and a wrap shell adds another level. Session
-capture used to compare the two as equals: a fastpick thread's own live session
-read as a stranger's, was skipped by the liveness filter on every scan, and the
-relaunch it was for had no id to replay. Every fastpick row in the database had
-an empty `session_id`, which is all that failure ever looked like from outside.
-`session::ProcessTree` walks the parent chain instead, bounded at sixteen hops
-because a pid map read while processes come and go can name a cycle.
+Session capture walks the parent chain (`session::ProcessTree`, bounded at
+sixteen hops, a pid map read while processes come and go can name a cycle).
+fastpick resolves a harness and then runs it, so claude's pid is a child of the
+one the PTY reports; comparing the two as equals left every fastpick row with an
+empty `session_id`.
 
 ## Status is measured, never latched
 
-Every pass of `thread/statusEngine.ts` decides running-or-ready from scratch, and
-the ticker belongs to the window rather than to a pane: it starts once in
-`+page.svelte`. Both of those are load-bearing. When a working signal set a
-timestamp and the thread stayed lit until it expired, "finished" was only ever
-the absence of evidence, and when the loop was refcounted off mounted
-`Terminal` components, closing the last local pane stopped the only thing that
+Every pass of `thread/statusEngine.ts` decides running-or-ready from scratch,
+and the ticker belongs to the window rather than to a pane: it starts once in
+`+page.svelte`. Both are load-bearing. Latch a working signal to a timestamp and
+"finished" only ever means the absence of evidence; refcount the loop off mounted
+`Terminal` components and closing the last local pane stops the only thing that
 could notice.
 
-Two sources answer, in this order. Three agents say what they are doing, each in
-a different place, and `boite-core/src/session.rs` reduces all three to one shape
-that `declaredTurn` (`thread/agent-registry.ts`) then reads:
+**First source: what the agent declares.** Three of the ten do, each somewhere
+else, and `boite-core/src/session.rs` reduces the three to the shape
+`declaredTurn` reads.
 
-- claude writes `~/.claude/sessions/<pid>.json` per open session and rewrites
-  `status` as each of its four states begins and ends: `busy`, `waiting`, `shell`,
-  `idle`.
-- codex leaves no live file at all. Its status model exists but is pushed over
-  JSON-RPC to whoever spawned the process, so a terminal a human started exposes
-  nothing. What is on disk is `~/.codex/state_*.sqlite` (thread id, cwd, rollout
-  path) plus the rollout itself, which brackets every turn with `task_started` and
-  closes it with `task_complete` or `turn_aborted`.
+- claude rewrites `status` in `~/.claude/sessions/<pid>.json`: `busy`, `waiting`,
+  `shell`, `idle`.
+- codex pushes its status over JSON-RPC to whoever spawned it, so a terminal a
+  human started exposes none of it. Its rollout is read instead, every turn
+  opening on `task_started` and closing on `task_complete` or `turn_aborted`,
+  with `~/.codex/state_*.sqlite` naming the file.
 - opencode serves `GET /session/status`, but a plain TUI runs its server in a
-  worker thread and binds no port, so that route is unreachable in the normal
-  case. Its database answers instead: an assistant message gains `time.completed`
-  when its turn ends and does not carry the field before that.
+  worker thread and binds no port. Its database answers: an assistant message
+  gains `time.completed` when its turn ends.
 
-An answer only counts while whatever wrote it is still there. Claude's registry
-is filtered by `pid_alive`; the other two have nothing equivalent, so their open
-turns are bounded by age instead. A rollout whose last marker is `task_started`
-and an opencode row that never gained `time.completed` both stop counting once
-they have gone untouched for half an hour, which is generous because a single
-long tool call appends nothing while it runs. Killed, crashed or rebooted
-mid-turn, either would otherwise read `busy` on every poll for good, with no pid
-to check and no row that ever ages out. A claude entry carrying no `status` key
-produces no answer either, rather than a default: absence is not a state, and
-this is the status source of truth now, so a default of `busy` would pin every
+An answer counts only while whatever wrote it is still there. Claude's entries
+are filtered by `pid_alive`, the other two age out after half an hour, generous
+because one long tool call appends nothing while it runs. Killed mid-turn, either
+would otherwise read `busy` for good. **No `status` key produces no answer, never
+a default**: absence is not a state, and a default of `busy` would pin every
 claude thread Running with nothing able to clear it.
 
-Everything else is read off the emulator's bottom rows (`terminalScreenRows`),
-which is level: the footer is on screen or it is not, so `false` means finished
-rather than "nothing seen lately". Detection never touches the byte stream. A
-rolling window of printed bytes answers a question about the recent past, and an
-`esc to interrupt` that had scrolled by kept re-matching itself for as long as the
-agent printed anything at all.
+**Second source: the emulator's bottom rows** (`terminalScreenRows`), for
+everyone else. Level by construction, the footer being on screen or not. Never
+the byte stream, where an `esc to interrupt` that scrolled past keeps re-matching
+for as long as the agent prints anything.
 
-What that reads is the shape of the row, never the glyph leading it. Claude
-rotates its spinner through `· ✢ ✳ ∗ ✻ ✽ ✶ *`, an ASCII asterisk and a middle dot
-among the dingbats, and it leads the line it prints when a turn ENDS with one of
-the same glyphs (`✻ Crunched for 19s`) and leaves it there until the next turn. A
-list of frames therefore matches some and misses others, which is a dot flickering
-twice a second, and a leading glyph on its own reads a finished turn as a running
-one. Every live frame carries the gerund's ellipsis and an elapsed count; the
-finished line carries the count alone. Braille and circle frames are the exception
-and stand on their own, because nothing leaves one of those on screen.
+- Match the shape of the row, never the glyph leading it. Claude's spinner
+  rotates through `· ✢ ✳ ∗ ✻ ✽ ✶ *`, and one of those also leads the line printed
+  when a turn **ends** (`✻ Crunched for 19s`), left there until the next one. A
+  live frame carries the gerund's suspension points and an elapsed count, the
+  finished line carries the count alone. Braille and circle frames stand on their
+  own, nothing leaves one of those on screen.
+- How far up to read is decided by the screen: the bottom run with no blank row
+  in it. A fixed count was calibrated on a bare claude, and a statusline plus a
+  banner push the spinner out of it.
 
-How far up the rows are read is decided by the screen, not by a number: the block
-is the bottom run with no blank row in it. A fixed count was calibrated on a bare
-claude, and a statusline plus a banner pushed the spinner eight rows up, out of a
-five-row window, so a working agent read as finished.
+**With no answer from either, a clock decides, and only there.** A thread whose
+pane is gone has no emulator, and seven agents declare nothing. It keeps its
+status until every activity stamp ages out, then drops to `ready`
+(`UNREAD_TTL_MS`, 2s, mirroring the server's `WORKING_TTL`), silently, being an
+absence of evidence rather than a turn that ended. Without it a thread frozen on
+`running` is frozen out of auto-sleep too, which only considers `ready` ones, so
+its PTY is never reclaimed.
 
-When neither source answers there is nothing to measure, and that is the one
-place a clock still decides anything. A thread whose pane is gone has no emulator
-holding its rows (a `Terminal` unmounts with the PTY alive whenever the thread
-leaves a group, loses its `rect` or `group`, or flips its respawn key), and seven
-of the agents declare nothing, so the pair answers nothing at all. It keeps its
-status until every activity stamp has aged out and then drops to `ready`
-(`UNREAD_TTL_MS`, two seconds, mirroring the server's `WORKING_TTL` and the
-`DeclaredTurn::Unknown` arm of its `next_status`). That is not the old grace
-period on a working signal, it is what stops "no answer" from meaning "keep the
-last answer forever": a thread frozen on `running` is also frozen out of
-auto-sleep, which only ever considers a `ready` one, so its PTY is never
-reclaimed either. Nothing is announced on that demotion, since it is the absence
-of evidence rather than a turn that ended.
+Only `idle` is a finished turn, and the other three stay apart. That is why a
+pass returns a status and an `active` flag separately: the dot and auto-sleep ask
+different questions.
 
-Only `idle` is a finished turn, and keeping the other three apart is the point.
-`waiting` means a dialog is up (a permission prompt, a plan to approve) and
-nothing moves until the user answers, so it gets its own `ThreadStatus` rather
-than reading as `ready`: it is worth a notification of its own and it must never
-be a candidate for auto-sleep. `shell` means the agent takes input again while
-something it launched still runs, so the dot says `ready` and the activity stamp
-still refuses to sleep it. That is why a pass returns a status and an `active`
-flag separately: the dot and auto-sleep are asking different questions. Only
-claude ever declares those two; codex and opencode answer `busy` or `idle` and
-nothing else, so their approval prompts still read as `ready`.
-
-A notification is a transition, never a reading. The first pass after a mount, a
-workspace switch or a `forget` has no previous status to compare against and so
-says nothing: a dialog that was already up when the pane opened is not a dialog
-that just went up, and announcing it pinged for every parked thread on every app
-start.
-
-A subagent is only ever visible this way. Claude runs one inside its own process,
-so it gets no session entry and the parent simply stays `busy`; codex holds the
-turn open across `sub_agent_activity`; opencode gives the child its own session
-row while the parent's assistant message stays incomplete. From outside, all three
-look like a terminal which has printed nothing for ten minutes, which is what used
-to get the thread scored as finished and its PTY killed by auto-sleep. This is
-also why the reading falls back to matching by directory while a thread's session
-id is still uncaptured: those seconds are part of the opening turn, the one most
-likely to spend a long time in a subagent. That fallback needs exactly one live
-session of that agent in the directory, and answers nothing otherwise. It also
-needs the session to have recorded a directory of its own: normalising strips a
-trailing slash, so a thread at the root of a drive would otherwise match every
-session that recorded nothing.
-
-## One pool of conversations per project
-
-Claude and pi file a transcript under the directory the CLI ran in, and every
-agent thread runs in a worktree of its own. So `/resume` typed inside a thread
-listed that thread's conversations and nothing else: the thread beside it, the
-user's own checkout and yesterday's closed thread are three other directories
-and therefore three other stores. `session/shared.rs` makes a worktree's store a
-link onto the project's instead, created when the worktree is handed out
-(`worktree.open`) and removed with it (`worktree.remove`, before git touches the
-directory, for the same reason the shared artifacts are unlinked there: on
-Windows a delete that meets a junction walks into it).
-
-The boot pass is what reaches the worktrees that already existed: `repair`
-asks `worktree.migrate` about every thread that has one, and a directory
-already where it belongs answers itself, so the same arm folds that worktree's
-own store into the pool. Nothing is overwritten on the way in, and a store
-holding a session id the pool already has keeps both and stays its own.
-
-Two consequences, both load-bearing. **Every scan of those stores skips the
-links** (`find_claude_session_blocking`, `collect_usage_blocking`): a transcript
-reached through two names is one transcript, and a project with ten open threads
-would otherwise open every file eleven times per pass. And **binding asks the
-registry before it asks about directories** (`named_by_registry`). A conversation
-in the pool sits in the project's folder rather than any thread's, and its head
-names the worktree it was started in, which is not the worktree asking once a
-thread has been restored. Both placement tests answer no for it, so a pid's
-answer that used to survive them was being dropped before `choose_claude_hit`
-could see it.
-
-## Closing a thread is not a deletion
-
-The X on a sidebar row used to kill the process, drop the row and delete the
-checkout in one go, so a misclick was final: the undo brought the row back, the
-directory it named was gone, and every launch from then on answered `spawn
-failed: this directory is not there`. The confirm dialog is not an answer to
-that, since it is off by default and a dialog answered by reflex is the
-misclick.
-
-So the parts that cannot be taken back wait (`worktree-grace.ts`): the process
-still dies at once and the row still leaves the sidebar, while the checkpoint
-refs and the worktree are given back ten minutes later, and restoring the thread
-inside that window cancels it. What is kept is empty by definition, because a
-worktree holding work refuses to be removed at the end of the wait exactly as it
-did at the start.
-
-Past the window the directory is gone and the row still names it, so a restore
-adopts the checkout when it is still there and opens a fresh one when it is not,
-carrying the transcript into it (`withWorktree`). Coming back with no worktree at
-all would put an agent to work in the user's own checkout without saying so. The
-app closing during the window is the one case nothing cleans up: the directory
-is left behind, and the project's Worktrees tab gives back every checkout no
-thread is standing in.
-
-## What a launch opens on
-
-A restart is not evidence of anything, so a row that was never run draws nothing:
-no colour, no badge, its logo and its name (`cold` in `threadVisual.ts`). Only a
-thread that was on when the app went away comes back asleep. The two used to be
-one state, because a status is a statement about a process and nothing survived
-the process, so every row read `idle` and the sidebar opened on a column of `z`
-badges — twenty of them on threads nobody had ever started, which is a badge that
-says nothing by saying it about everything.
-
-What survives is one mark. `thread.started` writes `running` on the row when a
-PTY comes up, and that is the only status the window persists: `running`,
-`ready` and `waiting` come and go several times a turn, and `thread.create`
-keeps the persisted status by design, so the whole-row saves this used to make
-were writing nothing. `display_status` reads that mark back as `stopped`, and
-`Store::settle_last_run` — once per host, before anything reads the table — turns
-it into a real `stopped` and turns the previous run's `stopped` back into `idle`.
-That second write is the half that is easy to drop and is the point: without it a
-thread launched once a month ago is still reported asleep today, and the column
-of sleeping rows grows back one restart at a time.
-
-The server persists the same one word for the same reason (`make_event_emitter`),
-and deliberately does **not** persist `stopped`: an auto-sleep is that run's own
-bookkeeping, and writing it would have the next boot decay the mark one restart
-early — a thread that was working last night, drawn this morning as one that has
-never run.
+- `waiting`, a dialog up and nothing moving until the user answers, is its own
+  `ThreadStatus`: worth a notification, never a candidate for auto-sleep.
+- `shell`, the agent taking input again while something it launched runs, draws
+  `ready` while its activity stamp still refuses sleep.
+- Only claude declares those two, so codex and opencode approval prompts read as
+  `ready`.
+- A notification is a transition, never a reading. The first pass after a mount,
+  a workspace switch or a `forget` says nothing: a dialog already up is not a
+  dialog that just went up.
+- **A subagent is only ever visible through this source.** From outside, claude
+  staying `busy`, codex holding the turn open across `sub_agent_activity` and
+  opencode's incomplete parent message all look like a terminal that has printed
+  nothing for ten minutes, which is what used to get the PTY reclaimed.
 
 ## Which conversation a thread is bound to
 
 A thread with no `sessionId` relaunches into a blank agent, so binding one is not
-cosmetic. The rule is asked in `find_claude_session_blocking`: the caller passes
-its pty id, the host turns it into the pid of the process behind it, and a
-registry entry naming that pid is the answer outright. Nothing else outranks it,
-neither a newer transcript nor an id another thread already claimed, and the hit
-says so with `ownPid` so the window knows it was told rather than having guessed.
+cosmetic. `find_claude_session_blocking` asks one question first: the caller
+passes its pty id, the host turns it into the pid behind it, and a registry entry
+naming that pid is the answer outright, flagged `ownPid` so the window knows it
+was told rather than having guessed. Nothing outranks it, neither a newer
+transcript nor an id another thread already claimed.
 
-Everything else is the guess, and it stays for the nine agents that keep no such
-registry: the newest unclaimed transcript in the directory, accepted only when
-its mtime lines up with this pty's own activity and with no sibling's
-(`attributedToSelf`). What that cannot settle is two agents of one kind busy in
-one folder — each is "recently active" whenever the other writes — and it settled
-it by binding neither, silently, for as long as both ran. Threads sharing a
-project folder rather than a worktree are the common case, and a `debug` line is
-compiled out of the builds where this happened, which is why the refusal now says
-so at `warn` once it has stopped looking early.
+The nine agents that keep no such registry get the guess: the newest unclaimed
+transcript in the directory, accepted only when its mtime lines up with this
+pty's own activity and with no sibling's (`attributedToSelf`). Two agents of one
+kind busy in one folder cannot be settled that way, each reading as recently
+active whenever the other writes, and threads sharing a project folder rather
+than a worktree are the common case. That refusal says so at `warn`, the `debug`
+line it used to write being compiled out of exactly those builds.
 
-An attach starts the monitor too. A thread parked before its first scan landed
-had no second chance at binding, and the pane coming back is exactly when it
-should get one.
+That read is one directory walk, two SQLite opens and up to a 256 KiB file, so
+every caller puts it on a blocking thread and abandons it past
+`POLL_DEADLINE_MS`: a call that never settles latches the poll shut and freezes
+every thread on its last declared state. `agentTurns` is asked only about open
+threads, at most once a second. An attach restarts the monitor, a thread parked
+before its first scan landed otherwise never getting a second chance.
 
-Reading these stores is not free, so `agentTurns` is asked only about the threads
-that are actually open, and at most once a second. That read is one directory
-walk, two SQLite opens and up to a 256 KiB file read, which is why every caller
-puts it on a blocking thread (`spawn_blocking` in `commands.rs`, `rpc.rs` and the
-server's status ticker) and why a read that has not answered inside
-`POLL_DEADLINE_MS` is abandoned rather than waited on: a call that never settles
-used to latch the poll shut and freeze every agent thread on its last declared
-state.
-
-The server runs the same decision over the same stores
-(`boite-core::session::agent_turns` and `declared_turn`, called from
-`registry.rs`), reading each thread's icon key and session id back out of its own
-thread table. It has no emulator, so with no answer it falls back to the OSC
-title and a 2s TTL. Both sides read the same files, so their rules are mirrored
-deliberately and tested in both languages (`agent-registry.test.ts`,
+The server runs the same decision over the same files (`session::agent_turns`,
+`declared_turn`, from `registry.rs`), with the OSC title and a 2s TTL where the
+emulator would be. Both sides are tested (`agent-registry.test.ts`,
 `session.rs::turn_tests`).
 
-The seven remaining agents (cursor, antigravity, copilot, grok, hermes, pi,
-muse) declare nothing that can be polled from outside, and get the screen rows
-alone. Pi still has a session to find — one JSONL file per conversation under an
-encoded cwd, the same shape as claude's store without the live registry — while
-muse has no build for this platform, so nothing reads its store at all and its
-row exists to be launched and resumed by hand.
+## One pool of conversations per project
 
-## Checking your work in the running app
+Claude, grok and pi file a transcript under the directory the CLI ran in, and every
+agent thread runs in a worktree of its own, so `/resume` inside a thread listed
+that thread's conversations and nothing else. `session/shared.rs` makes a
+worktree's store a link onto the project's, created when the worktree is handed
+out (`worktree.open`) and removed before git touches the directory
+(`worktree.remove`): on Windows a delete that meets a junction walks into it.
+`repair` folds in the worktrees that predate this, keeping both stores when a
+session id collides rather than overwriting.
 
-A screenshot and a DOM read tell you almost nothing here: **the terminals render
-to a WebGL canvas**, so everything an agent Boite runs prints is absent from the
-DOM, and a toast has dismissed itself before you look. Reach for
-`window.__boite` instead — `read("Claude #1")` returns what that terminal is
-showing as text, `thread(...)` returns its project, folder, worktree and session
-id, `toasts()` returns what was raised even after it vanished. Dev builds only;
-[`docs/development.md`](docs/development.md) has the full list.
+- **Every scan of those stores skips the links** (`find_claude_session_blocking`,
+  `collect_usage_blocking`). A transcript reached through two names is one
+  transcript, and a project with ten open threads would open every file eleven
+  times per pass.
+- **Binding asks the registry before it asks about directories**
+  (`named_by_registry`). A pooled conversation sits in the project's folder
+  rather than any thread's, and its head names the worktree it started in, so
+  both placement tests answer no for it and would drop a pid's answer before
+  `choose_claude_hit` sees it.
 
-A terminal only exists once its pane has been opened. A thread nobody clicked
-has no buffer to read, which is a different answer from an empty one.
+## Closing a thread is not a deletion
 
-From outside the window, ask the workspace instead of asking a human. One
+The process dies at once and the row leaves the sidebar, but the parts that
+cannot be taken back wait: the checkpoint refs and the worktree are given back
+ten minutes later (`worktree-grace.ts`), and restoring the thread inside that
+window cancels it. What is given back is empty by definition, a worktree holding
+work refusing removal at the end of the wait exactly as it does at the start. The
+confirm dialog is not an answer to this, being off by default and answered by
+reflex when it is on.
+
+Past the window a restore adopts the checkout when it is still there and opens a
+fresh one carrying the transcript when it is not (`withWorktree`): coming back
+with no worktree at all would put an agent to work in the user's own checkout
+without saying so. Quitting mid-window is the one case nothing cleans up, and the
+project's Worktrees tab gives back every checkout no thread is standing in.
+
+## What a launch opens on
+
+A restart is evidence of nothing, so a row that was never run draws nothing: no
+colour, no badge, its logo and its name (`cold` in `threadVisual.ts`). Only a
+thread that was on when the app went away comes back asleep. Collapse the two and
+the sidebar opens on a column of `z` badges on threads nobody ever started.
+
+One mark survives. `thread.started` writes `running` when a PTY comes up, the
+only status the window persists (`ready` and `waiting` come and go several times
+a turn), and `thread.create` keeps the persisted one by design.
+`Store::settle_last_run`, once per host before anything reads the table, turns
+that mark into a real `stopped` **and turns the previous run's `stopped` back
+into `idle`**. That second write is the half that is easy to drop and is the
+point: without it a thread launched a month ago is still reported asleep today.
+The server persists the same word and deliberately not `stopped`
+(`make_event_emitter`): an auto-sleep is that run's own bookkeeping, and writing
+it would decay the mark one restart early.
+
+## An MCP action never takes the screen
+
+A tool call arrives while somebody is typing in a terminal that is not the
+caller's, so nothing an agent asks for moves the view. `pane_open` puts the pane
+beside the **caller's own** thread, in that thread's group, and the selected
+project, the thread on screen and the keyboard focus stay exactly where the user
+left them (`openPane`'s anchor, `openBeside(..., focus: false)`). A toast says
+what was opened in a group nobody is looking at, the same way a spawn does.
+
+Which means an agent's pane is usually in a hidden group, and hidden is
+`visibility: hidden`, not unmounted: every group is mounted at once, so the frame
+loads and the driver answers the whole time.
+
+- **No browser tool is scoped to the project on screen.** One was, and every call
+  answered "the window is showing another project right now" to an agent working
+  while the user read something else, including about the pane it had just
+  opened. The `drivenBy` mark is the only rule (`which_pane`), and naming no
+  `paneId` means the caller's own pane.
+- **`browser_screenshot` is the exception.** A hidden pane is laid out at the
+  same coordinates as the pane covering it, so it refuses rather than
+  photographing somebody else's (`Pane::shown()`, absent from an older build's
+  description and read as visible). `browser_snapshot` reads the page wherever
+  it is.
+
+## Hit every surface
+
+The most common defect here is a change that works on the path it was tested on
+and is missing everywhere else. Before calling something done, walk this list and
+say which entries applied.
+
+- **Both hosts.** A capability put on `boite_core::command` reaches the desktop
+  and the server at once, which is the whole point of the bus. Anything above it
+  does not: a rule written in the webview has no effect on a phone talking to a
+  `boite-server`, and one written in `registry.rs` never runs in the window.
+- **Both status readers.** `agent-registry.ts` and `session.rs` decide the same
+  thing over the same files on purpose, and are tested in both languages. A
+  change to one is a change to two.
+- **Every provider.** Ten adapters, and they answer differently by nature: three
+  declare a turn, one keeps a live registry, one has no build for this platform.
+  A provider-shaped feature needs a decision per adapter, even if the decision is
+  "not supported here".
+- **Both languages.** `bun run check` catches a missing French key, not an
+  English one written straight into a component.
+- **The phone.** The mobile layout swaps the sidebar and the docked column for a
+  bottom bar, has no command palette and no local filesystem, and always talks
+  over the WebSocket. A feature reachable only from a right-click or a keybinding
+  does not exist there.
+- **Reverse states.** A way in needs the way out and the way to see it: closing
+  needs restoring, sleeping needs waking, opening a pane needs closing it. A
+  one-way door is a bug.
+- **The MCP endpoint.** An agent asks for the same things the user clicks. A new
+  capability the user has is usually one an agent should have, and always one it
+  must not be able to take the screen with.
+
+## Checking your own work
+
+**The terminals render to a WebGL canvas**, so a screenshot and a DOM read show
+none of what an agent printed, and a toast has dismissed itself before you look.
+Inside the window, reach for `window.__boite` (dev builds only, full list in
+[docs/development.md](docs/development.md)): `read("Claude #1")` returns what a
+terminal is showing as text, `thread(...)` its project, folder, worktree and
+session id, `toasts()` what was raised even after it vanished. A terminal exists
+only once its pane has been opened, and "no buffer" is a different answer from an
+empty one.
+
+From outside the window, ask the workspace rather than a human. One
 `workspace_snapshot` carries every project and thread, the terminals the process
-really has a child for, and `screen`: each pane with its kind, its title and its
-measured size, which one has focus, and what is covering the layout. A pane
-listed at zero pixels is open and not visible, and nothing else reports that.
-`screen.at` is a heartbeat, so one far behind `takenAtMs` means the window
-stopped answering. `workspace_search` and `workspace_timeline` answer where and
-when across the todo list, the log of what agents did and what the terminals
-printed, and `terminal_transcript` reads any thread's output back from the end,
-including a thread that has already stopped.
+really has a child for, and `screen`: each pane's kind, title and measured size,
+which one has focus, what covers the layout. A pane listed at zero pixels is open
+and not visible, and nothing else reports that; `screen.at` far behind
+`takenAtMs` means the window stopped answering. `workspace_search` and
+`workspace_timeline` answer where and when, `terminal_transcript` reads any
+thread's output back from the end, stopped threads included.
 
-## Measuring, before claiming
+## Measure before claiming
 
-An optimisation with no measurement attached does not stay. There are three
-ways to get one, and each already found something the comments had wrong.
+An optimisation with no measurement attached does not stay.
 
 - `bun run budget` separates what the window downloads before it can paint from
   what is merely shipped, against ceilings in `scripts/bundle-budget.json`. CI
-  runs it. Moving a ceiling is allowed and is the point: it happens in the same
-  commit as the growth, with the reason in the message.
-- `cargo bench -p boite-core` covers the paths whose cost is asserted in a doc
-  comment. Not in CI, because a benchmark on a shared runner measures the runner.
-  The first numbers are recorded in `benches/hot_paths.rs`.
-- `src/lib/app/boot-timing.ts` writes one line per boot, at `warn` past two
-  seconds so a slow one reaches the timeline beside whatever else was happening.
-- `src/lib/features/thread/spawn-timing.ts` does the same for one thread lighting
-  up: one line per launch, phased into `worktree`, `resume`, `pty` and `output`,
-  at `warn` past three seconds. Written on the first byte the process prints
-  rather than when the PTY comes back, because a PTY that opened in 40ms and
-  showed nothing for eight seconds is the case being looked for. Two watchdogs
-  cover the launches that would otherwise write nothing at all: one says a
-  launch is still opening after fifteen seconds and names the phase it is stuck
-  in, the other writes the line without a first byte after ten. A thread that is
-  worked in for two minutes with no session captured gets one line too, from
-  `session-monitor.svelte.ts`, since a silent capture failure is a thread with
-  no `--resume` behind it.
+  runs it. Moving a ceiling is allowed and is the point: same commit as the
+  growth, with the reason in the message.
+- `cargo bench -p boite-core` covers the paths whose cost a doc comment asserts.
+  Not in CI, where a benchmark measures the runner. First numbers in
+  `benches/hot_paths.rs`.
+- `app/boot-timing.ts` and `thread/spawn-timing.ts` write one line per boot and
+  per launch, at `warn` past two and three seconds, so a slow one lands on the
+  timeline beside whatever else was happening. A launch is phased into
+  `worktree`, `resume`, `pty` and `output`, and its line is written on the first
+  byte the process prints rather than when the PTY comes back: a PTY that opened
+  in 40ms and showed nothing for eight seconds is the case being looked for. Two
+  watchdogs cover the launches that would write nothing at all, and
+  `session-monitor.svelte.ts` writes one for a thread worked in for two minutes
+  with no session captured.
 
-A timer may slow down while `document.hidden`; a status timer may not stop.
-Nobody is reading a dot they cannot see, but the threads a status sweep demotes
-are exactly the ones nobody is looking at, and a notification is a transition it
-has to be awake to notice.
+A timer may slow down while `document.hidden`. A status timer may not stop: the
+threads a sweep demotes are exactly the ones nobody is looking at, and a
+notification is a transition it has to be awake to notice.
 
 ## Before pushing
 

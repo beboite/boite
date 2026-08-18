@@ -30,8 +30,11 @@ import { createProject } from "$lib/features/project/api";
 import { moveThreadToProject } from "$lib/features/thread/move";
 import { takesOpeningPrompt } from "$lib/features/thread/session";
 import { launchAgent } from "$lib/features/thread/api";
-import { anchorPaneId, anchorProjectId, openPane } from "$lib/features/panes/open";
+import { editorStore } from "$lib/features/editor/store.svelte";
+import { anchorProjectId, openPane } from "$lib/features/panes/open";
 import { leafNodesOf, paneStore } from "$lib/features/panes/store.svelte";
+import { paneIsShown } from "$lib/features/panes/visible";
+import { paneLabel } from "$lib/features/panes/label";
 import { classifyBrowserUrl, isLoopbackHost } from "$lib/features/browser/url";
 import { browserPanes } from "$lib/features/browser/state.svelte";
 import { paneDriver } from "$lib/features/browser/driver";
@@ -64,6 +67,7 @@ interface CreateRequest {
 interface SpawnRequest {
   kind: "thread.spawn";
   projectId: string;
+  requestId?: string;
   /** The thread that asked, when Boite launched it. */
   callerThreadId?: string | null;
   agent?: string | null;
@@ -73,11 +77,13 @@ interface SpawnRequest {
 interface PaneOpenRequest {
   kind: "pane.open";
   projectId: string;
+  requestId?: string;
   /** The thread that asked, so the pane lands beside it rather than beside
       whatever the user happens to be looking at. */
   callerThreadId?: string | null;
   pane: PaneContent["kind"];
   url?: string | null;
+  path?: string | null;
   /** The endpoint's reading of the address: off this machine, so ask first. */
   external?: boolean | null;
   side?: DropSide | null;
@@ -274,10 +280,22 @@ async function handleCreate(req: CreateRequest) {
   }
 }
 
+async function answerRequest(req: { requestId?: string }, payload: Record<string, unknown>) {
+  const id = req.requestId;
+  if (!id) return;
+  const fn =
+    backend().answerAgentRequest ?? workspace.remoteBackend?.answerAgentRequest;
+  if (!fn) return;
+  await fn(id, payload).catch((err) => {
+    logger.warn("agent-request", "could not answer", String(err));
+  });
+}
+
 async function handleSpawn(req: SpawnRequest) {
   const project = app.projects.find((p) => p.id === req.projectId);
   if (!project) {
     notifications.error(t("thread.spawnProjectGone"));
+    await answerRequest(req, { error: "that project is gone" });
     return;
   }
   // The caller, not the thread on screen: an agent that says nothing about
@@ -287,6 +305,7 @@ async function handleSpawn(req: SpawnRequest) {
   const launch = resolveLaunch(req.agent, caller?.iconKey ?? "claude");
   if (!launch) {
     notifications.error(t("thread.spawnNoAgent", { agent: req.agent ?? "" }));
+    await answerRequest(req, { error: "no agent matches that name" });
     return;
   }
   const prompt = req.prompt?.trim();
@@ -294,7 +313,11 @@ async function handleSpawn(req: SpawnRequest) {
   // often in another project, and a spawn they never clicked used to take the
   // screen away mid-sentence. The toast is what says it happened.
   const thread = await launchAgent(project, launch, { focus: false });
-  if (!thread) return;
+  if (!thread) {
+    await answerRequest(req, { error: "the terminal did not open" });
+    return;
+  }
+  await answerRequest(req, { ok: true, threadId: thread.id });
   if (prompt) app.setPendingPrompt(thread.id, prompt);
   notifications.success(
     t("thread.spawnedIn", { label: launch.label, project: project.name }),
@@ -318,38 +341,60 @@ async function handleSpawn(req: SpawnRequest) {
  * or written a diff knows what is worth looking at, and printing a path and
  * hoping was the only way to say so.
  *
- * The caller's own pane is made the anchor first, so the pane appears next to
- * the conversation it belongs to rather than next to whichever terminal the
- * user last clicked.
+ * **It lands beside the caller and moves nothing else.** This used to make the
+ * caller active first — its thread, its project, the terminal view — so that
+ * the anchor below would resolve to it. That is a pane the user never clicked
+ * taking the screen away from what they were reading, and an agent working in
+ * the background did it every time it had something to show. The same
+ * reasoning as `handleSpawn`, and the same answer: put it where it belongs,
+ * leave the view alone, and say out loud that it happened.
  */
 async function handlePaneOpen(req: PaneOpenRequest, from: RequestSource) {
   const caller = req.callerThreadId;
-  if (caller && app.hasThread(caller)) {
-    const group = paneStore.groupOf(caller);
-    if (group) {
-      group.focusedPaneId = caller;
-      app.activeThreadId = caller;
-      app.selectedProjectId = req.projectId;
-    }
-  }
+  const anchor = caller && app.hasThread(caller) && paneStore.groupOf(caller) ? caller : null;
   // With no caller to anchor to, the pane lands wherever the user is looking,
   // and that is very often another project. An agent in A asking for a pane
   // and getting one in B is the app answering the wrong question in somebody
   // else's workspace, so it is dropped rather than placed.
-  if (anchorProjectId() !== req.projectId) {
+  if (!anchor && anchorProjectId() !== req.projectId) {
     logger.warn(
       "agent-request",
       "pane asked for a project that is not the one on screen, dropping it",
       { asked: req.projectId },
     );
+    await answerRequest(req, { error: "the window is showing another project" });
     return;
   }
   const content = await paneContentOf(req, from);
-  if (!content) return;
+  if (!content) {
+    await answerRequest(req, { error: "the pane was not opened" });
+    return;
+  }
   // Half the width for a browser, a third for a panel: a page needs room to be
   // a page, and a file tree does not.
   const ratio = req.pane === "browser" ? 0.5 : 0.35;
-  openPane(content, req.side ?? "right", ratio);
+  const paneId = openPane(content, req.side ?? "right", ratio, anchor);
+  if (req.pane === "editor" && req.path) {
+    void editorStore.open(req.path);
+  }
+  if (!paneId) {
+    await answerRequest(req, { error: "the pane was not opened" });
+    return;
+  }
+  await answerRequest(req, { ok: true });
+  // Said out loud when it landed off the screen, for the same reason a spawn
+  // is: the agent has been told its pane is open, and without this the user
+  // would find it the next time they happened to click that thread. Read off
+  // the caller's own terminal rather than the new pane, which the page has not
+  // drawn yet.
+  if (anchor && !paneIsShown(anchor)) {
+    notifications.info(
+      t("panes.openedOffScreen", {
+        agent: app.threadById(anchor)?.label ?? t("browser.drivenByAgent"),
+        pane: paneLabel(content),
+      }),
+    );
+  }
 }
 
 /**
@@ -396,20 +441,28 @@ async function paneContentOf(
 }
 
 /**
- * The browser panes of the group the page is drawing.
+ * Every browser pane in the window, whichever group holds it.
  *
- * The same set the window describes to the endpoint, read the same way: panes
- * in another group are not on screen, and a pane the user cannot see is not one
- * an agent should be moving.
+ * This used to read the group the page is drawing, which was the same rule as
+ * "the user has to be looking at it". An agent's pane sits beside that agent's
+ * own terminal and the user is very often reading another thread, or another
+ * project, by the time the next call lands — and since every group stays
+ * mounted, that pane is loaded, driven and answering the whole time. Refusing
+ * it left an agent that had just opened a page unable to read the page it had
+ * just opened.
+ *
+ * What decides whether a call is allowed is the mark on the pane, below, and
+ * never where the user happens to be. Panes that are not the caller's are in
+ * this list on purpose: an agent naming one gets told whose it is rather than
+ * told it does not exist.
  */
 function browserLeaves(): { paneId: string; url: string; drivenBy: string | null }[] {
-  const anchor = anchorPaneId();
-  const group = anchor ? paneStore.groupOf(anchor) : null;
-  if (!group) return [];
-  return leafNodesOf(group.root).flatMap((leaf) =>
-    leaf.content.kind === "browser"
-      ? [{ paneId: leaf.paneId, url: leaf.content.url, drivenBy: leaf.content.drivenBy ?? null }]
-      : [],
+  return paneStore.groups.flatMap((group) =>
+    leafNodesOf(group.root).flatMap((leaf) =>
+      leaf.content.kind === "browser"
+        ? [{ paneId: leaf.paneId, url: leaf.content.url, drivenBy: leaf.content.drivenBy ?? null }]
+        : [],
+    ),
   );
 }
 
@@ -421,12 +474,6 @@ function browserLeaves(): { paneId: string; url: string; drivenBy: string | null
  * mistakes on the screen of the person it is working for.
  */
 async function handleBrowserDrive(req: BrowserDriveRequest, from: RequestSource) {
-  if (anchorProjectId() !== req.projectId) {
-    logger.warn("agent-request", "browser call for a project that is not on screen, dropping it", {
-      asked: req.projectId,
-    });
-    return;
-  }
   const panes = browserLeaves();
   const caller = req.callerThreadId ?? "";
   const pane = req.paneId
@@ -506,10 +553,6 @@ async function handleBrowserAsk(req: BrowserAskRequest) {
     );
   };
 
-  if (anchorProjectId() !== req.projectId) {
-    answer({ error: "the window moved to another project while you were asking" });
-    return;
-  }
   const panes = browserLeaves();
   const caller = req.callerThreadId ?? "";
   const pane = req.paneId
@@ -518,7 +561,7 @@ async function handleBrowserAsk(req: BrowserAskRequest) {
       ? panes[0]
       : undefined;
   if (!pane) {
-    answer({ error: "that browser pane is not on the screen any more" });
+    answer({ error: "that browser pane is closed" });
     return;
   }
   if (!caller || pane.drivenBy !== caller) {
@@ -538,6 +581,20 @@ async function handleBrowserAsk(req: BrowserAskRequest) {
       answer({
         error:
           "this device cannot photograph the pane; browser_snapshot reads it as elements and text",
+      });
+      return;
+    }
+    // The one call that needs the pane to be the one on screen. Everything
+    // else here goes through the frame, which answers from a hidden group as
+    // readily as from the drawn one; this photographs a rectangle of the
+    // window, and that rectangle currently holds whatever group the user IS
+    // looking at. A wrong picture is worse than a refusal — an agent acts on
+    // it.
+    if (!paneIsShown(pane.paneId)) {
+      answer({
+        error:
+          "that pane is beside its own terminal and the window is showing another one, so a \
+photograph would be of somebody else's pane. browser_snapshot reads it wherever it is",
       });
       return;
     }

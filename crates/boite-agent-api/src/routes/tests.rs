@@ -369,6 +369,10 @@ fn framed(id: &str, url: &str, driven_by: Option<&str>) -> Pane {
         driven_by: driven_by.map(str::to_string),
         rect: Rect { x: 0.0, y: 0.0, w: 640.0, h: 600.0 },
         focused: false,
+        // Framed and driven while the user reads another group is the ordinary
+        // case now, and none of the rules below turn on being looked at. Only
+        // the screenshot does, and it refuses on the webview side.
+        visible: Some(false),
     }
 }
 
@@ -422,17 +426,50 @@ fn a_credential_with_no_terminal_drives_no_pane() {
     assert_eq!(which_pane(&user_owned, &caller, None).unwrap_err(), NOT_YOURS);
 }
 
-/// A window shows one project's group at a time, so an agent in another one
-/// asking about "the browser pane" is asking about somebody else's screen.
+/// The regression that made the browser tools unusable in the one situation
+/// they exist for: an agent working while the user reads something else. The
+/// window used to answer only for the project whose group it was drawing, so an
+/// agent in another project was told "the window is showing another project
+/// right now" by every browser call, including for the pane it had opened
+/// itself a second earlier. Every group stays mounted, so that pane is loaded
+/// and answering the whole time.
 #[test]
-fn the_window_only_answers_for_the_project_it_is_showing() {
+fn a_pane_stays_the_callers_wherever_the_user_is_looking() {
     let fake = Fake::new("browser-project").with_project("p1", "/w/one");
-    *fake.screen.lock().unwrap() = Some(on_screen("p2", vec![framed("pane-a", "http://x/", None)]));
-    let reason = window_showing(&fake, &owner("p1", Some("t1"))).unwrap_err();
-    assert!(reason.contains("another project"), "{reason}");
+    let caller = owner("p1", Some("t1"));
+    *fake.screen.lock().unwrap() = Some(on_screen(
+        "p2",
+        vec![framed("pane-a", "http://localhost:1/", Some("t1"))],
+    ));
 
-    *fake.screen.lock().unwrap() = Some(on_screen("p1", vec![framed("pane-a", "http://x/", None)]));
-    assert!(window_showing(&fake, &owner("p1", Some("t1"))).is_ok());
+    let screen = window_showing(&fake).expect("a window that is up answers");
+    assert_eq!(which_pane(&screen, &caller, None).unwrap(), "pane-a");
+}
+
+/// And the other half: being on the screen was never what made a pane the
+/// agent's, so nothing about looking elsewhere hands it one it does not own.
+#[test]
+fn the_mark_is_the_only_thing_that_makes_a_pane_the_callers() {
+    let caller = owner("p1", Some("t1"));
+    // Two panes the user owns and one of the caller's, which is the ordinary
+    // shape of a window once the description carries every group's panes.
+    let mixed = on_screen(
+        "p2",
+        vec![
+            framed("pane-a", "http://localhost:1/", None),
+            framed("pane-b", "http://localhost:2/", Some("t2")),
+            framed("pane-c", "http://localhost:3/", Some("t1")),
+        ],
+    );
+    // Named nothing: its own, rather than "three panes are open, say which".
+    assert_eq!(which_pane(&mixed, &caller, None).unwrap(), "pane-c");
+    // Named somebody else's: told whose it is, not told it does not exist.
+    assert_eq!(which_pane(&mixed, &caller, Some("pane-b")).unwrap_err(), NOT_YOURS);
+    assert_eq!(which_pane(&mixed, &caller, Some("pane-a")).unwrap_err(), NOT_YOURS);
+
+    // None of its own, and the sentence points at how to get one.
+    let theirs = on_screen("p1", vec![framed("pane-a", "http://localhost:1/", Some("t2"))]);
+    assert_eq!(which_pane(&theirs, &caller, None).unwrap_err(), NOT_YOURS);
 }
 
 /// A host with no window says so rather than answering an empty list. "No
@@ -441,10 +478,7 @@ fn the_window_only_answers_for_the_project_it_is_showing() {
 #[test]
 fn a_boite_with_no_window_says_so_rather_than_answering_empty() {
     let fake = Fake::new("browser-headless").with_project("p1", "/w/one");
-    assert_eq!(
-        window_showing(&fake, &owner("p1", Some("t1"))).unwrap_err(),
-        NO_WINDOW_TO_LOOK_AT
-    );
+    assert_eq!(window_showing(&fake).unwrap_err(), NO_WINDOW_TO_LOOK_AT);
 }
 
 /// The status answer is scoped to the caller: a pane id means nothing to an
@@ -555,4 +589,115 @@ async fn an_unknown_snapshot_mode_is_refused_by_name() {
     .await
     .unwrap();
     assert!(out.0["error"].as_str().unwrap().contains("elements, diff or text"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn spawn_answers_with_the_new_thread_id() {
+    let fake = Fake::new("spawn-id").with_project("p1", "/w/one").with_thread("t1", "p1");
+    *fake.answer_with.lock().unwrap() = Some(json!({ "threadId": "new-1" }));
+    let shared: Shared = std::sync::Arc::new(fake);
+    let out = thread_spawn(
+        State(shared),
+        Extension(agent("p1", "t1")),
+        Json(SpawnIn {
+            agent: Some("claude".into()),
+            project: None,
+            prompt: None,
+        }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(out.0["ok"], json!(true));
+    assert_eq!(out.0["threadId"], json!("new-1"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn spawn_without_a_device_is_not_success() {
+    let fake = Fake::new("spawn-nobody").with_project("p1", "/w/one").with_thread("t1", "p1");
+    let shared: Shared = std::sync::Arc::new(fake);
+    let out = thread_spawn(
+        State(shared),
+        Extension(agent("p1", "t1")),
+        Json(SpawnIn {
+            agent: None,
+            project: None,
+            prompt: None,
+        }),
+    )
+    .await
+    .unwrap();
+    assert!(out.0.get("error").is_some(), "{:?}", out.0);
+    assert_ne!(out.0.get("ok"), Some(&json!(true)));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn pane_open_forwards_the_path() {
+    let fake = std::sync::Arc::new(
+        Fake::new("pane-path").with_project("p1", "/w/one").with_thread("t1", "p1"),
+    );
+    *fake.answer_with.lock().unwrap() = Some(json!({ "ok": true }));
+    let shared: Shared = fake.clone();
+    let out = pane_open(
+        State(shared),
+        Extension(agent("p1", "t1")),
+        Json(PaneOpenIn {
+            kind: "editor".into(),
+            url: None,
+            path: Some("src/lib.rs".into()),
+            side: None,
+        }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(out.0["ok"], json!(true));
+    let asked = fake.asked.lock().unwrap();
+    assert_eq!(asked[0]["path"], json!("src/lib.rs"));
+    assert_eq!(asked[0]["pane"], json!("editor"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn wait_reports_a_known_sibling() {
+    let fake = Fake::new("wait").with_project("p1", "/w/one").with_thread("sib", "p1");
+    let shared: Shared = std::sync::Arc::new(fake);
+    let out = thread_wait(
+        State(shared),
+        Extension(agent("p1", "t1")),
+        axum::extract::Query(ThreadWaitIn {
+            thread_id: "sib".into(),
+            timeout_ms: Some(0),
+        }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(out.0["threadId"], json!("sib"));
+    assert_eq!(out.0["live"], json!(false));
+    assert!(out.0.get("status").is_some(), "{:?}", out.0);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn whereami_names_this_thread_and_project() {
+    let fake = Fake::new("where").with_project("p1", "/w/one").with_thread("t1", "p1");
+    let shared: Shared = std::sync::Arc::new(fake);
+    let out = whereami(State(shared), Extension(agent("p1", "t1")))
+        .await
+        .unwrap();
+    assert_eq!(out.0["thread"], json!("t1"));
+    assert_eq!(out.0["project"], json!("p1"));
+    assert_eq!(out.0["projectId"], json!("p1"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn finish_allows_when_there_is_no_worktree() {
+    let fake = Fake::new("finish").with_project("p1", "/w/one").with_thread("t1", "p1");
+    let shared: Shared = std::sync::Arc::new(fake);
+    let out = finish(
+        State(shared),
+        Extension(agent("p1", "t1")),
+        axum::extract::Query(FinishIn {
+            stop_hook_active: None,
+        }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(out.0["allow"], json!(true));
 }

@@ -1,6 +1,6 @@
 //! One pool of conversations per project, rather than one per worktree.
 //!
-//! Claude and pi file a transcript under the directory the CLI ran in, and
+//! Claude, grok and pi file a transcript under the directory the CLI ran in, and
 //! every agent thread here runs in a worktree of its own. So `/resume` typed
 //! inside a thread offered that thread's conversations and nothing else: the
 //! thread beside it, the user's own checkout and yesterday's closed thread are
@@ -24,7 +24,7 @@ use std::path::Path;
 use crate::git::artifacts::link_dir;
 
 use super::claude::claude_project_dir_name;
-use super::editors::{pi_dir_name, pi_sessions_root};
+use super::editors::{grok_group_name, grok_sessions_dir, pi_dir_name, pi_sessions_root};
 
 /// The cwd as the CLI itself sees it. A trailing separator is dropped, because
 /// a path spelled with one and a path spelled without it are one directory and
@@ -61,6 +61,13 @@ pub fn share_session_stores(project_cwd: &str, worktree_cwd: &str) {
             );
         }
     }
+    if let Some(root) = grok_sessions_dir() {
+        share(
+            &root,
+            &grok_group_name(&root, as_given(project_cwd)),
+            &grok_group_name(&root, as_given(worktree_cwd)),
+        );
+    }
 }
 
 /// Takes the links back, and only the links.
@@ -80,6 +87,9 @@ pub fn unshare_session_stores(worktree_cwd: &str) {
         if !flat {
             unshare(&root, &pi_dir_name(as_given(worktree_cwd)));
         }
+    }
+    if let Some(root) = grok_sessions_dir() {
+        unshare(&root, &grok_group_name(&root, as_given(worktree_cwd)));
     }
 }
 

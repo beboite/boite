@@ -20,6 +20,8 @@ export interface McpPaths {
   configPath: string;
   /** The shim binary itself, for agents that take a command. */
   sidecarPath: string;
+  /** Claude `--settings` file that wires the stop hook. */
+  settingsPath?: string;
 }
 
 export type McpInjection = (paths: McpPaths) => string[];
@@ -29,7 +31,11 @@ const INJECTORS: Partial<Record<NonNullable<IconKey>, McpInjection>> = {
   // launches through a wrap shell, which re-quotes arguments and escapes `"` as
   // `\"` — accepted by POSIX shells, not by PowerShell. A path carries neither
   // quotes nor braces and survives all of them.
-  claude: ({ configPath }) => ["--mcp-config", configPath],
+  claude: ({ configPath, settingsPath }) => {
+    const args = ["--mcp-config", configPath];
+    if (settingsPath) args.push("--settings", settingsPath);
+    return args;
+  },
   // A per-invocation TOML override; codex has no file equivalent. The value
   // carries quotes, which is why this waited on the wrap shell learning to
   // quote for PowerShell — before that it was silently broken on Windows only.
@@ -37,6 +43,10 @@ const INJECTORS: Partial<Record<NonNullable<IconKey>, McpInjection>> = {
     "-c",
     `mcp_servers.boite.command=${JSON.stringify(sidecarPath)}`,
   ],
+  // No launch flag. Grok reads `[mcp_servers]` from `.grok/config.toml` in
+  // the cwd, so a worktree gets that file written just before spawn. An
+  // empty argv is still an injector: the panel treats grok as wired.
+  grok: () => [],
 };
 
 /**
@@ -47,16 +57,21 @@ const INJECTORS: Partial<Record<NonNullable<IconKey>, McpInjection>> = {
  *   in `opencode.jsonc` by hand.
  * - cursor exposes MCP only through interactive slash commands (`/mcp list`,
  *   `/mcp enable`); there is no non-interactive add.
- * - copilot, grok and hermes do each document a non-interactive `mcp add`, but
- *   the three take the command differently (`-- CMD ARGS`, `-- CMD ARGS`,
- *   `--command CMD --args ARGS`) and none has been run from here. Copilot
- *   already proved once that a documented subcommand can open a form instead,
- *   so they get the exact line to paste and their own output to read.
+ * - copilot and hermes do each document a non-interactive `mcp add`, but
+ *   they take the command differently (`-- CMD ARGS`, `--command CMD --args
+ *   ARGS`) and neither has been run from here. Copilot already proved once
+ *   that a documented subcommand can open a form instead, so they get the
+ *   exact line to paste and their own output to read.
+ * - grok is wired at launch when the thread has a worktree (a
+ *   `.grok/config.toml` in that checkout). The button still runs
+ *   `grok mcp add` for a thread that has none.
  *
  * Registering an agent that cannot then reach the endpoint is worse than not
  * offering it: the button would report success and nothing would work.
  */
-const REGISTER_CLI: Partial<Record<NonNullable<IconKey>, string>> = {};
+const REGISTER_CLI: Partial<Record<NonNullable<IconKey>, string>> = {
+  grok: "grok",
+};
 
 /**
  * What to run, or paste, to give an agent access when Boite cannot hand it
@@ -310,11 +325,22 @@ export async function mcpArgsFor(
   key: IconKey,
   enabled: boolean,
   origin: WorkspaceOrigin | undefined,
+  dest?: { cwd: string; worktree: boolean },
 ): Promise<string[]> {
   if (!enabled) return [];
   const injector = key ? INJECTORS[key] : undefined;
   if (!injector) return [];
   const paths = await mcpPaths(origin);
   if (!paths) return [];
+  if (key === "grok" && dest?.worktree) {
+    try {
+      await invoke("ensure_grok_mcp", {
+        cwd: dest.cwd,
+        sidecarPath: paths.sidecarPath,
+      });
+    } catch (err) {
+      logger.warn("mcp", "grok project mcp not written", String(err));
+    }
+  }
   return injector(paths);
 }

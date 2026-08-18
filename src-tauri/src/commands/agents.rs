@@ -25,6 +25,8 @@ pub struct AgentMcpConfig {
     pub sidecar_path: String,
     /// Generated file to hand an agent that takes one at launch.
     pub config_path: String,
+    /// Claude `--settings` file that wires the stop hook.
+    pub settings_path: String,
 }
 
 /// Prepares the MCP server definition agents are pointed at, and returns where
@@ -60,23 +62,12 @@ pub async fn agent_mcp_config(app: AppHandle) -> Result<AgentMcpConfig, String> 
         .path()
         .app_config_dir()
         .map_err(|e| format!("app_config_dir: {e}"))?;
-    std::fs::create_dir_all(&config_dir).map_err(|e| format!("create config dir: {e}"))?;
-    let config_path = config_dir.join("mcp-boite.json");
-
-    let body = serde_json::json!({
-        "mcpServers": {
-            "boite": { "command": sidecar.to_string_lossy() }
-        }
-    });
-    std::fs::write(
-        &config_path,
-        serde_json::to_vec_pretty(&body).map_err(|e| format!("serialize: {e}"))?,
-    )
-    .map_err(|e| format!("write mcp config: {e}"))?;
+    let written = boite_core::mcp_launch::write_files(&config_dir, &sidecar)?;
 
     Ok(AgentMcpConfig {
-        sidecar_path: sidecar.to_string_lossy().into_owned(),
-        config_path: config_path.to_string_lossy().into_owned(),
+        sidecar_path: written.sidecar.to_string_lossy().into_owned(),
+        config_path: written.config.to_string_lossy().into_owned(),
+        settings_path: written.settings.to_string_lossy().into_owned(),
     })
 }
 
@@ -92,7 +83,7 @@ pub async fn register_agent_mcp(cli: String, sidecar_path: String) -> Result<Str
     // Allow-listed rather than free-form: this runs a process, and the caller
     // is a webview. Only these three expose an `mcp add` subcommand.
     let cli = match cli.as_str() {
-        "codex" | "opencode" | "cursor-agent" => cli,
+        "codex" | "opencode" | "cursor-agent" | "grok" => cli,
         other => return Err(format!("no known mcp command for {other}")),
     };
     tauri::async_runtime::spawn_blocking(move || {
@@ -211,6 +202,54 @@ fn registration_in(texts: &[String], creds: &str) -> &'static str {
     "none"
 }
 
+/// Writes `[mcp_servers.boite]` into `{cwd}/.grok/config.toml`.
+///
+/// Grok has no launch flag for a server definition. It reads project MCP from
+/// that file, and a worktree's copy is not the user's repository. Existing
+/// tables stay; a boite block already there is left alone.
+#[tauri::command]
+pub fn ensure_grok_mcp(cwd: String, sidecar_path: String) -> Result<(), String> {
+    let dir = PathBuf::from(cwd).join(".grok");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("create .grok: {e}"))?;
+    let path = dir.join("config.toml");
+    let existing = std::fs::read_to_string(&path).ok();
+    let Some(next) = merge_grok_mcp(existing.as_deref(), &sidecar_path) else {
+        return Ok(());
+    };
+    std::fs::write(&path, next).map_err(|e| format!("write grok mcp: {e}"))
+}
+
+fn toml_basic_string(s: &str) -> String {
+    format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+fn grok_mcp_block(sidecar: &str) -> String {
+    format!(
+        "[mcp_servers.boite]\ncommand = {}\n",
+        toml_basic_string(sidecar)
+    )
+}
+
+/// None means the file already names boite and should not be touched.
+fn merge_grok_mcp(existing: Option<&str>, sidecar: &str) -> Option<String> {
+    if existing.is_some_and(|t| t.contains("[mcp_servers.boite]")) {
+        return None;
+    }
+    let block = grok_mcp_block(sidecar);
+    match existing {
+        None | Some("") => Some(block),
+        Some(prev) => {
+            let mut out = prev.to_string();
+            if !out.ends_with('\n') {
+                out.push('\n');
+            }
+            out.push('\n');
+            out.push_str(&block);
+            Some(out)
+        }
+    }
+}
+
 #[cfg(test)]
 mod registration_tests {
     use super::registration_in;
@@ -265,6 +304,33 @@ mod registration_tests {
         let stale = r#"{"args":["/Users/x/.../mcp/other.json"],"command":"/x/boite-mcp"}"#;
         let good = format!(r#"{{"args":["{CREDS}"]}}"#);
         assert_eq!(registration_in(&[stale.to_string(), good], CREDS), "this");
+    }
+}
+
+#[cfg(test)]
+mod grok_mcp_tests {
+    use super::{merge_grok_mcp, toml_basic_string};
+
+    #[test]
+    fn a_missing_file_is_just_the_boite_block() {
+        let out = merge_grok_mcp(None, r"C:\boite-mcp.exe").unwrap();
+        assert!(out.contains("[mcp_servers.boite]"));
+        assert!(out.contains(&toml_basic_string(r"C:\boite-mcp.exe")));
+    }
+
+    #[test]
+    fn an_existing_boite_block_is_left_alone() {
+        let prev = "[mcp_servers.boite]\ncommand = \"/old\"\n";
+        assert_eq!(merge_grok_mcp(Some(prev), "/new"), None);
+    }
+
+    #[test]
+    fn other_tables_are_kept() {
+        let prev = "[mcp_servers.semble]\ncommand = \"semble\"\n";
+        let out = merge_grok_mcp(Some(prev), "/boite-mcp").unwrap();
+        assert!(out.contains("[mcp_servers.semble]"));
+        assert!(out.contains("[mcp_servers.boite]"));
+        assert!(out.contains("semble"));
     }
 }
 

@@ -226,23 +226,29 @@ export function buildPaletteCommands(): PaletteCommand[] {
 
   // Git, files and the todo list show in the docked column, which is where they
   // live: asking for git from the palette means the same thing as clicking git
-  // in the titlebar, and neither should rearrange the panes. The info-box
-  // experiment replaces that column, so while it is on these commands would
-  // set a panel nothing renders — same reason the titlebar hides its buttons.
-  if (!settings.state.experimentInfoBox) {
-    const panelCommands: [PanelKind, MessageKey][] = [
-      ["git", "panes.openGit"],
-      ["explorer", "panes.openExplorer"],
-      ["todo", "panes.openTodo"],
-    ];
-    for (const [kind, labelKey] of panelCommands) {
-      commands.push({
-        id: `panel:${kind}`,
-        section: "panes",
-        labelKey,
-        run: () => settings.setRightPanel(app.currentProjectId, kind),
-      });
-    }
+  // in the titlebar, and neither should rearrange the panes.
+  //
+  // The info-box experiment replaces that column, and these three used to be
+  // dropped outright while it was on — the titlebar hides its buttons for the
+  // same reason, so turning the experiment on left no way at all to reach the
+  // todo list, the git panel or the files. Setting a panel nothing renders was
+  // the thing to avoid, not offering the three: with the column gone they open
+  // in a pane, which is where every other non-terminal surface already goes.
+  const panelCommands: [PanelKind, MessageKey][] = [
+    ["git", "panes.openGit"],
+    ["explorer", "panes.openExplorer"],
+    ["todo", "panes.openTodo"],
+  ];
+  for (const [kind, labelKey] of panelCommands) {
+    commands.push({
+      id: `panel:${kind}`,
+      section: "panes",
+      labelKey,
+      run: () =>
+        settings.state.experimentInfoBox
+          ? void openPane({ kind })
+          : settings.setRightPanel(app.currentProjectId, kind),
+    });
   }
 
   // Panes. Until now the only way to make one was to drag a thread row onto a

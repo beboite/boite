@@ -254,10 +254,19 @@ export interface Settings {
   sidebarHarnessLogos: boolean;
   /**
    * Experiment: replace the side panel's three tabs with one anchored info box
-   * over the terminals — current branch, the todo an agent claimed, the last
+   * over the terminals: current branch, the todo an agent claimed, the last
    * commit, and up to ten of them on hover. Off draws the classic column.
    */
   experimentInfoBox: boolean;
+  /**
+   * Where that box sits on every terminal. One value for the window, not per
+   * thread: a drag on any pane is the next pane's position too.
+   */
+  infoBoxAnchor: InfoBoxAnchor;
+  /**
+   * Whether the box is folded to its header. Same scope as the anchor.
+   */
+  infoBoxCollapsed: boolean;
   /**
    * Experiment: let the sidebar order itself instead of following the dragged
    * order. Arming it moves nothing on its own — `smartSortBy` starts at
@@ -270,6 +279,12 @@ export interface Settings {
    * no interrupt, no keystroke, no prompt.
    */
   experimentWhip: boolean;
+  /**
+   * Which noise the whip makes. Only read while `experimentWhip` is on, and
+   * `synth` is the default: the sample is a file the window downloads, and it
+   * only downloads once somebody has actually asked for it.
+   */
+  whipSound: WhipSound;
   smartSortBy: SmartSortBy;
   smartSortDirection: SortDirection;
 }
@@ -284,7 +299,31 @@ export interface Settings {
  */
 export type SmartSortBy = "manual" | "activity" | "alphabetical";
 
+/**
+ * What the whip cracks with.
+ *
+ * `synth` is the WebAudio burst `crack.ts` builds, which costs no asset and
+ * varies on its own. `meme` is one sampled crack, `static/sounds/whip-meme.mp3`,
+ * fetched on the first crack after it is picked and never before: a mode nobody
+ * selects costs the same nothing it did before this existed.
+ */
+export type WhipSound = "synth" | "meme";
+
 export type SortDirection = "asc" | "desc";
+
+/**
+ * The eight docks the info box can snap to: four corners and the midpoint of
+ * each edge. Mid-top and mid-bottom are `top-center` / `bottom-center`.
+ */
+export type InfoBoxAnchor =
+  | "top-left"
+  | "top-center"
+  | "top-right"
+  | "mid-left"
+  | "mid-right"
+  | "bottom-left"
+  | "bottom-center"
+  | "bottom-right";
 
 /**
  * The sidebar's two thread-row designs.

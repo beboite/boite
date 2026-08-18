@@ -12,12 +12,13 @@
 //! drive the workspace is not the same principal as an agent that may append to
 //! a checklist.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use serde_json::{json, Value};
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, oneshot};
 
 use boite_agent_api::{Change, Workspace, NOBODY_TO_CARRY_IT_OUT};
 use boite_core::scope::ProjectRoots;
@@ -42,6 +43,21 @@ pub struct AgentApi {
     /// dispatch, and two copies of that would be two ideas of what the user
     /// agreed to.
     pub workspace: boite_agent_api::Shared,
+    pending: Arc<Mutex<HashMap<String, oneshot::Sender<Value>>>>,
+    /// Generated MCP files on this host, when the sidecar was found.
+    pub mcp: Option<boite_core::mcp_launch::McpPaths>,
+}
+
+impl AgentApi {
+    /// Resolve a parked `ask_settled` wait. Quiet when nobody is waiting.
+    pub fn answer(&self, request_id: &str, payload: Value) -> bool {
+        let waiting = self.pending.lock().unwrap().remove(request_id);
+        if let Some(tx) = waiting {
+            tx.send(payload).is_ok()
+        } else {
+            false
+        }
+    }
 }
 
 struct ServerWorkspace {
@@ -58,6 +74,10 @@ struct ServerWorkspace {
     /// Only ever read for the snapshot: what the rows claim about a thread and
     /// what this process actually has a PTY for are two different questions.
     registry: Arc<crate::registry::Registry>,
+    /// Oneshots the HTTP handlers wait on, keyed by the request id the device
+    /// answers with. Shared with [`AgentApi::answer`] so the RPC can resolve
+    /// them without knowing about this struct.
+    pending: Arc<Mutex<HashMap<String, oneshot::Sender<Value>>>>,
 }
 
 impl Workspace for ServerWorkspace {
@@ -96,6 +116,29 @@ impl Workspace for ServerWorkspace {
         request["requestId"] = json!(uuid::Uuid::new_v4().to_string());
         let _ = self.events.send(AppEvent::AgentRequest(request));
         Ok(())
+    }
+
+    fn ask_settled(
+        &self,
+        mut request: Value,
+    ) -> Result<oneshot::Receiver<Value>, String> {
+        if self.devices.load(Ordering::Relaxed) == 0 {
+            return Err(NOBODY_TO_CARRY_IT_OUT.to_string());
+        }
+        let id = request
+            .get("requestId")
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        request["requestId"] = json!(id.clone());
+        let (tx, rx) = oneshot::channel();
+        {
+            let mut pending = self.pending.lock().unwrap();
+            pending.retain(|_, sender| !sender.is_closed());
+            pending.insert(id, tx);
+        }
+        let _ = self.events.send(AppEvent::AgentRequest(request));
+        Ok(rx)
     }
 
     fn transcripts_dir(&self) -> Option<PathBuf> {
@@ -156,6 +199,16 @@ pub async fn start(
         tracing::warn!("agent api disabled, cannot make the key directory: {e}");
         return None;
     }
+    let pending: Arc<Mutex<HashMap<String, oneshot::Sender<Value>>>> =
+        Arc::new(Mutex::new(HashMap::new()));
+    let mcp = sidecar_next_to_server().and_then(|sidecar| {
+        boite_core::mcp_launch::write_files(&data_dir.join("mcp"), &sidecar)
+            .map_err(|e| {
+                tracing::warn!("agent mcp files not written: {e}");
+                e
+            })
+            .ok()
+    });
     let workspace: boite_agent_api::Shared = Arc::new(ServerWorkspace {
         store,
         events,
@@ -164,6 +217,7 @@ pub async fn start(
         roots,
         workspace_dir,
         registry,
+        pending: pending.clone(),
     });
     let router = boite_agent_api::router(workspace.clone());
 
@@ -186,7 +240,21 @@ pub async fn start(
         url: format!("http://127.0.0.1:{port}"),
         keys_dir,
         workspace,
+        pending,
+        mcp,
     })
+}
+
+/// The shim next to this binary, the same place the desktop looks.
+fn sidecar_next_to_server() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let dir = exe.parent()?;
+    let sidecar = dir.join(if cfg!(windows) {
+        "boite-mcp.exe"
+    } else {
+        "boite-mcp"
+    });
+    sidecar.is_file().then_some(sidecar)
 }
 
 /// Small helper so the bind path stays a single expression chain.

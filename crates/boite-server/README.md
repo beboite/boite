@@ -3,32 +3,28 @@
 Headless boite: PTY orchestration, git, fs and session detection over a single
 WebSocket. The desktop app connects to it in "remote" mode; a phone reaches it
 as a PWA served by the same binary. Threads survive client disconnects (the
-server keeps the PTY and replays scrollback on reattach), and multiple devices
-can attach to the same thread at once.
+server keeps the PTY and replays scrollback on reattach), and several devices
+can attach to one thread at once.
 
-## Run with Docker (recommended)
+## Run with Docker
 
 The image is published on every push to master that touches the server, for
-`linux/arm64` only, and the package is public, so nothing needs a registry
-login. On any other architecture, build it yourself as below:
+`linux/arm64` only, and the package is public. On any other architecture, build
+it yourself with `--build` below.
 
 ```bash
 docker pull ghcr.io/beboite/boite-server:latest
 ```
 
 Tags are `latest`, the `package.json` version, and `sha-<commit>`. The compose
-file reads `${BOITE_IMAGE_TAG:-latest}`, so pinning a version or rolling back is
+file reads `${BOITE_IMAGE_TAG:-latest}`, so pinning or rolling back is
 `BOITE_IMAGE_TAG=1.0.2 docker compose up -d`.
-
-Building it yourself still works and is what `--build` below does. Built and
-tested natively on `linux/arm64` (Orange Pi); `docker buildx` is not required if
-you build on the target arch.
 
 ```bash
 # 1. Pick a bootstrap token. It pairs devices and opens nothing else, but
 #    pairing a device is granting one, so treat it like a root password.
 echo "BOITE_TOKEN=$(openssl rand -hex 32)" > .env
-# The name this boite is reached by from outside, so a pairing link points
+# What this boite is reached by from outside, so a pairing link points
 # somewhere. Behind a reverse proxy the server cannot work this out itself.
 echo "BOITE_PUBLIC_URL=https://boite.example" >> .env
 # optional mobile notifications:
@@ -49,13 +45,10 @@ docker exec -it boite claude
 docker exec boite boite-server pair --label "my phone" --kind phone
 ```
 
-The picker holds several boites; give each a name and color (synced to every
-connected device) to tell them apart.
-
 ## Pairing a device
 
 Every device holds its own credential, so one can be revoked without touching
-any other. There is no workspace-wide password any more.
+another. There is no workspace-wide password.
 
 ```bash
 boite-server pair [--label L] [--kind K] [--scopes ...] [--minutes N] [--url BASE]
@@ -63,15 +56,13 @@ boite-server devices          # what is paired, with scopes and last seen
 boite-server revoke <id>      # shut one out, at once
 ```
 
-These talk to the database rather than to the running server, so they work
-whether or not it is up. From a device already paired with `admin`, the same
-three live in Settings -> Devices.
+These talk to the database rather than the running server, so they work whether
+or not it is up. From a device paired with `admin`, the same three live in
+Settings -> Devices.
 
-Opening the printed link on the new device pairs it: the one-time token rides
-in the URL's **hash fragment**, so it reaches no access log, no proxy log and no
-`Referer` header. It is spent on first use.
-
-Scopes, and what each one is:
+Opening the printed link pairs the device: the one-time token rides in the URL's
+**hash fragment**, so it reaches no access log, no proxy log and no `Referer`
+header, and it is spent on first use.
 
 | Scope | Grants |
 |---|---|
@@ -81,8 +72,8 @@ Scopes, and what each one is:
 | `approve` | answer what an agent put in front of the user |
 | `admin` | reach past a project, and pair or revoke devices |
 
-`admin` covers `write` covers `read`. Nothing implies `terminal` or `approve`:
-a PTY is arbitrary code on the machine rather than a change to a project, so a
+`admin` covers `write` covers `read`. Nothing implies `terminal` or `approve`: a
+PTY is arbitrary code on the machine rather than a change to a project, so a
 device paired to rename projects does not come away with a shell. The default
 grant is everything except `admin`.
 
@@ -90,26 +81,25 @@ grant is everything except `admin`.
 
 | Var | Default | Meaning |
 |-----|---------|---------|
-| `BOITE_TOKEN` | generated | **Bootstrap** credential. It opens `POST /api/pairings` and nothing else: it cannot open a socket, call an RPC or mint a ticket. If unset, a 32-byte hex token is generated and written to `$BOITE_DATA_DIR/token` (chmod 600). |
-| `BOITE_PUBLIC_URL` | _(none)_ | What this boite is reached by from outside, used only to build the text of a pairing link. Behind a reverse proxy the server cannot work it out: the `Host` header is whatever the caller sent. |
+| `BOITE_TOKEN` | generated | **Bootstrap** credential. Opens `POST /api/pairings` and nothing else: no socket, no RPC, no ticket. If unset, a 32-byte hex token is written to `$BOITE_DATA_DIR/token` (chmod 600). |
+| `BOITE_PUBLIC_URL` | _(none)_ | What this boite is reached by from outside, for pairing links and notification deep links. Behind a reverse proxy the server cannot work it out: `Host` is whatever the caller sent. |
 | `BOITE_BIND` | `127.0.0.1:7337` | Listen address. The Docker image sets `0.0.0.0:7337`. |
 | `BOITE_DATA_DIR` | `./boite-data` | SQLite DB + token file. |
-| `BOITE_STATIC_DIR` | _(none)_ | Directory of the built SvelteKit SPA to serve. The image sets `/app/web`. |
-| `BOITE_WORKSPACE_DIR` | _(none)_ | Base dir the web folder picker can browse to add projects. The image sets `/workspace`. |
+| `BOITE_STATIC_DIR` | _(none)_ | Built SvelteKit SPA to serve. The image sets `/app/web`. |
+| `BOITE_WORKSPACE_DIR` | _(none)_ | Base dir the web folder picker can browse. The image sets `/workspace`. |
 | `BOITE_SCROLLBACK_BYTES` | `1048576` | Per-thread replay ring size. |
 | `BOITE_MAX_THREADS` | `200` | Max concurrent live PTYs. |
 | `BOITE_MAX_CONNECTIONS` | `64` | Max concurrent WebSocket connections. |
-| `BOITE_WEBHOOK_URL` | _(none)_ | Notification webhook fired on a thread going ready / waiting / exiting. Must be `http(s)`. |
+| `BOITE_WEBHOOK_URL` | _(none)_ | Notification webhook, fired on ready / waiting / exit. Must be `http(s)`. |
 | `BOITE_WEBHOOK_FORMAT` | `json` | `ntfy`, `discord`, or `json`. |
-| `BOITE_PUBLIC_URL` | _(none)_ | Where this workspace answers from on the internet, e.g. `https://boite.example.com`. Turns the deep link a notification carries into one a phone can open. Without it the ntfy `Click` header and the Discord embed link are omitted, since a relative one resolves against nothing in those clients. |
 
 ## Security
 
-A device paired with `terminal` holds a **remote shell**: it can spawn arbitrary
-processes (`thread.spawn` runs any command in any cwd) and read/write files
-under the project roots. Pair with the scopes a device actually needs.
+A device paired with `terminal` holds a **remote shell**: `thread.spawn` runs
+any command in any cwd, and files under the project roots are readable and
+writable. Pair with the scopes a device needs.
 
-Three credentials, and none of them converts into another:
+Three credentials, and none converts into another:
 
 | | Bootstrap token | Device credential | Socket ticket |
 |---|---|---|---|
@@ -117,95 +107,73 @@ Three credentials, and none of them converts into another:
 | Lives | as long as the deployment | until revoked | five minutes |
 | Opens | `POST /api/pairings`, nothing else | `POST /api/ticket`, nothing else | one WebSocket |
 
-The long-lived credential never travels in a URL and never opens a socket: it
-buys a ticket over authenticated HTTP, and the ticket is worth nothing once
-spent. An upgrade request carrying `?token=` or `?ticket=` is refused outright,
-because a query string reaches the access log of whatever proxy is in front.
-
-- Revoking a device takes effect immediately, including on a socket it is
-  already holding: the connection is hung up and the pairing row is re-read on
-  every call. `boite-server revoke` is a second process and cannot tell the
-  running server anything, so the two paths carrying terminal bytes re-read the
-  row as well, at most once every two seconds. A device revoked from the command
-  line loses its shell without the server being restarted.
-- A device can never invite another with more than it holds itself. `admin` is
-  what opens `pairing.create`; the scopes it asks for are intersected with the
-  caller's own before the token is minted, and the answer names what was
-  actually granted. The bootstrap paths (`boite-server pair`, `POST
-  /api/pairings`) are not clamped, because they are the trust root.
-- The database holds a SHA-256 of each secret and never the secret, so a dump of
-  it opens nothing. Every comparison is constant time.
-- The server binds loopback by default. When you bind a routable interface it
-  warns that credentials cross the wire in clear text on plain `http://` and
-  `ws://`.
-- **Always** terminate TLS in front of it (a reverse proxy) or tunnel it
-  (WireGuard / Tailscale / SSH). The PWA also requires a secure context
-  (HTTPS or `localhost`) to install and run its service worker; Tailscale
-  Serve or Caddy with a real cert is the blessed path.
-- Every door shares one per-IP lockout (5 failures -> 60s, the count persists
-  across lockouts so a repeat offender stays throttled), so guesses cannot be
-  spread across them for three times the tries.
+- The long-lived credential never travels in a URL and never opens a socket: it
+  buys a ticket over authenticated HTTP. An upgrade carrying `?token=` or
+  `?ticket=` is refused, since a query string reaches the proxy's access log.
+- Revoking takes effect immediately, including on a socket already held: the
+  connection is hung up, and the two paths carrying terminal bytes re-read the
+  pairing row at most every two seconds, so a revoke from the command line
+  reaches a running server without a restart.
+- A device can never invite another with more than it holds: `admin` opens
+  `pairing.create`, the scopes asked for are intersected with the caller's, and
+  the answer names what was granted. The bootstrap paths are the trust root and
+  are not clamped.
+- The database holds a SHA-256 of each secret and never the secret. Every
+  comparison is constant time.
+- One per-IP lockout across every door (5 failures -> 60s, the count persists,
+  so a repeat offender stays throttled).
+- The server binds loopback by default and warns when you bind a routable
+  interface. **Always** terminate TLS in front of it or tunnel it (WireGuard,
+  Tailscale, SSH). The PWA needs a secure context to install its service worker,
+  so Tailscale Serve or Caddy with a real cert is the blessed path.
 
 ## Mobile notifications
 
 Set `BOITE_WEBHOOK_URL` to an [ntfy](https://ntfy.sh) topic (or a Discord /
-Gotify webhook). The server POSTs when a thread finishes a turn (running ->
-ready), when one blocks on the user, and when a process exits, so an ntfy app on
-the phone delivers a native push even with the app closed. `notify.test` (RPC)
-fires a test notification, and takes an optional `threadId` so the test carries a
-real link.
+Gotify webhook). The server POSTs when a thread finishes a turn, blocks on the
+user, or exits, so an ntfy app delivers a native push with the app closed.
+`notify.test` (RPC) fires one, and takes an optional `threadId` so the test
+carries a real link.
 
-Native PWA Web Push (VAPID, RFC 8291) is also wired in: the server generates a
-keypair on first run, the PWA subscribes its browser push endpoint, and the
-server pushes down the same transitions. It uses `web-push-native` (pure
-RustCrypto: aes-gcm + hkdf + p256), so there is no OpenSSL/C dependency and it
-cross-compiles cleanly. The webhook above is the complementary path for non-PWA
-targets (ntfy/Discord/Gotify).
+Native PWA Web Push (VAPID, RFC 8291) is wired in too: a keypair is generated on
+first run and the same transitions are pushed down. It uses `web-push-native`
+(pure RustCrypto: aes-gcm + hkdf + p256), so there is no OpenSSL dependency and
+it cross-compiles cleanly.
 
 Both are built from one value, `boite_core::awareness`: a phase
 (`starting | running | waiting_for_approval | waiting_for_input | completed |
-failed | stale`), a headline, a detail, the project and thread it belongs to, and
-a deep link. What differs per transport is the envelope and nothing else — ntfy
-gets `Title`/`Tags`/`Priority`/`Click`, Discord gets an embed with the phase's
-colour, the generic JSON keeps `title`/`body`/`tag` for consumers written against
-the old shape and carries the whole value beside them under `awareness`. Web Push
-sends `{title, body, tag, url, phase, threadId}`; the service worker resolves
-`url` against its own origin, so the server never has to guess the address a
-browser reached it at.
+failed | stale`), a headline, a detail, the project and thread, and a deep link.
+Only the envelope differs: ntfy gets `Title`/`Tags`/`Priority`/`Click`, Discord
+an embed coloured by phase, the generic JSON keeps `title`/`body`/`tag` for
+consumers written against the old shape and carries the whole value under
+`awareness`. Web Push sends `{title, body, tag, url, phase, threadId}` and the
+service worker resolves `url` against its own origin, so the server never
+guesses the address a browser reached it at.
 
-### Answering from the notification
-
-A thread that is `waiting` has a dialog up and nothing moves until somebody
-answers. `thread.reply` writes one keystroke into it — `{threadId, answer}` where
-`answer` is one of `yes | no | enter | escape | 1..9` and nothing else. The
-vocabulary is `boite_core::reply` and it is closed: every arm is a compile-time
-constant of one byte, and no answer but `enter` submits a line.
-
-It is a device call, not an agent one. It is on this RPC surface, which is reached
-only after the token check, and it is deliberately absent from the command bus and
-from the agent endpoint: an agent that could answer its own permission prompts
-would not have permission prompts. Unlike the binary input frame it does not
-require the socket to have attached to the thread, because the caller this exists
-for is a phone that has never opened it.
+**Answering from the notification.** A `waiting` thread has a dialog up.
+`thread.reply` writes one keystroke into it: `{threadId, answer}` where `answer`
+is one of `yes | no | enter | escape | 1..9` and nothing else. The vocabulary is
+`boite_core::reply`, closed, every arm a one-byte constant, and only `enter`
+submits a line. It is a device call, not an agent one: deliberately absent from
+the command bus and the agent endpoint, because an agent that could answer its
+own permission prompts would not have permission prompts. It does not require
+the socket to have attached to the thread, since the caller it exists for is a
+phone that never opened it.
 
 ## Workspace identity
 
-Each server carries a cosmetic name + color, persisted in the settings table
-and shared by every connected device. `workspace.info` reads it; any client
-can change it with `workspace.setInfo` (name trimmed to 64 chars, color
-validated as a hex string), and the server broadcasts a `workspace.info`
-control event so the other devices update live. It is purely cosmetic: the
-client maps it to the workspace picker label and the connection outline color.
+Each server carries a cosmetic name and color, persisted in the settings table
+and shared by every connected device (`workspace.info` reads it,
+`workspace.setInfo` changes it and broadcasts, name trimmed to 64 chars, color
+validated as hex). The client maps it to the picker label and the connection
+outline.
 
-The build and the machine are the other half of that, and nobody types them in.
 `hello`, the first RPC of a connection, answers `ok` and `protocol` (`1`) plus
-three fields describing the server that replied: `version`, the `boite-server`
-crate version the running binary was built from; `platform`, one of `windows`,
-`macos`, `linux`, `unknown`; and `host`, the machine's own name, `null` when it
-has none to give. A server built before these answered the protocol alone, so a
-missing field means "it did not say" and is never filled in from the client
-side: the settings panel used to print the version of the bundle the browser
-had downloaded one row above a line saying the workspace was somewhere else.
+`version`, `platform` (`windows | macos | linux | unknown`) and `host`, `null`
+when the machine has no name. A server built before these answered the protocol
+alone, so a missing field means "it did not say" and is never filled in from the
+client side: the settings panel used to print the version of the bundle the
+browser had downloaded, one row above a line saying the workspace was elsewhere.
 
 ## Build without Docker
 

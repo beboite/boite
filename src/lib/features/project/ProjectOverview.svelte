@@ -3,6 +3,7 @@
   import { app } from "$lib/app/store.svelte";
   import { gitStore, gitScope } from "$lib/features/git/store.svelte";
   import { todos } from "$lib/features/todo/store.svelte";
+  import TodoList from "$lib/features/todo/TodoList.svelte";
   import DashboardCard from "./DashboardCard.svelte";
   import ProjectWorktrees from "./ProjectWorktrees.svelte";
   import ProjectUsage from "./ProjectUsage.svelte";
@@ -18,6 +19,7 @@
   import { formatAgo, formatSpan } from "$lib/shared/utils/relative-time";
   import GitBranch from "@lucide/svelte/icons/git-branch";
   import ListTodo from "@lucide/svelte/icons/list-todo";
+  import Eraser from "@lucide/svelte/icons/eraser";
   import Plus from "@lucide/svelte/icons/plus";
   import TerminalIcon from "@lucide/svelte/icons/terminal";
   import ArrowUp from "@lucide/svelte/icons/arrow-up";
@@ -56,10 +58,11 @@
   // two are separate scopes and no longer reset each other.
   const gitTarget = $derived(gitScope(project.id, project.gitRoot ?? project.cwd));
   const git = $derived(gitStore.get(gitTarget));
-  // One pass over the todo table, filtered twice, instead of two passes.
+  // One pass over the todo table, filtered three ways, instead of three passes.
   const projectTodos = $derived(todos.forProject(project.id));
   const openTodos = $derived(projectTodos.filter((x) => x.state !== "done"));
   const claimedTodos = $derived(projectTodos.filter((x) => x.state === "claimed"));
+  const doneTodos = $derived(projectTodos.filter((x) => x.state === "done"));
   const changed = $derived(
     git ? git.staged.length + git.unstaged.length + git.conflicts.length : 0,
   );
@@ -217,9 +220,14 @@
     {/if}
   </DashboardCard>
 
-  <!-- Todos. Claimed is called out separately: it means an agent says it is
-       done and only the user can confirm that, which is a thing to act on. -->
-  <DashboardCard title={t("project.todos")} badge={openTodos.length || null}>
+  <!-- Todos. The list itself, not a summary of it: this card used to be six
+       truncated titles with an input under them, which is the right shape only
+       while the docked column is one click away. The info-box experiment takes
+       that column away, and then this is the entire todo surface — so it draws
+       the same cards the panel does, with the same tick, confirm, edit, drag
+       and delete on every one. Claimed is still called out separately: it means
+       an agent says it is done and only the user can confirm that. -->
+  <DashboardCard title={t("project.todos")} badge={openTodos.length || null} flush>
     {#snippet icon()}<ListTodo class="size-3.5" />{/snippet}
     {#snippet lead()}
       {#if claimedTodos.length > 0}
@@ -228,48 +236,47 @@
         </span>
       {/if}
     {/snippet}
-    {#if openTodos.length === 0}
-      <p class="text-sm text-muted-foreground">{t("project.noTodos")}</p>
-    {:else}
-      <ul class="flex flex-col gap-1">
-        {#each openTodos.slice(0, 6) as todo (todo.id)}
-          <li class="flex items-start gap-1.5 text-sm text-foreground/85">
-            <span
-              class="mt-1.5 size-1 shrink-0 rounded-full"
-              style:background-color={todo.state === "claimed"
-                ? "var(--color-warning)"
-                : "var(--color-muted-foreground, currentColor)"}
-            ></span>
-            <!-- The title alone: the card's description is a paragraph, and
-                 this is a six-line summary, not the panel. -->
-            <span class="min-w-0 flex-1 truncate" title={todo.title}>{todo.title}</span>
-          </li>
-        {/each}
-      </ul>
-      {#if openTodos.length > 6}
-        <p class="mt-1 text-xs text-muted-foreground">
-          {t("project.andMore", { count: openTodos.length - 6 })}
-        </p>
-      {/if}
-    {/if}
-    <!-- Creation lives on the card either way: an empty list is exactly where
-         the first todo gets written. -->
-    <form
-      class="mt-2 flex items-center gap-1.5 border-t border-border pt-2"
-      onsubmit={(e) => {
-        e.preventDefault();
-        void addTodo();
-      }}
-    >
-      <Plus class="size-3.5 shrink-0 text-muted-foreground/70" />
-      <input
-        type="text"
-        bind:value={todoDraft}
-        placeholder={t("project.addTodo")}
-        aria-label={t("project.addTodo")}
-        class="min-w-0 flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
+    {#snippet actions()}
+      <button
+        type="button"
+        class="rounded p-1 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:opacity-40"
+        onclick={() => todos.clearDone(project.id)}
+        disabled={doneTodos.length === 0}
+        title={doneTodos.length === 0
+          ? t("todo.nothingDone")
+          : t("todo.clearDone", { count: doneTodos.length })}
+        aria-label={t("todo.clearDoneLabel")}
+      >
+        <Eraser class="size-3.5" />
+      </button>
+    {/snippet}
+    <div class="flex h-full min-h-0 flex-col">
+      <!-- Capped rather than free: the card sits in a grid row with two others,
+           and a project with forty todos would otherwise decide how tall every
+           card beside it is. -->
+      <TodoList
+        projectId={project.id}
+        class="max-h-80 min-h-0 flex-1 overflow-y-auto border-t border-border"
       />
-    </form>
+      <!-- Creation lives on the card either way: an empty list is exactly where
+           the first todo gets written. -->
+      <form
+        class="flex shrink-0 items-center gap-1.5 border-t border-border px-3.5 py-2"
+        onsubmit={(e) => {
+          e.preventDefault();
+          void addTodo();
+        }}
+      >
+        <Plus class="size-3.5 shrink-0 text-muted-foreground/70" />
+        <input
+          type="text"
+          bind:value={todoDraft}
+          placeholder={t("project.addTodo")}
+          aria-label={t("project.addTodo")}
+          class="min-w-0 flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
+        />
+      </form>
+    </div>
   </DashboardCard>
 
   <!-- What the agent did, turn by turn, and the way back out of one. Beside the

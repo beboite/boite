@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 /**
- * Who gets to push the toast stack down, now that the info box is one mount
- * per terminal rather than one per window.
+ * Who the toast stack attaches to, now that the info box can sit on any of
+ * the eight docks rather than only the top-right corner.
  *
  * Every group in the window keeps its boxes mounted and hides the ones nobody
  * is looking at with `visibility`, which lays them out anyway: they have a real
@@ -10,18 +10,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
  * writing a single shared number. No DOM here, only the arithmetic that
  * decides, so the element is whatever answers `getBoundingClientRect`.
  */
-import { toastAnchor, toastInset } from "./anchor.svelte";
+import { toastAnchor, toastInset, type ToastInsetParams } from "./anchor.svelte";
 
-type Rect = { top: number; right: number; width: number; height: number };
-
-// The measured `<main>`: 1000px window, work area ending 20px short of its
-// right edge and starting 100px down. A box in that corner therefore sits at
-// top 112 / right 968, one 0.75rem gutter inside it, exactly where the first
-// toast card would have gone.
-const ANCHOR_TOP = 100;
-const ANCHOR_RIGHT = 20;
-const CORNER_TOP = 112;
-const CORNER_RIGHT = 968;
+type Rect = { top: number; left: number; right: number; width: number; height: number };
 
 const observerCallbacks = new Set<() => void>();
 
@@ -44,10 +35,21 @@ function reflow() {
 function box(rect: Rect) {
   const live = { ...rect };
   const el = {
-    getBoundingClientRect: () => ({ ...live }),
+    getBoundingClientRect: () => ({
+      top: live.top,
+      left: live.left,
+      right: live.right,
+      bottom: live.top + live.height,
+      width: live.width,
+      height: live.height,
+    }),
   } as unknown as HTMLElement;
   return {
     el,
+    moveTo(next: Partial<Rect>) {
+      Object.assign(live, next);
+      reflow();
+    },
     resizeTo(height: number) {
       live.height = height;
       reflow();
@@ -55,14 +57,18 @@ function box(rect: Rect) {
   };
 }
 
-function cornerBox(height: number) {
-  return box({ top: CORNER_TOP, right: CORNER_RIGHT, width: 320, height });
-}
+const mounted: Array<{ destroy(): void; update(next: ToastInsetParams): void }> = [];
 
-const mounted: Array<{ destroy(): void }> = [];
-
-function mount(el: HTMLElement, standing = true) {
-  const handle = toastInset(el, standing);
+function mount(
+  el: HTMLElement,
+  params: Partial<ToastInsetParams> & { standing?: boolean } = {},
+) {
+  const handle = toastInset(el, {
+    standing: params.standing ?? true,
+    focused: params.focused ?? false,
+    stack: params.stack ?? "below",
+    align: params.align ?? "right",
+  });
   mounted.push(handle);
   return handle;
 }
@@ -71,7 +77,7 @@ beforeEach(() => {
   observerCallbacks.clear();
   (globalThis as { ResizeObserver?: unknown }).ResizeObserver = FakeResizeObserver;
   (globalThis as { window?: unknown }).window = { innerWidth: 1000 };
-  toastAnchor.set(ANCHOR_TOP, ANCHOR_RIGHT);
+  toastAnchor.set(100, 20);
 });
 
 afterEach(() => {
@@ -79,81 +85,82 @@ afterEach(() => {
   toastAnchor.clear();
 });
 
-describe("the toast corner and who is standing in it", () => {
-  it("drops the stack below a box that is in the corner", () => {
-    mount(cornerBox(84).el);
+describe("the toast stack and who it attaches to", () => {
+  it("attaches to a standing box anywhere in the work area", () => {
+    mount(box({ top: 200, left: 40, right: 360, width: 320, height: 84 }).el);
     expect(toastAnchor.inset).toBe(84);
-  });
-
-  it("ignores a box belonging to another pane of a split", () => {
-    // Same top, half a viewport to the left: the toasts land nowhere near it.
-    mount(box({ top: CORNER_TOP, right: 500, width: 320, height: 84 }).el);
-    expect(toastAnchor.inset).toBe(0);
-
-    // And the pane under a horizontal split, which is in the right column but
-    // far below where the stack starts.
-    mount(box({ top: 520, right: CORNER_RIGHT, width: 320, height: 84 }).el);
-    expect(toastAnchor.inset).toBe(0);
+    expect(toastAnchor.claim).toMatchObject({
+      top: 200,
+      left: 40,
+      height: 84,
+      stack: "below",
+      align: "right",
+    });
   });
 
   it("ignores a box under a view drawn over the terminals", () => {
-    // `display: none` measures zero everywhere, so nothing is in the corner.
-    mount(box({ top: 0, right: 0, width: 0, height: 0 }).el);
-    expect(toastAnchor.inset).toBe(0);
+    mount(box({ top: 0, left: 0, right: 0, width: 0, height: 0 }).el);
+    expect(toastAnchor.claim).toBeNull();
   });
 
-  it("does not let an offscreen group's box speak for the corner", () => {
-    const onscreen = cornerBox(84);
-    const offscreen = cornerBox(60);
-    mount(onscreen.el);
-    mount(offscreen.el);
+  it("does not let an offscreen group's box speak for the stack", () => {
+    const onscreen = box({ top: 112, left: 648, right: 968, width: 320, height: 84 });
+    const offscreen = box({ top: 112, left: 648, right: 968, width: 320, height: 60 });
+    mount(onscreen.el, { focused: true });
+    mount(offscreen.el, { standing: false });
     expect(toastAnchor.inset).toBe(84);
 
-    // The offscreen box resizing was what used to overwrite the whole thing.
     offscreen.resizeTo(40);
     expect(toastAnchor.inset).toBe(84);
   });
 
   it("takes no room for a box whose group nobody is looking at", () => {
-    // Hidden with `visibility`, so it is laid out in the same corner and
-    // measures a real height. The taller of the two used to set the inset,
-    // which is a stack sitting a row below the box it is meant to touch.
-    mount(cornerBox(84).el);
-    mount(cornerBox(160).el, false);
+    mount(box({ top: 112, left: 648, right: 968, width: 320, height: 84 }).el);
+    mount(box({ top: 112, left: 648, right: 968, width: 320, height: 160 }).el, {
+      standing: false,
+    });
     expect(toastAnchor.inset).toBe(84);
   });
 
-  it("hands the corner over when the group on screen changes", () => {
-    const wasOnScreen = mount(cornerBox(84).el);
-    const comingUp = mount(cornerBox(160).el, false);
-    wasOnScreen.update(false);
-    comingUp.update(true);
+  it("prefers the focused pane when several boxes are standing", () => {
+    mount(box({ top: 112, left: 40, right: 360, width: 320, height: 160 }).el);
+    mount(box({ top: 112, left: 648, right: 968, width: 320, height: 84 }).el, {
+      focused: true,
+    });
+    expect(toastAnchor.claim).toMatchObject({ left: 648, height: 84 });
+  });
+
+  it("hands the stack over when the group on screen changes", () => {
+    const wasOnScreen = mount(
+      box({ top: 112, left: 648, right: 968, width: 320, height: 84 }).el,
+    );
+    const comingUp = mount(
+      box({ top: 112, left: 648, right: 968, width: 320, height: 160 }).el,
+      { standing: false },
+    );
+    wasOnScreen.update({ standing: false, stack: "below", align: "right" });
+    comingUp.update({ standing: true, stack: "below", align: "right" });
     expect(toastAnchor.inset).toBe(160);
   });
 
-  it("keeps the inset when one of several boxes unmounts", () => {
-    const staying = cornerBox(84);
-    const closing = cornerBox(60);
+  it("keeps the claim when one of several boxes unmounts", () => {
+    const staying = box({ top: 112, left: 648, right: 968, width: 320, height: 84 });
+    const closing = box({ top: 112, left: 648, right: 968, width: 320, height: 60 });
     mount(staying.el);
     const closingHandle = mount(closing.el);
 
-    // Closing a pane, or narrowing it past the width the box needs. The box
-    // left standing never resized, so nothing would have restored an inset
-    // zeroed here and the stack would have sat on it for good.
     closingHandle.destroy();
     expect(toastAnchor.inset).toBe(84);
   });
 
-  it("gives the corner back once the last box is gone", () => {
-    const only = mount(cornerBox(84).el);
+  it("gives the stack back once the last box is gone", () => {
+    const only = mount(box({ top: 112, left: 648, right: 968, width: 320, height: 84 }).el);
     only.destroy();
-    expect(toastAnchor.inset).toBe(0);
+    expect(toastAnchor.claim).toBeNull();
   });
 
   it("follows the box as its log unfolds", () => {
-    // The whole card is measured, not the folded rows: the log expands into
-    // the room the stack was pushed into and draws under it.
-    const card = cornerBox(84);
+    const card = box({ top: 112, left: 648, right: 968, width: 320, height: 84 });
     mount(card.el);
     card.resizeTo(268);
     expect(toastAnchor.inset).toBe(268);
@@ -161,17 +168,18 @@ describe("the toast corner and who is standing in it", () => {
     expect(toastAnchor.inset).toBe(84);
   });
 
-  it("re-asks every box when the work area itself moves", () => {
-    const wasInTheCorner = cornerBox(84);
-    // Where the corner lands once a panel is docked beside the terminals.
-    const takesOver = box({ top: CORNER_TOP, right: 668, width: 320, height: 120 });
-    mount(wasInTheCorner.el);
-    mount(takesOver.el);
-    expect(toastAnchor.inset).toBe(84);
+  it("stacks above a box docked on a bottom edge", () => {
+    mount(box({ top: 500, left: 648, right: 968, width: 320, height: 84 }).el, {
+      stack: "above",
+      align: "right",
+    });
+    expect(toastAnchor.claim).toMatchObject({ stack: "above", align: "right", top: 500 });
+  });
 
-    // Nothing resized, so no ResizeObserver fires: the anchor moving is the
-    // only thing that can tell these two the answer has changed hands.
-    toastAnchor.set(ANCHOR_TOP, 320);
-    expect(toastAnchor.inset).toBe(120);
+  it("follows a drag that only moved the box", () => {
+    const card = box({ top: 112, left: 648, right: 968, width: 320, height: 84 });
+    mount(card.el, { align: "left" });
+    card.moveTo({ top: 300, left: 40, right: 360 });
+    expect(toastAnchor.claim).toMatchObject({ top: 300, left: 40, align: "left" });
   });
 });

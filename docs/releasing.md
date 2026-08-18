@@ -17,9 +17,7 @@ Bump the version in the eight places that carry it:
 Commit, then tag `vX.Y.Z` and push the tag. The `verify` job checks all of them
 against each other and against the tag before a single runner starts building.
 It globs the Cargo manifests rather than listing them, so a crate added to the
-workspace is covered the day it lands. That is the fix for what happened here:
-the list was written when there were three crates, two more were added, and
-neither this file nor the job noticed.
+workspace is covered the day it lands.
 
 ## Signing
 
@@ -30,15 +28,13 @@ push a tag can ship a signed release. **Never sign locally.**
 
 That keypair is permanent from 1.0.0 on, and there is one for the whole project
 rather than one per maintainer: the public key is compiled into every binary in
-the wild, so a second key would orphan every existing install. Replacing it was
-free only while no release existed. GitHub secrets cannot be read back and there
-is no revocation, so losing the private key ends updates forever and leaking it
-cannot be undone. An offline copy is held outside GitHub.
+the wild, so a second key would orphan every existing install. There is no
+revocation and GitHub secrets cannot be read back, so losing the private key
+ends updates forever. An offline copy is held outside GitHub.
 
 A `prune` job removes the `.sig` assets once every platform has uploaded. They
-are not the signatures the updater checks: `latest.json` carries each one inline
-and is the only file it fetches, so the uploads were duplicates on the release
-page.
+are duplicates: `latest.json` carries each signature inline and is the only file
+the updater fetches.
 
 ## Sidecar
 

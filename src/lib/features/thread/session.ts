@@ -168,9 +168,9 @@ export async function releaseClaudeSession(
  * resumed there.
  *
  * Two callers, one rule: a thread that changes project, and a thread restored
- * into a worktree that is not the one it was closed in. Claude and pi look a
- * session up under the directory the CLI ran in, so the transcript has to be
- * where the agent will be.
+ * into a worktree that is not the one it was closed in. Claude, grok and pi
+ * look a session up under the directory the CLI ran in, so the transcript has
+ * to be where the agent will be.
  *
  * Best effort on purpose, but a `false` here has to be acted on rather than
  * logged. Relaunching with `--resume` pointed at a transcript that is not in
@@ -245,6 +245,7 @@ export async function buildResumeArgsAsync(thread: Thread, cwd: string): Promise
     key,
     settings.state.agentTodoAccess,
     workspace.pathOriginResolver?.(cwd) ?? "local",
+    { cwd, worktree: !!thread.worktreePath },
   );
   argv = withMcpArgs(argv, mcp);
   argv = withPendingPrompt(thread, key, argv);
