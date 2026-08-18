@@ -350,6 +350,13 @@ export function resumeArgv(input: ResumeInput): {
  * (`pi --name "CI audit" -p "…"`), and nothing in its argument list is
  * variadic, so the positional cannot be swallowed by the flag before it.
  *
+ * `agy [flags]` takes one behind `-i` (`--prompt-interactive`: run an initial
+ * prompt interactively and continue the session). Not a positional, so the
+ * ambiguity that rules the others out does not arise: nothing in `agy --help`
+ * is variadic, and the value belongs to the flag that precedes it. Verified
+ * against agy 1.1.13. Without this an antigravity thread opens bare and waits
+ * for a human to paste the briefing it was spawned with.
+ *
  * Nothing else is listed. A guess here does not misfire quietly — it costs the
  * thread its whole launch — and the cost of being wrong the other way is one
  * agent that comes back up without being told why its folder changed.
@@ -358,6 +365,7 @@ function promptSeparator(key: IconKey, agent: string[]): string[] | null {
   if (key === "claude") return ["--"];
   if (key === "codex") return agent.includes("resume") ? null : [];
   if (key === "pi") return [];
+  if (key === "antigravity") return ["-i"];
   return null;
 }
 
@@ -373,6 +381,33 @@ export function takesOpeningPrompt(key: IconKey): boolean {
   // A fresh thread never carries a resume, which is the only thing that makes
   // the positional ambiguous.
   return promptSeparator(key, []) !== null;
+}
+
+const UNATTENDED_FLAG: Partial<Record<NonNullable<IconKey>, string>> = {
+  antigravity: "--dangerously-skip-permissions",
+};
+
+/**
+ * Flags a thread needs because nobody will be there to answer it.
+ *
+ * agy asks before every tool call, and a thread an agent spawned has nobody
+ * at the keyboard: it stops on the first confirmation and looks hung. Written
+ * onto the argv the row stores, so a relaunch keeps them.
+ *
+ * Only `thread_spawn` calls this. Putting the flag on the preset would skip
+ * confirms for a human click, and would miss the shortcuts already seeded as
+ * bare `agy` (resolveLaunch reads those first).
+ */
+export function withUnattendedArgs(
+  cmd: string,
+  args: readonly string[],
+  key: IconKey,
+): string[] {
+  const flag = key ? UNATTENDED_FLAG[key] : undefined;
+  if (!flag) return [...args];
+  const argv = splitArgv(cmd, args);
+  if (argv.agent.includes(flag)) return joinArgv(argv);
+  return joinArgv(withAgent(argv, [flag, ...argv.agent]));
 }
 
 /**

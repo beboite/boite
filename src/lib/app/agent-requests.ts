@@ -28,7 +28,7 @@ import { CLI_PRESETS } from "$lib/features/settings/cliPresets";
 import { resolveIconKey } from "$lib/shared/icons/detect";
 import { createProject } from "$lib/features/project/api";
 import { moveThreadToProject } from "$lib/features/thread/move";
-import { takesOpeningPrompt } from "$lib/features/thread/session";
+import { takesOpeningPrompt, withUnattendedArgs } from "$lib/features/thread/session";
 import { launchAgent } from "$lib/features/thread/api";
 import { anchorPaneId, anchorProjectId, openPane } from "$lib/features/panes/open";
 import { leafNodesOf, paneStore } from "$lib/features/panes/store.svelte";
@@ -293,7 +293,8 @@ async function handleSpawn(req: SpawnRequest) {
   // Not focused: the user is reading the thread that asked for this one, very
   // often in another project, and a spawn they never clicked used to take the
   // screen away mid-sentence. The toast is what says it happened.
-  const thread = await launchAgent(project, launch, { focus: false });
+  const args = withUnattendedArgs(launch.cmd, launch.args, launch.iconKey);
+  const thread = await launchAgent(project, { ...launch, args }, { focus: false });
   if (!thread) return;
   if (prompt) app.setPendingPrompt(thread.id, prompt);
   notifications.success(
