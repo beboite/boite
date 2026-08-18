@@ -602,6 +602,22 @@ export interface CodexSwitcherApi {
   version(): Promise<string | null>;
 }
 
+/**
+ * `fast-mcp-ssh`, the MCP server the agents reach their machines through:
+ * https://github.com/klNuno/fast-mcp-ssh
+ *
+ * Only its version, because that is the only question the plugins panel has.
+ * Whatever an agent does with the server afterwards is between the two of them,
+ * and its hosts file is never read here.
+ */
+export interface FastMcpSshApi {
+  /**
+   * What `fast-mcp-ssh --version` reports on the machine the agents run on, or
+   * null when there is none. Never rejects: absence is one of the two answers.
+   */
+  version(): Promise<string | null>;
+}
+
 export interface ScopeApi {
   registerProjectRoots(roots: string[]): Promise<void>;
   // The server's browsable base dir for adding projects via the web folder
@@ -1068,6 +1084,7 @@ export interface Backend {
   readonly shell: ShellApi;
   readonly fastpick: FastpickApi;
   readonly codexSwitcher: CodexSwitcherApi;
+  readonly fastMcpSsh: FastMcpSshApi;
   readonly scope: ScopeApi;
   readonly session: SessionApi;
   readonly log: LogApi;

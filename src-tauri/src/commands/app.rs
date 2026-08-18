@@ -252,3 +252,10 @@ pub async fn codex_switcher_activate(
 pub async fn codex_switcher_version(scope: State<'_, ProjectRoots>) -> Result<Value, String> {
     on_bus(scope.inner(), Sessions::CodexSwitcherVersion.into()).await
 }
+
+// Null means fast-mcp-ssh is not on this machine, which the plugins panel reads
+// as "offer the install" rather than as a failure.
+#[tauri::command]
+pub async fn fast_mcp_ssh_version(scope: State<'_, ProjectRoots>) -> Result<Value, String> {
+    on_bus(scope.inner(), Sessions::FastMcpSshVersion.into()).await
+}

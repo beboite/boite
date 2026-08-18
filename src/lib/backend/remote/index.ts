@@ -13,6 +13,7 @@ import type {
   ExplorerApi,
   CodexSwitcherApi,
   CodexSwitcherList,
+  FastMcpSshApi,
   FastpickApi,
   FastpickListing,
   FolderState,
@@ -87,6 +88,7 @@ export class RemoteBackend implements Backend {
   readonly shell: ShellApi;
   readonly fastpick: FastpickApi;
   readonly codexSwitcher: CodexSwitcherApi;
+  readonly fastMcpSsh: FastMcpSshApi;
   readonly scope: ScopeApi;
   readonly session: SessionApi;
   readonly search: SearchApi;
@@ -433,6 +435,11 @@ export class RemoteBackend implements Backend {
       activate: (accountId) => rpc("codexSwitcher.activate", { accountId }),
       version: () =>
         rpc("codexSwitcher.version", {}).then((r) => (r.version as string | null) ?? null),
+    };
+
+    this.fastMcpSsh = {
+      version: () =>
+        rpc("fastMcpSsh.version", {}).then((r) => (r.version as string | null) ?? null),
     };
 
     // The server derives its filesystem trust boundary from persisted projects;

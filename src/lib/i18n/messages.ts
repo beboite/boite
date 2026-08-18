@@ -606,6 +606,8 @@ export const EN_MESSAGES = {
   "fastpick.enableDesc": "Hidden anyway on a machine without fastpick.",
   "plugin.codexTitle": "codex-account-switcher",
   "plugin.codexDesc": "Saves and restores Codex logins. Install, update and switch from this panel. After a switch, Boite reloads the Codex threads.",
+  "plugin.fastMcpSshTitle": "fast-mcp-ssh",
+  "plugin.fastMcpSshDesc": "An MCP server giving an agent SSH, SFTP and persistent shells on your machines. Boite installs the binary; each agent declares it in its own MCP config.",
   "plugin.notInstalled": "Not on this machine",
   "plugin.installed": "Installed",
   "plugin.recheck": "Check again",

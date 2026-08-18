@@ -603,6 +603,8 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "fastpick.enableDesc": "Masqué de toute façon sur une machine sans fastpick.",
   "plugin.codexTitle": "codex-account-switcher",
   "plugin.codexDesc": "Sauve et restaure les logins Codex. Installer, mettre à jour et changer de compte depuis ce panneau. Après un changement, Boite relance les threads Codex.",
+  "plugin.fastMcpSshTitle": "fast-mcp-ssh",
+  "plugin.fastMcpSshDesc": "Un serveur MCP qui donne à un agent SSH, SFTP et des shells persistants sur vos machines. Boite installe le binaire ; chaque agent le déclare dans sa propre config MCP.",
   "plugin.notInstalled": "Absent de cette machine",
   "plugin.installed": "Installé",
   "plugin.recheck": "Revérifier",

@@ -9,6 +9,7 @@ import type {
   EditorApi,
   ExplorerApi,
   CodexSwitcherApi,
+  FastMcpSshApi,
   CodexSwitcherList,
   FastpickApi,
   FastpickListing,
@@ -177,6 +178,10 @@ export const tauriCodexSwitcher: CodexSwitcherApi = {
   save: () => invoke("codex_switcher_save"),
   activate: (accountId) => invoke("codex_switcher_activate", { accountId }),
   version: () => invoke<string | null>("codex_switcher_version"),
+};
+
+export const tauriFastMcpSsh: FastMcpSshApi = {
+  version: () => invoke<string | null>("fast_mcp_ssh_version"),
 };
 
 export const tauriScope: ScopeApi = {

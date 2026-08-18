@@ -470,6 +470,7 @@ pub fn run() {
             commands::app::codex_switcher_save,
             commands::app::codex_switcher_activate,
             commands::app::codex_switcher_version,
+            commands::app::fast_mcp_ssh_version,
             commands::records::records_project_list,
             commands::records::records_project_create,
             commands::records::records_project_archive,
