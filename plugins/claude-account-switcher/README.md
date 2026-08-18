@@ -3,9 +3,16 @@
 Several logins for Claude Code and for Codex, saved on this machine, and one
 command to move between them when one runs out of quota.
 
-It is vendored here rather than fetched: Boite writes these files into
-`~/.claude-tools` and runs `install.ps1` there. Nothing is downloaded, and there
-is no third-party repository in the trust path.
+It is vendored here rather than fetched, and it is a Rust binary: the crate is
+`crates/claude-cc`, built by the same `cargo build` that builds Boite, and
+`install.ps1` copies what came out of that build into `~/.claude-tools`. Nothing
+is downloaded, no binary is committed, and there is no third-party repository in
+the trust path.
+
+A command that a status line runs on every repaint, and a hook that runs at every
+session start, is a process start the user waits for: the binary answers in a few
+milliseconds where the PowerShell it replaces took most of a second to load its
+own runtime first.
 
 ## What it does
 
@@ -43,8 +50,8 @@ no daemon; between two sessions nothing of this is running.
 
 ## The status line
 
-`install.ps1 -StatusLine` points Claude Code's status line at
-`claude-cc-statusline.js`. It draws the account in use and its two windows, how
+`install.ps1 -StatusLine` points Claude Code's status line at `claude-cc
+statusline`, which reads the payload on stdin and prints one line. It draws the account in use and its two windows, how
 many saved Claude logins still have room, how many Codex logins do — Codex has
 no status line of its own, and both pools are switched from here — and, when the
 `SessionStart` hook is in place, what the switch is armed for:
@@ -63,7 +70,7 @@ Inside Claude Code the same things are slash commands: `/account-add-claude`,
 
 | Path | What |
 | --- | --- |
-| `~/.claude-tools/` | the scripts, and `.version` |
+| `~/.claude-tools/` | the binary, and `.version` |
 | `~/.claude-cc-accounts/` | saved Claude Code logins |
 | `~/.codex-cc-accounts/` | saved Codex logins |
 | `~/.claude/commands/account-*.md` | the slash commands |
@@ -86,18 +93,24 @@ read. `list`, `switch` and `doctor` report an entry that does not verify;
 
 ## Requirements
 
-PowerShell 7 (`pwsh`) on Windows, macOS or Linux. The status line additionally
-wants `node` on the PATH; it is off unless `install.ps1 -StatusLine` is passed.
+Nothing at run time: the binary carries what it needs, and it talks to DPAPI, to
+the Keychain or to libsecret through whatever the platform already has.
+PowerShell 7 (`pwsh`) is needed to run `install.ps1` and `uninstall.ps1`, and a
+Rust toolchain to build the crate.
 
 ## Layout
 
 ```
 install.ps1 / uninstall.ps1     put it down, take it back
-src/cc-providers.ps1            what each CLI keeps on disk
-src/cc-pool.ps1                 the trust stamps
-src/claude-cc-common.ps1        crypto, snapshots, usage
-src/claude-cc.ps1               the entry point, and `-Provider all`
-src/claude-code-*.ps1           one file per command
-src/claude-cc-statusline.js     the Claude Code status line
 src/commands/*.md               the slash commands
+crates/claude-cc/src/main.rs    the entry point, and `-Provider all`
+crates/claude-cc/src/provider.rs   what each CLI keeps on disk
+crates/claude-cc/src/pool.rs    the trust stamps
+crates/claude-cc/src/seal.rs    DPAPI, Keychain, libsecret
+crates/claude-cc/src/usage.rs   the quota windows and their cache
+crates/claude-cc/src/live.rs    the credentials the CLI is holding
+crates/claude-cc/src/cmd/       one file per command, status line included
 ```
+
+The crate lives in the workspace at the repository root rather than under
+`plugins/`, because that is where `cargo build` looks for it.

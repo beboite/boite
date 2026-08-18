@@ -3,6 +3,10 @@
 [CmdletBinding()]
 param(
     [string]$ToolsDir = (Join-Path $HOME '.claude-tools'),
+    # Leave the shell profile alone. The profile is not under $ToolsDir and not
+    # under CLAUDE_CONFIG_DIR, so it is the one thing a run against a sandbox
+    # would still reach out and change.
+    [switch]$NoProfileEdit,
     [switch]$Yes
 )
 
@@ -33,7 +37,7 @@ if (Test-Path -LiteralPath $commands) {
 # The function is one block between a marker and the line under it, so only
 # those two lines go and anything else in the profile stays.
 $profilePath = $PROFILE.CurrentUserAllHosts
-if (Test-Path -LiteralPath $profilePath) {
+if (-not $NoProfileEdit -and (Test-Path -LiteralPath $profilePath)) {
     $lines = Get-Content -LiteralPath $profilePath
     $kept  = @()
     for ($i = 0; $i -lt $lines.Count; $i++) {
@@ -56,7 +60,9 @@ if (Test-Path -LiteralPath $settingsPath) {
         $touched = $false
 
         $line = $settings.PSObject.Properties['statusLine']
-        if ($line -and "$($line.Value.command)" -like '*claude-cc-statusline*') {
+        # 5.x runs `claude-cc statusline`; 4.x ran a node script called
+        # claude-cc-statusline.js. Both spellings match this.
+        if ($line -and "$($line.Value.command)" -like '*claude-cc*statusline*') {
             $settings.PSObject.Properties.Remove('statusLine')
             Say 'Removed the status line from settings.json' Green
             $touched = $true
@@ -65,8 +71,9 @@ if (Test-Path -LiteralPath $settingsPath) {
         $hooks = $settings.PSObject.Properties['hooks']
         if ($hooks -and $hooks.Value.PSObject.Properties['SessionStart']) {
             $all  = @($hooks.Value.SessionStart)
-            # Both spellings: 4.x goes through the dispatcher, 3.x called the one
-            # script. Whatever else the user put there is left where it is.
+            # Every spelling this toolkit ever wrote: the binary, the 4.x
+            # dispatcher, the 3.x script. Whatever else the user put there is
+            # left where it is.
             $kept = @($all | Where-Object {
                 -not (@($_.hooks) | Where-Object { "$($_.command)" -like '*claude-c*auto*' })
             })

@@ -1,12 +1,12 @@
 ---
 description: The saved Codex accounts and their quota
-allowed-tools: Bash(pwsh:*)
+allowed-tools: Bash(~/.claude-tools/claude-cc:*)
 ---
 
 Run:
 
 ```
-pwsh -NoProfile -File "$HOME/.claude-tools/claude-cc.ps1" list -Provider codex
+~/.claude-tools/claude-cc list -Provider codex
 ```
 
 Pass `-Refresh` instead if the user wants fresh numbers from the API rather than the cache.

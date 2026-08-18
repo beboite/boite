@@ -1,12 +1,12 @@
 ---
 description: Run the quota check for every provider at once
-allowed-tools: Bash(pwsh:*)
+allowed-tools: Bash(~/.claude-tools/claude-cc:*)
 ---
 
 Run:
 
 ```
-pwsh -NoProfile -File "$HOME/.claude-tools/claude-cc.ps1" auto -Provider all
+~/.claude-tools/claude-cc auto -Provider all
 ```
 
 One block per provider. The exit code is the loudest of them, so read the blocks rather than the code.

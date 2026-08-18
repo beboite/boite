@@ -1,12 +1,12 @@
 ---
 description: Check the switcher install and the saved accounts
-allowed-tools: Bash(pwsh:*)
+allowed-tools: Bash(~/.claude-tools/claude-cc:*)
 ---
 
 Run:
 
 ```
-pwsh -NoProfile -File "$HOME/.claude-tools/claude-cc.ps1" doctor -Provider all
+~/.claude-tools/claude-cc doctor -Provider all
 ```
 
 Report the `!` and `~` lines. Plain-text snapshots are fixed with `doctor -Provider <id> -Protect`, unstamped ones with `-Adopt`.

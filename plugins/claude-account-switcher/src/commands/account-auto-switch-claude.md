@@ -1,12 +1,12 @@
 ---
 description: Switch Claude Code accounts only if this one is out of quota
-allowed-tools: Bash(pwsh:*)
+allowed-tools: Bash(~/.claude-tools/claude-cc:*)
 ---
 
 Run:
 
 ```
-pwsh -NoProfile -File "$HOME/.claude-tools/claude-cc.ps1" auto -Provider claude
+~/.claude-tools/claude-cc auto -Provider claude
 ```
 
 Exit 0 means there was room and nothing changed, 10 means it switched, 20 means every saved account is capped, 30 means fewer than two accounts are saved.

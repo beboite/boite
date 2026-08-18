@@ -1,12 +1,12 @@
 ---
 description: Forget a saved Claude Code account
-allowed-tools: Bash(pwsh:*)
+allowed-tools: Bash(~/.claude-tools/claude-cc:*)
 ---
 
 Run:
 
 ```
-pwsh -NoProfile -File "$HOME/.claude-tools/claude-cc.ps1" remove -Provider claude -Email <email> -Yes
+~/.claude-tools/claude-cc remove -Provider claude -Email <email> -Yes
 ```
 
 Confirm with the user which account before running this: it is not reversible without logging in again. The live session is untouched.

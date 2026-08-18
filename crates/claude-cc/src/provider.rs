@@ -1,0 +1,204 @@
+//! What each supported CLI keeps on disk, and how to name it.
+//!
+//! Every command asks this module where to look; nothing else knows the paths.
+
+use std::path::{Path, PathBuf};
+
+pub const PROVIDER_IDS: [&str; 2] = ["claude", "codex"];
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ProviderId {
+    Claude,
+    Codex,
+}
+
+impl ProviderId {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ProviderId::Claude => "claude",
+            ProviderId::Codex => "codex",
+        }
+    }
+}
+
+pub struct Provider {
+    pub id: ProviderId,
+    pub label: &'static str,
+    pub cli: &'static str,
+    pub store: PathBuf,
+    pub cred_candidates: Vec<PathBuf>,
+    pub config_candidates: Vec<PathBuf>,
+    pub cred_label: &'static str,
+    /// macOS keeps the Claude Code credentials in the Keychain when the file is
+    /// absent, so both places have to be tried.
+    pub uses_keychain: bool,
+    pub keychain_service: Option<&'static str>,
+}
+
+pub fn home() -> PathBuf {
+    dirs::home_dir().unwrap_or_else(|| PathBuf::from("."))
+}
+
+pub fn claude_config_dir() -> PathBuf {
+    match std::env::var_os("CLAUDE_CONFIG_DIR") {
+        Some(dir) if !dir.is_empty() => PathBuf::from(dir),
+        _ => home().join(".claude"),
+    }
+}
+
+/// `all` is not a provider: it is a request to run the command once per
+/// provider, and it has to be caught before this module is asked to resolve it.
+pub fn is_all(id: &str) -> bool {
+    matches!(
+        id.trim().to_ascii_lowercase().as_str(),
+        "all" | "every" | "*"
+    )
+}
+
+pub fn resolve(id: &str) -> Result<ProviderId, String> {
+    let key = id.trim().to_ascii_lowercase();
+    if key.is_empty() {
+        return Ok(ProviderId::Claude);
+    }
+    match key.as_str() {
+        "claude" | "claude-code" | "claudecode" | "cc" | "anthropic" => Ok(ProviderId::Claude),
+        "codex" | "openai" | "chatgpt" | "gpt" => Ok(ProviderId::Codex),
+        _ => Err(format!(
+            "Unknown provider '{id}'. Known providers: {}.",
+            PROVIDER_IDS.join(", ")
+        )),
+    }
+}
+
+/// The most recently written of several candidates, or none when they are all
+/// absent. Which file is current is a question of when it was last written.
+pub fn newest(paths: &[PathBuf]) -> Option<PathBuf> {
+    paths
+        .iter()
+        .filter(|p| p.exists())
+        .max_by_key(|p| {
+            std::fs::metadata(p)
+                .and_then(|m| m.modified())
+                .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
+        })
+        .cloned()
+}
+
+pub fn spec(id: ProviderId) -> Provider {
+    match id {
+        ProviderId::Codex => {
+            let dir = match std::env::var_os("CODEX_HOME") {
+                Some(d) if !d.is_empty() => PathBuf::from(d),
+                _ => home().join(".codex"),
+            };
+            Provider {
+                id,
+                label: "Codex",
+                cli: "codex",
+                store: store_dir("CODEX_CC_ACCOUNTS", ".codex-cc-accounts"),
+                cred_candidates: vec![dir.join("auth.json")],
+                config_candidates: vec![dir.join("auth.json")],
+                cred_label: "~/.codex/auth.json",
+                uses_keychain: false,
+                keychain_service: None,
+            }
+        }
+        ProviderId::Claude => {
+            let dir = claude_config_dir();
+            Provider {
+                id,
+                label: "Claude Code",
+                cli: "claude",
+                store: store_dir("CLAUDE_CC_ACCOUNTS", ".claude-cc-accounts"),
+                cred_candidates: vec![dir.join(".credentials.json")],
+                // The email lives beside the tokens rather than with them.
+                config_candidates: vec![home().join(".claude.json"), dir.join(".claude.json")],
+                cred_label: "~/.claude/.credentials.json",
+                uses_keychain: cfg!(target_os = "macos"),
+                keychain_service: Some("Claude Code-credentials"),
+            }
+        }
+    }
+}
+
+fn store_dir(env: &str, default: &str) -> PathBuf {
+    match std::env::var_os(env) {
+        Some(d) if !d.is_empty() => PathBuf::from(d),
+        _ => home().join(default),
+    }
+}
+
+impl Provider {
+    pub fn cred_file(&self) -> PathBuf {
+        newest(&self.cred_candidates).unwrap_or_else(|| self.cred_candidates[0].clone())
+    }
+
+    pub fn config_file(&self) -> PathBuf {
+        newest(&self.config_candidates).unwrap_or_else(|| self.config_candidates[0].clone())
+    }
+
+    pub fn is_codex(&self) -> bool {
+        self.id == ProviderId::Codex
+    }
+
+    pub fn backup_dir(&self) -> PathBuf {
+        self.store.join(".backups")
+    }
+
+    /// One saved login is one file, named after the account. Anything that could
+    /// walk out of the pool directory is replaced rather than escaped.
+    pub fn snapshot_path(&self, email: &str) -> PathBuf {
+        let safe: String = email
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '@' | '-') {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect();
+        self.store.join(format!("{safe}.json"))
+    }
+}
+
+/// Owner-only, on every platform: everything written here is a bearer token.
+pub fn protect_file(path: &Path) {
+    if !path.exists() {
+        return;
+    }
+    restrict(path, false);
+}
+
+pub fn protect_dir(path: &Path) {
+    if !path.exists() {
+        return;
+    }
+    restrict(path, true);
+}
+
+#[cfg(windows)]
+fn restrict(path: &Path, dir: bool) {
+    let user = match std::env::var("USERNAME") {
+        Ok(u) if !u.is_empty() => u,
+        _ => return,
+    };
+    let grant = if dir {
+        format!("{user}:(OI)(CI)F")
+    } else {
+        format!("{user}:(F)")
+    };
+    let _ = std::process::Command::new("icacls")
+        .arg(path)
+        .args(["/inheritance:r", "/grant:r", &grant])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+}
+
+#[cfg(not(windows))]
+fn restrict(path: &Path, dir: bool) {
+    use std::os::unix::fs::PermissionsExt;
+    let mode = if dir { 0o700 } else { 0o600 };
+    let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode));
+}

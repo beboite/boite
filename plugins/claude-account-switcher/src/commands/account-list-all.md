@@ -1,12 +1,12 @@
 ---
 description: Every saved account, across all providers
-allowed-tools: Bash(pwsh:*)
+allowed-tools: Bash(~/.claude-tools/claude-cc:*)
 ---
 
 Run:
 
 ```
-pwsh -NoProfile -File "$HOME/.claude-tools/claude-cc.ps1" list -Provider all
+~/.claude-tools/claude-cc list -Provider all
 ```
 
 One block per provider. Summarise how many accounts each has and which one is in use.
