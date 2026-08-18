@@ -2,6 +2,7 @@
   import { app } from "$lib/app/store.svelte";
   import { visibleStatus } from "$lib/domain/thread-status";
   import { isSettled } from "$lib/domain/thread-settle";
+  import { isDelegated } from "$lib/domain/delegation";
   import { closeThreadWithConfirm } from "$lib/features/thread/api";
   import { t } from "$lib/i18n/index.svelte";
   import type { Thread, ThreadStatus } from "$lib/types";
@@ -10,6 +11,7 @@
   import { threadIconColor } from "$lib/features/fastpick/threadAccent";
   import MobileSheet from "./MobileSheet.svelte";
   import X from "@lucide/svelte/icons/x";
+  import Unlink2 from "@lucide/svelte/icons/unlink-2";
 
   type Props = { open: boolean; onClose: () => void };
   let { open, onClose }: Props = $props();
@@ -73,6 +75,16 @@
           <!-- 44px, and held clear of the full-width open target it used to sit
                flush against: this button kills a running process, so a mistap
                on the row must not reach it. -->
+          {#if isDelegated(thread)}
+            <button
+              type="button"
+              class="flex size-11 shrink-0 items-center justify-center rounded-lg text-muted-foreground/70 transition hover:bg-accent hover:text-foreground active:bg-accent/70"
+              onclick={() => app.detachDelegation(thread.id)}
+              aria-label={t("sidebar.detachDelegation")}
+            >
+              <Unlink2 class="size-4" />
+            </button>
+          {/if}
           <button
             type="button"
             class="ml-2 flex size-11 shrink-0 items-center justify-center rounded-lg border-l border-border/60 text-muted-foreground/70 transition hover:bg-danger/20 hover:text-danger active:bg-danger/30"

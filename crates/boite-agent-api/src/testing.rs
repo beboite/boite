@@ -94,6 +94,9 @@ impl Fake {
                 keep_awake: false,
                 worktree_path: None,
                 settled_at: None,
+                parent_thread_id: None,
+                delegation_mode: None,
+                delegation_status: None,
             })
             .unwrap();
         self

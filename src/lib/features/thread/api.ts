@@ -64,6 +64,8 @@ function buildThread(
   label: string,
   iconKey: IconKey,
   iconColor: string | null = null,
+  parentThreadId?: string | null,
+  delegationMode?: 'normal' | 'delegation',
 ): Thread {
   return {
     id: uuid(),
@@ -81,6 +83,9 @@ function buildThread(
     createdAt: Date.now(),
     // A thread lives where its project lives (dynamic mode routing).
     origin: project.origin,
+    parentThreadId: parentThreadId ?? null,
+    delegationMode: delegationMode ?? 'normal',
+    delegationStatus: delegationMode === 'delegation' ? 'pending' : null,
   };
 }
 
@@ -399,7 +404,7 @@ function createThread(
   args: string[],
   labelPrefix: string,
   iconKey: IconKey,
-  opts: { fresh?: boolean; iconColor?: string | null; focus?: boolean } = {},
+  opts: { fresh?: boolean; iconColor?: string | null; focus?: boolean; parentThreadId?: string | null; delegationMode?: 'normal' | 'delegation' } = {},
 ): Thread {
   const count = nextLabelSuffix(project.id, labelPrefix);
   const thread = buildThread(
@@ -409,6 +414,8 @@ function createThread(
     `${labelPrefix} #${count}`,
     iconKey,
     opts.iconColor ?? null,
+    opts.parentThreadId,
+    opts.delegationMode,
   );
   if (opts.fresh) app.markFresh(thread.id);
   // Not awaited. The thread is in the store the moment this returns, which is
@@ -522,7 +529,7 @@ export async function launchAgent(
     iconKey: IconKey;
     iconColor?: string | null;
   },
-  opts: { focus?: boolean } = {},
+  opts: { focus?: boolean; parentThreadId?: string | null; delegationMode?: 'normal' | 'delegation' } = {},
 ): Promise<Thread | null> {
   return createThread(
     project,
@@ -534,6 +541,8 @@ export async function launchAgent(
       fresh: true,
       iconColor: launch.iconColor ?? null,
       focus: opts.focus ?? true,
+      parentThreadId: opts.parentThreadId,
+      delegationMode: opts.delegationMode,
     },
   );
 }
