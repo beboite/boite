@@ -60,7 +60,10 @@ describe("work activity", () => {
     for (let i = 0; i < 50; i++) m.noteWorkStarted("a", 1000 + i);
     expect(spy).not.toHaveBeenCalled();
     vi.advanceTimersByTime(10_000);
-    expect(spy).toHaveBeenCalledTimes(1);
+    // Two writes, one flush: the threads and the projects are two blobs under
+    // two keys, and the point of the debounce is that fifty stamps cost one
+    // pass rather than fifty.
+    expect(spy).toHaveBeenCalledTimes(2);
     expect(JSON.parse(map.get(KEY) as string)).toEqual({ a: 1049 });
   });
 
@@ -89,6 +92,57 @@ describe("work activity", () => {
     const m = await load();
     expect(m.workStartedSince("a")).toBeNull();
     expect(m.workStartedSince("b")).toBe(7);
+  });
+
+  it("remembers a project's work whatever happens to its threads", async () => {
+    installStorage();
+    const m = await load();
+    m.noteProjectWork("p", 1000);
+    expect(m.projectWorkSince("p")).toBe(1000);
+    expect(m.projectWorkSince("other")).toBeNull();
+    // Closing the thread that did the work is the case the ledger exists for:
+    // the project keeps its place instead of sinking down the list.
+    m.forgetWorkStarted("t");
+    expect(m.projectWorkSince("p")).toBe(1000);
+  });
+
+  it("never moves a project's stamp backwards", async () => {
+    installStorage();
+    const m = await load();
+    m.noteProjectWork("p", 5000);
+    m.noteProjectWork("p", 1000);
+    expect(m.projectWorkSince("p")).toBe(5000);
+  });
+
+  it("drops a project that was removed", async () => {
+    installStorage();
+    const m = await load();
+    m.noteProjectWork("p", 1000);
+    m.forgetProjectWork("p");
+    expect(m.projectWorkSince("p")).toBeNull();
+  });
+
+  it("spends a wake mark once, and only inside the grace", async () => {
+    installStorage();
+    const m = await load();
+    m.noteThreadWaking("a", 1000);
+    // The replay's `running`, which is not work.
+    expect(m.consumeWaking("a", 1500)).toBe(true);
+    // Whatever the agent does after that is.
+    expect(m.consumeWaking("a", 1600)).toBe(false);
+
+    // A thread that woke two minutes ago and only now reports running is
+    // reporting a turn, not a replay.
+    m.noteThreadWaking("b", 1000);
+    expect(m.consumeWaking("b", 1000 + 130_000)).toBe(false);
+  });
+
+  it("drops the wake mark when the user submits a line", async () => {
+    installStorage();
+    const m = await load();
+    m.noteThreadWaking("a", 1000);
+    m.clearWaking("a");
+    expect(m.consumeWaking("a", 1100)).toBe(false);
   });
 
   /** The order used to be about typing, and that blob answers a question

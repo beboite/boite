@@ -23,6 +23,7 @@ import { dropThreadCheckpoints, forgetThreadTurns } from "./checkpoints.svelte";
 import { samePromotion, type Promotion } from "./promote";
 import { carryTranscript, releaseClaudeSession } from "./session";
 import { cancelRelease, releaseAfterGrace } from "./worktree-grace";
+import { noteProjectWork } from "./work-activity.svelte";
 import type { IconKey, Project, Shortcut, Thread } from "$lib/types";
 import type { ShellOption } from "$lib/storage/platform.svelte";
 
@@ -418,6 +419,11 @@ function createThread(
     opts.delegationMode,
   );
   if (opts.fresh) app.markFresh(thread.id);
+  // Opening a thread here is the user starting work on this project, and it is
+  // the one bump that does not wait for an agent to pick anything up: a blank
+  // shell never reaches `running`, and a project the user just launched into
+  // belongs at the top of a recency order whatever runs in it.
+  noteProjectWork(thread.projectId);
   // Not awaited. The thread is in the store the moment this returns, which is
   // all the sidebar and the terminal need; waiting for the INSERT to come back
   // put an IPC round trip and a WAL commit between the click and the pane. A
