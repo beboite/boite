@@ -21,7 +21,7 @@ import type { IconKey, Thread } from "$lib/types";
 
 // The pure half of resuming lives in `resume-args.ts`. Re-exported so callers
 // keep asking the session module, which is where the question belongs.
-export { takesOpeningPrompt } from "./resume-args";
+export { takesOpeningPrompt, withUnattendedArgs } from "./resume-args";
 export type { ResumeBuilder } from "./resume-args";
 
 // mtimeMs is the session file's last-write time when the backend can provide
