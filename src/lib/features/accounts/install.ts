@@ -80,6 +80,24 @@ export function packageVersion(): string {
   return (packageFiles().get("VERSION") ?? "").trim() || "unknown";
 }
 
+/**
+ * FNV-1a over the bytes of a file, mirrored on the PowerShell side.
+ *
+ * The unpack script is typed into an interactive shell, where a line that goes
+ * wrong prints an error and the next line runs anyway. Nothing else would
+ * notice a file that arrived truncated, so each one is checked against this
+ * before the installer is allowed to start.
+ */
+function checksum(text: string): number {
+  const bytes = new TextEncoder().encode(text);
+  let hash = 0x811c9dc5;
+  for (const byte of bytes) {
+    hash = (hash ^ byte) >>> 0;
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash >>> 0;
+}
+
 function base64(text: string): string {
   const bytes = new TextEncoder().encode(text);
   let binary = "";
@@ -105,8 +123,22 @@ function writeFileLines(relative: string, content: string): string[] {
     lines.push(`[void]$b.Append('${encoded.slice(i, i + CHUNK)}')`);
   }
   lines.push("[IO.File]::WriteAllBytes($p, [Convert]::FromBase64String($b.ToString()))");
+  lines.push(
+    `try { if ((CcSum ([IO.File]::ReadAllBytes($p))) -ne ${checksum(content)}) ` +
+      `{ $bad += '${relative}' } } catch { $bad += '${relative}' }`,
+  );
   return lines;
 }
+
+/**
+ * The checksum function itself, on one line.
+ *
+ * One line because a multi-line block typed at a prompt depends on the shell
+ * holding a continuation open, which is not something to rely on here.
+ */
+const SUM_FUNCTION =
+  "function CcSum([byte[]]$b) { $h = [long]2166136261; " +
+  "foreach ($x in $b) { $h = $h -bxor [long]$x; $h = ([long]($h * 16777619)) -band 0xFFFFFFFFL }; return $h }";
 
 export type InstallScript = { cmd: string; args: string[]; stdin?: string[] };
 
@@ -127,6 +159,8 @@ function session(run: string): InstallScript {
 
   const lines = [
     "$ErrorActionPreference = 'Stop'",
+    SUM_FUNCTION,
+    "$bad = @()",
     `$pkg = Join-Path $HOME '${PACKAGE_DIR}'`,
     "if (Test-Path -LiteralPath $pkg) { Remove-Item -LiteralPath $pkg -Recurse -Force }",
     "New-Item -ItemType Directory -Force -Path $pkg | Out-Null",
@@ -134,6 +168,8 @@ function session(run: string): InstallScript {
       (dir) => `New-Item -ItemType Directory -Force -Path (Join-Path $pkg '${dir}') | Out-Null`,
     ),
     ...[...files].flatMap(([relative, content]) => writeFileLines(relative, content)),
+    // Nothing is installed from a package that did not arrive whole.
+    "if ($bad.Count) { Write-Host \"Incomplete: $($bad -join ', ')\" -ForegroundColor Red; exit 1 }",
     // Wrapped: a host without a real console — which is what a piped shell is —
     // throws rather than clearing, and would take the install down with it.
     "try { Clear-Host } catch { }",

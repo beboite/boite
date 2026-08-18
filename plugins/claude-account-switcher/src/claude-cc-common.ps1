@@ -279,7 +279,9 @@ function Set-CcLiveIdentity {
     if (-not $match.Success) {
         $head = [regex]::Match($text, '^\s*\{')
         if (-not $head.Success) { return }
-        $text = $text.Insert($head.Length, '"oauthAccount":' + $block + ',')
+        # No comma after the only member of an otherwise empty object.
+        $comma = if ($text.Substring($head.Length) -match '^\s*\}') { '' } else { ',' }
+        $text = $text.Insert($head.Length, '"oauthAccount":' + $block + $comma)
     } else {
         $start = $match.Index + $match.Length - 1
         $depth = 0

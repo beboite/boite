@@ -29,6 +29,9 @@ claude-cc auto -Provider claude
 claude-cc switch -Provider codex -Email you@example.com
 ```
 
+The status line reads the Claude Code pool only; Codex has no status line to
+put a segment in.
+
 Inside Claude Code the same things are slash commands: `/account-add-claude`,
 `/account-list-all`, `/account-auto-switch-all`, and so on.
 

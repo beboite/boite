@@ -39,66 +39,32 @@ Unicode is safe to use — the pane is xterm.js with a UTF-8 PTY — but an ASCI
 fallback still earns its keep for `TERM=dumb` captures and for transcripts read
 outside a terminal. `NO_COLOR` is worth honouring for the same reason.
 
-## Worked example: claude-account-switcher
+## Worked example: the account switcher
 
-[claude-account-switcher](https://github.com/karthiknl0/claude-account-switcher)
-rotates several Claude Code accounts and prints one segment into Claude Code's
-status line: which account is answering, how many of the saved ones are still
-under their limit, and how long until the next one comes back.
+The switcher vendored under
+[`plugins/claude-account-switcher`](../plugins/claude-account-switcher) keeps
+several Claude Code and Codex logins on one machine and swaps between them when
+one runs out of quota. Its status line
+(`src/claude-cc-statusline.js`) is a reference consumer of the contract above:
+Claude Code hands it the session payload on stdin, it prints one line, and it
+never asks the network — the live window comes from the payload and everything
+about the other accounts comes from the cache the switcher already wrote.
 
 ```
-⇄ alaric · 2/3 free ⏳4h20 pierre
+alaric · 5h 42% / 7d 12% · 1 free
 ```
 
-It reads its width from `CLAUDE_CC_STATUSLINE_WIDTH`, then `COLUMNS`, then
-`~/.claude-cc-accounts/.statusline.json` — the third being the one that works
-in a Boite pane, since the first two need a host that can set environment
-variables per pane:
+`CLAUDE_CC_STATUSLINE_ASCII=1` swaps the `·` separator for `|`, and an
+environment that does not say UTF-8 gets the ASCII form without being asked.
+`CLAUDE_CC_ACCOUNTS` moves the pool it reads.
 
-```json
-{ "width": 60, "ascii": false }
-```
+It renders one width, because Claude Code owns the truncation on its own status
+line. A Boite pane that wants a narrower segment is the case the pane contract
+above exists for, and the renderer is deliberately the simple end of it.
 
-If none of the three answers and stdout happens to be a tty after all, it falls
-back to that tty's own column count; an unknown width is treated as no
-constraint rather than as a narrow pane, so a full-width line is never mutilated
-by a guess. A caller that composes its own line and already knows the geometry
-passes it per invocation instead — `--width 48 --ascii` — which is the shape a
-Boite status-line integration wants: one process, one line, no environment to
-set up.
-
-With a width known it drops, in order, the handle of the returning account, then
-the handle of the current one, keeping the counts and the timer — the part that
-decides whether you switch — down to about 24 columns. `CLAUDE_CC_STATUSLINE_ASCII=1`
-swaps `⇄` and `⏳` for `<>` and `~`, and `CLAUDE_CC_STATUSLINE=0` hides the
-segment without touching a status line it wraps.
-
-A shell function or wrapper that launches `claude` from a Boite thread can also
-export the width itself, since at that point the pane's size is the tty's:
-
-```bash
-export COLUMNS=$(tput cols)
-```
-
-That is a snapshot, not a subscription: it stays right until the pane is
-resized, which is why the settings file is the better of the two here.
-
-## The example, in full
-
-The switcher that segment belongs to is vendored under
-[`plugins/claude-account-switcher`](../plugins/claude-account-switcher): a pool
-of Claude Code accounts on one machine, a watcher that notices a quota wall and
-swaps the credentials underneath a running thread, and the status-line renderer
-this page describes (`src/claude-cc-statusline.js`, and the PowerShell twin next
-to it).
-
-It is Windows-first PowerShell, installed by `install.ps1` into
-`~/.claude-tools`, and removed by `uninstall.ps1`. Its slash commands live in
-`src/commands/`: account add, list, remove, switch and auto-switch, plus
-`refresh-t` and `refresh-a`, which end and restart one thread — or every thread
-in the registry — on the same conversation, in the same pane, without closing
-Boite. The registry is written by the wrapper on PATH, so a thread that started
-before the wrapper was installed cannot be refreshed from outside itself.
-
-Nothing here is wired into the app: it is a reference consumer of the pane
-contract above, kept in the tree so the contract has something to break against.
+The toolkit itself is PowerShell 7, installed into `~/.claude-tools` by
+`install.ps1` and removed by `uninstall.ps1`, with slash commands in
+`src/commands/` for add, list, switch, remove, auto-switch and doctor. Settings
+carries an Accounts tab that installs it without leaving the app: the files are
+bundled into the build and typed into the shell the panel spawns, so nothing is
+downloaded.

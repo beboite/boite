@@ -22,6 +22,11 @@ if ($pool.Count -lt 2) {
 }
 
 $current = Find-CcCurrent $pool
+if (-not $current) {
+    # Switching now replaces a login nothing here saved. The previous
+    # credentials go to the backups first, which is where to get them back.
+    Note "The live $CcName login is not one of the saved ones. It will be backed up, not kept." Yellow
+}
 if ($current) {
     $usage = Get-CcPoolUsage $current
     if (Test-CcUsable $usage) {
