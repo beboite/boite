@@ -322,33 +322,6 @@
     return shortcuts.some((s) => s.label === preset.label && s.command === preset.command);
   }
 
-  function presetYoloAlreadyAdded(presetId: string): boolean {
-    const preset = CLI_PRESETS.find((p) => p.id === presetId);
-    if (!preset || !preset.yoloFlag) return false;
-    const yoloCmd = withYoloFlag(preset.command, preset.yoloFlag);
-    return shortcuts.some((s) => s.command === yoloCmd);
-  }
-
-  async function addPresetYolo(presetId: string) {
-    const preset = CLI_PRESETS.find((p) => p.id === presetId);
-    if (!preset || !preset.yoloFlag) return;
-    const ok = await confirmDialog.ask({
-      title: t("shortcuts.yoloWarningTitle", { label: preset.label }),
-      message: t("shortcuts.yoloWarningMessage", {
-        label: preset.label,
-        flag: preset.yoloFlag,
-      }),
-      confirmLabel: t("shortcuts.enableYolo"),
-      danger: true,
-    });
-    if (!ok) return;
-    onAdd({
-      label: `${preset.label} (YOLO)`,
-      command: withYoloFlag(preset.command, preset.yoloFlag),
-      iconKey: preset.iconKey as IconKey,
-    });
-  }
-
   async function toggleShortcutYolo(shortcut: Shortcut) {
     const preset = findPresetForCommand(shortcut.command);
     if (!preset?.yoloFlag) return;
@@ -618,23 +591,6 @@
             >
               <ExternalLink class="size-3.5" />
             </a>
-          {/if}
-          {#if preset.yoloFlag}
-            {@const yoloAdded = presetYoloAlreadyAdded(preset.id)}
-            <button
-              type="button"
-              disabled={yoloAdded}
-              onclick={() => void addPresetYolo(preset.id)}
-              class="flex h-7 cursor-pointer items-center gap-1 rounded-md border border-[var(--color-warning)]/40 bg-[var(--color-warning)]/10 px-2 text-xs font-semibold text-[var(--color-warning)] transition hover:bg-[var(--color-warning)]/20 disabled:cursor-not-allowed disabled:border-border/60 disabled:bg-transparent disabled:text-muted-foreground/60"
-              title={yoloAdded ? t("shortcuts.alreadyAdded") : t("shortcuts.addYolo")}
-            >
-              {#if yoloAdded}
-                <Check class="size-3" />
-              {:else}
-                <Zap class="size-3" />
-              {/if}
-              <span>{yoloAdded ? t("shortcuts.yoloBadge") : t("shortcuts.yolo")}</span>
-            </button>
           {/if}
           <button
             type="button"

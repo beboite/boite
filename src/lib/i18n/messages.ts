@@ -125,7 +125,6 @@ export const EN_MESSAGES = {
   "shortcuts.yolo": "YOLO",
   "shortcuts.yoloBadge": "YOLO",
   "shortcuts.yoloMode": "YOLO mode",
-  "shortcuts.addYolo": "Add (YOLO)",
   "shortcuts.yoloWarningTitle": "Enable YOLO mode for {label}?",
   "shortcuts.yoloWarningMessage": "This adds {flag} to the launch command. The agent will execute tools, commands, and edits without asking for confirmation.",
   "shortcuts.enableYolo": "Enable YOLO",

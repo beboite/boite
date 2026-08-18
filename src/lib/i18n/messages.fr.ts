@@ -129,7 +129,6 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "shortcuts.yolo": "YOLO",
   "shortcuts.yoloBadge": "YOLO",
   "shortcuts.yoloMode": "Mode YOLO",
-  "shortcuts.addYolo": "Ajouter (YOLO)",
   "shortcuts.yoloWarningTitle": "Activer le mode YOLO pour {label} ?",
   "shortcuts.yoloWarningMessage": "Cela ajoute {flag} à la commande de lancement. L'agent exécutera les outils, commandes et modifications sans demander de confirmation.",
   "shortcuts.enableYolo": "Activer YOLO",
