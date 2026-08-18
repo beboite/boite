@@ -388,6 +388,14 @@ export function takesOpeningPrompt(key: IconKey): boolean {
 
 const UNATTENDED_FLAG: Partial<Record<NonNullable<IconKey>, string>> = {
   antigravity: "--dangerously-skip-permissions",
+  claude: "--dangerously-skip-permissions",
+  codex: "--yolo",
+  opencode: "--auto",
+  cursor: "--force",
+  grok: "--yolo",
+  hermes: "--yolo",
+  copilot: "--yolo",
+  muse: "--yolo",
 };
 
 /**

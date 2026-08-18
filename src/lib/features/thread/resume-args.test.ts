@@ -334,10 +334,15 @@ describe("the opening prompt", () => {
 });
 
 describe("unattended spawn flags", () => {
-  it("gives antigravity the flag that stops it waiting for a yes", () => {
+  it("gives antigravity and claude the flag that stops it waiting for a yes", () => {
     expect(withUnattendedArgs("agy", [], "antigravity")).toEqual([
       "--dangerously-skip-permissions",
     ]);
+    expect(withUnattendedArgs("claude", [], "claude")).toEqual([
+      "--dangerously-skip-permissions",
+    ]);
+    expect(withUnattendedArgs("codex", [], "codex")).toEqual(["--yolo"]);
+    expect(withUnattendedArgs("opencode", [], "opencode")).toEqual(["--auto"]);
   });
 
   it("does not add it twice", () => {
@@ -346,9 +351,9 @@ describe("unattended spawn flags", () => {
     ).toEqual(["--dangerously-skip-permissions"]);
   });
 
-  it("leaves every other agent alone", () => {
-    expect(withUnattendedArgs("claude", [], "claude")).toEqual([]);
-    expect(withUnattendedArgs("agy", [], "claude")).toEqual([]);
+  it("leaves agents without unattended flag or null key alone", () => {
+    expect(withUnattendedArgs("pi", [], "pi")).toEqual([]);
+    expect(withUnattendedArgs("custom", [], null)).toEqual([]);
   });
 
   it("lands on the agent's side of a fastpick launch", () => {

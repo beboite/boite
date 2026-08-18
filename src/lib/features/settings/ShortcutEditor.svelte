@@ -2,7 +2,13 @@
   import { onMount } from "svelte";
   import { workspace } from "$lib/backend";
   import { settings } from "./store.svelte";
-  import { CLI_PRESETS } from "./cliPresets";
+  import {
+    CLI_PRESETS,
+    findPresetForCommand,
+    hasYoloFlag,
+    withYoloFlag,
+    withoutYoloFlag,
+  } from "./cliPresets";
   import { cliDetection } from "./cliDetection.svelte";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
   import { resolveIconKey } from "$lib/shared/icons/detect";
@@ -15,6 +21,7 @@
   import GripVertical from "@lucide/svelte/icons/grip-vertical";
   import ExternalLink from "@lucide/svelte/icons/external-link";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
+  import Zap from "@lucide/svelte/icons/zap";
   import { t } from "$lib/i18n/index.svelte";
   import type { IconKey, Shortcut } from "$lib/types";
 
@@ -314,6 +321,66 @@
     if (!preset) return false;
     return shortcuts.some((s) => s.label === preset.label && s.command === preset.command);
   }
+
+  function presetYoloAlreadyAdded(presetId: string): boolean {
+    const preset = CLI_PRESETS.find((p) => p.id === presetId);
+    if (!preset || !preset.yoloFlag) return false;
+    const yoloCmd = withYoloFlag(preset.command, preset.yoloFlag);
+    return shortcuts.some((s) => s.command === yoloCmd);
+  }
+
+  async function addPresetYolo(presetId: string) {
+    const preset = CLI_PRESETS.find((p) => p.id === presetId);
+    if (!preset || !preset.yoloFlag) return;
+    const ok = await confirmDialog.ask({
+      title: t("shortcuts.yoloWarningTitle", { label: preset.label }),
+      message: t("shortcuts.yoloWarningMessage", {
+        label: preset.label,
+        flag: preset.yoloFlag,
+      }),
+      confirmLabel: t("shortcuts.enableYolo"),
+      danger: true,
+    });
+    if (!ok) return;
+    onAdd({
+      label: `${preset.label} (YOLO)`,
+      command: withYoloFlag(preset.command, preset.yoloFlag),
+      iconKey: preset.iconKey as IconKey,
+    });
+  }
+
+  async function toggleShortcutYolo(shortcut: Shortcut) {
+    const preset = findPresetForCommand(shortcut.command);
+    if (!preset?.yoloFlag) return;
+    const active = hasYoloFlag(shortcut.command, preset.yoloFlag);
+    if (active) {
+      const newCmd = withoutYoloFlag(shortcut.command, preset.yoloFlag);
+      const newLabel = shortcut.label.replace(/\s*\(YOLO\)$/i, "").trim();
+      onUpdate(shortcut.id, {
+        command: newCmd,
+        label: newLabel || shortcut.label,
+      });
+    } else {
+      const ok = await confirmDialog.ask({
+        title: t("shortcuts.yoloWarningTitle", { label: shortcut.label || preset.label }),
+        message: t("shortcuts.yoloWarningMessage", {
+          label: shortcut.label || preset.label,
+          flag: preset.yoloFlag,
+        }),
+        confirmLabel: t("shortcuts.enableYolo"),
+        danger: true,
+      });
+      if (!ok) return;
+      const newCmd = withYoloFlag(shortcut.command, preset.yoloFlag);
+      const newLabel = shortcut.label.includes("(YOLO)")
+        ? shortcut.label
+        : `${shortcut.label} (YOLO)`;
+      onUpdate(shortcut.id, {
+        command: newCmd,
+        label: newLabel,
+      });
+    }
+  }
 </script>
 
 <div class="flex items-center justify-end gap-1.5">
@@ -348,13 +415,17 @@
   {#each shortcuts as shortcut, i (shortcut.id)}
     {@const isDragged = drag?.active && drag.fromIndex === i}
     {@const iconKey = resolveIconKey(shortcut.iconKey, shortcut.label, shortcut.command)}
+    {@const matchingPreset = findPresetForCommand(shortcut.command)}
+    {@const isYolo = matchingPreset?.yoloFlag
+      ? hasYoloFlag(shortcut.command, matchingPreset.yoloFlag)
+      : false}
     <div
       data-row={shortcut.id}
       role="listitem"
       onpointerdown={(e) => rowPointerDown(shortcut.id, i, e)}
       style:transform={drag ? `translateY(${rowOffset(i)}px)` : undefined}
       style:z-index={isDragged ? 10 : colorPickerFor === shortcut.id ? 20 : undefined}
-      class="relative grid grid-cols-[16px_24px_120px_1fr_28px] touch-none items-center gap-2 border-b border-border/60 px-3 py-2 last:border-b-0 {drag?.active
+      class="relative grid grid-cols-[16px_24px_110px_1fr_auto_28px] touch-none items-center gap-2 border-b border-border/60 px-3 py-2 last:border-b-0 {drag?.active
         ? 'select-none'
         : ''} {drag && drag.fromIndex !== i
         ? 'row-slide'
@@ -448,6 +519,22 @@
           onUpdate(shortcut.id, { command: (e.currentTarget as HTMLInputElement).value })}
         class="rounded-md border border-transparent bg-transparent px-2 py-1 font-mono text-sm text-foreground outline-none transition focus:border-border focus:bg-[var(--color-surface)]"
       />
+      {#if matchingPreset?.yoloFlag}
+        <button
+          type="button"
+          onclick={() => void toggleShortcutYolo(shortcut)}
+          class="flex h-6 items-center gap-1 rounded border px-1.5 text-2xs font-semibold transition {isYolo
+            ? 'border-[var(--color-warning)] bg-[var(--color-warning)]/15 text-[var(--color-warning)] hover:bg-[var(--color-warning)]/25'
+            : 'border-border/60 text-muted-foreground/50 hover:border-border hover:text-foreground'}"
+          title={isYolo ? t("shortcuts.yoloActive") : t("shortcuts.yoloInactive")}
+          aria-label={t("shortcuts.yoloMode")}
+        >
+          <Zap class="size-2.5" />
+          <span>{t("shortcuts.yoloBadge")}</span>
+        </button>
+      {:else}
+        <div></div>
+      {/if}
       <button
         type="button"
         class="flex size-7 items-center justify-center rounded-md text-muted-foreground/60 transition hover:bg-danger/15 hover:text-danger"
@@ -531,6 +618,23 @@
             >
               <ExternalLink class="size-3.5" />
             </a>
+          {/if}
+          {#if preset.yoloFlag}
+            {@const yoloAdded = presetYoloAlreadyAdded(preset.id)}
+            <button
+              type="button"
+              disabled={yoloAdded}
+              onclick={() => void addPresetYolo(preset.id)}
+              class="flex h-7 cursor-pointer items-center gap-1 rounded-md border border-[var(--color-warning)]/40 bg-[var(--color-warning)]/10 px-2 text-xs font-semibold text-[var(--color-warning)] transition hover:bg-[var(--color-warning)]/20 disabled:cursor-not-allowed disabled:border-border/60 disabled:bg-transparent disabled:text-muted-foreground/60"
+              title={yoloAdded ? t("shortcuts.alreadyAdded") : t("shortcuts.addYolo")}
+            >
+              {#if yoloAdded}
+                <Check class="size-3" />
+              {:else}
+                <Zap class="size-3" />
+              {/if}
+              <span>{yoloAdded ? t("shortcuts.yoloBadge") : t("shortcuts.yolo")}</span>
+            </button>
           {/if}
           <button
             type="button"
