@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  anchorForPoint,
   clampToPane,
   isInfoBoxAnchor,
-  nearestAnchor,
   snapPoint,
   toastAlignFor,
   toastStackFor,
@@ -32,15 +32,29 @@ describe("info box docks", () => {
     expect(snapPoint(pane, box, gutter, "mid-right")).toEqual({ x: 468, y: 260 });
   });
 
-  it("picks the nearest dock from a free-floating point", () => {
-    expect(nearestAnchor(pane, box, gutter, 20, 20)).toBe("top-left");
-    expect(nearestAnchor(pane, box, gutter, 450, 20)).toBe("top-right");
-    expect(nearestAnchor(pane, box, gutter, 230, 20)).toBe("top-center");
-    expect(nearestAnchor(pane, box, gutter, 20, 250)).toBe("mid-left");
-    expect(nearestAnchor(pane, box, gutter, 450, 250)).toBe("mid-right");
-    expect(nearestAnchor(pane, box, gutter, 20, 500)).toBe("bottom-left");
-    expect(nearestAnchor(pane, box, gutter, 230, 500)).toBe("bottom-center");
-    expect(nearestAnchor(pane, box, gutter, 450, 500)).toBe("bottom-right");
+  it("picks the dock from the third the pointer was released in", () => {
+    expect(anchorForPoint(pane, 40, 40, "top-right")).toBe("top-left");
+    expect(anchorForPoint(pane, 400, 40, "top-right")).toBe("top-center");
+    expect(anchorForPoint(pane, 760, 40, "top-left")).toBe("top-right");
+    expect(anchorForPoint(pane, 40, 300, "top-right")).toBe("mid-left");
+    expect(anchorForPoint(pane, 760, 300, "top-right")).toBe("mid-right");
+    expect(anchorForPoint(pane, 40, 560, "top-right")).toBe("bottom-left");
+    expect(anchorForPoint(pane, 400, 560, "top-right")).toBe("bottom-center");
+    expect(anchorForPoint(pane, 760, 560, "top-right")).toBe("bottom-right");
+  });
+
+  it("resolves the middle cell on the dominant axis, and holds on the exact centre", () => {
+    expect(anchorForPoint(pane, 330, 300, "top-right")).toBe("mid-left");
+    expect(anchorForPoint(pane, 470, 300, "top-right")).toBe("mid-right");
+    expect(anchorForPoint(pane, 400, 210, "top-right")).toBe("top-center");
+    expect(anchorForPoint(pane, 400, 390, "top-right")).toBe("bottom-center");
+    expect(anchorForPoint(pane, 400, 300, "mid-left")).toBe("mid-left");
+  });
+
+  it("clamps a release outside the pane onto the matching corner", () => {
+    expect(anchorForPoint(pane, -200, -200, "mid-left")).toBe("top-left");
+    expect(anchorForPoint(pane, 2000, 2000, "mid-left")).toBe("bottom-right");
+    expect(anchorForPoint({ w: 0, h: 0 }, 10, 10, "bottom-center")).toBe("bottom-center");
   });
 
   it("stacks toasts above only on the bottom edge", () => {
