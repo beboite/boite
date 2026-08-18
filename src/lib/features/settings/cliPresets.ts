@@ -45,7 +45,11 @@ export const CLI_PRESETS: CliPreset[] = [
   {
     id: "antigravity",
     label: "Antigravity",
-    command: "agy",
+    // agy asks before every tool call otherwise, and a thread spawned by an agent
+    // has nobody at the keyboard to answer: it would sit on the first confirmation
+    // exactly like it used to sit on the opening prompt. Auto-approves everything
+    // this CLI does, shell commands included.
+    command: "agy --dangerously-skip-permissions",
     iconKey: "antigravity",
     executable: "agy",
     docUrl: "https://antigravity.google/docs/cli",
