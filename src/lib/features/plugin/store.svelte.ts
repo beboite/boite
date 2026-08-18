@@ -3,6 +3,7 @@ import type { Backend, CodexSwitcherAccount } from "$lib/backend/types";
 import { app } from "$lib/app/store.svelte";
 import { ptyKill } from "$lib/storage/pty";
 import { CODEX_SWITCHER_CMD } from "./install";
+import { FAST_MCP_SSH_CMD } from "./fast-mcp-ssh";
 import { shouldReloadCodexThread } from "./restart";
 
 class CodexSwitcherStore {
@@ -116,3 +117,59 @@ class CodexSwitcherStore {
 }
 
 export const codexSwitcher = new CodexSwitcherStore();
+
+/**
+ * Whether `fast-mcp-ssh` is on the machine the agents run on, and which version.
+ *
+ * Smaller than the Codex store on purpose: boite installs this one and stops
+ * there. The server is started by whichever agent has it in its MCP config, its
+ * hosts file is that agent's business, and a panel that read either would be
+ * claiming an ownership boite does not have.
+ */
+class FastMcpSshStore {
+  installed = $state<boolean | null>(null);
+  version = $state<string | null>(null);
+  cargoPresent = $state<boolean | null>(null);
+  error = $state<string | null>(null);
+  probing = $state(false);
+
+  /** Which backend the current answers came from, so a swap discards them. */
+  #answeredBy: Backend | null = null;
+
+  #adopt(from: Backend): void {
+    if (this.#answeredBy === from) return;
+    this.#answeredBy = from;
+    this.installed = null;
+    this.version = null;
+    this.cargoPresent = null;
+    this.error = null;
+    this.probing = false;
+  }
+
+  async probe(): Promise<void> {
+    const from = backend();
+    this.#adopt(from);
+    this.probing = true;
+    this.error = null;
+    try {
+      const [installed, cargoPresent] = await Promise.all([
+        from.shell.commandExists(FAST_MCP_SSH_CMD),
+        from.shell.commandExists("cargo"),
+      ]);
+      if (this.#answeredBy !== from) return;
+      this.installed = installed;
+      this.cargoPresent = cargoPresent;
+      // Asked only of a binary that is there: `--version` on a missing command
+      // is a spawn failure, and absence is already the answer above.
+      const version = installed ? await from.fastMcpSsh.version() : null;
+      if (this.#answeredBy !== from) return;
+      this.version = version;
+    } catch (err) {
+      if (this.#answeredBy === from) this.error = String(err);
+    } finally {
+      if (this.#answeredBy === from) this.probing = false;
+    }
+  }
+}
+
+export const fastMcpSsh = new FastMcpSshStore();

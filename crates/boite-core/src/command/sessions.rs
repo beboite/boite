@@ -18,7 +18,7 @@ use super::{
     opt_str_param, str_list, str_param, u32_param, value_of, Command, Host, Ready, Wire,
 };
 use crate::capability::Capability;
-use crate::{codex_switcher, fastpick, session, shell, transcript, usage};
+use crate::{codex_switcher, fast_mcp_ssh, fastpick, session, shell, transcript, usage};
 
 /// Every method in this domain, in the order they appear below.
 pub const ALL_METHODS: &[&str] = &[
@@ -38,6 +38,7 @@ pub const ALL_METHODS: &[&str] = &[
     "codexSwitcher.save",
     "codexSwitcher.activate",
     "codexSwitcher.version",
+    "fastMcpSsh.version",
     "session.transcript",
 ];
 
@@ -115,6 +116,8 @@ pub enum Sessions {
     CodexSwitcherActivate { account_id: String },
     /// Null means the binary is not on this machine.
     CodexSwitcherVersion,
+    /// Null means `fast-mcp-ssh` is not on this machine.
+    FastMcpSshVersion,
     /// What a terminal printed, as text, from the end.
     ///
     /// The question anybody actually has is what it was doing when it stopped,
@@ -185,6 +188,7 @@ impl Sessions {
                 account_id: opt_str_param(params, "accountId").unwrap_or_default(),
             },
             "codexSwitcher.version" => Sessions::CodexSwitcherVersion,
+            "fastMcpSsh.version" => Sessions::FastMcpSshVersion,
             "session.transcript" => Sessions::Transcript {
                 thread_id: str_param(params, "threadId")?,
                 // A terminal prints more in a minute than anybody reads, and
@@ -214,6 +218,7 @@ impl Sessions {
             Sessions::CodexSwitcherSave => "codexSwitcher.save",
             Sessions::CodexSwitcherActivate { .. } => "codexSwitcher.activate",
             Sessions::CodexSwitcherVersion => "codexSwitcher.version",
+            Sessions::FastMcpSshVersion => "fastMcpSsh.version",
             Sessions::Transcript { .. } => "session.transcript",
         }
     }
@@ -235,7 +240,7 @@ impl Sessions {
             Sessions::CodexSwitcherList
             | Sessions::CodexSwitcherSave
             | Sessions::CodexSwitcherActivate { .. } => Wire::Key("json"),
-            Sessions::CodexSwitcherVersion => Wire::Key("version"),
+            Sessions::CodexSwitcherVersion | Sessions::FastMcpSshVersion => Wire::Key("version"),
             Sessions::Transcript { .. } => Wire::Key("text"),
         }
     }
@@ -260,6 +265,7 @@ impl Sessions {
             | Sessions::FastpickVersion
             | Sessions::CodexSwitcherList
             | Sessions::CodexSwitcherVersion
+            | Sessions::FastMcpSshVersion
             | Sessions::Transcript { .. } => Capability::ReadProject,
 
             Sessions::StopClaude { .. }
@@ -388,6 +394,7 @@ impl Sessions {
                 value_of(codex_switcher::activate_blocking(&account_id)?)
             }
             Sessions::CodexSwitcherVersion => value_of(codex_switcher::version_blocking()),
+            Sessions::FastMcpSshVersion => value_of(fast_mcp_ssh::version_blocking()),
             Sessions::Transcript {
                 thread_id,
                 bytes,

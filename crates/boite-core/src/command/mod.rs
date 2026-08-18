@@ -627,6 +627,7 @@ mod tests {
             ("codexSwitcher.save", MutateProject),
             ("codexSwitcher.activate", MutateProject),
             ("codexSwitcher.version", ReadProject),
+            ("fastMcpSsh.version", ReadProject),
             ("session.transcript", ReadProject),
             ("project.list", ReadProject),
             ("project.create", MutateAcross),

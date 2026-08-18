@@ -13,10 +13,11 @@
 //!   be carried to a new folder.
 //! - [`codex`] keeps a rollout log, which is what its turn state is read from.
 //! - [`opencode`] keeps a sqlite database of messages.
-//! - [`editors`] is the six that Boite can only ever read: copilot, cursor,
-//!   antigravity, grok, hermes and pi. Each one is "open a store and find the
-//!   newest session in this directory", and none of them says whether a turn is
-//!   in flight.
+//! - [`editors`] is the six that Boite can only ever read for *which*
+//!   conversation: copilot, cursor, antigravity, grok, hermes and pi. Grok is
+//!   the exception on the turn: its `updates.jsonl` brackets one the way a
+//!   codex rollout does, so it also contributes to the sidebar's activity
+//!   dot. The other five still do not.
 //!
 //! What stays here is what more than one of them needs, and the vocabulary they
 //! all answer in: [`SessionHit`], [`AgentTurn`], [`TurnQuery`],
@@ -303,8 +304,9 @@ impl DeclaredTurn {
 ///
 /// The agents disagree wildly on where this lives: claude writes a registry file
 /// per process, codex only leaves markers in the transcript it appends, opencode
-/// only records it in a SQLite row. Reading each one is a per-agent job; deciding
-/// what a thread's dot should say is not, so they meet here.
+/// only records it in a SQLite row, grok appends ACP session updates to a
+/// jsonl. Reading each one is a per-agent job; deciding what a thread's dot
+/// should say is not, so they meet here.
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentTurn {
@@ -393,7 +395,7 @@ pub fn declared_turn(
 
 /// Everything the agents behind these threads say about themselves right now.
 ///
-/// One pass per agent rather than one per thread: each of the three costs a
+/// One pass per agent rather than one per thread: each of the four costs a
 /// directory read or a database open, and doing that per thread on a timer is how
 /// a status sweep turns into the most expensive thing in the app.
 pub fn agent_turns(queries: &[TurnQuery]) -> Vec<AgentTurn> {
@@ -407,6 +409,9 @@ pub fn agent_turns(queries: &[TurnQuery]) -> Vec<AgentTurn> {
     }
     if has("opencode") {
         out.extend(opencode::opencode_turns(queries));
+    }
+    if has("grok") {
+        out.extend(editors::grok_turns(queries));
     }
     out
 }
@@ -702,6 +707,7 @@ mod tests {
         let live = [
             claude_said("shared", "busy", "/w/one"),
             turn("codex", "shared", "idle", "/w/one"),
+            turn("grok", "g", "busy", "/w/one"),
         ];
         assert_eq!(
             declared_turn(&live, "claude", Some("shared"), "/w/one"),
@@ -710,6 +716,10 @@ mod tests {
         assert_eq!(
             declared_turn(&live, "codex", Some("shared"), "/w/one"),
             DeclaredTurn::Idle
+        );
+        assert_eq!(
+            declared_turn(&live, "grok", Some("g"), "/w/one"),
+            DeclaredTurn::Busy
         );
         // By directory, each agent sees exactly one candidate rather than two.
         assert_eq!(

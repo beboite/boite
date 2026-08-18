@@ -8,6 +8,7 @@ pub mod command;
 pub mod editor;
 pub mod env;
 pub mod explorer;
+pub mod fast_mcp_ssh;
 pub mod fastpick;
 pub mod finish;
 pub mod mcp_launch;

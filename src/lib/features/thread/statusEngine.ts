@@ -306,7 +306,7 @@ function read(t: Thread, iconKey: IconKey): Reading | null {
   const term = liveTerminal(t.id);
   const rows = term ? terminalScreenRows(term, LIVE_ROW_COUNT) : null;
   const question = rows ? detectWaitingOnScreen(rows, iconKey) : null;
-  // The agent's own answer first, where it has one. Three of them do, each in a
+  // The agent's own answer first, where it has one. Four of them do, each in a
   // different place (see `agent-registry.ts`), and all three state that a turn
   // ended rather than merely stopping to say it continues. That is what stays
   // right through a quiet tool call, a subagent, a compaction and a hidden pane.

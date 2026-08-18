@@ -221,7 +221,7 @@ export const EN_MESSAGES = {
   "experiments.whipSoundSynth": "Synth",
   "experiments.whipSoundMeme": "Sampled",
   "experiments.whipSoundDesc":
-    "Pick one to hear it. The synth is built on the spot and downloads nothing; the sample is a 27 KB file, fetched the first time you ask for it and never before.",
+    "Pick one to hear it. The synth is built on the spot and downloads nothing; the sample is six cracks in a 34 KB file, fetched the first time you ask for it and never before.",
   "titlebar.whip": "Crack the whip",
   "titlebar.whipDrop": "Drop the whip",
 
@@ -606,6 +606,8 @@ export const EN_MESSAGES = {
   "fastpick.enableDesc": "Hidden anyway on a machine without fastpick.",
   "plugin.codexTitle": "codex-account-switcher",
   "plugin.codexDesc": "Saves and restores Codex logins. Install, update and switch from this panel. After a switch, Boite reloads the Codex threads.",
+  "plugin.fastMcpSshTitle": "fast-mcp-ssh",
+  "plugin.fastMcpSshDesc": "An MCP server giving an agent SSH, SFTP and persistent shells on your machines. Boite installs the binary; each agent declares it in its own MCP config.",
   "plugin.notInstalled": "Not on this machine",
   "plugin.installed": "Installed",
   "plugin.recheck": "Check again",

@@ -3,7 +3,7 @@ import type { AgentTurn as DeclaredAgentTurn } from "$lib/backend/types";
 /**
  * Reading a thread's turn out of what its own agent says about itself.
  *
- * Three of them say something, and they say it in three different places:
+ * Four of them say something, and they say it in four different places:
  *
  * - claude keeps `~/.claude/sessions/<pid>.json` per open session and rewrites
  *   `status` as each of its four states begins and ends. It is the only one that
@@ -16,6 +16,9 @@ import type { AgentTurn as DeclaredAgentTurn } from "$lib/backend/types";
  * - opencode exposes `GET /session/status`, but a plain TUI binds no port, so the
  *   database is what is left: an assistant message gains `time.completed` when
  *   its turn ends and does not carry the field before that.
+ * - grok appends ACP session updates to `~/.grok/sessions/<cwd>/<id>/updates.jsonl`.
+ *   A turn opens on `user_message_chunk` and closes on `turn_completed`.
+ *   `active_sessions.json` names the pid, so a killed grok does not stay busy.
  *
  * The reading of each is in `boite-core/src/session.rs`; by the time it reaches
  * here it is one shape. What makes any of it worth having is that all three are
