@@ -19,6 +19,9 @@ pub const FIVE_HOUR_CAP: f64 = 99.0;
 pub const SEVEN_DAY_CAP: f64 = 99.8;
 const CACHE_SECONDS: i64 = 60;
 
+/// The two windows, each against its own cap.
+const CAPS: [(&str, f64); 2] = [("five_hour", FIVE_HOUR_CAP), ("seven_day", SEVEN_DAY_CAP)];
+
 pub fn now_iso() -> String {
     Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Micros, true)
 }
@@ -32,6 +35,23 @@ pub struct Usage {
 pub struct Window {
     pub utilization: f64,
     pub resets_at: Option<String>,
+}
+
+impl Window {
+    /// When this window comes back, or none when it does not say.
+    fn resets(&self) -> Option<DateTime<Utc>> {
+        self.resets_at.as_deref().and_then(parse_time)
+    }
+
+    /// Whether this window is what stops the account being used. A percentage
+    /// read from a cache written before the window reset is a number about a
+    /// window that no longer exists, so it stops nothing.
+    fn blocking(&self, cap: f64) -> bool {
+        if self.utilization < cap {
+            return false;
+        }
+        self.resets().is_none_or(|at| at > Utc::now())
+    }
 }
 
 impl Usage {
@@ -49,30 +69,24 @@ impl Usage {
     /// Usage nobody could read is not usage that says no: an account with no
     /// numbers is treated as one with room, and the switch says so out loud.
     pub fn usable(&self) -> bool {
-        if self.pct("five_hour").is_some_and(|p| p >= FIVE_HOUR_CAP) {
-            return false;
-        }
-        if self.pct("seven_day").is_some_and(|p| p >= SEVEN_DAY_CAP) {
-            return false;
-        }
-        true
+        !CAPS
+            .iter()
+            .any(|(name, cap)| self.window(name).is_some_and(|w| w.blocking(*cap)))
     }
 
     /// When the account comes back, or none when nothing says.
     pub fn ready_at(&self) -> Option<DateTime<Utc>> {
         let mut at: Option<DateTime<Utc>> = None;
-        for (name, cap) in [("five_hour", FIVE_HOUR_CAP), ("seven_day", SEVEN_DAY_CAP)] {
-            let Some(pct) = self.pct(name) else { continue };
-            if pct < cap {
+        for (name, cap) in CAPS {
+            let Some(window) = self.window(name).filter(|w| w.blocking(cap)) else {
                 continue;
-            }
+            };
             // A window that says nothing about its reset cannot be timed. It
             // still caps the account, so the other window keeps its say rather
             // than the whole answer being dropped.
-            let Some(resets) = self.window(name).and_then(|w| w.resets_at.clone()) else {
+            let Some(when) = window.resets() else {
                 continue;
             };
-            let Some(when) = parse_time(&resets) else { continue };
             if at.is_none_or(|current| when > current) {
                 at = Some(when);
             }

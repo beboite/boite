@@ -17,7 +17,11 @@ pub enum Color {
 fn enabled() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| {
-        std::env::var_os("NO_COLOR").is_none()
+        use std::io::IsTerminal;
+        // A slash command, a hook and a pipe all read this output as text, and
+        // escape codes in it are noise rather than colour.
+        std::io::stdout().is_terminal()
+            && std::env::var_os("NO_COLOR").is_none()
             && std::env::var("TERM").map(|t| t != "dumb").unwrap_or(true)
     })
 }

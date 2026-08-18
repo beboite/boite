@@ -162,7 +162,9 @@ fn parse(tokens: &[String]) -> Result<(String, Options), String> {
             "provider" | "p" => {
                 provider = value().ok_or("-Provider needs a name: claude, codex or all.")?
             }
-            "email" | "e" => options.email = value(),
+            // An option that swallowed the next option instead of a value would
+            // go looking for an account named "-Provider".
+            "email" | "e" => options.email = Some(value().ok_or("-Email needs an address.")?),
             "quiet" => options.quiet = true,
             // What a SessionStart hook prints is fed to the model and what it
             // returns is shown to the user at every start, so a hook says

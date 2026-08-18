@@ -126,52 +126,106 @@ pub fn set_identity(provider: &Provider, identity: &Value) {
     let _ = jsonio::write_text(&path, &updated);
 }
 
-/// The byte range of one member's value, found by walking braces rather than by
-/// parsing: a brace inside a string must not count, and everything outside the
-/// member has to come back untouched.
+/// The byte range of one member's value in the outermost object, found by
+/// walking the file rather than by parsing it: everything outside the member has
+/// to come back untouched. Only the root object is searched — `~/.claude.json`
+/// also holds the conversation history, and the same name appearing in a
+/// transcript must not be mistaken for the account the CLI logs in as.
 fn find_member(text: &str, name: &str) -> Option<(usize, usize)> {
-    let needle = format!("\"{name}\"");
-    let at = text.find(&needle)?;
     let bytes = text.as_bytes();
-    let mut i = at + needle.len();
-    while i < bytes.len() && (bytes[i] as char).is_whitespace() {
-        i += 1;
-    }
-    if i >= bytes.len() || bytes[i] != b':' {
-        return None;
-    }
-    i += 1;
-    while i < bytes.len() && (bytes[i] as char).is_whitespace() {
-        i += 1;
-    }
+    let mut i = skip_space(bytes, 0);
     if i >= bytes.len() || bytes[i] != b'{' {
         return None;
     }
-    let start = i;
-    let mut depth = 0usize;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'"' => {
-                i += 1;
-                while i < bytes.len() && bytes[i] != b'"' {
-                    if bytes[i] == b'\\' {
-                        i += 1;
-                    }
-                    i += 1;
-                }
-            }
-            b'{' => depth += 1,
-            b'}' => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some((start, i + 1));
-                }
-            }
-            _ => {}
+    i += 1;
+    loop {
+        i = skip_space(bytes, i);
+        if i >= bytes.len() || bytes[i] == b'}' {
+            return None;
         }
+        if bytes[i] != b'"' {
+            return None;
+        }
+        let (key, after) = read_string(bytes, i)?;
+        i = skip_space(bytes, after);
+        if i >= bytes.len() || bytes[i] != b':' {
+            return None;
+        }
+        i = skip_space(bytes, i + 1);
+        let start = i;
+        i = skip_value(bytes, i)?;
+        if key == name {
+            // Whatever shape it is in now, those bytes are the ones to replace:
+            // a member left as null by an earlier login is still that member.
+            return Some((start, i));
+        }
+        i = skip_space(bytes, i);
+        match bytes.get(i) {
+            Some(b',') => i += 1,
+            _ => return None,
+        }
+    }
+}
+
+fn skip_space(bytes: &[u8], mut i: usize) -> usize {
+    while i < bytes.len() && bytes[i].is_ascii_whitespace() {
         i += 1;
     }
-    None
+    i
+}
+
+/// The string starting at `i`, and where it ends. Escapes are stepped over
+/// rather than decoded: this reads member names, which have none worth decoding.
+fn read_string(bytes: &[u8], i: usize) -> Option<(String, usize)> {
+    let mut end = i + 1;
+    while end < bytes.len() && bytes[end] != b'"' {
+        if bytes[end] == b'\\' {
+            end += 1;
+        }
+        end += 1;
+    }
+    if end >= bytes.len() {
+        return None;
+    }
+    let text = std::str::from_utf8(&bytes[i + 1..end]).ok()?.to_string();
+    Some((text, end + 1))
+}
+
+/// Where the value starting at `i` ends. Braces and brackets are counted, and a
+/// brace inside a string does not count.
+fn skip_value(bytes: &[u8], i: usize) -> Option<usize> {
+    match *bytes.get(i)? {
+        b'"' => read_string(bytes, i).map(|(_, end)| end),
+        open @ (b'{' | b'[') => {
+            let close = if open == b'{' { b'}' } else { b']' };
+            let mut depth = 0usize;
+            let mut at = i;
+            while at < bytes.len() {
+                match bytes[at] {
+                    b'"' => at = read_string(bytes, at)?.1 - 1,
+                    b if b == open => depth += 1,
+                    b if b == close => {
+                        depth -= 1;
+                        if depth == 0 {
+                            return Some(at + 1);
+                        }
+                    }
+                    _ => {}
+                }
+                at += 1;
+            }
+            None
+        }
+        // A number, or one of true / false / null: it runs to the comma or to
+        // the end of the object holding it.
+        _ => {
+            let mut at = i;
+            while at < bytes.len() && !matches!(bytes[at], b',' | b'}' | b']') {
+                at += 1;
+            }
+            (at > i).then_some(at)
+        }
+    }
 }
 
 /// The credentials that are about to be replaced, kept for the three most
@@ -267,4 +321,59 @@ pub fn activate(provider: &Provider, entry: &crate::pool::Entry) -> Result<(), S
         }
         Ok(())
     })?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::find_member;
+
+    #[test]
+    fn finds_a_member_of_the_root_object() {
+        let text = r#"{"a":1,"oauthAccount":{"emailAddress":"one@example.com"},"b":2}"#;
+        let (start, end) = find_member(text, "oauthAccount").unwrap();
+        assert_eq!(&text[start..end], r#"{"emailAddress":"one@example.com"}"#);
+    }
+
+    #[test]
+    fn ignores_the_same_name_deeper_in_the_file() {
+        // What `~/.claude.json` looks like: the account, and a history that can
+        // quote anything at all, including the name of the account member.
+        let text = r#"{"projects":{"x":{"history":[{"display":"\"oauthAccount\": {\"emailAddress\": \"nobody\"}"}]}},"oauthAccount":{"emailAddress":"real@example.com"}}"#;
+        let (start, end) = find_member(text, "oauthAccount").unwrap();
+        assert_eq!(&text[start..end], r#"{"emailAddress":"real@example.com"}"#);
+    }
+
+    #[test]
+    fn a_member_that_is_not_there_is_not_invented() {
+        let text = r#"{"projects":{"oauthAccount":{"emailAddress":"nested@example.com"}}}"#;
+        assert!(find_member(text, "oauthAccount").is_none());
+    }
+
+    /// The real file on this machine, when there is one: it is the size and the
+    /// shape no fixture here can stand in for, and the member found in it has to
+    /// be the account the CLI actually logs in as.
+    #[test]
+    fn finds_the_account_in_the_real_config() {
+        let path = crate::provider::home().join(".claude.json");
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            return;
+        };
+        let Some(expected) = serde_json::from_str::<serde_json::Value>(&text)
+            .ok()
+            .and_then(|config| crate::jsonio::obj(&config, "oauthAccount"))
+        else {
+            return;
+        };
+        let (start, end) = find_member(&text, "oauthAccount").expect("the member is in the file");
+        let spliced: serde_json::Value =
+            serde_json::from_str(&text[start..end]).expect("the range is one JSON value");
+        assert_eq!(spliced, expected);
+    }
+
+    #[test]
+    fn replaces_a_member_of_any_shape() {
+        let text = r#"{"oauthAccount":null,"b":2}"#;
+        let (start, end) = find_member(text, "oauthAccount").unwrap();
+        assert_eq!(&text[start..end], "null");
+    }
 }

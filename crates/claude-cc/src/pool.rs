@@ -213,8 +213,13 @@ impl<'a> Pool<'a> {
         let recorded_email = jsonio::str_of(entry, "email").unwrap_or_default();
         let recorded_uuid = jsonio::str_of(entry, "accountUuid").unwrap_or_default();
         let recorded_stamp = jsonio::str_of(entry, "stamp").unwrap_or_default();
-        let (uuid, _) = pool_identity(snapshot);
+        let (uuid, email) = pool_identity(snapshot);
         let uuid = uuid.unwrap_or_default();
+        // The stamp is over what was registered, so the entry has to still say
+        // the same thing: an account renamed in place would otherwise pass.
+        if !email.eq_ignore_ascii_case(&recorded_email) {
+            return Trust::Changed;
+        }
         let cred_hash = cred_hash(snapshot_creds(snapshot).as_deref());
 
         let expected = stamp(

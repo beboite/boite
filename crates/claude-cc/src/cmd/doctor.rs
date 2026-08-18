@@ -252,11 +252,11 @@ fn check_settings(report: &mut Report) {
         .and_then(|l| jsonio::str_of(l, "command"))
         .unwrap_or_default();
     if line.contains("statusline") && line.contains("claude-cc") {
-        match quoted_path(&line, "statusline") {
-            Some(script) if !Path::new(&script).exists() => report.bad(&format!(
-                "the status line points at {script}, which is not there"
+        match missing_path(&line) {
+            Some(gone) => report.bad(&format!(
+                "the status line points at {gone}, which is not there"
             )),
-            _ => report.good("status line installed"),
+            None => report.good("status line installed"),
         }
     } else {
         say(
@@ -329,12 +329,16 @@ pub fn hook_scope(command: &str) -> Option<String> {
         .filter(|w| !w.is_empty())
 }
 
-/// The path out of a status-line command, quoted or not, given a word that is
-/// part of the file name.
-fn quoted_path(command: &str, needle: &str) -> Option<String> {
+/// The first path in a command that is not on disk, or none when every path in
+/// it is — including a command that names no path at all. What is being asked is
+/// whether the status line still points at something that runs, and the answer
+/// has to hold for the binary this version installs as well as for the script
+/// an earlier one did.
+fn missing_path(command: &str) -> Option<String> {
     command
         .split(['"', '\'', ' '])
-        .find(|word| word.contains(needle) && (word.contains('/') || word.contains('\\')))
+        .filter(|word| word.contains('/') || word.contains('\\'))
+        .find(|word| !Path::new(word).exists())
         .map(str::to_string)
 }
 
