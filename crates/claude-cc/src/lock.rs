@@ -67,7 +67,7 @@ fn acquire(name: &str) -> Result<Guard, String> {
             Ok(()) => return Ok(Guard { dir }),
             Err(_) if start.elapsed() < WAIT => {
                 if let Ok(meta) = std::fs::metadata(&dir) {
-                    if let Ok(age) = meta.modified().and_then(|m| m.elapsed()) {
+                    if let Some(age) = meta.modified().ok().and_then(|m| m.elapsed().ok()) {
                         if age > Duration::from_secs(60) {
                             let _ = std::fs::remove_dir(&dir);
                             continue;
