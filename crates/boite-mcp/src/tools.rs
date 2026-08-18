@@ -52,7 +52,7 @@ head and closing the thread throws it away. Do this before you finish, not after
 - Work that surfaced along the way and does not belong in this turn: todo_add \
 rather than a note in your answer, which nobody reads again.
 - Something the user should look at, a diff, a dev server, a file: pane_open puts \
-it beside this terminal. Pass path for editor or explorer. Printing a path only \
+it beside this terminal. Pass path for editor. Printing a path only \
 works if they are reading this one.
 - A page you opened: browser action=status|snapshot|click|type|press|scroll|\
 navigate|reload|wait_for|close|screenshot. Desktop window only for read/drive; \
@@ -388,7 +388,7 @@ fn thread_tools() -> Value {
                     },
                     "path": {
                         "type": "string",
-                        "description": "For kind=editor or kind=explorer. The file or folder to show."
+                        "description": "For kind=editor. The file to open. The explorer opens at the thread's own directory and takes no path."
                     },
                     "side": {
                         "type": "string",

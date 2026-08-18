@@ -8,6 +8,8 @@ import type {
   CheckpointFileVersions,
   EditorApi,
   ExplorerApi,
+  CodexSwitcherApi,
+  CodexSwitcherList,
   FastpickApi,
   FastpickListing,
   FolderState,
@@ -165,6 +167,16 @@ export const tauriFastpick: FastpickApi = {
     return JSON.parse(raw) as FastpickListing;
   },
   version: () => invoke<string | null>("fastpick_version"),
+};
+
+export const tauriCodexSwitcher: CodexSwitcherApi = {
+  async list() {
+    const raw = await invoke<string>("codex_switcher_list");
+    return JSON.parse(raw) as CodexSwitcherList;
+  },
+  save: () => invoke("codex_switcher_save"),
+  activate: (accountId) => invoke("codex_switcher_activate", { accountId }),
+  version: () => invoke<string | null>("codex_switcher_version"),
 };
 
 export const tauriScope: ScopeApi = {

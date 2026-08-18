@@ -18,7 +18,7 @@ use super::{
     opt_str_param, str_list, str_param, u32_param, value_of, Command, Host, Ready, Wire,
 };
 use crate::capability::Capability;
-use crate::{fastpick, session, shell, transcript, usage};
+use crate::{codex_switcher, fastpick, session, shell, transcript, usage};
 
 /// Every method in this domain, in the order they appear below.
 pub const ALL_METHODS: &[&str] = &[
@@ -34,6 +34,10 @@ pub const ALL_METHODS: &[&str] = &[
     "shell.commandExists",
     "fastpick.list",
     "fastpick.version",
+    "codexSwitcher.list",
+    "codexSwitcher.save",
+    "codexSwitcher.activate",
+    "codexSwitcher.version",
     "session.transcript",
 ];
 
@@ -103,6 +107,14 @@ pub enum Sessions {
     /// Null means no fastpick here, which is a state the settings panel draws
     /// rather than an error it reports.
     FastpickVersion,
+    /// `codex-account-switcher list --json`, passed through as a string.
+    CodexSwitcherList,
+    /// `codex-account-switcher save --json`.
+    CodexSwitcherSave,
+    /// `codex-account-switcher activate <id> --force --json`.
+    CodexSwitcherActivate { account_id: String },
+    /// Null means the binary is not on this machine.
+    CodexSwitcherVersion,
     /// What a terminal printed, as text, from the end.
     ///
     /// The question anybody actually has is what it was doing when it stopped,
@@ -167,6 +179,12 @@ impl Sessions {
                 refresh: super::bool_param(params, "refresh", false),
             },
             "fastpick.version" => Sessions::FastpickVersion,
+            "codexSwitcher.list" => Sessions::CodexSwitcherList,
+            "codexSwitcher.save" => Sessions::CodexSwitcherSave,
+            "codexSwitcher.activate" => Sessions::CodexSwitcherActivate {
+                account_id: opt_str_param(params, "accountId").unwrap_or_default(),
+            },
+            "codexSwitcher.version" => Sessions::CodexSwitcherVersion,
             "session.transcript" => Sessions::Transcript {
                 thread_id: str_param(params, "threadId")?,
                 // A terminal prints more in a minute than anybody reads, and
@@ -192,6 +210,10 @@ impl Sessions {
             Sessions::CommandExists { .. } => "shell.commandExists",
             Sessions::FastpickList { .. } => "fastpick.list",
             Sessions::FastpickVersion => "fastpick.version",
+            Sessions::CodexSwitcherList => "codexSwitcher.list",
+            Sessions::CodexSwitcherSave => "codexSwitcher.save",
+            Sessions::CodexSwitcherActivate { .. } => "codexSwitcher.activate",
+            Sessions::CodexSwitcherVersion => "codexSwitcher.version",
             Sessions::Transcript { .. } => "session.transcript",
         }
     }
@@ -210,6 +232,10 @@ impl Sessions {
             Sessions::CommandExists { .. } => Wire::Key("found"),
             Sessions::FastpickList { .. } => Wire::Key("json"),
             Sessions::FastpickVersion => Wire::Key("version"),
+            Sessions::CodexSwitcherList
+            | Sessions::CodexSwitcherSave
+            | Sessions::CodexSwitcherActivate { .. } => Wire::Key("json"),
+            Sessions::CodexSwitcherVersion => Wire::Key("version"),
             Sessions::Transcript { .. } => Wire::Key("text"),
         }
     }
@@ -232,9 +258,14 @@ impl Sessions {
             | Sessions::CommandExists { .. }
             | Sessions::FastpickList { .. }
             | Sessions::FastpickVersion
+            | Sessions::CodexSwitcherList
+            | Sessions::CodexSwitcherVersion
             | Sessions::Transcript { .. } => Capability::ReadProject,
 
-            Sessions::StopClaude { .. } | Sessions::Migrate { .. } => Capability::MutateProject,
+            Sessions::StopClaude { .. }
+            | Sessions::Migrate { .. }
+            | Sessions::CodexSwitcherSave
+            | Sessions::CodexSwitcherActivate { .. } => Capability::MutateProject,
         }
     }
 
@@ -351,6 +382,12 @@ impl Sessions {
                 value_of(fastpick::list_blocking(provider, refresh)?)
             }
             Sessions::FastpickVersion => value_of(fastpick::version_blocking()),
+            Sessions::CodexSwitcherList => value_of(codex_switcher::list_blocking()?),
+            Sessions::CodexSwitcherSave => value_of(codex_switcher::save_blocking()?),
+            Sessions::CodexSwitcherActivate { account_id } => {
+                value_of(codex_switcher::activate_blocking(&account_id)?)
+            }
+            Sessions::CodexSwitcherVersion => value_of(codex_switcher::version_blocking()),
             Sessions::Transcript {
                 thread_id,
                 bytes,

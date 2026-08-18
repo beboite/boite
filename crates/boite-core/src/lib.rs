@@ -3,6 +3,7 @@ pub mod awareness;
 pub mod browser;
 pub mod capability;
 pub mod checkpoint;
+pub mod codex_switcher;
 pub mod command;
 pub mod editor;
 pub mod env;

@@ -804,7 +804,7 @@ export async function restoreLastClosedThread(): Promise<Thread | null> {
   return null;
 }
 
-export async function reloadThread(threadId: string) {
+export async function reloadThread(threadId: string, opts?: { silent?: boolean }) {
   const thread = app.threadById(threadId);
   if (!thread) return;
 
@@ -846,8 +846,10 @@ export async function reloadThread(threadId: string) {
     logger.error("thread", "saveThread failed", String(err));
   });
 
-  app.activeThreadId = thread.id;
-  app.selectedProjectId = thread.projectId;
-  app.view = "terminal";
+  if (!opts?.silent) {
+    app.activeThreadId = thread.id;
+    app.selectedProjectId = thread.projectId;
+    app.view = "terminal";
+  }
   app.bumpRespawn(thread.id);
 }
