@@ -16,15 +16,37 @@ pub fn write_text(path: &Path, text: &str) -> std::io::Result<()> {
         std::fs::create_dir_all(parent)?;
     }
     let tmp = path.with_extension(format!(
-        "{}tmp",
+        "{}{}.tmp",
         path.extension()
             .map(|e| format!("{}.", e.to_string_lossy()))
-            .unwrap_or_default()
+            .unwrap_or_default(),
+        std::process::id()
     ));
-    std::fs::write(&tmp, text)?;
-    std::fs::rename(&tmp, path)?;
-    crate::provider::protect_file(path);
+    if let Err(problem) = write_private(&tmp, text) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(problem);
+    }
+    if let Err(problem) = std::fs::rename(&tmp, path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(problem);
+    }
+    crate::provider::protect_new_file(path);
     Ok(())
+}
+
+fn write_private(path: &Path, text: &str) -> std::io::Result<()> {
+    use std::io::Write;
+
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(path)?;
+    file.write_all(text.as_bytes())?;
+    file.sync_all()
 }
 
 pub fn str_of(value: &Value, key: &str) -> Option<String> {

@@ -27,6 +27,7 @@ pub struct Options {
     pub countdown: bool,
     pub midtask: bool,
     pub check: bool,
+    pub spawned: bool,
 }
 
 pub fn current<'a>(provider: &Provider, pool: &'a [Entry]) -> Option<&'a Entry> {

@@ -60,12 +60,18 @@ kebacc-switch update -Check   # exit 10 when a newer release exists
 kebacc-switch update          # install it now
 ```
 
-Two environment variables decide the rest:
+`install.ps1 -NoAutoUpdate` turns this off at install time by writing
+`KEBACC_SWITCH_UPDATE=off` into the Claude Code settings. Two environment
+variables decide the rest:
 
 - `KEBACC_SWITCH_UPDATE=off` (also `0` or `no`) — never check, never install.
   `update` run by hand says so and does nothing.
 - `KEBACC_SWITCH_UPDATE_INTERVAL_MS` — how long between two checks. The default
   is a day.
+
+The check happens at session start only. The tool-use hook installed by
+`-AutoSwitch` never installs anything: a binary must not be replaced underneath a
+session that is already running.
 
 ## Switching without being asked
 
@@ -86,8 +92,12 @@ no status line of its own, and both pools are switched from here — and, when t
 `SessionStart` hook is in place, what the switch is armed for:
 
 ```
-you · 5h 43% / 7d 69% · 2 free · codex 1 free · auto all
+you · 5h 43% / 7d 69% · 2/3 free · codex 1/2 free · auto all
 ```
+
+An account whose quota has never been read counts as neither free nor capped: it
+is added on as `+1?` rather than folded into the free count, so the line does not
+promise room it has not seen.
 
 It never asks the network: the live window comes from the payload Claude Code
 hands it, the rest from the cache the switcher already wrote.
@@ -103,6 +113,7 @@ Inside Claude Code the same things are slash commands: `/account-add-claude`,
 | `~/.kebacc-switch-accounts/` | saved Claude Code logins |
 | `~/.kebacc-switch-codex-accounts/` | saved Codex logins |
 | `~/.claude/commands/account-*.md` | the slash commands |
+| `~/.kebacc-switch/` | stamps, locks and caches (`KEBACC_SWITCH_STATE_DIR` moves it) |
 
 One saved login is one `.json` file. The dotfiles beside them are the pool's own
 bookkeeping.

@@ -61,7 +61,7 @@ impl Drop for Guard {
 
 #[cfg(not(windows))]
 fn acquire(name: &str) -> Result<Guard, String> {
-    let dir = std::env::temp_dir().join(format!("{name}.lock"));
+    let dir = crate::provider::state_dir().join(format!("{name}.lock"));
     let start = Instant::now();
     loop {
         match std::fs::create_dir(&dir) {

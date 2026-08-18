@@ -85,7 +85,7 @@ fn dispatch(args: &[String]) -> i32 {
         return cmd::update::run(&options);
     }
 
-    if command == "auto" && options.hook {
+    if command == "auto" && options.hook && !options.spawned {
         cmd::update::maybe();
     }
 
@@ -180,6 +180,7 @@ fn parse(tokens: &[String]) -> Result<(String, Options), String> {
             "countdown" => options.countdown = true,
             "midtask" => options.midtask = true,
             "check" => options.check = true,
+            "spawned" => options.spawned = true,
             other => return Err(format!("Unknown option '-{other}'.")),
         }
     }

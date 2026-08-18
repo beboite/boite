@@ -7,7 +7,8 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-const TAIL_BYTES: u64 = 1024 * 1024;
+const TAIL_BYTES: u64 = 192 * 1024;
+const TAIL_LINES: usize = 400;
 const CONTEXT_LIMIT: f64 = 200_000.0;
 const CONTEXT_LIMIT_LARGE: f64 = 1_000_000.0;
 
@@ -399,15 +400,14 @@ impl Line<'_> {
     }
 
     fn git(&self) -> Option<String> {
-        let git_dir = git_dir(&self.cwd)?;
+        let (git_dir, root) = git_dir(&self.cwd)?;
         let head = std::fs::read_to_string(git_dir.join("HEAD")).ok()?;
         let head = head.trim();
         let branch = match head.strip_prefix("ref: refs/heads/") {
             Some(name) => name.to_string(),
             None => head.chars().take(7).collect(),
         };
-        let root = git_dir.parent()?;
-        let mark = match dirty(root) {
+        let mark = match dirty(&root) {
             Some(true) => red("*"),
             _ => String::new(),
         };
@@ -471,20 +471,23 @@ fn read_tail(path: &Path) -> Option<Vec<String>> {
     file.seek(SeekFrom::Start(start)).ok()?;
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes).ok()?;
-    Some(
-        String::from_utf8_lossy(&bytes)
-            .split('\n')
-            .map(str::to_string)
-            .collect(),
-    )
+    let text = String::from_utf8_lossy(&bytes);
+    let mut lines: Vec<String> = text
+        .split('\n')
+        .rev()
+        .take(TAIL_LINES)
+        .map(str::to_string)
+        .collect();
+    lines.reverse();
+    Some(lines)
 }
 
-fn git_dir(from: &Path) -> Option<PathBuf> {
+fn git_dir(from: &Path) -> Option<(PathBuf, PathBuf)> {
     let mut at = from.canonicalize().unwrap_or_else(|_| from.to_path_buf());
     loop {
         let candidate = at.join(".git");
         if candidate.is_dir() {
-            return Some(candidate);
+            return Some((candidate, at));
         }
         if candidate.is_file() {
             if let Some(pointed) = std::fs::read_to_string(&candidate)
@@ -492,7 +495,7 @@ fn git_dir(from: &Path) -> Option<PathBuf> {
                 .and_then(|text| pointer(&text))
             {
                 let pointed = at.join(pointed);
-                return Some(pointed.canonicalize().unwrap_or(pointed));
+                return Some((pointed.canonicalize().unwrap_or(pointed), at));
             }
         }
         at = at.parent()?.to_path_buf();
@@ -521,7 +524,12 @@ fn dirty(root: &Path) -> Option<bool> {
         };
     }
     let out = std::process::Command::new("git")
-        .args(["status", "--porcelain", "--untracked-files=no"])
+        .args([
+            "--no-optional-locks",
+            "status",
+            "--porcelain",
+            "--untracked-files=no",
+        ])
         .current_dir(root)
         .stderr(std::process::Stdio::null())
         .output()
@@ -535,16 +543,14 @@ fn dirty(root: &Path) -> Option<bool> {
 }
 
 fn dirty_cache_file(root: &Path) -> PathBuf {
-    use base64::engine::general_purpose::URL_SAFE_NO_PAD as B64;
-    use base64::Engine;
-    let key = B64.encode(root.to_string_lossy().as_bytes());
-    let key: String = key
-        .chars()
-        .rev()
-        .take(40)
-        .collect::<Vec<char>>()
-        .into_iter()
-        .rev()
-        .collect();
-    std::env::temp_dir().join(format!("kebacc-switch-statusline-git-{key}.txt"))
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(root.to_string_lossy().as_bytes());
+    let key = hasher
+        .finalize()
+        .iter()
+        .take(16)
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    crate::provider::state_dir().join(format!("git-{key}.txt"))
 }

@@ -109,14 +109,15 @@ fn secret_key(create: bool) -> Option<Vec<u8>> {
     let key = random_bytes(32);
     let b64 = B64.encode(&key);
     let stored = match backend {
-        Backend::Keychain => std::process::Command::new(tool)
-            .args(&write)
-            .arg(&b64)
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false),
+        Backend::Keychain => write_stdin(
+            tool,
+            &write,
+            &format!(
+                "{b64}
+{b64}
+"
+            ),
+        ),
         _ => write_stdin(tool, &write, &b64),
     };
     if stored {
@@ -124,6 +125,10 @@ fn secret_key(create: bool) -> Option<Vec<u8>> {
     } else {
         None
     }
+}
+
+pub fn secret_via_stdin(tool: &str, args: &[&str], text: &str) -> bool {
+    write_stdin(tool, args, text)
 }
 
 fn write_stdin(tool: &str, args: &[&str], text: &str) -> bool {

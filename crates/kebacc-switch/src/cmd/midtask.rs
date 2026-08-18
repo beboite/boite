@@ -15,7 +15,7 @@ pub fn run(provider: &str) -> i32 {
 }
 
 fn stamp_file() -> PathBuf {
-    std::env::temp_dir().join("kebacc-switch-midtask.stamp")
+    crate::provider::state_dir().join("midtask.stamp")
 }
 
 fn now_ms() -> u128 {
@@ -50,7 +50,7 @@ fn spawn(provider: &str) {
     };
     let mut command = Command::new(exe);
     command
-        .args(["auto", "-Provider", provider, "-Hook"])
+        .args(["auto", "-Provider", provider, "-Hook", "-Spawned"])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());

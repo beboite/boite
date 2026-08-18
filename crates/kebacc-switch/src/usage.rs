@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 use std::path::Path;
 
 pub const FIVE_HOUR_CAP: f64 = 99.0;
-pub const SEVEN_DAY_CAP: f64 = 99.8;
+pub const SEVEN_DAY_CAP: f64 = 99.0;
 const CACHE_SECONDS: i64 = 60;
 
 pub fn caps() -> [(&'static str, f64); 2] {
@@ -57,10 +57,7 @@ impl Window {
     }
 
     pub fn blocking(&self, cap: f64) -> bool {
-        if !at_cap(self.utilization, cap) {
-            return false;
-        }
-        self.resets().is_none_or(|at| at > Utc::now())
+        at_cap(self.utilization, cap)
     }
 }
 
@@ -74,6 +71,10 @@ impl Usage {
 
     pub fn pct(&self, name: &str) -> Option<f64> {
         self.window(name).map(|w| w.utilization)
+    }
+
+    pub fn known(&self) -> bool {
+        self.five_hour.is_some() || self.seven_day.is_some()
     }
 
     pub fn usable(&self) -> bool {
@@ -144,8 +145,7 @@ fn window_from(value: Option<&Value>) -> Option<Window> {
     let value = value.filter(|v| !v.is_null())?;
     let pct = ["used_percent", "utilization", "used_percentage"]
         .iter()
-        .find_map(|name| value.get(*name).and_then(Value::as_f64))
-        .unwrap_or(0.0);
+        .find_map(|name| value.get(*name).and_then(Value::as_f64))?;
     let resets = match jsonio::str_of(value, "resets_at") {
         Some(at) => Some(at),
         None => value
@@ -285,5 +285,41 @@ pub fn for_entry(provider: &Provider, entry: &Entry, force: bool) -> Option<Usag
             Some(usage)
         }
         None => from_cache(entry.cache.as_ref()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{window_from, Usage};
+    use serde_json::json;
+
+    #[test]
+    fn a_window_without_a_percentage_is_unknown_not_empty() {
+        assert!(window_from(Some(&json!({ "resets_at": "2026-01-01T00:00:00Z" }))).is_none());
+    }
+
+    #[test]
+    fn a_window_with_a_percentage_is_read() {
+        let window = window_from(Some(&json!({ "utilization": 42.25 }))).expect("a window");
+        assert_eq!(window.utilization, 42.3);
+    }
+
+    #[test]
+    fn a_reading_at_the_cap_blocks_even_when_its_reset_time_has_passed() {
+        let window = super::Window {
+            utilization: 100.0,
+            resets_at: Some("2000-01-01T00:00:00Z".into()),
+        };
+        assert!(window.blocking(super::FIVE_HOUR_CAP));
+    }
+
+    #[test]
+    fn usage_with_no_window_is_not_known() {
+        let usage = Usage {
+            five_hour: None,
+            seven_day: None,
+        };
+        assert!(!usage.known());
+        assert!(usage.usable());
     }
 }

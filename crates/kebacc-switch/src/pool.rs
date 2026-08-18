@@ -207,13 +207,13 @@ impl<'a> Pool<'a> {
             &recorded_uuid,
             Some(&cred_hash),
         );
-        if recorded_stamp == expected && uuid == recorded_uuid {
+        if same_stamp(&recorded_stamp, &expected) && uuid == recorded_uuid {
             return Trust::Trusted;
         }
 
         for legacy in [None, Some("none")] {
             let old = stamp(key, file_name, &recorded_email, &recorded_uuid, legacy);
-            if recorded_stamp != old || uuid != recorded_uuid {
+            if !same_stamp(&recorded_stamp, &old) || uuid != recorded_uuid {
                 continue;
             }
             self.register(file_name, snapshot);
@@ -366,4 +366,17 @@ pub fn plain_snapshots(store: &Path) -> Option<Vec<(PathBuf, Value)>> {
             })
             .collect(),
     )
+}
+
+fn same_stamp(left: &str, right: &str) -> bool {
+    let left = left.as_bytes();
+    let right = right.as_bytes();
+    if left.len() != right.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (a, b) in left.iter().zip(right.iter()) {
+        diff |= a ^ b;
+    }
+    diff == 0
 }

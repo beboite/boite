@@ -15,7 +15,7 @@ const DOWNLOAD_SECONDS: u64 = 120;
 const RETRY_MS: u128 = 60 * 60 * 1000;
 
 pub const MARKER: &str = ".update.json";
-const STAMP: &str = "kebacc-switch-update.stamp";
+const STAMP: &str = "update.stamp";
 
 pub fn run(opts: &Options) -> i32 {
     if off() {
@@ -95,7 +95,7 @@ pub fn run(opts: &Options) -> i32 {
 }
 
 fn retry_sooner() {
-    let stamp = std::env::temp_dir().join(STAMP);
+    let stamp = crate::provider::state_dir().join(STAMP);
     let when = now_ms().saturating_sub(interval_ms().saturating_sub(RETRY_MS));
     let _ = std::fs::write(stamp, when.to_string());
 }
@@ -104,7 +104,7 @@ pub fn maybe() {
     if off() {
         return;
     }
-    let stamp = std::env::temp_dir().join(STAMP);
+    let stamp = crate::provider::state_dir().join(STAMP);
     if !due(&stamp) {
         return;
     }

@@ -1,9 +1,14 @@
 # Puts the switcher on this machine.
 #
-# Nothing is downloaded. The switcher is a binary, built from `crates/kebacc-switch`
-# by the same `cargo build` that builds Boite, and this copies the one that came
-# out of that build into place. Run it again to update — it overwrites what it
-# owns and never touches the pools.
+# This step downloads nothing. The switcher is a binary, built from
+# `crates/kebacc-switch` by the same `cargo build` that builds Boite, and this
+# copies the one that came out of that build into place. Run it again to update —
+# it overwrites what it owns and never touches the pools.
+#
+# Once installed, the switcher keeps itself up to date from its own GitHub
+# releases: it checks once a day at session start and installs in the background.
+# Pass -NoAutoUpdate to write KEBACC_SWITCH_UPDATE=off into the Claude Code
+# settings instead.
 [CmdletBinding()]
 param(
     [string]$ToolsDir = (Join-Path $HOME '.claude-tools'),
@@ -17,7 +22,9 @@ param(
     # it changes which login the next session answers as.
     [ValidateSet('claude', 'codex', 'all')]
     [string]$AutoSwitch,
-    [switch]$NoProfileEdit
+    [switch]$NoProfileEdit,
+    # Turn the daily self-update off for this machine.
+    [switch]$NoAutoUpdate
 )
 
 $ErrorActionPreference = 'Stop'
@@ -56,8 +63,17 @@ if (-not (Test-Path -LiteralPath $ToolsDir)) { New-Item -ItemType Directory -Pat
 # Versions before this one were a set of PowerShell scripts and a node status
 # line, dot-sourced from this same directory. Left in place they would still be
 # on the PATH of a hook or a status line written by an earlier install.
-foreach ($pattern in @('*.ps1', '*.js', 'package.json')) {
-    Get-ChildItem -LiteralPath $ToolsDir -Filter $pattern -File -ErrorAction Ignore | Remove-Item -Force
+#
+# Named one by one on purpose: $ToolsDir is a shared directory and a wildcard
+# sweep here would delete files this installer never wrote.
+$legacy = @(
+    'claude-cc.ps1', 'claude-cc-core.ps1', 'claude-cc-usage.ps1',
+    'claude-cc-pool.ps1', 'claude-cc-statusline.ps1', 'claude-cc-providers.ps1',
+    'kebacc-switch.ps1', 'statusline.js', 'claude-cc.js', 'package.json'
+)
+foreach ($name in $legacy) {
+    $stale = Join-Path $ToolsDir $name
+    if (Test-Path -LiteralPath $stale -PathType Leaf) { Remove-Item -LiteralPath $stale -Force }
 }
 
 $entry = Join-Path $ToolsDir $exeName
@@ -132,10 +148,24 @@ function Read-ClaudeSettings {
 
 function Write-ClaudeSettings {
     param([psobject]$Settings)
-    if ((Test-Path -LiteralPath $settingsPath) -and -not (Test-Path -LiteralPath "$settingsPath.cc-backup")) {
-        Copy-Item -LiteralPath $settingsPath -Destination "$settingsPath.cc-backup" -Force
+    if (Test-Path -LiteralPath $settingsPath) {
+        # `.cc-backup` is the file as it was before this installer ever ran and is
+        # never overwritten; `.cc-backup.prev` is the state before this run.
+        if (-not (Test-Path -LiteralPath "$settingsPath.cc-backup")) {
+            Copy-Item -LiteralPath $settingsPath -Destination "$settingsPath.cc-backup" -Force
+        }
+        Copy-Item -LiteralPath $settingsPath -Destination "$settingsPath.cc-backup.prev" -Force
     }
-    [IO.File]::WriteAllText($settingsPath, ($Settings | ConvertTo-Json -Depth 20), [Text.UTF8Encoding]::new($false))
+    # Deep rather than 20: the default silently truncates anything nested deeper,
+    # and settings.json is the user's file, not ours to shorten.
+    $json = $Settings | ConvertTo-Json -Depth 100
+    # A round trip that cannot be read back means the write would corrupt the
+    # file, so nothing is written at all.
+    try { $null = $json | ConvertFrom-Json } catch {
+        Say "Refusing to rewrite $settingsPath — the result would not parse. Nothing changed." Red
+        exit 1
+    }
+    [IO.File]::WriteAllText($settingsPath, $json, [Text.UTF8Encoding]::new($false))
 }
 
 # Forward slashes throughout: these strings end up in JSON, where a backslash is
@@ -178,6 +208,15 @@ if ($AutoSwitch) {
     $settings | Add-Member -NotePropertyName hooks -NotePropertyValue $hooks -Force
     Write-ClaudeSettings $settings
     Say "Each session will now run: kebacc-switch auto -Provider $AutoSwitch" Green
+}
+
+if ($NoAutoUpdate) {
+    $settings = Read-ClaudeSettings
+    $envBlock = if ($settings.PSObject.Properties['env']) { $settings.env } else { [pscustomobject]@{} }
+    $envBlock | Add-Member -NotePropertyName KEBACC_SWITCH_UPDATE -NotePropertyValue 'off' -Force
+    $settings | Add-Member -NotePropertyName env -NotePropertyValue $envBlock -Force
+    Write-ClaudeSettings $settings
+    Say "The switcher will not update itself: KEBACC_SWITCH_UPDATE=off ($settingsPath)" Yellow
 }
 
 Say ''

@@ -326,11 +326,33 @@ pub fn hook_scope(command: &str) -> Option<String> {
 }
 
 fn missing_path(command: &str) -> Option<String> {
-    command
-        .split(['"', '\'', ' '])
+    quoted_words(command)
+        .into_iter()
         .filter(|word| word.contains('/') || word.contains('\\'))
         .find(|word| !Path::new(word).exists())
-        .map(str::to_string)
+}
+
+fn quoted_words(command: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut word = String::new();
+    let mut quote: Option<char> = None;
+    for c in command.chars() {
+        match quote {
+            Some(open) if c == open => quote = None,
+            Some(_) => word.push(c),
+            None if c == '"' || c == '\'' => quote = Some(c),
+            None if c == ' ' => {
+                if !word.is_empty() {
+                    words.push(std::mem::take(&mut word));
+                }
+            }
+            None => word.push(c),
+        }
+    }
+    if !word.is_empty() {
+        words.push(word);
+    }
+    words
 }
 
 fn stale_files(provider: &Provider) -> Vec<PathBuf> {
@@ -368,4 +390,21 @@ fn on_path(cli: &str) -> bool {
             .iter()
             .any(|ext| dir.join(format!("{cli}{ext}")).exists())
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::quoted_words;
+
+    #[test]
+    fn a_quoted_path_with_a_space_stays_one_word() {
+        let words = quoted_words("\"C:/Program Files/kebacc-switch.exe\" statusline");
+        assert_eq!(words[0], "C:/Program Files/kebacc-switch.exe");
+        assert_eq!(words[1], "statusline");
+    }
+
+    #[test]
+    fn bare_words_split_on_spaces() {
+        assert_eq!(quoted_words("a b  c"), vec!["a", "b", "c"]);
+    }
 }

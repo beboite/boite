@@ -30,7 +30,26 @@ pub struct Provider {
 }
 
 pub fn home() -> PathBuf {
-    dirs::home_dir().unwrap_or_else(|| PathBuf::from("."))
+    match dirs::home_dir() {
+        Some(dir) if !dir.as_os_str().is_empty() => dir,
+        _ => {
+            eprintln!(
+                "! No home directory: refusing to read or write credentials relative to the current directory."
+            );
+            std::process::exit(1);
+        }
+    }
+}
+
+pub fn state_dir() -> PathBuf {
+    let dir = match std::env::var_os("KEBACC_SWITCH_STATE_DIR") {
+        Some(d) if !d.is_empty() => PathBuf::from(d),
+        _ => home().join(".kebacc-switch"),
+    };
+    if std::fs::create_dir_all(&dir).is_ok() {
+        protect_dir(&dir);
+    }
+    dir
 }
 
 pub fn claude_config_dir() -> PathBuf {
@@ -160,26 +179,58 @@ pub fn protect_file(path: &Path) {
 }
 
 pub fn protect_dir(path: &Path) {
-    if !path.exists() {
+    protect_dir_once(path);
+}
+
+#[cfg(windows)]
+pub fn protect_new_file(path: &Path) {
+    let owned = path.parent().is_some_and(is_locked_down);
+    if !owned {
+        protect_file(path);
+    }
+}
+
+#[cfg(not(windows))]
+pub fn protect_new_file(path: &Path) {
+    protect_file(path);
+}
+
+fn locked_down() -> &'static std::sync::Mutex<std::collections::HashSet<PathBuf>> {
+    static DONE: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<PathBuf>>> =
+        std::sync::OnceLock::new();
+    DONE.get_or_init(|| std::sync::Mutex::new(std::collections::HashSet::new()))
+}
+
+#[cfg(windows)]
+fn is_locked_down(dir: &Path) -> bool {
+    locked_down()
+        .lock()
+        .map(|done| done.contains(dir))
+        .unwrap_or(false)
+}
+
+pub fn protect_dir_once(dir: &Path) {
+    if !dir.is_dir() {
         return;
     }
-    restrict(path, true);
+    let Ok(mut done) = locked_down().lock() else {
+        return;
+    };
+    if done.insert(dir.to_path_buf()) {
+        restrict(dir, true);
+    }
 }
 
 #[cfg(windows)]
 fn restrict(path: &Path, dir: bool) {
-    let user = match std::env::var("USERNAME") {
-        Ok(u) if !u.is_empty() => u,
-        _ => return,
-    };
     let grant = if dir {
-        format!("{user}:(OI)(CI)F")
+        "*S-1-3-4:(OI)(CI)F"
     } else {
-        format!("{user}:(F)")
+        "*S-1-3-4:(F)"
     };
     let _ = std::process::Command::new("icacls")
         .arg(path)
-        .args(["/inheritance:r", "/grant:r", &grant])
+        .args(["/inheritance:r", "/grant:r", grant])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status();

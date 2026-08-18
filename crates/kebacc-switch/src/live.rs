@@ -23,16 +23,13 @@ pub fn creds_raw(provider: &Provider) -> Option<String> {
 
 pub fn set_creds_raw(provider: &Provider, raw: &str) -> std::io::Result<()> {
     let file = provider.cred_file();
-    if let Some(parent) = file.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(&file, raw)?;
-    crate::provider::protect_file(&file);
+    jsonio::write_text(&file, raw)?;
     if provider.uses_keychain {
         if let Some(service) = provider.keychain_service {
             let user = std::env::var("USER").unwrap_or_default();
-            let _ = std::process::Command::new("security")
-                .args([
+            seal::secret_via_stdin(
+                "security",
+                &[
                     "add-generic-password",
                     "-U",
                     "-s",
@@ -40,11 +37,13 @@ pub fn set_creds_raw(provider: &Provider, raw: &str) -> std::io::Result<()> {
                     "-a",
                     &user,
                     "-w",
-                    raw,
-                ])
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .status();
+                ],
+                &format!(
+                    "{raw}
+{raw}
+"
+                ),
+            );
         }
     }
     Ok(())

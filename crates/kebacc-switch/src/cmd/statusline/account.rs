@@ -160,13 +160,14 @@ fn short_local(email: Option<&str>, max: usize) -> Option<String> {
 }
 
 pub fn current_email() -> Option<String> {
-    let config = jsonio::read(&provider::home().join(".claude.json"))?;
+    let config = jsonio::read(&provider::spec(ProviderId::Claude).config_file())?;
     let account = config.get("oauthAccount")?;
     jsonio::str_of(account, "emailAddress").map(|email| email.to_lowercase())
 }
 
 struct Seats {
     free: usize,
+    unknown: usize,
     total: usize,
     others: usize,
     wait_ms: Option<i64>,
@@ -182,6 +183,7 @@ fn seats(payload: &Value) -> Option<Seats> {
 
     let mut out = Seats {
         free: 0,
+        unknown: 0,
         total: 0,
         others: 0,
         wait_ms: None,
@@ -205,8 +207,8 @@ fn seats(payload: &Value) -> Option<Seats> {
             (true, Some(live)) => usage::from_cache(Some(live)),
             _ => usage::from_cache(snapshot.get("usageCache")),
         };
-        let Some(cache) = cache else {
-            out.free += 1;
+        let Some(cache) = cache.filter(usage::Usage::known) else {
+            out.unknown += 1;
             continue;
         };
 
@@ -362,6 +364,9 @@ pub fn segments(payload: &Value) -> Vec<String> {
         _ => green,
     };
     let mut state = paint(&format!("{}/{} free", seats.free, seats.total));
+    if seats.unknown > 0 {
+        state.push_str(&dim(&format!(" +{}?", seats.unknown)));
+    }
     if let Some(ms) = seats.wait_ms {
         let target = short_local(seats.wait_email.as_deref(), target_room);
         let wait = format!(
@@ -381,6 +386,33 @@ pub fn segments(payload: &Value) -> Vec<String> {
     }
     out.push(state);
 
+    if let Some(codex) = codex_seats() {
+        out.push(codex);
+    }
+
     out.push(auto_label(scope.as_deref()));
     out
+}
+
+fn codex_seats() -> Option<String> {
+    let store = provider::spec(ProviderId::Codex).store;
+    let accounts = pool::plain_snapshots(&store)?;
+    let mut total = 0usize;
+    let mut free = 0usize;
+    for (_, snapshot) in &accounts {
+        if snapshot.is_null() {
+            continue;
+        }
+        total += 1;
+        if usage::from_cache(snapshot.get("usageCache"))
+            .filter(usage::Usage::known)
+            .is_some_and(|cache| cache.usable())
+        {
+            free += 1;
+        }
+    }
+    if total == 0 {
+        return None;
+    }
+    Some(violet(&format!("codex {free}/{total} free")))
 }
