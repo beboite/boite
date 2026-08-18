@@ -71,13 +71,20 @@ const WORKING_BY_KEY: Partial<Record<NonNullable<IconKey>, RegExp[]>> = {
     /\bworking\b/i,
     /✨\s*generating/i,
   ],
-  // Grok's status line cycles a braille spinner plus an activity word
-  // (Waiting / Running: <tool> / Compacting / Retrying).
+  // Grok's status line. 1.0.5 dropped the braille + "Running:" chrome for a
+  // labelled spinner ("Writing file…", "Preparing tool call") and an interrupt
+  // hint that is a sentence, not a key. The idle footer is "Waiting for your
+  // next prompt", so a bare "waiting" must never match.
   grok: [
+    /send\s+a\s+message\s+to\s+interrupt/i,
     /esc\s+to\s+(?:interrupt|cancel|stop)/i,
     /\brunning:/i,
     /\bcompacting\b/i,
     /\bretrying\b/i,
+    /\bwriting (?:file|edit|command|image prompt|video prompt|workflow)\b/i,
+    /\bupdating todo list\b/i,
+    /\bpreparing(?:\s+(?:question|mcp tool|tool call))?/i,
+    /\bwaiting (?:for response|on subagent|on task output|on tasks|on answers)\b/i,
     /\(\d+s\s*[·•]/,
   ],
   // Hermes marks busy with a leading ⏳ (✓ idle, ⚠ waiting for approval). On
@@ -139,7 +146,7 @@ const ANIMATION_GLYPHS = /[◐-◓⏳⠁-⣿]/;
 const ELLIPSIS = /…|\.\.\./;
 const ELAPSED = /\b\d+\s*s\b/;
 const INTERRUPT_HINT =
-  /esc\s+to\s+(?:interrupt|cancel|stop)|ctrl\s*\+\s*c\s+to\s+(?:cancel|stop|interrupt)/i;
+  /esc\s+to\s+(?:interrupt|cancel|stop)|ctrl\s*\+\s*c\s+to\s+(?:cancel|stop|interrupt)|send\s+a\s+message\s+to\s+interrupt/i;
 
 const HAS_LETTER = /[a-zA-Z]/;
 

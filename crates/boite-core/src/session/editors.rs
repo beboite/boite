@@ -1,10 +1,11 @@
-//! The six stores Boite can only read.
+//! The six stores Boite can only read for which conversation.
 //!
 //! Copilot, cursor, antigravity, grok, hermes and pi. Grouped because they are
 //! the same shape of answer: open whatever the editor keeps, find the newest
 //! session recorded for this directory, hand back an id and when it was last
-//! touched. None of them says whether a turn is in flight, so none of them
-//! contributes to the sidebar's activity dot.
+//! touched. Grok is the one that also says whether a turn is in flight, from
+//! the same `updates.jsonl` the finder already walks. The other five still do
+//! not, so they still do not contribute to the sidebar's activity dot.
 //!
 //! Four are sqlite and two are directories of files, and that is the whole
 //! variation. What differs beyond it is where the store lives per platform,
@@ -478,6 +479,211 @@ fn migrate_grok_transcript_in(
     }
     copy_tree(&source, &target)?;
     Ok(true)
+}
+
+/// How far back through a grok `updates.jsonl` to look for a turn marker.
+///
+/// Same ceiling as a codex rollout: a turn that wrote nothing in this window
+/// is not an answer, and the terminal's own rows decide.
+const GROK_TAIL_BYTES: u64 = 256 * 1024;
+
+/// How long an `updates.jsonl` can go untouched before an open turn stops counting.
+///
+/// Grok killed mid-turn leaves `user_message_chunk` as the last marker it wrote.
+/// `active_sessions.json` names the pid when grok is still there, so a live
+/// process never ages out. This bound is only for a session the registry no
+/// longer holds, the same 30 minutes as a codex rollout.
+const GROK_FILE_TTL: Duration = Duration::from_secs(30 * 60);
+
+#[derive(Deserialize)]
+struct GrokUpdateLine {
+    params: Option<GrokUpdateParams>,
+}
+
+#[derive(Deserialize)]
+struct GrokUpdateParams {
+    update: Option<GrokUpdateBody>,
+}
+
+#[derive(Deserialize)]
+struct GrokUpdateBody {
+    #[serde(rename = "sessionUpdate")]
+    session_update: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct GrokActiveSession {
+    session_id: String,
+    pid: u32,
+}
+
+/// Whether a grok turn is in flight, read off the ACP stream it appends to.
+///
+/// Grok has no live status file. Each turn opens on `user_message_chunk` and
+/// stays open across thought, tool calls and the streamed answer, then closes
+/// on `turn_completed`. Reading the last of those backwards is the whole answer.
+///
+/// `live_pid` is whether `active_sessions.json` still names a living process
+/// for this session. A live one never ages out (a long tool call appends
+/// nothing). A dead one, or a session the registry dropped, is bounded by
+/// [`GROK_FILE_TTL`].
+fn grok_updates_state(path: &Path, live_pid: bool) -> Option<&'static str> {
+    let mut file = fs::File::open(path).ok()?;
+    let meta = file.metadata().ok()?;
+    let len = meta.len();
+    let age = meta
+        .modified()
+        .ok()
+        .and_then(|m| SystemTime::now().duration_since(m).ok());
+    let from = len.saturating_sub(GROK_TAIL_BYTES);
+    file.seek(SeekFrom::Start(from)).ok()?;
+    let mut buf = String::new();
+    file.read_to_string(&mut buf).ok()?;
+    let body = if from > 0 {
+        buf.split_once('\n').map(|(_, rest)| rest).unwrap_or("")
+    } else {
+        &buf
+    };
+    for line in body.lines().rev() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let Ok(event) = serde_json::from_str::<GrokUpdateLine>(line) else {
+            continue;
+        };
+        match event
+            .params
+            .and_then(|p| p.update)
+            .and_then(|u| u.session_update)
+            .as_deref()
+        {
+            Some("turn_completed") => return Some("idle"),
+            Some(
+                "user_message_chunk"
+                | "agent_thought_chunk"
+                | "agent_message_chunk"
+                | "tool_call"
+                | "tool_call_update",
+            ) => {
+                if live_pid {
+                    return Some("busy");
+                }
+                return grok_bound_open_turn(age);
+            }
+            _ => continue,
+        }
+    }
+    None
+}
+
+fn grok_bound_open_turn(age: Option<Duration>) -> Option<&'static str> {
+    match age {
+        Some(age) if age >= GROK_FILE_TTL => None,
+        _ => Some("busy"),
+    }
+}
+
+fn grok_live_pids() -> std::collections::HashMap<String, u32> {
+    let Some(path) = dirs::home_dir().map(|h| h.join(".grok").join("active_sessions.json")) else {
+        return std::collections::HashMap::new();
+    };
+    let Ok(bytes) = fs::read(&path) else {
+        return std::collections::HashMap::new();
+    };
+    let Ok(rows) = serde_json::from_slice::<Vec<GrokActiveSession>>(&bytes) else {
+        return std::collections::HashMap::new();
+    };
+    rows.into_iter().map(|r| (r.session_id, r.pid)).collect()
+}
+
+fn grok_updates_path(root: &Path, cwd: &str, session_id: Option<&str>) -> Option<PathBuf> {
+    if let Some(id) = session_id {
+        if let Some(dir) = grok_dir_for(root, cwd) {
+            let path = dir.join(id).join("updates.jsonl");
+            if path.is_file() {
+                return Some(path);
+            }
+        }
+        let encoded = root.join(grok_dir_name(cwd)).join(id).join("updates.jsonl");
+        if encoded.is_file() {
+            return Some(encoded);
+        }
+        for entry in fs::read_dir(root).ok()?.flatten() {
+            let path = entry.path().join(id).join("updates.jsonl");
+            if path.is_file() {
+                return Some(path);
+            }
+        }
+        return None;
+    }
+    let dir = grok_dir_for(root, cwd)?;
+    grok_newest_updates(&dir)
+}
+
+fn grok_newest_updates(group: &Path) -> Option<PathBuf> {
+    let mut best: Option<(PathBuf, SystemTime)> = None;
+    for entry in fs::read_dir(group).ok()?.flatten() {
+        let path = entry.path().join("updates.jsonl");
+        let Ok(meta) = path.metadata() else {
+            continue;
+        };
+        let Ok(modified) = meta.modified() else {
+            continue;
+        };
+        if best.as_ref().is_none_or(|(_, seen)| modified > *seen) {
+            best = Some((path, modified));
+        }
+    }
+    best.map(|(path, _)| path)
+}
+
+/// What grok says about the sessions behind these threads.
+///
+/// One file tail per query, not a walk of every conversation grok has ever
+/// recorded. The path is the captured id when the thread has one, otherwise
+/// the newest session of that folder, same rule as [`find_grok_session_in`].
+pub(super) fn grok_turns(queries: &[TurnQuery]) -> Vec<AgentTurn> {
+    let Some(root) = grok_sessions_dir() else {
+        return Vec::new();
+    };
+    if !root.is_dir() {
+        return Vec::new();
+    }
+    let live = grok_live_pids();
+    let mut out = Vec::new();
+    for query in queries.iter().filter(|q| q.kind == "grok") {
+        let Some(path) = grok_updates_path(&root, &query.cwd, query.id()) else {
+            continue;
+        };
+        let session_id = query
+            .id()
+            .map(str::to_string)
+            .or_else(|| {
+                path.parent()
+                    .and_then(|p| p.file_name())
+                    .map(|n| n.to_string_lossy().into_owned())
+            })
+            .unwrap_or_default();
+        if session_id.is_empty() {
+            continue;
+        }
+        let live_pid = live
+            .get(&session_id)
+            .copied()
+            .is_some_and(pid_alive);
+        let Some(state) = grok_updates_state(&path, live_pid) else {
+            continue;
+        };
+        out.push(AgentTurn {
+            kind: "grok".into(),
+            session_id,
+            cwd: query.cwd.clone(),
+            state: state.into(),
+            waiting_for: None,
+        });
+    }
+    out
 }
 
 fn hermes_db_path() -> Option<PathBuf> {
@@ -991,5 +1197,66 @@ mod tests {
     fn nothing_to_carry_for_grok_reads_as_nothing_to_resume() {
         let root = grok_fixture("empty");
         assert!(!migrate_grok_transcript_in(&root, "ghost", "/w/from", "/w/to").unwrap());
+    }
+
+    fn write_grok_updates(dir: &Path, name: &str, lines: &[&str]) -> PathBuf {
+        let path = dir.join(name);
+        fs::write(&path, lines.join("\n")).unwrap();
+        path
+    }
+
+    #[test]
+    fn grok_update_markers_decide_the_turn() {
+        let dir = grok_fixture("turns");
+        let busy = write_grok_updates(
+            &dir,
+            "busy.jsonl",
+            &[
+                r#"{"method":"session/update","params":{"update":{"sessionUpdate":"user_message_chunk"}}}"#,
+                r#"{"method":"session/update","params":{"update":{"sessionUpdate":"tool_call"}}}"#,
+            ],
+        );
+        assert_eq!(grok_updates_state(&busy, false), Some("busy"));
+
+        let done = write_grok_updates(
+            &dir,
+            "done.jsonl",
+            &[
+                r#"{"method":"session/update","params":{"update":{"sessionUpdate":"user_message_chunk"}}}"#,
+                r#"{"method":"_x.ai/session/update","params":{"update":{"sessionUpdate":"turn_completed"}}}"#,
+            ],
+        );
+        assert_eq!(grok_updates_state(&done, false), Some("idle"));
+
+        let again = write_grok_updates(
+            &dir,
+            "again.jsonl",
+            &[
+                r#"{"method":"session/update","params":{"update":{"sessionUpdate":"turn_completed"}}}"#,
+                r#"{"method":"session/update","params":{"update":{"sessionUpdate":"user_message_chunk"}}}"#,
+            ],
+        );
+        assert_eq!(grok_updates_state(&again, false), Some("busy"));
+
+        let hook_only = write_grok_updates(
+            &dir,
+            "hook.jsonl",
+            &[r#"{"method":"_x.ai/session/update","params":{"update":{"sessionUpdate":"hook_execution"}}}"#],
+        );
+        assert_eq!(grok_updates_state(&hook_only, false), None);
+        assert_eq!(grok_updates_state(&dir.join("missing.jsonl"), false), None);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_open_grok_turn_stops_counting_once_the_file_goes_stale() {
+        assert_eq!(grok_bound_open_turn(Some(Duration::from_secs(0))), Some("busy"));
+        assert_eq!(
+            grok_bound_open_turn(Some(GROK_FILE_TTL - Duration::from_secs(1))),
+            Some("busy")
+        );
+        assert_eq!(grok_bound_open_turn(Some(GROK_FILE_TTL)), None);
+        assert_eq!(grok_bound_open_turn(None), Some("busy"));
     }
 }

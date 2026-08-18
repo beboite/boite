@@ -15,7 +15,8 @@ import { declaredTurn, type AgentTurn } from "./agent-registry";
  */
 
 // Claude's is a directory of small files, codex's is a SQLite index plus the tail
-// of a transcript, opencode's is a SQLite query. Cheap for a handful of threads,
+// of a transcript, opencode's is a SQLite query, grok's is the tail of one
+// updates.jsonl. Cheap for a handful of threads,
 // not free, and a turn boundary is not something the dot has to catch inside a
 // frame: the status tick runs faster than this and reads the screen in between.
 export const POLL_MS = 1000;

@@ -59,9 +59,11 @@ describe("declaredTurn", () => {
       claude("shared", "busy", "/w/one"),
       turn("codex", "shared", "idle", "/w/one"),
       turn("opencode", "oc", "busy", "/w/two"),
+      turn("grok", "g", "busy", "/w/one"),
     ];
     expect(declaredTurn(live, "claude", "shared", "/w/one")).toEqual({ state: "busy" });
     expect(declaredTurn(live, "codex", "shared", "/w/one")).toEqual({ state: "idle" });
+    expect(declaredTurn(live, "grok", "g", "/w/one")).toEqual({ state: "busy" });
     // By directory, each agent sees exactly one candidate rather than two.
     expect(declaredTurn(live, "claude", null, "/w/one")).toEqual({ state: "busy" });
     expect(declaredTurn(live, "codex", null, "/w/one")).toEqual({ state: "idle" });

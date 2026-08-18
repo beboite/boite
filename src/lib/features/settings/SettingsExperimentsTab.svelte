@@ -17,7 +17,7 @@
 
   const WHIP_SOUNDS: { id: WhipSound; labelKey: MessageKey }[] = [
     { id: "synth", labelKey: "experiments.whipSoundSynth" },
-    { id: "meme", labelKey: "experiments.whipSoundMeme" },
+    { id: "sampled", labelKey: "experiments.whipSoundMeme" },
   ];
 
   const RADIO =
@@ -26,6 +26,13 @@
     "rounded-md border px-3 py-1 text-xs transition border-foreground/40 bg-[var(--color-surface-3)] text-foreground";
 
   const sortManual = $derived(settings.state.smartSortBy === "manual");
+
+  function whipSoundOn(id: WhipSound): boolean {
+    if (id === "sampled") {
+      return settings.state.whipSound === "sampled" || settings.state.whipSound === "meme";
+    }
+    return settings.state.whipSound === id;
+  }
 
   /**
    * Cracks once so the choice is audible.
@@ -133,8 +140,8 @@
         <button
           type="button"
           role="radio"
-          aria-checked={settings.state.whipSound === sound.id}
-          class={settings.state.whipSound === sound.id ? RADIO_ON : RADIO}
+          aria-checked={whipSoundOn(sound.id)}
+          class={whipSoundOn(sound.id) ? RADIO_ON : RADIO}
           onclick={() => {
             settings.setWhipSound(sound.id);
             // The click is the gesture that unlocks audio, so picking a noise

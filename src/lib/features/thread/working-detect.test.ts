@@ -89,6 +89,18 @@ describe("detectWorkingOnScreen", () => {
     expect(detectWorkingOnScreen(["⠹ Running: bash"], "grok")).toBe(true);
   });
 
+  it("reads grok 1.0.5's labelled spinner and not its idle prompt", () => {
+    // Sampled off grok.exe 1.0.5: the status line is a verb plus an ellipsis,
+    // and the interrupt hint is a sentence. The idle footer shares the word
+    // "waiting" with a mid-turn "Waiting for response", so the detector has
+    // to keep those two apart.
+    expect(detectWorkingOnScreen(["Writing file…"], "grok")).toBe(true);
+    expect(detectWorkingOnScreen(["Preparing tool call"], "grok")).toBe(true);
+    expect(detectWorkingOnScreen(["Waiting for response"], "grok")).toBe(true);
+    expect(detectWorkingOnScreen(["send a message to interrupt"], "grok")).toBe(true);
+    expect(detectWorkingOnScreen(["Waiting for your next prompt"], "grok")).toBe(false);
+  });
+
   it("takes any braille frame as a spinner, but not blank braille", () => {
     // grok cycles frames well past the common ⠋ to ⠏ subset.
     for (const frame of ["⠁", "⠋", "⣿", "⡇"]) {

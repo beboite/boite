@@ -223,7 +223,7 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "experiments.whipSoundSynth": "Synthèse",
   "experiments.whipSoundMeme": "Échantillon",
   "experiments.whipSoundDesc":
-    "Choisissez-en un pour l'entendre. La synthèse est fabriquée à la volée et ne télécharge rien ; l'échantillon est un fichier de 27 Ko, récupéré la première fois que vous le demandez et jamais avant.",
+    "Choisissez-en un pour l'entendre. La synthèse est fabriquée à la volée et ne télécharge rien ; l'échantillon est six claquements dans un fichier de 34 Ko, récupéré la première fois que vous le demandez et jamais avant.",
   "titlebar.whip": "Claquer le fouet",
   "titlebar.whipDrop": "Lâcher le fouet",
 
@@ -603,6 +603,8 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "fastpick.enableDesc": "Masqué de toute façon sur une machine sans fastpick.",
   "plugin.codexTitle": "codex-account-switcher",
   "plugin.codexDesc": "Sauve et restaure les logins Codex. Installer, mettre à jour et changer de compte depuis ce panneau. Après un changement, Boite relance les threads Codex.",
+  "plugin.fastMcpSshTitle": "fast-mcp-ssh",
+  "plugin.fastMcpSshDesc": "Un serveur MCP qui donne à un agent SSH, SFTP et des shells persistants sur vos machines. Boite installe le binaire ; chaque agent le déclare dans sa propre config MCP.",
   "plugin.notInstalled": "Absent de cette machine",
   "plugin.installed": "Installé",
   "plugin.recheck": "Revérifier",
