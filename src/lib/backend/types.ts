@@ -576,6 +576,32 @@ export interface FastpickApi {
   version(): Promise<string | null>;
 }
 
+/**
+ * What `codex-account-switcher list --json` prints. Only the fields the
+ * plugins card reads are typed: the document is that CLI's.
+ */
+export interface CodexSwitcherList {
+  environment?: string;
+  accounts: CodexSwitcherAccount[];
+}
+
+export interface CodexSwitcherAccount {
+  id: string;
+  email: string;
+  name?: string | null;
+  plan_label?: string | null;
+  is_active: boolean;
+  usage?: { weekly?: { remaining_percent: number } | null } | null;
+  usage_error?: string | null;
+}
+
+export interface CodexSwitcherApi {
+  list(): Promise<CodexSwitcherList>;
+  save(): Promise<unknown>;
+  activate(accountId: string): Promise<unknown>;
+  version(): Promise<string | null>;
+}
+
 export interface ScopeApi {
   registerProjectRoots(roots: string[]): Promise<void>;
   // The server's browsable base dir for adding projects via the web folder
@@ -1041,6 +1067,7 @@ export interface Backend {
   readonly system: SystemApi;
   readonly shell: ShellApi;
   readonly fastpick: FastpickApi;
+  readonly codexSwitcher: CodexSwitcherApi;
   readonly scope: ScopeApi;
   readonly session: SessionApi;
   readonly log: LogApi;
