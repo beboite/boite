@@ -1,5 +1,5 @@
 #[cfg(not(windows))]
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 #[cfg(not(windows))]
 use std::time::Instant;
@@ -65,15 +65,18 @@ fn acquire(name: &str) -> Result<Guard, String> {
     let start = Instant::now();
     loop {
         match std::fs::create_dir(&dir) {
-            Ok(()) => return Ok(Guard { dir }),
+            Ok(()) => {
+                if let Err(problem) = std::fs::write(dir.join("pid"), std::process::id().to_string())
+                {
+                    let _ = std::fs::remove_dir_all(&dir);
+                    return Err(format!("Could not take the switch lock: {problem}"));
+                }
+                return Ok(Guard { dir });
+            }
             Err(_) if start.elapsed() < WAIT => {
-                if let Ok(meta) = std::fs::metadata(&dir) {
-                    if let Some(age) = meta.modified().ok().and_then(|m| m.elapsed().ok()) {
-                        if age > Duration::from_secs(60) {
-                            let _ = std::fs::remove_dir(&dir);
-                            continue;
-                        }
-                    }
+                if !holder_alive(&dir) {
+                    let _ = std::fs::remove_dir_all(&dir);
+                    continue;
                 }
                 std::thread::sleep(Duration::from_millis(50));
             }
@@ -85,8 +88,38 @@ fn acquire(name: &str) -> Result<Guard, String> {
 }
 
 #[cfg(not(windows))]
+fn holder_alive(dir: &Path) -> bool {
+    match std::fs::read_to_string(dir.join("pid")) {
+        Ok(text) => text
+            .trim()
+            .parse::<i32>()
+            .ok()
+            .filter(|pid| *pid > 0)
+            .is_some_and(pid_alive),
+        // The creator writes the pid right after mkdir. A missing file that is
+        // still young is that write, not a leftover empty dir.
+        Err(_) => std::fs::metadata(dir)
+            .ok()
+            .and_then(|meta| meta.modified().ok())
+            .and_then(|when| when.elapsed().ok())
+            .is_some_and(|age| age < Duration::from_secs(2)),
+    }
+}
+
+#[cfg(not(windows))]
+fn pid_alive(pid: i32) -> bool {
+    std::process::Command::new("kill")
+        .args(["-0", &pid.to_string()])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+#[cfg(not(windows))]
 impl Drop for Guard {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir(&self.dir);
+        let _ = std::fs::remove_dir_all(&self.dir);
     }
 }

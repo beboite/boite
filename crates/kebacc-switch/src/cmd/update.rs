@@ -7,7 +7,10 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const REPO: &str = "kebab1337420/boite";
+const REPO: &str = match option_env!("KEBACC_SWITCH_RELEASES_REPO") {
+    Some(repo) => repo,
+    None => "beboite/boite",
+};
 const TAG_PREFIX: &str = "kebacc-switch-v";
 const DEFAULT_INTERVAL_MS: u128 = 24 * 60 * 60 * 1000;
 const MAX_BYTES: u64 = 64 * 1024 * 1024;
