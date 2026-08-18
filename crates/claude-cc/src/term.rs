@@ -1,6 +1,3 @@
-//! Printing. The same four colours the PowerShell version used, and the same
-//! rule about when to drop them: a terminal that says no gets plain text.
-
 use std::io::Write;
 use std::sync::OnceLock;
 
@@ -18,8 +15,6 @@ fn enabled() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| {
         use std::io::IsTerminal;
-        // A slash command, a hook and a pipe all read this output as text, and
-        // escape codes in it are noise rather than colour.
         std::io::stdout().is_terminal()
             && std::env::var_os("NO_COLOR").is_none()
             && std::env::var("TERM").map(|t| t != "dumb").unwrap_or(true)
@@ -51,8 +46,6 @@ pub fn say(text: &str, color: Color) {
     let _ = writeln!(out, "{}", paint(text, color));
 }
 
-/// A question on stdout and a line back from stdin. Returns an empty string
-/// when there is nothing on stdin, which is what an unattended run gets.
 pub fn ask(question: &str) -> String {
     let mut out = std::io::stdout().lock();
     let _ = write!(out, "{question}: ");

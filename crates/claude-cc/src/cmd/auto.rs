@@ -1,9 +1,3 @@
-//! Switches away from the account in use only when it is out of quota, and only
-//! to one that is not.
-//!
-//! Exit codes are the point of this command: 0 nothing to do, 10 switched,
-//! 20 every saved account is capped, 30 nothing is set up yet.
-
 use super::Options;
 use crate::live;
 use crate::pool::{Pool, Trust};
@@ -34,8 +28,6 @@ pub fn run(provider: &Provider, opts: &Options) -> i32 {
 
     let current = super::current(provider, &pool);
     if current.is_none() {
-        // Switching now replaces a login nothing here saved. The previous
-        // credentials go to the backups first, which is where to get them back.
         note(
             &format!(
                 "The live {} login is not one of the saved ones. It will be backed up, not kept.",
@@ -74,8 +66,6 @@ pub fn run(provider: &Provider, opts: &Options) -> i32 {
 
         let usage = usage::for_entry(provider, entry, false);
         if usage.as_ref().is_none_or(|u| u.usable()) {
-            // Nothing is asked here — this runs unattended — so an entry this
-            // machine never registered is used, and said out loud.
             if entry.trust != Trust::Trusted {
                 note(
                     &format!("{} is {}.", entry.email, entry.trust.verdict().0),

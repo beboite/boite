@@ -1,11 +1,3 @@
-//! How a saved login is sealed on disk.
-//!
-//! Windows seals with DPAPI and needs no key of its own. Elsewhere the AES key
-//! lives in the OS secret store, so a copied pool directory is not a copied
-//! login. The wire format is the one earlier versions wrote and is not free to
-//! change: `ccx1:` followed by base64 of either a DPAPI blob or
-//! nonce(12) | tag(16) | ciphertext.
-
 use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine;
 
@@ -60,8 +52,6 @@ pub fn random_bytes(count: usize) -> Vec<u8> {
     bytes
 }
 
-/// The AES key, from the OS secret store. `create` writes one the first time.
-/// Windows never reaches this: DPAPI is keyed by the user account itself.
 fn secret_key(create: bool) -> Option<Vec<u8>> {
     let backend = backend();
     let (tool, read, write): (&str, Vec<&str>, Vec<&str>) = match backend {
@@ -120,9 +110,6 @@ fn secret_key(create: bool) -> Option<Vec<u8>> {
     let key = random_bytes(32);
     let b64 = B64.encode(&key);
     let stored = match backend {
-        // The Keychain takes the secret as an argument; secret-tool reads it
-        // from stdin, which is also the only one of the two that keeps it off
-        // the process list.
         Backend::Keychain => std::process::Command::new(tool)
             .args(&write)
             .arg(&b64)
@@ -156,8 +143,6 @@ fn write_stdin(tool: &str, args: &[&str], text: &str) -> bool {
     child.wait().map(|s| s.success()).unwrap_or(false)
 }
 
-/// The pool key is raw bytes rather than text, and on Windows it is wrapped by
-/// DPAPI with no envelope around it — the format the PowerShell version wrote.
 pub fn wrap_bytes(plain: &[u8]) -> Option<Vec<u8>> {
     dpapi_protect(plain)
 }
@@ -166,9 +151,6 @@ pub fn unwrap_bytes(blob: &[u8]) -> Option<Vec<u8>> {
     dpapi_unprotect(blob)
 }
 
-/// Seals text, or returns none when this machine has nowhere to keep a key. The
-/// callers treat that as "write it in plain text and say so", never as an error
-/// to swallow.
 pub fn protect(text: &str) -> Option<String> {
     if text.is_empty() {
         return None;
@@ -196,8 +178,6 @@ pub fn unprotect(sealed: &str) -> Option<String> {
     String::from_utf8(aes_open(&key, &blob)?).ok()
 }
 
-/// Snapshots written before the prefix existed are bare base64 DPAPI. Anything
-/// that is not base64 was never sealed at all and is handed back as it is.
 fn unprotect_legacy(sealed: &str) -> Option<String> {
     let base64ish = !sealed.is_empty()
         && sealed
@@ -232,8 +212,6 @@ fn aes_seal(key: &[u8], plain: &[u8]) -> Option<Vec<u8>> {
             },
         )
         .ok()?;
-    // aes-gcm appends the tag; the format on disk carries it in the middle,
-    // which is where .NET's AesGcm put it.
     let (body, tag) = sealed.split_at(sealed.len() - 16);
     let mut out = Vec::with_capacity(28 + body.len());
     out.extend_from_slice(&nonce);

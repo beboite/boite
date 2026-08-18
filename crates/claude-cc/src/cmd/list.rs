@@ -1,5 +1,3 @@
-//! The saved logins for one provider, with what is known about their quota.
-
 use super::Options;
 use crate::pool::{Pool, Trust};
 use crate::provider::Provider;
@@ -31,7 +29,6 @@ pub fn run(provider: &Provider, opts: &Options) -> i32 {
     for entry in &pool {
         let live = current.is_some_and(|c| c.file == entry.file);
         let mark = if live { '*' } else { ' ' };
-        // Refresh reaches the API; without it this stays offline and prints the cache.
         let usage = if opts.refresh {
             usage::for_entry(provider, entry, true)
         } else {

@@ -1,10 +1,3 @@
-//! What is installed, what is readable, and what the pool thinks of itself.
-//!
-//! `-Protect` re-seals every snapshot that is still plain text, `-Adopt` stamps
-//! snapshots this machine did not register, `-Rollback` puts the credentials
-//! from before the last switch back in front of the CLI, and `-Clean` deletes
-//! the files earlier versions left in the pool.
-
 use super::Options;
 use crate::jsonio;
 use crate::live;
@@ -88,9 +81,6 @@ pub fn run(provider: &Provider, opts: &Options) -> i32 {
         return 0;
     }
 
-    // Earlier versions put a `claude.exe` shim on the PATH, in a directory this
-    // one does not write and cannot safely delete: while that directory is still
-    // on the PATH, `claude` runs the shim rather than the CLI.
     if let Some(shim) = install_dir()
         .map(|dir| dir.join("shim"))
         .filter(|s| s.exists())
@@ -186,9 +176,6 @@ pub fn run(provider: &Provider, opts: &Options) -> i32 {
         }
     }
 
-    // Versions that had a watcher, a relauncher and background threads left
-    // their state in the pool. Nothing reads these any more, and they sit next
-    // to the snapshots looking like they mean something.
     let stale = stale_files(provider);
     if !stale.is_empty() {
         if opts.clean {
@@ -239,10 +226,6 @@ fn install_dir() -> Option<PathBuf> {
         .and_then(|exe| exe.parent().map(Path::to_path_buf))
 }
 
-/// What Claude Code itself was told to run. Both of these live in settings.json
-/// rather than in the pool, so nothing else here would notice them missing — and
-/// a hook left pointing at a script that is gone fails at every session start.
-/// Reported once, under the Claude pool: the file is not per-provider.
 fn check_settings(report: &mut Report) {
     let path = crate::provider::claude_config_dir().join("settings.json");
     let settings = jsonio::read(&path).unwrap_or(Value::Null);
@@ -281,7 +264,6 @@ fn check_settings(report: &mut Report) {
     }
 }
 
-/// Every SessionStart command that calls this toolkit's `auto`.
 pub fn auto_hooks(settings: &Value) -> Vec<String> {
     let mut found = Vec::new();
     let Some(groups) = settings
@@ -307,14 +289,11 @@ pub fn auto_hooks(settings: &Value) -> Vec<String> {
     found
 }
 
-/// A command that runs `auto` from this toolkit, whatever it is called on this
-/// machine — the binary, or the PowerShell script an earlier version installed.
 pub fn is_auto_command(command: &str) -> bool {
     let lower = command.to_lowercase();
     lower.contains("claude-c") && lower.split_whitespace().any(|word| word == "auto")
 }
 
-/// The provider a hook command names, as a word.
 pub fn hook_scope(command: &str) -> Option<String> {
     let words: Vec<&str> = command.split_whitespace().collect();
     let at = words.iter().position(|w| {
@@ -329,11 +308,6 @@ pub fn hook_scope(command: &str) -> Option<String> {
         .filter(|w| !w.is_empty())
 }
 
-/// The first path in a command that is not on disk, or none when every path in
-/// it is — including a command that names no path at all. What is being asked is
-/// whether the status line still points at something that runs, and the answer
-/// has to hold for the binary this version installs as well as for the script
-/// an earlier one did.
 fn missing_path(command: &str) -> Option<String> {
     command
         .split(['"', '\'', ' '])
@@ -359,8 +333,6 @@ fn stale_files(provider: &Provider) -> Vec<PathBuf> {
     out
 }
 
-/// Whether a command would be found by running it: the same question `which`
-/// answers, without depending on `which` being there.
 fn on_path(cli: &str) -> bool {
     let Some(paths) = std::env::var_os("PATH") else {
         return false;

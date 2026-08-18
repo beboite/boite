@@ -1,5 +1,3 @@
-//! Switches the CLI to another saved login.
-
 use super::Options;
 use crate::live;
 use crate::pool::{Entry, Pool, Trust};
@@ -60,8 +58,6 @@ fn pick<'a>(pool: &'a [Entry], current: Option<&Entry>, wanted: Option<&str>) ->
         if let Some(hit) = pool.iter().find(|e| e.email.to_lowercase() == key) {
             return Some(hit);
         }
-        // A prefix is a convenience, and only while it names one account: this
-        // hands over credentials, so guessing between two of them is not on.
         let near: Vec<&Entry> = pool
             .iter()
             .filter(|e| e.email.to_lowercase().starts_with(&key))
@@ -82,7 +78,6 @@ fn pick<'a>(pool: &'a [Entry], current: Option<&Entry>, wanted: Option<&str>) ->
     }
 
     if pool.len() == 2 {
-        // Two accounts and one of them is in use: there is only one answer.
         if let Some(current) = current {
             return pool.iter().find(|e| e.file != current.file);
         }

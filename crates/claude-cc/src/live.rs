@@ -1,5 +1,3 @@
-//! What the CLI has live on this machine, and how a saved login takes its place.
-
 use crate::jsonio;
 use crate::lock;
 use crate::provider::Provider;
@@ -52,7 +50,6 @@ pub fn set_creds_raw(provider: &Provider, raw: &str) -> std::io::Result<()> {
     Ok(())
 }
 
-/// The account that owns the live credentials: an email and a stable id.
 pub fn identity(provider: &Provider) -> Option<Value> {
     if provider.is_codex() {
         let raw = creds_raw(provider)?;
@@ -63,7 +60,6 @@ pub fn identity(provider: &Provider) -> Option<Value> {
     jsonio::obj(&config, "oauthAccount")
 }
 
-/// Codex says who it is in the id token rather than in a field of its own.
 pub fn codex_identity(creds: &Value) -> Option<Value> {
     let tokens = creds.get("tokens").filter(|v| !v.is_null())?;
     let mut email = None;
@@ -82,11 +78,6 @@ pub fn codex_identity(creds: &Value) -> Option<Value> {
     Some(json!({ "emailAddress": email, "accountUuid": uuid }))
 }
 
-/// Claude keeps the email in `~/.claude.json`, a file that also holds the whole
-/// conversation history. It is edited in place — the `oauthAccount` object is
-/// located and exactly those bytes are replaced — rather than parsed and
-/// rewritten: a round trip through a serializer on a file that size is slow and
-/// drops anything nobody here owns.
 pub fn set_identity(provider: &Provider, identity: &Value) {
     if provider.is_codex() {
         return;
@@ -112,7 +103,6 @@ pub fn set_identity(provider: &Provider, identity: &Value) {
         None => {
             let Some(open) = text.find('{') else { return };
             let rest = text[open + 1..].trim_start();
-            // No comma after the only member of an otherwise empty object.
             let comma = if rest.starts_with('}') { "" } else { "," };
             let mut out = String::with_capacity(text.len() + block.len() + 20);
             out.push_str(&text[..=open]);
@@ -126,11 +116,6 @@ pub fn set_identity(provider: &Provider, identity: &Value) {
     let _ = jsonio::write_text(&path, &updated);
 }
 
-/// The byte range of one member's value in the outermost object, found by
-/// walking the file rather than by parsing it: everything outside the member has
-/// to come back untouched. Only the root object is searched — `~/.claude.json`
-/// also holds the conversation history, and the same name appearing in a
-/// transcript must not be mistaken for the account the CLI logs in as.
 fn find_member(text: &str, name: &str) -> Option<(usize, usize)> {
     let bytes = text.as_bytes();
     let mut i = skip_space(bytes, 0);
@@ -155,8 +140,6 @@ fn find_member(text: &str, name: &str) -> Option<(usize, usize)> {
         let start = i;
         i = skip_value(bytes, i)?;
         if key == name {
-            // Whatever shape it is in now, those bytes are the ones to replace:
-            // a member left as null by an earlier login is still that member.
             return Some((start, i));
         }
         i = skip_space(bytes, i);
@@ -174,8 +157,6 @@ fn skip_space(bytes: &[u8], mut i: usize) -> usize {
     i
 }
 
-/// The string starting at `i`, and where it ends. Escapes are stepped over
-/// rather than decoded: this reads member names, which have none worth decoding.
 fn read_string(bytes: &[u8], i: usize) -> Option<(String, usize)> {
     let mut end = i + 1;
     while end < bytes.len() && bytes[end] != b'"' {
@@ -191,8 +172,6 @@ fn read_string(bytes: &[u8], i: usize) -> Option<(String, usize)> {
     Some((text, end + 1))
 }
 
-/// Where the value starting at `i` ends. Braces and brackets are counted, and a
-/// brace inside a string does not count.
 fn skip_value(bytes: &[u8], i: usize) -> Option<usize> {
     match *bytes.get(i)? {
         b'"' => read_string(bytes, i).map(|(_, end)| end),
@@ -216,8 +195,6 @@ fn skip_value(bytes: &[u8], i: usize) -> Option<usize> {
             }
             None
         }
-        // A number, or one of true / false / null: it runs to the comma or to
-        // the end of the object holding it.
         _ => {
             let mut at = i;
             while at < bytes.len() && !matches!(bytes[at], b',' | b'}' | b']') {
@@ -228,9 +205,6 @@ fn skip_value(bytes: &[u8], i: usize) -> Option<usize> {
     }
 }
 
-/// The credentials that are about to be replaced, kept for the three most
-/// recent switches. Sealed the same way a snapshot is, so a pool that is
-/// encrypted does not keep plain-text copies of the same tokens beside it.
 pub fn backup_creds(provider: &Provider) {
     let Some(raw) = creds_raw(provider) else {
         return;
@@ -255,8 +229,6 @@ pub fn backup_creds(provider: &Provider) {
     }
 }
 
-/// Newest first. `backup-*` is what earlier versions wrote, and those are still
-/// worth rolling back to.
 pub fn backup_files(provider: &Provider) -> Vec<PathBuf> {
     let mut files: Vec<(std::time::SystemTime, PathBuf)> =
         match std::fs::read_dir(provider.backup_dir()) {
@@ -282,9 +254,6 @@ pub struct Backup {
     pub at: chrono::DateTime<chrono::Local>,
 }
 
-/// The newest backup, as the raw credentials text. Sealed or not is decided by
-/// what is in the file, so a backup written by an earlier version reads back
-/// the same way.
 pub fn newest_backup(provider: &Provider) -> Option<Backup> {
     let file = backup_files(provider).into_iter().next()?;
     let text = std::fs::read_to_string(&file).ok()?.trim().to_string();
@@ -303,8 +272,6 @@ pub fn newest_backup(provider: &Provider) -> Option<Backup> {
     Some(Backup { raw, at })
 }
 
-/// Puts a saved login back in front of the CLI: the tokens, and for Claude the
-/// email the CLI shows, which lives in a different file from the tokens.
 pub fn activate(provider: &Provider, entry: &crate::pool::Entry) -> Result<(), String> {
     let Some(creds) = entry.creds.as_deref() else {
         return Err(format!(
@@ -336,8 +303,6 @@ mod tests {
 
     #[test]
     fn ignores_the_same_name_deeper_in_the_file() {
-        // What `~/.claude.json` looks like: the account, and a history that can
-        // quote anything at all, including the name of the account member.
         let text = r#"{"projects":{"x":{"history":[{"display":"\"oauthAccount\": {\"emailAddress\": \"nobody\"}"}]}},"oauthAccount":{"emailAddress":"real@example.com"}}"#;
         let (start, end) = find_member(text, "oauthAccount").unwrap();
         assert_eq!(&text[start..end], r#"{"emailAddress":"real@example.com"}"#);
@@ -349,9 +314,6 @@ mod tests {
         assert!(find_member(text, "oauthAccount").is_none());
     }
 
-    /// The real file on this machine, when there is one: it is the size and the
-    /// shape no fixture here can stand in for, and the member found in it has to
-    /// be the account the CLI actually logs in as.
     #[test]
     fn finds_the_account_in_the_real_config() {
         let path = crate::provider::home().join(".claude.json");

@@ -1,5 +1,3 @@
-//! Saves the login the CLI is using right now into the pool.
-
 use super::Options;
 use crate::jsonio;
 use crate::live;
@@ -33,7 +31,6 @@ pub fn run(provider: &Provider, opts: &Options) -> i32 {
             .and_then(|id| jsonio::str_of(id, "emailAddress"))
     });
     let Some(email) = email.filter(|e| !e.is_empty()) else {
-        // Codex API keys carry no identity, so the pool needs a name for the file.
         say("Could not work out which account this is.", Color::Red);
         say(
             "Pass one: claude-cc add -Provider codex -Email you@example.com",
@@ -52,8 +49,6 @@ pub fn run(provider: &Provider, opts: &Options) -> i32 {
     let existed = path.exists();
     let previous = jsonio::read(&path);
     let cache = previous.as_ref().and_then(|p| jsonio::obj(p, "usageCache"));
-    // Saving over an account already in the pool refreshes its tokens; it does
-    // not make it a new saved login, so the date it was first saved is kept.
     let saved = previous.as_ref().and_then(|p| jsonio::str_of(p, "savedAt"));
 
     let (snapshot, protected) = pool::new_snapshot(

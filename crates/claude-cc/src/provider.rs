@@ -1,7 +1,3 @@
-//! What each supported CLI keeps on disk, and how to name it.
-//!
-//! Every command asks this module where to look; nothing else knows the paths.
-
 use std::path::{Path, PathBuf};
 
 pub const PROVIDER_IDS: [&str; 2] = ["claude", "codex"];
@@ -29,8 +25,6 @@ pub struct Provider {
     pub cred_candidates: Vec<PathBuf>,
     pub config_candidates: Vec<PathBuf>,
     pub cred_label: &'static str,
-    /// macOS keeps the Claude Code credentials in the Keychain when the file is
-    /// absent, so both places have to be tried.
     pub uses_keychain: bool,
     pub keychain_service: Option<&'static str>,
 }
@@ -46,8 +40,6 @@ pub fn claude_config_dir() -> PathBuf {
     }
 }
 
-/// `all` is not a provider: it is a request to run the command once per
-/// provider, and it has to be caught before this module is asked to resolve it.
 pub fn is_all(id: &str) -> bool {
     matches!(
         id.trim().to_ascii_lowercase().as_str(),
@@ -70,8 +62,6 @@ pub fn resolve(id: &str) -> Result<ProviderId, String> {
     }
 }
 
-/// The most recently written of several candidates, or none when they are all
-/// absent. Which file is current is a question of when it was last written.
 pub fn newest(paths: &[PathBuf]) -> Option<PathBuf> {
     paths
         .iter()
@@ -111,7 +101,6 @@ pub fn spec(id: ProviderId) -> Provider {
                 cli: "claude",
                 store: store_dir("CLAUDE_CC_ACCOUNTS", ".claude-cc-accounts"),
                 cred_candidates: vec![dir.join(".credentials.json")],
-                // The email lives beside the tokens rather than with them.
                 config_candidates: vec![home().join(".claude.json"), dir.join(".claude.json")],
                 cred_label: "~/.claude/.credentials.json",
                 uses_keychain: cfg!(target_os = "macos"),
@@ -145,8 +134,6 @@ impl Provider {
         self.store.join(".backups")
     }
 
-    /// One saved login is one file, named after the account. Anything that could
-    /// walk out of the pool directory is replaced rather than escaped.
     pub fn snapshot_path(&self, email: &str) -> PathBuf {
         let safe: String = email
             .chars()
@@ -162,7 +149,6 @@ impl Provider {
     }
 }
 
-/// Owner-only, on every platform: everything written here is a bearer token.
 pub fn protect_file(path: &Path) {
     if !path.exists() {
         return;

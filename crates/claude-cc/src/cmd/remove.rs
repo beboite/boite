@@ -1,5 +1,3 @@
-//! Forgets a saved login. The live session is left exactly as it is.
-
 use super::Options;
 use crate::pool::Pool;
 use crate::provider::Provider;
