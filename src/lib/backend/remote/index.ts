@@ -11,6 +11,8 @@ import type {
   CheckpointFileVersions,
   EditorApi,
   ExplorerApi,
+  CodexSwitcherApi,
+  CodexSwitcherList,
   FastpickApi,
   FastpickListing,
   FolderState,
@@ -84,6 +86,7 @@ export class RemoteBackend implements Backend {
   readonly system: SystemApi;
   readonly shell: ShellApi;
   readonly fastpick: FastpickApi;
+  readonly codexSwitcher: CodexSwitcherApi;
   readonly scope: ScopeApi;
   readonly session: SessionApi;
   readonly search: SearchApi;
@@ -421,6 +424,15 @@ export class RemoteBackend implements Backend {
         ),
       version: () =>
         rpc("fastpick.version", {}).then((r) => (r.version as string | null) ?? null),
+    };
+
+    this.codexSwitcher = {
+      list: () =>
+        rpc("codexSwitcher.list", {}).then((r) => JSON.parse(r.json as string) as CodexSwitcherList),
+      save: () => rpc("codexSwitcher.save", {}),
+      activate: (accountId) => rpc("codexSwitcher.activate", { accountId }),
+      version: () =>
+        rpc("codexSwitcher.version", {}).then((r) => (r.version as string | null) ?? null),
     };
 
     // The server derives its filesystem trust boundary from persisted projects;
