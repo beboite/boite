@@ -1,0 +1,4 @@
+# never commit credentials or account stores
+*.credentials.json
+.kebacc-switch-accounts/
+.kebacc-switch-codex-accounts/

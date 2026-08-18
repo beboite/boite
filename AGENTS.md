@@ -3,7 +3,8 @@
 The rules that are easy to break without noticing, and the file that owns each
 one. Stack and build commands: [README.md](README.md). Isolated dev window and
 MCP bridge: [docs/development.md](docs/development.md). Tags and signing:
-[docs/releasing.md](docs/releasing.md).
+[docs/releasing.md](docs/releasing.md). What a pane exports to a status line:
+[docs/status-lines.md](docs/status-lines.md).
 
 Everything here is a good default rather than a law, and the person asking
 outranks it. The four rules below are the exception: break one and something

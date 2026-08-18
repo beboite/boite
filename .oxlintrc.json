@@ -10,7 +10,8 @@
     "static/**",
     "mobile/**",
     "release-builds/**",
-    "src-tauri/gen/**"
+    "src-tauri/gen/**",
+    "plugins/**"
   ],
   "rules": {
     "no-empty": ["error", { "allowEmptyCatch": true }]
