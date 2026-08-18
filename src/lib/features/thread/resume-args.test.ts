@@ -257,10 +257,35 @@ describe("the opening prompt", () => {
     expect(next.argv.agent).toEqual(["--session", SESSION, "read the docs"]);
   });
 
+  // agy takes it behind -i, not as a positional. Before this, an antigravity
+  // thread opened bare and the briefing was only shown to the user to paste.
+  it("rides behind antigravity's -i", () => {
+    const { argv } = relaunch("agy", [], "antigravity");
+    const next = withPromptArg(argv, "antigravity", "read\nthe docs");
+    expect(next.typed).toBe(false);
+    // One line: a newline would end the prompt and type the rest as a second.
+    expect(next.argv.agent).toEqual(["--conversation", SESSION, "-i", "read the docs"]);
+  });
+
+  // The preset carries --dangerously-skip-permissions, so the prompt has to land
+  // behind it and not between the flag and its own value.
+  it("keeps antigravity's own flags in front of the prompt", () => {
+    const { argv } = relaunch("agy", ["--dangerously-skip-permissions"], "antigravity");
+    const next = withPromptArg(argv, "antigravity", "do the thing");
+    expect(next.argv.agent).toEqual([
+      "--dangerously-skip-permissions",
+      "--conversation",
+      SESSION,
+      "-i",
+      "do the thing",
+    ]);
+  });
+
   it("says which agents can be handed one at all", () => {
     expect(takesOpeningPrompt("claude")).toBe(true);
     expect(takesOpeningPrompt("codex")).toBe(true);
     expect(takesOpeningPrompt("pi")).toBe(true);
+    expect(takesOpeningPrompt("antigravity")).toBe(true);
     expect(takesOpeningPrompt("muse")).toBe(false);
     expect(takesOpeningPrompt("opencode")).toBe(false);
     expect(takesOpeningPrompt(null)).toBe(false);

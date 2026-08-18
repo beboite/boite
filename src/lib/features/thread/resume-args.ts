@@ -350,6 +350,13 @@ export function resumeArgv(input: ResumeInput): {
  * (`pi --name "CI audit" -p "…"`), and nothing in its argument list is
  * variadic, so the positional cannot be swallowed by the flag before it.
  *
+ * `agy [flags]` takes one behind `-i` (`--prompt-interactive`: run an initial
+ * prompt interactively and continue the session). Not a positional at all, so
+ * the ambiguity that rules the others out does not arise: nothing in `agy
+ * --help` is variadic, and the value belongs to the flag that precedes it.
+ * Verified against agy 1.1.13. Without this an antigravity thread opens bare
+ * and waits for a human to paste the briefing it was spawned with.
+ *
  * Nothing else is listed. A guess here does not misfire quietly — it costs the
  * thread its whole launch — and the cost of being wrong the other way is one
  * agent that comes back up without being told why its folder changed.
@@ -358,6 +365,7 @@ function promptSeparator(key: IconKey, agent: string[]): string[] | null {
   if (key === "claude") return ["--"];
   if (key === "codex") return agent.includes("resume") ? null : [];
   if (key === "pi") return [];
+  if (key === "antigravity") return ["-i"];
   return null;
 }
 
