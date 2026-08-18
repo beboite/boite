@@ -67,7 +67,8 @@ fn acquire(name: &str) -> Result<Guard, String> {
     loop {
         match std::fs::create_dir(&dir) {
             Ok(()) => {
-                if let Err(problem) = std::fs::write(dir.join("pid"), std::process::id().to_string())
+                if let Err(problem) =
+                    std::fs::write(dir.join("pid"), std::process::id().to_string())
                 {
                     let _ = std::fs::remove_dir_all(&dir);
                     return Err(format!("Could not take the switch lock: {problem}"));
