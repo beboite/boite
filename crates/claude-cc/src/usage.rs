@@ -66,8 +66,13 @@ impl Usage {
             if pct < cap {
                 continue;
             }
-            let resets = self.window(name).and_then(|w| w.resets_at.clone())?;
-            let when = parse_time(&resets)?;
+            // A window that says nothing about its reset cannot be timed. It
+            // still caps the account, so the other window keeps its say rather
+            // than the whole answer being dropped.
+            let Some(resets) = self.window(name).and_then(|w| w.resets_at.clone()) else {
+                continue;
+            };
+            let Some(when) = parse_time(&resets) else { continue };
             if at.is_none_or(|current| when > current) {
                 at = Some(when);
             }
@@ -120,10 +125,12 @@ pub fn wait_text(at: DateTime<Utc>) -> String {
 
 fn window_from(value: Option<&Value>) -> Option<Window> {
     let value = value.filter(|v| !v.is_null())?;
-    let pct = value
-        .get("used_percent")
-        .or_else(|| value.get("utilization"))
-        .and_then(Value::as_f64)
+    // Three names for one number: the snapshots this toolkit writes carry
+    // "utilization", the provider's own endpoint "used_percent", and the payload
+    // Claude Code hands the status line "used_percentage".
+    let pct = ["used_percent", "utilization", "used_percentage"]
+        .iter()
+        .find_map(|name| value.get(*name).and_then(Value::as_f64))
         .unwrap_or(0.0);
     let resets = match jsonio::str_of(value, "resets_at") {
         Some(at) => Some(at),
