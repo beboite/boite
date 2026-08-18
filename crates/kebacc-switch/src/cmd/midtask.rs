@@ -5,12 +5,17 @@ use std::time::{SystemTime, UNIX_EPOCH};
 const DEFAULT_INTERVAL_MS: u128 = 5 * 60 * 1000;
 
 pub fn run(provider: &str) -> i32 {
-    let stamp = stamp_file();
-    if !due(&stamp) {
-        return 0;
+    let claimed = crate::lock::locked(crate::lock::MIDTASK, || {
+        let stamp = stamp_file();
+        if !due(&stamp) {
+            return false;
+        }
+        let _ = std::fs::write(&stamp, now_ms().to_string());
+        true
+    });
+    if claimed == Ok(true) {
+        spawn(provider);
     }
-    let _ = std::fs::write(&stamp, now_ms().to_string());
-    spawn(provider);
     0
 }
 

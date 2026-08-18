@@ -32,8 +32,22 @@ fn cap_from_env(name: &str, fallback: f64) -> f64 {
 }
 
 pub fn at_cap(pct: f64, cap: f64) -> bool {
-    let cap = if pct.fract() == 0.0 { cap.floor() } else { cap };
     pct >= cap
+}
+
+pub fn debug(text: &str) {
+    if std::env::var_os("KEBACC_SWITCH_DEBUG").is_none() {
+        return;
+    }
+    use std::io::Write;
+    let path = crate::provider::state_dir().join("debug.log");
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
+        let _ = writeln!(file, "{} {text}", now_iso());
+    }
 }
 
 pub fn now_iso() -> String {
@@ -211,28 +225,21 @@ fn get_json(url: &str, headers: &[(&str, &str)]) -> Option<Value> {
     for (name, value) in headers {
         request = request.header(*name, *value);
     }
-    let loud = std::env::var_os("KEBACC_SWITCH_DEBUG").is_some();
     let mut response = match request.call() {
         Ok(response) => response,
         Err(problem) => {
-            if loud {
-                eprintln!("[debug] {url} did not answer: {problem}");
-            }
+            debug(&format!("{url} did not answer: {problem}"));
             return None;
         }
     };
     if !response.status().is_success() {
-        if loud {
-            eprintln!("[debug] {url} answered {}", response.status());
-        }
+        debug(&format!("{url} answered {}", response.status()));
         return None;
     }
     match response.body_mut().read_json::<Value>() {
         Ok(value) => Some(value),
         Err(problem) => {
-            if loud {
-                eprintln!("[debug] {url} answered something unreadable: {problem}");
-            }
+            debug(&format!("{url} answered something unreadable: {problem}"));
             None
         }
     }
@@ -318,8 +325,8 @@ pub fn for_entry(provider: &Provider, entry: &Entry, force: bool) -> Option<Usag
     }
     let live = live_token(provider, entry);
     if std::env::var_os("KEBACC_SWITCH_DEBUG").is_some() {
-        eprintln!(
-            "[debug] {}: live token {}, snapshot token {}",
+        debug(&format!(
+            "{}: live token {}, snapshot token {}",
             entry.email,
             if live.is_some() { "yes" } else { "no" },
             if access_token(provider, entry.creds.as_deref()).is_some() {
@@ -327,7 +334,7 @@ pub fn for_entry(provider: &Provider, entry: &Entry, force: bool) -> Option<Usag
             } else {
                 "no"
             }
-        );
+        ));
     }
     let token = live.or_else(|| access_token(provider, entry.creds.as_deref()));
     match fetch(provider, token.as_deref()) {
@@ -382,6 +389,13 @@ mod tests {
         };
         assert!(!window.stale());
         assert!(window.blocking(super::FIVE_HOUR_CAP));
+    }
+
+    #[test]
+    fn the_cap_is_a_plain_threshold() {
+        assert!(super::at_cap(99.0, super::FIVE_HOUR_CAP));
+        assert!(super::at_cap(99.4, super::FIVE_HOUR_CAP));
+        assert!(!super::at_cap(98.9, super::FIVE_HOUR_CAP));
     }
 
     #[test]

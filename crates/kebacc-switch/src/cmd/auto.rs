@@ -5,11 +5,22 @@ use crate::provider::Provider;
 use crate::term::{say, Color};
 use crate::usage;
 use chrono::{DateTime, Utc};
+use std::time::{Duration, Instant};
+
+const BUDGET: Duration = Duration::from_secs(12);
 
 pub fn run(provider: &Provider, opts: &Options) -> i32 {
     let note = |text: &str, colour: Color| {
         if !opts.quiet {
             say(text, colour);
+        }
+    };
+    let started = Instant::now();
+    let read = |entry: &crate::pool::Entry| {
+        if started.elapsed() >= BUDGET {
+            usage::from_cache(entry.cache.as_ref())
+        } else {
+            usage::for_entry(provider, entry, false)
         }
     };
 
@@ -36,23 +47,37 @@ pub fn run(provider: &Provider, opts: &Options) -> i32 {
             Color::Yellow,
         );
     }
+
+    let mut blind = false;
     if let Some(current) = current {
-        let usage = usage::for_entry(provider, current, false);
+        let usage = read(current);
         let pair = usage
             .as_ref()
             .map(|u| u.as_pair())
             .unwrap_or_else(|| "usage n/a".into());
-        if usage.as_ref().is_none_or(|u| u.usable()) {
+        let known = usage.as_ref().is_some_and(usage::Usage::known);
+        if known && usage.as_ref().is_some_and(usage::Usage::usable) {
             note(
                 &format!("{} still has room ({pair}).", current.email),
                 Color::Dim,
             );
             return 0;
         }
-        note(
-            &format!("{} is out of quota ({pair}).", current.email),
-            Color::Yellow,
-        );
+        if known {
+            note(
+                &format!("{} is out of quota ({pair}).", current.email),
+                Color::Yellow,
+            );
+        } else {
+            blind = true;
+            note(
+                &format!(
+                    "{}: no quota reading. Looking for an account that reports room.",
+                    current.email
+                ),
+                Color::Yellow,
+            );
+        }
     }
 
     let mut soonest: Option<DateTime<Utc>> = None;
@@ -66,10 +91,10 @@ pub fn run(provider: &Provider, opts: &Options) -> i32 {
             continue;
         }
 
-        let usage = usage::for_entry(provider, entry, false);
-        let readable = usage.as_ref().is_some_and(|u| u.known());
-        if readable && !usage.as_ref().is_some_and(|u| u.usable()) {
-            if let Some(ready) = usage.as_ref().and_then(|u| u.ready_at()) {
+        let usage = read(entry);
+        let readable = usage.as_ref().is_some_and(usage::Usage::known);
+        if readable && !usage.as_ref().is_some_and(usage::Usage::usable) {
+            if let Some(ready) = usage.as_ref().and_then(usage::Usage::ready_at) {
                 if soonest.is_none_or(|current| ready < current) {
                     soonest = Some(ready);
                 }
@@ -81,6 +106,14 @@ pub fn run(provider: &Provider, opts: &Options) -> i32 {
             continue;
         }
         return take(provider, entry, usage.as_ref(), &note);
+    }
+
+    if blind {
+        note(
+            "No account reports room either. Staying where we are rather than guessing.",
+            Color::Yellow,
+        );
+        return 0;
     }
 
     if let Some((entry, usage)) = fallback.first() {

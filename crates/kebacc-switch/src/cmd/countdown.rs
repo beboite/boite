@@ -90,6 +90,7 @@ fn cell(cache: Option<&Value>, key: &str, label: &str) -> String {
         None => "  ?".to_string(),
     };
     let back = match jsonio::str_of(window, "resets_at").and_then(|at| usage::parse_time(&at)) {
+        Some(at) if at <= Utc::now() => " window already reset, number is stale".to_string(),
         Some(at) => format!(" resets in {}", wait_text(at)),
         None => String::new(),
     };

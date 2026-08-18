@@ -7,6 +7,7 @@ use std::time::Instant;
 pub const CRED_SWAP: &str = "KebaccSwitchCredentialSwap";
 pub const USAGE_CACHE: &str = "KebaccSwitchUsageCache";
 pub const UPDATE: &str = "KebaccSwitchUpdate";
+pub const MIDTASK: &str = "KebaccSwitchMidtask";
 
 const WAIT: Duration = Duration::from_secs(15);
 
