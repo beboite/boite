@@ -44,6 +44,12 @@ export type ThreadStatus =
   | "error"
   | "stopped";
 
+/** A thread is either the user's own or one an agent spawned to work for it. */
+export type DelegationMode = "normal" | "delegation";
+
+/** Where a delegation is in its life: queued, working, done, or broken. */
+export type DelegationStatus = "pending" | "running" | "completed" | "failed";
+
 export interface Thread {
   id: string;
   projectId: string;
@@ -75,6 +81,12 @@ export interface Thread {
    * answerable without a second column.
    */
   settledAt?: number | null;
+  /** Parent thread ID when spawned as a delegation. */
+  parentThreadId?: string | null;
+  /** Whether this is a normal thread or a delegation sub-thread. */
+  delegationMode?: DelegationMode;
+  /** Lifecycle status for delegation threads. */
+  delegationStatus?: DelegationStatus | null;
   origin?: WorkspaceOrigin;
 }
 

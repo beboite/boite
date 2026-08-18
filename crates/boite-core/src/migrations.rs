@@ -328,6 +328,15 @@ pub const ALL: &[Migration] = &[
         );",
         applies: Applies::ServerOnly,
     },
+    // Parent-child thread hierarchy for delegation tracking. Threads spawned as
+    // delegations carry their parent's id, a mode flag distinguishing them in
+    // the UI, and an optional status tracking the delegation lifecycle.
+    both(
+        "add_thread_delegation",
+        "ALTER TABLE threads ADD COLUMN parent_thread_id TEXT;\
+                  ALTER TABLE threads ADD COLUMN delegation_mode TEXT DEFAULT 'normal';\
+                  ALTER TABLE threads ADD COLUMN delegation_status TEXT;",
+    ),
 ];
 
 /// The desktop's list: `(version, description, sql)`, versions from 1.
@@ -361,7 +370,7 @@ mod tests {
     #[test]
     fn the_shipped_order_is_preserved_on_both_sides() {
         let desktop = desktop();
-        assert_eq!(desktop.len(), 22);
+        assert_eq!(desktop.len(), 23);
         assert_eq!(desktop[0], (1, "create_projects", ALL[0].sql));
         assert_eq!(desktop[4].1, "add_thread_session_and_icon");
         assert_eq!(desktop[8].1, "add_project_git_root", "no push table here");
@@ -374,7 +383,7 @@ mod tests {
         assert_eq!(desktop[21].1, "add_thread_ageing");
 
         let server = server();
-        assert_eq!(server.len(), 22);
+        assert_eq!(server.len(), 23);
         assert_eq!(server[8].description, "create_push_subscriptions");
         assert_eq!(server[9].description, "add_project_git_root");
         assert_eq!(
@@ -478,7 +487,7 @@ mod tests {
         );
         assert_eq!(
             columns(&conn, "threads"),
-            ["id", "project_id", "label", "title", "cmd", "args", "exit_code", "created_at", "session_id", "icon_key", "status", "auto_slept", "keep_awake", "icon_color", "worktree_path", "pin_order", "settled_at", "snoozed_until"]
+            ["id", "project_id", "label", "title", "cmd", "args", "exit_code", "created_at", "session_id", "icon_key", "status", "auto_slept", "keep_awake", "icon_color", "worktree_path", "pin_order", "settled_at", "snoozed_until", "parent_thread_id", "delegation_mode", "delegation_status"]
         );
         assert_eq!(
             columns(&conn, "todos"),

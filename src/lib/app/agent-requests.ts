@@ -70,6 +70,10 @@ interface SpawnRequest {
   requestId?: string;
   /** The thread that asked, when Boite launched it. */
   callerThreadId?: string | null;
+  /** Parent thread ID for delegation hierarchy. */
+  parentThreadId?: string | null;
+  /** Whether this is a normal thread or a delegation. */
+  delegationMode?: 'normal' | 'delegation';
   agent?: string | null;
   prompt?: string | null;
 }
@@ -312,7 +316,11 @@ async function handleSpawn(req: SpawnRequest) {
   // Not focused: the user is reading the thread that asked for this one, very
   // often in another project, and a spawn they never clicked used to take the
   // screen away mid-sentence. The toast is what says it happened.
-  const thread = await launchAgent(project, launch, { focus: false });
+  const thread = await launchAgent(project, launch, {
+    focus: false,
+    parentThreadId: req.parentThreadId,
+    delegationMode: req.delegationMode,
+  });
   if (!thread) {
     await answerRequest(req, { error: "the terminal did not open" });
     return;

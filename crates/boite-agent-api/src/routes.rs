@@ -1008,6 +1008,9 @@ async fn thread_spawn(
         // Who asked, so an unnamed agent defaults to another of the caller
         // rather than to whatever terminal the user happens to be looking at.
         "callerThreadId": (!asking_thread.is_empty()).then(|| asking_thread.clone()),
+        // Parent relationship for delegation hierarchy tracking.
+        "parentThreadId": (!asking_thread.is_empty()).then(|| asking_thread.clone()),
+        "delegationMode": "delegation",
         "agent": body.agent,
         "prompt": body.prompt,
     });

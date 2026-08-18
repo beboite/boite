@@ -596,7 +596,7 @@ impl Store {
         let conn = self.conn.lock();
         let mut stmt = conn
             .prepare(
-                "SELECT id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, status, keep_awake, created_at, icon_color, worktree_path, settled_at
+                "SELECT id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, status, keep_awake, created_at, icon_color, worktree_path, settled_at, parent_thread_id, delegation_mode, delegation_status
                  FROM threads ORDER BY created_at ASC",
             )
             .map_err(|e| e.to_string())?;
@@ -622,6 +622,9 @@ impl Store {
                     keep_awake: r.get::<_, i64>(10)? == 1,
                     worktree_path: r.get(13)?,
                     settled_at: r.get(14)?,
+                    parent_thread_id: r.get(15)?,
+                    delegation_mode: r.get(16)?,
+                    delegation_status: r.get(17)?,
                 })
             })
             .map_err(|e| e.to_string())?;
@@ -631,7 +634,7 @@ impl Store {
     pub fn load_thread(&self, id: &str) -> Result<Option<Thread>, String> {
         let conn = self.conn.lock();
         conn.query_row(
-            "SELECT id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, status, keep_awake, created_at, icon_color, worktree_path, settled_at
+            "SELECT id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, status, keep_awake, created_at, icon_color, worktree_path, settled_at, parent_thread_id, delegation_mode, delegation_status
              FROM threads WHERE id = ?1",
             [id],
             |r| {
@@ -655,6 +658,9 @@ impl Store {
                     keep_awake: r.get::<_, i64>(10)? == 1,
                     worktree_path: r.get(13)?,
                     settled_at: r.get(14)?,
+                    parent_thread_id: r.get(15)?,
+                    delegation_mode: r.get(16)?,
+                    delegation_status: r.get(17)?,
                 })
             },
         )
@@ -744,12 +750,13 @@ impl Store {
         let args = serde_json::to_string(&t.args).unwrap_or_else(|_| "[]".to_string());
         conn.execute(
             "INSERT OR REPLACE INTO threads
-             (id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, status, keep_awake, created_at, icon_color, worktree_path, settled_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+             (id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, status, keep_awake, created_at, icon_color, worktree_path, settled_at, parent_thread_id, delegation_mode, delegation_status)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
             rusqlite::params![
                 t.id, t.project_id, t.label, t.title, t.cmd, args, t.exit_code,
                 t.session_id, t.icon_key, t.status, t.keep_awake as i64, t.created_at,
-                t.icon_color, t.worktree_path, t.settled_at,
+                t.icon_color, t.worktree_path, t.settled_at, t.parent_thread_id,
+                t.delegation_mode, t.delegation_status,
             ],
         )
         .map_err(|e| e.to_string())?;
