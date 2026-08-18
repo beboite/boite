@@ -120,8 +120,8 @@ and the ticker belongs to the window rather than to a pane: it starts once in
 `Terminal` components and closing the last local pane stops the only thing that
 could notice.
 
-**First source: what the agent declares.** Three of the ten do, each somewhere
-else, and `boite-core/src/session.rs` reduces the three to the shape
+**First source: what the agent declares.** Four of the ten do, each somewhere
+else, and `boite-core/src/session.rs` reduces the four to the shape
 `declaredTurn` reads.
 
 - claude rewrites `status` in `~/.claude/sessions/<pid>.json`: `busy`, `waiting`,
@@ -133,13 +133,18 @@ else, and `boite-core/src/session.rs` reduces the three to the shape
 - opencode serves `GET /session/status`, but a plain TUI runs its server in a
   worker thread and binds no port. Its database answers: an assistant message
   gains `time.completed` when its turn ends.
+- grok appends ACP session updates to
+  `~/.grok/sessions/<cwd>/<id>/updates.jsonl`. A turn opens on
+  `user_message_chunk` and closes on `turn_completed`. `active_sessions.json`
+  names the pid, so a killed grok does not stay busy.
 
 An answer counts only while whatever wrote it is still there. Claude's entries
-are filtered by `pid_alive`, the other two age out after half an hour, generous
-because one long tool call appends nothing while it runs. Killed mid-turn, either
-would otherwise read `busy` for good. **No `status` key produces no answer, never
-a default**: absence is not a state, and a default of `busy` would pin every
-claude thread Running with nothing able to clear it.
+and grok's `active_sessions.json` are filtered by `pid_alive`. Codex and
+opencode age out after half an hour, generous because one long tool call
+appends nothing while it runs. Killed mid-turn, either would otherwise read
+`busy` for good. **No `status` key produces no answer, never a default**:
+absence is not a state, and a default of `busy` would pin every claude thread
+Running with nothing able to clear it.
 
 **Second source: the emulator's bottom rows** (`terminalScreenRows`), for
 everyone else. Level by construction, the footer being on screen or not. Never
@@ -157,7 +162,7 @@ for as long as the agent prints anything.
   banner push the spinner out of it.
 
 **With no answer from either, a clock decides, and only there.** A thread whose
-pane is gone has no emulator, and seven agents declare nothing. It keeps its
+pane is gone has no emulator, and six agents declare nothing. It keeps its
 status until every activity stamp ages out, then drops to `ready`
 (`UNREAD_TTL_MS`, 2s, mirroring the server's `WORKING_TTL`), silently, being an
 absence of evidence rather than a turn that ended. Without it a thread frozen on
