@@ -47,7 +47,8 @@ kebacc-switch switch -Provider codex -Email you@example.com
 The switcher updates itself. At session start, at most once a day, it asks
 GitHub for the newest `kebacc-switch-v*` release of this repository, and if that
 release is newer than what is installed it downloads the binary built for this
-platform and puts it in place. That happens in a detached process, so the
+platform, checks it against the SHA-256 the release publishes for that asset,
+and puts it in place. That happens in a detached process, so the
 session does not wait for it, and the running command finishes on the binary it
 started on — the new one is used from the next start.
 

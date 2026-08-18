@@ -1,4 +1,5 @@
 use super::Options;
+use crate::lock;
 use crate::term::{say, Color};
 use crate::usage;
 use serde_json::{json, Value};
@@ -10,6 +11,8 @@ const REPO: &str = "kebab1337420/boite";
 const TAG_PREFIX: &str = "kebacc-switch-v";
 const DEFAULT_INTERVAL_MS: u128 = 24 * 60 * 60 * 1000;
 const MAX_BYTES: u64 = 64 * 1024 * 1024;
+const DOWNLOAD_SECONDS: u64 = 120;
+const RETRY_MS: u128 = 60 * 60 * 1000;
 
 pub const MARKER: &str = ".update.json";
 const STAMP: &str = "kebacc-switch-update.stamp";
@@ -56,7 +59,7 @@ pub fn run(opts: &Options) -> i32 {
         );
         return 10;
     }
-    let Some(url) = release.asset else {
+    let Some(asset) = release.asset else {
         if !opts.quiet {
             say(
                 &format!(
@@ -70,7 +73,7 @@ pub fn run(opts: &Options) -> i32 {
         }
         return 1;
     };
-    match install(&url, &here, &release.version) {
+    match install(&asset, &here, &release.version) {
         Ok(()) => {
             if !opts.quiet {
                 say(
@@ -81,12 +84,20 @@ pub fn run(opts: &Options) -> i32 {
             0
         }
         Err(problem) => {
-            if !opts.quiet {
+            if opts.quiet {
+                retry_sooner();
+            } else {
                 say(&problem, Color::Red);
             }
             1
         }
     }
+}
+
+fn retry_sooner() {
+    let stamp = std::env::temp_dir().join(STAMP);
+    let when = now_ms().saturating_sub(interval_ms().saturating_sub(RETRY_MS));
+    let _ = std::fs::write(stamp, when.to_string());
 }
 
 pub fn maybe() {
@@ -148,7 +159,12 @@ fn due(stamp: &Path) -> bool {
 
 struct Release {
     version: String,
-    asset: Option<String>,
+    asset: Option<Asset>,
+}
+
+struct Asset {
+    url: String,
+    digest: Option<String>,
 }
 
 fn latest() -> Result<Option<Release>, String> {
@@ -193,20 +209,40 @@ fn latest() -> Result<Option<Release>, String> {
         }
         best = Some(Release {
             version: version.to_string(),
-            asset: asset_url(release, &wanted),
+            asset: asset_of(release, &wanted),
         });
     }
     Ok(best)
 }
 
-fn asset_url(release: &Value, wanted: &str) -> Option<String> {
-    release
+fn asset_of(release: &Value, wanted: &str) -> Option<Asset> {
+    let found = release
         .get("assets")
         .and_then(Value::as_array)?
         .iter()
-        .find(|asset| asset.get("name").and_then(Value::as_str) == Some(wanted))
-        .and_then(|asset| asset.get("browser_download_url").and_then(Value::as_str))
-        .map(str::to_string)
+        .find(|asset| asset.get("name").and_then(Value::as_str) == Some(wanted))?;
+    Some(Asset {
+        url: found
+            .get("browser_download_url")
+            .and_then(Value::as_str)?
+            .to_string(),
+        digest: found
+            .get("digest")
+            .and_then(Value::as_str)
+            .and_then(|raw| raw.strip_prefix("sha256:"))
+            .map(str::to_lowercase),
+    })
+}
+
+fn sha256(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 fn asset_name() -> String {
@@ -238,14 +274,43 @@ fn fields(version: &str) -> (u64, u64, u64) {
     )
 }
 
-fn install(url: &str, from: &str, to: &str) -> Result<(), String> {
+fn install(asset: &Asset, from: &str, to: &str) -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|_| "Cannot find my own path.".to_string())?;
     let dir = exe
         .parent()
         .ok_or_else(|| "Cannot find my own directory.".to_string())?
         .to_path_buf();
 
-    let mut response = usage::agent()
+    lock::locked(lock::UPDATE, || {
+        let bytes = download(&asset.url)?;
+        if let Some(wanted) = &asset.digest {
+            let got = sha256(&bytes);
+            if &got != wanted {
+                return Err(format!(
+                    "The download does not match what the release says it is: {got} instead of {wanted}."
+                ));
+            }
+        }
+
+        let fresh = dir.join(format!("kebacc-switch.{}.new", std::process::id()));
+        std::fs::write(&fresh, &bytes).map_err(|_| format!("Cannot write {}.", fresh.display()))?;
+        runnable(&fresh);
+        if let Err(problem) = swap(&exe, &fresh) {
+            let _ = std::fs::remove_file(&fresh);
+            return Err(problem);
+        }
+
+        let _ = crate::jsonio::write_text(&dir.join(".version"), to);
+        let _ = crate::jsonio::write(
+            &dir.join(MARKER),
+            &json!({ "from": from, "to": to, "at": now_ms() as u64 }),
+        );
+        Ok(())
+    })?
+}
+
+fn download(url: &str) -> Result<Vec<u8>, String> {
+    let mut response = usage::agent_with_timeout(DOWNLOAD_SECONDS)
         .get(url)
         .header("User-Agent", &format!("kebacc-switch/{}", version()))
         .call()
@@ -262,18 +327,7 @@ fn install(url: &str, from: &str, to: &str) -> Result<(), String> {
     if bytes.len() < 1024 {
         return Err("The download is too small to be the switcher.".into());
     }
-
-    let fresh = dir.join("kebacc-switch.new");
-    std::fs::write(&fresh, &bytes).map_err(|_| format!("Cannot write {}.", fresh.display()))?;
-    runnable(&fresh);
-    swap(&exe, &fresh)?;
-
-    let _ = crate::jsonio::write_text(&dir.join(".version"), to);
-    let _ = crate::jsonio::write(
-        &dir.join(MARKER),
-        &json!({ "from": from, "to": to, "at": now_ms() as u64 }),
-    );
-    Ok(())
+    Ok(bytes)
 }
 
 fn swap(exe: &Path, fresh: &Path) -> Result<(), String> {
@@ -305,7 +359,7 @@ pub fn last(dir: &Path) -> Option<(String, String, u128)> {
     let at = marker.get("at").and_then(Value::as_u64)? as u128;
     let now = now_ms();
     let age = now.checked_sub(at)?;
-    if age > DEFAULT_INTERVAL_MS {
+    if age > interval_ms() {
         return None;
     }
     Some((
@@ -320,6 +374,28 @@ pub fn sweep() {
         return;
     };
     let _ = std::fs::remove_file(exe.with_extension("old"));
+    let Some(dir) = exe.parent() else {
+        return;
+    };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with("kebacc-switch.") && name.ends_with(".new") && !recent(&entry) {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
+fn recent(entry: &std::fs::DirEntry) -> bool {
+    entry
+        .metadata()
+        .ok()
+        .and_then(|meta| meta.modified().ok())
+        .and_then(|when| when.elapsed().ok())
+        .is_some_and(|age| age.as_millis() < RETRY_MS)
 }
 
 #[cfg(test)]
@@ -332,6 +408,37 @@ mod tests {
         assert!(!newer("5.0.0", "5.0.0"));
         assert!(!newer("4.9.9", "5.0.0"));
         assert!(newer("5.0.1", "5.0.0"));
+    }
+
+    #[test]
+    fn the_digest_is_the_one_github_publishes() {
+        assert_eq!(
+            sha256(b"abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+    }
+
+    #[test]
+    fn a_release_without_a_digest_still_yields_an_asset() {
+        let release = serde_json::json!({
+            "assets": [{ "name": "kebacc-switch-x", "browser_download_url": "https://example/x" }]
+        });
+        let asset = asset_of(&release, "kebacc-switch-x").expect("asset");
+        assert_eq!(asset.url, "https://example/x");
+        assert!(asset.digest.is_none());
+    }
+
+    #[test]
+    fn a_digest_loses_its_prefix() {
+        let release = serde_json::json!({
+            "assets": [{
+                "name": "kebacc-switch-x",
+                "browser_download_url": "https://example/x",
+                "digest": "sha256:AB12"
+            }]
+        });
+        let asset = asset_of(&release, "kebacc-switch-x").expect("asset");
+        assert_eq!(asset.digest.as_deref(), Some("ab12"));
     }
 
     #[test]

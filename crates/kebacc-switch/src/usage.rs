@@ -175,8 +175,12 @@ pub fn access_token(provider: &Provider, creds_raw: Option<&str>) -> Option<Stri
 }
 
 pub fn agent() -> ureq::Agent {
+    agent_with_timeout(8)
+}
+
+pub fn agent_with_timeout(seconds: u64) -> ureq::Agent {
     let config =
-        ureq::Agent::config_builder().timeout_global(Some(std::time::Duration::from_secs(8)));
+        ureq::Agent::config_builder().timeout_global(Some(std::time::Duration::from_secs(seconds)));
     #[cfg(windows)]
     let config = config.tls_config(
         ureq::tls::TlsConfig::builder()
