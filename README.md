@@ -79,10 +79,10 @@ whether its binary was found, and any custom command can be added.
 An agent's own status line is part of its output, so a split pane is narrower
 than the line was written for. [`docs/status-lines.md`](docs/status-lines.md)
 has what a pane exports, what it does not, and a worked example. The worked
-example ships as [`plugins/claude-account-switcher`](plugins/claude-account-switcher):
+example ships as [`plugins/kebacc-switch`](plugins/kebacc-switch):
 a pool of Claude and Codex logins with a status-line segment that shows which
 one is live and how much of its quota is left. It installs itself with
-`plugins/claude-account-switcher/install.ps1`.
+`plugins/kebacc-switch/install.ps1`.
 
 ## A page per project
 

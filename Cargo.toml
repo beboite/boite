@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/claude-cc", "crates/boite-agent-api", "crates/boite-core", "crates/boite-identity", "crates/boite-mcp", "crates/boite-server", "src-tauri"]
+members = ["crates/kebacc-switch", "crates/boite-agent-api", "crates/boite-core", "crates/boite-identity", "crates/boite-mcp", "crates/boite-server", "src-tauri"]
 resolver = "2"
 
 [profile.release]
@@ -16,5 +16,5 @@ strip = true
 # The switcher is a short-lived command whose cost is process startup, not
 # throughput: optimising it for size instead of speed takes ~250 KB off the
 # binary and leaves the status line at the same 15 ms.
-[profile.release.package.claude-cc]
+[profile.release.package.kebacc-switch]
 opt-level = "z"

@@ -1,4 +1,0 @@
-# never commit credentials or account stores
-*.credentials.json
-.claude-cc-accounts/
-.codex-cc-accounts/

@@ -42,10 +42,10 @@ outside a terminal. `NO_COLOR` is worth honouring for the same reason.
 ## Worked example: the account switcher
 
 The switcher vendored under
-[`plugins/claude-account-switcher`](../plugins/claude-account-switcher) keeps
+[`plugins/kebacc-switch`](../plugins/kebacc-switch) keeps
 several Claude Code and Codex logins on one machine and swaps between them when
 one runs out of quota. Its status line
-(`src/claude-cc-statusline.js`) is a reference consumer of the contract above:
+(`src/kebacc-switch-statusline.js`) is a reference consumer of the contract above:
 Claude Code hands it the session payload on stdin, it prints one line, and it
 never asks the network — the live window comes from the payload and everything
 about the other accounts comes from the cache the switcher already wrote.
@@ -54,9 +54,9 @@ about the other accounts comes from the cache the switcher already wrote.
 alaric · 5h 42% / 7d 12% · 1 free
 ```
 
-`CLAUDE_CC_STATUSLINE_ASCII=1` swaps the `·` separator for `|`, and an
+`KEBACC_SWITCH_STATUSLINE_ASCII=1` swaps the `·` separator for `|`, and an
 environment that does not say UTF-8 gets the ASCII form without being asked.
-`CLAUDE_CC_ACCOUNTS` moves the pool it reads.
+`KEBACC_SWITCH_ACCOUNTS` moves the pool it reads.
 
 It renders one width, because Claude Code owns the truncation on its own status
 line. A Boite pane that wants a narrower segment is the case the pane contract
