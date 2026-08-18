@@ -1,9 +1,9 @@
 ---
 description: Forget a saved Codex account
-allowed-tools: Bash(~/.claude-tools/kebacc-switch:*)
+allowed-tools: Bash(~/.claude-tools/kebacc-switch:*), Bash(~/.claude-tools/kebacc-switch.exe:*)
 ---
 
-Run:
+Run `~/.claude-tools/kebacc-switch`, or `~/.claude-tools/kebacc-switch.exe` on Windows:
 
 ```
 ~/.claude-tools/kebacc-switch remove -Provider codex -Email <email> -Yes

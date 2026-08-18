@@ -44,11 +44,11 @@ outside a terminal. `NO_COLOR` is worth honouring for the same reason.
 The switcher vendored under
 [`plugins/kebacc-switch`](../plugins/kebacc-switch) keeps
 several Claude Code and Codex logins on one machine and swaps between them when
-one runs out of quota. Its status line
-(`src/kebacc-switch-statusline.js`) is a reference consumer of the contract above:
-Claude Code hands it the session payload on stdin, it prints one line, and it
-never asks the network — the live window comes from the payload and everything
-about the other accounts comes from the cache the switcher already wrote.
+one runs out of quota. Its status line (`kebacc-switch statusline`) is a
+reference consumer of the contract above: Claude Code hands it the session
+payload on stdin, it prints one line, and it never asks the network. The live
+window comes from the payload and everything about the other accounts comes from
+the cache the switcher already wrote.
 
 ```
 alaric · 5h 42% / 7d 12% · 1 free
@@ -68,9 +68,8 @@ It renders one width, because Claude Code owns the truncation on its own status
 line. A Boite pane that wants a narrower segment is the case the pane contract
 above exists for, and the renderer is deliberately the simple end of it.
 
-The toolkit itself is PowerShell 7, installed into `~/.claude-tools` by
-`install.ps1` and removed by `uninstall.ps1`, with slash commands in
-`src/commands/` for add, list, switch, remove, auto-switch and doctor. Settings
-carries an Accounts tab that installs it without leaving the app: the files are
-bundled into the build and typed into the shell the panel spawns, so nothing is
-downloaded.
+The toolkit itself is the `kebacc-switch` binary, installed into
+`~/.claude-tools` by
+[`plugins/kebacc-switch/install.ps1`](../plugins/kebacc-switch/install.ps1)
+and removed by `uninstall.ps1`, with slash commands in `src/commands/` for add,
+list, switch, remove, auto-switch and doctor.

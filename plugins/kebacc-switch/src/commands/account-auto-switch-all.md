@@ -1,9 +1,9 @@
 ---
 description: Run the quota check for every provider at once
-allowed-tools: Bash(~/.claude-tools/kebacc-switch:*)
+allowed-tools: Bash(~/.claude-tools/kebacc-switch:*), Bash(~/.claude-tools/kebacc-switch.exe:*)
 ---
 
-Run:
+Run `~/.claude-tools/kebacc-switch`, or `~/.claude-tools/kebacc-switch.exe` on Windows:
 
 ```
 ~/.claude-tools/kebacc-switch auto -Provider all

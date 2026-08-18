@@ -1,9 +1,9 @@
 ---
 description: Forget a saved Claude Code account
-allowed-tools: Bash(~/.claude-tools/kebacc-switch:*)
+allowed-tools: Bash(~/.claude-tools/kebacc-switch:*), Bash(~/.claude-tools/kebacc-switch.exe:*)
 ---
 
-Run:
+Run `~/.claude-tools/kebacc-switch`, or `~/.claude-tools/kebacc-switch.exe` on Windows:
 
 ```
 ~/.claude-tools/kebacc-switch remove -Provider claude -Email <email> -Yes

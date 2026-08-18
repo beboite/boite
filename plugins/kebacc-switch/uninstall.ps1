@@ -86,7 +86,16 @@ if (Test-Path -LiteralPath $settingsPath) {
         }
 
         if ($touched) {
-            [IO.File]::WriteAllText($settingsPath, ($settings | ConvertTo-Json -Depth 20), [Text.UTF8Encoding]::new($false))
+            if (-not (Test-Path -LiteralPath "$settingsPath.cc-backup")) {
+                Copy-Item -LiteralPath $settingsPath -Destination "$settingsPath.cc-backup" -Force
+            }
+            Copy-Item -LiteralPath $settingsPath -Destination "$settingsPath.cc-backup.prev" -Force
+            $json = $settings | ConvertTo-Json -Depth 100
+            try { $null = $json | ConvertFrom-Json } catch {
+                Say "Refusing to rewrite $settingsPath: the result would not parse. Nothing changed." Red
+                exit 1
+            }
+            [IO.File]::WriteAllText($settingsPath, $json, [Text.UTF8Encoding]::new($false))
         }
     } catch { }
 }
