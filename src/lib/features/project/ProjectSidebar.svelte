@@ -25,6 +25,8 @@
   import { isScratch } from "$lib/domain/project";
   import { projectDisplayName } from "$lib/shared/project-label";
   import { filterSidebar, normaliseTerm } from "./sidebar-filter";
+  import { visibleDelegationRows } from "./delegation-stack";
+  import DelegationStack from "./DelegationStack.svelte";
   import SearchIcon from "@lucide/svelte/icons/search";
   import ThreadGlyph from "$lib/features/thread/ThreadGlyph.svelte";
   import {
@@ -67,6 +69,7 @@
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import { canSettle, isSettled, splitSettled } from "$lib/domain/thread-settle";
+  import { isDelegated } from "$lib/domain/delegation";
   import ShortcutBar from "$lib/features/shortcut/ShortcutBar.svelte";
   import { t } from "$lib/i18n/index.svelte";
 
@@ -94,6 +97,10 @@
    * cleared.
    */
   let settledOpen = $state<Record<string, boolean>>({});
+  /** Which parents have had their delegation pile opened. Session-scoped like
+   * the settled drawer: folding is a look, and persisting it would leave a
+   * tree standing open after the children it was showing are gone. */
+  let stacksOpen = $state<Record<string, boolean>>({});
   // Session-scoped on purpose: revealing what was filed away is a look, not a
   // preference, and one that persisted would quietly undo the filing.
   // Opt-in, so it costs no vertical space in a sidebar whose whole job is to
@@ -593,7 +600,10 @@
       // list. The order that gets saved is still the whole one, see
       // `reorderedAmongVisible`, so a pinned or filed thread keeps its place.
       const ids = app.threadsByProjectSorted(drag.projectId).map((t) => t.id);
-      const drawn = (threadsByProject.get(drag.projectId) ?? []).map((t) => t.id);
+      const drawn = visibleDelegationRows(
+        threadsByProject.get(drag.projectId) ?? [],
+        stacksOpen,
+      ).map((r) => r.thread.id);
       const next = reorderedAmongVisible(ids, drawn, drag.id, drag.slotIndex);
       if (next) void settings.setThreadOrder(drag.projectId, next);
       return;
@@ -737,6 +747,15 @@
       });
     }
     items.push({ separator: true });
+    if (isDelegated(thread)) {
+      items.push({
+        label: t("sidebar.detachDelegation"),
+        action: () => {
+          app.detachDelegation(thread.id);
+        },
+      });
+      items.push({ separator: true });
+    }
     if (inMultiPane) {
       items.push({
         label: t("sidebar.detachFromGroup"),
@@ -1083,8 +1102,30 @@
   const threadSourceIdx = $derived.by(() => {
     if (!liveDrag || liveDrag.kind !== "thread") return -1;
     const list = threadsByProject.get(liveDrag.projectId) ?? [];
-    return list.findIndex((t) => t.id === liveDrag.id);
+    return visibleDelegationRows(list, stacksOpen).findIndex(
+      (r) => r.thread.id === liveDrag.id,
+    );
   });
+
+  function toggleStack(id: string) {
+    if (stacksOpen[id]) delete stacksOpen[id];
+    else stacksOpen[id] = true;
+  }
+
+  /** The active thread is inside this folded pile, so the parent keeps the
+   * selected outline: the child has no row of its own until the pile opens. */
+  function pileCoversActive(threadId: string, folded: boolean): boolean {
+    if (!folded || app.view !== "terminal" || !app.activeThreadId) return false;
+    let current = app.threadById(app.activeThreadId);
+    const seen = new Set<string>();
+    while (current?.parentThreadId) {
+      if (current.parentThreadId === threadId) return true;
+      if (seen.has(current.parentThreadId)) return false;
+      seen.add(current.parentThreadId);
+      current = app.threadById(current.parentThreadId);
+    }
+    return false;
+  }
 
   const threadDragGhost = $derived.by(() => {
     if (!liveDrag || liveDrag.kind !== "thread" || !liveDrag.sourceRect) {
@@ -1425,10 +1466,20 @@
           <!-- The row used to live inline in the live list. It is a snippet
                now because the drawer draws the same card under the cut, and
                two copies of this markup is how they would drift. -->
-          {#snippet threadItem(thread: Thread, threadIdx: number, reorderable: boolean)}
+          {#snippet threadItem(
+            thread: Thread,
+            threadIdx: number,
+            reorderable: boolean,
+            depth: number,
+            stack: Thread[],
+            foldedCount: number,
+            expandable: boolean,
+          )}
               {@const isThreadSource = liveDrag?.kind === "thread" && liveDrag.id === thread.id}
               {@const isActive =
-                app.activeThreadId === thread.id && app.view === "terminal"}
+                app.view === "terminal" &&
+                (app.activeThreadId === thread.id ||
+                  pileCoversActive(thread.id, stack.length > 0))}
               {@const shiftY =
                 reorderable && dragInThisProject && liveDrag.slotIndex !== null && threadSourceIdx >= 0
                   ? rowShift(threadIdx, threadSourceIdx, liveDrag.slotIndex, liveDrag.sourceHeight)
@@ -1463,6 +1514,7 @@
                 style:transform={threadSlide.transform}
                 style:transition={threadSlide.transition}
                 style:z-index={isThreadSource ? 50 : "auto"}
+                style:margin-left={depth > 0 ? `${depth * 16}px` : null}
                 onpointerdown={(e) => threadPointerDown(thread, e)}
                 onmouseenter={() => threadHoverEnter(thread.id)}
                 onmouseleave={() => threadHoverLeave(thread.id)}
@@ -1580,6 +1632,14 @@
                       {thread.title ?? thread.label}
                     </span>
                   {/if}
+                  {#if expandable}
+                    <DelegationStack
+                      {stack}
+                      count={foldedCount}
+                      expanded={!!stacksOpen[thread.id]}
+                      onToggle={() => toggleStack(thread.id)}
+                    />
+                  {/if}
                   <!-- The logo used to live here, opposite the status dot, and
                        swapped for the close button on hover. The glyph on the
                        left carries both now, which leaves this end for the one
@@ -1622,8 +1682,8 @@
               data-thread-list
               data-project-id={project.id}
             >
-              {#each live as thread, threadIdx (thread.id)}
-                {@render threadItem(thread, threadIdx, true)}
+              {#each visibleDelegationRows(live, stacksOpen) as { thread, depth, stack, foldedCount, expandable }, threadIdx (thread.id)}
+                {@render threadItem(thread, threadIdx, true, depth, stack, foldedCount, expandable)}
               {/each}
             </ul>
           {/if}
@@ -1662,8 +1722,8 @@
               </button>
               {#if open}
                 <ul class="px-0.5 pb-0.5 {rowGapClass}">
-                  {#each settled as thread, threadIdx (thread.id)}
-                    {@render threadItem(thread, threadIdx, false)}
+                  {#each visibleDelegationRows(settled, stacksOpen) as { thread, depth, stack, foldedCount, expandable }, threadIdx (thread.id)}
+                    {@render threadItem(thread, threadIdx, false, depth, stack, foldedCount, expandable)}
                   {/each}
                 </ul>
               {/if}

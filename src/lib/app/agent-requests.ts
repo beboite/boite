@@ -30,6 +30,12 @@ import { createProject } from "$lib/features/project/api";
 import { moveThreadToProject } from "$lib/features/thread/move";
 import { takesOpeningPrompt, withUnattendedArgs } from "$lib/features/thread/session";
 import { launchAgent } from "$lib/features/thread/api";
+import {
+  comboArgs,
+  comboLabel,
+  FASTPICK_CMD,
+  iconKeyForKind,
+} from "$lib/features/fastpick/combo";
 import { editorStore } from "$lib/features/editor/store.svelte";
 import { anchorProjectId, openPane } from "$lib/features/panes/open";
 import { leafNodesOf, paneStore } from "$lib/features/panes/store.svelte";
@@ -70,6 +76,10 @@ interface SpawnRequest {
   requestId?: string;
   /** The thread that asked, when Boite launched it. */
   callerThreadId?: string | null;
+  /** Parent thread ID for delegation hierarchy. */
+  parentThreadId?: string | null;
+  /** Whether this is a normal thread or a delegation. */
+  delegationMode?: 'normal' | 'delegation';
   agent?: string | null;
   prompt?: string | null;
 }
@@ -193,6 +203,28 @@ function resolveLaunch(
 ): { cmd: string; args: string[]; label: string; iconKey: IconKey; iconColor: string | null } | null {
   const needle = agent?.trim().toLowerCase() ?? "";
 
+  // `fastpick:<provider>:<model>` names an endpoint rather than a CLI, which is
+  // the one thing the shortcut list cannot hold: the pair is the user's to pick
+  // per launch, and writing a shortcut for every combination is not a list.
+  // The harness is claude-code until the name carries one, because that is the
+  // harness every provider in the catalogue answers on.
+  if (needle.startsWith(`${FASTPICK_CMD}:`)) {
+    const [, provider, ...rest] = needle.split(":");
+    // Rejoined rather than taken at [2]: a model id is allowed to hold colons,
+    // and cutting at the first one would launch a model that does not exist.
+    const model = rest.join(":");
+    if (provider && model) {
+      const combo = { harness: "claude-code", provider, model };
+      return {
+        cmd: FASTPICK_CMD,
+        args: comboArgs(combo),
+        label: comboLabel(combo),
+        iconKey: iconKeyForKind(combo.harness),
+        iconColor: null,
+      };
+    }
+  }
+
   if (needle) {
     const shortcut = settings.state.shortcuts.find(
       (s) => s.label.toLowerCase() === needle,
@@ -313,7 +345,15 @@ async function handleSpawn(req: SpawnRequest) {
   // often in another project, and a spawn they never clicked used to take the
   // screen away mid-sentence. The toast is what says it happened.
   const args = withUnattendedArgs(launch.cmd, launch.args, launch.iconKey);
-  const thread = await launchAgent(project, { ...launch, args }, { focus: false });
+  const thread = await launchAgent(
+    project,
+    { ...launch, args },
+    {
+      focus: false,
+      parentThreadId: req.parentThreadId,
+      delegationMode: req.delegationMode,
+    },
+  );
   if (!thread) {
     await answerRequest(req, { error: "the terminal did not open" });
     return;

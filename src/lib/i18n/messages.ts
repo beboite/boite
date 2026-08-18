@@ -269,6 +269,11 @@ export const EN_MESSAGES = {
   "sidebar.filterThreads": "Filter threads",
   "sidebar.showArchived": "Show archived projects",
   "sidebar.archivedProjects": "Archived projects",
+  "sidebar.delegationStack": "{count} delegations",
+  "sidebar.delegationStackOne": "1 delegation",
+  "sidebar.collapseDelegations": "Hide delegations",
+  "sidebar.detachDelegation": "Detach from delegation",
+
   "sidebar.addProject": "Add project",
   "sidebar.addProjectFromFolder": "Add project from folder",
   "sidebar.addProjectOnBoite": "Add project on boite",

@@ -96,6 +96,15 @@ pub struct Thread {
     /// status of the last run.
     #[serde(default)]
     pub settled_at: Option<i64>,
+    /// Parent thread ID when this thread was spawned as a delegation.
+    #[serde(default)]
+    pub parent_thread_id: Option<String>,
+    /// Whether this is a normal thread or a delegation sub-thread.
+    #[serde(default)]
+    pub delegation_mode: Option<String>,
+    /// Lifecycle status for delegation threads.
+    #[serde(default)]
+    pub delegation_status: Option<String>,
 }
 
 fn default_status() -> String {
