@@ -107,7 +107,11 @@ fn build(payload: &Value) -> String {
             quota(limits.get("five_hour"), "5h"),
             quota(limits.get("seven_day"), "7j"),
         ],
-        account::segments(payload).into_iter().map(Some).collect(),
+        account::segments(payload)
+            .into_iter()
+            .chain(account::update_note())
+            .map(Some)
+            .collect(),
         vec![line.cost(), line.lines(), line.duration()],
     ];
 

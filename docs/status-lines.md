@@ -58,6 +58,12 @@ alaric · 5h 42% / 7d 12% · 1 free
 environment that does not say UTF-8 gets the ASCII form without being asked.
 `KEBACC_SWITCH_ACCOUNTS` moves the pool it reads.
 
+
+For a day after the switcher has updated itself, the line carries one more
+segment saying which version it came from: `^5.0.0->5.1.0` (`↑5.0.0→5.1.0` when
+the terminal takes UTF-8). It is read from a file the update wrote next to the
+binary, so this segment costs no more than the rest of the line.
+
 It renders one width, because Claude Code owns the truncation on its own status
 line. A Boite pane that wants a narrower segment is the case the pane contract
 above exists for, and the renderer is deliberately the simple end of it.

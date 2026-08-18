@@ -59,7 +59,7 @@ fn spawn(provider: &str) {
 }
 
 #[cfg(windows)]
-fn detach(command: &mut Command) {
+pub fn detach(command: &mut Command) {
     use std::os::windows::process::CommandExt;
     const DETACHED_PROCESS: u32 = 0x0000_0008;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -67,4 +67,4 @@ fn detach(command: &mut Command) {
 }
 
 #[cfg(not(windows))]
-fn detach(_command: &mut Command) {}
+pub fn detach(_command: &mut Command) {}

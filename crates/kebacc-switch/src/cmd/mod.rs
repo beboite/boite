@@ -7,6 +7,7 @@ pub mod midtask;
 pub mod remove;
 pub mod statusline;
 pub mod switch;
+pub mod update;
 
 use crate::live;
 use crate::pool::Entry;
@@ -25,6 +26,7 @@ pub struct Options {
     pub clean: bool,
     pub countdown: bool,
     pub midtask: bool,
+    pub check: bool,
 }
 
 pub fn current<'a>(provider: &Provider, pool: &'a [Entry]) -> Option<&'a Entry> {

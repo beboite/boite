@@ -5,9 +5,11 @@ command to move between them when one runs out of quota.
 
 It is vendored here rather than fetched, and it is a Rust binary: the crate is
 `crates/kebacc-switch`, built by the same `cargo build` that builds Boite, and
-`install.ps1` copies what came out of that build into `~/.claude-tools`. Nothing
-is downloaded, no binary is committed, and there is no third-party repository in
-the trust path.
+`install.ps1` copies what came out of that build into `~/.claude-tools`. No
+binary is committed and there is no third-party repository in the trust path.
+The one thing that is downloaded is the switcher updating itself, from this
+repository's own releases — see *Staying up to date*, and the switch that turns
+it off.
 
 A command that a status line runs on every repaint, and a hook that runs at every
 session start, is a process start the user waits for: the binary answers in a few
@@ -28,6 +30,8 @@ own runtime first.
   itself. `-Protect` re-seals plain-text snapshots, `-Adopt` stamps the ones
   this machine never registered, `-Rollback` puts back the credentials from
   before the last switch, `-Clean` deletes files an earlier version left behind.
+- **update** — replaces the installed binary with the newest release.
+  `-Check` only says whether one is out.
 
 Every command takes `-Provider claude`, `-Provider codex`, or `-Provider all`
 to run once per provider.
@@ -37,6 +41,30 @@ kebacc-switch list -Provider all
 kebacc-switch auto -Provider claude
 kebacc-switch switch -Provider codex -Email you@example.com
 ```
+
+## Staying up to date
+
+The switcher updates itself. At session start, at most once a day, it asks
+GitHub for the newest `kebacc-switch-v*` release of this repository, and if that
+release is newer than what is installed it downloads the binary built for this
+platform and puts it in place. That happens in a detached process, so the
+session does not wait for it, and the running command finishes on the binary it
+started on — the new one is used from the next start.
+
+It says so afterwards rather than before: the status line shows `^5.0.0->5.1.0`
+for a day after an update, and `doctor` reports the same thing.
+
+```
+kebacc-switch update -Check   # exit 10 when a newer release exists
+kebacc-switch update          # install it now
+```
+
+Two environment variables decide the rest:
+
+- `KEBACC_SWITCH_UPDATE=off` (also `0` or `no`) — never check, never install.
+  `update` run by hand says so and does nothing.
+- `KEBACC_SWITCH_UPDATE_INTERVAL_MS` — how long between two checks. The default
+  is a day.
 
 ## Switching without being asked
 

@@ -13,6 +13,7 @@ use provider::ProviderId;
 use term::{say, Color};
 
 fn main() {
+    cmd::update::sweep();
     let args: Vec<String> = std::env::args().skip(1).collect();
     std::process::exit(dispatch(&args));
 }
@@ -29,9 +30,12 @@ fn usage_text() {
     println!("  auto        switch only if the one in use is out of quota");
     println!("  doctor      check the install and the pool (-Protect, -Adopt, -Clean to repair, -Rollback to undo a switch)");
     println!("  statusline  the Claude Code status line, from a payload on stdin");
+    println!("  update      install the newest release (-Check to only say whether one is out)");
     println!();
     println!("  list -Countdown   both quota windows of every saved account, with their resets");
     println!("  auto -Midtask     auto from a tool-use hook, at most once every few minutes");
+    println!();
+    println!("  Updates install themselves once a day at session start. KEBACC_SWITCH_UPDATE=off stops that.");
 }
 
 fn dispatch(args: &[String]) -> i32 {
@@ -53,11 +57,12 @@ fn dispatch(args: &[String]) -> i32 {
         "rm" => "remove",
         "save" => "add",
         "check" => "doctor",
+        "upgrade" | "selfupdate" => "update",
         other => other,
     };
     if !matches!(
         command,
-        "add" | "list" | "switch" | "remove" | "auto" | "doctor" | "statusline"
+        "add" | "list" | "switch" | "remove" | "auto" | "doctor" | "statusline" | "update"
     ) {
         say(&format!("Unknown command '{command}'."), Color::Red);
         usage_text();
@@ -75,6 +80,14 @@ fn dispatch(args: &[String]) -> i32 {
             return 64;
         }
     };
+
+    if command == "update" {
+        return cmd::update::run(&options);
+    }
+
+    if command == "auto" && options.hook {
+        cmd::update::maybe();
+    }
 
     if command == "auto" && options.midtask {
         return cmd::midtask::run(&wanted);
@@ -166,6 +179,7 @@ fn parse(tokens: &[String]) -> Result<(String, Options), String> {
             "clean" => options.clean = true,
             "countdown" => options.countdown = true,
             "midtask" => options.midtask = true,
+            "check" => options.check = true,
             other => return Err(format!("Unknown option '-{other}'.")),
         }
     }

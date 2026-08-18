@@ -91,6 +91,12 @@ pub fn run(provider: &Provider, opts: &Options) -> i32 {
         ));
     }
 
+    if let Some(dir) = install_dir() {
+        if let Some((from, to, age)) = super::update::last(&dir) {
+            report.good(&format!("updated from {from} to {to} {}", ago(age)));
+        }
+    }
+
     let backend = seal::backend();
     if backend == seal::Backend::None {
         report.warn("No OS secret store: snapshots cannot be encrypted on this machine.");
@@ -218,6 +224,14 @@ fn exit_code(report: &Report) -> i32 {
     } else {
         0
     }
+}
+
+fn ago(age_ms: u128) -> String {
+    let minutes = age_ms / 60_000;
+    if minutes < 60 {
+        return format!("{minutes}m ago");
+    }
+    format!("{}h ago", minutes / 60)
 }
 
 fn install_dir() -> Option<PathBuf> {

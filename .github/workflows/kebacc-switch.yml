@@ -1,0 +1,115 @@
+name: kebacc-switch
+
+# The switcher lives in this repository but ships on its own clock: its crate
+# carries its own version and its releases are tagged `kebacc-switch-v5.1.0`,
+# which is what `kebacc-switch update` looks for. Boite's own `v*` tags are a
+# different channel and this workflow ignores them.
+#
+# Asset names are a contract, not a convention: `cmd/update.rs` builds the name
+# it downloads out of the target triple, so renaming a file here silently turns
+# the auto-update off for that platform.
+on:
+  push:
+    tags: ["kebacc-switch-v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: The crate version is the tag
+        run: |
+          set -euo pipefail
+          crate=$(grep -m1 '^version = ' crates/kebacc-switch/Cargo.toml | cut -d'"' -f2)
+          echo "crates/kebacc-switch/Cargo.toml=$crate"
+          if [ "${GITHUB_REF_TYPE:-}" = "tag" ] && [ "$GITHUB_REF_NAME" != "kebacc-switch-v$crate" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match crate version $crate" >&2
+            exit 1
+          fi
+
+  build:
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-pc-windows-msvc
+            runner: windows-latest
+          - target: aarch64-apple-darwin
+            runner: macos-latest
+          - target: x86_64-apple-darwin
+            runner: macos-latest
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          targets: ${{ matrix.target }}
+
+      # Only this crate is built, so the cache key is its own lockfile slice
+      # rather than the whole workspace: a change to the Tauri side has no
+      # business invalidating a switcher build.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ matrix.target }}-kebacc-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ matrix.target }}-kebacc-
+
+      - name: Build
+        run: cargo build --release -p kebacc-switch --target ${{ matrix.target }}
+
+      # The name the updater will ask for. `EXE_SUFFIX` on the reading side is
+      # `.exe` on Windows and empty everywhere else, and this matches it.
+      - name: Name the binary after its target
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          if [ "${{ matrix.runner }}" = "windows-latest" ]; then
+            cp "target/${{ matrix.target }}/release/kebacc-switch.exe" \
+               "dist/kebacc-switch-${{ matrix.target }}.exe"
+          else
+            cp "target/${{ matrix.target }}/release/kebacc-switch" \
+               "dist/kebacc-switch-${{ matrix.target }}"
+          fi
+
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: kebacc-switch-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: List what will ship
+        run: ls -l dist
+
+      # Published, not drafted: an installed switcher only sees a release once
+      # it is out, and a draft nobody remembers to publish reads to every
+      # machine as "no update exists".
+      - uses: softprops/action-gh-release@aef70fc9ed7b9339c9aa47ec4a80630ca34a8c47 # v2.4.1
+        with:
+          files: dist/*
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          fail_on_unmatched_files: true

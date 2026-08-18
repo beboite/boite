@@ -174,7 +174,7 @@ pub fn access_token(provider: &Provider, creds_raw: Option<&str>) -> Option<Stri
     jsonio::str_of(oauth, "accessToken")
 }
 
-fn agent() -> ureq::Agent {
+pub fn agent() -> ureq::Agent {
     let config =
         ureq::Agent::config_builder().timeout_global(Some(std::time::Duration::from_secs(8)));
     #[cfg(windows)]

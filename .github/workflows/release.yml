@@ -43,7 +43,10 @@ jobs:
             exit 1
           fi
 
+          # kebacc-switch ships on its own tags and carries its own version,
+          # so it is deliberately not held to the app version.
           for manifest in src-tauri/Cargo.toml crates/*/Cargo.toml; do
+            case "$manifest" in crates/kebacc-switch/Cargo.toml) continue ;; esac
             v=$(grep -m1 '^version = ' "$manifest" | cut -d'"' -f2)
             echo "$manifest=$v"
             if [ "$v" != "$conf" ]; then
