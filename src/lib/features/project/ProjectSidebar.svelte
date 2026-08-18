@@ -69,6 +69,7 @@
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import { canSettle, isSettled, splitSettled } from "$lib/domain/thread-settle";
+  import { isDelegated } from "$lib/domain/delegation";
   import ShortcutBar from "$lib/features/shortcut/ShortcutBar.svelte";
   import { t } from "$lib/i18n/index.svelte";
 
@@ -746,6 +747,15 @@
       });
     }
     items.push({ separator: true });
+    if (isDelegated(thread)) {
+      items.push({
+        label: t("sidebar.detachDelegation"),
+        action: () => {
+          app.detachDelegation(thread.id);
+        },
+      });
+      items.push({ separator: true });
+    }
     if (inMultiPane) {
       items.push({
         label: t("sidebar.detachFromGroup"),

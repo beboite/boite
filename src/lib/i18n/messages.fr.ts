@@ -274,6 +274,7 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "sidebar.delegationStack": "{count} délégations",
   "sidebar.delegationStackOne": "1 délégation",
   "sidebar.collapseDelegations": "Masquer les délégations",
+  "sidebar.detachDelegation": "Détacher de la délégation",
 
   "sidebar.addProject": "Ajouter un projet",
   "sidebar.addProjectFromFolder": "Ajouter un projet depuis un dossier",

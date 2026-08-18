@@ -272,6 +272,7 @@ export const EN_MESSAGES = {
   "sidebar.delegationStack": "{count} delegations",
   "sidebar.delegationStackOne": "1 delegation",
   "sidebar.collapseDelegations": "Hide delegations",
+  "sidebar.detachDelegation": "Detach from delegation",
 
   "sidebar.addProject": "Add project",
   "sidebar.addProjectFromFolder": "Add project from folder",

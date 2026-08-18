@@ -1,5 +1,4 @@
 import type {
-  DelegationStatus,
   MobileTab,
   Project,
   Thread,
@@ -15,6 +14,11 @@ import {
   deleteThread as dbDeleteThread,
 } from "$lib/storage/db";
 import { canSettle, isSettled } from "$lib/domain/thread-settle";
+import {
+  delegationOutcome,
+  isDelegated,
+  shouldCloseDelegation,
+} from "$lib/domain/delegation";
 import { settings } from "$lib/features/settings/store.svelte";
 import { device } from "$lib/features/settings/device.svelte";
 import { logger } from "$lib/shared/services/logger.svelte";
@@ -52,17 +56,17 @@ import { TitleWrites } from "./title-writes";
 // instead of silently corrupting the index.
 const EMPTY_THREADS = Object.freeze([]) as unknown as Thread[];
 
-/** How long a finished delegation keeps its row before it settles itself.
+/** How long a finished delegation keeps its row before it is closed.
  * Long enough for the thread that asked for it to read the outcome, short
  * enough that a burst of them does not bury the list. */
-const DELEGATION_SETTLE_DELAY_MS = 5000;
+const DELEGATION_CLOSE_DELAY_MS = 5000;
 
 export class AppState {
   projects = $state<Project[]>([]);
   threads = $state<Thread[]>([]);
-  /** Pending self-settle timers, by thread id, so a delegation that wakes back
+  /** Pending self-close timers, by thread id, so a delegation that wakes back
    * up inside the delay keeps its row instead of vanishing under the user. */
-  #delegationSettleTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  #delegationCloseTimers = new Map<string, ReturnType<typeof setTimeout>>();
   activeThreadId = $state<string | null>(null);
   selectedProjectId = $state<string | null>(null);
   view = $state<View>("terminal");
@@ -578,6 +582,7 @@ export class AppState {
   }
 
   async removeThread(id: string) {
+    this.#clearDelegationClose(id);
     const removed = this.threadById(id);
     this.threads = this.threads.filter((t) => t.id !== id);
     if (this.activeThreadId === id) {
@@ -615,43 +620,30 @@ export class AppState {
       this.setThreadAutoSlept(id, false);
     }
 
-    // A delegation is a thread another thread asked for, and nobody is
-    // watching it: its own row is the only place its outcome shows. The
-    // status here is that outcome, and a finished one settles itself so the
-    // sidebar does not fill with the leftovers of work already reported.
-    if (t.delegationMode === "delegation") {
-      const failed =
-        status === "error" ||
-        (status === "exited" && exitCode !== null && exitCode !== 0);
-      const done =
-        status === "ready" ||
-        status === "stopped" ||
-        (status === "done" && (exitCode === null || exitCode === 0));
-
-      let next: DelegationStatus | null = t.delegationStatus ?? null;
-      if (status === "running" || status === "waiting") next = "running";
-      else if (failed) next = "failed"; // stays on screen: the parent has to see it
-      else if (done) next = "completed";
-
-      // The row is left up for a beat before it goes, long enough for the
-      // parent to read the result off it. A thread that comes back to life in
-      // that window keeps its row: the timer is cleared, not fired.
-      const pending = this.#delegationSettleTimers.get(id);
-      if (pending !== undefined && next !== "completed") {
+    // A delegation is a thread another thread asked for. When its process
+    // actually ends it is closed, not put away: Ranger is the user's gesture
+    // and a finished worker is leftover work, not a row to file. `ready` is
+    // still a live agent. Failed stays so the parent can see it.
+    if (isDelegated(t)) {
+      const next = delegationOutcome(status, exitCode);
+      const pending = this.#delegationCloseTimers.get(id);
+      if (pending !== undefined && !shouldCloseDelegation(next)) {
         clearTimeout(pending);
-        this.#delegationSettleTimers.delete(id);
+        this.#delegationCloseTimers.delete(id);
       }
-      if (next === "completed" && pending === undefined) {
-        this.#delegationSettleTimers.set(
+      if (shouldCloseDelegation(next) && pending === undefined) {
+        this.#delegationCloseTimers.set(
           id,
           setTimeout(() => {
-            this.#delegationSettleTimers.delete(id);
-            void this.settleThread(id, true);
-          }, DELEGATION_SETTLE_DELAY_MS),
+            this.#delegationCloseTimers.delete(id);
+            void import("$lib/features/thread/api").then(({ closeThread }) =>
+              closeThread(id),
+            );
+          }, DELEGATION_CLOSE_DELAY_MS),
         );
       }
 
-      if (next !== t.delegationStatus) {
+      if (next && next !== t.delegationStatus) {
         t.delegationStatus = next;
         void saveThread($state.snapshot(t) as Thread).catch((err) => {
           logger.error("app", "Failed to save delegation status", err);
@@ -687,6 +679,32 @@ export class AppState {
    *
    * Returns whether it went through, so a caller can say so.
    */
+  #clearDelegationClose(id: string) {
+    const pending = this.#delegationCloseTimers.get(id);
+    if (pending === undefined) return;
+    clearTimeout(pending);
+    this.#delegationCloseTimers.delete(id);
+  }
+
+  /**
+   * Drops the parent link so this thread is a thread of its own.
+   *
+   * The row stays, the process stays. Only the delegation mark goes, which is
+   * also what stops the finished-worker timer from closing it.
+   */
+  detachDelegation(id: string): boolean {
+    const t = this.threadById(id);
+    if (!t || !isDelegated(t)) return false;
+    this.#clearDelegationClose(id);
+    t.parentThreadId = null;
+    t.delegationMode = "normal";
+    t.delegationStatus = null;
+    void saveThread($state.snapshot(t) as Thread).catch((err) => {
+      logger.error("app", "Failed to detach delegation", err);
+    });
+    return true;
+  }
+
   async settleThread(id: string, settled: boolean): Promise<boolean> {
     const thread = this.threadById(id);
     if (!thread) return false;
