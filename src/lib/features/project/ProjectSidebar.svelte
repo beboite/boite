@@ -25,6 +25,8 @@
   import { isScratch } from "$lib/domain/project";
   import { projectDisplayName } from "$lib/shared/project-label";
   import { filterSidebar, normaliseTerm } from "./sidebar-filter";
+  import { visibleDelegationRows } from "./delegation-stack";
+  import DelegationStack from "./DelegationStack.svelte";
   import SearchIcon from "@lucide/svelte/icons/search";
   import ThreadGlyph from "$lib/features/thread/ThreadGlyph.svelte";
   import {
@@ -94,6 +96,10 @@
    * cleared.
    */
   let settledOpen = $state<Record<string, boolean>>({});
+  /** Which parents have had their delegation pile opened. Session-scoped like
+   * the settled drawer: folding is a look, and persisting it would leave a
+   * tree standing open after the children it was showing are gone. */
+  let stacksOpen = $state<Record<string, boolean>>({});
   // Session-scoped on purpose: revealing what was filed away is a look, not a
   // preference, and one that persisted would quietly undo the filing.
   // Opt-in, so it costs no vertical space in a sidebar whose whole job is to
@@ -593,7 +599,10 @@
       // list. The order that gets saved is still the whole one, see
       // `reorderedAmongVisible`, so a pinned or filed thread keeps its place.
       const ids = app.threadsByProjectSorted(drag.projectId).map((t) => t.id);
-      const drawn = (threadsByProject.get(drag.projectId) ?? []).map((t) => t.id);
+      const drawn = visibleDelegationRows(
+        threadsByProject.get(drag.projectId) ?? [],
+        stacksOpen,
+      ).map((r) => r.thread.id);
       const next = reorderedAmongVisible(ids, drawn, drag.id, drag.slotIndex);
       if (next) void settings.setThreadOrder(drag.projectId, next);
       return;
@@ -1083,32 +1092,29 @@
   const threadSourceIdx = $derived.by(() => {
     if (!liveDrag || liveDrag.kind !== "thread") return -1;
     const list = threadsByProject.get(liveDrag.projectId) ?? [];
-    return list.findIndex((t) => t.id === liveDrag.id);
+    return visibleDelegationRows(list, stacksOpen).findIndex(
+      (r) => r.thread.id === liveDrag.id,
+    );
   });
 
-  /** Delegation children are drawn under the thread that spawned them, one
-   * indent step per level. A child whose parent is not in the same list — the
-   * parent settled, or it lives in another project — is drawn at the root
-   * rather than dropped, so a delegation never disappears with its parent. */
-  function flattenDelegations(
-    threads: Thread[],
-  ): Array<{ thread: Thread; depth: number }> {
-    const byId = new Map(threads.map((t) => [t.id, t]));
-    const rows: Array<{ thread: Thread; depth: number }> = [];
+  function toggleStack(id: string) {
+    if (stacksOpen[id]) delete stacksOpen[id];
+    else stacksOpen[id] = true;
+  }
+
+  /** The active thread is inside this folded pile, so the parent keeps the
+   * selected outline: the child has no row of its own until the pile opens. */
+  function pileCoversActive(threadId: string, folded: boolean): boolean {
+    if (!folded || app.view !== "terminal" || !app.activeThreadId) return false;
+    let current = app.threadById(app.activeThreadId);
     const seen = new Set<string>();
-    const walk = (thread: Thread, depth: number) => {
-      if (seen.has(thread.id)) return;
-      seen.add(thread.id);
-      rows.push({ thread, depth });
-      for (const childId of app.childThreadIds(thread.id)) {
-        const child = byId.get(childId);
-        if (child) walk(child, depth + 1);
-      }
-    };
-    for (const t of threads) {
-      if (!t.parentThreadId || !byId.has(t.parentThreadId)) walk(t, 0);
+    while (current?.parentThreadId) {
+      if (current.parentThreadId === threadId) return true;
+      if (seen.has(current.parentThreadId)) return false;
+      seen.add(current.parentThreadId);
+      current = app.threadById(current.parentThreadId);
     }
-    return rows;
+    return false;
   }
 
   const threadDragGhost = $derived.by(() => {
@@ -1455,10 +1461,15 @@
             threadIdx: number,
             reorderable: boolean,
             depth: number,
+            stack: Thread[],
+            foldedCount: number,
+            expandable: boolean,
           )}
               {@const isThreadSource = liveDrag?.kind === "thread" && liveDrag.id === thread.id}
               {@const isActive =
-                app.activeThreadId === thread.id && app.view === "terminal"}
+                app.view === "terminal" &&
+                (app.activeThreadId === thread.id ||
+                  pileCoversActive(thread.id, stack.length > 0))}
               {@const shiftY =
                 reorderable && dragInThisProject && liveDrag.slotIndex !== null && threadSourceIdx >= 0
                   ? rowShift(threadIdx, threadSourceIdx, liveDrag.slotIndex, liveDrag.sourceHeight)
@@ -1604,24 +1615,20 @@
                          from assistive tech because the row button already
                          carries this name. -->
                     <span
-                      class="pointer-events-none relative flex min-w-0 flex-1 items-center gap-1.5 text-left text-base leading-[19px]"
+                      class="pointer-events-none relative min-w-0 flex-1 truncate-safe text-left text-base leading-[19px]"
+                      title={thread.title ?? thread.label}
                       aria-hidden="true"
                     >
-                      {#if depth > 0}
-                        <span class="shrink-0 text-muted-foreground/50">↳</span>
-                      {/if}
-                      <span class="truncate-safe" title={thread.title ?? thread.label}>
-                        {thread.title ?? thread.label}
-                      </span>
-                      {#if thread.delegationMode === "delegation"}
-                        <span
-                          class="shrink-0 rounded-xs bg-primary/10 px-1 py-0.5 text-2xs font-medium text-primary"
-                          title={t("sidebar.delegationThread")}
-                        >
-                          {t("sidebar.delegation")}
-                        </span>
-                      {/if}
+                      {thread.title ?? thread.label}
                     </span>
+                  {/if}
+                  {#if expandable}
+                    <DelegationStack
+                      {stack}
+                      count={foldedCount}
+                      expanded={!!stacksOpen[thread.id]}
+                      onToggle={() => toggleStack(thread.id)}
+                    />
                   {/if}
                   <!-- The logo used to live here, opposite the status dot, and
                        swapped for the close button on hover. The glyph on the
@@ -1665,8 +1672,8 @@
               data-thread-list
               data-project-id={project.id}
             >
-              {#each flattenDelegations(live) as { thread, depth }, threadIdx (thread.id)}
-                {@render threadItem(thread, threadIdx, true, depth)}
+              {#each visibleDelegationRows(live, stacksOpen) as { thread, depth, stack, foldedCount, expandable }, threadIdx (thread.id)}
+                {@render threadItem(thread, threadIdx, true, depth, stack, foldedCount, expandable)}
               {/each}
             </ul>
           {/if}
@@ -1705,8 +1712,8 @@
               </button>
               {#if open}
                 <ul class="px-0.5 pb-0.5 {rowGapClass}">
-                  {#each settled as thread, threadIdx (thread.id)}
-                    {@render threadItem(thread, threadIdx, false, 0)}
+                  {#each visibleDelegationRows(settled, stacksOpen) as { thread, depth, stack, foldedCount, expandable }, threadIdx (thread.id)}
+                    {@render threadItem(thread, threadIdx, false, depth, stack, foldedCount, expandable)}
                   {/each}
                 </ul>
               {/if}
