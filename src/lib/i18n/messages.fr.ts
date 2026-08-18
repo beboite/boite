@@ -223,7 +223,7 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "experiments.whipSoundSynth": "Synthèse",
   "experiments.whipSoundMeme": "Échantillon",
   "experiments.whipSoundDesc":
-    "Choisissez-en un pour l'entendre. La synthèse est fabriquée à la volée et ne télécharge rien ; l'échantillon est un fichier de 27 Ko, récupéré la première fois que vous le demandez et jamais avant.",
+    "Choisissez-en un pour l'entendre. La synthèse est fabriquée à la volée et ne télécharge rien ; l'échantillon est six claquements dans un fichier de 34 Ko, récupéré la première fois que vous le demandez et jamais avant.",
   "titlebar.whip": "Claquer le fouet",
   "titlebar.whipDrop": "Lâcher le fouet",
 

@@ -198,7 +198,7 @@ function isSortDirection(value: unknown): value is SortDirection {
 }
 
 function isWhipSound(value: unknown): value is WhipSound {
-  return value === "synth" || value === "meme";
+  return value === "synth" || value === "sampled" || value === "meme";
 }
 
 /**

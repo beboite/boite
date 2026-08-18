@@ -11,17 +11,22 @@ import type { WhipSound } from "$lib/types";
  * variation that the five files existed for comes from jittering the sweep.
  * That is still what `synth` does and still what every session gets by default.
  *
- * `meme` is the one concession: a single 27 KB file, fetched on the first crack
- * after the setting is picked rather than at import, so a mode nobody selects
- * costs exactly what it did before it existed. The fetch failing is not worth a
- * silent whip — the burst plays instead, and the mode falls back for good.
+ * `sampled` is the one concession: six cracks in one 34 KB sprite, fetched on
+ * the first crack after the setting is picked rather than at import, so a mode
+ * nobody selects costs exactly what it did before it existed. The fetch failing
+ * is not worth a silent whip: the burst plays instead, and the mode falls back
+ * for good.
  *
  * The context is built on the first crack, never at import: a whip only exists
  * after a click, so the gesture that unlocks audio has always happened by then.
  */
 
 const DURATION = 0.19;
-const SAMPLE_URL = "/sounds/whip-meme.mp3";
+const SAMPLE_URL = "/sounds/whip-cracks.mp3";
+/** Equal slices of the sprite; the 80 ms of silence sits at the end of each. */
+const CRACKS = 6;
+/** ±3 %. The burst needs a wider jitter; six different cracks do not. */
+const SAMPLE_RATE_JITTER = 0.03;
 
 let ctx: AudioContext | null = null;
 let noise: AudioBuffer | null = null;
@@ -33,6 +38,8 @@ let sample: AudioBuffer | null = null;
 let loading: Promise<AudioBuffer | null> | null = null;
 /** A sample that could not be fetched or decoded: synth from here on. */
 let sampleBroken = false;
+/** Last sprite slice, so two cracks in a row are never the same recording. */
+let lastCrack: number | null = null;
 
 function context(): AudioContext | null {
   if (broken) return null;
@@ -95,23 +102,41 @@ function loadSample(audio: AudioContext): Promise<AudioBuffer | null> {
   return loading;
 }
 
+/** True for the sprite mode, including a settings row still stored as `meme`. */
+export function isSampledSound(sound: WhipSound): boolean {
+  return sound === "sampled" || sound === "meme";
+}
+
 /**
- * Warms the sample so the first crack is already the noise that was picked.
+ * Next slice of the sprite, never the same one twice running.
  *
- * Called by the overlay when it mounts under `meme`. Without it the first crack
+ * `roll` is 0..1 so a test can pin the pick without stubbing `Math.random`.
+ */
+export function pickCrack(last: number | null, count: number, roll: number): number {
+  if (count <= 1) return 0;
+  let i = Math.floor(roll * count);
+  if (i >= count) i = count - 1;
+  if (last !== null && i === last) i = (i + 1) % count;
+  return i;
+}
+
+/**
+ * Warms the sprite so the first crack is already the noise that was picked.
+ *
+ * Called by the overlay when the rope is thrown. Without it the first crack
  * of a session is the burst while the fetch is still in the air, which reads as
  * the setting not having taken.
  */
 export async function primeCrackSound(sound: WhipSound): Promise<void> {
-  if (sound !== "meme" || sample || sampleBroken) return;
+  if (!isSampledSound(sound) || sample || sampleBroken) return;
   const audio = context();
   if (!audio) return;
   await loadSample(audio);
 }
 
 /**
- * @param sound which noise to make; `meme` falls back to the burst until the
- *   sample is decoded, and for good if it never is.
+ * @param sound which noise to make; `sampled` falls back to the burst until
+ *   the sprite is decoded, and for good if it never is.
  * @param volume 0..1, the peak of the burst.
  */
 export function playCrack(sound: WhipSound = "synth", volume = 0.35): void {
@@ -120,9 +145,9 @@ export function playCrack(sound: WhipSound = "synth", volume = 0.35): void {
   // Suspended is the normal state after the OS or the browser parks the tab.
   if (audio.state === "suspended") void audio.resume().catch(() => {});
 
-  if (sound === "meme") {
+  if (isSampledSound(sound)) {
     if (sample) {
-      playSample(audio, sample, volume);
+      playSampled(audio, sample, volume);
       return;
     }
     // Not decoded yet: start it, and make the noise the burst can make now.
@@ -171,20 +196,23 @@ export function playCrack(sound: WhipSound = "synth", volume = 0.35): void {
 }
 
 /**
- * The sample, played whole with the same rate jitter the burst gets.
+ * One of the six cracks, never the same one twice running.
  *
- * One file rather than five, so the jitter is what keeps a flurry of cracks
- * from reading as the same 0.77s clip retriggered.
+ * The sprite is packed as equal slices with the silence between them sitting
+ * at the end of each, so a random index is the whole pick.
  */
-function playSample(audio: AudioContext, buffer: AudioBuffer, volume: number): void {
+function playSampled(audio: AudioContext, buffer: AudioBuffer, volume: number): void {
   try {
     const src = audio.createBufferSource();
     src.buffer = buffer;
-    src.playbackRate.value = 0.9 + Math.random() * 0.25;
+    src.playbackRate.value = 1 - SAMPLE_RATE_JITTER + Math.random() * SAMPLE_RATE_JITTER * 2;
+    const index = pickCrack(lastCrack, CRACKS, Math.random());
+    lastCrack = index;
+    const slice = buffer.duration / CRACKS;
     const gain = audio.createGain();
     gain.gain.value = Math.max(volume, 0.0001);
     src.connect(gain).connect(audio.destination);
-    src.start();
+    src.start(0, index * slice, slice);
     src.onended = () => {
       src.disconnect();
       gain.disconnect();
@@ -205,5 +233,6 @@ export function closeCrackAudio(): void {
   // failure flags stay: a sample that 404s does so on the next context too.
   sample = null;
   loading = null;
+  lastCrack = null;
   void audio.close().catch(() => {});
 }

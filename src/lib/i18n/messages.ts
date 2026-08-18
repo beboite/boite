@@ -221,7 +221,7 @@ export const EN_MESSAGES = {
   "experiments.whipSoundSynth": "Synth",
   "experiments.whipSoundMeme": "Sampled",
   "experiments.whipSoundDesc":
-    "Pick one to hear it. The synth is built on the spot and downloads nothing; the sample is a 27 KB file, fetched the first time you ask for it and never before.",
+    "Pick one to hear it. The synth is built on the spot and downloads nothing; the sample is six cracks in a 34 KB file, fetched the first time you ask for it and never before.",
   "titlebar.whip": "Crack the whip",
   "titlebar.whipDrop": "Drop the whip",
 

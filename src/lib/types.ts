@@ -315,11 +315,12 @@ export type SmartSortBy = "manual" | "activity" | "alphabetical";
  * What the whip cracks with.
  *
  * `synth` is the WebAudio burst `crack.ts` builds, which costs no asset and
- * varies on its own. `meme` is one sampled crack, `static/sounds/whip-meme.mp3`,
+ * varies on its own. `sampled` is six cracks in `static/sounds/whip-cracks.mp3`,
  * fetched on the first crack after it is picked and never before: a mode nobody
- * selects costs the same nothing it did before this existed.
+ * selects costs the same nothing it did before this existed. `meme` is the
+ * name a row written before the sprite still carries; it plays the same file.
  */
-export type WhipSound = "synth" | "meme";
+export type WhipSound = "synth" | "sampled" | "meme";
 
 export type SortDirection = "asc" | "desc";
 
