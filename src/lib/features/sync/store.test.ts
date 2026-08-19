@@ -13,7 +13,10 @@ vi.mock("$lib/backend", () => ({
   backend: () => active,
 }));
 
-const settingsState = { syncOnLaunch: true, syncRemoteUrl: "git@example.invalid:me/config.git" };
+const settingsState: { syncOnLaunch: boolean; syncRemoteUrl: string | null } = {
+  syncOnLaunch: true,
+  syncRemoteUrl: "git@example.invalid:me/config.git",
+};
 
 vi.mock("$lib/features/settings/store.svelte", () => ({
   settings: {
