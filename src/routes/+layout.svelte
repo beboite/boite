@@ -153,6 +153,11 @@
       });
       return true;
     }
+    if (app.view === "home") {
+      app.view = "terminal";
+      app.mobileTab = "terminal";
+      return true;
+    }
     if (app.view === "settings" || app.view === "project") {
       app.view = "terminal";
       return true;
@@ -180,6 +185,7 @@
       settingsOpen: app.view === "settings",
       editorFocus: app.view === "editor",
       projectFocus: app.view === "project",
+      homeFocus: app.view === "home",
       inputFocus:
         typeof document !== "undefined" && isEditableTarget(document.activeElement),
       hasThread: app.activeThreadId !== null,
