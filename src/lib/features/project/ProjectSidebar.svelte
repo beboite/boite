@@ -1679,14 +1679,6 @@
                       {thread.title ?? thread.label}
                     </span>
                   {/if}
-                  {#if expandable}
-                    <DelegationStack
-                      {stack}
-                      count={foldedCount}
-                      expanded={!!stacksOpen[thread.id]}
-                      onToggle={() => toggleStack(thread.id)}
-                    />
-                  {/if}
                   <!-- The logo used to live here, opposite the status dot, and
                        swapped for the close button on hover. The glyph on the
                        left carries both now, which leaves this end for the one
@@ -1712,6 +1704,27 @@
                   </button>
                 </div>
               </li>
+              {#if expandable}
+                <!-- Its own row under the parent, indented where the children
+                     themselves land, rather than a pile of faces inside the
+                     parent's card. No data-thread-row on it: the reorder
+                     measures those rects to place a drop slot, and a row that
+                     is not a thread must not take a slot. -->
+                <li
+                  class="delegation-row"
+                  class:source={isThreadSource}
+                  style:margin-left={`${(depth + 1) * 16}px`}
+                  style:transform={threadSlide.transform}
+                  style:transition={threadSlide.transition}
+                >
+                  <DelegationStack
+                    {stack}
+                    count={foldedCount}
+                    expanded={!!stacksOpen[thread.id]}
+                    onToggle={() => toggleStack(thread.id)}
+                  />
+                </li>
+              {/if}
           {/snippet}
 
           <!-- No rail down the left any more: the card's own outline is what
@@ -1987,6 +2000,12 @@
   }
   .thread-row {
     transform-origin: left center;
+  }
+  /* The dragged thread's card is hidden while the ghost carries it; its
+     delegation row belongs to that card and goes with it. */
+  .delegation-row.source {
+    opacity: 0;
+    pointer-events: none;
   }
   /* A well under the live list, not a faded copy of the same rows. The cut
      is the well's top edge, so opening grows down from the toggle instead of
