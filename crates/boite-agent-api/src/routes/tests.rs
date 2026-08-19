@@ -701,3 +701,106 @@ async fn finish_allows_when_there_is_no_worktree() {
     .unwrap();
     assert_eq!(out.0["allow"], json!(true));
 }
+
+/// The cap is per orchestrator and counts only live workers: settle one and
+/// the next spawn goes through.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_orchestrator_past_the_worker_cap_is_refused_by_name() {
+    let fake = Fake::new("spawn-cap")
+        .with_project("p1", "/w/one")
+        .with_thread("boss", "p1")
+        .with_child("w1", "p1", "boss")
+        .with_child("w2", "p1", "boss")
+        .with_child("w3", "p1", "boss");
+    fake.store.stamp_orchestrator_role("boss", None).unwrap();
+    *fake.answer_with.lock().unwrap() = Some(json!({ "threadId": "new-1" }));
+    let fake = std::sync::Arc::new(fake);
+    let ask = |shared: Shared| async move {
+        thread_spawn(
+            State(shared),
+            Extension(agent("p1", "boss")),
+            Json(SpawnIn {
+                agent: Some("claude".into()),
+                project: None,
+                prompt: None,
+            }),
+        )
+        .await
+        .unwrap()
+    };
+    let refused = ask(fake.clone() as Shared).await;
+    assert!(
+        refused.0["error"].as_str().unwrap().contains("TOO_MANY_WORKERS"),
+        "{:?}",
+        refused.0
+    );
+    fake.store
+        .update_thread_field(
+            "w3",
+            boite_core::store::ThreadCol::SettledAt,
+            boite_core::store::ColVal::Int(1),
+        )
+        .unwrap();
+    let allowed = ask(fake.clone() as Shared).await;
+    assert_eq!(allowed.0["ok"], json!(true), "{:?}", allowed.0);
+}
+
+/// The row is the proof for `/v1/say`, same as on the bus.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn say_is_the_orchestrators_alone_and_announces() {
+    let fake = std::sync::Arc::new(
+        Fake::new("say-role")
+            .with_project("p1", "/w/one")
+            .with_thread("worker", "p1")
+            .with_thread("boss", "p1"),
+    );
+    fake.store.stamp_orchestrator_role("boss", None).unwrap();
+    let body = || SayIn {
+        text: "done".into(),
+        aloud: Some("done".into()),
+        urgency: Some("answer".into()),
+    };
+    let refused = say(
+        State(fake.clone() as Shared),
+        Extension(agent("p1", "worker")),
+        Json(body()),
+    )
+    .await
+    .unwrap();
+    assert!(refused.0["error"].as_str().unwrap().contains("not one"));
+    assert!(fake.announced.lock().unwrap().is_empty());
+
+    let said = say(
+        State(fake.clone() as Shared),
+        Extension(agent("p1", "boss")),
+        Json(body()),
+    )
+    .await
+    .unwrap();
+    assert!(said.0["messageId"].as_str().is_some(), "{:?}", said.0);
+    assert!(matches!(
+        fake.announced.lock().unwrap().as_slice(),
+        [crate::Change::Orchestrator]
+    ));
+}
+
+/// A zero-timeout pulse on a quiet host answers now and honestly.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_quiet_pulse_with_no_wait_answers_now() {
+    let fake = std::sync::Arc::new(
+        Fake::new("pulse-now").with_project("p1", "/w/one").with_thread("boss", "p1"),
+    );
+    let out = pulse(
+        State(fake.clone() as Shared),
+        Extension(agent("p1", "boss")),
+        axum::extract::Query(PulseIn {
+            since_seq: Some(0),
+            timeout_ms: Some(0),
+            project: None,
+        }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(out.0["timedOut"], json!(false));
+    assert_eq!(out.0["moments"], json!([]));
+}

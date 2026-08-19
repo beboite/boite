@@ -404,7 +404,7 @@ function createThread(
   args: string[],
   labelPrefix: string,
   iconKey: IconKey,
-  opts: { fresh?: boolean; iconColor?: string | null; focus?: boolean; parentThreadId?: string | null; delegationMode?: 'normal' | 'delegation' } = {},
+  opts: { fresh?: boolean; iconColor?: string | null; focus?: boolean; parentThreadId?: string | null; delegationMode?: 'normal' | 'delegation'; deferActivation?: boolean } = {},
 ): Thread {
   const count = nextLabelSuffix(project.id, labelPrefix);
   const thread = buildThread(
@@ -424,7 +424,11 @@ function createThread(
   // row that fails to land still gives a working thread for this session, and
   // says so.
   void app.upsertThread(thread).catch((err) => recordUnsavedThread(thread, err));
-  if (opts.focus === false) {
+  if (opts.deferActivation) {
+    // Nothing mounts yet. Mounting the Terminal is what spawns the PTY, and the
+    // caller has a write that must land on the row before that spawn reads it —
+    // the orchestrator role stamp. It calls `app.requestActivation` itself.
+  } else if (opts.focus === false) {
     // Nobody clicked, so nobody moves. Mounting the Terminal is what spawns the
     // PTY, and that is the only reason the screen had to follow a launch: the
     // activation queue does it without taking the user off the thread they are
@@ -529,7 +533,7 @@ export async function launchAgent(
     iconKey: IconKey;
     iconColor?: string | null;
   },
-  opts: { focus?: boolean; parentThreadId?: string | null; delegationMode?: 'normal' | 'delegation' } = {},
+  opts: { focus?: boolean; parentThreadId?: string | null; delegationMode?: 'normal' | 'delegation'; deferActivation?: boolean } = {},
 ): Promise<Thread | null> {
   return createThread(
     project,
@@ -543,6 +547,7 @@ export async function launchAgent(
       focus: opts.focus ?? true,
       parentThreadId: opts.parentThreadId,
       delegationMode: opts.delegationMode,
+      deferActivation: opts.deferActivation,
     },
   );
 }

@@ -219,6 +219,10 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "experiments.smartSortDescending": "Décroissant",
   "experiments.smartSortDirManual": "La direction s'applique une fois un ordre choisi.",
 
+  "experiments.orchestrator": "Orchestrateur",
+  "experiments.orchestratorDesc": "Un agent au niveau du workspace, joignable depuis l'Accueil. Il observe le pouls et répond ; rien ne tourne avant votre premier message.",
+  "experiments.orchestratorAgent": "Agent",
+  "experiments.orchestratorBrokered": "Cet agent tourne sur un endpoint brokeré. Gardez les secrets hors de ce que l'orchestrateur peut lire.",
   "experiments.whip": "Fouet",
   "experiments.whipDesc":
     "Met un fouet dans la barre de titre. On le lance, on le claque, un clic le lâche. Il claque et il fait du bruit, et il n'atteint aucun terminal : rien n'est envoyé, rien n'est interrompu.",
@@ -236,6 +240,17 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "home.inbox": "Boîte de réception",
   "home.empty": "Rien n'attend.",
   "home.goToProject": "Aller au projet",
+
+  "orchestrator.title": "Orchestrateur",
+  "orchestrator.empty": "Rien pour l'instant. Dites ce que vous voulez ; l'orchestrateur démarre à votre premier message.",
+  "orchestrator.placeholder": "Dites-le à l'orchestrateur...",
+  "orchestrator.send": "Envoyer",
+  "orchestrator.you": "Vous",
+  "orchestrator.them": "Orchestrateur",
+  "orchestrator.noAgent": "Aucun agent ne correspond à « {agent} ». Choisissez-en un dans Réglages > Expériences.",
+  "orchestrator.noProject": "L'orchestrateur a besoin d'au moins un projet où vivre.",
+  "orchestrator.startFailed": "L'orchestrateur n'a pas démarré : {error}",
+  "orchestrator.postFailed": "Le message n'a pas été remis.",
 
   "welcome.pickFolder": "Choisissez un dossier pour créer votre premier projet.",
   "welcome.tapToOpen": "Appuyez sur + pour ouvrir un terminal.",

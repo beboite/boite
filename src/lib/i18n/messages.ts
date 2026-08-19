@@ -217,6 +217,10 @@ export const EN_MESSAGES = {
   "experiments.smartSortDescending": "Descending",
   "experiments.smartSortDirManual": "Direction applies once an order is picked.",
 
+  "experiments.orchestrator": "Orchestrator",
+  "experiments.orchestratorDesc": "A workspace-level agent you talk to from Home. It watches the pulse and answers; nothing runs until your first message.",
+  "experiments.orchestratorAgent": "Agent",
+  "experiments.orchestratorBrokered": "This agent runs on a brokered endpoint. Keep secrets out of what the orchestrator can read.",
   "experiments.whip": "Whip",
   "experiments.whipDesc":
     "Puts a whip in the titlebar. Throw it, flick it, click to let go. It cracks and it makes a noise, and it reaches no terminal: nothing is sent, nothing is interrupted.",
@@ -234,6 +238,17 @@ export const EN_MESSAGES = {
   "home.inbox": "Inbox",
   "home.empty": "Nothing waiting.",
   "home.goToProject": "Go to project",
+
+  "orchestrator.title": "Orchestrator",
+  "orchestrator.empty": "Nothing yet. Say what you want done; the orchestrator starts on your first message.",
+  "orchestrator.placeholder": "Tell the orchestrator...",
+  "orchestrator.send": "Send",
+  "orchestrator.you": "You",
+  "orchestrator.them": "Orchestrator",
+  "orchestrator.noAgent": "No agent matches «{agent}». Pick one in Settings > Experiments.",
+  "orchestrator.noProject": "The orchestrator needs at least one project to live in.",
+  "orchestrator.startFailed": "The orchestrator did not start: {error}",
+  "orchestrator.postFailed": "The message was not delivered.",
 
   "welcome.pickFolder": "Pick a folder to create your first project.",
   "welcome.tapToOpen": "Tap + to open a terminal.",

@@ -246,6 +246,9 @@ pub fn run() {
         .manage(commands::app::LastScreen::default())
         .manage(agent_api::DeviceAnswers::default())
         .manage(commands::records::Rows::default())
+        // One wait registry for the whole app: the window's conduct writes
+        // wake the agent endpoint's `GET /v1/pulse` long-polls.
+        .manage(commands::conduct::PulseWaiters::default())
         .setup(|app| {
             // Built here rather than declared in tauri.conf.json, for exactly
             // one reason: an initialization script can only be attached to a
@@ -494,6 +497,8 @@ pub fn run() {
             commands::conduct::conduct_orchestrator_post,
             commands::conduct::conduct_orchestrator_say,
             commands::conduct::conduct_orchestrator_messages,
+            commands::conduct::conduct_orchestrator_start,
+            commands::conduct::conduct_orchestrator_status,
             commands::window::set_keep_backdrop_active,
         ])
         .build(tauri::generate_context!())

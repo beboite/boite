@@ -573,6 +573,15 @@ export class RemoteBackend implements Backend {
         rpc("orchestrator.messages", params).then(
           (r) => (r?.messages ?? []) as OrchestratorMessage[],
         ),
+      start: (params) =>
+        rpc("orchestrator.start", params).then((r) => ({
+          threadId: (r?.threadId as string) ?? "",
+        })),
+      status: (params) =>
+        rpc("orchestrator.status", params).then((r) => ({
+          threadId: (r?.threadId as string | null) ?? null,
+          state: (r?.state as string) ?? "off",
+        })),
     };
 
     this.pairing = {
