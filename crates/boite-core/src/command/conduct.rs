@@ -157,6 +157,141 @@ pub fn say(
     Ok(json!({ "messageId": id, "seq": seq }))
 }
 
+/// The static guards every orchestrator-to-worker verb shares, answering the
+/// target's project when they all pass.
+///
+/// The row is the proof of the caller's role, the target never carries a role
+/// of its own, and the scope rule is the same both ways: a project
+/// orchestrator stays inside its project, a global one stays out of a project
+/// that has its own.
+fn conducted_target(
+    store: &Store,
+    thread_id: &str,
+    to_thread_id: &str,
+) -> Result<String, String> {
+    let (role, scope, _) = store
+        .thread_orchestration(thread_id)
+        .ok_or("unknown thread")?;
+    if role.as_deref() != Some(crate::orchestrator::ROLE) {
+        return Err(
+            "only an orchestrator thread may reach another thread this way, and this thread \
+             is not one"
+                .to_string(),
+        );
+    }
+    let (to_role, _, _) = store
+        .thread_orchestration(to_thread_id)
+        .ok_or("unknown target thread")?;
+    if to_role.is_some() {
+        return Err(
+            "NO_ORCHESTRATOR_TO_ORCHESTRATOR: the target carries a role, and a \
+             dispatch between orchestrators is refused in both directions"
+                .to_string(),
+        );
+    }
+    let target_project = store.project_of_thread(to_thread_id)?;
+    match scope.as_deref() {
+        // A global orchestrator stays out of a project another orchestrator
+        // owns.
+        None => {
+            if store.find_orchestrator(Some(&target_project)).is_some() {
+                return Err(format!(
+                    "SCOPE_TAKEN: project {target_project} has its own live \
+                     orchestrator, and dispatch into it belongs to that one"
+                ));
+            }
+        }
+        // A project orchestrator stays inside its own project.
+        Some(own) if own != target_project => {
+            return Err(format!(
+                "OUT_OF_SCOPE: this orchestrator is scoped to {own} and the \
+                 target lives in {target_project}"
+            ));
+        }
+        Some(_) => {}
+    }
+    Ok(target_project)
+}
+
+/// Queues one line for another thread's prompt. Shared with `POST /v1/dispatch`.
+///
+/// The static guards run here, at queue time; the live ones — phase, a
+/// permission on screen — are the device's at flush time
+/// (`crate::orchestrator::dispatch`), and it re-checks these too: a row can
+/// change between queue and flush.
+pub fn dispatch(
+    store: &Store,
+    waiters: Option<&Arc<Waiters>>,
+    thread_id: &str,
+    to_thread_id: &str,
+    text: &str,
+    mode: &str,
+) -> Result<Value, String> {
+    let target_project = conducted_target(store, thread_id, to_thread_id)?;
+    let (_, _, to_accepts) = store
+        .thread_orchestration(to_thread_id)
+        .ok_or("unknown target thread")?;
+    if !to_accepts {
+        return Err(
+            "MUTED: the user muted dispatch into this thread, and only the user rearms it"
+                .to_string(),
+        );
+    }
+    let now = crate::now_ms();
+    let id = store.queue_dispatch(thread_id, to_thread_id, text, mode, now)?;
+    let seq = store.append_moment(
+        "dispatch.queued",
+        Some(&target_project),
+        Some(&id),
+        mode,
+        "dispatch",
+        now,
+    )?;
+    if let Some(waiters) = waiters {
+        waiters.notify();
+    }
+    Ok(json!({ "dispatchId": id, "seq": seq }))
+}
+
+/// Puts a finished worker away on the orchestrator's word. Route-only: the
+/// dismissal is `thread.settle`'s write behind the same busy rule
+/// (`crate::settle::can_settle`), gated on the caller's role.
+pub fn dismiss(
+    store: &Store,
+    waiters: Option<&Arc<Waiters>>,
+    thread_id: &str,
+    to_thread_id: &str,
+) -> Result<Value, String> {
+    let target_project = conducted_target(store, thread_id, to_thread_id)?;
+    // The recorded status is the best either host holds here, and it is the
+    // same column the persistence task writes on every transition.
+    let status = store
+        .thread_status(to_thread_id)
+        .map(|(status, _)| status)
+        .unwrap_or_else(|| "idle".to_string());
+    if !crate::settle::can_settle(&status) {
+        return Err(crate::settle::refusal(&status));
+    }
+    let now = crate::now_ms();
+    store.update_thread_field(
+        to_thread_id,
+        crate::store::ThreadCol::SettledAt,
+        crate::store::ColVal::Int(now),
+    )?;
+    let seq = store.append_moment(
+        "thread.dismissed",
+        Some(&target_project),
+        Some(to_thread_id),
+        "",
+        "dispatch",
+        now,
+    )?;
+    if let Some(waiters) = waiters {
+        waiters.notify();
+    }
+    Ok(json!({ "threadId": to_thread_id, "seq": seq }))
+}
+
 #[derive(Debug, Clone)]
 pub enum Conduct {
     /// The workspace since a cursor, with an optional wait when it is quiet.
@@ -503,73 +638,14 @@ impl Conduct {
                 to_thread_id,
                 text,
                 mode,
-            } => {
-                let (role, scope, _) = store
-                    .thread_orchestration(&thread_id)
-                    .ok_or("unknown thread")?;
-                if role.as_deref() != Some(crate::orchestrator::ROLE) {
-                    return Err(
-                        "only an orchestrator thread may dispatch, and this thread is not one"
-                            .to_string(),
-                    );
-                }
-                // The static guards, the ones a row can answer. The live ones
-                // — phase, a permission on screen — are the device's at flush
-                // time (`crate::orchestrator::dispatch`), and it re-checks
-                // these too: a row can change between queue and flush.
-                let (to_role, _, to_accepts) = store
-                    .thread_orchestration(&to_thread_id)
-                    .ok_or("unknown target thread")?;
-                if to_role.is_some() {
-                    return Err(
-                        "NO_ORCHESTRATOR_TO_ORCHESTRATOR: the target carries a role, and a \
-                         dispatch between orchestrators is refused in both directions"
-                            .to_string(),
-                    );
-                }
-                if !to_accepts {
-                    return Err(
-                        "MUTED: the user muted dispatch into this thread, and only the user \
-                         rearms it"
-                            .to_string(),
-                    );
-                }
-                let target_project = store.project_of_thread(&to_thread_id)?;
-                match scope.as_deref() {
-                    // A global orchestrator stays out of a project another
-                    // orchestrator owns.
-                    None => {
-                        if store.find_orchestrator(Some(&target_project)).is_some() {
-                            return Err(format!(
-                                "SCOPE_TAKEN: project {target_project} has its own live \
-                                 orchestrator, and dispatch into it belongs to that one"
-                            ));
-                        }
-                    }
-                    // A project orchestrator stays inside its own project.
-                    Some(own) if own != target_project => {
-                        return Err(format!(
-                            "OUT_OF_SCOPE: this orchestrator is scoped to {own} and the \
-                             target lives in {target_project}"
-                        ));
-                    }
-                    Some(_) => {}
-                }
-                let now = crate::now_ms();
-                let id = store.queue_dispatch(&thread_id, &to_thread_id, &text, &mode, now)?;
-                let seq = store.append_moment(
-                    "dispatch.queued",
-                    Some(&target_project),
-                    Some(&id),
-                    &mode,
-                    "dispatch",
-                    now,
-                )?;
-                if let Some(waiters) = waiters {
-                    waiters.notify();
-                }
-                json!({ "dispatchId": id, "seq": seq })
-            }
+            } => dispatch(
+                store,
+                waiters.as_ref(),
+                &thread_id,
+                &to_thread_id,
+                &text,
+                &mode,
+            )?,
             Conduct::AcceptDispatch { thread_id, accept } => {
                 store
                     .thread_orchestration(&thread_id)
