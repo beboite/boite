@@ -237,6 +237,57 @@ pub fn find(id: &str) -> Option<&'static Synced> {
     SOURCES.iter().find(|entry| entry.id == id)
 }
 
+/// What a source is called inside the repository.
+///
+/// The id first, then the home-relative path as it stands: `claude/.claude/settings.json`,
+/// `agents/.agents/AGENTS.md`. The two halves repeat a little, and both earn
+/// their place. The id says which switch owns the file, which is what a pull
+/// needs in order to leave a disabled source alone without a lookup table. The
+/// rest is where the file actually goes, which is what a human reading the
+/// repository — or resolving a conflict in it — needs to see.
+pub fn repo_path(id: &str, home_relative: &str) -> String {
+    format!("{id}/{home_relative}")
+}
+
+/// What a repository path names on this machine, if it names anything this
+/// build declares.
+///
+/// Nothing here is trusted: a path in the repository was written by another
+/// machine and it decides where bytes land in this home. An unknown id, a
+/// source no longer declared, a shape that is not home-relative, or a name on
+/// the always-denied list all answer `None`, and the caller reports the path
+/// rather than writing it.
+#[derive(Debug, Clone)]
+pub struct Named {
+    /// Which switch owns the file.
+    pub id: &'static str,
+    /// The source it belongs to, for its rules and its kind.
+    pub source: &'static Source,
+    /// Where it goes, relative to the home directory. For a file source this is
+    /// the source's own path; for a tree it is a path inside it.
+    pub home_relative: String,
+}
+
+pub fn from_repo_path(path: &str) -> Option<Named> {
+    let (id, rest) = path.split_once('/')?;
+    let entry = find(id)?;
+    if !is_home_relative(rest) {
+        return None;
+    }
+    if rest.split('/').any(denied_always) {
+        return None;
+    }
+    let source = entry.sources.iter().find(|source| match source.kind {
+        Kind::File { .. } => source.path == rest,
+        Kind::Tree { deny, .. } => {
+            rest.starts_with(source.path)
+                && rest.as_bytes().get(source.path.len()) == Some(&b'/')
+                && !rest.split('/').any(|segment| deny.contains(&segment))
+        }
+    })?;
+    Some(Named { id: entry.id, source, home_relative: rest.to_string() })
+}
+
 /// Why a path was not turned into somewhere on this machine.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Refusal {
@@ -419,6 +470,57 @@ mod tests {
         }
         for name in ["AGENTS.md", "settings.json", "skill.md"] {
             assert!(!denied_always(name), "{name} was denied");
+        }
+    }
+
+    /// A name goes out and comes back meaning the same thing, or a pull writes
+    /// somewhere nobody asked for.
+    ///
+    /// File sources only. A tree's own path is a directory, and a directory is
+    /// not something the repository ever holds — only the files inside it are,
+    /// which the test below covers.
+    #[test]
+    fn a_repository_path_round_trips() {
+        for entry in SOURCES {
+            for source in entry.sources {
+                let Kind::File { .. } = source.kind else { continue };
+                let named = from_repo_path(&repo_path(entry.id, source.path))
+                    .unwrap_or_else(|| panic!("{} did not come back", source.path));
+                assert_eq!(named.id, entry.id);
+                assert_eq!(named.home_relative, source.path);
+            }
+        }
+        assert!(from_repo_path("agents/.agents").is_none(), "a tree root is not a file");
+    }
+
+    /// A file inside the tree resolves to the tree's source and keeps its own
+    /// path, which is where it actually goes.
+    #[test]
+    fn a_file_inside_the_tree_is_named_by_its_own_path() {
+        let named = from_repo_path("agents/.agents/skills/caveman/SKILL.md").expect("named");
+        assert_eq!(named.id, AGENTS_ID);
+        assert_eq!(named.home_relative, ".agents/skills/caveman/SKILL.md");
+    }
+
+    /// Every one of these was written by another machine and decides where bytes
+    /// land in this home. None of them may resolve.
+    #[test]
+    fn a_hostile_repository_path_names_nothing() {
+        for path in [
+            "agents/../../.ssh/authorized_keys",
+            "agents/.agents/../.claude/settings.json",
+            "claude/.claude.json",
+            "claude/.claude/.credentials.json",
+            "claude/.claude/settings.json/../../../etc/passwd",
+            "agents/.agents/.skill-lock.json",
+            "unknown-agent/.whatever/config.json",
+            "agents/C:/Windows/System32/x",
+            "codex/.codex/config.toml",
+            "agents",
+            "/etc/passwd",
+            "",
+        ] {
+            assert!(from_repo_path(path).is_none(), "{path} resolved");
         }
     }
 
