@@ -1,15 +1,22 @@
 <!--
-  One agent CLI: what this machine has, and the two buttons that change it.
+  One agent CLI: what this machine has, and the buttons that change it.
 
-  Three rows in one, because a row that looked different per source would be
-  three components disagreeing about the same three questions. What the source
-  decides is who does the work: Boite downloads a binary, a package manager runs
-  in a terminal underneath the row, and an agent that publishes neither keeps its
-  documentation link.
+  Three rows in one, because a row that looked different per source would be three
+  components disagreeing about the same three questions. What the source decides is
+  who does the work: Boite downloads a binary, a package manager runs in a terminal
+  underneath the row, and an agent that publishes neither keeps its documentation
+  link.
+
+  Every way this can fail has somewhere to be said. A download that stopped says why
+  in the row, a package manager that exited non-zero says so above its own log, and a
+  manager that is not on the machine disables the button *and* names the tool with a
+  link to it — from one rule (`rules.ts`), so the sentence and the button can never
+  disagree.
 -->
 <script lang="ts">
   import Download from "@lucide/svelte/icons/download";
   import ExternalLink from "@lucide/svelte/icons/external-link";
+  import RotateCw from "@lucide/svelte/icons/rotate-cw";
   import Square from "@lucide/svelte/icons/square";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
@@ -17,6 +24,7 @@
   import type { CliRow } from "$lib/backend";
   import { CLI_PRESETS } from "$lib/features/settings/cliPresets";
   import { cliManager, settled } from "./store.svelte";
+  import { blocker, removable } from "./rules";
   import CliUninstallDialog from "./CliUninstallDialog.svelte";
 
   let { row }: { row: CliRow } = $props();
@@ -31,6 +39,7 @@
   const installer = $derived(cliManager.installerFor(row));
   const terminalBusy = $derived(installer?.busy === true);
   const busy = $derived(running || terminalBusy);
+  const blocked = $derived(blocker(row));
 
   let asking = $state(false);
 
@@ -87,15 +96,49 @@
         : "text-muted-foreground",
   );
 
-  /** Whether the primary button can do anything, and if not, what to say instead. */
-  const blocked = $derived.by(() => {
-    if (row.source === "manual") return t("cli.manualOnly");
-    if (!row.installable) return t("cli.noBuild");
-    if (row.source === "managed" && row.requiresPresent === false) {
-      return t("cli.needs", { tool: row.requires ?? "" });
+  /** The command line the package manager was asked to run, for its verdict. */
+  function commandLine(action: "install" | "update" | "uninstall" | null): string {
+    const argv =
+      action === "uninstall"
+        ? row.uninstallCommand
+        : action === "update"
+          ? row.updateCommand
+          : row.installCommand;
+    return (argv ?? []).join(" ");
+  }
+
+  /**
+   * What came of the terminal run, in words.
+   *
+   * Without it the only account of a failed `gh extension install` was its own log,
+   * which is where a reader looks *after* being told there is something to look for.
+   */
+  const terminalVerdict = $derived.by(() => {
+    if (!installer) return null;
+    const cmd = commandLine(installer.action);
+    switch (installer.status) {
+      case "running":
+        return t("cli.terminalRunning", { cmd });
+      case "done":
+        return t("cli.done");
+      case "cancelled":
+        return t("cli.cancelled");
+      case "failed":
+        return installer.failure
+          ? t("cli.terminalFailedToStart", { cmd, error: installer.failure })
+          : t("cli.terminalFailedWithCode", { cmd, code: String(installer.exitCode ?? "") });
+      case "idle":
+        return null;
     }
-    return null;
   });
+
+  const terminalClass = $derived(
+    installer?.status === "failed"
+      ? "text-[var(--color-danger)]"
+      : installer?.status === "done"
+        ? "text-[var(--color-success)]"
+        : "text-muted-foreground",
+  );
 
   function primary(): void {
     if (row.source === "managed") {
@@ -177,12 +220,15 @@
           class="flex items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-3)] px-2.5 py-1 text-xs text-foreground transition hover:border-foreground/30 disabled:cursor-not-allowed disabled:opacity-40"
           onclick={primary}
           disabled={busy || blocked !== null}
+          title={row.source === "managed"
+            ? commandLine(row.installed ? "update" : "install")
+            : undefined}
         >
           <Download class="size-3" />
           {row.installed ? t("cli.update") : t("cli.install")}
         </button>
       {/if}
-      {#if row.installed && row.source !== "manual"}
+      {#if removable(row)}
         <button
           type="button"
           class="flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground transition hover:border-[var(--color-danger)] hover:text-[var(--color-danger)] disabled:cursor-not-allowed disabled:opacity-40"
@@ -216,7 +262,20 @@
   </div>
 
   {#if blocked}
-    <p class="text-xs leading-snug text-muted-foreground/70">{blocked}</p>
+    <p class="flex flex-wrap items-baseline gap-2 text-xs leading-snug text-muted-foreground/70">
+      <span>{t(blocked.key, { tool: blocked.tool ?? "" })}</span>
+      {#if blocked.url}
+        <a
+          href={blocked.url}
+          target="_blank"
+          rel="noreferrer"
+          class="inline-flex items-center gap-1 text-[var(--color-warning)] underline decoration-dotted transition hover:text-foreground"
+        >
+          <ExternalLink class="size-3" />
+          {t("cli.getTool", { tool: blocked.tool ?? "" })}
+        </a>
+      {/if}
+    </p>
   {:else if row.source === "managed"}
     <p class="text-xs leading-snug text-muted-foreground/70">
       {t("cli.runsInTerminal", { tool: row.requires ?? "" })}
@@ -227,13 +286,25 @@
     <div class="flex items-center justify-between gap-2">
       <span class="text-xs leading-snug {phaseClass}">{phaseText}</span>
       {#if settled(job)}
-        <button
-          type="button"
-          class="shrink-0 text-xs text-muted-foreground/70 transition hover:text-foreground"
-          onclick={() => cliManager.dismiss(row.id)}
-        >
-          {t("cli.dismiss")}
-        </button>
+        <div class="flex shrink-0 items-center gap-2">
+          {#if job.phase !== "done" && job.kind === "install"}
+            <button
+              type="button"
+              class="flex items-center gap-1 text-xs text-muted-foreground/70 transition hover:text-foreground"
+              onclick={() => cliManager.retry(row.id)}
+            >
+              <RotateCw class="size-3" />
+              {t("cli.retry")}
+            </button>
+          {/if}
+          <button
+            type="button"
+            class="text-xs text-muted-foreground/70 transition hover:text-foreground"
+            onclick={() => cliManager.dismiss(row.id)}
+          >
+            {t("cli.dismiss")}
+          </button>
+        </div>
       {/if}
     </div>
     {#if job.phase === "downloading"}
@@ -259,6 +330,35 @@
     {/if}
   {/if}
 
+  {#if installer && terminalVerdict}
+    <div class="flex items-center justify-between gap-2">
+      <span class="text-xs leading-snug {terminalClass}">{terminalVerdict}</span>
+      {#if !installer.busy}
+        <div class="flex shrink-0 items-center gap-2">
+          {#if installer.status === "failed" || installer.status === "cancelled"}
+            <button
+              type="button"
+              class="flex items-center gap-1 text-xs text-muted-foreground/70 transition hover:text-foreground"
+              onclick={() => installer?.retry()}
+            >
+              <RotateCw class="size-3" />
+              {t("cli.retry")}
+            </button>
+          {/if}
+          {#if installer.hasOutput}
+            <button
+              type="button"
+              class="text-xs text-muted-foreground/70 transition hover:text-foreground"
+              onclick={() => installer?.dismiss()}
+            >
+              {t("cli.dismiss")}
+            </button>
+          {/if}
+        </div>
+      {/if}
+    </div>
+  {/if}
+
   {#if installer && (installer.busy || installer.lines.length > 0)}
     <div
       class="max-h-40 overflow-y-auto rounded-md border border-border bg-[var(--color-titlebar)] p-2 font-mono text-xs leading-snug"
@@ -271,10 +371,5 @@
 </div>
 
 {#if asking}
-  <CliUninstallDialog
-    {row}
-    {label}
-    onClose={() => (asking = false)}
-    onConfirm={confirmRemoval}
-  />
+  <CliUninstallDialog {row} {label} onClose={() => (asking = false)} onConfirm={confirmRemoval} />
 {/if}

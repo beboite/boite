@@ -15,6 +15,16 @@ import { makeInstaller, type PluginInstaller } from "$lib/features/plugin/instal
  */
 const POLL_MS = 500;
 
+/**
+ * How many polls in a row may fail before the running jobs are called off.
+ *
+ * A boite that stopped answering leaves a row saying "downloading" with nothing
+ * behind it, and it says so for as long as the panel is open. Three misses is
+ * about a second and a half, which is longer than a reload of the socket and
+ * shorter than anybody's patience.
+ */
+const POLL_MISSES_ALLOWED = 3;
+
 /** Whether nothing more will happen to this job. Mirrors `jobs::Phase::settled`. */
 export function settled(job: CliJob | null | undefined): boolean {
   return job === null || job === undefined
@@ -47,6 +57,7 @@ class CliManager {
   #answeredBy: Backend | null = null;
   #timer: ReturnType<typeof setTimeout> | null = null;
   #installers = new Map<string, PluginInstaller>();
+  #misses = 0;
 
   /** Whether any job is still running, which is what disables the row's buttons. */
   get busy(): boolean {
@@ -123,9 +134,35 @@ class CliManager {
     try {
       await backend().cli.cancel(id);
     } catch (err) {
+      // The job runs on the other machine, so a refusal here means it is still
+      // running: calling it failed would be this panel inventing an outcome. The
+      // card says the ask did not land, and the poll keeps reporting the truth.
+      this.error = String(err);
       logger.warn("cli", "the job would not stop", { id, error: String(err) });
+      return;
     }
     await this.#pollOnce();
+  }
+
+  /**
+   * Forgets a failed install and starts it again.
+   *
+   * Both halves, in that order: a settled job still holds the slot Rust checks
+   * before starting another, so retrying without dismissing is refused as
+   * "already running" by the job that just failed.
+   *
+   * Installs only. A removal that failed is not retried behind the user's back:
+   * what it was asked to do included an answer about their data, and repeating it
+   * from a button labelled "try again" would repeat a decision rather than an
+   * action. The row offers Dismiss, and Uninstall asks again.
+   */
+  async retry(id: string): Promise<void> {
+    if (this.jobFor(id)?.kind === "uninstall") {
+      await this.dismiss(id);
+      return;
+    }
+    await this.dismiss(id);
+    await this.install(id);
   }
 
   async dismiss(id: string): Promise<void> {
@@ -184,17 +221,20 @@ class CliManager {
    */
   #failLocally(id: string, kind: CliJob["kind"], err: unknown): void {
     const now = Date.now();
+    const previous = this.jobs[id] ?? null;
     this.jobs = {
       ...this.jobs,
       [id]: {
         id,
         kind,
         phase: "failed",
-        received: 0,
-        total: null,
-        version: null,
+        // What it had got to is kept: "it stopped at 40 MB of 60" and "it stopped"
+        // are different things to read.
+        received: previous?.received ?? 0,
+        total: previous?.total ?? null,
+        version: previous?.version ?? null,
         message: String(err),
-        startedAt: now,
+        startedAt: previous?.startedAt ?? now,
         updatedAt: now,
       },
     };
@@ -216,8 +256,19 @@ class CliManager {
     let jobs: CliJob[];
     try {
       jobs = await from.cli.jobs();
+      this.#misses = 0;
     } catch (err) {
       logger.warn("cli", "a job could not be read back", { error: String(err) });
+      this.#misses += 1;
+      if (this.#misses >= POLL_MISSES_ALLOWED && this.#answeredBy === from) {
+        // Nothing here can tell a boite that went away from one that is merely
+        // slow, and a row that stays "downloading" for good is the worse of the
+        // two answers. What the machine is doing is unchanged; what is being
+        // reported is that this panel no longer knows.
+        for (const job of Object.values(this.jobs)) {
+          if (!settled(job)) this.#failLocally(job.id, job.kind, err);
+        }
+      }
       return;
     }
     if (this.#answeredBy !== from) return;

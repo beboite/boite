@@ -82,10 +82,11 @@ pub struct Status {
     /// `download`, `managed` or `manual`, which is what the row's buttons follow.
     pub source: &'static str,
     pub installable: bool,
-    /// For a `managed` source: the command that has to be there first, and
-    /// whether it is.
+    /// For a `managed` source: the command that has to be there first, whether it
+    /// is, and where to get it when it is not.
     pub requires: Option<&'static str>,
     pub requires_present: Option<bool>,
+    pub requires_url: Option<&'static str>,
     /// The three command lines a `managed` source runs in a terminal, argv-style,
     /// so the webview holds no package names of its own.
     pub install_command: Option<Vec<&'static str>>,
@@ -116,22 +117,30 @@ pub fn status_blocking(probe_versions: bool) -> Vec<Status> {
                 Presence::Exe => true,
                 Presence::Listed { argv, needle } => listed(argv, needle),
             };
-        let (requires, requires_present, install_command, update_command, uninstall_command) =
-            match &cli.source {
-                Source::Managed {
-                    requires,
-                    install,
-                    update,
-                    uninstall,
-                } => (
-                    Some(*requires),
-                    Some(crate::shell::command_exists(requires)),
-                    Some(install.to_vec()),
-                    Some(update.to_vec()),
-                    Some(uninstall.to_vec()),
-                ),
-                Source::Download(_) | Source::Manual => (None, None, None, None, None),
-            };
+        let (
+            requires,
+            requires_present,
+            requires_url,
+            install_command,
+            update_command,
+            uninstall_command,
+        ) = match &cli.source {
+            Source::Managed {
+                requires,
+                requires_url,
+                install,
+                update,
+                uninstall,
+            } => (
+                Some(*requires),
+                Some(crate::shell::command_exists(requires)),
+                Some(*requires_url),
+                Some(install.to_vec()),
+                Some(update.to_vec()),
+                Some(uninstall.to_vec()),
+            ),
+            Source::Download(_) | Source::Manual => (None, None, None, None, None, None),
+        };
         if probe_versions && installed {
             if let Some(arg) = cli.version_arg {
                 let exe = cli.exe.to_string();
@@ -155,6 +164,7 @@ pub fn status_blocking(probe_versions: bool) -> Vec<Status> {
             installable: cli.installable(),
             requires,
             requires_present,
+            requires_url,
             install_command,
             update_command,
             uninstall_command,
@@ -200,11 +210,36 @@ fn listed(argv: &[&str], needle: &str) -> bool {
     out.status.success() && String::from_utf8_lossy(&out.stdout).contains(needle)
 }
 
+/// The version inside whatever a `--version` printed.
+///
+/// The first token that looks like one, not the last token on the line: they are
+/// the same thing for `codex-cli 0.148.0` and different for
+/// `2.1.235 (Claude Code)`, which is what claude prints and which read as the
+/// version "Code)" for as long as this took the last one.
+fn parse_version(text: &str) -> Option<String> {
+    let line = text.lines().find(|line| !line.trim().is_empty())?;
+    let looks_like_one = |token: &str| {
+        let token = token.trim_start_matches('v');
+        let mut parts = token.split('.');
+        parts.next().is_some_and(|first| {
+            !first.is_empty() && first.chars().all(|c| c.is_ascii_digit())
+        }) && token.contains('.')
+    };
+    let found = line
+        .split_whitespace()
+        .map(|token| token.trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '.' && c != '-'))
+        .find(|token| looks_like_one(token))
+        // A tool that prints something else entirely still gets to answer with the
+        // last word rather than with nothing, which is what the plugins panel has
+        // always done.
+        .or_else(|| line.split_whitespace().last())?;
+    let found = found.trim_start_matches('v').trim();
+    (!found.is_empty()).then(|| found.to_string())
+}
+
 /// What `<exe> <arg>` says, or `None` when it says nothing usable.
 ///
-/// The last whitespace-separated token, which is the convention every one of
-/// these follows (`claude 2.1.227`, `codex-cli 0.148.0`). Absence is an answer
-/// rather than an error: the panel draws a row either way.
+/// Absence is an answer rather than an error: the panel draws a row either way.
 fn probe_version(exe: &str, arg: &str) -> Option<String> {
     use std::process::{Command, Stdio};
 
@@ -219,17 +254,7 @@ fn probe_version(exe: &str, arg: &str) -> Option<String> {
     if !out.status.success() {
         return None;
     }
-    let text = String::from_utf8_lossy(&out.stdout);
-    let version = text
-        .lines()
-        .next()
-        .unwrap_or_default()
-        .split_whitespace()
-        .last()
-        .unwrap_or_default()
-        .trim()
-        .to_string();
-    (!version.is_empty()).then_some(version)
+    parse_version(&String::from_utf8_lossy(&out.stdout))
 }
 
 /// The data directories of one CLI with their sizes, for the uninstall dialogue.
@@ -256,6 +281,14 @@ pub fn start_install(id: &str) -> Result<Snapshot, Failed> {
             "{id} has no build for this platform, so there is nothing to download"
         ))
     })?;
+    // Asked before the download rather than after it: with no home directory there
+    // is nowhere to install, and finding that out is not worth three hundred
+    // megabytes.
+    if install::bin_dir().is_none() {
+        return Err(Failed(
+            "no home directory on this machine, so there is nowhere to install into".to_string(),
+        ));
+    }
 
     let cancel = jobs::start(id, Kind::Install)?;
     let owned = id.to_string();
@@ -590,6 +623,31 @@ mod tests {
             artifact_name("https://example.test/2.1.227/linux-x64/claude", claude),
             "claude"
         );
+    }
+
+    /// Every shape these ten actually print, and the one that broke it.
+    #[test]
+    fn the_version_is_the_number_and_not_the_last_word() {
+        // What claude prints. Reading the last token answered "Code)".
+        assert_eq!(parse_version("2.1.235 (Claude Code)").unwrap(), "2.1.235");
+        assert_eq!(parse_version("1.18.18
+").unwrap(), "1.18.18");
+        assert_eq!(parse_version("codex-cli 0.148.0").unwrap(), "0.148.0");
+        assert_eq!(parse_version("grok v1.0.5").unwrap(), "1.0.5");
+        assert_eq!(
+            parse_version("cursor-agent 2026.08.11-e8db854").unwrap(),
+            "2026.08.11-e8db854"
+        );
+        assert_eq!(parse_version("
+
+  1.2.3  
+").unwrap(), "1.2.3");
+        // Nothing that looks like a version: the last word beats no answer, which
+        // is what the plugins panel has always done.
+        assert_eq!(parse_version("version unknown").unwrap(), "unknown");
+        assert_eq!(parse_version("   
+"), None);
+        assert_eq!(parse_version(""), None);
     }
 
     /// The asset a platform takes is matched whole. A release listing four tools

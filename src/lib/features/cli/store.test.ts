@@ -43,6 +43,7 @@ const row = (over: Partial<CliRow> = {}): CliRow => ({
   installable: true,
   requires: null,
   requiresPresent: null,
+  requiresUrl: null,
   installCommand: null,
   updateCommand: null,
   uninstallCommand: null,
@@ -142,6 +143,74 @@ describe("a call that never reached the machine", () => {
     await cliManager.dismiss("claude");
     expect(cliManager.jobFor("claude")).toBeNull();
     expect(cli.dismiss).toHaveBeenCalledWith("claude");
+  });
+});
+
+describe("a machine that stopped answering", () => {
+  it("calls the running job off rather than reporting it forever", async () => {
+    cli.install.mockResolvedValue(job({ phase: "downloading", received: 40, total: 100 }));
+    await cliManager.refresh(true);
+    await cliManager.install("claude");
+
+    cli.jobs.mockRejectedValue("the socket closed");
+    // Two misses are tolerated; the third is when this panel admits it no longer
+    // knows what the machine is doing.
+    await tick();
+    await tick();
+    expect(cliManager.busy, "gave up on the first miss").toBe(true);
+    await tick();
+
+    const called = cliManager.jobFor("claude");
+    expect(called?.phase).toBe("failed");
+    expect(called?.message).toContain("socket");
+    // How far it had got is kept: "stopped at 40 of 100" and "stopped" are
+    // different things to read.
+    expect(called?.received).toBe(40);
+    expect(called?.total).toBe(100);
+  });
+
+  it("does not call a cancel that never landed a finished job", async () => {
+    cli.install.mockResolvedValue(job({ phase: "downloading" }));
+    await cliManager.refresh(true);
+    await cliManager.install("claude");
+
+    cli.cancel.mockRejectedValue("no route to the boite");
+    await cliManager.cancel("claude");
+
+    // The job is on the other machine and is still running there. Saying it
+    // stopped would be this panel inventing an outcome.
+    expect(cliManager.jobFor("claude")?.phase).toBe("downloading");
+    expect(cliManager.error).toContain("no route");
+  });
+});
+
+describe("trying again", () => {
+  it("forgets the failed install first, because a settled job still holds the slot", async () => {
+    await cliManager.refresh(true);
+    cli.install.mockRejectedValueOnce("nothing published");
+    await cliManager.install("claude");
+    expect(cliManager.jobFor("claude")?.phase).toBe("failed");
+
+    cli.dismiss.mockResolvedValue(undefined);
+    cli.install.mockResolvedValue(job({ phase: "resolving" }));
+    await cliManager.retry("claude");
+
+    expect(cli.dismiss).toHaveBeenCalledWith("claude");
+    expect(cliManager.jobFor("claude")?.phase).toBe("resolving");
+  });
+
+  it("does not repeat a removal, which carried an answer about the user's data", async () => {
+    await cliManager.refresh(true);
+    cli.uninstall.mockRejectedValueOnce("cannot remove it");
+    await cliManager.uninstall("claude", true);
+    expect(cliManager.jobFor("claude")?.kind).toBe("uninstall");
+
+    cli.dismiss.mockResolvedValue(undefined);
+    await cliManager.retry("claude");
+
+    expect(cli.uninstall).toHaveBeenCalledTimes(1);
+    expect(cli.install).not.toHaveBeenCalled();
+    expect(cliManager.jobFor("claude")).toBeNull();
   });
 });
 

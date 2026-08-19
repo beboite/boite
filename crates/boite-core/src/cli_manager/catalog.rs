@@ -117,9 +117,12 @@ pub enum Source {
     Download(Download),
     /// A package manager the user already has does the work, in a PTY, because
     /// these tools ship no standalone binary. `requires` is the command that has
-    /// to be there first, which the panel probes before offering the button.
+    /// to be there first, which the panel probes before offering the button, and
+    /// `requires_url` is where the user goes to get it — a row that says "needs
+    /// gh" and stops there leaves them to search for it themselves.
     Managed {
         requires: &'static str,
+        requires_url: &'static str,
         install: &'static [&'static str],
         update: &'static [&'static str],
         uninstall: &'static [&'static str],
@@ -336,6 +339,7 @@ pub const CLIS: &[Cli] = &[
         },
         source: Source::Managed {
             requires: "gh",
+            requires_url: "https://cli.github.com",
             install: &["gh", "extension", "install", "github/gh-copilot"],
             update: &["gh", "extension", "upgrade", "gh-copilot"],
             uninstall: &["gh", "extension", "remove", "gh-copilot"],
@@ -496,11 +500,19 @@ mod tests {
             match &cli.source {
                 Source::Managed {
                     requires,
+                    requires_url,
                     install,
                     update,
                     uninstall,
                 } => {
                     assert!(!requires.is_empty(), "{} requires nothing", cli.id);
+                    // Where to get it, or the row is a dead end that names a tool
+                    // and leaves the user to find it.
+                    assert!(
+                        requires_url.starts_with("https://"),
+                        "{} points nowhere for {requires}",
+                        cli.id
+                    );
                     for line in [install, update, uninstall] {
                         assert!(line.len() >= 2, "{} has a one-word command line", cli.id);
                     }

@@ -639,6 +639,8 @@ export interface CliRow {
   installable: boolean;
   requires: string | null;
   requiresPresent: boolean | null;
+  /** Where to get the missing tool, so a blocked row is not a dead end. */
+  requiresUrl: string | null;
   installCommand: string[] | null;
   updateCommand: string[] | null;
   uninstallCommand: string[] | null;
