@@ -1133,6 +1133,32 @@ export interface ConductApi {
    */
   start(params: { threadId: string; scope?: string | null }): Promise<{ threadId: string }>;
   status(params: { scope?: string | null }): Promise<{ threadId: string | null; state: string }>;
+  /**
+   * The user's mute switch. Local grant on the bus: an agent never rearms a
+   * thread the user cut. Muting also drops the thread's queued lines.
+   */
+  acceptDispatch(params: {
+    threadId: string;
+    accept: boolean;
+  }): Promise<{ threadId: string; accept: boolean; dropped: number }>;
+  /** The device half: sweep expired lines, answer with what is still open. */
+  drainDispatches(params: { ttlMs?: number }): Promise<DispatchLine[]>;
+  /** Report one line's fate. First writer wins; `settled: false` means lost the race. */
+  settleDispatch(params: {
+    dispatchId: string;
+    state: string;
+    reason?: string;
+  }): Promise<{ settled: boolean }>;
+}
+
+/** One queued dispatch, as `dispatch.drain` answers it. */
+export interface DispatchLine {
+  id: string;
+  fromThreadId: string;
+  toThreadId: string;
+  text: string;
+  mode: string;
+  createdAt: number;
 }
 
 export interface Backend {

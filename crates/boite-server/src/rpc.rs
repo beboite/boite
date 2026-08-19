@@ -731,7 +731,11 @@ pub async fn dispatch(state: &AppState, request: Authorized) -> Result<Value, St
             // event is what a chat pane refreshes on. Fanned out here because
             // the bus itself owns no event channel. Every conduct write that
             // appended one answers with its seq: record, post, say, start.
-            if m.starts_with("conduct.") || m.starts_with("orchestrator.") {
+            if m.starts_with("conduct.")
+                || m.starts_with("orchestrator.")
+                || m.starts_with("dispatch.")
+                || m.starts_with("thread.dispatch")
+            {
                 if let Some(seq) = answer.get("seq").and_then(|v| v.as_i64()) {
                     if m != "conduct.pulse" {
                         let _ = state.events.send(AppEvent::MomentAppended { seq });
@@ -739,6 +743,18 @@ pub async fn dispatch(state: &AppState, request: Authorized) -> Result<Value, St
                 }
                 if m == "orchestrator.start" {
                     let _ = state.events.send(AppEvent::OrchestratorChanged);
+                }
+                // The one device that owns the target PTY flushes on this.
+                if m == "thread.dispatch" {
+                    if let (Some(to), Some(id)) = (
+                        params.get("toThreadId").and_then(|v| v.as_str()),
+                        answer.get("dispatchId").and_then(|v| v.as_str()),
+                    ) {
+                        let _ = state.events.send(AppEvent::DispatchQueued {
+                            thread_id: to.to_string(),
+                            dispatch_id: id.to_string(),
+                        });
+                    }
                 }
             }
             Ok(wire.wrap(answer))

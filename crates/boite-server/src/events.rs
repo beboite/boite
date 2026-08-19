@@ -55,6 +55,16 @@ pub enum AppEvent {
     /// The orchestrator conversation moved — a reply through `/v1/say`, or a
     /// role stamped by `orchestrator.start`. Chats re-read by cursor.
     OrchestratorChanged,
+    /// A line was queued for a thread's prompt. The device that owns the
+    /// target PTY drains and types; everyone else ignores it.
+    DispatchQueued {
+        thread_id: String,
+        dispatch_id: String,
+    },
+    /// An orchestrator put a finished worker away. Thread lists re-read.
+    ThreadDismissed {
+        thread_id: String,
+    },
     /// One device is out, as of now.
     ///
     /// Broadcast rather than left to the next call, and this is the half that
@@ -108,6 +118,17 @@ impl AppEvent {
             AppEvent::OrchestratorChanged => {
                 Event::new("orchestrator.changed", serde_json::json!({}))
             }
+            AppEvent::DispatchQueued {
+                thread_id,
+                dispatch_id,
+            } => Event::new(
+                "dispatch.queued",
+                serde_json::json!({ "threadId": thread_id, "dispatchId": dispatch_id }),
+            ),
+            AppEvent::ThreadDismissed { thread_id } => Event::new(
+                "thread.dismissed",
+                serde_json::json!({ "threadId": thread_id }),
+            ),
             // Named on the wire so every *other* device can refresh its list.
             // The one being revoked never reads it: its socket is closed by the
             // task that received it.

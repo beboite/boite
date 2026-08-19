@@ -800,6 +800,132 @@ impl Store {
         Ok(())
     }
 
+    /// Queues one dispatched line. A row, never a byte: the device that owns
+    /// the target PTY is the only thing that will ever type it.
+    pub fn queue_dispatch(
+        &self,
+        from_thread_id: &str,
+        to_thread_id: &str,
+        text: &str,
+        mode: &str,
+        at: i64,
+    ) -> Result<String, String> {
+        let conn = self.conn.lock();
+        let id = uuid::Uuid::new_v4().simple().to_string();
+        conn.execute(
+            "INSERT INTO dispatches (id, from_thread_id, to_thread_id, text, mode, state, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, 'queued', ?6)",
+            rusqlite::params![id, from_thread_id, to_thread_id, text, mode, at],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(id)
+    }
+
+    /// Every line still queued, oldest first. The device filters to the
+    /// threads whose PTY it actually owns; the store does not know that.
+    pub fn open_dispatches(&self) -> Result<Vec<serde_json::Value>, String> {
+        let conn = self.conn.lock();
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, from_thread_id, to_thread_id, text, mode, created_at
+                 FROM dispatches WHERE state = 'queued' ORDER BY created_at ASC, id ASC",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(serde_json::json!({
+                    "id": r.get::<_, String>(0)?,
+                    "fromThreadId": r.get::<_, String>(1)?,
+                    "toThreadId": r.get::<_, String>(2)?,
+                    "text": r.get::<_, String>(3)?,
+                    "mode": r.get::<_, String>(4)?,
+                    "createdAt": r.get::<_, i64>(5)?,
+                }))
+            })
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    }
+
+    /// Settles one queued dispatch, and answers who it involved so the caller
+    /// can emit the moment. `None` when the row was not there or already
+    /// settled: a settle races the TTL sweep, and the second writer must not
+    /// overwrite the first one's reason.
+    pub fn settle_dispatch(
+        &self,
+        id: &str,
+        state: &str,
+        reason: Option<&str>,
+        at: i64,
+    ) -> Result<Option<(String, String)>, String> {
+        let conn = self.conn.lock();
+        let changed = conn
+            .execute(
+                "UPDATE dispatches SET state = ?2, reason = ?3, settled_at = ?4
+                 WHERE id = ?1 AND state = 'queued'",
+                rusqlite::params![id, state, reason, at],
+            )
+            .map_err(|e| e.to_string())?;
+        if changed == 0 {
+            return Ok(None);
+        }
+        conn.query_row(
+            "SELECT from_thread_id, to_thread_id FROM dispatches WHERE id = ?1",
+            [id],
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
+        )
+        .map(Some)
+        .map_err(|e| e.to_string())
+    }
+
+    /// Settles every line still queued for one thread. What muting a thread
+    /// does to its backlog; answers the ids so each gets its moment.
+    pub fn settle_dispatches_to(
+        &self,
+        to_thread_id: &str,
+        state: &str,
+        reason: &str,
+        at: i64,
+    ) -> Result<Vec<String>, String> {
+        let conn = self.conn.lock();
+        let mut stmt = conn
+            .prepare("SELECT id FROM dispatches WHERE state = 'queued' AND to_thread_id = ?1")
+            .map_err(|e| e.to_string())?;
+        let ids = stmt
+            .query_map([to_thread_id], |r| r.get::<_, String>(0))
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE dispatches SET state = ?2, reason = ?3, settled_at = ?4
+             WHERE state = 'queued' AND to_thread_id = ?1",
+            rusqlite::params![to_thread_id, state, reason, at],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(ids)
+    }
+
+    /// Settles every line queued before the cutoff as `dropped(no_device)`.
+    /// Run on every drain, so no sweep has to exist; answers the ids so each
+    /// expiry gets its moment and the orchestrator learns what never landed.
+    pub fn expire_dispatches(&self, cutoff: i64, at: i64) -> Result<Vec<String>, String> {
+        let conn = self.conn.lock();
+        let mut stmt = conn
+            .prepare("SELECT id FROM dispatches WHERE state = 'queued' AND created_at < ?1")
+            .map_err(|e| e.to_string())?;
+        let ids = stmt
+            .query_map([cutoff], |r| r.get::<_, String>(0))
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE dispatches SET state = 'dropped', reason = 'no_device', settled_at = ?2
+             WHERE state = 'queued' AND created_at < ?1",
+            rusqlite::params![cutoff, at],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(ids)
+    }
+
     /// Appends one moment to the workspace pulse and prunes the ring.
     ///
     /// The prune keeps the newest [`crate::pulse::RING_CAP`] rows. Done here,

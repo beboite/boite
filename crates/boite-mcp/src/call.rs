@@ -287,6 +287,42 @@ pub fn call_tool<B: Backend>(host: &B, name: &str, args: &Value) -> Result<Strin
             w.field("said", out.get("messageId").and_then(|v| v.as_str()).unwrap_or("?"));
             Ok(w.into_string())
         }
+        "thread_dispatch" => {
+            let to = args
+                .get("threadId")
+                .and_then(|v| v.as_str())
+                .ok_or("thread_dispatch needs a threadId")?;
+            let text = args
+                .get("text")
+                .and_then(|v| v.as_str())
+                .ok_or("thread_dispatch needs text")?;
+            let mut body = json!({ "toThreadId": to, "text": text });
+            if let Some(mode) = args.get("mode").and_then(|v| v.as_str()) {
+                body["mode"] = json!(mode);
+            }
+            let out = host.send("POST", "/v1/dispatch", Some(body))?;
+            if let Some(error) = out.get("error").and_then(|v| v.as_str()) {
+                return Err(error.to_string());
+            }
+            let mut w = Toon::new();
+            w.field("queued", out.get("dispatchId").and_then(|v| v.as_str()).unwrap_or("?"))
+                .field("to", to)
+                .hint("the pulse says what became of it: dispatch.settled with delivered, dropped or refused");
+            Ok(w.into_string())
+        }
+        "thread_dismiss" => {
+            let id = args
+                .get("threadId")
+                .and_then(|v| v.as_str())
+                .ok_or("thread_dismiss needs a threadId")?;
+            let out = host.send("POST", "/v1/thread/dismiss", Some(json!({ "threadId": id })))?;
+            if let Some(error) = out.get("error").and_then(|v| v.as_str()) {
+                return Err(error.to_string());
+            }
+            let mut w = Toon::new();
+            w.field("dismissed", id);
+            Ok(w.into_string())
+        }
         "pane_open" => {
             let mut body = json!({});
             for key in ["kind", "url", "side", "path"] {

@@ -79,6 +79,11 @@ You do not do the work. A request that needs edits, a build or a review gets \
 a terminal of its own via thread_spawn, with a prompt written for someone who \
 was not in this conversation.
 
+A worker that needs one more line at its prompt gets thread_dispatch. The \
+line is typed by the device, only at the worker's prompt, visibly marked as \
+yours; the pulse tells you whether it was delivered, dropped or refused. A \
+finished worker you are done with gets thread_dismiss.
+
 You wait by sleeping in workspace_pulse. Never a loop, never a timer. If \
 nothing happened, nothing happened. The pulse already carries each terminal's \
 phase; read a transcript only when the pulse is not enough — a transcript \
@@ -163,6 +168,41 @@ fn orchestrator_tools() -> Value {
                 "additionalProperties": false
             },
             "annotations": { "title": "Say", "destructiveHint": false, "openWorldHint": false }
+        },
+        {
+            "name": "thread_dispatch",
+            "description": "Queue one line for a worker terminal's prompt. It is typed by the \
+                            device that owns that terminal, only when the worker is at its \
+                            prompt, with a visible mark saying it came from you — never during \
+                            a permission dialog, never into a muted thread, never into another \
+                            orchestrator. You learn the outcome on the pulse as \
+                            dispatch.settled: delivered, dropped or refused with the reason.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "threadId": { "type": "string", "description": "The target worker's thread id." },
+                    "text": { "type": "string", "description": "The line to type, written for someone who was not in this conversation." },
+                    "mode": { "type": "string", "enum": ["queue", "now"], "description": "queue waits for the prompt; now lands only if the worker is at it right now." }
+                },
+                "required": ["threadId", "text"],
+                "additionalProperties": false
+            },
+            "annotations": { "title": "Dispatch", "destructiveHint": false, "openWorldHint": false }
+        },
+        {
+            "name": "thread_dismiss",
+            "description": "Put a finished worker away. Refused while the worker is running or \
+                            waiting on the user — the same rule as the user's own settle. The \
+                            terminal is not killed; it leaves the active list.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "threadId": { "type": "string", "description": "The worker's thread id." }
+                },
+                "required": ["threadId"],
+                "additionalProperties": false
+            },
+            "annotations": { "title": "Dismiss", "destructiveHint": false, "openWorldHint": false }
         }
     ])
 }
@@ -581,11 +621,11 @@ mod tests {
         assert_eq!(names.len(), 20, "{names:?}");
     }
 
-    /// Pinned like the count above: the orchestrator tier is two tools, an
+    /// Pinned like the count above: the orchestrator tier is four tools, an
     /// ordinary thread never sees them, and an unknown role is an ordinary
     /// thread rather than a wider one.
     #[test]
-    fn the_orchestrator_tier_is_two_tools_nobody_else_sees() {
+    fn the_orchestrator_tier_is_four_tools_nobody_else_sees() {
         let plain: Vec<String> = tools_for_role(None)
             .as_array()
             .unwrap()
@@ -595,6 +635,8 @@ mod tests {
         assert_eq!(plain.len(), 20, "{plain:?}");
         assert!(!plain.iter().any(|n| n == "workspace_pulse"));
         assert!(!plain.iter().any(|n| n == "say"));
+        assert!(!plain.iter().any(|n| n == "thread_dispatch"));
+        assert!(!plain.iter().any(|n| n == "thread_dismiss"));
         assert_eq!(tools_for_role(Some("supervisor")).as_array().unwrap().len(), 20);
 
         let raised: Vec<String> = tools_for_role(Some("orchestrator"))
@@ -603,9 +645,11 @@ mod tests {
             .iter()
             .filter_map(|t| t.get("name").and_then(|v| v.as_str()).map(str::to_string))
             .collect();
-        assert_eq!(raised.len(), 22, "{raised:?}");
+        assert_eq!(raised.len(), 24, "{raised:?}");
         assert!(raised.iter().any(|n| n == "workspace_pulse"));
         assert!(raised.iter().any(|n| n == "say"));
+        assert!(raised.iter().any(|n| n == "thread_dispatch"));
+        assert!(raised.iter().any(|n| n == "thread_dismiss"));
 
         assert!(instructions_for_role(Some("orchestrator")).contains("workspace_pulse"));
         assert!(!instructions_for_role(None).contains("orchestrator"));
