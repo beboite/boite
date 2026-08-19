@@ -11,6 +11,7 @@ import type {
   InfoBoxAnchor,
   Keybinding,
   LocaleSetting,
+  OpenOnLaunch,
   RightPanelTab,
   Settings,
   Shortcut,
@@ -168,6 +169,8 @@ const DEFAULTS: Settings = {
   whipSound: "synth",
   smartSortBy: "manual",
   smartSortDirection: "desc",
+  experimentHome: false,
+  openOnLaunch: "last",
 };
 
 // First-run guess: touch-primary, narrow screens (a phone TWA/PWA) default to
@@ -199,6 +202,10 @@ function isSortDirection(value: unknown): value is SortDirection {
 
 function isWhipSound(value: unknown): value is WhipSound {
   return value === "synth" || value === "sampled" || value === "meme";
+}
+
+function isOpenOnLaunch(value: unknown): value is OpenOnLaunch {
+  return value === "home" || value === "project" || value === "last";
 }
 
 /**
@@ -312,24 +319,29 @@ const DEVICE_FIELDS = [
   "smartSortBy",
   "smartSortDirection",
   "confirmCloseThread",
+  "experimentHome",
+  "openOnLaunch",
 ] as const;
 
 // Stamped on the blob so an absent key can be told apart from a key that had
 // not been promoted yet. Bump it whenever a field joins DEVICE_FIELDS, and list
 // the newcomers in PROMOTED_TO_DEVICE so they migrate once.
-const DEVICE_BLOB_VERSION = 1;
+const DEVICE_BLOB_VERSION = 2;
 
-// Moved out of the workspace blob in the version that introduced `v`. A device
-// blob written before that has no key for them and the workspace value is the
-// right one-shot seed. Once `v` is on the blob, an absent key means the default
-// and never the boite's value: falling through to the workspace blob is how
-// `motionMode`, `locale` and `layoutPinned` used to leak in from the server on
-// any device whose localStorage predated them joining the list.
+// Moved out of the workspace blob. A device blob whose `v` is missing or older
+// than DEVICE_BLOB_VERSION has no key for the newcomers, and the workspace
+// value is the right one-shot seed. Once the blob is at the current version, an
+// absent key means the default and never the boite's value: falling through to
+// the workspace blob is how `motionMode`, `locale` and `layoutPinned` used to
+// leak in from the server on any device whose localStorage predated them
+// joining the list.
 const PROMOTED_TO_DEVICE: readonly string[] = [
   "colorByModel",
   "sidebarDesign",
   "sidebarHarnessLogos",
   "confirmCloseThread",
+  "experimentHome",
+  "openOnLaunch",
 ];
 
 type DeviceBlob = Partial<Settings> & { v?: number };
@@ -347,15 +359,15 @@ function loadDeviceOverrides(): DeviceBlob | null {
 /** Lays the device blob over a freshly hydrated state. */
 function applyDeviceOverrides(state: Settings, dev: DeviceBlob): void {
   const target = state as unknown as Record<string, unknown>;
-  const legacyBlob = typeof dev.v !== "number";
+  const staleBlob = typeof dev.v !== "number" || dev.v < DEVICE_BLOB_VERSION;
   for (const k of DEVICE_FIELDS) {
     if (dev[k] !== undefined) {
       target[k] = dev[k];
       continue;
     }
-    // Left alone on a legacy blob: whatever is in `target` came from the
+    // Left alone on a stale blob: whatever is in `target` came from the
     // workspace and is the migration source for exactly one load.
-    if (legacyBlob && PROMOTED_TO_DEVICE.includes(k)) continue;
+    if (staleBlob && PROMOTED_TO_DEVICE.includes(k)) continue;
     target[k] = structuredClone(DEFAULTS[k]);
   }
   state.rightPanelByProject = readRightPanelMap(state.rightPanelByProject);
@@ -368,6 +380,12 @@ function applyDeviceOverrides(state: Settings, dev: DeviceBlob): void {
   }
   if (typeof state.infoBoxCollapsed !== "boolean") {
     state.infoBoxCollapsed = DEFAULTS.infoBoxCollapsed;
+  }
+  if (typeof state.experimentHome !== "boolean") {
+    state.experimentHome = DEFAULTS.experimentHome;
+  }
+  if (!isOpenOnLaunch(state.openOnLaunch)) {
+    state.openOnLaunch = DEFAULTS.openOnLaunch;
   }
 }
 
@@ -520,6 +538,13 @@ class SettingsStore {
         smartSortDirection: isSortDirection(stored.smartSortDirection)
           ? stored.smartSortDirection
           : DEFAULTS.smartSortDirection,
+        experimentHome:
+          typeof stored.experimentHome === "boolean"
+            ? stored.experimentHome
+            : DEFAULTS.experimentHome,
+        openOnLaunch: isOpenOnLaunch(stored.openOnLaunch)
+          ? stored.openOnLaunch
+          : DEFAULTS.openOnLaunch,
         // A settings row written before the wizard existed carries no flag.
         // Its owner already has a shortcut list, and finishing the wizard
         // replaces that list wholesale, so an existing install counts as
@@ -563,7 +588,7 @@ class SettingsStore {
           this.state.mobileLayout = detectMobileDefault();
           this.state.layoutPinned = false;
           this.persistDeviceNow();
-        } else if (typeof dev.v !== "number") {
+        } else if (typeof dev.v !== "number" || dev.v < DEVICE_BLOB_VERSION) {
           // Stamp the version and write the promoted keys down, so this load is
           // the only one that reads them off the workspace.
           this.persistDeviceNow();
@@ -897,6 +922,18 @@ class SettingsStore {
   setSmartSortDirection(value: SortDirection) {
     if (this.state.smartSortDirection === value) return;
     this.state.smartSortDirection = value;
+    this.persistDeviceNow();
+  }
+
+  setExperimentHome(value: boolean) {
+    if (this.state.experimentHome === value) return;
+    this.state.experimentHome = value;
+    this.persistDeviceNow();
+  }
+
+  setOpenOnLaunch(value: OpenOnLaunch) {
+    if (!isOpenOnLaunch(value) || this.state.openOnLaunch === value) return;
+    this.state.openOnLaunch = value;
     this.persistDeviceNow();
   }
 

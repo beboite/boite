@@ -52,6 +52,13 @@
 <p class="px-3 text-sm text-muted-foreground">{t("experiments.intro")}</p>
 
 <ToggleSetting
+  label={t("experiments.home")} anchor="experiments.home"
+  description={t("experiments.homeDesc")}
+  enabled={settings.state.experimentHome}
+  onToggle={() => settings.setExperimentHome(!settings.state.experimentHome)}
+/>
+
+<ToggleSetting
   label={t("experiments.infoBox")} anchor="experiments.infoBox"
   description={t("experiments.infoBoxDesc")}
   enabled={settings.state.experimentInfoBox}

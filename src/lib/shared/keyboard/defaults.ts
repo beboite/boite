@@ -13,8 +13,8 @@ import type { Keybinding } from "./types";
  */
 
 // Every view, but nothing while an overlay owns the keyboard. `View` has
-// exactly four values, so this is the old `["app","settings","editor",
-// "project"]` spelled once.
+// exactly five values, so this is the old `["app","settings","editor",
+// "project","home"]` spelled once.
 const ANY_VIEW = "!overlayOpen";
 const TERMINAL_ONLY = "terminalFocus && !overlayOpen";
 
@@ -22,7 +22,7 @@ export const DEFAULT_KEYBINDINGS: Keybinding[] = [
   {
     key: "escape",
     command: "view.backToTerminal",
-    when: "(settingsOpen || editorFocus || projectFocus) && !overlayOpen",
+    when: "(settingsOpen || editorFocus || projectFocus || homeFocus) && !overlayOpen",
   },
   { key: "mod+plus", command: "view.zoomIn", when: ANY_VIEW },
   { key: "mod+minus", command: "view.zoomOut", when: ANY_VIEW },

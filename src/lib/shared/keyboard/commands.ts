@@ -75,6 +75,7 @@ export const CONTEXT_KEYS = [
   "settingsOpen",
   "editorFocus",
   "projectFocus",
+  "homeFocus",
   "paletteOpen",
   "modalOpen",
   "overlayOpen",

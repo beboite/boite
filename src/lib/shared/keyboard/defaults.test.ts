@@ -23,7 +23,7 @@ const RULES: CompiledRule[] = DEFAULT_KEYBINDINGS.map((binding) => {
   };
 });
 
-type Layer = "terminal" | "settings" | "editor" | "project" | "palette" | "modal";
+type Layer = "terminal" | "settings" | "editor" | "project" | "home" | "palette" | "modal";
 
 function context(layer: Layer): KeyContext {
   const paletteOpen = layer === "palette";
@@ -38,6 +38,7 @@ function context(layer: Layer): KeyContext {
     settingsOpen: layer === "settings",
     editorFocus: layer === "editor",
     projectFocus: layer === "project",
+    homeFocus: layer === "home",
     inputFocus: false,
     hasThread: true,
   };
@@ -107,7 +108,7 @@ describe("the shipped table reproduces the scope ladder", () => {
 
   it("leaves Escape to whatever is running in the terminal", () => {
     expect(fire("terminal", { key: "Escape" })).toBeNull();
-    for (const layer of ["settings", "editor", "project"] as const) {
+    for (const layer of ["settings", "editor", "project", "home"] as const) {
       expect(fire(layer, { key: "Escape" })).toBe("view.backToTerminal");
     }
   });

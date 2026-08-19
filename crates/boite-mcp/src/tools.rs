@@ -361,10 +361,10 @@ fn thread_tools() -> Value {
                     "prompt": {
                         "type": "string",
                         "description": "Its opening instruction, written for someone who was not in \
-                                        this conversation. Only claude and codex take one on the \
-                                        command line; ask for one of those if it must start knowing \
-                                        something. The rest open bare and Boite shows the user what \
-                                        was meant to be said."
+                                        this conversation. claude, codex, pi, grok and antigravity \
+                                        take one on the command line; ask for one of those if it \
+                                        must start knowing something. The rest open bare and Boite \
+                                        shows the user what was meant to be said."
                     }
                 },
                 "additionalProperties": false
