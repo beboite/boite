@@ -30,6 +30,18 @@ const talker = WINDOWS
 // would pass the check whether or not anything was replayed.
 const idler = { cmd: WINDOWS ? "cmd" : "sh", args: [] as string[] };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+// Output arrives when it arrives: a spawn on a cold shared runner is slower
+// than the same spawn on a laptop, and a fixed wait long enough for the slow
+// case is dead time in every other run. This waits for the thing it is about
+// to assert on and gives up at the deadline, so a real failure still fails.
+async function until(cond: () => boolean, ms = 8000): Promise<boolean> {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    if (cond()) return true;
+    await sleep(50);
+  }
+  return cond();
+}
 
 let fail = false;
 function check(label: string, ok: boolean, extra = "") {
@@ -97,7 +109,7 @@ const key = await rb.pty.open(
 );
 check("pty.open returns key", !!key, `key=${String(key).slice(0, 8)}`);
 
-await sleep(1200);
+await until(() => out.includes(MARKER));
 check("live output", out.includes(MARKER), `(${out.length} bytes)`);
 
 // detach (release) then reattach -> replay carries the earlier output
@@ -114,8 +126,8 @@ const key2 = await rb.pty.open(
     if (e.type === "output") out += dec.decode(e.bytes);
   },
 );
-await sleep(400);
-check("reattach replay", out.includes(MARKER));
+await until(() => out.includes(MARKER));
+check("reattach replay", out.includes(MARKER), `(${out.length} bytes)`);
 
 const threads = await rb.db.loadThreads();
 const t = threads.find((x) => x.id === threadId);
