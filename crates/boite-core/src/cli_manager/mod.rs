@@ -17,11 +17,18 @@
 //! `~/.claude` are not things a terminal's agent should be able to do on the
 //! user's behalf, and a tool call that could is a tool call that will.
 //!
-//! Three shapes cover every vendor (see [`catalog::Shape`]): a bare binary, an
-//! archive holding one, and a tree that has to stay together. Four of the ten
-//! CLIs come down that way, one goes through the package manager it ships on, and
-//! the rest keep their doc link, because an install line nobody verified fetches
-//! the wrong package.
+//! Two shapes cover every vendor (see [`catalog::Shape`]): one executable, bare
+//! or inside an archive, and a tree that has to stay together. Eight of the ten
+//! CLIs come down that way, one goes through the package manager it ships on,
+//! and the last keeps its doc link.
+//!
+//! **A vendor's installer being a shell script is not the same as a vendor
+//! having no artifact.** Most of these scripts do what this module does — read a
+//! manifest, take a URL, check a digest — and doing it here instead means it
+//! works the same on Windows, where a bash installer does not run at all and two
+//! vendors' scripts refuse to try. What is left is Pi, which is a Node package
+//! with no native build, and Hermes, whose installer clones a repository and
+//! puts a Python runtime beside it; there is no artifact there to name or check.
 
 pub mod archive;
 pub mod catalog;
@@ -32,7 +39,7 @@ pub mod purge;
 
 use std::path::PathBuf;
 
-use catalog::{Checksum, Cli, Download, Platform, Presence, Shape, Source, Version};
+use catalog::{Algo, Checksum, Cli, Download, Platform, Presence, Shape, Source, Version};
 pub use jobs::{Kind, Phase, Snapshot};
 pub use purge::DataPath;
 
@@ -257,6 +264,62 @@ fn probe_version(exe: &str, arg: &str) -> Option<String> {
     parse_version(&String::from_utf8_lossy(&out.stdout))
 }
 
+/// What the vendor publishes right now, for one CLI Boite downloads.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Latest {
+    pub id: String,
+    /// The current version, or `None` when asking did not get an answer.
+    pub version: Option<String>,
+    /// Why it could not be asked. Carried rather than swallowed: "you are up to
+    /// date" and "nobody could tell you" are different rows, and a panel that
+    /// draws the first for the second is the reason this exists.
+    pub error: Option<String>,
+}
+
+/// What every downloadable CLI's vendor currently publishes.
+///
+/// **Separate from [`status_blocking`] on purpose.** Presence is read off this
+/// machine and answers in milliseconds; this one is a request per vendor over
+/// somebody else's network, and folding it in would make opening the panel wait
+/// on six web servers. So the panel draws the rows first and asks this second.
+///
+/// Only a `download` source is here. A package manager's idea of what is current
+/// is its own to answer, and running it to find out is the update itself.
+pub fn latest_blocking() -> Vec<Latest> {
+    let mut probes = Vec::new();
+    for cli in catalog::CLIS {
+        let Source::Download(download) = cli.source else {
+            continue;
+        };
+        // No build for this machine is not a failure to report: the row already
+        // says the button is off, and an error under it would say it twice.
+        let Some(platform) = download.platform() else {
+            continue;
+        };
+        probes.push((
+            cli.id,
+            std::thread::spawn(move || match resolve(&download, platform) {
+                Ok(resolved) => (Some(resolved.version), None),
+                Err(Failed(why)) => (None, Some(why)),
+            }),
+        ));
+    }
+    probes
+        .into_iter()
+        .map(|(id, probe)| {
+            let (version, error) = probe.join().unwrap_or_else(|_| {
+                (None, Some("the check stopped without an answer".to_string()))
+            });
+            Latest {
+                id: id.to_string(),
+                version,
+                error,
+            }
+        })
+        .collect()
+}
+
 /// The data directories of one CLI with their sizes, for the uninstall dialogue.
 pub fn data_paths(id: &str) -> Result<Vec<DataPath>, Failed> {
     let cli = catalog::find(id).ok_or_else(|| Failed(format!("no CLI named {id}")))?;
@@ -339,6 +402,9 @@ fn snapshot_of(id: &str) -> Result<Snapshot, Failed> {
 struct Resolved {
     version: String,
     url: String,
+    /// The digest the same answer carried, for the vendor that publishes one
+    /// alongside the URL rather than in a manifest of its own.
+    digest: Option<(Algo, String)>,
 }
 
 /// A version is substituted into a URL and into a directory name, so it is
@@ -369,6 +435,7 @@ fn resolve(download: &Download, platform: &Platform) -> Result<Resolved, Failed>
             Ok(Resolved {
                 url: platform.artifact.replace("{version}", &version),
                 version,
+                digest: None,
             })
         }
         Version::Script { url, needle } => {
@@ -383,6 +450,7 @@ fn resolve(download: &Download, platform: &Platform) -> Result<Resolved, Failed>
             Ok(Resolved {
                 url: platform.artifact.replace("{version}", &version),
                 version,
+                digest: None,
             })
         }
         Version::GithubLatest { repo } => {
@@ -390,7 +458,191 @@ fn resolve(download: &Download, platform: &Platform) -> Result<Resolved, Failed>
                 net::json(&format!("https://api.github.com/repos/{repo}/releases/latest"))?;
             pick_asset(&listing, platform, repo)
         }
+        Version::PlatformManifest { digest } => {
+            read_manifest(&net::json(platform.artifact)?, platform, digest)
+        }
+        Version::Channel { url, digest } => {
+            let channel = net::json(url)?;
+            let version = sane_version(json_string(&channel, &["version"], "the channel")?)?;
+            let manifest_url = https_url(
+                json_string(&channel, &["manifest_url"], "the channel")?,
+                "the channel",
+            )?;
+            read_channel(&net::json(&manifest_url)?, platform, digest, version)
+        }
+        Version::NpmPlatformPackage { root } => resolve_npm(root, platform),
     }
+}
+
+/// One string out of a vendor's JSON, or a refusal naming what was missing.
+///
+/// A field that went missing is what a vendor changing shape looks like from
+/// here, and it has to read as that rather than as an empty string carried into
+/// a URL.
+fn json_string<'a>(
+    document: &'a serde_json::Value,
+    keys: &[&str],
+    what: &str,
+) -> Result<&'a str, Failed> {
+    let mut node = document;
+    for key in keys {
+        node = node
+            .get(key)
+            .ok_or_else(|| Failed(format!("{what} names no {key}")))?;
+    }
+    node.as_str()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            Failed(format!(
+                "{what} answered nothing for {}",
+                keys.last().copied().unwrap_or("it")
+            ))
+        })
+}
+
+/// A URL a vendor wrote and this process is about to fetch.
+///
+/// Held to https rather than trusted. Everywhere the artifact URL comes out of a
+/// document instead of out of this catalogue, the digest beside it is the only
+/// thing saying the bytes are the vendor's — and a document that came back over a
+/// hijacked connection naming an `http://` or a `file://` would be the way past it.
+fn https_url(url: &str, what: &str) -> Result<String, Failed> {
+    if !url.starts_with("https://") {
+        return Err(Failed(format!(
+            "{what} points somewhere that is not https"
+        )));
+    }
+    Ok(url.to_string())
+}
+
+/// A published digest, lowercased and checked to be hex.
+fn hex_digest(raw: &str, algo: Algo, what: &str) -> Result<(Algo, String), Failed> {
+    let hex = raw.trim().to_ascii_lowercase();
+    if hex.is_empty() || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(Failed(format!(
+            "{what} carries a {} that is not hex",
+            algo.field()
+        )));
+    }
+    Ok((algo, hex))
+}
+
+/// The version, URL and digest one per-platform manifest carries.
+///
+/// Separate from the fetch so the parsing is testable without a network, the same
+/// way [`pick_asset`] is.
+fn read_manifest(
+    manifest: &serde_json::Value,
+    platform: &Platform,
+    algo: Algo,
+) -> Result<Resolved, Failed> {
+    let what = format!("the manifest for {}", platform.plat);
+    let version = sane_version(json_string(manifest, &["version"], &what)?)?;
+    let url = https_url(json_string(manifest, &["url"], &what)?, &what)?;
+    // A manifest that stopped carrying a digest is not a reason to install
+    // without one: the check going missing is exactly the failure it exists for.
+    let digest = hex_digest(json_string(manifest, &[algo.field()], &what)?, algo, &what)?;
+    Ok(Resolved {
+        version,
+        url,
+        digest: Some(digest),
+    })
+}
+
+/// This platform's artifact out of a manifest that names every platform.
+///
+/// The file name is checked against the URL rather than taken on trust. It is the
+/// one thing this can verify about a manifest it did not write: a platform key
+/// that started pointing at another platform's build would otherwise install a
+/// binary that cannot run here, with a digest that matches it perfectly.
+fn read_channel(
+    manifest: &serde_json::Value,
+    platform: &Platform,
+    algo: Algo,
+    version: String,
+) -> Result<Resolved, Failed> {
+    let what = format!("the manifest for {}", platform.plat);
+    let url = https_url(
+        json_string(manifest, &["artifacts", platform.plat, "url"], &what)?,
+        &what,
+    )?;
+    if !url.contains(platform.artifact) {
+        return Err(Failed(format!(
+            "{what} points at something other than {}",
+            platform.artifact
+        )));
+    }
+    let digest = hex_digest(
+        json_string(manifest, &["artifacts", platform.plat, "checksum"], &what)?,
+        algo,
+        &what,
+    )?;
+    Ok(Resolved {
+        version,
+        url,
+        digest: Some(digest),
+    })
+}
+
+/// What npm publishes for this platform, in the two requests npm itself makes.
+///
+/// The root package names the version and pins one package per platform; that
+/// package names its tarball and the digest. The pin is read rather than the root
+/// version reused, because a platform the vendor stopped building for loses its
+/// pin — and asking for a version that was never published is a 404 the user
+/// would read as "the network is down".
+fn resolve_npm(root: &'static str, platform: &Platform) -> Result<Resolved, Failed> {
+    let root_document = net::json(&format!("https://registry.npmjs.org/{root}/latest"))?;
+    let what = format!("{root}");
+    let version = sane_version(json_string(&root_document, &["version"], &what)?)?;
+    let pinned = sane_version(json_string(
+        &root_document,
+        &["optionalDependencies", platform.artifact],
+        &format!("{root}, for {}", platform.plat),
+    )?)?;
+
+    let package = net::json(&format!(
+        "https://registry.npmjs.org/{}/{pinned}",
+        platform.artifact
+    ))?;
+    let what = format!("{} {pinned}", platform.artifact);
+    let url = https_url(json_string(&package, &["dist", "tarball"], &what)?, &what)?;
+    let digest = npm_integrity(json_string(&package, &["dist", "integrity"], &what)?, &what)?;
+    // The version shown is the product's, not the platform package's. They are
+    // the same number today, and the one the user reads back out of
+    // `copilot --version` is the product's.
+    Ok(Resolved {
+        version,
+        url,
+        digest: Some(digest),
+    })
+}
+
+/// npm's `dist.integrity`, which is `<algorithm>-<base64>` rather than hex.
+fn npm_integrity(raw: &str, what: &str) -> Result<(Algo, String), Failed> {
+    use base64::Engine as _;
+
+    let (name, encoded) = raw
+        .trim()
+        .split_once('-')
+        .ok_or_else(|| Failed(format!("{what} carries an integrity that names no algorithm")))?;
+    let algo = match name {
+        "sha512" => Algo::Sha512,
+        "sha256" => Algo::Sha256,
+        // sha1 is also legal there and is not a check worth making. Refusing is
+        // the honest answer: this installs nothing it cannot verify.
+        other => {
+            return Err(Failed(format!(
+                "{what} is published with {other}, which is not a digest this checks"
+            )))
+        }
+    };
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .map_err(|e| Failed(format!("{what} carries an integrity that is not base64: {e}")))?;
+    let hex: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+    hex_digest(&hex, algo, what)
 }
 
 /// The version and URL a GitHub release listing gives this platform.
@@ -414,21 +666,47 @@ fn pick_asset(listing: &serde_json::Value, platform: &Platform, repo: &str) -> R
         .get("assets")
         .and_then(|v| v.as_array())
         .ok_or_else(|| Failed(format!("{repo}'s latest release has no assets")))?;
-    let url = assets
+    let asset = assets
         .iter()
         .find(|asset| asset.get("name").and_then(|v| v.as_str()) == Some(platform.artifact))
-        .and_then(|asset| asset.get("browser_download_url"))
-        .and_then(|v| v.as_str())
         .ok_or_else(|| {
             Failed(format!(
                 "{repo} {tag} publishes no {}, so this platform has nothing to install",
                 platform.artifact
             ))
         })?;
+    let url = json_string(asset, &["browser_download_url"], &format!("{repo} {tag}"))?;
+    // GitHub hashes every asset it stores and hands the digest back with the
+    // listing, so these two came down unverified for no reason other than nobody
+    // having read the field. `None` where an older release predates it, which is
+    // the same install these had before.
+    let digest = match asset.get("digest").and_then(|value| value.as_str()) {
+        Some(published) => Some(github_digest(published, &format!("{repo} {tag}"))?),
+        None => None,
+    };
     Ok(Resolved {
         version,
         url: url.to_string(),
+        digest,
     })
+}
+
+/// GitHub's asset digest, which is `<algorithm>:<hex>`.
+fn github_digest(raw: &str, what: &str) -> Result<(Algo, String), Failed> {
+    let (name, hex) = raw
+        .trim()
+        .split_once(':')
+        .ok_or_else(|| Failed(format!("{what} publishes a digest that names no algorithm")))?;
+    let algo = match name {
+        "sha256" => Algo::Sha256,
+        "sha512" => Algo::Sha512,
+        other => {
+            return Err(Failed(format!(
+                "{what} publishes a {other} digest, which is not one this checks"
+            )))
+        }
+    };
+    hex_digest(hex, algo, what)
 }
 
 /// The sha256 the vendor published for this platform, when it published one.
@@ -498,7 +776,13 @@ fn run_install(
     jobs::version(id, &resolved.version);
     cancelled(cancel)?;
 
-    let expected = published_checksum(&download.checksum, platform, &resolved.version)?;
+    // The digest the resolve already carried wins: a vendor that publishes it
+    // beside the URL has answered, and a second lookup could only disagree.
+    let expected = match &resolved.digest {
+        Some((algo, hex)) => Some((*algo, hex.clone())),
+        None => published_checksum(&download.checksum, platform, &resolved.version)?
+            .map(|hex| (Algo::Sha256, hex)),
+    };
     let scratch = Scratch::new(id)?;
     let artifact = scratch.0.join(artifact_name(&resolved.url, cli));
 
@@ -508,9 +792,9 @@ fn run_install(
     })?;
     cancelled(cancel)?;
 
-    if let Some(expected) = expected {
+    if let Some((algo, expected)) = expected {
         jobs::phase(id, Phase::Verifying);
-        let actual = net::sha256(&artifact)?;
+        let actual = net::digest(&artifact, algo)?;
         if actual != expected {
             return Err(Failed(format!(
                 "the download does not match the digest the vendor published ({} rather than {})",
@@ -523,20 +807,24 @@ fn run_install(
 
     let name = cli.file_name();
     match download.shape {
-        Shape::Binary => {
-            jobs::phase(id, Phase::Installing);
-            install::place_binary(&artifact, &name)?;
-        }
-        Shape::Archive => {
-            jobs::phase(id, Phase::Unpacking);
-            let kind = archive::kind_of(&resolved.url)?;
-            let unpacked = scratch.0.join("unpacked");
-            archive::extract(&artifact, kind, &unpacked, 0)?;
-            let binary = archive::find_binary(&unpacked, cli.exe)?;
-            cancelled(cancel)?;
-            jobs::phase(id, Phase::Installing);
-            install::place_binary(&binary, &name)?;
-        }
+        // The artifact's own name decides whether there is anything to unpack:
+        // one vendor ships a bare `.exe` on Windows and a tarball everywhere
+        // else, and reading it here is what keeps that from being declared twice.
+        Shape::Executable { inner } => match archive::kind_of(&resolved.url) {
+            Err(_) => {
+                jobs::phase(id, Phase::Installing);
+                install::place_binary(&artifact, &name)?;
+            }
+            Ok(kind) => {
+                jobs::phase(id, Phase::Unpacking);
+                let unpacked = scratch.0.join("unpacked");
+                archive::extract(&artifact, kind, &unpacked, 0)?;
+                let binary = archive::find_binary(&unpacked, inner.unwrap_or(cli.exe))?;
+                cancelled(cancel)?;
+                jobs::phase(id, Phase::Installing);
+                install::place_binary(&binary, &name)?;
+            }
+        },
         Shape::Package { entry } => {
             jobs::phase(id, Phase::Unpacking);
             let kind = archive::kind_of(&resolved.url)?;
@@ -717,11 +1005,136 @@ mod tests {
             .is_none());
     }
 
+    /// The three things a per-platform manifest has to answer, and the four ways
+    /// it can be wrong.
+    ///
+    /// Pinned because this is the one artifact URL the catalogue does not spell
+    /// out: the vendor writes it, this process fetches it, and the digest beside
+    /// it is the only thing that says the bytes are the vendor's. A manifest that
+    /// dropped a field, or that names something other than https, has to be a
+    /// refusal rather than an install without a check.
+    #[test]
+    fn a_manifest_answers_all_three_or_none() {
+        let platform = Platform {
+            os: catalog::Os::Linux,
+            arch: catalog::Arch::X64,
+            plat: "linux_amd64",
+            artifact: "https://example.test/manifests/linux_amd64.json",
+        };
+        let read = |json: &str| {
+            read_manifest(
+                &serde_json::from_str(json).unwrap(),
+                &platform,
+                Algo::Sha512,
+            )
+        };
+
+        let good = read(
+            r#"{"version":"1.1.15","url":"https://example.test/1.1.15-53503/linux-x64/cli.tar.gz","sha512":"AB12"}"#,
+        )
+        .unwrap();
+        assert_eq!(good.version, "1.1.15");
+        assert_eq!(
+            good.url,
+            "https://example.test/1.1.15-53503/linux-x64/cli.tar.gz"
+        );
+        // Lowercased here so the comparison against what was hashed is one rule
+        // rather than two spellings of it.
+        assert_eq!(good.digest, Some((Algo::Sha512, "ab12".to_string())));
+
+        assert!(read(r#"{"url":"https://example.test/cli","sha512":"ab"}"#).is_err());
+        assert!(read(r#"{"version":"1.0","sha512":"ab"}"#).is_err());
+        // A manifest that stopped carrying a digest installs nothing: the check
+        // going missing is the failure it exists for.
+        assert!(read(r#"{"version":"1.0","url":"https://example.test/cli"}"#).is_err());
+        assert!(read(r#"{"version":"1.0","url":"http://example.test/cli","sha512":"ab"}"#).is_err());
+        assert!(read(r#"{"version":"1.0","url":"https://example.test/cli","sha512":"zz"}"#).is_err());
+        assert!(read(r#"{"version":"../../etc","url":"https://example.test/cli","sha512":"ab"}"#).is_err());
+    }
+
+    /// One platform's artifact out of a manifest that names them all, and the
+    /// check that it is this platform's.
+    ///
+    /// The file-name check is the only thing this can verify about a document it
+    /// did not write. A platform key that started pointing at another platform's
+    /// build would otherwise install a binary that cannot run here, carrying a
+    /// digest that matches it perfectly.
+    #[test]
+    fn a_channel_manifest_gives_this_platform_and_not_a_neighbour() {
+        let platform = Platform {
+            os: catalog::Os::Windows,
+            arch: catalog::Arch::X64,
+            plat: "x86_windows",
+            artifact: "muse-x86-windows.exe",
+        };
+        let read = |json: &str| {
+            read_channel(
+                &serde_json::from_str(json).unwrap(),
+                &platform,
+                Algo::Sha256,
+                "0.2.1-R1215.1".to_string(),
+            )
+        };
+
+        let good = read(
+            r#"{"artifacts":{"x86_windows":{"url":"https://example.test/d/?file=muse-x86-windows.exe","checksum":"D51F"},
+                             "x86_linux":{"url":"https://example.test/d/?file=muse-x86-linux","checksum":"BFD8"}}}"#,
+        )
+        .unwrap();
+        assert_eq!(good.version, "0.2.1-R1215.1");
+        assert_eq!(good.digest, Some((Algo::Sha256, "d51f".to_string())));
+
+        // The linux build filed under the windows key.
+        assert!(read(
+            r#"{"artifacts":{"x86_windows":{"url":"https://example.test/d/?file=muse-x86-linux","checksum":"BFD8"}}}"#
+        )
+        .is_err());
+        // A platform the vendor stopped building for.
+        assert!(read(r#"{"artifacts":{"x86_linux":{"url":"https://example.test/d/?file=muse-x86-linux","checksum":"BF"}}}"#).is_err());
+        assert!(read(r#"{"artifacts":{"x86_windows":{"url":"https://example.test/d/?file=muse-x86-windows.exe"}}}"#).is_err());
+        assert!(read(r#"{"artifacts":{"x86_windows":{"url":"http://example.test/d/?file=muse-x86-windows.exe","checksum":"D51F"}}}"#).is_err());
+    }
+
+    /// The two digest spellings this reads, and the refusals around them.
+    ///
+    /// npm writes `<algorithm>-<base64>` and GitHub writes `<algorithm>:<hex>`,
+    /// and both end up compared against the same lowercase hex. An algorithm
+    /// neither hasher covers is a refusal rather than an install that skips the
+    /// check, which is the one way an unverified binary could still get through.
+    #[test]
+    fn a_published_digest_is_read_in_whichever_way_it_was_written() {
+        // The sha512 npm published for `@github/copilot-linux-x64` 1.0.80, whose
+        // hex was read off the tarball it names.
+        let (algo, hex) = npm_integrity(
+            "sha512-qv1ytVNwA3IDK7kcQow+fAikD67t42+AQ8X42bK/7oudNiv4frVZMO0yh1DYIebVRcmEhmPvbVPY/ptVUK3cbA==",
+            "a package",
+        )
+        .unwrap();
+        assert_eq!(algo, Algo::Sha512);
+        assert!(hex.starts_with("aafd72b553700372"), "{hex}");
+        assert_eq!(hex.len(), 128);
+
+        assert_eq!(
+            github_digest("sha256:A3F0", "a release").unwrap(),
+            (Algo::Sha256, "a3f0".to_string())
+        );
+
+        assert!(npm_integrity("sha1-YWJj", "a package").is_err());
+        assert!(npm_integrity("qv1ytVNwA3ID", "a package").is_err());
+        assert!(npm_integrity("sha512-not base64!", "a package").is_err());
+        assert!(github_digest("md5:abcd", "a release").is_err());
+        assert!(github_digest("abcd", "a release").is_err());
+        assert!(github_digest("sha256:zzzz", "a release").is_err());
+    }
+
     /// Only what the panel is told is installable may start a job, and the
     /// refusals say which of the two reasons it was.
     #[test]
     fn a_cli_boite_does_not_download_refuses_to_start() {
-        let err = start_install("copilot").unwrap_err();
+        // Pi, whose package is Node and has no native build to fetch. Never a
+        // download-source id: this call starts a real job, and asserting on the
+        // refusal is only safe where there is nothing to refuse to.
+        let err = start_install("pi").unwrap_err();
         assert!(err.0.contains("package manager"), "{}", err.0);
         let err = start_install("nothing-like-that").unwrap_err();
         assert!(err.0.contains("no CLI named"), "{}", err.0);

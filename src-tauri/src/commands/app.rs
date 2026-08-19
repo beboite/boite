@@ -278,6 +278,14 @@ pub async fn cli_catalog(
     .await
 }
 
+// What each vendor publishes right now. Its own call rather than a field on the
+// catalogue: this one waits on somebody else's web server, and the panel draws
+// its rows before it has an answer.
+#[tauri::command]
+pub async fn cli_latest(scope: State<'_, ProjectRoots>) -> Result<Value, String> {
+    on_bus(scope.inner(), Sessions::CliLatest.into()).await
+}
+
 // An install takes minutes and this call takes milliseconds: it starts the job
 // and the panel polls `cli_jobs`, which is the one progress path both hosts share.
 #[tauri::command]

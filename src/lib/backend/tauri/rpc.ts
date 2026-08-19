@@ -11,6 +11,7 @@ import type {
   CodexSwitcherApi,
   CliApi,
   CliDataPath,
+  CliLatest,
   CliJob,
   CliRow,
   FastMcpSshApi,
@@ -190,6 +191,7 @@ export const tauriFastMcpSsh: FastMcpSshApi = {
 
 export const tauriCli: CliApi = {
   catalog: (probeVersions) => invoke<CliRow[]>("cli_catalog", { probeVersions: probeVersions ?? false }),
+  latest: () => invoke<CliLatest[]>("cli_latest"),
   jobs: () => invoke<CliJob[]>("cli_jobs"),
   dataPaths: (id) => invoke<CliDataPath[]>("cli_data_paths", { id }),
   install: (id) => invoke<CliJob>("cli_install", { id }),

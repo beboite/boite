@@ -667,6 +667,7 @@ mod tests {
             ("fastMcpSsh.version", ReadProject),
             ("session.transcript", ReadProject),
             ("cli.catalog", ReadProject),
+            ("cli.latest", ReadProject),
             ("cli.jobs", ReadProject),
             ("cli.dataPaths", ReadProject),
             ("cli.install", MutateAcross),

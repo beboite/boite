@@ -16,6 +16,10 @@
 
   onMount(() => {
     void cliManager.ensure();
+    // Not awaited alongside the rows: what this machine has takes milliseconds
+    // and what six vendors publish does not, so the list draws first and the
+    // rows stop saying "Update" as the answers land.
+    void cliManager.checkLatest();
   });
 </script>
 
@@ -24,11 +28,14 @@
     <button
       type="button"
       class="flex items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-1 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground disabled:opacity-50"
-      onclick={() => cliManager.refresh(true)}
-      disabled={cliManager.loading}
+      onclick={() => {
+        void cliManager.refresh(true);
+        void cliManager.checkLatest(true);
+      }}
+      disabled={cliManager.loading || cliManager.checking}
       title={t("cli.recheck")}
     >
-      <RefreshCw class="size-3 {cliManager.loading ? 'animate-spin' : ''}" />
+      <RefreshCw class="size-3 {cliManager.loading || cliManager.checking ? 'animate-spin' : ''}" />
       {t("cli.recheck")}
     </button>
   {/snippet}

@@ -84,18 +84,31 @@ the panel.
 
 | How it arrives | Agents |
 | -------------- | ------ |
-| Boite downloads the vendor's binary | Claude Code, Codex, Opencode, Cursor Agent, Grok |
-| Its own package manager, in a terminal you can read | GitHub Copilot (`gh extension`) |
-| The vendor's instructions, linked | Antigravity, Hermes, Pi, Muse |
+| Boite downloads the vendor's binary | Claude Code, Codex, Opencode, Cursor Agent, Antigravity, Copilot, Grok, Muse |
+| Its own package manager, in a terminal you can read | Pi (`npm`) |
+| The vendor's instructions, linked | Hermes |
+
+Everything in the first row is fetched by Boite itself — no Node, no `gh`, no
+shell script piped into a shell — which is what makes it work the same on
+Windows as on macOS and Linux. Two of those agents get a platform their own
+installer does not offer: Muse's launcher is a bash script that refuses anything
+but macOS and Linux, while the manifest it reads has carried Windows builds all
+along.
 
 What Boite downloads goes to `~/.boite/bin`, a directory it owns and nothing else
 writes to, which is on the PATH every thread is spawned with — a fresh install
 runs without restarting the app. Nothing lands in `~/.cargo/bin` or
 `/usr/local/bin`: an install Boite did is an install Boite can take back. Where a
-vendor publishes a digest, the download is checked against it; where it does not,
-HTTPS is the whole story and the panel says so. An agent that publishes no
+vendor publishes a digest, the download is checked against it — a manifest, npm's
+`dist.integrity`, or the digest GitHub itself records for a release asset; where
+none of those exist, HTTPS is the whole story and the panel says so. An agent that publishes no
 binary for your platform gets its documentation link instead of a button that
 would fail.
+
+Each vendor is asked what it currently publishes, so an agent that is current
+says **Up to date** rather than offering an update to the version already on the
+machine, and the button reads *Reinstall*. A vendor that cannot be reached simply
+leaves the row saying nothing about updates.
 
 Removing one asks a second question: **keep my data**, on by default. Kept, only
 the binary goes. Cleared, the CLI's own directories go with it (`~/.claude`,

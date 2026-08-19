@@ -679,6 +679,24 @@ export interface CliDataPath {
 }
 
 /**
+ * What one vendor publishes right now.
+ *
+ * Read separately from the catalogue because it costs a request to somebody
+ * else's web server per CLI, and the rows are drawn before it lands. Only the
+ * CLIs Boite downloads are here: what a package manager considers current is its
+ * own to answer, and asking it is the update itself.
+ */
+export interface CliLatest {
+  id: string;
+  version: string | null;
+  /**
+   * Why the vendor could not be asked. Kept rather than dropped: "you are up to
+   * date" and "nobody could tell you" are different rows.
+   */
+  error: string | null;
+}
+
+/**
  * Installing and removing the agent CLIs, on the machine the agents run on.
  *
  * Progress is polled rather than pushed. One call answers for every job, so the
@@ -693,6 +711,12 @@ export interface CliApi {
    * left off when only presence is being refreshed.
    */
   catalog(probeVersions?: boolean): Promise<CliRow[]>;
+  /**
+   * What each downloadable CLI's vendor publishes right now, so a row can say it
+   * is up to date instead of offering an update nobody needs. One request per
+   * vendor, which is why it is not folded into `catalog`.
+   */
+  latest(): Promise<CliLatest[]>;
   jobs(): Promise<CliJob[]>;
   /** The data directories with their sizes, for the uninstall dialogue's sentence. */
   dataPaths(id: string): Promise<CliDataPath[]>;

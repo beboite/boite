@@ -11,7 +11,11 @@
 //! **Every artifact is spelled out per platform.** A template with `{os}` and
 //! `{arch}` in it looks shorter and cannot be read against the vendor's own
 //! release list, which is the only thing that can tell you it is wrong.
-//! `{version}` is the one substitution, being the part nobody can pin.
+//! `{version}` is the one substitution, being the part nobody can pin. The one
+//! exception is a vendor whose artifact path carries a build id it publishes
+//! nowhere but its own per-platform manifest ([`Version::PlatformManifest`]);
+//! there the manifest URL is what gets spelled out, one per platform, and the
+//! manifest names the binary.
 
 use std::path::PathBuf;
 
@@ -53,6 +57,24 @@ pub fn host_target() -> Option<(Os, Arch)> {
     Some((os, arch))
 }
 
+/// Which digest a vendor publishes, which is both the field to read and the
+/// hash to run over what came down.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Algo {
+    Sha256,
+    Sha512,
+}
+
+impl Algo {
+    /// The manifest field carrying it. Vendors name it after the algorithm.
+    pub fn field(self) -> &'static str {
+        match self {
+            Algo::Sha256 => "sha256",
+            Algo::Sha512 => "sha512",
+        }
+    }
+}
+
 /// How the current version is found. Every vendor publishes it somewhere else.
 #[derive(Debug, Clone, Copy)]
 pub enum Version {
@@ -68,15 +90,47 @@ pub enum Version {
         url: &'static str,
         needle: &'static str,
     },
+    /// A JSON manifest per platform, answering all three questions in one
+    /// request: `{"version": …, "url": …, "<digest>": …}`. `Platform::artifact`
+    /// is that manifest's URL rather than the binary's, which is the one shape
+    /// where the artifact URL cannot be spelled out here — the manifest is what
+    /// names it, and it carries the build id nobody else publishes.
+    PlatformManifest { digest: Algo },
+    /// A channel document naming what is current and where the manifest for it
+    /// is (`{"version": …, "manifest_url": …}`), and that manifest naming every
+    /// platform at once (`{"artifacts": {"<plat>": {"url": …, "checksum": …}}}`).
+    ///
+    /// Two requests because the manifest's own URL carries the version, so
+    /// nothing can ask for it before the channel has answered. `Platform::plat`
+    /// is the key inside `artifacts` and `Platform::artifact` is the file name
+    /// that URL has to name, which is what catches a manifest whose platform key
+    /// started pointing at somebody else's build.
+    Channel { url: &'static str, digest: Algo },
+    /// npm's registry, where a package publishes each platform's native build as
+    /// a package of its own and pins them all to one version.
+    ///
+    /// `root` is the package the user installs; `Platform::artifact` is the
+    /// platform package it pins. The pin is read rather than assumed: a platform
+    /// the vendor stopped building for loses its pin, and that is a refusal
+    /// rather than a guess at a version that was never published. The digest is
+    /// npm's own `dist.integrity`, which is what npm verifies too.
+    NpmPlatformPackage { root: &'static str },
 }
 
 /// What comes down the wire, and what has to end up in the managed bin.
 #[derive(Debug, Clone, Copy)]
 pub enum Shape {
-    /// The download is the executable.
-    Binary,
-    /// An archive holding one executable, which is moved into the managed bin.
-    Archive,
+    /// One executable, bare or inside an archive.
+    ///
+    /// Which of the two is read off the artifact's own name, because the
+    /// extension is already what decides which unpacker runs: a second
+    /// declaration of the same fact can only ever disagree with it, and one
+    /// vendor ships a bare `.exe` on Windows and a tarball everywhere else.
+    ///
+    /// `inner` names the executable inside the archive where the vendor calls it
+    /// something other than the command it installs as. `None` looks for the
+    /// command's own name.
+    Executable { inner: Option<&'static str> },
     /// A tree that has to stay together, a launcher beside its own runtime, so it
     /// is unpacked whole and `entry` is linked into the managed bin.
     Package { entry: &'static str },
@@ -94,9 +148,14 @@ pub enum Checksum {
 pub struct Platform {
     pub os: Os,
     pub arch: Arch,
-    /// The vendor's own name for this platform, used to read a checksum manifest.
+    /// The vendor's own name for this platform: the key its manifest is filed
+    /// under, and what a checksum manifest is read by.
     pub plat: &'static str,
-    /// A full URL, or a GitHub asset name for [`Version::GithubLatest`].
+    /// What this platform's build is called where the version says to look. A
+    /// full URL for a plain download and for [`Version::PlatformManifest`]; a
+    /// release asset name for [`Version::GithubLatest`]; the file name the
+    /// manifest has to point at for [`Version::Channel`]; the platform package
+    /// for [`Version::NpmPlatformPackage`].
     pub artifact: &'static str,
 }
 
@@ -157,13 +216,18 @@ pub struct DataDir {
 
 /// How presence is decided.
 ///
-/// For nine of the ten it is the executable resolving, which is what the rest of
-/// Boite already asks. Copilot is a `gh` extension: `gh` resolving says the host
-/// tool is there and nothing about the agent, and a row that read it as installed
-/// offered an update that upgrades something nobody installed.
+/// The executable resolving, for every entry in the table today, which is what
+/// the rest of Boite already asks.
 #[derive(Debug, Clone, Copy)]
 pub enum Presence {
     Exe,
+    /// An agent that installs *inside* another tool rather than beside it, where
+    /// the host tool resolving says the host is there and nothing about the
+    /// agent. Copilot was read this way while it was `gh copilot`, and a row that
+    /// took `gh` for the agent offered an update to something nobody installed.
+    ///
+    /// Kept because that is a shape a vendor can go back to, and because it is
+    /// the only honest answer when they do.
     Listed {
         argv: &'static [&'static str],
         needle: &'static str,
@@ -199,7 +263,7 @@ const CLAUDE: Download = Download {
     version: Version::Text(
         "https://storage.googleapis.com/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/claude-code-releases/stable",
     ),
-    shape: Shape::Binary,
+    shape: Shape::Executable { inner: None },
     checksum: Some(Checksum::Manifest {
         url: "https://storage.googleapis.com/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/claude-code-releases/{version}/manifest.json",
     }),
@@ -215,7 +279,7 @@ const CLAUDE: Download = Download {
 
 const GROK: Download = Download {
     version: Version::Text("https://x.ai/cli/stable"),
-    shape: Shape::Binary,
+    shape: Shape::Executable { inner: None },
     // The vendor's installer publishes no digest of its own, so HTTPS is the
     // whole story here, and the panel says as much.
     checksum: None,
@@ -231,7 +295,7 @@ const GROK: Download = Download {
 
 const CODEX: Download = Download {
     version: Version::GithubLatest { repo: "openai/codex" },
-    shape: Shape::Archive,
+    shape: Shape::Executable { inner: None },
     // The release also carries `.zst` payloads and sigstore bundles. The zip and
     // the gzipped tar are taken because they are the two formats this crate reads.
     checksum: None,
@@ -245,9 +309,13 @@ const CODEX: Download = Download {
     ],
 };
 
+// `sst/opencode` still redirects here, and a redirect is a thing a vendor can
+// stop honouring. The current name is the one that gets asked.
 const OPENCODE: Download = Download {
-    version: Version::GithubLatest { repo: "sst/opencode" },
-    shape: Shape::Archive,
+    version: Version::GithubLatest {
+        repo: "anomalyco/opencode",
+    },
+    shape: Shape::Executable { inner: None },
     checksum: None,
     platforms: &[
         Platform { os: Os::Windows, arch: Arch::X64, plat: "windows-x64", artifact: "opencode-windows-x64.zip" },
@@ -276,6 +344,112 @@ const CURSOR: Download = Download {
         Platform { os: Os::Macos, arch: Arch::X64, plat: "darwin-x64", artifact: "https://downloads.cursor.com/lab/{version}/darwin/x64/agent-cli-package.tar.gz" },
         Platform { os: Os::Linux, arch: Arch::X64, plat: "linux-x64", artifact: "https://downloads.cursor.com/lab/{version}/linux/x64/agent-cli-package.tar.gz" },
         Platform { os: Os::Linux, arch: Arch::Arm64, plat: "linux-arm64", artifact: "https://downloads.cursor.com/lab/{version}/linux/arm64/agent-cli-package.tar.gz" },
+    ],
+};
+
+macro_rules! antigravity_manifest {
+    ($plat:literal) => {
+        concat!(
+            "https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/",
+            $plat,
+            ".json"
+        )
+    };
+}
+
+/// The vendor's own bootstrapper reads these manifests and nothing else, so this
+/// is the published install path rather than a guess at one: `install.sh` and
+/// `install.ps1` both fetch `manifests/{platform}.json`, take `url`, and refuse
+/// anything whose sha512 disagrees.
+///
+/// Windows gets a bare `.exe` and the rest a `.tar.gz` holding one file called
+/// `antigravity`, which is why the shape reads the artifact's name rather than
+/// being declared twice.
+const ANTIGRAVITY: Download = Download {
+    version: Version::PlatformManifest {
+        digest: Algo::Sha512,
+    },
+    shape: Shape::Executable {
+        inner: Some("antigravity"),
+    },
+    // The digest travels with the version, so there is no second manifest.
+    checksum: None,
+    // No musl row: the vendor publishes `linux_{arch}_musl` manifests in its
+    // script and serves 404 for both, so a musl machine gets the glibc build the
+    // same way it would from the vendor's own installer.
+    platforms: &[
+        Platform { os: Os::Windows, arch: Arch::X64, plat: "windows_amd64", artifact: antigravity_manifest!("windows_amd64") },
+        Platform { os: Os::Windows, arch: Arch::Arm64, plat: "windows_arm64", artifact: antigravity_manifest!("windows_arm64") },
+        Platform { os: Os::Macos, arch: Arch::Arm64, plat: "darwin_arm64", artifact: antigravity_manifest!("darwin_arm64") },
+        Platform { os: Os::Macos, arch: Arch::X64, plat: "darwin_amd64", artifact: antigravity_manifest!("darwin_amd64") },
+        Platform { os: Os::Linux, arch: Arch::X64, plat: "linux_amd64", artifact: antigravity_manifest!("linux_amd64") },
+        Platform { os: Os::Linux, arch: Arch::Arm64, plat: "linux_arm64", artifact: antigravity_manifest!("linux_arm64") },
+    ],
+};
+
+macro_rules! copilot_package {
+    ($plat:literal) => {
+        concat!("@github/copilot-", $plat)
+    };
+}
+
+/// The standalone Copilot CLI, which is the one `session::editors` reads and the
+/// one `copilot mcp add` belongs to — not the `gh copilot` extension, which
+/// keeps no session store and is a different product wearing the same name.
+///
+/// npm is only the registry here. Each platform package holds a Node
+/// single-file executable that runs on its own, checked outside its package
+/// before this was written, so nothing needs npm or node on the machine.
+const COPILOT: Download = Download {
+    version: Version::NpmPlatformPackage {
+        root: "@github/copilot",
+    },
+    // The tarball carries the whole npm package around the binary — app.js, the
+    // tree-sitter grammars, a bundled ripgrep — and none of it is loaded: the
+    // executable answers `--version` from an empty directory.
+    shape: Shape::Executable {
+        inner: Some("copilot"),
+    },
+    // dist.integrity, read at resolve time.
+    checksum: None,
+    // The musl packages exist (`@github/copilot-linuxmusl-*`) and are not taken,
+    // the same way antigravity's musl manifests are not: nothing here detects a
+    // musl machine, and the glibc build is what the vendor's own installer picks
+    // when it cannot tell either.
+    platforms: &[
+        Platform { os: Os::Windows, arch: Arch::X64, plat: "win32-x64", artifact: copilot_package!("win32-x64") },
+        Platform { os: Os::Windows, arch: Arch::Arm64, plat: "win32-arm64", artifact: copilot_package!("win32-arm64") },
+        Platform { os: Os::Macos, arch: Arch::Arm64, plat: "darwin-arm64", artifact: copilot_package!("darwin-arm64") },
+        Platform { os: Os::Macos, arch: Arch::X64, plat: "darwin-x64", artifact: copilot_package!("darwin-x64") },
+        Platform { os: Os::Linux, arch: Arch::X64, plat: "linux-x64", artifact: copilot_package!("linux-x64") },
+        Platform { os: Os::Linux, arch: Arch::Arm64, plat: "linux-arm64", artifact: copilot_package!("linux-arm64") },
+    ],
+};
+
+/// Muse, whose `install.sh` writes a launcher that reads a public channel
+/// document and a public manifest — no login for either, checked before this was
+/// written.
+///
+/// **Including on Windows, which the vendor's own launcher refuses.** Its
+/// `detect_platform` accepts Darwin and Linux and dies on anything else, while
+/// the manifest it reads has carried `x86_windows` and `aarch64_windows` with
+/// their checksums all along. The launcher is a bash script; that is the whole
+/// reason for the gap, and Rust does not have it.
+const MUSE: Download = Download {
+    version: Version::Channel {
+        url: "https://api.meta.ai/muse-code/channels/muse-stable",
+        digest: Algo::Sha256,
+    },
+    shape: Shape::Executable { inner: None },
+    // The manifest carries the checksum beside the URL, so there is no second one.
+    checksum: None,
+    platforms: &[
+        Platform { os: Os::Windows, arch: Arch::X64, plat: "x86_windows", artifact: "muse-x86-windows.exe" },
+        Platform { os: Os::Windows, arch: Arch::Arm64, plat: "aarch64_windows", artifact: "muse-aarch64-windows.exe" },
+        Platform { os: Os::Macos, arch: Arch::Arm64, plat: "aarch64_macos", artifact: "muse-aarch64-macos" },
+        Platform { os: Os::Macos, arch: Arch::X64, plat: "x86_macos", artifact: "muse-x86-macos" },
+        Platform { os: Os::Linux, arch: Arch::X64, plat: "x86_linux", artifact: "muse-x86-linux" },
+        Platform { os: Os::Linux, arch: Arch::Arm64, plat: "aarch64_linux", artifact: "muse-aarch64-linux" },
     ],
 };
 
@@ -322,29 +496,23 @@ pub const CLIS: &[Cli] = &[
         exe: "agy",
         version_arg: Some("--version"),
         presence: Presence::Exe,
-        source: Source::Manual,
+        source: Source::Download(ANTIGRAVITY),
         data: &[DataDir { base: Base::Home, path: ".gemini/antigravity-cli" }],
     },
     Cli {
         id: "copilot",
-        // The extension is what gets installed; `gh` itself is the user's to
-        // install, which is why it is what `requires` names.
-        exe: "gh",
-        // `gh --version` is gh's, not the extension's, and a number that names
-        // the wrong tool is worse than no number.
-        version_arg: None,
-        presence: Presence::Listed {
-            argv: &["gh", "extension", "list"],
-            needle: "gh-copilot",
-        },
-        source: Source::Managed {
-            requires: "gh",
-            requires_url: "https://cli.github.com",
-            install: &["gh", "extension", "install", "github/gh-copilot"],
-            update: &["gh", "extension", "upgrade", "gh-copilot"],
-            uninstall: &["gh", "extension", "remove", "gh-copilot"],
-        },
-        data: &[DataDir { base: Base::Home, path: ".copilot" }],
+        exe: "copilot",
+        version_arg: Some("--version"),
+        presence: Presence::Exe,
+        source: Source::Download(COPILOT),
+        data: &[
+            DataDir { base: Base::Home, path: ".copilot" },
+            // Where `session::editors::copilot_db_path` looks on Windows, which
+            // is the same directory read the same way. A platform that does not
+            // keep it there simply has no such path, and the panel lists only
+            // the paths that are actually on the machine.
+            DataDir { base: Base::Data, path: "GitHub Copilot" },
+        ],
     },
     Cli {
         id: "grok",
@@ -367,7 +535,18 @@ pub const CLIS: &[Cli] = &[
         exe: "pi",
         version_arg: Some("--version"),
         presence: Presence::Exe,
-        source: Source::Manual,
+        // The vendor's `install.sh` is an interactive wrapper around this exact
+        // line — it checks for node, then runs npm. Boite runs the npm half in a
+        // terminal the user can read rather than piping a script into a shell.
+        // `--ignore-scripts` is the vendor's own flag, and `--ignore-scripts`
+        // works because the package publishes an npm-shrinkwrap.
+        source: Source::Managed {
+            requires: "npm",
+            requires_url: "https://nodejs.org/en/download",
+            install: &["npm", "install", "-g", "--ignore-scripts", "@earendil-works/pi-coding-agent"],
+            update: &["npm", "install", "-g", "--ignore-scripts", "@earendil-works/pi-coding-agent"],
+            uninstall: &["npm", "uninstall", "-g", "@earendil-works/pi-coding-agent"],
+        },
         data: &[DataDir { base: Base::Home, path: ".pi" }],
     },
     Cli {
@@ -375,8 +554,12 @@ pub const CLIS: &[Cli] = &[
         exe: "muse",
         version_arg: Some("--version"),
         presence: Presence::Exe,
-        source: Source::Manual,
-        data: &[],
+        source: Source::Download(MUSE),
+        // `$XDG_CONFIG_HOME/muse` or `$HOME/.config/muse`, which is where the
+        // vendor's launcher writes the login it obtains. Spelled off the home
+        // rather than through `Base::Config`, because on macOS that would be
+        // `~/Library/Application Support` and the launcher says `~/.config`.
+        data: &[DataDir { base: Base::Home, path: ".config/muse" }],
     },
 ];
 
@@ -472,9 +655,19 @@ mod tests {
             for platform in download.platforms {
                 let names_a_url = platform.artifact.starts_with("https://");
                 let carries_version = platform.artifact.contains("{version}");
+                // A manifest URL is the one artifact that carries no version:
+                // the manifest is what answers with one, along with the build id
+                // in the path that nobody else publishes.
+                let is_manifest = matches!(download.version, Version::PlatformManifest { .. });
                 assert!(
-                    names_a_url == carries_version || !names_a_url,
+                    !names_a_url || carries_version || is_manifest,
                     "{} {} names a URL with no version in it",
+                    cli.id,
+                    platform.plat
+                );
+                assert!(
+                    !is_manifest || names_a_url,
+                    "{} {} has to name the manifest it reads",
                     cli.id,
                     platform.plat
                 );

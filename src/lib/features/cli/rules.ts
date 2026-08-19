@@ -39,6 +39,104 @@ export function blocker(row: CliRow): CliBlocker | null {
   return null;
 }
 
+export type CliAction = "install" | "update" | "reinstall";
+
+/**
+ * What the primary button does, which is also what it is allowed to be called.
+ *
+ * The row used to read "Update" for anything installed, so ten CLIs that were
+ * all current offered ten updates. Reinstalling and updating are the same call
+ * here — fetch what the vendor publishes and put it in the managed bin — but
+ * they are not the same sentence, and the one the user acts on has to be the
+ * true one.
+ *
+ * `latest` is what the vendor publishes right now, `undefined` while nobody has
+ * asked yet and `null` when asking failed. Both mean the same thing here:
+ * nothing knows of an update, so nothing claims one.
+ */
+export function action(row: CliRow, latest?: string | null): CliAction {
+  if (!row.installed) return "install";
+  // A package manager keeps its own idea of what is current and will not say
+  // without being run, and running it *is* the update. So the button keeps the
+  // name of the command behind it rather than guessing.
+  if (row.source === "managed") return "update";
+  return behind(row.version, latest) ? "update" : "reinstall";
+}
+
+/**
+ * Whether the row may say it is current, rather than merely not known to be behind.
+ *
+ * Being *ahead* counts. Claude's stable pointer said 2.1.227 while the binary on
+ * the machine was 2.1.235, because the two came off different channels — and a
+ * row that read "different" as "newer" offered a downgrade under the word
+ * Update.
+ */
+export function upToDate(row: CliRow, latest?: string | null): boolean {
+  if (!row.installed) return false;
+  const here = normalise(row.version);
+  const there = normalise(latest);
+  if (here === null || there === null) return false;
+  if (here === there) return true;
+  const order = compare(there, here);
+  // Neither ahead nor behind can be claimed of two versions nothing can order,
+  // and "up to date" is a claim.
+  return order !== null && order < 0;
+}
+
+/** Whether what is installed is older than what the vendor publishes. */
+function behind(installed: string | null | undefined, published: string | null | undefined): boolean {
+  const here = normalise(installed);
+  const there = normalise(published);
+  if (here === null || there === null || here === there) return false;
+  const order = compare(there, here);
+  // Not orderable and not identical: something changed and nothing here can say
+  // in which direction, so the row claims nothing rather than claiming wrongly.
+  if (order === null) return false;
+  // Same numbers and a different string is the vendor rebuilding the same
+  // version, which is still something newer than what is on the machine.
+  return order >= 0;
+}
+
+/**
+ * Two spellings of one version.
+ *
+ * A vendor's pointer says `v1.1.15` and its own `--version` says `1.1.15`, and a
+ * row that read those as different offered an update to the version already on
+ * the machine.
+ */
+function normalise(version: string | null | undefined): string | null {
+  if (!version) return null;
+  const trimmed = version.trim().replace(/^v/i, "");
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+/**
+ * `a` against `b` by their leading numbers, or `null` when neither has any.
+ *
+ * The numbers only, stopping at the first part that is not one: cursor publishes
+ * `2026.08.11-e8db854`, where the build hash orders nothing and comparing it as
+ * text would order `1.9.0` above `1.10.0`.
+ */
+function compare(a: string, b: string): number | null {
+  const left = numbers(a);
+  const right = numbers(b);
+  if (left === null || right === null) return null;
+  for (let i = 0; i < Math.max(left.length, right.length); i += 1) {
+    const difference = (left[i] ?? 0) - (right[i] ?? 0);
+    if (difference !== 0) return difference > 0 ? 1 : -1;
+  }
+  return 0;
+}
+
+function numbers(version: string): number[] | null {
+  const parts: number[] = [];
+  for (const part of version.split(/[.\-+_]/)) {
+    if (!/^\d+$/.test(part)) break;
+    parts.push(Number(part));
+  }
+  return parts.length > 0 ? parts : null;
+}
+
 /**
  * Whether removing is offered.
  *

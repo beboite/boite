@@ -1,5 +1,5 @@
 import { backend } from "$lib/backend";
-import type { Backend, CliDataPath, CliJob, CliRow } from "$lib/backend";
+import type { Backend, CliDataPath, CliJob, CliLatest, CliRow } from "$lib/backend";
 import { logger } from "$lib/shared/services/logger.svelte";
 import { cliDetection } from "$lib/features/settings/cliDetection.svelte";
 import { makeInstaller, type PluginInstaller } from "$lib/features/plugin/installer.svelte";
@@ -46,6 +46,14 @@ class CliManager {
   rows = $state<CliRow[]>([]);
   /** The live job per CLI id, settled ones included until they are dismissed. */
   jobs = $state<Record<string, CliJob>>({});
+  /**
+   * What each vendor publishes right now, per CLI id. Absent while nobody has
+   * asked and null where asking failed, which the row reads the same way: it
+   * does not know of an update, so it does not offer one.
+   */
+  latest = $state<Record<string, string | null>>({});
+  /** Whether the vendors are being asked, for the row that says so. */
+  checking = $state(false);
   loading = $state(false);
   error = $state<string | null>(null);
 
@@ -55,6 +63,8 @@ class CliManager {
    * show the other machine's.
    */
   #answeredBy: Backend | null = null;
+  /** Which transport answered `checkLatest`, so switching boite asks again. */
+  #checkedBy: Backend | null = null;
   #timer: ReturnType<typeof setTimeout> | null = null;
   #installers = new Map<string, PluginInstaller>();
   #misses = 0;
@@ -72,6 +82,10 @@ class CliManager {
     return this.rows.find((row) => row.id === id) ?? null;
   }
 
+  latestFor(id: string): string | null | undefined {
+    return this.latest[id];
+  }
+
   /** Loads the list unless this boite's is already on screen. */
   async ensure(): Promise<void> {
     if (this.#answeredBy === backend() && this.rows.length > 0) {
@@ -79,6 +93,47 @@ class CliManager {
       return;
     }
     await this.refresh(true);
+  }
+
+  /**
+   * Asks every vendor what it publishes, so a row can say it is current.
+   *
+   * Not awaited by `refresh`: the rows are this machine's answer and arrive in
+   * milliseconds, this is six web servers and does not. Asked once per boite
+   * unless the caller says otherwise, because the answer does not change while a
+   * settings panel is open — the button that reruns it is `cli.recheck`.
+   */
+  async checkLatest(force = false): Promise<void> {
+    const from = backend();
+    if (!force && this.#checkedBy === from) return;
+    this.#checkedBy = from;
+    this.checking = true;
+    try {
+      const answers = await from.cli.latest();
+      if (this.#checkedBy !== from) return;
+      this.latest = Object.fromEntries(
+        answers.map((answer: CliLatest) => [answer.id, answer.version]),
+      );
+      for (const answer of answers) {
+        // Reported rather than swallowed, and only to the log: a vendor that is
+        // unreachable changes nothing the user has to act on, and the row simply
+        // stops claiming to know what is current.
+        if (answer.error) {
+          logger.warn("cli", "a vendor would not say what it publishes", {
+            id: answer.id,
+            error: answer.error,
+          });
+        }
+      }
+    } catch (err) {
+      if (this.#checkedBy !== from) return;
+      // Forgotten so the next open asks again rather than trusting a check that
+      // never happened.
+      this.#checkedBy = null;
+      logger.warn("cli", "the published versions could not be read", { error: String(err) });
+    } finally {
+      if (this.#checkedBy === from || this.#checkedBy === null) this.checking = false;
+    }
   }
 
   /**

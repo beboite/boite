@@ -475,6 +475,7 @@ pub fn run() {
             commands::app::codex_switcher_version,
             commands::app::fast_mcp_ssh_version,
             commands::app::cli_catalog,
+            commands::app::cli_latest,
             commands::app::cli_jobs,
             commands::app::cli_data_paths,
             commands::app::cli_install,

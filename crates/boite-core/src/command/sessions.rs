@@ -43,6 +43,7 @@ pub const ALL_METHODS: &[&str] = &[
     "fastMcpSsh.version",
     "session.transcript",
     "cli.catalog",
+    "cli.latest",
     "cli.jobs",
     "cli.dataPaths",
     "cli.install",
@@ -144,6 +145,13 @@ pub enum Sessions {
     /// costs a process spawn per installed CLI, so the panel asks for it when it
     /// opens and leaves it off when it is only refreshing presence.
     CliCatalog { probe_versions: bool },
+    /// What each downloadable CLI's vendor publishes right now, so a row can say
+    /// "up to date" rather than offering an update nobody needs.
+    ///
+    /// Its own call rather than a field on `cli.catalog`: this one is a request
+    /// per vendor over somebody else's network, and folding it in would make
+    /// opening the panel wait on six web servers.
+    CliLatest,
     /// What the installs and removals running right now are doing. Polled, which
     /// is what lets the desktop and a phone read the same progress through the
     /// same call rather than through an event channel written twice.
@@ -231,6 +239,7 @@ impl Sessions {
             "cli.catalog" => Sessions::CliCatalog {
                 probe_versions: super::bool_param(params, "probeVersions", false),
             },
+            "cli.latest" => Sessions::CliLatest,
             "cli.jobs" => Sessions::CliJobs,
             "cli.dataPaths" => Sessions::CliDataPaths {
                 id: str_param(params, "id")?,
@@ -273,6 +282,7 @@ impl Sessions {
             Sessions::FastMcpSshVersion => "fastMcpSsh.version",
             Sessions::Transcript { .. } => "session.transcript",
             Sessions::CliCatalog { .. } => "cli.catalog",
+            Sessions::CliLatest => "cli.latest",
             Sessions::CliJobs => "cli.jobs",
             Sessions::CliDataPaths { .. } => "cli.dataPaths",
             Sessions::CliInstall { .. } => "cli.install",
@@ -302,6 +312,7 @@ impl Sessions {
             Sessions::CodexSwitcherVersion | Sessions::FastMcpSshVersion => Wire::Key("version"),
             Sessions::Transcript { .. } => Wire::Key("text"),
             Sessions::CliCatalog { .. } => Wire::Key("clis"),
+            Sessions::CliLatest => Wire::Key("latest"),
             Sessions::CliJobs => Wire::Key("jobs"),
             Sessions::CliDataPaths { .. } => Wire::Key("paths"),
             Sessions::CliInstall { .. } | Sessions::CliUninstall { .. } => Wire::Key("job"),
@@ -333,6 +344,7 @@ impl Sessions {
             | Sessions::FastMcpSshVersion
             | Sessions::Transcript { .. }
             | Sessions::CliCatalog { .. }
+            | Sessions::CliLatest
             | Sessions::CliJobs
             | Sessions::CliDataPaths { .. } => Capability::ReadProject,
 
@@ -486,6 +498,7 @@ impl Sessions {
             Sessions::CliCatalog { probe_versions } => {
                 value_of(cli_manager::status_blocking(probe_versions))
             }
+            Sessions::CliLatest => value_of(cli_manager::latest_blocking()),
             Sessions::CliJobs => value_of(cli_manager::jobs::all()),
             Sessions::CliDataPaths { id } => {
                 value_of(cli_manager::data_paths(&id).map_err(|e| e.0)?)

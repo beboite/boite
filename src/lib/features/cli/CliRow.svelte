@@ -24,7 +24,7 @@
   import type { CliRow } from "$lib/backend";
   import { CLI_PRESETS } from "$lib/features/settings/cliPresets";
   import { cliManager, settled } from "./store.svelte";
-  import { blocker, removable } from "./rules";
+  import { action, blocker, removable, upToDate } from "./rules";
   import CliUninstallDialog from "./CliUninstallDialog.svelte";
 
   let { row }: { row: CliRow } = $props();
@@ -40,6 +40,11 @@
   const terminalBusy = $derived(installer?.busy === true);
   const busy = $derived(running || terminalBusy);
   const blocked = $derived(blocker(row));
+  const latest = $derived(cliManager.latestFor(row.id));
+  // What the button does, which is also the only thing it may be called. A row
+  // that is current says so instead of offering an update to the version it has.
+  const primaryAction = $derived(action(row, latest));
+  const current = $derived(upToDate(row, latest));
 
   let asking = $state(false);
 
@@ -97,11 +102,11 @@
   );
 
   /** The command line the package manager was asked to run, for its verdict. */
-  function commandLine(action: "install" | "update" | "uninstall" | null): string {
+  function commandLine(which: "install" | "update" | "uninstall" | null): string {
     const argv =
-      action === "uninstall"
+      which === "uninstall"
         ? row.uninstallCommand
-        : action === "update"
+        : which === "update"
           ? row.updateCommand
           : row.installCommand;
     return (argv ?? []).join(" ");
@@ -225,7 +230,11 @@
             : undefined}
         >
           <Download class="size-3" />
-          {row.installed ? t("cli.update") : t("cli.install")}
+          {primaryAction === "install"
+            ? t("cli.install")
+            : primaryAction === "update"
+              ? t("cli.update")
+              : t("cli.reinstall")}
         </button>
       {/if}
       {#if removable(row)}
@@ -280,6 +289,12 @@
     <p class="text-xs leading-snug text-muted-foreground/70">
       {t("cli.runsInTerminal", { tool: row.requires ?? "" })}
     </p>
+  {:else if primaryAction === "update"}
+    <p class="text-xs leading-snug text-[var(--color-warning)]">
+      {t("cli.updateAvailable", { version: latest ?? "" })}
+    </p>
+  {:else if current}
+    <p class="text-xs leading-snug text-muted-foreground/70">{t("cli.upToDate")}</p>
   {/if}
 
   {#if job}

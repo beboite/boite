@@ -12,6 +12,7 @@ import type {
   CheckpointFileVersions,
   CliApi,
   CliDataPath,
+  CliLatest,
   CliJob,
   CliRow,
   EditorApi,
@@ -460,6 +461,7 @@ export class RemoteBackend implements Backend {
         rpc("cli.catalog", { probeVersions: probeVersions ?? false }).then(
           (r) => (r.clis as CliRow[] | null) ?? [],
         ),
+      latest: () => rpc("cli.latest", {}).then((r) => (r.latest as CliLatest[] | null) ?? []),
       jobs: () => rpc("cli.jobs", {}).then((r) => (r.jobs as CliJob[] | null) ?? []),
       dataPaths: (id) =>
         rpc("cli.dataPaths", { id }).then((r) => (r.paths as CliDataPath[] | null) ?? []),

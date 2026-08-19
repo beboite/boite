@@ -12,6 +12,7 @@ use std::io::{Read, Write};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use super::catalog::Algo;
 use super::Failed;
 
 /// A text answer nobody reads past: a version pointer is one line, a release
@@ -159,14 +160,19 @@ fn stream_to_file(
     Ok(())
 }
 
-/// The sha256 of a file, lowercase hex, read in chunks so a 300 MB binary is not
+/// The digest of a file, lowercase hex, read in chunks so a 300 MB binary is not
 /// a 300 MB allocation.
-pub fn sha256(path: &Path) -> Result<String, Failed> {
-    use sha2::{Digest, Sha256};
+///
+/// Which hash is the vendor's choice rather than this module's: one publishes a
+/// sha256 manifest and another a sha512, and running the wrong one over the right
+/// file is a mismatch that reads as a compromised download.
+pub fn digest(path: &Path, algo: Algo) -> Result<String, Failed> {
+    use sha2::{Digest, Sha256, Sha512};
 
     let mut file = std::fs::File::open(path)
         .map_err(|e| Failed(format!("cannot read {}: {e}", path.display())))?;
-    let mut hasher = Sha256::new();
+    let mut sha256 = Sha256::new();
+    let mut sha512 = Sha512::new();
     let mut buffer = vec![0u8; CHUNK];
     loop {
         let read = file
@@ -175,11 +181,14 @@ pub fn sha256(path: &Path) -> Result<String, Failed> {
         if read == 0 {
             break;
         }
-        hasher.update(&buffer[..read]);
+        match algo {
+            Algo::Sha256 => sha256.update(&buffer[..read]),
+            Algo::Sha512 => sha512.update(&buffer[..read]),
+        }
     }
-    Ok(hasher
-        .finalize()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect())
+    let hex = |bytes: &[u8]| -> String { bytes.iter().map(|byte| format!("{byte:02x}")).collect() };
+    Ok(match algo {
+        Algo::Sha256 => hex(&sha256.finalize()),
+        Algo::Sha512 => hex(&sha512.finalize()),
+    })
 }

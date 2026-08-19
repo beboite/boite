@@ -320,8 +320,9 @@
       {:else}
         <!-- No verified way to register this one from a command line. Inventing
              `<agent> mcp add …` from the label was wrong twice over: the binary
-             is not always the label (copilot runs as `gh copilot`) and the
-             subcommand is not always non-interactive (copilot's opens a form).
+             is not always the label (cursor runs as `cursor-agent`, antigravity
+             as `agy`) and the subcommand is not always non-interactive
+             (copilot's opens a form).
              So offer the path and let the user register it the way their agent
              documents. -->
         <button
