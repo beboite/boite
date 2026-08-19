@@ -85,12 +85,24 @@ impl Plan {
 }
 
 /// Classifies every path across the three sides.
-pub fn compare(local: &Files, remote: &Files, base: &Files) -> Plan {
+///
+/// `settled` is the paths a person already decided this round. They skip the
+/// lattice entirely and travel as this machine has them: the merge tool wrote
+/// the answer here, and asking again would be asking the same question twice.
+/// Without this a resolved file compares as diverged for ever, because it
+/// matches neither the base nor the other side — which is exactly what the
+/// merging was for.
+pub fn compare(local: &Files, remote: &Files, base: &Files, settled: &BTreeSet<String>) -> Plan {
     let mut plan = Plan::default();
     let paths: BTreeSet<&String> =
         local.keys().chain(remote.keys()).chain(base.keys()).collect();
     for path in paths {
-        match classify(local.get(path), remote.get(path), base.get(path)) {
+        let decided = if settled.contains(path) && local.contains_key(path) {
+            Class::LocalOnly
+        } else {
+            classify(local.get(path), remote.get(path), base.get(path))
+        };
+        match decided {
             Class::Unchanged => plan.unchanged += 1,
             Class::Converged => plan.converged += 1,
             Class::LocalOnly => {
@@ -174,6 +186,10 @@ fn divergence(
 mod tests {
     use super::*;
 
+    fn nothing() -> BTreeSet<String> {
+        BTreeSet::new()
+    }
+
     fn files(pairs: &[(&str, &str)]) -> Files {
         pairs.iter().map(|(path, body)| ((*path).to_string(), body.as_bytes().to_vec())).collect()
     }
@@ -209,7 +225,7 @@ mod tests {
             ("agents/.agents/AGENTS.md", "# theirs\n"),
             ("claude/.claude/settings.json", r#"{"model":"sonnet"}"#),
         ]);
-        let plan = compare(&local, &remote, &Files::new());
+        let plan = compare(&local, &remote, &Files::new(), &nothing());
 
         assert_eq!(plan.diverged.len(), 2, "{:?}", plan.diverged);
         assert!(plan.to_machine.is_empty(), "a first sync wrote to the machine");
@@ -222,7 +238,7 @@ mod tests {
     #[test]
     fn a_first_sync_that_already_agrees_is_not_a_conflict() {
         let both = files(&[("agents/.agents/AGENTS.md", "# same\n")]);
-        let plan = compare(&both, &both, &Files::new());
+        let plan = compare(&both, &both, &Files::new(), &nothing());
         assert!(plan.diverged.is_empty());
         assert_eq!(plan.converged, 1);
         assert!(plan.settled());
@@ -234,7 +250,7 @@ mod tests {
     #[test]
     fn a_local_deletion_is_not_propagated() {
         let base = files(&[("agents/.agents/AGENTS.md", "# was\n")]);
-        let plan = compare(&Files::new(), &base, &base);
+        let plan = compare(&Files::new(), &base, &base, &nothing());
         assert!(plan.to_repo.is_empty());
         assert_eq!(plan.to_machine.len(), 1);
         assert!(plan.diverged.is_empty());
@@ -245,7 +261,7 @@ mod tests {
     #[test]
     fn a_remote_deletion_is_not_propagated() {
         let base = files(&[("agents/.agents/AGENTS.md", "# was\n")]);
-        let plan = compare(&base, &Files::new(), &base);
+        let plan = compare(&base, &Files::new(), &base, &nothing());
         assert!(plan.to_machine.is_empty());
         assert_eq!(plan.to_repo.len(), 1);
         assert!(plan.diverged.is_empty());
@@ -255,11 +271,11 @@ mod tests {
     #[test]
     fn a_file_new_on_one_side_travels_without_a_question() {
         let mine = files(&[("agents/.agents/new.md", "# new\n")]);
-        let plan = compare(&mine, &Files::new(), &Files::new());
+        let plan = compare(&mine, &Files::new(), &Files::new(), &nothing());
         assert_eq!(plan.to_repo.len(), 1);
         assert!(plan.diverged.is_empty());
 
-        let plan = compare(&Files::new(), &mine, &Files::new());
+        let plan = compare(&Files::new(), &mine, &Files::new(), &nothing());
         assert_eq!(plan.to_machine.len(), 1);
         assert!(plan.diverged.is_empty());
     }
@@ -272,6 +288,7 @@ mod tests {
             &files(&[("agents/.agents/AGENTS.md", "# mine\n")]),
             &files(&[("agents/.agents/AGENTS.md", "# theirs\n")]),
             &files(&[("agents/.agents/AGENTS.md", "# base\n")]),
+            &nothing(),
         );
         assert!(!plan.settled());
         assert!(plan.to_machine.is_empty() && plan.to_repo.is_empty());
@@ -285,6 +302,7 @@ mod tests {
             &files(&[("claude/.claude/settings.json", r#"{"model":"opus"}"#)]),
             &files(&[("claude/.claude/settings.json", r#"{"model":"sonnet"}"#)]),
             &Files::new(),
+            &nothing(),
         );
         assert_eq!(plan.diverged[0].source_id, "claude");
         assert!(!plan.diverged[0].binary);
@@ -297,10 +315,32 @@ mod tests {
     fn a_side_that_is_not_text_is_flagged_rather_than_shown() {
         let mut remote = Files::new();
         remote.insert("agents/.agents/x.md".into(), vec![0xff, 0xfe, 0x00]);
-        let plan = compare(&files(&[("agents/.agents/x.md", "# text\n")]), &remote, &Files::new());
+        let plan = compare(&files(&[("agents/.agents/x.md", "# text\n")]), &remote, &Files::new(), &nothing());
         assert!(plan.diverged[0].binary);
         assert!(plan.diverged[0].remote.is_none());
         assert_eq!(plan.diverged[0].local.as_deref(), Some("# text\n"));
+    }
+
+    /// A file the user merged travels as this machine has it, whatever the base
+    /// says. Without this it would compare as diverged for ever — matching
+    /// neither side — which is what the merging was supposed to end.
+    #[test]
+    fn a_file_the_user_settled_is_not_asked_about_again() {
+        let merged = files(&[("agents/.agents/AGENTS.md", "# mine
+# theirs
+")]);
+        let remote = files(&[("agents/.agents/AGENTS.md", "# theirs
+")]);
+        let mut settled = BTreeSet::new();
+        settled.insert("agents/.agents/AGENTS.md".to_string());
+
+        let asked_again = compare(&merged, &remote, &Files::new(), &nothing());
+        assert_eq!(asked_again.diverged.len(), 1, "without the settled list");
+
+        let plan = compare(&merged, &remote, &Files::new(), &settled);
+        assert!(plan.diverged.is_empty(), "the user was asked the same question twice");
+        assert_eq!(plan.to_repo.len(), 1);
+        assert!(plan.settled());
     }
 
     /// Both directions in one pass, because a real sync is rarely one-sided.
@@ -321,7 +361,7 @@ mod tests {
             ("agents/.agents/b.md", "# theirs\n"),
             ("agents/.agents/c.md", "# base\n"),
         ]);
-        let plan = compare(&local, &remote, &base);
+        let plan = compare(&local, &remote, &base, &nothing());
         assert_eq!(plan.to_repo.keys().collect::<Vec<_>>(), vec!["agents/.agents/a.md"]);
         assert_eq!(plan.to_machine.keys().collect::<Vec<_>>(), vec!["agents/.agents/b.md"]);
         assert_eq!(plan.unchanged, 1);
