@@ -13,6 +13,22 @@ const URL = "ws://127.0.0.1:7399/ws";
 const HTTP = URL.replace(/^ws/, "http").replace(/\/ws\/?$/, "");
 const BOOTSTRAP = process.env.BOITE_TOKEN || "test";
 const dec = new TextDecoder();
+
+// The one command this drives has to exist on whatever runs it. `cmd` is not on
+// a Linux runner and `sh` is not on Windows, and a script that only ever ran on
+// its author's machine is how this one reached CI red the first time it was
+// wired up: it passed here and could not have passed there. Both spellings
+// print the same mark and then stay alive long enough for the detach-and-
+// reattach half to have something to replay.
+const WINDOWS = process.platform === "win32";
+const MARKER = "REMOTEMARK";
+const talker = WINDOWS
+  ? { cmd: "cmd", args: ["/c", `echo ${MARKER} & ping -n 3 127.0.0.1 >NUL`] }
+  : { cmd: "sh", args: ["-c", `echo ${MARKER}; sleep 2`] };
+// Reattaching wants a shell that sits there rather than the command above a
+// second time: the point is the replay, and a fresh copy of the same output
+// would pass the check whether or not anything was replayed.
+const idler = { cmd: WINDOWS ? "cmd" : "sh", args: [] as string[] };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 let fail = false;
@@ -65,13 +81,7 @@ let out = "";
 const key = await rb.pty.open(
   {
     threadId,
-    spec: {
-      cwd: process.cwd(),
-      cmd: "cmd",
-      args: ["/c", "echo REMOTEMARK & ping -n 3 127.0.0.1 >NUL"],
-      cols: 80,
-      rows: 24,
-    },
+    spec: { cwd: process.cwd(), ...talker, cols: 80, rows: 24 },
     meta: { projectId: "p1", label: "t", iconKey: null },
   },
   (e) => {
@@ -88,7 +98,7 @@ const key = await rb.pty.open(
 check("pty.open returns key", !!key, `key=${String(key).slice(0, 8)}`);
 
 await sleep(1200);
-check("live output", out.includes("REMOTEMARK"), `(${out.length} bytes)`);
+check("live output", out.includes(MARKER), `(${out.length} bytes)`);
 
 // detach (release) then reattach -> replay carries the earlier output
 await rb.pty.release(key);
@@ -97,7 +107,7 @@ out = "";
 const key2 = await rb.pty.open(
   {
     threadId,
-    spec: { cwd: process.cwd(), cmd: "cmd", args: [], cols: 80, rows: 24 },
+    spec: { cwd: process.cwd(), ...idler, cols: 80, rows: 24 },
     meta: { projectId: "p1", label: "t", iconKey: null },
   },
   (e) => {
@@ -105,7 +115,7 @@ const key2 = await rb.pty.open(
   },
 );
 await sleep(400);
-check("reattach replay", out.includes("REMOTEMARK"));
+check("reattach replay", out.includes(MARKER));
 
 const threads = await rb.db.loadThreads();
 const t = threads.find((x) => x.id === threadId);

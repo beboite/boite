@@ -30,6 +30,31 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const FULL_SCOPES = ["read", "write", "terminal", "approve", "admin"];
 
+// The shell every spawn below asks for. `bash` is on the Linux runner this job
+// happens to use and is not on a Windows machine, which made the script pass in
+// ci and fail for anyone running it locally on the platform boite is mostly
+// developed on. `SHELL_ARGS` builds the two-part "say this, then stay alive"
+// invocation both spellings need.
+const WINDOWS = process.platform === "win32";
+const SHELL = WINDOWS ? "cmd" : "bash";
+/**
+ * `steps` are shell-agnostic fragments: "echo X", "sleep 1". Joined with the
+ * separator each shell understands, and `sleep N` rewritten as the ping trick
+ * cmd needs, since cmd has no sleep.
+ */
+const shellArgs = (steps) =>
+  WINDOWS
+    ? [
+        "/c",
+        steps
+          .map((s) => {
+            const secs = /^sleep (\d+)$/.exec(s);
+            return secs ? `ping -n ${Number(secs[1]) + 1} 127.0.0.1 >NUL` : s;
+          })
+          .join(" & "),
+      ]
+    : ["-c", steps.join("; ")];
+
 // **The per-IP lockout is five failures, and every check below that expects a
 // refusal spends one of them.** A success clears the count, so the negative
 // checks are interleaved with real connections on purpose: four in a row is the
@@ -311,8 +336,8 @@ const thread = {
   id: threadId,
   projectId: "smoke",
   label: "smoke",
-  cmd: "bash",
-  args: ["-c", "echo SMOKEMARK; sleep 1; echo MIDMARK; sleep 60"],
+  cmd: SHELL,
+  args: shellArgs(["echo SMOKEMARK", "sleep 1", "echo MIDMARK", "sleep 60"]),
   iconKey: null,
 };
 await c.rpc("thread.spawn", { thread, cwd: CWD, cols: 80, rows: 24 });
@@ -352,8 +377,12 @@ await c.rpc("thread.spawn", {
     id: probeId,
     projectId: "smoke",
     label: "probe",
-    cmd: "bash",
-    args: ["-c", "echo URL=$BOITE_MCP_URL; echo FILE=$BOITE_KEY_FILE; sleep 30"],
+    cmd: SHELL,
+    args: shellArgs([
+      WINDOWS ? "echo URL=%BOITE_MCP_URL%" : "echo URL=$BOITE_MCP_URL",
+      WINDOWS ? "echo FILE=%BOITE_KEY_FILE%" : "echo FILE=$BOITE_KEY_FILE",
+      "sleep 30",
+    ]),
     iconKey: null,
   },
   cwd: CWD,
@@ -362,7 +391,14 @@ await c.rpc("thread.spawn", {
 });
 await c.rpc("thread.attach", { threadId: probeId, cols: 200, rows: 24 });
 await sleep(900);
-const said = c.out(probeId);
+// ConPTY redraws the line it just wrote, so the value comes back with an
+// erase-to-end-of-line escape glued to its tail and `\S+` happily takes it
+// as part of a path. Strip the escapes before reading anything out.
+// Built rather than written as a literal: an escape byte inside a regex
+// literal is what `no-control-regex` is there to catch, and it is right
+// every other time.
+const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[ -/]*[@-~]`, "g");
+const said = c.out(probeId).replace(ANSI, "");
 const agentUrl = said.match(/URL=(\S+)/)?.[1];
 const keyFile = said.match(/FILE=(\S+)/)?.[1];
 check("a spawned terminal is told where the agent endpoint is", !!agentUrl && !!keyFile);
@@ -777,7 +813,7 @@ if (ro) {
   const info = await ro.rpc("git.repoInfo", { path: CWD });
   check("a read-only device still reads", typeof info?.isRepo === "boolean");
   await refuses("a read-only device cannot open a terminal", "thread.spawn", {
-    thread: { id: crypto.randomUUID(), projectId: "smoke", label: "nope", cmd: "bash", args: [] },
+    thread: { id: crypto.randomUUID(), projectId: "smoke", label: "nope", cmd: SHELL, args: [] },
     cwd: CWD,
     cols: 80,
     rows: 24,
@@ -845,7 +881,7 @@ await c.rpc("pairing.revoke", { id: readonly.pairing.id });
 // the machine hosting the workspace.
 const replied = await c.rpc("thread.reply", { threadId, answer: "escape" });
 check("thread.reply accepts an answer from the vocabulary", replied?.ok === true);
-for (const answer of ["", "Y", "yes\r", "0", "rm -rf /", "[A", "enter "]) {
+for (const answer of ["", "Y", "yes\r", "0", "rm -rf /", "\x1b[A", "enter "]) {
   let refused = false;
   try {
     await c.rpc("thread.reply", { threadId, answer });
