@@ -21,6 +21,12 @@
     "budget": "node scripts/bundle-budget.mjs"
   },
   "license": "MIT",
+  "//overrides": "Every @codemirror/lang-* package depends on @codemirror/state, view and autocomplete with its own range, and bumping only the three top-level ones left two copies of each in the tree. Every lazily loaded grammar chunk then carried its own copy: 1516 KB of extra shipped bytes for nothing, which is what took `bun run budget` over its ceiling. CodeMirror packages are documented as needing exactly one copy of state and view at runtime, so this is not only about size.",
+  "overrides": {
+    "@codemirror/state": "6.7.1",
+    "@codemirror/view": "6.43.9",
+    "@codemirror/autocomplete": "6.20.3"
+  },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.3",
     "@codemirror/commands": "^6.11.0",
