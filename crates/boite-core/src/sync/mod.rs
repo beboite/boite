@@ -31,6 +31,7 @@
 pub mod apply;
 pub mod home;
 pub mod manifest;
+pub mod mirror;
 pub mod plan;
 pub mod portable;
 pub mod scan;
