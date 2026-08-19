@@ -22,9 +22,22 @@ const dec = new TextDecoder();
 // reattach half to have something to replay.
 const WINDOWS = process.platform === "win32";
 const MARKER = "REMOTEMARK";
+// The second mark is printed a second later, which is what the reattach half
+// reads. A remote reattach asks for the delta since the byte this client
+// already has — that is the point of keeping the offset across a detach, so a
+// terminal does not redraw what is already on it — so the first mark is
+// precisely what a correct server does not send again, and a check for it
+// tested the ConPTY redraw that happened to resend it rather than the replay.
+const MARKER2 = "REMOTEBACK";
 const talker = WINDOWS
-  ? { cmd: "cmd", args: ["/c", `echo ${MARKER} & ping -n 3 127.0.0.1 >NUL`] }
-  : { cmd: "sh", args: ["-c", `echo ${MARKER}; sleep 2`] };
+  ? {
+      cmd: "cmd",
+      args: [
+        "/c",
+        `echo ${MARKER} & ping -n 2 127.0.0.1 >NUL & echo ${MARKER2} & ping -n 30 127.0.0.1 >NUL`,
+      ],
+    }
+  : { cmd: "sh", args: ["-c", `echo ${MARKER}; sleep 1; echo ${MARKER2}; sleep 30`] };
 // Reattaching wants a shell that sits there rather than the command above a
 // second time: the point is the replay, and a fresh copy of the same output
 // would pass the check whether or not anything was replayed.
@@ -112,9 +125,10 @@ check("pty.open returns key", !!key, `key=${String(key).slice(0, 8)}`);
 await until(() => out.includes(MARKER));
 check("live output", out.includes(MARKER), `(${out.length} bytes)`);
 
-// detach (release) then reattach -> replay carries the earlier output
+// detach (release), let the terminal talk to nobody for a moment, then
+// reattach: what comes back is what was missed.
 await rb.pty.release(key);
-await sleep(300);
+await sleep(1500);
 out = "";
 const key2 = await rb.pty.open(
   {
@@ -126,8 +140,8 @@ const key2 = await rb.pty.open(
     if (e.type === "output") out += dec.decode(e.bytes);
   },
 );
-await until(() => out.includes(MARKER));
-check("reattach replay", out.includes(MARKER), `(${out.length} bytes)`);
+await until(() => out.includes(MARKER2));
+check("reattach replays what was missed", out.includes(MARKER2), `(${out.length} bytes)`);
 
 const threads = await rb.db.loadThreads();
 const t = threads.find((x) => x.id === threadId);
