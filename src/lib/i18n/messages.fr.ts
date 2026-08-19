@@ -174,6 +174,9 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
 
   "experiments.intro":
     "Chacune remplace un pan entier de l'interface. On peut revenir en arrière sans risque.",
+  "experiments.home": "Accueil",
+  "experiments.homeDesc":
+    "Un accueil d'espace de travail : agents en vie, consommation de tokens de tous les projets, et une boîte de ce qui vous attend.",
   "experiments.sidebarDesign": "Lignes de thread",
   "experiments.sidebarDesignDesc":
     "Classique entoure le logo de l'agent avec l'état du thread. Lumineux allume toute la ligne avec, et y fait traverser une lumière pendant qu'un agent travaille.",
@@ -226,6 +229,13 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
     "Choisissez-en un pour l'entendre. La synthèse est fabriquée à la volée et ne télécharge rien ; l'échantillon est six claquements dans un fichier de 34 Ko, récupéré la première fois que vous le demandez et jamais avant.",
   "titlebar.whip": "Claquer le fouet",
   "titlebar.whipDrop": "Lâcher le fouet",
+
+  "home.title": "Accueil",
+  "home.agentsLive": "Agents en vie",
+  "home.tokens": "Tokens",
+  "home.inbox": "Boîte de réception",
+  "home.empty": "Rien n'attend.",
+  "home.goToProject": "Aller au projet",
 
   "welcome.pickFolder": "Choisissez un dossier pour créer votre premier projet.",
   "welcome.tapToOpen": "Appuyez sur + pour ouvrir un terminal.",
@@ -933,6 +943,12 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   // deux fois.
   "connection.refused": "{name} a refusé le jeton",
   "connection.refusedDesc": "Il a été modifié ou révoqué, et se reconnecter ne vous fera pas rentrer. Saisissez le nouveau depuis le sélecteur d'espace de travail.",
+  "general.openOnLaunch": "À l'ouverture",
+  "general.openOnLaunchDesc":
+    "Où s'ouvre la fenêtre au démarrage de Boite. Accueil n'est utilisé que si l'expérience Accueil est activée.",
+  "general.openOnLaunchHome": "Accueil",
+  "general.openOnLaunchProject": "Projet",
+  "general.openOnLaunchLast": "Dernière vue",
   "general.pushTitle": "Notifications push",
   "general.pushDesc": "Être prévenu qu'un agent a besoin de vous, même application fermée.",
   "general.pushEnable": "Activer les notifications",

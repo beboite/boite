@@ -2,8 +2,16 @@
   import { onMount } from "svelte";
   import ShortcutEditor from "$lib/features/settings/ShortcutEditor.svelte";
   import SettingsCard from "$lib/shared/components/SettingsCard.svelte";
+  import { settings } from "$lib/features/settings/store.svelte";
   import { enablePush, pushPermission, pushSupported } from "$lib/features/push/api";
-  import { t } from "$lib/i18n/index.svelte";
+  import { t, type MessageKey } from "$lib/i18n/index.svelte";
+  import type { OpenOnLaunch } from "$lib/types";
+
+  const LAUNCH_OPTIONS: { id: OpenOnLaunch; labelKey: MessageKey }[] = [
+    { id: "home", labelKey: "general.openOnLaunchHome" },
+    { id: "project", labelKey: "general.openOnLaunchProject" },
+    { id: "last", labelKey: "general.openOnLaunchLast" },
+  ];
 
   // Updates moved to About, with the version they are about.
 
@@ -29,6 +37,28 @@
     }
   }
 </script>
+
+<SettingsCard
+  title={t("general.openOnLaunch")}
+  anchor="general.openOnLaunch"
+  description={t("general.openOnLaunchDesc")}
+>
+  <select
+    class="w-full rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-1.5 text-sm text-foreground"
+    value={settings.state.openOnLaunch}
+    aria-label={t("general.openOnLaunch")}
+    onchange={(e) => {
+      const value = e.currentTarget.value;
+      if (value === "home" || value === "project" || value === "last") {
+        settings.setOpenOnLaunch(value);
+      }
+    }}
+  >
+    {#each LAUNCH_OPTIONS as option (option.id)}
+      <option value={option.id}>{t(option.labelKey)}</option>
+    {/each}
+  </select>
+</SettingsCard>
 
 {#if showPush}
   <SettingsCard title={t("general.pushTitle")} anchor="general.pushTitle" description={t("general.pushDesc")}>

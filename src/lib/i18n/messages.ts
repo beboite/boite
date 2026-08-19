@@ -172,6 +172,9 @@ export const EN_MESSAGES = {
 
   "experiments.intro":
     "Each of these replaces a whole piece of the interface. They are safe to flip back.",
+  "experiments.home": "Home",
+  "experiments.homeDesc":
+    "A workspace home: live agents, token use across every project, and an inbox of what is waiting on you.",
   "experiments.sidebarDesign": "Thread rows",
   "experiments.sidebarDesignDesc":
     "Classic rings the agent's logo with the thread's state. Glow lights the whole row with it, and runs a light across the row while an agent works.",
@@ -224,6 +227,13 @@ export const EN_MESSAGES = {
     "Pick one to hear it. The synth is built on the spot and downloads nothing; the sample is six cracks in a 34 KB file, fetched the first time you ask for it and never before.",
   "titlebar.whip": "Crack the whip",
   "titlebar.whipDrop": "Drop the whip",
+
+  "home.title": "Home",
+  "home.agentsLive": "Live agents",
+  "home.tokens": "Tokens",
+  "home.inbox": "Inbox",
+  "home.empty": "Nothing waiting.",
+  "home.goToProject": "Go to project",
 
   "welcome.pickFolder": "Pick a folder to create your first project.",
   "welcome.tapToOpen": "Tap + to open a terminal.",
@@ -940,6 +950,12 @@ export const EN_MESSAGES = {
   // over.
   "connection.refused": "{name} refused the token",
   "connection.refusedDesc": "It was changed or revoked, and reconnecting will not get you back in. Enter the new one from the workspace picker.",
+  "general.openOnLaunch": "Open on launch",
+  "general.openOnLaunchDesc":
+    "Where the window opens when Boite starts. Home is only used while the home experiment is on.",
+  "general.openOnLaunchHome": "Home",
+  "general.openOnLaunchProject": "Project",
+  "general.openOnLaunchLast": "Last view",
   "general.pushTitle": "Push notifications",
   "general.pushDesc": "Be told an agent needs you, even with the app closed.",
   "general.pushEnable": "Enable notifications",

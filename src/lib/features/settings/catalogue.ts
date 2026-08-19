@@ -51,6 +51,7 @@ export interface SettingEntry {
 }
 
 export const SETTINGS_CATALOGUE: SettingEntry[] = [
+  { tab: "general", key: "general.openOnLaunch", descKey: "general.openOnLaunchDesc" },
   { tab: "general", key: "general.pushTitle", descKey: "general.pushDesc", when: "push" },
   { tab: "general", key: "shortcuts.title", descKey: "shortcuts.description" },
 
@@ -99,6 +100,7 @@ export const SETTINGS_CATALOGUE: SettingEntry[] = [
   { tab: "plugins", key: "plugin.codexTitle", descKey: "plugin.codexDesc" },
   { tab: "plugins", key: "plugin.fastMcpSshTitle", descKey: "plugin.fastMcpSshDesc" },
 
+  { tab: "experiments", key: "experiments.home", descKey: "experiments.homeDesc" },
   { tab: "experiments", key: "experiments.infoBox", descKey: "experiments.infoBoxDesc" },
   { tab: "experiments", key: "experiments.smartSort", descKey: "experiments.smartSortDesc" },
   { tab: "experiments", key: "experiments.whip", descKey: "experiments.whipDesc" },

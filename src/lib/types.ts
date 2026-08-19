@@ -116,6 +116,15 @@ export interface Shortcut {
 
 export type LocaleSetting = "system" | "en" | "fr";
 
+/**
+ * Where the window goes when Boite starts.
+ *
+ * `home` only lands while `experimentHome` is on. `last` leaves the existing
+ * boot path alone. `project` is also what a launch resolves to whenever the
+ * experiment is off, whatever this field says.
+ */
+export type OpenOnLaunch = "home" | "project" | "last";
+
 export interface Settings {
   shortcuts: Shortcut[];
   /**
@@ -299,6 +308,15 @@ export interface Settings {
   whipSound: WhipSound;
   smartSortBy: SmartSortBy;
   smartSortDirection: SortDirection;
+  /**
+   * Experiment: a workspace home with live agents, token use, and an inbox.
+   * Off keeps launch on a project, whatever `openOnLaunch` says.
+   */
+  experimentHome: boolean;
+  /**
+   * Where the window goes when Boite starts. Resolved by `resolveLaunchView`.
+   */
+  openOnLaunch: OpenOnLaunch;
 }
 
 /**
@@ -430,7 +448,7 @@ export interface TodoItem {
   updatedAt: number;
 }
 
-export type View = "terminal" | "settings" | "editor" | "project";
+export type View = "terminal" | "settings" | "editor" | "project" | "home";
 
 // Bottom-bar destinations in the phone layout. Independent of `View`: the
 // terminal/editor/settings desktop views still drive the shared viewport and
@@ -441,4 +459,5 @@ export type MobileTab =
   | "terminal"
   | "todo"
   | "projects"
-  | "settings";
+  | "settings"
+  | "home";
