@@ -47,6 +47,11 @@ pub enum AppEvent {
     /// row is not carried, because the writer may be a phone that has just
     /// finished pairing and holds no socket yet.
     PairingsChanged,
+    /// A moment landed on the workspace pulse. Carries only the sequence:
+    /// whoever cares reads by cursor, so the row itself never rides the fanout.
+    MomentAppended {
+        seq: i64,
+    },
     /// One device is out, as of now.
     ///
     /// Broadcast rather than left to the next call, and this is the half that
@@ -94,6 +99,9 @@ impl AppEvent {
             ),
             AppEvent::AgentRequest(request) => Event::new("agent.request", request.clone()),
             AppEvent::PairingsChanged => Event::new("pairings.changed", serde_json::json!({})),
+            AppEvent::MomentAppended { seq } => {
+                Event::new("moment.appended", serde_json::json!({ "seq": seq }))
+            }
             // Named on the wire so every *other* device can refresh its list.
             // The one being revoked never reads it: its socket is closed by the
             // task that received it.

@@ -21,6 +21,7 @@ import type {
   WhipSound,
 } from "$lib/types";
 import { isInfoBoxAnchor } from "$lib/features/infobox/anchor";
+import { orchestratorEnabledFor } from "./orchestratorEnabledFor";
 import { DEFAULT_KEYBINDINGS } from "$lib/shared/keyboard/defaults";
 import {
   mergeDefaultKeybindings,
@@ -171,6 +172,16 @@ const DEFAULTS: Settings = {
   smartSortDirection: "desc",
   experimentHome: false,
   openOnLaunch: "last",
+  experimentOrchestrator: false,
+  experimentOrchestratorPerProject: false,
+  orchestratorAgent: null,
+  orchestratorByProject: {},
+  orchestratorAutonomy: "observer",
+  orchestratorIdleMinutes: 20,
+  orchestratorDailyTokenCap: 0,
+  orchestratorSessionHours: 24,
+  dispatchTtlMinutes: 60,
+  orchestratorBlindProjects: [],
 };
 
 // First-run guess: touch-primary, narrow screens (a phone TWA/PWA) default to
@@ -206,6 +217,35 @@ function isWhipSound(value: unknown): value is WhipSound {
 
 function isOpenOnLaunch(value: unknown): value is OpenOnLaunch {
   return value === "home" || value === "project" || value === "last";
+}
+
+function isOrchestratorAutonomy(
+  value: unknown,
+): value is Settings["orchestratorAutonomy"] {
+  return value === "observer" || value === "dispatcher" || value === "autopilot";
+}
+
+// Per-project overrides: only "on"/"off" survive the read, anything else in a
+// row written by an older or foreign build falls back to the global answer.
+function readOnOffMap(value: unknown): Record<string, "on" | "off"> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const out: Record<string, "on" | "off"> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    if (v === "on" || v === "off") out[k] = v;
+  }
+  return out;
+}
+
+function readStringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
+}
+
+// A cap or a delay stored as anything but a usable number is the default, not a
+// crash and not a negative that would read as "always asleep".
+function readMinutes(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? value
+    : fallback;
 }
 
 /**
@@ -321,12 +361,18 @@ const DEVICE_FIELDS = [
   "confirmCloseThread",
   "experimentHome",
   "openOnLaunch",
+  // Arming the orchestrator is a device gesture, like every experiment flag:
+  // the phone opting in must not switch the desktop on. What the orchestrator
+  // *is* once armed (agent, autonomy, caps) stays in the workspace blob, where
+  // every device reads the same answer.
+  "experimentOrchestrator",
+  "experimentOrchestratorPerProject",
 ] as const;
 
 // Stamped on the blob so an absent key can be told apart from a key that had
 // not been promoted yet. Bump it whenever a field joins DEVICE_FIELDS, and list
 // the newcomers in PROMOTED_TO_DEVICE so they migrate once.
-const DEVICE_BLOB_VERSION = 2;
+const DEVICE_BLOB_VERSION = 3;
 
 // Moved out of the workspace blob. A device blob whose `v` is missing or older
 // than DEVICE_BLOB_VERSION has no key for the newcomers, and the workspace
@@ -342,6 +388,8 @@ const PROMOTED_TO_DEVICE: readonly string[] = [
   "confirmCloseThread",
   "experimentHome",
   "openOnLaunch",
+  "experimentOrchestrator",
+  "experimentOrchestratorPerProject",
 ];
 
 type DeviceBlob = Partial<Settings> & { v?: number };
@@ -386,6 +434,12 @@ function applyDeviceOverrides(state: Settings, dev: DeviceBlob): void {
   }
   if (!isOpenOnLaunch(state.openOnLaunch)) {
     state.openOnLaunch = DEFAULTS.openOnLaunch;
+  }
+  if (typeof state.experimentOrchestrator !== "boolean") {
+    state.experimentOrchestrator = DEFAULTS.experimentOrchestrator;
+  }
+  if (typeof state.experimentOrchestratorPerProject !== "boolean") {
+    state.experimentOrchestratorPerProject = DEFAULTS.experimentOrchestratorPerProject;
   }
 }
 
@@ -545,6 +599,41 @@ class SettingsStore {
         openOnLaunch: isOpenOnLaunch(stored.openOnLaunch)
           ? stored.openOnLaunch
           : DEFAULTS.openOnLaunch,
+        // The two arming flags are device-scoped; these blob reads only matter
+        // as the one-shot seed applyDeviceOverrides migrates from.
+        experimentOrchestrator:
+          typeof stored.experimentOrchestrator === "boolean"
+            ? stored.experimentOrchestrator
+            : DEFAULTS.experimentOrchestrator,
+        experimentOrchestratorPerProject:
+          typeof stored.experimentOrchestratorPerProject === "boolean"
+            ? stored.experimentOrchestratorPerProject
+            : DEFAULTS.experimentOrchestratorPerProject,
+        orchestratorAgent:
+          typeof stored.orchestratorAgent === "string" && stored.orchestratorAgent
+            ? stored.orchestratorAgent
+            : DEFAULTS.orchestratorAgent,
+        orchestratorByProject: readOnOffMap(stored.orchestratorByProject),
+        orchestratorAutonomy: isOrchestratorAutonomy(stored.orchestratorAutonomy)
+          ? stored.orchestratorAutonomy
+          : DEFAULTS.orchestratorAutonomy,
+        orchestratorIdleMinutes: readMinutes(
+          stored.orchestratorIdleMinutes,
+          DEFAULTS.orchestratorIdleMinutes,
+        ),
+        orchestratorDailyTokenCap: readMinutes(
+          stored.orchestratorDailyTokenCap,
+          DEFAULTS.orchestratorDailyTokenCap,
+        ),
+        orchestratorSessionHours: readMinutes(
+          stored.orchestratorSessionHours,
+          DEFAULTS.orchestratorSessionHours,
+        ),
+        dispatchTtlMinutes: readMinutes(
+          stored.dispatchTtlMinutes,
+          DEFAULTS.dispatchTtlMinutes,
+        ),
+        orchestratorBlindProjects: readStringList(stored.orchestratorBlindProjects),
         // A settings row written before the wizard existed carries no flag.
         // Its owner already has a shortcut list, and finishing the wizard
         // replaces that list wholesale, so an existing install counts as
@@ -935,6 +1024,83 @@ class SettingsStore {
     if (!isOpenOnLaunch(value) || this.state.openOnLaunch === value) return;
     this.state.openOnLaunch = value;
     this.persistDeviceNow();
+  }
+
+  // Arming is device-scoped, configuring is workspace-scoped: the two flags
+  // below write localStorage, everything after them writes the shared blob.
+  setExperimentOrchestrator(value: boolean) {
+    if (this.state.experimentOrchestrator === value) return;
+    this.state.experimentOrchestrator = value;
+    this.persistDeviceNow();
+  }
+
+  setExperimentOrchestratorPerProject(value: boolean) {
+    if (this.state.experimentOrchestratorPerProject === value) return;
+    this.state.experimentOrchestratorPerProject = value;
+    this.persistDeviceNow();
+  }
+
+  async setOrchestratorAgent(value: string | null) {
+    const next = typeof value === "string" && value ? value : null;
+    if (this.state.orchestratorAgent === next) return;
+    this.state.orchestratorAgent = next;
+    await this.persist();
+  }
+
+  /** `null` clears the override, falling back to the global answer. */
+  async setOrchestratorForProject(projectId: string, value: "on" | "off" | null) {
+    if ((this.state.orchestratorByProject[projectId] ?? null) === value) return;
+    if (value === null) delete this.state.orchestratorByProject[projectId];
+    else this.state.orchestratorByProject[projectId] = value;
+    await this.persist();
+  }
+
+  async setOrchestratorAutonomy(value: Settings["orchestratorAutonomy"]) {
+    if (!isOrchestratorAutonomy(value) || this.state.orchestratorAutonomy === value)
+      return;
+    this.state.orchestratorAutonomy = value;
+    await this.persist();
+  }
+
+  async setOrchestratorIdleMinutes(value: number) {
+    const next = readMinutes(value, DEFAULTS.orchestratorIdleMinutes);
+    if (this.state.orchestratorIdleMinutes === next) return;
+    this.state.orchestratorIdleMinutes = next;
+    await this.persist();
+  }
+
+  async setOrchestratorDailyTokenCap(value: number) {
+    const next = readMinutes(value, DEFAULTS.orchestratorDailyTokenCap);
+    if (this.state.orchestratorDailyTokenCap === next) return;
+    this.state.orchestratorDailyTokenCap = next;
+    await this.persist();
+  }
+
+  async setOrchestratorSessionHours(value: number) {
+    const next = readMinutes(value, DEFAULTS.orchestratorSessionHours);
+    if (this.state.orchestratorSessionHours === next) return;
+    this.state.orchestratorSessionHours = next;
+    await this.persist();
+  }
+
+  async setDispatchTtlMinutes(value: number) {
+    const next = readMinutes(value, DEFAULTS.dispatchTtlMinutes);
+    if (this.state.dispatchTtlMinutes === next) return;
+    this.state.dispatchTtlMinutes = next;
+    await this.persist();
+  }
+
+  async setOrchestratorBlindProjects(value: string[]) {
+    const next = readStringList(value);
+    const current = this.state.orchestratorBlindProjects;
+    if (current.length === next.length && current.every((v, i) => v === next[i]))
+      return;
+    this.state.orchestratorBlindProjects = next;
+    await this.persist();
+  }
+
+  orchestratorEnabledFor(projectId: string | null): boolean {
+    return orchestratorEnabledFor(this.state, projectId);
   }
 
   // `persist()` strips every device field before it writes, so a setter that

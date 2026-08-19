@@ -105,8 +105,27 @@ pub struct Thread {
     /// Lifecycle status for delegation threads.
     #[serde(default)]
     pub delegation_status: Option<String>,
+    /// `"orchestrator"` on a thread Boite spawned as one, `None` on every
+    /// worker. Stamped by Boite at creation; `thread.update` cannot reach it
+    /// and `thread.create` ignores what a caller claims — it is what selects
+    /// the orchestrator tool tier, so it must not be claimable.
+    #[serde(default)]
+    pub role: Option<String>,
+    /// The project an orchestrator is scoped to, or `None` for the global one.
+    /// Same write rules as `role`.
+    #[serde(default)]
+    pub orchestrator_scope: Option<String>,
+    /// Whether this thread still accepts dispatched lines. The user mutes a
+    /// thread; an agent never re-arms one, which is why no agent-reachable
+    /// write carries it.
+    #[serde(default = "default_accept_dispatch")]
+    pub accept_dispatch: bool,
 }
 
 fn default_status() -> String {
     "idle".to_string()
+}
+
+fn default_accept_dispatch() -> bool {
+    true
 }

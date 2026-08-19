@@ -39,12 +39,14 @@ use crate::scope::ProjectRoots;
 use crate::store::Store;
 
 pub mod checkpoint;
+pub mod conduct;
 pub mod files;
 pub mod git;
 pub mod records;
 pub mod sessions;
 
 pub use checkpoint::Checkpoints;
+pub use conduct::Conduct;
 pub use files::Files;
 pub use git::Git;
 pub use records::{Records, ThreadPatch};
@@ -135,6 +137,15 @@ pub trait Host {
             .unwrap_or_default()
     }
 
+    /// The live pulse waits of this process, when it keeps any.
+    ///
+    /// `None` is honest for a test and for a host that never long-polls: a
+    /// `conduct.pulse` there answers immediately with `timedOut: true` rather
+    /// than parking a thread nothing will ever wake.
+    fn pulse_waiters(&self) -> Option<Arc<crate::pulse::Waiters>> {
+        None
+    }
+
     /// The rows this host keeps: projects, threads, todos, settings.
     ///
     /// `None` means it keeps none, and the record commands say so rather than
@@ -162,6 +173,7 @@ pub fn methods() -> impl Iterator<Item = &'static str> {
         .chain(sessions::ALL_METHODS)
         .chain(records::ALL_METHODS)
         .chain(checkpoint::ALL_METHODS)
+        .chain(conduct::ALL_METHODS)
         .copied()
 }
 
@@ -224,6 +236,7 @@ fn probe_params() -> Value {
         "id": "p", "todoId": "d", "settings": {}, "q": "q",
         "edge": "start", "to": "0",
         "status": "idle", "ids": [], "settled": true,
+        "text": "t",
     })
 }
 
@@ -234,10 +247,17 @@ fn probe_params() -> Value {
 #[derive(Debug, Clone)]
 pub enum Command {
     Checkpoints(Checkpoints),
+    Conduct(Conduct),
     Files(Files),
     Git(Git),
     Records(Records),
     Sessions(Sessions),
+}
+
+impl From<Conduct> for Command {
+    fn from(conduct: Conduct) -> Self {
+        Command::Conduct(conduct)
+    }
 }
 
 impl From<Checkpoints> for Command {
@@ -298,6 +318,9 @@ impl Command {
         if checkpoint::ALL_METHODS.contains(&method) {
             return Checkpoints::decode(method, params).map(Command::Checkpoints);
         }
+        if conduct::ALL_METHODS.contains(&method) {
+            return Conduct::decode(method, params).map(Command::Conduct);
+        }
         Err(format!("unknown method: {method}"))
     }
 
@@ -305,6 +328,7 @@ impl Command {
     pub fn name(&self) -> &'static str {
         match self {
             Command::Checkpoints(c) => c.name(),
+            Command::Conduct(c) => c.name(),
             Command::Files(f) => f.name(),
             Command::Git(g) => g.name(),
             Command::Records(r) => r.name(),
@@ -316,6 +340,7 @@ impl Command {
     pub fn wire(&self) -> Wire {
         match self {
             Command::Checkpoints(c) => c.wire(),
+            Command::Conduct(c) => c.wire(),
             Command::Files(f) => f.wire(),
             Command::Git(g) => g.wire(),
             Command::Records(r) => r.wire(),
@@ -332,6 +357,7 @@ impl Command {
     pub fn capability(&self) -> Capability {
         match self {
             Command::Checkpoints(c) => c.capability(),
+            Command::Conduct(c) => c.capability(),
             Command::Files(f) => f.capability(),
             Command::Git(g) => g.capability(),
             Command::Records(r) => r.capability(),
@@ -353,6 +379,7 @@ impl Command {
         grant.ensure(self.capability())?;
         match self {
             Command::Checkpoints(c) => c.prepare(host),
+            Command::Conduct(c) => c.prepare(host),
             Command::Files(f) => f.prepare(host),
             Command::Git(g) => g.prepare(host),
             Command::Records(r) => r.prepare(host),
@@ -379,6 +406,10 @@ pub enum Ready {
     /// "a host that keeps no records" a refusal at the boundary instead of an
     /// error thrown from inside the work.
     Records(Records, Arc<Store>),
+    /// An orchestration command, with the store and the live-wait registry the
+    /// host resolved for it. Same reasoning as [`Ready::Records`]; the registry
+    /// is optional because a host with no long-poll answers honestly without.
+    Conduct(Conduct, Arc<Store>, Option<Arc<crate::pulse::Waiters>>),
 }
 
 impl Ready {
@@ -395,7 +426,11 @@ impl Ready {
             Ready::Work(Command::Records(r)) => {
                 Err(format!("{} was not prepared with a store", r.name()))
             }
+            Ready::Work(Command::Conduct(c)) => {
+                Err(format!("{} was not prepared with a store", c.name()))
+            }
             Ready::Records(r, store) => r.run(&store),
+            Ready::Conduct(c, store, waiters) => c.run(&store, waiters),
         }
     }
 }
@@ -653,6 +688,11 @@ mod tests {
             ("checkpoint.fileVersions", ReadProject),
             ("checkpoint.restore", MutateProject),
             ("checkpoint.forget", MutateProject),
+            ("conduct.pulse", ReadProject),
+            ("conduct.record", MutateProject),
+            ("orchestrator.post", MutateProject),
+            ("orchestrator.say", MutateProject),
+            ("orchestrator.messages", ReadProject),
         ];
         let actual: Vec<(&str, Capability)> = every_command()
             .iter()

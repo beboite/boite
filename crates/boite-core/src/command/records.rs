@@ -487,6 +487,23 @@ impl Records {
                 // another device may have settled it since. A new row has no
                 // answer at all, which is what an ordinary live thread is.
                 thread.settled_at = store.thread_settled_at(&thread.id);
+                // The orchestration columns are never the caller's to state.
+                // `role` selects the orchestrator tool tier, so a create that
+                // took the caller's word for it would let any agent promote a
+                // row; a re-save keeps what the row says, and a new row is a
+                // worker until `orchestrator.start` (Grant::Local) stamps it.
+                match store.thread_orchestration(&thread.id) {
+                    Some((role, scope, accept)) => {
+                        thread.role = role;
+                        thread.orchestrator_scope = scope;
+                        thread.accept_dispatch = accept;
+                    }
+                    None => {
+                        thread.role = None;
+                        thread.orchestrator_scope = None;
+                        thread.accept_dispatch = true;
+                    }
+                }
                 store.save_thread(&thread)?;
                 // The row keeps the mark of its last run; the caller is told what
                 // that mark means, which for a row still naming a process is
@@ -758,6 +775,58 @@ mod tests {
         ask(&host, "thread.update", json!({ "threadId": "t", "title": null })).unwrap();
         let threads = ask(&host, "thread.list", json!({})).unwrap();
         assert_eq!(threads[0]["title"], json!(null));
+    }
+
+    /// The role barrier, named column by column: `role`, `orchestrator_scope`
+    /// and `accept_dispatch` are not writable through any record command. The
+    /// stamp selects the orchestrator tool tier, so a write path here would be
+    /// an agent promoting itself; the only write is
+    /// `Store::stamp_orchestrator_role`, reached by a `Grant::Local` command.
+    #[test]
+    fn the_orchestration_columns_are_not_claimable_through_records() {
+        let host = Rows::new("role-barrier");
+        let store = host.store().unwrap();
+
+        // A create that claims the role lands as a worker.
+        ask(
+            &host,
+            "thread.create",
+            json!({ "thread": { "id": "t", "projectId": "p", "label": "l", "cmd": "c",
+                                "args": [], "role": "orchestrator",
+                                "orchestratorScope": "p", "acceptDispatch": false } }),
+        )
+        .unwrap();
+        assert_eq!(
+            store.thread_orchestration("t"),
+            Some((None, None, true)),
+            "a caller stated the stamp and it must not land"
+        );
+
+        // An update that names the columns changes nothing: the patch does not
+        // carry them, by construction.
+        ask(
+            &host,
+            "thread.update",
+            json!({ "threadId": "t", "role": "orchestrator",
+                    "orchestratorScope": "p", "acceptDispatch": false }),
+        )
+        .unwrap();
+        assert_eq!(store.thread_orchestration("t"), Some((None, None, true)));
+
+        // And a re-save cannot wash a real stamp away either: the row's answer
+        // wins in both directions.
+        store.stamp_orchestrator_role("t", Some("p")).unwrap();
+        ask(
+            &host,
+            "thread.create",
+            json!({ "thread": { "id": "t", "projectId": "p", "label": "l", "cmd": "c",
+                                "args": [] } }),
+        )
+        .unwrap();
+        assert_eq!(
+            store.thread_orchestration("t"),
+            Some((Some("orchestrator".into()), Some("p".into()), true))
+        );
     }
 
     /// A blank name clears the override rather than storing a blank one, and a

@@ -489,6 +489,11 @@ pub fn run() {
             commands::records::records_workspace_info,
             commands::records::records_workspace_set_info,
             commands::records::records_search,
+            commands::conduct::conduct_pulse,
+            commands::conduct::conduct_record,
+            commands::conduct::conduct_orchestrator_post,
+            commands::conduct::conduct_orchestrator_say,
+            commands::conduct::conduct_orchestrator_messages,
             commands::window::set_keep_backdrop_active,
         ])
         .build(tauri::generate_context!())

@@ -317,6 +317,43 @@ export interface Settings {
    * Where the window goes when Boite starts. Resolved by `resolveLaunchView`.
    */
   openOnLaunch: OpenOnLaunch;
+  /**
+   * Experiment: the orchestrator layer. Device-scoped on purpose: arming is a
+   * per-device decision (this glass shows the chat), while everything the
+   * orchestrator *is* — its agent, its autonomy, its caps — is workspace
+   * configuration below, because the thread runs on the workspace and every
+   * device must agree on what it may do.
+   */
+  experimentOrchestrator: boolean;
+  /**
+   * Experiment: per-project orchestrators. Read by `orchestratorEnabledFor`
+   * only while `experimentOrchestrator` is on. Device-scoped like its parent.
+   */
+  experimentOrchestratorPerProject: boolean;
+  /**
+   * The harness the orchestrator runs, in `thread_spawn`'s agent vocabulary
+   * (a plain key or a `fastpick:provider:model` combo). Null means none was
+   * picked and the chat shows the selector instead of a composer: no default,
+   * every provider decision is explicit.
+   */
+  orchestratorAgent: string | null;
+  /** Per-project override: "on" | "off", absent inherits the global answer. */
+  orchestratorByProject: Record<string, "on" | "off">;
+  /** observer: answers only. dispatcher: may queue lines. autopilot: later. */
+  orchestratorAutonomy: "observer" | "dispatcher" | "autopilot";
+  /** Minutes of silence before the orchestrator session is put to sleep. */
+  orchestratorIdleMinutes: number;
+  /** Daily token budget; 0 means uncapped. Past it, the orchestrator sleeps. */
+  orchestratorDailyTokenCap: number;
+  /** Hours before a session is restarted fresh on a Boite-built briefing. */
+  orchestratorSessionHours: number;
+  /** Minutes a queued dispatch survives with no device to flush it. */
+  dispatchTtlMinutes: number;
+  /**
+   * Projects the orchestrator must not see at all: absent from its roster,
+   * search and transcripts. The refusal is named, never an empty answer.
+   */
+  orchestratorBlindProjects: string[];
 }
 
 /**

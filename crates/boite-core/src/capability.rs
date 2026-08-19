@@ -75,6 +75,15 @@ pub enum Grant {
     /// device authenticated on. Named so the bus takes one argument from every
     /// caller instead of an `Option` that means "skip the check".
     Local,
+
+    /// An orchestrator thread Boite spawned with a `role`.
+    ///
+    /// Not `Owner`, and that is the whole point: `Owner` reaches across
+    /// projects because a user is watching that terminal, and an orchestrator
+    /// is exactly the terminal the user is *not* watching. It reads and writes
+    /// inside a project, and anything that changes *where* work happens goes
+    /// through the approval queue like any other agent's ask.
+    Conduct,
 }
 
 impl Grant {
@@ -82,6 +91,10 @@ impl Grant {
         match self {
             Grant::Owner | Grant::Local => true,
             Grant::Project => capability != Capability::MutateAcross,
+            // Never `MutateAcross`, including for the global orchestrator: a
+            // cross-project spawn has to land in the approval queue rather
+            // than ride a grant nobody decided to widen.
+            Grant::Conduct => capability != Capability::MutateAcross,
         }
     }
 
@@ -117,6 +130,17 @@ mod tests {
                 assert!(grant.ensure(capability).is_ok(), "{grant:?} {capability:?}");
             }
         }
+    }
+
+    /// An orchestrator never reaches across projects on its own grant. Any
+    /// widening of this arm is a silent privilege escalation: the approval
+    /// queue is what a cross-project spawn must go through.
+    #[test]
+    fn conduct_never_crosses() {
+        assert!(Grant::Conduct.allows(Capability::ReadProject));
+        assert!(Grant::Conduct.allows(Capability::MutateProject));
+        assert!(!Grant::Conduct.allows(Capability::MutateAcross));
+        assert!(Grant::Conduct.ensure(Capability::MutateAcross).is_err());
     }
 
     /// The refusal is what the agent reads, so it has to say what to do next
