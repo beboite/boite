@@ -183,6 +183,23 @@ export interface Settings {
   idleAutocloseByIcon: Record<string, boolean>;
   confirmCloseThread: boolean;
   /**
+   * Where the configuration sync pushes and pulls. Null: not set up.
+   *
+   * In this blob rather than the device one because it describes the machine the
+   * threads run on — whose ~/.claude is read, whose git credentials are used —
+   * not the glass in front of the user. A phone on a boite-server that kept its
+   * own copy here would push an empty address over the server's.
+   */
+  syncRemoteUrl: string | null;
+  /** Whether opening Boite pulls. Off keeps the address and the button. */
+  syncOnLaunch: boolean;
+  /**
+   * Per source: an agent id, or `agents` for the shared instruction tree. An id
+   * that is absent is off, so nothing syncs until it is asked for — the only
+   * safe default for something that writes into a home directory.
+   */
+  syncSources: Record<string, boolean>;
+  /**
    * Which of git, files and todo the side panel is showing, or null when it is
    * closed.
    *

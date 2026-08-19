@@ -127,6 +127,9 @@ const DEFAULTS: Settings = {
   todoPromptTemplate: DEFAULT_TODO_PROMPT,
   agentTodoAccess: true,
   mcpYolo: false,
+  syncRemoteUrl: null,
+  syncOnLaunch: true,
+  syncSources: {},
   idleTimeoutMinutes: 10,
   idleAutocloseByIcon: {
     claude: true,
@@ -454,6 +457,18 @@ class SettingsStore {
           typeof stored.confirmCloseThread === "boolean"
             ? stored.confirmCloseThread
             : DEFAULTS.confirmCloseThread,
+        syncRemoteUrl:
+          typeof stored.syncRemoteUrl === "string" && stored.syncRemoteUrl.trim()
+            ? stored.syncRemoteUrl
+            : DEFAULTS.syncRemoteUrl,
+        syncOnLaunch:
+          typeof stored.syncOnLaunch === "boolean"
+            ? stored.syncOnLaunch
+            : DEFAULTS.syncOnLaunch,
+        syncSources:
+          stored.syncSources && typeof stored.syncSources === "object"
+            ? { ...stored.syncSources }
+            : structuredClone(DEFAULTS.syncSources),
         rightPanel: isRightPanelTab(stored.rightPanel)
           ? stored.rightPanel
           : DEFAULTS.rightPanel,
@@ -1017,6 +1032,33 @@ class SettingsStore {
     if (this.state.idleTimeoutMinutes === clamped) return;
     this.state.idleTimeoutMinutes = clamped;
     this.persistSoon();
+  }
+
+  /**
+   * Where the configuration sync pushes and pulls.
+   *
+   * Blank clears it, which is how the panel offers "forget this repository": it
+   * stops the sync and touches no file, here or in the repository.
+   */
+  async setSyncRemoteUrl(url: string | null) {
+    const trimmed = url?.trim() ?? "";
+    const next = trimmed === "" ? null : trimmed;
+    if (this.state.syncRemoteUrl === next) return;
+    this.state.syncRemoteUrl = next;
+    await this.persist();
+  }
+
+  setSyncOnLaunch(value: boolean) {
+    if (this.state.syncOnLaunch === value) return;
+    this.state.syncOnLaunch = value;
+    this.persistSoon();
+  }
+
+  /** One source switched, the object replaced rather than mutated. */
+  async setSyncSource(id: string, on: boolean) {
+    if ((this.state.syncSources[id] ?? false) === on) return;
+    this.state.syncSources = { ...this.state.syncSources, [id]: on };
+    await this.persist();
   }
 
   async setIdleAutocloseForIcon(iconKey: string, on: boolean) {
