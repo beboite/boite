@@ -31,6 +31,7 @@ pub mod status;
 pub mod timeline;
 pub mod transcript;
 pub mod store;
+pub mod sync;
 pub mod usage;
 
 /// Now, in milliseconds since the epoch.
