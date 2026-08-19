@@ -412,9 +412,17 @@ impl Cli {
 
 impl DataDir {
     /// The absolute path, or `None` when the base directory itself is unknown.
+    ///
+    /// The three platform bases are read from `dirs`, which knows nothing about the
+    /// home a test pointed `BOITE_CLI_HOME` at — so under an override they answer
+    /// nothing at all rather than the real `%APPDATA%`. A test home that reached
+    /// half of the developer's own directories would be no test home.
     pub fn resolve(&self) -> Option<PathBuf> {
         let base = match self.base {
             Base::Home => super::home_dir(),
+            Base::Config if super::home_overridden() => None,
+            Base::Data if super::home_overridden() => None,
+            Base::DataLocal if super::home_overridden() => None,
             Base::Config => dirs::config_dir(),
             Base::Data => dirs::data_dir(),
             Base::DataLocal => dirs::data_local_dir(),

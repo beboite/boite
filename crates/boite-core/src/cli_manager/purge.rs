@@ -47,14 +47,30 @@ pub fn preview(cli: &Cli) -> Vec<DataPath> {
 pub fn purge(cli: &Cli) -> Result<Vec<String>, Failed> {
     let home = super::home_dir()
         .ok_or_else(|| Failed("no home directory, so nothing can be checked".to_string()))?;
+    purge_paths(&paths(cli), &home)
+}
+
+/// The pass itself, over paths somebody else resolved.
+///
+/// Every path is attempted, and a refusal does not end the pass: returning at the
+/// first one reported a failure having already deleted the directories before it,
+/// so the one thing the answer left out was what had actually happened.
+fn purge_paths(targets: &[PathBuf], home: &Path) -> Result<Vec<String>, Failed> {
     let mut removed = Vec::new();
-    for dir in cli.data {
-        let Some(path) = dir.resolve() else {
-            continue;
-        };
-        if remove_guarded(&path, &home)? {
-            removed.push(path.to_string_lossy().into_owned());
+    let mut refused = Vec::new();
+    for path in targets {
+        match remove_guarded(path, home) {
+            Ok(true) => removed.push(path.to_string_lossy().into_owned()),
+            Ok(false) => {}
+            Err(Failed(why)) => refused.push(why),
         }
+    }
+    if !refused.is_empty() {
+        return Err(Failed(format!(
+            "removed {}, and refused: {}",
+            removed.len(),
+            refused.join("; ")
+        )));
     }
     Ok(removed)
 }
@@ -213,6 +229,33 @@ mod tests {
         let home = scratch("absent");
         assert!(!remove_guarded(&home.join("nothing-here"), &home).unwrap());
         std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    /// A refusal in the middle of a pass says what went as well as what did not.
+    /// The removals have already happened by then, and an answer that only carried
+    /// the refusal would be the wrong half of the truth.
+    #[test]
+    fn a_pass_reports_what_it_removed_alongside_what_it_refused() {
+        let home = scratch("mixed-home");
+        let elsewhere = scratch("mixed-elsewhere");
+        let inside = home.join(".agent");
+        std::fs::create_dir_all(&inside).unwrap();
+        std::fs::write(elsewhere.join("keep"), b"x").unwrap();
+
+        let err = purge_paths(&[inside.clone(), elsewhere.clone()], &home).unwrap_err();
+        assert!(err.0.starts_with("removed 1,"), "{}", err.0);
+        assert!(err.0.contains("outside the home"), "{}", err.0);
+        assert!(!inside.exists(), "the path it was allowed to remove stayed");
+        assert!(elsewhere.join("keep").exists());
+
+        // And a clean pass answers with the paths themselves, for the job's message.
+        let second = home.join(".other");
+        std::fs::create_dir_all(&second).unwrap();
+        let removed = purge_paths(&[second.clone(), home.join("never-existed")], &home).unwrap();
+        assert_eq!(removed, vec![second.to_string_lossy().into_owned()]);
+
+        std::fs::remove_dir_all(&home).unwrap();
+        std::fs::remove_dir_all(&elsewhere).unwrap();
     }
 
     #[test]

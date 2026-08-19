@@ -60,6 +60,11 @@ pub fn home_dir() -> Option<PathBuf> {
     dirs::home_dir()
 }
 
+/// Whether the home above is a test's rather than the user's.
+pub(crate) fn home_overridden() -> bool {
+    std::env::var_os("BOITE_CLI_HOME").is_some_and(|value| !value.is_empty())
+}
+
 /// One CLI, as the settings panel draws it.
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
