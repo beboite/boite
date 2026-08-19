@@ -148,6 +148,16 @@ export function applyControlEvent(app: AppState, ev: ControlEvent, envId?: strin
         .catch((err) => logger.error("app", "agent.request failed", err));
       break;
     }
+    // The orchestrator log grew, or an orchestrator was armed. The store pulls
+    // from its cursor, so a burst of moments costs one cheap fetch, not a
+    // re-read. Imported late for the same reason agent-requests is.
+    case "moment.appended":
+    case "orchestrator.changed": {
+      void import("$lib/features/orchestrator/store.svelte")
+        .then((m) => m.orchestrator.onWorkspaceEvent())
+        .catch(() => {});
+      break;
+    }
     // The server lost track of which control events we missed (broadcast lag);
     // refetch the durable lists so the two do not diverge silently.
     case "resync": {

@@ -87,6 +87,14 @@ export interface Thread {
   delegationMode?: DelegationMode;
   /** Lifecycle status for delegation threads. */
   delegationStatus?: DelegationStatus | null;
+  /**
+   * `"orchestrator"` on a thread Boite armed as one, absent on every worker.
+   * Read-only on this side: the row is the proof and only `orchestrator.start`
+   * (a local-grant command) writes it.
+   */
+  role?: string | null;
+  /** The project an orchestrator answers for, or null for the global one. */
+  orchestratorScope?: string | null;
   origin?: WorkspaceOrigin;
 }
 

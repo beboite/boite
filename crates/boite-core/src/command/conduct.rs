@@ -18,7 +18,7 @@ use std::sync::Arc;
 use serde_json::{json, Value};
 
 use super::{opt_str_param, str_param, u32_param, value_of, Host, Ready, Wire};
-use crate::capability::Capability;
+use crate::capability::{Capability, Grant};
 use crate::pulse::{self, Waiters};
 use crate::store::Store;
 
@@ -29,6 +29,8 @@ pub const ALL_METHODS: &[&str] = &[
     "orchestrator.post",
     "orchestrator.say",
     "orchestrator.messages",
+    "orchestrator.start",
+    "orchestrator.status",
 ];
 
 /// How many moments one pulse answer carries at most.
@@ -37,6 +39,102 @@ const PULSE_LIMIT: usize = 500;
 /// How many chat lines one read answers with when the caller says nothing.
 const MESSAGES_LIMIT_DEFAULT: u32 = 50;
 const MESSAGES_LIMIT_MAX: u32 = 500;
+
+/// Reads the pulse, waiting when it is quiet.
+///
+/// `pub` because the agent endpoint's `GET /v1/pulse` is the same read with a
+/// different door: one implementation, or the two drift on what a timeout
+/// answers with.
+pub fn read_pulse(
+    store: &Store,
+    waiters: Option<&Arc<Waiters>>,
+    since_seq: i64,
+    timeout_ms: u64,
+    project: Option<&str>,
+    waiter: &str,
+) -> Result<Value, String> {
+    let timeout_ms = timeout_ms.min(pulse::MAX_TIMEOUT_MS);
+    let (mut moments, mut truncated) = store.read_moments(since_seq, PULSE_LIMIT, project)?;
+    let mut timed_out = false;
+    if moments.is_empty() {
+        match waiters {
+            Some(waiters) if timeout_ms > 0 => match waiters.wait(waiter, timeout_ms)? {
+                pulse::Outcome::Woken => {
+                    let again = store.read_moments(since_seq, PULSE_LIMIT, project)?;
+                    moments = again.0;
+                    truncated = again.1;
+                }
+                pulse::Outcome::TimedOut => timed_out = true,
+                pulse::Outcome::Superseded => {
+                    // The agent doubled itself. A named error, never a lying
+                    // timeout.
+                    return Err(
+                        "PULSE_SUPERSEDED: a newer pulse from the same caller replaced this one"
+                            .to_string(),
+                    );
+                }
+            },
+            // No waiter registry on this host, or a zero timeout: an empty
+            // answer now is the honest one.
+            _ => timed_out = timeout_ms > 0,
+        }
+    }
+    let seq = moments
+        .last()
+        .map(|m| m.seq)
+        .unwrap_or_else(|| store.latest_moment_seq().max(since_seq));
+    Ok(json!({
+        "seq": seq,
+        "moments": value_of(moments),
+        "timedOut": timed_out,
+        "truncated": truncated,
+    }))
+}
+
+/// The orchestrator's line back into the chat. Shared with `POST /v1/say`.
+///
+/// The row is the proof: only a thread Boite stamped may speak as the
+/// orchestrator, whatever the caller claims to be.
+pub fn say(
+    store: &Store,
+    waiters: Option<&Arc<Waiters>>,
+    thread_id: &str,
+    text: &str,
+    aloud: Option<&str>,
+    urgency: Option<&str>,
+) -> Result<Value, String> {
+    let (role, scope, _) = store
+        .thread_orchestration(thread_id)
+        .ok_or("unknown thread")?;
+    if role.as_deref() != Some(crate::orchestrator::ROLE) {
+        return Err(
+            "only an orchestrator thread may say something here, and this thread is not one"
+                .to_string(),
+        );
+    }
+    let id = store.add_orchestrator_message(
+        scope.as_deref(),
+        "orchestrator",
+        text,
+        aloud,
+        urgency,
+        crate::now_ms(),
+    )?;
+    // A moment too, so a window reading the pulse learns a reply landed
+    // without polling the chat table.
+    let seq = store.append_moment(
+        "chat.said",
+        scope.as_deref(),
+        Some(&id),
+        urgency.unwrap_or(""),
+        "chat",
+        crate::now_ms(),
+    )?;
+    if let Some(waiters) = waiters {
+        waiters.notify();
+    }
+    Ok(json!({ "messageId": id, "seq": seq }))
+}
 
 #[derive(Debug, Clone)]
 pub enum Conduct {
@@ -77,6 +175,17 @@ pub enum Conduct {
         since_id: Option<String>,
         limit: usize,
     },
+    /// Stamps the orchestrator role onto a thread the window just opened.
+    ///
+    /// The one write the records barrier points at, and the one method in this
+    /// domain only `Grant::Local` reaches: a role is the user arming something,
+    /// never an agent promoting itself.
+    Start {
+        thread_id: String,
+        scope: Option<String>,
+    },
+    /// Which thread is the live orchestrator for a scope, if any.
+    Status { scope: Option<String> },
 }
 
 impl Conduct {
@@ -118,6 +227,13 @@ impl Conduct {
                 limit: u32_param(params, "limit", MESSAGES_LIMIT_DEFAULT)
                     .clamp(1, MESSAGES_LIMIT_MAX) as usize,
             },
+            "orchestrator.start" => Conduct::Start {
+                thread_id: str_param(params, "threadId")?,
+                scope: opt_str_param(params, "scope"),
+            },
+            "orchestrator.status" => Conduct::Status {
+                scope: opt_str_param(params, "scope"),
+            },
             other => return Err(format!("unknown method: {other}")),
         })
     }
@@ -129,6 +245,8 @@ impl Conduct {
             Conduct::Post { .. } => "orchestrator.post",
             Conduct::Say { .. } => "orchestrator.say",
             Conduct::Messages { .. } => "orchestrator.messages",
+            Conduct::Start { .. } => "orchestrator.start",
+            Conduct::Status { .. } => "orchestrator.status",
         }
     }
 
@@ -139,19 +257,33 @@ impl Conduct {
             Conduct::Record { .. } => Wire::Bare,
             Conduct::Post { .. } | Conduct::Say { .. } => Wire::Bare,
             Conduct::Messages { .. } => Wire::Key("messages"),
+            Conduct::Start { .. } | Conduct::Status { .. } => Wire::Bare,
         }
     }
 
     pub(super) fn capability(&self) -> Capability {
         match self {
-            Conduct::Pulse { .. } | Conduct::Messages { .. } => Capability::ReadProject,
-            Conduct::Record { .. } | Conduct::Post { .. } | Conduct::Say { .. } => {
-                Capability::MutateProject
+            Conduct::Pulse { .. } | Conduct::Messages { .. } | Conduct::Status { .. } => {
+                Capability::ReadProject
             }
+            Conduct::Record { .. }
+            | Conduct::Post { .. }
+            | Conduct::Say { .. }
+            | Conduct::Start { .. } => Capability::MutateProject,
         }
     }
 
-    pub(super) fn prepare(self, host: &dyn Host) -> Result<Ready, String> {
+    pub(super) fn prepare(self, host: &dyn Host, grant: Grant) -> Result<Ready, String> {
+        // Not a capability: `Grant::Conduct` holds MutateProject too, and an
+        // orchestrator stamping a second orchestrator is exactly the promotion
+        // this refuses. The role is armed from the user's own window or not at
+        // all.
+        if matches!(self, Conduct::Start { .. }) && grant != Grant::Local {
+            return Err(
+                "only Boite's own window arms an orchestrator; an agent cannot stamp the role"
+                    .to_string(),
+            );
+        }
         let store = host
             .store()
             .ok_or("this Boite keeps no records, so there is no pulse to read or write")?;
@@ -169,51 +301,14 @@ impl Conduct {
                 timeout_ms,
                 project,
                 waiter,
-            } => {
-                let (mut moments, mut truncated) =
-                    store.read_moments(since_seq, PULSE_LIMIT, project.as_deref())?;
-                let mut timed_out = false;
-                if moments.is_empty() {
-                    match waiters {
-                        Some(waiters) if timeout_ms > 0 => {
-                            match waiters.wait(&waiter, timeout_ms)? {
-                                pulse::Outcome::Woken => {
-                                    let again = store.read_moments(
-                                        since_seq,
-                                        PULSE_LIMIT,
-                                        project.as_deref(),
-                                    )?;
-                                    moments = again.0;
-                                    truncated = again.1;
-                                }
-                                pulse::Outcome::TimedOut => timed_out = true,
-                                pulse::Outcome::Superseded => {
-                                    // The agent doubled itself. A named error,
-                                    // never a lying timeout.
-                                    return Err(
-                                        "PULSE_SUPERSEDED: a newer pulse from the same caller \
-                                         replaced this one"
-                                            .to_string(),
-                                    );
-                                }
-                            }
-                        }
-                        // No waiter registry on this host, or a zero timeout:
-                        // an empty answer now is the honest one.
-                        _ => timed_out = timeout_ms > 0,
-                    }
-                }
-                let seq = moments
-                    .last()
-                    .map(|m| m.seq)
-                    .unwrap_or_else(|| store.latest_moment_seq().max(since_seq));
-                json!({
-                    "seq": seq,
-                    "moments": value_of(moments),
-                    "timedOut": timed_out,
-                    "truncated": truncated,
-                })
-            }
+            } => read_pulse(
+                store,
+                waiters.as_ref(),
+                since_seq,
+                timeout_ms,
+                project.as_deref(),
+                &waiter,
+            )?,
             Conduct::Record {
                 kind,
                 project_id,
@@ -243,36 +338,34 @@ impl Conduct {
                     None,
                     crate::now_ms(),
                 )?;
-                json!({ "messageId": id })
+                // The user spoke: also a moment, because a sleeping
+                // orchestrator's only ear is the pulse it long-polls.
+                let seq = store.append_moment(
+                    "chat.posted",
+                    scope.as_deref(),
+                    Some(&id),
+                    "",
+                    "chat",
+                    crate::now_ms(),
+                )?;
+                if let Some(waiters) = waiters {
+                    waiters.notify();
+                }
+                json!({ "messageId": id, "seq": seq })
             }
             Conduct::Say {
                 thread_id,
                 text,
                 aloud,
                 urgency,
-            } => {
-                // The row is the proof: only a thread Boite stamped may speak
-                // as the orchestrator, whatever the caller claims to be.
-                let (role, scope, _) = store
-                    .thread_orchestration(&thread_id)
-                    .ok_or("unknown thread")?;
-                if role.as_deref() != Some(crate::orchestrator::ROLE) {
-                    return Err(
-                        "only an orchestrator thread may say something here, \
-                         and this thread is not one"
-                            .to_string(),
-                    );
-                }
-                let id = store.add_orchestrator_message(
-                    scope.as_deref(),
-                    "orchestrator",
-                    &text,
-                    aloud.as_deref(),
-                    urgency.as_deref(),
-                    crate::now_ms(),
-                )?;
-                json!({ "messageId": id })
-            }
+            } => say(
+                store,
+                waiters.as_ref(),
+                &thread_id,
+                &text,
+                aloud.as_deref(),
+                urgency.as_deref(),
+            )?,
             Conduct::Messages {
                 scope,
                 since_id,
@@ -282,6 +375,39 @@ impl Conduct {
                 since_id.as_deref(),
                 limit,
             )?),
+            Conduct::Start { thread_id, scope } => {
+                store
+                    .thread_orchestration(&thread_id)
+                    .ok_or("unknown thread")?;
+                // One live holder per scope. The settled check is inside
+                // `find_orchestrator`: a stamp on a closed row does not block
+                // the next start.
+                if let Some(holder) = store.find_orchestrator(scope.as_deref()) {
+                    if holder != thread_id {
+                        return Err(format!(
+                            "ORCHESTRATOR_TAKEN: thread {holder} is already the live \
+                             orchestrator for this scope"
+                        ));
+                    }
+                }
+                store.stamp_orchestrator_role(&thread_id, scope.as_deref())?;
+                let seq = store.append_moment(
+                    "orchestrator.started",
+                    scope.as_deref(),
+                    Some(&thread_id),
+                    "",
+                    "orchestrator",
+                    crate::now_ms(),
+                )?;
+                if let Some(waiters) = waiters {
+                    waiters.notify();
+                }
+                json!({ "threadId": thread_id, "seq": seq })
+            }
+            Conduct::Status { scope } => match store.find_orchestrator(scope.as_deref()) {
+                Some(id) => json!({ "threadId": id, "state": "live" }),
+                None => json!({ "threadId": null, "state": "off" }),
+            },
         })
     }
 }
@@ -427,6 +553,43 @@ mod tests {
         let list = after.as_array().unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0]["text"], json!("second"));
+    }
+
+    /// Arming is the user's gesture: no agent grant reaches it, one live
+    /// holder per scope, and asking again for the same thread is idempotent.
+    #[test]
+    fn start_is_local_only_and_one_holder_per_scope() {
+        let host = Rows::new("start");
+        let row = |id: &str| {
+            json!({ "thread": { "id": id, "projectId": "p", "label": "l", "cmd": "c", "args": [] } })
+        };
+        ask(&host, "thread.create", row("a")).unwrap();
+        ask(&host, "thread.create", row("b")).unwrap();
+
+        let refusal = Command::decode("orchestrator.start", &json!({ "threadId": "a" }))
+            .unwrap()
+            .prepare(&host, Grant::Conduct)
+            .unwrap_err();
+        assert!(refusal.contains("arms an orchestrator"), "{refusal}");
+
+        ask(&host, "orchestrator.start", json!({ "threadId": "a" })).unwrap();
+        let taken = ask(&host, "orchestrator.start", json!({ "threadId": "b" })).unwrap_err();
+        assert!(taken.contains("ORCHESTRATOR_TAKEN"), "{taken}");
+        // The same thread asking again is a restart, not a conflict.
+        ask(&host, "orchestrator.start", json!({ "threadId": "a" })).unwrap();
+
+        let status = ask(&host, "orchestrator.status", json!({})).unwrap();
+        assert_eq!(status["threadId"], json!("a"));
+        assert_eq!(status["state"], json!("live"));
+
+        // A settled holder releases the scope.
+        ask(
+            &host,
+            "thread.settle",
+            json!({ "threadId": "a", "status": "idle", "settled": true }),
+        )
+        .unwrap();
+        ask(&host, "orchestrator.start", json!({ "threadId": "b" })).unwrap();
     }
 
     /// The wait wakes on a record and never holds past its cap. The transport

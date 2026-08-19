@@ -70,6 +70,8 @@ fn verbs() -> Router<Shared> {
         .route("/v1/browser/type", post(browser_type))
         .route("/v1/browser/press", post(browser_press))
         .route("/v1/browser/scroll", post(browser_scroll))
+        .route("/v1/pulse", get(pulse))
+        .route("/v1/say", post(say))
         .route("/v1/snapshot", get(snapshot))
         .route("/v1/transcript", get(transcript))
         .route("/v1/search", get(search))
@@ -109,6 +111,9 @@ fn now_ms() -> i64 {
 
 /// How long a device has to claim and answer a request the agent will read.
 const SETTLE_MS: u64 = 8_000;
+
+/// How many live workers one orchestrator may hold open at once.
+const MAX_ORCHESTRATOR_WORKERS: i64 = 3;
 
 /// Dispatch and wait for the device, so an unclaimed request is not success.
 async fn settle(workspace: &dyn Workspace, request: Value) -> Result<Value, String> {
@@ -441,6 +446,79 @@ async fn claim(
 /// holding a dead PTY is exactly the kind of thing the caller needs to see. It
 /// carries no secret — no token, no environment, no file contents — so it is
 /// meant to be pasted into an issue.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PulseIn {
+    since_seq: Option<i64>,
+    timeout_ms: Option<u64>,
+    project: Option<String>,
+}
+
+/// The orchestrator's wait. Anyone with a thread key may read the pulse — it
+/// is the same feed the timeline shows — but only the orchestrator tier is
+/// ever told the tool exists.
+async fn pulse(
+    State(workspace): State<Shared>,
+    Extension(caller): Extension<Caller>,
+    axum::extract::Query(q): axum::extract::Query<PulseIn>,
+) -> Result<Json<Value>, StatusCode> {
+    // One wait per caller, keyed on who is asking: the thread for a spawned
+    // agent, the project for a credentials file.
+    let waiter = format!(
+        "agent-{}",
+        caller.thread_id.as_deref().unwrap_or(&caller.project_id)
+    );
+    let answered = tokio::task::spawn_blocking(move || {
+        boite_core::command::conduct::read_pulse(
+            workspace.store(),
+            workspace.pulse_waiters().as_ref(),
+            q.since_seq.unwrap_or(0),
+            q.timeout_ms.unwrap_or(30_000),
+            q.project.as_deref(),
+            &waiter,
+        )
+    })
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(match answered {
+        Ok(v) => v,
+        Err(e) => json!({ "error": e }),
+    }))
+}
+
+#[derive(Deserialize)]
+struct SayIn {
+    text: String,
+    aloud: Option<String>,
+    urgency: Option<String>,
+}
+
+/// The orchestrator's reply. The thread row is the proof of the role;
+/// `boite_core::command::conduct::say` refuses anyone else by name.
+async fn say(
+    State(workspace): State<Shared>,
+    Extension(caller): Extension<Caller>,
+    Json(body): Json<SayIn>,
+) -> Result<Json<Value>, StatusCode> {
+    let thread = caller.thread()?.to_string();
+    let answered = boite_core::command::conduct::say(
+        workspace.store(),
+        workspace.pulse_waiters().as_ref(),
+        &thread,
+        &body.text,
+        body.aloud.as_deref(),
+        body.urgency.as_deref(),
+    );
+    Ok(Json(match answered {
+        Ok(v) => {
+            workspace.announce(Change::Orchestrator);
+            workspace.touched(&thread, "say");
+            v
+        }
+        Err(e) => json!({ "error": e }),
+    }))
+}
+
 async fn snapshot(
     State(workspace): State<Shared>,
     Extension(_caller): Extension<Caller>,
@@ -1002,6 +1080,26 @@ async fn thread_spawn(
         }
     }
     let asking_thread = caller.thread_or_empty().to_string();
+    // Non-negotiable cap for an orchestrator: the workers run on the user's
+    // machine, and an unattended thread multiplying terminals is exactly the
+    // process nobody is watching. Named so the agent reports it as it is.
+    if !asking_thread.is_empty() {
+        let is_orchestrator = workspace
+            .store()
+            .thread_orchestration(&asking_thread)
+            .and_then(|(role, _, _)| role)
+            .as_deref()
+            == Some(boite_core::orchestrator::ROLE);
+        if is_orchestrator {
+            let live = workspace.store().live_children(&asking_thread);
+            if live >= MAX_ORCHESTRATOR_WORKERS {
+                return Ok(refused(format!(
+                    "TOO_MANY_WORKERS: {live} of your workers are still live, and the cap is \
+                     {MAX_ORCHESTRATOR_WORKERS}. Wait for one to settle, or tell the user."
+                )));
+            }
+        }
+    }
     let request = json!({
         "kind": "thread.spawn",
         "projectId": project_id,

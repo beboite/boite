@@ -1126,6 +1126,13 @@ export interface ConductApi {
     sinceId?: string | null;
     limit?: number;
   }): Promise<OrchestratorMessage[]>;
+  /**
+   * Stamps a thread as the orchestrator for a scope. Local grant only: the
+   * remote arm exists so a paired window can arm the server-side workspace,
+   * but an agent key is refused by the bus itself.
+   */
+  start(params: { threadId: string; scope?: string | null }): Promise<{ threadId: string }>;
+  status(params: { scope?: string | null }): Promise<{ threadId: string | null; state: string }>;
 }
 
 export interface Backend {

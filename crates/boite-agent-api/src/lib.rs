@@ -47,6 +47,9 @@ pub enum Change {
     Worktrees,
     /// Something is waiting on the user. See `boite_core::approval`.
     Approvals,
+    /// The orchestrator conversation moved: a reply landed through `/v1/say`.
+    /// Every open chat re-reads by cursor rather than receiving the row.
+    Orchestrator,
 }
 
 /// What an agent is told when it asks for something no device is there to do.
@@ -76,6 +79,13 @@ pub trait Workspace: Send + Sync + 'static {
     /// The filesystem trust boundary, so where a project may be created is one
     /// rule rather than two that drift.
     fn roots(&self) -> &ProjectRoots;
+
+    /// The live `conduct.pulse` waits of this process, when the host keeps
+    /// one. `None` answers a `GET /v1/pulse` immediately, which is honest on a
+    /// host with no writer to wake it.
+    fn pulse_waiters(&self) -> Option<std::sync::Arc<boite_core::pulse::Waiters>> {
+        None
+    }
 
     /// The workspace secret. Never handed to anybody as it is.
     ///

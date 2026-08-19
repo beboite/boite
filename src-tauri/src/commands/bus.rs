@@ -36,6 +36,7 @@ pub(super) struct DesktopHost<'a> {
     legacy_worktree_base: Option<PathBuf>,
     transcripts: Option<PathBuf>,
     store: Option<Arc<Store>>,
+    pulse: Option<Arc<boite_core::pulse::Waiters>>,
 }
 
 impl<'a> DesktopHost<'a> {
@@ -46,7 +47,15 @@ impl<'a> DesktopHost<'a> {
             legacy_worktree_base: None,
             transcripts: None,
             store: None,
+            pulse: None,
         }
+    }
+
+    /// The app's wait registry, so a conduct write here wakes the agent
+    /// endpoint's long-polls. Only the conduct commands attach it.
+    pub(super) fn with_pulse(mut self, pulse: Arc<boite_core::pulse::Waiters>) -> Self {
+        self.pulse = Some(pulse);
+        self
     }
 
     /// Where this app writes what its terminals print. Built from the app
@@ -99,6 +108,10 @@ impl boite_core::command::Host for DesktopHost<'_> {
 
     fn store(&self) -> Option<Arc<Store>> {
         self.store.clone()
+    }
+
+    fn pulse_waiters(&self) -> Option<Arc<boite_core::pulse::Waiters>> {
+        self.pulse.clone()
     }
 }
 

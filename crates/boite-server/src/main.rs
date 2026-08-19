@@ -120,14 +120,17 @@ async fn main() {
     // routable interface, and an agent appending to a checklist is not the same
     // principal as a device driving the workspace.
     let devices = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    // One wait registry for the whole process: the RPC's writes wake the agent
+    // endpoint's long-polls, so the two must hold the same one.
+    let pulse = boite_core::pulse::Waiters::new();
     let agent_api = agent_api::start(
         store.clone(),
         events.clone(),
         roots.clone(),
-        config.workspace_dir.clone(),
+        &config,
         devices.clone(),
-        config.data_dir.clone(),
         registry.clone(),
+        pulse.clone(),
     )
     .await;
 
@@ -148,7 +151,7 @@ async fn main() {
         data_dir: config.data_dir,
         public_url: config.public_url,
         claimed_requests: Default::default(),
-        pulse: boite_core::pulse::Waiters::new(),
+        pulse,
     });
 
     if let Err(e) = state.refresh_roots() {

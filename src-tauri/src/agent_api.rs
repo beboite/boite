@@ -139,9 +139,19 @@ impl Workspace for DesktopWorkspace {
                 Change::Todos => "boite://todos-changed",
                 Change::Worktrees => "boite://worktrees-changed",
                 Change::Approvals => "boite://approvals-changed",
+                Change::Orchestrator => "boite://orchestrator-changed",
             },
             (),
         );
+    }
+
+    fn pulse_waiters(&self) -> Option<std::sync::Arc<boite_core::pulse::Waiters>> {
+        Some(
+            self.app
+                .state::<crate::commands::conduct::PulseWaiters>()
+                .0
+                .clone(),
+        )
     }
 
     fn transcripts_dir(&self) -> Option<std::path::PathBuf> {

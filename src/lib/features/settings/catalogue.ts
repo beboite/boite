@@ -101,6 +101,11 @@ export const SETTINGS_CATALOGUE: SettingEntry[] = [
   { tab: "plugins", key: "plugin.fastMcpSshTitle", descKey: "plugin.fastMcpSshDesc" },
 
   { tab: "experiments", key: "experiments.home", descKey: "experiments.homeDesc" },
+  {
+    tab: "experiments",
+    key: "experiments.orchestrator",
+    descKey: "experiments.orchestratorDesc",
+  },
   { tab: "experiments", key: "experiments.infoBox", descKey: "experiments.infoBoxDesc" },
   { tab: "experiments", key: "experiments.smartSort", descKey: "experiments.smartSortDesc" },
   { tab: "experiments", key: "experiments.whip", descKey: "experiments.whipDesc" },

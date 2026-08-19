@@ -339,6 +339,42 @@ pub(crate) fn format_moments(out: &Value) -> String {
     w.into_string()
 }
 
+/// What the pulse answered: the cursor, then what happened, oldest first.
+///
+/// The order is the opposite of the timeline's on purpose: an orchestrator
+/// replays what it slept through, and replaying newest-first is how a reply
+/// lands before the question it answers.
+pub(crate) fn format_pulse(out: &Value) -> String {
+    let mut w = Toon::new();
+    let seq = out.get("seq").and_then(|v| v.as_i64()).unwrap_or(0);
+    w.field("seq", &seq.to_string());
+    if out.get("truncated").and_then(|v| v.as_bool()) == Some(true) {
+        w.field("truncated", "true");
+        w.hint("you slept past the ring: re-read state with workspace_snapshot, do not replay");
+        return w.into_string();
+    }
+    let moments = out
+        .get("moments")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    if moments.is_empty() {
+        w.field("changed", "nothing");
+        w.hint("a quiet wait is an answer; sleep again with the same seq");
+        return w.into_string();
+    }
+    let rows: Vec<Vec<String>> = moments
+        .iter()
+        .map(|m| {
+            let at = |key: &str| m.get(key).and_then(|v| v.as_str()).unwrap_or("").to_string();
+            vec![at("kind"), at("projectId"), at("objectId"), clip(&at("detail"), MAX_CELL)]
+        })
+        .collect();
+    w.table("moments", &["kind", "project", "object", "detail"], &rows);
+    w.hint("oldest first; pass this seq back as sinceSeq on your next pulse");
+    w.into_string()
+}
+
 /// What a search found, one row each.
 ///
 /// The kind is the first column on purpose: a hit in the log carries a reason

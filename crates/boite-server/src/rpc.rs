@@ -213,6 +213,25 @@ pub async fn dispatch(state: &AppState, request: Authorized) -> Result<Value, St
                     Err(e) => tracing::warn!("thread {} spawns without tools: {e}", thread.id),
                 }
             }
+            // The role hint for the shim's tool tier, read off the row Boite
+            // stamped. A hint only: the endpoint re-checks the row per call.
+            if let Some((Some(role), scope, _)) = state.store.thread_orchestration(&thread.id) {
+                env.insert(boite_agent_api::env::ROLE.into(), role);
+                if let Some(scope) = scope {
+                    env.insert(boite_agent_api::env::ORCHESTRATOR_SCOPE.into(), scope);
+                }
+                let autonomy = state
+                    .store
+                    .load_settings()
+                    .ok()
+                    .and_then(|s| {
+                        s.get("orchestratorAutonomy")
+                            .and_then(|v| v.as_str())
+                            .map(str::to_string)
+                    })
+                    .unwrap_or_else(|| "observer".to_string());
+                env.insert(boite_agent_api::env::AUTONOMY.into(), autonomy);
+            }
             let env = Some(env);
 
             let wrap = params
@@ -710,10 +729,16 @@ pub async fn dispatch(state: &AppState, request: Authorized) -> Result<Value, St
             let answer = blocking(move || ready.run()).await??;
             // A moment is what an orchestrator's long-poll wakes on, and the
             // event is what a chat pane refreshes on. Fanned out here because
-            // the bus itself owns no event channel.
-            if m == "conduct.record" {
+            // the bus itself owns no event channel. Every conduct write that
+            // appended one answers with its seq: record, post, say, start.
+            if m.starts_with("conduct.") || m.starts_with("orchestrator.") {
                 if let Some(seq) = answer.get("seq").and_then(|v| v.as_i64()) {
-                    let _ = state.events.send(AppEvent::MomentAppended { seq });
+                    if m != "conduct.pulse" {
+                        let _ = state.events.send(AppEvent::MomentAppended { seq });
+                    }
+                }
+                if m == "orchestrator.start" {
+                    let _ = state.events.send(AppEvent::OrchestratorChanged);
                 }
             }
             Ok(wire.wrap(answer))

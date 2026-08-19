@@ -21,4 +21,12 @@ export const tauriConduct: ConductApi = {
   messages(params): Promise<OrchestratorMessage[]> {
     return invoke("conduct_orchestrator_messages", { params });
   },
+
+  start(params): Promise<{ threadId: string }> {
+    return invoke("conduct_orchestrator_start", { params });
+  },
+
+  status(params): Promise<{ threadId: string | null; state: string }> {
+    return invoke("conduct_orchestrator_status", { params });
+  },
 };
