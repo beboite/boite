@@ -24,7 +24,9 @@ use axum::routing::{get, post};
 use axum::Router;
 use tokio::sync::broadcast;
 use tokio::sync::broadcast::error::RecvError;
+use axum::http::{header, HeaderValue};
 use tower_http::services::{ServeDir, ServeFile};
+use tower_http::set_header::SetResponseHeaderLayer;
 
 use auth::Auth;
 use boite_core::scope::ProjectRoots;
@@ -35,6 +37,7 @@ use state::AppState;
 use boite_core::store::{ColVal, Store, ThreadCol};
 
 const EVENT_CHANNEL_CAP: usize = 1024;
+const MAX_WS_MESSAGE: usize = 1024 * 1024;
 
 #[tokio::main]
 async fn main() {
@@ -213,7 +216,49 @@ async fn main() {
     if let Some(dir) = &config.static_dir {
         let index = dir.join("index.html");
         let serve = ServeDir::new(dir).fallback(ServeFile::new(index));
-        app = app.fallback_service(serve);
+        // The same SPA the desktop window runs, served to a phone or a browser
+        // — and until now with none of the protection the desktop window has.
+        // Tauri hands the webview a strict CSP from tauri.conf.json; this door
+        // sent the identical files with no CSP, no nosniff and no framing rule
+        // at all.
+        //
+        // What is set here is the half that cannot break a page: no
+        // `script-src`, no `style-src`, no `connect-src`. That is deliberate
+        // rather than lazy. adapter-static emits one inline `<script>` of about
+        // 320 bytes to start the app, its hash changes every build, and a
+        // `script-src 'self'` here would leave a phone staring at a blank page
+        // with the reason only in a console it cannot open. Locking the script
+        // side down properly means SvelteKit's own `kit.csp` in hash mode, so
+        // the hash is generated with the file it covers — its own change, with
+        // the desktop CSP checked against it, not a line snuck in here.
+        //
+        // `frame-ancestors 'none'` and `X-Frame-Options` say the same thing to
+        // two generations of browser: a boite is not something to embed. It
+        // drives terminals, and a click landing on one through a transparent
+        // overlay is a real command in a real shell.
+        app = app
+            .fallback_service(serve)
+            .layer(SetResponseHeaderLayer::overriding(
+                header::CONTENT_SECURITY_POLICY,
+                HeaderValue::from_static(
+                    "object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
+                ),
+            ))
+            .layer(SetResponseHeaderLayer::overriding(
+                header::X_FRAME_OPTIONS,
+                HeaderValue::from_static("DENY"),
+            ))
+            .layer(SetResponseHeaderLayer::overriding(
+                header::X_CONTENT_TYPE_OPTIONS,
+                HeaderValue::from_static("nosniff"),
+            ))
+            // A boite is reached over plain http on a LAN as often as not, and
+            // the referrer of a page served from one leaks the host and port it
+            // lives at to anything it links out to.
+            .layer(SetResponseHeaderLayer::overriding(
+                header::REFERRER_POLICY,
+                HeaderValue::from_static("no-referrer"),
+            ));
     }
 
     let registry_for_shutdown = state.registry.clone();
@@ -320,7 +365,16 @@ async fn ws_upgrade(
                 .into_response();
         }
     }
-    ws.on_upgrade(move |socket| ws::handle_socket(socket, state, addr))
+    // tungstenite defaults to a 64 MiB message and a 16 MiB frame, and the
+    // first frame on this socket arrives before the ticket is checked: an
+    // unauthenticated peer could make the process buffer that much, times
+    // `max_connections`, before anything decided who it was. Nothing a client
+    // sends is anywhere near it — the widest legitimate message is a paste on
+    // its way to a PTY — so a megabyte leaves room to spare and takes the
+    // pre-auth cost down by a factor of sixty-four.
+    ws.max_message_size(MAX_WS_MESSAGE)
+        .max_frame_size(MAX_WS_MESSAGE)
+        .on_upgrade(move |socket| ws::handle_socket(socket, state, addr))
         .into_response()
 }
 
