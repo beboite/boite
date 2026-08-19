@@ -25,6 +25,7 @@ export const EN_MESSAGES = {
   "tabs.about": "About",
   "tabs.devices": "Devices",
   "tabs.experiments": "Experiments",
+  "tabs.sync": "Sync",
   "tabs.generalHint": "Notifications, and the shortcuts the launcher offers.",
   "tabs.terminalHint": "How a terminal starts, and when it is put to sleep.",
   "tabs.appearanceHint": "Scale, layout, motion and language.",
@@ -34,6 +35,8 @@ export const EN_MESSAGES = {
   "tabs.logsHint": "What the app recorded about this session.",
   "tabs.aboutHint": "Which build is running, and whether there is a newer one.",
   "tabs.experimentsHint": "Big redesigns you can switch on before they become the default.",
+  "tabs.syncHint":
+    "Carry your agent configuration between computers, through a repository of your own.",
 
 
   "devices.title": "Paired devices",
@@ -1164,6 +1167,69 @@ export const EN_MESSAGES = {
   "keybindings.cmd.splitDown": "Split down",
   "keybindings.cmd.nextPane": "Next pane",
   "keybindings.cmd.previousPane": "Previous pane",
+
+  // Carrying the agent configuration between computers.
+  "sync.enable": "Sync when Boite opens",
+  "sync.enableDesc":
+    "Boite reads the repository at start. Anything that differs opens the merge tool, and nothing is written until you say so.",
+  "sync.enableNoRemote": "Name a repository first.",
+
+  "sync.remoteTitle": "The repository",
+  "sync.remoteDesc":
+    "A private git repository you own. Boite writes to it and reads from it, and never sees your credentials: git resolves those on the machine the terminals run on, the same way it does for every other repository there.",
+  "sync.remotePlaceholder": "git@github.com:you/boite-config.git",
+  "sync.remoteLabel": "Repository address",
+  "sync.remoteCheck": "Check",
+  "sync.remoteChecking": "Asking the repository…",
+  "sync.remoteSave": "Use this repository",
+  "sync.remoteReachable": "It answers, and there is a history to read.",
+  "sync.remoteEmpty":
+    "It answers and it is empty. The first sync fills it with what this machine has.",
+  "sync.remoteNeedsAuth":
+    "It refused. Git has no credential for this address on the machine the terminals run on — set one up there, an SSH key or a credential helper, and check again.",
+  "sync.remoteMissing": "Nothing answers at that address: {error}",
+  "sync.remoteEdit": "Change the address",
+  "sync.remoteForget": "Forget this repository",
+  "sync.remoteForgetAsk":
+    "Boite stops syncing. Every file stays exactly as it is, on this machine and in the repository.",
+
+  "sync.statusTitle": "Last sync",
+  "sync.statusDesc": "What the last run did, and the button that starts another.",
+  "sync.now": "Sync now",
+  "sync.neverSynced": "This machine has never synced.",
+  "sync.lastSyncedAt": "Last synced at {when}.",
+  "sync.pendingCount": "{count} files still differ.",
+  "sync.review": "Review the differences",
+  "sync.dismiss": "Clear",
+  "sync.repair": "Reset the local copy",
+  "sync.unsupportedHere": "Not available on this machine.",
+  "sync.unsupportedHereDetail":
+    "Syncing needs git on the machine the terminals run on, and Boite can find none there.",
+  "sync.phaseIdle": "Nothing is running.",
+  "sync.phaseOpening": "Finding the local copy.",
+  "sync.phaseFetching": "Reading the repository.",
+  "sync.phaseReading": "Reading this machine.",
+  "sync.phaseComparing": "Comparing the two.",
+  "sync.phaseWriting": "Writing what was agreed.",
+  "sync.phaseCommitting": "Recording the change.",
+  "sync.phasePushing": "Sending this machine's side back.",
+  "sync.phaseDone": "Everything matches.",
+  "sync.phaseNeedsMerge": "Waiting on you.",
+  "sync.phaseFailed": "It stopped: {error}",
+  "sync.phaseCancelled": "Stopped before it finished.",
+
+  "sync.sourcesTitle": "What gets synced",
+  "sync.sourcesDesc":
+    "One switch per agent, plus the folder they all read. A switch that is off is a file Boite neither sends nor touches, and every switch starts off.",
+  "sync.sourcesShared": "Shared",
+  "sync.sourcesAgents": "Agent CLIs",
+  "sync.agentsRow": "The .agents folder",
+  "sync.agentsRowDesc": "AGENTS.md, the skills and the commands every agent reads.",
+  "sync.sourceUnknown": "Boite does not know where this one keeps its configuration.",
+  "sync.sourceAbsent":
+    "Not on this machine. Its configuration can still arrive before it does.",
+  "sync.secretsNote":
+    "Credentials never leave. A field Boite knows is a secret travels as a placeholder, and a pull puts back the value this machine already had.",
 
 } as const;
 
