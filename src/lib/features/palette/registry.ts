@@ -184,6 +184,17 @@ export function buildPaletteCommands(): PaletteCommand[] {
       app.mobileTab = "settings";
     },
   });
+  if (settings.state.experimentHome) {
+    commands.push({
+      id: "action:home",
+      section: "actions",
+      labelKey: "home.title",
+      run: () => {
+        app.view = "home";
+        app.mobileTab = "home";
+      },
+    });
+  }
 
   // What the project itself says it can run. The list is read when the palette
   // opens, so a script added to package.json five minutes ago is offered

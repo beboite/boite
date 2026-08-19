@@ -444,7 +444,18 @@ export class AppState {
     if (this.selectedProjectId === null) {
       const scratch = await projectWrites.ensureScratch(this);
       this.selectedProjectId = scratch?.id ?? this.sortedProjects[0]?.id ?? null;
-      if (scratch) this.view = "project";
+      if (scratch) {
+        // Flag off leaves this landing exactly as it was: Scratch's project page.
+        if (
+          settings.state.experimentHome &&
+          settings.state.openOnLaunch === "home"
+        ) {
+          this.view = "home";
+          this.mobileTab = "home";
+        } else {
+          this.view = "project";
+        }
+      }
     }
     // Before ready: panels start polling fs/git commands as soon as they
     // mount, and those commands reject paths outside registered roots.

@@ -79,6 +79,10 @@
   const ProjectView = lazyComponent(
     () => import("$lib/features/project/ProjectPage.svelte"),
   );
+  // Behind import(): a boot that never arms the experiment never fetches it.
+  const HomeView = lazyComponent(
+    () => import("$lib/features/home/HomePage.svelte"),
+  );
   // A canvas and a rope simulation, for an experiment that is off by default.
   // Behind import(), a boot that never switches it on never fetches it.
   const WhipView = lazyComponent(
@@ -101,6 +105,11 @@
   );
   const settingsActive = $derived(
     mobile ? app.mobileTab === "settings" : app.view === "settings",
+  );
+  // Flag off: always false, so every branch below collapses to today's chrome.
+  const homeActive = $derived(
+    settings.state.experimentHome &&
+      (mobile ? app.mobileTab === "home" : app.view === "home"),
   );
 
   // Colored inset outline marks the PURE remote workspace: green connected,
@@ -388,6 +397,10 @@
   });
 
   $effect(() => {
+    if (homeActive) void HomeView.ensure();
+  });
+
+  $effect(() => {
     if (settingsActive) void SettingsView.ensure();
   });
 
@@ -465,7 +478,7 @@
     {/if}
   {:else}
     <div class="flex min-h-0 flex-1">
-    {#if !mobile && !settings.state.sidebarCollapsed}
+    {#if !mobile && !homeActive && !settings.state.sidebarCollapsed}
       <ProjectSidebar
         onActivateThread={activateThread}
         onNewProject={addProject}
@@ -670,6 +683,19 @@
           </div>
         {/if}
 
+        {#if homeActive}
+          <div class="absolute inset-0 z-10 bg-[var(--color-background)]">
+            {#if HomeView.current}
+              {@const HomeComp = HomeView.current}
+              <HomeComp />
+            {:else}
+              <div class="flex h-full items-center justify-center text-xs text-muted-foreground/70">
+                {t("common.loading")}
+              </div>
+            {/if}
+          </div>
+        {/if}
+
         {#if app.view === "editor"}
           <div class="absolute inset-0 z-10 bg-[var(--color-background)]">
             {#if EditorView.current}
@@ -708,7 +734,7 @@
           </div>
         {/if}
 
-        {#if mobile && app.view === "terminal" && app.mobileTab === "projects"}
+        {#if mobile && app.mobileTab === "projects" && (app.view === "terminal" || app.view === "home")}
           <div class="absolute inset-0 z-10 bg-[var(--color-background)]">
             <MobileProjectsPage />
           </div>
@@ -725,7 +751,7 @@
 
     <!-- Outside <main>, beside it: the column describes the project rather than
          whatever view is up. -->
-    {#if !mobile && app.ready && !settings.state.experimentInfoBox && settings.rightPanelFor(app.currentProjectId)}
+    {#if !mobile && app.ready && !homeActive && !settings.state.experimentInfoBox && settings.rightPanelFor(app.currentProjectId)}
       <SidePanel />
     {/if}
   </div>
