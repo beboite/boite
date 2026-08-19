@@ -50,6 +50,10 @@ pub struct Divergence {
     pub path: String,
     /// Which switch owns it, so the panel can group and label.
     pub source_id: String,
+    /// What the merged file has to still be readable as. The merge tool defaults
+    /// to stacking both sides where that can work and refuses to guess where it
+    /// cannot, which is a property of the format rather than of the content.
+    pub syntax: String,
     /// The last agreed content, when there was one. A merge tool with a base can
     /// tell an addition from a deletion; without one it can still show both
     /// sides, which is what a first sync gets.
@@ -166,14 +170,17 @@ fn divergence(
     remote: Option<&Vec<u8>>,
     base: Option<&Vec<u8>>,
 ) -> Divergence {
+    let named = manifest::from_repo_path(path);
     let as_text = |bytes: Option<&Vec<u8>>| bytes.and_then(|raw| String::from_utf8(raw.clone()).ok());
     let local_text = as_text(local);
     let remote_text = as_text(remote);
     Divergence {
         path: path.to_string(),
-        source_id: manifest::from_repo_path(path)
-            .map(|named| named.id.to_string())
-            .unwrap_or_default(),
+        source_id: named.as_ref().map(|named| named.id.to_string()).unwrap_or_default(),
+        syntax: named
+            .as_ref()
+            .map(|named| manifest::syntax_of(&named.home_relative).to_string())
+            .unwrap_or_else(|| "text".to_string()),
         base: as_text(base),
         binary: local.is_some() && local_text.is_none()
             || remote.is_some() && remote_text.is_none(),

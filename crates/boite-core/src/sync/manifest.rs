@@ -353,6 +353,26 @@ pub fn is_home_relative(path: &str) -> bool {
     path.split('/').all(|segment| !segment.is_empty() && segment != ".." && segment != ".")
 }
 
+/// What a file can be checked against, and therefore whether stacking both
+/// sides of it could produce something readable.
+///
+/// Decided here rather than from the extension in the webview, because the
+/// extension lies: `~/.copilot/config.json` is JSONC, with `//` comments and a
+/// trailing comma, and a merge tool that parsed it as JSON would report a
+/// perfectly good file as broken.
+pub fn syntax_of(home_relative: &str) -> &'static str {
+    if home_relative.ends_with(".md") {
+        return "markdown";
+    }
+    if home_relative == ".copilot/config.json" {
+        return "jsonc";
+    }
+    if home_relative.ends_with(".json") {
+        return "json";
+    }
+    "text"
+}
+
 /// Whether a name is one the walk never picks up, wherever it appears.
 pub fn denied_always(name: &str) -> bool {
     DENY_ALWAYS

@@ -436,6 +436,7 @@ mod tests {
         Divergence {
             path: path.to_string(),
             source_id: "agents".to_string(),
+            syntax: "markdown".to_string(),
             base: None,
             local: Some("# mine\n".to_string()),
             remote: Some("# theirs\n".to_string()),

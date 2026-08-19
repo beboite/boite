@@ -71,6 +71,7 @@ function conflict(path: string): SyncConflict {
   return {
     path,
     sourceId: "agents",
+    syntax: "markdown",
     base: null,
     local: "# mine\n",
     remote: "# theirs\n",

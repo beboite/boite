@@ -1077,6 +1077,11 @@ export interface SyncConflict {
   path: string;
   /** Which switch owns it, so the panel can group and label. */
   sourceId: string;
+  /**
+   * What the merged file has to still be readable as. The backend decides it,
+   * because the extension lies: ~/.copilot/config.json is JSONC.
+   */
+  syntax: SyncSyntax;
   /** The last agreed content, when there was one. Absent on a first sync. */
   base: string | null;
   /** This machine's side. Null when the file is not here at all. */

@@ -1231,6 +1231,41 @@ export const EN_MESSAGES = {
   "sync.secretsNote":
     "Credentials never leave. A field Boite knows is a secret travels as a placeholder, and a pull puts back the value this machine already had.",
 
+  "syncMerge.title": "Files that differ",
+  "syncMerge.progress": "{done} of {total} decided",
+  "syncMerge.files": "Files that differ",
+  "syncMerge.nothingWaiting": "Nothing is waiting.",
+  "syncMerge.statusWaiting": "Waiting",
+  "syncMerge.statusResolved": "Applied",
+  "syncMerge.statusSkipped": "Left alone",
+  "syncMerge.statusFailed": "Could not be written",
+  "syncMerge.mineLabel": "This machine",
+  "syncMerge.theirsLabel": "The repository",
+  "syncMerge.differenceOf": "Difference {index} of {total}",
+  "syncMerge.nothingHere": "(nothing on this side)",
+  "syncMerge.mine": "Mine",
+  "syncMerge.theirs": "Theirs",
+  "syncMerge.both": "Both",
+  "syncMerge.bothReversed": "Both, theirs first",
+  "syncMerge.keepAllBoth": "Keep both everywhere",
+  "syncMerge.undecided": "{count} still to decide",
+  "syncMerge.noDifferences": "The two sides match.",
+  "syncMerge.result": "What will be written",
+  "syncMerge.invalid": "This cannot be read back: {error}",
+  "syncMerge.invalidAtLine": "Line {line} cannot be read back: {error}",
+  "syncMerge.apply": "Apply to this file",
+  "syncMerge.skip": "Leave it alone",
+  "syncMerge.binary":
+    "One side of this file is not text, so there is nothing to stack. Keep one or leave it alone.",
+  "syncMerge.keepMine": "Keep mine",
+  "syncMerge.takeTheirs": "Take theirs",
+  "syncMerge.abandonAsk":
+    "{count} files still differ. They stay exactly as they are, here and in the repository, and the next sync will ask again. What you already applied stays applied.",
+  "syncMerge.abandonConfirm": "Close anyway",
+  "syncMerge.abandonCancel": "Keep going",
+  "syncMerge.sendNote": "Nothing is sent until everything here is decided.",
+  "syncMerge.send": "Send this machine's side",
+
 } as const;
 
 export type MessageKey = keyof typeof EN_MESSAGES;

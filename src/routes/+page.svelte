@@ -41,6 +41,7 @@
   import MobileBottomBar from "$lib/features/mobile/MobileBottomBar.svelte";
   import MobileProjectsPage from "$lib/features/mobile/MobileProjectsPage.svelte";
   import { lazyComponent, prefetchWhenIdle } from "$lib/shared/lazy.svelte";
+  import { syncStore } from "$lib/features/sync/store.svelte";
   import { t } from "$lib/i18n/index.svelte";
   import type { MessageKey } from "$lib/i18n/messages";
   import { fade, fly } from "svelte/transition";
@@ -81,6 +82,13 @@
   );
   // A canvas and a rope simulation, for an experiment that is off by default.
   // Behind import(), a boot that never switches it on never fetches it.
+  // Behind import(): a machine whose configuration never differs never fetches
+  // the merge tool, and it drags @codemirror/merge and the language table in
+  // behind it. The sync store itself imports none of that, on purpose — a test
+  // asserts it — because the launch pull puts the store on the boot graph.
+  const SyncMergeView = lazyComponent(
+    () => import("$lib/features/sync/SyncMergeOverlay.svelte"),
+  );
   const WhipView = lazyComponent(
     () => import("$lib/features/whip/WhipOverlay.svelte"),
   );
@@ -403,6 +411,30 @@
   $effect(() => {
     if (settings.state.experimentWhip) void WhipView.ensure();
     if (settings.state.experimentInfoBox) void InfoBoxView.ensure();
+  });
+
+  // The launch pull, and deliberately not part of the boot.
+  //
+  // After `app.ready`, which is after the boot timing has been reported: a git
+  // fetch sitting inside `app.init` would land between two boot marks and blame
+  // sync for a slow open. It is not a boot phase and must never look like one.
+  //
+  // `untrack` because pullAtLaunch reads settings and writes its own store, and
+  // without it the effect would subscribe to what it just wrote. The store
+  // itself does nothing when the switch is off or no repository is named, and
+  // once per transport identity, so a workspace grafted later gets its own.
+  $effect(() => {
+    if (!app.ready || !settings.ready) return;
+    if (!settings.state.syncOnLaunch || !settings.state.syncRemoteUrl) return;
+    untrack(() => {
+      void SyncMergeView.ensure().then(() => syncStore.pullAtLaunch());
+    });
+  });
+
+  // Opening the Sync tab with something waiting is the strongest signal the
+  // merge view is about to be needed.
+  $effect(() => {
+    if (syncStore.pending > 0) prefetchWhenIdle(SyncMergeView);
   });
 
   // Opening the Files or Git panel is the strongest signal that a file or a
@@ -754,6 +786,13 @@
   {#if settings.state.experimentWhip && WhipView.current}
     {@const WhipComp = WhipView.current}
     <WhipComp />
+  {/if}
+
+  <!-- Over everything, because a configuration that differs is the user's to
+       settle before anything else reads it. -->
+  {#if syncStore.mergeOpen && SyncMergeView.current}
+    {@const SyncMergeComp = SyncMergeView.current}
+    <SyncMergeComp />
   {/if}
 </div>
 
