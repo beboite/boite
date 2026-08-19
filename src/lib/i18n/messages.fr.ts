@@ -288,7 +288,6 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
 
   "sidebar.addProject": "Ajouter un projet",
   "sidebar.addProjectFromFolder": "Ajouter un projet depuis un dossier",
-  "sidebar.addProjectOnBoite": "Ajouter un projet sur la boite",
   "sidebar.addProjectOn": "Ajouter un projet sur {name}",
   "sidebar.remoteProjects": "Projets de la boite",
   "sidebar.remoteProjectsOn": "Quels projets de {name} afficher",
@@ -428,7 +427,6 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "project.detached": "détaché",
   "project.clean": "rien à committer",
   "project.changedFiles": "{count} modifiés",
-  "project.aheadBehind": "{ahead} en avance, {behind} en retard",
   "project.todos": "Todos",
   "project.addTodo": "Ajouter un todo…",
   "project.awaitingYou": "{count} en attente de votre confirmation",
@@ -449,7 +447,6 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "project.tokensCacheRead": "cache lu",
   "project.tokensRefresh": "Relire les transcriptions",
   "project.tokensDay": "{total} le {day}",
-  "project.tokensNothingOn": "rien le {day}",
   "project.tokensSpent": "{total} tokens",
   "project.tokensQuiet": "Rien de dépensé",
   "project.tokensLess": "moins",
@@ -771,7 +768,6 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "terminalTab.idleTimeout": "Délai d'inactivité (min)",
   "terminalTab.seconds": "{count} s",
   "terminalTab.minutes": "{count} min",
-  "terminalTab.days": "{count} j",
   "logs.scopeCurrent": "Session actuelle",
   "logs.scopePrevious": "Session précédente",
   "logs.levelAll": "Tous les niveaux",
@@ -977,14 +973,12 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "editor.discardMessage": "{name} a des modifications non enregistrées.",
   "editor.discardConfirm": "Abandonner",
   "editor.saveFailed": "Enregistrement échoué : {error}",
-  "editor.backToTerminal": "Retour au terminal",
   "editor.staleWarning":
     "Le fichier a été modifié en dehors de l'éditeur alors que vous avez des changements non enregistrés",
   "editor.reload": "Recharger depuis le disque (abandonne vos modifications)",
   "editor.saveWithShortcut": "Enregistrer (Ctrl+S)",
   "editor.pickAFile": "Choisissez un fichier dans le panneau Fichiers ou Git.",
   "editor.readonly": "lecture seule",
-  "editor.terminal": "Terminal",
   "fastpick.addProjectFirst": "Ajoutez d'abord un projet",
   "project.pickerFailed": "Impossible d'ouvrir le sélecteur de dossier",
   "project.dropIsOnThisMachine":
@@ -1152,8 +1146,6 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "keybindings.changed": "Modifié",
   "keybindings.conflict": "Partage cette touche avec {other}",
   "keybindings.conflictShadowed": "{other} occupe cette touche et l'emporte",
-  "keybindings.invalid":
-    "La condition de cette règle ne s'analyse pas, donc elle ne se déclenche jamais.",
   "keybindings.when": "quand {clause}",
   "keybindings.whenAlways": "partout",
 
