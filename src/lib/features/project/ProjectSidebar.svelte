@@ -19,6 +19,11 @@
     stopThread,
   } from "$lib/features/thread/api";
   import { moveThreadToProject } from "$lib/features/thread/move";
+  import {
+    muteProjectDispatches,
+    setThreadAcceptDispatch,
+  } from "$lib/app/dispatches";
+  import { orchestrator } from "$lib/features/orchestrator/store.svelte";
   import { notifications } from "$lib/features/notifications/store.svelte";
   import { refreshProjectIcon } from "$lib/features/project/api";
   import { openProjectDashboard } from "$lib/features/project/dashboard";
@@ -783,6 +788,19 @@
         app.toggleThreadKeepAwake(thread.id);
       },
     });
+    // The dispatch mute, user-only by construction: the bus refuses this
+    // write to any agent grant, so this menu is the one way back on.
+    if (orchestrator.enabled && !thread.role) {
+      items.push({
+        label:
+          thread.acceptDispatch === false
+            ? t("sidebar.unmuteDispatch")
+            : t("sidebar.muteDispatch"),
+        action: () => {
+          void setThreadAcceptDispatch(thread.id, thread.acceptDispatch === false);
+        },
+      });
+    }
     items.push({ separator: true });
     items.push({
       label: t("sidebar.reloadThread"),
@@ -878,6 +896,14 @@
         if (p) void refreshProjectIcon(p);
       },
     });
+    // The project-wide cut: every worker muted at once, and muting empties
+    // each thread's queued lines on the boite.
+    if (orchestrator.enabled) {
+      items.push({
+        label: t("sidebar.muteProjectDispatch"),
+        action: () => void muteProjectDispatches(project.id),
+      });
+    }
     items.push({ separator: true });
     items.push({
       label: t("sidebar.removeProject"),

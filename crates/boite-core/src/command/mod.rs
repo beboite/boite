@@ -237,6 +237,7 @@ fn probe_params() -> Value {
         "edge": "start", "to": "0",
         "status": "idle", "ids": [], "settled": true,
         "text": "t",
+        "toThreadId": "t", "dispatchId": "d", "state": "delivered",
     })
 }
 
@@ -695,6 +696,10 @@ mod tests {
             ("orchestrator.messages", ReadProject),
             ("orchestrator.start", MutateProject),
             ("orchestrator.status", ReadProject),
+            ("thread.dispatch", MutateProject),
+            ("thread.acceptDispatch", MutateProject),
+            ("dispatch.drain", MutateProject),
+            ("dispatch.settle", MutateProject),
         ];
         let actual: Vec<(&str, Capability)> = every_command()
             .iter()

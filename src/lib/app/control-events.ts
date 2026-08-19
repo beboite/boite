@@ -158,6 +158,24 @@ export function applyControlEvent(app: AppState, ev: ControlEvent, envId?: strin
         .catch(() => {});
       break;
     }
+    // A line was queued for a thread whose PTY may be this device's; the
+    // dispatch module drains and decides. Dismissed is the boite putting a
+    // row away, mirrored locally. Imported late like agent-requests: the
+    // module pulls in the store this is called from.
+    case "dispatch.queued": {
+      void import("./dispatches")
+        .then((m) => m.flushDispatches())
+        .catch((err) => logger.error("app", "dispatch.queued failed", err));
+      break;
+    }
+    case "thread.dismissed": {
+      const id = data?.threadId as string | undefined;
+      if (id)
+        void import("./dispatches")
+          .then((m) => m.onThreadDismissed(id))
+          .catch(() => {});
+      break;
+    }
     // The server lost track of which control events we missed (broadcast lag);
     // refetch the durable lists so the two do not diverge silently.
     case "resync": {

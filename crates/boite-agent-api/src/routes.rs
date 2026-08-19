@@ -72,6 +72,8 @@ fn verbs() -> Router<Shared> {
         .route("/v1/browser/scroll", post(browser_scroll))
         .route("/v1/pulse", get(pulse))
         .route("/v1/say", post(say))
+        .route("/v1/dispatch", post(dispatch))
+        .route("/v1/thread/dismiss", post(thread_dismiss))
         .route("/v1/snapshot", get(snapshot))
         .route("/v1/transcript", get(transcript))
         .route("/v1/search", get(search))
@@ -513,6 +515,81 @@ async fn say(
         Ok(v) => {
             workspace.announce(Change::Orchestrator);
             workspace.touched(&thread, "say");
+            v
+        }
+        Err(e) => json!({ "error": e }),
+    }))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DispatchIn {
+    to_thread_id: String,
+    text: String,
+    mode: Option<String>,
+}
+
+/// One line queued for another thread's prompt. The static guards — role,
+/// mute, scope — are `boite_core::command::conduct::dispatch`'s; the live
+/// ones belong to the device that flushes.
+async fn dispatch(
+    State(workspace): State<Shared>,
+    Extension(caller): Extension<Caller>,
+    Json(body): Json<DispatchIn>,
+) -> Result<Json<Value>, StatusCode> {
+    let thread = caller.thread()?.to_string();
+    let answered = boite_core::command::conduct::dispatch(
+        workspace.store(),
+        workspace.pulse_waiters().as_ref(),
+        &thread,
+        &body.to_thread_id,
+        &body.text,
+        body.mode.as_deref().unwrap_or("queue"),
+    );
+    Ok(Json(match answered {
+        Ok(v) => {
+            let dispatch_id = v
+                .get("dispatchId")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string();
+            workspace.announce(Change::DispatchQueued {
+                to_thread_id: body.to_thread_id,
+                dispatch_id,
+            });
+            workspace.touched(&thread, "dispatch");
+            v
+        }
+        Err(e) => json!({ "error": e }),
+    }))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DismissIn {
+    thread_id: String,
+}
+
+/// Puts a finished worker away on the orchestrator's word. The same busy rule
+/// as the user's own settle, gated on the caller's role.
+async fn thread_dismiss(
+    State(workspace): State<Shared>,
+    Extension(caller): Extension<Caller>,
+    Json(body): Json<DismissIn>,
+) -> Result<Json<Value>, StatusCode> {
+    let thread = caller.thread()?.to_string();
+    let answered = boite_core::command::conduct::dismiss(
+        workspace.store(),
+        workspace.pulse_waiters().as_ref(),
+        &thread,
+        &body.thread_id,
+    );
+    Ok(Json(match answered {
+        Ok(v) => {
+            workspace.announce(Change::ThreadDismissed {
+                thread_id: body.thread_id,
+            });
+            workspace.touched(&thread, "dismiss");
             v
         }
         Err(e) => json!({ "error": e }),

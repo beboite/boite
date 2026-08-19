@@ -14,6 +14,7 @@
   import { installMobileInput } from "./mobile-input";
   import { Touches } from "./touch";
   import { registerTerminal, unregisterTerminal } from "$lib/shared/terminals";
+  import { registerDispatchSink } from "$lib/app/dispatches";
   import { openUrl } from "$lib/platform/opener";
   import { readText, writeText } from "$lib/platform/clipboard";
   import {
@@ -75,6 +76,7 @@
 
   let container: HTMLDivElement;
   let term: Terminal | null = null;
+  let unregisterDispatchSink: (() => void) | null = null;
   let fit: FitAddon | null = null;
   let resizeObserver: ResizeObserver | null = null;
   let ptyId: string | null = null;
@@ -1223,6 +1225,14 @@
     // log cannot say which one is being looked at.
     logger.info("terminal", `${thread.label}: pane mounted`);
     mountedAt = Date.now();
+    // The queue's device half: an orchestrator's line for this thread is typed
+    // here, behind a notice line so the terminal says who wrote. `sendReport`
+    // on purpose — a dispatch is not the user being present, so it must not
+    // stamp `lastInputAt`.
+    unregisterDispatchSink = registerDispatchSink(thread.id, {
+      notice: (line) => term?.write(`\r\n\x1b[2m● ${line}\x1b[0m\r\n`),
+      type: (text) => sendReport(text),
+    });
     term = new Terminal({
       cursorBlink: true,
       cursorStyle: "bar",
@@ -1530,6 +1540,8 @@
 
   onDestroy(() => {
     destroyed = true;
+    unregisterDispatchSink?.();
+    unregisterDispatchSink = null;
     statusEngine.forget(thread.id);
     stopSessionMonitor();
     disposeMobileInput?.();

@@ -49,8 +49,19 @@
                 {phaseWord(thread)}
               </span>
             </span>
-            <span class="mt-0.5 shrink-0 truncate text-2xs text-muted-foreground/70">
-              {app.projectById(thread.projectId)?.name ?? ""}
+            <span class="mt-0.5 flex shrink-0 items-center gap-1.5">
+              {#if thread.acceptDispatch === false}
+                <!-- The dispatch mute, visible from the dashboard: this row no
+                     longer takes the orchestrator's lines. -->
+                <span
+                  class="rounded-sm border border-border px-1 text-2xs text-muted-foreground/80"
+                >
+                  {t("home.dispatchMuted")}
+                </span>
+              {/if}
+              <span class="truncate text-2xs text-muted-foreground/70">
+                {app.projectById(thread.projectId)?.name ?? ""}
+              </span>
             </span>
           </button>
         </li>

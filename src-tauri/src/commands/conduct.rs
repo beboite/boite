@@ -66,3 +66,9 @@ conduct_command!(conduct_orchestrator_say, "orchestrator.say");
 conduct_command!(conduct_orchestrator_messages, "orchestrator.messages");
 conduct_command!(conduct_orchestrator_start, "orchestrator.start");
 conduct_command!(conduct_orchestrator_status, "orchestrator.status");
+// The queue's device half. The window is the device on the desktop: it owns
+// the PTYs, so it drains, types and settles — the bus refuses these three to
+// any agent grant.
+conduct_command!(conduct_thread_accept_dispatch, "thread.acceptDispatch");
+conduct_command!(conduct_dispatch_drain, "dispatch.drain");
+conduct_command!(conduct_dispatch_settle, "dispatch.settle");

@@ -1,10 +1,16 @@
-//! The orchestration surface: the pulse, and the orchestrator conversation.
+//! The orchestration surface: the pulse, the orchestrator conversation, and
+//! the dispatch queue.
 //!
-//! Small on purpose, and grown phase by phase: dispatch joins later, behind its
-//! own review. What is here is what phase 1 needs — a worker's phase
-//! transitions written down (`conduct.record`), read back with an optional wait
-//! (`conduct.pulse`), and the durable chat the user and the orchestrator share
-//! (`orchestrator.post` / `orchestrator.say` / `orchestrator.messages`).
+//! Small on purpose, and grown phase by phase. Phase 1 brought a worker's
+//! phase transitions written down (`conduct.record`), read back with an
+//! optional wait (`conduct.pulse`), and the durable chat the user and the
+//! orchestrator share (`orchestrator.post` / `orchestrator.say` /
+//! `orchestrator.messages`). Phase 3 adds the dispatch queue: a dispatch is a
+//! row, never a byte (`crate::reply` forbids typing from the bus, on purpose,
+//! and this does not go around it). `thread.dispatch` queues the line, the
+//! device that owns the target PTY drains and types it (`dispatch.drain`,
+//! guards in `crate::orchestrator::dispatch`), and reports what happened
+//! (`dispatch.settle`). `thread.acceptDispatch` is the user's mute switch.
 //!
 //! The wait is the part with rules. `conduct.pulse` long-polls the ring through
 //! `crate::pulse::Waiters`, which caps the timeout at 120 s, allows one live
@@ -31,6 +37,21 @@ pub const ALL_METHODS: &[&str] = &[
     "orchestrator.messages",
     "orchestrator.start",
     "orchestrator.status",
+    "thread.dispatch",
+    "thread.acceptDispatch",
+    "dispatch.drain",
+    "dispatch.settle",
+];
+
+/// How long a queued line lives when the drain does not say otherwise.
+const DISPATCH_TTL_MS_DEFAULT: u32 = 3_600_000;
+
+/// The three words a settle may write. Anything else is a caller inventing a
+/// state the readers of this table were never taught.
+const SETTLE_STATES: &[&str] = &[
+    crate::orchestrator::dispatch::STATE_DELIVERED,
+    crate::orchestrator::dispatch::STATE_DROPPED,
+    crate::orchestrator::dispatch::STATE_REFUSED,
 ];
 
 /// How many moments one pulse answer carries at most.
@@ -136,6 +157,141 @@ pub fn say(
     Ok(json!({ "messageId": id, "seq": seq }))
 }
 
+/// The static guards every orchestrator-to-worker verb shares, answering the
+/// target's project when they all pass.
+///
+/// The row is the proof of the caller's role, the target never carries a role
+/// of its own, and the scope rule is the same both ways: a project
+/// orchestrator stays inside its project, a global one stays out of a project
+/// that has its own.
+fn conducted_target(
+    store: &Store,
+    thread_id: &str,
+    to_thread_id: &str,
+) -> Result<String, String> {
+    let (role, scope, _) = store
+        .thread_orchestration(thread_id)
+        .ok_or("unknown thread")?;
+    if role.as_deref() != Some(crate::orchestrator::ROLE) {
+        return Err(
+            "only an orchestrator thread may reach another thread this way, and this thread \
+             is not one"
+                .to_string(),
+        );
+    }
+    let (to_role, _, _) = store
+        .thread_orchestration(to_thread_id)
+        .ok_or("unknown target thread")?;
+    if to_role.is_some() {
+        return Err(
+            "NO_ORCHESTRATOR_TO_ORCHESTRATOR: the target carries a role, and a \
+             dispatch between orchestrators is refused in both directions"
+                .to_string(),
+        );
+    }
+    let target_project = store.project_of_thread(to_thread_id)?;
+    match scope.as_deref() {
+        // A global orchestrator stays out of a project another orchestrator
+        // owns.
+        None => {
+            if store.find_orchestrator(Some(&target_project)).is_some() {
+                return Err(format!(
+                    "SCOPE_TAKEN: project {target_project} has its own live \
+                     orchestrator, and dispatch into it belongs to that one"
+                ));
+            }
+        }
+        // A project orchestrator stays inside its own project.
+        Some(own) if own != target_project => {
+            return Err(format!(
+                "OUT_OF_SCOPE: this orchestrator is scoped to {own} and the \
+                 target lives in {target_project}"
+            ));
+        }
+        Some(_) => {}
+    }
+    Ok(target_project)
+}
+
+/// Queues one line for another thread's prompt. Shared with `POST /v1/dispatch`.
+///
+/// The static guards run here, at queue time; the live ones — phase, a
+/// permission on screen — are the device's at flush time
+/// (`crate::orchestrator::dispatch`), and it re-checks these too: a row can
+/// change between queue and flush.
+pub fn dispatch(
+    store: &Store,
+    waiters: Option<&Arc<Waiters>>,
+    thread_id: &str,
+    to_thread_id: &str,
+    text: &str,
+    mode: &str,
+) -> Result<Value, String> {
+    let target_project = conducted_target(store, thread_id, to_thread_id)?;
+    let (_, _, to_accepts) = store
+        .thread_orchestration(to_thread_id)
+        .ok_or("unknown target thread")?;
+    if !to_accepts {
+        return Err(
+            "MUTED: the user muted dispatch into this thread, and only the user rearms it"
+                .to_string(),
+        );
+    }
+    let now = crate::now_ms();
+    let id = store.queue_dispatch(thread_id, to_thread_id, text, mode, now)?;
+    let seq = store.append_moment(
+        "dispatch.queued",
+        Some(&target_project),
+        Some(&id),
+        mode,
+        "dispatch",
+        now,
+    )?;
+    if let Some(waiters) = waiters {
+        waiters.notify();
+    }
+    Ok(json!({ "dispatchId": id, "seq": seq }))
+}
+
+/// Puts a finished worker away on the orchestrator's word. Route-only: the
+/// dismissal is `thread.settle`'s write behind the same busy rule
+/// (`crate::settle::can_settle`), gated on the caller's role.
+pub fn dismiss(
+    store: &Store,
+    waiters: Option<&Arc<Waiters>>,
+    thread_id: &str,
+    to_thread_id: &str,
+) -> Result<Value, String> {
+    let target_project = conducted_target(store, thread_id, to_thread_id)?;
+    // The recorded status is the best either host holds here, and it is the
+    // same column the persistence task writes on every transition.
+    let status = store
+        .thread_status(to_thread_id)
+        .map(|(status, _)| status)
+        .unwrap_or_else(|| "idle".to_string());
+    if !crate::settle::can_settle(&status) {
+        return Err(crate::settle::refusal(&status));
+    }
+    let now = crate::now_ms();
+    store.update_thread_field(
+        to_thread_id,
+        crate::store::ThreadCol::SettledAt,
+        crate::store::ColVal::Int(now),
+    )?;
+    let seq = store.append_moment(
+        "thread.dismissed",
+        Some(&target_project),
+        Some(to_thread_id),
+        "",
+        "dispatch",
+        now,
+    )?;
+    if let Some(waiters) = waiters {
+        waiters.notify();
+    }
+    Ok(json!({ "threadId": to_thread_id, "seq": seq }))
+}
+
 #[derive(Debug, Clone)]
 pub enum Conduct {
     /// The workspace since a cursor, with an optional wait when it is quiet.
@@ -186,6 +342,30 @@ pub enum Conduct {
     },
     /// Which thread is the live orchestrator for a scope, if any.
     Status { scope: Option<String> },
+    /// One line queued for another thread's prompt. The static guards live
+    /// here (role, mute, scope); the live ones (phase, permission on screen)
+    /// belong to the device at flush time.
+    Dispatch {
+        /// Who asks. The row is the proof: only an orchestrator dispatches.
+        thread_id: String,
+        to_thread_id: String,
+        text: String,
+        mode: String,
+    },
+    /// The user's mute switch for one thread. Local only: an agent never
+    /// rearms a thread the user muted, and muting drops the thread's backlog.
+    AcceptDispatch { thread_id: String, accept: bool },
+    /// Everything still queued, oldest first, with the TTL sweep applied
+    /// first. What a device reads before it types anything.
+    Drain { ttl_ms: u32 },
+    /// The device's report on one line: `delivered`, `dropped` or `refused`,
+    /// with the guard's named reason. How the orchestrator learns the outcome
+    /// without polling — the settle is also a moment.
+    SettleDispatch {
+        dispatch_id: String,
+        state: String,
+        reason: Option<String>,
+    },
 }
 
 impl Conduct {
@@ -234,6 +414,24 @@ impl Conduct {
             "orchestrator.status" => Conduct::Status {
                 scope: opt_str_param(params, "scope"),
             },
+            "thread.dispatch" => Conduct::Dispatch {
+                thread_id: str_param(params, "threadId")?,
+                to_thread_id: str_param(params, "toThreadId")?,
+                text: str_param(params, "text")?,
+                mode: opt_str_param(params, "mode").unwrap_or_else(|| "queue".to_string()),
+            },
+            "thread.acceptDispatch" => Conduct::AcceptDispatch {
+                thread_id: str_param(params, "threadId")?,
+                accept: super::bool_param(params, "accept", true),
+            },
+            "dispatch.drain" => Conduct::Drain {
+                ttl_ms: u32_param(params, "ttlMs", DISPATCH_TTL_MS_DEFAULT),
+            },
+            "dispatch.settle" => Conduct::SettleDispatch {
+                dispatch_id: str_param(params, "dispatchId")?,
+                state: str_param(params, "state")?,
+                reason: opt_str_param(params, "reason"),
+            },
             other => return Err(format!("unknown method: {other}")),
         })
     }
@@ -247,6 +445,10 @@ impl Conduct {
             Conduct::Messages { .. } => "orchestrator.messages",
             Conduct::Start { .. } => "orchestrator.start",
             Conduct::Status { .. } => "orchestrator.status",
+            Conduct::Dispatch { .. } => "thread.dispatch",
+            Conduct::AcceptDispatch { .. } => "thread.acceptDispatch",
+            Conduct::Drain { .. } => "dispatch.drain",
+            Conduct::SettleDispatch { .. } => "dispatch.settle",
         }
     }
 
@@ -258,6 +460,10 @@ impl Conduct {
             Conduct::Post { .. } | Conduct::Say { .. } => Wire::Bare,
             Conduct::Messages { .. } => Wire::Key("messages"),
             Conduct::Start { .. } | Conduct::Status { .. } => Wire::Bare,
+            Conduct::Drain { .. } => Wire::Key("dispatches"),
+            Conduct::Dispatch { .. }
+            | Conduct::AcceptDispatch { .. }
+            | Conduct::SettleDispatch { .. } => Wire::Bare,
         }
     }
 
@@ -269,7 +475,11 @@ impl Conduct {
             Conduct::Record { .. }
             | Conduct::Post { .. }
             | Conduct::Say { .. }
-            | Conduct::Start { .. } => Capability::MutateProject,
+            | Conduct::Start { .. }
+            | Conduct::Dispatch { .. }
+            | Conduct::AcceptDispatch { .. }
+            | Conduct::Drain { .. }
+            | Conduct::SettleDispatch { .. } => Capability::MutateProject,
         }
     }
 
@@ -281,6 +491,21 @@ impl Conduct {
         if matches!(self, Conduct::Start { .. }) && grant != Grant::Local {
             return Err(
                 "only Boite's own window arms an orchestrator; an agent cannot stamp the role"
+                    .to_string(),
+            );
+        }
+        // Same shape for the queue's device half: draining, settling and the
+        // mute switch belong to the thing that owns the PTY and to the user.
+        // An agent that could rearm `accept_dispatch` would undo the user's
+        // own mute, which is the promotion this refuses.
+        if matches!(
+            self,
+            Conduct::AcceptDispatch { .. } | Conduct::Drain { .. } | Conduct::SettleDispatch { .. }
+        ) && grant != Grant::Local
+        {
+            return Err(
+                "only a device drains, settles or mutes dispatches; an agent never touches \
+                 the queue's device half"
                     .to_string(),
             );
         }
@@ -408,6 +633,109 @@ impl Conduct {
                 Some(id) => json!({ "threadId": id, "state": "live" }),
                 None => json!({ "threadId": null, "state": "off" }),
             },
+            Conduct::Dispatch {
+                thread_id,
+                to_thread_id,
+                text,
+                mode,
+            } => dispatch(
+                store,
+                waiters.as_ref(),
+                &thread_id,
+                &to_thread_id,
+                &text,
+                &mode,
+            )?,
+            Conduct::AcceptDispatch { thread_id, accept } => {
+                store
+                    .thread_orchestration(&thread_id)
+                    .ok_or("unknown thread")?;
+                store.set_accept_dispatch(&thread_id, accept)?;
+                let now = crate::now_ms();
+                let mut dropped = 0;
+                if !accept {
+                    // Muting empties the backlog too: a mute that lets queued
+                    // lines land later is not a mute. Each drop is a moment,
+                    // so the orchestrator learns without polling.
+                    let project = store.project_of_thread(&thread_id).ok();
+                    for id in store.settle_dispatches_to(
+                        &thread_id,
+                        crate::orchestrator::dispatch::STATE_DROPPED,
+                        "muted",
+                        now,
+                    )? {
+                        store.append_moment(
+                            "dispatch.settled",
+                            project.as_deref(),
+                            Some(&id),
+                            "dropped:muted",
+                            "dispatch",
+                            now,
+                        )?;
+                        dropped += 1;
+                    }
+                }
+                if let Some(waiters) = waiters {
+                    waiters.notify();
+                }
+                json!({ "threadId": thread_id, "accept": accept, "dropped": dropped })
+            }
+            Conduct::Drain { ttl_ms } => {
+                let now = crate::now_ms();
+                let expired = store.expire_dispatches(now - i64::from(ttl_ms), now)?;
+                for id in &expired {
+                    store.append_moment(
+                        "dispatch.settled",
+                        None,
+                        Some(id),
+                        "dropped:no_device",
+                        "dispatch",
+                        now,
+                    )?;
+                }
+                if !expired.is_empty() {
+                    if let Some(waiters) = waiters {
+                        waiters.notify();
+                    }
+                }
+                value_of(store.open_dispatches()?)
+            }
+            Conduct::SettleDispatch {
+                dispatch_id,
+                state,
+                reason,
+            } => {
+                if !SETTLE_STATES.contains(&state.as_str()) {
+                    return Err(format!(
+                        "unknown settle state {state}; it is one of delivered, dropped, refused"
+                    ));
+                }
+                let now = crate::now_ms();
+                match store.settle_dispatch(&dispatch_id, &state, reason.as_deref(), now)? {
+                    Some((_, to_thread_id)) => {
+                        let project = store.project_of_thread(&to_thread_id).ok();
+                        let detail = match &reason {
+                            Some(reason) => format!("{state}:{reason}"),
+                            None => state.clone(),
+                        };
+                        let seq = store.append_moment(
+                            "dispatch.settled",
+                            project.as_deref(),
+                            Some(&dispatch_id),
+                            &detail,
+                            "dispatch",
+                            now,
+                        )?;
+                        if let Some(waiters) = waiters {
+                            waiters.notify();
+                        }
+                        json!({ "dispatchId": dispatch_id, "settled": true, "seq": seq })
+                    }
+                    // Already settled, most often by the TTL sweep racing this
+                    // report. The first writer's reason stands.
+                    None => json!({ "dispatchId": dispatch_id, "settled": false }),
+                }
+            }
         })
     }
 }
@@ -617,5 +945,220 @@ mod tests {
         writer.join().unwrap();
         assert_eq!(pulse["timedOut"], json!(false));
         assert_eq!(pulse["moments"].as_array().unwrap().len(), 1);
+    }
+
+    fn thread_row(id: &str, project: &str) -> Value {
+        json!({ "thread": { "id": id, "projectId": project, "label": "l", "cmd": "c", "args": [] } })
+    }
+
+    /// A host with a stamped global orchestrator and one plain worker, the
+    /// starting shape of every dispatch test.
+    fn dispatch_host(name: &str) -> Rows {
+        let host = Rows::new(name);
+        ask(&host, "thread.create", thread_row("boss", "p")).unwrap();
+        ask(&host, "thread.create", thread_row("worker", "p")).unwrap();
+        host.store.stamp_orchestrator_role("boss", None).unwrap();
+        host
+    }
+
+    /// The row is the proof: a worker asking to dispatch is refused by role,
+    /// and static target guards refuse at queue time with the same names the
+    /// device would use at flush time.
+    #[test]
+    fn dispatch_is_refused_by_role_and_static_target_guards() {
+        let host = dispatch_host("guards");
+        ask(&host, "thread.create", thread_row("peer", "p")).unwrap();
+
+        let no_role = ask(
+            &host,
+            "thread.dispatch",
+            json!({ "threadId": "worker", "toThreadId": "peer", "text": "hi" }),
+        )
+        .unwrap_err();
+        assert!(no_role.contains("not one"), "{no_role}");
+
+        // Both directions: the boss into another orchestrator is refused too.
+        host.store.stamp_orchestrator_role("peer", Some("q")).unwrap();
+        let to_peer = ask(
+            &host,
+            "thread.dispatch",
+            json!({ "threadId": "boss", "toThreadId": "peer", "text": "hi" }),
+        )
+        .unwrap_err();
+        assert!(to_peer.contains("NO_ORCHESTRATOR_TO_ORCHESTRATOR"), "{to_peer}");
+
+        ask(
+            &host,
+            "thread.acceptDispatch",
+            json!({ "threadId": "worker", "accept": false }),
+        )
+        .unwrap();
+        let muted = ask(
+            &host,
+            "thread.dispatch",
+            json!({ "threadId": "boss", "toThreadId": "worker", "text": "hi" }),
+        )
+        .unwrap_err();
+        assert!(muted.contains("MUTED"), "{muted}");
+    }
+
+    /// A global orchestrator stays out of a project that has its own, and a
+    /// project orchestrator stays inside its own project.
+    #[test]
+    fn dispatch_scope_is_owned_by_the_nearest_orchestrator() {
+        let host = dispatch_host("scope");
+        ask(&host, "thread.create", thread_row("qworker", "q")).unwrap();
+        ask(&host, "thread.create", thread_row("qboss", "q")).unwrap();
+        host.store.stamp_orchestrator_role("qboss", Some("q")).unwrap();
+
+        let taken = ask(
+            &host,
+            "thread.dispatch",
+            json!({ "threadId": "boss", "toThreadId": "qworker", "text": "hi" }),
+        )
+        .unwrap_err();
+        assert!(taken.contains("SCOPE_TAKEN"), "{taken}");
+
+        let out = ask(
+            &host,
+            "thread.dispatch",
+            json!({ "threadId": "qboss", "toThreadId": "worker", "text": "hi" }),
+        )
+        .unwrap_err();
+        assert!(out.contains("OUT_OF_SCOPE"), "{out}");
+
+        // Inside its own project the line queues.
+        ask(
+            &host,
+            "thread.dispatch",
+            json!({ "threadId": "qboss", "toThreadId": "qworker", "text": "hi" }),
+        )
+        .unwrap();
+    }
+
+    /// The queue roundtrip: queued, read by the drain, settled once. The
+    /// second settle loses the race and says so rather than rewriting history.
+    #[test]
+    fn a_dispatch_queues_drains_and_settles_once() {
+        let host = dispatch_host("queue-roundtrip");
+        let queued = ask(
+            &host,
+            "thread.dispatch",
+            json!({ "threadId": "boss", "toThreadId": "worker", "text": "run tests", "mode": "now" }),
+        )
+        .unwrap();
+        let id = queued["dispatchId"].as_str().unwrap().to_string();
+
+        let open = ask(&host, "dispatch.drain", json!({})).unwrap();
+        let list = open.as_array().unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0]["id"], json!(id.clone()));
+        assert_eq!(list[0]["toThreadId"], json!("worker"));
+        assert_eq!(list[0]["mode"], json!("now"));
+
+        let bad = ask(
+            &host,
+            "dispatch.settle",
+            json!({ "dispatchId": id.clone(), "state": "typed" }),
+        )
+        .unwrap_err();
+        assert!(bad.contains("unknown settle state"), "{bad}");
+
+        let first = ask(
+            &host,
+            "dispatch.settle",
+            json!({ "dispatchId": id.clone(), "state": "delivered" }),
+        )
+        .unwrap();
+        assert_eq!(first["settled"], json!(true));
+        let again = ask(
+            &host,
+            "dispatch.settle",
+            json!({ "dispatchId": id.clone(), "state": "refused", "reason": "TARGET_BUSY" }),
+        )
+        .unwrap();
+        assert_eq!(again["settled"], json!(false), "the first writer's word stands");
+
+        let drained = ask(&host, "dispatch.drain", json!({})).unwrap();
+        assert!(drained.as_array().unwrap().is_empty());
+    }
+
+    /// Muting a thread drops its backlog: a mute that lets queued lines land
+    /// later is not a mute.
+    #[test]
+    fn muting_drops_the_backlog() {
+        let host = dispatch_host("mute");
+        ask(
+            &host,
+            "thread.dispatch",
+            json!({ "threadId": "boss", "toThreadId": "worker", "text": "one" }),
+        )
+        .unwrap();
+        ask(
+            &host,
+            "thread.dispatch",
+            json!({ "threadId": "boss", "toThreadId": "worker", "text": "two" }),
+        )
+        .unwrap();
+        let muted = ask(
+            &host,
+            "thread.acceptDispatch",
+            json!({ "threadId": "worker", "accept": false }),
+        )
+        .unwrap();
+        assert_eq!(muted["dropped"], json!(2));
+        let open = ask(&host, "dispatch.drain", json!({})).unwrap();
+        assert!(open.as_array().unwrap().is_empty());
+    }
+
+    /// A line older than the TTL is swept by the drain before anything reads
+    /// it, settled `dropped` with the reason the orchestrator can act on.
+    #[test]
+    fn the_drain_sweeps_expired_lines_first() {
+        let host = dispatch_host("ttl");
+        // Backdated through the store: the bus stamps its own clock.
+        host.store
+            .queue_dispatch("boss", "worker", "stale", "queue", 1)
+            .unwrap();
+        let open = ask(&host, "dispatch.drain", json!({ "ttlMs": 1000 })).unwrap();
+        assert!(open.as_array().unwrap().is_empty());
+        let pulse = ask(&host, "conduct.pulse", json!({ "sinceSeq": 0, "timeoutMs": 0 })).unwrap();
+        let settled = pulse["moments"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["kind"] == json!("dispatch.settled"))
+            .expect("the sweep is a moment");
+        assert_eq!(settled["detail"], json!("dropped:no_device"));
+    }
+
+    /// The queue's device half is the device's and the user's, never an
+    /// agent's: an agent that could drain, settle or rearm a mute would be
+    /// typing with the user's hands.
+    #[test]
+    fn the_device_half_is_local_only() {
+        let host = dispatch_host("local");
+        for (method, params) in [
+            ("thread.acceptDispatch", json!({ "threadId": "worker" })),
+            ("dispatch.drain", json!({})),
+            (
+                "dispatch.settle",
+                json!({ "dispatchId": "d", "state": "delivered" }),
+            ),
+        ] {
+            let refusal = Command::decode(method, &params)
+                .unwrap()
+                .prepare(&host, Grant::Conduct)
+                .unwrap_err();
+            assert!(refusal.contains("device half"), "{method}: {refusal}");
+        }
+        // Dispatch itself is the agent's verb: the conduct grant reaches it.
+        Command::decode(
+            "thread.dispatch",
+            &json!({ "threadId": "boss", "toThreadId": "worker", "text": "hi" }),
+        )
+        .unwrap()
+        .prepare(&host, Grant::Conduct)
+        .unwrap();
     }
 }

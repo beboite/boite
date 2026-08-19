@@ -250,6 +250,13 @@ export const EN_MESSAGES = {
   "orchestrator.startFailed": "The orchestrator did not start: {error}",
   "orchestrator.postFailed": "The message was not delivered.",
 
+  "dispatch.notice": "sent by the orchestrator",
+  "home.takeBackAll": "Take everything back",
+  "home.dispatchMuted": "muted",
+  "sidebar.muteDispatch": "Mute orchestrator dispatches",
+  "sidebar.unmuteDispatch": "Accept orchestrator dispatches again",
+  "sidebar.muteProjectDispatch": "Mute dispatches for this project",
+
   "welcome.pickFolder": "Pick a folder to create your first project.",
   "welcome.tapToOpen": "Tap + to open a terminal.",
   "welcome.clickShortcut": "Click a shortcut above to launch a terminal.",

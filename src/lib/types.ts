@@ -95,6 +95,11 @@ export interface Thread {
   role?: string | null;
   /** The project an orchestrator answers for, or null for the global one. */
   orchestratorScope?: string | null;
+  /**
+   * Whether this thread still accepts dispatched lines. Absent means yes.
+   * The user mutes; no agent-reachable write rearms it.
+   */
+  acceptDispatch?: boolean;
   origin?: WorkspaceOrigin;
 }
 

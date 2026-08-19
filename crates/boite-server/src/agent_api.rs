@@ -175,6 +175,14 @@ impl Workspace for ServerWorkspace {
             Change::Approvals => AppEvent::ApprovalsChanged,
             Change::Todos | Change::Worktrees => AppEvent::TodosChanged,
             Change::Orchestrator => AppEvent::OrchestratorChanged,
+            Change::DispatchQueued {
+                to_thread_id,
+                dispatch_id,
+            } => AppEvent::DispatchQueued {
+                thread_id: to_thread_id,
+                dispatch_id,
+            },
+            Change::ThreadDismissed { thread_id } => AppEvent::ThreadDismissed { thread_id },
         });
     }
 

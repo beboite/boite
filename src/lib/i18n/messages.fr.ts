@@ -252,6 +252,13 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "orchestrator.startFailed": "L'orchestrateur n'a pas démarré : {error}",
   "orchestrator.postFailed": "Le message n'a pas été remis.",
 
+  "dispatch.notice": "envoyé par l'orchestrateur",
+  "home.takeBackAll": "Tout reprendre",
+  "home.dispatchMuted": "coupé",
+  "sidebar.muteDispatch": "Couper les envois de l'orchestrateur",
+  "sidebar.unmuteDispatch": "Accepter de nouveau les envois de l'orchestrateur",
+  "sidebar.muteProjectDispatch": "Couper les envois pour ce projet",
+
   "welcome.pickFolder": "Choisissez un dossier pour créer votre premier projet.",
   "welcome.tapToOpen": "Appuyez sur + pour ouvrir un terminal.",
   "welcome.clickShortcut": "Cliquez sur un raccourci ci-dessus pour lancer un terminal.",
