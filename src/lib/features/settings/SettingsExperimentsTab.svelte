@@ -3,6 +3,7 @@
   import ToggleSetting from "$lib/shared/components/ToggleSetting.svelte";
   import { t, type MessageKey } from "$lib/i18n/index.svelte";
   import type { SmartSortBy, SortDirection, WhipSound } from "$lib/types";
+  import { CLI_PRESETS } from "$lib/features/settings/cliPresets";
 
   const SORT_MODES: { id: SmartSortBy; labelKey: MessageKey }[] = [
     { id: "manual", labelKey: "experiments.smartSortManual" },
@@ -57,6 +58,47 @@
   enabled={settings.state.experimentHome}
   onToggle={() => settings.setExperimentHome(!settings.state.experimentHome)}
 />
+
+<ToggleSetting
+  label={t("experiments.orchestrator")} anchor="experiments.orchestrator"
+  description={t("experiments.orchestratorDesc")}
+  enabled={settings.state.experimentOrchestrator}
+  onToggle={() =>
+    settings.setExperimentOrchestrator(!settings.state.experimentOrchestrator)}
+/>
+
+{#if settings.state.experimentOrchestrator}
+  <div class="flex flex-col gap-1.5 pl-3">
+    <div
+      class="flex flex-wrap items-center gap-1.5"
+      role="radiogroup"
+      aria-label={t("experiments.orchestratorAgent")}
+    >
+      <span class="w-20 shrink-0 text-xs text-muted-foreground">
+        {t("experiments.orchestratorAgent")}
+      </span>
+      {#each CLI_PRESETS as preset (preset.id)}
+        <button
+          type="button"
+          role="radio"
+          aria-checked={settings.state.orchestratorAgent === preset.id}
+          class={settings.state.orchestratorAgent === preset.id ? RADIO_ON : RADIO}
+          onclick={() =>
+            settings.setOrchestratorAgent(
+              settings.state.orchestratorAgent === preset.id ? null : preset.id,
+            )}
+        >
+          {preset.label}
+        </button>
+      {/each}
+    </div>
+    <!-- A shortcut can also name the agent, and a shortcut may point at a
+         brokered endpoint; the warning follows the value, not the buttons. -->
+    {#if settings.state.orchestratorAgent?.startsWith("fastpick:")}
+      <p class="text-xs text-amber-500">{t("experiments.orchestratorBrokered")}</p>
+    {/if}
+  </div>
+{/if}
 
 <ToggleSetting
   label={t("experiments.infoBox")} anchor="experiments.infoBox"

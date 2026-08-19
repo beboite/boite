@@ -60,6 +60,20 @@ impl Endpoint {
         headers: &[(&str, &str)],
         body: Option<Vec<u8>>,
     ) -> Result<Response, String> {
+        self.send_with_read_timeout(method, path, headers, body, IO_TIMEOUT)
+    }
+
+    /// [`Endpoint::send`] with its own patience, for the pulse long-poll: the
+    /// endpoint holds that route open on purpose, and the flat twenty seconds
+    /// would tear it down mid-wait and report a workspace that went quiet.
+    pub fn send_with_read_timeout(
+        &self,
+        method: &str,
+        path: &str,
+        headers: &[(&str, &str)],
+        body: Option<Vec<u8>>,
+        read_timeout: Duration,
+    ) -> Result<Response, String> {
         let addr = self
             .authority
             .to_socket_addrs()
@@ -68,7 +82,7 @@ impl Endpoint {
             .ok_or_else(|| format!("boite unreachable: {} resolves to nothing", self.authority))?;
         let mut stream = TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT)
             .map_err(|e| format!("boite unreachable: {e}"))?;
-        stream.set_read_timeout(Some(IO_TIMEOUT)).ok();
+        stream.set_read_timeout(Some(read_timeout)).ok();
         stream.set_write_timeout(Some(IO_TIMEOUT)).ok();
         // The requests are two hundred bytes; Nagle would only hold them back
         // waiting for a second write that never comes.

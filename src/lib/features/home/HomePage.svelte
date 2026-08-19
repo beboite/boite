@@ -5,6 +5,8 @@
   import AgentsLive from "./AgentsLive.svelte";
   import WorkspaceTokens from "./WorkspaceTokens.svelte";
   import Inbox from "./Inbox.svelte";
+  import OrchestratorChat from "./OrchestratorChat.svelte";
+  import { orchestrator } from "$lib/features/orchestrator/store.svelte";
 
   $effect(() => relativeClock.subscribe());
 </script>
@@ -28,6 +30,11 @@
         <AgentsLive />
         <WorkspaceTokens />
         <Inbox />
+        {#if orchestrator.enabled}
+          <div class="lg:col-span-3">
+            <OrchestratorChat />
+          </div>
+        {/if}
       </div>
     </div>
   </div>

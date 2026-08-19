@@ -197,7 +197,7 @@ function writtenOnThisMachine(from: RequestSource): boolean {
  * matching means falling back to the caller's own agent, which is nearly always
  * the one meant — an agent splitting its work reaches for another of itself.
  */
-function resolveLaunch(
+export function resolveLaunch(
   agent: string | null | undefined,
   fallbackIcon: IconKey,
 ): { cmd: string; args: string[]; label: string; iconKey: IconKey; iconColor: string | null } | null {

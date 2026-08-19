@@ -7,10 +7,11 @@
 //! claimable — see `crate::command::records` for the write rules.
 //!
 //! This module holds what is shared between the hosts: the briefing a restarted
-//! session opens with. The wake decision (`wake.rs`) and the dispatch queue
-//! (`dispatch.rs`) arrive with their own phases.
+//! session opens with, and the wake decision (`wake.rs`). The dispatch queue
+//! (`dispatch.rs`) arrives with its own phase.
 
 pub mod briefing;
+pub mod wake;
 
 /// The one value `role` ever holds. A constant so a typo is a compile error
 /// rather than a thread that silently is not one.

@@ -379,7 +379,7 @@ impl Command {
         grant.ensure(self.capability())?;
         match self {
             Command::Checkpoints(c) => c.prepare(host),
-            Command::Conduct(c) => c.prepare(host),
+            Command::Conduct(c) => c.prepare(host, grant),
             Command::Files(f) => f.prepare(host),
             Command::Git(g) => g.prepare(host),
             Command::Records(r) => r.prepare(host),
@@ -693,6 +693,8 @@ mod tests {
             ("orchestrator.post", MutateProject),
             ("orchestrator.say", MutateProject),
             ("orchestrator.messages", ReadProject),
+            ("orchestrator.start", MutateProject),
+            ("orchestrator.status", ReadProject),
         ];
         let actual: Vec<(&str, Capability)> = every_command()
             .iter()

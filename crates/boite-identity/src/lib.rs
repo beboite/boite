@@ -75,6 +75,18 @@ pub mod env {
     pub const KEY_FILE: &str = "BOITE_KEY_FILE";
     /// Which thread this terminal is. Not a credential on its own.
     pub const THREAD: &str = "BOITE_THREAD_ID";
+    /// The role the thread's row carries, today only `orchestrator`.
+    ///
+    /// A hint for the shim's tool list, never an authority: every privileged
+    /// call is re-checked against the row itself, so a process exporting this
+    /// by hand gets a longer menu of refusals and nothing else.
+    pub const ROLE: &str = "BOITE_ROLE";
+    /// The scope of an orchestrator thread: a project id, or unset for the
+    /// whole workspace. Same trust rules as [`ROLE`].
+    pub const ORCHESTRATOR_SCOPE: &str = "BOITE_ORCHESTRATOR_SCOPE";
+    /// The autonomy the user chose: `observer`, `dispatcher` or `autopilot`.
+    /// Read by the orchestrator's own prompt; enforcement lives server-side.
+    pub const AUTONOMY: &str = "BOITE_AUTONOMY";
 }
 
 /// The private half of a thread's identity.

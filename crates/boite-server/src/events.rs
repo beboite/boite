@@ -52,6 +52,9 @@ pub enum AppEvent {
     MomentAppended {
         seq: i64,
     },
+    /// The orchestrator conversation moved — a reply through `/v1/say`, or a
+    /// role stamped by `orchestrator.start`. Chats re-read by cursor.
+    OrchestratorChanged,
     /// One device is out, as of now.
     ///
     /// Broadcast rather than left to the next call, and this is the half that
@@ -101,6 +104,9 @@ impl AppEvent {
             AppEvent::PairingsChanged => Event::new("pairings.changed", serde_json::json!({})),
             AppEvent::MomentAppended { seq } => {
                 Event::new("moment.appended", serde_json::json!({ "seq": seq }))
+            }
+            AppEvent::OrchestratorChanged => {
+                Event::new("orchestrator.changed", serde_json::json!({}))
             }
             // Named on the wire so every *other* device can refresh its list.
             // The one being revoked never reads it: its socket is closed by the

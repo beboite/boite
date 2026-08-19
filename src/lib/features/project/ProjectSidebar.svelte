@@ -1029,7 +1029,9 @@
   const filtered = $derived(
     filterSidebar(
       showArchived ? app.archivedProjects : app.sortedProjects,
-      (id: string) => app.threadsByProjectSorted(id),
+      // An orchestrator is not one of the project's terminals; the home chat
+      // is its surface, so a role-bearing row stays out of the sidebar.
+      (id: string) => app.threadsByProjectSorted(id).filter((th) => !th.role),
       projectDisplayName,
       filterTerm,
     ),

@@ -66,12 +66,105 @@ with the new thread id; terminal_transcript and thread_wait take that id.
 Answers are TOON: `key: value` for a single record, and `name(N):` followed by a \
 header row then one row per item for a list.";
 
+/// What an orchestrator session reads after the workspace instructions.
+///
+/// Written as moments, short, because it is paid on every connection. The
+/// autonomy level rides in `BOITE_AUTONOMY`; enforcement is Boite's, this text
+/// only tells the agent not to look for a detour.
+pub const ORCHESTRATOR_INSTRUCTIONS: &str = "\
+You are this workspace's orchestrator: the one thread the user talks to. \
+Everything else here is a worker, and you see them from the outside.
+
+You do not do the work. A request that needs edits, a build or a review gets \
+a terminal of its own via thread_spawn, with a prompt written for someone who \
+was not in this conversation.
+
+You wait by sleeping in workspace_pulse. Never a loop, never a timer. If \
+nothing happened, nothing happened. The pulse already carries each terminal's \
+phase; read a transcript only when the pulse is not enough — a transcript \
+costs a hundred pulses.
+
+If a worker is waiting on the user, tell the user instead of answering in \
+their place. A permission request belongs to the user, never to you.
+
+Answer with exactly one say of urgency answer per turn. Before anything you \
+expect to be long, send a say of urgency ack: thirty seconds of silence reads \
+as a failure on a phone. Put in aloud one or two sentences written to be \
+heard, not read. Speak the user's language.
+
+Your autonomy level is in BOITE_AUTONOMY. As observer you watch and answer \
+and open nothing. Asked for something your level forbids, say so and offer to \
+raise it. When Boite refuses you, report the refusal as it was said.";
+
 pub fn tools() -> Value {
     let mut list = common_tools();
     if let (Some(all), Value::Array(tail)) = (list.as_array_mut(), thread_tools()) {
         all.extend(tail);
     }
     list
+}
+
+/// The list a given role reads. Only `orchestrator` adds anything: a worker
+/// handed the pulse would be a worker taught to idle in a long-poll.
+pub fn tools_for_role(role: Option<&str>) -> Value {
+    let mut list = tools();
+    if role == Some("orchestrator") {
+        if let (Some(all), Value::Array(tail)) = (list.as_array_mut(), orchestrator_tools()) {
+            all.extend(tail);
+        }
+    }
+    list
+}
+
+/// The instructions a given role reads, same selection as [`tools_for_role`].
+pub fn instructions_for_role(role: Option<&str>) -> String {
+    match role {
+        Some("orchestrator") => format!("{INSTRUCTIONS}\n\n{ORCHESTRATOR_INSTRUCTIONS}"),
+        _ => INSTRUCTIONS.to_string(),
+    }
+}
+
+/// Orchestrator only, selected on the role Boite stamped into the row and the
+/// environment. The endpoint re-checks the row on every call, so a process
+/// that exports `BOITE_ROLE` by hand reads a longer menu of refusals.
+fn orchestrator_tools() -> Value {
+    json!([
+        {
+            "name": "workspace_pulse",
+            "description": "Wait here. Answers what changed since your cursor — worker phases, \
+                            user messages — or nothing when the wait ran out, which is an answer \
+                            too. This is how you wait: never call anything in a loop. Pass the \
+                            seq you were last given.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "sinceSeq": { "type": "number", "description": "Your cursor: the seq of the last answer. 0 the first time." },
+                    "timeoutMs": { "type": "number", "description": "How long to wait when nothing changed. Default 30000, max 120000; 0 answers now." },
+                    "project": { "type": "string", "description": "One project id. Omit for the whole workspace." }
+                },
+                "additionalProperties": false
+            },
+            "annotations": { "title": "Pulse", "readOnlyHint": true, "idempotentHint": false, "openWorldHint": false }
+        },
+        {
+            "name": "say",
+            "description": "Your reply to the user. text goes into the chat; aloud is the one-or-two \
+                            sentence version to be read out loud. A turn ends with exactly one say \
+                            of urgency answer; a say of urgency ack in the middle of a turn says \
+                            you are working.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "text": { "type": "string", "description": "The reply, one short paragraph." },
+                    "aloud": { "type": "string", "description": "One or two sentences written to be heard. Omit to stay silent." },
+                    "urgency": { "type": "string", "enum": ["ack", "answer", "alert"], "description": "answer ends the turn; ack says you are on it; alert interrupts." }
+                },
+                "required": ["text"],
+                "additionalProperties": false
+            },
+            "annotations": { "title": "Say", "destructiveHint": false, "openWorldHint": false }
+        }
+    ])
 }
 
 fn common_tools() -> Value {
@@ -486,6 +579,36 @@ mod tests {
         assert!(names.iter().any(|n| n == "whereami"), "{names:?}");
         assert!(names.iter().any(|n| n == "thread_wait"), "{names:?}");
         assert_eq!(names.len(), 20, "{names:?}");
+    }
+
+    /// Pinned like the count above: the orchestrator tier is two tools, an
+    /// ordinary thread never sees them, and an unknown role is an ordinary
+    /// thread rather than a wider one.
+    #[test]
+    fn the_orchestrator_tier_is_two_tools_nobody_else_sees() {
+        let plain: Vec<String> = tools_for_role(None)
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|t| t.get("name").and_then(|v| v.as_str()).map(str::to_string))
+            .collect();
+        assert_eq!(plain.len(), 20, "{plain:?}");
+        assert!(!plain.iter().any(|n| n == "workspace_pulse"));
+        assert!(!plain.iter().any(|n| n == "say"));
+        assert_eq!(tools_for_role(Some("supervisor")).as_array().unwrap().len(), 20);
+
+        let raised: Vec<String> = tools_for_role(Some("orchestrator"))
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|t| t.get("name").and_then(|v| v.as_str()).map(str::to_string))
+            .collect();
+        assert_eq!(raised.len(), 22, "{raised:?}");
+        assert!(raised.iter().any(|n| n == "workspace_pulse"));
+        assert!(raised.iter().any(|n| n == "say"));
+
+        assert!(instructions_for_role(Some("orchestrator")).contains("workspace_pulse"));
+        assert!(!instructions_for_role(None).contains("orchestrator"));
     }
 }
 

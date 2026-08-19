@@ -758,6 +758,37 @@ impl Store {
         Ok(())
     }
 
+    /// The live orchestrator thread for a scope, if one is running.
+    ///
+    /// Live means not settled: a settled orchestrator left its stamp behind,
+    /// and the stamp on a closed row must not block the next start. Ties are
+    /// broken by creation time, newest first, though two live holders of one
+    /// scope is exactly what `orchestrator.start` refuses to create.
+    pub fn find_orchestrator(&self, scope: Option<&str>) -> Option<String> {
+        let conn = self.conn.lock();
+        conn.query_row(
+            "SELECT id FROM threads
+             WHERE role = 'orchestrator' AND settled_at IS NULL
+               AND (?1 IS NULL AND orchestrator_scope IS NULL OR orchestrator_scope = ?1)
+             ORDER BY created_at DESC LIMIT 1",
+            [scope],
+            |r| r.get::<_, String>(0),
+        )
+        .ok()
+    }
+
+    /// How many live threads this one has spawned. Live means not settled: a
+    /// worker whose job ended and was filed no longer counts against a cap.
+    pub fn live_children(&self, parent_id: &str) -> i64 {
+        let conn = self.conn.lock();
+        conn.query_row(
+            "SELECT COUNT(*) FROM threads WHERE parent_thread_id = ?1 AND settled_at IS NULL",
+            [parent_id],
+            |r| r.get(0),
+        )
+        .unwrap_or(0)
+    }
+
     /// Whether this thread still accepts dispatched lines. User-only write.
     pub fn set_accept_dispatch(&self, id: &str, accept: bool) -> Result<(), String> {
         let conn = self.conn.lock();

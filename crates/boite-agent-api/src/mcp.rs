@@ -83,6 +83,13 @@ pub(crate) async fn endpoint(
     // shim is a loop over lines), so the whole answer is computed off the
     // runtime, and the in-process `/v1` calls hop back onto it one by one.
     let handle = tokio::runtime::Handle::current();
+    // The row is the authority on the role here — this door has the store in
+    // reach, so no environment hint is even consulted.
+    let role = caller
+        .thread_id
+        .as_deref()
+        .and_then(|id| workspace.store().thread_orchestration(id))
+        .and_then(|(role, _, _)| role);
     let answered = tokio::task::spawn_blocking(move || {
         let door = InProcess {
             router: crate::routes::open(workspace),
@@ -96,11 +103,12 @@ pub(crate) async fn endpoint(
         // an agent reaching the workspace over HTTP gets the same image the
         // stdio shim would have handed it.
         let blocks = |name: &str, args: &Value| boite_mcp::call_blocks(&door, name, args);
+        let instructions = boite_mcp::instructions_for_role(role.as_deref());
         let service = rpc::Service {
             call: &call,
             blocks: Some(&blocks),
-            tools: boite_mcp::tools(),
-            instructions: boite_mcp::INSTRUCTIONS,
+            tools: boite_mcp::tools_for_role(role.as_deref()),
+            instructions: &instructions,
         };
         rpc::answer(&service, &msg)
     })
