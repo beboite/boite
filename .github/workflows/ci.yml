@@ -85,6 +85,15 @@ jobs:
         run: cargo clippy --workspace --all-targets --no-deps -- -D warnings
       - name: cargo test
         run: cargo test --workspace
+      # crates/boite-core/benches/hot_paths.rs is a bench target, and
+      # `--all-targets` above builds it — but only under the default features.
+      # Compiling it explicitly is what catches the day a signature it measures
+      # changes: a bench that stopped compiling is discovered when somebody
+      # wants a number, which is exactly when they cannot get one. Building
+      # without running keeps it to a compile and off a shared runner's noisy
+      # timings.
+      - name: cargo bench --no-run
+        run: cargo bench --workspace --no-run
 
   # What the two lockfiles are known to be vulnerable to.
   #
@@ -118,7 +127,19 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       # The rustsec advisory database against Cargo.lock. The action caches the
       # database and the binary, which a `cargo install cargo-audit` does not.
+      #
+      # This half reports and does not gate, which is the opposite of the bun
+      # half above and is not an oversight. `cargo-audit` has no severity floor
+      # to raise: it reports what it finds. What it finds today is six
+      # advisories, every one of them transitive through tauri or web-push and
+      # none of them fixable from this repository — and RUSTSEC-2023-0071
+      # against `rsa` (via web-push-native -> jwt-simple -> superboring) has no
+      # patched version published at all. Gating on that is gating on a
+      # condition nobody here can clear, which trains people to merge past a red
+      # check. The output is in the job log and dependabot moves the versions
+      # when upstream does.
       - uses: rustsec/audit-check@v2
+        continue-on-error: true
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -163,10 +184,11 @@ jobs:
         run: cargo check -p boite --all-targets
 
   # The real-time path — spawn, live output, detach, replay on reattach, two
-  # devices on one thread — is what a broken release breaks first, and no
-  # #[test] covers it: rpc.rs, ws.rs and auth.rs have none between them. The
-  # script that does cover it has existed since the server did and was never
-  # run by anything. This job is that missing call.
+  # devices on one thread — is what a broken release breaks first, and the unit
+  # tests in rpc.rs, ws.rs and auth.rs do not reach it: they cover routing,
+  # scopes and the ticket, none of which needs a live PTY. The script that does
+  # cover it has existed since the server did and was never run by anything.
+  # This job is that missing call.
   smoke:
     runs-on: ubuntu-latest
     steps:
