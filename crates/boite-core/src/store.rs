@@ -596,7 +596,7 @@ impl Store {
         let conn = self.conn.lock();
         let mut stmt = conn
             .prepare(
-                "SELECT id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, status, keep_awake, created_at, icon_color, worktree_path, settled_at, parent_thread_id, delegation_mode, delegation_status
+                "SELECT id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, status, keep_awake, created_at, icon_color, worktree_path, settled_at, parent_thread_id, delegation_mode, delegation_status, role, orchestrator_scope, accept_dispatch
                  FROM threads ORDER BY created_at ASC",
             )
             .map_err(|e| e.to_string())?;
@@ -625,6 +625,9 @@ impl Store {
                     parent_thread_id: r.get(15)?,
                     delegation_mode: r.get(16)?,
                     delegation_status: r.get(17)?,
+                    role: r.get(18)?,
+                    orchestrator_scope: r.get(19)?,
+                    accept_dispatch: r.get::<_, i64>(20)? == 1,
                 })
             })
             .map_err(|e| e.to_string())?;
@@ -634,7 +637,7 @@ impl Store {
     pub fn load_thread(&self, id: &str) -> Result<Option<Thread>, String> {
         let conn = self.conn.lock();
         conn.query_row(
-            "SELECT id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, status, keep_awake, created_at, icon_color, worktree_path, settled_at, parent_thread_id, delegation_mode, delegation_status
+            "SELECT id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, status, keep_awake, created_at, icon_color, worktree_path, settled_at, parent_thread_id, delegation_mode, delegation_status, role, orchestrator_scope, accept_dispatch
              FROM threads WHERE id = ?1",
             [id],
             |r| {
@@ -661,6 +664,9 @@ impl Store {
                     parent_thread_id: r.get(15)?,
                     delegation_mode: r.get(16)?,
                     delegation_status: r.get(17)?,
+                    role: r.get(18)?,
+                    orchestrator_scope: r.get(19)?,
+                    accept_dispatch: r.get::<_, i64>(20)? == 1,
                 })
             },
         )
@@ -711,6 +717,207 @@ impl Store {
         .flatten()
     }
 
+    /// The orchestration columns of a row, or `None` if the row is absent.
+    ///
+    /// Read back on every re-save for the same reason as
+    /// [`Store::thread_status`]: `save_thread` is an `INSERT OR REPLACE`, and
+    /// `role` is what selects the orchestrator tool tier, so a caller's copy of
+    /// it is never trusted — the row's own answer is.
+    pub fn thread_orchestration(&self, id: &str) -> Option<(Option<String>, Option<String>, bool)> {
+        let conn = self.conn.lock();
+        conn.query_row(
+            "SELECT role, orchestrator_scope, accept_dispatch FROM threads WHERE id = ?1",
+            [id],
+            |r| {
+                Ok((
+                    r.get::<_, Option<String>>(0)?,
+                    r.get::<_, Option<String>>(1)?,
+                    r.get::<_, i64>(2)? == 1,
+                ))
+            },
+        )
+        .ok()
+    }
+
+    /// Stamps a thread as an orchestrator. The one write path for `role`.
+    ///
+    /// Deliberately not a `ThreadCol`: `update_thread_field` is what
+    /// `thread.update` reaches, and these columns must not be reachable from
+    /// there. Only a `Grant::Local` command calls this.
+    pub fn stamp_orchestrator_role(
+        &self,
+        id: &str,
+        scope: Option<&str>,
+    ) -> Result<(), String> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "UPDATE threads SET role = 'orchestrator', orchestrator_scope = ?2 WHERE id = ?1",
+            rusqlite::params![id, scope],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    /// Whether this thread still accepts dispatched lines. User-only write.
+    pub fn set_accept_dispatch(&self, id: &str, accept: bool) -> Result<(), String> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "UPDATE threads SET accept_dispatch = ?2 WHERE id = ?1",
+            rusqlite::params![id, accept as i64],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    /// Appends one moment to the workspace pulse and prunes the ring.
+    ///
+    /// The prune keeps the newest [`crate::pulse::RING_CAP`] rows. Done here,
+    /// on every write, so no sweep has to exist: a delete of zero rows is one
+    /// indexed statement.
+    pub fn append_moment(
+        &self,
+        kind: &str,
+        project_id: Option<&str>,
+        object_id: Option<&str>,
+        detail: &str,
+        source: &str,
+        at: i64,
+    ) -> Result<i64, String> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "INSERT INTO moments (kind, project_id, object_id, detail, source, at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![kind, project_id, object_id, detail, source, at],
+        )
+        .map_err(|e| e.to_string())?;
+        let seq = conn.last_insert_rowid();
+        conn.execute(
+            "DELETE FROM moments WHERE seq <= ?1",
+            [seq - crate::pulse::RING_CAP],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(seq)
+    }
+
+    /// Moments after a cursor, oldest first, plus whether the cursor fell out
+    /// of the ring.
+    ///
+    /// `truncated` is the honest answer for an orchestrator that slept past the
+    /// ring: it missed things, and it must know that rather than believe
+    /// nothing happened. The caller re-reads the roster in that case.
+    pub fn read_moments(
+        &self,
+        after_seq: i64,
+        limit: usize,
+        project_id: Option<&str>,
+    ) -> Result<(Vec<crate::pulse::Moment>, bool), String> {
+        let conn = self.conn.lock();
+        let oldest: Option<i64> = conn
+            .query_row("SELECT MIN(seq) FROM moments", [], |r| r.get(0))
+            .map_err(|e| e.to_string())?;
+        let truncated = matches!(oldest, Some(min) if after_seq > 0 && min > after_seq + 1);
+        let mut stmt = conn
+            .prepare(
+                "SELECT seq, kind, project_id, object_id, detail, source, at FROM moments
+                 WHERE seq > ?1 AND (?2 IS NULL OR project_id = ?2)
+                 ORDER BY seq ASC LIMIT ?3",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(
+                rusqlite::params![after_seq, project_id, limit as i64],
+                |r| {
+                    Ok(crate::pulse::Moment {
+                        seq: r.get(0)?,
+                        kind: r.get(1)?,
+                        project_id: r.get(2)?,
+                        object_id: r.get(3)?,
+                        detail: r.get(4)?,
+                        source: r.get(5)?,
+                        at: r.get(6)?,
+                    })
+                },
+            )
+            .map_err(|e| e.to_string())?;
+        let moments = rows
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        Ok((moments, truncated))
+    }
+
+    /// The newest sequence the pulse has handed out, or 0 on an empty ring.
+    pub fn latest_moment_seq(&self) -> i64 {
+        let conn = self.conn.lock();
+        conn.query_row("SELECT COALESCE(MAX(seq), 0) FROM moments", [], |r| r.get(0))
+            .unwrap_or(0)
+    }
+
+    /// Writes one line of the orchestrator conversation.
+    pub fn add_orchestrator_message(
+        &self,
+        scope: Option<&str>,
+        role: &str,
+        text: &str,
+        aloud: Option<&str>,
+        urgency: Option<&str>,
+        at: i64,
+    ) -> Result<String, String> {
+        let conn = self.conn.lock();
+        let id = uuid::Uuid::new_v4().simple().to_string();
+        conn.execute(
+            "INSERT INTO orchestrator_messages (id, scope, role, text, aloud, urgency, at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            rusqlite::params![id, scope, role, text, aloud, urgency, at],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(id)
+    }
+
+    /// One scope's conversation, oldest first, after an optional cursor id.
+    ///
+    /// The cursor is resolved to its timestamp first: message ids are random,
+    /// so "after this id" only means anything as "after the moment it landed".
+    pub fn orchestrator_messages(
+        &self,
+        scope: Option<&str>,
+        since_id: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<serde_json::Value>, String> {
+        let conn = self.conn.lock();
+        // No cursor reads everything, including a row stamped at zero; an
+        // unknown cursor reads everything too rather than nothing.
+        let since_at: i64 = match since_id {
+            Some(id) => conn
+                .query_row(
+                    "SELECT at FROM orchestrator_messages WHERE id = ?1",
+                    [id],
+                    |r| r.get(0),
+                )
+                .unwrap_or(-1),
+            None => -1,
+        };
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, role, text, aloud, urgency, at FROM orchestrator_messages
+                 WHERE (?1 IS NULL AND scope IS NULL OR scope = ?1) AND at > ?2
+                 ORDER BY at ASC, id ASC LIMIT ?3",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(rusqlite::params![scope, since_at, limit as i64], |r| {
+                Ok(serde_json::json!({
+                    "id": r.get::<_, String>(0)?,
+                    "role": r.get::<_, String>(1)?,
+                    "text": r.get::<_, String>(2)?,
+                    "aloud": r.get::<_, Option<String>>(3)?,
+                    "urgency": r.get::<_, Option<String>>(4)?,
+                    "at": r.get::<_, i64>(5)?,
+                }))
+            })
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    }
+
     /// Settles what the last run of this host left on the rows. Once, at start.
     ///
     /// Two writes, in this order, and nowhere else. A row still naming a process
@@ -750,13 +957,14 @@ impl Store {
         let args = serde_json::to_string(&t.args).unwrap_or_else(|_| "[]".to_string());
         conn.execute(
             "INSERT OR REPLACE INTO threads
-             (id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, status, keep_awake, created_at, icon_color, worktree_path, settled_at, parent_thread_id, delegation_mode, delegation_status)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+             (id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, status, keep_awake, created_at, icon_color, worktree_path, settled_at, parent_thread_id, delegation_mode, delegation_status, role, orchestrator_scope, accept_dispatch)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
             rusqlite::params![
                 t.id, t.project_id, t.label, t.title, t.cmd, args, t.exit_code,
                 t.session_id, t.icon_key, t.status, t.keep_awake as i64, t.created_at,
                 t.icon_color, t.worktree_path, t.settled_at, t.parent_thread_id,
-                t.delegation_mode, t.delegation_status,
+                t.delegation_mode, t.delegation_status, t.role, t.orchestrator_scope,
+                t.accept_dispatch as i64,
             ],
         )
         .map_err(|e| e.to_string())?;

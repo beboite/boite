@@ -707,7 +707,16 @@ pub async fn dispatch(state: &AppState, request: Authorized) -> Result<Value, St
             // own token, which is the user, not an agent. Agents reach the bus
             // through their own endpoint and carry a narrower grant.
             let ready = command.prepare(&state.command_host(), Grant::Local)?;
-            Ok(wire.wrap(blocking(move || ready.run()).await??))
+            let answer = blocking(move || ready.run()).await??;
+            // A moment is what an orchestrator's long-poll wakes on, and the
+            // event is what a chat pane refreshes on. Fanned out here because
+            // the bus itself owns no event channel.
+            if m == "conduct.record" {
+                if let Some(seq) = answer.get("seq").and_then(|v| v.as_i64()) {
+                    let _ = state.events.send(AppEvent::MomentAppended { seq });
+                }
+            }
+            Ok(wire.wrap(answer))
         }
 
         other => Err(format!("unknown method: {other}")),
