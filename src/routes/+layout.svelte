@@ -28,6 +28,7 @@
   } from "$lib/features/thread/api";
   import { addProjectByPath } from "$lib/features/project/api";
   import { watchAgentRequests } from "$lib/app/agent-requests";
+  import { watchDispatches } from "$lib/app/dispatches";
     import { watchAgentActivity } from "$lib/features/thread/agentActivity.svelte";
   import { watchScreen } from "$lib/app/screen.svelte";
   import { installInspector } from "$lib/features/devtools/inspect";
@@ -261,6 +262,11 @@
   // Its own: an agent can ask to be moved before boot has finished, and
   // the request would land on nobody.
   onMount(() => watchAgentRequests());
+
+  // The queue's device half: an orchestrator's line lands as a row on the
+  // boite, and this window types it into the PTY it owns. Mounted with the
+  // other watchers so a line queued during boot still finds a device.
+  onMount(() => watchDispatches());
 
   // The pulse that says an agent reached into Boite itself rather than into its
   // own terminal. Mounted here for the same reason: the first call can land

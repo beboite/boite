@@ -24,6 +24,7 @@ import type {
   UsageReport,
   LogApi,
   PendingApproval,
+  DispatchLine,
   OrchestratorMessage,
   PairedDevice,
   PairingApi,
@@ -581,6 +582,20 @@ export class RemoteBackend implements Backend {
         rpc("orchestrator.status", params).then((r) => ({
           threadId: (r?.threadId as string | null) ?? null,
           state: (r?.state as string) ?? "off",
+        })),
+      acceptDispatch: (params) =>
+        rpc("thread.acceptDispatch", params).then((r) => ({
+          threadId: (r?.threadId as string) ?? params.threadId,
+          accept: (r?.accept as boolean) ?? params.accept,
+          dropped: (r?.dropped as number) ?? 0,
+        })),
+      drainDispatches: (params) =>
+        rpc("dispatch.drain", params).then(
+          (r) => (r?.dispatches ?? []) as DispatchLine[],
+        ),
+      settleDispatch: (params) =>
+        rpc("dispatch.settle", params).then((r) => ({
+          settled: r?.settled === true,
         })),
     };
 
