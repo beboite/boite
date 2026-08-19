@@ -18,7 +18,9 @@ use super::{
     opt_str_param, str_list, str_param, u32_param, value_of, Command, Host, Ready, Wire,
 };
 use crate::capability::Capability;
-use crate::{codex_switcher, fast_mcp_ssh, fastpick, session, shell, transcript, usage};
+use crate::{
+    cli_manager, codex_switcher, fast_mcp_ssh, fastpick, session, shell, transcript, usage,
+};
 
 /// Every method in this domain, in the order they appear below.
 pub const ALL_METHODS: &[&str] = &[
@@ -40,6 +42,13 @@ pub const ALL_METHODS: &[&str] = &[
     "codexSwitcher.version",
     "fastMcpSsh.version",
     "session.transcript",
+    "cli.catalog",
+    "cli.jobs",
+    "cli.dataPaths",
+    "cli.install",
+    "cli.uninstall",
+    "cli.cancel",
+    "cli.dismiss",
 ];
 
 /// Which PTY the caller is, for the one command that has to tell its own live
@@ -131,6 +140,26 @@ pub enum Sessions {
         bytes: u32,
         dir: Option<std::path::PathBuf>,
     },
+    /// Every agent CLI, with what this machine says about it. `probe_versions`
+    /// costs a process spawn per installed CLI, so the panel asks for it when it
+    /// opens and leaves it off when it is only refreshing presence.
+    CliCatalog { probe_versions: bool },
+    /// What the installs and removals running right now are doing. Polled, which
+    /// is what lets the desktop and a phone read the same progress through the
+    /// same call rather than through an event channel written twice.
+    CliJobs,
+    /// The data directories of one CLI with their sizes, for the sentence the
+    /// uninstall dialogue has to be able to write before anything is deleted.
+    CliDataPaths { id: String },
+    /// Starts a download and answers with the job. Only for a CLI whose vendor
+    /// publishes a binary; the rest install through their own package manager, in
+    /// a terminal the user can read.
+    CliInstall { id: String },
+    /// Takes back what Boite installed, and the CLI's own data when asked to.
+    CliUninstall { id: String, purge_data: bool },
+    CliCancel { id: String },
+    /// Forgets a job that has settled, which is how a failure is dismissed.
+    CliDismiss { id: String },
 }
 
 impl Sessions {
@@ -199,6 +228,26 @@ impl Sessions {
                 bytes: u32_param(params, "bytes", 16_384).min(1024 * 1024),
                 dir: None,
             },
+            "cli.catalog" => Sessions::CliCatalog {
+                probe_versions: super::bool_param(params, "probeVersions", false),
+            },
+            "cli.jobs" => Sessions::CliJobs,
+            "cli.dataPaths" => Sessions::CliDataPaths {
+                id: str_param(params, "id")?,
+            },
+            "cli.install" => Sessions::CliInstall {
+                id: str_param(params, "id")?,
+            },
+            "cli.uninstall" => Sessions::CliUninstall {
+                id: str_param(params, "id")?,
+                purge_data: super::bool_param(params, "purgeData", false),
+            },
+            "cli.cancel" => Sessions::CliCancel {
+                id: str_param(params, "id")?,
+            },
+            "cli.dismiss" => Sessions::CliDismiss {
+                id: str_param(params, "id")?,
+            },
             other => return Err(format!("unknown method: {other}")),
         })
     }
@@ -223,6 +272,13 @@ impl Sessions {
             Sessions::CodexSwitcherVersion => "codexSwitcher.version",
             Sessions::FastMcpSshVersion => "fastMcpSsh.version",
             Sessions::Transcript { .. } => "session.transcript",
+            Sessions::CliCatalog { .. } => "cli.catalog",
+            Sessions::CliJobs => "cli.jobs",
+            Sessions::CliDataPaths { .. } => "cli.dataPaths",
+            Sessions::CliInstall { .. } => "cli.install",
+            Sessions::CliUninstall { .. } => "cli.uninstall",
+            Sessions::CliCancel { .. } => "cli.cancel",
+            Sessions::CliDismiss { .. } => "cli.dismiss",
         }
     }
 
@@ -245,6 +301,12 @@ impl Sessions {
             | Sessions::CodexSwitcherActivate { .. } => Wire::Key("json"),
             Sessions::CodexSwitcherVersion | Sessions::FastMcpSshVersion => Wire::Key("version"),
             Sessions::Transcript { .. } => Wire::Key("text"),
+            Sessions::CliCatalog { .. } => Wire::Key("clis"),
+            Sessions::CliJobs => Wire::Key("jobs"),
+            Sessions::CliDataPaths { .. } => Wire::Key("paths"),
+            Sessions::CliInstall { .. } | Sessions::CliUninstall { .. } => Wire::Key("job"),
+            Sessions::CliCancel { .. } => Wire::Key("cancelled"),
+            Sessions::CliDismiss { .. } => Wire::Key("dismissed"),
         }
     }
 
@@ -269,12 +331,23 @@ impl Sessions {
             | Sessions::CodexSwitcherList
             | Sessions::CodexSwitcherVersion
             | Sessions::FastMcpSshVersion
-            | Sessions::Transcript { .. } => Capability::ReadProject,
+            | Sessions::Transcript { .. }
+            | Sessions::CliCatalog { .. }
+            | Sessions::CliJobs
+            | Sessions::CliDataPaths { .. } => Capability::ReadProject,
 
             Sessions::StopClaude { .. }
             | Sessions::Migrate { .. }
             | Sessions::CodexSwitcherSave
-            | Sessions::CodexSwitcherActivate { .. } => Capability::MutateProject,
+            | Sessions::CodexSwitcherActivate { .. }
+            | Sessions::CliCancel { .. }
+            | Sessions::CliDismiss { .. } => Capability::MutateProject,
+
+            // Installing a binary and deleting a CLI's data change the machine
+            // rather than a project, so a grant scoped to one project must not
+            // reach them. The credentials file the Todo panel writes is exactly
+            // such a grant, and it is handed to agents.
+            Sessions::CliInstall { .. } | Sessions::CliUninstall { .. } => Capability::MutateAcross,
         }
     }
 
@@ -410,6 +483,24 @@ impl Sessions {
                 )?;
                 value_of(transcript::tail(&dir, &thread_id, bytes as usize)?)
             }
+            Sessions::CliCatalog { probe_versions } => {
+                value_of(cli_manager::status_blocking(probe_versions))
+            }
+            Sessions::CliJobs => value_of(cli_manager::jobs::all()),
+            Sessions::CliDataPaths { id } => {
+                value_of(cli_manager::data_paths(&id).map_err(|e| e.0)?)
+            }
+            Sessions::CliInstall { id } => {
+                value_of(cli_manager::start_install(&id).map_err(|e| e.0)?)
+            }
+            Sessions::CliUninstall { id, purge_data } => {
+                value_of(cli_manager::start_uninstall(&id, purge_data).map_err(|e| e.0)?)
+            }
+            Sessions::CliCancel { id } => value_of(cli_manager::jobs::cancel(&id)),
+            Sessions::CliDismiss { id } => {
+                cli_manager::jobs::dismiss(&id);
+                value_of(true)
+            }
         })
     }
 }
@@ -433,6 +524,7 @@ mod tests {
             "cmd": "claude",
             "cwds": ["/w"],
             "threadId": "t1",
+            "id": "claude",
         });
         for method in ALL_METHODS {
             let command = Command::decode(method, &params)

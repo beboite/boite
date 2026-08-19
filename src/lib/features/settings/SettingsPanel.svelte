@@ -3,6 +3,7 @@
   import SettingsGeneralTab from "./SettingsGeneralTab.svelte";
   import SettingsTerminalTab from "./SettingsTerminalTab.svelte";
   import SettingsAppearanceTab from "./SettingsAppearanceTab.svelte";
+  import SettingsCliTab from "./SettingsCliTab.svelte";
   import SettingsPluginsTab from "./SettingsPluginsTab.svelte";
   import SettingsKeyboardTab from "./SettingsKeyboardTab.svelte";
   import SettingsDevicesTab from "./SettingsDevicesTab.svelte";
@@ -15,6 +16,7 @@
   import TerminalIcon from "@lucide/svelte/icons/terminal";
   import Palette from "@lucide/svelte/icons/palette";
   import Blocks from "@lucide/svelte/icons/blocks";
+  import PackageIcon from "@lucide/svelte/icons/package";
   import Keyboard from "@lucide/svelte/icons/keyboard";
   import ScrollText from "@lucide/svelte/icons/scroll-text";
   import Smartphone from "@lucide/svelte/icons/smartphone";
@@ -71,6 +73,7 @@
       hintKey: "tabs.appearanceHint",
       icon: Palette,
     },
+    { id: "cli", labelKey: "tabs.cli", hintKey: "tabs.cliHint", icon: PackageIcon },
     { id: "plugins", labelKey: "tabs.plugins", hintKey: "tabs.pluginsHint", icon: Blocks },
     {
       id: "keyboard",
@@ -443,6 +446,8 @@
           <SettingsTerminalTab />
         {:else if activeTab === "appearance"}
           <SettingsAppearanceTab />
+        {:else if activeTab === "cli"}
+          <SettingsCliTab />
         {:else if activeTab === "plugins"}
           <SettingsPluginsTab />
         {:else if activeTab === "keyboard"}

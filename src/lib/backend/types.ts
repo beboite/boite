@@ -618,6 +618,91 @@ export interface FastMcpSshApi {
   version(): Promise<string | null>;
 }
 
+/**
+ * One agent CLI, as the machine that runs the agents describes it.
+ *
+ * The shape comes from `boite_core::cli_manager`, which is where the install
+ * recipes and the data directories live: the webview holds no package names and
+ * no paths of its own, so there is one table to correct when a vendor moves
+ * something.
+ */
+export interface CliRow {
+  id: string;
+  exe: string;
+  installed: boolean;
+  path: string | null;
+  /** Whether Boite installed it, which is what decides who may remove it. */
+  managed: boolean;
+  version: string | null;
+  /** `download` is Boite's to do; `managed` runs in a terminal; `manual` is a link. */
+  source: "download" | "managed" | "manual";
+  installable: boolean;
+  requires: string | null;
+  requiresPresent: boolean | null;
+  installCommand: string[] | null;
+  updateCommand: string[] | null;
+  uninstallCommand: string[] | null;
+  /** The CLI's data directories that exist right now. Paths only; sizes cost a walk. */
+  dataPaths: string[];
+}
+
+export type CliJobPhase =
+  | "resolving"
+  | "downloading"
+  | "verifying"
+  | "unpacking"
+  | "installing"
+  | "removing"
+  | "purging"
+  | "done"
+  | "failed"
+  | "cancelled";
+
+export interface CliJob {
+  id: string;
+  kind: "install" | "uninstall";
+  phase: CliJobPhase;
+  received: number;
+  /** Null while the vendor sends no length: a bar with no end, not a made-up one. */
+  total: number | null;
+  version: string | null;
+  message: string | null;
+  startedAt: number;
+  updatedAt: number;
+}
+
+export interface CliDataPath {
+  path: string;
+  bytes: number;
+}
+
+/**
+ * Installing and removing the agent CLIs, on the machine the agents run on.
+ *
+ * Progress is polled rather than pushed. One call answers for every job, so the
+ * desktop and a phone talking to a `boite-server` read the same progress through
+ * the same path, and a panel opened halfway through an install sees where it got
+ * to rather than nothing at all.
+ */
+export interface CliApi {
+  /**
+   * Every CLI and what this machine says about it. `probeVersions` costs one
+   * process spawn per installed CLI, so it is asked for when the tab opens and
+   * left off when only presence is being refreshed.
+   */
+  catalog(probeVersions?: boolean): Promise<CliRow[]>;
+  jobs(): Promise<CliJob[]>;
+  /** The data directories with their sizes, for the uninstall dialogue's sentence. */
+  dataPaths(id: string): Promise<CliDataPath[]>;
+  /** Starts a download and answers with the job it started. */
+  install(id: string): Promise<CliJob>;
+  /** Takes back what Boite installed, and the CLI's own data when asked. */
+  uninstall(id: string, purgeData: boolean): Promise<CliJob>;
+  cancel(id: string): Promise<boolean>;
+  /** Forgets a settled job, which is how a failure is dismissed. */
+  dismiss(id: string): Promise<void>;
+}
+
 export interface ScopeApi {
   registerProjectRoots(roots: string[]): Promise<void>;
   // The server's browsable base dir for adding projects via the web folder
@@ -1217,6 +1302,7 @@ export interface Backend {
   readonly fastpick: FastpickApi;
   readonly codexSwitcher: CodexSwitcherApi;
   readonly fastMcpSsh: FastMcpSshApi;
+  readonly cli: CliApi;
   readonly scope: ScopeApi;
   readonly session: SessionApi;
   readonly log: LogApi;

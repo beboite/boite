@@ -76,6 +76,37 @@ won't get status or resume detection.
 Shortcuts are editable (label, command, icon, color, order), each preset says
 whether its binary was found, and any custom command can be added.
 
+## Installing the agents themselves
+
+The **CLIs** tab installs, updates and removes the agents, on the machine the
+threads spawn on — which for a remote boite is the server, not the device drawing
+the panel.
+
+| How it arrives | Agents |
+| -------------- | ------ |
+| Boite downloads the vendor's binary | Claude Code, Codex, Opencode, Cursor Agent, Grok |
+| Its own package manager, in a terminal you can read | GitHub Copilot (`gh extension`) |
+| The vendor's instructions, linked | Antigravity, Hermes, Pi, Muse |
+
+What Boite downloads goes to `~/.boite/bin`, a directory it owns and nothing else
+writes to, which is on the PATH every thread is spawned with — a fresh install
+runs without restarting the app. Nothing lands in `~/.cargo/bin` or
+`/usr/local/bin`: an install Boite did is an install Boite can take back. Where a
+vendor publishes a digest, the download is checked against it; where it does not,
+HTTPS is the whole story and the panel says so. An agent that publishes no
+binary for your platform gets its documentation link instead of a button that
+would fail.
+
+Removing one asks a second question: **keep my data**, on by default. Kept, only
+the binary goes. Cleared, the CLI's own directories go with it (`~/.claude`,
+`~/.codex`, `~/.grok`…), listed with their sizes in the dialog before anything is
+deleted — never a path outside your home folder, never a symlink followed, never
+a project-local folder.
+
+Installing and removing a CLI are the two capabilities the MCP endpoint
+deliberately does not carry. An agent asking for the same things you click is the
+rule everywhere else; deleting `~/.claude` is where it stops.
+
 ## A worktree per thread
 
 Every agent thread opens in its own detached git worktree instead of sharing the

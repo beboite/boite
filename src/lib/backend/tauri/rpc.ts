@@ -9,6 +9,10 @@ import type {
   EditorApi,
   ExplorerApi,
   CodexSwitcherApi,
+  CliApi,
+  CliDataPath,
+  CliJob,
+  CliRow,
   FastMcpSshApi,
   CodexSwitcherList,
   FastpickApi,
@@ -182,6 +186,16 @@ export const tauriCodexSwitcher: CodexSwitcherApi = {
 
 export const tauriFastMcpSsh: FastMcpSshApi = {
   version: () => invoke<string | null>("fast_mcp_ssh_version"),
+};
+
+export const tauriCli: CliApi = {
+  catalog: (probeVersions) => invoke<CliRow[]>("cli_catalog", { probeVersions: probeVersions ?? false }),
+  jobs: () => invoke<CliJob[]>("cli_jobs"),
+  dataPaths: (id) => invoke<CliDataPath[]>("cli_data_paths", { id }),
+  install: (id) => invoke<CliJob>("cli_install", { id }),
+  uninstall: (id, purgeData) => invoke<CliJob>("cli_uninstall", { id, purgeData }),
+  cancel: (id) => invoke<boolean>("cli_cancel", { id }),
+  dismiss: (id) => invoke<void>("cli_dismiss", { id }),
 };
 
 export const tauriScope: ScopeApi = {

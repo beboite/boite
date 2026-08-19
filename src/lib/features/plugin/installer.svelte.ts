@@ -394,4 +394,20 @@ export const fastMcpSshInstaller = new PluginInstaller(
   () => void fastMcpSsh.probe(),
 );
 
+/**
+ * One installer for something that is not one of the three plugins.
+ *
+ * The CLI manager needs the same machine — a hidden PTY, a log, a stop button —
+ * for the agents that ship on a package manager rather than as a binary, and
+ * their command lines come from the Rust catalogue at runtime rather than from a
+ * module here. The class is what is shared; the singletons above are not.
+ */
+export function makeInstaller(
+  plugin: string,
+  commands: CommandSet,
+  settled: () => void,
+): PluginInstaller {
+  return new PluginInstaller(plugin, commands, settled);
+}
+
 export type { PluginInstaller };
