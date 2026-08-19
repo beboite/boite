@@ -3,6 +3,7 @@ import type {
   Backend,
   BackendCaps,
   CommitStateAnswer,
+  ConductApi,
   ControlEvent,
   DbApi,
   Checkpoint,
@@ -23,6 +24,7 @@ import type {
   UsageReport,
   LogApi,
   PendingApproval,
+  OrchestratorMessage,
   PairedDevice,
   PairingApi,
   PairingInvite,
@@ -97,6 +99,7 @@ export class RemoteBackend implements Backend {
   readonly push: PushApi;
   readonly meta: WorkspaceMetaApi;
   readonly pairing: PairingApi;
+  readonly conduct: ConductApi;
 
   #socket: Socket;
   #keyToThread = new Map<string, string>();
@@ -553,6 +556,23 @@ export class RemoteBackend implements Backend {
     this.meta = {
       get: () => rpc("workspace.info").then(readMeta),
       set: (patch) => rpc("workspace.setInfo", patch).then(readMeta),
+    };
+
+    // The generic RPC arm answers for the conduct domain; only `pulse` needs a
+    // ceiling of its own, set in RPC_TIMEOUTS above the server's 120 s wait.
+    // A pulse torn by a reconnect rejects like any other in-flight call, and
+    // the caller's loop asks again with the cursor it already holds.
+    this.conduct = {
+      record: (moment) => rpc("conduct.record", moment).then((r) => ({ seq: (r?.seq as number) ?? 0 })),
+      pulse: (params) => rpc("conduct.pulse", params),
+      post: (params) =>
+        rpc("orchestrator.post", params).then((r) => ({
+          messageId: (r?.messageId as string) ?? "",
+        })),
+      messages: (params) =>
+        rpc("orchestrator.messages", params).then(
+          (r) => (r?.messages ?? []) as OrchestratorMessage[],
+        ),
     };
 
     this.pairing = {

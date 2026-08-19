@@ -1,6 +1,7 @@
 import type { Backend } from "../types";
 import { tauriPty } from "./pty";
 import { tauriDb, tauriWorkspaceMeta } from "./db";
+import { tauriConduct } from "./conduct";
 import {
   tauriAnswerAgentRequest,
   tauriApprovals,
@@ -44,6 +45,7 @@ export class TauriBackend implements Backend {
   readonly log = tauriLog;
   readonly approvals = tauriApprovals;
   readonly meta = tauriWorkspaceMeta;
+  readonly conduct = tauriConduct;
   readonly answerAgentRequest = tauriAnswerAgentRequest;
   readonly capturePane = tauriCapturePane;
 }

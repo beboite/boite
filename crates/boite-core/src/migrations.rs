@@ -337,6 +337,84 @@ pub const ALL: &[Migration] = &[
                   ALTER TABLE threads ADD COLUMN delegation_mode TEXT DEFAULT 'normal';\
                   ALTER TABLE threads ADD COLUMN delegation_status TEXT;",
     ),
+    // The orchestrator columns. `role` is stamped by Boite at creation and is
+    // deliberately not reachable through `thread.update`: it is what selects
+    // the orchestrator MCP tool tier, so an agent that could write it would be
+    // an agent that could promote itself. `accept_dispatch` defaults on; the
+    // user mutes a thread, an agent never re-arms one.
+    both(
+        "add_thread_orchestration",
+        "ALTER TABLE threads ADD COLUMN role TEXT;\
+                  ALTER TABLE threads ADD COLUMN orchestrator_scope TEXT;\
+                  ALTER TABLE threads ADD COLUMN accept_dispatch INTEGER NOT NULL DEFAULT 1;",
+    ),
+    // The workspace pulse: one monotonic sequence of what happened, pruned to a
+    // ring so an orchestrator asleep for a week wakes to a truncation flag
+    // rather than to a table that grew all week. `Applies::Both`, like every
+    // orchestrator table below: the `chats`/`chat_messages` pair was
+    // DesktopOnly, never reached a server, and had to be dropped again.
+    both(
+        "create_moments",
+        "CREATE TABLE IF NOT EXISTS moments (
+            seq INTEGER PRIMARY KEY AUTOINCREMENT,
+            kind TEXT NOT NULL,
+            project_id TEXT,
+            object_id TEXT,
+            detail TEXT NOT NULL,
+            source TEXT NOT NULL,
+            at INTEGER NOT NULL
+        );",
+    ),
+    // The durable half of the orchestrator conversation. The harness session is
+    // disposable; these rows are what a restarted session is briefed from.
+    both(
+        "create_orchestrator_messages",
+        "CREATE TABLE IF NOT EXISTS orchestrator_messages (
+            id TEXT PRIMARY KEY,
+            scope TEXT,
+            role TEXT NOT NULL,
+            text TEXT NOT NULL,
+            aloud TEXT,
+            urgency TEXT,
+            at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_orchestrator_messages_scope
+            ON orchestrator_messages (scope, at);",
+    ),
+    // A dispatch is a row, never a byte: the orchestrator queues a line here
+    // and the device that owns the target PTY is the only thing that types it.
+    both(
+        "create_dispatches",
+        "CREATE TABLE IF NOT EXISTS dispatches (
+            id TEXT PRIMARY KEY,
+            from_thread_id TEXT NOT NULL,
+            to_thread_id TEXT NOT NULL,
+            text TEXT NOT NULL,
+            mode TEXT NOT NULL,
+            state TEXT NOT NULL,
+            reason TEXT,
+            created_at INTEGER NOT NULL,
+            settled_at INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_dispatches_open ON dispatches (state, to_thread_id);",
+    ),
+    // What the orchestrator caused, one row per spawn, claimed branch, worktree
+    // or todo, so the inbox can offer to undo the reversible ones. Nothing
+    // committed is ever destroyed through this table.
+    both(
+        "create_orchestrator_actions",
+        "CREATE TABLE IF NOT EXISTS orchestrator_actions (
+            id TEXT PRIMARY KEY,
+            orchestrator_thread_id TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            object_id TEXT,
+            project_id TEXT,
+            undoable INTEGER NOT NULL DEFAULT 0,
+            at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_orchestrator_actions_owner
+            ON orchestrator_actions (orchestrator_thread_id, at);",
+    ),
 ];
 
 /// The desktop's list: `(version, description, sql)`, versions from 1.
@@ -370,7 +448,7 @@ mod tests {
     #[test]
     fn the_shipped_order_is_preserved_on_both_sides() {
         let desktop = desktop();
-        assert_eq!(desktop.len(), 23);
+        assert_eq!(desktop.len(), 28);
         assert_eq!(desktop[0], (1, "create_projects", ALL[0].sql));
         assert_eq!(desktop[4].1, "add_thread_session_and_icon");
         assert_eq!(desktop[8].1, "add_project_git_root", "no push table here");
@@ -383,7 +461,7 @@ mod tests {
         assert_eq!(desktop[21].1, "add_thread_ageing");
 
         let server = server();
-        assert_eq!(server.len(), 23);
+        assert_eq!(server.len(), 28);
         assert_eq!(server[8].description, "create_push_subscriptions");
         assert_eq!(server[9].description, "add_project_git_root");
         assert_eq!(
@@ -396,6 +474,10 @@ mod tests {
         assert_eq!(server[19].description, "create_approvals");
         assert_eq!(server[20].description, "add_thread_ageing");
         assert_eq!(server[21].description, "create_pairings");
+        assert_eq!(desktop[23].1, "add_thread_orchestration");
+        assert_eq!(server[23].description, "add_thread_orchestration");
+        assert_eq!(desktop[27].1, "create_orchestrator_actions");
+        assert_eq!(server[27].description, "create_orchestrator_actions");
         assert!(
             !server.iter().any(|m| m.description.contains("chat")),
             "no chat migration ever ran on a server"
@@ -487,7 +569,24 @@ mod tests {
         );
         assert_eq!(
             columns(&conn, "threads"),
-            ["id", "project_id", "label", "title", "cmd", "args", "exit_code", "created_at", "session_id", "icon_key", "status", "auto_slept", "keep_awake", "icon_color", "worktree_path", "pin_order", "settled_at", "snoozed_until", "parent_thread_id", "delegation_mode", "delegation_status"]
+            ["id", "project_id", "label", "title", "cmd", "args", "exit_code", "created_at", "session_id", "icon_key", "status", "auto_slept", "keep_awake", "icon_color", "worktree_path", "pin_order", "settled_at", "snoozed_until", "parent_thread_id", "delegation_mode", "delegation_status", "role", "orchestrator_scope", "accept_dispatch"]
+        );
+        assert_eq!(
+            columns(&conn, "moments"),
+            ["seq", "kind", "project_id", "object_id", "detail", "source", "at"]
+        );
+        assert_eq!(
+            columns(&conn, "orchestrator_messages"),
+            ["id", "scope", "role", "text", "aloud", "urgency", "at"]
+        );
+        assert_eq!(
+            columns(&conn, "dispatches"),
+            ["id", "from_thread_id", "to_thread_id", "text", "mode", "state", "reason",
+             "created_at", "settled_at"]
+        );
+        assert_eq!(
+            columns(&conn, "orchestrator_actions"),
+            ["id", "orchestrator_thread_id", "kind", "object_id", "project_id", "undoable", "at"]
         );
         assert_eq!(
             columns(&conn, "todos"),
@@ -528,8 +627,11 @@ mod tests {
         for column in ["commit_sha", "claimed_by", "description"] {
             assert!(columns(&conn, "todos").contains(&column.to_string()), "{column}");
         }
-        for column in ["pin_order", "settled_at", "snoozed_until"] {
+        for column in ["pin_order", "settled_at", "snoozed_until", "role", "orchestrator_scope", "accept_dispatch"] {
             assert!(columns(&conn, "threads").contains(&column.to_string()), "{column}");
+        }
+        for table in ["moments", "orchestrator_messages", "dispatches", "orchestrator_actions"] {
+            assert!(!columns(&conn, table).is_empty(), "{table} must exist on a server too");
         }
         assert_eq!(
             columns(&conn, "pairings"),

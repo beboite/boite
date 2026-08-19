@@ -97,6 +97,9 @@ impl Fake {
                 parent_thread_id: None,
                 delegation_mode: None,
                 delegation_status: None,
+                role: None,
+                orchestrator_scope: None,
+                accept_dispatch: true,
             })
             .unwrap();
         self

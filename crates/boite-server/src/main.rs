@@ -148,6 +148,7 @@ async fn main() {
         data_dir: config.data_dir,
         public_url: config.public_url,
         claimed_requests: Default::default(),
+        pulse: boite_core::pulse::Waiters::new(),
     });
 
     if let Err(e) = state.refresh_roots() {

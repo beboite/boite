@@ -1066,6 +1066,68 @@ export interface SearchApi {
   query(text: string, limit: number): Promise<WorkspaceHit[]>;
 }
 
+/** One row of the workspace pulse. Mirrors `boite_core::pulse::Moment`. */
+export interface Moment {
+  seq: number;
+  kind: string;
+  projectId: string | null;
+  objectId: string | null;
+  detail: string;
+  source: string;
+  at: number;
+}
+
+/** What `conduct.pulse` answers with. */
+export interface PulseAnswer {
+  /** The cursor to pass back as `sinceSeq` next time. */
+  seq: number;
+  moments: Moment[];
+  /** True when the wait lapsed with nothing to show. An answer, not an error. */
+  timedOut: boolean;
+  /** True when `sinceSeq` fell out of the ring: re-read state, do not replay. */
+  truncated: boolean;
+}
+
+/** One line of the orchestrator conversation. */
+export interface OrchestratorMessage {
+  id: string;
+  role: string;
+  text: string;
+  aloud: string | null;
+  urgency: string | null;
+  at: number;
+}
+
+/**
+ * The conduct domain: the workspace pulse and the orchestrator conversation.
+ *
+ * `record` is fire-and-forget by design — the status engine writes a phase
+ * transition and moves on, and a moment lost to a torn connection is a moment
+ * the next roster read covers anyway. `say` is not here: only the orchestrator
+ * process speaks, through the agent API, never the window.
+ */
+export interface ConductApi {
+  record(moment: {
+    kind: string;
+    projectId?: string | null;
+    objectId?: string | null;
+    detail?: string;
+    source?: string;
+  }): Promise<{ seq: number }>;
+  pulse(params: {
+    sinceSeq: number;
+    timeoutMs?: number;
+    project?: string | null;
+    waiter?: string;
+  }): Promise<PulseAnswer>;
+  post(params: { scope?: string | null; text: string }): Promise<{ messageId: string }>;
+  messages(params: {
+    scope?: string | null;
+    sinceId?: string | null;
+    limit?: number;
+  }): Promise<OrchestratorMessage[]>;
+}
+
 export interface Backend {
   readonly kind: "tauri" | "remote";
   readonly caps: BackendCaps;
@@ -1090,6 +1152,9 @@ export interface Backend {
   readonly log: LogApi;
   readonly approvals: ApprovalsApi;
   readonly search: SearchApi;
+  // The workspace pulse and the orchestrator conversation. Optional while the
+  // orchestrator is an experiment; a backend without it just writes no moments.
+  readonly conduct?: ConductApi;
   // Web Push registration. Present only on remote (web/PWA); undefined on
   // desktop, which notifies through the OS directly.
   readonly push?: PushApi;
