@@ -28,6 +28,7 @@
 //! merge tool that can keep both, the first sync on a machine that already has
 //! configuration included.
 
+pub mod apply;
 pub mod home;
 pub mod manifest;
 pub mod portable;
