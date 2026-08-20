@@ -83,7 +83,8 @@ fn main() {
     // endpoint re-checks the row on every privileged call, so exporting it by
     // hand widens the menu and nothing else.
     let role = std::env::var(boite_identity::env::ROLE).ok();
-    let instructions = boite_mcp::instructions_for_role(role.as_deref());
+    let scope = std::env::var(boite_identity::env::ORCHESTRATOR_SCOPE).ok();
+    let instructions = boite_mcp::instructions_for_role(role.as_deref(), scope.as_deref());
     let service = rpc::Service {
         call: &call,
         blocks: Some(&blocks),

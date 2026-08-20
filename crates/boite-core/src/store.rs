@@ -904,6 +904,41 @@ impl Store {
         Ok(ids)
     }
 
+    /// Settles every line still queued into one project's threads, except the
+    /// new owner's own. What a scoped start does to the global backlog: the
+    /// queue changed hands, and a line queued under the old owner must not
+    /// land under the new one's watch. Answers the ids so each gets its
+    /// moment.
+    pub fn settle_dispatches_into_project(
+        &self,
+        project_id: &str,
+        except_from: &str,
+        state: &str,
+        reason: &str,
+        at: i64,
+    ) -> Result<Vec<String>, String> {
+        let conn = self.conn.lock();
+        let mut stmt = conn
+            .prepare(
+                "SELECT d.id FROM dispatches d JOIN threads t ON t.id = d.to_thread_id
+                 WHERE d.state = 'queued' AND t.project_id = ?1 AND d.from_thread_id != ?2",
+            )
+            .map_err(|e| e.to_string())?;
+        let ids = stmt
+            .query_map([project_id, except_from], |r| r.get::<_, String>(0))
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE dispatches SET state = ?3, reason = ?4, settled_at = ?5
+             WHERE state = 'queued' AND from_thread_id != ?2
+               AND to_thread_id IN (SELECT id FROM threads WHERE project_id = ?1)",
+            rusqlite::params![project_id, except_from, state, reason, at],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(ids)
+    }
+
     /// Settles every line queued before the cutoff as `dropped(no_device)`.
     /// Run on every drain, so no sweep has to exist; answers the ids so each
     /// expiry gets its moment and the orchestrator learns what never landed.

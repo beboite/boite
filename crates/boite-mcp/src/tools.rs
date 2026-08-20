@@ -66,15 +66,18 @@ with the new thread id; terminal_transcript and thread_wait take that id.
 Answers are TOON: `key: value` for a single record, and `name(N):` followed by a \
 header row then one row per item for a list.";
 
-/// What an orchestrator session reads after the workspace instructions.
+/// Who a global orchestrator is. One paragraph, swapped for the scoped one
+/// when the row carries a project: everything after it is the same craft.
+const ORCHESTRATOR_GLOBAL: &str = "\
+You are this workspace's orchestrator: the one thread the user talks to. \
+Everything else here is a worker, and you see them from the outside.";
+
+/// What an orchestrator session reads after its opening paragraph.
 ///
 /// Written as moments, short, because it is paid on every connection. The
 /// autonomy level rides in `BOITE_AUTONOMY`; enforcement is Boite's, this text
 /// only tells the agent not to look for a detour.
 pub const ORCHESTRATOR_INSTRUCTIONS: &str = "\
-You are this workspace's orchestrator: the one thread the user talks to. \
-Everything else here is a worker, and you see them from the outside.
-
 You do not do the work. A request that needs edits, a build or a review gets \
 a terminal of its own via thread_spawn, with a prompt written for someone who \
 was not in this conversation.
@@ -122,9 +125,25 @@ pub fn tools_for_role(role: Option<&str>) -> Value {
 }
 
 /// The instructions a given role reads, same selection as [`tools_for_role`].
-pub fn instructions_for_role(role: Option<&str>) -> String {
+///
+/// The scope names the project a scoped orchestrator answers for, so its
+/// opening paragraph says whose it is and what stays with the workspace one.
+/// A scope without the role means nothing: workers carry no instructions of
+/// their own whatever their row says about projects.
+pub fn instructions_for_role(role: Option<&str>, scope: Option<&str>) -> String {
     match role {
-        Some("orchestrator") => format!("{INSTRUCTIONS}\n\n{ORCHESTRATOR_INSTRUCTIONS}"),
+        Some("orchestrator") => {
+            let opening = match scope {
+                Some(project) => format!(
+                    "You are project {project}'s orchestrator: the one thread the user talks \
+                     to about this project. Every worker you see lives here. Anything beyond \
+                     it, another project or the workspace as a whole, belongs to the user or \
+                     to the workspace orchestrator: do not reach for it, say whose it is."
+                ),
+                None => ORCHESTRATOR_GLOBAL.to_string(),
+            };
+            format!("{INSTRUCTIONS}\n\n{opening}\n\n{ORCHESTRATOR_INSTRUCTIONS}")
+        }
         _ => INSTRUCTIONS.to_string(),
     }
 }
@@ -651,8 +670,16 @@ mod tests {
         assert!(raised.iter().any(|n| n == "thread_dispatch"));
         assert!(raised.iter().any(|n| n == "thread_dismiss"));
 
-        assert!(instructions_for_role(Some("orchestrator")).contains("workspace_pulse"));
-        assert!(!instructions_for_role(None).contains("orchestrator"));
+        assert!(instructions_for_role(Some("orchestrator"), None).contains("workspace_pulse"));
+        assert!(!instructions_for_role(None, None).contains("orchestrator"));
+
+        // The scoped opening names its project and drops the workspace claim;
+        // the craft below the opening is the same text either way.
+        let scoped = instructions_for_role(Some("orchestrator"), Some("p1"));
+        assert!(scoped.contains("project p1's orchestrator"), "{scoped}");
+        assert!(!scoped.contains("workspace's orchestrator"), "{scoped}");
+        assert!(scoped.contains("workspace_pulse"));
+        assert!(instructions_for_role(None, Some("p1")) == instructions_for_role(None, None));
     }
 }
 

@@ -221,6 +221,8 @@ export const EN_MESSAGES = {
   "experiments.orchestratorDesc": "A workspace-level agent you talk to from Home. It watches the pulse and answers; nothing runs until your first message.",
   "experiments.orchestratorAgent": "Agent",
   "experiments.orchestratorBrokered": "This agent runs on a brokered endpoint. Keep secrets out of what the orchestrator can read.",
+  "experiments.orchestratorPerProject": "Per-project orchestrators",
+  "experiments.orchestratorPerProjectDesc": "Each project can carry its own orchestrator, on or off, beside the global one. Switching this off restores one global orchestrator without erasing the choices.",
   "experiments.whip": "Whip",
   "experiments.whipDesc":
     "Puts a whip in the titlebar. Throw it, flick it, click to let go. It cracks and it makes a noise, and it reaches no terminal: nothing is sent, nothing is interrupted.",
@@ -249,6 +251,13 @@ export const EN_MESSAGES = {
   "orchestrator.noProject": "The orchestrator needs at least one project to live in.",
   "orchestrator.startFailed": "The orchestrator did not start: {error}",
   "orchestrator.postFailed": "The message was not delivered.",
+  "orchestrator.scopeLabel": "Conversation scope",
+  "orchestrator.scopeWorkspace": "Whole workspace",
+  "project.orchestrator": "Orchestrator",
+  "project.orchestratorInherit": "inherit",
+  "project.orchestratorOn": "on",
+  "project.orchestratorOff": "off",
+  "sidebar.orchestratorTriState": "Orchestrator: {state}",
 
   "dispatch.notice": "sent by the orchestrator",
   "home.takeBackAll": "Take everything back",

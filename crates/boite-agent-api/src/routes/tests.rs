@@ -804,3 +804,62 @@ async fn a_quiet_pulse_with_no_wait_answers_now() {
     assert_eq!(out.0["timedOut"], json!(false));
     assert_eq!(out.0["moments"], json!([]));
 }
+
+/// A scoped orchestrator's pulse is clamped to its project: whatever project
+/// it asks for, it reads its own and nothing else.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_scoped_orchestrator_reads_its_own_project_whatever_it_asks() {
+    let fake = std::sync::Arc::new(
+        Fake::new("pulse-clamp").with_project("p1", "/w/one").with_thread("qboss", "p1"),
+    );
+    fake.store().stamp_orchestrator_role("qboss", Some("p1")).unwrap();
+    fake.store()
+        .append_moment("thread.phase", Some("p1"), None, "own", "phase", 1)
+        .unwrap();
+    fake.store()
+        .append_moment("thread.phase", Some("p2"), None, "other", "phase", 2)
+        .unwrap();
+    let out = pulse(
+        State(fake.clone() as Shared),
+        Extension(agent("p1", "qboss")),
+        axum::extract::Query(PulseIn {
+            since_seq: Some(0),
+            timeout_ms: Some(0),
+            project: Some("p2".into()),
+        }),
+    )
+    .await
+    .unwrap();
+    let moments = out.0["moments"].as_array().unwrap().clone();
+    assert_eq!(moments.len(), 1, "{moments:?}");
+    assert_eq!(moments[0]["detail"], json!("own"), "{moments:?}");
+}
+
+/// A scoped orchestrator spawning outside its project is refused by name,
+/// before any permission is asked: crossing over is the one capability its
+/// scope withholds.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_scoped_orchestrator_cannot_spawn_across() {
+    let fake = Fake::new("spawn-across")
+        .with_project("p1", "/w/one")
+        .with_project("p2", "/w/two")
+        .with_thread("qboss", "p1");
+    fake.store().stamp_orchestrator_role("qboss", Some("p1")).unwrap();
+    let shared: Shared = std::sync::Arc::new(fake);
+    let out = thread_spawn(
+        State(shared),
+        Extension(agent("p1", "qboss")),
+        Json(SpawnIn {
+            agent: Some("claude".into()),
+            project: Some("p2".into()),
+            prompt: None,
+        }),
+    )
+    .await
+    .unwrap();
+    assert!(
+        out.0["error"].as_str().unwrap().contains("OUT_OF_SCOPE"),
+        "{:?}",
+        out.0
+    );
+}

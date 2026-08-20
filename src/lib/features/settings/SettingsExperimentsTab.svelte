@@ -97,6 +97,16 @@
     {#if settings.state.orchestratorAgent?.startsWith("fastpick:")}
       <p class="text-xs text-amber-500">{t("experiments.orchestratorBrokered")}</p>
     {/if}
+    <ToggleSetting
+      label={t("experiments.orchestratorPerProject")}
+      anchor="experiments.orchestratorPerProject"
+      description={t("experiments.orchestratorPerProjectDesc")}
+      enabled={settings.state.experimentOrchestratorPerProject}
+      onToggle={() =>
+        settings.setExperimentOrchestratorPerProject(
+          !settings.state.experimentOrchestratorPerProject,
+        )}
+    />
   </div>
 {/if}
 
