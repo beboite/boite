@@ -2,6 +2,7 @@
   import { settings } from "$lib/features/settings/store.svelte";
   import ToggleSetting from "$lib/shared/components/ToggleSetting.svelte";
   import { t, type MessageKey } from "$lib/i18n/index.svelte";
+  import VoiceSettings from "$lib/features/voice/VoiceSettings.svelte";
   import type { SmartSortBy, SortDirection, WhipSound } from "$lib/types";
   import { CLI_PRESETS } from "$lib/features/settings/cliPresets";
 
@@ -108,6 +109,17 @@
         )}
     />
   </div>
+{/if}
+
+<ToggleSetting
+  label={t("experiments.voice")} anchor="experiments.voice"
+  description={t("experiments.voiceDesc")}
+  enabled={settings.state.experimentVoice}
+  onToggle={() => settings.setExperimentVoice(!settings.state.experimentVoice)}
+/>
+
+{#if settings.state.experimentVoice}
+  <VoiceSettings />
 {/if}
 
 <ToggleSetting
