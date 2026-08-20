@@ -52,6 +52,47 @@ const GENERIC_TITLES = new Set([
   "terminal",
 ]);
 
+const GENERIC_COMMAND_TOOLS = new Set([
+  "git",
+  "cargo",
+  "rustc",
+  "bun",
+  "bunx",
+  "npm",
+  "npx",
+  "pnpm",
+  "yarn",
+  "node",
+  "deno",
+  "python",
+  "python3",
+  "py",
+  "pip",
+  "conda",
+  "pytest",
+  "make",
+  "cmake",
+  "ninja",
+  "gcc",
+  "g++",
+  "clang",
+  "clang++",
+  "go",
+  "dotnet",
+  "docker",
+  "docker-compose",
+  "kubectl",
+  "curl",
+  "wget",
+  "grep",
+  "ripgrep",
+  "rg",
+  "cat",
+  "find",
+  "dir",
+  "ls",
+]);
+
 // Shells often emit their full executable path as the initial OSC title
 // (e.g. "C:\Program Files\PowerShell\7\pwsh.exe", "/usr/bin/bash") or a
 // Windows-style "Administrator: C:\Windows\System32\cmd.exe". Normalize to
@@ -71,6 +112,42 @@ function normalizeShellPath(title: string): string | null {
   return base.toLowerCase();
 }
 
+const TOOL_PROSE = new Set([
+  "the",
+  "a",
+  "an",
+  "to",
+  "for",
+  "of",
+  "in",
+  "on",
+  "at",
+  "it",
+  "this",
+  "that",
+  "my",
+  "your",
+  "and",
+  "or",
+  "is",
+  "are",
+  "was",
+  "were",
+  "with",
+  "from",
+  "into",
+  "about",
+  "by",
+]);
+
+function isToolCommandTitle(direct: string, tool: string): boolean {
+  if (direct === tool) return true;
+  const prefix = `${tool} `;
+  if (!direct.startsWith(prefix)) return false;
+  const first = direct.slice(prefix.length).split(/\s+/, 1)[0] ?? "";
+  return first.length > 0 && !TOOL_PROSE.has(first);
+}
+
 export function isGenericTitle(
   title: string | null | undefined,
   cwd?: string | null,
@@ -79,7 +156,10 @@ export function isGenericTitle(
   const direct = title.trim().toLowerCase();
   if (GENERIC_TITLES.has(direct)) return true;
   const base = normalizeShellPath(title);
-  if (base && GENERIC_TITLES.has(base)) return true;
+  if (base && (GENERIC_TITLES.has(base) || GENERIC_COMMAND_TOOLS.has(base))) return true;
+  for (const tool of GENERIC_COMMAND_TOOLS) {
+    if (isToolCommandTitle(direct, tool)) return true;
+  }
   // Codex's default terminal_title is spinner + project dir name, which would
   // rename every thread in a project after its folder.
   if (cwd) {

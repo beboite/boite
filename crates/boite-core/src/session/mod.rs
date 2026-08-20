@@ -81,6 +81,8 @@ use serde::{Deserialize, Serialize};
 pub struct SessionHit {
     pub id: String,
     pub modified_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
 }
 
 #[cfg(unix)]

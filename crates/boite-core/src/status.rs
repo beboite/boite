@@ -92,7 +92,14 @@ const GENERIC_TITLES: &[&str] = &[
     "terminal",
 ];
 
-/// True for titles that merely restate the tool/shell name.
+const GENERIC_COMMAND_TOOLS: &[&str] = &[
+    "git", "cargo", "rustc", "bun", "bunx", "npm", "npx", "pnpm", "yarn", "node", "deno",
+    "python", "python3", "py", "pip", "conda", "pytest", "make", "cmake", "ninja", "gcc",
+    "g++", "clang", "clang++", "go", "dotnet", "docker", "docker-compose", "kubectl", "curl",
+    "wget", "grep", "ripgrep", "rg", "cat", "find", "dir", "ls",
+];
+
+/// True for titles that merely restate the tool/shell name or a child command.
 pub fn is_generic_title(title: &str) -> bool {
     let direct = title.trim().to_lowercase();
     if direct.is_empty() {
@@ -102,11 +109,33 @@ pub fn is_generic_title(title: &str) -> bool {
         return true;
     }
     if let Some(base) = normalize_shell_path(title) {
-        if GENERIC_TITLES.contains(&base.as_str()) {
+        if GENERIC_TITLES.contains(&base.as_str()) || GENERIC_COMMAND_TOOLS.contains(&base.as_str()) {
+            return true;
+        }
+    }
+    for tool in GENERIC_COMMAND_TOOLS {
+        if is_tool_command_title(&direct, tool) {
             return true;
         }
     }
     false
+}
+
+const TOOL_PROSE: &[&str] = &[
+    "the", "a", "an", "to", "for", "of", "in", "on", "at", "it", "this", "that", "my",
+    "your", "and", "or", "is", "are", "was", "were", "with", "from", "into", "about", "by",
+];
+
+fn is_tool_command_title(direct: &str, tool: &str) -> bool {
+    if direct == tool {
+        return true;
+    }
+    let prefix = format!("{tool} ");
+    let Some(rest) = direct.strip_prefix(&prefix) else {
+        return false;
+    };
+    let first = rest.split_whitespace().next().unwrap_or("");
+    !first.is_empty() && !TOOL_PROSE.contains(&first)
 }
 
 /// True when the title is just the project directory basename. Codex's
@@ -283,6 +312,13 @@ mod tests {
         assert!(!is_generic_title("   "));
         // A path whose basename is not a known shell must survive.
         assert!(!is_generic_title("/usr/local/bin/boite"));
+        // Tool names that are also English words must not swallow a sentence.
+        assert!(!is_generic_title("find the bug"));
+        assert!(!is_generic_title("go to the store"));
+        assert!(!is_generic_title("make it work"));
+        assert!(is_generic_title("find"));
+        assert!(is_generic_title("go test"));
+        assert!(is_generic_title("git status"));
     }
 
     #[test]
