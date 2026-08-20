@@ -27,6 +27,12 @@
   import type { PtyEvent } from "$lib/storage/pty";
   import { backendFor } from "$lib/backend";
   import { parkedLocal } from "$lib/backend/tauri/parked";
+  import {
+    clearWaking,
+    noteProjectWork,
+    noteThreadWaking,
+    noteWorkStarted,
+  } from "$lib/features/thread/work-activity.svelte";
   import { app } from "$lib/app/store.svelte";
   import { isFinished } from "$lib/domain/thread-status";
   import { settings } from "$lib/features/settings/store.svelte";
@@ -185,12 +191,28 @@
     { id: "~", label: "~" },
     { id: "-", label: "-" },
   ];
+  // What a terminal sends when the user presses Enter. Named because the order
+  // reads it: a line submitted is work asked for, and a carriage return is the
+  // only part of a keystroke stream that says one was.
+  const SUBMIT = "\r";
+
   function rawWrite(s: string) {
     if (!shouldUsePty(ptyId)) return;
     // The one funnel every keystroke passes through, xterm's onData and the
     // phone's key bar alike. What the terminal answers on its own goes out
     // through `sendReport` instead, so it never reads as the user being here.
     lastInputAt = Date.now();
+    // A submitted line is the user giving this thread work, and the only kind
+    // of input the sidebar's order is allowed to read: it comes from the
+    // keystroke funnel, so the focus reports and mouse reports the terminal
+    // writes back on its own (they go out through `sendReport`) never reach it.
+    // It is also what tells a woken thread apart from a working one: waking a
+    // thread to type into it is two events, and this is the one that counts.
+    if (s.includes(SUBMIT)) {
+      clearWaking(thread.id);
+      noteWorkStarted(thread.id);
+      noteProjectWork(thread.projectId);
+    }
     void ptyWrite(ptyId, encoder.encode(s));
   }
 
@@ -932,6 +954,13 @@
     }
 
     spawning = true;
+
+    // A pane opening onto a conversation that already exists is a thread coming
+    // back, not one starting. Its replay draws the same spinner a turn draws,
+    // so the `running` that follows is held rather than counted as work: an app
+    // restart resumes every thread at once, and that used to reshuffle the whole
+    // sidebar around nothing the user had asked for.
+    if (thread.sessionId || reattaching) noteThreadWaking(thread.id);
 
     // A relaunch landing on a pane whose previous launch never printed a byte:
     // that measurement is over, and leaving it pending would let the older
