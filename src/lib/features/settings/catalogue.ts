@@ -111,6 +111,9 @@ export const SETTINGS_CATALOGUE: SettingEntry[] = [
     key: "experiments.orchestratorPerProject",
     descKey: "experiments.orchestratorPerProjectDesc",
   },
+  // The voice sub-controls live in VoiceSettings.svelte, outside this
+  // directory's scan, so the experiment row is the search's landing spot.
+  { tab: "experiments", key: "experiments.voice", descKey: "experiments.voiceDesc" },
   { tab: "experiments", key: "experiments.infoBox", descKey: "experiments.infoBoxDesc" },
   { tab: "experiments", key: "experiments.smartSort", descKey: "experiments.smartSortDesc" },
   { tab: "experiments", key: "experiments.whip", descKey: "experiments.whipDesc" },
