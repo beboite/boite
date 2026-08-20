@@ -295,6 +295,29 @@ loads and the driver answers the whole time.
   description and read as visible). `browser_snapshot` reads the page wherever
   it is.
 
+## The orchestrator is a role, not a claim
+
+A thread is an orchestrator because the workspace stamped `role` on its row
+(`orchestrator.start`, a `Grant::Local` command), never because it says so. The
+bus checks the row on every conducted verb (`conducted_target`), so an agent
+cannot promote itself, arm a second orchestrator, or dispatch into another
+orchestrator's scope. Arming is device-side (the user's own window writes the
+stamp); which projects carry one is workspace-side configuration
+(`orchestratorEnabledFor`). Undoing what one caused is Local-only too
+(`orchestrator.undo`): taking an action back is the user's, and nothing
+committed is ever destroyed — a spawn is put away, a dismissal brought back,
+both stamps on rows.
+
+A dispatch is a line, not a byte: `thread.dispatch` writes a row the target's
+own device drains and types at its prompt (`dispatch.drain`), never a write to
+the PTY from the bus — `crate::reply` forbids that on purpose, and the queue
+does not go around it. The line never lands while the worker is waiting on the
+user, because a question asked to the user is the user's.
+
+`home` is not a pane an agent can open: the orchestrator chat lives there, and
+an agent that could put its own conversation on screen would be an agent
+taking the screen.
+
 ## Hit every surface
 
 The most common defect here is a change that works on the path it was tested on

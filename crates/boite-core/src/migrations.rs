@@ -415,6 +415,12 @@ pub const ALL: &[Migration] = &[
         CREATE INDEX IF NOT EXISTS idx_orchestrator_actions_owner
             ON orchestrator_actions (orchestrator_thread_id, at);",
     ),
+    // When an action was undone, so the inbox stops offering it. A stamp
+    // rather than a delete: what the orchestrator did stays on the record.
+    both(
+        "add_orchestrator_actions_undone",
+        "ALTER TABLE orchestrator_actions ADD COLUMN undone_at INTEGER;",
+    ),
 ];
 
 /// The desktop's list: `(version, description, sql)`, versions from 1.
@@ -448,7 +454,7 @@ mod tests {
     #[test]
     fn the_shipped_order_is_preserved_on_both_sides() {
         let desktop = desktop();
-        assert_eq!(desktop.len(), 28);
+        assert_eq!(desktop.len(), 29);
         assert_eq!(desktop[0], (1, "create_projects", ALL[0].sql));
         assert_eq!(desktop[4].1, "add_thread_session_and_icon");
         assert_eq!(desktop[8].1, "add_project_git_root", "no push table here");
@@ -461,7 +467,7 @@ mod tests {
         assert_eq!(desktop[21].1, "add_thread_ageing");
 
         let server = server();
-        assert_eq!(server.len(), 28);
+        assert_eq!(server.len(), 29);
         assert_eq!(server[8].description, "create_push_subscriptions");
         assert_eq!(server[9].description, "add_project_git_root");
         assert_eq!(
@@ -586,7 +592,8 @@ mod tests {
         );
         assert_eq!(
             columns(&conn, "orchestrator_actions"),
-            ["id", "orchestrator_thread_id", "kind", "object_id", "project_id", "undoable", "at"]
+            ["id", "orchestrator_thread_id", "kind", "object_id", "project_id", "undoable", "at",
+             "undone_at"]
         );
         assert_eq!(
             columns(&conn, "todos"),

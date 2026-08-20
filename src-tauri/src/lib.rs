@@ -499,6 +499,8 @@ pub fn run() {
             commands::conduct::conduct_orchestrator_messages,
             commands::conduct::conduct_orchestrator_start,
             commands::conduct::conduct_orchestrator_status,
+            commands::conduct::conduct_orchestrator_actions,
+            commands::conduct::conduct_orchestrator_undo,
             commands::conduct::conduct_thread_accept_dispatch,
             commands::conduct::conduct_dispatch_drain,
             commands::conduct::conduct_dispatch_settle,
