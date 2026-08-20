@@ -59,9 +59,12 @@ export const CLI_PRESETS: CliPreset[] = [
   {
     id: "copilot",
     label: "Copilot",
-    command: "gh copilot",
+    // The standalone Copilot CLI, which is the one `session/editors.rs` reads a
+    // session store for and the one `copilot mcp add` belongs to. The `gh copilot`
+    // extension is a different product that happens to share the name.
+    command: "copilot",
     iconKey: "copilot",
-    executable: "gh",
+    executable: "copilot",
     docUrl: "https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli",
     yoloFlag: "-- --yolo",
   },
@@ -111,9 +114,6 @@ export function findPresetForCommand(command: string): CliPreset | null {
   return (
     CLI_PRESETS.find((p) => {
       const presetParts = p.command.trim().split(/\s+/);
-      if (presetParts[0] === "gh" && parts[0] === "gh") {
-        return parts[1] === "copilot";
-      }
       return p.executable === first || presetParts[0] === first;
     }) ?? null
   );

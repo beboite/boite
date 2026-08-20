@@ -259,3 +259,73 @@ pub async fn codex_switcher_version(scope: State<'_, ProjectRoots>) -> Result<Va
 pub async fn fast_mcp_ssh_version(scope: State<'_, ProjectRoots>) -> Result<Value, String> {
     on_bus(scope.inner(), Sessions::FastMcpSshVersion.into()).await
 }
+
+// The CLI manager. Every one of these answers for the machine the threads spawn
+// on, which for a remote boite is the server rather than the device drawing the
+// panel — the same rule `command_exists` follows.
+#[tauri::command]
+pub async fn cli_catalog(
+    scope: State<'_, ProjectRoots>,
+    probe_versions: Option<bool>,
+) -> Result<Value, String> {
+    on_bus(
+        scope.inner(),
+        Sessions::CliCatalog {
+            probe_versions: probe_versions.unwrap_or(false),
+        }
+        .into(),
+    )
+    .await
+}
+
+// What each vendor publishes right now. Its own call rather than a field on the
+// catalogue: this one waits on somebody else's web server, and the panel draws
+// its rows before it has an answer.
+#[tauri::command]
+pub async fn cli_latest(scope: State<'_, ProjectRoots>) -> Result<Value, String> {
+    on_bus(scope.inner(), Sessions::CliLatest.into()).await
+}
+
+// An install takes minutes and this call takes milliseconds: it starts the job
+// and the panel polls `cli_jobs`, which is the one progress path both hosts share.
+#[tauri::command]
+pub async fn cli_jobs(scope: State<'_, ProjectRoots>) -> Result<Value, String> {
+    on_bus(scope.inner(), Sessions::CliJobs.into()).await
+}
+
+#[tauri::command]
+pub async fn cli_data_paths(scope: State<'_, ProjectRoots>, id: String) -> Result<Value, String> {
+    on_bus(scope.inner(), Sessions::CliDataPaths { id }.into()).await
+}
+
+#[tauri::command]
+pub async fn cli_install(scope: State<'_, ProjectRoots>, id: String) -> Result<Value, String> {
+    on_bus(scope.inner(), Sessions::CliInstall { id }.into()).await
+}
+
+#[tauri::command]
+pub async fn cli_uninstall(
+    scope: State<'_, ProjectRoots>,
+    id: String,
+    purge_data: Option<bool>,
+) -> Result<Value, String> {
+    on_bus(
+        scope.inner(),
+        Sessions::CliUninstall {
+            id,
+            purge_data: purge_data.unwrap_or(false),
+        }
+        .into(),
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn cli_cancel(scope: State<'_, ProjectRoots>, id: String) -> Result<Value, String> {
+    on_bus(scope.inner(), Sessions::CliCancel { id }.into()).await
+}
+
+#[tauri::command]
+pub async fn cli_dismiss(scope: State<'_, ProjectRoots>, id: String) -> Result<Value, String> {
+    on_bus(scope.inner(), Sessions::CliDismiss { id }.into()).await
+}
