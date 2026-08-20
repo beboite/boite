@@ -1,5 +1,11 @@
 import type {
   ApprovalsApi,
+  SyncApi,
+  SyncConflict,
+  SyncJob,
+  SyncProbe,
+  SyncSource,
+  SyncStatus,
   Backend,
   BackendCaps,
   CommitStateAnswer,
@@ -96,6 +102,7 @@ export class RemoteBackend implements Backend {
   readonly scope: ScopeApi;
   readonly session: SessionApi;
   readonly search: SearchApi;
+  readonly sync: SyncApi;
   readonly log: LogApi;
   readonly approvals: ApprovalsApi;
   readonly push: PushApi;
@@ -541,6 +548,29 @@ export class RemoteBackend implements Backend {
         rpc("search.query", { q, limit })
           .then((r) => (r.hits ?? []) as WorkspaceHit[])
           .catch(() => [] as WorkspaceHit[]),
+    };
+
+    // Runs on the machine the threads spawn on, which is this server. A phone
+    // asking to sync is asking the server to read its own ~/.claude and use its
+    // own git credentials, and the merge tool the phone draws decides the
+    // server's files. The same rule the CLI surface follows.
+    this.sync = {
+      sources: () =>
+        rpc("sync.sources").then((r) => ((r.sources ?? []) as SyncSource[])),
+      status: () => rpc("sync.status").then((r) => r as unknown as SyncStatus),
+      probe: (remoteUrl) =>
+        rpc("sync.probe", { remoteUrl }).then((r) => r as unknown as SyncProbe),
+      pull: () =>
+        rpc("sync.pull").then((r) => ((r.conflicts ?? []) as SyncConflict[])),
+      conflicts: () =>
+        rpc("sync.conflicts").then((r) => ((r.conflicts ?? []) as SyncConflict[])),
+      resolve: (path, content) =>
+        rpc("sync.resolve", { path, content }).then((r) => r as unknown as SyncJob),
+      skip: (path) => rpc("sync.skip", { path }).then((r) => r as unknown as SyncJob),
+      push: () => rpc("sync.push").then((r) => r as unknown as SyncJob),
+      cancel: () => rpc("sync.cancel").then((r) => Boolean(r.cancelled)),
+      dismiss: () => rpc("sync.dismiss").then(() => {}),
+      repair: () => rpc("sync.repair").then(() => {}),
     };
 
     this.push = {

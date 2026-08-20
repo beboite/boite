@@ -28,6 +28,7 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "tabs.about": "À propos",
   "tabs.devices": "Appareils",
   "tabs.experiments": "Expérimentations",
+  "tabs.sync": "Synchronisation",
   "tabs.generalHint": "Notifications, et les raccourcis proposés par le lanceur.",
   "tabs.terminalHint": "Comment un terminal démarre, et quand il est mis en veille.",
   "tabs.appearanceHint": "Échelle, disposition, animations et langue.",
@@ -40,6 +41,8 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "tabs.aboutHint": "Quelle build tourne, et s'il en existe une plus récente.",
   "tabs.experimentsHint":
     "Les grandes refontes, à activer avant qu'elles ne deviennent la norme.",
+  "tabs.syncHint":
+    "Emporter la configuration de vos agents d'un ordinateur à l'autre, par un dépôt qui vous appartient.",
 
 
   "devices.title": "Appareils appairés",
@@ -1243,5 +1246,102 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "keybindings.cmd.splitDown": "Diviser en bas",
   "keybindings.cmd.nextPane": "Pane suivant",
   "keybindings.cmd.previousPane": "Pane précédent",
+
+  // Emporter la configuration des agents d'un ordinateur à l'autre.
+  "sync.enable": "Synchroniser à l'ouverture de Boite",
+  "sync.enableDesc":
+    "Boite lit le dépôt au démarrage. Tout ce qui diffère ouvre l'outil de fusion, et rien n'est écrit avant que vous ne le disiez.",
+  "sync.enableNoRemote": "Indiquez d'abord un dépôt.",
+
+  "sync.remoteTitle": "Le dépôt",
+  "sync.remoteDesc":
+    "Un dépôt git privé qui vous appartient. Boite y écrit et le lit, sans jamais voir vos identifiants : git les résout sur la machine où tournent les terminaux, comme pour n'importe quel autre dépôt qui s'y trouve.",
+  "sync.remotePlaceholder": "git@github.com:vous/boite-config.git",
+  "sync.remoteLabel": "Adresse du dépôt",
+  "sync.remoteCheck": "Vérifier",
+  "sync.remoteChecking": "Interrogation du dépôt…",
+  "sync.remoteSave": "Utiliser ce dépôt",
+  "sync.remoteReachable": "Il répond, et il y a un historique à lire.",
+  "sync.remoteEmpty":
+    "Il répond et il est vide. La première synchronisation le remplira avec ce que contient cette machine.",
+  "sync.remoteNeedsAuth":
+    "Il a refusé. Git n'a aucun identifiant pour cette adresse sur la machine où tournent les terminaux — configurez-en un là-bas, une clé SSH ou un gestionnaire d'identifiants, puis vérifiez à nouveau.",
+  "sync.remoteMissing": "Rien ne répond à cette adresse : {error}",
+  "sync.remoteEdit": "Changer l'adresse",
+  "sync.remoteForget": "Oublier ce dépôt",
+  "sync.remoteForgetAsk":
+    "Boite arrête de synchroniser. Chaque fichier reste exactement tel qu'il est, sur cette machine et dans le dépôt.",
+
+  "sync.statusTitle": "Dernière synchronisation",
+  "sync.statusDesc": "Ce qu'a fait la dernière exécution, et le bouton qui en lance une autre.",
+  "sync.now": "Synchroniser maintenant",
+  "sync.neverSynced": "Cette machine n'a jamais été synchronisée.",
+  "sync.lastSyncedAt": "Dernière synchronisation à {when}.",
+  "sync.pendingCount": "{count} fichiers diffèrent encore.",
+  "sync.review": "Examiner les différences",
+  "sync.dismiss": "Effacer",
+  "sync.repair": "Réinitialiser la copie locale",
+  "sync.unsupportedHere": "Indisponible sur cette machine.",
+  "sync.unsupportedHereDetail":
+    "La synchronisation a besoin de git sur la machine où tournent les terminaux, et Boite n'en trouve aucun là-bas.",
+  "sync.phaseIdle": "Rien n'est en cours.",
+  "sync.phaseOpening": "Recherche de la copie locale.",
+  "sync.phaseFetching": "Lecture du dépôt.",
+  "sync.phaseReading": "Lecture de cette machine.",
+  "sync.phaseComparing": "Comparaison des deux.",
+  "sync.phaseWriting": "Écriture de ce qui a été décidé.",
+  "sync.phaseCommitting": "Enregistrement du changement.",
+  "sync.phasePushing": "Renvoi de la version de cette machine.",
+  "sync.phaseDone": "Tout correspond.",
+  "sync.phaseNeedsMerge": "En attente de votre décision.",
+  "sync.phaseFailed": "Arrêt : {error}",
+  "sync.phaseCancelled": "Arrêté avant la fin.",
+
+  "sync.sourcesTitle": "Ce qui est synchronisé",
+  "sync.sourcesDesc":
+    "Un interrupteur par agent, plus le dossier qu'ils lisent tous. Un interrupteur éteint est un fichier que Boite n'envoie pas et ne touche pas, et tous démarrent éteints.",
+  "sync.sourcesShared": "Commun",
+  "sync.sourcesAgents": "CLI des agents",
+  "sync.agentsRow": "Le dossier .agents",
+  "sync.agentsRowDesc": "AGENTS.md, les compétences et les commandes que lisent tous les agents.",
+  "sync.sourceUnknown": "Boite ne sait pas où celui-ci garde sa configuration.",
+  "sync.sourceAbsent": "Absent de cette machine. Sa configuration peut arriver avant lui.",
+  "sync.secretsNote":
+    "Les identifiants ne partent jamais. Un champ que Boite sait être un secret voyage sous forme de marqueur, et une récupération remet la valeur que cette machine avait déjà.",
+
+  "syncMerge.title": "Fichiers qui diffèrent",
+  "syncMerge.progress": "{done} sur {total} décidés",
+  "syncMerge.files": "Fichiers qui diffèrent",
+  "syncMerge.nothingWaiting": "Rien n'est en attente.",
+  "syncMerge.statusWaiting": "En attente",
+  "syncMerge.statusResolved": "Appliqué",
+  "syncMerge.statusSkipped": "Laissé tel quel",
+  "syncMerge.statusFailed": "N'a pas pu être écrit",
+  "syncMerge.mineLabel": "Cette machine",
+  "syncMerge.theirsLabel": "Le dépôt",
+  "syncMerge.differenceOf": "Différence {index} sur {total}",
+  "syncMerge.nothingHere": "(rien de ce côté)",
+  "syncMerge.mine": "La mienne",
+  "syncMerge.theirs": "La sienne",
+  "syncMerge.both": "Les deux",
+  "syncMerge.bothReversed": "Les deux, la sienne d'abord",
+  "syncMerge.keepAllBoth": "Garder les deux partout",
+  "syncMerge.undecided": "{count} encore à décider",
+  "syncMerge.noDifferences": "Les deux côtés correspondent.",
+  "syncMerge.result": "Ce qui sera écrit",
+  "syncMerge.invalid": "Ceci ne peut plus être relu : {error}",
+  "syncMerge.invalidAtLine": "La ligne {line} ne peut plus être relue : {error}",
+  "syncMerge.apply": "Appliquer à ce fichier",
+  "syncMerge.skip": "Le laisser tel quel",
+  "syncMerge.binary":
+    "Un côté de ce fichier n'est pas du texte, il n'y a donc rien à empiler. Gardez-en un ou laissez-le tel quel.",
+  "syncMerge.keepMine": "Garder la mienne",
+  "syncMerge.takeTheirs": "Prendre la sienne",
+  "syncMerge.abandonAsk":
+    "{count} fichiers diffèrent encore. Ils restent exactement tels quels, ici et dans le dépôt, et la prochaine synchronisation reposera la question. Ce que vous avez déjà appliqué reste appliqué.",
+  "syncMerge.abandonConfirm": "Fermer quand même",
+  "syncMerge.abandonCancel": "Continuer",
+  "syncMerge.sendNote": "Rien n'est envoyé tant que tout ici n'est pas décidé.",
+  "syncMerge.send": "Envoyer la version de cette machine",
 
 };

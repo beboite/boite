@@ -681,5 +681,29 @@ mod tests {
         assert!(scoped.contains("workspace_pulse"));
         assert!(instructions_for_role(None, Some("p1")) == instructions_for_role(None, None));
     }
+
+    /// Configuration sync is not something an agent may reach, and the reason it
+    /// cannot is that nothing here names it — not the capability check, which
+    /// `Grant::Owner` passes.
+    ///
+    /// Three of the calls write into `~/.gemini/config/mcp_config.json`, which
+    /// decides which MCP servers an agent may talk to, and into `~/.agents`,
+    /// which is the instruction tree every agent on the machine reads and which
+    /// this feature then pushes to a git remote and onto every other computer
+    /// the user owns. An agent that could write those could grant itself tools
+    /// and write its own future instructions, everywhere, at once.
+    ///
+    /// Reading is left out too. It is harmless on its own, and a tool list is
+    /// paid for in every session that connects and again in the context window
+    /// that reads it — for an answer no agent workflow needs.
+    ///
+    /// Deleting this test to add one is the point: it should take a sentence
+    /// saying why.
+    #[test]
+    fn no_sync_tool_is_offered_to_an_agent() {
+        for name in names() {
+            assert!(!name.contains("sync"), "{name} puts configuration sync in reach of an agent");
+        }
+    }
 }
 

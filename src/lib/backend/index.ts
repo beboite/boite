@@ -10,3 +10,15 @@ export {
   workspace,
 } from "./active.svelte";
 export type { Backend } from "./types";
+export type {
+  SyncApi,
+  SyncConflict,
+  SyncField,
+  SyncJob,
+  SyncNotes,
+  SyncPhase,
+  SyncProbe,
+  SyncSource,
+  SyncStatus,
+  SyncSyntax,
+} from "./types";

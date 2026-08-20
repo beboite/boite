@@ -24,6 +24,7 @@ export type SettingsTabId =
   | "devices"
   | "logs"
   | "experiments"
+  | "sync"
   | "about";
 
 /**
@@ -52,6 +53,11 @@ export interface SettingEntry {
 
 export const SETTINGS_CATALOGUE: SettingEntry[] = [
   { tab: "general", key: "general.openOnLaunch", descKey: "general.openOnLaunchDesc" },
+  { tab: "sync", key: "sync.enable", descKey: "sync.enableDesc" },
+  { tab: "sync", key: "sync.remoteTitle", descKey: "sync.remoteDesc" },
+  { tab: "sync", key: "sync.statusTitle", descKey: "sync.statusDesc" },
+  { tab: "sync", key: "sync.sourcesTitle", descKey: "sync.sourcesDesc" },
+
   { tab: "general", key: "general.pushTitle", descKey: "general.pushDesc", when: "push" },
   { tab: "general", key: "shortcuts.title", descKey: "shortcuts.description" },
 

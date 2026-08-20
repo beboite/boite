@@ -318,6 +318,43 @@ user, because a question asked to the user is the user's.
 an agent that could put its own conversation on screen would be an agent
 taking the screen.
 
+## Sync is an allowlist, and a pull never overwrites
+
+Five rules in `boite_core::sync`, each of which ships broken if it is forgotten
+and none of which the compiler will remind you about.
+
+- **The manifest is an allowlist of named files plus one tree, never a directory
+  minus a denylist.** `~/.claude` is not a source; `~/.claude/settings.json` is.
+  A denylist drifts the moment a vendor adds a directory, and `~/.claude/plugins`
+  is 820 files and nine megabytes of absolute paths that would have been in it.
+  `~/.claude.json` is refused by name as well, because fifty kilobytes of which
+  twenty-six are a launch-time cache would conflict at every start.
+- **A file is parsed only if it declares a field rule, and it is never written
+  back.** `serde_json` here has no `preserve_order`, so a parse and reserialise
+  alphabetises every object, and `~/.copilot/config.json` is JSONC. Redaction
+  substitutes a value's own text — in its *escaped* form, because the bytes in
+  the file are not the parsed value. `commands/agents.rs` already states this
+  refusal for the same class of file; this extends it rather than departing.
+- **Create atomically, update in place.** `~/.agents/AGENTS.md` is one inode with
+  four names, `~/.gemini/GEMINI.md` among them. Tmp-file-then-rename severs all
+  of them silently. In place is not atomic, so a copy of the old bytes is written
+  first and its directory is reported.
+- **The scanner reads links and never follows, makes or removes one.**
+  `~/.claude/{skills,commands,agents}` point into `~/.agents`, so a walk that
+  followed them would sync the same content twice. `symlink_metadata` and
+  `is_symlink()` come before any `is_dir()`, because a Windows junction reports
+  `is_dir() == false`. `remove_dir_all` appears nowhere in the module.
+- **A divergence is the frontend's to merge.** Rust reports three sides and
+  applies whatever bytes come back. There is no pick-a-side path and no automatic
+  overwrite, the first sync on a machine with existing configuration included —
+  which falls out of the base ref being absent rather than from a special case.
+
+Two more that are not in `sync` and belong to it. Nothing in `boite-mcp` names a
+sync tool, and a test there asserts it: the capability check is not the guard,
+because `Grant::Owner` allows everything. And the sync store imports no
+`@codemirror`, asserted by a test in the slice, because the launch pull puts it
+on the boot path and one import would drag the editor stack in behind it.
+
 ## Hit every surface
 
 The most common defect here is a change that works on the path it was tested on

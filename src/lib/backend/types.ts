@@ -1198,6 +1198,166 @@ export interface DispatchLine {
   createdAt: number;
 }
 
+/** What a file's contents can be checked against, and whether stacking is legal. */
+export type SyncSyntax = "json" | "jsonc" | "markdown" | "text";
+
+/** One agent's configuration, or `agents` for the shared instruction tree. */
+export interface SyncSource {
+  /** An agent id, or `agents`. */
+  id: string;
+  /** The files this source covers, home-relative. Empty when unsupported. */
+  paths: string[];
+  /**
+   * False when Boite does not know where this agent keeps its configuration.
+   * A declared answer rather than a gap: ten agents, ten answers.
+   */
+  supported: boolean;
+  /**
+   * Whether anything is here now. Absence does not disable the switch — a
+   * configuration arriving before its agent is how a new machine is set up.
+   */
+  presentHere: boolean;
+}
+
+/** One file that differs on both sides, with nothing written yet. */
+export interface SyncConflict {
+  /** The repository path, which is also what `resolve` and `skip` name. */
+  path: string;
+  /** Which switch owns it, so the panel can group and label. */
+  sourceId: string;
+  /**
+   * What the merged file has to still be readable as. The backend decides it,
+   * because the extension lies: ~/.copilot/config.json is JSONC.
+   */
+  syntax: SyncSyntax;
+  /** The last agreed content, when there was one. Absent on a first sync. */
+  base: string | null;
+  /** This machine's side. Null when the file is not here at all. */
+  local: string | null;
+  /** The repository's side. Null when the repository has no such file. */
+  remote: string | null;
+  /**
+   * Either side is not text. Stacking bytes is meaningless, so the panel offers
+   * a side rather than a merge.
+   */
+  binary: boolean;
+}
+
+export type SyncPhase =
+  | "idle"
+  | "opening"
+  | "fetching"
+  | "reading"
+  | "comparing"
+  | "writing"
+  | "committing"
+  | "pushing"
+  | "done"
+  /** Settled, and not a failure: files differ and it is the user's turn. */
+  | "needsMerge"
+  | "failed"
+  | "cancelled";
+
+/** A rule that reached a value on the way out, or a value with nothing to put back. */
+export interface SyncField {
+  pointer: string;
+  field: "secret" | "machineLocal";
+}
+
+/** Everything a run decided not to do, so the panel can say so. */
+export interface SyncNotes {
+  skippedLinks: string[];
+  throughLink: string[];
+  notText: string[];
+  denied: string[];
+  rulesSkipped: { pointer: string; reason: string }[];
+  unreadable: string[];
+}
+
+/** What the run is doing. Polled, never pushed. */
+export interface SyncJob {
+  phase: SyncPhase;
+  /** False when the machine the threads run on has no git Boite can find. */
+  supported: boolean;
+  filesRead: number;
+  /** Null while the count is unknown, which is a bar with no end. */
+  filesTotal: number | null;
+  path: string | null;
+  message: string | null;
+  pushedSha: string | null;
+  lastSyncedAt: number | null;
+  /** Files still waiting on a person. */
+  pending: number;
+  startedAt: number;
+  updatedAt: number;
+  notes: SyncNotes;
+  /** Placeholders this machine had no value to put back for. */
+  needed: SyncField[];
+  refused: { path: string; reason: string }[];
+  /** Where replaced contents were kept, when anything was replaced. */
+  backupDir: string | null;
+}
+
+export interface SyncStatus {
+  supported: boolean;
+  remoteUrl: string | null;
+  branch: string | null;
+  /** Whether this machine has ever finished a sync. */
+  hasBase: boolean;
+  job: SyncJob;
+}
+
+/** What `git ls-remote` said, so the address field can be honest with no token. */
+export interface SyncProbe {
+  reachable: boolean;
+  /** It answers and holds nothing. The first sync fills it. */
+  empty: boolean;
+  /** It refused. The fix is a git credential on the host, not a field here. */
+  needsAuth: boolean;
+  message: string | null;
+}
+
+/**
+ * Carrying the agent configuration between computers, through a repository the
+ * user owns.
+ *
+ * Everything happens on the machine the threads spawn on, which for a remote
+ * boite is the server rather than the device drawing the panel. Progress is
+ * polled rather than pushed, so a panel opened half way through sees where it
+ * got to.
+ *
+ * The configuration itself — the address and the per-source switches — is not
+ * here. It lives in the settings blob both hosts already read, and the host
+ * reads it out of that row on every call, so turning a source off stops the next
+ * sync rather than the next session.
+ */
+export interface SyncApi {
+  /** Every source and what this machine says about it. */
+  sources(): Promise<SyncSource[]>;
+  status(): Promise<SyncStatus>;
+  /** `git ls-remote` on the host, for the address field's verdict. */
+  probe(remoteUrl: string): Promise<SyncProbe>;
+  /** Fetches and compares. Sends nothing. Answers with what diverged. */
+  pull(): Promise<SyncConflict[]>;
+  /** What is still waiting, for a panel opened after the pull. */
+  conflicts(): Promise<SyncConflict[]>;
+  /**
+   * Arbitrary bytes for one file — the merge tool can keep both sides, so this
+   * is not a pick-a-side call. It writes that file and nothing else, which is
+   * what makes an abandoned merge safe to walk away from.
+   */
+  resolve(path: string, content: string): Promise<SyncJob>;
+  /** Leaves the file as both sides have it. The next pull asks again. */
+  skip(path: string): Promise<SyncJob>;
+  /** Sends what this machine settled. */
+  push(): Promise<SyncJob>;
+  cancel(): Promise<boolean>;
+  /** Forgets a settled run, which is how a failure is dismissed. */
+  dismiss(): Promise<void>;
+  /** Resets the local mirror, and nothing outside it. */
+  repair(): Promise<void>;
+}
+
 export interface Backend {
   readonly kind: "tauri" | "remote";
   readonly caps: BackendCaps;
@@ -1225,6 +1385,7 @@ export interface Backend {
   // The workspace pulse and the orchestrator conversation. Optional while the
   // orchestrator is an experiment; a backend without it just writes no moments.
   readonly conduct?: ConductApi;
+  readonly sync: SyncApi;
   // Web Push registration. Present only on remote (web/PWA); undefined on
   // desktop, which notifies through the OS directly.
   readonly push?: PushApi;

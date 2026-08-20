@@ -44,6 +44,7 @@ pub mod files;
 pub mod git;
 pub mod records;
 pub mod sessions;
+pub mod sync;
 
 pub use checkpoint::Checkpoints;
 pub use conduct::Conduct;
@@ -51,6 +52,7 @@ pub use files::Files;
 pub use git::Git;
 pub use records::{Records, ThreadPatch};
 pub use sessions::Sessions;
+pub use sync::Sync;
 
 /// What a command wants to do with a path the caller handed it.
 ///
@@ -174,6 +176,7 @@ pub fn methods() -> impl Iterator<Item = &'static str> {
         .chain(records::ALL_METHODS)
         .chain(checkpoint::ALL_METHODS)
         .chain(conduct::ALL_METHODS)
+        .chain(sync::ALL_METHODS)
         .copied()
 }
 
@@ -239,6 +242,7 @@ fn probe_params() -> Value {
         "text": "t",
         "toThreadId": "t", "dispatchId": "d", "state": "delivered",
         "audio": "", "actionId": "a",
+        "remoteUrl": "https://example.invalid/x.git",
     })
 }
 
@@ -254,6 +258,7 @@ pub enum Command {
     Git(Git),
     Records(Records),
     Sessions(Sessions),
+    Sync(Sync),
 }
 
 impl From<Conduct> for Command {
@@ -283,6 +288,12 @@ impl From<Records> for Command {
 impl From<Files> for Command {
     fn from(files: Files) -> Self {
         Command::Files(files)
+    }
+}
+
+impl From<Sync> for Command {
+    fn from(value: Sync) -> Self {
+        Command::Sync(value)
     }
 }
 
@@ -323,6 +334,9 @@ impl Command {
         if conduct::ALL_METHODS.contains(&method) {
             return Conduct::decode(method, params).map(Command::Conduct);
         }
+        if sync::ALL_METHODS.contains(&method) {
+            return Sync::decode(method, params).map(Command::Sync);
+        }
         Err(format!("unknown method: {method}"))
     }
 
@@ -335,6 +349,7 @@ impl Command {
             Command::Git(g) => g.name(),
             Command::Records(r) => r.name(),
             Command::Sessions(s) => s.name(),
+            Command::Sync(s) => s.name(),
         }
     }
 
@@ -347,6 +362,7 @@ impl Command {
             Command::Git(g) => g.wire(),
             Command::Records(r) => r.wire(),
             Command::Sessions(s) => s.wire(),
+            Command::Sync(s) => s.wire(),
         }
     }
 
@@ -364,6 +380,7 @@ impl Command {
             Command::Git(g) => g.capability(),
             Command::Records(r) => r.capability(),
             Command::Sessions(s) => s.capability(),
+            Command::Sync(s) => s.capability(),
         }
     }
 
@@ -386,6 +403,7 @@ impl Command {
             Command::Git(g) => g.prepare(host),
             Command::Records(r) => r.prepare(host),
             Command::Sessions(s) => s.prepare(host),
+            Command::Sync(s) => s.prepare(host),
         }
     }
 }
@@ -423,6 +441,7 @@ impl Ready {
             Ready::Work(Command::Files(f)) => f.run(),
             Ready::Work(Command::Git(g)) => g.run(),
             Ready::Work(Command::Sessions(s)) => s.run(),
+            Ready::Work(Command::Sync(s)) => s.run(),
             // `prepare` turns every record command into the arm below, so this
             // is unreachable rather than a case with an answer.
             Ready::Work(Command::Records(r)) => {
@@ -704,6 +723,17 @@ mod tests {
             ("dispatch.drain", MutateProject),
             ("dispatch.settle", MutateProject),
             ("voice.transcribe", ReadProject),
+            ("sync.sources", ReadProject),
+            ("sync.status", ReadProject),
+            ("sync.probe", ReadProject),
+            ("sync.pull", MutateAcross),
+            ("sync.conflicts", ReadProject),
+            ("sync.resolve", MutateAcross),
+            ("sync.skip", MutateProject),
+            ("sync.push", MutateAcross),
+            ("sync.cancel", MutateProject),
+            ("sync.dismiss", MutateProject),
+            ("sync.repair", MutateAcross),
         ];
         let actual: Vec<(&str, Capability)> = every_command()
             .iter()
@@ -729,6 +759,8 @@ mod tests {
             "thread.delete",
             "todo.save", "todo.delete", "settings.set", "workspace.setInfo",
             "checkpoint.capture", "checkpoint.restore", "checkpoint.forget",
+            "sync.pull", "sync.push", "sync.resolve", "sync.repair",
+            "sync.skip", "sync.cancel", "sync.dismiss",
         ] {
             let command = every_command()
                 .into_iter()
@@ -738,19 +770,34 @@ mod tests {
         }
     }
 
-    /// Exactly three commands reach past the project they were called in, and a
-    /// credentials file can use everything else.
+    /// The calls that reach past the project they were called in, written out so
+    /// that an arrival is a diff somebody has to agree with rather than a
+    /// silently widened grant.
     ///
-    /// This test used to assert that the number was zero, with a note saying
-    /// that it failing would be the notice that the endpoint's own check is no
-    /// longer the only one. That is what happened: the record domain brought
-    /// creating a project, deleting one and deleting a thread onto the bus, and
-    /// those are the calls the capability doc names as reaching past. So the
-    /// list is written out rather than counted, and a fourth arrival is a diff
-    /// somebody has to agree with instead of a silently widened grant.
+    /// This test used to assert the number was zero, with a note saying that it
+    /// failing would be the notice that the endpoint's own check is no longer
+    /// the only one. That is what happened twice. First the record domain
+    /// brought creating a project, deleting one and deleting a thread. Then sync
+    /// brought four more, and they are the sharpest of the lot: they write into
+    /// `~/.claude` and `~/.agents`, which is every agent's own configuration and
+    /// the instructions every agent reads. A grant scoped to one project — the
+    /// credentials file the todo panel hands to agents — must not reach them,
+    /// and `Grant::Project.allows` refusing each one is asserted below.
+    ///
+    /// The capability check is not the whole guard for sync, and is not meant to
+    /// be: `Grant::Owner` allows everything. What keeps an agent away from these
+    /// is that `boite-mcp` does not offer them, which its own test asserts.
     #[test]
-    fn only_the_three_calls_that_change_where_work_happens_reach_across() {
-        const ACROSS: &[&str] = &["project.create", "project.delete", "thread.delete"];
+    fn only_the_calls_that_change_the_machine_reach_across() {
+        const ACROSS: &[&str] = &[
+            "project.create",
+            "project.delete",
+            "thread.delete",
+            "sync.pull",
+            "sync.push",
+            "sync.resolve",
+            "sync.repair",
+        ];
         for command in every_command() {
             let across = command.capability() == Capability::MutateAcross;
             assert_eq!(
