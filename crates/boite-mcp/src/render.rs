@@ -155,12 +155,35 @@ pub(crate) fn format_worktree(out: &Value) -> String {
         .field("repo", string_at("repo"))
         .field("branch", string_at("branch"))
         .flag("detached", detached)
-        .flag("uncommitted", dirty)
-        .inline("branches", &branches, MAX_BRANCHES);
+        .flag("uncommitted", dirty);
+    if let Some(state) = push_state(out, detached) {
+        w.field("push", &state);
+    }
+    w.inline("branches", &branches, MAX_BRANCHES);
     if detached {
         w.hint("worktree_branch name=<new> once the work is worth keeping");
     }
     w.into_string()
+}
+
+/// What the remote has of this branch, in one line, or nothing to say.
+///
+/// Nothing to say covers a detached worktree (no branch to push) and a
+/// repository with no remote at all (never behind on pushing). Reported rather
+/// than objected to at the end of a turn: closing the thread keeps the commits.
+fn push_state(out: &Value, detached: bool) -> Option<String> {
+    if detached || !out.get("hasRemote").and_then(|v| v.as_bool()).unwrap_or(false) {
+        return None;
+    }
+    let ahead = out.get("ahead").and_then(|v| v.as_u64()).unwrap_or(0);
+    match out.get("upstream").and_then(|v| v.as_str()) {
+        None => Some("no remote has this branch".into()),
+        Some(upstream) if ahead > 0 => Some(format!(
+            "{ahead} {} ahead of {upstream}",
+            if ahead == 1 { "commit" } else { "commits" }
+        )),
+        Some(upstream) => Some(format!("level with {upstream}")),
+    }
 }
 
 pub(crate) fn format_whereami(out: &Value) -> String {
@@ -740,6 +763,48 @@ mod tests {
         assert!(text.contains("uncommitted: false\n"), "{text}");
         assert!(text.contains("branches(2): master feat/x\n"), "{text}");
         assert!(text.contains("hint: worktree_branch"), "{text}");
+        assert!(!text.contains("push:"), "detached has no branch to push: {text}");
+    }
+
+    /// The push state the Stop hook used to block a turn over. Silent when
+    /// there is nothing a push would change.
+    #[test]
+    fn worktree_status_says_what_the_remote_has() {
+        let base = json!({
+            "path": "C:\\worktrees\\3506",
+            "repo": "D:\\Dev\\Collab\\boite",
+            "branch": "feat/x",
+            "detached": false,
+            "uncommittedChanges": false,
+            "hasRemote": true,
+            "upstream": null,
+            "ahead": 0,
+            "branches": ["master", "feat/x"]
+        });
+        assert!(
+            format_worktree(&base).contains("push: \"no remote has this branch\"\n"),
+            "{}",
+            format_worktree(&base)
+        );
+
+        let mut ahead = base.clone();
+        ahead["upstream"] = json!("origin/feat/x");
+        ahead["ahead"] = json!(2);
+        let text = format_worktree(&ahead);
+        assert!(
+            text.contains("push: \"2 commits ahead of origin/feat/x\"\n"),
+            "{text}"
+        );
+
+        let mut level = ahead.clone();
+        level["ahead"] = json!(0);
+        let text = format_worktree(&level);
+        assert!(text.contains("push: \"level with origin/feat/x\"\n"), "{text}");
+
+        let mut no_remote = base.clone();
+        no_remote["hasRemote"] = json!(false);
+        let text = format_worktree(&no_remote);
+        assert!(!text.contains("push:"), "no remote, nothing to be behind on: {text}");
     }
 
     /// A detected policy and a declared one differ in one line, and that line is
