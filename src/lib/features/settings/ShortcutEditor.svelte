@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { tip } from "$lib/shared/actions/tooltip";
   import { workspace } from "$lib/backend";
   import { settings } from "./store.svelte";
   import {
@@ -357,7 +358,7 @@
     type="button"
     class="flex items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-1.5 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
     onclick={() => void onReset()}
-    title={t("shortcuts.resetTitle")}
+    use:tip={t("shortcuts.resetTitle")}
   >
     <RotateCcw class="size-3" />
     {t("common.reset")}
@@ -412,7 +413,7 @@
         aria-label={t("shortcuts.dragToReorder")}
         aria-pressed={grabbedId === shortcut.id}
         aria-keyshortcuts="ArrowUp ArrowDown"
-        title={t("shortcuts.reorderHint")}
+        use:tip={t("shortcuts.reorderHint")}
         onkeydown={(e) => gripKeydown(shortcut, i, e)}
         onblur={() => {
           if (grabbedId === shortcut.id) grabbedId = null;
@@ -438,7 +439,7 @@
           onclick={() => (colorPickerFor = colorPickerFor === shortcut.id ? null : shortcut.id)}
           aria-label={t("shortcuts.changeIconColor")}
           aria-expanded={colorPickerFor === shortcut.id}
-          title={t("shortcuts.changeIconColor")}
+          use:tip={t("shortcuts.changeIconColor")}
         >
           <ShortcutIcon {iconKey} size={16} color={shortcut.iconColor ?? null} />
         </button>
@@ -458,7 +459,7 @@
                   style:background-color={c}
                   onclick={() => setIconColor(shortcut.id, c)}
                   aria-label={t("shortcuts.setColor", { color: c })}
-                  title={c}
+                  use:tip={c}
                 ></button>
               {/each}
             </div>
@@ -509,7 +510,7 @@
         class="flex size-7 items-center justify-center rounded-md text-muted-foreground/60 transition hover:bg-danger/15 hover:text-danger"
         onclick={() => void onRemove(shortcut)}
         aria-label={t("shortcuts.removeShortcut")}
-        title={t("shortcuts.remove")}
+        use:tip={t("shortcuts.remove")}
       >
         <Trash2 class="size-3" />
       </button>
@@ -582,7 +583,7 @@
               target="_blank"
               rel="noopener noreferrer"
               class="flex size-7 cursor-pointer items-center justify-center rounded-md border border-border/60 bg-[var(--color-surface-3)] text-muted-foreground transition hover:bg-[var(--color-surface)] hover:text-foreground"
-              title={t("shortcuts.documentation")}
+              use:tip={t("shortcuts.documentation")}
               aria-label={t("shortcuts.documentation")}
             >
               <ExternalLink class="size-3.5" />
@@ -593,7 +594,7 @@
             disabled={added}
             onclick={() => addPreset(preset.id)}
             class="flex h-7 cursor-pointer items-center gap-1 rounded-md bg-foreground px-2.5 text-xs font-semibold text-background transition hover:bg-neutral-200 disabled:cursor-not-allowed disabled:border disabled:border-border/60 disabled:bg-transparent disabled:text-muted-foreground/60"
-            title={added ? t("shortcuts.alreadyAdded") : t("shortcuts.addToShortcuts")}
+            use:tip={added ? t("shortcuts.alreadyAdded") : t("shortcuts.addToShortcuts")}
           >
             {#if added}
               <Check class="size-3" />

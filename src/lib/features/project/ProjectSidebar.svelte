@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
-  import { scale } from "svelte/transition";
+  import { tip } from "$lib/shared/actions/tooltip";
+  import { scale, slide } from "svelte/transition";
+  import { DUR, easeOutQuint } from "$lib/theme/motion";
   import { app } from "$lib/app/store.svelte";
   import { visibleStatus } from "$lib/domain/thread-status";
   import { workspace } from "$lib/backend";
@@ -116,6 +118,27 @@
   let filterTerm = $state("");
   let filterEl: HTMLInputElement | null = $state(null);
   let remotePicker = $state(false);
+
+  /**
+   * How a project card or a thread row arrives and leaves.
+   *
+   * The only list in the app whose rows appeared and vanished in one frame:
+   * everything the sidebar moves is drag, and a drag animates itself through
+   * `rowShift`. So a thread launched, a thread closed, a project added and a
+   * project archived all popped, on the surface the user looks at most.
+   *
+   * `slide` rather than `fly` or `scale`: the row is taking the column's height
+   * with it, and the thing to show is the space opening or closing. A transform
+   * would also fight the drag's own, which is written inline on the same nodes.
+   *
+   * Off while the filter is being typed. Each keystroke rewrites the list, and
+   * rows collapsing out under the caret while more are still leaving reads as
+   * the sidebar struggling to keep up rather than as an answer.
+   */
+  const rowMotion = $derived({
+    duration: filterTerm ? 0 : DUR.base,
+    easing: easeOutQuint,
+  });
 
   /**
    * The signal design, and what it does to the glyph.
@@ -1223,7 +1246,7 @@
         class="section-label flex items-center gap-1.5 rounded transition hover:text-foreground"
         onclick={() => (showArchived = false)}
         aria-label={t("sidebar.backToProjects")}
-        title={t("sidebar.backToProjects")}
+        use:tip={t("sidebar.backToProjects")}
       >
         <ArrowLeft class="size-3.5" />
         {t("sidebar.archives")}
@@ -1247,7 +1270,7 @@
           else queueMicrotask(() => filterEl?.focus());
         }}
         aria-label={t("sidebar.filterThreads")}
-        title={t("sidebar.filterThreads")}
+        use:tip={t("sidebar.filterThreads")}
       >
         <SearchIcon class="size-4" />
       </button>
@@ -1258,7 +1281,7 @@
           : ''}"
         onclick={() => (showArchived = !showArchived)}
         aria-label={t("sidebar.showArchived")}
-        title={t("sidebar.archivedProjects")}
+        use:tip={t("sidebar.archivedProjects")}
       >
         <FolderArchive class="size-4" />
       </button>
@@ -1268,7 +1291,7 @@
           class="rounded-md p-1 text-muted-foreground transition hover:bg-accent hover:text-foreground"
           onclick={addProjectClick}
           aria-label={t("sidebar.addProject")}
-          title={t("sidebar.addProjectFromFolder")}
+          use:tip={t("sidebar.addProjectFromFolder")}
         >
           <Plus class="size-4" />
         </button>
@@ -1286,7 +1309,7 @@
             onclick={() => (remotePicker = true)}
             aria-label={t("sidebar.remoteProjects")}
             aria-expanded={remotePicker}
-            title={t("sidebar.remoteProjectsOn", {
+            use:tip={t("sidebar.remoteProjectsOn", {
               name: workspace.info.name || "boite",
             })}
           >
@@ -1329,7 +1352,7 @@
        other, so it is still one click away by being clicked. -->
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
   <div
-    class="flex-1 overflow-y-auto px-2 pb-2"
+    class="flex-1 scroll-pane overflow-y-auto px-2 pb-2"
     role="list"
     onkeydown={onListKeydown}
     use:rowFlip={{ key: () => projectOrderKey, enabled: () => !liveDrag }}
@@ -1376,6 +1399,7 @@
       )}
       <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
       <div
+        transition:slide={rowMotion}
         class="project-block group/block mb-2"
         class:launching={launcher?.projectId === project.id}
         class:scratch-block={isScratchRow}
@@ -1401,7 +1425,7 @@
           class="project-row group/project relative flex items-center gap-2 px-2 py-1.5 transition hover:text-foreground {showArchived
             ? ''
             : 'cursor-pointer'}"
-          title={isRemoteOrigin
+          use:tip={isRemoteOrigin
             ? boiteOffline
               ? t("sidebar.onBoiteOffline", {
                   name: workspace.info.name || "boite",
@@ -1449,7 +1473,7 @@
               type="button"
               data-nav-row
               class="min-w-0 flex-1 truncate-safe text-left text-base font-medium leading-[19px] text-foreground/90 transition group-hover/project:text-foreground"
-              title={project.cwd}
+              use:tip={project.cwd}
               onclick={() => {
                 if (consumeDragClick(project.id)) return;
                 if (showArchived) return;
@@ -1470,7 +1494,7 @@
               }}
               data-drag-block
               aria-label={t("sidebar.unarchiveProject")}
-              title={t("sidebar.unarchive")}
+              use:tip={t("sidebar.unarchive")}
             >
               <FolderUp class="size-3.5" />
             </button>
@@ -1495,7 +1519,7 @@
               data-drag-block
               data-launcher-trigger
               aria-label={t("sidebar.launchHere")}
-              title={t("sidebar.launchHere")}
+              use:tip={t("sidebar.launchHere")}
               aria-expanded={launcher?.projectId === project.id}
             >
               <Plus class="size-3.5" />
@@ -1506,7 +1530,7 @@
               onclick={(e) => openProjectContextMenu(project, e)}
               data-drag-block
               aria-label={t("sidebar.projectOptions")}
-              title={t("sidebar.more")}
+              use:tip={t("sidebar.more")}
             >
               <MoreHorizontal class="size-3.5" />
             </button>
@@ -1566,6 +1590,7 @@
                   : null}
               <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
               <li
+                transition:slide={rowMotion}
                 class="thread-row group/thread"
                 class:source={isThreadSource}
                 data-thread-row={thread.id}
@@ -1686,7 +1711,7 @@
                          carries this name. -->
                     <span
                       class="pointer-events-none relative min-w-0 flex-1 truncate-safe text-left text-base leading-[19px]"
-                      title={thread.title ?? thread.label}
+                      use:tip={thread.title ?? thread.label}
                       aria-hidden="true"
                     >
                       {thread.title ?? thread.label}
@@ -1711,7 +1736,7 @@
                     aria-label={t("sidebar.closeThreadNamed", {
                       name: thread.title ?? thread.label,
                     })}
-                    title={t("sidebar.closeThread")}
+                    use:tip={t("sidebar.closeThread")}
                   >
                     <X class="size-3.5" />
                   </button>
@@ -1791,7 +1816,7 @@
                 }}
                 aria-expanded={open}
                 aria-controls={`settled-${project.id}`}
-                title={open ? t("sidebar.hideSettled") : t("sidebar.showSettled")}
+                use:tip={open ? t("sidebar.hideSettled") : t("sidebar.showSettled")}
               >
                 <ChevronRight
                   class="size-3 shrink-0 transition-transform {open ? 'rotate-90' : ''}"
@@ -1828,7 +1853,7 @@
       onStateChange: (r) => (resizing = r),
     }}
     aria-label={t("sidebar.resizeSidebar")}
-    title={t("sidebar.resizeSidebar")}
+    use:tip={t("sidebar.resizeSidebar")}
     tabindex="-1"
   ></button>
 </aside>
@@ -1884,7 +1909,7 @@
     />
     <span
       class="min-w-0 flex-1 truncate-safe text-left text-base leading-[19px]"
-      title={threadDragGhost.thread.title ?? threadDragGhost.thread.label}
+      use:tip={threadDragGhost.thread.title ?? threadDragGhost.thread.label}
     >
       {threadDragGhost.thread.title ?? threadDragGhost.thread.label}
     </span>

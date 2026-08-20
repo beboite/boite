@@ -114,7 +114,7 @@
         <button
           bind:this={cancelBtn}
           type="button"
-          class="rounded-md px-3 py-1.5 text-xs text-muted-foreground transition hover:bg-accent hover:text-foreground"
+          class="press rounded-md px-3 py-1.5 text-xs text-muted-foreground transition hover:bg-accent hover:text-foreground"
           onclick={onCancel}
         >
           {cancelLabel}
@@ -122,7 +122,7 @@
         <button
           bind:this={confirmBtn}
           type="button"
-          class="rounded-md px-3 py-1.5 text-xs font-medium transition {danger
+          class="press rounded-md px-3 py-1.5 text-xs font-medium transition {danger
             ? 'bg-danger text-white hover:bg-danger/90'
             : 'bg-foreground text-background hover:bg-foreground/90'}"
           onclick={onConfirm}

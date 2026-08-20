@@ -1,5 +1,6 @@
 <script lang="ts">
   import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
+  import { tip } from "$lib/shared/actions/tooltip";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import { keybindings } from "./keybindings.svelte";
   import { comboFromEvent, formatCombo } from "$lib/shared/keyboard/combo";
@@ -130,7 +131,7 @@
           type="button"
           class="rounded-md p-1 text-muted-foreground transition hover:text-foreground disabled:opacity-30"
           disabled={shipped}
-          title={t("keybindings.resetOne")}
+          use:tip={t("keybindings.resetOne")}
           aria-label={t("keybindings.resetOne")}
           onclick={() => keybindings.reset(command.id)}
         >

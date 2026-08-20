@@ -1,5 +1,6 @@
 <script module lang="ts">
   import type { McpRegistration } from "$lib/features/thread/agentMcp";
+  import { tip } from "$lib/shared/actions/tooltip";
 
   type AgentRow = {
     key: string;
@@ -305,7 +306,7 @@
         {agent.label}
       </span>
       {#if agent.auto || agent.reg === "this"}
-        <span class="shrink-0 text-xs text-muted-foreground" title={t("todo.agentReadyHint")}>
+        <span class="shrink-0 text-xs text-muted-foreground" use:tip={t("todo.agentReadyHint")}>
           {t("todo.agentActive")}
         </span>
       {:else if agent.cli}

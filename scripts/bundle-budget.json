@@ -53,14 +53,18 @@
     "Then to 880640, for the dispatch device half: the layout mounts the queue",
     "watcher and every terminal registers its sink before first paint, or a line",
     "queued during boot finds no device. Measured at 852.4 KB, 7.6 KB spare.",
-    "Then to 890880, for the kebacc-switch plugin card: CI measured 861.8 KB",
-    "against 860, 8.2 KB spare.",
+    "Then to 893952, for the overlay tooltip and edge-fade: they replaced the",
+    "title attribute on controls the titlebar, sidebar and shortcut bar draw",
+    "before first paint, so both are on the boot path by construction.",
+    "Measured at 866.4 KB, so this leaves 6.6 KB.",
+    "Then to 897024, for the kebacc-switch plugin card on top of that.",
+    "CI measured 861.8 KB on the previous ceiling.",
     "",
     "largestEagerChunkBytes moved with it, 256000 -> 262144. The main route is",
     "the chunk in question and it had 0.2 KB left, which is a ceiling that fails",
     "the next commit whatever the next commit is."
   ],
-  "eagerBytes": 890880,
+  "eagerBytes": 897024,
   "totalBytes": 6144000,
   "largestEagerChunkBytes": 262144
 }

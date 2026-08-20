@@ -550,6 +550,22 @@ html[data-motion="reduced"] *::after {
   }
 }
 
+/* The scrollbar is an answer to "how far down am I", and nobody asks that
+   about a pane they are not touching. So the track is always there and the
+   thumb is not: it fades in when the pointer is over the scrolling element,
+   or when the keyboard is inside it, and fades back out on the way off.
+   A permanent thumb down every list, panel and popover in the app was the
+   loudest thing on screen and said nothing most of the time.
+
+   `:hover` matches ancestors too, which is the wanted behaviour rather than a
+   side effect: the pointer is inside the pane it would scroll, wherever inside
+   it happens to be. `:focus-within` covers the other way down, a list being
+   walked with the arrow keys having no pointer over it at all. Between them
+   there is no state where the bar is needed and missing, which is what buys
+   the resting state.
+
+   Not `overlay`/`scrollbar-width: thin`: those hand the whole appearance back
+   to the engine, and the two hosts draw a different bar. */
 *::-webkit-scrollbar {
   width: 10px;
   height: 10px;
@@ -558,14 +574,22 @@ html[data-motion="reduced"] *::after {
   background: transparent;
 }
 *::-webkit-scrollbar-thumb {
-  background: var(--color-border);
+  background: transparent;
   border-radius: 6px;
   border: 2px solid transparent;
   background-clip: content-box;
+  /* The fade out. Coming in is instant on purpose: a bar asked for by a wheel
+     that is already turning must not arrive after the scroll it describes. */
+  transition: background-color var(--dur-3) var(--ease-out-quint);
 }
-*::-webkit-scrollbar-thumb:hover {
+*:hover::-webkit-scrollbar-thumb,
+*:focus-within::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  transition-duration: 0ms;
+}
+*:hover::-webkit-scrollbar-thumb:hover,
+*:focus-within::-webkit-scrollbar-thumb:hover {
   background: var(--color-muted-foreground);
-  background-clip: content-box;
 }
 *::-webkit-scrollbar-corner {
   background: transparent;
@@ -594,6 +618,86 @@ html[data-motion="reduced"] *::after {
   scrollbar-width: none;
   &::-webkit-scrollbar {
     display: none;
+  }
+}
+
+/* Every vertical list, panel and popover that scrolls. Two properties, both of
+   which were missing app-wide and both of which are felt rather than seen.
+
+   `overscroll-behavior: contain` stops the wheel that reached the end of this
+   pane from carrying on into whatever is behind it. The sidebar handing its
+   last notch to the page under it, the git panel handing it to the sidebar and
+   the settings body handing it to the modal backdrop were all the same bug, and
+   it reads as the scroll leaking rather than as a list that ended.
+
+   `scrollbar-gutter: stable` reserves the 10px whether or not there is anything
+   to scroll, so a list crossing its overflow threshold no longer shifts its own
+   contents sideways. The filter field in the sidebar did exactly that: opening
+   it pushed the list past the fold and every card jumped 10px left. Cheap here
+   because the resting thumb is invisible, so the reserved gutter costs nothing
+   to look at. */
+@utility scroll-pane {
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+/* The horizontal strips wearing `hide-scrollbar`. With the bar gone there is
+   nothing left to say the strip runs past its edge, and a tab or a shortcut
+   sitting just off-screen is a tab nobody knows about.
+
+   The mask fades the strip out at whichever end has more to show, which is the
+   affordance the scrollbar used to be, in the room a 32px bar actually has.
+   `shared/actions/edgeFade.ts` owns the two custom properties; with no action
+   attached both read 0 and the mask is a no-op, so the utility is safe on a
+   strip that has not been wired yet. */
+/* Registered rather than left as plain custom properties: an unregistered one
+   is a string as far as the engine is concerned, so it steps from 0 to 1 and
+   the fade appears in a single frame. Typed as numbers they interpolate, and
+   the transition below is on the two properties rather than on `mask-image`,
+   which is not animatable anywhere. */
+@property --fade-start {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+@property --fade-end {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+
+@utility edge-fade {
+  --fade-start: 0;
+  --fade-end: 0;
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 calc(var(--fade-start) * 1.5rem),
+    #000 calc(100% - var(--fade-end) * 1.5rem),
+    transparent 100%
+  );
+  transition:
+    --fade-start var(--dur-2) var(--ease-in-out-quad),
+    --fade-end var(--dur-2) var(--ease-in-out-quad);
+}
+
+/* A control that answers the press before the action does.
+   The desktop side had none of this: `active:` states live almost entirely in
+   `features/mobile`, and with `button { cursor: default }` above there is no
+   pointer change either, so a desktop button confirmed nothing until whatever
+   it did finished happening. Opt-in rather than a rule on `button`, because the
+   things drawn as buttons include rows, tabs and cards that are dragged by
+   their own transform, and a scale fighting a drag is worse than no feedback.
+   The motion gate collapses the duration, and a 1.5% scale with no travel time
+   is not perceived as movement. */
+@utility press {
+  transition:
+    transform var(--dur-1) var(--ease-out-quint),
+    background-color var(--dur-1) var(--ease-out-quint),
+    color var(--dur-1) var(--ease-out-quint),
+    border-color var(--dur-1) var(--ease-out-quint);
+  &:active:not(:disabled) {
+    transform: scale(0.985);
   }
 }
 
@@ -719,6 +823,54 @@ kbd.kbd {
 /* The gate above kills animation-duration app-wide, which would leave the
    sweep parked over the middle of the bar. Hide it instead. */
 html[data-motion="reduced"] .skeleton::after {
+  display: none;
+}
+
+/* The app's tooltip (shared/actions/tooltip.ts). A plain class rather than a
+   Tailwind utility because the node is built in TypeScript, and a class name
+   that only ever appears inside a string literal is a class name the scanner
+   is entitled not to emit.
+
+   Positioned by transform on a fixed box: the action writes one `translate`,
+   so moving it is a composite rather than a layout, and the box never inherits
+   a clipping or transformed ancestor the way an in-tree popover would. */
+.boite-tip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: var(--z-popover);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 22rem;
+  padding: 4px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-2);
+  box-shadow: var(--shadow-e3);
+  color: var(--color-foreground);
+  font-size: var(--text-sm);
+  line-height: 1.45;
+  /* A tooltip explaining a control must not be the thing under the pointer, or
+     leaving the control means entering the box that says what it does. */
+  pointer-events: none;
+  /* Hidden by default and shown by `data-open`, rather than mounted and
+     unmounted: the action measures the box to place it, and a node that is not
+     in the layout has no size to measure. */
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity var(--dur-1) var(--ease-out-quint),
+    visibility var(--dur-1) step-end;
+}
+.boite-tip[data-open] {
+  opacity: 1;
+  visibility: visible;
+  transition:
+    opacity var(--dur-1) var(--ease-out-quint),
+    visibility 0s;
+}
+.boite-tip kbd[hidden] {
   display: none;
 }
 

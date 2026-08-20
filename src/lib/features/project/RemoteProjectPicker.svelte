@@ -130,7 +130,7 @@
       </div>
     {/if}
 
-    <div class="min-h-0 flex-1 overflow-y-auto border-t border-border p-1.5">
+    <div class="min-h-0 flex-1 scroll-pane overflow-y-auto border-t border-border p-1.5">
       {#if remoteProjects.length === 0}
         <p class="px-3 py-6 text-center text-xs text-muted-foreground">
           {t("sidebar.remoteProjectsEmpty")}
