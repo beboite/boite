@@ -11,6 +11,7 @@ mod protocol;
 mod push;
 mod registry;
 mod rpc;
+mod secret_file;
 mod state;
 mod ws;
 
