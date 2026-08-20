@@ -293,7 +293,7 @@ fn common_tools() -> Value {
             "description": "Where this terminal works: its own detached worktree of the project, \
                             isolated from the user's checkout and from other terminals, sharing one \
                             history. Reports path, repo, branch if one was taken, uncommitted \
-                            changes, and the existing branches.",
+                            changes, what the remote has of the branch, and the existing branches.",
             "inputSchema": { "type": "object" },
             "annotations": { "title": "Worktree", "readOnlyHint": true, "idempotentHint": true, "openWorldHint": false }
         },

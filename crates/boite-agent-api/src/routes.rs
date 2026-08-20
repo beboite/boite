@@ -775,19 +775,29 @@ async fn worktree_status(
         blocking(move || {
             let hold = git::worktree_hold_blocking(&worktree);
             let branches = git::branches_blocking(&repo).unwrap_or_default();
-            let current = git::repo_info_blocking(&worktree).ok().and_then(|i| i.branch);
-            (hold, branches, current)
+            let info = git::repo_info_blocking(&worktree).ok();
+            let has_remote = git::has_remote_blocking(&worktree);
+            (hold, branches, info, has_remote)
         })
         .await?
     };
-    let (hold, branches, current) = read;
+    let (hold, branches, info, has_remote) = read;
     let hold = hold.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let current = info.as_ref().and_then(|i| i.branch.clone());
+    // The push state is reported here rather than objected to at the end of a
+    // turn: closing the thread keeps the commits, so it is something to know
+    // when asked, not something to be held open for.
+    let upstream = info.as_ref().and_then(|i| i.upstream.clone());
+    let ahead = info.as_ref().map(|i| i.ahead).unwrap_or(0);
     Ok(Json(json!({
         "path": worktree,
         "repo": repo,
         "branch": current,
         "detached": current.is_none(),
         "uncommittedChanges": hold.dirty,
+        "hasRemote": has_remote,
+        "upstream": upstream,
+        "ahead": ahead,
         "branches": branches.iter().map(|b| &b.name).collect::<Vec<_>>(),
     })))
 }

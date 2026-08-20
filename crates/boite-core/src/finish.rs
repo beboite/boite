@@ -2,12 +2,19 @@
 //!
 //! Read by the Stop hook, not chosen by the model: a tool is something an
 //! agent elects to call, and the point here is the turn where it chose not to.
-//! Three objections, worst first. Everything that is not a clear objection
-//! allows the stop, because this is the only mechanism that can hold a
-//! conversation open against the user's wishes.
+//! Two objections, worst first, and both are the same fact: closing the thread
+//! would destroy commits or edits nothing else has. Everything that is not a
+//! clear objection allows the stop, because this is the only mechanism that can
+//! hold a conversation open against the user's wishes.
+//!
+//! A branch no remote has is deliberately not one of them. Nothing is lost, the
+//! checkout keeps the commits, so the objection could never clear itself: it
+//! fired at the end of every turn until someone pushed, which for a workspace
+//! whose branches are reviewed before they leave is most turns of most threads.
+//! The push state travels with `worktree_status` instead, where an agent that
+//! asked gets it and a turn that did not ask is left alone.
 
 use std::path::Path;
-use std::process::{Command, Stdio};
 
 use serde::Serialize;
 
@@ -61,11 +68,7 @@ pub fn decide(worktree: Option<&str>, already_active: bool) -> Finish {
         Ok(h) => h,
         Err(_) => return Finish::allow(),
     };
-    if let Some(blocked) = objection_from_hold(&hold) {
-        return blocked;
-    }
-
-    unpublished_branch(path).unwrap_or_else(Finish::allow)
+    objection_from_hold(&hold).unwrap_or_else(Finish::allow)
 }
 
 fn objection_from_hold(hold: &WorktreeHold) -> Option<Finish> {
@@ -86,52 +89,12 @@ fn objection_from_hold(hold: &WorktreeHold) -> Option<Finish> {
     }
 }
 
-/// A branch the repository has a remote for, and that remote does not have.
-///
-/// Skipped when there is no remote at all: a project that never had one is
-/// not behind on pushing.
-fn unpublished_branch(path: &str) -> Option<Finish> {
-    if !has_remote(path) {
-        return None;
-    }
-    let info = git::repo_info_blocking(path).ok()?;
-    let branch = info.branch?;
-    // Two states, and the recovery differs: one wants a first push, the other
-    // wants a push. Saying "not on a remote" for a branch that is on one sends
-    // an agent looking for a remote it already has.
-    let reason = match (&info.upstream, info.ahead) {
-        (None, _) => format!(
-            "branch '{branch}' is not on a remote; closing the thread keeps the checkout but nothing else has the commits"
-        ),
-        (Some(upstream), ahead) if ahead > 0 => format!(
-            "branch '{branch}' is {ahead} {} ahead of {upstream}; closing the thread keeps the checkout but the remote does not have {}",
-            if ahead == 1 { "commit" } else { "commits" },
-            if ahead == 1 { "it" } else { "them" }
-        ),
-        _ => return None,
-    };
-    Some(Finish::block(&reason, "worktree_status"))
-}
-
-fn has_remote(path: &str) -> bool {
-    let mut cmd = Command::new("git");
-    cmd.args(["-C", path, "remote"]);
-    cmd.env("GIT_OPTIONAL_LOCKS", "0");
-    cmd.env("GIT_TERMINAL_PROMPT", "0");
-    cmd.env("LC_ALL", "C");
-    cmd.stdin(Stdio::null());
-    cmd.output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| !String::from_utf8_lossy(&o.stdout).trim().is_empty())
-        .unwrap_or(false)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
     use std::path::PathBuf;
+    use std::process::Command;
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -208,50 +171,28 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// Nothing here is lost by closing the thread, so neither state is an
+    /// objection. Both used to block, and blocked again on the next turn, and
+    /// on every turn after that until someone pushed.
     #[test]
-    fn a_branch_with_a_remote_and_no_upstream_blocks() {
-        let dir = init_repo("ahead");
+    fn a_branch_no_remote_has_still_allows() {
+        let dir = init_repo("unpushed");
         let remote = scratch("remote.git");
         git_ok(&remote, &["init", "--bare", "-b", "master"]);
-        git_ok(
-            &dir,
-            &["remote", "add", "origin", remote.to_str().unwrap()],
-        );
-        let out = decide(dir.to_str(), false);
-        assert!(!out.allow, "{out:?}");
-        assert!(
-            out.reason.as_deref().unwrap().contains("not on a remote"),
-            "{out:?}"
-        );
-        let _ = fs::remove_dir_all(&dir);
-        let _ = fs::remove_dir_all(&remote);
-    }
-
-    /// The other half of the same block, and the half whose recovery is a
-    /// plain push: the branch is on the remote, the remote is just behind.
-    #[test]
-    fn a_branch_ahead_of_its_upstream_is_not_called_absent_from_the_remote() {
-        let dir = init_repo("pushed");
-        let remote = scratch("pushed-remote.git");
-        git_ok(&remote, &["init", "--bare", "-b", "master"]);
         git_ok(&dir, &["remote", "add", "origin", remote.to_str().unwrap()]);
-        git_ok(&dir, &["push", "-u", "origin", "master"]);
 
+        // Never pushed: the remote does not know this branch.
         let out = decide(dir.to_str(), false);
-        assert!(out.allow, "a branch level with its upstream should pass: {out:?}");
+        assert!(out.allow, "{out:?}");
 
+        // Pushed, then one commit further along.
+        git_ok(&dir, &["push", "-u", "origin", "master"]);
         fs::write(dir.join("later.txt"), "x\n").unwrap();
         git_ok(&dir, &["add", "-A"]);
         git_ok(&dir, &["commit", "-m", "later"]);
-
         let out = decide(dir.to_str(), false);
-        assert!(!out.allow, "{out:?}");
-        let reason = out.reason.as_deref().unwrap();
-        assert!(
-            !reason.contains("not on a remote"),
-            "the branch is on the remote, so this sends the agent after a remote it has: {reason}"
-        );
-        assert!(reason.contains("ahead of origin/master"), "{reason}");
+        assert!(out.allow, "{out:?}");
+
         let _ = fs::remove_dir_all(&dir);
         let _ = fs::remove_dir_all(&remote);
     }
