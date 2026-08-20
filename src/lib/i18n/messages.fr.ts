@@ -231,6 +231,14 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "voice.tts": "Sortie voix",
   "voice.off": "coupé",
   "voice.webspeech": "navigateur",
+  "voice.whisper": "local",
+  "voice.whisperDesc":
+    "Enregistre ici, transcrit sur le whisper.cpp de la machine appairée. Définir BOITE_WHISPER_BIN et BOITE_WHISPER_MODEL là où tourne le serveur.",
+  "voice.insecureContext":
+    "Contexte non sécurisé : le navigateur refuse le micro en http simple. Joindre le serveur en https ou via un tunnel.",
+  "voice.noCapture": "Cette webview n'expose aucune API micro.",
+  "voice.transcribing": "Transcription",
+  "voice.transcribeFailed": "Transcription échouée : {error}",
   "voice.sttUnsupported": "Cette webview n'expose pas la reconnaissance vocale. Android Chrome et la PWA l'ont ; Windows WebView2 est inégal et Linux WebKitGTK en est presque dépourvu.",
   "voice.voice": "Voix",
   "voice.voicePick": "choisir une voix",

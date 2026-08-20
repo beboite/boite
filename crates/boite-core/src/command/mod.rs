@@ -238,6 +238,7 @@ fn probe_params() -> Value {
         "status": "idle", "ids": [], "settled": true,
         "text": "t",
         "toThreadId": "t", "dispatchId": "d", "state": "delivered",
+        "audio": "",
     })
 }
 
@@ -700,6 +701,7 @@ mod tests {
             ("thread.acceptDispatch", MutateProject),
             ("dispatch.drain", MutateProject),
             ("dispatch.settle", MutateProject),
+            ("voice.transcribe", ReadProject),
         ];
         let actual: Vec<(&str, Capability)> = every_command()
             .iter()

@@ -393,8 +393,13 @@ export interface Settings {
   voiceSpeakWhenUnfocused: boolean;
 }
 
-/** Speech-to-text provider. `webspeech` is the page's own SpeechRecognition. */
-export type VoiceStt = "off" | "webspeech";
+/**
+ * Speech-to-text provider. `webspeech` is the page's own SpeechRecognition;
+ * `whisper` records here and transcribes on the paired host's own whisper.cpp
+ * (`voice.transcribe` on the bus), for the webviews that cannot hear on their
+ * own.
+ */
+export type VoiceStt = "off" | "webspeech" | "whisper";
 
 /** Text-to-speech provider. `webspeech` is the page's own speechSynthesis. */
 export type VoiceTts = "off" | "webspeech";

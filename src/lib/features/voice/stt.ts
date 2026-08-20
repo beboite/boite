@@ -51,6 +51,12 @@ function recognitionCtor(): RecognitionCtor | null {
 
 /** Whether this webview can hear at all, with the reason spelled out when not. */
 export function sttAvailability(): { ok: true } | { ok: false; reasonKey: MessageKey } {
+  // A phone on the server over plain http still exposes the constructor, but
+  // the platform refuses the microphone underneath it. Named here, because a
+  // button that opens and hears nothing reads as broken hardware.
+  if (typeof window !== "undefined" && window.isSecureContext === false) {
+    return { ok: false, reasonKey: "voice.insecureContext" };
+  }
   if (recognitionCtor()) return { ok: true };
   return { ok: false, reasonKey: "voice.sttUnsupported" };
 }
