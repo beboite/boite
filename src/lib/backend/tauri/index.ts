@@ -9,6 +9,7 @@ import {
   tauriCheckpoints,
   tauriEditor,
   tauriExplorer,
+  tauriCli,
   tauriCodexSwitcher,
   tauriFastMcpSsh,
   tauriKebaccSwitcher,
@@ -41,6 +42,7 @@ export class TauriBackend implements Backend {
   readonly codexSwitcher = tauriCodexSwitcher;
   readonly fastMcpSsh = tauriFastMcpSsh;
   readonly kebaccSwitcher = tauriKebaccSwitcher;
+  readonly cli = tauriCli;
   readonly scope = tauriScope;
   readonly session = tauriSession;
   readonly search = tauriSearch;

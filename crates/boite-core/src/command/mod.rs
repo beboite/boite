@@ -671,6 +671,14 @@ mod tests {
             ("kebaccSwitcher.switch", MutateProject),
             ("kebaccSwitcher.version", ReadProject),
             ("session.transcript", ReadProject),
+            ("cli.catalog", ReadProject),
+            ("cli.latest", ReadProject),
+            ("cli.jobs", ReadProject),
+            ("cli.dataPaths", ReadProject),
+            ("cli.install", MutateAcross),
+            ("cli.uninstall", MutateAcross),
+            ("cli.cancel", MutateProject),
+            ("cli.dismiss", MutateProject),
             ("project.list", ReadProject),
             ("project.create", MutateAcross),
             ("project.archive", MutateProject),
@@ -750,12 +758,21 @@ mod tests {
     /// that it failing would be the notice that the endpoint's own check is no
     /// longer the only one. That is what happened: the record domain brought
     /// creating a project, deleting one and deleting a thread onto the bus, and
-    /// those are the calls the capability doc names as reaching past. So the
-    /// list is written out rather than counted, and a fourth arrival is a diff
-    /// somebody has to agree with instead of a silently widened grant.
+    /// those are the calls the capability doc names as reaching past. Then the
+    /// CLI manager brought two more, which do not reach past a project so much as
+    /// past every project: installing a binary onto the machine, and deleting an
+    /// agent's own data directory. So the list is written out rather than counted,
+    /// and the next arrival is a diff somebody has to agree with instead of a
+    /// silently widened grant.
     #[test]
-    fn only_the_three_calls_that_change_where_work_happens_reach_across() {
-        const ACROSS: &[&str] = &["project.create", "project.delete", "thread.delete"];
+    fn only_the_calls_that_change_the_machine_reach_across() {
+        const ACROSS: &[&str] = &[
+            "project.create",
+            "project.delete",
+            "thread.delete",
+            "cli.install",
+            "cli.uninstall",
+        ];
         for command in every_command() {
             let across = command.capability() == Capability::MutateAcross;
             assert_eq!(

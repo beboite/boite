@@ -9,6 +9,11 @@ import type {
   EditorApi,
   ExplorerApi,
   CodexSwitcherApi,
+  CliApi,
+  CliDataPath,
+  CliLatest,
+  CliJob,
+  CliRow,
   FastMcpSshApi,
   KebaccSwitcherApi,
   KebaccSwitcherList,
@@ -200,6 +205,17 @@ export const tauriKebaccSwitcher: KebaccSwitcherApi = {
     return JSON.parse(raw) as KebaccSwitcherList;
   },
   version: () => invoke<string | null>("kebacc_switcher_version"),
+};
+
+export const tauriCli: CliApi = {
+  catalog: (probeVersions) => invoke<CliRow[]>("cli_catalog", { probeVersions: probeVersions ?? false }),
+  latest: () => invoke<CliLatest[]>("cli_latest"),
+  jobs: () => invoke<CliJob[]>("cli_jobs"),
+  dataPaths: (id) => invoke<CliDataPath[]>("cli_data_paths", { id }),
+  install: (id) => invoke<CliJob>("cli_install", { id }),
+  uninstall: (id, purgeData) => invoke<CliJob>("cli_uninstall", { id, purgeData }),
+  cancel: (id) => invoke<boolean>("cli_cancel", { id }),
+  dismiss: (id) => invoke<void>("cli_dismiss", { id }),
 };
 
 export const tauriScope: ScopeApi = {
