@@ -114,9 +114,6 @@ export function findPresetForCommand(command: string): CliPreset | null {
   return (
     CLI_PRESETS.find((p) => {
       const presetParts = p.command.trim().split(/\s+/);
-      if (presetParts[0] === "gh" && parts[0] === "gh") {
-        return parts[1] === "copilot";
-      }
       return p.executable === first || presetParts[0] === first;
     }) ?? null
   );

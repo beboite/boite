@@ -47,7 +47,10 @@ describe("cliPresets", () => {
       expect(findPresetForCommand("claude --dangerously-skip-permissions")?.id).toBe("claude");
       expect(findPresetForCommand("agy -i 'test'")?.id).toBe("antigravity");
       expect(findPresetForCommand("codex --no-alt-screen --yolo")?.id).toBe("codex");
-      expect(findPresetForCommand("gh copilot -- --yolo")?.id).toBe("copilot");
+      expect(findPresetForCommand("copilot -- --yolo")?.id).toBe("copilot");
+      // The gh extension is a different product from the standalone CLI this
+      // preset names.
+      expect(findPresetForCommand("gh copilot -- --yolo")).toBeNull();
     });
 
     it("returns null for unknown command", () => {
@@ -65,8 +68,8 @@ describe("cliPresets", () => {
     });
 
     it("detects copilot dashed flag", () => {
-      expect(hasYoloFlag("gh copilot -- --yolo", "-- --yolo")).toBe(true);
-      expect(hasYoloFlag("gh copilot", "-- --yolo")).toBe(false);
+      expect(hasYoloFlag("copilot -- --yolo", "-- --yolo")).toBe(true);
+      expect(hasYoloFlag("copilot", "-- --yolo")).toBe(false);
     });
   });
 
@@ -82,10 +85,10 @@ describe("cliPresets", () => {
     });
 
     it("handles copilot flag correctly", () => {
-      const initial = "gh copilot";
+      const initial = "copilot";
       const withFlag = withYoloFlag(initial, "-- --yolo");
-      expect(withFlag).toBe("gh copilot -- --yolo");
-      expect(withoutYoloFlag(withFlag, "-- --yolo")).toBe("gh copilot");
+      expect(withFlag).toBe("copilot -- --yolo");
+      expect(withoutYoloFlag(withFlag, "-- --yolo")).toBe("copilot");
     });
   });
 });
