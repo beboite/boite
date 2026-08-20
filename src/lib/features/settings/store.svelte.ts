@@ -18,6 +18,8 @@ import type {
   SidebarDesign,
   SmartSortBy,
   SortDirection,
+  VoiceStt,
+  VoiceTts,
   WhipSound,
 } from "$lib/types";
 import { isInfoBoxAnchor } from "$lib/features/infobox/anchor";
@@ -182,6 +184,13 @@ const DEFAULTS: Settings = {
   orchestratorSessionHours: 24,
   dispatchTtlMinutes: 60,
   orchestratorBlindProjects: [],
+  experimentVoice: false,
+  voiceStt: "off",
+  voiceTts: "webspeech",
+  voiceName: null,
+  voicePushToTalk: true,
+  voiceAutoSend: false,
+  voiceSpeakWhenUnfocused: false,
 };
 
 // First-run guess: touch-primary, narrow screens (a phone TWA/PWA) default to
@@ -213,6 +222,14 @@ function isSortDirection(value: unknown): value is SortDirection {
 
 function isWhipSound(value: unknown): value is WhipSound {
   return value === "synth" || value === "sampled" || value === "meme";
+}
+
+function isVoiceStt(value: unknown): value is VoiceStt {
+  return value === "off" || value === "webspeech";
+}
+
+function isVoiceTts(value: unknown): value is VoiceTts {
+  return value === "off" || value === "webspeech";
 }
 
 function isOpenOnLaunch(value: unknown): value is OpenOnLaunch {
@@ -367,12 +384,21 @@ const DEVICE_FIELDS = [
   // every device reads the same answer.
   "experimentOrchestrator",
   "experimentOrchestratorPerProject",
+  // The whole voice block is device: a microphone, a synthesis voice and the
+  // right to speak unfocused are facts about this machine, not the workspace.
+  "experimentVoice",
+  "voiceStt",
+  "voiceTts",
+  "voiceName",
+  "voicePushToTalk",
+  "voiceAutoSend",
+  "voiceSpeakWhenUnfocused",
 ] as const;
 
 // Stamped on the blob so an absent key can be told apart from a key that had
 // not been promoted yet. Bump it whenever a field joins DEVICE_FIELDS, and list
 // the newcomers in PROMOTED_TO_DEVICE so they migrate once.
-const DEVICE_BLOB_VERSION = 3;
+const DEVICE_BLOB_VERSION = 4;
 
 // Moved out of the workspace blob. A device blob whose `v` is missing or older
 // than DEVICE_BLOB_VERSION has no key for the newcomers, and the workspace
@@ -390,6 +416,13 @@ const PROMOTED_TO_DEVICE: readonly string[] = [
   "openOnLaunch",
   "experimentOrchestrator",
   "experimentOrchestratorPerProject",
+  "experimentVoice",
+  "voiceStt",
+  "voiceTts",
+  "voiceName",
+  "voicePushToTalk",
+  "voiceAutoSend",
+  "voiceSpeakWhenUnfocused",
 ];
 
 type DeviceBlob = Partial<Settings> & { v?: number };
@@ -440,6 +473,23 @@ function applyDeviceOverrides(state: Settings, dev: DeviceBlob): void {
   }
   if (typeof state.experimentOrchestratorPerProject !== "boolean") {
     state.experimentOrchestratorPerProject = DEFAULTS.experimentOrchestratorPerProject;
+  }
+  if (typeof state.experimentVoice !== "boolean") {
+    state.experimentVoice = DEFAULTS.experimentVoice;
+  }
+  if (!isVoiceStt(state.voiceStt)) state.voiceStt = DEFAULTS.voiceStt;
+  if (!isVoiceTts(state.voiceTts)) state.voiceTts = DEFAULTS.voiceTts;
+  if (state.voiceName !== null && typeof state.voiceName !== "string") {
+    state.voiceName = DEFAULTS.voiceName;
+  }
+  if (typeof state.voicePushToTalk !== "boolean") {
+    state.voicePushToTalk = DEFAULTS.voicePushToTalk;
+  }
+  if (typeof state.voiceAutoSend !== "boolean") {
+    state.voiceAutoSend = DEFAULTS.voiceAutoSend;
+  }
+  if (typeof state.voiceSpeakWhenUnfocused !== "boolean") {
+    state.voiceSpeakWhenUnfocused = DEFAULTS.voiceSpeakWhenUnfocused;
   }
 }
 
@@ -634,6 +684,30 @@ class SettingsStore {
           DEFAULTS.dispatchTtlMinutes,
         ),
         orchestratorBlindProjects: readStringList(stored.orchestratorBlindProjects),
+        // Device-scoped end to end: these defaults only stand until
+        // applyDeviceOverrides replays what this machine stored locally.
+        experimentVoice:
+          typeof stored.experimentVoice === "boolean"
+            ? stored.experimentVoice
+            : DEFAULTS.experimentVoice,
+        voiceStt: isVoiceStt(stored.voiceStt) ? stored.voiceStt : DEFAULTS.voiceStt,
+        voiceTts: isVoiceTts(stored.voiceTts) ? stored.voiceTts : DEFAULTS.voiceTts,
+        voiceName:
+          typeof stored.voiceName === "string" && stored.voiceName
+            ? stored.voiceName
+            : DEFAULTS.voiceName,
+        voicePushToTalk:
+          typeof stored.voicePushToTalk === "boolean"
+            ? stored.voicePushToTalk
+            : DEFAULTS.voicePushToTalk,
+        voiceAutoSend:
+          typeof stored.voiceAutoSend === "boolean"
+            ? stored.voiceAutoSend
+            : DEFAULTS.voiceAutoSend,
+        voiceSpeakWhenUnfocused:
+          typeof stored.voiceSpeakWhenUnfocused === "boolean"
+            ? stored.voiceSpeakWhenUnfocused
+            : DEFAULTS.voiceSpeakWhenUnfocused,
         // A settings row written before the wizard existed carries no flag.
         // Its owner already has a shortcut list, and finishing the wizard
         // replaces that list wholesale, so an existing install counts as
@@ -1101,6 +1175,51 @@ class SettingsStore {
 
   orchestratorEnabledFor(projectId: string | null): boolean {
     return orchestratorEnabledFor(this.state, projectId);
+  }
+
+  // The voice block is device-scoped end to end (see DEVICE_FIELDS): every
+  // setter below writes localStorage, never the workspace blob.
+  setExperimentVoice(value: boolean) {
+    if (this.state.experimentVoice === value) return;
+    this.state.experimentVoice = value;
+    this.persistDeviceNow();
+  }
+
+  setVoiceStt(value: VoiceStt) {
+    if (!isVoiceStt(value) || this.state.voiceStt === value) return;
+    this.state.voiceStt = value;
+    this.persistDeviceNow();
+  }
+
+  setVoiceTts(value: VoiceTts) {
+    if (!isVoiceTts(value) || this.state.voiceTts === value) return;
+    this.state.voiceTts = value;
+    this.persistDeviceNow();
+  }
+
+  setVoiceName(value: string | null) {
+    const next = typeof value === "string" && value ? value : null;
+    if (this.state.voiceName === next) return;
+    this.state.voiceName = next;
+    this.persistDeviceNow();
+  }
+
+  setVoicePushToTalk(value: boolean) {
+    if (this.state.voicePushToTalk === value) return;
+    this.state.voicePushToTalk = value;
+    this.persistDeviceNow();
+  }
+
+  setVoiceAutoSend(value: boolean) {
+    if (this.state.voiceAutoSend === value) return;
+    this.state.voiceAutoSend = value;
+    this.persistDeviceNow();
+  }
+
+  setVoiceSpeakWhenUnfocused(value: boolean) {
+    if (this.state.voiceSpeakWhenUnfocused === value) return;
+    this.state.voiceSpeakWhenUnfocused = value;
+    this.persistDeviceNow();
   }
 
   // `persist()` strips every device field before it writes, so a setter that

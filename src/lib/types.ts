@@ -367,7 +367,37 @@ export interface Settings {
    * search and transcripts. The refusal is named, never an empty answer.
    */
   orchestratorBlindProjects: string[];
+  /**
+   * Experiment: voice in and out of the orchestrator chat. Device-scoped, and
+   * so is every knob under it: a microphone and a speaker are properties of
+   * this glass, not of the workspace.
+   */
+  experimentVoice: boolean;
+  /** How speech becomes text. Off means the mic button is not drawn at all. */
+  voiceStt: VoiceStt;
+  /** How the orchestrator's `aloud` line becomes sound. */
+  voiceTts: VoiceTts;
+  /**
+   * The synthesis voice, by `SpeechSynthesisVoice.name`. Null means none was
+   * picked and nothing is spoken: no silent fall back to an English voice.
+   */
+  voiceName: string | null;
+  /** Hold Ctrl+Space to talk while the home chat is on screen. */
+  voicePushToTalk: boolean;
+  /**
+   * Send a transcription on a short countdown instead of waiting for Enter.
+   * False by default: a misheard sentence must not open work on its own.
+   */
+  voiceAutoSend: boolean;
+  /** Speak with the window unfocused too. Off, speech follows the eyes. */
+  voiceSpeakWhenUnfocused: boolean;
 }
+
+/** Speech-to-text provider. `webspeech` is the page's own SpeechRecognition. */
+export type VoiceStt = "off" | "webspeech";
+
+/** Text-to-speech provider. `webspeech` is the page's own speechSynthesis. */
+export type VoiceTts = "off" | "webspeech";
 
 /**
  * What the smart-sort experiment orders the sidebar by.

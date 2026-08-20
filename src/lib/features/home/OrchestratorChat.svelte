@@ -5,6 +5,8 @@
   import { settings } from "$lib/features/settings/store.svelte";
   import DashboardCard from "$lib/features/project/DashboardCard.svelte";
   import ChatMessage from "./ChatMessage.svelte";
+  import VoiceButton from "$lib/features/voice/VoiceButton.svelte";
+  import { voice } from "$lib/features/voice/store.svelte";
   import MessageSquareIcon from "@lucide/svelte/icons/message-square";
 
   let draft = $state("");
@@ -43,7 +45,18 @@
     if (list) list.scrollTop = list.scrollHeight;
   });
 
+  // Speech out rides the same reads the bubbles do: each new orchestrator line
+  // is offered to the voice store, which speaks its `aloud` field or nothing.
+  $effect(() => {
+    voice.considerSpeaking(orchestrator.conversation.messages);
+  });
+
+  const voiceOn = $derived(
+    settings.state.experimentVoice && settings.state.voiceStt !== "off",
+  );
+
   async function send() {
+    voice.cancelAutoSend();
     const text = draft;
     draft = "";
     const ok = await orchestrator.post(text);
@@ -51,6 +64,9 @@
   }
 
   function onKeydown(e: KeyboardEvent) {
+    // Any keystroke in the composer is the hand correcting a transcription:
+    // the auto-send countdown must lose that race, every time.
+    voice.cancelAutoSend();
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       void send();
@@ -89,7 +105,22 @@
         {/each}
       </ul>
     {/if}
-    <div class="flex items-end gap-1.5 border-t border-border px-2.5 py-2">
+    {#if voice.pendingSend}
+      <p class="border-t border-border px-3 pt-1.5 text-xs text-muted-foreground">
+        {t("voice.sending")}
+      </p>
+    {/if}
+    <div
+      class="flex items-end gap-1.5 border-border px-2.5 py-2 {voice.pendingSend
+        ? ''
+        : 'border-t'}"
+    >
+      {#if voiceOn}
+        <VoiceButton
+          onTranscript={(text) => (draft = text)}
+          onAutoSend={() => void send()}
+        />
+      {/if}
       <textarea
         rows="1"
         class="max-h-24 min-h-7 flex-1 resize-none rounded-md border border-border bg-[var(--color-surface-2)] px-2 py-1 text-sm text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-foreground/30"
