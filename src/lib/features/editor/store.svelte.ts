@@ -156,12 +156,46 @@ function diffBufferId(
   return `diff:${mode}:${span}${repoPath}::${file}`;
 }
 
+/**
+ * What a caller can say about an open beyond the path itself.
+ *
+ * `owner` is the project the buffer belongs to when the caller knows better
+ * than the disk does. An agent's `pane_open kind=editor` is that caller: the
+ * pane lands in the caller thread's group, so the file has to be in that
+ * project's strip whatever `projectOwning` makes of the path. Without it a plan
+ * written to the scratchpad opened a pane the strip filtered out, and the agent
+ * was told `opened` over an empty panel.
+ */
+export interface OpenOptions {
+  owner?: string | null;
+}
+
+/** The project a new buffer is filed under: the caller's word first. */
+function ownerOf(path: string, opts?: OpenOptions): string | null {
+  return opts?.owner ?? projectOwning(path);
+}
+
 class EditorStore {
   buffers = $state<Buffer[]>([]);
   activeId = $state<string | null>(null);
 
   get active(): Buffer | null {
     return this.buffers.find((b) => b.id === this.activeId) ?? null;
+  }
+
+  /**
+   * Re-file a buffer already open under whichever project asked for it last.
+   *
+   * One path is one buffer, so a file opened from its own explorer and then
+   * shown by an agent in another project would otherwise keep the first strip
+   * and be invisible in the second. Only a caller that named an owner moves it;
+   * the explorer and the git panel say nothing and change nothing.
+   */
+  private adopt(b: Buffer, opts?: OpenOptions): void {
+    const owner = opts?.owner;
+    if (owner === undefined || b.projectId === owner) return;
+    if (b.kind === "diff") return;
+    b.projectId = owner;
   }
 
   isDirty(b: Buffer): boolean {
@@ -174,17 +208,21 @@ class EditorStore {
    * The single entry point on purpose. Every caller — the explorer, the git
    * panel, the palette, an agent — wants "show me this path", and none of them
    * should have to know that a PDF takes a different road than a `.ts`.
+   *
+   * `owner` names the project whose strip the buffer belongs in, for a caller
+   * that knows better than the path does. See `OpenOptions`.
    */
-  async open(path: string): Promise<string> {
-    return isPreviewable(path) ? this.openPreview(path) : this.openFile(path);
+  async open(path: string, opts?: OpenOptions): Promise<string> {
+    return isPreviewable(path) ? this.openPreview(path, opts) : this.openFile(path, opts);
   }
 
   /** A PDF or an image, handed to the webview as a URL it can render. */
-  async openPreview(path: string): Promise<string> {
+  async openPreview(path: string, opts?: OpenOptions): Promise<string> {
     const normalized = path.replace(/\\/g, "/");
     const id = `preview:${normalized}`;
     const existing = this.buffers.find((b) => b.id === id);
     if (existing) {
+      this.adopt(existing, opts);
       this.activeId = id;
       return id;
     }
@@ -196,7 +234,7 @@ class EditorStore {
       displayName: basename(normalized),
       loading: true,
       error: null,
-      projectId: projectOwning(normalized),
+      projectId: ownerOf(normalized, opts),
       bytes: new Uint8Array(),
       media,
       dataUrl: "",
@@ -226,13 +264,14 @@ class EditorStore {
     return id;
   }
 
-  async openFile(path: string): Promise<string> {
+  async openFile(path: string, opts?: OpenOptions): Promise<string> {
     // One separator convention so the same file opened from the explorer
     // (forward slashes) and the git panel (native) shares one buffer.
     const normalized = path.replace(/\\/g, "/");
     const id = fileBufferId(normalized);
     const existing = this.buffers.find((b) => b.id === id);
     if (existing) {
+      this.adopt(existing, opts);
       this.activeId = id;
       if (existing.kind === "file" && !existing.loading && !existing.error) {
         void this.syncFromDisk(id);
@@ -246,7 +285,7 @@ class EditorStore {
       displayName: basename(normalized),
       loading: true,
       error: null,
-      projectId: projectOwning(normalized),
+      projectId: ownerOf(normalized, opts),
       content: "",
       savedContent: "",
       isReadonly: false,
