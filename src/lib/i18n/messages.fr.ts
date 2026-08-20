@@ -1300,8 +1300,6 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "sync.sourcesTitle": "Ce qui est synchronisé",
   "sync.sourcesDesc":
     "Un interrupteur par agent, plus le dossier qu'ils lisent tous. Un interrupteur éteint est un fichier que Boite n'envoie pas et ne touche pas, et tous démarrent éteints.",
-  "sync.sourcesShared": "Commun",
-  "sync.sourcesAgents": "CLI des agents",
   "sync.agentsRow": "Le dossier .agents",
   "sync.agentsRowDesc": "AGENTS.md, les compétences et les commandes que lisent tous les agents.",
   "sync.sourceUnknown": "Boite ne sait pas où celui-ci garde sa configuration.",

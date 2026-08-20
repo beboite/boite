@@ -1308,8 +1308,6 @@ export const EN_MESSAGES = {
   "sync.sourcesTitle": "What gets synced",
   "sync.sourcesDesc":
     "One switch per agent, plus the folder they all read. A switch that is off is a file Boite neither sends nor touches, and every switch starts off.",
-  "sync.sourcesShared": "Shared",
-  "sync.sourcesAgents": "Agent CLIs",
   "sync.agentsRow": "The .agents folder",
   "sync.agentsRowDesc": "AGENTS.md, the skills and the commands every agent reads.",
   "sync.sourceUnknown": "Boite does not know where this one keeps its configuration.",
