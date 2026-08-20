@@ -345,12 +345,8 @@
       });
       if (!ok) return;
       const newCmd = withYoloFlag(shortcut.command, preset.yoloFlag);
-      const newLabel = shortcut.label.includes("(YOLO)")
-        ? shortcut.label
-        : `${shortcut.label} (YOLO)`;
       onUpdate(shortcut.id, {
         command: newCmd,
-        label: newLabel,
       });
     }
   }

@@ -334,15 +334,13 @@ describe("the opening prompt", () => {
 });
 
 describe("unattended spawn flags", () => {
-  it("gives antigravity and claude the flag that stops it waiting for a yes", () => {
+  it("gives antigravity the flag that stops it waiting for a yes", () => {
     expect(withUnattendedArgs("agy", [], "antigravity")).toEqual([
       "--dangerously-skip-permissions",
     ]);
-    expect(withUnattendedArgs("claude", [], "claude")).toEqual([
-      "--dangerously-skip-permissions",
-    ]);
-    expect(withUnattendedArgs("codex", [], "codex")).toEqual(["--yolo"]);
-    expect(withUnattendedArgs("opencode", [], "opencode")).toEqual(["--auto"]);
+    expect(withUnattendedArgs("claude", [], "claude")).toEqual([]);
+    expect(withUnattendedArgs("codex", [], "codex")).toEqual([]);
+    expect(withUnattendedArgs("opencode", [], "opencode")).toEqual([]);
   });
 
   it("does not add it twice", () => {
