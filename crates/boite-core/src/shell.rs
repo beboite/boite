@@ -55,11 +55,24 @@ pub fn user_bin_dirs() -> Vec<std::path::PathBuf> {
     let Some(home) = home else {
         return Vec::new();
     };
-    [".bun/bin", ".local/bin", ".cargo/bin", ".deno/bin", "go/bin", "bin"]
-        .iter()
-        .map(|suffix| home.join(suffix))
-        .filter(|p| p.is_dir())
-        .collect()
+    // `.boite/bin` is Boite's own: what the CLI manager installed goes there and
+    // nowhere a package manager considers its own. It is first because it is the
+    // one directory this process is sure about, and it is in this list because
+    // otherwise a CLI Boite had just installed answered "absent" to the panel and
+    // to the spawn alike until the app was restarted.
+    [
+        ".boite/bin",
+        ".bun/bin",
+        ".local/bin",
+        ".cargo/bin",
+        ".deno/bin",
+        "go/bin",
+        "bin",
+    ]
+    .iter()
+    .map(|suffix| home.join(suffix))
+    .filter(|p| p.is_dir())
+    .collect()
 }
 
 /// Where `name` actually is on this machine, or `None`.
