@@ -415,11 +415,18 @@ async function handlePaneOpen(req: PaneOpenRequest, from: RequestSource) {
   // a page, and a file tree does not.
   const ratio = req.pane === "browser" ? 0.5 : 0.35;
   const paneId = openPane(content, req.side ?? "right", ratio, anchor);
-  if (req.pane === "editor" && req.path) {
-    void editorStore.open(req.path);
-  }
   if (!paneId) {
     await answerRequest(req, { error: "the pane was not opened" });
+    return;
+  }
+  // Filed under the project that asked, not under the one the path happens to
+  // sit in: the pane is in the caller's group, and a buffer belonging anywhere
+  // else is filtered out of the strip drawn there. A scratchpad path is the
+  // everyday case: it lives under the home directory, which is very often a
+  // project of its own.
+  const failed = req.pane === "editor" && req.path ? await showFile(req.path, req.projectId) : null;
+  if (failed) {
+    await answerRequest(req, { error: failed });
     return;
   }
   await answerRequest(req, { ok: true });
@@ -436,6 +443,31 @@ async function handlePaneOpen(req: PaneOpenRequest, from: RequestSource) {
       }),
     );
   }
+}
+
+/** How long an editor pane waits on its file before answering anyway. */
+const READ_GRACE_MS = 2_500;
+
+/**
+ * Puts the file the agent named in the editor, and says what went wrong.
+ *
+ * Awaited rather than fired off, and the buffer read back afterwards: the store
+ * keeps a failed read as an error on the tab instead of throwing, so a path
+ * that does not exist used to answer `opened` all the same. The agent is still
+ * running and can say something about it; the user should not have to work out
+ * why the panel is empty.
+ */
+async function showFile(path: string, projectId: string): Promise<string | null> {
+  const read = editorStore
+    .open(path, { owner: projectId })
+    .then((id) => editorStore.buffers.find((b) => b.id === id)?.error ?? null)
+    .catch((err: unknown) => String(err));
+  // The endpoint gives the device eight seconds to answer at all, so a file
+  // slow to arrive must not hold the answer hostage: past this the tab is open
+  // and the agent is told so, and a read that fails afterwards shows on the tab
+  // like any other.
+  const grace = new Promise<null>((resolve) => setTimeout(() => resolve(null), READ_GRACE_MS));
+  return Promise.race([read, grace]);
 }
 
 /**
