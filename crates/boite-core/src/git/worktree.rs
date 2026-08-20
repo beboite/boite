@@ -80,7 +80,15 @@ pub fn ensure_boite_excluded(repo: &Path) {
     if existing.is_err() {
         let _ = fs::create_dir_all(exclude.parent().unwrap_or(&exclude));
     }
-    let _ = fs::write(&exclude, text);
+    // Not fatal — the worktrees work either way — but the user sees the result
+    // as their own repository suddenly full of untracked directories, and
+    // nothing connects that to this.
+    if let Err(e) = fs::write(&exclude, text) {
+        eprintln!(
+            "[boite/worktree] {} could not be written: {e}. Worktree directories will show up as untracked.",
+            exclude.display()
+        );
+    }
 }
 
 /// One directory named after an id, directly under `base` and never elsewhere.
@@ -590,8 +598,17 @@ fn rename_claimed(repo: &Path, from: &Path, label: &str) -> Option<String> {
     repair.args(["worktree", "repair", &to.to_string_lossy()]);
     if run(repair).is_err() {
         // Back where git still believes it is, rather than left at a path git
-        // was never told about.
-        let _ = fs::rename(&to, from);
+        // was never told about. If even that fails the checkout is at a path
+        // nothing knows, which is the one outcome here that a person has to
+        // sort out by hand, so it says where it left it.
+        if let Err(e) = fs::rename(&to, from) {
+            eprintln!(
+                "[boite/worktree] {} was moved to {} and could not be put back: {e}. \
+                 git still expects it at the first path; `git worktree repair` there fixes it.",
+                from.display(),
+                to.display()
+            );
+        }
         return None;
     }
     Some(to.to_string_lossy().into_owned())

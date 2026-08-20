@@ -41,6 +41,21 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # PTY and explorer shell out to; chromium + xvfb give axi a headful browser.
 FROM node:26-bookworm-slim
 
+# This stage runs as root, and the image ships that way. It is worth saying why
+# rather than leaving it to look like nobody thought about it: everything in
+# here — the npm globals, the agent CLIs, the chromium profile, the mounted
+# credentials — lives under /root, and every deployment that already pulled this
+# image has host directories owned by root behind /data and /workspace. A `USER`
+# line added now breaks each of them on the next `docker compose pull`, silently,
+# at the first write.
+#
+# It is still the right change: the process in here runs whatever an agent
+# decides to run, and root in the container is one fewer boundary between that
+# and the host. Doing it properly means a non-root user, an entrypoint that
+# chowns the volumes while it still can and drops privileges before exec, and a
+# note in the release that says so. That is its own change, not a line in this
+# one.
+
 # Base tools + gh (GitHub CLI, arm64 from official apt repo) + headful browser.
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
@@ -100,6 +115,18 @@ ENV BOITE_BIND=0.0.0.0:7337 \
 # Codex/opencode configs are mounted from the host compose dir (see compose).
 VOLUME ["/data", "/workspace", "/root/.claude"]
 EXPOSE 7337
+
+# `restart: unless-stopped` in the compose file restarts a container that exits.
+# A server that is up and answering nothing exits never, and that is the failure
+# an agent host actually has: the process lives, the port listens, and every
+# request hangs. Without this the restart policy covers the one case that
+# already fixes itself and none of the case it was written for.
+#
+# /api/health is the one route that answers before pairing, which is what makes
+# it usable from here: a check that needed a credential would report a healthy
+# server unhealthy the moment the token rotated.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD curl -fsS http://127.0.0.1:7337/api/health || exit 1
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["boite-entry"]
