@@ -34,6 +34,8 @@ import { noteStatusChange, resetFinished } from "$lib/features/thread/finished.s
 import { forgetThreadActivity } from "$lib/features/thread/activity.svelte";
 import {
   forgetWorkStarted,
+  noteProjectWork,
+  projectWorkSince,
   workStartedSince,
 } from "$lib/features/thread/work-activity.svelte";
 import { SCRATCH_PROJECT_ID } from "$lib/domain/project";
@@ -196,6 +198,23 @@ export class AppState {
     return workStartedSince(thread.id) ?? thread.createdAt;
   }
 
+  /**
+   * Give every project the ledger entry its history already implies.
+   *
+   * The ledger is what the order reads, and a device that has been using the
+   * app since before it existed has none. Without this the first close in a
+   * project would still sink it, because the fallback the sort keeps for
+   * unrecorded projects is the one that reads the live threads. Run whenever a
+   * set of rows lands, and harmless on the second pass: `noteProjectWork` only
+   * ever moves a stamp forward.
+   */
+  #seedProjectWork() {
+    for (const [projectId, list] of this.#threadsByProject) {
+      if (list.length === 0) continue;
+      noteProjectWork(projectId, Math.max(...list.map((t) => this.#threadActivity(t))));
+    }
+  }
+
   #threadsByProjectSortedIndex: Map<string, Thread[]> = $derived.by(() => {
     const orderByProject = settings.state.threadOrderByProject ?? {};
     const smart = this.#smartSort();
@@ -336,9 +355,19 @@ export class AppState {
     const order = settings.state.projectOrder ?? [];
     const idx = new Map(order.map((id, i) => [id, i]));
     const smart = this.#smartSort();
-    // A project ranks by its most recently active thread. Zero for a project
-    // with none, which parks the empty ones together at the quiet end.
+    // A project ranks by when work last happened in it, which is a fact about
+    // the project and not about the threads it still holds. It used to be the
+    // highest stamp among its live threads, so closing the thread that held
+    // that stamp took the stamp with it and the project sank down the list
+    // while the user was doing nothing but tidying up. The ledger only ever
+    // moves forward, so closing a thread moves nothing.
+    //
+    // The fallback covers a project nothing has been recorded against yet — a
+    // rank it holds until its first turn, since `seedProjectWork` writes down
+    // whatever history the threads carry as soon as the rows land.
     const activityOf = (p: Project): number => {
+      const recorded = projectWorkSince(p.id);
+      if (recorded !== null) return recorded;
       const threads = this.#threadsByProject.get(p.id);
       if (!threads || threads.length === 0) return 0;
       return Math.max(...threads.map((t) => this.#threadActivity(t)));
@@ -462,6 +491,7 @@ export class AppState {
     await syncRoots(this);
     bootTiming.mark("roots");
     this.threads = threads;
+    this.#seedProjectWork();
 
     deduplicateSessionIds(this);
     dropGenericTitles(this);
@@ -501,6 +531,7 @@ export class AppState {
     const remote = workspace.remoteBackend;
     if (!remote || !this.ready) return;
     await resyncFromServer(this);
+    this.#seedProjectWork();
     if (workspace.activeBoiteId && device.needsRemoteProjectSeed) {
       device.seedRemoteProjects(
         workspace.activeBoiteId,
@@ -621,7 +652,7 @@ export class AppState {
     // warm. The guard is one null check on rows that carry no settling at all,
     // which is all of them until somebody puts one away.
     if (isSettled(t) && !canSettle(status)) void this.settleThread(id, false);
-    noteStatusChange(id, t.status, status);
+    noteStatusChange(id, t.status, status, t.projectId);
     t.status = status;
     t.exitCode = exitCode;
     if (status !== "stopped" && t.autoSlept) {
