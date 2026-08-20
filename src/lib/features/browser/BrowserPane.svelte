@@ -1,5 +1,6 @@
 <script lang="ts">
   import { openUrl } from "$lib/platform/opener";
+  import { tip } from "$lib/shared/actions/tooltip";
   import { isLocalPage } from "./url";
   import { browserPanes } from "./state.svelte";
   import { browserNote } from "./note.svelte";
@@ -153,7 +154,7 @@
            product, so the mark sits before the address rather than after it. -->
       <span
         class="flex shrink-0 items-center gap-1 rounded-xs bg-[var(--color-surface-2)] px-1 py-0.5 text-2xs text-muted-foreground"
-        title={t("browser.drivenByTitle", { agent: driver?.label ?? drivenBy })}
+        use:tip={t("browser.drivenByTitle", { agent: driver?.label ?? drivenBy })}
       >
         <Bot class="size-3" />
         {driver?.label ?? t("browser.drivenByAgent")}
@@ -167,7 +168,7 @@
     >
       {t("browser.previewChip")}
     </span>
-    <span class="min-w-0 flex-1 truncate text-2xs" title={url}>
+    <span class="min-w-0 flex-1 truncate text-2xs" use:tip={url}>
       <span class="text-foreground/80">{address.host}</span><span
         class="text-muted-foreground">{address.rest}</span
       >
@@ -177,7 +178,7 @@
         type="button"
         class={ACTION}
         onclick={reclaim}
-        title={t("browser.reclaim")}
+        use:tip={t("browser.reclaim")}
         aria-label={t("browser.reclaim")}
       >
         <Hand class="size-3" />
@@ -188,7 +189,7 @@
       class={ACTION}
       class:text-foreground={!browserNote.read}
       onclick={() => browserNote.toggle()}
-      title={t("browser.explain")}
+      use:tip={t("browser.explain")}
       aria-label={t("browser.explain")}
       aria-expanded={!browserNote.read}
     >
@@ -198,7 +199,7 @@
       type="button"
       class={ACTION}
       onclick={() => browserPanes.reload(paneId)}
-      title={t("browser.reload")}
+      use:tip={t("browser.reload")}
       aria-label={t("browser.reload")}
     >
       <RotateCw class="size-3" />
@@ -207,7 +208,7 @@
       type="button"
       class={ACTION}
       onclick={() => void openUrl(url)}
-      title={t("browser.openExternal")}
+      use:tip={t("browser.openExternal")}
       aria-label={t("browser.openExternal")}
     >
       <ExternalLink class="size-3" />
@@ -220,7 +221,7 @@
       type="button"
       class={ACTION}
       onclick={() => paneStore.closePane(paneId)}
-      title={t("browser.close")}
+      use:tip={t("browser.close")}
       aria-label={t("browser.close")}
     >
       <X class="size-3.5" />

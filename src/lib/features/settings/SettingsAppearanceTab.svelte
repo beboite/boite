@@ -1,5 +1,6 @@
 <script lang="ts">
   import { settings } from "$lib/features/settings/store.svelte";
+  import { tip } from "$lib/shared/actions/tooltip";
   import SettingsCard from "$lib/shared/components/SettingsCard.svelte";
   import ToggleSetting from "$lib/shared/components/ToggleSetting.svelte";
   import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
@@ -177,7 +178,7 @@
       type="button"
       class="flex items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-1 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
       onclick={reset}
-      title={t("appearance.resetScale")}
+      use:tip={t("appearance.resetScale")}
     >
       <RotateCcw class="size-3" />
       {t("common.reset")}
@@ -266,7 +267,7 @@
       type="button"
       class="flex items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-1 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
       onclick={() => settings.setTerminalFontScalePercent(100)}
-      title={t("appearance.resetTerminalSize")}
+      use:tip={t("appearance.resetTerminalSize")}
     >
       <RotateCcw class="size-3" />
       {t("common.reset")}

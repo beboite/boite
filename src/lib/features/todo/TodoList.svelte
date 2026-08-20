@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
+  import { tip } from "$lib/shared/actions/tooltip";
   import { app } from "$lib/app/store.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
   import { notifications } from "$lib/features/notifications/store.svelte";
@@ -9,6 +10,7 @@
   import { confirmDialog } from "$lib/shared/components/confirm.svelte";
   import { registerEscape } from "$lib/shared/keyboard/overlay";
   import { t } from "$lib/i18n/index.svelte";
+  import { scrollIntoViewSmooth } from "$lib/theme/motion";
   import { ptyWrite } from "$lib/storage/pty";
   import { openUrl } from "$lib/platform/opener";
   import { claimGitState, type ClaimGit } from "./claimGit";
@@ -127,9 +129,7 @@
     // scrolling before that lands on the row's old box. Scoped to this list, so
     // a second one mounted elsewhere cannot be the thing that scrolls.
     queueMicrotask(() => {
-      listEl
-        ?.querySelector(`[data-todo-row="${wanted}"]`)
-        ?.scrollIntoView({ block: "nearest" });
+      scrollIntoViewSmooth(listEl?.querySelector(`[data-todo-row="${wanted}"]`));
     });
   });
 
@@ -516,7 +516,7 @@
                  there. -->
             <span
               class="shrink-0 text-muted-foreground/50"
-              title={t("todo.hasDescription")}
+              use:tip={t("todo.hasDescription")}
             >
               <AlignLeft class="size-3" />
             </span>
@@ -527,7 +527,7 @@
           class="{ROW_ACTION} hover:bg-[var(--color-surface-3)] hover:text-foreground disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-muted-foreground/50"
           onclick={() => handOff(item)}
           disabled={!canSend}
-          title={canSend
+          use:tip={canSend
             ? t("todo.sendTo", {
                 target: target?.title ?? target?.label ?? "the terminal",
               })
@@ -540,7 +540,7 @@
           type="button"
           class="{ROW_ACTION} hover:bg-danger/15 hover:text-danger"
           onclick={() => void remove(item)}
-          title={t("todo.remove")}
+          use:tip={t("todo.remove")}
           aria-label={t("todo.removeLabel")}
         >
           <Trash2 class="size-3.5" />
@@ -621,7 +621,7 @@
                 onclick={() => toggleTip(`${item.id}:sha`)}
               >
                 {t("todo.gitUnreachable")}
-                {@render tip(item.commitSha, `${item.id}:sha`)}
+                {@render chipDetail(item.commitSha, `${item.id}:sha`)}
               </button>
             {:else if !g.commit.known}
               <!-- Reported a sha the repository has never heard of. Said
@@ -633,7 +633,7 @@
                 onclick={() => toggleTip(`${item.id}:sha`)}
               >
                 {t("todo.gitUnknownCommit")}
-                {@render tip(item.commitSha, `${item.id}:sha`)}
+                {@render chipDetail(item.commitSha, `${item.id}:sha`)}
               </button>
             {:else}
               <!-- The branch first: it says where the work is, which is the
@@ -648,7 +648,7 @@
                 <span class="block truncate text-foreground/80">
                   {g.commit.branch ?? g.commit.short}
                 </span>
-                {@render tip(
+                {@render chipDetail(
                   `${g.commit.short}${g.commit.subject ? ` — ${g.commit.subject}` : ""}`,
                   `${item.id}:commit`,
                 )}
@@ -669,7 +669,7 @@
                   {t("todo.gitPr", { number: String(g.pr.pr.number) })}
                   <!-- No toggle on this one: pressing it opens the PR, which
                        is more than the url it would have shown. -->
-                  {@render tip(g.pr.pr.url, null)}
+                  {@render chipDetail(g.pr.pr.url, null)}
                 </button>
               {:else if g.pr.kind === "failed"}
                 <!-- gh was there and refused. Said, because unlike a missing
@@ -683,7 +683,7 @@
                   onclick={() => toggleTip(`${item.id}:pr`)}
                 >
                   {g.pr.auth ? t("todo.gitPrNoAuth") : t("todo.gitPrFailed")}
-                  {@render tip(
+                  {@render chipDetail(
                     g.pr.auth ? t("todo.gitPrNoAuthHint") : g.pr.detail,
                     `${item.id}:pr`,
                   )}
@@ -732,7 +732,7 @@
   <div class="pointer-events-none -my-px h-0.5 bg-foreground/50"></div>
 {/snippet}
 
-{#snippet tip(text: string, key: string | null)}
+{#snippet chipDetail(text: string, key: string | null)}
   <!-- Replaces the native `title`, whose ~1s delay is the browser's and cannot
        be configured. Appears on hover with nothing in between.
        Below the chip, not above: the list scrolls, and anything absolute is

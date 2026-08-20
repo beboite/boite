@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from "svelte";
+  import { tip } from "$lib/shared/actions/tooltip";
   import { scale } from "svelte/transition";
   import { app } from "$lib/app/store.svelte";
   import { workspace } from "$lib/backend";
@@ -229,7 +230,7 @@
       openMenu(e.clientX, e.clientY);
     }}
     use:longPress={{ onLongPress: openMenu }}
-    title={defaultShell
+    use:tip={defaultShell
       ? t("shell.launchNamed", { name: defaultShell.label })
       : t("shell.newBlank")}
     aria-label={t("shell.launchTerminal")}
@@ -244,7 +245,7 @@
     onclick={toggle}
     aria-haspopup="menu"
     aria-expanded={open}
-    title={t("shell.pick")}
+    use:tip={t("shell.pick")}
     aria-label={t("shell.pick")}
   >
     <ChevronDown class="size-3.5" />

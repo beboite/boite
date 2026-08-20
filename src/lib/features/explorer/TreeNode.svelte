@@ -1,5 +1,6 @@
 <script module lang="ts">
   import { getContext, setContext } from "svelte";
+  import { tip } from "$lib/shared/actions/tooltip";
 
   /**
    * The tree's cursor, owned by ExplorerPanel.
@@ -222,7 +223,7 @@
     onclick={activate}
     oncontextmenu={openMenu}
     use:longPress={{ onLongPress: openMenuAt }}
-    title={entry.path}
+    use:tip={entry.path}
   >
     {#if entry.isDir}
       <ChevronRight

@@ -94,7 +94,7 @@
     </button>
   </header>
 
-  <div class="min-h-0 flex-1 overflow-y-auto p-2.5">
+  <div class="min-h-0 flex-1 scroll-pane overflow-y-auto p-2.5">
     {#if projects.length === 0}
       <div class="flex flex-col items-center gap-3 px-4 py-12 text-center text-sm text-muted-foreground">
         {t("mobile.noProjects")}
