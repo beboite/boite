@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { tip } from "$lib/shared/actions/tooltip";
   import SettingsCard from "$lib/shared/components/SettingsCard.svelte";
   import { backend } from "$lib/backend";
   import type { PairedDevice, PairingInvite } from "$lib/backend/types";
@@ -146,7 +147,7 @@
                 class="shrink-0 rounded-md p-1.5 text-muted-foreground transition hover:bg-accent hover:text-danger"
                 onclick={() => revoke(row)}
                 aria-label={t("devices.revokeAction")}
-                title={t("devices.revokeAction")}
+                use:tip={t("devices.revokeAction")}
               >
                 <Trash2 class="size-4" />
               </button>

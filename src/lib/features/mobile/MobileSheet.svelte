@@ -137,7 +137,7 @@
       aria-labelledby={title ? "sheet-title" : undefined}
       aria-label={title ? undefined : t("titlebar.close")}
       tabindex="-1"
-      class="surface-dialog relative max-h-[75dvh] overflow-y-auto overscroll-contain rounded-b-none border-x-0 border-b-0"
+      class="surface-dialog relative max-h-[75dvh] scroll-pane overflow-y-auto overscroll-contain rounded-b-none border-x-0 border-b-0"
       style="padding-bottom: env(safe-area-inset-bottom, 0px); padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-area-inset-right, 0px);"
       style:transform={dragY > 0 ? `translateY(${dragY}px)` : undefined}
       style:transition={dragY > 0 ? "none" : "transform var(--dur-2)"}

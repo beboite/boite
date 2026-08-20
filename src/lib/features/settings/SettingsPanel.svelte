@@ -1,5 +1,7 @@
 <script lang="ts">
   import { app } from "$lib/app/store.svelte";
+  import { tip } from "$lib/shared/actions/tooltip";
+  import { edgeFade } from "$lib/shared/actions/edgeFade";
   import SettingsGeneralTab from "./SettingsGeneralTab.svelte";
   import SettingsTerminalTab from "./SettingsTerminalTab.svelte";
   import SettingsAppearanceTab from "./SettingsAppearanceTab.svelte";
@@ -11,6 +13,7 @@
   import SettingsAboutTab from "./SettingsAboutTab.svelte";
   import { updater } from "$lib/features/updater/store.svelte";
   import X from "@lucide/svelte/icons/x";
+  import { scrollIntoViewSmooth } from "$lib/theme/motion";
   import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
   import TerminalIcon from "@lucide/svelte/icons/terminal";
   import Palette from "@lucide/svelte/icons/palette";
@@ -136,15 +139,6 @@
     windowsHost: () => platform.isHostWindows,
   };
 
-  /**
-   * The app's own animation switch rather than the OS one: `motion.ts` folds
-   * the two into `data-motion`, and an in-app choice of "off" wins over an OS
-   * that never asked for it.
-   */
-  function motionReduced() {
-    return document.documentElement.dataset.motion === "reduced";
-  }
-
   const TAB_LABELS: Record<TabId, MessageKey> = Object.fromEntries(
     TABS.map((tab) => [tab.id, tab.labelKey]),
   ) as Record<TabId, MessageKey>;
@@ -200,12 +194,9 @@
     // microtask only ever worked because Svelte happened to have queued its
     // flush first, which is true today and is not a contract.
     await tick();
-    document.getElementById(id)?.scrollIntoView({
-      block: "center",
-      // A jump the user asked for is still a jump: reduced motion gets the
-      // position without the travel.
-      behavior: motionReduced() ? "auto" : "smooth",
-    });
+    // A jump the user asked for is still a jump, and `scrollIntoViewSmooth`
+    // is where reduced motion gets the position without the travel.
+    scrollIntoViewSmooth(document.getElementById(id), { block: "center" });
   }
 
   // The timer outlives the panel otherwise, and fires into a component that is
@@ -317,7 +308,7 @@
       class="rounded-md p-1 text-muted-foreground transition hover:bg-accent hover:text-foreground"
       onclick={close}
       aria-label={t("common.closeSettings")}
-      title={t("common.backToTerminal")}
+      use:tip={t("common.backToTerminal")}
     >
       <X class="size-4" />
     </button>
@@ -327,7 +318,8 @@
   <div class="shrink-0 border-b border-border bg-[var(--color-surface)] px-3 md:hidden">
     <div
       bind:this={stripEl}
-      class="hide-scrollbar flex gap-0.5 overflow-x-auto"
+      class="edge-fade hide-scrollbar flex gap-0.5 overflow-x-auto"
+      use:edgeFade
       role="tablist"
       aria-label={t("common.settings")}
     >
@@ -357,7 +349,7 @@
          is the one combination the a11y rules refuse. -->
     <div
       bind:this={railEl}
-      class="hidden w-52 shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-border bg-[var(--color-surface)] p-2 md:flex"
+      class="hidden w-52 shrink-0 flex-col gap-0.5 scroll-pane overflow-y-auto border-r border-border bg-[var(--color-surface)] p-2 md:flex"
       role="tablist"
       aria-orientation="vertical"
       aria-label={t("common.settings")}
@@ -392,7 +384,7 @@
       role="tabpanel"
       aria-labelledby={tabId(activeTab, "rail")}
       tabindex="0"
-      class="min-w-0 flex-1 overflow-y-auto px-4 py-4"
+      class="min-w-0 flex-1 scroll-pane overflow-y-auto px-4 py-4"
     >
       <div class="mx-auto flex max-w-3xl flex-col gap-2.5">
         {#if query.trim()}
