@@ -25,6 +25,7 @@ import type {
   LogApi,
   PendingApproval,
   DispatchLine,
+  OrchestratorAction,
   OrchestratorMessage,
   PairedDevice,
   PairingApi,
@@ -461,14 +462,16 @@ export class RemoteBackend implements Backend {
       // never run anything. The empty report is still what comes back, because
       // the caller's own catch would flatten a rejection into one anyway, but
       // it now says which of the two it is.
-      usage: (cwds, days) =>
-        rpc("session.usage", { cwds, days })
+      usage: (cwds, days, orchestratorSessions) =>
+        rpc("session.usage", { cwds, days, orchestratorSessions: orchestratorSessions ?? [] })
           .then((r) => r as unknown as UsageReport)
           .catch(
             (): UsageReport => ({
               models: [],
               days: [],
               sessions: 0,
+              orchestratorTotal: 0,
+              orchestratorSessions: 0,
               missing: [],
               unreachable: true,
             }),
@@ -582,6 +585,14 @@ export class RemoteBackend implements Backend {
         rpc("orchestrator.status", params).then((r) => ({
           threadId: (r?.threadId as string | null) ?? null,
           state: (r?.state as string) ?? "off",
+        })),
+      actions: (params) =>
+        rpc("orchestrator.actions", params).then(
+          (r) => (r?.actions ?? []) as OrchestratorAction[],
+        ),
+      undo: (params) =>
+        rpc("orchestrator.undo", params).then((r) => ({
+          done: r?.done === true,
         })),
       acceptDispatch: (params) =>
         rpc("thread.acceptDispatch", params).then((r) => ({

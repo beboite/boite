@@ -10,7 +10,14 @@ import { USAGE_DAYS } from "$lib/features/project/usage.svelte";
  * refresh for when the number has moved.
  */
 
-const EMPTY: UsageReport = { models: [], days: [], sessions: 0, missing: [] };
+const EMPTY: UsageReport = {
+  models: [],
+  days: [],
+  sessions: 0,
+  orchestratorTotal: 0,
+  orchestratorSessions: 0,
+  missing: [],
+};
 
 const STALE_MS = 120_000;
 
@@ -27,7 +34,7 @@ class WorkspaceUsageStore {
     return this.#loading;
   }
 
-  async load(cwds: string[]) {
+  async load(cwds: string[], orchestratorSessions: string[] = []) {
     if (this.#loading) return;
     this.#loading = true;
     this.#readAt = Date.now();
@@ -36,7 +43,7 @@ class WorkspaceUsageStore {
         this.#report = EMPTY;
         return;
       }
-      this.#report = await backend().session.usage(cwds, USAGE_DAYS);
+      this.#report = await backend().session.usage(cwds, USAGE_DAYS, orchestratorSessions);
     } catch {
       this.#report = { ...EMPTY, unreachable: true };
     } finally {
@@ -44,9 +51,9 @@ class WorkspaceUsageStore {
     }
   }
 
-  ensure(cwds: string[]) {
+  ensure(cwds: string[], orchestratorSessions: string[] = []) {
     if (this.#report && Date.now() - this.#readAt < STALE_MS) return;
-    void this.load(cwds);
+    void this.load(cwds, orchestratorSessions);
   }
 }
 

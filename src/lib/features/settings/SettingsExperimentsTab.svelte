@@ -1,6 +1,8 @@
 <script lang="ts">
+  import { app } from "$lib/app/store.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
   import ToggleSetting from "$lib/shared/components/ToggleSetting.svelte";
+  import { confirmDialog } from "$lib/shared/components/confirm.svelte";
   import { t, type MessageKey } from "$lib/i18n/index.svelte";
   import VoiceSettings from "$lib/features/voice/VoiceSettings.svelte";
   import type { SmartSortBy, SortDirection, WhipSound } from "$lib/types";
@@ -44,6 +46,32 @@
    * the sample is awaited: previewing `meme` and hearing the synth because the
    * fetch had not landed is the one thing this button must not do.
    */
+  /**
+   * Turning the experiment off unmounts the surface, and asks once whether the
+   * live orchestrator threads should be put away with it. Their workers are
+   * not touched either way: a spawned terminal belongs to the workspace, not
+   * to the conductor that opened it, and "put away" is the sidebar's own
+   * settle, reversible from there.
+   */
+  async function toggleOrchestrator() {
+    const next = !settings.state.experimentOrchestrator;
+    settings.setExperimentOrchestrator(next);
+    if (next) return;
+    const live = app.threads.filter(
+      (thread) => thread.role === "orchestrator" && !thread.settledAt,
+    );
+    if (live.length === 0) return;
+    const close = await confirmDialog.ask({
+      title: t("experiments.orchestratorCloseTitle"),
+      message: t("experiments.orchestratorCloseAsk", { count: live.length }),
+      confirmLabel: t("experiments.orchestratorCloseConfirm"),
+    });
+    if (!close) return;
+    for (const thread of live) {
+      await app.settleThread(thread.id, true);
+    }
+  }
+
   async function playPreview(sound: WhipSound) {
     const { playCrack, primeCrackSound } = await import("$lib/features/whip/crack");
     await primeCrackSound(sound);
@@ -64,8 +92,7 @@
   label={t("experiments.orchestrator")} anchor="experiments.orchestrator"
   description={t("experiments.orchestratorDesc")}
   enabled={settings.state.experimentOrchestrator}
-  onToggle={() =>
-    settings.setExperimentOrchestrator(!settings.state.experimentOrchestrator)}
+  onToggle={() => void toggleOrchestrator()}
 />
 
 {#if settings.state.experimentOrchestrator}

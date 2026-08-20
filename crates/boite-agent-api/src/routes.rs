@@ -596,6 +596,19 @@ async fn thread_dismiss(
     );
     Ok(Json(match answered {
         Ok(v) => {
+            // The dismissal on the undo list, beside the spawns. Same rule as
+            // the spawn's row: a failed write never fails the dismissal.
+            let project = workspace.store().project_of_thread(&body.thread_id).ok();
+            if let Err(e) = workspace.store().record_orchestrator_action(
+                &thread,
+                "thread.dismiss",
+                Some(&body.thread_id),
+                project.as_deref(),
+                true,
+                now_ms(),
+            ) {
+                eprintln!("[boite/agent-api] orchestrator action write failed: {e}");
+            }
             workspace.announce(Change::ThreadDismissed {
                 thread_id: body.thread_id,
             });
@@ -1186,21 +1199,20 @@ async fn thread_spawn(
     // Non-negotiable cap for an orchestrator: the workers run on the user's
     // machine, and an unattended thread multiplying terminals is exactly the
     // process nobody is watching. Named so the agent reports it as it is.
-    if !asking_thread.is_empty() {
-        let is_orchestrator = workspace
+    let is_orchestrator = !asking_thread.is_empty()
+        && workspace
             .store()
             .thread_orchestration(&asking_thread)
             .and_then(|(role, _, _)| role)
             .as_deref()
             == Some(boite_core::orchestrator::ROLE);
-        if is_orchestrator {
-            let live = workspace.store().live_children(&asking_thread);
-            if live >= MAX_ORCHESTRATOR_WORKERS {
-                return Ok(refused(format!(
-                    "TOO_MANY_WORKERS: {live} of your workers are still live, and the cap is \
-                     {MAX_ORCHESTRATOR_WORKERS}. Wait for one to settle, or tell the user."
-                )));
-            }
+    if is_orchestrator {
+        let live = workspace.store().live_children(&asking_thread);
+        if live >= MAX_ORCHESTRATOR_WORKERS {
+            return Ok(refused(format!(
+                "TOO_MANY_WORKERS: {live} of your workers are still live, and the cap is \
+                 {MAX_ORCHESTRATOR_WORKERS}. Wait for one to settle, or tell the user."
+            )));
         }
     }
     let request = json!({
@@ -1246,6 +1258,21 @@ async fn thread_spawn(
         .get("threadId")
         .and_then(|v| v.as_str())
         .unwrap_or("");
+    // One row per spawn an orchestrator caused, so the inbox can offer to put
+    // the worker away. A failed write is a gap in the undo list, never a
+    // failed spawn: the terminal is already open.
+    if is_orchestrator && !thread_id.is_empty() {
+        if let Err(e) = workspace.store().record_orchestrator_action(
+            &asking_thread,
+            "thread.spawn",
+            Some(thread_id),
+            Some(&project_id),
+            true,
+            now_ms(),
+        ) {
+            eprintln!("[boite/agent-api] orchestrator action write failed: {e}");
+        }
+    }
     Ok(Json(json!({ "ok": true, "threadId": thread_id })))
 }
 

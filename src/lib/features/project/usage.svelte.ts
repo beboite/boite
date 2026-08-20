@@ -40,7 +40,14 @@ export function formatTokens(n: number): string {
   return String(n);
 }
 
-const EMPTY: UsageReport = { models: [], days: [], sessions: 0, missing: [] };
+const EMPTY: UsageReport = {
+  models: [],
+  days: [],
+  sessions: 0,
+  orchestratorTotal: 0,
+  orchestratorSessions: 0,
+  missing: [],
+};
 
 /** How long a scan stands for before arriving on the page asks again. Long
     enough that walking back and forth between two projects costs nothing,

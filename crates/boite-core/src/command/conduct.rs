@@ -37,6 +37,8 @@ pub const ALL_METHODS: &[&str] = &[
     "orchestrator.messages",
     "orchestrator.start",
     "orchestrator.status",
+    "orchestrator.actions",
+    "orchestrator.undo",
     "thread.dispatch",
     "thread.acceptDispatch",
     "dispatch.drain",
@@ -61,6 +63,10 @@ const PULSE_LIMIT: usize = 500;
 /// How many chat lines one read answers with when the caller says nothing.
 const MESSAGES_LIMIT_DEFAULT: u32 = 50;
 const MESSAGES_LIMIT_MAX: u32 = 500;
+
+/// How many recorded actions one read answers with.
+const ACTIONS_LIMIT_DEFAULT: u32 = 50;
+const ACTIONS_LIMIT_MAX: u32 = 200;
 
 /// Reads the pulse, waiting when it is quiet.
 ///
@@ -254,6 +260,69 @@ pub fn dispatch(
     Ok(json!({ "dispatchId": id, "seq": seq }))
 }
 
+/// Un-does one recorded orchestrator action, on the user's word.
+///
+/// The table's own rule holds here: nothing committed is ever destroyed.
+/// Undoing a spawn puts the worker away behind the same busy rule as any
+/// settle; undoing a dismissal brings the thread back out. Both are stamps on
+/// rows, never deletes, and a kind nothing here knows how to reverse is
+/// refused by name rather than guessed at.
+pub fn undo(
+    store: &Store,
+    waiters: Option<&Arc<Waiters>>,
+    action_id: &str,
+) -> Result<Value, String> {
+    let (kind, object_id, undoable, undone) = store
+        .orchestrator_action(action_id)
+        .ok_or("unknown action")?;
+    if undone {
+        return Err("ALREADY_UNDONE: this action was already undone".to_string());
+    }
+    if !undoable {
+        return Err(format!("NOT_UNDOABLE: a {kind} is not reversible from here"));
+    }
+    let object = object_id.ok_or("the action names no object to act on")?;
+    let now = crate::now_ms();
+    match kind.as_str() {
+        "thread.spawn" => {
+            let status = store
+                .thread_status(&object)
+                .map(|(status, _)| status)
+                .unwrap_or_else(|| "idle".to_string());
+            if !crate::settle::can_settle(&status) {
+                return Err(crate::settle::refusal(&status));
+            }
+            store.update_thread_field(
+                &object,
+                crate::store::ThreadCol::SettledAt,
+                crate::store::ColVal::Int(now),
+            )?;
+        }
+        "thread.dismiss" => {
+            store.update_thread_field(
+                &object,
+                crate::store::ThreadCol::SettledAt,
+                crate::store::ColVal::Null,
+            )?;
+        }
+        other => return Err(format!("NOT_UNDOABLE: no undo is written for {other}")),
+    }
+    store.mark_orchestrator_action_undone(action_id, now)?;
+    let project = store.project_of_thread(&object).ok();
+    let seq = store.append_moment(
+        "orchestrator.undone",
+        project.as_deref(),
+        Some(action_id),
+        &kind,
+        "orchestrator",
+        now,
+    )?;
+    if let Some(waiters) = waiters {
+        waiters.notify();
+    }
+    Ok(json!({ "done": true, "seq": seq }))
+}
+
 /// Puts a finished worker away on the orchestrator's word. Route-only: the
 /// dismissal is `thread.settle`'s write behind the same busy rule
 /// (`crate::settle::can_settle`), gated on the caller's role.
@@ -343,6 +412,11 @@ pub enum Conduct {
     },
     /// Which thread is the live orchestrator for a scope, if any.
     Status { scope: Option<String> },
+    /// What the orchestrators caused, newest first, for the inbox's undo list.
+    Actions { limit: usize },
+    /// Un-does one recorded action. Local only: undoing is the user taking
+    /// something back, never an agent covering its tracks.
+    Undo { action_id: String },
     /// One line queued for another thread's prompt. The static guards live
     /// here (role, mute, scope); the live ones (phase, permission on screen)
     /// belong to the device at flush time.
@@ -421,6 +495,13 @@ impl Conduct {
                 thread_id: str_param(params, "threadId")?,
                 scope: opt_str_param(params, "scope"),
             },
+            "orchestrator.actions" => Conduct::Actions {
+                limit: u32_param(params, "limit", ACTIONS_LIMIT_DEFAULT).clamp(1, ACTIONS_LIMIT_MAX)
+                    as usize,
+            },
+            "orchestrator.undo" => Conduct::Undo {
+                action_id: str_param(params, "actionId")?,
+            },
             "orchestrator.status" => Conduct::Status {
                 scope: opt_str_param(params, "scope"),
             },
@@ -461,6 +542,8 @@ impl Conduct {
             Conduct::Messages { .. } => "orchestrator.messages",
             Conduct::Start { .. } => "orchestrator.start",
             Conduct::Status { .. } => "orchestrator.status",
+            Conduct::Actions { .. } => "orchestrator.actions",
+            Conduct::Undo { .. } => "orchestrator.undo",
             Conduct::Dispatch { .. } => "thread.dispatch",
             Conduct::AcceptDispatch { .. } => "thread.acceptDispatch",
             Conduct::Drain { .. } => "dispatch.drain",
@@ -477,6 +560,8 @@ impl Conduct {
             Conduct::Post { .. } | Conduct::Say { .. } => Wire::Bare,
             Conduct::Messages { .. } => Wire::Key("messages"),
             Conduct::Start { .. } | Conduct::Status { .. } => Wire::Bare,
+            Conduct::Actions { .. } => Wire::Key("actions"),
+            Conduct::Undo { .. } => Wire::Bare,
             Conduct::Drain { .. } => Wire::Key("dispatches"),
             Conduct::Dispatch { .. }
             | Conduct::AcceptDispatch { .. }
@@ -493,11 +578,13 @@ impl Conduct {
             Conduct::Pulse { .. }
             | Conduct::Messages { .. }
             | Conduct::Status { .. }
+            | Conduct::Actions { .. }
             | Conduct::Transcribe { .. } => Capability::ReadProject,
             Conduct::Record { .. }
             | Conduct::Post { .. }
             | Conduct::Say { .. }
             | Conduct::Start { .. }
+            | Conduct::Undo { .. }
             | Conduct::Dispatch { .. }
             | Conduct::AcceptDispatch { .. }
             | Conduct::Drain { .. }
@@ -513,6 +600,14 @@ impl Conduct {
         if matches!(self, Conduct::Start { .. }) && grant != Grant::Local {
             return Err(
                 "only Boite's own window arms an orchestrator; an agent cannot stamp the role"
+                    .to_string(),
+            );
+        }
+        // Same refusal for the undo: taking an action back is the user's,
+        // and an agent that could undo would be an agent covering its tracks.
+        if matches!(self, Conduct::Undo { .. }) && grant != Grant::Local {
+            return Err(
+                "only Boite's own window undoes an orchestrator action; an agent cannot"
                     .to_string(),
             );
         }
@@ -679,6 +774,8 @@ impl Conduct {
                 Some(id) => json!({ "threadId": id, "state": "live" }),
                 None => json!({ "threadId": null, "state": "off" }),
             },
+            Conduct::Actions { limit } => value_of(store.orchestrator_actions(limit)?),
+            Conduct::Undo { action_id } => undo(store, waiters.as_ref(), &action_id)?,
             Conduct::Dispatch {
                 thread_id,
                 to_thread_id,
@@ -969,6 +1066,50 @@ mod tests {
         )
         .unwrap();
         ask(&host, "orchestrator.start", json!({ "threadId": "b" })).unwrap();
+    }
+
+    /// An undo is the user's, stamped once: a dismissal comes back, asking
+    /// again is refused by name, and no agent grant reaches it at all.
+    #[test]
+    fn undo_brings_a_dismissed_thread_back_and_refuses_twice() {
+        let host = Rows::new("undo");
+        let row = |id: &str| {
+            json!({ "thread": { "id": id, "projectId": "p", "label": "l", "cmd": "c", "args": [] } })
+        };
+        ask(&host, "thread.create", row("boss")).unwrap();
+        ask(&host, "thread.create", row("worker")).unwrap();
+        host.store.stamp_orchestrator_role("boss", None).unwrap();
+        // The worker was put away, and the route wrote it down.
+        host.store
+            .update_thread_field(
+                "worker",
+                crate::store::ThreadCol::SettledAt,
+                crate::store::ColVal::Int(5),
+            )
+            .unwrap();
+        let action = host
+            .store
+            .record_orchestrator_action("boss", "thread.dismiss", Some("worker"), Some("p"), true, 5)
+            .unwrap();
+
+        let refusal = Command::decode("orchestrator.undo", &json!({ "actionId": action }))
+            .unwrap()
+            .prepare(&host, Grant::Conduct)
+            .unwrap_err();
+        assert!(refusal.contains("undoes"), "{refusal}");
+
+        let listed = ask(&host, "orchestrator.actions", json!({})).unwrap();
+        assert_eq!(listed[0]["undoable"], json!(true));
+
+        let done = ask(&host, "orchestrator.undo", json!({ "actionId": action })).unwrap();
+        assert_eq!(done["done"], json!(true));
+        // The thread is back out, and the action stops being offered.
+        let worker = host.store.load_thread("worker").unwrap().unwrap();
+        assert_eq!(worker.settled_at, None);
+        let again = ask(&host, "orchestrator.undo", json!({ "actionId": action })).unwrap_err();
+        assert!(again.contains("ALREADY_UNDONE"), "{again}");
+        let listed = ask(&host, "orchestrator.actions", json!({})).unwrap();
+        assert!(listed[0]["undoneAt"].is_i64());
     }
 
     /// Arming a project orchestrator empties the global one's backlog into

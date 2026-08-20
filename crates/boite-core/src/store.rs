@@ -789,6 +789,97 @@ impl Store {
         .unwrap_or(0)
     }
 
+    /// Writes down one thing the orchestrator caused, so the inbox can show it
+    /// and offer to undo the reversible ones. Nothing committed is ever
+    /// destroyed through this table.
+    pub fn record_orchestrator_action(
+        &self,
+        orchestrator_thread_id: &str,
+        kind: &str,
+        object_id: Option<&str>,
+        project_id: Option<&str>,
+        undoable: bool,
+        at: i64,
+    ) -> Result<String, String> {
+        let conn = self.conn.lock();
+        let id = uuid::Uuid::new_v4().simple().to_string();
+        conn.execute(
+            "INSERT INTO orchestrator_actions
+             (id, orchestrator_thread_id, kind, object_id, project_id, undoable, at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            rusqlite::params![
+                id,
+                orchestrator_thread_id,
+                kind,
+                object_id,
+                project_id,
+                undoable as i64,
+                at
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(id)
+    }
+
+    /// One recorded action, for the undo that has to know what it is undoing.
+    /// `(kind, object_id, undoable, undone)`.
+    pub fn orchestrator_action(&self, id: &str) -> Option<(String, Option<String>, bool, bool)> {
+        let conn = self.conn.lock();
+        conn.query_row(
+            "SELECT kind, object_id, undoable, undone_at FROM orchestrator_actions WHERE id = ?1",
+            [id],
+            |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, Option<String>>(1)?,
+                    r.get::<_, i64>(2)? == 1,
+                    r.get::<_, Option<i64>>(3)?.is_some(),
+                ))
+            },
+        )
+        .ok()
+    }
+
+    /// What the orchestrators caused, newest first.
+    pub fn orchestrator_actions(&self, limit: usize) -> Result<Vec<serde_json::Value>, String> {
+        let conn = self.conn.lock();
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, orchestrator_thread_id, kind, object_id, project_id, undoable, at, undone_at
+                 FROM orchestrator_actions ORDER BY at DESC LIMIT ?1",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([limit as i64], |r| {
+                Ok(serde_json::json!({
+                    "id": r.get::<_, String>(0)?,
+                    "orchestratorThreadId": r.get::<_, String>(1)?,
+                    "kind": r.get::<_, String>(2)?,
+                    "objectId": r.get::<_, Option<String>>(3)?,
+                    "projectId": r.get::<_, Option<String>>(4)?,
+                    "undoable": r.get::<_, i64>(5)? == 1,
+                    "at": r.get::<_, i64>(6)?,
+                    "undoneAt": r.get::<_, Option<i64>>(7)?,
+                }))
+            })
+            .map_err(|e| e.to_string())?
+            .filter_map(Result::ok)
+            .collect();
+        Ok(rows)
+    }
+
+    /// Stamps an action undone. A stamp rather than a delete: what happened
+    /// stays on the record, the inbox just stops offering it.
+    pub fn mark_orchestrator_action_undone(&self, id: &str, at: i64) -> Result<(), String> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "UPDATE orchestrator_actions SET undone_at = ?2 WHERE id = ?1",
+            rusqlite::params![id, at],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
     /// Whether this thread still accepts dispatched lines. User-only write.
     pub fn set_accept_dispatch(&self, id: &str, accept: bool) -> Result<(), String> {
         let conn = self.conn.lock();

@@ -89,6 +89,12 @@ pub struct UsageReport {
     pub days: Vec<DayUsage>,
     /// Transcripts that contributed something.
     pub sessions: usize,
+    /// The orchestrators' own share of the totals, split out by the session
+    /// ids the workspace stamped on their threads. Zero when none match, which
+    /// is also what a store whose ids this cannot see honestly reports.
+    pub orchestrator_total: i64,
+    /// How many of `sessions` belonged to an orchestrator thread.
+    pub orchestrator_sessions: usize,
     /// Stores that are not on this machine at all, by icon key. The difference
     /// between "this agent spent nothing here" and "this agent was never
     /// installed" is the whole reading of an empty card.
@@ -256,6 +262,10 @@ impl Accumulator {
         }
     }
 
+    fn total(&self) -> i64 {
+        self.models.values().map(|m| m.total).sum()
+    }
+
     fn finish(self, missing: Vec<String>) -> UsageReport {
         let mut models: Vec<ModelUsage> = self.models.into_values().collect();
         models.sort_by(|a, b| b.total.cmp(&a.total).then_with(|| a.model.cmp(&b.model)));
@@ -269,9 +279,26 @@ impl Accumulator {
             models,
             days,
             sessions: self.sessions,
+            orchestrator_total: 0,
+            orchestrator_sessions: 0,
             missing,
         }
     }
+}
+
+/// The session id a transcript answers to, the way each store names one.
+///
+/// Claude and codex name the file after the session; grok names the folder and
+/// calls every transcript `updates`, so the folder is the id there.
+fn session_key(path: &Path) -> Option<String> {
+    let stem = path.file_stem()?.to_string_lossy().into_owned();
+    if stem == "updates" {
+        return path
+            .parent()
+            .and_then(|p| p.file_name())
+            .map(|n| n.to_string_lossy().into_owned());
+    }
+    Some(stem)
 }
 
 // ------------------------------------------------------------------ cache
@@ -833,8 +860,17 @@ fn codex_session_cwd(path: &Path) -> Option<String> {
 /// isolation a project's threads run in folders that are not under it, and an
 /// agent's store keys on the directory it ran in. Missing one means the card
 /// under-reports without ever saying so.
-pub fn collect_usage_blocking(cwds: Vec<String>, days: u32) -> UsageReport {
+/// `orchestrator_sessions` are the session ids the workspace stamped on its
+/// orchestrator threads; transcripts answering to one are also summed apart,
+/// so the card can show the conductor's share next to the workers'.
+pub fn collect_usage_blocking(
+    cwds: Vec<String>,
+    days: u32,
+    orchestrator_sessions: Vec<String>,
+) -> UsageReport {
     let mut acc = Accumulator::default();
+    let mut orch = Accumulator::default();
+    let split: HashSet<String> = orchestrator_sessions.into_iter().collect();
     let mut missing = Vec::new();
     let Some(home) = dirs::home_dir() else {
         return acc.finish(vec!["claude".into(), "codex".into(), "grok".into()]);
@@ -874,6 +910,7 @@ pub fn collect_usage_blocking(cwds: Vec<String>, days: u32) -> UsageReport {
         }
         let wanted = shortlist(files, cutoff, "claude", &mut seen_sessions);
         absorb_all(&mut acc, &wanted, parse_claude_file);
+        absorb_split(&mut orch, &wanted, &split, parse_claude_file);
     } else {
         missing.push("claude".to_string());
     }
@@ -895,6 +932,7 @@ pub fn collect_usage_blocking(cwds: Vec<String>, days: u32) -> UsageReport {
             .collect();
         let wanted = shortlist(mine, cutoff, "codex", &mut seen_sessions);
         absorb_all(&mut acc, &wanted, parse_codex_file);
+        absorb_split(&mut orch, &wanted, &split, parse_codex_file);
     } else {
         missing.push("codex".to_string());
     }
@@ -943,6 +981,7 @@ pub fn collect_usage_blocking(cwds: Vec<String>, days: u32) -> UsageReport {
                 }
             }
             absorb_all(&mut acc, &files, parse_grok_file);
+            absorb_split(&mut orch, &files, &split, parse_grok_file);
         } else {
             missing.push("grok".to_string());
         }
@@ -950,7 +989,30 @@ pub fn collect_usage_blocking(cwds: Vec<String>, days: u32) -> UsageReport {
         missing.push("grok".to_string());
     }
 
-    acc.finish(missing)
+    let mut report = acc.finish(missing);
+    report.orchestrator_total = orch.total();
+    report.orchestrator_sessions = orch.sessions;
+    report
+}
+
+/// Folds only the transcripts whose session id the split set names. Runs after
+/// [`absorb_all`] over the same batch, so every file it wants is a warm cache
+/// hit, never a second parse.
+fn absorb_split(
+    acc: &mut Accumulator,
+    files: &[Candidate],
+    split: &HashSet<String>,
+    parse: fn(&Path) -> FileUsage,
+) {
+    if split.is_empty() {
+        return;
+    }
+    let mine: Vec<Candidate> = files
+        .iter()
+        .filter(|c| session_key(&c.path).is_some_and(|k| split.contains(&k)))
+        .cloned()
+        .collect();
+    absorb_all(acc, &mine, parse);
 }
 
 #[cfg(test)]

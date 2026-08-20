@@ -747,6 +747,13 @@ export interface UsageReport {
   /** Ascending by day. */
   days: DayUsage[];
   sessions: number;
+  /**
+   * The orchestrators' own share of the totals, split out by the session ids
+   * the caller named. Zero when it named none, or when none matched.
+   */
+  orchestratorTotal: number;
+  /** How many of `sessions` belonged to an orchestrator thread. */
+  orchestratorSessions: number;
   /** Agents whose store is not on this machine at all, by icon key. */
   missing: string[];
   /**
@@ -777,7 +784,7 @@ export interface SessionApi {
    * rejection: the caller's own catch flattens a rejection into an empty
    * report, so the reason has to travel inside the answer to survive it.
    */
-  usage(cwds: string[], days: number): Promise<UsageReport>;
+  usage(cwds: string[], days: number, orchestratorSessions?: string[]): Promise<UsageReport>;
   /**
    * `ptyId` names the PTY asking. Its process holds the session the caller is
    * trying to bind, and that one alone is exempt from the liveness filter —
@@ -1089,6 +1096,18 @@ export interface PulseAnswer {
 }
 
 /** One line of the orchestrator conversation. */
+/** One thing an orchestrator caused, as the undo list reads it back. */
+export interface OrchestratorAction {
+  id: string;
+  orchestratorThreadId: string;
+  kind: string;
+  objectId: string | null;
+  projectId: string | null;
+  undoable: boolean;
+  at: number;
+  undoneAt: number | null;
+}
+
 export interface OrchestratorMessage {
   id: string;
   role: string;
@@ -1133,6 +1152,14 @@ export interface ConductApi {
    */
   start(params: { threadId: string; scope?: string | null }): Promise<{ threadId: string }>;
   status(params: { scope?: string | null }): Promise<{ threadId: string | null; state: string }>;
+  /** What the orchestrators caused, newest first, for the inbox's undo list. */
+  actions(params: { limit?: number }): Promise<OrchestratorAction[]>;
+  /**
+   * Un-does one recorded action. Local grant only on the bus: taking an
+   * action back is the user's, never an agent covering its tracks. Nothing
+   * committed is destroyed — a spawn is put away, a dismissal brought back.
+   */
+  undo(params: { actionId: string }): Promise<{ done: boolean }>;
   /**
    * The user's mute switch. Local grant on the bus: an agent never rearms a
    * thread the user cut. Muting also drops the thread's queued lines.
