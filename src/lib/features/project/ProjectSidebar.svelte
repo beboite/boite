@@ -904,6 +904,25 @@
         action: () => void muteProjectDispatches(project.id),
       });
     }
+    // The per-project override, cycled: inherit, on, off. The label carries
+    // where it stands; the overview holds the same choice as a select.
+    if (
+      settings.state.experimentOrchestrator &&
+      settings.state.experimentOrchestratorPerProject
+    ) {
+      const own = settings.state.orchestratorByProject[project.id] ?? null;
+      const state =
+        own === "on"
+          ? t("project.orchestratorOn")
+          : own === "off"
+            ? t("project.orchestratorOff")
+            : t("project.orchestratorInherit");
+      const next = own === null ? "on" : own === "on" ? "off" : null;
+      items.push({
+        label: t("sidebar.orchestratorTriState", { state }),
+        action: () => void settings.setOrchestratorForProject(project.id, next),
+      });
+    }
     items.push({ separator: true });
     items.push({
       label: t("sidebar.removeProject"),

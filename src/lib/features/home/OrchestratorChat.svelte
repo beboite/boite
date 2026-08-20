@@ -1,12 +1,34 @@
 <script lang="ts">
   import { t } from "$lib/i18n/index.svelte";
+  import { app } from "$lib/app/store.svelte";
   import { orchestrator } from "$lib/features/orchestrator/store.svelte";
+  import { settings } from "$lib/features/settings/store.svelte";
   import DashboardCard from "$lib/features/project/DashboardCard.svelte";
   import ChatMessage from "./ChatMessage.svelte";
   import MessageSquareIcon from "@lucide/svelte/icons/message-square";
 
   let draft = $state("");
   let list: HTMLUListElement | null = $state(null);
+
+  // One thread per scope: the workspace, plus every project the orchestrator
+  // watches while the per-project experiment is armed. Switching scopes swaps
+  // the conversation shown; each keeps its own cursor in the store.
+  const scopes = $derived(
+    settings.state.experimentOrchestratorPerProject
+      ? app.projects.filter((p) => !p.archived && orchestrator.enabledFor(p.id))
+      : [],
+  );
+
+  // A scope that vanished under the selector (project archived, override cut)
+  // falls back to the workspace rather than showing a chat nobody answers.
+  $effect(() => {
+    if (
+      orchestrator.scope !== null &&
+      !scopes.some((p) => p.id === orchestrator.scope)
+    ) {
+      orchestrator.scope = null;
+    }
+  });
 
   // Event-driven only: one catch-up read on mount, then the watch (desktop
   // Tauri event) or the control plane (remote) call in. No timer anywhere.
@@ -38,6 +60,20 @@
 
 <DashboardCard title={t("orchestrator.title")} flush>
   {#snippet icon()}<MessageSquareIcon class="size-3.5" />{/snippet}
+  {#snippet actions()}
+    {#if scopes.length > 0}
+      <select
+        class="max-w-36 rounded-md border border-border bg-[var(--color-surface-2)] px-1.5 py-0.5 text-xs text-muted-foreground outline-none focus:border-foreground/30"
+        aria-label={t("orchestrator.scopeLabel")}
+        bind:value={orchestrator.scope}
+      >
+        <option value={null}>{t("orchestrator.scopeWorkspace")}</option>
+        {#each scopes as project (project.id)}
+          <option value={project.id}>{project.name}</option>
+        {/each}
+      </select>
+    {/if}
+  {/snippet}
   <div class="flex max-h-80 min-h-40 flex-col">
     {#if orchestrator.conversation.messages.length === 0}
       <p class="flex-1 px-3.5 pb-2 text-sm text-muted-foreground">

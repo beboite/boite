@@ -106,6 +106,11 @@ export const SETTINGS_CATALOGUE: SettingEntry[] = [
     key: "experiments.orchestrator",
     descKey: "experiments.orchestratorDesc",
   },
+  {
+    tab: "experiments",
+    key: "experiments.orchestratorPerProject",
+    descKey: "experiments.orchestratorPerProjectDesc",
+  },
   { tab: "experiments", key: "experiments.infoBox", descKey: "experiments.infoBoxDesc" },
   { tab: "experiments", key: "experiments.smartSort", descKey: "experiments.smartSortDesc" },
   { tab: "experiments", key: "experiments.whip", descKey: "experiments.whipDesc" },

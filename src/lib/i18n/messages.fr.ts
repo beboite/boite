@@ -223,6 +223,8 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "experiments.orchestratorDesc": "Un agent au niveau du workspace, joignable depuis l'Accueil. Il observe le pouls et répond ; rien ne tourne avant votre premier message.",
   "experiments.orchestratorAgent": "Agent",
   "experiments.orchestratorBrokered": "Cet agent tourne sur un endpoint brokeré. Gardez les secrets hors de ce que l'orchestrateur peut lire.",
+  "experiments.orchestratorPerProject": "Orchestrateurs par projet",
+  "experiments.orchestratorPerProjectDesc": "Chaque projet peut porter son propre orchestrateur, activé ou coupé, à côté du global. Couper ce réglage restaure un orchestrateur global sans effacer les choix.",
   "experiments.whip": "Fouet",
   "experiments.whipDesc":
     "Met un fouet dans la barre de titre. On le lance, on le claque, un clic le lâche. Il claque et il fait du bruit, et il n'atteint aucun terminal : rien n'est envoyé, rien n'est interrompu.",
@@ -251,6 +253,13 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "orchestrator.noProject": "L'orchestrateur a besoin d'au moins un projet où vivre.",
   "orchestrator.startFailed": "L'orchestrateur n'a pas démarré : {error}",
   "orchestrator.postFailed": "Le message n'a pas été remis.",
+  "orchestrator.scopeLabel": "Portée de la conversation",
+  "orchestrator.scopeWorkspace": "Tout l'atelier",
+  "project.orchestrator": "Orchestrateur",
+  "project.orchestratorInherit": "hérite",
+  "project.orchestratorOn": "activé",
+  "project.orchestratorOff": "coupé",
+  "sidebar.orchestratorTriState": "Orchestrateur : {state}",
 
   "dispatch.notice": "envoyé par l'orchestrateur",
   "home.takeBackAll": "Tout reprendre",

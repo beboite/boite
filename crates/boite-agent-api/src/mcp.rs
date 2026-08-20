@@ -85,11 +85,12 @@ pub(crate) async fn endpoint(
     let handle = tokio::runtime::Handle::current();
     // The row is the authority on the role here — this door has the store in
     // reach, so no environment hint is even consulted.
-    let role = caller
+    let (role, scope) = caller
         .thread_id
         .as_deref()
         .and_then(|id| workspace.store().thread_orchestration(id))
-        .and_then(|(role, _, _)| role);
+        .map(|(role, scope, _)| (role, scope))
+        .unwrap_or((None, None));
     let answered = tokio::task::spawn_blocking(move || {
         let door = InProcess {
             router: crate::routes::open(workspace),
@@ -103,7 +104,7 @@ pub(crate) async fn endpoint(
         // an agent reaching the workspace over HTTP gets the same image the
         // stdio shim would have handed it.
         let blocks = |name: &str, args: &Value| boite_mcp::call_blocks(&door, name, args);
-        let instructions = boite_mcp::instructions_for_role(role.as_deref());
+        let instructions = boite_mcp::instructions_for_role(role.as_deref(), scope.as_deref());
         let service = rpc::Service {
             call: &call,
             blocks: Some(&blocks),
