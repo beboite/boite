@@ -616,6 +616,30 @@ impl Conduct {
                     }
                 }
                 store.stamp_orchestrator_role(&thread_id, scope.as_deref())?;
+                // The queue changes hands with the scope: what the global
+                // orchestrator queued into this project settles as refused,
+                // or a line queued under the old owner lands under the new
+                // one's watch. Each settle is a moment, so the old owner
+                // learns without polling.
+                if let Some(project) = scope.as_deref() {
+                    let now = crate::now_ms();
+                    for id in store.settle_dispatches_into_project(
+                        project,
+                        &thread_id,
+                        crate::orchestrator::dispatch::STATE_REFUSED,
+                        "SCOPE_TAKEN",
+                        now,
+                    )? {
+                        store.append_moment(
+                            "dispatch.settled",
+                            Some(project),
+                            Some(&id),
+                            "refused:SCOPE_TAKEN",
+                            "dispatch",
+                            now,
+                        )?;
+                    }
+                }
                 let seq = store.append_moment(
                     "orchestrator.started",
                     scope.as_deref(),
@@ -918,6 +942,47 @@ mod tests {
         )
         .unwrap();
         ask(&host, "orchestrator.start", json!({ "threadId": "b" })).unwrap();
+    }
+
+    /// Arming a project orchestrator empties the global one's backlog into
+    /// that project: the queue changed hands, and the old owner's queued
+    /// lines settle as refused rather than landing under the new watch.
+    #[test]
+    fn a_scoped_start_settles_the_global_backlog_into_its_project() {
+        let host = Rows::new("takeover");
+        let row = |id: &str, project: &str| {
+            json!({ "thread": { "id": id, "projectId": project, "label": "l", "cmd": "c", "args": [] } })
+        };
+        ask(&host, "thread.create", row("boss", "hub")).unwrap();
+        ask(&host, "thread.create", row("worker", "q")).unwrap();
+        ask(&host, "thread.create", row("qboss", "q")).unwrap();
+        ask(&host, "orchestrator.start", json!({ "threadId": "boss" })).unwrap();
+        let queued = ask(
+            &host,
+            "thread.dispatch",
+            json!({ "threadId": "boss", "toThreadId": "worker", "text": "line" }),
+        )
+        .unwrap();
+        let dispatch_id = queued["dispatchId"].as_str().unwrap().to_string();
+
+        ask(
+            &host,
+            "orchestrator.start",
+            json!({ "threadId": "qboss", "scope": "q" }),
+        )
+        .unwrap();
+
+        // The line never reaches a drain: it settled at the takeover.
+        let open = ask(&host, "dispatch.drain", json!({})).unwrap();
+        assert!(open.as_array().unwrap().is_empty(), "{open}");
+        // And the takeover's word stands: first writer wins.
+        let again = ask(
+            &host,
+            "dispatch.settle",
+            json!({ "dispatchId": dispatch_id, "state": "delivered" }),
+        )
+        .unwrap();
+        assert_eq!(again["settled"], json!(false));
     }
 
     /// The wait wakes on a record and never holds past its cap. The transport

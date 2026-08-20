@@ -470,13 +470,23 @@ async fn pulse(
         "agent-{}",
         caller.thread_id.as_deref().unwrap_or(&caller.project_id)
     );
+    // A scoped orchestrator reads its own project's pulse whatever it asks
+    // for. The clamp is the read side of the dispatch guard: one project,
+    // never a window into the rest of the workspace.
+    let clamp = caller
+        .thread_id
+        .as_deref()
+        .and_then(|id| workspace.store().thread_orchestration(id))
+        .filter(|(role, _, _)| role.as_deref() == Some(boite_core::orchestrator::ROLE))
+        .and_then(|(_, scope, _)| scope);
+    let project = clamp.or(q.project);
     let answered = tokio::task::spawn_blocking(move || {
         boite_core::command::conduct::read_pulse(
             workspace.store(),
             workspace.pulse_waiters().as_ref(),
             q.since_seq.unwrap_or(0),
             q.timeout_ms.unwrap_or(30_000),
-            q.project.as_deref(),
+            project.as_deref(),
             &waiter,
         )
     })
@@ -1142,6 +1152,23 @@ async fn thread_spawn(
         None => own_project.clone(),
     };
     let elsewhere = project_id != own_project;
+    let asking_thread = caller.thread_or_empty().to_string();
+    // A scoped orchestrator spawns inside its project or not at all: crossing
+    // over is MutateAcross, and that capability is exactly what its scope
+    // withholds. Named, not escalated, so the agent reports it as it is.
+    if elsewhere && !asking_thread.is_empty() {
+        if let Some((Some(role), Some(own), _)) =
+            workspace.store().thread_orchestration(&asking_thread)
+        {
+            if role == boite_core::orchestrator::ROLE && own != project_id {
+                return Ok(refused(format!(
+                    "OUT_OF_SCOPE: this orchestrator is scoped to {own}, and spawning into \
+                     {project_id} would mutate across it. That belongs to the workspace \
+                     orchestrator or to the user."
+                )));
+            }
+        }
+    }
     // Only when it lands somewhere else. Opening a second terminal beside your
     // own is what an agent splitting a job does, and asking for a wider grant
     // for it would make the capability mean "spawn", not "across".
@@ -1156,7 +1183,6 @@ async fn thread_spawn(
             return Ok(refusal);
         }
     }
-    let asking_thread = caller.thread_or_empty().to_string();
     // Non-negotiable cap for an orchestrator: the workers run on the user's
     // machine, and an unattended thread multiplying terminals is exactly the
     // process nobody is watching. Named so the agent reports it as it is.
