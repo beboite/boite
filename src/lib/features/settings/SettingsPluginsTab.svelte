@@ -1,19 +1,24 @@
 <script lang="ts">
   import FastpickSettingsCard from "./FastpickSettingsCard.svelte";
+  import KebaccSwitcherCard from "$lib/features/plugin/KebaccSwitcherCard.svelte";
   import CodexSwitcherCard from "$lib/features/plugin/CodexSwitcherCard.svelte";
   import FastMcpSshCard from "$lib/features/plugin/FastMcpSshCard.svelte";
-  import ToggleSetting from "$lib/shared/components/ToggleSetting.svelte";
-  import { settings } from "$lib/features/settings/store.svelte";
-  import { t } from "$lib/i18n/index.svelte";
 </script>
 
-<FastpickSettingsCard anchor="fastpick.settingsTitle" />
-<ToggleSetting
-  label={t("fastpick.enable")}
+<!--
+  The toggles live inside the cards. Their anchors stay named here so settings
+  search, which only reads this page, can still jump to them.
   anchor="fastpick.enable"
-  description={t("fastpick.enableDesc")}
-  enabled={settings.state.fastpickEnabled}
-  onToggle={() => settings.setFastpickEnabled(!settings.state.fastpickEnabled)}
+  anchor="plugin.kebaccClaude"
+  anchor="plugin.kebaccCodex"
+  anchor="plugin.kebaccAntigravity"
+-->
+<FastpickSettingsCard anchor="fastpick.settingsTitle" enableAnchor="fastpick.enable" />
+<KebaccSwitcherCard
+  anchor="plugin.kebaccTitle"
+  claudeAnchor="plugin.kebaccClaude"
+  codexAnchor="plugin.kebaccCodex"
+  antigravityAnchor="plugin.kebaccAntigravity"
 />
 <CodexSwitcherCard anchor="plugin.codexTitle" />
 <FastMcpSshCard anchor="plugin.fastMcpSshTitle" />

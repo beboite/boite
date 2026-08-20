@@ -3,6 +3,7 @@
   import { t } from "$lib/i18n/index.svelte";
   import { goToHomeProject } from "./store.svelte";
   import AgentsLive from "./AgentsLive.svelte";
+  import AccountsCard from "./AccountsCard.svelte";
   import WorkspaceTokens from "./WorkspaceTokens.svelte";
   import Inbox from "./Inbox.svelte";
   import OrchestratorChat from "./OrchestratorChat.svelte";
@@ -42,6 +43,7 @@
         <AgentsLive />
         <WorkspaceTokens />
         <Inbox />
+        <AccountsCard />
         {#if orchestrator.enabled}
           <div class="lg:col-span-3">
             <OrchestratorChat />

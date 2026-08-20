@@ -1,6 +1,6 @@
 <!--
   The half of a plugin card that is the same for every plugin: whether the
-  binary is here, the three cargo buttons, the build log and what it exited
+  binary is here, install/update/uninstall, the build log and what it exited
   with. What a given plugin can do once installed goes in the `children`
   snippet, which is the only part any of them disagree about.
 -->
@@ -16,7 +16,7 @@
   import Copy from "@lucide/svelte/icons/copy";
   import { t, type MessageKey } from "$lib/i18n/index.svelte";
   import { tip } from "$lib/shared/actions/tooltip";
-  import type { PluginInstaller } from "./installer.svelte";
+  import type { PluginInstallDriver } from "./installer.svelte";
   import type { PluginProbe } from "./spec";
 
   let {
@@ -29,6 +29,7 @@
     uninstall,
     probe,
     installer,
+    runningUpdateKey = "plugin.runningUpdate",
     children,
   }: {
     anchor: MessageKey;
@@ -40,7 +41,9 @@
     update: { cmd: string; args: string[] };
     uninstall: { cmd: string; args: string[] };
     probe: PluginProbe;
-    installer: PluginInstaller;
+    installer: PluginInstallDriver;
+    /** fastpick's update is a signed fetch, not a cargo rebuild. */
+    runningUpdateKey?: MessageKey;
     /** What this plugin offers once it is installed, if anything. */
     children?: Snippet;
   } = $props();
@@ -60,7 +63,7 @@
           case "uninstall":
             return t("plugin.runningUninstall");
           case "update":
-            return t("plugin.runningUpdate");
+            return t(runningUpdateKey);
           default:
             return t("plugin.runningInstall");
         }
@@ -148,7 +151,7 @@
       type="button"
       class="flex items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-1 text-xs text-foreground transition hover:border-foreground/30 disabled:cursor-not-allowed disabled:opacity-40"
       onclick={() => (installed ? installer.update() : installer.install())}
-      disabled={(!installed && cargoMissing) || installer.busy}
+      disabled={installer.busy || (primary.cmd === "cargo" && cargoMissing)}
       use:tip={line(primary)}
     >
       <Download class="size-3" />
@@ -159,7 +162,7 @@
         type="button"
         class="flex items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-1 text-xs text-muted-foreground transition hover:border-[var(--color-danger)] hover:text-[var(--color-danger)] disabled:cursor-not-allowed disabled:opacity-40"
         onclick={() => installer.uninstall()}
-        disabled={cargoMissing || installer.busy}
+        disabled={installer.busy || (uninstall.cmd === "cargo" && cargoMissing)}
         use:tip={line(uninstall)}
       >
         <Trash2 class="size-3" />
@@ -224,7 +227,7 @@
     </div>
   {/if}
 
-  {#if cargoMissing && !installed}
+  {#if cargoMissing && !installed && install.cmd === "cargo"}
     <p class="text-xs leading-snug text-[var(--color-warning)]">
       {t("plugin.needsCargo")}
     </p>

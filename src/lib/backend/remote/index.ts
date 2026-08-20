@@ -20,6 +20,8 @@ import type {
   CodexSwitcherApi,
   CodexSwitcherList,
   FastMcpSshApi,
+  KebaccSwitcherApi,
+  KebaccSwitcherList,
   FastpickApi,
   FastpickListing,
   FolderState,
@@ -98,6 +100,7 @@ export class RemoteBackend implements Backend {
   readonly fastpick: FastpickApi;
   readonly codexSwitcher: CodexSwitcherApi;
   readonly fastMcpSsh: FastMcpSshApi;
+  readonly kebaccSwitcher: KebaccSwitcherApi;
   readonly cli: CliApi;
   readonly scope: ScopeApi;
   readonly session: SessionApi;
@@ -451,6 +454,23 @@ export class RemoteBackend implements Backend {
     this.fastMcpSsh = {
       version: () =>
         rpc("fastMcpSsh.version", {}).then((r) => (r.version as string | null) ?? null),
+    };
+
+    this.kebaccSwitcher = {
+      list: (provider) =>
+        rpc("kebaccSwitcher.list", { provider: provider ?? null }).then(
+          (r) => JSON.parse(r.json as string) as KebaccSwitcherList,
+        ),
+      add: (provider) =>
+        rpc("kebaccSwitcher.add", { provider }).then(
+          (r) => JSON.parse(r.json as string) as KebaccSwitcherList,
+        ),
+      switchTo: (provider, email) =>
+        rpc("kebaccSwitcher.switch", { provider, email }).then(
+          (r) => JSON.parse(r.json as string) as KebaccSwitcherList,
+        ),
+      version: () =>
+        rpc("kebaccSwitcher.version", {}).then((r) => (r.version as string | null) ?? null),
     };
 
     // Installed on the machine the threads spawn on, which is this server. A

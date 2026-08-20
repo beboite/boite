@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { shouldReloadCodexThread } from "./restart";
+import {
+  accountProviderOf,
+  shouldReloadCodexThread,
+  shouldReloadProviderThread,
+} from "./restart";
 
 const base = {
   cmd: "codex",
@@ -30,5 +34,39 @@ describe("shouldReloadCodexThread", () => {
         ptyId: null,
       }),
     ).toBe(false);
+  });
+});
+
+describe("shouldReloadProviderThread", () => {
+  it("reloads a live Claude thread for a Claude switch", () => {
+    expect(
+      shouldReloadProviderThread(
+        { ...base, iconKey: "claude", cmd: "claude", label: "Claude" },
+        "claude",
+      ),
+    ).toBe(true);
+  });
+
+  it("reloads antigravity the same way", () => {
+    expect(
+      shouldReloadProviderThread(
+        { ...base, iconKey: "antigravity", cmd: "antigravity", label: "Antigravity" },
+        "antigravity",
+      ),
+    ).toBe(true);
+  });
+
+  it("leaves the other provider alone", () => {
+    expect(shouldReloadProviderThread(base, "claude")).toBe(false);
+  });
+
+  it("counts a fastpick Claude row as Claude", () => {
+    expect(
+      accountProviderOf({
+        iconKey: "claude",
+        cmd: "fastpick",
+        label: "Claude",
+      }),
+    ).toBe("claude");
   });
 });

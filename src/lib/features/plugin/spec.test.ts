@@ -1,12 +1,19 @@
 import { describe, expect, it } from "vitest";
 import { PLUGINS } from "./spec";
 import { CODEX_SWITCHER_CMD, CODEX_SWITCHER_REPO } from "./install";
+import { KEBACC_SWITCH_CMD, KEBACC_SWITCH_REPO } from "./install-kebacc";
 import { FAST_MCP_SSH_CMD, FAST_MCP_SSH_REPO } from "./fast-mcp-ssh";
 
 describe("plugin catalogue", () => {
   it("only lists published tools", () => {
     expect(PLUGINS.every((plugin) => plugin.repo.startsWith("https://"))).toBe(true);
     expect(PLUGINS.some((plugin) => plugin.id === "claude-switcher")).toBe(false);
+  });
+
+  it("names the published kebacc-switch repo", () => {
+    const kebacc = PLUGINS.find((plugin) => plugin.id === "kebacc-switch");
+    expect(kebacc?.repo).toBe(KEBACC_SWITCH_REPO);
+    expect(KEBACC_SWITCH_CMD).toBe("kebacc-switch");
   });
 
   it("names the real Codex CLI", () => {
