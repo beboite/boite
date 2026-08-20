@@ -83,3 +83,38 @@ export const easeOutQuint = bezier(EASE.outQuint);
 export const easeInOutQuad = bezier(EASE.inOutQuad);
 /** Overshoots past 1 before settling. Only for the reward moments. */
 export const easeSpring = bezier(EASE.spring);
+
+/**
+ * The app's own animation switch rather than the OS one.
+ *
+ * `applyMotionPreference` folds the OS query and the in-app choice into
+ * `data-motion`, so this reads the answer both have already agreed on: an
+ * in-app "off" wins over an OS that never asked for it, and an OS that did is
+ * honoured by "system". Everything that animates from JS asks here, the CSS
+ * gate in `app.css` covering everything that animates from a stylesheet.
+ */
+export function motionReduced(doc: Document = document): boolean {
+  return doc.documentElement.dataset.motion === "reduced";
+}
+
+/**
+ * `scrollIntoView` with the travel the app's motion preference allows.
+ *
+ * Six call sites moved a list under the keyboard by teleporting it, which is
+ * the one moment a jump costs something: the row the user was reading is gone
+ * before the eye has followed it anywhere. Smooth is not decoration here, it is
+ * the thread between where the selection was and where it went.
+ *
+ * `block: "nearest"` by default because that is what every caller wanted: a row
+ * already on screen should not move at all, and only the ones that scrolled off
+ * should bring themselves back.
+ */
+export function scrollIntoViewSmooth(
+  node: Element | null | undefined,
+  options: Omit<ScrollIntoViewOptions, "behavior"> = { block: "nearest" },
+): void {
+  node?.scrollIntoView({
+    ...options,
+    behavior: motionReduced() ? "auto" : "smooth",
+  });
+}

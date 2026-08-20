@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
+  import { tip } from "$lib/shared/actions/tooltip";
   import { t } from "$lib/i18n/index.svelte";
   import {
     launchFastpick,
@@ -306,7 +307,7 @@
         class="flex items-center rounded p-0.5 transition hover:bg-accent hover:text-foreground"
         onclick={back}
         aria-label={t("fastpick.back")}
-        title={t("fastpick.back")}
+        use:tip={t("fastpick.back")}
       >
         <ChevronLeft class="size-3.5" />
       </button>
@@ -323,7 +324,7 @@
         class="ml-auto flex items-center rounded p-0.5 transition hover:bg-accent hover:text-foreground"
         onclick={() => providerId && fastpick.loadModels(providerId, true)}
         aria-label={t("fastpick.refresh")}
-        title={t("fastpick.refresh")}
+        use:tip={t("fastpick.refresh")}
       >
         <RefreshCw class="size-3" />
       </button>
@@ -345,7 +346,7 @@
     </div>
   {/if}
 
-  <div class="flex min-h-0 flex-col overflow-y-auto p-1">
+  <div class="flex min-h-0 flex-col scroll-pane overflow-y-auto p-1">
     {#if fastpick.loading}
       <div class="px-2 py-1.5 text-xs text-muted-foreground">{t("common.loading")}</div>
     {:else if fastpick.error}
@@ -432,7 +433,7 @@
                 class="flex shrink-0 items-center rounded-r border-l border-border/60 px-1.5 text-muted-foreground/70 transition hover:bg-[var(--color-surface-3)] hover:text-foreground focus-visible:bg-[var(--color-surface-3)] focus-visible:text-foreground focus-visible:outline-none group-hover:text-foreground/70"
                 onclick={(e) => openOptions(m, e)}
                 aria-label={t("fastpick.options")}
-                title={t("fastpick.options")}
+                use:tip={t("fastpick.options")}
               >
                 <ChevronRight class="size-3.5" />
               </button>

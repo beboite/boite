@@ -1,5 +1,6 @@
 <script lang="ts">
   import { app } from "$lib/app/store.svelte";
+  import { tip } from "$lib/shared/actions/tooltip";
   import { backendForPath } from "$lib/backend";
   import type { CheckpointFile } from "$lib/backend/types";
   import DashboardCard from "$lib/features/project/DashboardCard.svelte";
@@ -152,7 +153,7 @@
   {:else if turns.length === 0}
     <p class="px-3.5 pb-3 text-sm text-muted-foreground">{t("turns.none")}</p>
   {:else}
-    <ul class="flex max-h-64 flex-col overflow-y-auto px-2 pb-2">
+    <ul class="flex max-h-64 flex-col scroll-pane overflow-y-auto px-2 pb-2">
       {#each turns as turn (turn.id)}
         <li>
           <div class="flex items-center gap-1">
@@ -185,7 +186,7 @@
               class="shrink-0 rounded-sm p-1.5 text-muted-foreground/70 transition hover:bg-accent hover:text-foreground disabled:opacity-40"
               onclick={() => revert(turn)}
               disabled={reverting}
-              title={t("turns.revert")}
+              use:tip={t("turns.revert")}
               aria-label={t("turns.revert")}
             >
               <Undo2 class="size-3.5" />

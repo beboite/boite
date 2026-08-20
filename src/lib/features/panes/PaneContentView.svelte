@@ -66,7 +66,7 @@
   {:else if content.kind === "dashboard"}
     {#if project && OverviewView.current}
       {@const OverviewComp = OverviewView.current}
-      <div class="h-full overflow-y-auto p-3">
+      <div class="h-full scroll-pane overflow-y-auto p-3">
         <OverviewComp {project} onOpenThread={openThread} />
       </div>
     {:else}

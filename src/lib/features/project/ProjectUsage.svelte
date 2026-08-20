@@ -1,5 +1,6 @@
 <script lang="ts">
   import { untrack } from "svelte";
+  import { tip } from "$lib/shared/actions/tooltip";
   import { app } from "$lib/app/store.svelte";
   import DashboardCard from "./DashboardCard.svelte";
   import { formatTokens as fmt, projectUsage } from "./usage.svelte";
@@ -334,7 +335,7 @@
       class="rounded-sm p-1 text-muted-foreground transition hover:bg-accent hover:text-foreground disabled:opacity-40"
       onclick={load}
       disabled={loading}
-      title={t("project.tokensRefresh")}
+      use:tip={t("project.tokensRefresh")}
       aria-label={t("project.tokensRefresh")}
     >
       <RefreshCw class={["size-3.5", loading && "animate-spin"]} />
@@ -386,7 +387,7 @@
           <ShortcutIcon iconKey={providerIcon(model.provider)} size={13} />
           <span
             class="w-24 shrink-0 truncate text-sm text-foreground/85"
-            title={model.model}
+            use:tip={model.model}
             aria-hidden="true"
           >
             {shortModel(model.model)}

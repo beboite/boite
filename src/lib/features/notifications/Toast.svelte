@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { tip } from "$lib/shared/actions/tooltip";
   import { t } from "$lib/i18n/index.svelte";
   import X from "@lucide/svelte/icons/x";
   import type { ToastKind } from "./store.svelte";
@@ -66,7 +67,7 @@
     class="dismiss"
     onclick={onDone}
     aria-label={t("common.dismiss")}
-    title={t("common.dismiss")}
+    use:tip={t("common.dismiss")}
   >
     <X class="size-3" />
   </button>

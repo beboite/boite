@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { tip } from "$lib/shared/actions/tooltip";
   import { fastpick } from "$lib/features/fastpick/store.svelte";
   import { installer } from "$lib/features/fastpick/installer.svelte";
   import {
@@ -108,7 +109,7 @@
       class="flex items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-1 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground disabled:opacity-50"
       onclick={() => fastpick.probe()}
       disabled={fastpick.probing}
-      title={t("fastpick.recheck")}
+      use:tip={t("fastpick.recheck")}
     >
       <RefreshCw class="size-3 {fastpick.probing ? 'animate-spin' : ''}" />
       {t("fastpick.recheck")}
@@ -138,7 +139,7 @@
       class="flex items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-1 text-xs text-foreground transition hover:border-foreground/30 disabled:cursor-not-allowed disabled:opacity-40"
       onclick={() => (installed ? installer.update() : installer.install())}
       disabled={(!installed && cargoMissing) || installer.busy}
-      title={line(primary)}
+      use:tip={line(primary)}
     >
       <Download class="size-3" />
       {installed ? t("fastpick.update") : t("fastpick.install")}
@@ -149,7 +150,7 @@
         class="flex items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-1 text-xs text-muted-foreground transition hover:border-[var(--color-danger)] hover:text-[var(--color-danger)] disabled:cursor-not-allowed disabled:opacity-40"
         onclick={() => installer.uninstall()}
         disabled={cargoMissing || installer.busy}
-        title={line(uninstall)}
+        use:tip={line(uninstall)}
       >
         <Trash2 class="size-3" />
         {t("fastpick.uninstall")}
@@ -205,7 +206,7 @@
     <div
       bind:this={logBox}
       onscroll={onLogScroll}
-      class="max-h-52 min-h-24 overflow-y-auto rounded-md border border-border bg-[var(--color-titlebar)] p-2 font-mono text-xs leading-snug"
+      class="max-h-52 min-h-24 scroll-pane overflow-y-auto rounded-md border border-border bg-[var(--color-titlebar)] p-2 font-mono text-xs leading-snug"
     >
       <!-- Unkeyed on purpose. The tail rolls, so every line's content changes
            under a fixed position: keying on the text would rebuild the whole

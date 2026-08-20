@@ -53,15 +53,19 @@
     "Then to 880640, for the dispatch device half: the layout mounts the queue",
     "watcher and every terminal registers its sink before first paint, or a line",
     "queued during boot finds no device. Measured at 852.4 KB, 7.6 KB spare.",
-    "Then to 890880, for the CLI manager types, i18n and catalogue row: the",
-    "settings store hydrates on boot and the shortcut bar reads the presets,",
-    "so neither can be lazy. Measured at 863.3 KB, so this leaves 6.7 KB.",
+    "Then to 893952, for the overlay tooltip and edge-fade: they replaced the",
+    "title attribute on controls the titlebar, sidebar and shortcut bar draw",
+    "before first paint, so both are on the boot path by construction.",
+    "Measured at 866.4 KB, so this leaves 6.6 KB.",
+    "Then to 899072, for the CLI manager types, i18n and catalogue row on top",
+    "of that: the settings store hydrates on boot and the shortcut bar reads",
+    "the presets. CLI manager measured 863.3 KB on the previous ceiling.",
     "",
     "largestEagerChunkBytes moved with it, 256000 -> 262144. The main route is",
     "the chunk in question and it had 0.2 KB left, which is a ceiling that fails",
     "the next commit whatever the next commit is."
   ],
-  "eagerBytes": 890880,
+  "eagerBytes": 899072,
   "totalBytes": 6144000,
   "largestEagerChunkBytes": 262144
 }
