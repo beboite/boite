@@ -244,6 +244,7 @@ fn find_opencode_session_by_activity(
             return Some(SessionHit {
                 id,
                 modified_ms: (activity_ms > 0).then_some(activity_ms),
+                title: None,
             });
         }
     }
@@ -284,6 +285,7 @@ fn find_opencode_session_by_created(
             return Some(SessionHit {
                 id,
                 modified_ms: created_ms.filter(|ms| *ms > 0),
+                title: None,
             });
         }
     }

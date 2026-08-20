@@ -51,6 +51,32 @@ describe("isGenericTitle", () => {
     expect(isGenericTitle("anything", "")).toBe(false);
   });
 
+  it("treats common tool and shell command executions as generic so thread names are not corrupted", () => {
+    for (const title of [
+      "git status",
+      "git diff",
+      "git log",
+      "cargo test",
+      "cargo build",
+      "bun run check",
+      "npm test",
+      "python script.py",
+      "pytest",
+      "dir",
+      "ls -la",
+    ]) {
+      expect(isGenericTitle(title), title).toBe(true);
+    }
+  });
+
+  it("does not treat an English sentence that starts with a tool word as generic", () => {
+    expect(isGenericTitle("find the bug")).toBe(false);
+    expect(isGenericTitle("go to the store")).toBe(false);
+    expect(isGenericTitle("make it work")).toBe(false);
+    expect(isGenericTitle("find")).toBe(true);
+    expect(isGenericTitle("go test")).toBe(true);
+  });
+
   it("stays consistent with the Rust implementation for the shared cases", () => {
     // status.rs derives the same thing server-side; a title that is generic on
     // one side and not the other renames a thread only in remote mode.
@@ -59,6 +85,9 @@ describe("isGenericTitle", () => {
       ["pwsh", null],
       ["cmd.exe", null],
       ["boite", "/home/nuno/boite"],
+      ["git status", null],
+      ["cargo test", null],
+      ["bun run check", null],
     ];
     for (const [title, cwd] of shared) {
       expect(isGenericTitle(title, cwd), title).toBe(true);
