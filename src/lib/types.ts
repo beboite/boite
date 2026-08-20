@@ -279,6 +279,13 @@ export interface Settings {
    */
   fastpickEnabled: boolean;
   /**
+   * Which kebacc-switch providers Home draws. Device-scoped: the dashboard is
+   * this window's, and a phone hiding Codex must not hide it on the desktop.
+   */
+  kebaccClaude: boolean;
+  kebaccCodex: boolean;
+  kebaccAntigravity: boolean;
+  /**
    * Tint a thread's agent icon with what is actually answering it. A fastpick thread keeps
    * the agent's own glyph, so without this nothing on screen tells a stock Claude apart
    * from a Claude pointed at another endpoint.

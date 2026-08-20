@@ -60,7 +60,9 @@
     "Then to 899072, for the CLI manager types, i18n and catalogue row on top",
     "of that: the settings store hydrates on boot and the shortcut bar reads",
     "the presets. CLI manager measured 863.3 KB on the previous ceiling.",
-    "Then to 913408, for configuration sync on top of that: the English strings,",
+    "Then to 903552, for the kebacc accounts card and shared plugin install",
+    "card on top of that.",
+    "Then to 917888, for configuration sync on top of that: the English strings,",
     "the settings tab and the store the launch pull puts on the boot path.",
     "The merge view stays behind import(); a test in the sync slice asserts the",
     "store imports no @codemirror.",
@@ -69,7 +71,7 @@
     "the chunk in question and it had 0.2 KB left, which is a ceiling that fails",
     "the next commit whatever the next commit is."
   ],
-  "eagerBytes": 913408,
+  "eagerBytes": 917888,
   "totalBytes": 6144000,
   "largestEagerChunkBytes": 262144
 }

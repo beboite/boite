@@ -1,6 +1,7 @@
 import type { MessageKey } from "$lib/i18n/messages";
 import { FASTPICK_REPO } from "$lib/features/fastpick/install";
 import { CODEX_SWITCHER_REPO } from "./install";
+import { KEBACC_SWITCH_REPO } from "./install-kebacc";
 import { FAST_MCP_SSH_REPO } from "./fast-mcp-ssh";
 
 /**
@@ -35,6 +36,12 @@ export const PLUGINS: PluginSpec[] = [
     titleKey: "fastpick.settingsTitle",
     descKey: "fastpick.settingsDesc",
     repo: FASTPICK_REPO,
+  },
+  {
+    id: "kebacc-switch",
+    titleKey: "plugin.kebaccTitle",
+    descKey: "plugin.kebaccDesc",
+    repo: KEBACC_SWITCH_REPO,
   },
   {
     id: "codex-account-switcher",

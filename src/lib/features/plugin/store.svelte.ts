@@ -1,10 +1,33 @@
 import { backend } from "$lib/backend";
-import type { Backend, CodexSwitcherAccount } from "$lib/backend/types";
+import type {
+  Backend,
+  CodexSwitcherAccount,
+  KebaccSwitcherAccount,
+  KebaccSwitcherProvider,
+} from "$lib/backend/types";
 import { app } from "$lib/app/store.svelte";
 import { ptyKill } from "$lib/storage/pty";
 import { CODEX_SWITCHER_CMD } from "./install";
 import { FAST_MCP_SSH_CMD } from "./fast-mcp-ssh";
-import { shouldReloadCodexThread } from "./restart";
+import { shouldReloadCodexThread, shouldReloadProviderThread } from "./restart";
+import type { Thread } from "$lib/types";
+
+async function killThreads(threads: Thread[]): Promise<void> {
+  for (const thread of threads) {
+    if (thread.ptyId) {
+      await ptyKill(thread.ptyId, true).catch(() => {});
+      thread.ptyId = null;
+      thread.status = "idle";
+    }
+  }
+}
+
+function respawnThreads(threads: Thread[]): number {
+  for (const thread of threads) {
+    app.bumpRespawn(thread.id);
+  }
+  return threads.length;
+}
 
 class CodexSwitcherStore {
   installed = $state<boolean | null>(null);
@@ -93,20 +116,12 @@ class CodexSwitcherStore {
     this.error = null;
     const threads = app.threads.filter(shouldReloadCodexThread);
     try {
-      for (const thread of threads) {
-        if (thread.ptyId) {
-          await ptyKill(thread.ptyId, true).catch(() => {});
-          thread.ptyId = null;
-          thread.status = "idle";
-        }
-      }
+      await killThreads(threads);
       await from.codexSwitcher.activate(accountId);
       if (this.#answeredBy !== from) return 0;
-      for (const thread of threads) {
-        app.bumpRespawn(thread.id);
-      }
+      const n = respawnThreads(threads);
       await this.probe();
-      return threads.length;
+      return n;
     } catch (err) {
       if (this.#answeredBy === from) this.error = String(err);
       return 0;
@@ -173,3 +188,109 @@ class FastMcpSshStore {
 }
 
 export const fastMcpSsh = new FastMcpSshStore();
+
+class KebaccSwitcherStore {
+  installed = $state<boolean | null>(null);
+  version = $state<string | null>(null);
+  cargoPresent = $state<boolean | null>(null);
+  providers = $state<KebaccSwitcherProvider[]>([]);
+  error = $state<string | null>(null);
+  switching = $state(false);
+  probing = $state(false);
+
+  #answeredBy: Backend | null = null;
+
+  #adopt(from: Backend): void {
+    if (this.#answeredBy === from) return;
+    this.#answeredBy = from;
+    this.installed = null;
+    this.version = null;
+    this.cargoPresent = null;
+    this.providers = [];
+    this.error = null;
+    this.switching = false;
+    this.probing = false;
+  }
+
+  accountsOf(provider: string): KebaccSwitcherAccount[] {
+    return this.providers.find((row) => row.provider === provider)?.accounts ?? [];
+  }
+
+  labelOf(provider: string): string | null {
+    return this.providers.find((row) => row.provider === provider)?.label ?? null;
+  }
+
+  async probe(): Promise<void> {
+    const from = backend();
+    this.#adopt(from);
+    this.probing = true;
+    this.error = null;
+    try {
+      const [version, cargoPresent] = await Promise.all([
+        from.kebaccSwitcher.version(),
+        from.shell.commandExists("cargo"),
+      ]);
+      if (this.#answeredBy !== from) return;
+      this.version = version;
+      this.installed = version !== null;
+      this.cargoPresent = cargoPresent;
+      if (!version) {
+        this.providers = [];
+        return;
+      }
+      const list = await from.kebaccSwitcher.list("all").then(
+        (doc) => ({ ok: true as const, doc }),
+        (err: unknown) => ({ ok: false as const, err: String(err) }),
+      );
+      if (this.#answeredBy !== from) return;
+      if (list.ok) {
+        this.providers = list.doc.providers ?? [];
+      } else {
+        this.providers = [];
+        this.error = list.err;
+      }
+    } catch (err) {
+      if (this.#answeredBy === from) this.error = String(err);
+    } finally {
+      if (this.#answeredBy === from) this.probing = false;
+    }
+  }
+
+  async saveCurrent(provider: string): Promise<void> {
+    const from = backend();
+    this.#adopt(from);
+    this.switching = true;
+    this.error = null;
+    try {
+      await from.kebaccSwitcher.add(provider);
+      await this.probe();
+    } catch (err) {
+      if (this.#answeredBy === from) this.error = String(err);
+    } finally {
+      if (this.#answeredBy === from) this.switching = false;
+    }
+  }
+
+  async switchTo(provider: string, email: string): Promise<number> {
+    const from = backend();
+    this.#adopt(from);
+    this.switching = true;
+    this.error = null;
+    const threads = app.threads.filter((thread) => shouldReloadProviderThread(thread, provider));
+    try {
+      await killThreads(threads);
+      await from.kebaccSwitcher.switchTo(provider, email);
+      if (this.#answeredBy !== from) return 0;
+      const n = respawnThreads(threads);
+      await this.probe();
+      return n;
+    } catch (err) {
+      if (this.#answeredBy === from) this.error = String(err);
+      return 0;
+    } finally {
+      if (this.#answeredBy === from) this.switching = false;
+    }
+  }
+}
+
+export const kebaccSwitcher = new KebaccSwitcherStore();

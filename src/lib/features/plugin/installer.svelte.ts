@@ -11,12 +11,17 @@ import {
   updateCommand as codexUpdate,
 } from "./install";
 import {
+  kebaccInstallCommand,
+  kebaccUninstallCommand,
+  kebaccUpdateCommand,
+} from "./install-kebacc";
+import {
   installCommand as sshInstall,
   uninstallCommand as sshUninstall,
   updateCommand as sshUpdate,
 } from "./fast-mcp-ssh";
 import { InstallOutput, TerminalQueries } from "$lib/features/fastpick/install-output";
-import { codexSwitcher, fastMcpSsh } from "./store.svelte";
+import { codexSwitcher, fastMcpSsh, kebaccSwitcher } from "./store.svelte";
 import type { PtyEvent } from "$lib/backend/types";
 import type { Project } from "$lib/types";
 
@@ -73,6 +78,27 @@ export type InstallAction = "install" | "update" | "uninstall";
 export type CommandSet = Record<InstallAction, () => { cmd: string; args: string[] }>;
 
 export type InstallStatus = "idle" | "running" | "done" | "failed" | "cancelled";
+
+/**
+ * What PluginInstallCard reads. Fastpick's installer is a sibling class with
+ * the same surface, so the card is typed against this rather than the cargo
+ * class.
+ */
+export type PluginInstallDriver = {
+  status: InstallStatus;
+  action: InstallAction | null;
+  busy: boolean;
+  lines: string[];
+  failure: string | null;
+  exitCode: number | null;
+  hasOutput: boolean;
+  install(): Promise<void>;
+  update(): Promise<void>;
+  uninstall(): Promise<void>;
+  cancel(): void;
+  retry(): Promise<void>;
+  dismiss(): void;
+};
 
 /**
  * Where to run it. Any project will do: this installs a binary, not something
@@ -392,6 +418,16 @@ export const fastMcpSshInstaller = new PluginInstaller(
   "fast-mcp-ssh",
   { install: sshInstall, update: sshUpdate, uninstall: sshUninstall },
   () => void fastMcpSsh.probe(),
+);
+
+export const kebaccInstaller = new PluginInstaller(
+  "kebacc-switch",
+  {
+    install: kebaccInstallCommand,
+    update: kebaccUpdateCommand,
+    uninstall: kebaccUninstallCommand,
+  },
+  () => void kebaccSwitcher.probe(),
 );
 
 /**
