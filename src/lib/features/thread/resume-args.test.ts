@@ -338,6 +338,9 @@ describe("unattended spawn flags", () => {
     expect(withUnattendedArgs("agy", [], "antigravity")).toEqual([
       "--dangerously-skip-permissions",
     ]);
+    expect(withUnattendedArgs("claude", [], "claude")).toEqual([]);
+    expect(withUnattendedArgs("codex", [], "codex")).toEqual([]);
+    expect(withUnattendedArgs("opencode", [], "opencode")).toEqual([]);
   });
 
   it("does not add it twice", () => {
@@ -346,9 +349,9 @@ describe("unattended spawn flags", () => {
     ).toEqual(["--dangerously-skip-permissions"]);
   });
 
-  it("leaves every other agent alone", () => {
-    expect(withUnattendedArgs("claude", [], "claude")).toEqual([]);
-    expect(withUnattendedArgs("agy", [], "claude")).toEqual([]);
+  it("leaves agents without unattended flag or null key alone", () => {
+    expect(withUnattendedArgs("pi", [], "pi")).toEqual([]);
+    expect(withUnattendedArgs("custom", [], null)).toEqual([]);
   });
 
   it("lands on the agent's side of a fastpick launch", () => {

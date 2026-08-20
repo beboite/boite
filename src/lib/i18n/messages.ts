@@ -122,6 +122,13 @@ export const EN_MESSAGES = {
   "shortcuts.detectionTargetLocal": "this computer",
   "shortcuts.checking": "Checking…",
   "shortcuts.recheck": "Check again",
+  "shortcuts.yoloBadge": "YOLO",
+  "shortcuts.yoloMode": "YOLO mode",
+  "shortcuts.yoloWarningTitle": "Enable YOLO mode for {label}?",
+  "shortcuts.yoloWarningMessage": "This adds {flag} to the launch command. The agent will execute tools, commands, and edits without asking for confirmation.",
+  "shortcuts.enableYolo": "Enable YOLO",
+  "shortcuts.yoloActive": "YOLO active: auto-approves tool calls",
+  "shortcuts.yoloInactive": "Standard mode: asks for confirmation",
 
   "appearance.theme": "Theme",
   "appearance.themeDesc": "System follows your OS light or dark setting.",
