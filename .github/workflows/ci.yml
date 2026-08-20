@@ -150,7 +150,14 @@ jobs:
   # key already in play. A `windows` bump to a version tauri is not on did
   # exactly that — every `win.hwnd()` call stopped compiling while ci stayed
   # green — and nothing would have said so before the four platform runners
-  # started. Two `cargo check`s are cheaper than a release that fails half way.
+  # started. Two runs here are cheaper than a release that fails half way.
+  #
+  # It runs the workspace, not just `-p boite`, and it lints and tests rather
+  # than checking. `boite-core` carries twenty-odd `cfg(windows)` and
+  # `cfg(target_os = "macos")` sites of its own — the shell it spawns, the paths
+  # it joins, the editor it opens — and its three hundred tests only ever ran on
+  # Linux, where none of those arms exist. Clippy subsumes the `cargo check`
+  # this replaces: it type-checks everything it lints.
   desktop:
     strategy:
       fail-fast: false
@@ -180,8 +187,10 @@ jobs:
           triple=$(rustc -vV | sed -n 's/^host: //p')
           if [ "${{ runner.os }}" = "Windows" ]; then ext=".exe"; else ext=""; fi
           cp "target/debug/boite-mcp$ext" "src-tauri/binaries/boite-mcp-$triple$ext"
-      - name: cargo check
-        run: cargo check -p boite --all-targets
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets --no-deps -- -D warnings
+      - name: cargo test
+        run: cargo test --workspace
 
   # The real-time path — spawn, live output, detach, replay on reattach, two
   # devices on one thread — is what a broken release breaks first, and the unit

@@ -25,6 +25,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use serde::Serialize;
 
@@ -270,11 +271,28 @@ fn write_worktree_tree(repo: &Path, index: &TempIndex) -> Result<String, String>
     add.args(["add", "-A"]);
     git_run(add)?;
 
-    let mut write = git_cmd(repo);
-    with_temp_index(&mut write, index);
-    write.arg("write-tree");
-    let out = git_run(write)?;
-    Ok(String::from_utf8_lossy(&out).trim().to_string())
+    let mut last_err = String::new();
+    for attempt in 0..4 {
+        let mut write = git_cmd(repo);
+        with_temp_index(&mut write, index);
+        write.arg("write-tree");
+        match git_run(write) {
+            Ok(out) => return Ok(String::from_utf8_lossy(&out).trim().to_string()),
+            Err(e) if windows_object_lock(&e) && attempt < 3 => {
+                last_err = e;
+                std::thread::sleep(Duration::from_millis(15 * (attempt + 1) as u64));
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    Err(last_err)
+}
+
+/// Windows refuses a second create of the same loose object while the first
+/// write still holds the file. Four threads checkpointing one worktree all
+/// write the same blobs, and `write-tree` then fails with Permission denied.
+fn windows_object_lock(err: &str) -> bool {
+    err.contains("Permission denied") && err.contains(".git/objects/")
 }
 
 fn is_repo(repo: &Path) -> bool {

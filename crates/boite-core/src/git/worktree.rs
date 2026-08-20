@@ -360,9 +360,12 @@ fn take_marker(dir: &Path) -> bool {
     spare_marker(dir).is_some_and(|marker| fs::remove_file(marker).is_ok())
 }
 
-/// Same directory, whatever the platform spelled it as. Compared as text rather
-/// than canonicalized: canonicalizing costs syscalls per call and resolves
-/// symlinks, and both paths here were written by this app.
+/// Same directory, whatever the platform spelled it as.
+///
+/// Text first: both paths were usually written by this app. Git's porcelain
+/// list is the exception. It prints the canonical form, so `/var` becomes
+/// `/private/var` on macOS and Windows may 8.3-shorten a name. Canonicalize
+/// only when the strings disagree, and only then.
 fn same_dir(a: &Path, b: &Path) -> bool {
     let norm = |p: &Path| {
         p.to_string_lossy()
@@ -370,7 +373,13 @@ fn same_dir(a: &Path, b: &Path) -> bool {
             .trim_end_matches('/')
             .to_lowercase()
     };
-    norm(a) == norm(b)
+    if norm(a) == norm(b) {
+        return true;
+    }
+    match (fs::canonicalize(a), fs::canonicalize(b)) {
+        (Ok(ca), Ok(cb)) => norm(&ca) == norm(&cb),
+        _ => false,
+    }
 }
 
 struct Spare {
@@ -2488,6 +2497,11 @@ mod worktree_tests {
 
     /// The whole point of the fallback: the dependency artifacts arrive without
     /// costing disk, and nothing a build rewrites comes with them.
+    ///
+    /// macOS takes `clonefile` first, which is copy-on-write: a write through
+    /// the main checkout does not appear in the worktree. This assertion is
+    /// about hard links, the path Linux and Windows actually take.
+    #[cfg(not(target_os = "macos"))]
     #[test]
     fn build_output_arrives_as_links_for_dependencies_only() {
         let f = Fixture::new();
@@ -2551,6 +2565,10 @@ mod worktree_tests {
     /// The fallback refuses rather than guesses. A manifest that names no
     /// package leaves no way to tell a local artifact from a vendored one, and
     /// linking the wrong one is the failure this whole design exists to avoid.
+    ///
+    /// macOS never reaches this path: `clonefile` clones the whole tree before
+    /// package names are asked, and a CoW clone does not need them.
+    #[cfg(not(target_os = "macos"))]
     #[test]
     fn build_output_is_left_alone_when_the_packages_cannot_be_identified() {
         let f = Fixture::new();
