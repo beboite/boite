@@ -66,29 +66,34 @@ export function snapPoint(pane: Size, box: Size, gutter: number, anchor: InfoBox
   }
 }
 
-/** Nearest of the eight docks to a free-floating top-left. */
-export function nearestAnchor(
+/**
+ * Dock for a bare point in the pane, by thirds rather than by distance.
+ *
+ * Measuring box centre against dock centre, which is what this replaced, makes
+ * a wide box in a narrow pane pack its three columns within a few dozen pixels,
+ * so the drag has to be aimed. This reads the pointer: the pane is a 3x3 grid, drop
+ * anywhere in a third and that third wins. The middle cell has no dock, so it
+ * resolves on the dominant axis away from the pane centre, and a release on the
+ * exact centre keeps `fallback` rather than jumping somewhere arbitrary.
+ */
+export function anchorForPoint(
   pane: Size,
-  box: Size,
-  gutter: number,
   x: number,
   y: number,
+  fallback: InfoBoxAnchor,
 ): InfoBoxAnchor {
-  const cx = x + box.w / 2;
-  const cy = y + box.h / 2;
-  let best: InfoBoxAnchor = "top-right";
-  let bestD = Number.POSITIVE_INFINITY;
-  for (const anchor of INFO_BOX_ANCHORS) {
-    const p = snapPoint(pane, box, gutter, anchor);
-    const dx = cx - (p.x + box.w / 2);
-    const dy = cy - (p.y + box.h / 2);
-    const d = dx * dx + dy * dy;
-    if (d < bestD) {
-      bestD = d;
-      best = anchor;
-    }
-  }
-  return best;
+  if (pane.w <= 0 || pane.h <= 0) return fallback;
+  const ux = clamp(x / pane.w, 0, 1);
+  const uy = clamp(y / pane.h, 0, 1);
+  const col = ux < 1 / 3 ? "left" : ux > 2 / 3 ? "right" : "center";
+  const row = uy < 1 / 3 ? "top" : uy > 2 / 3 ? "bottom" : "mid";
+  if (row !== "mid") return `${row}-${col}` as InfoBoxAnchor;
+  if (col !== "center") return `mid-${col}` as InfoBoxAnchor;
+  const offX = ux - 0.5;
+  const offY = uy - 0.5;
+  if (offX === 0 && offY === 0) return fallback;
+  if (Math.abs(offX) >= Math.abs(offY)) return offX < 0 ? "mid-left" : "mid-right";
+  return offY < 0 ? "top-center" : "bottom-center";
 }
 
 /** Keep a free-floating top-left inside the pane, gutter included. */
