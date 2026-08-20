@@ -225,7 +225,7 @@ function isWhipSound(value: unknown): value is WhipSound {
 }
 
 function isVoiceStt(value: unknown): value is VoiceStt {
-  return value === "off" || value === "webspeech";
+  return value === "off" || value === "webspeech" || value === "whisper";
 }
 
 function isVoiceTts(value: unknown): value is VoiceTts {

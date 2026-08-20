@@ -502,6 +502,7 @@ pub fn run() {
             commands::conduct::conduct_thread_accept_dispatch,
             commands::conduct::conduct_dispatch_drain,
             commands::conduct::conduct_dispatch_settle,
+            commands::conduct::conduct_voice_transcribe,
             commands::window::set_keep_backdrop_active,
         ])
         .build(tauri::generate_context!())

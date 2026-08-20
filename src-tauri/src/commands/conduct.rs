@@ -72,3 +72,6 @@ conduct_command!(conduct_orchestrator_status, "orchestrator.status");
 conduct_command!(conduct_thread_accept_dispatch, "thread.acceptDispatch");
 conduct_command!(conduct_dispatch_drain, "dispatch.drain");
 conduct_command!(conduct_dispatch_settle, "dispatch.settle");
+// Present for symmetry: the desktop webview usually hears through its own
+// SpeechRecognition, but the local engine is a setting, not a platform.
+conduct_command!(conduct_voice_transcribe, "voice.transcribe");

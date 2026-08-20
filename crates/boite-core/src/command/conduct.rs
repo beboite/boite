@@ -41,6 +41,7 @@ pub const ALL_METHODS: &[&str] = &[
     "thread.acceptDispatch",
     "dispatch.drain",
     "dispatch.settle",
+    "voice.transcribe",
 ];
 
 /// How long a queued line lives when the drain does not say otherwise.
@@ -366,6 +367,15 @@ pub enum Conduct {
         state: String,
         reason: Option<String>,
     },
+    /// One recorded utterance turned into text by the desktop's own
+    /// whisper.cpp (`crate::voice`). A bounded body on the ordinary bus, never
+    /// a stream: this is how a paired phone without a speech engine borrows
+    /// the machine that has one.
+    Transcribe {
+        audio: String,
+        mime: String,
+        provider: String,
+    },
 }
 
 impl Conduct {
@@ -432,6 +442,12 @@ impl Conduct {
                 state: str_param(params, "state")?,
                 reason: opt_str_param(params, "reason"),
             },
+            "voice.transcribe" => Conduct::Transcribe {
+                audio: str_param(params, "audio")?,
+                mime: opt_str_param(params, "mime").unwrap_or_else(|| "audio/wav".to_string()),
+                provider: opt_str_param(params, "provider")
+                    .unwrap_or_else(|| crate::voice::PROVIDER_WHISPER_LOCAL.to_string()),
+            },
             other => return Err(format!("unknown method: {other}")),
         })
     }
@@ -449,6 +465,7 @@ impl Conduct {
             Conduct::AcceptDispatch { .. } => "thread.acceptDispatch",
             Conduct::Drain { .. } => "dispatch.drain",
             Conduct::SettleDispatch { .. } => "dispatch.settle",
+            Conduct::Transcribe { .. } => "voice.transcribe",
         }
     }
 
@@ -464,14 +481,19 @@ impl Conduct {
             Conduct::Dispatch { .. }
             | Conduct::AcceptDispatch { .. }
             | Conduct::SettleDispatch { .. } => Wire::Bare,
+            Conduct::Transcribe { .. } => Wire::Key("text"),
         }
     }
 
     pub(super) fn capability(&self) -> Capability {
         match self {
-            Conduct::Pulse { .. } | Conduct::Messages { .. } | Conduct::Status { .. } => {
-                Capability::ReadProject
-            }
+            // Transcribe reads nothing from the store, but it does spend the
+            // desktop's CPU on the caller's behalf: ReadProject keeps it off
+            // an unpaired key without pretending it mutates anything.
+            Conduct::Pulse { .. }
+            | Conduct::Messages { .. }
+            | Conduct::Status { .. }
+            | Conduct::Transcribe { .. } => Capability::ReadProject,
             Conduct::Record { .. }
             | Conduct::Post { .. }
             | Conduct::Say { .. }
@@ -760,6 +782,11 @@ impl Conduct {
                     None => json!({ "dispatchId": dispatch_id, "settled": false }),
                 }
             }
+            Conduct::Transcribe {
+                audio,
+                mime,
+                provider,
+            } => json!(crate::voice::transcribe(&audio, &mime, &provider)?),
         })
     }
 }

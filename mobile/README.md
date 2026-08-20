@@ -48,6 +48,8 @@ Read the diff before keeping it. Bubblewrap writes literal values back over
 `app/build.gradle`, which reads the version out of `package.json` on purpose —
 that block has to survive. `twa-manifest.json`'s own `appVersionName` /
 `appVersionCode` are cosmetic for the same reason and are kept in step by hand.
+The `RECORD_AUDIO` permission in `AndroidManifest.xml` is hand-added for voice
+input and has to survive a regeneration the same way.
 
 ## Build
 
