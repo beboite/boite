@@ -597,6 +597,10 @@ export class RemoteBackend implements Backend {
         rpc("dispatch.settle", params).then((r) => ({
           settled: r?.settled === true,
         })),
+      transcribe: (params) =>
+        rpc("voice.transcribe", params).then((r) => ({
+          text: (r?.text as string) ?? "",
+        })),
     };
 
     this.pairing = {

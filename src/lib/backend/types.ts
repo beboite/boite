@@ -1149,6 +1149,16 @@ export interface ConductApi {
     state: string;
     reason?: string;
   }): Promise<{ settled: boolean }>;
+  /**
+   * One recorded utterance turned into text by the host's local whisper.cpp.
+   * A bounded body (WAV, base64) on the ordinary bus, never a stream: how a
+   * webview without a speech engine borrows the machine that has one.
+   */
+  transcribe(params: {
+    audio: string;
+    mime: string;
+    provider: string;
+  }): Promise<{ text: string }>;
 }
 
 /** One queued dispatch, as `dispatch.drain` answers it. */

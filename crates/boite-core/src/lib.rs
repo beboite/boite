@@ -1,3 +1,8 @@
+// The probe_params `json!` literal in command/mod.rs grew past the default
+// macro recursion limit when the conduct domain filled out; the limit is the
+// only thing this raises.
+#![recursion_limit = "256"]
+
 pub mod approval;
 pub mod awareness;
 pub mod browser;
@@ -35,6 +40,7 @@ pub mod timeline;
 pub mod transcript;
 pub mod store;
 pub mod usage;
+pub mod voice;
 
 /// Now, in milliseconds since the epoch.
 ///

@@ -41,4 +41,10 @@ export const tauriConduct: ConductApi = {
   settleDispatch(params): Promise<{ settled: boolean }> {
     return invoke("conduct_dispatch_settle", { params });
   },
+
+  // The bus answers with the bare string; the wire key only wraps it on the
+  // remote door.
+  transcribe(params): Promise<{ text: string }> {
+    return invoke<string>("conduct_voice_transcribe", { params }).then((text) => ({ text }));
+  },
 };

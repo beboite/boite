@@ -5,7 +5,7 @@
   import type { VoiceStt, VoiceTts } from "$lib/types";
   import { sttAvailability } from "./stt";
   import { listVoices, ttsSupported, voiceMatchesLocale, watchVoices } from "./tts";
-  import { testMicrophone } from "./capture";
+  import { captureAvailability, testMicrophone } from "./capture";
 
   const RADIO =
     "rounded-md border px-3 py-1 text-xs transition border-border bg-[var(--color-surface-2)] text-muted-foreground hover:border-foreground/30 hover:text-foreground";
@@ -13,10 +13,14 @@
     "rounded-md border px-3 py-1 text-xs transition border-foreground/40 bg-[var(--color-surface-3)] text-foreground";
 
   const stt = sttAvailability();
+  const capture = captureAvailability();
 
-  const STT_MODES: { id: VoiceStt; label: string }[] = [
-    { id: "off", label: t("voice.off") },
-    { id: "webspeech", label: t("voice.webspeech") },
+  // `whisper` records here and transcribes on the paired host: the gate is the
+  // microphone, not a speech engine, so it stays offered where webspeech is not.
+  const STT_MODES: { id: VoiceStt; label: string; ok: boolean }[] = [
+    { id: "off", label: t("voice.off"), ok: true },
+    { id: "webspeech", label: t("voice.webspeech"), ok: stt.ok },
+    { id: "whisper", label: t("voice.whisper"), ok: capture.ok },
   ];
   const TTS_MODES: { id: VoiceTts; label: string }[] = [
     { id: "off", label: t("voice.off") },
@@ -58,10 +62,10 @@
         type="button"
         role="radio"
         aria-checked={settings.state.voiceStt === mode.id}
-        aria-disabled={mode.id === "webspeech" && !stt.ok}
+        aria-disabled={!mode.ok}
         class={settings.state.voiceStt === mode.id ? RADIO_ON : RADIO}
         onclick={() => {
-          if (mode.id === "webspeech" && !stt.ok) return;
+          if (!mode.ok) return;
           settings.setVoiceStt(mode.id);
         }}
       >
@@ -73,6 +77,11 @@
        WebKitGTK, and the line says so instead of a mic that silently fails. -->
   {#if !stt.ok}
     <p class="text-xs text-muted-foreground">{t(stt.reasonKey)}</p>
+  {/if}
+  {#if !capture.ok}
+    <p class="text-xs text-muted-foreground">{t(capture.reasonKey)}</p>
+  {:else if settings.state.voiceStt === "whisper"}
+    <p class="text-xs text-muted-foreground">{t("voice.whisperDesc")}</p>
   {/if}
 
   <div class="flex flex-wrap items-center gap-1.5" role="radiogroup" aria-label={t("voice.tts")}>

@@ -24,7 +24,11 @@
 
     
         <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
-    
+        <!-- Voice input in the TWA: the page's SpeechRecognition and getUserMedia
+             are refused without the app-level grant. Keep this line when
+             regenerating with Bubblewrap (see ../../../README.md). -->
+        <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+
 
     
 

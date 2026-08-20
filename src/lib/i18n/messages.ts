@@ -229,6 +229,14 @@ export const EN_MESSAGES = {
   "voice.tts": "Speech out",
   "voice.off": "off",
   "voice.webspeech": "browser",
+  "voice.whisper": "local",
+  "voice.whisperDesc":
+    "Records here, transcribes on the paired machine's own whisper.cpp. Set BOITE_WHISPER_BIN and BOITE_WHISPER_MODEL where the server runs.",
+  "voice.insecureContext":
+    "Not a secure context: the browser refuses the microphone over plain http. Reach the server through https or a tunnel.",
+  "voice.noCapture": "This webview exposes no microphone API.",
+  "voice.transcribing": "Transcribing",
+  "voice.transcribeFailed": "Transcription failed: {error}",
   "voice.sttUnsupported": "This webview does not expose speech recognition. Android Chrome and the PWA have it; Windows WebView2 is uneven and Linux WebKitGTK mostly lacks it.",
   "voice.voice": "Voice",
   "voice.voicePick": "pick a voice",
