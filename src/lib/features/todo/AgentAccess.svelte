@@ -201,13 +201,24 @@
     // their agent — so nothing here would ever hear about it. Re-reading a
     // handful of small config files is the cheapest way to notice, and it stops
     // as soon as every agent is wired.
+    const settled = () => agentsHere.length > 0 && agentsHere.every((a) => a.reg === "this");
     const timer = setInterval(() => {
-      if (agentsHere.length > 0 && agentsHere.every((a) => a.reg === "this")) return;
+      // A hidden window is a laptop lid or a phone in a pocket, and a tick
+      // there reads config files off disk for a panel nobody is looking at.
+      // The catch-up below covers what the pause missed, so nothing is lost by
+      // skipping: the poll exists to notice a change made outside Boite, and
+      // noticing it on the way back is soon enough.
+      if (document.hidden || settled()) return;
       run();
     }, 5000);
+    const wake = () => {
+      if (!document.hidden && !settled()) run();
+    };
+    document.addEventListener("visibilitychange", wake);
     return () => {
       cancelled = true;
       clearInterval(timer);
+      document.removeEventListener("visibilitychange", wake);
     };
   });
 
