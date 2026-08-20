@@ -125,6 +125,11 @@ fn write_one(
     };
     let target = home.join(as_native(&named.home_relative));
 
+    // Parents first: reading a path whose ancestor is a file is ENOTDIR on
+    // Unix and NotFound on Windows, and neither of those names the file in
+    // the way. The walk below does.
+    ensure_parents(home, &named.home_relative)?;
+
     // The local file is read for two reasons at once: to put back a secret this
     // machine already had, and to know whether there is anything to back up.
     let existing = read_existing(&target)?;
@@ -138,8 +143,6 @@ fn write_one(
     if existing.as_deref() == Some(restored.text.as_str()) {
         return Ok(Wrote::AlreadyMatched);
     }
-
-    ensure_parents(home, &named.home_relative)?;
     match existing {
         Some(previous) => {
             back_up(backup_dir, &named.home_relative, previous.as_bytes())?;
