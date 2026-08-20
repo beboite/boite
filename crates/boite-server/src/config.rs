@@ -113,17 +113,7 @@ fn resolve_token(data_dir: &std::path::Path) -> Result<String, String> {
     let mut bytes = [0u8; 32];
     rand::rng().fill_bytes(&mut bytes);
     let token: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
-    fs::write(&token_path, &token)
+    crate::secret_file::write(&token_path, &token)
         .map_err(|e| format!("cannot write token file {}: {e}", token_path.display()))?;
-    set_token_permissions(&token_path);
     Ok(token)
 }
-
-#[cfg(unix)]
-fn set_token_permissions(path: &std::path::Path) {
-    use std::os::unix::fs::PermissionsExt;
-    let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
-}
-
-#[cfg(not(unix))]
-fn set_token_permissions(_path: &std::path::Path) {}
