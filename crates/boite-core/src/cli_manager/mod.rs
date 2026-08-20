@@ -594,8 +594,7 @@ fn read_channel(
 /// would read as "the network is down".
 fn resolve_npm(root: &'static str, platform: &Platform) -> Result<Resolved, Failed> {
     let root_document = net::json(&format!("https://registry.npmjs.org/{root}/latest"))?;
-    let what = format!("{root}");
-    let version = sane_version(json_string(&root_document, &["version"], &what)?)?;
+    let version = sane_version(json_string(&root_document, &["version"], root)?)?;
     let pinned = sane_version(json_string(
         &root_document,
         &["optionalDependencies", platform.artifact],
