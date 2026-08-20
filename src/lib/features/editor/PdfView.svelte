@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy, untrack } from "svelte";
+  import { tip } from "$lib/shared/actions/tooltip";
   import { logger } from "$lib/shared/services/logger.svelte";
   import { t } from "$lib/i18n/index.svelte";
   import ZoomIn from "@lucide/svelte/icons/zoom-in";
@@ -136,7 +137,7 @@
       class="rounded p-1 transition hover:bg-[var(--color-surface-2)] hover:text-foreground"
       onclick={() => zoom(-0.2)}
       aria-label={t("editor.zoomOut")}
-      title={t("editor.zoomOut")}
+      use:tip={t("editor.zoomOut")}
     >
       <ZoomOut class="size-3.5" />
     </button>
@@ -145,7 +146,7 @@
       class="rounded p-1 transition hover:bg-[var(--color-surface-2)] hover:text-foreground"
       onclick={() => zoom(0.2)}
       aria-label={t("editor.zoomIn")}
-      title={t("editor.zoomIn")}
+      use:tip={t("editor.zoomIn")}
     >
       <ZoomIn class="size-3.5" />
     </button>

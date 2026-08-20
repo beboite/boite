@@ -15,6 +15,7 @@
   import RotateCw from "@lucide/svelte/icons/rotate-cw";
   import Copy from "@lucide/svelte/icons/copy";
   import { t, type MessageKey } from "$lib/i18n/index.svelte";
+  import { tip } from "$lib/shared/actions/tooltip";
   import type { PluginInstallDriver } from "./installer.svelte";
   import type { PluginProbe } from "./spec";
 
@@ -121,7 +122,7 @@
       class="flex items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-1 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground disabled:opacity-50"
       onclick={() => probe.probe()}
       disabled={probe.probing || installer.busy}
-      title={t("plugin.recheck")}
+      use:tip={t("plugin.recheck")}
     >
       <RefreshCw class="size-3 {probe.probing ? 'animate-spin' : ''}" />
       {t("plugin.recheck")}
@@ -151,7 +152,7 @@
       class="flex items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-1 text-xs text-foreground transition hover:border-foreground/30 disabled:cursor-not-allowed disabled:opacity-40"
       onclick={() => (installed ? installer.update() : installer.install())}
       disabled={installer.busy || (primary.cmd === "cargo" && cargoMissing)}
-      title={line(primary)}
+      use:tip={line(primary)}
     >
       <Download class="size-3" />
       {installed ? t("plugin.update") : t("plugin.install")}
@@ -162,7 +163,7 @@
         class="flex items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-1 text-xs text-muted-foreground transition hover:border-[var(--color-danger)] hover:text-[var(--color-danger)] disabled:cursor-not-allowed disabled:opacity-40"
         onclick={() => installer.uninstall()}
         disabled={installer.busy || (uninstall.cmd === "cargo" && cargoMissing)}
-        title={line(uninstall)}
+        use:tip={line(uninstall)}
       >
         <Trash2 class="size-3" />
         {t("plugin.uninstall")}
@@ -218,7 +219,7 @@
     <div
       bind:this={logBox}
       onscroll={onLogScroll}
-      class="max-h-52 min-h-24 overflow-y-auto rounded-md border border-border bg-[var(--color-titlebar)] p-2 font-mono text-xs leading-snug"
+      class="max-h-52 min-h-24 scroll-pane overflow-y-auto rounded-md border border-border bg-[var(--color-titlebar)] p-2 font-mono text-xs leading-snug"
     >
       {#each installer.lines as text}
         <div class="break-words whitespace-pre-wrap text-foreground/80">{text}</div>

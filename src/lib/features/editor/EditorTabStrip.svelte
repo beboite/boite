@@ -1,10 +1,13 @@
 <script lang="ts">
   import { app } from "$lib/app/store.svelte";
+  import { tip } from "$lib/shared/actions/tooltip";
+  import { edgeFade } from "$lib/shared/actions/edgeFade";
   import { editorStore } from "./store.svelte";
   import X from "@lucide/svelte/icons/x";
   import FileIcon from "@lucide/svelte/icons/file";
   import GitCompareArrows from "@lucide/svelte/icons/git-compare-arrows";
   import { t } from "$lib/i18n/index.svelte";
+  import { scrollIntoViewSmooth } from "$lib/theme/motion";
 
   // This project's files only. A buffer belonging to another project is still
   // open — it is just not in this strip, the same way its threads are not in
@@ -238,13 +241,14 @@
     const id = editorStore.activeId;
     if (!id || !stripEl) return;
     const el = stripEl.querySelector<HTMLElement>(`[data-tab-id="${CSS.escape(id)}"]`);
-    el?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    scrollIntoViewSmooth(el, { block: "nearest", inline: "nearest" });
   });
 </script>
 
 <div
   bind:this={stripEl}
-  class="tab-strip flex h-8 shrink-0 items-stretch gap-px overflow-x-auto bg-[var(--color-titlebar)]"
+  class="tab-strip edge-fade flex h-8 shrink-0 items-stretch gap-px overflow-x-auto bg-[var(--color-titlebar)]"
+  use:edgeFade
   onwheel={wheelScroll}
   role="tablist"
   aria-label={t("editor.openFiles")}
@@ -287,7 +291,7 @@
         onclick={() => clickTab(b.id)}
         onkeydown={onStripKeydown}
         onauxclick={(e) => middleClickClose(e, b.id)}
-        title={b.path}
+        use:tip={b.path}
       >
         {#if b.kind === "diff"}
           <GitCompareArrows class="size-3.5 shrink-0" />

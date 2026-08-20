@@ -1,6 +1,7 @@
 <script lang="ts">
   import { app } from "$lib/app/store.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
+  import { tip } from "$lib/shared/actions/tooltip";
   import ToggleSetting from "$lib/shared/components/ToggleSetting.svelte";
   import { confirmDialog } from "$lib/shared/components/confirm.svelte";
   import { t, type MessageKey } from "$lib/i18n/index.svelte";
@@ -193,7 +194,7 @@
       class:opacity-50={sortManual}
       role="radiogroup"
       aria-label={t("experiments.smartSortDirection")}
-      title={sortManual ? t("experiments.smartSortDirManual") : undefined}
+      use:tip={sortManual ? t("experiments.smartSortDirManual") : undefined}
     >
       <span class="w-20 shrink-0 text-xs text-muted-foreground">
         {t("experiments.smartSortDirection")}
