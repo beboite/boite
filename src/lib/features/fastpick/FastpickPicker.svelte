@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from "svelte";
+  import { tip } from "$lib/shared/actions/tooltip";
   import { scale } from "svelte/transition";
   import { settings } from "$lib/features/settings/store.svelte";
   import { t } from "$lib/i18n/index.svelte";
@@ -126,7 +127,7 @@
       onclick={toggle}
       aria-haspopup="menu"
       aria-expanded={open}
-      title={t("fastpick.tooltip")}
+      use:tip={t("fastpick.tooltip")}
       aria-label={t("fastpick.tooltip")}
     >
       <!-- Same three parts as the Terminal button beside it: it launches a thread too, and

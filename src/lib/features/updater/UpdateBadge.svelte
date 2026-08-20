@@ -1,5 +1,6 @@
 <script lang="ts">
   import { updater } from "./store.svelte";
+  import { tip } from "$lib/shared/actions/tooltip";
   import { t } from "$lib/i18n/index.svelte";
 
   // Only surfaces once the payload is on disk. Anything earlier would offer a
@@ -14,7 +15,7 @@
     class="update-btn"
     onclick={() => updater.install()}
     disabled={installing}
-    title={t("updater.readyTooltip", { version })}
+    use:tip={t("updater.readyTooltip", { version })}
     aria-label={t("updater.restartLabel", { version })}
   >
     {installing ? t("updater.ctaInstalling") : t("updater.ctaAvailable")}

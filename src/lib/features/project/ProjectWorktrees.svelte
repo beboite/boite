@@ -1,5 +1,6 @@
 <script lang="ts">
   import { untrack } from "svelte";
+  import { tip } from "$lib/shared/actions/tooltip";
   import { app } from "$lib/app/store.svelte";
   import { backendForPath } from "$lib/backend";
   import { settings } from "$lib/features/settings/store.svelte";
@@ -333,7 +334,7 @@
       class="rounded-sm p-1 text-muted-foreground transition hover:bg-accent hover:text-foreground disabled:opacity-40"
       onclick={load}
       disabled={loading}
-      title={t("worktree.refresh")}
+      use:tip={t("worktree.refresh")}
       aria-label={t("worktree.refresh")}
     >
       <RefreshCw class="size-3.5 {loading ? 'animate-spin' : ''}" />
@@ -367,7 +368,7 @@
       <!-- Capped and scrolled: this sits on the dashboard beside five other
            cards now, and a repository with a dozen worktrees used to push all of
            them off the screen. -->
-      <ul class="max-h-64 divide-y divide-border overflow-y-auto">
+      <ul class="max-h-64 divide-y divide-border scroll-pane overflow-y-auto">
         {#each entries as w (w.path)}
           {@const holder = holders.get(pathKey(w.path))}
           {@const size = sizes[w.path] ?? 0}
@@ -378,7 +379,7 @@
           >
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-1.5">
-                <span class="truncate text-base text-foreground/90" title={w.path}>
+                <span class="truncate text-base text-foreground/90" use:tip={w.path}>
                   {basename(w.path)}
                 </span>
                 {#if w.main}
@@ -391,7 +392,7 @@
                 {#if w.spare}
                   <span
                     class="shrink-0 rounded-full border border-border px-1.5 py-px text-[9.5px] uppercase tracking-wide text-muted-foreground"
-                    title={t("worktree.spareHint")}
+                    use:tip={t("worktree.spareHint")}
                   >
                     {t("worktree.spare")}
                   </span>
@@ -440,7 +441,7 @@
                 class="shrink-0 rounded-sm p-1 text-muted-foreground transition hover:bg-accent hover:text-[var(--color-danger)] disabled:opacity-40"
                 onclick={() => remove(w)}
                 disabled={busy[w.path] === true || sweeping}
-                title={t("worktree.remove")}
+                use:tip={t("worktree.remove")}
                 aria-label={t("worktree.remove")}
               >
                 <Trash2 class="size-3.5" />

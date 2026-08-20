@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
+  import { tip } from "$lib/shared/actions/tooltip";
   import { logger, type LogEntry } from "$lib/shared/services/logger.svelte";
   import { notifications } from "$lib/features/notifications/store.svelte";
   import RotateCw from "@lucide/svelte/icons/rotate-cw";
@@ -206,7 +207,7 @@
         type="button"
         class="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground transition hover:bg-accent hover:text-foreground"
         onclick={refresh}
-        title={t("logs.refresh")}
+        use:tip={t("logs.refresh")}
       >
         <RotateCw class="size-3 {loading ? 'animate-spin' : ''}" />
         {t("logs.refresh")}
@@ -215,7 +216,7 @@
         type="button"
         class="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground transition hover:bg-accent hover:text-foreground"
         onclick={copyAll}
-        title={t("logs.copyFiltered")}
+        use:tip={t("logs.copyFiltered")}
       >
         <Copy class="size-3" />
         {t("logs.copy")}
@@ -225,7 +226,7 @@
           type="button"
           class="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground transition hover:bg-danger/15 hover:text-danger"
           onclick={clear}
-          title={t("logs.clearTitle")}
+          use:tip={t("logs.clearTitle")}
         >
           <Trash2 class="size-3" />
           {t("logs.clear")}
@@ -236,7 +237,7 @@
   </header>
 
   <div
-    class="max-h-[60vh] min-h-[200px] overflow-y-auto rounded-md border border-border bg-[var(--color-titlebar)] p-2 font-mono text-xs"
+    class="max-h-[60vh] min-h-[200px] scroll-pane overflow-y-auto rounded-md border border-border bg-[var(--color-titlebar)] p-2 font-mono text-xs"
   >
     {#if deviceLocal}
       <p class="py-4 text-center text-muted-foreground/60">{t("logs.deviceLocalOnly")}</p>
@@ -251,7 +252,7 @@
         <div class="flex gap-2 py-0.5 {levelClass[entry.level] ?? 'text-foreground/80'}">
           <span class="shrink-0 text-muted-foreground/60">{formatTime(entry.tsMs)}</span>
           <span class="w-12 shrink-0 uppercase">{entry.level}</span>
-          <span class="w-32 shrink-0 truncate text-muted-foreground" title={entry.source}>
+          <span class="w-32 shrink-0 truncate text-muted-foreground" use:tip={entry.source}>
             [{entry.source}]
           </span>
           <span class="min-w-0 flex-1 break-words">
@@ -272,7 +273,7 @@
         type="button"
         class="flex items-center gap-1 transition hover:text-foreground"
         onclick={copyPath}
-        title={t("logs.copyPath")}
+        use:tip={t("logs.copyPath")}
       >
         <FolderOpen class="size-3" />
         <span class="truncate">{logPath}</span>

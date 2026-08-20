@@ -1,5 +1,6 @@
 <script lang="ts">
   import ThreadGlyph from "$lib/features/thread/ThreadGlyph.svelte";
+  import { tip } from "$lib/shared/actions/tooltip";
   import { visibleStatus } from "$lib/domain/thread-status";
   import { threadIconColor } from "$lib/features/fastpick/threadAccent";
   import { settings } from "$lib/features/settings/store.svelte";
@@ -39,7 +40,7 @@
   class:glow
   aria-expanded={expanded}
   aria-label={label}
-  title={label}
+  use:tip={label}
   onclick={(e) => {
     e.stopPropagation();
     onToggle();

@@ -1,5 +1,6 @@
 <script lang="ts">
   import DashboardCard from "./DashboardCard.svelte";
+  import { tip } from "$lib/shared/actions/tooltip";
   import { formatTokens as fmt, projectUsage } from "./usage.svelte";
   import { app } from "$lib/app/store.svelte";
   import ChartNoAxesColumn from "@lucide/svelte/icons/chart-no-axes-column";
@@ -84,7 +85,7 @@
         <!-- The hint is only ever on a dash, and only when the dash stands for
              a read that never happened. Absent otherwise, so nothing here
              grows a tooltip that says what the number already says. -->
-        <dd class="shrink-0 font-medium tabular-nums text-base text-foreground/90" title={row.hint}>
+        <dd class="shrink-0 font-medium tabular-nums text-base text-foreground/90" use:tip={row.hint}>
           {row.value}
         </dd>
       </div>

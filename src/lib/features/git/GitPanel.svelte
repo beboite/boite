@@ -1,5 +1,6 @@
 <script lang="ts">
   import { app } from "$lib/app/store.svelte";
+  import { tip } from "$lib/shared/actions/tooltip";
   import { workspace } from "$lib/backend";
   import { threadGitRoot } from "$lib/features/thread/cwd";
   import { isScratch } from "$lib/domain/project";
@@ -397,7 +398,7 @@
           disabled={gs.switchingBranch}
           aria-haspopup="menu"
           aria-expanded={branchMenuOpen}
-          title={t("git.changeBranch")}
+          use:tip={t("git.changeBranch")}
         >
           <GitBranch class="size-3.5 shrink-0 text-muted-foreground" />
           <span class="truncate">{gs.branch ?? t("git.detached")}</span>
@@ -425,14 +426,14 @@
                 type="submit"
                 class="rounded border border-border bg-[var(--color-surface-2)] p-1.5 text-muted-foreground transition hover:bg-[var(--color-surface-3)] hover:text-foreground disabled:opacity-40"
                 disabled={!newBranchName.trim() || gs.switchingBranch}
-                title={t("git.createBranch")}
+                use:tip={t("git.createBranch")}
                 aria-label={t("git.createBranch")}
               >
                 <Plus class="size-3.5" />
               </button>
             </form>
 
-            <div class="max-h-64 overflow-y-auto py-1">
+            <div class="max-h-64 scroll-pane overflow-y-auto py-1">
               {#if gs.branchesLoading && !gs.branchesLoaded}
                 <div class="px-3 py-3 text-center text-xs text-muted-foreground">
                   {t("git.loadingBranches")}
@@ -451,7 +452,7 @@
                     onclick={() => requestBranchChange(branch.name, false)}
                     disabled={branch.current || gs.switchingBranch}
                     role="menuitem"
-                    title={branch.name}
+                    use:tip={branch.name}
                   >
                     <Check class="size-3.5 shrink-0 {branch.current ? 'opacity-100' : 'opacity-0'}" />
                     <span class="min-w-0 flex-1 truncate text-xs">{branch.name}</span>
@@ -484,7 +485,7 @@
       <button
         type="button"
         class="group/root flex min-w-0 shrink items-center gap-1 rounded-full border border-border bg-[var(--color-surface-2)] px-1.5 py-0.5 text-2xs text-muted-foreground transition hover:text-foreground"
-        title={t("git.nestedRepo", { path: project.gitRoot })}
+        use:tip={t("git.nestedRepo", { path: project.gitRoot })}
         onclick={clearGitRoot}
       >
         <FolderGit2 class="size-3 shrink-0" />
@@ -498,7 +499,7 @@
         class="rounded p-1 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:opacity-40"
         onclick={pull}
         disabled={!gs?.isRepo || !gs.upstream || gs.pulling}
-        title={t("git.pullFf")}
+        use:tip={t("git.pullFf")}
         aria-label={t("git.pull")}
       >
         <ArrowDownToLine class="size-3.5 {gs?.pulling ? 'animate-pulse' : ''}" />
@@ -508,7 +509,7 @@
         class="rounded p-1 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:opacity-40"
         onclick={push}
         disabled={!gs?.isRepo || gs.pushing || (gs.upstream !== null && gs.ahead === 0)}
-        title={gs?.upstream ? t("git.push") : t("git.publishBranch")}
+        use:tip={gs?.upstream ? t("git.push") : t("git.publishBranch")}
         aria-label={t("git.push")}
       >
         <ArrowUpFromLine class="size-3.5 {gs?.pushing ? 'animate-pulse' : ''}" />
@@ -518,7 +519,7 @@
         class="rounded p-1 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:opacity-40"
         onclick={fetch}
         disabled={!gs?.isRepo || gs.fetching}
-        title={t("git.fetchRemote")}
+        use:tip={t("git.fetchRemote")}
         aria-label={t("git.fetchRemote")}
       >
         <CloudDownload class="size-3.5 {gs?.fetching ? 'animate-pulse' : ''}" />
@@ -544,7 +545,7 @@
       {/each}
     </div>
   {:else if !gs.isRepo}
-    <div class="flex flex-1 flex-col overflow-y-auto">
+    <div class="flex flex-1 flex-col scroll-pane overflow-y-auto">
       <div
         class="flex flex-col items-center gap-3 px-3 py-6 text-center text-xs text-muted-foreground"
       >
@@ -581,7 +582,7 @@
           <button
             type="button"
             class="flex items-center gap-2 px-3 py-1.5 text-left text-xs text-foreground/85 transition hover:bg-[var(--color-surface-2)] hover:text-foreground"
-            title={repo}
+            use:tip={repo}
             onclick={() => selectRepo(repo)}
           >
             <FolderGit2 class="size-3.5 shrink-0 text-muted-foreground" />
@@ -659,7 +660,7 @@
           {/if}
         </div>
 
-        <div class="min-h-0 flex-1 overflow-y-auto">
+        <div class="min-h-0 flex-1 scroll-pane overflow-y-auto">
           {#if gs.conflicts.length > 0}
             {@render section({
               label: t("git.mergeChanges"),
@@ -738,7 +739,7 @@
           {/if}
         </button>
         {#if commitsOpen}
-          <div class="flex min-h-0 min-w-0 w-full flex-1 flex-col overflow-y-auto overflow-x-hidden">
+          <div class="flex min-h-0 min-w-0 w-full flex-1 flex-col scroll-pane overflow-y-auto overflow-x-hidden">
             {#if gs.log.length === 0}
               <div
                 class="px-3 py-4 text-center text-xs text-muted-foreground/70"
@@ -798,7 +799,7 @@
           class="flex shrink-0 items-center justify-center rounded text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground {mobile
             ? 'size-11'
             : 'p-0.5'}"
-          title={t("git.unstageAll")}
+          use:tip={t("git.unstageAll")}
           aria-label={t("git.unstageAll")}
           onclick={() => unstagePaths(entries.map((x) => x.path))}
         >
@@ -810,7 +811,7 @@
           class="flex shrink-0 items-center justify-center rounded text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground {mobile
             ? 'size-11'
             : 'p-0.5'}"
-          title={t("git.stageAll")}
+          use:tip={t("git.stageAll")}
           aria-label={t("git.stageAll")}
           onclick={() => stagePaths(entries.map((x) => x.path))}
         >
@@ -824,7 +825,7 @@
           class="group/row flex items-center gap-1.5 hover:bg-[var(--color-surface-2)] {mobile
             ? 'min-h-11 px-3 text-base'
             : 'px-2 py-1 text-xs'}"
-          title={entry.path}
+          use:tip={entry.path}
         >
           <!-- The padding is on the button, not the row: it is what makes the
                whole 44px band open the diff instead of a 22px strip through the
@@ -858,7 +859,7 @@
                 class="flex items-center justify-center rounded text-muted-foreground hover:bg-[var(--color-surface-3)] hover:text-foreground {mobile
                   ? 'size-11'
                   : 'p-0.5'}"
-                title={t("git.unstage")}
+                use:tip={t("git.unstage")}
                 aria-label={t("git.unstageFile")}
                 onclick={() => unstagePaths([entry.path])}
               >
@@ -870,7 +871,7 @@
                 class="flex items-center justify-center rounded text-muted-foreground hover:bg-[var(--color-surface-3)] hover:text-foreground {mobile
                   ? 'size-11'
                   : 'p-0.5'}"
-                title={entry.status === "?" ? t("git.deleteFile") : t("git.discard")}
+                use:tip={entry.status === "?" ? t("git.deleteFile") : t("git.discard")}
                 aria-label={entry.status === "?" ? t("git.deleteFile") : t("git.discard")}
                 onclick={() => discardEntry(entry)}
               >
@@ -881,7 +882,7 @@
                 class="flex items-center justify-center rounded text-muted-foreground hover:bg-[var(--color-surface-3)] hover:text-foreground {mobile
                   ? 'size-11'
                   : 'p-0.5'}"
-                title={t("git.stage")}
+                use:tip={t("git.stage")}
                 aria-label={t("git.stageFile")}
                 onclick={() => stagePaths([entry.path])}
               >
@@ -893,7 +894,7 @@
                 class="flex items-center justify-center rounded text-muted-foreground hover:bg-[var(--color-surface-3)] hover:text-foreground {mobile
                   ? 'size-11'
                   : 'p-0.5'}"
-                title={t("git.markResolvedTitle")}
+                use:tip={t("git.markResolvedTitle")}
                 aria-label={t("git.markResolved")}
                 onclick={() => markResolved(entry.path)}
               >

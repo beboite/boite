@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { tip } from "$lib/shared/actions/tooltip";
   import { app } from "$lib/app/store.svelte";
   import { projectDisplayName } from "$lib/shared/project-label";
   import { todos } from "./store.svelte";
@@ -85,7 +86,7 @@
       class="ml-auto rounded p-1 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:opacity-40"
       onclick={() => projectId && todos.clearDone(projectId)}
       disabled={doneCount === 0}
-      title={doneCount === 0
+      use:tip={doneCount === 0
         ? t("todo.nothingDone")
         : t("todo.clearDone", { count: doneCount })}
       aria-label={t("todo.clearDoneLabel")}
@@ -102,7 +103,7 @@
       {t("todo.noProject")}
     </p>
   {:else}
-    <TodoList {projectId} class="min-h-0 flex-1 overflow-y-auto" />
+    <TodoList {projectId} class="min-h-0 flex-1 scroll-pane overflow-y-auto" />
 
     <!-- Right under the list it appends to, not below the agent section: the
          input parked at the very bottom of the panel read as chrome, and
