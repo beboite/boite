@@ -129,6 +129,19 @@ describe("which transitions the sidebar's order follows", () => {
     expect(workStartedSince("a")).not.toBeNull();
     expect(projectWorkSince("p")).not.toBeNull();
   });
+
+  /**
+   * A live reattach re-asserts `running` without a transition. The mark stays
+   * armed, and the next real turn would be swallowed. The pane must not arm on
+   * reattach; this locks what happens if it does.
+   */
+  it("leaves a wake mark unspent when running is re-asserted", () => {
+    noteThreadWaking("a");
+    noteStatusChange("a", "running", "running", "p");
+    noteStatusChange("a", "ready", "running", "p");
+    expect(workStartedSince("a")).toBeNull();
+    expect(projectWorkSince("p")).toBeNull();
+  });
 });
 
 describe("clearing", () => {

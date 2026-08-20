@@ -960,7 +960,13 @@
     // so the `running` that follows is held rather than counted as work: an app
     // restart resumes every thread at once, and that used to reshuffle the whole
     // sidebar around nothing the user had asked for.
-    if (thread.sessionId || reattaching) noteThreadWaking(thread.id);
+    //
+    // Not a live reattach. Parking the window, or attaching from a phone, opens
+    // onto a PTY whose status is already `running`. `noteStatusChange` returns
+    // before it can spend the mark (`previous === next`), and the next real
+    // turn is then swallowed. `sessionId` alone still covers resume from
+    // idle/stopped, which is the reshuffle this exists to stop.
+    if (thread.sessionId && !reattaching) noteThreadWaking(thread.id);
 
     // A relaunch landing on a pane whose previous launch never printed a byte:
     // that measurement is over, and leaving it pending would let the older
