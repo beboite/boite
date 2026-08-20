@@ -53,12 +53,14 @@
     "Then to 880640, for the dispatch device half: the layout mounts the queue",
     "watcher and every terminal registers its sink before first paint, or a line",
     "queued during boot finds no device. Measured at 852.4 KB, 7.6 KB spare.",
+    "Then to 890880, for the kebacc accounts card and shared plugin install",
+    "card: CI measured 862.3 KB against 860, 7.7 KB spare.",
     "",
     "largestEagerChunkBytes moved with it, 256000 -> 262144. The main route is",
     "the chunk in question and it had 0.2 KB left, which is a ceiling that fails",
     "the next commit whatever the next commit is."
   ],
-  "eagerBytes": 880640,
+  "eagerBytes": 890880,
   "totalBytes": 6144000,
   "largestEagerChunkBytes": 262144
 }
