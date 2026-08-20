@@ -238,7 +238,7 @@ fn probe_params() -> Value {
         "status": "idle", "ids": [], "settled": true,
         "text": "t",
         "toThreadId": "t", "dispatchId": "d", "state": "delivered",
-        "audio": "",
+        "audio": "", "actionId": "a",
     })
 }
 
@@ -697,6 +697,8 @@ mod tests {
             ("orchestrator.messages", ReadProject),
             ("orchestrator.start", MutateProject),
             ("orchestrator.status", ReadProject),
+            ("orchestrator.actions", ReadProject),
+            ("orchestrator.undo", MutateProject),
             ("thread.dispatch", MutateProject),
             ("thread.acceptDispatch", MutateProject),
             ("dispatch.drain", MutateProject),

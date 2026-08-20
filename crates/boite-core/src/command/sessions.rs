@@ -79,7 +79,9 @@ pub enum Sessions {
     /// open apiece, so nobody enumerates every agent's history on a timer.
     AgentTurns { queries: Vec<session::TurnQuery> },
     /// Tokens and money per directory, from the transcripts on this machine.
-    Usage { cwds: Vec<String>, days: u32 },
+    /// `orchestrator_sessions` names the session ids whose spend is also
+    /// summed apart, so a card can split the conductor from the workers.
+    Usage { cwds: Vec<String>, days: u32, orchestrator_sessions: Vec<String> },
     StopClaude { session_id: String },
     /// Copilot turns down an id whose session was opened and never used.
     CopilotResumable { session_id: String },
@@ -157,6 +159,7 @@ impl Sessions {
             "session.usage" => Sessions::Usage {
                 cwds: str_list(params, "cwds"),
                 days: u32_param(params, "days", 365),
+                orchestrator_sessions: str_list(params, "orchestratorSessions"),
             },
             "session.stopClaude" => Sessions::StopClaude {
                 session_id: str_param(params, "sessionId")?,
@@ -358,7 +361,9 @@ impl Sessions {
             }
             Sessions::LiveClaude => value_of(session::live_claude_sessions()),
             Sessions::AgentTurns { queries } => value_of(session::agent_turns(&queries)),
-            Sessions::Usage { cwds, days } => value_of(usage::collect_usage_blocking(cwds, days)),
+            Sessions::Usage { cwds, days, orchestrator_sessions } => {
+                value_of(usage::collect_usage_blocking(cwds, days, orchestrator_sessions))
+            }
             Sessions::StopClaude { session_id } => {
                 value_of(session::stop_claude_session(&session_id))
             }

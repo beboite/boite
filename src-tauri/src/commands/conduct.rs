@@ -66,6 +66,10 @@ conduct_command!(conduct_orchestrator_say, "orchestrator.say");
 conduct_command!(conduct_orchestrator_messages, "orchestrator.messages");
 conduct_command!(conduct_orchestrator_start, "orchestrator.start");
 conduct_command!(conduct_orchestrator_status, "orchestrator.status");
+// The undo list and the undo itself. Both land here because the window is the
+// user: the bus refuses `orchestrator.undo` to any agent grant.
+conduct_command!(conduct_orchestrator_actions, "orchestrator.actions");
+conduct_command!(conduct_orchestrator_undo, "orchestrator.undo");
 // The queue's device half. The window is the device on the desktop: it owns
 // the PTYs, so it drains, types and settles — the bus refuses these three to
 // any agent grant.

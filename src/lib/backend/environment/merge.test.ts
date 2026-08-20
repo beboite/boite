@@ -3,7 +3,15 @@ import type { UsageReport } from "../types";
 import { environmentLabel, mergeUsageReports } from "./merge";
 
 function report(p: Partial<UsageReport>): UsageReport {
-  return { models: [], days: [], sessions: 0, missing: [], ...p };
+  return {
+    models: [],
+    days: [],
+    sessions: 0,
+    orchestratorTotal: 0,
+    orchestratorSessions: 0,
+    missing: [],
+    ...p,
+  };
 }
 
 function model(name: string, total: number, provider = "claude") {
@@ -99,6 +107,8 @@ describe("mergeUsageReports", () => {
       models: [],
       days: [],
       sessions: 0,
+      orchestratorTotal: 0,
+      orchestratorSessions: 0,
       missing: [],
     });
   });

@@ -203,7 +203,8 @@ const SESSION_COMMANDS: Record<SessionKind, string> = {
 };
 
 export const tauriSession: SessionApi = {
-  usage: (cwds, days) => invoke<UsageReport>("agent_token_usage", { cwds, days }),
+  usage: (cwds, days, orchestratorSessions) =>
+    invoke<UsageReport>("agent_token_usage", { cwds, days, orchestratorSessions }),
   liveClaude: () => invoke<LiveClaudeSession[]>("live_claude_sessions"),
   agentTurns: (queries) => invoke<AgentTurn[]>("agent_turns", { queries }),
   stopClaude: (sessionId) => invoke<boolean>("stop_claude_session", { sessionId }),

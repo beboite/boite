@@ -1,5 +1,11 @@
 import { invoke } from "./ipc";
-import type { ConductApi, DispatchLine, OrchestratorMessage, PulseAnswer } from "../types";
+import type {
+  ConductApi,
+  DispatchLine,
+  OrchestratorAction,
+  OrchestratorMessage,
+  PulseAnswer,
+} from "../types";
 
 // Same bus as records: `boite_core::command::conduct` answers for both hosts,
 // this file only names the Tauri handlers. No long-poll goes through here — the
@@ -28,6 +34,14 @@ export const tauriConduct: ConductApi = {
 
   status(params): Promise<{ threadId: string | null; state: string }> {
     return invoke("conduct_orchestrator_status", { params });
+  },
+
+  actions(params): Promise<OrchestratorAction[]> {
+    return invoke("conduct_orchestrator_actions", { params });
+  },
+
+  undo(params): Promise<{ done: boolean }> {
+    return invoke("conduct_orchestrator_undo", { params });
   },
 
   acceptDispatch(params): Promise<{ threadId: string; accept: boolean; dropped: number }> {

@@ -238,10 +238,14 @@ fn usage_scan(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("usage::collect");
     group.bench_function("this checkout, warm", |b| {
-        b.iter(|| boite_core::usage::collect_usage_blocking(black_box(vec![here.clone()]), 371))
+        b.iter(|| {
+            boite_core::usage::collect_usage_blocking(black_box(vec![here.clone()]), 371, vec![])
+        })
     });
     group.bench_function("no match, warm", |b| {
-        b.iter(|| boite_core::usage::collect_usage_blocking(black_box(nowhere.clone()), 371))
+        b.iter(|| {
+            boite_core::usage::collect_usage_blocking(black_box(nowhere.clone()), 371, vec![])
+        })
     });
     group.finish();
 }

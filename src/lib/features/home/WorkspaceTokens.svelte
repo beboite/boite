@@ -33,13 +33,23 @@
     return [...out.values()];
   });
 
+  // The session ids the workspace stamped on its orchestrators, live or put
+  // away: the split is history, and a conductor that finished still spent.
+  const orchestratorSessions = $derived(
+    app.threads
+      .filter((thread) => thread.role === "orchestrator" && thread.sessionId)
+      .map((thread) => thread.sessionId as string),
+  );
+
   function load() {
-    void workspaceUsage.load($state.snapshot(cwds));
+    void workspaceUsage.load($state.snapshot(cwds), $state.snapshot(orchestratorSessions));
   }
 
   $effect(() => {
     void app.sortedProjects.map((p) => p.id).join("\0");
-    untrack(() => workspaceUsage.ensure($state.snapshot(cwds)));
+    untrack(() =>
+      workspaceUsage.ensure($state.snapshot(cwds), $state.snapshot(orchestratorSessions)),
+    );
   });
 
   const total = $derived(report?.models.reduce((sum, m) => sum + m.total, 0) ?? 0);
@@ -254,6 +264,17 @@
         </p>
       {/if}
     </div>
+    <!-- The conductor's share next to the workers', in the same card: two
+         cards would invite adding them up, and they are one spend. -->
+    {#if report.orchestratorTotal > 0}
+      <p class="mt-1 tabular-nums text-xs text-muted-foreground/70">
+        {t("home.tokensSplit", {
+          workers: fmt(Math.max(0, total - report.orchestratorTotal)),
+          orchestrator: fmt(report.orchestratorTotal),
+          transcripts: report.orchestratorSessions,
+        })}
+      </p>
+    {/if}
 
     <ul class="mt-2.5 grid grid-cols-1 gap-x-6 gap-y-1.5 sm:grid-cols-2">
       {#each report.models as model (model.provider + model.model)}
