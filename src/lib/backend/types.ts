@@ -619,6 +619,41 @@ export interface FastMcpSshApi {
 }
 
 /**
+ * What Boite makes of `kebacc-switch list`. Usage windows keep the labels the
+ * CLI printed (or the keys of its JSON), so a new quota window shows up without
+ * a Boite change.
+ */
+export interface KebaccSwitcherList {
+  providers: KebaccSwitcherProvider[];
+}
+
+export interface KebaccSwitcherProvider {
+  provider: string;
+  label: string;
+  accounts: KebaccSwitcherAccount[];
+}
+
+export interface KebaccUsageWindow {
+  label: string;
+  used_percent: number | null;
+  remaining_percent: number | null;
+  reset: string | null;
+}
+
+export interface KebaccSwitcherAccount {
+  email: string;
+  active: boolean;
+  windows: KebaccUsageWindow[];
+}
+
+export interface KebaccSwitcherApi {
+  list(provider?: string): Promise<KebaccSwitcherList>;
+  add(provider: string): Promise<KebaccSwitcherList>;
+  switchTo(provider: string, email: string): Promise<KebaccSwitcherList>;
+  version(): Promise<string | null>;
+}
+
+/**
  * One agent CLI, as the machine that runs the agents describes it.
  *
  * The shape comes from `boite_core::cli_manager`, which is where the install
@@ -1328,6 +1363,7 @@ export interface Backend {
   readonly fastpick: FastpickApi;
   readonly codexSwitcher: CodexSwitcherApi;
   readonly fastMcpSsh: FastMcpSshApi;
+  readonly kebaccSwitcher: KebaccSwitcherApi;
   readonly cli: CliApi;
   readonly scope: ScopeApi;
   readonly session: SessionApi;

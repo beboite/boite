@@ -19,7 +19,8 @@ use super::{
 };
 use crate::capability::Capability;
 use crate::{
-    cli_manager, codex_switcher, fast_mcp_ssh, fastpick, session, shell, transcript, usage,
+    cli_manager, codex_switcher, fast_mcp_ssh, fastpick, kebacc_switcher, session, shell, transcript,
+    usage,
 };
 
 /// Every method in this domain, in the order they appear below.
@@ -41,6 +42,10 @@ pub const ALL_METHODS: &[&str] = &[
     "codexSwitcher.activate",
     "codexSwitcher.version",
     "fastMcpSsh.version",
+    "kebaccSwitcher.list",
+    "kebaccSwitcher.add",
+    "kebaccSwitcher.switch",
+    "kebaccSwitcher.version",
     "session.transcript",
     "cli.catalog",
     "cli.latest",
@@ -130,6 +135,14 @@ pub enum Sessions {
     CodexSwitcherVersion,
     /// Null means `fast-mcp-ssh` is not on this machine.
     FastMcpSshVersion,
+    /// `kebacc-switch list`, normalised to `{ providers: [...] }`.
+    KebaccSwitcherList { provider: Option<String> },
+    /// `kebacc-switch add -Provider <p>`.
+    KebaccSwitcherAdd { provider: String },
+    /// `kebacc-switch switch -Provider <p> -Email <email> -Yes`.
+    KebaccSwitcherSwitch { provider: String, email: String },
+    /// Null means the binary is not on this machine.
+    KebaccSwitcherVersion,
     /// What a terminal printed, as text, from the end.
     ///
     /// The question anybody actually has is what it was doing when it stopped,
@@ -229,6 +242,17 @@ impl Sessions {
             },
             "codexSwitcher.version" => Sessions::CodexSwitcherVersion,
             "fastMcpSsh.version" => Sessions::FastMcpSshVersion,
+            "kebaccSwitcher.list" => Sessions::KebaccSwitcherList {
+                provider: opt_str_param(params, "provider"),
+            },
+            "kebaccSwitcher.add" => Sessions::KebaccSwitcherAdd {
+                provider: str_param(params, "provider")?,
+            },
+            "kebaccSwitcher.switch" => Sessions::KebaccSwitcherSwitch {
+                provider: str_param(params, "provider")?,
+                email: str_param(params, "email")?,
+            },
+            "kebaccSwitcher.version" => Sessions::KebaccSwitcherVersion,
             "session.transcript" => Sessions::Transcript {
                 thread_id: str_param(params, "threadId")?,
                 // A terminal prints more in a minute than anybody reads, and
@@ -280,6 +304,10 @@ impl Sessions {
             Sessions::CodexSwitcherActivate { .. } => "codexSwitcher.activate",
             Sessions::CodexSwitcherVersion => "codexSwitcher.version",
             Sessions::FastMcpSshVersion => "fastMcpSsh.version",
+            Sessions::KebaccSwitcherList { .. } => "kebaccSwitcher.list",
+            Sessions::KebaccSwitcherAdd { .. } => "kebaccSwitcher.add",
+            Sessions::KebaccSwitcherSwitch { .. } => "kebaccSwitcher.switch",
+            Sessions::KebaccSwitcherVersion => "kebaccSwitcher.version",
             Sessions::Transcript { .. } => "session.transcript",
             Sessions::CliCatalog { .. } => "cli.catalog",
             Sessions::CliLatest => "cli.latest",
@@ -309,7 +337,12 @@ impl Sessions {
             Sessions::CodexSwitcherList
             | Sessions::CodexSwitcherSave
             | Sessions::CodexSwitcherActivate { .. } => Wire::Key("json"),
-            Sessions::CodexSwitcherVersion | Sessions::FastMcpSshVersion => Wire::Key("version"),
+            Sessions::CodexSwitcherVersion
+            | Sessions::FastMcpSshVersion
+            | Sessions::KebaccSwitcherVersion => Wire::Key("version"),
+            Sessions::KebaccSwitcherList { .. }
+            | Sessions::KebaccSwitcherAdd { .. }
+            | Sessions::KebaccSwitcherSwitch { .. } => Wire::Key("json"),
             Sessions::Transcript { .. } => Wire::Key("text"),
             Sessions::CliCatalog { .. } => Wire::Key("clis"),
             Sessions::CliLatest => Wire::Key("latest"),
@@ -342,6 +375,8 @@ impl Sessions {
             | Sessions::CodexSwitcherList
             | Sessions::CodexSwitcherVersion
             | Sessions::FastMcpSshVersion
+            | Sessions::KebaccSwitcherList { .. }
+            | Sessions::KebaccSwitcherVersion
             | Sessions::Transcript { .. }
             | Sessions::CliCatalog { .. }
             | Sessions::CliLatest
@@ -352,6 +387,8 @@ impl Sessions {
             | Sessions::Migrate { .. }
             | Sessions::CodexSwitcherSave
             | Sessions::CodexSwitcherActivate { .. }
+            | Sessions::KebaccSwitcherAdd { .. }
+            | Sessions::KebaccSwitcherSwitch { .. }
             | Sessions::CliCancel { .. }
             | Sessions::CliDismiss { .. } => Capability::MutateProject,
 
@@ -485,6 +522,16 @@ impl Sessions {
             }
             Sessions::CodexSwitcherVersion => value_of(codex_switcher::version_blocking()),
             Sessions::FastMcpSshVersion => value_of(fast_mcp_ssh::version_blocking()),
+            Sessions::KebaccSwitcherList { provider } => {
+                value_of(kebacc_switcher::list_blocking(provider.as_deref())?)
+            }
+            Sessions::KebaccSwitcherAdd { provider } => {
+                value_of(kebacc_switcher::add_blocking(&provider)?)
+            }
+            Sessions::KebaccSwitcherSwitch { provider, email } => {
+                value_of(kebacc_switcher::switch_blocking(&provider, &email)?)
+            }
+            Sessions::KebaccSwitcherVersion => value_of(kebacc_switcher::version_blocking()),
             Sessions::Transcript {
                 thread_id,
                 bytes,
@@ -537,6 +584,8 @@ mod tests {
             "cmd": "claude",
             "cwds": ["/w"],
             "threadId": "t1",
+            "provider": "claude",
+            "email": "you@example.com",
             "id": "claude",
         });
         for method in ALL_METHODS {

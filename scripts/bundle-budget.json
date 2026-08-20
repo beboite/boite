@@ -60,12 +60,14 @@
     "Then to 899072, for the CLI manager types, i18n and catalogue row on top",
     "of that: the settings store hydrates on boot and the shortcut bar reads",
     "the presets. CLI manager measured 863.3 KB on the previous ceiling.",
+    "Then to 903552, for the kebacc accounts card and shared plugin install",
+    "card on top of that.",
     "",
     "largestEagerChunkBytes moved with it, 256000 -> 262144. The main route is",
     "the chunk in question and it had 0.2 KB left, which is a ceiling that fails",
     "the next commit whatever the next commit is."
   ],
-  "eagerBytes": 899072,
+  "eagerBytes": 903552,
   "totalBytes": 6144000,
   "largestEagerChunkBytes": 262144
 }

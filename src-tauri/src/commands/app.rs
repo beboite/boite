@@ -260,6 +260,40 @@ pub async fn fast_mcp_ssh_version(scope: State<'_, ProjectRoots>) -> Result<Valu
     on_bus(scope.inner(), Sessions::FastMcpSshVersion.into()).await
 }
 
+#[tauri::command]
+pub async fn kebacc_switcher_list(
+    scope: State<'_, ProjectRoots>,
+    provider: Option<String>,
+) -> Result<Value, String> {
+    on_bus(scope.inner(), Sessions::KebaccSwitcherList { provider }.into()).await
+}
+
+#[tauri::command]
+pub async fn kebacc_switcher_add(
+    scope: State<'_, ProjectRoots>,
+    provider: String,
+) -> Result<Value, String> {
+    on_bus(scope.inner(), Sessions::KebaccSwitcherAdd { provider }.into()).await
+}
+
+#[tauri::command]
+pub async fn kebacc_switcher_switch(
+    scope: State<'_, ProjectRoots>,
+    provider: String,
+    email: String,
+) -> Result<Value, String> {
+    on_bus(
+        scope.inner(),
+        Sessions::KebaccSwitcherSwitch { provider, email }.into(),
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn kebacc_switcher_version(scope: State<'_, ProjectRoots>) -> Result<Value, String> {
+    on_bus(scope.inner(), Sessions::KebaccSwitcherVersion.into()).await
+}
+
 // The CLI manager. Every one of these answers for the machine the threads spawn
 // on, which for a remote boite is the server rather than the device drawing the
 // panel — the same rule `command_exists` follows.
