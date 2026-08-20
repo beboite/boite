@@ -2,7 +2,7 @@ import type { ThreadStatus } from "$lib/types";
 import { isFinished } from "$lib/domain/thread-status";
 import { TransientMark } from "$lib/shared/utils/transientMark.svelte";
 import { noteThreadActivity, resetThreadActivity } from "./activity.svelte";
-import { noteWorkStarted } from "./work-activity.svelte";
+import { consumeWaking, noteProjectWork, noteWorkStarted } from "./work-activity.svelte";
 
 // Long enough that a glance a few seconds after the agent stopped still catches
 // it, short enough that a row is never still claiming to be fresh news by the
@@ -29,6 +29,7 @@ export function noteStatusChange(
   threadId: string,
   previous: ThreadStatus,
   next: ThreadStatus,
+  projectId: string | null = null,
 ) {
   if (previous === next) return;
   // Every change, not only the finishing ones: "working for 3 min" needs the
@@ -38,7 +39,15 @@ export function noteStatusChange(
   // An agent picking up a task, which is the one thing the sidebar's order
   // moves for. A transition by construction: the guard above already turned
   // away the sweep re-asserting `running` twice a second through a whole turn.
-  if (next === "running") noteWorkStarted(threadId);
+  //
+  // Unless the thread is coming back rather than starting: a resume replays its
+  // conversation, the replay draws a spinner, and from out here that spinner
+  // reads exactly like a turn. `consumeWaking` is the mark the pane armed when
+  // it spawned onto an existing session, and it answers once.
+  if (next === "running" && !consumeWaking(threadId)) {
+    noteWorkStarted(threadId);
+    if (projectId) noteProjectWork(projectId);
+  }
   if (isFinished(previous) || !isFinished(next)) return;
   marks.mark(threadId);
 }

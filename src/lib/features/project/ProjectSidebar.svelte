@@ -46,6 +46,7 @@
   import RemoteProjectPicker from "./RemoteProjectPicker.svelte";
   import { confirmDialog } from "$lib/shared/components/confirm.svelte";
   import { resizeHandle } from "$lib/shared/actions/resizeHandle";
+  import { rowFlip } from "$lib/shared/actions/rowFlip.svelte";
   import { longPress } from "$lib/shared/actions/longPress";
   import ContextMenu from "$lib/shared/components/ContextMenu.svelte";
   import type { ContextMenuItem } from "$lib/shared/components/ContextMenu.svelte";
@@ -1083,6 +1084,17 @@
   );
 
   const visibleProjects = $derived(filtered.projects);
+
+  /**
+   * The order itself, as one string, for the lists that animate their moves.
+   *
+   * The ids and nothing else: a project's threads, its status and its title all
+   * change constantly, and every one of those would have the sidebar measure
+   * itself twice for rows that have not moved. A drag is left out of it because
+   * it slides the rows by hand (`dragShiftStyle`), and two owners of one
+   * transform is a row that fights itself.
+   */
+  const projectOrderKey = $derived(visibleProjects.map((p) => p.id).join(","));
   const filtering = $derived(normaliseTerm(filterTerm).length > 0);
 
   /**
@@ -1320,6 +1332,7 @@
     class="flex-1 overflow-y-auto px-2 pb-2"
     role="list"
     onkeydown={onListKeydown}
+    use:rowFlip={{ key: () => projectOrderKey, enabled: () => !liveDrag }}
   >
     {#if showArchived && visibleProjects.length === 0}
       <div
@@ -1723,13 +1736,18 @@
                now `0 0 12px -3px`, which is a nine-pixel bloom rather than a
                thirteen-pixel one, and every pixel of gap is a thread the
                sidebar stops showing. -->
+          {@const liveRows = visibleDelegationRows(live, stacksOpen)}
           {#if live.length > 0}
             <ul
               class="px-1 {settledCount > 0 ? 'pb-0.5' : 'pb-1'} {rowGapClass}"
               data-thread-list
               data-project-id={project.id}
+              use:rowFlip={{
+                key: () => liveRows.map((r) => r.thread.id).join(","),
+                enabled: () => !liveDrag,
+              }}
             >
-              {#each visibleDelegationRows(live, stacksOpen) as { thread, depth, stack, foldedCount, expandable }, threadIdx (thread.id)}
+              {#each liveRows as { thread, depth, stack, foldedCount, expandable }, threadIdx (thread.id)}
                 {@render threadItem(thread, threadIdx, true, depth, stack, foldedCount, expandable)}
               {/each}
             </ul>
@@ -1768,8 +1786,15 @@
                 {t("sidebar.settledCount", { count: String(settledCount) })}
               </button>
               {#if open}
-                <ul class="px-0.5 pb-0.5 {rowGapClass}">
-                  {#each visibleDelegationRows(settled, stacksOpen) as { thread, depth, stack, foldedCount, expandable }, threadIdx (thread.id)}
+                {@const settledRows = visibleDelegationRows(settled, stacksOpen)}
+                <ul
+                  class="px-0.5 pb-0.5 {rowGapClass}"
+                  use:rowFlip={{
+                    key: () => settledRows.map((r) => r.thread.id).join(","),
+                    enabled: () => !liveDrag,
+                  }}
+                >
+                  {#each settledRows as { thread, depth, stack, foldedCount, expandable }, threadIdx (thread.id)}
                     {@render threadItem(thread, threadIdx, false, depth, stack, foldedCount, expandable)}
                   {/each}
                 </ul>

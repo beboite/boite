@@ -8,8 +8,8 @@
   import {
     INFO_BOX_ANCHORS,
     INFO_BOX_GUTTER_REM,
+    anchorForPoint,
     clampToPane,
-    nearestAnchor,
     snapPoint,
     toastAlignFor,
     toastStackFor,
@@ -293,6 +293,8 @@
     startY: number;
     originX: number;
     originY: number;
+    paneX: number;
+    paneY: number;
     armed: boolean;
   };
   let session: DragSession | null = null;
@@ -306,12 +308,15 @@
     if (pointerFromButton(e.target)) return;
     if (!hostEl) return;
     e.preventDefault();
+    const host = hostEl.getBoundingClientRect();
     session = {
       pointerId: e.pointerId,
       startX: e.clientX,
       startY: e.clientY,
       originX: left,
       originY: top,
+      paneX: host.left,
+      paneY: host.top,
       armed: false,
     };
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
@@ -334,13 +339,21 @@
       session.originY + dy,
     );
     dragPos = next;
-    hoverSnap = nearestAnchor(pane, boxSize, gutter, next.x, next.y);
+    // Aimed at the pointer, not at the box: the card is clamped inside the pane
+    // and is wide, so its own centre barely moves near an edge. Throw the
+    // cursor at the corner you want and release, the card follows.
+    hoverSnap = anchorForPoint(
+      pane,
+      e.clientX - session.paneX,
+      e.clientY - session.paneY,
+      dock,
+    );
   }
 
   function onPointerUp(e: PointerEvent) {
     if (!session || e.pointerId !== session.pointerId) return;
     const snap = session.armed
-      ? nearestAnchor(pane, boxSize, gutter, dragPos.x, dragPos.y)
+      ? anchorForPoint(pane, e.clientX - session.paneX, e.clientY - session.paneY, dock)
       : null;
     session = null;
     dragging = false;
