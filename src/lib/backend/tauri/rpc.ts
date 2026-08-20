@@ -10,6 +10,8 @@ import type {
   ExplorerApi,
   CodexSwitcherApi,
   FastMcpSshApi,
+  KebaccSwitcherApi,
+  KebaccSwitcherList,
   CodexSwitcherList,
   FastpickApi,
   FastpickListing,
@@ -182,6 +184,22 @@ export const tauriCodexSwitcher: CodexSwitcherApi = {
 
 export const tauriFastMcpSsh: FastMcpSshApi = {
   version: () => invoke<string | null>("fast_mcp_ssh_version"),
+};
+
+export const tauriKebaccSwitcher: KebaccSwitcherApi = {
+  async list(provider) {
+    const raw = await invoke<string>("kebacc_switcher_list", { provider: provider ?? null });
+    return JSON.parse(raw) as KebaccSwitcherList;
+  },
+  async add(provider) {
+    const raw = await invoke<string>("kebacc_switcher_add", { provider });
+    return JSON.parse(raw) as KebaccSwitcherList;
+  },
+  async switchTo(provider, email) {
+    const raw = await invoke<string>("kebacc_switcher_switch", { provider, email });
+    return JSON.parse(raw) as KebaccSwitcherList;
+  },
+  version: () => invoke<string | null>("kebacc_switcher_version"),
 };
 
 export const tauriScope: ScopeApi = {

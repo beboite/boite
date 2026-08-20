@@ -239,6 +239,7 @@ fn probe_params() -> Value {
         "text": "t",
         "toThreadId": "t", "dispatchId": "d", "state": "delivered",
         "audio": "", "actionId": "a",
+        "provider": "claude", "email": "you@example.com",
     })
 }
 
@@ -665,6 +666,10 @@ mod tests {
             ("codexSwitcher.activate", MutateProject),
             ("codexSwitcher.version", ReadProject),
             ("fastMcpSsh.version", ReadProject),
+            ("kebaccSwitcher.list", ReadProject),
+            ("kebaccSwitcher.add", MutateProject),
+            ("kebaccSwitcher.switch", MutateProject),
+            ("kebaccSwitcher.version", ReadProject),
             ("session.transcript", ReadProject),
             ("project.list", ReadProject),
             ("project.create", MutateAcross),

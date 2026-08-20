@@ -618,6 +618,41 @@ export interface FastMcpSshApi {
   version(): Promise<string | null>;
 }
 
+/**
+ * What Boite makes of `kebacc-switch list`. Usage windows keep the labels the
+ * CLI printed (or the keys of its JSON), so a new quota window shows up without
+ * a Boite change.
+ */
+export interface KebaccSwitcherList {
+  providers: KebaccSwitcherProvider[];
+}
+
+export interface KebaccSwitcherProvider {
+  provider: string;
+  label: string;
+  accounts: KebaccSwitcherAccount[];
+}
+
+export interface KebaccUsageWindow {
+  label: string;
+  used_percent: number | null;
+  remaining_percent: number | null;
+  reset: string | null;
+}
+
+export interface KebaccSwitcherAccount {
+  email: string;
+  active: boolean;
+  windows: KebaccUsageWindow[];
+}
+
+export interface KebaccSwitcherApi {
+  list(provider?: string): Promise<KebaccSwitcherList>;
+  add(provider: string): Promise<KebaccSwitcherList>;
+  switchTo(provider: string, email: string): Promise<KebaccSwitcherList>;
+  version(): Promise<string | null>;
+}
+
 export interface ScopeApi {
   registerProjectRoots(roots: string[]): Promise<void>;
   // The server's browsable base dir for adding projects via the web folder
@@ -1217,6 +1252,7 @@ export interface Backend {
   readonly fastpick: FastpickApi;
   readonly codexSwitcher: CodexSwitcherApi;
   readonly fastMcpSsh: FastMcpSshApi;
+  readonly kebaccSwitcher: KebaccSwitcherApi;
   readonly scope: ScopeApi;
   readonly session: SessionApi;
   readonly log: LogApi;

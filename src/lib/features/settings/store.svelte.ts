@@ -161,6 +161,9 @@ const DEFAULTS: Settings = {
   locale: "system",
   setupCompleted: false,
   fastpickEnabled: true,
+  kebaccClaude: true,
+  kebaccCodex: true,
+  kebaccAntigravity: true,
   colorByModel: true,
   sidebarDesign: "classic",
   sidebarHarnessLogos: true,
@@ -393,12 +396,15 @@ const DEVICE_FIELDS = [
   "voicePushToTalk",
   "voiceAutoSend",
   "voiceSpeakWhenUnfocused",
+  "kebaccClaude",
+  "kebaccCodex",
+  "kebaccAntigravity",
 ] as const;
 
 // Stamped on the blob so an absent key can be told apart from a key that had
 // not been promoted yet. Bump it whenever a field joins DEVICE_FIELDS, and list
 // the newcomers in PROMOTED_TO_DEVICE so they migrate once.
-const DEVICE_BLOB_VERSION = 4;
+const DEVICE_BLOB_VERSION = 5;
 
 // Moved out of the workspace blob. A device blob whose `v` is missing or older
 // than DEVICE_BLOB_VERSION has no key for the newcomers, and the workspace
@@ -423,6 +429,9 @@ const PROMOTED_TO_DEVICE: readonly string[] = [
   "voicePushToTalk",
   "voiceAutoSend",
   "voiceSpeakWhenUnfocused",
+  "kebaccClaude",
+  "kebaccCodex",
+  "kebaccAntigravity",
 ];
 
 type DeviceBlob = Partial<Settings> & { v?: number };
@@ -607,6 +616,18 @@ class SettingsStore {
           typeof stored.fastpickEnabled === "boolean"
             ? stored.fastpickEnabled
             : DEFAULTS.fastpickEnabled,
+        kebaccClaude:
+          typeof stored.kebaccClaude === "boolean"
+            ? stored.kebaccClaude
+            : DEFAULTS.kebaccClaude,
+        kebaccCodex:
+          typeof stored.kebaccCodex === "boolean"
+            ? stored.kebaccCodex
+            : DEFAULTS.kebaccCodex,
+        kebaccAntigravity:
+          typeof stored.kebaccAntigravity === "boolean"
+            ? stored.kebaccAntigravity
+            : DEFAULTS.kebaccAntigravity,
         colorByModel:
           typeof stored.colorByModel === "boolean"
             ? stored.colorByModel
@@ -1020,6 +1041,24 @@ class SettingsStore {
     if (this.state.fastpickEnabled === value) return;
     this.state.fastpickEnabled = value;
     await this.persist();
+  }
+
+  setKebaccClaude(value: boolean) {
+    if (this.state.kebaccClaude === value) return;
+    this.state.kebaccClaude = value;
+    this.persistDeviceNow();
+  }
+
+  setKebaccCodex(value: boolean) {
+    if (this.state.kebaccCodex === value) return;
+    this.state.kebaccCodex = value;
+    this.persistDeviceNow();
+  }
+
+  setKebaccAntigravity(value: boolean) {
+    if (this.state.kebaccAntigravity === value) return;
+    this.state.kebaccAntigravity = value;
+    this.persistDeviceNow();
   }
 
   setColorByModel(value: boolean) {

@@ -97,6 +97,10 @@ export const SETTINGS_CATALOGUE: SettingEntry[] = [
 
   { tab: "plugins", key: "fastpick.settingsTitle", descKey: "fastpick.settingsDesc" },
   { tab: "plugins", key: "fastpick.enable", descKey: "fastpick.enableDesc" },
+  { tab: "plugins", key: "plugin.kebaccTitle", descKey: "plugin.kebaccDesc" },
+  { tab: "plugins", key: "plugin.kebaccClaude" },
+  { tab: "plugins", key: "plugin.kebaccCodex" },
+  { tab: "plugins", key: "plugin.kebaccAntigravity" },
   { tab: "plugins", key: "plugin.codexTitle", descKey: "plugin.codexDesc" },
   { tab: "plugins", key: "plugin.fastMcpSshTitle", descKey: "plugin.fastMcpSshDesc" },
 

@@ -18,6 +18,7 @@ pub mod fastpick;
 pub mod finish;
 pub mod mcp_launch;
 pub mod git;
+pub mod kebacc_switcher;
 pub mod journal;
 pub mod migrations;
 pub mod model;
