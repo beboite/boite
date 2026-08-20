@@ -25,6 +25,7 @@
   import ArrowUp from "@lucide/svelte/icons/arrow-up";
   import ArrowDown from "@lucide/svelte/icons/arrow-down";
   import { t } from "$lib/i18n/index.svelte";
+  import { settings } from "$lib/features/settings/store.svelte";
   import type { Project, Thread } from "$lib/types";
 
   /**
@@ -131,6 +132,27 @@
         <span class="text-xs text-[var(--color-success)]">
           {t("project.threadsRunning", { count: running })}
         </span>
+      {/if}
+    {/snippet}
+    {#snippet actions()}
+      <!-- The per-project override, three states: absent inherits the global
+           answer. Only drawn while that experiment is armed, so switching it
+           off restores one global orchestrator without erasing the choices. -->
+      {#if settings.state.experimentOrchestrator && settings.state.experimentOrchestratorPerProject}
+        <select
+          class="rounded-md border border-border bg-[var(--color-surface-2)] px-1.5 py-0.5 text-xs text-muted-foreground outline-none focus:border-foreground/30"
+          aria-label={t("project.orchestrator")}
+          value={settings.state.orchestratorByProject[project.id] ?? ""}
+          onchange={(e) =>
+            void settings.setOrchestratorForProject(
+              project.id,
+              (e.currentTarget.value || null) as "on" | "off" | null,
+            )}
+        >
+          <option value="">{t("project.orchestratorInherit")}</option>
+          <option value="on">{t("project.orchestratorOn")}</option>
+          <option value="off">{t("project.orchestratorOff")}</option>
+        </select>
       {/if}
     {/snippet}
     {#if threads.length === 0}

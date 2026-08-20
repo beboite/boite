@@ -1,10 +1,16 @@
 import { backend } from "$lib/backend/active.svelte";
 import { settings } from "$lib/features/settings/store.svelte";
+import { orchestratorEnabledFor } from "$lib/features/settings/orchestratorEnabledFor";
 import { logger } from "$lib/shared/services/logger.svelte";
 import { Conversation } from "./conversation.svelte";
 
 /**
- * The one orchestrator conversation this window shows, and how it stays fresh.
+ * The orchestrator conversations this window shows, and how they stay fresh.
+ *
+ * One conversation per scope: `null` is the workspace, a project id is that
+ * project's own orchestrator. The chat shows one at a time (`scope`), but
+ * every conversation already opened keeps refreshing, so switching back is a
+ * read from memory rather than a refetch from zero.
  *
  * Fresh means event-driven. On desktop the Rust side emits
  * `boite://orchestrator-changed` when the log grows; on remote the control
@@ -15,25 +21,52 @@ import { Conversation } from "./conversation.svelte";
 class OrchestratorStore {
   posting = $state(false);
 
-  readonly conversation = new Conversation(async (sinceId) => {
-    const conduct = backend().conduct;
-    if (!conduct) return [];
-    return conduct.messages({ scope: null, sinceId });
-  });
+  /** Which conversation the chat shows. `null` is the workspace. */
+  scope = $state<string | null>(null);
 
-  /** Whether the home card draws at all. Same resolver the status engine uses. */
-  get enabled(): boolean {
-    return (
-      settings.state.experimentOrchestrator && !!settings.state.orchestratorAgent
-    );
+  #conversations = new Map<string | null, Conversation>();
+
+  conversationFor(scope: string | null): Conversation {
+    let held = this.#conversations.get(scope);
+    if (!held) {
+      held = new Conversation(async (sinceId) => {
+        const conduct = backend().conduct;
+        if (!conduct) return [];
+        return conduct.messages({ scope, sinceId });
+      });
+      this.#conversations.set(scope, held);
+    }
+    return held;
   }
 
-  /** Something changed workspace-side; pull what is new. */
+  get conversation(): Conversation {
+    return this.conversationFor(this.scope);
+  }
+
+  /** Whether the home card draws at all. Same resolver the tri-state uses. */
+  get enabled(): boolean {
+    return orchestratorEnabledFor(settings.state, null);
+  }
+
+  /** Whether a given project is watched, overrides included. */
+  enabledFor(projectId: string | null): boolean {
+    return orchestratorEnabledFor(settings.state, projectId);
+  }
+
+  /** Something changed workspace-side; pull what is new, every scope held. */
   onWorkspaceEvent() {
     if (!this.enabled) return;
-    void this.conversation.refresh().catch((err) => {
-      logger.warn("orchestrator", "refresh failed", String(err));
-    });
+    for (const conversation of this.#conversations.values()) {
+      void conversation.refresh().catch((err) => {
+        logger.warn("orchestrator", "refresh failed", String(err));
+      });
+    }
+    // Nothing opened yet: the current scope still deserves its catch-up read.
+    if (this.#conversations.size === 0) {
+      void this.conversation.refresh().catch((err) => {
+        logger.warn("orchestrator", "refresh failed", String(err));
+      });
+    }
   }
 
   /**
@@ -58,15 +91,16 @@ class OrchestratorStore {
     };
   }
 
-  /** The user's line: make sure someone is listening, then post it. */
+  /** The user's line into the shown scope: ensure a listener, then post. */
   async post(text: string): Promise<boolean> {
     const trimmed = text.trim();
     if (!trimmed || this.posting) return false;
     this.posting = true;
+    const scope = this.scope;
     try {
       const { postToOrchestrator } = await import("./api");
-      const ok = await postToOrchestrator(trimmed);
-      if (ok) await this.conversation.refresh();
+      const ok = await postToOrchestrator(trimmed, scope);
+      if (ok) await this.conversationFor(scope).refresh();
       return ok;
     } finally {
       this.posting = false;
@@ -74,7 +108,9 @@ class OrchestratorStore {
   }
 
   reset() {
-    this.conversation.reset();
+    for (const conversation of this.#conversations.values()) conversation.reset();
+    this.#conversations.clear();
+    this.scope = null;
   }
 }
 
