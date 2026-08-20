@@ -7,6 +7,7 @@ export interface CliPreset {
   iconKey: IconKey;
   executable: string;
   docUrl: string;
+  yoloFlag?: string;
 }
 
 export const CLI_PRESETS: CliPreset[] = [
@@ -17,6 +18,7 @@ export const CLI_PRESETS: CliPreset[] = [
     iconKey: "claude",
     executable: "claude",
     docUrl: "https://code.claude.com/docs/en/overview",
+    yoloFlag: "--dangerously-skip-permissions",
   },
   {
     id: "codex",
@@ -25,6 +27,7 @@ export const CLI_PRESETS: CliPreset[] = [
     iconKey: "codex",
     executable: "codex",
     docUrl: "https://github.com/openai/codex",
+    yoloFlag: "--yolo",
   },
   {
     id: "opencode",
@@ -33,6 +36,7 @@ export const CLI_PRESETS: CliPreset[] = [
     iconKey: "opencode",
     executable: "opencode",
     docUrl: "https://opencode.ai/docs",
+    yoloFlag: "--auto",
   },
   {
     id: "cursor",
@@ -41,6 +45,7 @@ export const CLI_PRESETS: CliPreset[] = [
     iconKey: "cursor",
     executable: "cursor-agent",
     docUrl: "https://cursor.com/fr/cli",
+    yoloFlag: "--force",
   },
   {
     id: "antigravity",
@@ -49,6 +54,7 @@ export const CLI_PRESETS: CliPreset[] = [
     iconKey: "antigravity",
     executable: "agy",
     docUrl: "https://antigravity.google/docs/cli",
+    yoloFlag: "--dangerously-skip-permissions",
   },
   {
     id: "copilot",
@@ -57,6 +63,7 @@ export const CLI_PRESETS: CliPreset[] = [
     iconKey: "copilot",
     executable: "gh",
     docUrl: "https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli",
+    yoloFlag: "-- --yolo",
   },
   {
     id: "grok",
@@ -65,6 +72,7 @@ export const CLI_PRESETS: CliPreset[] = [
     iconKey: "grok",
     executable: "grok",
     docUrl: "https://x.ai/cli",
+    yoloFlag: "--yolo",
   },
   {
     id: "hermes",
@@ -73,6 +81,7 @@ export const CLI_PRESETS: CliPreset[] = [
     iconKey: "hermes",
     executable: "hermes",
     docUrl: "https://github.com/NousResearch/hermes-agent#installation",
+    yoloFlag: "--yolo",
   },
   {
     id: "pi",
@@ -89,5 +98,51 @@ export const CLI_PRESETS: CliPreset[] = [
     iconKey: "muse",
     executable: "muse",
     docUrl: "https://dev.meta.ai/docs/muse-code",
+    yoloFlag: "--yolo",
   },
 ];
+
+/** Finds a preset matching a given command line or executable name. */
+export function findPresetForCommand(command: string): CliPreset | null {
+  const trimmed = command.trim();
+  if (!trimmed) return null;
+  const parts = trimmed.split(/\s+/);
+  const first = parts[0];
+  return (
+    CLI_PRESETS.find((p) => {
+      const presetParts = p.command.trim().split(/\s+/);
+      if (presetParts[0] === "gh" && parts[0] === "gh") {
+        return parts[1] === "copilot";
+      }
+      return p.executable === first || presetParts[0] === first;
+    }) ?? null
+  );
+}
+
+/** Checks whether a command string already contains the preset's YOLO flag. */
+export function hasYoloFlag(command: string, flag?: string): boolean {
+  if (!flag) return false;
+  if (flag.startsWith("-- ")) {
+    return command.includes(flag);
+  }
+  const tokens = command.trim().split(/\s+/);
+  return tokens.includes(flag);
+}
+
+/** Injects the YOLO flag into a command line. */
+export function withYoloFlag(command: string, flag?: string): string {
+  if (!flag || hasYoloFlag(command, flag)) return command;
+  const trimmed = command.trim();
+  if (!trimmed) return flag;
+  return `${trimmed} ${flag}`;
+}
+
+/** Removes the YOLO flag from a command line. */
+export function withoutYoloFlag(command: string, flag?: string): string {
+  if (!flag || !hasYoloFlag(command, flag)) return command;
+  if (flag.startsWith("-- ")) {
+    return command.replace(/\s*--\s+--yolo\b/, "").trim();
+  }
+  const tokens = command.trim().split(/\s+/);
+  return tokens.filter((t) => t !== flag).join(" ").trim();
+}
