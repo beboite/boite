@@ -122,7 +122,6 @@ export const EN_MESSAGES = {
   "shortcuts.detectionTargetLocal": "this computer",
   "shortcuts.checking": "Checking…",
   "shortcuts.recheck": "Check again",
-  "shortcuts.yolo": "YOLO",
   "shortcuts.yoloBadge": "YOLO",
   "shortcuts.yoloMode": "YOLO mode",
   "shortcuts.yoloWarningTitle": "Enable YOLO mode for {label}?",

@@ -126,7 +126,6 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "shortcuts.detectionTargetLocal": "cet ordinateur",
   "shortcuts.checking": "Vérification…",
   "shortcuts.recheck": "Revérifier",
-  "shortcuts.yolo": "YOLO",
   "shortcuts.yoloBadge": "YOLO",
   "shortcuts.yoloMode": "Mode YOLO",
   "shortcuts.yoloWarningTitle": "Activer le mode YOLO pour {label} ?",
