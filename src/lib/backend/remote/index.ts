@@ -16,6 +16,11 @@ import type {
   CheckpointApi,
   CheckpointDiff,
   CheckpointFileVersions,
+  CliApi,
+  CliDataPath,
+  CliLatest,
+  CliJob,
+  CliRow,
   EditorApi,
   ExplorerApi,
   CodexSwitcherApi,
@@ -99,6 +104,7 @@ export class RemoteBackend implements Backend {
   readonly fastpick: FastpickApi;
   readonly codexSwitcher: CodexSwitcherApi;
   readonly fastMcpSsh: FastMcpSshApi;
+  readonly cli: CliApi;
   readonly scope: ScopeApi;
   readonly session: SessionApi;
   readonly search: SearchApi;
@@ -452,6 +458,25 @@ export class RemoteBackend implements Backend {
     this.fastMcpSsh = {
       version: () =>
         rpc("fastMcpSsh.version", {}).then((r) => (r.version as string | null) ?? null),
+    };
+
+    // Installed on the machine the threads spawn on, which is this server. A
+    // phone asking for an install is asking the server to fetch a Linux binary
+    // for itself, and the progress it reads back is the server's.
+    this.cli = {
+      catalog: (probeVersions) =>
+        rpc("cli.catalog", { probeVersions: probeVersions ?? false }).then(
+          (r) => (r.clis as CliRow[] | null) ?? [],
+        ),
+      latest: () => rpc("cli.latest", {}).then((r) => (r.latest as CliLatest[] | null) ?? []),
+      jobs: () => rpc("cli.jobs", {}).then((r) => (r.jobs as CliJob[] | null) ?? []),
+      dataPaths: (id) =>
+        rpc("cli.dataPaths", { id }).then((r) => (r.paths as CliDataPath[] | null) ?? []),
+      install: (id) => rpc("cli.install", { id }).then((r) => r.job as CliJob),
+      uninstall: (id, purgeData) =>
+        rpc("cli.uninstall", { id, purgeData }).then((r) => r.job as CliJob),
+      cancel: (id) => rpc("cli.cancel", { id }).then((r) => r.cancelled as boolean),
+      dismiss: (id) => rpc("cli.dismiss", { id }).then(() => undefined),
     };
 
     // The server derives its filesystem trust boundary from persisted projects;

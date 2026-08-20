@@ -19,6 +19,7 @@ export type SettingsTabId =
   | "general"
   | "terminal"
   | "appearance"
+  | "cli"
   | "plugins"
   | "keyboard"
   | "devices"
@@ -100,6 +101,8 @@ export const SETTINGS_CATALOGUE: SettingEntry[] = [
 
   { tab: "devices", key: "devices.title", descKey: "devices.description" },
   { tab: "devices", key: "devices.inviteTitle", descKey: "devices.inviteDesc" },
+
+  { tab: "cli", key: "cli.title", descKey: "cli.description" },
 
   { tab: "plugins", key: "fastpick.settingsTitle", descKey: "fastpick.settingsDesc" },
   { tab: "plugins", key: "fastpick.enable", descKey: "fastpick.enableDesc" },

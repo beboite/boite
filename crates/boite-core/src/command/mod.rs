@@ -685,6 +685,14 @@ mod tests {
             ("codexSwitcher.version", ReadProject),
             ("fastMcpSsh.version", ReadProject),
             ("session.transcript", ReadProject),
+            ("cli.catalog", ReadProject),
+            ("cli.latest", ReadProject),
+            ("cli.jobs", ReadProject),
+            ("cli.dataPaths", ReadProject),
+            ("cli.install", MutateAcross),
+            ("cli.uninstall", MutateAcross),
+            ("cli.cancel", MutateProject),
+            ("cli.dismiss", MutateProject),
             ("project.list", ReadProject),
             ("project.create", MutateAcross),
             ("project.archive", MutateProject),
@@ -780,9 +788,12 @@ mod tests {
     /// brought creating a project, deleting one and deleting a thread. Then sync
     /// brought four more, and they are the sharpest of the lot: they write into
     /// `~/.claude` and `~/.agents`, which is every agent's own configuration and
-    /// the instructions every agent reads. A grant scoped to one project — the
-    /// credentials file the todo panel hands to agents — must not reach them,
-    /// and `Grant::Project.allows` refusing each one is asserted below.
+    /// the instructions every agent reads. Then the CLI manager brought two more,
+    /// which do not reach past a project so much as past every project:
+    /// installing a binary onto the machine, and deleting an agent's own data
+    /// directory. A grant scoped to one project — the credentials file the todo
+    /// panel hands to agents — must not reach them, and `Grant::Project.allows`
+    /// refusing each one is asserted below.
     ///
     /// The capability check is not the whole guard for sync, and is not meant to
     /// be: `Grant::Owner` allows everything. What keeps an agent away from these
@@ -797,6 +808,8 @@ mod tests {
             "sync.push",
             "sync.resolve",
             "sync.repair",
+            "cli.install",
+            "cli.uninstall",
         ];
         for command in every_command() {
             let across = command.capability() == Capability::MutateAcross;
