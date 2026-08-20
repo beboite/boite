@@ -1,7 +1,6 @@
 <script lang="ts">
   import { updater } from "./store.svelte";
   import { t } from "$lib/i18n/index.svelte";
-  import ArrowUpCircle from "@lucide/svelte/icons/arrow-up-circle";
 
   // Only surfaces once the payload is on disk. Anything earlier would offer a
   // restart that still has to wait on the network.
@@ -12,15 +11,40 @@
 {#if version}
   <button
     type="button"
-    class="flex h-7 items-center gap-1.5 rounded-md bg-foreground px-2 text-xs font-medium text-background transition hover:bg-foreground/90 disabled:opacity-60"
+    class="update-btn"
     onclick={() => updater.install()}
     disabled={installing}
     title={t("updater.readyTooltip", { version })}
     aria-label={t("updater.restartLabel", { version })}
   >
-    <ArrowUpCircle class="size-3.5" />
-    <span class="hidden sm:inline">
-      {installing ? t("updater.restarting") : t("updater.restartToUpdate")}
-    </span>
+    {installing ? t("updater.ctaInstalling") : t("updater.ctaAvailable")}
   </button>
 {/if}
+
+<style>
+  /* Lifted from accshift's titlebar CTA: a pill that sits on the bar instead
+     of inverting it. color-mix against the live tokens so every theme keeps
+     the same mix ratios. */
+  .update-btn {
+    height: 1.5rem;
+    border: 1px solid color-mix(in srgb, var(--color-foreground) 25%, var(--color-border));
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--color-surface-2) 92%, var(--color-foreground) 8%);
+    color: var(--color-foreground);
+    font-size: var(--text-xs);
+    font-weight: 600;
+    line-height: 1;
+    padding: 0 0.625rem;
+    cursor: pointer;
+    transition: background 120ms ease-out, opacity 120ms ease-out;
+  }
+
+  .update-btn:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--color-surface-2) 70%, var(--color-foreground) 30%);
+  }
+
+  .update-btn:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+</style>
