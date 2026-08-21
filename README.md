@@ -161,6 +161,13 @@ actually answers, computed at render, so the Appearance toggle reaches every
 thread rather than the next one. The Fastpick tab in the settings installs and
 removes it.
 
+A provider can hold several credentials, and the menu treats them as what they
+are: each model row says which account answers it, the launch names that account
+so two keys serving the same model id cannot be confused, and a credential wired
+to another agent is not offered here. Every pane refreshes in place, the config
+listing on one button and a provider's catalogue on the other, so a key file
+dropped in or a provider added reaches the menu without a restart.
+
 Boite never touches a credential. It asks fastpick what the choices are and
 launches it with the three answers; key files, local proxies and the machines
 some endpoints have to wake all stay on fastpick's side, read on the machine

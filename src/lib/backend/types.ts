@@ -494,10 +494,27 @@ export interface ShellApi {
  */
 export interface FastpickListing {
   schema: number;
+  /** The version that answered. Absent before schema 3. */
+  fastpick?: string;
+  /** The config file it read, as an absolute path on the machine that answered. */
+  config?: string;
+  /** Where `--md` names are resolved, on that same machine. */
+  systemPromptsDir?: string;
   harnesses: FastpickHarness[];
   providers: FastpickProvider[];
+  /**
+   * Every file in the prompts folder, not only the ones matching a model. fastpick's own
+   * menu puts this behind `a`, and the options pane behind the same kind of toggle.
+   */
+  prompts?: FastpickPrompt[];
   /** Only present when a provider was asked for. */
   models?: FastpickModels;
+}
+
+/** A system prompt file: `stem` is what `--md` takes, `name` is what it is called on disk. */
+export interface FastpickPrompt {
+  name: string;
+  stem: string;
 }
 
 export interface FastpickHarness {
@@ -506,8 +523,12 @@ export interface FastpickHarness {
   /**
    * Which agent this is, whatever the config named it. `id` is the user's word and can be
    * anything, so the icon and the session machinery key off this instead.
+   *
+   * Open rather than a closed union: fastpick grows a kind whenever it learns an agent,
+   * and a listing naming one boite has never heard of is a row with no icon, not a parse
+   * that has to fail. `iconKeyForKind` decides what an unknown one looks like.
    */
-  kind: "claude-code" | "opencode" | "codex";
+  kind: "claude-code" | "opencode" | "codex" | "pi" | (string & {});
   /** Whether the agent's binary is on the machine that would run it. */
   installed: boolean;
   supportsEffort: boolean;
@@ -516,18 +537,49 @@ export interface FastpickHarness {
   providers: string[];
 }
 
+/**
+ * One entry of fastpick's config, which since schema 3 holds several credentials.
+ *
+ * A site reached with two keys is one provider with two `keys`, each with its own key file,
+ * its own bindings and its own model catalogue. The fields that used to sit here moved onto
+ * the key; `providerKeys` in `fastpick/keys.ts` reads either shape, and nothing else should
+ * touch the legacy ones.
+ */
 export interface FastpickProvider {
   id: string;
   name: string;
   /** Heading several providers share, typically the site they belong to. */
   group: string | null;
+  /** Schema 3 and up. One entry when the provider holds a single credential. */
+  keys?: FastpickKey[];
+  /** Schema 2 and below, where a provider held exactly one credential. */
+  needsKey?: boolean;
+  /** Schema 2 and below. See `FastpickKey.keyPresent`. */
+  keyPresent?: boolean;
+  /** Schema 2 and below. See `FastpickKey.harnesses`. */
+  harnesses?: Record<string, FastpickBinding>;
+  /** Schema 2 and below. See `FastpickKey.proxyPort`. */
+  proxyPort?: number | null;
+}
+
+/**
+ * One credential of a provider, which is what a launch actually resolves against.
+ *
+ * `id` is what `--key <provider>.<id>` names. It is what makes `--model` unambiguous when
+ * two keys of one site serve a model of the same name, and it is why every model carries
+ * the key it came from.
+ */
+export interface FastpickKey {
+  id: string;
+  /** What fastpick draws for it. Null means the id is the name. */
+  label: string | null;
   needsKey: boolean;
   /**
    * Whether that key file is there. fastpick never reports where it is or what is in it,
    * and boite never asks: the credential is read at spawn time, on the machine that spawns.
    */
   keyPresent: boolean;
-  /** What each wired harness reaches this provider through, keyed by harness id. */
+  /** What each wired harness reaches this credential through, keyed by harness id. */
   harnesses?: Record<string, FastpickBinding>;
   /** Set when fastpick has to start a local proxy first. */
   proxyPort?: number | null;
@@ -545,12 +597,35 @@ export interface FastpickBinding {
 export interface FastpickModels {
   provider: string;
   /** Where the list came from, so a cached one is never shown as live. */
-  source: { kind: "live" | "cache" | "config" | "failed"; ageSecs?: number; error?: string };
+  source: FastpickSource;
   items: FastpickModel[];
+}
+
+/**
+ * How that list was obtained.
+ *
+ * `several` is a provider with several credentials answering differently: some catalogues
+ * were fetched and others were not, and `failed` names the ones that were not. Reporting
+ * that as a plain success hides a key whose models are silently missing from the list.
+ */
+export interface FastpickSource {
+  kind: "live" | "cache" | "config" | "failed" | "several" | (string & {});
+  ageSecs?: number;
+  /** How many models the list holds, fastpick's own count. */
+  count?: number;
+  error?: string;
+  /** One line per credential that could not be reached, already carrying its key's name. */
+  failed?: string[];
 }
 
 export interface FastpickModel {
   id: string;
+  /**
+   * Which credential of the provider serves it. Absent before schema 3, where a provider
+   * held one. It is what `--key` names at launch, and what tells two models sharing an id
+   * apart.
+   */
+  key?: string | null;
   label: string | null;
   contextWindow: number | null;
   effort: string[];

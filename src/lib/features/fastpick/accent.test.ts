@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import { ACCENT_COLOR, isLocalUrl, modelAccent, modelFamily } from "./accent";
 import type { FastpickProvider } from "$lib/backend/types";
 
+// The pre-schema-3 shape, where a provider held one credential and carried its fields
+// itself. Still drawn by a remote boite whose fastpick predates the split, and every
+// assertion below is as true of it as of the current one.
 function provider(patch: Partial<FastpickProvider> = {}): FastpickProvider {
   return {
     id: "acme",
@@ -76,5 +79,38 @@ describe("modelAccent", () => {
   it("falls back too when the provider is listed but not wired to this harness", () => {
     const p = provider({ harnesses: { other: { baseUrl: null } } });
     expect(modelAccent(combo, p)).toBe("claude");
+  });
+});
+
+describe("modelAccent, one provider holding several credentials", () => {
+  // Schema 3: the endpoint belongs to the key, not to the provider, and two keys of one
+  // site can answer on two different ones.
+  const acme: FastpickProvider = {
+    id: "acme",
+    name: "Acme",
+    group: null,
+    keys: [
+      { id: "native", label: null, needsKey: false, keyPresent: true, harnesses: { cc: { baseUrl: null } } },
+      {
+        id: "relay",
+        label: "relay",
+        needsKey: true,
+        keyPresent: true,
+        harnesses: { cc: { baseUrl: "https://relay.acme.com" } },
+      },
+    ],
+  };
+
+  it("reads the endpoint of the key the combo names", () => {
+    expect(modelAccent({ ...combo, key: "native" }, acme)).toBe("native");
+    expect(modelAccent({ ...combo, key: "relay" }, acme)).toBe("claude");
+  });
+
+  it("falls back to the first key when the combo names none, as an old thread does", () => {
+    expect(modelAccent(combo, acme)).toBe("native");
+  });
+
+  it("falls back to the first key when the combo names one that is gone", () => {
+    expect(modelAccent({ ...combo, key: "removed" }, acme)).toBe("native");
   });
 });
