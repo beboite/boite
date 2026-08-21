@@ -1,6 +1,7 @@
 <script lang="ts">
   import SettingsCard from "$lib/shared/components/SettingsCard.svelte";
   import UpdatesCard from "$lib/features/updater/UpdatesCard.svelte";
+  import LogsSection from "./LogsSection.svelte";
   import BoiteLogo from "$lib/shared/components/BoiteLogo.svelte";
   import { hasTauri } from "$lib/backend/env";
   import { workspace } from "$lib/backend";
@@ -118,3 +119,8 @@
 {#if canUpdate}
   <UpdatesCard />
 {/if}
+
+<!-- The logs were their own page in the rail, which spent a permanent line on
+     a page opened when something has already gone wrong. They belong beside
+     the build number: what version is this, and what did it write. -->
+<LogsSection />

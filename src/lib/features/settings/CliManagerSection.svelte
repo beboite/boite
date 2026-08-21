@@ -10,6 +10,7 @@
   import { onMount } from "svelte";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import SettingsCard from "$lib/shared/components/SettingsCard.svelte";
+  import Button from "$lib/shared/components/Button.svelte";
   import CliRow from "$lib/features/cli/CliRow.svelte";
   import { cliManager } from "$lib/features/cli/store.svelte";
   import { t } from "$lib/i18n/index.svelte";
@@ -25,9 +26,7 @@
 
 <SettingsCard title={t("cli.title")} anchor="cli.title" description={t("cli.description")}>
   {#snippet actions()}
-    <button
-      type="button"
-      class="flex items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-1 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground disabled:opacity-50"
+    <Button
       onclick={() => {
         void cliManager.refresh(true);
         void cliManager.checkLatest(true);
@@ -37,7 +36,7 @@
     >
       <RefreshCw class="size-3 {cliManager.loading || cliManager.checking ? 'animate-spin' : ''}" />
       {t("cli.recheck")}
-    </button>
+    </Button>
   {/snippet}
 
   {#if cliManager.error}

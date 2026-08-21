@@ -20,11 +20,12 @@
   import Square from "@lucide/svelte/icons/square";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
+  import Button from "$lib/shared/components/Button.svelte";
   import { t } from "$lib/i18n/index.svelte";
   import type { CliRow } from "$lib/backend";
   import { CLI_PRESETS } from "$lib/features/settings/cliPresets";
   import { cliManager, settled } from "./store.svelte";
-  import { action, blocker, removable, upToDate } from "./rules";
+  import { action, blocker, removable } from "./rules";
   import CliUninstallDialog from "./CliUninstallDialog.svelte";
 
   let { row }: { row: CliRow } = $props();
@@ -44,7 +45,19 @@
   // What the button does, which is also the only thing it may be called. A row
   // that is current says so instead of offering an update to the version it has.
   const primaryAction = $derived(action(row, latest));
-  const current = $derived(upToDate(row, latest));
+
+  /**
+   * The button's own tooltip carries what used to be a paragraph under every
+   * managed row: which package manager runs, and the exact command line it is
+   * handed. Ten rows do not need to say it in prose; the one row being clicked
+   * does.
+   */
+  const buttonHint = $derived.by(() => {
+    if (row.source !== "managed") return undefined;
+    const cmd = commandLine(row.installed ? "update" : "install");
+    return row.requires ? `${t("cli.runsInTerminal", { tool: row.requires })}
+${cmd}` : cmd;
+  });
 
   let asking = $state(false);
 
@@ -188,14 +201,26 @@
         {#if row.version}
           <span class="shrink-0 tabular-nums text-xs text-muted-foreground/70">v{row.version}</span>
         {/if}
+        {#if primaryAction === "update" && latest}
+          <span class="shrink-0 tabular-nums text-xs text-[var(--color-warning)]">v{latest}</span>
+        {/if}
       </span>
       <span class="flex items-center gap-1.5">
         <span
           class="size-1.5 shrink-0 rounded-full"
-          style:background-color={row.installed ? "var(--color-success)" : "var(--color-border)"}
+          style:background-color={row.installed
+            ? "var(--color-success)"
+            : row.unlinked
+              ? "var(--color-warning)"
+              : "var(--color-border)"}
         ></span>
-        <span class="truncate text-xs text-muted-foreground" title={row.path ?? undefined}>
-          {#if !row.installed}
+        <span
+          class="truncate text-xs text-muted-foreground"
+          title={row.path ?? row.unlinked ?? undefined}
+        >
+          {#if !row.installed && row.unlinked}
+            {t("cli.unlinked", { path: row.unlinked })}
+          {:else if !row.installed}
             {t("cli.notInstalled")}
           {:else if row.managed}
             {t("cli.managedByBoite")}
@@ -212,7 +237,7 @@
           href={preset.docUrl}
           target="_blank"
           rel="noreferrer"
-          class="flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-muted-foreground/70 transition hover:text-foreground"
+          class="inline-flex size-7 shrink-0 items-center justify-center rounded-md border border-transparent text-muted-foreground transition hover:bg-[var(--color-surface-3)] hover:text-foreground"
           title={t("cli.docs")}
           aria-label={t("cli.docs")}
         >
@@ -220,14 +245,11 @@
         </a>
       {/if}
       {#if row.source !== "manual"}
-        <button
-          type="button"
-          class="flex items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-3)] px-2.5 py-1 text-xs text-foreground transition hover:border-foreground/30 disabled:cursor-not-allowed disabled:opacity-40"
+        <Button
+          variant={primaryAction === "update" ? "primary" : "secondary"}
           onclick={primary}
           disabled={busy || blocked !== null}
-          title={row.source === "managed"
-            ? commandLine(row.installed ? "update" : "install")
-            : undefined}
+          title={buttonHint}
         >
           <Download class="size-3" />
           {primaryAction === "install"
@@ -235,41 +257,32 @@
             : primaryAction === "update"
               ? t("cli.update")
               : t("cli.reinstall")}
-        </button>
+        </Button>
       {/if}
       {#if removable(row)}
-        <button
-          type="button"
-          class="flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground transition hover:border-[var(--color-danger)] hover:text-[var(--color-danger)] disabled:cursor-not-allowed disabled:opacity-40"
-          onclick={remove}
-          disabled={busy}
-        >
+        <Button variant="danger" onclick={remove} disabled={busy}>
           <Trash2 class="size-3" />
           {t("cli.uninstall")}
-        </button>
+        </Button>
       {/if}
       {#if running}
-        <button
-          type="button"
-          class="flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground transition hover:border-[var(--color-danger)] hover:text-[var(--color-danger)]"
-          onclick={() => cliManager.cancel(row.id)}
-        >
+        <Button variant="danger" onclick={() => cliManager.cancel(row.id)}>
           <Square class="size-3" />
           {t("cli.stop")}
-        </button>
+        </Button>
       {:else if terminalBusy}
-        <button
-          type="button"
-          class="flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground transition hover:border-[var(--color-danger)] hover:text-[var(--color-danger)]"
-          onclick={() => installer?.cancel()}
-        >
+        <Button variant="danger" onclick={() => installer?.cancel()}>
           <Square class="size-3" />
           {t("cli.stop")}
-        </button>
+        </Button>
       {/if}
     </div>
   </div>
 
+  <!-- Only what the row cannot say in its own line. A version already on screen
+       beside a button reading "Update" says "up to date" and "1.2.3 is out"
+       twice over, and ten rows repeating either is the noise this drops. What is
+       left is the one case a reader has to act on: the manager is missing. -->
   {#if blocked}
     <p class="flex flex-wrap items-baseline gap-2 text-xs leading-snug text-muted-foreground/70">
       <span>{t(blocked.key, { tool: blocked.tool ?? "" })}</span>
@@ -285,16 +298,6 @@
         </a>
       {/if}
     </p>
-  {:else if row.source === "managed"}
-    <p class="text-xs leading-snug text-muted-foreground/70">
-      {t("cli.runsInTerminal", { tool: row.requires ?? "" })}
-    </p>
-  {:else if primaryAction === "update"}
-    <p class="text-xs leading-snug text-[var(--color-warning)]">
-      {t("cli.updateAvailable", { version: latest ?? "" })}
-    </p>
-  {:else if current}
-    <p class="text-xs leading-snug text-muted-foreground/70">{t("cli.upToDate")}</p>
   {/if}
 
   {#if job}
@@ -303,22 +306,14 @@
       {#if settled(job)}
         <div class="flex shrink-0 items-center gap-2">
           {#if job.phase !== "done" && job.kind === "install"}
-            <button
-              type="button"
-              class="flex items-center gap-1 text-xs text-muted-foreground/70 transition hover:text-foreground"
-              onclick={() => cliManager.retry(row.id)}
-            >
+            <Button variant="ghost" size="sm" onclick={() => cliManager.retry(row.id)}>
               <RotateCw class="size-3" />
               {t("cli.retry")}
-            </button>
+            </Button>
           {/if}
-          <button
-            type="button"
-            class="text-xs text-muted-foreground/70 transition hover:text-foreground"
-            onclick={() => cliManager.dismiss(row.id)}
-          >
+          <Button variant="ghost" size="sm" onclick={() => cliManager.dismiss(row.id)}>
             {t("cli.dismiss")}
-          </button>
+          </Button>
         </div>
       {/if}
     </div>
@@ -351,23 +346,15 @@
       {#if !installer.busy}
         <div class="flex shrink-0 items-center gap-2">
           {#if installer.status === "failed" || installer.status === "cancelled"}
-            <button
-              type="button"
-              class="flex items-center gap-1 text-xs text-muted-foreground/70 transition hover:text-foreground"
-              onclick={() => installer?.retry()}
-            >
+            <Button variant="ghost" size="sm" onclick={() => installer?.retry()}>
               <RotateCw class="size-3" />
               {t("cli.retry")}
-            </button>
+            </Button>
           {/if}
           {#if installer.hasOutput}
-            <button
-              type="button"
-              class="text-xs text-muted-foreground/70 transition hover:text-foreground"
-              onclick={() => installer?.dismiss()}
-            >
+            <Button variant="ghost" size="sm" onclick={() => installer?.dismiss()}>
               {t("cli.dismiss")}
-            </button>
+            </Button>
           {/if}
         </div>
       {/if}

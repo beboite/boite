@@ -19,7 +19,6 @@
   import Copy from "@lucide/svelte/icons/copy";
   import X from "@lucide/svelte/icons/x";
   import Settings from "@lucide/svelte/icons/settings";
-  import Home from "@lucide/svelte/icons/home";
   import PanelLeft from "@lucide/svelte/icons/panel-left";
   import GitBranch from "@lucide/svelte/icons/git-branch";
   import FolderTree from "@lucide/svelte/icons/folder-tree";
@@ -260,17 +259,24 @@
     };
   }
 
-  // The boite logo doubles as a context-aware "home" button:
-  //  - from the settings view it just returns to the terminal/threads view;
+  // The boite logo *is* the home button. A second one beside it said the same
+  // thing twice and made the app's own mark decorative, so the mark carries the
+  // door: it opens home where home is armed, and closes it again, because a way
+  // in with no way out is the one-way door AGENTS.md refuses.
+  //
+  // Where nothing arms home it keeps what it always did:
+  //  - from the settings view it returns to the terminal/threads view;
   //  - already in the terminal view it opens a fresh terminal at the workspace
   //    root (the "folder of folders"), creating the default workspace project
   //    the first time so a bare install can start a shell with zero folder-
   //    picking. Remote only — TauriBackend has no workspace root.
-  // Home has no other door on the desktop: the palette command is typed, not
-  // seen, and the mobile tab does not exist here. Drawn only when something
-  // arms the view, so a device that never touched the experiments keeps the
-  // titlebar it shipped with.
   const homeShown = $derived(homeAvailable(settings.state));
+  const onHome = $derived(homeShown && app.view === "home");
+
+  function showTerminal() {
+    app.view = "terminal";
+    app.mobileTab = "terminal";
+  }
 
   function showHome() {
     app.view = "home";
@@ -278,8 +284,13 @@
   }
 
   async function goHome() {
+    if (homeShown) {
+      if (onHome) showTerminal();
+      else showHome();
+      return;
+    }
     if (app.view === "settings") {
-      app.view = "terminal";
+      showTerminal();
       return;
     }
     if (workspace.mode === "local") return;
@@ -305,30 +316,18 @@
   <div class="flex items-center gap-0.5 {macLightsGap ? 'pl-[78px]' : 'pl-1.5'}">
     <button
       type="button"
-      class="press flex h-7 items-center justify-center rounded-md px-2 transition {app.view ===
-      'terminal'
+      class="press flex h-7 items-center justify-center rounded-md px-2 transition {(
+        homeShown ? onHome : app.view === 'terminal'
+      )
         ? 'bg-accent text-foreground'
         : 'text-muted-foreground hover:bg-accent hover:text-foreground'}"
       onclick={goHome}
-      use:tip={t("titlebar.workspaceTooltip")}
-      aria-label={t("titlebar.workspaceLabel")}
+      use:tip={homeShown ? t("home.title") : t("titlebar.workspaceTooltip")}
+      aria-label={homeShown ? t("home.title") : t("titlebar.workspaceLabel")}
+      aria-pressed={homeShown ? onHome : undefined}
     >
       <BoiteLogo size={17} />
     </button>
-    {#if homeShown}
-      <button
-        type="button"
-        class="flex h-7 items-center justify-center rounded-md px-2 transition {app.view ===
-        'home'
-          ? 'bg-accent text-foreground'
-          : 'text-muted-foreground hover:bg-accent hover:text-foreground'}"
-        onclick={showHome}
-        title={t("home.title")}
-        aria-label={t("home.title")}
-      >
-        <Home class="size-[15px]" />
-      </button>
-    {/if}
     <button
       type="button"
       class="press flex h-7 items-center justify-center rounded-md px-2 transition {app.view ===
@@ -380,7 +379,11 @@
 
   <div class="flex items-center gap-0.5 pr-1.5">
     <UpdateBadge />
-    {#if editorOpen}
+    <!-- Home draws no thread group, so the editor toggle and the three panel
+         buttons have nothing to act on there: they used to be clickable and
+         silently do nothing. Hidden rather than disabled — a control that can
+         never apply on this page is not a control in a state. -->
+    {#if editorOpen && !onHome}
       <button
         type="button"
         class="press flex h-7 items-center justify-center gap-1 rounded-md px-2 transition {editorShowing
@@ -397,7 +400,7 @@
     {/if}
     <!-- Drawn under the info-box experiment too: it replaces the docked column,
          and `togglePanel` opens these in a pane while it is on. -->
-    {#each PANEL_BUTTONS as panel (panel.kind)}
+    {#each onHome ? [] : PANEL_BUTTONS as panel (panel.kind)}
       {@const open = panelShowing(panel.kind)}
       {@const Icon = panel.icon}
       {@const pulsing = panel.surface !== undefined && mcpPulse.surface(panel.surface)}

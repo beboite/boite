@@ -2,6 +2,7 @@
   import { onMount, untrack } from "svelte";
   import { app } from "$lib/app/store.svelte";
   import { isFinished } from "$lib/domain/thread-status";
+  import { clearFinished } from "$lib/features/thread/finished.svelte";
   import { workspace } from "$lib/backend";
   import { settings } from "$lib/features/settings/store.svelte";
   import { homeAvailable } from "$lib/features/settings/homeAvailable";
@@ -210,6 +211,12 @@
   function activateThread(id: string) {
     const t = app.threadById(id);
     const finished = !!t && isFinished(t.status);
+
+    // Reading it is what takes the unread mark back, and every way in has to
+    // do it: the sidebar row cleared its own, so a thread reached from the
+    // palette, a keyboard jump or a pane kept blinking behind the terminal the
+    // user was already looking at.
+    clearFinished(id);
 
     if (app.activeThreadId === id && app.view === "terminal" && !finished) {
       return;
@@ -512,7 +519,11 @@
     {/if}
   {:else}
     <div class="flex min-h-0 flex-1">
-    {#if !mobile && !homeActive && !settings.state.sidebarCollapsed}
+    <!-- Home keeps the sidebar. It used to drop it, which made the one view a
+         user lands on the one view with no way to reach a thread: the door in
+         was a click and the way back was the titlebar. The threads are what the
+         workspace is, and home is a page about them, not a mode without them. -->
+    {#if !mobile && !settings.state.sidebarCollapsed}
       <ProjectSidebar
         onActivateThread={activateThread}
         onNewProject={addProject}

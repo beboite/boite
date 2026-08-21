@@ -568,6 +568,24 @@ pub fn find(id: &str) -> Option<&'static Cli> {
     CLIS.iter().find(|c| c.id == id)
 }
 
+/// Where a vendor's own installer keeps a CLI that never reaches `PATH`.
+///
+/// Presence stays the executable resolving, because a package directory is not a
+/// runnable command. But copilot's updater unpacks `@github/copilot` into
+/// `%LOCALAPPDATA%/copilot/pkg/<platform>/<version>` and leaves the shim to npm,
+/// so a global install whose shim went missing reads as "nothing here" while a
+/// complete copy sits one directory away. A row that says which of the two it is
+/// turns the install button into a repair.
+pub const VENDOR_INSTALLS: &[(&str, DataDir)] =
+    &[("copilot", DataDir { base: Base::DataLocal, path: "copilot/pkg" })];
+
+/// The vendor's own install directory for `id`, when this machine has one.
+pub fn vendor_install(id: &str) -> Option<PathBuf> {
+    let (_, dir) = VENDOR_INSTALLS.iter().find(|(cli, _)| *cli == id)?;
+    let path = dir.resolve()?;
+    std::fs::metadata(&path).ok()?.is_dir().then_some(path)
+}
+
 impl Download {
     /// The platform entry for this machine, or `None` where the vendor has no build.
     pub fn platform(&self) -> Option<&'static Platform> {
