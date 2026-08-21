@@ -1,45 +1,327 @@
 <script lang="ts">
   import { t } from "$lib/i18n/index.svelte";
   import { openUrl } from "$lib/platform/opener";
+  import { motionReduced } from "$lib/theme/motion";
+  import tradeOfferVideo from "./assets/trade-offer.webm";
+  import noThanksVideo from "./assets/no-thanks.webm";
 
   const DOC_URL = "https://github.com/beboite/boite/blob/master/docs/analytics.md";
+  const REJECT_TOTAL_MS = 2000;
 
   type Props = {
     onChoose: (modeB: boolean) => void | Promise<void>;
     busy?: boolean;
+    headingId?: string;
   };
-  let { onChoose, busy = false }: Props = $props();
+  let { onChoose, busy = false, headingId = "telemetry-deal-title" }: Props = $props();
+
+  let submitting = $state(false);
+  let rejecting = $state(false);
+  let dealTitleEl = $state<HTMLHeadingElement | null>(null);
+  let gifEl = $state<HTMLVideoElement | null>(null);
+  let gifSize = $state<{ w: number; h: number } | null>(null);
+
+  const locked = $derived(busy || submitting || rejecting);
+
+  $effect(() => {
+    if (!dealTitleEl) return;
+    if (motionReduced()) {
+      dealTitleEl.style.color = "#ef4444";
+      return () => dealTitleEl?.style.removeProperty("color");
+    }
+    const anim = dealTitleEl.animate(
+      [
+        { color: "#ffffff", textShadow: "0 0 0px rgba(239, 68, 68, 0)" },
+        { color: "#f0a3a3", textShadow: "0 0 6px rgba(239, 68, 68, 0.2)", offset: 0.4 },
+        { color: "#ef4444", textShadow: "0 0 18px rgba(239, 68, 68, 0.6)" },
+      ],
+      { duration: 10000, easing: "linear", fill: "forwards" },
+    );
+    return () => anim.cancel();
+  });
+
+  async function finish(modeB: boolean) {
+    if (submitting) return;
+    submitting = true;
+    try {
+      await onChoose(modeB);
+    } finally {
+      submitting = false;
+    }
+  }
+
+  function handleEnough() {
+    if (locked) return;
+    if (gifEl) {
+      const r = gifEl.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) gifSize = { w: r.width, h: r.height };
+    }
+    rejecting = true;
+    setTimeout(() => {
+      void finish(false);
+    }, REJECT_TOTAL_MS);
+  }
+
+  function handleDeal() {
+    void finish(true);
+  }
 </script>
 
-<div class="flex flex-col gap-2">
+<div class="deal">
+  <h2 id={headingId} class="deal-title" bind:this={dealTitleEl}>
+    {t("setup.telemetryTitle")}
+  </h2>
+  {#key rejecting}
+    <video
+      class="deal-gif"
+      bind:this={gifEl}
+      src={rejecting ? noThanksVideo : tradeOfferVideo}
+      aria-label={t("setup.telemetryGifAlt")}
+      autoplay
+      loop
+      muted
+      playsinline
+      disablepictureinpicture
+      style={gifSize ? `width:${gifSize.w}px;height:${gifSize.h}px;` : undefined}
+    ></video>
+  {/key}
+  <p class="intro">{t("setup.telemetryIntro")}</p>
+  <p class="question">{t("setup.telemetryQuestion")}</p>
+
+  <div class="deal-buttons">
+    <button
+      type="button"
+      class="deal-row no-btn"
+      class:no-clicked={rejecting}
+      disabled={locked}
+      onclick={handleEnough}
+    >
+      <div class="deal-row-label">
+        {t("setup.telemetryBasic")}
+        <span class="default-inline">{t("setup.telemetryBasicDefault")}</span>
+      </div>
+      <div class="deal-row-body">{t("setup.telemetryBasicHint")}</div>
+    </button>
+    <button
+      type="button"
+      class="deal-row deal-accent"
+      disabled={locked}
+      onclick={handleDeal}
+    >
+      <div class="deal-row-label">{t("setup.telemetryDeal")}</div>
+      <div class="deal-row-body">{t("setup.telemetryDealHint")}</div>
+    </button>
+  </div>
+
+  <p class="opt-out-note">{t("setup.telemetryOptOutNote")}</p>
+
   <button
     type="button"
-    disabled={busy}
-    class="rounded-lg border border-border bg-[var(--color-surface-2)] px-4 py-3 text-left transition hover:border-foreground/30 disabled:opacity-60"
-    onclick={() => void onChoose(false)}
+    class="learn-more"
+    disabled={locked}
+    onclick={() => void openUrl(DOC_URL)}
   >
-    <div class="text-sm font-semibold text-foreground">{t("setup.telemetryBasic")}</div>
-    <p class="mt-0.5 text-xs leading-relaxed text-muted-foreground">
-      {t("setup.telemetryBasicHint")}
-    </p>
-  </button>
-  <button
-    type="button"
-    disabled={busy}
-    class="rounded-lg border border-border bg-[var(--color-surface-2)] px-4 py-3 text-left transition hover:border-foreground/30 disabled:opacity-60"
-    onclick={() => void onChoose(true)}
-  >
-    <div class="text-sm font-semibold text-foreground">{t("setup.telemetryEnhanced")}</div>
-    <p class="mt-0.5 text-xs leading-relaxed text-muted-foreground">
-      {t("setup.telemetryEnhancedHint")}
-    </p>
+    {t("setup.telemetryDoc")}
   </button>
 </div>
 
-<button
-  type="button"
-  class="self-center text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-  onclick={() => void openUrl(DOC_URL)}
->
-  {t("setup.telemetryDoc")}
-</button>
+<style>
+  .deal {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-height: 0;
+  }
+
+  .deal-title {
+    text-align: center;
+    font-size: clamp(16px, min(5vw, 3.4vh), 24px);
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    color: #ffffff;
+    margin: 0;
+  }
+
+  .deal-gif {
+    max-width: 100%;
+    max-height: 32vh;
+    width: auto;
+    height: auto;
+    flex: 0 1 auto;
+    min-height: 0;
+    object-fit: contain;
+    display: block;
+    margin: 0 auto;
+    border-radius: 10px;
+    animation: gifSwap 240ms ease-out;
+  }
+
+  .intro {
+    margin: 0 auto;
+    max-width: 46ch;
+    font-size: 12.5px;
+    line-height: 1.6;
+    color: var(--color-muted-foreground);
+    text-align: center;
+  }
+  .question {
+    margin: 2px 0 0;
+    font-size: clamp(14px, min(4vw, 2.6vh), 17px);
+    font-weight: 800;
+    text-align: center;
+    letter-spacing: 0.01em;
+    color: var(--color-foreground);
+  }
+
+  .deal-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .deal-row {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 3px;
+    padding: 11px 16px;
+    border-radius: 12px;
+    border: 1px solid var(--color-border);
+    background: color-mix(in srgb, var(--color-surface-2) 88%, #fff 12%);
+    color: var(--color-foreground);
+    text-align: left;
+    cursor: pointer;
+    transition:
+      transform 120ms ease-out,
+      border-color 160ms ease-out,
+      background 160ms ease-out,
+      color 160ms ease-out,
+      box-shadow 160ms ease-out;
+  }
+  .deal-row:hover:not(:disabled) {
+    transform: translateY(-1px);
+    border-color: color-mix(in srgb, var(--color-foreground) 45%, var(--color-border));
+    background: color-mix(in srgb, var(--color-surface-2) 80%, #fff 20%);
+  }
+  .deal-row:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .deal-row-label {
+    font-size: 13px;
+    font-weight: 700;
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .default-inline {
+    font-size: 11px;
+    font-weight: 500;
+    color: color-mix(in srgb, var(--color-muted-foreground) 80%, transparent);
+  }
+  .deal-row-body {
+    font-size: 11.5px;
+    line-height: 1.5;
+    color: var(--color-muted-foreground);
+  }
+
+  .opt-out-note {
+    margin: 0;
+    font-size: 11px;
+    line-height: 1.5;
+    color: color-mix(in srgb, var(--color-muted-foreground) 85%, transparent);
+    text-align: center;
+  }
+
+  .no-btn:hover:not(:disabled) {
+    background: color-mix(in srgb, #ef4444 14%, var(--color-surface-2));
+    border-color: color-mix(in srgb, #ef4444 55%, var(--color-border));
+    color: #ef4444;
+  }
+  .no-btn:hover:not(:disabled) .deal-row-body {
+    color: #ef4444;
+  }
+  .no-btn.no-clicked,
+  .no-btn.no-clicked:disabled {
+    background: #ef4444 !important;
+    border-color: #ef4444 !important;
+    color: #ffffff !important;
+    opacity: 1 !important;
+    box-shadow: 0 10px 28px color-mix(in srgb, #ef4444 35%, transparent);
+  }
+  .no-btn.no-clicked .deal-row-body {
+    color: #ffffff !important;
+  }
+
+  .deal-row.deal-accent {
+    border-color: rgba(255, 255, 255, 0.65);
+    background: color-mix(in srgb, var(--color-surface-2) 86%, #fff 14%);
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.18),
+      0 6px 22px rgba(255, 255, 255, 0.08);
+  }
+  .deal-row.deal-accent .deal-row-label {
+    color: #ffffff;
+    letter-spacing: 0.04em;
+  }
+  .deal-row.deal-accent:hover:not(:disabled) {
+    transform: translateY(-2px);
+    border-color: #ffffff;
+    background: color-mix(in srgb, var(--color-surface-2) 78%, #fff 22%);
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.45),
+      0 14px 32px rgba(255, 255, 255, 0.16);
+  }
+
+  .learn-more {
+    border: none;
+    background: transparent;
+    color: var(--color-muted-foreground);
+    padding: 0;
+    font-size: 12px;
+    text-decoration: underline;
+    cursor: pointer;
+    align-self: center;
+    transition: color 120ms ease-out;
+  }
+  .learn-more:hover:not(:disabled) {
+    color: var(--color-foreground);
+  }
+  .learn-more:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  @keyframes gifSwap {
+    from {
+      opacity: 0;
+      transform: scale(0.96);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+
+  @media (max-height: 640px) {
+    .intro {
+      display: none;
+    }
+    .deal-row {
+      padding: 8px 14px;
+    }
+  }
+  @media (max-height: 520px) {
+    .deal-gif {
+      display: none;
+    }
+  }
+
+  :global(html[data-motion="reduced"]) .deal-gif {
+    animation: none;
+  }
+  :global(html[data-motion="reduced"]) .deal-row:hover:not(:disabled) {
+    transform: none;
+  }
+</style>

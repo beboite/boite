@@ -70,7 +70,10 @@
        that is no longer in the document. -->
   <div
     bind:this={dialogEl}
-    class="surface-dialog modal flex w-[min(94vw,520px)] flex-col gap-4 p-6 outline-none"
+    class="surface-dialog modal flex w-[min(94vw,540px)] flex-col gap-4 p-6 outline-none {current?.id ===
+    'telemetry'
+      ? 'deal-mode'
+      : ''}"
     role="dialog"
     aria-modal="true"
     aria-labelledby={step === 0 ? "setup-title" : undefined}
@@ -168,6 +171,30 @@
   }
   .step {
     animation: stepIn 200ms ease-out;
+  }
+  .deal-mode {
+    overflow: hidden;
+    gap: 12px;
+    padding: 18px 22px 16px;
+    max-height: min(92vh, 660px);
+  }
+  .deal-mode .step {
+    min-height: 0;
+    gap: 10px;
+  }
+  @media (max-height: 640px) {
+    .deal-mode {
+      gap: 8px;
+      padding: 14px 18px 12px;
+    }
+    .deal-mode .step {
+      gap: 8px;
+    }
+  }
+  @media (max-height: 520px) {
+    .deal-mode {
+      overflow-y: auto;
+    }
   }
   @keyframes modalIn {
     from {

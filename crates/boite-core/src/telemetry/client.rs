@@ -28,6 +28,13 @@ pub const TELEMETRY_URL: &str = if RAW_TELEMETRY_URL.is_empty() {
     RAW_TELEMETRY_URL
 };
 
+/// True when the compiled URL is the inert placeholder. A local `tauri dev`
+/// without `BOITE_TELEMETRY_URL` used to sit on a 5s timeout against `.invalid`
+/// then back off for an hour, on every flush. Skip the socket instead.
+pub fn is_inert(url: &str) -> bool {
+    url.is_empty() || url.contains("telemetry.invalid")
+}
+
 /// User-Agent sent with every request.
 /// Must match `UA_PREFIX` on the Worker (rejected otherwise).
 pub fn user_agent(app_version: &str) -> String {
@@ -198,7 +205,7 @@ pub fn send_batch(
     identifier: Option<&str>,
     events_json: Vec<Value>,
 ) -> Result<(), String> {
-    if events_json.is_empty() {
+    if events_json.is_empty() || is_inert(base_url) {
         return Ok(());
     }
     let payload = TrackPayload {
@@ -254,6 +261,9 @@ pub fn record_consent_choice(
     choice: ConsentChoice,
     app_version: &str,
 ) -> Result<(), String> {
+    if is_inert(base_url) {
+        return Ok(());
+    }
     let url = format!("{base_url}/consent");
     let payload = ConsentPayload {
         choice: choice.as_str(),
@@ -280,6 +290,9 @@ pub fn forget(
     user_agent: &str,
     install_id: &str,
 ) -> Result<(), String> {
+    if is_inert(base_url) {
+        return Ok(());
+    }
     let url = format!("{base_url}/forget");
     let res = client
         .post(&url)
@@ -302,6 +315,9 @@ pub fn export(
     user_agent: &str,
     install_id: &str,
 ) -> Result<Value, String> {
+    if is_inert(base_url) {
+        return Ok(json!({ "events": [] }));
+    }
     let url = format!("{base_url}/export");
     let res = client
         .post(&url)
@@ -526,5 +542,13 @@ mod tests {
     fn telemetry_url_fallback_does_not_leak_private_infrastructure() {
         assert!(!TELEMETRY_URL_FALLBACK.contains("mtsu"));
         assert!(TELEMETRY_URL_FALLBACK.ends_with(".invalid"));
+    }
+
+    #[test]
+    fn inert_placeholder_is_detected() {
+        assert!(is_inert(TELEMETRY_URL_FALLBACK));
+        assert!(is_inert("https://telemetry.invalid/track"));
+        assert!(is_inert(""));
+        assert!(!is_inert("https://boite-telemetry.example.workers.dev"));
     }
 }

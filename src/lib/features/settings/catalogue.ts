@@ -157,10 +157,11 @@ export const SETTINGS_CATALOGUE: SettingEntry[] = [
     descKey: "experiments.harnessLogosDesc",
   },
 
-  { tab: "privacy", key: "privacy.doc", descKey: "privacy.docDesc" },
+  { tab: "privacy", key: "privacy.stop", descKey: "privacy.stopDesc" },
   { tab: "privacy", key: "privacy.modeA", descKey: "privacy.modeADesc" },
   { tab: "privacy", key: "privacy.modeB", descKey: "privacy.modeBDesc" },
   { tab: "privacy", key: "privacy.data", descKey: "privacy.dataDesc" },
+  { tab: "privacy", key: "privacy.doc", descKey: "privacy.docDesc" },
 
   { tab: "about", key: "about.title" },
 ];

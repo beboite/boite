@@ -156,6 +156,9 @@ impl TelemetryRuntime {
         // This one aggregate is recorded even for a refusal so the three
         // choices have an unbiased denominator. It runs best-effort on a
         // side thread and never delays or changes the selected mode.
+        if client::is_inert(TELEMETRY_URL) {
+            return Ok(());
+        }
         let app_version = self.app_version.clone();
         std::thread::Builder::new()
             .name("boite-telemetry-consent".into())
@@ -167,20 +170,15 @@ impl TelemetryRuntime {
                     .build()
                 {
                     Ok(http) => http,
-                    Err(e) => {
-                        eprintln!("telemetry: consent client failed: {e}");
-                        return;
-                    }
+                    Err(_) => return,
                 };
-                if let Err(e) = client::record_consent_choice(
+                let _ = client::record_consent_choice(
                     &http,
                     TELEMETRY_URL,
                     &ua,
                     choice,
                     &app_version,
-                ) {
-                    eprintln!("telemetry: consent choice failed: {e}");
-                }
+                );
             })
             .map_err(|e| format!("consent thread: {e}"))?;
         Ok(())

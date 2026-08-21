@@ -95,26 +95,18 @@
   }
 </script>
 
-<SettingsCard title={t("privacy.doc")} anchor="privacy.doc" description={t("privacy.docDesc")}>
-  <button
-    type="button"
-    class="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground transition hover:border-foreground/30"
-    onclick={() => void openUrl(DOC_URL)}
-  >
-    {t("privacy.docLink")}
-  </button>
-</SettingsCard>
-
 {#if loadFailed}
   <p class="px-1 text-xs text-muted-foreground">{t("privacy.loadFailed")}</p>
 {:else if telemetry}
-  <ToggleSetting
-    label={t("privacy.modeA")}
-    anchor="privacy.modeA"
-    description={t("privacy.modeADesc")}
-    enabled={telemetry.modeAEnabled}
-    onToggle={() => void toggleModeA()}
-  />
+  <SettingsCard title={t("privacy.stop")} anchor="privacy.stop" description={t("privacy.stopDesc")}>
+    <ToggleSetting
+      label={t("privacy.modeA")}
+      anchor="privacy.modeA"
+      description={t("privacy.modeADesc")}
+      enabled={telemetry.modeAEnabled}
+      onToggle={() => void toggleModeA()}
+    />
+  </SettingsCard>
   <ToggleSetting
     label={t("privacy.modeB")}
     anchor="privacy.modeB"
@@ -148,3 +140,13 @@
     {/if}
   </SettingsCard>
 {/if}
+
+<SettingsCard title={t("privacy.doc")} anchor="privacy.doc" description={t("privacy.docDesc")}>
+  <button
+    type="button"
+    class="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground transition hover:border-foreground/30"
+    onclick={() => void openUrl(DOC_URL)}
+  >
+    {t("privacy.docLink")}
+  </button>
+</SettingsCard>

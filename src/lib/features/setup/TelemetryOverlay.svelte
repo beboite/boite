@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { t } from "$lib/i18n/index.svelte";
   import { backend } from "$lib/backend";
   import { restoreFocus } from "$lib/shared/keyboard/overlay";
   import TelemetryConsent from "./TelemetryConsent.svelte";
@@ -38,18 +37,25 @@
 >
   <div
     bind:this={dialogEl}
-    class="surface-dialog flex w-[min(94vw,520px)] flex-col gap-4 p-6 outline-none"
+    class="surface-dialog deal-dialog flex w-[min(94vw,540px)] flex-col p-5 outline-none"
     role="dialog"
     aria-modal="true"
     aria-labelledby="telemetry-overlay-title"
     tabindex="-1"
   >
-    <h2 id="telemetry-overlay-title" class="text-center text-lg font-bold text-foreground">
-      {t("setup.telemetryOverlayTitle")}
-    </h2>
-    <p class="text-center text-xs leading-relaxed text-muted-foreground">
-      {t("setup.telemetryOverlayDesc")}
-    </p>
-    <TelemetryConsent onChoose={choose} {busy} />
+    <TelemetryConsent onChoose={choose} {busy} headingId="telemetry-overlay-title" />
   </div>
 </div>
+
+<style>
+  .deal-dialog {
+    max-height: min(92vh, 660px);
+    overflow: hidden;
+    gap: 12px;
+  }
+  @media (max-height: 520px) {
+    .deal-dialog {
+      overflow-y: auto;
+    }
+  }
+</style>

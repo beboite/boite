@@ -23,7 +23,7 @@ mod sidecar;
 mod time;
 
 pub use client::{
-    export, forget, record_consent_choice, user_agent, ConsentChoice, Mode, TELEMETRY_URL,
+    export, forget, is_inert, record_consent_choice, user_agent, ConsentChoice, Mode, TELEMETRY_URL,
 };
 pub use events::{
     classify_thread, code_from, pane_kind_code, provider_code, sanitize_code,

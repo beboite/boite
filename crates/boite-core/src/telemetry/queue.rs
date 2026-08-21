@@ -312,6 +312,11 @@ fn flush(
     state: &mut WorkerState,
     dropped: &Arc<AtomicU64>,
 ) {
+    if client::is_inert(&params.endpoint) {
+        state.buffer.clear();
+        return;
+    }
+
     let snapshot = {
         let guard = consent.lock().unwrap_or_else(|e| e.into_inner());
         guard.clone()
@@ -538,6 +543,39 @@ mod tests {
         );
 
         // Dropped locally before any network send was attempted.
+        assert!(state.buffer.is_empty());
+        assert_eq!(state.consecutive_failures, 0);
+    }
+
+    #[test]
+    fn flush_on_inert_url_drops_without_touching_the_network() {
+        let http = reqwest::blocking::Client::new();
+        let consent = Arc::new(Mutex::new(ConsentState {
+            mode_a: true,
+            mode_b: false,
+            install_id: None,
+            anonymous_id: Some("797f20fe-94de-4e89-98a2-ae3a3273ad1e".into()),
+        }));
+        let dropped = Arc::new(AtomicU64::new(0));
+        let mut state = new_state(vec![(
+            Event::AppLaunched { duration_ms: 10 },
+            SystemTime::now(),
+        )]);
+        let params = QueueParams {
+            endpoint: "https://telemetry.invalid".into(),
+            ..Default::default()
+        };
+
+        flush(
+            &http,
+            &params,
+            "test-ua",
+            &test_ctx(),
+            &consent,
+            &mut state,
+            &dropped,
+        );
+
         assert!(state.buffer.is_empty());
         assert_eq!(state.consecutive_failures, 0);
     }
