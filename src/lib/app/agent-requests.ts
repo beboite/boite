@@ -209,12 +209,19 @@ export function resolveLaunch(
   // The harness is claude-code until the name carries one, because that is the
   // harness every provider in the catalogue answers on.
   if (needle.startsWith(`${FASTPICK_CMD}:`)) {
-    const [, provider, ...rest] = needle.split(":");
+    const [, where, ...rest] = needle.split(":");
     // Rejoined rather than taken at [2]: a model id is allowed to hold colons,
     // and cutting at the first one would launch a model that does not exist.
     const model = rest.join(":");
+    // `<provider>.<key>` picks one credential of a provider that holds several,
+    // written the way fastpick's own `--key` takes it. Without it a site reached
+    // with two accounts answers on whichever fastpick resolves first, which is
+    // not always the one the caller meant and not always the one being paid for.
+    const dot = where?.indexOf(".") ?? -1;
+    const provider = dot > 0 ? where.slice(0, dot) : where;
+    const key = dot > 0 ? where.slice(dot + 1) : null;
     if (provider && model) {
-      const combo = { harness: "claude-code", provider, model };
+      const combo = { harness: "claude-code", provider, key, model };
       return {
         cmd: FASTPICK_CMD,
         args: comboArgs(combo),
