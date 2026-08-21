@@ -38,6 +38,7 @@ pub mod git;
 pub mod pty;
 pub mod records;
 pub mod sessions;
+pub mod sync;
 pub mod window;
 
 // The one type outside this module that a command's shape is part of: the PTY
