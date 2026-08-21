@@ -37,6 +37,7 @@ use serde_json::Value;
 use crate::capability::{Capability, Grant};
 use crate::scope::ProjectRoots;
 use crate::store::Store;
+use crate::telemetry::TelemetryRuntime;
 
 pub mod checkpoint;
 pub mod conduct;
@@ -45,6 +46,7 @@ pub mod git;
 pub mod records;
 pub mod sessions;
 pub mod sync;
+pub mod telemetry;
 
 pub use checkpoint::Checkpoints;
 pub use conduct::Conduct;
@@ -53,6 +55,7 @@ pub use git::Git;
 pub use records::{Records, ThreadPatch};
 pub use sessions::Sessions;
 pub use sync::Sync;
+pub use telemetry::Telemetry;
 
 /// What a command wants to do with a path the caller handed it.
 ///
@@ -160,6 +163,15 @@ pub trait Host {
     fn store(&self) -> Option<Arc<Store>> {
         None
     }
+
+    /// The process-wide telemetry runtime, when this host has one.
+    ///
+    /// `None` is honest for a test and for a host that never queued an event.
+    /// The queue cannot be derived from the other answers, which is why this
+    /// is its own method rather than something `prepare` rebuilds.
+    fn telemetry(&self) -> Option<Arc<TelemetryRuntime>> {
+        None
+    }
 }
 
 /// Every method the bus serves, across every domain.
@@ -177,6 +189,7 @@ pub fn methods() -> impl Iterator<Item = &'static str> {
         .chain(checkpoint::ALL_METHODS)
         .chain(conduct::ALL_METHODS)
         .chain(sync::ALL_METHODS)
+        .chain(telemetry::ALL_METHODS)
         .copied()
 }
 
@@ -244,6 +257,11 @@ fn probe_params() -> Value {
         "audio": "", "actionId": "a",
         "remoteUrl": "https://example.invalid/x.git",
         "provider": "claude", "email": "you@example.com",
+        "enabled": true, "modeA": true, "modeB": false, "stage": "available",
+        "targetVersion": "1.0.0", "errorCode": "io", "paneKind": "editor",
+        "uiLanguage": "en", "theme": "dark", "threadWorktrees": true,
+        "animations": "system", "mcpYolo": false, "idleAutoclose": true,
+        "orchestrator": false, "voice": false,
     })
 }
 
@@ -260,6 +278,7 @@ pub enum Command {
     Records(Records),
     Sessions(Sessions),
     Sync(Sync),
+    Telemetry(Telemetry),
 }
 
 impl From<Conduct> for Command {
@@ -304,6 +323,12 @@ impl From<Sessions> for Command {
     }
 }
 
+impl From<Telemetry> for Command {
+    fn from(telemetry: Telemetry) -> Self {
+        Command::Telemetry(telemetry)
+    }
+}
+
 impl Command {
     /// Reads a wire method name and its parameters into a command.
     ///
@@ -338,6 +363,9 @@ impl Command {
         if sync::ALL_METHODS.contains(&method) {
             return Sync::decode(method, params).map(Command::Sync);
         }
+        if telemetry::ALL_METHODS.contains(&method) {
+            return Telemetry::decode(method, params).map(Command::Telemetry);
+        }
         Err(format!("unknown method: {method}"))
     }
 
@@ -351,6 +379,7 @@ impl Command {
             Command::Records(r) => r.name(),
             Command::Sessions(s) => s.name(),
             Command::Sync(s) => s.name(),
+            Command::Telemetry(t) => t.name(),
         }
     }
 
@@ -364,6 +393,7 @@ impl Command {
             Command::Records(r) => r.wire(),
             Command::Sessions(s) => s.wire(),
             Command::Sync(s) => s.wire(),
+            Command::Telemetry(t) => t.wire(),
         }
     }
 
@@ -382,6 +412,7 @@ impl Command {
             Command::Records(r) => r.capability(),
             Command::Sessions(s) => s.capability(),
             Command::Sync(s) => s.capability(),
+            Command::Telemetry(t) => t.capability(),
         }
     }
 
@@ -405,6 +436,7 @@ impl Command {
             Command::Records(r) => r.prepare(host),
             Command::Sessions(s) => s.prepare(host),
             Command::Sync(s) => s.prepare(host),
+            Command::Telemetry(t) => t.prepare(host, grant),
         }
     }
 }
@@ -426,11 +458,13 @@ pub enum Ready {
     /// `prepare` and travels here rather than being fetched later — which keeps
     /// "a host that keeps no records" a refusal at the boundary instead of an
     /// error thrown from inside the work.
-    Records(Records, Arc<Store>),
+    Records(Records, Arc<Store>, Option<Arc<TelemetryRuntime>>),
     /// An orchestration command, with the store and the live-wait registry the
     /// host resolved for it. Same reasoning as [`Ready::Records`]; the registry
     /// is optional because a host with no long-poll answers honestly without.
     Conduct(Conduct, Arc<Store>, Option<Arc<crate::pulse::Waiters>>),
+    /// A telemetry command, with the runtime `prepare` resolved for it.
+    Telemetry(Telemetry, Arc<TelemetryRuntime>),
 }
 
 impl Ready {
@@ -451,8 +485,12 @@ impl Ready {
             Ready::Work(Command::Conduct(c)) => {
                 Err(format!("{} was not prepared with a store", c.name()))
             }
-            Ready::Records(r, store) => r.run(&store),
+            Ready::Work(Command::Telemetry(t)) => {
+                Err(format!("{} was not prepared with a telemetry runtime", t.name()))
+            }
+            Ready::Records(r, store, telemetry) => r.run(&store, telemetry.as_deref()),
             Ready::Conduct(c, store, waiters) => c.run(&store, waiters),
+            Ready::Telemetry(t, runtime) => t.run(&runtime),
         }
     }
 }
@@ -747,6 +785,15 @@ mod tests {
             ("sync.cancel", MutateProject),
             ("sync.dismiss", MutateProject),
             ("sync.repair", MutateAcross),
+            ("telemetry.state", ReadProject),
+            ("telemetry.setModeA", MutateProject),
+            ("telemetry.setModeB", MutateProject),
+            ("telemetry.completeOnboarding", MutateProject),
+            ("telemetry.export", ReadProject),
+            ("telemetry.retryForget", MutateProject),
+            ("telemetry.trackUpdate", MutateProject),
+            ("telemetry.trackPane", MutateProject),
+            ("telemetry.trackSettingsSnapshot", MutateProject),
         ];
         let actual: Vec<(&str, Capability)> = every_command()
             .iter()

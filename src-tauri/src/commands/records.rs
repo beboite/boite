@@ -80,11 +80,11 @@ async fn on_rows(
     command: Records,
 ) -> Result<Value, String> {
     let store = rows.get(app)?;
-    through(
-        DesktopHost::new(scope).with_store(store).with_transcripts(app),
-        command.into(),
-    )
-    .await
+    let mut host = DesktopHost::new(scope).with_store(store).with_transcripts(app);
+    if let Some(runtime) = app.try_state::<Arc<boite_core::telemetry::TelemetryRuntime>>() {
+        host = host.with_telemetry(runtime.inner().clone());
+    }
+    through(host, command.into()).await
 }
 
 /// Reads a wire-shaped call into a command.

@@ -1,14 +1,16 @@
 <script lang="ts">
   import { settings } from "$lib/features/settings/store.svelte";
+  import { backend } from "$lib/backend";
   import { SETUP_STEPS, type SetupDraft } from "./steps";
   import BoiteLogo from "$lib/shared/components/BoiteLogo.svelte";
   import { restoreFocus } from "$lib/shared/keyboard/overlay";
   import { t, LOCALE_OPTIONS } from "$lib/i18n/index.svelte";
+  import { reportSettingsSnapshot } from "./telemetry";
 
   // 0 is the welcome screen, 1..n index SETUP_STEPS.
   let step = $state(0);
 
-  const draft = $state<SetupDraft>({ shortcuts: [] });
+  const draft = $state<SetupDraft>({ shortcuts: [], modeB: false });
 
   let dialogEl = $state<HTMLDivElement | null>(null);
   let nextBtn = $state<HTMLButtonElement | null>(null);
@@ -35,8 +37,28 @@
     step += 1;
   }
 
-  function finish() {
+  async function finish() {
+    await completeOnboarding(draft.modeB);
     return settings.completeSetup(draft.shortcuts.map((shortcut) => ({ ...shortcut })));
+  }
+
+  async function finishWith(modeB: boolean) {
+    draft.modeB = modeB;
+    await finish();
+  }
+
+  async function skipWizard() {
+    await completeOnboarding(false);
+    await settings.setSetupCompleted(true);
+  }
+
+  async function completeOnboarding(modeB: boolean) {
+    try {
+      await backend().telemetry.completeOnboarding(true, modeB);
+      void reportSettingsSnapshot();
+    } catch {
+      // No runtime: the sidecar never existed, and nothing will be sent.
+    }
   }
 </script>
 
@@ -98,16 +120,22 @@
           </div>
         {:else}
           {@const Step = current.component}
-          <Step {draft} />
+          <Step
+            {draft}
+            onTelemetryChosen={current.id === "telemetry"
+              ? (modeB) => void finishWith(modeB)
+              : undefined}
+          />
         {/if}
       </div>
     {/key}
 
+    {#if current?.id !== "telemetry"}
     <div class="flex items-center justify-between gap-3">
       {#if step === 0}
         <button
           type="button"
-          onclick={() => void settings.setSetupCompleted(true)}
+          onclick={() => void skipWizard()}
           class="rounded-lg border border-border px-3.5 py-2 text-xs font-medium text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
         >
           {t("setup.skip")}
@@ -130,6 +158,7 @@
         {isLast ? t("setup.finish") : t("setup.continue")}
       </button>
     </div>
+    {/if}
   </div>
 </div>
 

@@ -1,0 +1,84 @@
+name = "boite-telemetry"
+main = "src/index.ts"
+compatibility_date = "2026-04-01"
+compatibility_flags = ["nodejs_compat"]
+
+# account_id is read from the CLOUDFLARE_ACCOUNT_ID env var (or wrangler login).
+# Not versioned here so the repo stays fork-friendly.
+
+# Public hostname is a workers.dev subdomain until a custom domain is chosen.
+# Do not invent one here.
+workers_dev = true
+preview_urls = false
+
+# This Worker has no storage binding on purpose. It forwards to PostHog and
+# keeps nothing: no D1, no Analytics Engine, no KV, no object storage. The only
+# state it touches is the rate-limit counters below, which hold no payload.
+
+# ── Public variables (non-secret) ──
+[vars]
+ENVIRONMENT = "production"
+BATCH_MAX_EVENTS = "200" # per /track request
+
+# PostHog EU. Ingestion and the REST API live on different hosts.
+POSTHOG_INGEST_HOST = "https://eu.i.posthog.com"
+POSTHOG_API_HOST = "https://eu.posthog.com"
+
+# Numeric project id, the one in the PostHog dashboard URL. Not a secret.
+# Replace with the real Boite project before the first signed binary.
+POSTHOG_PROJECT_ID = "0"
+
+ALLOWED_ORIGINS = "http://localhost:1420,https://tauri.localhost"
+ALERT_FROM = "onboarding@resend.dev" # replace with a verified domain once set up
+
+# Expected User-Agent prefix. Requests without it are rejected.
+# Cheap filter against opportunistic scripts. Trivially spoofable but effective.
+UA_PREFIX = "Boite/"
+
+# ── Secrets (set with `wrangler secret put <NAME>`) ──
+# HASH_SECRET               -> salt for the Mode A hashes
+# POSTHOG_PROJECT_API_KEY   -> PostHog write key (phc_...), used for ingestion
+# POSTHOG_PERSONAL_API_KEY  -> PostHog personal key (phx_...) for /forget and
+#                              /export. Scope it to person:read, person:write
+#                              and query:read, nothing more. This key can read
+#                              and delete the whole project, which is why it
+#                              lives here and never in the app binary.
+# RESEND_API_KEY            -> Resend API key for email alerts (optional)
+# ALERT_EMAIL               -> recipient address for alerts (optional)
+
+# ── Rate limiting (native bindings, free) ──
+# The period field accepts only 10 or 60 seconds.
+# namespace_id values must be unique within the Cloudflare account. Accshift
+# already uses 1001-1006 on the same account; these are a different range.
+
+[[unsafe.bindings]]
+name = "RL_TRACK"
+type = "ratelimit"
+namespace_id = "2001"
+simple = { limit = 30, period = 60 } # 30 batches/min/IP (up to 6000 events/min)
+
+[[unsafe.bindings]]
+name = "RL_RGPD"
+type = "ratelimit"
+namespace_id = "2003"
+simple = { limit = 5, period = 60 } # forget + export combined, per IP
+
+# Shared ceiling, keyed on a constant rather than on the caller. Bounds what a
+# burst can push into the PostHog monthly quota, which is the resource that now
+# costs money. Not account-wide: Cloudflare enforces one limit per key per
+# location. The hard spend stop is the billing limit on the PostHog project.
+[[unsafe.bindings]]
+name = "RL_GLOBAL"
+type = "ratelimit"
+namespace_id = "2006"
+simple = { limit = 120, period = 60 }
+
+[[unsafe.bindings]]
+name = "RL_NOTIFY"
+type = "ratelimit"
+namespace_id = "2005"
+simple = { limit = 1, period = 60 } # email throttle: 1/min per (endpoint, IP)
+
+# ── Observability ──
+[observability]
+enabled = true

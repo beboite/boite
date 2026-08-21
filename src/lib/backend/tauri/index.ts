@@ -22,6 +22,7 @@ import {
   tauriSession,
   tauriShell,
   tauriSync,
+  tauriTelemetry,
   tauriSystem,
   tauriWorktree,
 } from "./rpc";
@@ -48,6 +49,7 @@ export class TauriBackend implements Backend {
   readonly session = tauriSession;
   readonly search = tauriSearch;
   readonly sync = tauriSync;
+  readonly telemetry = tauriTelemetry;
   readonly log = tauriLog;
   readonly approvals = tauriApprovals;
   readonly meta = tauriWorkspaceMeta;

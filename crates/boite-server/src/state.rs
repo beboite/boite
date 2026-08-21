@@ -57,6 +57,8 @@ pub struct AppState {
     /// endpoint, so an orchestrator's long-poll wakes on a moment whichever
     /// door wrote it.
     pub pulse: Arc<boite_core::pulse::Waiters>,
+    /// Process-wide telemetry queue. None in tests, which never send.
+    pub telemetry: Option<Arc<boite_core::telemetry::TelemetryRuntime>>,
 }
 
 /// How many claims are remembered. Each is a uuid a client either took or lost
@@ -232,6 +234,10 @@ impl boite_core::command::Host for ServerHost<'_> {
     fn transcripts_dir(&self) -> Option<PathBuf> {
         self.state.registry.transcripts_dir()
     }
+
+    fn telemetry(&self) -> Option<Arc<boite_core::telemetry::TelemetryRuntime>> {
+        self.state.telemetry.clone()
+    }
 }
 
 fn ensure_under(root: &Path, path: &str) -> Result<(), String> {
@@ -277,6 +283,7 @@ pub fn state_for_test(dir: &Path) -> AppState {
         public_url: None,
         claimed_requests: Default::default(),
         pulse: boite_core::pulse::Waiters::new(),
+        telemetry: None,
     };
     // The dispatcher tests drive real calls, and a real call reads the pairing
     // row behind the session that sent it. `Session::for_test` names this one.
@@ -367,6 +374,7 @@ mod tests {
             public_url: None,
             claimed_requests: Default::default(),
         pulse: boite_core::pulse::Waiters::new(),
+            telemetry: None,
         };
 
         state.refresh_roots().unwrap();
@@ -408,6 +416,7 @@ mod tests {
             public_url: None,
             claimed_requests: Default::default(),
         pulse: boite_core::pulse::Waiters::new(),
+            telemetry: None,
         };
 
         assert!(state.ensure_project_path(inside.to_str().unwrap()).is_ok());

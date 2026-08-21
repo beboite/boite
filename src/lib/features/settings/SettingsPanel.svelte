@@ -11,6 +11,7 @@
   import SettingsMachinesTab from "./SettingsMachinesTab.svelte";
   import SettingsExperimentsTab from "./SettingsExperimentsTab.svelte";
   import SettingsAboutTab from "./SettingsAboutTab.svelte";
+  import SettingsPrivacyTab from "./SettingsPrivacyTab.svelte";
   import { updater } from "$lib/features/updater/store.svelte";
   import X from "@lucide/svelte/icons/x";
   import { scrollIntoViewSmooth } from "$lib/theme/motion";
@@ -23,6 +24,7 @@
   import FlaskConical from "@lucide/svelte/icons/flask-conical";
   import Info from "@lucide/svelte/icons/info";
   import Server from "@lucide/svelte/icons/server";
+  import Shield from "@lucide/svelte/icons/shield";
   import { onDestroy, tick, type Component } from "svelte";
   import { t, type MessageKey } from "$lib/i18n/index.svelte";
   import Search from "@lucide/svelte/icons/search";
@@ -89,6 +91,11 @@
       labelKey: "tabs.machines",
       hintKey: "tabs.machinesHint",
       icon: Smartphone,
+    },
+    privacy: {
+      labelKey: "tabs.privacy",
+      hintKey: "tabs.privacyHint",
+      icon: Shield,
     },
     experiments: {
       labelKey: "tabs.experiments",
@@ -489,6 +496,8 @@
           <SettingsKeyboardTab />
         {:else if activeTab === "machines"}
           <SettingsMachinesTab />
+        {:else if activeTab === "privacy"}
+          <SettingsPrivacyTab />
         {:else if activeTab === "experiments"}
           <SettingsExperimentsTab />
         {:else if activeTab === "about"}

@@ -5,6 +5,8 @@
 //! command exists, and what fastpick has to offer.
 
 
+use std::sync::Arc;
+
 use tauri::{
     AppHandle, Manager, State,
 };
@@ -14,6 +16,7 @@ use serde_json::Value;
 use boite_core::command::Sessions;
 use boite_core::pty::PtyManager;
 use boite_core::scope::ProjectRoots;
+use boite_core::telemetry::TelemetryRuntime;
 
 use crate::BootState;
 use crate::local_pty::LocalSessions;
@@ -110,6 +113,21 @@ pub fn finish_boot(app: AppHandle, boot: State<'_, BootState>) {
         // First paint of the row the client area does not reach; the window
         // event hook keeps it painted from here on.
         crate::paint_frame_gap(&win);
+    }
+    report_boot_telemetry(&app);
+}
+
+/// First frame is up: `app_launched`, and a Mode B workspace snapshot if the
+/// rows have been attached. Called from `finish_boot` and from the failsafe
+/// that shows the window if the frontend never does.
+pub(crate) fn report_boot_telemetry(app: &AppHandle) {
+    let Some(runtime) = app.try_state::<Arc<TelemetryRuntime>>() else {
+        return;
+    };
+    runtime.on_boot_complete();
+    let live = app.state::<PtyManager>().live_count() as u64;
+    if let Ok(store) = app.state::<super::records::Rows>().get(app) {
+        runtime.track_workspace_from(&store, live);
     }
 }
 

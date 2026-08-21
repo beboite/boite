@@ -1,0 +1,16 @@
+{
+  "name": "boite-telemetry",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250421.0",
+    "typescript": "^5.9.3",
+    "wrangler": "^4.122.0"
+  }
+}

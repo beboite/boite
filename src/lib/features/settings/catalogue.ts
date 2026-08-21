@@ -21,9 +21,10 @@ import type { MessageKey } from "$lib/i18n/index.svelte";
  * Eleven of them was the problem: "CLIs" and "plugins" were the same question
  * asked twice (what can this machine run, under which account), "devices" and
  * "sync" were both about the other computers, and "logs" spent a permanent
- * line on a page nobody opens until something has gone wrong. Eight now, and
- * the list lives here rather than in `SettingsPanel` so the test that walks the
- * pages reads the same one the panel does.
+ * line on a page nobody opens until something has gone wrong. Privacy sits
+ * next to machines: both are about what leaves this computer. The list lives
+ * here rather than in `SettingsPanel` so the test that walks the pages reads
+ * the same one the panel does.
  */
 export const SETTINGS_TABS = [
   "general",
@@ -32,6 +33,7 @@ export const SETTINGS_TABS = [
   "agents",
   "keyboard",
   "machines",
+  "privacy",
   "experiments",
   "about",
 ] as const;
@@ -154,6 +156,11 @@ export const SETTINGS_CATALOGUE: SettingEntry[] = [
     key: "experiments.harnessLogos",
     descKey: "experiments.harnessLogosDesc",
   },
+
+  { tab: "privacy", key: "privacy.doc", descKey: "privacy.docDesc" },
+  { tab: "privacy", key: "privacy.modeA", descKey: "privacy.modeADesc" },
+  { tab: "privacy", key: "privacy.modeB", descKey: "privacy.modeBDesc" },
+  { tab: "privacy", key: "privacy.data", descKey: "privacy.dataDesc" },
 
   { tab: "about", key: "about.title" },
 ];

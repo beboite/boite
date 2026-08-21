@@ -148,6 +148,10 @@ jobs:
           # anchor — never echo them, never move them out of repo secrets.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Compiled into the binary (`option_env!`). Empty or unset falls back
+          # to https://telemetry.invalid, so a tag without this secret ships a
+          # fleet that cannot report. Never echo it.
+          BOITE_TELEMETRY_URL: ${{ secrets.BOITE_TELEMETRY_URL }}
         with:
           tagName: v__VERSION__
           releaseName: Boite v__VERSION__
