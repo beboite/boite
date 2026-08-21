@@ -187,6 +187,39 @@ different questions.
   opencode's incomplete parent message all look like a terminal that has printed
   nothing for ten minutes, which is what used to get the PTY reclaimed.
 
+## A PTY is stopped politely or instantly, never both
+
+`PtyManager::kill` reads its `wait` flag as which of the two the caller needs.
+
+`wait = false` is the background stop: auto-sleep, an explicit stop, a pane
+closing, `thread.delete`, the app quitting. It drops the master, which closes the
+pseudoconsole. Node reports that as `SIGHUP`, and every agent CLI here runs its
+own exit path from it through signal-exit. The child gets `GRACE` (1.5s), then
+the job object is terminated anyway. The waiting runs on a detached thread, so
+the caller returns in microseconds. `kill_all` is the one that blocks: the job
+objects die with this process, so returning early would shoot the children it
+just asked to leave.
+
+`wait = true` is the foreground stop and stays a bare `TerminateJobObject`. The
+caller blocks because it is about to open a fresh PTY on the same session, and a
+grace there is two `claude --resume <id>` racing on one file.
+
+What the grace buys, and why it was worth the code: Claude Code writes a
+`fullscreenBootPending` record into `~/.claude.json` at every fullscreen launch
+and clears it from its exit hook. A hard kill skips the hook, so the next launch
+finds a pending record whose pid is gone and counts a strike; two strikes turn
+the fullscreen renderer off until it is turned back on by hand. A boite left
+running auto-slept a thread every ten minutes, which spent both strikes within
+the hour. Transcript flushes and lock files are the same story with a quieter
+failure.
+
+On Windows the pseudoconsole is the only lever. A ConPTY child sits in a console
+of its own, `AttachConsole` on it answers `ERROR_GEN_FAILURE`, and a raw `0x03`
+on the input side arrives as a byte rather than as a key. That same drop is also
+what ends `read()`: a ConPTY reports EOF when the pseudoconsole closes, never
+when the client dies. On unix the process group gets `SIGTERM` first and
+`SIGKILL` after the grace.
+
 ## Which conversation a thread is bound to
 
 A thread with no `sessionId` relaunches into a blank agent, so binding one is not
