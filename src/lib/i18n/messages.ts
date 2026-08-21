@@ -16,6 +16,11 @@ export const EN_MESSAGES = {
   "common.retry": "Retry",
   "common.close": "Close",
 
+  "plugins.title": "Plugins",
+  "plugins.description": "what boite can drive here, and the account behind each one.",
+  "plugins.movedDesc": "The switchers and fastpick have a page of their own now.",
+  "plugins.open": "Open plugins",
+
   "tabs.general": "General",
   "tabs.terminal": "Terminal",
   "tabs.appearance": "Appearance",

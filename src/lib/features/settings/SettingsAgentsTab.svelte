@@ -1,17 +1,31 @@
 <!--
-  The agents page: the CLIs on the machine, and the tools that switch accounts
-  for them.
+  The agents page: the CLIs on the machine.
 
-  Two pages until now, and the split asked the user to know that "CLI" meant
-  installing the binary while "plugins" meant the switcher that logs it in.
-  Both answer the same question — what can this machine run, and under which
-  account — so they are one page with the install list first, since a switcher
-  is worth nothing without the CLI it drives.
+  It held the plugin cards too until they moved to `PluginsPage.svelte`. What
+  stays is the install list, and one row saying where the rest went, because a
+  user who learned the toggles were here would otherwise read the shorter page
+  as a removal.
 -->
 <script lang="ts">
+  import { app } from "$lib/app/store.svelte";
   import CliManagerSection from "./CliManagerSection.svelte";
-  import PluginsSection from "./PluginsSection.svelte";
+  import SettingsCard from "$lib/shared/components/SettingsCard.svelte";
+  import Button from "$lib/shared/components/Button.svelte";
+  import { t } from "$lib/i18n/index.svelte";
+
+  function openPlugins() {
+    app.view = "plugins";
+  }
 </script>
 
 <CliManagerSection />
-<PluginsSection />
+
+<SettingsCard
+  title={t("plugins.title")}
+  anchor="plugins.title"
+  description={t("plugins.movedDesc")}
+>
+  <div class="flex">
+    <Button onclick={openPlugins}>{t("plugins.open")}</Button>
+  </div>
+</SettingsCard>
