@@ -726,8 +726,6 @@ export const EN_MESSAGES = {
   "cli.install": "Install",
   "cli.update": "Update",
   "cli.reinstall": "Reinstall",
-  "cli.upToDate": "Up to date.",
-  "cli.updateAvailable": "Version {version} is out.",
   "cli.uninstall": "Uninstall",
   "cli.stop": "Stop",
   "cli.dismiss": "Clear",
@@ -1301,12 +1299,12 @@ export const EN_MESSAGES = {
   // Carrying the agent configuration between computers.
   "sync.enable": "Sync when Boite opens",
   "sync.enableDesc":
-    "Boite reads the repository at start. Anything that differs opens the merge tool, and nothing is written until you say so.",
+    "Boite reads the repository at start. Anything that differs opens the merge tool.",
   "sync.enableNoRemote": "Name a repository first.",
 
   "sync.remoteTitle": "The repository",
   "sync.remoteDesc":
-    "A private git repository you own. Boite writes to it and reads from it, and never sees your credentials: git resolves those on the machine the terminals run on, the same way it does for every other repository there.",
+    "Any git repository you own, private, on any host. Git resolves the credential on the machine the terminals run on, so Boite never sees one.",
   "sync.remotePlaceholder": "git@github.com:you/boite-config.git",
   "sync.remoteLabel": "Repository address",
   "sync.remoteCheck": "Check",
@@ -1321,7 +1319,7 @@ export const EN_MESSAGES = {
   "sync.remoteEdit": "Change the address",
   "sync.remoteForget": "Forget this repository",
   "sync.remoteForgetAsk":
-    "Boite stops syncing. Every file stays exactly as it is, on this machine and in the repository.",
+    "Boite stops syncing. Every file stays as it is, here and in the repository.",
 
   "sync.statusTitle": "Last sync",
   "sync.statusDesc": "What the last run did, and the button that starts another.",
@@ -1349,15 +1347,13 @@ export const EN_MESSAGES = {
   "sync.phaseCancelled": "Stopped before it finished.",
 
   "sync.sourcesTitle": "What gets synced",
-  "sync.sourcesDesc":
-    "One switch per agent, plus the folder they all read. A switch that is off is a file Boite neither sends nor touches, and every switch starts off.",
+  "sync.sourcesDesc": "Off is a file Boite neither sends nor touches. All start off.",
   "sync.agentsRow": "The .agents folder",
   "sync.agentsRowDesc": "AGENTS.md, the skills and the commands every agent reads.",
-  "sync.sourceUnknown": "Boite does not know where this one keeps its configuration.",
-  "sync.sourceAbsent":
-    "Not on this machine. Its configuration can still arrive before it does.",
+  "sync.sourcesNotYet": "Nothing verified to sync yet: {names}.",
+  "sync.sourceAbsent": "Not installed here. Its configuration can arrive first.",
   "sync.secretsNote":
-    "Credentials never leave. A field Boite knows is a secret travels as a placeholder, and a pull puts back the value this machine already had.",
+    "Credentials never leave: a secret travels as a placeholder, and a pull puts back the value this machine had.",
 
   "syncMerge.title": "Files that differ",
   "syncMerge.progress": "{done} of {total} decided",

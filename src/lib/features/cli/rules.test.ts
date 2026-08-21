@@ -172,7 +172,7 @@ describe("what the primary button does, and may be called", () => {
   });
 
   it("names keys the dictionary actually has, since the button prints them", () => {
-    for (const key of ["cli.install", "cli.update", "cli.reinstall", "cli.upToDate", "cli.updateAvailable"] as const) {
+    for (const key of ["cli.install", "cli.update", "cli.reinstall"] as const) {
       expect(EN_MESSAGES[key]).toBeTruthy();
     }
   });

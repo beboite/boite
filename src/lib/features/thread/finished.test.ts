@@ -35,9 +35,34 @@ describe("which transitions light a row up", () => {
     expect(justFinished("b")).toBe(true);
   });
 
-  /** A thread put to sleep has ended too; the colour is the caller's business. */
-  it("marks a thread stopped from anywhere alive", () => {
-    noteStatusChange("a", "ready", "stopped");
+  /**
+   * Sleep is the far end of the mark, not another way to earn one. The idle
+   * timer takes minutes to reclaim a PTY, so a row that reaches `stopped` has
+   * had its news on screen for that long and stops claiming to be news.
+   */
+  it("lifts the mark when the idle timer parks the thread", () => {
+    noteStatusChange("a", "running", "done");
+    expect(justFinished("a")).toBe(true);
+    noteStatusChange("a", "done", "stopped");
+    expect(justFinished("a")).toBe(false);
+  });
+
+  /** A thread back at work has nothing left to say about its last turn. */
+  it("lifts the mark when the thread starts working again", () => {
+    noteStatusChange("a", "running", "done");
+    noteStatusChange("a", "done", "running");
+    expect(justFinished("a")).toBe(false);
+  });
+
+  /**
+   * No clock behind it: the mark used to expire after six seconds, which lost
+   * every turn that ended while the user was in another window.
+   */
+  it("keeps the mark for as long as nobody has looked", () => {
+    noteStatusChange("a", "running", "exited");
+    for (let sweep = 0; sweep < 100; sweep += 1) {
+      noteStatusChange("a", "exited", "exited");
+    }
     expect(justFinished("a")).toBe(true);
   });
 

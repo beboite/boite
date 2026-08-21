@@ -723,8 +723,6 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "cli.install": "Installer",
   "cli.update": "Mettre à jour",
   "cli.reinstall": "Réinstaller",
-  "cli.upToDate": "À jour.",
-  "cli.updateAvailable": "La version {version} est sortie.",
   "cli.uninstall": "Désinstaller",
   "cli.stop": "Arrêter",
   "cli.dismiss": "Effacer",
@@ -1293,12 +1291,12 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   // Emporter la configuration des agents d'un ordinateur à l'autre.
   "sync.enable": "Synchroniser à l'ouverture de Boite",
   "sync.enableDesc":
-    "Boite lit le dépôt au démarrage. Tout ce qui diffère ouvre l'outil de fusion, et rien n'est écrit avant que vous ne le disiez.",
+    "Boite lit le dépôt au démarrage. Tout ce qui diffère ouvre l'outil de fusion.",
   "sync.enableNoRemote": "Indiquez d'abord un dépôt.",
 
   "sync.remoteTitle": "Le dépôt",
   "sync.remoteDesc":
-    "Un dépôt git privé qui vous appartient. Boite y écrit et le lit, sans jamais voir vos identifiants : git les résout sur la machine où tournent les terminaux, comme pour n'importe quel autre dépôt qui s'y trouve.",
+    "N'importe quel dépôt git qui vous appartient, privé, chez n'importe quel hébergeur. Git résout l'identifiant sur la machine où tournent les terminaux, Boite n'en voit jamais un.",
   "sync.remotePlaceholder": "git@github.com:vous/boite-config.git",
   "sync.remoteLabel": "Adresse du dépôt",
   "sync.remoteCheck": "Vérifier",
@@ -1313,7 +1311,7 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "sync.remoteEdit": "Changer l'adresse",
   "sync.remoteForget": "Oublier ce dépôt",
   "sync.remoteForgetAsk":
-    "Boite arrête de synchroniser. Chaque fichier reste exactement tel qu'il est, sur cette machine et dans le dépôt.",
+    "Boite arrête de synchroniser. Chaque fichier reste tel quel, ici et dans le dépôt.",
 
   "sync.statusTitle": "Dernière synchronisation",
   "sync.statusDesc": "Ce qu'a fait la dernière exécution, et le bouton qui en lance une autre.",
@@ -1341,14 +1339,13 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "sync.phaseCancelled": "Arrêté avant la fin.",
 
   "sync.sourcesTitle": "Ce qui est synchronisé",
-  "sync.sourcesDesc":
-    "Un interrupteur par agent, plus le dossier qu'ils lisent tous. Un interrupteur éteint est un fichier que Boite n'envoie pas et ne touche pas, et tous démarrent éteints.",
+  "sync.sourcesDesc": "Éteint, Boite n'envoie ni ne touche le fichier. Tous démarrent éteints.",
   "sync.agentsRow": "Le dossier .agents",
   "sync.agentsRowDesc": "AGENTS.md, les compétences et les commandes que lisent tous les agents.",
-  "sync.sourceUnknown": "Boite ne sait pas où celui-ci garde sa configuration.",
-  "sync.sourceAbsent": "Absent de cette machine. Sa configuration peut arriver avant lui.",
+  "sync.sourcesNotYet": "Rien de vérifié à synchroniser pour l'instant : {names}.",
+  "sync.sourceAbsent": "Pas installé ici. Sa configuration peut arriver avant lui.",
   "sync.secretsNote":
-    "Les identifiants ne partent jamais. Un champ que Boite sait être un secret voyage sous forme de marqueur, et une récupération remet la valeur que cette machine avait déjà.",
+    "Les identifiants ne partent jamais : un secret voyage sous forme de marqueur, et une récupération remet la valeur que cette machine avait.",
 
   "syncMerge.title": "Fichiers qui diffèrent",
   "syncMerge.progress": "{done} sur {total} décidés",

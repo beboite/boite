@@ -2134,13 +2134,21 @@
       0 0 12px -4px color-mix(in srgb, var(--color-foreground) 60%, transparent);
   }
 
-  /* A thread that has just finished. Green drains out of the card over six
-     seconds, which is long enough to be caught by a glance that arrives late
-     and short enough that the row goes back to being a row. `forwards` matters:
-     without it the box-shadow snaps back to the 0% keyframe for one frame
-     before the class drops, and the card flashes green on its way out. */
+  /* A thread that finished and has not been read. It blinks green to violet
+     until something takes the mark back — see `boite-finish-blink`. */
   .thread-card.just-finished {
-    animation: boite-finish-glow 6s var(--ease-out-quint) forwards;
+    animation: boite-finish-blink 2.4s ease-in-out infinite;
+  }
+
+  /* Reduced motion still needs the answer, just not the movement: the card
+     holds the green ring the blink starts on. */
+  @media (prefers-reduced-motion: reduce) {
+    .thread-card.just-finished {
+      animation: none;
+      box-shadow:
+        inset 0 0 0 1px color-mix(in srgb, var(--color-success) 70%, transparent),
+        0 0 12px 1px color-mix(in srgb, var(--color-success) 24%, transparent);
+    }
   }
 
   /* This agent just changed something in Boite itself rather than in its own
@@ -2239,21 +2247,38 @@
     --lit: 0.8;
     --wash: 16%;
   }
+  /* Unread, in the glow design's own terms: the halo it already draws swaps
+     hue instead of a second ring being stacked over it. `--tone` is the state's
+     own colour written by the markup, so the green half is whatever the theme
+     calls success and only the violet is named here.
+
+     This is the one animation in the design that repaints, and it is the
+     exception the rest of the file argues against on purpose: a hue cannot
+     travel on the compositor. What keeps it affordable is how few rows can be
+     in this state at once — a row leaves it on the first click, on the next
+     turn, or when the idle timer parks it — against `working`, which is what
+     the no-repaint rule was written for and can hold half a column. */
   .thread-card.glow.fresh[data-state="finished"]::before {
-    animation: card-finish 1.4s var(--ease-out-quint) forwards;
+    animation: card-finish 2.4s ease-in-out infinite;
   }
-  /* `forwards` pins the last keyframe for as long as `.fresh` is on the card, so
-     a literal here is not a starting point the state rule can correct: it is the
-     state rule, overriding it for the whole flash. It reads `--lit` for that
-     reason. */
   @keyframes card-finish {
-    0% {
-      opacity: 1;
-      transform: scale(1.015);
-    }
+    0%,
     100% {
-      opacity: var(--lit);
-      transform: scale(1);
+      box-shadow:
+        inset 0 0 0 1px color-mix(in srgb, var(--tone) 75%, transparent),
+        0 0 10px -2px color-mix(in srgb, var(--tone) 70%, transparent);
+    }
+    50% {
+      box-shadow:
+        inset 0 0 0 1px color-mix(in srgb, var(--color-awake) 75%, transparent),
+        0 0 10px -2px color-mix(in srgb, var(--color-awake) 70%, transparent);
+    }
+  }
+  /* No movement, and still an answer: the row keeps the halo its state already
+     draws, which is the green half of the blink. */
+  @media (prefers-reduced-motion: reduce) {
+    .thread-card.glow.fresh[data-state="finished"]::before {
+      animation: none;
     }
   }
 

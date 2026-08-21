@@ -4,10 +4,18 @@
   import { orchestrator } from "$lib/features/orchestrator/store.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
   import DashboardCard from "$lib/features/project/DashboardCard.svelte";
+  import Button from "$lib/shared/components/Button.svelte";
   import ChatMessage from "./ChatMessage.svelte";
   import VoiceButton from "$lib/features/voice/VoiceButton.svelte";
   import { voice } from "$lib/features/voice/store.svelte";
   import MessageSquareIcon from "@lucide/svelte/icons/message-square";
+
+  /**
+   * `fill` is home's layout asking for the whole column. Off, the card keeps the
+   * bounded height a dashboard tile needs, which is what every other surface
+   * embedding this wants.
+   */
+  let { fill = false }: { fill?: boolean } = $props();
 
   let draft = $state("");
   let list: HTMLUListElement | null = $state(null);
@@ -74,7 +82,7 @@
   }
 </script>
 
-<DashboardCard title={t("orchestrator.title")} flush>
+<DashboardCard title={t("orchestrator.title")} flush class={fill ? "h-full min-h-0" : ""}>
   {#snippet icon()}<MessageSquareIcon class="size-3.5" />{/snippet}
   {#snippet actions()}
     {#if scopes.length > 0}
@@ -90,7 +98,7 @@
       </select>
     {/if}
   {/snippet}
-  <div class="flex max-h-80 min-h-40 flex-col">
+  <div class="flex flex-col {fill ? 'h-full min-h-0' : 'max-h-80 min-h-40'}">
     {#if orchestrator.conversation.messages.length === 0}
       <p class="flex-1 px-3.5 pb-2 text-sm text-muted-foreground">
         {t("orchestrator.empty")}
@@ -129,14 +137,13 @@
         onkeydown={onKeydown}
         disabled={orchestrator.posting}
       ></textarea>
-      <button
-        type="button"
-        class="rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground disabled:opacity-50"
+      <Button
+        variant="primary"
         onclick={() => void send()}
         disabled={orchestrator.posting || !draft.trim()}
       >
         {t("orchestrator.send")}
-      </button>
+      </Button>
     </div>
   </div>
 </DashboardCard>
