@@ -9,6 +9,19 @@ use std::sync::mpsc::{SyncSender, TrySendError};
 // grow the process indefinitely.
 const WRITE_QUEUE_DEPTH: usize = 1024;
 
+// How long a background kill lets the child leave on its own before the tree is
+// terminated. Agent CLIs do real work on the way out: flush a transcript,
+// release a lock, and in Claude Code's case clear the fullscreen boot canary it
+// writes to ~/.claude.json at every launch. A hard kill skips all of it, and
+// that canary in particular is read by the *next* launch: a pending record
+// whose pid is gone counts a strike, and two strikes turn fullscreen off until
+// the user turns it back on by hand. Windows allows a process 5s after
+// CTRL_CLOSE_EVENT, so this is well inside what the OS tolerates.
+const GRACE: std::time::Duration = std::time::Duration::from_millis(1500);
+
+// How long anything waits for the reaper once the tree has been terminated.
+const REAP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
 use parking_lot::Mutex;
 use portable_pty::{ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use serde::{Deserialize, Serialize};
@@ -565,16 +578,16 @@ impl PtyManager {
     }
 
     pub fn kill_all(&self) {
-        // Parallel; each kill is one TerminateJobObject syscall, the join
-        // only matters for the rare taskkill fallback.
+        // Parallel, and blocking on purpose: the app is on its way out, and
+        // the job objects die with this process (KILL_ON_JOB_CLOSE), so
+        // returning early would hard-kill the children we just asked to leave
+        // politely. One grace window for all of them, not one each.
         let ids: Vec<String> = self.inner.lock().keys().cloned().collect();
         let joins: Vec<_> = ids
             .into_iter()
             .map(|id| {
                 let manager = self.clone();
-                std::thread::spawn(move || {
-                    let _ = manager.kill(&id, false);
-                })
+                std::thread::spawn(move || manager.stop_gracefully(&id))
             })
             .collect();
         for join in joins {
@@ -582,7 +595,105 @@ impl PtyManager {
         }
     }
 
+    /// Kill the PTY.
+    ///
+    /// `wait = true` is the foreground path and stays a hard kill: the caller
+    /// blocks because it is about to open a fresh PTY on the same session, so
+    /// the old process has to be gone now rather than politely (two Claude
+    /// `--resume <session>` racing on one session file).
+    ///
+    /// `wait = false` is the background path: nothing is racing, so the child
+    /// gets `GRACE` to run its own exit code before the tree is terminated.
+    /// The waiting happens on a detached thread, so the caller returns at once
+    /// either way. Auto-sleep, an explicit stop and thread.delete take this
+    /// path, and they are the ones that used to leave a stale canary behind.
     pub fn kill(&self, id: &str, wait: bool) -> Result<(), String> {
+        if !wait {
+            if !self.inner.lock().contains_key(id) {
+                return Ok(());
+            }
+            let manager = self.clone();
+            let id = id.to_string();
+            std::thread::spawn(move || manager.stop_gracefully(&id));
+            return Ok(());
+        }
+        self.hard_kill(id);
+        // Wait for the reader thread to clean up after child.wait() returns,
+        // so the caller can safely spawn a fresh PTY without the previous
+        // process still being alive.
+        if self.wait_until_reaped(id, REAP_TIMEOUT) {
+            Ok(())
+        } else {
+            Err("pty kill timed out: process may still be alive".into())
+        }
+    }
+
+    /// Ask the child to leave, give it `GRACE`, terminate whatever is left.
+    /// Blocking; callers that must not block run it on their own thread.
+    fn stop_gracefully(&self, id: &str) {
+        if !self.request_stop(id) {
+            return;
+        }
+        if self.wait_until_reaped(id, GRACE) {
+            return;
+        }
+        self.hard_kill(id);
+        let _ = self.wait_until_reaped(id, REAP_TIMEOUT);
+    }
+
+    /// Tell the child it is time to go, without killing it. False when the PTY
+    /// is already gone.
+    fn request_stop(&self, id: &str) -> bool {
+        #[cfg(target_os = "windows")]
+        {
+            // There is no signal to send. A ConPTY child sits in a console of
+            // its own, and AttachConsole on it answers ERROR_GEN_FAILURE, so
+            // GenerateConsoleCtrlEvent has nothing to aim at; a raw 0x03 on the
+            // input side is read as a byte, not as a key. Closing the
+            // pseudoconsole is the one lever left, and it is enough: the child
+            // sees its console go, which node reports as SIGHUP and every agent
+            // CLI here turns into its own exit path through signal-exit.
+            // Measured at ~20ms from this drop to a reaped child.
+            //
+            // It is also what ends read(): a ConPTY reports EOF when the
+            // pseudoconsole closes, never when the client dies, so the reaper
+            // is already sitting in child.wait() before the grace starts.
+            // Output written after this point is lost, which is what a process
+            // on its way out has to accept.
+            let master = {
+                let map = self.inner.lock();
+                match map.get(id) {
+                    Some(handle) => handle.master.clone(),
+                    None => return false,
+                }
+            };
+            drop(master.lock().take());
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            // portable-pty setsid()s the child, so it leads its own process
+            // group (pgid == pid). Signal the whole group: the direct shell on
+            // its own leaves claude and its descendants running.
+            let pid = {
+                let map = self.inner.lock();
+                match map.get(id) {
+                    Some(handle) => handle.pid,
+                    None => return false,
+                }
+            };
+            // The master stays open, unlike Windows: the tty is where the child
+            // writes its last lines, and read() reports EOF here on its own.
+            if let Some(pid) = pid {
+                unsafe {
+                    libc::kill(-(pid as i32), libc::SIGTERM);
+                }
+            }
+        }
+        true
+    }
+
+    /// Terminate the process tree. No grace, nothing the child can catch.
+    fn hard_kill(&self, id: &str) {
         #[cfg(target_os = "windows")]
         {
             let (killer, pid, job, master) = {
@@ -594,7 +705,7 @@ impl PtyManager {
                         handle.job.clone(),
                         handle.master.clone(),
                     ),
-                    None => return Ok(()),
+                    None => return,
                 }
             };
             let tree_killed = job.map(|j| j.terminate()).unwrap_or(false);
@@ -604,9 +715,9 @@ impl PtyManager {
                 }
             }
             let _ = killer.lock().kill();
-            // Drop the master to close the pseudoconsole, otherwise the
-            // reader thread stays blocked in read() forever and the wait
-            // loop below burns its whole 5s deadline.
+            // Drop the master to close the pseudoconsole, otherwise the reader
+            // thread stays blocked in read() forever and the wait below burns
+            // its whole deadline. Already taken when a graceful stop ran first.
             drop(master.lock().take());
         }
         #[cfg(not(target_os = "windows"))]
@@ -617,12 +728,9 @@ impl PtyManager {
                     Some(handle) => {
                         (handle.killer.clone(), handle.master.clone(), handle.pid)
                     }
-                    None => return Ok(()),
+                    None => return,
                 }
             };
-            // portable-pty setsid()s the child, so it leads its own process
-            // group (pgid == pid). Signal the whole group: killer.kill() only
-            // reaps the direct shell, orphaning claude and its descendants.
             if let Some(pid) = pid {
                 unsafe {
                     libc::kill(-(pid as i32), libc::SIGKILL);
@@ -631,21 +739,21 @@ impl PtyManager {
             let _ = killer.lock().kill();
             drop(master.lock().take());
         }
-        if !wait {
-            return Ok(());
-        }
-        // Wait for the reader thread to clean up after child.wait() returns,
-        // so the caller can safely spawn a fresh PTY without the previous
-        // process still being alive (e.g. two Claude `--resume <session>`
-        // racing on the same session file).
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        while std::time::Instant::now() < deadline {
+    }
+
+    /// True once the reaper has removed the entry, which it only does after
+    /// child.wait() returns: the child is gone, not merely signalled.
+    fn wait_until_reaped(&self, id: &str, timeout: std::time::Duration) -> bool {
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
             if !self.inner.lock().contains_key(id) {
-                return Ok(());
+                return true;
+            }
+            if std::time::Instant::now() >= deadline {
+                return false;
             }
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
-        Err("pty kill timed out: process may still be alive".into())
     }
 }
 
@@ -918,6 +1026,114 @@ mod tests {
         assert!(
             probe.env.keys().all(|k| std::env::var_os(k).is_none()),
             "the probe kept a variable this process already defines"
+        );
+    }
+
+    /// A child that records how it was told to leave. It installs the same
+    /// handlers signal-exit does, which is what every agent CLI on this machine
+    /// runs its own exit path from, claude included: node without them dies on
+    /// a console close without running anything, so a bare `process.on("exit")`
+    /// would measure node rather than the stop. None when node is not
+    /// installed, which is the CI image's business.
+    fn exit_hook_probe(m: &PtyManager, name: &str) -> Option<(String, std::path::PathBuf)> {
+        which::which("node").ok()?;
+        let dir = std::env::temp_dir();
+        let script = dir.join(format!("boite_exit_hook_{name}.js"));
+        let marker = dir.join(format!("boite_exit_hook_{name}.txt"));
+        let _ = std::fs::remove_file(&marker);
+        std::fs::write(
+            &script,
+            "const fs = require('fs');\nconst m = process.argv[2];\nfor (const s of ['SIGHUP', 'SIGINT', 'SIGTERM', 'SIGBREAK']) {\n  try { process.on(s, () => { try { fs.writeFileSync(m, s); } catch (e) {} process.exit(0); }); } catch (e) {}\n}\nconsole.log('ready');\nsetInterval(() => {}, 1000);\n",
+        )
+        .ok()?;
+
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let sink: Arc<dyn EventSink> = Arc::new(Collector(seen.clone()));
+        let mut args = spec("node", None);
+        args.args = vec![
+            script.to_string_lossy().into_owned(),
+            marker.to_string_lossy().into_owned(),
+        ];
+        args.cwd = dir.to_string_lossy().into_owned();
+        let id = m.spawn(sink, args).expect("node spawn");
+
+        // ConPTY opens by asking the terminal where the cursor is and hands the
+        // child nothing until something answers. In here we are the terminal,
+        // and a child still stuck on that question proves nothing about a kill.
+        let mut answered = false;
+        for _ in 0..100 {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            let got = String::from_utf8_lossy(&seen.lock()).into_owned();
+            if got.contains("ready") {
+                return Some((id, marker));
+            }
+            if !answered && got.contains("\x1b[6n") {
+                answered = true;
+                let _ = m.write(&id, b"\x1b[1;1R");
+            }
+        }
+        panic!("the probe child never reached its own first line");
+    }
+
+    /// Measured on Windows, and the whole point of the grace: a job-object kill
+    /// leaves `process.on("exit")` unrun. Claude Code clears its fullscreen boot
+    /// canary from there, so every hard stop costs the user a strike against a
+    /// renderer they chose.
+    #[test]
+    fn a_background_kill_reaches_the_child_exit_hook() {
+        let m = PtyManager::new();
+        let Some((id, marker)) = exit_hook_probe(&m, "background") else {
+            return;
+        };
+
+        let started = std::time::Instant::now();
+        m.kill(&id, false).expect("background kill");
+        let returned = started.elapsed();
+        // The caller is a UI thread closing a pane. It waits for nothing.
+        assert!(
+            returned < std::time::Duration::from_millis(250),
+            "kill(wait=false) held its caller for {returned:?}"
+        );
+
+        assert!(
+            m.wait_until_reaped(&id, GRACE + REAP_TIMEOUT),
+            "the child outlived both the grace and the hard kill behind it"
+        );
+        // The hook may still be writing as the process object goes away.
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert!(
+            !std::fs::read_to_string(&marker).unwrap_or_default().is_empty(),
+            "the child was killed without being told it was time to go"
+        );
+    }
+
+    /// The other half, stated so a later refactor cannot quietly make every
+    /// kill polite: a caller that blocks is about to open a fresh PTY on the
+    /// same session, and a grace there is two `--resume` racing on one file.
+    #[test]
+    fn a_foreground_kill_does_not_wait_for_anyone() {
+        let m = PtyManager::new();
+        let Some((id, marker)) = exit_hook_probe(&m, "foreground") else {
+            return;
+        };
+
+        let started = std::time::Instant::now();
+        // Not unwrapped: the 5s reap deadline is a property of the machine
+        // under load, and a box that cannot reap in five seconds has nothing to
+        // say about whether this path is polite.
+        let reaped = m.kill(&id, true).is_ok();
+        let took = started.elapsed();
+        if reaped {
+            assert!(!m.is_alive(&id), "kill(wait=true) returned on a live PTY");
+            assert!(
+                took < GRACE,
+                "kill(wait=true) took {took:?}, which is the grace it is meant to skip"
+            );
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert!(
+            std::fs::read_to_string(&marker).unwrap_or_default().is_empty(),
+            "the hard kill ran the exit hook, so the grace the other path pays for proves nothing"
         );
     }
 }
