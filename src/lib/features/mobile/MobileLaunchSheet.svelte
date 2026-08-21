@@ -10,6 +10,7 @@
   import { app } from "$lib/app/store.svelte";
   import { workspace } from "$lib/backend";
   import { settings } from "$lib/features/settings/store.svelte";
+  import { homeAvailable } from "$lib/features/settings/homeAvailable";
   import { platform } from "$lib/storage/platform.svelte";
   import {
     launchShortcut,
@@ -88,7 +89,7 @@
 </script>
 
 <MobileSheet {open} {onClose} title={t("mobile.newTerminal")}>
-  {#if settings.state.experimentHome}
+  {#if homeAvailable(settings.state)}
     <button
       type="button"
       class="mb-3 flex w-full items-center gap-3 rounded-xl border border-border bg-[var(--color-surface-2)] px-3 py-3 text-left text-sm text-foreground/90 transition active:scale-[0.98] active:bg-[var(--color-surface-3)]"

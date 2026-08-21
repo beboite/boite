@@ -1,6 +1,7 @@
 <script lang="ts">
   import { app } from "$lib/app/store.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
+  import { homeAvailable } from "$lib/features/settings/homeAvailable";
   import { t, type MessageKey } from "$lib/i18n/index.svelte";
   import type { MobileTab } from "$lib/types";
   import type { Component } from "svelte";
@@ -28,10 +29,10 @@
   const SETTINGS_TAB: Tab = { id: "settings", labelKey: "common.settings", icon: Settings };
   const HOME: Tab = { id: "home", labelKey: "home.title", icon: Home };
 
-  // Flag off keeps the six-tab row this bar shipped with. Flag on puts home
-  // first and drops projects into the launch sheet, so the count stays six.
+  // No home keeps the six-tab row this bar shipped with. Home reachable puts
+  // it first and drops projects into the launch sheet, so the count stays six.
   const TABS = $derived(
-    settings.state.experimentHome
+    homeAvailable(settings.state)
       ? [HOME, FILES, GIT, TERMINAL, TODO, SETTINGS_TAB]
       : [FILES, GIT, TERMINAL, TODO, PROJECTS, SETTINGS_TAB],
   );
