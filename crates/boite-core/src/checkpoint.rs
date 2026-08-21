@@ -263,21 +263,41 @@ fn with_temp_index(cmd: &mut std::process::Command, index: &TempIndex) {
 
 /// Writes the whole worktree into a tree, respecting `.gitignore`.
 fn write_worktree_tree(repo: &Path, index: &TempIndex) -> Result<String, String> {
-    let mut add = git_cmd(repo);
-    with_temp_index(&mut add, index);
-    // No pathspec on purpose: since git 2.0 that means the whole working tree
-    // whatever directory this runs in, and a thread's cwd is not always the top
-    // of its worktree.
-    add.args(["add", "-A"]);
-    git_run(add)?;
+    // `add -A` writes the blobs and `write-tree` the trees, so both hit the
+    // collision and both are retried. Retrying only the second one is what left
+    // the four-thread case failing on Windows.
+    run_writing_objects(|| {
+        let mut add = git_cmd(repo);
+        with_temp_index(&mut add, index);
+        // No pathspec on purpose: since git 2.0 that means the whole working
+        // tree whatever directory this runs in, and a thread's cwd is not
+        // always the top of its worktree.
+        add.args(["add", "-A"]);
+        add
+    })?;
 
-    let mut last_err = String::new();
-    for attempt in 0..4 {
+    let tree = run_writing_objects(|| {
         let mut write = git_cmd(repo);
         with_temp_index(&mut write, index);
         write.arg("write-tree");
-        match git_run(write) {
-            Ok(out) => return Ok(String::from_utf8_lossy(&out).trim().to_string()),
+        write
+    })?;
+    Ok(String::from_utf8_lossy(&tree).trim().to_string())
+}
+
+/// Runs a git command that writes loose objects, retrying the one failure that
+/// is not the command's fault.
+///
+/// The command is rebuilt per attempt because running one consumes it. Every
+/// command retried here is idempotent, an object git already has being a no-op
+/// the second time, so a retry costs a re-hash and nothing else.
+fn run_writing_objects(
+    mut build: impl FnMut() -> std::process::Command,
+) -> Result<Vec<u8>, String> {
+    let mut last_err = String::new();
+    for attempt in 0..4 {
+        match git_run(build()) {
+            Ok(out) => return Ok(out),
             Err(e) if windows_object_lock(&e) && attempt < 3 => {
                 last_err = e;
                 std::thread::sleep(Duration::from_millis(15 * (attempt + 1) as u64));
@@ -290,7 +310,8 @@ fn write_worktree_tree(repo: &Path, index: &TempIndex) -> Result<String, String>
 
 /// Windows refuses a second create of the same loose object while the first
 /// write still holds the file. Four threads checkpointing one worktree all
-/// write the same blobs, and `write-tree` then fails with Permission denied.
+/// write the same blobs, and whichever git command is writing one at that
+/// moment fails with Permission denied.
 fn windows_object_lock(err: &str) -> bool {
     err.contains("Permission denied") && err.contains(".git/objects/")
 }
@@ -348,20 +369,23 @@ pub fn capture_blocking(
             "del": delta.2,
         })
     );
-    let mut commit = git_cmd(path);
-    commit.args(["commit-tree", &tree]);
-    if let Some(prev) = &previous {
-        commit.args(["-p", &prev.sha]);
-    }
-    commit.args(["-m", &message]);
-    // Pinned rather than inherited: a repository with no `user.email` configured
-    // would refuse to write the object at all, and a checkpoint is Boite's, not
-    // the user's, so it must not borrow their name either.
-    commit.env("GIT_AUTHOR_NAME", "Boite");
-    commit.env("GIT_AUTHOR_EMAIL", "checkpoint@boite.invalid");
-    commit.env("GIT_COMMITTER_NAME", "Boite");
-    commit.env("GIT_COMMITTER_EMAIL", "checkpoint@boite.invalid");
-    let sha = String::from_utf8_lossy(&git_run(commit)?).trim().to_string();
+    let written = run_writing_objects(|| {
+        let mut commit = git_cmd(path);
+        commit.args(["commit-tree", &tree]);
+        if let Some(prev) = &previous {
+            commit.args(["-p", &prev.sha]);
+        }
+        commit.args(["-m", &message]);
+        // Pinned rather than inherited: a repository with no `user.email`
+        // configured would refuse to write the object at all, and a checkpoint
+        // is Boite's, not the user's, so it must not borrow their name either.
+        commit.env("GIT_AUTHOR_NAME", "Boite");
+        commit.env("GIT_AUTHOR_EMAIL", "checkpoint@boite.invalid");
+        commit.env("GIT_COMMITTER_NAME", "Boite");
+        commit.env("GIT_COMMITTER_EMAIL", "checkpoint@boite.invalid");
+        commit
+    })?;
+    let sha = String::from_utf8_lossy(&written).trim().to_string();
 
     let mut update = git_cmd(path);
     update.args(["update-ref", &format!("{prefix}/{index}"), &sha]);
