@@ -112,8 +112,8 @@ POSTs.
 ### PostHog setup
 
 1. Create a project. Its numeric id is in the dashboard URL; put it in
-   `POSTHOG_PROJECT_ID` in `wrangler.toml`. The committed value is `0` on
-   purpose until that project exists.
+   `POSTHOG_PROJECT_ID` in `wrangler.toml`. The committed value is the Boite
+   EU project. Forks replace it with their own.
 2. Copy the project API key (`phc_...`) from project settings. It is used for
    ingestion only.
 3. Create a personal API key (`phx_...`) scoped to `person:read`,

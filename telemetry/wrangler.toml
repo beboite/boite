@@ -25,8 +25,7 @@ POSTHOG_INGEST_HOST = "https://eu.i.posthog.com"
 POSTHOG_API_HOST = "https://eu.posthog.com"
 
 # Numeric project id, the one in the PostHog dashboard URL. Not a secret.
-# Replace with the real Boite project before the first signed binary.
-POSTHOG_PROJECT_ID = "0"
+POSTHOG_PROJECT_ID = "254303"
 
 ALLOWED_ORIGINS = "http://localhost:1420,https://tauri.localhost"
 ALERT_FROM = "onboarding@resend.dev" # replace with a verified domain once set up
