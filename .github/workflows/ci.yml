@@ -24,6 +24,16 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
+      # This job, the two below it and the four release runners all run
+      # `bun install --frozen-lockfile`, and setup-bun caches the bun binary,
+      # never the packages. This is the global install cache, keyed on the
+      # lockfile, so an unchanged tree resolves from disk.
+      - name: Cache bun deps
+        uses: actions/cache@v6
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: ${{ runner.os }}-bun-
       - name: Install
         run: bun install --frozen-lockfile
       - name: Sync + svelte-check + oxlint
@@ -79,21 +89,25 @@ jobs:
           mkdir -p src-tauri/binaries
           cp target/debug/boite-mcp \
             "src-tauri/binaries/boite-mcp-$(rustc -vV | sed -n 's/^host: //p')"
-      - name: cargo check
-        run: cargo check --workspace --all-targets
+      # No `cargo check` step ahead of this one. It was there, with the same
+      # `--workspace --all-targets`, and it bought nothing: clippy runs through
+      # `clippy-driver`, which fingerprints differently from rustc, so it never
+      # reused a single unit of what check had just built. It type-checked the
+      # whole workspace a second time and reported the same errors plus the
+      # lints. One pass, and it is this one.
+      #
+      # `--all-targets` covers `crates/boite-core/benches/hot_paths.rs` too, so
+      # a bench that stopped compiling fails here rather than the day somebody
+      # wants a number. There used to be a `cargo bench --workspace --no-run`
+      # below for that, justified by benches building "only under the default
+      # features". They build under the same ones: `criterion` is a plain
+      # dev-dependency with `default-features = false` pinned in the manifest,
+      # not something a feature flag turns on. Running the benchmarks is a
+      # local job either way: on a shared runner the numbers measure the runner.
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets --no-deps -- -D warnings
       - name: cargo test
         run: cargo test --workspace
-      # crates/boite-core/benches/hot_paths.rs is a bench target, and
-      # `--all-targets` above builds it — but only under the default features.
-      # Compiling it explicitly is what catches the day a signature it measures
-      # changes: a bench that stopped compiling is discovered when somebody
-      # wants a number, which is exactly when they cannot get one. Building
-      # without running keeps it to a compile and off a shared runner's noisy
-      # timings.
-      - name: cargo bench --no-run
-        run: cargo bench --workspace --no-run
 
   # What the two lockfiles are known to be vulnerable to.
   #
@@ -115,6 +129,12 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
+      - name: Cache bun deps
+        uses: actions/cache@v6
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: ${{ runner.os }}-bun-
       - name: Install
         run: bun install --frozen-lockfile
       # Moderate and up. The one advisory below that line today is a `cookie`
@@ -204,10 +224,26 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
+      - name: Cache bun deps
+        uses: actions/cache@v6
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: ${{ runner.os }}-bun-
       - name: Install
         run: bun install --frozen-lockfile
-      # Same key as the rust job so this reuses whatever it just compiled
-      # rather than building the workspace a second time from scratch.
+      # Its own key, with the rust job's as a fallback. It used to carry that
+      # job's exact key, described as reusing "whatever it just compiled".
+      # There is no `needs: rust` here, the two run at the same time, so the
+      # restore happened before rust had written anything and boite-server was
+      # built from scratch on every run. Worse, an identical key means only
+      # whichever job finishes first ever saves: the other is refused as a
+      # duplicate, so the entry never held both trees.
+      #
+      # Keeping them parallel is worth more than the serialisation a `needs:`
+      # would buy, so this saves under its own name and falls back through
+      # `restore-keys` to the rust job's entry from an earlier run, which does
+      # contain boite-server's dependencies.
       - name: Cache cargo
         uses: actions/cache@v6
         with:
@@ -215,8 +251,10 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+          key: ${{ runner.os }}-cargo-smoke-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-smoke-
+            ${{ runner.os }}-cargo-
       - name: Build the server
         run: cargo build -p boite-server
       - name: Start it

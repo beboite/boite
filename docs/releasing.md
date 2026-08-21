@@ -19,6 +19,14 @@ against each other and against the tag before a single runner starts building.
 It globs the Cargo manifests rather than listing them, so a crate added to the
 workspace is covered the day it lands.
 
+## The test suite, once
+
+Nothing gets signed without a green ci on that exact tree, and nothing runs it
+twice for the privilege. A `preflight` job asks the API whether ci has already
+succeeded on the tagged sha, which it has whenever the bump commit went through
+master first, and the `tests` job is skipped when the answer is yes. Tag a
+commit no branch ever carried and the whole suite runs on the tag instead.
+
 ## Signing
 
 No key is needed on your machine. The keypair already exists: its public half is
