@@ -185,6 +185,14 @@ export function buildPaletteCommands(): PaletteCommand[] {
       app.mobileTab = "settings";
     },
   });
+  commands.push({
+    id: "action:plugins",
+    section: "actions",
+    labelKey: "plugins.title",
+    run: () => {
+      app.view = "plugins";
+    },
+  });
   if (homeAvailable(settings.state)) {
     commands.push({
       id: "action:home",

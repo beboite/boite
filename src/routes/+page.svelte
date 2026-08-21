@@ -82,6 +82,11 @@
   const ProjectView = lazyComponent(
     () => import("$lib/features/project/ProjectPage.svelte"),
   );
+  // Four cards read once a machine is set up, and the fastpick table behind
+  // one of them. Behind import() like every other page opened on purpose.
+  const PluginsView = lazyComponent(
+    () => import("$lib/features/plugin/PluginsPage.svelte"),
+  );
   // Behind import(): a boot that never arms the experiment never fetches it.
   const HomeView = lazyComponent(
     () => import("$lib/features/home/HomePage.svelte"),
@@ -422,6 +427,10 @@
   });
 
   $effect(() => {
+    if (app.view === "plugins") void PluginsView.ensure();
+  });
+
+  $effect(() => {
     if (app.ready && !settings.state.setupCompleted) {
       void SetupView.ensure();
     }
@@ -733,6 +742,19 @@
             {#if HomeView.current}
               {@const HomeComp = HomeView.current}
               <HomeComp />
+            {:else}
+              <div class="flex h-full items-center justify-center text-xs text-muted-foreground/70">
+                {t("common.loading")}
+              </div>
+            {/if}
+          </div>
+        {/if}
+
+        {#if app.view === "plugins"}
+          <div class="absolute inset-0 z-10 bg-[var(--color-background)]">
+            {#if PluginsView.current}
+              {@const PluginsComp = PluginsView.current}
+              <PluginsComp />
             {:else}
               <div class="flex h-full items-center justify-center text-xs text-muted-foreground/70">
                 {t("common.loading")}

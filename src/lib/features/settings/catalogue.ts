@@ -120,15 +120,10 @@ export const SETTINGS_CATALOGUE: SettingEntry[] = [
   },
 
   { tab: "agents", key: "cli.title", descKey: "cli.description" },
+  // The cards themselves left for `PluginsPage.svelte`; what stays here is the
+  // row that opens it, so searching settings for "plugins" still lands somewhere.
+  { tab: "agents", key: "plugins.title", descKey: "plugins.movedDesc" },
 
-  { tab: "agents", key: "fastpick.settingsTitle", descKey: "fastpick.settingsDesc" },
-  { tab: "agents", key: "fastpick.enable", descKey: "fastpick.enableDesc" },
-  { tab: "agents", key: "plugin.kebaccTitle", descKey: "plugin.kebaccDesc" },
-  { tab: "agents", key: "plugin.kebaccClaude" },
-  { tab: "agents", key: "plugin.kebaccCodex" },
-  { tab: "agents", key: "plugin.kebaccAntigravity" },
-  { tab: "agents", key: "plugin.codexTitle", descKey: "plugin.codexDesc" },
-  { tab: "agents", key: "plugin.fastMcpSshTitle", descKey: "plugin.fastMcpSshDesc" },
 
   { tab: "experiments", key: "experiments.home", descKey: "experiments.homeDesc" },
   {

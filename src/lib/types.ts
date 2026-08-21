@@ -557,7 +557,7 @@ export interface TodoItem {
   updatedAt: number;
 }
 
-export type View = "terminal" | "settings" | "editor" | "project" | "home";
+export type View = "terminal" | "settings" | "editor" | "project" | "home" | "plugins";
 
 // Bottom-bar destinations in the phone layout. Independent of `View`: the
 // terminal/editor/settings desktop views still drive the shared viewport and

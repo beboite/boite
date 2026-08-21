@@ -19,6 +19,11 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "common.retry": "Réessayer",
   "common.close": "Fermer",
 
+  "plugins.title": "Plugins",
+  "plugins.description": "ce que boite pilote ici, et le compte derrière chacun.",
+  "plugins.movedDesc": "Les switchers et fastpick ont maintenant leur propre page.",
+  "plugins.open": "Ouvrir les plugins",
+
   "tabs.general": "Général",
   "tabs.terminal": "Terminal",
   "tabs.appearance": "Apparence",
