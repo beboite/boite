@@ -705,5 +705,19 @@ mod tests {
             assert!(!name.contains("sync"), "{name} puts configuration sync in reach of an agent");
         }
     }
+
+    /// Telemetry consent, export and forget are `Grant::Local`. An agent that
+    /// saw a tool named after them would try, get refused, and still learn
+    /// that the methods exist. The bus already blocks `Grant::Owner`; this
+    /// keeps the tool list from advertising the door.
+    #[test]
+    fn no_telemetry_tool_is_offered_to_an_agent() {
+        for name in names() {
+            assert!(
+                !name.contains("telemetry"),
+                "{name} puts telemetry in reach of an agent"
+            );
+        }
+    }
 }
 

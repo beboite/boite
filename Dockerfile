@@ -16,6 +16,12 @@ RUN --mount=type=cache,target=/root/.bun/install/cache \
 FROM rust:1-bookworm AS server
 WORKDIR /app
 COPY . .
+# Same compile-time URL as the desktop release (`option_env!`). Empty, which is
+# a local `docker compose build` without the arg, compiles against
+# https://telemetry.invalid and the host sends nothing. image.yml injects the
+# repository secret.
+ARG BOITE_TELEMETRY_URL=
+ENV BOITE_TELEMETRY_URL=$BOITE_TELEMETRY_URL
 # Cache the cargo registry/git and the target dir across builds: a source-only
 # change then recompiles just the changed crates instead of every dependency
 # (the slow part on arm64). target/ is an ephemeral cache mount and is NOT kept

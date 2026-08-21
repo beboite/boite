@@ -141,6 +141,10 @@ impl TelemetryRuntime {
             (true, true) => ConsentChoice::Enhanced,
             (false, true) => return Err("mode_b_requires_mode_a".into()),
         };
+        let first_answer = {
+            let cfg = self.sidecar.lock().unwrap_or_else(|e| e.into_inner());
+            !cfg.onboarding_completed
+        };
         self.update(|cfg| {
             cfg.onboarding_completed = true;
             cfg.mode_a_enabled = mode_a;
@@ -153,6 +157,14 @@ impl TelemetryRuntime {
             }
         })?;
         self.maybe_first_run();
+        // `on_boot_complete` already fired, and the queue dropped `app_launched`
+        // because consent did not exist yet. Replay it now that the answer is
+        // in, so the first session still reports how long boot took.
+        if first_answer && mode_a {
+            self.track(Event::AppLaunched {
+                duration_ms: self.boot_duration_ms(),
+            });
+        }
         // This one aggregate is recorded even for a refusal so the three
         // choices have an unbiased denominator. It runs best-effort on a
         // side thread and never delays or changes the selected mode.
@@ -254,25 +266,29 @@ impl TelemetryRuntime {
         });
     }
 
-    /// First boot completion: `first_run` if this install has never reported
-    /// one, then `app_launched`. `ping` is not emitted here: the queue owns it.
-    pub fn on_boot_complete(&self) {
-        let duration_ms = self
-            .app_start
+    fn boot_duration_ms(&self) -> u64 {
+        self.app_start
             .elapsed()
             .as_millis()
-            .min(u128::from(u64::MAX)) as u64;
+            .min(u128::from(u64::MAX)) as u64
+    }
+
+    /// First boot completion: `first_run` if this install has never reported
+    /// one, then `app_launched`. `ping` is not emitted here: the queue owns it.
+    ///
+    /// Before onboarding the queue drops both. `complete_onboarding` re-emits
+    /// `app_launched` once consent exists, so the first session is not silent.
+    pub fn on_boot_complete(&self) {
         self.maybe_first_run();
-        self.track(Event::AppLaunched { duration_ms });
+        self.track(Event::AppLaunched {
+            duration_ms: self.boot_duration_ms(),
+        });
     }
 
     pub fn on_session_end(&self) {
-        let duration_ms = self
-            .app_start
-            .elapsed()
-            .as_millis()
-            .min(u128::from(u64::MAX)) as u64;
-        self.track(Event::SessionEnded { duration_ms });
+        self.track(Event::SessionEnded {
+            duration_ms: self.boot_duration_ms(),
+        });
     }
 
     /// Mode B workspace size. Counts only, never names or paths.

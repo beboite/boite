@@ -289,7 +289,7 @@ async function handleConsent(request: Request, env: Env, ctx: ExecutionContext):
         $process_person_profile: false,
         ...privacyProperties(),
         choice: parsed.choice,
-        app_version: parsed.app_version ?? "",
+        app_version: version(parsed.app_version) ?? "other",
       },
     },
   ]);
@@ -457,6 +457,7 @@ export interface BatchIdentifiers {
 
 const CODE_RE = /^[a-z0-9_]{1,40}$/;
 const VERSION_RE = /^[A-Za-z0-9.+-]{1,32}$/;
+const OS_VERSION_RE = /^[A-Za-z0-9 ._+-]{1,64}$/;
 const CLIENT_TS_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
 
 /// How far a client timestamp may sit from the server's clock.
@@ -473,6 +474,10 @@ function code(value: unknown): string | undefined {
 
 function version(value: unknown): string | undefined {
   return typeof value === "string" && VERSION_RE.test(value) ? value : undefined;
+}
+
+function osVersion(value: unknown): string | undefined {
+  return typeof value === "string" && OS_VERSION_RE.test(value) ? value : undefined;
 }
 
 function count(value: unknown): number | undefined {
@@ -516,8 +521,8 @@ export function buildBatch(
       ...privacyProperties(),
       telemetry_mode: mode,
       country,
-      app_version: ev.app_version ?? "",
-      os_version: ev.os_version ?? "",
+      app_version: version(ev.app_version) ?? "other",
+      os_version: osVersion(ev.os_version) ?? "other",
     };
     // Optional fields are omitted rather than sent empty, so an absent value
     // stays distinguishable from an empty one on the dashboard side. Each one
@@ -554,11 +559,13 @@ export function buildBatch(
     // Person properties are Mode B only, by construction: Mode A has no person
     // to attach them to.
     if (isModeB) {
+      const setLocale =
+        typeof ev.locale === "string" && ev.locale.length <= 35 ? ev.locale : undefined;
       properties.$set = {
-        app_version: ev.app_version ?? "",
-        os_version: ev.os_version ?? "",
+        app_version: version(ev.app_version) ?? "other",
+        os_version: osVersion(ev.os_version) ?? "other",
         country,
-        ...(ev.locale ? { locale: ev.locale } : {}),
+        ...(setLocale ? { locale: setLocale } : {}),
       };
     }
     return {

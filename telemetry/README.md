@@ -168,6 +168,12 @@ The compiled desktop binary reads `BOITE_TELEMETRY_URL` at build time. A GitHub
 release injects it from the `BOITE_TELEMETRY_URL` secret. A tag without that
 secret compiles against `https://telemetry.invalid` and the fleet sends nothing.
 
+The Docker image is the same compile-time read. The Dockerfile takes
+`ARG BOITE_TELEMETRY_URL`, and `.github/workflows/image.yml` passes the
+repository secret as a build-arg. A local `docker compose build` without it
+compiles against `https://telemetry.invalid`. Export and deletion then fail
+with `telemetry_inert` instead of pretending the host talked to PostHog.
+
 ### Local dev
 
 ```bash

@@ -86,6 +86,24 @@ describe("buildBatch", () => {
     expect(launchItem!.distinct_id).toBe("daily-rotating-hash");
   });
 
+  it("rewrites a path-shaped app_version and os_version to other", () => {
+    const hostile = {
+      name: "app_launched",
+      app_version: "C:\\Users\\alice\\boite",
+      os_version: "/etc/passwd; Windows 11",
+      locale: "fr_FR",
+    } as unknown as TelemetryEvent;
+    const ids = { eventIdentifier: "install-uuid", pingIdentifier: "install-uuid" };
+    const [item] = buildBatch("B", [hostile], ids, "FR", TS);
+    const set = item!.properties.$set as Record<string, unknown>;
+
+    expect(item!.properties.app_version).toBe("other");
+    expect(item!.properties.os_version).toBe("other");
+    expect(set.app_version).toBe("other");
+    expect(set.os_version).toBe("other");
+    expect(set.locale).toBe("fr_FR");
+  });
+
   it("uses the install_id for every Mode B event and attaches person properties", () => {
     const ids = { eventIdentifier: "install-uuid", pingIdentifier: "install-uuid" };
     const batch = buildBatch("B", [ping, launch], ids, "FR", TS);

@@ -685,8 +685,9 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "privacy.forgetPending": "Une suppression précédente n'a pas abouti. Réessayez une fois en ligne.",
   "privacy.forgetFailed": "La suppression a échoué : {error}",
   "privacy.loadFailed": "Impossible de lire l'état de la télémétrie.",
-  "privacy.enableFailed": "Impossible d'activer les métriques étendues : {error}",
+  "privacy.enableFailed": "Impossible d'activer ça : {error}",
   "privacy.disableFailed": "Impossible de couper ça : {error}",
+  "privacy.inert": "Cette build n'a pas d'endpoint de télémétrie, donc il n'y a rien à exporter ni à supprimer.",
 
   "fastpick.label": "fastpick",
   "fastpick.tooltip": "Lancer un agent sur un autre fournisseur et un autre modèle",

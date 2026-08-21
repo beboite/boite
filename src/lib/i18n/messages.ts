@@ -688,8 +688,9 @@ export const EN_MESSAGES = {
   "privacy.forgetPending": "A previous deletion did not finish. Retry when you are online.",
   "privacy.forgetFailed": "Deletion failed: {error}",
   "privacy.loadFailed": "Could not read the telemetry state.",
-  "privacy.enableFailed": "Could not turn enhanced metrics on: {error}",
+  "privacy.enableFailed": "Could not turn this on: {error}",
   "privacy.disableFailed": "Could not turn this off: {error}",
+  "privacy.inert": "This build has no telemetry endpoint, so there is nothing to export or delete.",
 
   "fastpick.label": "fastpick",
   "fastpick.tooltip": "Launch an agent on another provider and model",

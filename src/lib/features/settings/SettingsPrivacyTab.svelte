@@ -39,7 +39,11 @@
       await refresh();
     } catch (e) {
       await refresh();
-      notifications.error(t("privacy.disableFailed", { error: String(e) }));
+      if (next) {
+        notifications.error(t("privacy.enableFailed", { error: String(e) }));
+      } else {
+        notifications.error(t("privacy.disableFailed", { error: String(e) }));
+      }
     }
   }
 
@@ -74,7 +78,9 @@
       notifications.error(
         message.includes("mode_b_disabled")
           ? t("privacy.exportNeedB")
-          : t("privacy.exportFailed", { error: message }),
+          : message.includes("telemetry_inert")
+            ? t("privacy.inert")
+            : t("privacy.exportFailed", { error: message }),
       );
     } finally {
       exportBusy = false;
@@ -88,7 +94,12 @@
       await backend().telemetry.retryForget();
       await refresh();
     } catch (e) {
-      notifications.error(t("privacy.forgetFailed", { error: String(e) }));
+      const message = String(e);
+      notifications.error(
+        message.includes("telemetry_inert")
+          ? t("privacy.inert")
+          : t("privacy.forgetFailed", { error: message }),
+      );
     } finally {
       forgetBusy = false;
     }

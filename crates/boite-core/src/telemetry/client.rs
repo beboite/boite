@@ -291,7 +291,7 @@ pub fn forget(
     install_id: &str,
 ) -> Result<(), String> {
     if is_inert(base_url) {
-        return Ok(());
+        return Err("telemetry_inert".into());
     }
     let url = format!("{base_url}/forget");
     let res = client
@@ -316,7 +316,7 @@ pub fn export(
     install_id: &str,
 ) -> Result<Value, String> {
     if is_inert(base_url) {
-        return Ok(json!({ "events": [] }));
+        return Err("telemetry_inert".into());
     }
     let url = format!("{base_url}/export");
     let res = client
@@ -550,5 +550,19 @@ mod tests {
         assert!(is_inert("https://telemetry.invalid/track"));
         assert!(is_inert(""));
         assert!(!is_inert("https://boite-telemetry.example.workers.dev"));
+    }
+
+    #[test]
+    fn inert_export_fails_instead_of_lying() {
+        let http = reqwest::blocking::Client::new();
+        let err = export(&http, TELEMETRY_URL_FALLBACK, "Boite/test", "install-id").unwrap_err();
+        assert_eq!(err, "telemetry_inert");
+    }
+
+    #[test]
+    fn inert_forget_fails_instead_of_lying() {
+        let http = reqwest::blocking::Client::new();
+        let err = forget(&http, TELEMETRY_URL_FALLBACK, "Boite/test", "install-id").unwrap_err();
+        assert_eq!(err, "telemetry_inert");
     }
 }

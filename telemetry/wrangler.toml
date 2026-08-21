@@ -27,7 +27,10 @@ POSTHOG_API_HOST = "https://eu.posthog.com"
 # Numeric project id, the one in the PostHog dashboard URL. Not a secret.
 POSTHOG_PROJECT_ID = "254303"
 
-ALLOWED_ORIGINS = "http://localhost:1420,https://tauri.localhost"
+# Empty on purpose. The SPA never talks to this Worker; native reqwest sends
+# no Origin. A browser Origin would only appear if the webview started posting
+# here, which is the door this list must not open.
+ALLOWED_ORIGINS = ""
 ALERT_FROM = "onboarding@resend.dev" # replace with a verified domain once set up
 
 # Expected User-Agent prefix. Requests without it are rejected.

@@ -50,7 +50,7 @@ from one PC onto another. That is why they sit in a sidecar instead.
 
 ## What is collected
 
-Fifteen events, and that is the complete list.
+Fourteen events, and that is the complete list.
 
 | Event                  | When                                      | Fields beyond the common ones                          |
 | ---------------------- | ----------------------------------------- | ------------------------------------------------------ |
@@ -62,7 +62,6 @@ Fifteen events, and that is the complete list.
 | `thread_closed`        | A thread row was deleted                  | `kind`                                                 |
 | `project_added`        | A project was created                     | none                                                   |
 | `pane_opened`          | A pane kind new to that group             | `pane_kind`                                            |
-| `operation_failed`     | A named operation failed                  | `operation`, `error_code`                              |
 | `update_available`     | An update was found                       | `target_version`                                       |
 | `update_downloaded`    | It finished downloading                   | `target_version`                                       |
 | `update_applied`       | It was installed                          | `target_version`                                       |
@@ -103,8 +102,8 @@ precisely so that two events cannot be tied to one installation across days.
 installation that predates the release introducing it, it fires on the first
 launch after the update rather than on the day it was installed.
 
-This table is checked against the code on every release. Where this page and the
-code disagree, the code is right and the page is a bug worth reporting.
+The event enum still has an `operation_failed` variant the Worker would accept.
+Nothing in this repo emits it. The table is what the app actually sends.
 
 ## What the payload actually looks like
 
@@ -152,8 +151,15 @@ oldest are discarded past that. `ping` reports how many were lost, which is the
 only reason that count exists.
 
 A build with no `BOITE_TELEMETRY_URL` (dev, `bun run dev:isolated`, a tag
-signed without the secret) points at `https://telemetry.invalid`. Nothing
-leaves.
+signed without the secret, a Docker image built without the arg) points at
+`https://telemetry.invalid`. Nothing leaves. Export and deletion then fail
+with `telemetry_inert` rather than returning empty success: there is no
+server to talk to, and pretending otherwise would hide that.
+
+The GHCR image built by
+[`.github/workflows/image.yml`](../.github/workflows/image.yml) injects the
+same secret as the desktop release, so a phone talking to that host reports
+the same way the window does.
 
 ## The two switches
 

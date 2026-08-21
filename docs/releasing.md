@@ -36,6 +36,19 @@ A `prune` job removes the `.sig` assets once every platform has uploaded. They
 are duplicates: `latest.json` carries each signature inline and is the only file
 the updater fetches.
 
+## Telemetry
+
+The desktop jobs and the GHCR image both compile `BOITE_TELEMETRY_URL` into
+the binary (`option_env!` in `boite-core`). The value is the Worker base URL,
+no `/track`. It lives in the `BOITE_TELEMETRY_URL` repository secret, the
+same one `release.yml` and `image.yml` inject. Empty or unset compiles
+against `https://telemetry.invalid`: the host sends nothing, and export or
+deletion fail instead of returning empty success.
+
+A local `docker compose build` without `--build-arg BOITE_TELEMETRY_URL`
+is that inert image on purpose. Do not bake a Worker URL into a laptop
+build you will then push.
+
 ## Sidecar
 
 `scripts/build-sidecar.mjs` builds `boite-mcp` before every bundle and names it

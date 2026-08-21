@@ -80,6 +80,12 @@ jobs:
           platforms: linux/arm64
           push: true
           provenance: false
+          # Compiled into boite-server (`option_env!`). Empty or unset falls
+          # back to https://telemetry.invalid, so an image built without this
+          # secret cannot report. Same secret the desktop release injects.
+          # Never echo it.
+          build-args: |
+            BOITE_TELEMETRY_URL=${{ secrets.BOITE_TELEMETRY_URL }}
           tags: |
             ${{ steps.meta.outputs.image }}:latest
             ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}

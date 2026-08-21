@@ -569,18 +569,14 @@ impl Records {
                 json!(null)
             }
             Records::ThreadDelete { id } => {
-                let kind = store
-                    .load_threads()
-                    .ok()
-                    .and_then(|threads| {
-                        threads.into_iter().find(|t| t.id == id).map(|t| {
-                            crate::telemetry::classify_thread(&t.cmd, t.icon_key.as_deref()).0
-                        })
+                let kind = store.load_threads().ok().and_then(|threads| {
+                    threads.into_iter().find(|t| t.id == id).map(|t| {
+                        crate::telemetry::classify_thread(&t.cmd, t.icon_key.as_deref()).0
                     })
-                    .unwrap_or("other");
+                });
                 store.delete_thread(&id)?;
                 store.forget_thread_identity(&id)?;
-                if let Some(telemetry) = telemetry {
+                if let (Some(kind), Some(telemetry)) = (kind, telemetry) {
                     telemetry.track(crate::telemetry::Event::ThreadClosed {
                         kind: kind.to_string(),
                     });
