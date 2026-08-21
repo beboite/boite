@@ -115,11 +115,13 @@ mod tests {
     #[test]
     fn round_trip_preserves_ids() {
         let path = tmp();
-        let mut sidecar = Sidecar::default();
-        sidecar.onboarding_completed = true;
-        sidecar.mode_b_enabled = true;
-        sidecar.install_id = "550e8400-e29b-41d4-a716-446655440000".into();
-        sidecar.anonymous_id = "797f20fe-94de-4e89-98a2-ae3a3273ad1e".into();
+        let sidecar = Sidecar {
+            onboarding_completed: true,
+            mode_b_enabled: true,
+            install_id: "550e8400-e29b-41d4-a716-446655440000".into(),
+            anonymous_id: "797f20fe-94de-4e89-98a2-ae3a3273ad1e".into(),
+            ..Default::default()
+        };
         save(&path, &sidecar).unwrap();
         let loaded = load(&path);
         assert_eq!(loaded.install_id, sidecar.install_id);
