@@ -8,6 +8,7 @@
   import { PushToTalk } from "./ptt.svelte";
   import { voice } from "./store.svelte";
   import MicIcon from "@lucide/svelte/icons/mic";
+  import Button from "$lib/shared/components/Button.svelte";
 
   // The live transcript replaces the composer text while talking; on release
   // the final text stays there, editable, and auto-send (when armed) counts
@@ -107,25 +108,27 @@
   });
 </script>
 
-<button
-  type="button"
-  class="rounded-md border px-2 py-1 text-xs transition disabled:opacity-50 {listening
-    ? 'border-red-500/60 bg-red-500/10 text-foreground'
-    : 'border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground'}"
-  aria-pressed={listening}
-  aria-busy={busy}
-  aria-label={t("voice.hold")}
+<!-- The composer's own metrics: the mic, the box and the send button are one
+     height, which they were not while each carried its own padding. -->
+<Button
+  size="lg"
+  icon
+  variant={listening ? "danger" : "secondary"}
+  disabled={!availability.ok || busy}
+  ariaLabel={t("voice.hold")}
   title={busy
     ? t("voice.transcribing")
     : availability.ok
       ? t("voice.hold")
       : t(availability.reasonKey)}
-  disabled={!availability.ok || busy}
+  class={listening ? "border-red-500/60 bg-red-500/10 text-foreground" : ""}
   onpointerdown={begin}
   onpointerup={end}
   onpointercancel={end}
   onpointerleave={end}
+  pressed={listening}
+  {busy}
 >
-  <MicIcon class="size-3.5 {busy ? 'animate-pulse' : ''}" />
+  <MicIcon class="size-4 {busy ? 'animate-pulse' : ''}" />
   <span class="sr-only">{listening ? t("voice.listening") : t("voice.hold")}</span>
-</button>
+</Button>

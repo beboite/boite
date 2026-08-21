@@ -22,27 +22,23 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "tabs.general": "Général",
   "tabs.terminal": "Terminal",
   "tabs.appearance": "Apparence",
-  "tabs.plugins": "Plugins",
+  "tabs.agents": "Agents",
   "tabs.keyboard": "Clavier",
-  "tabs.logs": "Journaux",
   "tabs.about": "À propos",
-  "tabs.devices": "Appareils",
+  "tabs.machines": "Machines",
   "tabs.experiments": "Expérimentations",
-  "tabs.sync": "Synchronisation",
   "tabs.generalHint": "Notifications, et les raccourcis proposés par le lanceur.",
   "tabs.terminalHint": "Comment un terminal démarre, et quand il est mis en veille.",
   "tabs.appearanceHint": "Échelle, disposition, animations et langue.",
-  "tabs.pluginsHint": "Les outils que Boite installe et met à jour pour vous.",
-  "tabs.devicesHint":
-    "Quels appareils peuvent atteindre cette boite, et comment en ajouter ou en retirer un.",
+  "tabs.agentsHint":
+    "Les CLI présents sur cette machine, et les outils qui changent leur compte.",
   "tabs.keyboardHint":
     "À quoi chaque raccourci est associé, et comment le réassocier.",
-  "tabs.logsHint": "Ce que l'app a enregistré sur cette session.",
-  "tabs.aboutHint": "Quelle build tourne, et s'il en existe une plus récente.",
+  "tabs.aboutHint": "Quelle build tourne, et ce qu'elle a enregistré.",
   "tabs.experimentsHint":
     "Les grandes refontes, à activer avant qu'elles ne deviennent la norme.",
-  "tabs.syncHint":
-    "Emporter la configuration de vos agents d'un ordinateur à l'autre, par un dépôt qui vous appartient.",
+  "tabs.machinesHint":
+    "Les ordinateurs autour de cette boite : ce qui circule entre eux, et lesquels peuvent l'atteindre.",
 
 
   "devices.title": "Appareils appairés",
@@ -302,6 +298,7 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "orchestrator.noAgent": "Aucun agent ne correspond à « {agent} ». Choisissez-en un dans Réglages > Expériences.",
   "orchestrator.noProject": "L'orchestrateur a besoin d'au moins un projet où vivre.",
   "orchestrator.startFailed": "L'orchestrateur n'a pas démarré : {error}",
+  "orchestrator.typedNotice": "Depuis la conversation",
   "orchestrator.postFailed": "Le message n'a pas été remis.",
   "orchestrator.scopeLabel": "Portée de la conversation",
   "orchestrator.scopeWorkspace": "Tout l'atelier",
@@ -712,19 +709,16 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "plugin.switched": "Compte changé. Rechargement de {count} thread(s).",
   "plugin.switchedNone": "Compte changé. Aucun thread à recharger.",
   "plugin.current": "actuel",
-  "tabs.cli": "CLI",
-  "tabs.cliHint": "Installer, mettre à jour et supprimer les agents que Boite lance.",
   "cli.title": "CLI des agents",
   "cli.description": "Boite récupère le binaire publié par l'éditeur et le garde dans un dossier qui lui appartient, pour qu'une suppression n'emporte rien d'autre. Les agents distribués par un gestionnaire de paquets sont installés par lui, dans un terminal que vous pouvez lire.",
   "cli.recheck": "Vérifier à nouveau",
   "cli.notInstalled": "Absent de cette machine",
+  "cli.unlinked": "Installé dans {path}, mais aucune commande sur le PATH. Installer répare.",
   "cli.managedByBoite": "Installé par Boite",
   "cli.installedElsewhere": "Installé dans {path}",
   "cli.install": "Installer",
   "cli.update": "Mettre à jour",
   "cli.reinstall": "Réinstaller",
-  "cli.upToDate": "À jour.",
-  "cli.updateAvailable": "La version {version} est sortie.",
   "cli.uninstall": "Désinstaller",
   "cli.stop": "Arrêter",
   "cli.dismiss": "Effacer",
@@ -799,6 +793,10 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "workspace.versionBehind": "Boite {version}, en retard sur cette application ({local})",
   "workspace.versionUnknown": "version inconnue",
   "workspace.removeBoite": "Retirer la boite",
+  "workspace.boiteSettings": "Paramètres de {name}",
+  "settings.editingRemote": "Modification de {name}",
+  "settings.editingRemoteDesc":
+    "Ces paramètres appartiennent à cette boite, pas à cet appareil.",
   "workspace.name": "Nom",
   "workspace.color": "Couleur",
   "workspace.backToList": "Retour à la liste",
@@ -890,6 +888,7 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "terminalTab.idleTimeout": "Délai d'inactivité (min)",
   "terminalTab.seconds": "{count} s",
   "terminalTab.minutes": "{count} min",
+  "logs.title": "Journaux",
   "logs.scopeCurrent": "Session actuelle",
   "logs.scopePrevious": "Session précédente",
   "logs.levelAll": "Tous les niveaux",
@@ -1293,12 +1292,12 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   // Emporter la configuration des agents d'un ordinateur à l'autre.
   "sync.enable": "Synchroniser à l'ouverture de Boite",
   "sync.enableDesc":
-    "Boite lit le dépôt au démarrage. Tout ce qui diffère ouvre l'outil de fusion, et rien n'est écrit avant que vous ne le disiez.",
+    "Boite lit le dépôt au démarrage. Tout ce qui diffère ouvre l'outil de fusion.",
   "sync.enableNoRemote": "Indiquez d'abord un dépôt.",
 
   "sync.remoteTitle": "Le dépôt",
   "sync.remoteDesc":
-    "Un dépôt git privé qui vous appartient. Boite y écrit et le lit, sans jamais voir vos identifiants : git les résout sur la machine où tournent les terminaux, comme pour n'importe quel autre dépôt qui s'y trouve.",
+    "N'importe quel dépôt git qui vous appartient, privé, chez n'importe quel hébergeur. Git résout l'identifiant sur la machine où tournent les terminaux, Boite n'en voit jamais un.",
   "sync.remotePlaceholder": "git@github.com:vous/boite-config.git",
   "sync.remoteLabel": "Adresse du dépôt",
   "sync.remoteCheck": "Vérifier",
@@ -1313,7 +1312,7 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "sync.remoteEdit": "Changer l'adresse",
   "sync.remoteForget": "Oublier ce dépôt",
   "sync.remoteForgetAsk":
-    "Boite arrête de synchroniser. Chaque fichier reste exactement tel qu'il est, sur cette machine et dans le dépôt.",
+    "Boite arrête de synchroniser. Chaque fichier reste tel quel, ici et dans le dépôt.",
 
   "sync.statusTitle": "Dernière synchronisation",
   "sync.statusDesc": "Ce qu'a fait la dernière exécution, et le bouton qui en lance une autre.",
@@ -1341,14 +1340,13 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "sync.phaseCancelled": "Arrêté avant la fin.",
 
   "sync.sourcesTitle": "Ce qui est synchronisé",
-  "sync.sourcesDesc":
-    "Un interrupteur par agent, plus le dossier qu'ils lisent tous. Un interrupteur éteint est un fichier que Boite n'envoie pas et ne touche pas, et tous démarrent éteints.",
+  "sync.sourcesDesc": "Éteint, Boite n'envoie ni ne touche le fichier. Tous démarrent éteints.",
   "sync.agentsRow": "Le dossier .agents",
   "sync.agentsRowDesc": "AGENTS.md, les compétences et les commandes que lisent tous les agents.",
-  "sync.sourceUnknown": "Boite ne sait pas où celui-ci garde sa configuration.",
-  "sync.sourceAbsent": "Absent de cette machine. Sa configuration peut arriver avant lui.",
+  "sync.sourcesNotYet": "Rien de vérifié à synchroniser pour l'instant : {names}.",
+  "sync.sourceAbsent": "Pas installé ici. Sa configuration peut arriver avant lui.",
   "sync.secretsNote":
-    "Les identifiants ne partent jamais. Un champ que Boite sait être un secret voyage sous forme de marqueur, et une récupération remet la valeur que cette machine avait déjà.",
+    "Les identifiants ne partent jamais : un secret voyage sous forme de marqueur, et une récupération remet la valeur que cette machine avait.",
 
   "syncMerge.title": "Fichiers qui diffèrent",
   "syncMerge.progress": "{done} sur {total} décidés",

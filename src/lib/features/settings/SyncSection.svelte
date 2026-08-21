@@ -5,6 +5,7 @@
   import Pencil from "@lucide/svelte/icons/pencil";
 
   import SettingsCard from "$lib/shared/components/SettingsCard.svelte";
+  import Button from "$lib/shared/components/Button.svelte";
   import ToggleSetting from "$lib/shared/components/ToggleSetting.svelte";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
   import { t } from "$lib/i18n/index.svelte";
@@ -33,7 +34,7 @@
    * shared tree first. The presets are the frontend's half of the same list the
    * backend keeps, and a test asserts the two agree.
    */
-  const rows = $derived(
+  const all = $derived(
     [
       { id: AGENTS_ID, label: t("sync.agentsRow"), iconKey: null },
       ...CLI_PRESETS.map((preset) => ({
@@ -46,6 +47,17 @@
       source: syncStore.sources.find((source) => source.id === row.id) ?? null,
       enabled: settings.state.syncSources[row.id] ?? false,
     })),
+  );
+
+  /**
+   * Seven of the ten agents have nothing verified to sync, and a row each drew
+   * the same sentence seven times. They stay visible as one line of names: a
+   * decision that was made still reads differently from one that was forgotten,
+   * and it costs a line rather than a list.
+   */
+  const rows = $derived(all.filter((row) => row.source?.supported !== false));
+  const notYet = $derived(
+    all.filter((row) => row.source?.supported === false).map((row) => row.label),
   );
 
   function phaseText(phase: SyncPhase): string {
@@ -136,22 +148,16 @@
         class="min-w-0 flex-1 truncate rounded-md bg-[var(--color-surface-2)] px-2 py-1 font-mono text-xs text-foreground"
         title={remote}>{remote}</span
       >
-      <button
-        type="button"
-        class="rounded-md p-1.5 text-muted-foreground transition hover:bg-[var(--color-surface-3)] hover:text-foreground"
+      <Button
+        variant="ghost"
+        icon
         title={t("sync.remoteEdit")}
-        aria-label={t("sync.remoteEdit")}
+        ariaLabel={t("sync.remoteEdit")}
         onclick={startEditing}
       >
         <Pencil size={14} />
-      </button>
-      <button
-        type="button"
-        class="rounded-md px-2 py-1 text-xs text-[var(--color-danger)] transition hover:bg-[var(--color-surface-3)]"
-        onclick={forget}
-      >
-        {t("sync.remoteForget")}
-      </button>
+      </Button>
+      <Button variant="danger" onclick={forget}>{t("sync.remoteForget")}</Button>
     </div>
     <p class="mt-1.5 text-xs text-muted-foreground/80">{t("sync.remoteForgetAsk")}</p>
   {:else}
@@ -168,22 +174,12 @@
         placeholder={t("sync.remotePlaceholder")}
         class="min-w-0 flex-1 rounded-md border border-border bg-[var(--color-surface-2)] px-2 py-1 font-mono text-xs text-foreground"
       />
-      <button
-        type="button"
-        class="rounded-md border border-border px-2 py-1 text-xs text-foreground transition hover:bg-[var(--color-surface-3)]"
-        disabled={probing || draft.trim() === ""}
-        onclick={check}
-      >
+      <Button disabled={probing || draft.trim() === ""} onclick={check}>
         {probing ? t("sync.remoteChecking") : t("sync.remoteCheck")}
-      </button>
-      <button
-        type="button"
-        class="rounded-md bg-foreground px-2 py-1 text-xs text-[var(--color-surface)] transition disabled:opacity-50"
-        disabled={draft.trim() === ""}
-        onclick={save}
-      >
+      </Button>
+      <Button variant="primary" disabled={draft.trim() === ""} onclick={save}>
         {t("sync.remoteSave")}
-      </button>
+      </Button>
     </div>
     {#if verdict}
       <p
@@ -204,16 +200,16 @@
   description={t("sync.statusDesc")}
 >
   {#snippet actions()}
-    <button
-      type="button"
-      class="rounded-md p-1.5 text-muted-foreground transition hover:bg-[var(--color-surface-3)] hover:text-foreground disabled:opacity-50"
+    <Button
+      variant="ghost"
+      icon
       title={t("sync.now")}
-      aria-label={t("sync.now")}
+      ariaLabel={t("sync.now")}
       disabled={syncStore.busy || !remote || !supported}
       onclick={() => void syncStore.syncNow()}
     >
       <RefreshCw size={14} class={syncStore.busy ? "animate-spin" : ""} />
-    </button>
+    </Button>
   {/snippet}
 
   {#if !supported}
@@ -246,31 +242,15 @@
         <span class="text-xs text-foreground">
           {t("sync.pendingCount", { count: syncStore.pending })}
         </span>
-        <button
-          type="button"
-          class="rounded-md border border-border px-2 py-1 text-xs text-foreground transition hover:bg-[var(--color-surface-3)]"
-          onclick={() => syncStore.openMerge(null)}
-        >
-          {t("sync.review")}
-        </button>
+        <Button onclick={() => syncStore.openMerge(null)}>{t("sync.review")}</Button>
       </div>
     {/if}
     {#if job && (job.phase === "failed" || job.phase === "cancelled")}
       <div class="mt-2 flex items-center gap-2">
-        <button
-          type="button"
-          class="rounded-md border border-border px-2 py-1 text-xs text-foreground transition hover:bg-[var(--color-surface-3)]"
-          onclick={() => void syncStore.dismiss()}
-        >
-          {t("sync.dismiss")}
-        </button>
-        <button
-          type="button"
-          class="rounded-md border border-border px-2 py-1 text-xs text-muted-foreground transition hover:bg-[var(--color-surface-3)]"
-          onclick={() => void syncStore.repair()}
-        >
+        <Button onclick={() => void syncStore.dismiss()}>{t("sync.dismiss")}</Button>
+        <Button variant="ghost" onclick={() => void syncStore.repair()}>
           {t("sync.repair")}
-        </button>
+        </Button>
       </div>
     {/if}
   {/if}
@@ -282,14 +262,11 @@
   description={t("sync.sourcesDesc")}
 >
   <div class="overflow-hidden rounded-lg border border-border bg-[var(--color-surface-2)]">
-    {#each rows as row, index (row.id)}
-      {@const unsupported = row.source ? !row.source.supported : false}
+    {#each rows as row (row.id)}
       {@const absent = row.source ? !row.source.presentHere : false}
       <label
-        class="flex items-center justify-between gap-3 border-b border-border/60 px-3 py-2 transition last:border-b-0"
-        class:cursor-pointer={!unsupported}
-        class:opacity-60={absent && !unsupported}
-        class:hover:bg-[var(--color-surface-3)]={!unsupported}
+        class="flex cursor-pointer items-center justify-between gap-3 border-b border-border/60 px-3 py-2 transition last:border-b-0 hover:bg-[var(--color-surface-3)]"
+        class:opacity-60={absent}
       >
         <span class="flex min-w-0 flex-col gap-0.5">
           <span class="flex items-center gap-2">
@@ -298,9 +275,7 @@
             {/if}
             <span class="text-xs text-foreground">{row.label}</span>
           </span>
-          {#if unsupported}
-            <span class="text-[11px] text-muted-foreground/80">{t("sync.sourceUnknown")}</span>
-          {:else if index === 0}
+          {#if row.id === AGENTS_ID}
             <span class="text-[11px] text-muted-foreground/80">{t("sync.agentsRowDesc")}</span>
           {:else if absent}
             <span class="text-[11px] text-muted-foreground/80">{t("sync.sourceAbsent")}</span>
@@ -314,7 +289,6 @@
         <input
           type="checkbox"
           checked={row.enabled}
-          disabled={unsupported}
           onchange={(event) =>
             settings.setSyncSource(row.id, (event.currentTarget as HTMLInputElement).checked)}
           class="size-4 shrink-0 accent-foreground"
@@ -322,4 +296,9 @@
       </label>
     {/each}
   </div>
+  {#if notYet.length > 0}
+    <p class="mt-2 text-[11px] text-muted-foreground/80">
+      {t("sync.sourcesNotYet", { names: notYet.join(", ") })}
+    </p>
+  {/if}
 </SettingsCard>

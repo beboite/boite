@@ -743,6 +743,12 @@ export interface CliRow {
   path: string | null;
   /** Whether Boite installed it, which is what decides who may remove it. */
   managed: boolean;
+  /**
+   * A complete copy the vendor's own installer left behind, when the executable
+   * resolves nowhere. Set with `installed: false` and nothing else: a broken
+   * install, not an absent one.
+   */
+  unlinked: string | null;
   version: string | null;
   /** `download` is Boite's to do; `managed` runs in a terminal; `manual` is a link. */
   source: "download" | "managed" | "manual";

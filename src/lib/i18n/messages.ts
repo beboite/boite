@@ -19,24 +19,20 @@ export const EN_MESSAGES = {
   "tabs.general": "General",
   "tabs.terminal": "Terminal",
   "tabs.appearance": "Appearance",
-  "tabs.plugins": "Plugins",
+  "tabs.agents": "Agents",
   "tabs.keyboard": "Keyboard",
-  "tabs.logs": "Logs",
   "tabs.about": "About",
-  "tabs.devices": "Devices",
+  "tabs.machines": "Machines",
   "tabs.experiments": "Experiments",
-  "tabs.sync": "Sync",
   "tabs.generalHint": "Notifications, and the shortcuts the launcher offers.",
   "tabs.terminalHint": "How a terminal starts, and when it is put to sleep.",
   "tabs.appearanceHint": "Scale, layout, motion and language.",
-  "tabs.pluginsHint": "Tools Boite installs and updates for you.",
-  "tabs.devicesHint": "Which devices may reach this boite, and how to add or remove one.",
+  "tabs.agentsHint": "The CLIs on this machine, and the tools that switch their accounts.",
   "tabs.keyboardHint": "What every shortcut is bound to, and what to rebind it to.",
-  "tabs.logsHint": "What the app recorded about this session.",
-  "tabs.aboutHint": "Which build is running, and whether there is a newer one.",
+  "tabs.aboutHint": "Which build is running, and what it recorded.",
   "tabs.experimentsHint": "Big redesigns you can switch on before they become the default.",
-  "tabs.syncHint":
-    "Carry your agent configuration between computers, through a repository of your own.",
+  "tabs.machinesHint":
+    "The computers around this boite: what travels between them, and which may reach it.",
 
 
   "devices.title": "Paired devices",
@@ -300,6 +296,7 @@ export const EN_MESSAGES = {
   "orchestrator.noAgent": "No agent matches «{agent}». Pick one in Settings > Experiments.",
   "orchestrator.noProject": "The orchestrator needs at least one project to live in.",
   "orchestrator.startFailed": "The orchestrator did not start: {error}",
+  "orchestrator.typedNotice": "From the chat",
   "orchestrator.postFailed": "The message was not delivered.",
   "orchestrator.scopeLabel": "Conversation scope",
   "orchestrator.scopeWorkspace": "Whole workspace",
@@ -715,19 +712,16 @@ export const EN_MESSAGES = {
   "plugin.switched": "Switched. Reloading {count} thread(s).",
   "plugin.switchedNone": "Switched. No thread needed a reload.",
   "plugin.current": "current",
-  "tabs.cli": "CLIs",
-  "tabs.cliHint": "Install, update and remove the agents Boite launches.",
   "cli.title": "Agent CLIs",
   "cli.description": "Boite fetches the vendor's own binary and keeps it in a directory of its own, so removing one takes nothing else with it. The agents that ship on a package manager are installed by it, in a terminal you can read.",
   "cli.recheck": "Check again",
   "cli.notInstalled": "Not on this machine",
+  "cli.unlinked": "Installed in {path}, but no command on the PATH. Install repairs it.",
   "cli.managedByBoite": "Installed by Boite",
   "cli.installedElsewhere": "Installed at {path}",
   "cli.install": "Install",
   "cli.update": "Update",
   "cli.reinstall": "Reinstall",
-  "cli.upToDate": "Up to date.",
-  "cli.updateAvailable": "Version {version} is out.",
   "cli.uninstall": "Uninstall",
   "cli.stop": "Stop",
   "cli.dismiss": "Clear",
@@ -806,6 +800,10 @@ export const EN_MESSAGES = {
   "workspace.versionBehind": "Boite {version}, behind this app ({local})",
   "workspace.versionUnknown": "version unknown",
   "workspace.removeBoite": "Remove boite",
+  "workspace.boiteSettings": "Settings for {name}",
+  "settings.editingRemote": "Editing {name}",
+  "settings.editingRemoteDesc":
+    "These settings belong to that boite, not to this device.",
   "workspace.name": "Name",
   "workspace.color": "Color",
   "workspace.backToList": "Back to list",
@@ -897,6 +895,7 @@ export const EN_MESSAGES = {
   "terminalTab.idleTimeout": "Idle timeout (min)",
   "terminalTab.seconds": "{count}s",
   "terminalTab.minutes": "{count} min",
+  "logs.title": "Logs",
   "logs.scopeCurrent": "Current",
   "logs.scopePrevious": "Previous",
   "logs.levelAll": "All levels",
@@ -1301,12 +1300,12 @@ export const EN_MESSAGES = {
   // Carrying the agent configuration between computers.
   "sync.enable": "Sync when Boite opens",
   "sync.enableDesc":
-    "Boite reads the repository at start. Anything that differs opens the merge tool, and nothing is written until you say so.",
+    "Boite reads the repository at start. Anything that differs opens the merge tool.",
   "sync.enableNoRemote": "Name a repository first.",
 
   "sync.remoteTitle": "The repository",
   "sync.remoteDesc":
-    "A private git repository you own. Boite writes to it and reads from it, and never sees your credentials: git resolves those on the machine the terminals run on, the same way it does for every other repository there.",
+    "Any git repository you own, private, on any host. Git resolves the credential on the machine the terminals run on, so Boite never sees one.",
   "sync.remotePlaceholder": "git@github.com:you/boite-config.git",
   "sync.remoteLabel": "Repository address",
   "sync.remoteCheck": "Check",
@@ -1321,7 +1320,7 @@ export const EN_MESSAGES = {
   "sync.remoteEdit": "Change the address",
   "sync.remoteForget": "Forget this repository",
   "sync.remoteForgetAsk":
-    "Boite stops syncing. Every file stays exactly as it is, on this machine and in the repository.",
+    "Boite stops syncing. Every file stays as it is, here and in the repository.",
 
   "sync.statusTitle": "Last sync",
   "sync.statusDesc": "What the last run did, and the button that starts another.",
@@ -1349,15 +1348,13 @@ export const EN_MESSAGES = {
   "sync.phaseCancelled": "Stopped before it finished.",
 
   "sync.sourcesTitle": "What gets synced",
-  "sync.sourcesDesc":
-    "One switch per agent, plus the folder they all read. A switch that is off is a file Boite neither sends nor touches, and every switch starts off.",
+  "sync.sourcesDesc": "Off is a file Boite neither sends nor touches. All start off.",
   "sync.agentsRow": "The .agents folder",
   "sync.agentsRowDesc": "AGENTS.md, the skills and the commands every agent reads.",
-  "sync.sourceUnknown": "Boite does not know where this one keeps its configuration.",
-  "sync.sourceAbsent":
-    "Not on this machine. Its configuration can still arrive before it does.",
+  "sync.sourcesNotYet": "Nothing verified to sync yet: {names}.",
+  "sync.sourceAbsent": "Not installed here. Its configuration can arrive first.",
   "sync.secretsNote":
-    "Credentials never leave. A field Boite knows is a secret travels as a placeholder, and a pull puts back the value this machine already had.",
+    "Credentials never leave: a secret travels as a placeholder, and a pull puts back the value this machine had.",
 
   "syncMerge.title": "Files that differ",
   "syncMerge.progress": "{done} of {total} decided",

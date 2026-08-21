@@ -6,13 +6,30 @@ import { EN_MESSAGES } from "$lib/i18n/messages";
 
 const dir = fileURLToPath(new URL(".", import.meta.url));
 
+/**
+ * A page's source, plus the sources of the sections it composes.
+ *
+ * A page used to be one file, and two of them are now several: "agents" is the
+ * CLI list and the switcher cards, "machines" is sync and pairing. Those parts
+ * are `*Section.svelte` rather than `Settings*Tab.svelte` precisely so this
+ * walk can tell a page from a piece of one — a piece read as a page of its own
+ * would draw every one of its anchors twice over.
+ */
+function sourceOf(name: string, seen = new Set<string>()): string {
+  if (seen.has(name)) return "";
+  seen.add(name);
+  const source = readFileSync(`${dir}/${name}`, "utf8");
+  const sections = [...source.matchAll(/from "\.\/(\w+Section)\.svelte"/g)];
+  return [source, ...sections.map((m) => sourceOf(`${m[1]}.svelte`, seen))].join("\n");
+}
+
 const pages = new Map(
   readdirSync(dir)
     .filter((name) => /^Settings.*Tab\.svelte$/.test(name))
     .map((name) => [
       // SettingsTerminalTab.svelte -> terminal
       name.replace(/^Settings|Tab\.svelte$/g, "").toLowerCase(),
-      readFileSync(`${dir}/${name}`, "utf8"),
+      sourceOf(name),
     ]),
 );
 

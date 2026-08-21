@@ -15,18 +15,28 @@ import type { MessageKey } from "$lib/i18n/index.svelte";
  * and both leave a setting unfindable while everything still compiles.
  */
 
-export type SettingsTabId =
-  | "general"
-  | "terminal"
-  | "appearance"
-  | "cli"
-  | "plugins"
-  | "keyboard"
-  | "devices"
-  | "logs"
-  | "experiments"
-  | "sync"
-  | "about";
+/**
+ * The pages of the settings panel, in the order the rail draws them.
+ *
+ * Eleven of them was the problem: "CLIs" and "plugins" were the same question
+ * asked twice (what can this machine run, under which account), "devices" and
+ * "sync" were both about the other computers, and "logs" spent a permanent
+ * line on a page nobody opens until something has gone wrong. Eight now, and
+ * the list lives here rather than in `SettingsPanel` so the test that walks the
+ * pages reads the same one the panel does.
+ */
+export const SETTINGS_TABS = [
+  "general",
+  "terminal",
+  "appearance",
+  "agents",
+  "keyboard",
+  "machines",
+  "experiments",
+  "about",
+] as const;
+
+export type SettingsTabId = (typeof SETTINGS_TABS)[number];
 
 /**
  * What has to be true for a page to draw the control an entry names.
@@ -35,7 +45,7 @@ export type SettingsTabId =
  * behind it and the test can read it in Node. `SettingsPanel` is where the
  * stores are and where the name is answered.
  */
-export type SettingCondition = "push" | "windowsHost";
+export type SettingCondition = "push" | "windowsHost" | "pairing";
 
 export interface SettingEntry {
   tab: SettingsTabId;
@@ -54,10 +64,10 @@ export interface SettingEntry {
 
 export const SETTINGS_CATALOGUE: SettingEntry[] = [
   { tab: "general", key: "general.openOnLaunch", descKey: "general.openOnLaunchDesc" },
-  { tab: "sync", key: "sync.enable", descKey: "sync.enableDesc" },
-  { tab: "sync", key: "sync.remoteTitle", descKey: "sync.remoteDesc" },
-  { tab: "sync", key: "sync.statusTitle", descKey: "sync.statusDesc" },
-  { tab: "sync", key: "sync.sourcesTitle", descKey: "sync.sourcesDesc" },
+  { tab: "machines", key: "sync.enable", descKey: "sync.enableDesc" },
+  { tab: "machines", key: "sync.remoteTitle", descKey: "sync.remoteDesc" },
+  { tab: "machines", key: "sync.statusTitle", descKey: "sync.statusDesc" },
+  { tab: "machines", key: "sync.sourcesTitle", descKey: "sync.sourcesDesc" },
 
   { tab: "general", key: "general.pushTitle", descKey: "general.pushDesc", when: "push" },
   { tab: "general", key: "shortcuts.title", descKey: "shortcuts.description" },
@@ -99,19 +109,26 @@ export const SETTINGS_CATALOGUE: SettingEntry[] = [
   { tab: "appearance", key: "appearance.animations", descKey: "appearance.animationsDesc" },
   { tab: "appearance", key: "appearance.language", descKey: "appearance.languageDesc" },
 
-  { tab: "devices", key: "devices.title", descKey: "devices.description" },
-  { tab: "devices", key: "devices.inviteTitle", descKey: "devices.inviteDesc" },
+  // Drawn only where a boite-server answers for pairing; on a desktop the
+  // machines page is the sync page alone.
+  { tab: "machines", key: "devices.title", descKey: "devices.description", when: "pairing" },
+  {
+    tab: "machines",
+    key: "devices.inviteTitle",
+    descKey: "devices.inviteDesc",
+    when: "pairing",
+  },
 
-  { tab: "cli", key: "cli.title", descKey: "cli.description" },
+  { tab: "agents", key: "cli.title", descKey: "cli.description" },
 
-  { tab: "plugins", key: "fastpick.settingsTitle", descKey: "fastpick.settingsDesc" },
-  { tab: "plugins", key: "fastpick.enable", descKey: "fastpick.enableDesc" },
-  { tab: "plugins", key: "plugin.kebaccTitle", descKey: "plugin.kebaccDesc" },
-  { tab: "plugins", key: "plugin.kebaccClaude" },
-  { tab: "plugins", key: "plugin.kebaccCodex" },
-  { tab: "plugins", key: "plugin.kebaccAntigravity" },
-  { tab: "plugins", key: "plugin.codexTitle", descKey: "plugin.codexDesc" },
-  { tab: "plugins", key: "plugin.fastMcpSshTitle", descKey: "plugin.fastMcpSshDesc" },
+  { tab: "agents", key: "fastpick.settingsTitle", descKey: "fastpick.settingsDesc" },
+  { tab: "agents", key: "fastpick.enable", descKey: "fastpick.enableDesc" },
+  { tab: "agents", key: "plugin.kebaccTitle", descKey: "plugin.kebaccDesc" },
+  { tab: "agents", key: "plugin.kebaccClaude" },
+  { tab: "agents", key: "plugin.kebaccCodex" },
+  { tab: "agents", key: "plugin.kebaccAntigravity" },
+  { tab: "agents", key: "plugin.codexTitle", descKey: "plugin.codexDesc" },
+  { tab: "agents", key: "plugin.fastMcpSshTitle", descKey: "plugin.fastMcpSshDesc" },
 
   { tab: "experiments", key: "experiments.home", descKey: "experiments.homeDesc" },
   {

@@ -3,6 +3,7 @@
   import { tip } from "$lib/shared/actions/tooltip";
   import { scale } from "svelte/transition";
   import { workspace } from "$lib/backend";
+  import { app } from "$lib/app/store.svelte";
   import { confirmDialog } from "$lib/shared/components/confirm.svelte";
   import { registerEscape, restoreFocus, viewportHeight } from "$lib/shared/keyboard/overlay";
   import { hasTauri } from "$lib/backend/env";
@@ -30,6 +31,7 @@
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
   import Monitor from "@lucide/svelte/icons/monitor";
   import Layers from "@lucide/svelte/icons/layers";
+  import Settings from "@lucide/svelte/icons/settings";
 
   // No local backend in a browser/PWA: only saved boites stand.
   const isTauri = hasTauri();
@@ -273,6 +275,21 @@
       close();
     }
   }
+
+  /**
+   * That boite's settings, from the list of boites.
+   *
+   * The panel is a view over `backend()`, so there is one way to edit a remote
+   * boite's settings and it is to be standing on it: the button switches first
+   * and opens the panel after. Which is also why the panel names the boite it
+   * is editing — see SettingsPanel.
+   */
+  async function openBoiteSettings(id: string) {
+    if (!isActiveBoite(id)) await pickBoite(id);
+    else close();
+    app.view = "settings";
+    app.mobileTab = "settings";
+  }
   async function submitAdd() {
     const u = addUrl.trim();
     const t = addToken.trim();
@@ -473,6 +490,16 @@
               {environmentPhase(b.id)}
             </span>
           {/if}
+        </button>
+        <button
+          type="button"
+          class={`flex shrink-0 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-accent hover:text-foreground ${mobile ? "w-11" : "w-9"}`}
+          onclick={() => void openBoiteSettings(b.id)}
+          disabled={busy}
+          aria-label={t("workspace.boiteSettings", { name: labelOf(b) })}
+          use:tip={t("workspace.boiteSettings", { name: labelOf(b) })}
+        >
+          <Settings class="size-4" />
         </button>
         {#if !active}
           <button
