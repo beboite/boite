@@ -26,9 +26,18 @@ ENV BOITE_TELEMETRY_URL=$BOITE_TELEMETRY_URL
 # change then recompiles just the changed crates instead of every dependency
 # (the slow part on arm64). target/ is an ephemeral cache mount and is NOT kept
 # in the layer, so copy the binary out within the same RUN.
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/usr/local/cargo/git \
-    --mount=type=cache,target=/app/target \
+#
+# The registry and git caches carry an id of their own, one per stage. Cargo
+# guards a shared registry with a lock on `$CARGO_HOME/.package-cache`, which
+# sits in the layer rather than in the mount, so this stage and the rtk stage
+# below each take their own lock and neither sees the other. buildkit runs the
+# two in parallel, and two unlocked cargos unpacking one registry raced on
+# `.cargo-ok`: "failed to unpack package `vcpkg`: File exists". Separate ids
+# rather than `sharing=locked`, which would queue the rtk build behind the long
+# one to save a download it does once per runner anyway.
+RUN --mount=type=cache,id=cargo-registry-server,target=/usr/local/cargo/registry \
+    --mount=type=cache,id=cargo-git-server,target=/usr/local/cargo/git \
+    --mount=type=cache,id=cargo-target-server,target=/app/target \
     cargo build -p boite-server -p boite-mcp --release \
     && cp target/release/boite-server /boite-server \
     && cp target/release/boite-mcp /boite-mcp
@@ -36,8 +45,8 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # ---- rtk (Rust Token Killer): pinned to the same commit as the author's host ----
 # No prebuilt arm64 release exists; build from the exact git rev (rtk-ai/rtk).
 FROM rust:1-bookworm AS rtk
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/usr/local/cargo/git \
+RUN --mount=type=cache,id=cargo-registry-rtk,target=/usr/local/cargo/registry \
+    --mount=type=cache,id=cargo-git-rtk,target=/usr/local/cargo/git \
     cargo install --git https://github.com/rtk-ai/rtk \
       --rev d8c550eefba41e112bd174d58844a803db6e432f rtk --root /usr/local
 
