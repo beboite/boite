@@ -446,14 +446,28 @@ impl Records {
         let store = host
             .store()
             .ok_or("this Boite keeps no records, so there is nothing to read or write")?;
-        Ok(Ready::Records(self, store))
+        Ok(Ready::Records(self, store, host.telemetry()))
     }
 
-    pub(super) fn run(self, store: &Store) -> Result<Value, String> {
+    pub(super) fn run(
+        self,
+        store: &Store,
+        telemetry: Option<&crate::telemetry::TelemetryRuntime>,
+    ) -> Result<Value, String> {
         Ok(match self {
             Records::ProjectList => value_of(store.load_projects()?),
             Records::ProjectCreate { project } => {
+                let is_new = store
+                    .load_projects()
+                    .ok()
+                    .map(|projects| projects.iter().all(|p| p.id != project.id))
+                    .unwrap_or(true);
                 store.save_project(&project, crate::now_ms())?;
+                if is_new {
+                    if let Some(telemetry) = telemetry {
+                        telemetry.track(crate::telemetry::Event::ProjectAdded);
+                    }
+                }
                 value_of(*project)
             }
             Records::ProjectArchive { id, archived } => {
@@ -467,6 +481,7 @@ impl Records {
             Records::ThreadList => value_of(store.load_threads()?),
             Records::ThreadCreate { thread } => {
                 let mut thread = *thread;
+                let is_new = store.thread_status(&thread.id).is_none();
                 if thread.created_at == 0 {
                     thread.created_at = crate::now_ms();
                 }
@@ -505,6 +520,18 @@ impl Records {
                     }
                 }
                 store.save_thread(&thread)?;
+                if is_new {
+                    if let Some(telemetry) = telemetry {
+                        let (kind, provider) = crate::telemetry::classify_thread(
+                            &thread.cmd,
+                            thread.icon_key.as_deref(),
+                        );
+                        telemetry.track(crate::telemetry::Event::ThreadSpawned {
+                            kind: kind.to_string(),
+                            provider: provider.to_string(),
+                        });
+                    }
+                }
                 // The row keeps the mark of its last run; the caller is told what
                 // that mark means, which for a row still naming a process is
                 // `stopped` rather than the word itself.
@@ -542,8 +569,18 @@ impl Records {
                 json!(null)
             }
             Records::ThreadDelete { id } => {
+                let kind = store.load_threads().ok().and_then(|threads| {
+                    threads.into_iter().find(|t| t.id == id).map(|t| {
+                        crate::telemetry::classify_thread(&t.cmd, t.icon_key.as_deref()).0
+                    })
+                });
                 store.delete_thread(&id)?;
                 store.forget_thread_identity(&id)?;
+                if let (Some(kind), Some(telemetry)) = (kind, telemetry) {
+                    telemetry.track(crate::telemetry::Event::ThreadClosed {
+                        kind: kind.to_string(),
+                    });
+                }
                 json!(null)
             }
             Records::TodoList => value_of(store.load_todos()?),

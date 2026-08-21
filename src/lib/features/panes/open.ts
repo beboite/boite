@@ -1,4 +1,5 @@
 import { app } from "$lib/app/store.svelte";
+import { backend } from "$lib/backend";
 import { paneStore, MAX_LEAVES, leafNodesOf, threadLeavesOf } from "./store.svelte";
 import type { DropSide, PaneContent, PaneKind, PanelKind } from "./types";
 import { notifications } from "$lib/features/notifications/store.svelte";
@@ -25,14 +26,25 @@ import { t } from "$lib/i18n/index.svelte";
  * The pane appears where it belongs and waits there, since every group stays
  * mounted whether or not it is the one being drawn.
  */
+function trackPaneOpened(kind: PaneKind) {
+  try {
+    void backend().telemetry.trackPane(kind).catch(() => {});
+  } catch {
+    // Tests, or a backend that has no telemetry method.
+  }
+}
+
 export function openPane(
   content: PaneContent,
   side: DropSide = "right",
   ratio = panelRatio(),
   anchor?: string | null,
 ): string | null {
+  const already = panePresence(content.kind);
   if (anchor) {
-    return beside(anchor, content, side, ratio, false);
+    const paneId = beside(anchor, content, side, ratio, false);
+    if (paneId && !already) trackPaneOpened(content.kind);
+    return paneId;
   }
   // A pane is part of the terminal view; opening one from the project page
   // would otherwise put it behind the page that asked for it.
@@ -42,7 +54,9 @@ export function openPane(
   // focus is on a panel the group index still knows about.
   const onScreen = anchorPaneId();
   if (onScreen) {
-    return beside(onScreen, content, side, ratio, true);
+    const paneId = beside(onScreen, content, side, ratio, true);
+    if (paneId && !already) trackPaneOpened(content.kind);
+    return paneId;
   }
   // Nothing open to sit beside. The rail this replaced drew git, files and the
   // todo list whether or not a terminal was running, so refusing here took the
@@ -52,7 +66,9 @@ export function openPane(
     notifications.error(t("panes.needProject"));
     return null;
   }
-  return paneStore.openGroup(projectId, content);
+  const paneId = paneStore.openGroup(projectId, content);
+  if (paneId && !already) trackPaneOpened(content.kind);
+  return paneId;
 }
 
 /** The half the two anchors share, so the refusal reads the same either way. */

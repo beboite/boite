@@ -21,7 +21,7 @@ export default defineConfig({
     },
   },
   test: {
-    include: ["src/**/*.test.ts"],
+    include: ["src/**/*.test.ts", "telemetry/src/**/*.test.ts"],
     environment: "node",
   },
 });

@@ -69,9 +69,16 @@
     "",
     "largestEagerChunkBytes moved with it, 256000 -> 262144. The main route is",
     "the chunk in question and it had 0.2 KB left, which is a ceiling that fails",
-    "the next commit whatever the next commit is."
+    "the next commit whatever the next commit is.",
+    "",
+    "eagerBytes moved to 931840 on the telemetry work: the privacy strings, the",
+    "blocking overlay and the wizard deal screen sit on +page, so they are on",
+    "the boot path. Measured at 902.7 KB, 7.3 KB spare.",
+    "totalBytes moved to 6553600 with it: the two deal-screen webms (22.2 KB",
+    "and 346.8 KB) are lazy, they only inflate everything shipped. Measured",
+    "at 6333.1 KB, 66.9 KB spare."
   ],
-  "eagerBytes": 917888,
-  "totalBytes": 6144000,
+  "eagerBytes": 931840,
+  "totalBytes": 6553600,
   "largestEagerChunkBytes": 262144
 }

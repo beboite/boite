@@ -1585,6 +1585,39 @@ export interface SyncApi {
   repair(): Promise<void>;
 }
 
+export interface TelemetryState {
+  modeAEnabled: boolean;
+  modeBEnabled: boolean;
+  installIdSet: boolean;
+  forgetPending: boolean;
+  onboardingCompleted: boolean;
+}
+
+export interface TelemetryApi {
+  state(): Promise<TelemetryState>;
+  setModeA(enabled: boolean): Promise<void>;
+  setModeB(enabled: boolean): Promise<void>;
+  completeOnboarding(modeA: boolean, modeB: boolean): Promise<void>;
+  export(): Promise<unknown>;
+  retryForget(): Promise<void>;
+  trackUpdate(args: {
+    stage: string;
+    targetVersion?: string;
+    errorCode?: string;
+  }): Promise<void>;
+  trackPane(paneKind: string): Promise<void>;
+  trackSettingsSnapshot(args: {
+    uiLanguage: string;
+    theme: string;
+    threadWorktrees: boolean;
+    animations: string;
+    mcpYolo: boolean;
+    idleAutoclose: boolean;
+    orchestrator: boolean;
+    voice: boolean;
+  }): Promise<void>;
+}
+
 export interface Backend {
   readonly kind: "tauri" | "remote";
   readonly caps: BackendCaps;
@@ -1615,6 +1648,7 @@ export interface Backend {
   // orchestrator is an experiment; a backend without it just writes no moments.
   readonly conduct?: ConductApi;
   readonly sync: SyncApi;
+  readonly telemetry: TelemetryApi;
   // Web Push registration. Present only on remote (web/PWA); undefined on
   // desktop, which notifies through the OS directly.
   readonly push?: PushApi;

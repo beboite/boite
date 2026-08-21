@@ -550,6 +550,12 @@ impl PtyManager {
         self.inner.lock().contains_key(id)
     }
 
+    /// How many PTYs this process still tracks. Used by the Mode B workspace
+    /// snapshot; a count, never an id.
+    pub fn live_count(&self) -> usize {
+        self.inner.lock().len()
+    }
+
     // The process this PTY spawned. Used to tell a thread's own agent apart
     // from one running elsewhere: claude registers every session it holds
     // open, and the two are otherwise indistinguishable from the registry.

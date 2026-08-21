@@ -44,6 +44,8 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
     "Les grandes refontes, à activer avant qu'elles ne deviennent la norme.",
   "tabs.machinesHint":
     "Les ordinateurs autour de cette boite : ce qui circule entre eux, et lesquels peuvent l'atteindre.",
+  "tabs.privacy": "Confidentialité",
+  "tabs.privacyHint": "Ce que cette Boite envoie, et comment l'exporter ou le supprimer.",
 
 
   "devices.title": "Appareils appairés",
@@ -647,6 +649,45 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "setup.agentsNoneHint": "Installez-en un — Claude Code, Codex, Opencode… — puis revenez cliquer sur Revérifier. Vous pourrez aussi ajouter n'importe quelle commande à la main plus tard.",
   "setup.agentsRecheck": "Revérifier",
   "setup.settingsHint": "Tout ça se change dans les paramètres : renommer un raccourci, modifier sa commande, la couleur de son icône, ou sa place dans la barre.",
+  "setup.telemetryTitle": "VENDS TON ÂME À BOITE !",
+  "setup.telemetryIntro":
+    "Boite compte quelques stats d'utilisation anonymes pour que je sache quoi corriger en premier. Rien de personnel ne quitte ta machine, l'app marche pareil dans tous les cas, et tu peux changer d'avis quand tu veux dans les paramètres.",
+  "setup.telemetryQuestion": "Marché conclu ?",
+  "setup.telemetryGifAlt": "Mème Trade Offer",
+  "setup.telemetryBasic": "NON ! ça suffit",
+  "setup.telemetryBasicDefault": "(par défaut)",
+  "setup.telemetryBasicHint":
+    "Des compteurs anonymes et rien d'autre : aucun profil, aucun identifiant qui te suit.",
+  "setup.telemetryDeal": "MARCHÉ CONCLU",
+  "setup.telemetryDealHint":
+    "Ajoute un UUID distinct pour les stats avancées, stocké uniquement sur ta machine. Je ne sais toujours pas qui tu es, mais tu aides beaucoup. Merci !",
+  "setup.telemetryOptOutNote":
+    "Si tu ne veux VRAIMENT pas aider boite, tu peux tout désactiver dans Paramètres -> Confidentialité. :c",
+  "setup.telemetryDoc": "Ce qui est collecté",
+
+  "privacy.stop": "Tout couper",
+  "privacy.stopDesc":
+    "L'écran du premier lancement a laissé les compteurs anonymes allumés. Coupe l'interrupteur ci-dessous et plus rien ne quitte cette machine. Pas de seconde question.",
+  "privacy.doc": "Ce qui est collecté",
+  "privacy.docDesc": "La liste publique des events, des champs, et comment couper ça. Elle vit dans le dépôt, donc un changement apparaît dans git log.",
+  "privacy.docLink": "Ouvrir la page télémétrie",
+  "privacy.modeA": "Compteurs anonymes",
+  "privacy.modeADesc": "Des totaux quotidiens, sans profil. Désactivé, plus rien ne part, métriques étendues comprises.",
+  "privacy.modeB": "Métriques étendues",
+  "privacy.modeBDesc": "Un identifiant d'install aléatoire sur cette machine, pour la rétention, l'export et l'oubli. Implique les compteurs anonymes.",
+  "privacy.data": "Vos events",
+  "privacy.dataDesc": "Exporter une copie, ou demander au serveur d'oublier l'identifiant étendu. Les compteurs anonymes ne peuvent pas être effacés : ils n'ont jamais été rattachés à un identifiant.",
+  "privacy.exportAction": "Copier l'export",
+  "privacy.exportCopied": "Copié dans le presse-papiers.",
+  "privacy.exportFailed": "L'export a échoué : {error}",
+  "privacy.exportNeedB": "Les métriques étendues doivent être actives, ou encore en attente d'oubli, pour qu'il y ait quelque chose à exporter.",
+  "privacy.forgetRetry": "Réessayer la suppression",
+  "privacy.forgetPending": "Une suppression précédente n'a pas abouti. Réessayez une fois en ligne.",
+  "privacy.forgetFailed": "La suppression a échoué : {error}",
+  "privacy.loadFailed": "Impossible de lire l'état de la télémétrie.",
+  "privacy.enableFailed": "Impossible d'activer ça : {error}",
+  "privacy.disableFailed": "Impossible de couper ça : {error}",
+  "privacy.inert": "Cette build n'a pas d'endpoint de télémétrie, donc il n'y a rien à exporter ni à supprimer.",
 
   "fastpick.label": "fastpick",
   "fastpick.tooltip": "Lancer un agent sur un autre fournisseur et un autre modèle",
