@@ -373,6 +373,11 @@ export class AppState {
       if (!threads || threads.length === 0) return 0;
       return Math.max(...threads.map((t) => this.#threadActivity(t)));
     };
+    const hasThreads = (p: Project): boolean => {
+      const threads = this.#threadsByProject.get(p.id);
+      if (!threads || threads.length === 0) return false;
+      return threads.some((t) => !isSettled(t));
+    };
     return this.projects
       .filter((p) => !p.archived && !this.#hiddenRemote(p))
       // Scratch stays listed even with nothing in it. It was hidden while empty,
@@ -387,6 +392,12 @@ export class AppState {
         const as = a.id === SCRATCH_PROJECT_ID ? 1 : 0;
         const bs = b.id === SCRATCH_PROJECT_ID ? 1 : 0;
         if (as !== bs) return as - bs;
+
+        // A project with no threads sinks to the bottom, above Scratch.
+        const ae = hasThreads(a) ? 0 : 1;
+        const be = hasThreads(b) ? 0 : 1;
+        if (ae !== be) return ae - be;
+
         if (smart) {
           const cmp =
             smart.by === "activity"
