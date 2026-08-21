@@ -277,15 +277,14 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
 
   "home.title": "Accueil",
   "home.agentsLive": "Agents en vie",
-  "home.tokens": "Tokens",
   "home.inbox": "Boîte de réception",
   "home.empty": "Rien n'attend.",
-  "home.goToProject": "Aller au projet",
+  "home.goToProject": "Ouvrir le projet",
+  "home.goToProjectTip": "Quitte la page workspace et ouvre le tableau de bord du projet sélectionné.",
   "home.undo": "Défaire",
   "home.undoFailed": "Impossible de défaire : {error}",
   "home.actionSpawned": "L'orchestrateur a ouvert {name}",
   "home.actionDismissed": "L'orchestrateur a rangé {name}",
-  "home.tokensSplit": "travailleurs {workers} · orchestrateur {orchestrator} ({transcripts} transcripts lus)",
   "home.accounts": "Comptes",
   "home.noAccounts": "Aucun login sauvé pour ce fournisseur.",
 
@@ -309,7 +308,8 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "sidebar.orchestratorTriState": "Orchestrateur : {state}",
 
   "dispatch.notice": "envoyé par l'orchestrateur",
-  "home.takeBackAll": "Tout reprendre",
+  "home.takeBackAll": "Couper les agents",
+  "home.takeBackAllTip": "Empêche l'orchestrateur d'écrire où que ce soit : chaque agent en cours est coupé et les lignes en attente sont annulées. On réactive un agent depuis son propre terminal.",
   "home.dispatchMuted": "coupé",
   "sidebar.muteDispatch": "Couper les envois de l'orchestrateur",
   "sidebar.unmuteDispatch": "Accepter de nouveau les envois de l'orchestrateur",

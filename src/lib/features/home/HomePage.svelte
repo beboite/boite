@@ -15,7 +15,6 @@
   import Button from "$lib/shared/components/Button.svelte";
   import AgentsLive from "./AgentsLive.svelte";
   import AccountsCard from "./AccountsCard.svelte";
-  import WorkspaceTokens from "./WorkspaceTokens.svelte";
   import Inbox from "./Inbox.svelte";
   import OrchestratorChat from "./OrchestratorChat.svelte";
   import { orchestrator } from "$lib/features/orchestrator/store.svelte";
@@ -39,11 +38,17 @@
     {#if orchestrator.enabled}
       <!-- The kill switch the plan promises: every worker muted, every queued
            line dropped on the boite. The user owns the workspace again. -->
-      <Button variant="danger" onclick={() => void takeEverythingBack()}>
+      <Button
+        variant="danger"
+        onclick={() => void takeEverythingBack()}
+        tip={t("home.takeBackAllTip")}
+      >
         {t("home.takeBackAll")}
       </Button>
     {/if}
-    <Button variant="ghost" onclick={goToHomeProject}>{t("home.goToProject")}</Button>
+    <Button variant="ghost" onclick={goToHomeProject} tip={t("home.goToProjectTip")}>
+      {t("home.goToProject")}
+    </Button>
   </header>
 
   <div class="min-h-0 flex-1 overflow-y-auto lg:overflow-hidden">
@@ -58,7 +63,6 @@
       <div class="flex shrink-0 flex-col gap-3 {aside}">
         <AgentsLive />
         <Inbox />
-        <WorkspaceTokens />
         <AccountsCard />
       </div>
     </div>

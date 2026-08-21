@@ -275,15 +275,14 @@ export const EN_MESSAGES = {
 
   "home.title": "Home",
   "home.agentsLive": "Live agents",
-  "home.tokens": "Tokens",
   "home.inbox": "Inbox",
   "home.empty": "Nothing waiting.",
-  "home.goToProject": "Go to project",
+  "home.goToProject": "Open project",
+  "home.goToProjectTip": "Leave the workspace page and open the selected project's dashboard.",
   "home.undo": "Undo",
   "home.undoFailed": "Could not undo: {error}",
   "home.actionSpawned": "The orchestrator opened {name}",
   "home.actionDismissed": "The orchestrator put {name} away",
-  "home.tokensSplit": "workers {workers} · orchestrator {orchestrator} ({transcripts} transcripts read)",
   "home.accounts": "Accounts",
   "home.noAccounts": "No saved login for this provider yet.",
 
@@ -307,7 +306,8 @@ export const EN_MESSAGES = {
   "sidebar.orchestratorTriState": "Orchestrator: {state}",
 
   "dispatch.notice": "sent by the orchestrator",
-  "home.takeBackAll": "Take everything back",
+  "home.takeBackAll": "Mute every agent",
+  "home.takeBackAllTip": "Stops the orchestrator from typing anywhere: every running agent is muted and every queued line is dropped. Unmute an agent from its own terminal.",
   "home.dispatchMuted": "muted",
   "sidebar.muteDispatch": "Mute orchestrator dispatches",
   "sidebar.unmuteDispatch": "Accept orchestrator dispatches again",

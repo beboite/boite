@@ -14,6 +14,7 @@
 -->
 <script lang="ts">
   import type { Snippet } from "svelte";
+  import { tip as tooltip, type TipParam } from "$lib/shared/actions/tooltip";
 
   type Variant = "primary" | "secondary" | "ghost" | "danger";
   type Size = "sm" | "md" | "lg";
@@ -26,6 +27,8 @@
     type?: "button" | "submit";
     disabled?: boolean;
     title?: string;
+    /** The app tooltip, for a control whose label does not say what it does. */
+    tip?: TipParam;
     ariaLabel?: string;
     /** Toggle state, for a button that is on or off rather than an action. */
     pressed?: boolean;
@@ -48,6 +51,7 @@
     type = "button",
     disabled = false,
     title,
+    tip,
     ariaLabel,
     pressed,
     busy,
@@ -97,6 +101,7 @@
   {type}
   {disabled}
   {title}
+  use:tooltip={tip}
   aria-label={ariaLabel}
   aria-pressed={pressed}
   aria-busy={busy}
