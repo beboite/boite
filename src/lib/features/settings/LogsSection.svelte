@@ -160,7 +160,7 @@
 <section class="flex flex-col gap-2">
   <header class="flex items-center justify-between">
     <div class="flex items-center gap-2">
-      <h3 class="text-sm font-semibold tracking-tight">{t("tabs.logs")}</h3>
+      <h3 class="text-sm font-semibold tracking-tight">{t("logs.title")}</h3>
       {#if !deviceLocal}
       <div class="flex rounded-md border border-border bg-[var(--color-surface)] p-0.5 text-xs">
         <button

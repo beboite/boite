@@ -22,27 +22,23 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "tabs.general": "Général",
   "tabs.terminal": "Terminal",
   "tabs.appearance": "Apparence",
-  "tabs.plugins": "Plugins",
+  "tabs.agents": "Agents",
   "tabs.keyboard": "Clavier",
-  "tabs.logs": "Journaux",
   "tabs.about": "À propos",
-  "tabs.devices": "Appareils",
+  "tabs.machines": "Machines",
   "tabs.experiments": "Expérimentations",
-  "tabs.sync": "Synchronisation",
   "tabs.generalHint": "Notifications, et les raccourcis proposés par le lanceur.",
   "tabs.terminalHint": "Comment un terminal démarre, et quand il est mis en veille.",
   "tabs.appearanceHint": "Échelle, disposition, animations et langue.",
-  "tabs.pluginsHint": "Les outils que Boite installe et met à jour pour vous.",
-  "tabs.devicesHint":
-    "Quels appareils peuvent atteindre cette boite, et comment en ajouter ou en retirer un.",
+  "tabs.agentsHint":
+    "Les CLI présents sur cette machine, et les outils qui changent leur compte.",
   "tabs.keyboardHint":
     "À quoi chaque raccourci est associé, et comment le réassocier.",
-  "tabs.logsHint": "Ce que l'app a enregistré sur cette session.",
-  "tabs.aboutHint": "Quelle build tourne, et s'il en existe une plus récente.",
+  "tabs.aboutHint": "Quelle build tourne, et ce qu'elle a enregistré.",
   "tabs.experimentsHint":
     "Les grandes refontes, à activer avant qu'elles ne deviennent la norme.",
-  "tabs.syncHint":
-    "Emporter la configuration de vos agents d'un ordinateur à l'autre, par un dépôt qui vous appartient.",
+  "tabs.machinesHint":
+    "Les ordinateurs autour de cette boite : ce qui circule entre eux, et lesquels peuvent l'atteindre.",
 
 
   "devices.title": "Appareils appairés",
@@ -712,8 +708,6 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "plugin.switched": "Compte changé. Rechargement de {count} thread(s).",
   "plugin.switchedNone": "Compte changé. Aucun thread à recharger.",
   "plugin.current": "actuel",
-  "tabs.cli": "CLI",
-  "tabs.cliHint": "Installer, mettre à jour et supprimer les agents que Boite lance.",
   "cli.title": "CLI des agents",
   "cli.description": "Boite récupère le binaire publié par l'éditeur et le garde dans un dossier qui lui appartient, pour qu'une suppression n'emporte rien d'autre. Les agents distribués par un gestionnaire de paquets sont installés par lui, dans un terminal que vous pouvez lire.",
   "cli.recheck": "Vérifier à nouveau",
@@ -797,6 +791,10 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "workspace.versionBehind": "Boite {version}, en retard sur cette application ({local})",
   "workspace.versionUnknown": "version inconnue",
   "workspace.removeBoite": "Retirer la boite",
+  "workspace.boiteSettings": "Paramètres de {name}",
+  "settings.editingRemote": "Modification de {name}",
+  "settings.editingRemoteDesc":
+    "Ces paramètres appartiennent à cette boite, pas à cet appareil.",
   "workspace.name": "Nom",
   "workspace.color": "Couleur",
   "workspace.backToList": "Retour à la liste",
@@ -888,6 +886,7 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "terminalTab.idleTimeout": "Délai d'inactivité (min)",
   "terminalTab.seconds": "{count} s",
   "terminalTab.minutes": "{count} min",
+  "logs.title": "Journaux",
   "logs.scopeCurrent": "Session actuelle",
   "logs.scopePrevious": "Session précédente",
   "logs.levelAll": "Tous les niveaux",

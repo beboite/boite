@@ -1,17 +1,15 @@
 <script lang="ts">
   import { app } from "$lib/app/store.svelte";
+  import { backend, workspace } from "$lib/backend";
   import { tip } from "$lib/shared/actions/tooltip";
   import { edgeFade } from "$lib/shared/actions/edgeFade";
   import SettingsGeneralTab from "./SettingsGeneralTab.svelte";
   import SettingsTerminalTab from "./SettingsTerminalTab.svelte";
   import SettingsAppearanceTab from "./SettingsAppearanceTab.svelte";
-  import SettingsCliTab from "./SettingsCliTab.svelte";
-  import SettingsPluginsTab from "./SettingsPluginsTab.svelte";
+  import SettingsAgentsTab from "./SettingsAgentsTab.svelte";
   import SettingsKeyboardTab from "./SettingsKeyboardTab.svelte";
-  import SettingsDevicesTab from "./SettingsDevicesTab.svelte";
-  import SettingsLogsTab from "./SettingsLogsTab.svelte";
+  import SettingsMachinesTab from "./SettingsMachinesTab.svelte";
   import SettingsExperimentsTab from "./SettingsExperimentsTab.svelte";
-  import SettingsSyncTab from "./SettingsSyncTab.svelte";
   import SettingsAboutTab from "./SettingsAboutTab.svelte";
   import { updater } from "$lib/features/updater/store.svelte";
   import X from "@lucide/svelte/icons/x";
@@ -19,14 +17,12 @@
   import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
   import TerminalIcon from "@lucide/svelte/icons/terminal";
   import Palette from "@lucide/svelte/icons/palette";
-  import Blocks from "@lucide/svelte/icons/blocks";
   import PackageIcon from "@lucide/svelte/icons/package";
   import Keyboard from "@lucide/svelte/icons/keyboard";
-  import ScrollText from "@lucide/svelte/icons/scroll-text";
   import Smartphone from "@lucide/svelte/icons/smartphone";
-  import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import FlaskConical from "@lucide/svelte/icons/flask-conical";
   import Info from "@lucide/svelte/icons/info";
+  import Server from "@lucide/svelte/icons/server";
   import { onDestroy, tick, type Component } from "svelte";
   import { t, type MessageKey } from "$lib/i18n/index.svelte";
   import Search from "@lucide/svelte/icons/search";
@@ -35,6 +31,7 @@
   import { platform } from "$lib/storage/platform.svelte";
   import {
     SETTINGS_CATALOGUE,
+    SETTINGS_TABS,
     settingAnchorId,
     type SettingCondition,
     type SettingsTabId,
@@ -54,56 +51,87 @@
    */
   type TabId = SettingsTabId;
 
-  const TABS: {
+  type Tab = {
     id: TabId;
     labelKey: MessageKey;
     hintKey: MessageKey;
     icon: Component;
-  }[] = [
-    {
-      id: "general",
+  };
+
+  /**
+   * Keyed by id and drawn in the catalogue's order, so the rail and the search
+   * index cannot disagree about which pages exist: a `Record` over the union is
+   * a compile error the day a page is added there and forgotten here.
+   */
+  const TAB_SPECS: Record<TabId, Omit<Tab, "id">> = {
+    general: {
       labelKey: "tabs.general",
       hintKey: "tabs.generalHint",
       icon: SlidersHorizontal,
     },
-    {
-      id: "terminal",
+    terminal: {
       labelKey: "tabs.terminal",
       hintKey: "tabs.terminalHint",
       icon: TerminalIcon,
     },
-    {
-      id: "appearance",
+    appearance: {
       labelKey: "tabs.appearance",
       hintKey: "tabs.appearanceHint",
       icon: Palette,
     },
-    { id: "cli", labelKey: "tabs.cli", hintKey: "tabs.cliHint", icon: PackageIcon },
-    { id: "plugins", labelKey: "tabs.plugins", hintKey: "tabs.pluginsHint", icon: Blocks },
-    {
-      id: "keyboard",
+    agents: { labelKey: "tabs.agents", hintKey: "tabs.agentsHint", icon: PackageIcon },
+    keyboard: {
       labelKey: "tabs.keyboard",
       hintKey: "tabs.keyboardHint",
       icon: Keyboard,
     },
-    {
-      id: "devices",
-      labelKey: "tabs.devices",
-      hintKey: "tabs.devicesHint",
+    machines: {
+      labelKey: "tabs.machines",
+      hintKey: "tabs.machinesHint",
       icon: Smartphone,
     },
-    { id: "sync", labelKey: "tabs.sync", hintKey: "tabs.syncHint", icon: RefreshCw },
-    { id: "logs", labelKey: "tabs.logs", hintKey: "tabs.logsHint", icon: ScrollText },
-    {
-      id: "experiments",
+    experiments: {
       labelKey: "tabs.experiments",
       hintKey: "tabs.experimentsHint",
       icon: FlaskConical,
     },
-    { id: "about", labelKey: "tabs.about", hintKey: "tabs.aboutHint", icon: Info },
-  ];
+    about: { labelKey: "tabs.about", hintKey: "tabs.aboutHint", icon: Info },
+  };
+
+  const ALL_TABS: Tab[] = SETTINGS_TABS.map((id) => ({ id, ...TAB_SPECS[id] }));
+
+  const TABS = ALL_TABS;
 
   let activeTab = $state<TabId>("general");
+
+  /**
+   * The boite these settings belong to, when it is not this device.
+   *
+   * The panel is a view over `backend()`, so standing on a remote boite means
+   * every control here writes over there. Nothing said so, and the two look
+   * identical.
+   */
+  const editingRemote = $derived(
+    workspace.mode === "remote"
+      ? workspace.info.name ||
+          (workspace.remoteUrl ? hostOf(workspace.remoteUrl) : "") ||
+          t("workspace.remote")
+      : null,
+  );
+
+  function hostOf(url: string): string {
+    try {
+      return new URL(url).host;
+    } catch {
+      return url;
+    }
+  }
+
+  // A page that stops applying under the user (a boite switch, a disconnect)
+  // must not leave the rail pointing at nothing.
+  $effect(() => {
+    if (!TABS.some((tab) => tab.id === activeTab)) activeTab = "general";
+  });
   let railEl: HTMLElement | null = $state(null);
   let stripEl: HTMLElement | null = $state(null);
   let query = $state("");
@@ -143,10 +171,11 @@
   const CONDITIONS: Record<SettingCondition, () => boolean> = {
     push: pushSupported,
     windowsHost: () => platform.isHostWindows,
+    pairing: () => backend().pairing !== null,
   };
 
   const TAB_LABELS: Record<TabId, MessageKey> = Object.fromEntries(
-    TABS.map((tab) => [tab.id, tab.labelKey]),
+    ALL_TABS.map((tab) => [tab.id, tab.labelKey]),
   ) as Record<TabId, MessageKey>;
 
   /**
@@ -279,7 +308,20 @@
   <header
     class="flex shrink-0 items-center justify-between border-b border-border bg-[var(--color-surface)] px-4 py-2"
   >
-    <h2 class="text-base font-semibold tracking-tight">{t("common.settings")}</h2>
+    <h2 class="shrink-0 text-base font-semibold tracking-tight">{t("common.settings")}</h2>
+
+    <!-- Next to the title rather than as a banner over the page: it qualifies
+         the word "Settings", and a strip above the first card is read once and
+         scrolled past. -->
+    {#if editingRemote}
+      <span
+        class="ml-2 flex min-w-0 items-center gap-1.5 rounded-md border border-warning/40 bg-warning/10 px-2 py-0.5 text-xs text-warning"
+        use:tip={t("settings.editingRemoteDesc")}
+      >
+        <Server class="size-3 shrink-0" />
+        <span class="truncate">{t("settings.editingRemote", { name: editingRemote })}</span>
+      </span>
+    {/if}
 
     <!-- In the header rather than over the rail: it searches every page, and a
          box sitting on top of one page's list reads as filtering that list. -->
@@ -441,18 +483,12 @@
           <SettingsTerminalTab />
         {:else if activeTab === "appearance"}
           <SettingsAppearanceTab />
-        {:else if activeTab === "cli"}
-          <SettingsCliTab />
-        {:else if activeTab === "plugins"}
-          <SettingsPluginsTab />
+        {:else if activeTab === "agents"}
+          <SettingsAgentsTab />
         {:else if activeTab === "keyboard"}
           <SettingsKeyboardTab />
-        {:else if activeTab === "devices"}
-          <SettingsDevicesTab />
-        {:else if activeTab === "sync"}
-          <SettingsSyncTab />
-        {:else if activeTab === "logs"}
-          <SettingsLogsTab />
+        {:else if activeTab === "machines"}
+          <SettingsMachinesTab />
         {:else if activeTab === "experiments"}
           <SettingsExperimentsTab />
         {:else if activeTab === "about"}
