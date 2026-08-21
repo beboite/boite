@@ -56,6 +56,47 @@ export function isFastpick(cmd: string): boolean {
   return stem.toLowerCase() === FASTPICK_CMD;
 }
 
+/**
+ * The harness ids fastpick answers to.
+ *
+ * It is read to tell a name that opens with a harness from one whose model holds a colon,
+ * so a harness fastpick grows is a provider here until this list learns it. That way round
+ * on purpose: an unknown first word reaches fastpick as a provider and is refused there,
+ * where guessing would have cut the model in half and launched something else.
+ */
+const HARNESS_IDS = ["claude-code", "opencode", "codex", "pi"];
+
+/**
+ * The combo an agent asked for by name, or null when the name is not a fastpick one.
+ *
+ * `fastpick:<provider>[.<key>]:<model>`, with an optional harness in front of the provider.
+ * Omitted, the harness is claude-code: that is what every three-part name written before
+ * this meant, and the one every provider in the catalogue answers on.
+ */
+export function parseFastpickAgent(agent: string): FastpickCombo | null {
+  const parts = agent.trim().toLowerCase().split(":");
+  if (parts.shift() !== FASTPICK_CMD) return null;
+
+  let harness = "claude-code";
+  if (parts.length > 2 && HARNESS_IDS.includes(parts[0])) harness = parts.shift() ?? harness;
+
+  const where = parts.shift() ?? "";
+  // Rejoined rather than taken at [1]: a model id is allowed to hold colons, and cutting
+  // at the first one would launch a model that does not exist.
+  const model = parts.join(":");
+
+  // `<provider>.<key>` picks one credential of a provider that holds several, written the
+  // way fastpick's own `--key` takes it. Without it a site reached with two accounts
+  // answers on whichever fastpick resolves first, which is not always the one the caller
+  // meant and not always the one being paid for.
+  const dot = where.indexOf(".");
+  const provider = dot > 0 ? where.slice(0, dot) : where;
+  const key = dot > 0 ? where.slice(dot + 1) : null;
+  if (!provider || !model) return null;
+
+  return { harness, provider, key, model };
+}
+
 /** Which agent a harness kind is, for the icon and everything else keyed on it. */
 export function iconKeyForKind(kind: string): IconKey {
   switch (kind) {

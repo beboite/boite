@@ -508,7 +508,7 @@ fn thread_tools() -> Value {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "agent": { "type": "string", "description": "claude, codex, opencode, cursor, copilot, grok, hermes, antigravity, pi, muse, or one of the user's shortcut labels. For fastpick agents, use the format 'fastpick:provider:model' (e.g., 'fastpick:crof:deepseek-v4-pro'), or 'fastpick:provider.key:model' to name one credential of a provider that holds several. Defaults to yours." },
+                    "agent": { "type": "string", "description": "claude, codex, opencode, cursor, copilot, grok, hermes, antigravity, pi, muse, or one of the user's shortcut labels. For fastpick agents, use the format 'fastpick:provider:model' (e.g., 'fastpick:crof:deepseek-v4-pro'), or 'fastpick:provider.key:model' to name one credential of a provider that holds several. A harness in front of the provider picks which agent runs on that endpoint: 'fastpick:pi:crof:deepseek-v4-pro', one of claude-code, opencode, codex or pi, claude-code when the name omits it. Defaults to yours." },
                     "project": { "type": "string", "description": "Id, name or folder. Defaults to this project." },
                     "prompt": {
                         "type": "string",
