@@ -85,6 +85,11 @@ pub struct Status {
     /// Whether that path is inside Boite's own bin, which is what decides whether
     /// an uninstall is Boite's to do or the user's package manager's.
     pub managed: bool,
+    /// A complete copy the vendor's own installer left behind, when the
+    /// executable resolves nowhere. `Some` here with `installed: false` is a
+    /// broken install rather than an absent one, and the two read very
+    /// differently to somebody who remembers installing it.
+    pub unlinked: Option<String>,
     pub version: Option<String>,
     /// `download`, `managed` or `manual`, which is what the row's buttons follow.
     pub source: &'static str,
@@ -162,6 +167,10 @@ pub fn status_blocking(probe_versions: bool) -> Vec<Status> {
             installed,
             path: resolved.map(|p| p.to_string_lossy().into_owned()),
             managed,
+            unlinked: (!installed)
+                .then(|| catalog::vendor_install(cli.id))
+                .flatten()
+                .map(|p| p.to_string_lossy().into_owned()),
             version: None,
             source: match cli.source {
                 Source::Download(_) => "download",

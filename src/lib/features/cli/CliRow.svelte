@@ -208,10 +208,19 @@ ${cmd}` : cmd;
       <span class="flex items-center gap-1.5">
         <span
           class="size-1.5 shrink-0 rounded-full"
-          style:background-color={row.installed ? "var(--color-success)" : "var(--color-border)"}
+          style:background-color={row.installed
+            ? "var(--color-success)"
+            : row.unlinked
+              ? "var(--color-warning)"
+              : "var(--color-border)"}
         ></span>
-        <span class="truncate text-xs text-muted-foreground" title={row.path ?? undefined}>
-          {#if !row.installed}
+        <span
+          class="truncate text-xs text-muted-foreground"
+          title={row.path ?? row.unlinked ?? undefined}
+        >
+          {#if !row.installed && row.unlinked}
+            {t("cli.unlinked", { path: row.unlinked })}
+          {:else if !row.installed}
             {t("cli.notInstalled")}
           {:else if row.managed}
             {t("cli.managedByBoite")}
@@ -297,22 +306,14 @@ ${cmd}` : cmd;
       {#if settled(job)}
         <div class="flex shrink-0 items-center gap-2">
           {#if job.phase !== "done" && job.kind === "install"}
-            <button
-              type="button"
-              class="flex items-center gap-1 text-xs text-muted-foreground/70 transition hover:text-foreground"
-              onclick={() => cliManager.retry(row.id)}
-            >
+            <Button variant="ghost" size="sm" onclick={() => cliManager.retry(row.id)}>
               <RotateCw class="size-3" />
               {t("cli.retry")}
-            </button>
+            </Button>
           {/if}
-          <button
-            type="button"
-            class="text-xs text-muted-foreground/70 transition hover:text-foreground"
-            onclick={() => cliManager.dismiss(row.id)}
-          >
+          <Button variant="ghost" size="sm" onclick={() => cliManager.dismiss(row.id)}>
             {t("cli.dismiss")}
-          </button>
+          </Button>
         </div>
       {/if}
     </div>
@@ -345,23 +346,15 @@ ${cmd}` : cmd;
       {#if !installer.busy}
         <div class="flex shrink-0 items-center gap-2">
           {#if installer.status === "failed" || installer.status === "cancelled"}
-            <button
-              type="button"
-              class="flex items-center gap-1 text-xs text-muted-foreground/70 transition hover:text-foreground"
-              onclick={() => installer?.retry()}
-            >
+            <Button variant="ghost" size="sm" onclick={() => installer?.retry()}>
               <RotateCw class="size-3" />
               {t("cli.retry")}
-            </button>
+            </Button>
           {/if}
           {#if installer.hasOutput}
-            <button
-              type="button"
-              class="text-xs text-muted-foreground/70 transition hover:text-foreground"
-              onclick={() => installer?.dismiss()}
-            >
+            <Button variant="ghost" size="sm" onclick={() => installer?.dismiss()}>
               {t("cli.dismiss")}
-            </button>
+            </Button>
           {/if}
         </div>
       {/if}

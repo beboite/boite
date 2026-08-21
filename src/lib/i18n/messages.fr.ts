@@ -713,6 +713,7 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "cli.description": "Boite récupère le binaire publié par l'éditeur et le garde dans un dossier qui lui appartient, pour qu'une suppression n'emporte rien d'autre. Les agents distribués par un gestionnaire de paquets sont installés par lui, dans un terminal que vous pouvez lire.",
   "cli.recheck": "Vérifier à nouveau",
   "cli.notInstalled": "Absent de cette machine",
+  "cli.unlinked": "Installé dans {path}, mais aucune commande sur le PATH. Installer répare.",
   "cli.managedByBoite": "Installé par Boite",
   "cli.installedElsewhere": "Installé dans {path}",
   "cli.install": "Installer",

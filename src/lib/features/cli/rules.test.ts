@@ -19,6 +19,7 @@ const row = (over: Partial<CliRow> = {}): CliRow => ({
   updateCommand: null,
   uninstallCommand: null,
   dataPaths: [],
+  unlinked: null,
   ...over,
 });
 

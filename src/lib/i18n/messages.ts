@@ -716,6 +716,7 @@ export const EN_MESSAGES = {
   "cli.description": "Boite fetches the vendor's own binary and keeps it in a directory of its own, so removing one takes nothing else with it. The agents that ship on a package manager are installed by it, in a terminal you can read.",
   "cli.recheck": "Check again",
   "cli.notInstalled": "Not on this machine",
+  "cli.unlinked": "Installed in {path}, but no command on the PATH. Install repairs it.",
   "cli.managedByBoite": "Installed by Boite",
   "cli.installedElsewhere": "Installed at {path}",
   "cli.install": "Install",
