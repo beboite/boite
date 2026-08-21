@@ -65,6 +65,13 @@ async fn main() {
             std::process::exit(1);
         }
     };
+    let app_start = std::time::Instant::now();
+    let telemetry = Some(Arc::new(boite_core::telemetry::TelemetryRuntime::spawn(
+        &config.data_dir,
+        env!("CARGO_PKG_VERSION"),
+        "server",
+        app_start,
+    )));
 
     let db_path = config.data_dir.join("boite.db");
     let store = match Store::open(&db_path) {
@@ -156,6 +163,7 @@ async fn main() {
         public_url: config.public_url,
         claimed_requests: Default::default(),
         pulse,
+        telemetry,
     });
 
     if let Err(e) = state.refresh_roots() {
@@ -266,7 +274,8 @@ async fn main() {
     }
 
     let registry_for_shutdown = state.registry.clone();
-    let app = app.with_state(state);
+    let telemetry_for_shutdown = state.telemetry.clone();
+    let app = app.with_state(state.clone());
 
     let listener = match tokio::net::TcpListener::bind(&config.bind).await {
         Ok(l) => l,
@@ -275,6 +284,12 @@ async fn main() {
             std::process::exit(1);
         }
     };
+
+    if let Some(telemetry) = &state.telemetry {
+        telemetry.on_boot_complete();
+        let live = state.registry.pty_manager().live_count() as u64;
+        telemetry.track_workspace_from(&state.store, live);
+    }
 
     let serve = axum::serve(
         listener,
@@ -288,6 +303,10 @@ async fn main() {
             // kill_all spawns + joins one OS thread per PTY; keep it off the
             // async worker so a slow killer syscall can't stall the runtime.
             let _ = tokio::task::spawn_blocking(move || {
+                if let Some(telemetry) = telemetry_for_shutdown {
+                    telemetry.on_session_end();
+                    telemetry.shutdown();
+                }
                 registry_for_shutdown.pty_manager().kill_all();
             })
             .await;

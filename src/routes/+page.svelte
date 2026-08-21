@@ -3,7 +3,8 @@
   import { app } from "$lib/app/store.svelte";
   import { isFinished } from "$lib/domain/thread-status";
   import { clearFinished } from "$lib/features/thread/finished.svelte";
-  import { workspace } from "$lib/backend";
+  import { workspace, backend } from "$lib/backend";
+  import { reportSettingsSnapshot } from "$lib/features/setup/telemetry";
   import { settings } from "$lib/features/settings/store.svelte";
   import { homeAvailable } from "$lib/features/settings/homeAvailable";
   import { pickAndAddProject } from "$lib/features/project/api";
@@ -79,6 +80,11 @@
   const SetupView = lazyComponent(
     () => import("$lib/features/setup/SetupWizard.svelte"),
   );
+  const TelemetryOverlayView = lazyComponent(
+    () => import("$lib/features/setup/TelemetryOverlay.svelte"),
+  );
+
+  let telemetryOnboarding = $state<"unknown" | "pending" | "done">("unknown");
   const ProjectView = lazyComponent(
     () => import("$lib/features/project/ProjectPage.svelte"),
   );
@@ -436,6 +442,29 @@
     }
   });
 
+  $effect(() => {
+    if (!app.ready || !settings.ready) return;
+    if (!settings.state.setupCompleted) {
+      telemetryOnboarding = "done";
+      return;
+    }
+    untrack(() => {
+      void backend()
+        .telemetry.state()
+        .then((state) => {
+          telemetryOnboarding = state.onboardingCompleted ? "done" : "pending";
+          if (state.onboardingCompleted) void reportSettingsSnapshot();
+        })
+        .catch(() => {
+          telemetryOnboarding = "done";
+        });
+    });
+  });
+
+  $effect(() => {
+    if (telemetryOnboarding === "pending") void TelemetryOverlayView.ensure();
+  });
+
   // Fetched when the experiment is armed rather than when the button is
   // pressed: the chunk has to be mounted and listening for the pointer before
   // the first throw, or the rope spawns wherever the pointer was at boot.
@@ -526,6 +555,13 @@
       {@const SetupComp = SetupView.current}
       <SetupComp />
     {/if}
+  {:else if app.ready && settings.state.setupCompleted && telemetryOnboarding === "pending"}
+    {#if TelemetryOverlayView.current}
+      {@const Overlay = TelemetryOverlayView.current}
+      <Overlay onDone={() => (telemetryOnboarding = "done")} />
+    {/if}
+  {:else if app.ready && settings.state.setupCompleted && telemetryOnboarding === "unknown"}
+    <div class="flex min-h-0 flex-1"></div>
   {:else}
     <div class="flex min-h-0 flex-1">
     <!-- Home keeps the sidebar. It used to drop it, which made the one view a

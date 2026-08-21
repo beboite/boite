@@ -2,6 +2,8 @@ import { invoke } from "./ipc";
 import type {
   ApprovalsApi,
   SyncApi,
+  TelemetryApi,
+  TelemetryState,
   SyncConflict,
   SyncJob,
   SyncProbe,
@@ -327,6 +329,21 @@ export const tauriLog: LogApi = {
  * of the settings row, so what is on screen and what the next sync uses cannot
  * disagree.
  */
+export const tauriTelemetry: TelemetryApi = {
+  state: () => invoke<TelemetryState>("telemetry_state"),
+  setModeA: (enabled) => invoke("telemetry_set_mode_a", { params: { enabled } }),
+  setModeB: (enabled) => invoke("telemetry_set_mode_b", { params: { enabled } }),
+  completeOnboarding: (modeA, modeB) =>
+    invoke("telemetry_complete_onboarding", { params: { modeA, modeB } }),
+  export: () => invoke<unknown>("telemetry_export"),
+  retryForget: () => invoke("telemetry_retry_forget"),
+  trackUpdate: ({ stage, targetVersion, errorCode }) =>
+    invoke("telemetry_track_update", { params: { stage, targetVersion, errorCode } }),
+  trackPane: (paneKind) => invoke("telemetry_track_pane", { params: { paneKind } }),
+  trackSettingsSnapshot: (args) =>
+    invoke("telemetry_track_settings_snapshot", { params: args }),
+};
+
 export const tauriSync: SyncApi = {
   sources: () => invoke<SyncSource[]>("sync_sources"),
   status: () => invoke<SyncStatus>("sync_status"),

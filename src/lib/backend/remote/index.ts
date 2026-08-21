@@ -1,6 +1,8 @@
 import type {
   ApprovalsApi,
   SyncApi,
+  TelemetryApi,
+  TelemetryState,
   SyncConflict,
   SyncJob,
   SyncProbe,
@@ -112,6 +114,7 @@ export class RemoteBackend implements Backend {
   readonly session: SessionApi;
   readonly search: SearchApi;
   readonly sync: SyncApi;
+  readonly telemetry: TelemetryApi;
   readonly log: LogApi;
   readonly approvals: ApprovalsApi;
   readonly push: PushApi;
@@ -616,6 +619,21 @@ export class RemoteBackend implements Backend {
       cancel: () => rpc("sync.cancel").then((r) => Boolean(r.cancelled)),
       dismiss: () => rpc("sync.dismiss").then(() => {}),
       repair: () => rpc("sync.repair").then(() => {}),
+    };
+
+    this.telemetry = {
+      state: () => rpc("telemetry.state").then((r) => r as unknown as TelemetryState),
+      setModeA: (enabled) => rpc("telemetry.setModeA", { enabled }).then(() => {}),
+      setModeB: (enabled) => rpc("telemetry.setModeB", { enabled }).then(() => {}),
+      completeOnboarding: (modeA, modeB) =>
+        rpc("telemetry.completeOnboarding", { modeA, modeB }).then(() => {}),
+      export: () => rpc("telemetry.export"),
+      retryForget: () => rpc("telemetry.retryForget").then(() => {}),
+      trackUpdate: ({ stage, targetVersion, errorCode }) =>
+        rpc("telemetry.trackUpdate", { stage, targetVersion, errorCode }).then(() => {}),
+      trackPane: (paneKind) => rpc("telemetry.trackPane", { paneKind }).then(() => {}),
+      trackSettingsSnapshot: (args) =>
+        rpc("telemetry.trackSettingsSnapshot", args).then(() => {}),
     };
 
     this.push = {

@@ -38,6 +38,8 @@ export const EN_MESSAGES = {
   "tabs.experimentsHint": "Big redesigns you can switch on before they become the default.",
   "tabs.machinesHint":
     "The computers around this boite: what travels between them, and which may reach it.",
+  "tabs.privacy": "Privacy",
+  "tabs.privacyHint": "What this Boite reports, and how to export or delete it.",
 
 
   "devices.title": "Paired devices",
@@ -650,6 +652,45 @@ export const EN_MESSAGES = {
   "setup.agentsNoneHint": "Install one — Claude Code, Codex, Opencode… — then come back and check again. You can also add any command by hand later.",
   "setup.agentsRecheck": "Check again",
   "setup.settingsHint": "Everything here can be changed in the settings: rename a shortcut, change its command, its icon color, or its place in the bar.",
+  "setup.telemetryTitle": "SELL YOUR SOUL TO BOITE!",
+  "setup.telemetryIntro":
+    "Boite counts a few anonymous usage stats so we know what to fix first. Nothing personal leaves your machine, the app works the same either way, and you can change your mind anytime in Settings.",
+  "setup.telemetryQuestion": "Deal?",
+  "setup.telemetryGifAlt": "Trade offer meme",
+  "setup.telemetryBasic": "NO! Enough is enough",
+  "setup.telemetryBasicDefault": "(default)",
+  "setup.telemetryBasicHint":
+    "Anonymous counters and nothing else: no profile, no identifier that follows you around.",
+  "setup.telemetryDeal": "DEAL",
+  "setup.telemetryDealHint":
+    "Adds a separate UUID for enhanced stats, stored only on your machine. Still no idea who you are, but you help a lot. Thank you!",
+  "setup.telemetryOptOutNote":
+    "If you REALLY don't want to help boite, you can opt-out of everything in Settings -> Privacy. :c",
+  "setup.telemetryDoc": "What is collected",
+
+  "privacy.stop": "Stop sending data",
+  "privacy.stopDesc":
+    "The first-run screen left anonymous counters on. Flip the switch below and nothing leaves this machine. No second question.",
+  "privacy.doc": "What is collected",
+  "privacy.docDesc": "The public list of events, fields, and how to turn this off. It lives in the repository so a change shows up in git log.",
+  "privacy.docLink": "Open the telemetry page",
+  "privacy.modeA": "Anonymous counters",
+  "privacy.modeADesc": "Daily counts with no profile. Off means nothing is sent, including enhanced metrics.",
+  "privacy.modeB": "Enhanced metrics",
+  "privacy.modeBDesc": "A random install id on this machine, so we can see retention and export or delete your events. Implies the anonymous counters.",
+  "privacy.data": "Your events",
+  "privacy.dataDesc": "Export a copy, or ask the server to forget the enhanced id. Anonymous counters cannot be deleted because they were never attached to one.",
+  "privacy.exportAction": "Copy export",
+  "privacy.exportCopied": "Copied to the clipboard.",
+  "privacy.exportFailed": "Export failed: {error}",
+  "privacy.exportNeedB": "Enhanced metrics have to be on, or still waiting to be forgotten, before there is anything to export.",
+  "privacy.forgetRetry": "Retry deletion",
+  "privacy.forgetPending": "A previous deletion did not finish. Retry when you are online.",
+  "privacy.forgetFailed": "Deletion failed: {error}",
+  "privacy.loadFailed": "Could not read the telemetry state.",
+  "privacy.enableFailed": "Could not turn this on: {error}",
+  "privacy.disableFailed": "Could not turn this off: {error}",
+  "privacy.inert": "This build has no telemetry endpoint, so there is nothing to export or delete.",
 
   "fastpick.label": "fastpick",
   "fastpick.tooltip": "Launch an agent on another provider and model",

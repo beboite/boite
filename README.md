@@ -206,9 +206,12 @@ format.
 
 ## Privacy and data
 
-No telemetry, no account. The only unprompted network call is the update check,
-which sends nothing but the request; every other connection is to a remote
-workspace you configured. Data lives next to the app config, never in the cloud:
+No account. Optional anonymous usage counters, described in
+[docs/analytics.md](docs/analytics.md). Nothing is sent until you answer the
+first-launch screen, and Settings, Privacy turns it off afterwards. The only
+other unprompted network call is the update check, which sends nothing but the
+request; every other connection is to a remote workspace you configured.
+Projects, threads and transcripts stay on disk next to the app config:
 
 | OS      | Path                                              |
 | ------- | ------------------------------------------------- |

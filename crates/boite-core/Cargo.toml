@@ -34,6 +34,7 @@ sha2 = "0.11"
 # implementation rather than two.
 reqwest = { version = "0.12", default-features = false, features = [
     "blocking",
+    "json",
     "rustls-tls",
     "gzip",
 ] }
@@ -59,11 +60,13 @@ harness = false
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
+    "Win32_Globalization",
     "Win32_Security",
     # A PTY's agent may be a grandchild (a launcher, a wrap shell), so session
     # ownership is decided on the process tree. ToolHelp is the pid-to-parent map.
     "Win32_System_Diagnostics_ToolHelp",
     "Win32_System_JobObjects",
+    "Win32_System_Registry",
     "Win32_System_Threading",
 ] }
 

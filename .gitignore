@@ -23,3 +23,6 @@ boite-data/
 # whoever wrote them and carry their own history; a copy checked in here goes
 # stale the day upstream moves.
 /plugins/
+
+# Wrangler local secrets for telemetry/ (`npx wrangler dev`).
+telemetry/.dev.vars
