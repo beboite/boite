@@ -13,6 +13,7 @@
   import { ACCOUNT_PROVIDERS, type AccountProvider } from "$lib/features/plugin/restart";
   import DashboardCard from "$lib/features/project/DashboardCard.svelte";
   import { relativeClock } from "$lib/shared/utils/clock.svelte";
+  import { tip } from "$lib/shared/actions/tooltip";
   import { t, type MessageKey } from "$lib/i18n/index.svelte";
   import Users from "@lucide/svelte/icons/users";
 
@@ -113,8 +114,14 @@
           <li>
             <button
               type="button"
-              class="group flex w-full items-baseline gap-2 rounded-sm px-1.5 py-1.5 text-left text-xs transition hover:bg-accent disabled:opacity-60"
+              class="group flex w-full items-baseline gap-2 rounded-sm px-1.5 py-1.5 text-left text-xs transition hover:bg-accent {account.active
+                ? 'bg-accent font-medium text-foreground'
+                : switching
+                  ? 'opacity-60'
+                  : ''}"
               disabled={switching || account.active}
+              aria-current={account.active ? "true" : undefined}
+              use:tip={account.active ? t("plugin.current") : null}
               onclick={() => void activate(account)}
             >
               <span
@@ -122,11 +129,6 @@
               >
                 {account.email}
               </span>
-              {#if account.active}
-                <span class="shrink-0 text-2xs uppercase tracking-wider text-muted-foreground/70">
-                  {t("plugin.current")}
-                </span>
-              {/if}
               <span class="ml-auto flex min-w-0 shrink-0 flex-wrap justify-end gap-x-2 text-muted-foreground/70">
                 {#each account.windows as window (window.label)}
                   {@const percent = windowPercent(window)}
