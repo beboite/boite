@@ -21,6 +21,7 @@ import {
 } from "$lib/domain/delegation";
 import { settings } from "$lib/features/settings/store.svelte";
 import { device } from "$lib/features/settings/device.svelte";
+import { resolveLaunchView } from "$lib/features/settings/resolveLaunchView";
 import { logger } from "$lib/shared/services/logger.svelte";
 import { t } from "$lib/i18n/index.svelte";
 import { platform } from "$lib/storage/platform.svelte";
@@ -474,11 +475,9 @@ export class AppState {
       const scratch = await projectWrites.ensureScratch(this);
       this.selectedProjectId = scratch?.id ?? this.sortedProjects[0]?.id ?? null;
       if (scratch) {
-        // Flag off leaves this landing exactly as it was: Scratch's project page.
-        if (
-          settings.state.experimentHome &&
-          settings.state.openOnLaunch === "home"
-        ) {
+        // Nothing reaching home leaves this landing exactly as it was:
+        // Scratch's project page.
+        if (resolveLaunchView(settings.state) === "home") {
           this.view = "home";
           this.mobileTab = "home";
         } else {

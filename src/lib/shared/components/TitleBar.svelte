@@ -9,6 +9,7 @@
   import { workspace } from "$lib/backend";
   import { app } from "$lib/app/store.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
+  import { homeAvailable } from "$lib/features/settings/homeAvailable";
   import { addProjectByPath } from "$lib/features/project/api";
   import { launchBlankTerminal } from "$lib/features/thread/api";
   import { t } from "$lib/i18n/index.svelte";
@@ -18,6 +19,7 @@
   import Copy from "@lucide/svelte/icons/copy";
   import X from "@lucide/svelte/icons/x";
   import Settings from "@lucide/svelte/icons/settings";
+  import Home from "@lucide/svelte/icons/home";
   import PanelLeft from "@lucide/svelte/icons/panel-left";
   import GitBranch from "@lucide/svelte/icons/git-branch";
   import FolderTree from "@lucide/svelte/icons/folder-tree";
@@ -264,6 +266,17 @@
   //    root (the "folder of folders"), creating the default workspace project
   //    the first time so a bare install can start a shell with zero folder-
   //    picking. Remote only — TauriBackend has no workspace root.
+  // Home has no other door on the desktop: the palette command is typed, not
+  // seen, and the mobile tab does not exist here. Drawn only when something
+  // arms the view, so a device that never touched the experiments keeps the
+  // titlebar it shipped with.
+  const homeShown = $derived(homeAvailable(settings.state));
+
+  function showHome() {
+    app.view = "home";
+    app.mobileTab = "home";
+  }
+
   async function goHome() {
     if (app.view === "settings") {
       app.view = "terminal";
@@ -302,6 +315,20 @@
     >
       <BoiteLogo size={17} />
     </button>
+    {#if homeShown}
+      <button
+        type="button"
+        class="flex h-7 items-center justify-center rounded-md px-2 transition {app.view ===
+        'home'
+          ? 'bg-accent text-foreground'
+          : 'text-muted-foreground hover:bg-accent hover:text-foreground'}"
+        onclick={showHome}
+        title={t("home.title")}
+        aria-label={t("home.title")}
+      >
+        <Home class="size-[15px]" />
+      </button>
+    {/if}
     <button
       type="button"
       class="press flex h-7 items-center justify-center rounded-md px-2 transition {app.view ===

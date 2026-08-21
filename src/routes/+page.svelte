@@ -4,6 +4,7 @@
   import { isFinished } from "$lib/domain/thread-status";
   import { workspace } from "$lib/backend";
   import { settings } from "$lib/features/settings/store.svelte";
+  import { homeAvailable } from "$lib/features/settings/homeAvailable";
   import { pickAndAddProject } from "$lib/features/project/api";
   import { ptyKill } from "$lib/storage/pty";
   import { reloadThread, warmWorktreeFor } from "$lib/features/thread/api";
@@ -114,9 +115,10 @@
   const settingsActive = $derived(
     mobile ? app.mobileTab === "settings" : app.view === "settings",
   );
-  // Flag off: always false, so every branch below collapses to today's chrome.
+  // Nothing arming home: always false, so every branch below collapses to
+  // today's chrome.
   const homeActive = $derived(
-    settings.state.experimentHome &&
+    homeAvailable(settings.state) &&
       (mobile ? app.mobileTab === "home" : app.view === "home"),
   );
 

@@ -1,5 +1,6 @@
 import { app } from "$lib/app/store.svelte";
 import { settings } from "$lib/features/settings/store.svelte";
+import { homeAvailable } from "$lib/features/settings/homeAvailable";
 import { projectDisplayName } from "$lib/shared/project-label";
 import {
   closeThreadWithConfirm,
@@ -184,7 +185,7 @@ export function buildPaletteCommands(): PaletteCommand[] {
       app.mobileTab = "settings";
     },
   });
-  if (settings.state.experimentHome) {
+  if (homeAvailable(settings.state)) {
     commands.push({
       id: "action:home",
       section: "actions",
