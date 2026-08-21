@@ -11,6 +11,7 @@
   import SettingsDevicesTab from "./SettingsDevicesTab.svelte";
   import SettingsLogsTab from "./SettingsLogsTab.svelte";
   import SettingsExperimentsTab from "./SettingsExperimentsTab.svelte";
+  import SettingsSyncTab from "./SettingsSyncTab.svelte";
   import SettingsAboutTab from "./SettingsAboutTab.svelte";
   import { updater } from "$lib/features/updater/store.svelte";
   import X from "@lucide/svelte/icons/x";
@@ -23,6 +24,7 @@
   import Keyboard from "@lucide/svelte/icons/keyboard";
   import ScrollText from "@lucide/svelte/icons/scroll-text";
   import Smartphone from "@lucide/svelte/icons/smartphone";
+  import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import FlaskConical from "@lucide/svelte/icons/flask-conical";
   import Info from "@lucide/svelte/icons/info";
   import { onDestroy, tick, type Component } from "svelte";
@@ -90,6 +92,7 @@
       hintKey: "tabs.devicesHint",
       icon: Smartphone,
     },
+    { id: "sync", labelKey: "tabs.sync", hintKey: "tabs.syncHint", icon: RefreshCw },
     { id: "logs", labelKey: "tabs.logs", hintKey: "tabs.logsHint", icon: ScrollText },
     {
       id: "experiments",
@@ -446,6 +449,8 @@
           <SettingsKeyboardTab />
         {:else if activeTab === "devices"}
           <SettingsDevicesTab />
+        {:else if activeTab === "sync"}
+          <SettingsSyncTab />
         {:else if activeTab === "logs"}
           <SettingsLogsTab />
         {:else if activeTab === "experiments"}

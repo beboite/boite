@@ -25,6 +25,7 @@ export const EN_MESSAGES = {
   "tabs.about": "About",
   "tabs.devices": "Devices",
   "tabs.experiments": "Experiments",
+  "tabs.sync": "Sync",
   "tabs.generalHint": "Notifications, and the shortcuts the launcher offers.",
   "tabs.terminalHint": "How a terminal starts, and when it is put to sleep.",
   "tabs.appearanceHint": "Scale, layout, motion and language.",
@@ -34,6 +35,8 @@ export const EN_MESSAGES = {
   "tabs.logsHint": "What the app recorded about this session.",
   "tabs.aboutHint": "Which build is running, and whether there is a newer one.",
   "tabs.experimentsHint": "Big redesigns you can switch on before they become the default.",
+  "tabs.syncHint":
+    "Carry your agent configuration between computers, through a repository of your own.",
 
 
   "devices.title": "Paired devices",
@@ -1289,6 +1292,102 @@ export const EN_MESSAGES = {
   "keybindings.cmd.splitDown": "Split down",
   "keybindings.cmd.nextPane": "Next pane",
   "keybindings.cmd.previousPane": "Previous pane",
+
+  // Carrying the agent configuration between computers.
+  "sync.enable": "Sync when Boite opens",
+  "sync.enableDesc":
+    "Boite reads the repository at start. Anything that differs opens the merge tool, and nothing is written until you say so.",
+  "sync.enableNoRemote": "Name a repository first.",
+
+  "sync.remoteTitle": "The repository",
+  "sync.remoteDesc":
+    "A private git repository you own. Boite writes to it and reads from it, and never sees your credentials: git resolves those on the machine the terminals run on, the same way it does for every other repository there.",
+  "sync.remotePlaceholder": "git@github.com:you/boite-config.git",
+  "sync.remoteLabel": "Repository address",
+  "sync.remoteCheck": "Check",
+  "sync.remoteChecking": "Asking the repository…",
+  "sync.remoteSave": "Use this repository",
+  "sync.remoteReachable": "It answers, and there is a history to read.",
+  "sync.remoteEmpty":
+    "It answers and it is empty. The first sync fills it with what this machine has.",
+  "sync.remoteNeedsAuth":
+    "It refused. Git has no credential for this address on the machine the terminals run on — set one up there, an SSH key or a credential helper, and check again.",
+  "sync.remoteMissing": "Nothing answers at that address: {error}",
+  "sync.remoteEdit": "Change the address",
+  "sync.remoteForget": "Forget this repository",
+  "sync.remoteForgetAsk":
+    "Boite stops syncing. Every file stays exactly as it is, on this machine and in the repository.",
+
+  "sync.statusTitle": "Last sync",
+  "sync.statusDesc": "What the last run did, and the button that starts another.",
+  "sync.now": "Sync now",
+  "sync.neverSynced": "This machine has never synced.",
+  "sync.lastSyncedAt": "Last synced at {when}.",
+  "sync.pendingCount": "{count} files still differ.",
+  "sync.review": "Review the differences",
+  "sync.dismiss": "Clear",
+  "sync.repair": "Reset the local copy",
+  "sync.unsupportedHere": "Not available on this machine.",
+  "sync.unsupportedHereDetail":
+    "Syncing needs git on the machine the terminals run on, and Boite can find none there.",
+  "sync.phaseIdle": "Nothing is running.",
+  "sync.phaseOpening": "Finding the local copy.",
+  "sync.phaseFetching": "Reading the repository.",
+  "sync.phaseReading": "Reading this machine.",
+  "sync.phaseComparing": "Comparing the two.",
+  "sync.phaseWriting": "Writing what was agreed.",
+  "sync.phaseCommitting": "Recording the change.",
+  "sync.phasePushing": "Sending this machine's side back.",
+  "sync.phaseDone": "Everything matches.",
+  "sync.phaseNeedsMerge": "Waiting on you.",
+  "sync.phaseFailed": "It stopped: {error}",
+  "sync.phaseCancelled": "Stopped before it finished.",
+
+  "sync.sourcesTitle": "What gets synced",
+  "sync.sourcesDesc":
+    "One switch per agent, plus the folder they all read. A switch that is off is a file Boite neither sends nor touches, and every switch starts off.",
+  "sync.agentsRow": "The .agents folder",
+  "sync.agentsRowDesc": "AGENTS.md, the skills and the commands every agent reads.",
+  "sync.sourceUnknown": "Boite does not know where this one keeps its configuration.",
+  "sync.sourceAbsent":
+    "Not on this machine. Its configuration can still arrive before it does.",
+  "sync.secretsNote":
+    "Credentials never leave. A field Boite knows is a secret travels as a placeholder, and a pull puts back the value this machine already had.",
+
+  "syncMerge.title": "Files that differ",
+  "syncMerge.progress": "{done} of {total} decided",
+  "syncMerge.files": "Files that differ",
+  "syncMerge.nothingWaiting": "Nothing is waiting.",
+  "syncMerge.statusWaiting": "Waiting",
+  "syncMerge.statusResolved": "Applied",
+  "syncMerge.statusSkipped": "Left alone",
+  "syncMerge.statusFailed": "Could not be written",
+  "syncMerge.mineLabel": "This machine",
+  "syncMerge.theirsLabel": "The repository",
+  "syncMerge.differenceOf": "Difference {index} of {total}",
+  "syncMerge.nothingHere": "(nothing on this side)",
+  "syncMerge.mine": "Mine",
+  "syncMerge.theirs": "Theirs",
+  "syncMerge.both": "Both",
+  "syncMerge.bothReversed": "Both, theirs first",
+  "syncMerge.keepAllBoth": "Keep both everywhere",
+  "syncMerge.undecided": "{count} still to decide",
+  "syncMerge.noDifferences": "The two sides match.",
+  "syncMerge.result": "What will be written",
+  "syncMerge.invalid": "This cannot be read back: {error}",
+  "syncMerge.invalidAtLine": "Line {line} cannot be read back: {error}",
+  "syncMerge.apply": "Apply to this file",
+  "syncMerge.skip": "Leave it alone",
+  "syncMerge.binary":
+    "One side of this file is not text, so there is nothing to stack. Keep one or leave it alone.",
+  "syncMerge.keepMine": "Keep mine",
+  "syncMerge.takeTheirs": "Take theirs",
+  "syncMerge.abandonAsk":
+    "{count} files still differ. They stay exactly as they are, here and in the repository, and the next sync will ask again. What you already applied stays applied.",
+  "syncMerge.abandonConfirm": "Close anyway",
+  "syncMerge.abandonCancel": "Keep going",
+  "syncMerge.sendNote": "Nothing is sent until everything here is decided.",
+  "syncMerge.send": "Send this machine's side",
 
 } as const;
 
