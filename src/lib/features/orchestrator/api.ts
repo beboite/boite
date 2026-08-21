@@ -3,6 +3,7 @@ import { resolveLaunch } from "$lib/app/agent-requests";
 import { backend } from "$lib/backend/active.svelte";
 import { settings } from "$lib/features/settings/store.svelte";
 import { launchAgent, reloadThread } from "$lib/features/thread/api";
+import { typeIntoOrchestrator } from "$lib/app/dispatches";
 import { withUnattendedArgs } from "$lib/features/thread/session";
 import { logger } from "$lib/shared/services/logger.svelte";
 import { notifications } from "$lib/features/notifications/store.svelte";
@@ -112,14 +113,32 @@ export async function postToOrchestrator(
 ): Promise<boolean> {
   const conduct = backend().conduct;
   if (!conduct) return false;
+
+  // Read before the launch, because launching is what changes the answer. A
+  // thread already mid-turn is the one case the pulse covers on its own: the
+  // agent is inside `workspace_pulse` or working, and `chat.posted` reaches it
+  // there. Every other case ends at a prompt nobody is typing at, which is
+  // what "the orchestrator does not answer" was.
+  const before = findOrchestrator(scope);
+  const listening =
+    !!before &&
+    !before.autoSlept &&
+    (before.status === "running" || before.status === "waiting");
+
   const thread = await ensureOrchestrator(scope);
   if (!thread) return false;
   try {
     await conduct.post({ scope, text });
-    return true;
   } catch (err) {
     logger.error("orchestrator", "post failed", String(err));
     notifications.error(t("orchestrator.postFailed"));
     return false;
   }
+  if (!listening) {
+    // Not awaited: the row is written and the chat has the user's bubble, so
+    // the send is done. This waits on a prompt that may be twenty seconds
+    // away, and blocking the composer on it would read as a hung send.
+    void typeIntoOrchestrator(thread.id, text);
+  }
+  return true;
 }

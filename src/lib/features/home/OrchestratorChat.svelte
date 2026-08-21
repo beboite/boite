@@ -119,7 +119,7 @@
       </p>
     {/if}
     <div
-      class="flex items-end gap-1.5 border-border px-2.5 py-2 {voice.pendingSend
+      class="flex items-end gap-2 border-border px-2.5 py-2 {voice.pendingSend
         ? ''
         : 'border-t'}"
     >
@@ -131,7 +131,7 @@
       {/if}
       <textarea
         rows="1"
-        class="max-h-24 min-h-7 flex-1 resize-none rounded-md border border-border bg-[var(--color-surface-2)] px-2 py-1 text-sm text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-foreground/30"
+        class="max-h-24 min-h-9 flex-1 resize-none rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-1.5 text-sm text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-foreground/30"
         placeholder={t("orchestrator.placeholder")}
         bind:value={draft}
         onkeydown={onKeydown}
@@ -139,6 +139,7 @@
       ></textarea>
       <Button
         variant="primary"
+        size="lg"
         onclick={() => void send()}
         disabled={orchestrator.posting || !draft.trim()}
       >

@@ -298,6 +298,7 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "orchestrator.noAgent": "Aucun agent ne correspond à « {agent} ». Choisissez-en un dans Réglages > Expériences.",
   "orchestrator.noProject": "L'orchestrateur a besoin d'au moins un projet où vivre.",
   "orchestrator.startFailed": "L'orchestrateur n'a pas démarré : {error}",
+  "orchestrator.typedNotice": "Depuis la conversation",
   "orchestrator.postFailed": "Le message n'a pas été remis.",
   "orchestrator.scopeLabel": "Portée de la conversation",
   "orchestrator.scopeWorkspace": "Tout l'atelier",

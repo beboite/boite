@@ -16,7 +16,7 @@
   import type { Snippet } from "svelte";
 
   type Variant = "primary" | "secondary" | "ghost" | "danger";
-  type Size = "sm" | "md";
+  type Size = "sm" | "md" | "lg";
 
   type Props = {
     variant?: Variant;
@@ -27,8 +27,17 @@
     disabled?: boolean;
     title?: string;
     ariaLabel?: string;
+    /** Toggle state, for a button that is on or off rather than an action. */
+    pressed?: boolean;
+    /** Something is running behind it, for a control that stays enabled. */
+    busy?: boolean;
     class?: string;
     onclick?: (event: MouseEvent) => void;
+    /** Push-to-talk and the like: a press that begins and ends, not a click. */
+    onpointerdown?: (event: PointerEvent) => void;
+    onpointerup?: (event: PointerEvent) => void;
+    onpointercancel?: (event: PointerEvent) => void;
+    onpointerleave?: (event: PointerEvent) => void;
     children: Snippet;
   };
 
@@ -40,17 +49,24 @@
     disabled = false,
     title,
     ariaLabel,
+    pressed,
+    busy,
     class: extra = "",
     onclick,
+    onpointerdown,
+    onpointerup,
+    onpointercancel,
+    onpointerleave,
     children,
   }: Props = $props();
 
   const SIZES: Record<Size, string> = {
     sm: "h-6 text-2xs gap-1",
     md: "h-7 text-xs gap-1.5",
+    lg: "h-9 text-sm gap-2",
   };
-  const PADDING: Record<Size, string> = { sm: "px-2", md: "px-2.5" };
-  const SQUARE: Record<Size, string> = { sm: "w-6", md: "w-7" };
+  const PADDING: Record<Size, string> = { sm: "px-2", md: "px-2.5", lg: "px-3" };
+  const SQUARE: Record<Size, string> = { sm: "w-6", md: "w-7", lg: "w-9" };
 
   const VARIANTS: Record<Variant, string> = {
     primary:
@@ -77,6 +93,19 @@
   );
 </script>
 
-<button {type} {disabled} {title} aria-label={ariaLabel} class={classes} {onclick}>
+<button
+  {type}
+  {disabled}
+  {title}
+  aria-label={ariaLabel}
+  aria-pressed={pressed}
+  aria-busy={busy}
+  class={classes}
+  {onclick}
+  {onpointerdown}
+  {onpointerup}
+  {onpointercancel}
+  {onpointerleave}
+>
   {@render children()}
 </button>

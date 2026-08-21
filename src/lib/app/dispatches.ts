@@ -138,6 +138,53 @@ export async function flushDispatches(): Promise<void> {
   }
 }
 
+/** How long a fresh orchestrator is given to reach a prompt we can type at. */
+const WAKE_TIMEOUT_MS = 25_000;
+/** Between looks. The status engine sweeps twice a second; this is slower. */
+const WAKE_POLL_MS = 300;
+
+/**
+ * Put the user's line at the orchestrator's own prompt.
+ *
+ * `orchestrator.post` writes a row and a moment, and the agent is meant to be
+ * asleep in `workspace_pulse` when it lands. It is not always: a thread that
+ * has just spawned has never taken a turn, and one whose last turn ended
+ * without going back into the pulse is sitting at a bare prompt. In both cases
+ * the row was written, the chat drew the user's bubble, and nothing on the
+ * other side was listening — which is the whole of "the orchestrator does not
+ * answer".
+ *
+ * So the caller says whether the pulse can be trusted to carry it. When it
+ * cannot, this waits for the thread to reach a prompt and types the line there,
+ * through the same sink a dispatch uses: the bus still never writes to a PTY,
+ * the device does, and the terminal shows the line came from the chat.
+ */
+export async function typeIntoOrchestrator(
+  threadId: string,
+  text: string,
+): Promise<boolean> {
+  const line = text.replace(/\s*[\r\n]+\s*/g, " ").trim();
+  if (!line) return false;
+  const deadline = Date.now() + WAKE_TIMEOUT_MS;
+  for (;;) {
+    const thread = app.threadById(threadId);
+    const sink = sinks.get(threadId);
+    // A thread that went away, or one whose PTY died: nothing to type into,
+    // and the row stays in the chat for the next launch to read.
+    if (!thread || thread.settledAt) return false;
+    if (sink && thread.ptyId && (thread.status === "ready" || thread.status === "idle")) {
+      sink.notice(t("orchestrator.typedNotice"));
+      sink.type(line + "\r");
+      return true;
+    }
+    if (Date.now() >= deadline) {
+      logger.warn("orchestrator", "no prompt to type at", { threadId, status: thread.status });
+      return false;
+    }
+    await new Promise((resolve) => setTimeout(resolve, WAKE_POLL_MS));
+  }
+}
+
 /** The boite put a thread away (`thread.dismiss`); mirror the row here. */
 export function onThreadDismissed(threadId: string) {
   const thread = app.threadById(threadId);

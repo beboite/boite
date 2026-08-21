@@ -296,6 +296,7 @@ export const EN_MESSAGES = {
   "orchestrator.noAgent": "No agent matches «{agent}». Pick one in Settings > Experiments.",
   "orchestrator.noProject": "The orchestrator needs at least one project to live in.",
   "orchestrator.startFailed": "The orchestrator did not start: {error}",
+  "orchestrator.typedNotice": "From the chat",
   "orchestrator.postFailed": "The message was not delivered.",
   "orchestrator.scopeLabel": "Conversation scope",
   "orchestrator.scopeWorkspace": "Whole workspace",
