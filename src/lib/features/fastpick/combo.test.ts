@@ -7,6 +7,15 @@ function model(id: string, label: string | null): FastpickModel {
 }
 
 describe("comboArgs", () => {
+  it("names the credential only when there is one to name", () => {
+    expect(comboArgs({ harness: "h", provider: "p", model: "m" })).not.toContain("--key");
+    expect(comboArgs({ harness: "h", provider: "p", key: null, model: "m" })).not.toContain("--key");
+    expect(comboArgs({ harness: "h", provider: "p", key: "second", model: "m" })).toEqual([
+      "--harness", "h", "--provider", "p", "--model", "m",
+      "--key", "p.second",
+    ]);
+  });
+
   it("names all three answers so fastpick opens no menu", () => {
     expect(comboArgs({ harness: "claude-code", provider: "acme", model: "acme-large" })).toEqual([
       "--harness",
@@ -41,11 +50,38 @@ describe("parseCombo", () => {
     const combo = {
       harness: "claude-code",
       provider: "acme",
+      key: null,
       model: "acme-large",
       effort: "high",
       prompts: ["acme-large"],
     };
     expect(parseCombo("fastpick", comboArgs(combo))).toEqual(combo);
+  });
+
+  it("reads back a credential too, which is what makes a shared model id unambiguous", () => {
+    const combo = {
+      harness: "claude-code",
+      provider: "acme",
+      key: "billing",
+      model: "acme-large",
+      effort: null,
+      prompts: undefined,
+    };
+    expect(parseCombo("fastpick", comboArgs(combo))).toEqual(combo);
+  });
+
+  it("takes the provider from --key when nothing else named it", () => {
+    expect(
+      parseCombo("fastpick", ["--harness", "h", "--key", "acme.billing", "--model", "m"]),
+    ).toEqual({ harness: "h", provider: "acme", key: "billing", model: "m", effort: null, prompts: undefined });
+  });
+
+  it("keeps --provider when both are written, the two being one answer", () => {
+    expect(
+      parseCombo("fastpick", [
+        "--harness", "h", "--provider", "acme", "--key", "acme.billing", "--model", "m",
+      ])?.provider,
+    ).toBe("acme");
   });
 
   it("ignores a command that is not fastpick", () => {
@@ -54,7 +90,7 @@ describe("parseCombo", () => {
 
   it("recognises the launcher however the thread spells it", () => {
     const args = ["--harness", "h", "--provider", "p", "--model", "m"];
-    const combo = { harness: "h", provider: "p", model: "m", effort: null, prompts: undefined };
+    const combo = { harness: "h", provider: "p", key: null, model: "m", effort: null, prompts: undefined };
     for (const cmd of [
       "fastpick.exe",
       "C:\\Users\\x\\.cargo\\bin\\fastpick.exe",
@@ -86,7 +122,7 @@ describe("parseCombo", () => {
       "--harness", "h", "--provider", "p", "--model", "m",
       "--", "-p", "hello",
     ]);
-    expect(combo).toEqual({ harness: "h", provider: "p", model: "m", effort: null, prompts: undefined });
+    expect(combo).toEqual({ harness: "h", provider: "p", key: null, model: "m", effort: null, prompts: undefined });
   });
 
   it("reads --no-md as an explicit none", () => {
@@ -102,6 +138,7 @@ describe("iconKeyForKind", () => {
     expect(iconKeyForKind("claude-code")).toBe("claude");
     expect(iconKeyForKind("opencode")).toBe("opencode");
     expect(iconKeyForKind("codex")).toBe("codex");
+    expect(iconKeyForKind("pi")).toBe("pi");
   });
 
   it("has no icon for a kind it has never heard of", () => {

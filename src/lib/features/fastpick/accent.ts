@@ -1,5 +1,6 @@
 import type { FastpickProvider } from "$lib/backend/types";
 import type { FastpickCombo } from "./combo";
+import { keyById } from "./keys";
 
 /**
  * What is actually answering, when the icon says Claude.
@@ -70,13 +71,19 @@ export function modelFamily(model: string): "claude" | "gpt" | "other" {
  *
  * A provider fastpick has to start a proxy for is never local: the proxy listens here, the
  * model does not.
+ *
+ * The endpoint belongs to the credential rather than to the provider: one site reached with
+ * two keys can answer on two base URLs, and one of them being the harness's own is exactly
+ * the difference this tint draws. The combo names which key, and a combo that names none
+ * falls back to the provider's only one.
  */
 export function modelAccent(
   combo: FastpickCombo,
   provider?: FastpickProvider | null,
 ): ModelAccent {
-  const binding = provider?.harnesses?.[combo.harness];
-  const proxied = (provider?.proxyPort ?? null) !== null;
+  const key = keyById(provider, combo.key);
+  const binding = key?.harnesses?.[combo.harness];
+  const proxied = (key?.proxyPort ?? null) !== null;
   if (binding && !proxied) {
     if (!binding.baseUrl) return "native";
     if (isLocalUrl(binding.baseUrl)) return "local";
