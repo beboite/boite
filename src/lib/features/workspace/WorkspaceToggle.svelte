@@ -38,15 +38,18 @@
   const mobile = $derived(settings.state.mobileLayout);
 
   // Differentiation palette for the connection outline. Free-form hex is
-  // allowed (the server validates), but these cover the picker.
+  // allowed (the server validates and drops anything that is not #rgb or
+  // #rrggbb), so the values stay literals rather than var() references — but
+  // they are the same hues the shortcut colour picker offers through
+  // --color-icon-*, so the two pickers read as one product.
   const PALETTE = [
     "#4ade80",
-    "#22d3ee",
-    "#60a5fa",
-    "#a855f7",
-    "#f472b6",
-    "#f87171",
-    "#fb923c",
+    "#2ec4b6",
+    "#3b9eff",
+    "#c04ad8",
+    "#ff8fab",
+    "#e5484d",
+    "#f5a524",
     "#facc15",
   ];
 
@@ -504,7 +507,7 @@
         {#if !active}
           <button
             type="button"
-            class={`flex shrink-0 items-center justify-center rounded-lg transition hover:bg-accent ${mobile ? "w-11" : "w-9"} ${b.enabled ? "text-foreground" : "text-muted-foreground/50"}`}
+            class={`flex shrink-0 items-center justify-center rounded-lg transition hover:bg-accent ${mobile ? "w-11" : "w-9"} ${b.enabled ? "text-foreground" : "text-muted-foreground/60"}`}
             onclick={() => toggleKeepConnected(b)}
             aria-label={t("workspace.keepConnected")}
             use:tip={b.enabled

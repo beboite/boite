@@ -35,6 +35,7 @@ import {
   comboLabel,
   FASTPICK_CMD,
   iconKeyForKind,
+  parseFastpickAgent,
 } from "$lib/features/fastpick/combo";
 import { editorStore } from "$lib/features/editor/store.svelte";
 import { anchorProjectId, openPane } from "$lib/features/panes/open";
@@ -203,33 +204,19 @@ export function resolveLaunch(
 ): { cmd: string; args: string[]; label: string; iconKey: IconKey; iconColor: string | null } | null {
   const needle = agent?.trim().toLowerCase() ?? "";
 
-  // `fastpick:<provider>:<model>` names an endpoint rather than a CLI, which is
-  // the one thing the shortcut list cannot hold: the pair is the user's to pick
-  // per launch, and writing a shortcut for every combination is not a list.
-  // The harness is claude-code until the name carries one, because that is the
-  // harness every provider in the catalogue answers on.
-  if (needle.startsWith(`${FASTPICK_CMD}:`)) {
-    const [, where, ...rest] = needle.split(":");
-    // Rejoined rather than taken at [2]: a model id is allowed to hold colons,
-    // and cutting at the first one would launch a model that does not exist.
-    const model = rest.join(":");
-    // `<provider>.<key>` picks one credential of a provider that holds several,
-    // written the way fastpick's own `--key` takes it. Without it a site reached
-    // with two accounts answers on whichever fastpick resolves first, which is
-    // not always the one the caller meant and not always the one being paid for.
-    const dot = where?.indexOf(".") ?? -1;
-    const provider = dot > 0 ? where.slice(0, dot) : where;
-    const key = dot > 0 ? where.slice(dot + 1) : null;
-    if (provider && model) {
-      const combo = { harness: "claude-code", provider, key, model };
-      return {
-        cmd: FASTPICK_CMD,
-        args: comboArgs(combo),
-        label: comboLabel(combo),
-        iconKey: iconKeyForKind(combo.harness),
-        iconColor: null,
-      };
-    }
+  // `fastpick:<harness>:<provider>:<model>` names an endpoint rather than a CLI,
+  // which is the one thing the shortcut list cannot hold: the combination is the
+  // user's to pick per launch, and writing a shortcut for every one of them is
+  // not a list.
+  const combo = parseFastpickAgent(needle);
+  if (combo) {
+    return {
+      cmd: FASTPICK_CMD,
+      args: comboArgs(combo),
+      label: comboLabel(combo),
+      iconKey: iconKeyForKind(combo.harness),
+      iconColor: null,
+    };
   }
 
   if (needle) {

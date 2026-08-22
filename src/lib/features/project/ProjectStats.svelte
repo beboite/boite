@@ -99,7 +99,7 @@
         {#each tokenRows as row (row.label)}
           <div class="flex items-baseline justify-between gap-3">
             <dt class="truncate text-sm text-muted-foreground">{row.label}</dt>
-            <dd class="shrink-0 font-medium tabular-nums text-sm text-foreground/85">{fmt(row.value)}</dd>
+            <dd class="shrink-0 font-medium tabular-nums text-sm text-foreground/80">{fmt(row.value)}</dd>
           </div>
         {/each}
       </dl>

@@ -128,12 +128,12 @@
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-2">
                 <span class="truncate text-sm text-foreground">{row.label}</span>
-                <span class="shrink-0 text-[11px] text-muted-foreground/70">{row.kind}</span>
+                <span class="shrink-0 text-xs text-muted-foreground/70">{row.kind}</span>
                 {#if row.revokedAt}
-                  <span class="shrink-0 text-[11px] text-danger">{t("devices.revoked")}</span>
+                  <span class="shrink-0 text-xs text-danger">{t("devices.revoked")}</span>
                 {/if}
               </div>
-              <p class="truncate text-[11px] text-muted-foreground/70">
+              <p class="truncate text-xs text-muted-foreground/70">
                 {row.scopes.join(", ") || t("devices.noScopes")}
                 &middot;
                 {row.lastSeenAt
@@ -192,7 +192,7 @@
         </button>
       {/each}
     </div>
-    <p class="text-[11px] text-muted-foreground/70">{t("devices.scopeHint")}</p>
+    <p class="text-xs text-muted-foreground/70">{t("devices.scopeHint")}</p>
 
     <button
       type="button"
@@ -226,7 +226,7 @@
           </svg>
         {/if}
         <p class="text-xs text-muted-foreground">{t("devices.inviteOnce")}</p>
-        <code class="w-full break-all rounded bg-[var(--color-surface-3)] px-2 py-1 text-[11px] text-foreground">
+        <code class="w-full break-all rounded bg-[var(--color-surface-3)] px-2 py-1 text-xs text-foreground">
           {invite.url}
         </code>
         <button

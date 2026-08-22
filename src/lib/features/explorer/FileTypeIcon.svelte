@@ -35,7 +35,7 @@
     <path d={glyph.path} />
   </svg>
 {:else}
-  <span class="inline-flex shrink-0 text-muted-foreground/85">
+  <span class="inline-flex shrink-0 text-muted-foreground/80">
     {#if glyph.category === "image"}
       <FileImage {size} />
     {:else if glyph.category === "video"}

@@ -386,7 +386,7 @@
         <li class="flex min-w-0 items-center gap-2">
           <ShortcutIcon iconKey={providerIcon(model.provider)} size={13} />
           <span
-            class="w-24 shrink-0 truncate text-sm text-foreground/85"
+            class="w-24 shrink-0 truncate text-sm text-foreground/80"
             use:tip={model.model}
             aria-hidden="true"
           >

@@ -164,7 +164,7 @@
               aria-expanded={expanded === turn.id}
             >
               <span class="flex items-baseline gap-2">
-                <span class="min-w-0 flex-1 truncate text-base text-foreground/85">
+                <span class="min-w-0 flex-1 truncate text-base text-foreground/80">
                   {t("turns.files", { count: turn.files })}
                 </span>
                 <span class="shrink-0 tabular-nums text-xs text-muted-foreground/70">

@@ -279,7 +279,7 @@
         <button
           type="button"
           role="menuitem"
-          class="flex items-center justify-between gap-3 rounded px-2 py-1.5 text-left text-sm text-foreground/85 transition hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none"
+          class="flex items-center justify-between gap-3 rounded px-2 py-1.5 text-left text-sm text-foreground/80 transition hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none"
           onclick={(e) => void pick(shell, e.shiftKey)}
         >
           <span class="font-medium">{shell.label}</span>
