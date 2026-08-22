@@ -119,7 +119,7 @@
         bind:value={token}
         autocomplete="off"
       />
-      <span class="text-[11px] text-muted-foreground/70">{t("workspace.pairingHint")}</span>
+      <span class="text-xs text-muted-foreground/70">{t("workspace.pairingHint")}</span>
     </label>
 
     {#if pairError}

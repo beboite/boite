@@ -577,7 +577,7 @@
     {@const isMerge = row.commit.parents.length > 1}
     <div
       data-sha={row.commit.sha}
-      class="flex min-w-0 cursor-pointer items-stretch transition hover:bg-[var(--color-surface-2)] focus-visible:bg-[var(--color-surface-2)]"
+      class="flex min-w-0 cursor-pointer items-stretch transition hover:bg-accent focus-visible:bg-[var(--color-surface-2)]"
       style:height="{ROW_H}px"
       onmouseenter={(e) => showPopup(row, e)}
       onmouseleave={leaveRow}
@@ -688,7 +688,7 @@
       <div
         class="flex min-w-0 flex-1 items-center gap-1.5 pl-1 pr-2"
       >
-        <span class="min-w-0 flex-1 truncate text-sm text-foreground/85">
+        <span class="min-w-0 flex-1 truncate text-sm text-foreground/80">
           {row.commit.summary}
         </span>
         {#each row.refBadges as badge (badge.ref)}
@@ -706,7 +706,7 @@
           </span>
         {/if}
         <span
-          class="shrink-0 tabular-nums text-2xs text-muted-foreground/55"
+          class="shrink-0 tabular-nums text-2xs text-muted-foreground/50"
         >
           {relTime(row.commit.time)}
         </span>
@@ -735,21 +735,21 @@
       {c.summary}
     </div>
     <div class="mt-2 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
-      <span class="tabular-nums font-medium text-foreground/75">{c.shortSha}</span>
-      <span class="text-muted-foreground/40">·</span>
-      <span class="text-muted-foreground/85">{c.author}</span>
+      <span class="tabular-nums font-medium text-foreground/70">{c.shortSha}</span>
+      <span class="text-muted-foreground/50">·</span>
+      <span class="text-muted-foreground/80">{c.author}</span>
       {#if c.email}
-        <span class="text-muted-foreground/55">&lt;{c.email}&gt;</span>
+        <span class="text-muted-foreground/50">&lt;{c.email}&gt;</span>
       {/if}
     </div>
-    <div class="mt-1 text-xs text-muted-foreground/65">
+    <div class="mt-1 text-xs text-muted-foreground/60">
       {fmtTime(c.time)}
     </div>
     <div class="mt-2 flex items-center gap-2 tabular-nums text-xs font-medium">
-      <span class={c.additions > 0 ? "text-[var(--color-success)]" : "text-muted-foreground/45"}>
+      <span class={c.additions > 0 ? "text-[var(--color-success)]" : "text-muted-foreground/50"}>
         +{c.additions}
       </span>
-      <span class={c.deletions > 0 ? "text-danger" : "text-muted-foreground/45"}>
+      <span class={c.deletions > 0 ? "text-danger" : "text-muted-foreground/50"}>
         -{c.deletions}
       </span>
     </div>

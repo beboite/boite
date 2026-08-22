@@ -395,7 +395,7 @@
         aria-pressed={editorShowing}
       >
         <FileCode class="size-[15px]" />
-        <span class="text-[11px] tabular-nums">{openHere}</span>
+        <span class="text-xs tabular-nums">{openHere}</span>
       </button>
     {/if}
     <!-- Drawn under the info-box experiment too: it replaces the docked column,

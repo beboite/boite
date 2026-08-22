@@ -182,7 +182,7 @@
                         keepAwake={(thread.keepAwake ?? false) && !!thread.ptyId}
                       />
                       <ShortcutIcon iconKey={thread.iconKey} size={15} color={threadIconColor(thread)} />
-                      <span class="min-w-0 flex-1 truncate text-base text-foreground/85">
+                      <span class="min-w-0 flex-1 truncate text-base text-foreground/80">
                         {thread.title ?? thread.label}
                       </span>
                     </button>

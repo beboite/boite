@@ -180,7 +180,7 @@
                 />
               </span>
               <span class="min-w-0 flex-1">
-                <span class="block truncate text-base text-foreground/85">
+                <span class="block truncate text-base text-foreground/80">
                   {thread.title ?? thread.label}
                 </span>
                 <span class="block truncate text-xs text-muted-foreground/80">

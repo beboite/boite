@@ -209,11 +209,11 @@
     data-name={entry.name}
     data-dir={entry.isDir ? "1" : "0"}
     tabindex="-1"
-    class="group flex w-full items-center px-1 text-left transition hover:bg-[var(--color-surface-2)] focus-visible:bg-[var(--color-surface-2)] focus-visible:outline-none {current
+    class="group flex w-full items-center px-1 text-left transition hover:bg-accent focus-visible:bg-[var(--color-surface-2)] focus-visible:outline-none {current
       ? 'bg-[var(--color-surface-2)]'
       : ''} {mobile
       ? 'min-h-11 gap-2 py-2 text-base'
-      : 'gap-1 py-0.5 text-sm'} {entry.isHidden ? 'text-foreground/55' : 'text-foreground/85'}"
+      : 'gap-1 py-0.5 text-sm'} {entry.isHidden ? 'text-foreground/50' : 'text-foreground/80'}"
     style:padding-left="{depth * 12 + 4}px"
     role="treeitem"
     aria-expanded={entry.isDir ? isOpen : undefined}

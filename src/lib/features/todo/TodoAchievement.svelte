@@ -96,7 +96,7 @@
     top: 18%;
     left: 50%;
     transform: translateX(-50%);
-    z-index: 40;
+    z-index: var(--z-dropdown);
     pointer-events: none;
     display: flex;
     justify-content: center;
