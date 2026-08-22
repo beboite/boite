@@ -76,8 +76,8 @@
        only thing that will move it is the user. -->
   <span
     class="dot-waiting inline-block size-2.5 shrink-0 rounded-full bg-warning"
-    aria-label={status}
-    use:tip={status}
+    aria-label={statusLabel}
+    use:tip={statusLabel}
   ></span>
 {:else}
   <span
