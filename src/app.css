@@ -144,6 +144,12 @@
   --z-modal: 50;
   --z-sheet: 60;
   --z-popover: 70;
+  /* Above every popover, and only just: the tooltip and the panel it explains
+     are both fixed children of <body> (shared/actions/portal.ts), so at equal
+     z-index the winner was whichever was appended last. The tip node is built
+     once and parked there for the life of the app, so every panel opened after
+     the first tooltip painted over it. */
+  --z-tooltip: 75;
   --z-toast: 80;
   --z-outline: 90;
   /* Above everything, the connection outline included: the whip experiment is
@@ -844,7 +850,7 @@ html[data-motion="reduced"] .skeleton::after {
   position: fixed;
   top: 0;
   left: 0;
-  z-index: var(--z-popover);
+  z-index: var(--z-tooltip);
   display: flex;
   align-items: center;
   gap: 6px;
