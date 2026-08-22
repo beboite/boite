@@ -309,7 +309,7 @@
     {/if}
     <button
       type="button"
-      class="ml-auto rounded p-1 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:opacity-40"
+      class="ml-auto rounded p-1 text-muted-foreground transition hover:bg-accent hover:text-foreground disabled:opacity-40"
       onclick={collapseAll}
       disabled={!root}
       use:tip={t("explorer.collapseAll")}
@@ -319,7 +319,7 @@
     </button>
     <button
       type="button"
-      class="rounded p-1 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:opacity-40"
+      class="rounded p-1 text-muted-foreground transition hover:bg-accent hover:text-foreground disabled:opacity-40"
       onclick={refresh}
       disabled={!root || manualRefreshing}
       use:tip={t("explorer.refresh")}
@@ -350,7 +350,7 @@
       {#if filterActive}
         <button
           type="button"
-          class="shrink-0 rounded p-0.5 text-muted-foreground/70 transition hover:bg-[var(--color-surface-3)] hover:text-foreground"
+          class="shrink-0 rounded p-0.5 text-muted-foreground/70 transition hover:bg-accent hover:text-foreground"
           onclick={clearFilter}
           use:tip={t("explorer.clearFilterTitle")}
           aria-label={t("explorer.clearFilter")}

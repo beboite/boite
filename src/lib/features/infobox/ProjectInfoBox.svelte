@@ -712,7 +712,7 @@
     position: absolute;
     inset: 0;
     pointer-events: none;
-    z-index: 5;
+    z-index: var(--z-pane-overlay);
   }
 
   .snaps {

@@ -409,7 +409,7 @@
         class="flex size-4 cursor-grab items-center justify-center rounded transition hover:text-muted-foreground focus-visible:text-foreground active:cursor-grabbing {grabbedId ===
         shortcut.id
           ? 'text-foreground'
-          : 'text-muted-foreground/40'}"
+          : 'text-muted-foreground/50'}"
         aria-label={t("shortcuts.dragToReorder")}
         aria-pressed={grabbedId === shortcut.id}
         aria-keyshortcuts="ArrowUp ArrowDown"
@@ -495,7 +495,7 @@
           onclick={() => void toggleShortcutYolo(shortcut)}
           class="flex h-6 items-center gap-1 rounded border px-1.5 text-2xs font-semibold transition {isYolo
             ? 'border-[var(--color-warning)] bg-[var(--color-warning)]/15 text-[var(--color-warning)] hover:bg-[var(--color-warning)]/25'
-            : 'border-border/60 text-muted-foreground/50 hover:border-border hover:text-foreground'}"
+            : 'border-border/60 text-muted-foreground/60 hover:border-border hover:text-foreground'}"
           title={isYolo ? t("shortcuts.yoloActive") : t("shortcuts.yoloInactive")}
           aria-label={t("shortcuts.yoloMode")}
         >
@@ -561,7 +561,7 @@
                 <span
                   class="size-1.5 shrink-0 rounded-full {installed
                     ? 'bg-[var(--color-success)]'
-                    : 'bg-muted-foreground/40'}"
+                    : 'bg-muted-foreground/50'}"
                 ></span>
                 <span class="truncate">
                   {installed
@@ -593,7 +593,7 @@
             type="button"
             disabled={added}
             onclick={() => addPreset(preset.id)}
-            class="flex h-7 cursor-pointer items-center gap-1 rounded-md bg-foreground px-2.5 text-xs font-semibold text-background transition hover:bg-neutral-200 disabled:cursor-not-allowed disabled:border disabled:border-border/60 disabled:bg-transparent disabled:text-muted-foreground/60"
+            class="flex h-7 cursor-pointer items-center gap-1 rounded-md bg-foreground px-2.5 text-xs font-semibold text-background transition hover:bg-foreground/90 disabled:cursor-not-allowed disabled:border disabled:border-border/60 disabled:bg-transparent disabled:text-muted-foreground/60"
             use:tip={added ? t("shortcuts.alreadyAdded") : t("shortcuts.addToShortcuts")}
           >
             {#if added}

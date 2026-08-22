@@ -150,7 +150,7 @@
   }
 
   const rowClass =
-    "flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1 text-left text-xs text-foreground/85 transition hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-40";
+    "flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1 text-left text-xs text-foreground/80 transition hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-40";
 </script>
 
 <!-- Compact carries no surface of its own: it is the contents of a popover, and
@@ -222,7 +222,7 @@
           type="button"
           class={compact
             ? rowClass
-            : "press group flex shrink-0 items-center gap-1.5 rounded-md border border-transparent bg-[var(--color-surface-2)] px-2.5 py-1 text-xs text-foreground/85 hover:border-border hover:bg-[var(--color-surface-3)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"}
+            : "press group flex shrink-0 items-center gap-1.5 rounded-md border border-transparent bg-[var(--color-surface-2)] px-2.5 py-1 text-xs text-foreground/80 hover:border-border hover:bg-[var(--color-surface-3)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"}
           disabled={!shortcut.command.trim()}
           onclick={(e) => void launch(shortcut.id, e.shiftKey)}
           oncontextmenu={(e) => {

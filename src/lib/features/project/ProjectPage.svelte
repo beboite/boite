@@ -38,13 +38,13 @@ import { projectDisplayName } from "$lib/shared/project-label";
 {#if !project}
   <div class="flex h-full items-center justify-center">
     <div class="flex flex-col items-center gap-3 text-center">
-      <span class="text-muted-foreground/40"><BoiteLogo size={48} /></span>
+      <span class="text-muted-foreground/50"><BoiteLogo size={48} /></span>
       <p class="text-sm text-muted-foreground">{t("project.pickOne")}</p>
     </div>
   </div>
 {:else}
   <div class="flex h-full min-h-0 flex-col">
-    <header class="flex h-8 shrink-0 items-center gap-2 border-b border-border px-4">
+    <header class="flex h-9 shrink-0 items-center gap-2 border-b border-border px-4">
       {#if project.icon}
         <img src={project.icon} alt="" class="size-4 shrink-0 rounded-sm object-cover" />
       {/if}

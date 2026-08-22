@@ -126,10 +126,10 @@
           >
             {#if item.kind === "approval"}
               {@const line = approvalLine(item)}
-              <span class="block w-full truncate text-base text-foreground/85">{line.title}</span>
+              <span class="block w-full truncate text-base text-foreground/80">{line.title}</span>
               <span class="block w-full truncate text-xs text-muted-foreground/80">{line.detail}</span>
             {:else if item.kind === "waiting"}
-              <span class="block w-full truncate text-base text-foreground/85">
+              <span class="block w-full truncate text-base text-foreground/80">
                 {item.thread.title ?? item.thread.label}
               </span>
               <span class="flex w-full items-center justify-between gap-2">
@@ -139,7 +139,7 @@
                 </span>
               </span>
             {:else}
-              <span class="block w-full truncate text-base text-foreground/85">
+              <span class="block w-full truncate text-base text-foreground/80">
                 {item.thread.title ?? item.thread.label}
               </span>
               <span class="flex w-full items-center justify-between gap-2">
