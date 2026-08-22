@@ -448,7 +448,7 @@
     {#if fastpick.loading}
       <div class="px-2 py-1.5 text-xs text-muted-foreground">{t("common.loading")}</div>
     {:else if fastpick.error}
-      <div class="px-2 py-1.5 text-xs text-destructive">{fastpick.error}</div>
+      <div class="px-2 py-1.5 text-xs text-danger">{fastpick.error}</div>
     {:else if pane === "harness"}
       {#if fastpick.harnesses.length === 0}
         <div class="px-2 py-1.5 text-xs text-muted-foreground">
@@ -459,7 +459,7 @@
         <button
           type="button"
           role="menuitem"
-          class="flex items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-foreground/85 transition hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none"
+          class="flex items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-foreground/80 transition hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none"
           onclick={() => pickHarness(h.id)}
         >
           <ShortcutIcon iconKey={iconKeyForKind(h.kind)} size={14} color={null} />
@@ -473,7 +473,7 @@
         <button
           type="button"
           role="menuitem"
-          class="flex items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-foreground/85 transition hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none"
+          class="flex items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-foreground/80 transition hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none"
           onclick={() => pickProvider(p.id)}
         >
           <span class="min-w-0 truncate font-medium">{p.name}</span>
@@ -482,7 +482,7 @@
                ones this harness binds to: a key file missing on a credential that cannot
                launch here is not this row's problem. -->
           {#if missingKeyFile(keys)}
-            <KeyRound class="size-3 text-destructive" aria-label={t("fastpick.noKey")} />
+            <KeyRound class="size-3 text-danger" aria-label={t("fastpick.noKey")} />
             <span class="sr-only">{t("fastpick.noKey")}</span>
           {/if}
           <!-- How many accounts are behind that one name, which is the thing worth knowing
@@ -504,7 +504,7 @@
       {#if providerId && fastpick.loadingModels === providerId}
         <div class="px-2 py-1.5 text-xs text-muted-foreground">{t("common.loading")}</div>
       {:else if providerId && fastpick.modelsError[providerId]}
-        <div class="px-2 py-1.5 text-xs text-destructive">
+        <div class="px-2 py-1.5 text-xs text-danger">
           {fastpick.modelsError[providerId]}
         </div>
       {:else if models}
@@ -533,7 +533,7 @@
             <button
               type="button"
               role="menuitem"
-              class="flex min-w-0 flex-1 items-baseline gap-2 rounded px-2 py-1.5 text-left text-sm text-foreground/85 transition group-hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none"
+              class="flex min-w-0 flex-1 items-baseline gap-2 rounded px-2 py-1.5 text-left text-sm text-foreground/80 transition group-hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none"
               onclick={(e) => pickModel(m, e.shiftKey)}
             >
               <span class="min-w-0 truncate font-medium">{nameOf(m)}</span>
@@ -545,7 +545,7 @@
                 {#if key}
                   <span
                     class="min-w-0 max-w-28 shrink truncate text-2xs text-muted-foreground/70"
-                    class:text-destructive={key.needsKey && !key.keyPresent}
+                    class:text-danger={key.needsKey && !key.keyPresent}
                     title={key.needsKey && !key.keyPresent ? t("fastpick.noKey") : keyLabel(key)}
                   >
                     {keyLabel(key)}
@@ -588,7 +588,7 @@
             type="button"
             role="menuitemradio"
             aria-checked={effort === level}
-            class="flex items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-foreground/85 transition hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none"
+            class="flex items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-foreground/80 transition hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none"
             onclick={() => (effort = level)}
           >
             <span
@@ -632,7 +632,7 @@
             type="button"
             role="menuitemcheckbox"
             aria-checked={promptChecked(stem)}
-            class="flex items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-foreground/85 transition hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none"
+            class="flex items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-foreground/80 transition hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none"
             onclick={() => togglePrompt(stem)}
           >
             <span
