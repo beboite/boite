@@ -18,6 +18,7 @@ pub mod fast_mcp_ssh;
 pub mod fastpick;
 pub mod finish;
 pub mod mcp_launch;
+pub mod mcp_catalog;
 pub mod git;
 pub mod kebacc_switcher;
 pub mod journal;

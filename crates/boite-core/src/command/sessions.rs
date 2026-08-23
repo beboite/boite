@@ -19,8 +19,8 @@ use super::{
 };
 use crate::capability::Capability;
 use crate::{
-    cli_manager, codex_switcher, fast_mcp_ssh, fastpick, kebacc_switcher, session, shell, transcript,
-    usage,
+    cli_manager, codex_switcher, fast_mcp_ssh, fastpick, kebacc_switcher, mcp_catalog, session,
+    shell, transcript, usage,
 };
 
 /// Every method in this domain, in the order they appear below.
@@ -55,6 +55,7 @@ pub const ALL_METHODS: &[&str] = &[
     "cli.uninstall",
     "cli.cancel",
     "cli.dismiss",
+    "mcp.catalog",
 ];
 
 /// Which PTY the caller is, for the one command that has to tell its own live
@@ -181,6 +182,9 @@ pub enum Sessions {
     CliCancel { id: String },
     /// Forgets a job that has settled, which is how a failure is dismissed.
     CliDismiss { id: String },
+    /// MCP servers configured on the machine that launches this project's
+    /// agents. Names and capabilities only; definitions never cross the bus.
+    McpCatalog,
 }
 
 impl Sessions {
@@ -281,6 +285,7 @@ impl Sessions {
             "cli.dismiss" => Sessions::CliDismiss {
                 id: str_param(params, "id")?,
             },
+            "mcp.catalog" => Sessions::McpCatalog,
             other => return Err(format!("unknown method: {other}")),
         })
     }
@@ -317,6 +322,7 @@ impl Sessions {
             Sessions::CliUninstall { .. } => "cli.uninstall",
             Sessions::CliCancel { .. } => "cli.cancel",
             Sessions::CliDismiss { .. } => "cli.dismiss",
+            Sessions::McpCatalog => "mcp.catalog",
         }
     }
 
@@ -351,6 +357,7 @@ impl Sessions {
             Sessions::CliInstall { .. } | Sessions::CliUninstall { .. } => Wire::Key("job"),
             Sessions::CliCancel { .. } => Wire::Key("cancelled"),
             Sessions::CliDismiss { .. } => Wire::Key("dismissed"),
+            Sessions::McpCatalog => Wire::Key("servers"),
         }
     }
 
@@ -381,7 +388,8 @@ impl Sessions {
             | Sessions::CliCatalog { .. }
             | Sessions::CliLatest
             | Sessions::CliJobs
-            | Sessions::CliDataPaths { .. } => Capability::ReadProject,
+            | Sessions::CliDataPaths { .. }
+            | Sessions::McpCatalog => Capability::ReadProject,
 
             Sessions::StopClaude { .. }
             | Sessions::Migrate { .. }
@@ -561,6 +569,7 @@ impl Sessions {
                 cli_manager::jobs::dismiss(&id);
                 value_of(true)
             }
+            Sessions::McpCatalog => value_of(mcp_catalog::catalog()?),
         })
     }
 }

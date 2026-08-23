@@ -22,6 +22,8 @@ import type {
   CliLatest,
   CliJob,
   CliRow,
+  McpApi,
+  McpServerRow,
   FastMcpSshApi,
   KebaccSwitcherApi,
   KebaccSwitcherList,
@@ -224,6 +226,10 @@ export const tauriCli: CliApi = {
   uninstall: (id, purgeData) => invoke<CliJob>("cli_uninstall", { id, purgeData }),
   cancel: (id) => invoke<boolean>("cli_cancel", { id }),
   dismiss: (id) => invoke<void>("cli_dismiss", { id }),
+};
+
+export const tauriMcp: McpApi = {
+  catalog: () => invoke<McpServerRow[]>("mcp_catalog"),
 };
 
 export const tauriScope: ScopeApi = {

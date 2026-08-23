@@ -425,6 +425,8 @@ pub fn run() {
             commands::sessions::agent_turns,
             commands::sessions::agent_token_usage,
             commands::agents::agent_mcp_config,
+            commands::agents::agent_mcp_args,
+            commands::app::mcp_catalog,
             commands::agents::agent_api_ready,
             agent_api::approvals_open,
             agent_api::approval_decide,

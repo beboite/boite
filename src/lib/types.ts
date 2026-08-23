@@ -26,6 +26,11 @@ export interface Project {
    * ones nobody has touched.
    */
   worktrees?: boolean | null;
+  /**
+   * Complete MCP allow-list for this project. Undefined or null leaves each
+   * agent's global configuration alone; an empty list disables every server.
+   */
+  mcpServerIds?: string[] | null;
   origin?: WorkspaceOrigin;
 }
 

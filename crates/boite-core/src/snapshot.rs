@@ -241,10 +241,15 @@ mod tests {
                     archived: false,
                     git_root: None,
                     worktrees: None,
+                    mcp_server_ids: Some(vec!["codex:unityMCP".into()]),
                 },
                 1,
             )
             .unwrap();
+        assert_eq!(
+            store.load_projects().unwrap()[0].mcp_server_ids,
+            Some(vec!["codex:unityMCP".into()])
+        );
 
         let roots = ProjectRoots::default();
         roots.replace(vec![dir.to_string_lossy().to_string()]);
@@ -285,6 +290,7 @@ mod tests {
                     archived: false,
                     git_root: None,
                     worktrees: None,
+                    mcp_server_ids: None,
                 },
                 1,
             )

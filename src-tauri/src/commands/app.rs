@@ -330,6 +330,13 @@ pub async fn cli_catalog(
     .await
 }
 
+/// MCP names configured on the machine that will spawn the agent. Definitions
+/// stay on that machine so config values never travel through the webview.
+#[tauri::command]
+pub async fn mcp_catalog(scope: State<'_, ProjectRoots>) -> Result<Value, String> {
+    on_bus(scope.inner(), Sessions::McpCatalog.into()).await
+}
+
 // What each vendor publishes right now. Its own call rather than a field on the
 // catalogue: this one waits on somebody else's web server, and the panel draws
 // its rows before it has an answer.

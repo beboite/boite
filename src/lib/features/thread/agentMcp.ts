@@ -325,9 +325,31 @@ export async function mcpArgsFor(
   key: IconKey,
   enabled: boolean,
   origin: WorkspaceOrigin | undefined,
-  dest?: { cwd: string; worktree: boolean },
+  dest?: {
+    cwd: string;
+    worktree: boolean;
+    projectId: string;
+    mcpServerIds: string[] | null;
+  },
 ): Promise<string[]> {
-  if (!enabled) return [];
+  const explicit = dest?.mcpServerIds ?? null;
+  const boiteEnabled = explicit ? explicit.includes("boite") : enabled;
+  if ((key === "claude" || key === "codex") && dest) {
+    if (explicit === null && !enabled) return [];
+    if (agentHostFor(origin) !== "here") return [];
+    try {
+      return await invoke<string[]>("agent_mcp_args", {
+        cmd: key,
+        projectId: dest.projectId,
+        mcpServerIds: explicit,
+        defaultBoite: enabled,
+      });
+    } catch (err) {
+      logger.warn("mcp", "project mcp launch arguments unavailable", String(err));
+      return [];
+    }
+  }
+  if (!boiteEnabled) return [];
   const injector = key ? INJECTORS[key] : undefined;
   if (!injector) return [];
   const paths = await mcpPaths(origin);

@@ -336,6 +336,7 @@ mod tests {
                     archived: false,
                     git_root: None,
                     worktrees: None,
+                    mcp_server_ids: None,
                 },
                 1,
             )
@@ -350,6 +351,7 @@ mod tests {
                     archived: true,
                     git_root: None,
                     worktrees: None,
+                    mcp_server_ids: None,
                 },
                 2,
             )
