@@ -3,24 +3,21 @@
   import { flip } from "svelte/animate";
   import { notifications } from "./store.svelte";
   import { toastAnchor } from "./anchor.svelte";
+  import {
+    toastPlace,
+    TOAST_AIR_REM,
+    TOAST_GAP_REM,
+    TOAST_WIDTH,
+  } from "./place";
   import Toast from "./Toast.svelte";
 
-  // Gap between the info box and the first card, and the work-area gutter the
-  // stack uses when no box is standing.
-  const GAP_REM = 0.75;
-  const AIR_REM = 0.5;
-  const TOAST_WIDTH = 320;
-
-  const anchor = $derived(toastAnchor.box);
   const claim = $derived(toastAnchor.claim);
-  const stack = $derived(claim?.stack ?? "below");
+  const area = $derived(toastAnchor.box);
 
   let vw = $state(typeof window === "undefined" ? 0 : window.innerWidth);
-  let vh = $state(typeof window === "undefined" ? 0 : window.innerHeight);
 
   function onResize() {
     vw = window.innerWidth;
-    vh = window.innerHeight;
   }
 
   function remPx(n: number): number {
@@ -29,41 +26,16 @@
     return n * (Number.isFinite(root) ? root : 16);
   }
 
-  const place = $derived.by(() => {
-    const gap = remPx(GAP_REM);
-    const air = remPx(AIR_REM);
-    if (claim) {
-      let top: number | null = null;
-      let bottom: number | null = null;
-      if (claim.stack === "below") {
-        top = claim.bottom + air;
-      } else {
-        bottom = vh - claim.top + air;
-      }
-      let left: number | null = null;
-      let right: number | null = null;
-      if (claim.align === "left") {
-        left = claim.left;
-      } else if (claim.align === "right") {
-        right = vw - claim.right;
-      } else {
-        left = claim.left + claim.width / 2 - TOAST_WIDTH / 2;
-      }
-      if (left != null) {
-        left = Math.max(gap, Math.min(left, vw - TOAST_WIDTH - gap));
-      }
-      return { top, right, bottom, left };
-    }
-    if (anchor) {
-      return {
-        top: anchor.top + gap,
-        right: anchor.right + gap,
-        bottom: null,
-        left: null,
-      };
-    }
-    return { top: null, right: null, bottom: null, left: null };
-  });
+  const place = $derived(
+    toastPlace({
+      claim,
+      area,
+      vw,
+      gap: remPx(TOAST_GAP_REM),
+      air: remPx(TOAST_AIR_REM),
+      width: TOAST_WIDTH,
+    }),
+  );
 
   function px(n: number | null): string | null {
     return n == null ? null : `${n}px`;
@@ -77,19 +49,12 @@
      each card now carries its own role instead (alert for errors, status for
      the rest). -->
 <div
-  class="toaster pointer-events-none fixed z-[var(--z-toast)] flex w-80 max-w-[calc(100vw-2rem)] gap-1.5"
-  class:flex-col={stack === "below"}
-  class:flex-col-reverse={stack === "above"}
-  style:top={place.top != null ? px(place.top) : place.bottom != null ? "auto" : null}
-  style:right={place.right != null ? px(place.right) : place.left != null ? "auto" : null}
-  style:bottom={px(place.bottom)}
-  style:left={px(place.left)}
+  class="toaster pointer-events-none fixed z-[var(--z-toast)] flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-1.5"
+  style:top={px(place.top)}
+  style:right={px(place.right)}
 >
   {#each notifications.toasts as toast (toast.id)}
-    <div
-      animate:flip={{ duration: 150 }}
-      transition:fly={{ y: stack === "above" ? 8 : -8, duration: 150 }}
-    >
+    <div animate:flip={{ duration: 150 }} transition:fly={{ y: -8, duration: 150 }}>
       <!-- A repeat of the same message bumps resetKey rather than stacking a
            second card; remounting here is what restarts its countdown. -->
       {#key toast.resetKey}

@@ -12,8 +12,6 @@
     anchorForPoint,
     clampToPane,
     snapPoint,
-    toastAlignFor,
-    toastStackFor,
   } from "./anchor";
   import { settings } from "$lib/features/settings/store.svelte";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
@@ -229,8 +227,6 @@
 
   const collapsed = $derived(settings.state.infoBoxCollapsed);
   const dock = $derived(settings.state.infoBoxAnchor);
-  const stack = $derived(toastStackFor(dock));
-  const align = $derived(toastAlignFor(dock));
 
   let hostEl = $state<HTMLElement | null>(null);
   let cardEl = $state<HTMLElement | null>(null);
@@ -274,8 +270,6 @@
     void boxSize.h;
     void visible;
     void focused;
-    void stack;
-    void align;
     remeasureToastClaims();
   });
 
@@ -370,8 +364,6 @@
   const toastParams = $derived({
     standing: visible && hasContent,
     focused,
-    stack,
-    align,
   });
 </script>
 
@@ -400,14 +392,11 @@
          expansion reachable from a keyboard (focus-within), which is exactly the
          combination the a11y rule cannot see. -->
     <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-    <!-- use:toastInset: the toast stack attaches to this box, and this is what
-         sends it below the card instead of on top of it, or above the card when
-         it is docked on a bottom edge. On the card, so the unfolded log is
-         measured too: it grows into exactly the room the stack was pushed into
-         and draws under it, so a stack that stayed put would hide the log
-         behind opaque toasts. Given `visible` and `focused` because a box in
-         another group is laid out and measures the same way while nobody can
-         see it. -->
+    <!-- use:toastInset: the toast stack stays in the work-area top-right and
+         only drops below this card when the two would overlap. On the card, so
+         the unfolded log is measured too: it grows into the corner the stack
+         was using. Given `visible` and `focused` because a box in another
+         group is laid out and measures the same way while nobody can see it. -->
     <div
       bind:this={cardEl}
       class="card"

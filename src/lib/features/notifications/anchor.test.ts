@@ -1,8 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 /**
- * Who the toast stack attaches to, now that the info box can sit on any of
- * the eight docks rather than only the top-right corner.
+ * Which standing info box the toaster must not cover.
  *
  * Every group in the window keeps its boxes mounted and hides the ones nobody
  * is looking at with `visibility`, which lays them out anyway: they have a real
@@ -66,8 +65,6 @@ function mount(
   const handle = toastInset(el, {
     standing: params.standing ?? true,
     focused: params.focused ?? false,
-    stack: params.stack ?? "below",
-    align: params.align ?? "right",
   });
   mounted.push(handle);
   return handle;
@@ -93,8 +90,6 @@ describe("the toast stack and who it attaches to", () => {
       top: 200,
       left: 40,
       height: 84,
-      stack: "below",
-      align: "right",
     });
   });
 
@@ -138,8 +133,8 @@ describe("the toast stack and who it attaches to", () => {
       box({ top: 112, left: 648, right: 968, width: 320, height: 160 }).el,
       { standing: false },
     );
-    wasOnScreen.update({ standing: false, stack: "below", align: "right" });
-    comingUp.update({ standing: true, stack: "below", align: "right" });
+    wasOnScreen.update({ standing: false });
+    comingUp.update({ standing: true });
     expect(toastAnchor.inset).toBe(160);
   });
 
@@ -168,18 +163,15 @@ describe("the toast stack and who it attaches to", () => {
     expect(toastAnchor.inset).toBe(84);
   });
 
-  it("stacks above a box docked on a bottom edge", () => {
-    mount(box({ top: 500, left: 648, right: 968, width: 320, height: 84 }).el, {
-      stack: "above",
-      align: "right",
-    });
-    expect(toastAnchor.claim).toMatchObject({ stack: "above", align: "right", top: 500 });
+  it("still reports a box docked on a bottom edge, without asking the stack to follow", () => {
+    mount(box({ top: 500, left: 648, right: 968, width: 320, height: 84 }).el);
+    expect(toastAnchor.claim).toMatchObject({ top: 500, left: 648 });
   });
 
   it("follows a drag that only moved the box", () => {
     const card = box({ top: 112, left: 648, right: 968, width: 320, height: 84 });
-    mount(card.el, { align: "left" });
+    mount(card.el);
     card.moveTo({ top: 300, left: 40, right: 360 });
-    expect(toastAnchor.claim).toMatchObject({ top: 300, left: 40, align: "left" });
+    expect(toastAnchor.claim).toMatchObject({ top: 300, left: 40 });
   });
 });

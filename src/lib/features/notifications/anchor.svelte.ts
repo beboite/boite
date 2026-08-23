@@ -10,9 +10,6 @@
  * gap from the right edge of the window, which is what CSS wants.
  */
 
-export type ToastStack = "above" | "below";
-export type ToastAlign = "left" | "center" | "right";
-
 export type ToastClaim = {
   top: number;
   left: number;
@@ -20,17 +17,15 @@ export type ToastClaim = {
   bottom: number;
   width: number;
   height: number;
-  stack: ToastStack;
-  align: ToastAlign;
 };
 
 class ToastAnchor {
   box = $state<{ top: number; right: number } | null>(null);
 
   /**
-   * The standing info box the stack attaches to, or null when none is on
-   * screen. The toaster sits below it, or above it when the box is on a
-   * bottom edge.
+   * The standing info box the stack must not cover, or null when none is on
+   * screen. The toaster stays in the work-area top-right and only drops below
+   * this box when the two would overlap.
    */
   claim = $state<ToastClaim | null>(null);
 
@@ -93,12 +88,10 @@ export function toastArea(el: HTMLElement) {
 export type ToastInsetParams = {
   standing: boolean;
   focused?: boolean;
-  stack: ToastStack;
-  align: ToastAlign;
 };
 
 /**
- * Who the toast stack attaches to, one entry per box rather than one number
+ * Who the toast stack must not cover, one entry per box rather than one number
  * for the window.
  *
  * The info box is one mount per terminal, which means one per thread in every
@@ -114,7 +107,7 @@ export type ToastInsetParams = {
  */
 const claims = new Map<
   symbol,
-  { el: HTMLElement; standing: boolean; focused: boolean; stack: ToastStack; align: ToastAlign }
+  { el: HTMLElement; standing: boolean; focused: boolean }
 >();
 
 function readRect(el: HTMLElement): ToastClaim | null {
@@ -129,8 +122,6 @@ function readRect(el: HTMLElement): ToastClaim | null {
     bottom: rect.bottom,
     width: rect.width,
     height: rect.height,
-    stack: "below",
-    align: "right",
   };
 }
 
@@ -140,12 +131,7 @@ function resolveClaim() {
     if (!claim.standing) continue;
     const rect = readRect(claim.el);
     if (!rect) continue;
-    const candidate = {
-      ...rect,
-      stack: claim.stack,
-      align: claim.align,
-      focused: claim.focused,
-    };
+    const candidate = { ...rect, focused: claim.focused };
     if (!best) {
       best = candidate;
       continue;
@@ -166,8 +152,6 @@ function resolveClaim() {
         bottom: best.bottom,
         width: best.width,
         height: best.height,
-        stack: best.stack,
-        align: best.align,
       }
     : null;
   const prev = toastAnchor.claim;
@@ -179,9 +163,7 @@ function resolveClaim() {
     prev.right === next.right &&
     prev.bottom === next.bottom &&
     prev.width === next.width &&
-    prev.height === next.height &&
-    prev.stack === next.stack &&
-    prev.align === next.align
+    prev.height === next.height
   ) {
     return;
   }
@@ -196,8 +178,8 @@ export function remeasureToastClaims() {
 /**
  * Action for a box the toasts must not cover.
  *
- * Measures the whole card, unfolded log included. The stack sits below it, or
- * above it when the box is docked on a bottom edge.
+ * Measures the whole card, unfolded log included. The stack stays in the
+ * work-area top-right and only drops below this box when the two would overlap.
  *
  * `standing` is the caller's own answer about whether its box is on screen, and
  * it is what the geometry cannot give: a pane in another group keeps its box
@@ -210,8 +192,6 @@ export function toastInset(el: HTMLElement, params: ToastInsetParams) {
     el,
     standing: params.standing,
     focused: params.focused ?? false,
-    stack: params.stack,
-    align: params.align,
   });
   const observer = new ResizeObserver(remeasureToastClaims);
   observer.observe(el);
@@ -222,8 +202,6 @@ export function toastInset(el: HTMLElement, params: ToastInsetParams) {
       if (!claim) return;
       claim.standing = next.standing;
       claim.focused = next.focused ?? false;
-      claim.stack = next.stack;
-      claim.align = next.align;
       remeasureToastClaims();
     },
     destroy() {
