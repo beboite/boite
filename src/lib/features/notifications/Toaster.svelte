@@ -49,12 +49,20 @@
      each card now carries its own role instead (alert for errors, status for
      the rest). -->
 <div
-  class="toaster pointer-events-none fixed z-[var(--z-toast)] flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-1.5"
+  class="toaster pointer-events-none fixed z-[var(--z-toast)] flex w-80 max-w-[calc(100vw-2rem)] gap-1.5"
+  class:flex-col={!place.above}
+  class:flex-col-reverse={place.above}
   style:top={px(place.top)}
-  style:right={px(place.right)}
+  style:left={px(place.left)}
+  style:right={place.left != null ? "auto" : null}
+  style:bottom={place.left != null ? "auto" : null}
+  style:transform={place.above ? "translateY(-100%)" : place.left != null ? "none" : null}
 >
   {#each notifications.toasts as toast (toast.id)}
-    <div animate:flip={{ duration: 150 }} transition:fly={{ y: -8, duration: 150 }}>
+    <div
+      animate:flip={{ duration: 150 }}
+      transition:fly={{ y: place.above ? 8 : -8, duration: 150 }}
+    >
       <!-- A repeat of the same message bumps resetKey rather than stacking a
            second card; remounting here is what restarts its countdown. -->
       {#key toast.resetKey}
@@ -72,7 +80,9 @@
 
 <style>
   /* Overridden inline as soon as the work area has been measured; this is the
-     window corner the login and setup screens use. */
+     window corner the login and setup screens use. `right` and `top` here are
+     why placement is always top+left once a box is standing: leaving this
+     `right` in place while an inline `left` lands is what stretched the stack. */
   .toaster {
     right: 1rem;
     top: calc(1rem + env(safe-area-inset-top, 0px));

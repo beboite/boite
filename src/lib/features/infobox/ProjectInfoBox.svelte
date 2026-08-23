@@ -12,10 +12,17 @@
     anchorForPoint,
     clampToPane,
     snapPoint,
+    toastAlignFor,
+    toastStackFor,
   } from "./anchor";
   import { settings } from "$lib/features/settings/store.svelte";
+  import { DUR } from "$lib/theme/motion";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
-  import { remeasureToastClaims, toastInset } from "$lib/features/notifications/anchor.svelte";
+  import {
+    followToastSnap,
+    remeasureToastClaims,
+    toastInset,
+  } from "$lib/features/notifications/anchor.svelte";
   import { relativeClock } from "$lib/shared/utils/clock.svelte";
   import { formatAgo, formatSpan } from "$lib/shared/utils/relative-time";
   import { t } from "$lib/i18n/index.svelte";
@@ -242,6 +249,11 @@
   let dragging = $state(false);
   let dragPos = $state({ x: 0, y: 0 });
   let hoverSnap = $state<InfoBoxAnchor | null>(null);
+  // The dock the pointer is aiming at while dragging, so the stack flips to
+  // above/left before the drop rather than jumping after it.
+  const liveDock = $derived(hoverSnap ?? dock);
+  const stack = $derived(toastStackFor(liveDock));
+  const align = $derived(toastAlignFor(liveDock));
 
   const settled = $derived(snapPoint(pane, boxSize, gutter, dock));
   const left = $derived(dragging ? dragPos.x : settled.x);
@@ -270,6 +282,8 @@
     void boxSize.h;
     void visible;
     void focused;
+    void stack;
+    void align;
     remeasureToastClaims();
   });
 
@@ -347,13 +361,17 @@
 
   function onPointerUp(e: PointerEvent) {
     if (!session || e.pointerId !== session.pointerId) return;
-    const snap = session.armed
+    const armed = session.armed;
+    const snap = armed
       ? anchorForPoint(pane, e.clientX - session.paneX, e.clientY - session.paneY, dock)
       : null;
     session = null;
     dragging = false;
     hoverSnap = null;
     if (snap) settings.setInfoBoxAnchor(snap);
+    // The card eases to the dock over --dur-3. ResizeObserver ignores left/top,
+    // so without this the stack stays at the drop point while the box leaves.
+    if (armed) followToastSnap(DUR.slow);
   }
 
   function ghostStyle(anchor: InfoBoxAnchor): string {
@@ -364,6 +382,8 @@
   const toastParams = $derived({
     standing: visible && hasContent,
     focused,
+    stack,
+    align,
   });
 </script>
 
@@ -392,11 +412,11 @@
          expansion reachable from a keyboard (focus-within), which is exactly the
          combination the a11y rule cannot see. -->
     <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-    <!-- use:toastInset: the toast stack stays in the work-area top-right and
-         only drops below this card when the two would overlap. On the card, so
-         the unfolded log is measured too: it grows into the corner the stack
-         was using. Given `visible` and `focused` because a box in another
-         group is laid out and measures the same way while nobody can see it. -->
+    <!-- use:toastInset: the toast stack attaches to this box, below it, or
+         above it when the box is on a bottom edge. On the card, so the unfolded
+         log is measured too. Given `visible` and `focused` because a box in
+         another group is laid out and measures the same way while nobody can
+         see it. -->
     <div
       bind:this={cardEl}
       class="card"

@@ -21,6 +21,17 @@ export function isInfoBoxAnchor(value: unknown): value is InfoBoxAnchor {
   );
 }
 
+/** Toasts sit under the box, except on the bottom edge where they stack up. */
+export function toastStackFor(anchor: InfoBoxAnchor): "above" | "below" {
+  return anchor.startsWith("bottom") ? "above" : "below";
+}
+
+export function toastAlignFor(anchor: InfoBoxAnchor): "left" | "center" | "right" {
+  if (anchor.endsWith("left")) return "left";
+  if (anchor.endsWith("right")) return "right";
+  return "center";
+}
+
 export type Size = { w: number; h: number };
 export type Point = { x: number; y: number };
 

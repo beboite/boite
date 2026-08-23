@@ -65,6 +65,8 @@ function mount(
   const handle = toastInset(el, {
     standing: params.standing ?? true,
     focused: params.focused ?? false,
+    stack: params.stack ?? "below",
+    align: params.align ?? "right",
   });
   mounted.push(handle);
   return handle;
@@ -90,6 +92,8 @@ describe("the toast stack and who it attaches to", () => {
       top: 200,
       left: 40,
       height: 84,
+      stack: "below",
+      align: "right",
     });
   });
 
@@ -133,8 +137,8 @@ describe("the toast stack and who it attaches to", () => {
       box({ top: 112, left: 648, right: 968, width: 320, height: 160 }).el,
       { standing: false },
     );
-    wasOnScreen.update({ standing: false });
-    comingUp.update({ standing: true });
+    wasOnScreen.update({ standing: false, stack: "below", align: "right" });
+    comingUp.update({ standing: true, stack: "below", align: "right" });
     expect(toastAnchor.inset).toBe(160);
   });
 
@@ -163,15 +167,18 @@ describe("the toast stack and who it attaches to", () => {
     expect(toastAnchor.inset).toBe(84);
   });
 
-  it("still reports a box docked on a bottom edge, without asking the stack to follow", () => {
-    mount(box({ top: 500, left: 648, right: 968, width: 320, height: 84 }).el);
-    expect(toastAnchor.claim).toMatchObject({ top: 500, left: 648 });
+  it("stacks above a box docked on a bottom edge", () => {
+    mount(box({ top: 500, left: 648, right: 968, width: 320, height: 84 }).el, {
+      stack: "above",
+      align: "right",
+    });
+    expect(toastAnchor.claim).toMatchObject({ stack: "above", align: "right", top: 500 });
   });
 
   it("follows a drag that only moved the box", () => {
     const card = box({ top: 112, left: 648, right: 968, width: 320, height: 84 });
-    mount(card.el);
+    mount(card.el, { align: "left" });
     card.moveTo({ top: 300, left: 40, right: 360 });
-    expect(toastAnchor.claim).toMatchObject({ top: 300, left: 40 });
+    expect(toastAnchor.claim).toMatchObject({ top: 300, left: 40, align: "left" });
   });
 });

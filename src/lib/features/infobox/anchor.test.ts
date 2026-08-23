@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { anchorForPoint, clampToPane, isInfoBoxAnchor, snapPoint } from "./anchor";
+import {
+  anchorForPoint,
+  clampToPane,
+  isInfoBoxAnchor,
+  snapPoint,
+  toastAlignFor,
+  toastStackFor,
+} from "./anchor";
 
 const pane = { w: 800, h: 600 };
 const box = { w: 320, h: 80 };
@@ -48,6 +55,15 @@ describe("info box docks", () => {
     expect(anchorForPoint(pane, -200, -200, "mid-left")).toBe("top-left");
     expect(anchorForPoint(pane, 2000, 2000, "mid-left")).toBe("bottom-right");
     expect(anchorForPoint({ w: 0, h: 0 }, 10, 10, "bottom-center")).toBe("bottom-center");
+  });
+
+  it("stacks toasts above only on the bottom edge", () => {
+    expect(toastStackFor("top-right")).toBe("below");
+    expect(toastStackFor("mid-left")).toBe("below");
+    expect(toastStackFor("bottom-center")).toBe("above");
+    expect(toastAlignFor("top-left")).toBe("left");
+    expect(toastAlignFor("mid-right")).toBe("right");
+    expect(toastAlignFor("bottom-center")).toBe("center");
   });
 
   it("keeps a drag inside the pane", () => {

@@ -1,67 +1,72 @@
 /**
- * Where the toast stack sits, always the work-area top-right.
+ * Where the toast stack sits: glued to the standing info box.
  *
- * The info box can dock on any of eight edges. Following it meant the stack
- * jumped left, centre, below, above, and flipped its flex direction on a drop.
- * Approvals own the bottom centre and the connection banner owns the top, so a
- * stack that tracked the box landed on both. The only move that is still
- * allowed is down, and only when the box is already occupying that corner.
+ * The first version pinned the toaster with `top` or `bottom`, `left` or
+ * `right`, whichever edge the dock used. Switching a `position: fixed` box
+ * from `top` to `bottom` (or `right` to `left`) leaves both edges set for a
+ * frame, so the stack stretches across the pane. That is the "going in every
+ * direction" bug. Always `top` + `left`; stacking above is `translateY(-100%)`.
  */
 
-export type ToastBox = {
+export type ToastStack = "above" | "below";
+export type ToastAlign = "left" | "center" | "right";
+
+export type ToastPlace = {
   top: number | null;
-  right: number | null;
-  bottom: number | null;
   left: number | null;
+  above: boolean;
 };
 
 export type ToastArea = { top: number; right: number };
 
-export type ToastRect = {
+export type PlaceClaim = {
   top: number;
   left: number;
   right: number;
   bottom: number;
+  width: number;
+  stack: ToastStack;
+  align: ToastAlign;
 };
 
 export const TOAST_WIDTH = 320;
 export const TOAST_GAP_REM = 0.75;
 export const TOAST_AIR_REM = 0.5;
-/** How much of the top-right corner counts as occupied. About two cards. */
-export const TOAST_SLOT_HEIGHT = 160;
 
 export type PlaceInput = {
-  claim: ToastRect | null;
+  claim: PlaceClaim | null;
   area: ToastArea | null;
   vw: number;
   gap: number;
   air: number;
   width?: number;
-  slotHeight?: number;
 };
 
-function overlaps(a: ToastRect, b: ToastRect): boolean {
-  return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
-}
-
-export function toastPlace(input: PlaceInput): ToastBox {
-  const empty: ToastBox = { top: null, right: null, bottom: null, left: null };
+export function toastPlace(input: PlaceInput): ToastPlace {
+  const empty: ToastPlace = { top: null, left: null, above: false };
   const { claim, area, vw, gap, air } = input;
-  if (!area) return empty;
-
   const width = input.width ?? TOAST_WIDTH;
-  const slotHeight = input.slotHeight ?? TOAST_SLOT_HEIGHT;
-  const top = area.top + gap;
-  const right = area.right + gap;
-  const corner: ToastBox = { top, right, bottom: null, left: null };
-  if (!claim) return corner;
 
-  const slot: ToastRect = {
-    top,
-    right: vw - right,
-    left: vw - right - width,
-    bottom: top + slotHeight,
-  };
-  if (!overlaps(claim, slot)) return corner;
-  return { top: claim.bottom + air, right, bottom: null, left: null };
+  if (claim) {
+    const above = claim.stack === "above";
+    const top = above ? claim.top - air : claim.bottom + air;
+    let left =
+      claim.align === "left"
+        ? claim.left
+        : claim.align === "right"
+          ? claim.right - width
+          : claim.left + claim.width / 2 - width / 2;
+    left = Math.max(gap, Math.min(left, vw - width - gap));
+    return { top, left, above };
+  }
+
+  if (area) {
+    return {
+      top: area.top + gap,
+      left: vw - area.right - gap - width,
+      above: false,
+    };
+  }
+
+  return empty;
 }

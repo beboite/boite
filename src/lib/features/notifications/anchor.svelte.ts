@@ -6,9 +6,14 @@
  * terminal instead, the docked git, files or todo column, and covered the
  * commit button of a panel the toast had nothing to say about.
  *
- * Client coordinates, because the toaster is `position: fixed`: `right` is the
- * gap from the right edge of the window, which is what CSS wants.
+ * Client coordinates, because the toaster is `position: fixed`. Placement
+ * itself is always `top` + `left` (see `place.ts`); `right` here is only how
+ * the work-area gutter is stored.
  */
+
+import type { ToastAlign, ToastStack } from "./place";
+
+export type { ToastAlign, ToastStack };
 
 export type ToastClaim = {
   top: number;
@@ -17,15 +22,17 @@ export type ToastClaim = {
   bottom: number;
   width: number;
   height: number;
+  stack: ToastStack;
+  align: ToastAlign;
 };
 
 class ToastAnchor {
   box = $state<{ top: number; right: number } | null>(null);
 
   /**
-   * The standing info box the stack must not cover, or null when none is on
-   * screen. The toaster stays in the work-area top-right and only drops below
-   * this box when the two would overlap.
+   * The standing info box the stack attaches to, or null when none is on
+   * screen. The toaster sits below it, or above it when the box is on a
+   * bottom edge.
    */
   claim = $state<ToastClaim | null>(null);
 
@@ -48,6 +55,7 @@ class ToastAnchor {
 
   clear() {
     this.box = null;
+    stopFollow();
     remeasureToastClaims();
   }
 }
@@ -88,10 +96,12 @@ export function toastArea(el: HTMLElement) {
 export type ToastInsetParams = {
   standing: boolean;
   focused?: boolean;
+  stack: ToastStack;
+  align: ToastAlign;
 };
 
 /**
- * Who the toast stack must not cover, one entry per box rather than one number
+ * Who the toast stack attaches to, one entry per box rather than one number
  * for the window.
  *
  * The info box is one mount per terminal, which means one per thread in every
@@ -107,10 +117,10 @@ export type ToastInsetParams = {
  */
 const claims = new Map<
   symbol,
-  { el: HTMLElement; standing: boolean; focused: boolean }
+  { el: HTMLElement; standing: boolean; focused: boolean; stack: ToastStack; align: ToastAlign }
 >();
 
-function readRect(el: HTMLElement): ToastClaim | null {
+function readRect(el: HTMLElement): Omit<ToastClaim, "stack" | "align"> | null {
   const rect = el.getBoundingClientRect();
   // A box under `display: none`, which is every pane while a view is drawn
   // over the terminals, measures zero. Zero is the right answer there.
@@ -131,7 +141,12 @@ function resolveClaim() {
     if (!claim.standing) continue;
     const rect = readRect(claim.el);
     if (!rect) continue;
-    const candidate = { ...rect, focused: claim.focused };
+    const candidate = {
+      ...rect,
+      stack: claim.stack,
+      align: claim.align,
+      focused: claim.focused,
+    };
     if (!best) {
       best = candidate;
       continue;
@@ -152,6 +167,8 @@ function resolveClaim() {
         bottom: best.bottom,
         width: best.width,
         height: best.height,
+        stack: best.stack,
+        align: best.align,
       }
     : null;
   const prev = toastAnchor.claim;
@@ -163,7 +180,9 @@ function resolveClaim() {
     prev.right === next.right &&
     prev.bottom === next.bottom &&
     prev.width === next.width &&
-    prev.height === next.height
+    prev.height === next.height &&
+    prev.stack === next.stack &&
+    prev.align === next.align
   ) {
     return;
   }
@@ -175,11 +194,46 @@ export function remeasureToastClaims() {
   resolveClaim();
 }
 
+let followRaf = 0;
+let followUntil = 0;
+
+function stopFollow() {
+  if (followRaf) {
+    cancelAnimationFrame(followRaf);
+    followRaf = 0;
+  }
+  followUntil = 0;
+}
+
+function tickFollow(now: number) {
+  followRaf = 0;
+  resolveClaim();
+  if (now < followUntil) {
+    followRaf = requestAnimationFrame(tickFollow);
+  }
+}
+
+/**
+ * Keep reading the card through its snap animation.
+ *
+ * ResizeObserver does not fire on `left`/`top` CSS transitions, and a single
+ * remeasure at pointer-up still sees the drop point. Without this the stack
+ * sits in the middle of the pane while the box eases to its dock.
+ */
+export function followToastSnap(durationMs: number) {
+  if (typeof requestAnimationFrame !== "function") {
+    resolveClaim();
+    return;
+  }
+  followUntil = performance.now() + durationMs;
+  if (!followRaf) followRaf = requestAnimationFrame(tickFollow);
+}
+
 /**
  * Action for a box the toasts must not cover.
  *
- * Measures the whole card, unfolded log included. The stack stays in the
- * work-area top-right and only drops below this box when the two would overlap.
+ * Measures the whole card, unfolded log included. The stack sits below it, or
+ * above it when the box is docked on a bottom edge.
  *
  * `standing` is the caller's own answer about whether its box is on screen, and
  * it is what the geometry cannot give: a pane in another group keeps its box
@@ -192,6 +246,8 @@ export function toastInset(el: HTMLElement, params: ToastInsetParams) {
     el,
     standing: params.standing,
     focused: params.focused ?? false,
+    stack: params.stack,
+    align: params.align,
   });
   const observer = new ResizeObserver(remeasureToastClaims);
   observer.observe(el);
@@ -202,6 +258,8 @@ export function toastInset(el: HTMLElement, params: ToastInsetParams) {
       if (!claim) return;
       claim.standing = next.standing;
       claim.focused = next.focused ?? false;
+      claim.stack = next.stack;
+      claim.align = next.align;
       remeasureToastClaims();
     },
     destroy() {
