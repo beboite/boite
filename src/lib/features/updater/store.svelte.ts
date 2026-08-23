@@ -1,6 +1,7 @@
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { hasTauri } from "$lib/backend/env";
+import { backend } from "$lib/backend";
 import { notifications } from "$lib/features/notifications/store.svelte";
 import { logger } from "$lib/shared/services/logger.svelte";
 import { t } from "$lib/i18n/index.svelte";
@@ -27,6 +28,16 @@ export type UpdateStatus =
 function messageOf(err: unknown): string {
   if (err instanceof Error) return err.message;
   return typeof err === "string" ? err : String(err);
+}
+
+function trackUpdate(stage: string, targetVersion?: string, errorCode?: string) {
+  try {
+    void backend()
+      .telemetry.trackUpdate({ stage, targetVersion, errorCode })
+      .catch(() => {});
+  } catch {
+    // No runtime, or a test backend.
+  }
 }
 
 class UpdaterStore {
@@ -120,7 +131,14 @@ class UpdaterStore {
         if (manual) notifications.success(t("updater.upToDate"));
         return;
       }
-      await this.download(update);
+      trackUpdate("available", update.version);
+      try {
+        await this.download(update);
+        trackUpdate("downloaded", update.version);
+      } catch (err) {
+        trackUpdate("failed", update.version, "download_failed");
+        throw err;
+      }
     } catch (err) {
       const message = messageOf(err);
       // A background check fails on any offline moment, an unreachable endpoint,
@@ -191,8 +209,10 @@ class UpdaterStore {
     this.status = { kind: "installing" };
     try {
       await update.install();
+      trackUpdate("applied", version);
       await relaunch();
     } catch (err) {
+      trackUpdate("failed", version, "install_failed");
       const message = messageOf(err);
       logger.error("updater", "install failed", message);
       // The payload handle is spent once install() has thrown; a retry has to

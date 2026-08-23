@@ -18,7 +18,10 @@ use super::{
     opt_str_param, str_list, str_param, u32_param, value_of, Command, Host, Ready, Wire,
 };
 use crate::capability::Capability;
-use crate::{codex_switcher, fastpick, session, shell, transcript, usage};
+use crate::{
+    cli_manager, codex_switcher, fast_mcp_ssh, fastpick, kebacc_switcher, session, shell, transcript,
+    usage,
+};
 
 /// Every method in this domain, in the order they appear below.
 pub const ALL_METHODS: &[&str] = &[
@@ -38,7 +41,20 @@ pub const ALL_METHODS: &[&str] = &[
     "codexSwitcher.save",
     "codexSwitcher.activate",
     "codexSwitcher.version",
+    "fastMcpSsh.version",
+    "kebaccSwitcher.list",
+    "kebaccSwitcher.add",
+    "kebaccSwitcher.switch",
+    "kebaccSwitcher.version",
     "session.transcript",
+    "cli.catalog",
+    "cli.latest",
+    "cli.jobs",
+    "cli.dataPaths",
+    "cli.install",
+    "cli.uninstall",
+    "cli.cancel",
+    "cli.dismiss",
 ];
 
 /// Which PTY the caller is, for the one command that has to tell its own live
@@ -78,7 +94,9 @@ pub enum Sessions {
     /// open apiece, so nobody enumerates every agent's history on a timer.
     AgentTurns { queries: Vec<session::TurnQuery> },
     /// Tokens and money per directory, from the transcripts on this machine.
-    Usage { cwds: Vec<String>, days: u32 },
+    /// `orchestrator_sessions` names the session ids whose spend is also
+    /// summed apart, so a card can split the conductor from the workers.
+    Usage { cwds: Vec<String>, days: u32, orchestrator_sessions: Vec<String> },
     StopClaude { session_id: String },
     /// Copilot turns down an id whose session was opened and never used.
     CopilotResumable { session_id: String },
@@ -115,6 +133,16 @@ pub enum Sessions {
     CodexSwitcherActivate { account_id: String },
     /// Null means the binary is not on this machine.
     CodexSwitcherVersion,
+    /// Null means `fast-mcp-ssh` is not on this machine.
+    FastMcpSshVersion,
+    /// `kebacc-switch list`, normalised to `{ providers: [...] }`.
+    KebaccSwitcherList { provider: Option<String> },
+    /// `kebacc-switch add -Provider <p>`.
+    KebaccSwitcherAdd { provider: String },
+    /// `kebacc-switch switch -Provider <p> -Email <email> -Yes`.
+    KebaccSwitcherSwitch { provider: String, email: String },
+    /// Null means the binary is not on this machine.
+    KebaccSwitcherVersion,
     /// What a terminal printed, as text, from the end.
     ///
     /// The question anybody actually has is what it was doing when it stopped,
@@ -126,6 +154,33 @@ pub enum Sessions {
         bytes: u32,
         dir: Option<std::path::PathBuf>,
     },
+    /// Every agent CLI, with what this machine says about it. `probe_versions`
+    /// costs a process spawn per installed CLI, so the panel asks for it when it
+    /// opens and leaves it off when it is only refreshing presence.
+    CliCatalog { probe_versions: bool },
+    /// What each downloadable CLI's vendor publishes right now, so a row can say
+    /// "up to date" rather than offering an update nobody needs.
+    ///
+    /// Its own call rather than a field on `cli.catalog`: this one is a request
+    /// per vendor over somebody else's network, and folding it in would make
+    /// opening the panel wait on six web servers.
+    CliLatest,
+    /// What the installs and removals running right now are doing. Polled, which
+    /// is what lets the desktop and a phone read the same progress through the
+    /// same call rather than through an event channel written twice.
+    CliJobs,
+    /// The data directories of one CLI with their sizes, for the sentence the
+    /// uninstall dialogue has to be able to write before anything is deleted.
+    CliDataPaths { id: String },
+    /// Starts a download and answers with the job. Only for a CLI whose vendor
+    /// publishes a binary; the rest install through their own package manager, in
+    /// a terminal the user can read.
+    CliInstall { id: String },
+    /// Takes back what Boite installed, and the CLI's own data when asked to.
+    CliUninstall { id: String, purge_data: bool },
+    CliCancel { id: String },
+    /// Forgets a job that has settled, which is how a failure is dismissed.
+    CliDismiss { id: String },
 }
 
 impl Sessions {
@@ -154,6 +209,7 @@ impl Sessions {
             "session.usage" => Sessions::Usage {
                 cwds: str_list(params, "cwds"),
                 days: u32_param(params, "days", 365),
+                orchestrator_sessions: str_list(params, "orchestratorSessions"),
             },
             "session.stopClaude" => Sessions::StopClaude {
                 session_id: str_param(params, "sessionId")?,
@@ -185,12 +241,45 @@ impl Sessions {
                 account_id: opt_str_param(params, "accountId").unwrap_or_default(),
             },
             "codexSwitcher.version" => Sessions::CodexSwitcherVersion,
+            "fastMcpSsh.version" => Sessions::FastMcpSshVersion,
+            "kebaccSwitcher.list" => Sessions::KebaccSwitcherList {
+                provider: opt_str_param(params, "provider"),
+            },
+            "kebaccSwitcher.add" => Sessions::KebaccSwitcherAdd {
+                provider: str_param(params, "provider")?,
+            },
+            "kebaccSwitcher.switch" => Sessions::KebaccSwitcherSwitch {
+                provider: str_param(params, "provider")?,
+                email: str_param(params, "email")?,
+            },
+            "kebaccSwitcher.version" => Sessions::KebaccSwitcherVersion,
             "session.transcript" => Sessions::Transcript {
                 thread_id: str_param(params, "threadId")?,
                 // A terminal prints more in a minute than anybody reads, and
                 // this answer goes into a context window.
                 bytes: u32_param(params, "bytes", 16_384).min(1024 * 1024),
                 dir: None,
+            },
+            "cli.catalog" => Sessions::CliCatalog {
+                probe_versions: super::bool_param(params, "probeVersions", false),
+            },
+            "cli.latest" => Sessions::CliLatest,
+            "cli.jobs" => Sessions::CliJobs,
+            "cli.dataPaths" => Sessions::CliDataPaths {
+                id: str_param(params, "id")?,
+            },
+            "cli.install" => Sessions::CliInstall {
+                id: str_param(params, "id")?,
+            },
+            "cli.uninstall" => Sessions::CliUninstall {
+                id: str_param(params, "id")?,
+                purge_data: super::bool_param(params, "purgeData", false),
+            },
+            "cli.cancel" => Sessions::CliCancel {
+                id: str_param(params, "id")?,
+            },
+            "cli.dismiss" => Sessions::CliDismiss {
+                id: str_param(params, "id")?,
             },
             other => return Err(format!("unknown method: {other}")),
         })
@@ -214,7 +303,20 @@ impl Sessions {
             Sessions::CodexSwitcherSave => "codexSwitcher.save",
             Sessions::CodexSwitcherActivate { .. } => "codexSwitcher.activate",
             Sessions::CodexSwitcherVersion => "codexSwitcher.version",
+            Sessions::FastMcpSshVersion => "fastMcpSsh.version",
+            Sessions::KebaccSwitcherList { .. } => "kebaccSwitcher.list",
+            Sessions::KebaccSwitcherAdd { .. } => "kebaccSwitcher.add",
+            Sessions::KebaccSwitcherSwitch { .. } => "kebaccSwitcher.switch",
+            Sessions::KebaccSwitcherVersion => "kebaccSwitcher.version",
             Sessions::Transcript { .. } => "session.transcript",
+            Sessions::CliCatalog { .. } => "cli.catalog",
+            Sessions::CliLatest => "cli.latest",
+            Sessions::CliJobs => "cli.jobs",
+            Sessions::CliDataPaths { .. } => "cli.dataPaths",
+            Sessions::CliInstall { .. } => "cli.install",
+            Sessions::CliUninstall { .. } => "cli.uninstall",
+            Sessions::CliCancel { .. } => "cli.cancel",
+            Sessions::CliDismiss { .. } => "cli.dismiss",
         }
     }
 
@@ -235,8 +337,20 @@ impl Sessions {
             Sessions::CodexSwitcherList
             | Sessions::CodexSwitcherSave
             | Sessions::CodexSwitcherActivate { .. } => Wire::Key("json"),
-            Sessions::CodexSwitcherVersion => Wire::Key("version"),
+            Sessions::CodexSwitcherVersion
+            | Sessions::FastMcpSshVersion
+            | Sessions::KebaccSwitcherVersion => Wire::Key("version"),
+            Sessions::KebaccSwitcherList { .. }
+            | Sessions::KebaccSwitcherAdd { .. }
+            | Sessions::KebaccSwitcherSwitch { .. } => Wire::Key("json"),
             Sessions::Transcript { .. } => Wire::Key("text"),
+            Sessions::CliCatalog { .. } => Wire::Key("clis"),
+            Sessions::CliLatest => Wire::Key("latest"),
+            Sessions::CliJobs => Wire::Key("jobs"),
+            Sessions::CliDataPaths { .. } => Wire::Key("paths"),
+            Sessions::CliInstall { .. } | Sessions::CliUninstall { .. } => Wire::Key("job"),
+            Sessions::CliCancel { .. } => Wire::Key("cancelled"),
+            Sessions::CliDismiss { .. } => Wire::Key("dismissed"),
         }
     }
 
@@ -260,12 +374,29 @@ impl Sessions {
             | Sessions::FastpickVersion
             | Sessions::CodexSwitcherList
             | Sessions::CodexSwitcherVersion
-            | Sessions::Transcript { .. } => Capability::ReadProject,
+            | Sessions::FastMcpSshVersion
+            | Sessions::KebaccSwitcherList { .. }
+            | Sessions::KebaccSwitcherVersion
+            | Sessions::Transcript { .. }
+            | Sessions::CliCatalog { .. }
+            | Sessions::CliLatest
+            | Sessions::CliJobs
+            | Sessions::CliDataPaths { .. } => Capability::ReadProject,
 
             Sessions::StopClaude { .. }
             | Sessions::Migrate { .. }
             | Sessions::CodexSwitcherSave
-            | Sessions::CodexSwitcherActivate { .. } => Capability::MutateProject,
+            | Sessions::CodexSwitcherActivate { .. }
+            | Sessions::KebaccSwitcherAdd { .. }
+            | Sessions::KebaccSwitcherSwitch { .. }
+            | Sessions::CliCancel { .. }
+            | Sessions::CliDismiss { .. } => Capability::MutateProject,
+
+            // Installing a binary and deleting a CLI's data change the machine
+            // rather than a project, so a grant scoped to one project must not
+            // reach them. The credentials file the Todo panel writes is exactly
+            // such a grant, and it is handed to agents.
+            Sessions::CliInstall { .. } | Sessions::CliUninstall { .. } => Capability::MutateAcross,
         }
     }
 
@@ -352,7 +483,9 @@ impl Sessions {
             }
             Sessions::LiveClaude => value_of(session::live_claude_sessions()),
             Sessions::AgentTurns { queries } => value_of(session::agent_turns(&queries)),
-            Sessions::Usage { cwds, days } => value_of(usage::collect_usage_blocking(cwds, days)),
+            Sessions::Usage { cwds, days, orchestrator_sessions } => {
+                value_of(usage::collect_usage_blocking(cwds, days, orchestrator_sessions))
+            }
             Sessions::StopClaude { session_id } => {
                 value_of(session::stop_claude_session(&session_id))
             }
@@ -388,6 +521,17 @@ impl Sessions {
                 value_of(codex_switcher::activate_blocking(&account_id)?)
             }
             Sessions::CodexSwitcherVersion => value_of(codex_switcher::version_blocking()),
+            Sessions::FastMcpSshVersion => value_of(fast_mcp_ssh::version_blocking()),
+            Sessions::KebaccSwitcherList { provider } => {
+                value_of(kebacc_switcher::list_blocking(provider.as_deref())?)
+            }
+            Sessions::KebaccSwitcherAdd { provider } => {
+                value_of(kebacc_switcher::add_blocking(&provider)?)
+            }
+            Sessions::KebaccSwitcherSwitch { provider, email } => {
+                value_of(kebacc_switcher::switch_blocking(&provider, &email)?)
+            }
+            Sessions::KebaccSwitcherVersion => value_of(kebacc_switcher::version_blocking()),
             Sessions::Transcript {
                 thread_id,
                 bytes,
@@ -397,6 +541,25 @@ impl Sessions {
                     "this Boite keeps no transcripts, so there is nothing to read back",
                 )?;
                 value_of(transcript::tail(&dir, &thread_id, bytes as usize)?)
+            }
+            Sessions::CliCatalog { probe_versions } => {
+                value_of(cli_manager::status_blocking(probe_versions))
+            }
+            Sessions::CliLatest => value_of(cli_manager::latest_blocking()),
+            Sessions::CliJobs => value_of(cli_manager::jobs::all()),
+            Sessions::CliDataPaths { id } => {
+                value_of(cli_manager::data_paths(&id).map_err(|e| e.0)?)
+            }
+            Sessions::CliInstall { id } => {
+                value_of(cli_manager::start_install(&id).map_err(|e| e.0)?)
+            }
+            Sessions::CliUninstall { id, purge_data } => {
+                value_of(cli_manager::start_uninstall(&id, purge_data).map_err(|e| e.0)?)
+            }
+            Sessions::CliCancel { id } => value_of(cli_manager::jobs::cancel(&id)),
+            Sessions::CliDismiss { id } => {
+                cli_manager::jobs::dismiss(&id);
+                value_of(true)
             }
         })
     }
@@ -421,6 +584,9 @@ mod tests {
             "cmd": "claude",
             "cwds": ["/w"],
             "threadId": "t1",
+            "provider": "claude",
+            "email": "you@example.com",
+            "id": "claude",
         });
         for method in ALL_METHODS {
             let command = Command::decode(method, &params)

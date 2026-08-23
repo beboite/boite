@@ -5,6 +5,7 @@
   import { app } from "$lib/app/store.svelte";
   import { projectScripts } from "$lib/features/project/scripts.svelte";
   import { t, type MessageKey } from "$lib/i18n/index.svelte";
+  import { scrollIntoViewSmooth } from "$lib/theme/motion";
   import {
     buildContentCommands,
     buildPaletteCommands,
@@ -200,7 +201,7 @@
     if (visible.length === 0) return;
     activeIndex = (activeIndex + delta + visible.length) % visible.length;
     const el = listEl?.querySelector(`#palette-item-${activeIndex}`);
-    el?.scrollIntoView({ block: "nearest" });
+    scrollIntoViewSmooth(el);
   }
 
   function handleKeydown(e: KeyboardEvent) {
@@ -280,7 +281,7 @@
         bind:this={listEl}
         id="palette-list"
         role="listbox"
-        class="overflow-y-auto py-1"
+        class="scroll-pane overflow-y-auto py-1"
       >
         {#if liveMode === "url"}
           <p class="px-4 py-6 text-center text-xs text-muted-foreground">

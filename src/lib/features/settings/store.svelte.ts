@@ -11,15 +11,19 @@ import type {
   InfoBoxAnchor,
   Keybinding,
   LocaleSetting,
+  OpenOnLaunch,
   RightPanelTab,
   Settings,
   Shortcut,
   SidebarDesign,
   SmartSortBy,
   SortDirection,
+  VoiceStt,
+  VoiceTts,
   WhipSound,
 } from "$lib/types";
 import { isInfoBoxAnchor } from "$lib/features/infobox/anchor";
+import { orchestratorEnabledFor } from "./orchestratorEnabledFor";
 import { DEFAULT_KEYBINDINGS } from "$lib/shared/keyboard/defaults";
 import {
   mergeDefaultKeybindings,
@@ -127,6 +131,9 @@ const DEFAULTS: Settings = {
   todoPromptTemplate: DEFAULT_TODO_PROMPT,
   agentTodoAccess: true,
   mcpYolo: false,
+  syncRemoteUrl: null,
+  syncOnLaunch: true,
+  syncSources: {},
   idleTimeoutMinutes: 10,
   idleAutocloseByIcon: {
     claude: true,
@@ -157,6 +164,9 @@ const DEFAULTS: Settings = {
   locale: "system",
   setupCompleted: false,
   fastpickEnabled: true,
+  kebaccClaude: true,
+  kebaccCodex: true,
+  kebaccAntigravity: true,
   colorByModel: true,
   sidebarDesign: "classic",
   sidebarHarnessLogos: true,
@@ -168,6 +178,25 @@ const DEFAULTS: Settings = {
   whipSound: "synth",
   smartSortBy: "manual",
   smartSortDirection: "desc",
+  experimentHome: false,
+  openOnLaunch: "last",
+  experimentOrchestrator: false,
+  experimentOrchestratorPerProject: false,
+  orchestratorAgent: null,
+  orchestratorByProject: {},
+  orchestratorAutonomy: "observer",
+  orchestratorIdleMinutes: 20,
+  orchestratorDailyTokenCap: 0,
+  orchestratorSessionHours: 24,
+  dispatchTtlMinutes: 60,
+  orchestratorBlindProjects: [],
+  experimentVoice: false,
+  voiceStt: "off",
+  voiceTts: "webspeech",
+  voiceName: null,
+  voicePushToTalk: true,
+  voiceAutoSend: false,
+  voiceSpeakWhenUnfocused: false,
 };
 
 // First-run guess: touch-primary, narrow screens (a phone TWA/PWA) default to
@@ -198,7 +227,48 @@ function isSortDirection(value: unknown): value is SortDirection {
 }
 
 function isWhipSound(value: unknown): value is WhipSound {
-  return value === "synth" || value === "meme";
+  return value === "synth" || value === "sampled" || value === "meme";
+}
+
+function isVoiceStt(value: unknown): value is VoiceStt {
+  return value === "off" || value === "webspeech" || value === "whisper";
+}
+
+function isVoiceTts(value: unknown): value is VoiceTts {
+  return value === "off" || value === "webspeech";
+}
+
+function isOpenOnLaunch(value: unknown): value is OpenOnLaunch {
+  return value === "home" || value === "project" || value === "last";
+}
+
+function isOrchestratorAutonomy(
+  value: unknown,
+): value is Settings["orchestratorAutonomy"] {
+  return value === "observer" || value === "dispatcher" || value === "autopilot";
+}
+
+// Per-project overrides: only "on"/"off" survive the read, anything else in a
+// row written by an older or foreign build falls back to the global answer.
+function readOnOffMap(value: unknown): Record<string, "on" | "off"> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const out: Record<string, "on" | "off"> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    if (v === "on" || v === "off") out[k] = v;
+  }
+  return out;
+}
+
+function readStringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
+}
+
+// A cap or a delay stored as anything but a usable number is the default, not a
+// crash and not a negative that would read as "always asleep".
+function readMinutes(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? value
+    : fallback;
 }
 
 /**
@@ -312,24 +382,59 @@ const DEVICE_FIELDS = [
   "smartSortBy",
   "smartSortDirection",
   "confirmCloseThread",
+  "experimentHome",
+  "openOnLaunch",
+  // Arming the orchestrator is a device gesture, like every experiment flag:
+  // the phone opting in must not switch the desktop on. What the orchestrator
+  // *is* once armed (agent, autonomy, caps) stays in the workspace blob, where
+  // every device reads the same answer.
+  "experimentOrchestrator",
+  "experimentOrchestratorPerProject",
+  // The whole voice block is device: a microphone, a synthesis voice and the
+  // right to speak unfocused are facts about this machine, not the workspace.
+  "experimentVoice",
+  "voiceStt",
+  "voiceTts",
+  "voiceName",
+  "voicePushToTalk",
+  "voiceAutoSend",
+  "voiceSpeakWhenUnfocused",
+  "kebaccClaude",
+  "kebaccCodex",
+  "kebaccAntigravity",
 ] as const;
 
 // Stamped on the blob so an absent key can be told apart from a key that had
 // not been promoted yet. Bump it whenever a field joins DEVICE_FIELDS, and list
 // the newcomers in PROMOTED_TO_DEVICE so they migrate once.
-const DEVICE_BLOB_VERSION = 1;
+const DEVICE_BLOB_VERSION = 5;
 
-// Moved out of the workspace blob in the version that introduced `v`. A device
-// blob written before that has no key for them and the workspace value is the
-// right one-shot seed. Once `v` is on the blob, an absent key means the default
-// and never the boite's value: falling through to the workspace blob is how
-// `motionMode`, `locale` and `layoutPinned` used to leak in from the server on
-// any device whose localStorage predated them joining the list.
+// Moved out of the workspace blob. A device blob whose `v` is missing or older
+// than DEVICE_BLOB_VERSION has no key for the newcomers, and the workspace
+// value is the right one-shot seed. Once the blob is at the current version, an
+// absent key means the default and never the boite's value: falling through to
+// the workspace blob is how `motionMode`, `locale` and `layoutPinned` used to
+// leak in from the server on any device whose localStorage predated them
+// joining the list.
 const PROMOTED_TO_DEVICE: readonly string[] = [
   "colorByModel",
   "sidebarDesign",
   "sidebarHarnessLogos",
   "confirmCloseThread",
+  "experimentHome",
+  "openOnLaunch",
+  "experimentOrchestrator",
+  "experimentOrchestratorPerProject",
+  "experimentVoice",
+  "voiceStt",
+  "voiceTts",
+  "voiceName",
+  "voicePushToTalk",
+  "voiceAutoSend",
+  "voiceSpeakWhenUnfocused",
+  "kebaccClaude",
+  "kebaccCodex",
+  "kebaccAntigravity",
 ];
 
 type DeviceBlob = Partial<Settings> & { v?: number };
@@ -347,15 +452,15 @@ function loadDeviceOverrides(): DeviceBlob | null {
 /** Lays the device blob over a freshly hydrated state. */
 function applyDeviceOverrides(state: Settings, dev: DeviceBlob): void {
   const target = state as unknown as Record<string, unknown>;
-  const legacyBlob = typeof dev.v !== "number";
+  const staleBlob = typeof dev.v !== "number" || dev.v < DEVICE_BLOB_VERSION;
   for (const k of DEVICE_FIELDS) {
     if (dev[k] !== undefined) {
       target[k] = dev[k];
       continue;
     }
-    // Left alone on a legacy blob: whatever is in `target` came from the
+    // Left alone on a stale blob: whatever is in `target` came from the
     // workspace and is the migration source for exactly one load.
-    if (legacyBlob && PROMOTED_TO_DEVICE.includes(k)) continue;
+    if (staleBlob && PROMOTED_TO_DEVICE.includes(k)) continue;
     target[k] = structuredClone(DEFAULTS[k]);
   }
   state.rightPanelByProject = readRightPanelMap(state.rightPanelByProject);
@@ -368,6 +473,35 @@ function applyDeviceOverrides(state: Settings, dev: DeviceBlob): void {
   }
   if (typeof state.infoBoxCollapsed !== "boolean") {
     state.infoBoxCollapsed = DEFAULTS.infoBoxCollapsed;
+  }
+  if (typeof state.experimentHome !== "boolean") {
+    state.experimentHome = DEFAULTS.experimentHome;
+  }
+  if (!isOpenOnLaunch(state.openOnLaunch)) {
+    state.openOnLaunch = DEFAULTS.openOnLaunch;
+  }
+  if (typeof state.experimentOrchestrator !== "boolean") {
+    state.experimentOrchestrator = DEFAULTS.experimentOrchestrator;
+  }
+  if (typeof state.experimentOrchestratorPerProject !== "boolean") {
+    state.experimentOrchestratorPerProject = DEFAULTS.experimentOrchestratorPerProject;
+  }
+  if (typeof state.experimentVoice !== "boolean") {
+    state.experimentVoice = DEFAULTS.experimentVoice;
+  }
+  if (!isVoiceStt(state.voiceStt)) state.voiceStt = DEFAULTS.voiceStt;
+  if (!isVoiceTts(state.voiceTts)) state.voiceTts = DEFAULTS.voiceTts;
+  if (state.voiceName !== null && typeof state.voiceName !== "string") {
+    state.voiceName = DEFAULTS.voiceName;
+  }
+  if (typeof state.voicePushToTalk !== "boolean") {
+    state.voicePushToTalk = DEFAULTS.voicePushToTalk;
+  }
+  if (typeof state.voiceAutoSend !== "boolean") {
+    state.voiceAutoSend = DEFAULTS.voiceAutoSend;
+  }
+  if (typeof state.voiceSpeakWhenUnfocused !== "boolean") {
+    state.voiceSpeakWhenUnfocused = DEFAULTS.voiceSpeakWhenUnfocused;
   }
 }
 
@@ -454,6 +588,18 @@ class SettingsStore {
           typeof stored.confirmCloseThread === "boolean"
             ? stored.confirmCloseThread
             : DEFAULTS.confirmCloseThread,
+        syncRemoteUrl:
+          typeof stored.syncRemoteUrl === "string" && stored.syncRemoteUrl.trim()
+            ? stored.syncRemoteUrl
+            : DEFAULTS.syncRemoteUrl,
+        syncOnLaunch:
+          typeof stored.syncOnLaunch === "boolean"
+            ? stored.syncOnLaunch
+            : DEFAULTS.syncOnLaunch,
+        syncSources:
+          stored.syncSources && typeof stored.syncSources === "object"
+            ? { ...stored.syncSources }
+            : structuredClone(DEFAULTS.syncSources),
         rightPanel: isRightPanelTab(stored.rightPanel)
           ? stored.rightPanel
           : DEFAULTS.rightPanel,
@@ -485,6 +631,18 @@ class SettingsStore {
           typeof stored.fastpickEnabled === "boolean"
             ? stored.fastpickEnabled
             : DEFAULTS.fastpickEnabled,
+        kebaccClaude:
+          typeof stored.kebaccClaude === "boolean"
+            ? stored.kebaccClaude
+            : DEFAULTS.kebaccClaude,
+        kebaccCodex:
+          typeof stored.kebaccCodex === "boolean"
+            ? stored.kebaccCodex
+            : DEFAULTS.kebaccCodex,
+        kebaccAntigravity:
+          typeof stored.kebaccAntigravity === "boolean"
+            ? stored.kebaccAntigravity
+            : DEFAULTS.kebaccAntigravity,
         colorByModel:
           typeof stored.colorByModel === "boolean"
             ? stored.colorByModel
@@ -520,6 +678,72 @@ class SettingsStore {
         smartSortDirection: isSortDirection(stored.smartSortDirection)
           ? stored.smartSortDirection
           : DEFAULTS.smartSortDirection,
+        experimentHome:
+          typeof stored.experimentHome === "boolean"
+            ? stored.experimentHome
+            : DEFAULTS.experimentHome,
+        openOnLaunch: isOpenOnLaunch(stored.openOnLaunch)
+          ? stored.openOnLaunch
+          : DEFAULTS.openOnLaunch,
+        // The two arming flags are device-scoped; these blob reads only matter
+        // as the one-shot seed applyDeviceOverrides migrates from.
+        experimentOrchestrator:
+          typeof stored.experimentOrchestrator === "boolean"
+            ? stored.experimentOrchestrator
+            : DEFAULTS.experimentOrchestrator,
+        experimentOrchestratorPerProject:
+          typeof stored.experimentOrchestratorPerProject === "boolean"
+            ? stored.experimentOrchestratorPerProject
+            : DEFAULTS.experimentOrchestratorPerProject,
+        orchestratorAgent:
+          typeof stored.orchestratorAgent === "string" && stored.orchestratorAgent
+            ? stored.orchestratorAgent
+            : DEFAULTS.orchestratorAgent,
+        orchestratorByProject: readOnOffMap(stored.orchestratorByProject),
+        orchestratorAutonomy: isOrchestratorAutonomy(stored.orchestratorAutonomy)
+          ? stored.orchestratorAutonomy
+          : DEFAULTS.orchestratorAutonomy,
+        orchestratorIdleMinutes: readMinutes(
+          stored.orchestratorIdleMinutes,
+          DEFAULTS.orchestratorIdleMinutes,
+        ),
+        orchestratorDailyTokenCap: readMinutes(
+          stored.orchestratorDailyTokenCap,
+          DEFAULTS.orchestratorDailyTokenCap,
+        ),
+        orchestratorSessionHours: readMinutes(
+          stored.orchestratorSessionHours,
+          DEFAULTS.orchestratorSessionHours,
+        ),
+        dispatchTtlMinutes: readMinutes(
+          stored.dispatchTtlMinutes,
+          DEFAULTS.dispatchTtlMinutes,
+        ),
+        orchestratorBlindProjects: readStringList(stored.orchestratorBlindProjects),
+        // Device-scoped end to end: these defaults only stand until
+        // applyDeviceOverrides replays what this machine stored locally.
+        experimentVoice:
+          typeof stored.experimentVoice === "boolean"
+            ? stored.experimentVoice
+            : DEFAULTS.experimentVoice,
+        voiceStt: isVoiceStt(stored.voiceStt) ? stored.voiceStt : DEFAULTS.voiceStt,
+        voiceTts: isVoiceTts(stored.voiceTts) ? stored.voiceTts : DEFAULTS.voiceTts,
+        voiceName:
+          typeof stored.voiceName === "string" && stored.voiceName
+            ? stored.voiceName
+            : DEFAULTS.voiceName,
+        voicePushToTalk:
+          typeof stored.voicePushToTalk === "boolean"
+            ? stored.voicePushToTalk
+            : DEFAULTS.voicePushToTalk,
+        voiceAutoSend:
+          typeof stored.voiceAutoSend === "boolean"
+            ? stored.voiceAutoSend
+            : DEFAULTS.voiceAutoSend,
+        voiceSpeakWhenUnfocused:
+          typeof stored.voiceSpeakWhenUnfocused === "boolean"
+            ? stored.voiceSpeakWhenUnfocused
+            : DEFAULTS.voiceSpeakWhenUnfocused,
         // A settings row written before the wizard existed carries no flag.
         // Its owner already has a shortcut list, and finishing the wizard
         // replaces that list wholesale, so an existing install counts as
@@ -563,7 +787,7 @@ class SettingsStore {
           this.state.mobileLayout = detectMobileDefault();
           this.state.layoutPinned = false;
           this.persistDeviceNow();
-        } else if (typeof dev.v !== "number") {
+        } else if (typeof dev.v !== "number" || dev.v < DEVICE_BLOB_VERSION) {
           // Stamp the version and write the promoted keys down, so this load is
           // the only one that reads them off the workspace.
           this.persistDeviceNow();
@@ -834,6 +1058,24 @@ class SettingsStore {
     await this.persist();
   }
 
+  setKebaccClaude(value: boolean) {
+    if (this.state.kebaccClaude === value) return;
+    this.state.kebaccClaude = value;
+    this.persistDeviceNow();
+  }
+
+  setKebaccCodex(value: boolean) {
+    if (this.state.kebaccCodex === value) return;
+    this.state.kebaccCodex = value;
+    this.persistDeviceNow();
+  }
+
+  setKebaccAntigravity(value: boolean) {
+    if (this.state.kebaccAntigravity === value) return;
+    this.state.kebaccAntigravity = value;
+    this.persistDeviceNow();
+  }
+
   setColorByModel(value: boolean) {
     if (this.state.colorByModel === value) return;
     this.state.colorByModel = value;
@@ -897,6 +1139,140 @@ class SettingsStore {
   setSmartSortDirection(value: SortDirection) {
     if (this.state.smartSortDirection === value) return;
     this.state.smartSortDirection = value;
+    this.persistDeviceNow();
+  }
+
+  setExperimentHome(value: boolean) {
+    if (this.state.experimentHome === value) return;
+    this.state.experimentHome = value;
+    this.persistDeviceNow();
+  }
+
+  setOpenOnLaunch(value: OpenOnLaunch) {
+    if (!isOpenOnLaunch(value) || this.state.openOnLaunch === value) return;
+    this.state.openOnLaunch = value;
+    this.persistDeviceNow();
+  }
+
+  // Arming is device-scoped, configuring is workspace-scoped: the two flags
+  // below write localStorage, everything after them writes the shared blob.
+  setExperimentOrchestrator(value: boolean) {
+    if (this.state.experimentOrchestrator === value) return;
+    this.state.experimentOrchestrator = value;
+    this.persistDeviceNow();
+  }
+
+  setExperimentOrchestratorPerProject(value: boolean) {
+    if (this.state.experimentOrchestratorPerProject === value) return;
+    this.state.experimentOrchestratorPerProject = value;
+    this.persistDeviceNow();
+  }
+
+  async setOrchestratorAgent(value: string | null) {
+    const next = typeof value === "string" && value ? value : null;
+    if (this.state.orchestratorAgent === next) return;
+    this.state.orchestratorAgent = next;
+    await this.persist();
+  }
+
+  /** `null` clears the override, falling back to the global answer. */
+  async setOrchestratorForProject(projectId: string, value: "on" | "off" | null) {
+    if ((this.state.orchestratorByProject[projectId] ?? null) === value) return;
+    if (value === null) delete this.state.orchestratorByProject[projectId];
+    else this.state.orchestratorByProject[projectId] = value;
+    await this.persist();
+  }
+
+  async setOrchestratorAutonomy(value: Settings["orchestratorAutonomy"]) {
+    if (!isOrchestratorAutonomy(value) || this.state.orchestratorAutonomy === value)
+      return;
+    this.state.orchestratorAutonomy = value;
+    await this.persist();
+  }
+
+  async setOrchestratorIdleMinutes(value: number) {
+    const next = readMinutes(value, DEFAULTS.orchestratorIdleMinutes);
+    if (this.state.orchestratorIdleMinutes === next) return;
+    this.state.orchestratorIdleMinutes = next;
+    await this.persist();
+  }
+
+  async setOrchestratorDailyTokenCap(value: number) {
+    const next = readMinutes(value, DEFAULTS.orchestratorDailyTokenCap);
+    if (this.state.orchestratorDailyTokenCap === next) return;
+    this.state.orchestratorDailyTokenCap = next;
+    await this.persist();
+  }
+
+  async setOrchestratorSessionHours(value: number) {
+    const next = readMinutes(value, DEFAULTS.orchestratorSessionHours);
+    if (this.state.orchestratorSessionHours === next) return;
+    this.state.orchestratorSessionHours = next;
+    await this.persist();
+  }
+
+  async setDispatchTtlMinutes(value: number) {
+    const next = readMinutes(value, DEFAULTS.dispatchTtlMinutes);
+    if (this.state.dispatchTtlMinutes === next) return;
+    this.state.dispatchTtlMinutes = next;
+    await this.persist();
+  }
+
+  async setOrchestratorBlindProjects(value: string[]) {
+    const next = readStringList(value);
+    const current = this.state.orchestratorBlindProjects;
+    if (current.length === next.length && current.every((v, i) => v === next[i]))
+      return;
+    this.state.orchestratorBlindProjects = next;
+    await this.persist();
+  }
+
+  orchestratorEnabledFor(projectId: string | null): boolean {
+    return orchestratorEnabledFor(this.state, projectId);
+  }
+
+  // The voice block is device-scoped end to end (see DEVICE_FIELDS): every
+  // setter below writes localStorage, never the workspace blob.
+  setExperimentVoice(value: boolean) {
+    if (this.state.experimentVoice === value) return;
+    this.state.experimentVoice = value;
+    this.persistDeviceNow();
+  }
+
+  setVoiceStt(value: VoiceStt) {
+    if (!isVoiceStt(value) || this.state.voiceStt === value) return;
+    this.state.voiceStt = value;
+    this.persistDeviceNow();
+  }
+
+  setVoiceTts(value: VoiceTts) {
+    if (!isVoiceTts(value) || this.state.voiceTts === value) return;
+    this.state.voiceTts = value;
+    this.persistDeviceNow();
+  }
+
+  setVoiceName(value: string | null) {
+    const next = typeof value === "string" && value ? value : null;
+    if (this.state.voiceName === next) return;
+    this.state.voiceName = next;
+    this.persistDeviceNow();
+  }
+
+  setVoicePushToTalk(value: boolean) {
+    if (this.state.voicePushToTalk === value) return;
+    this.state.voicePushToTalk = value;
+    this.persistDeviceNow();
+  }
+
+  setVoiceAutoSend(value: boolean) {
+    if (this.state.voiceAutoSend === value) return;
+    this.state.voiceAutoSend = value;
+    this.persistDeviceNow();
+  }
+
+  setVoiceSpeakWhenUnfocused(value: boolean) {
+    if (this.state.voiceSpeakWhenUnfocused === value) return;
+    this.state.voiceSpeakWhenUnfocused = value;
     this.persistDeviceNow();
   }
 
@@ -1017,6 +1393,33 @@ class SettingsStore {
     if (this.state.idleTimeoutMinutes === clamped) return;
     this.state.idleTimeoutMinutes = clamped;
     this.persistSoon();
+  }
+
+  /**
+   * Where the configuration sync pushes and pulls.
+   *
+   * Blank clears it, which is how the panel offers "forget this repository": it
+   * stops the sync and touches no file, here or in the repository.
+   */
+  async setSyncRemoteUrl(url: string | null) {
+    const trimmed = url?.trim() ?? "";
+    const next = trimmed === "" ? null : trimmed;
+    if (this.state.syncRemoteUrl === next) return;
+    this.state.syncRemoteUrl = next;
+    await this.persist();
+  }
+
+  setSyncOnLaunch(value: boolean) {
+    if (this.state.syncOnLaunch === value) return;
+    this.state.syncOnLaunch = value;
+    this.persistSoon();
+  }
+
+  /** One source switched, the object replaced rather than mutated. */
+  async setSyncSource(id: string, on: boolean) {
+    if ((this.state.syncSources[id] ?? false) === on) return;
+    this.state.syncSources = { ...this.state.syncSources, [id]: on };
+    await this.persist();
   }
 
   async setIdleAutocloseForIcon(iconKey: string, on: boolean) {

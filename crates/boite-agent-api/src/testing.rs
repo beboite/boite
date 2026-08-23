@@ -75,35 +75,48 @@ impl Fake {
 
     /// A thread row, so a caller can be given a key and a project to answer for.
     pub fn with_thread(self, id: &str, project_id: &str) -> Fake {
-        self.store
-            .save_thread(&boite_core::model::Thread {
-                id: id.into(),
-                project_id: project_id.into(),
-                pty_id: None,
-                label: id.into(),
-                title: None,
-                cmd: "sh".into(),
-                args: Vec::new(),
-                icon_key: None,
-                icon_color: None,
-                session_id: None,
-                status: "idle".into(),
-                exit_code: None,
-                created_at: 1,
-                auto_slept: false,
-                keep_awake: false,
-                worktree_path: None,
-                settled_at: None,
-                parent_thread_id: None,
-                delegation_mode: None,
-                delegation_status: None,
-            })
-            .unwrap();
+        self.store.save_thread(&thread_row(id, project_id)).unwrap();
+        self
+    }
+
+    /// A thread another one spawned, for anything counting workers.
+    pub fn with_child(self, id: &str, project_id: &str, parent: &str) -> Fake {
+        let mut thread = thread_row(id, project_id);
+        thread.parent_thread_id = Some(parent.into());
+        self.store.save_thread(&thread).unwrap();
         self
     }
 
     pub fn scratch(&self) -> &PathBuf {
         &self.dir
+    }
+}
+
+fn thread_row(id: &str, project_id: &str) -> boite_core::model::Thread {
+    boite_core::model::Thread {
+        id: id.into(),
+        project_id: project_id.into(),
+        pty_id: None,
+        label: id.into(),
+        title: None,
+        cmd: "sh".into(),
+        args: Vec::new(),
+        icon_key: None,
+        icon_color: None,
+        session_id: None,
+        status: "idle".into(),
+        exit_code: None,
+        created_at: 1,
+        auto_slept: false,
+        keep_awake: false,
+        worktree_path: None,
+        settled_at: None,
+        parent_thread_id: None,
+        delegation_mode: None,
+        delegation_status: None,
+        role: None,
+        orchestrator_scope: None,
+        accept_dispatch: true,
     }
 }
 

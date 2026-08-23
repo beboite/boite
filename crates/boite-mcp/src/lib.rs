@@ -21,7 +21,9 @@ pub mod toon;
 mod tools;
 
 pub use call::{call_blocks, call_tool};
-pub use tools::{tools, INSTRUCTIONS};
+pub use tools::{
+    instructions_for_role, tools, tools_for_role, INSTRUCTIONS, ORCHESTRATOR_INSTRUCTIONS,
+};
 
 use std::io::Write;
 

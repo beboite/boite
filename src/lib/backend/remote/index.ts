@@ -1,18 +1,35 @@
 import type {
   ApprovalsApi,
+  SyncApi,
+  TelemetryApi,
+  TelemetryState,
+  SyncConflict,
+  SyncJob,
+  SyncProbe,
+  SyncSource,
+  SyncStatus,
   Backend,
   BackendCaps,
   CommitStateAnswer,
+  ConductApi,
   ControlEvent,
   DbApi,
   Checkpoint,
   CheckpointApi,
   CheckpointDiff,
   CheckpointFileVersions,
+  CliApi,
+  CliDataPath,
+  CliLatest,
+  CliJob,
+  CliRow,
   EditorApi,
   ExplorerApi,
   CodexSwitcherApi,
   CodexSwitcherList,
+  FastMcpSshApi,
+  KebaccSwitcherApi,
+  KebaccSwitcherList,
   FastpickApi,
   FastpickListing,
   FolderState,
@@ -22,6 +39,9 @@ import type {
   UsageReport,
   LogApi,
   PendingApproval,
+  DispatchLine,
+  OrchestratorAction,
+  OrchestratorMessage,
   PairedDevice,
   PairingApi,
   PairingInvite,
@@ -87,14 +107,20 @@ export class RemoteBackend implements Backend {
   readonly shell: ShellApi;
   readonly fastpick: FastpickApi;
   readonly codexSwitcher: CodexSwitcherApi;
+  readonly fastMcpSsh: FastMcpSshApi;
+  readonly kebaccSwitcher: KebaccSwitcherApi;
+  readonly cli: CliApi;
   readonly scope: ScopeApi;
   readonly session: SessionApi;
   readonly search: SearchApi;
+  readonly sync: SyncApi;
+  readonly telemetry: TelemetryApi;
   readonly log: LogApi;
   readonly approvals: ApprovalsApi;
   readonly push: PushApi;
   readonly meta: WorkspaceMetaApi;
   readonly pairing: PairingApi;
+  readonly conduct: ConductApi;
 
   #socket: Socket;
   #keyToThread = new Map<string, string>();
@@ -435,6 +461,47 @@ export class RemoteBackend implements Backend {
         rpc("codexSwitcher.version", {}).then((r) => (r.version as string | null) ?? null),
     };
 
+    this.fastMcpSsh = {
+      version: () =>
+        rpc("fastMcpSsh.version", {}).then((r) => (r.version as string | null) ?? null),
+    };
+
+    this.kebaccSwitcher = {
+      list: (provider) =>
+        rpc("kebaccSwitcher.list", { provider: provider ?? null }).then(
+          (r) => JSON.parse(r.json as string) as KebaccSwitcherList,
+        ),
+      add: (provider) =>
+        rpc("kebaccSwitcher.add", { provider }).then(
+          (r) => JSON.parse(r.json as string) as KebaccSwitcherList,
+        ),
+      switchTo: (provider, email) =>
+        rpc("kebaccSwitcher.switch", { provider, email }).then(
+          (r) => JSON.parse(r.json as string) as KebaccSwitcherList,
+        ),
+      version: () =>
+        rpc("kebaccSwitcher.version", {}).then((r) => (r.version as string | null) ?? null),
+    };
+
+    // Installed on the machine the threads spawn on, which is this server. A
+    // phone asking for an install is asking the server to fetch a Linux binary
+    // for itself, and the progress it reads back is the server's.
+    this.cli = {
+      catalog: (probeVersions) =>
+        rpc("cli.catalog", { probeVersions: probeVersions ?? false }).then(
+          (r) => (r.clis as CliRow[] | null) ?? [],
+        ),
+      latest: () => rpc("cli.latest", {}).then((r) => (r.latest as CliLatest[] | null) ?? []),
+      jobs: () => rpc("cli.jobs", {}).then((r) => (r.jobs as CliJob[] | null) ?? []),
+      dataPaths: (id) =>
+        rpc("cli.dataPaths", { id }).then((r) => (r.paths as CliDataPath[] | null) ?? []),
+      install: (id) => rpc("cli.install", { id }).then((r) => r.job as CliJob),
+      uninstall: (id, purgeData) =>
+        rpc("cli.uninstall", { id, purgeData }).then((r) => r.job as CliJob),
+      cancel: (id) => rpc("cli.cancel", { id }).then((r) => r.cancelled as boolean),
+      dismiss: (id) => rpc("cli.dismiss", { id }).then(() => undefined),
+    };
+
     // The server derives its filesystem trust boundary from persisted projects;
     // clients never set roots directly.
     this.scope = {
@@ -450,14 +517,16 @@ export class RemoteBackend implements Backend {
       // never run anything. The empty report is still what comes back, because
       // the caller's own catch would flatten a rejection into one anyway, but
       // it now says which of the two it is.
-      usage: (cwds, days) =>
-        rpc("session.usage", { cwds, days })
+      usage: (cwds, days, orchestratorSessions) =>
+        rpc("session.usage", { cwds, days, orchestratorSessions: orchestratorSessions ?? [] })
           .then((r) => r as unknown as UsageReport)
           .catch(
             (): UsageReport => ({
               models: [],
               days: [],
               sessions: 0,
+              orchestratorTotal: 0,
+              orchestratorSessions: 0,
               missing: [],
               unreachable: true,
             }),
@@ -529,6 +598,44 @@ export class RemoteBackend implements Backend {
           .catch(() => [] as WorkspaceHit[]),
     };
 
+    // Runs on the machine the threads spawn on, which is this server. A phone
+    // asking to sync is asking the server to read its own ~/.claude and use its
+    // own git credentials, and the merge tool the phone draws decides the
+    // server's files. The same rule the CLI surface follows.
+    this.sync = {
+      sources: () =>
+        rpc("sync.sources").then((r) => ((r.sources ?? []) as SyncSource[])),
+      status: () => rpc("sync.status").then((r) => r as unknown as SyncStatus),
+      probe: (remoteUrl) =>
+        rpc("sync.probe", { remoteUrl }).then((r) => r as unknown as SyncProbe),
+      pull: () =>
+        rpc("sync.pull").then((r) => ((r.conflicts ?? []) as SyncConflict[])),
+      conflicts: () =>
+        rpc("sync.conflicts").then((r) => ((r.conflicts ?? []) as SyncConflict[])),
+      resolve: (path, content) =>
+        rpc("sync.resolve", { path, content }).then((r) => r as unknown as SyncJob),
+      skip: (path) => rpc("sync.skip", { path }).then((r) => r as unknown as SyncJob),
+      push: () => rpc("sync.push").then((r) => r as unknown as SyncJob),
+      cancel: () => rpc("sync.cancel").then((r) => Boolean(r.cancelled)),
+      dismiss: () => rpc("sync.dismiss").then(() => {}),
+      repair: () => rpc("sync.repair").then(() => {}),
+    };
+
+    this.telemetry = {
+      state: () => rpc("telemetry.state").then((r) => r as unknown as TelemetryState),
+      setModeA: (enabled) => rpc("telemetry.setModeA", { enabled }).then(() => {}),
+      setModeB: (enabled) => rpc("telemetry.setModeB", { enabled }).then(() => {}),
+      completeOnboarding: (modeA, modeB) =>
+        rpc("telemetry.completeOnboarding", { modeA, modeB }).then(() => {}),
+      export: () => rpc("telemetry.export"),
+      retryForget: () => rpc("telemetry.retryForget").then(() => {}),
+      trackUpdate: ({ stage, targetVersion, errorCode }) =>
+        rpc("telemetry.trackUpdate", { stage, targetVersion, errorCode }).then(() => {}),
+      trackPane: (paneKind) => rpc("telemetry.trackPane", { paneKind }).then(() => {}),
+      trackSettingsSnapshot: (args) =>
+        rpc("telemetry.trackSettingsSnapshot", args).then(() => {}),
+    };
+
     this.push = {
       publicKey: () => rpc("push.publicKey").then((r) => (r.key as string) ?? null),
       subscribe: (sub) => rpc("push.subscribe", sub).then(() => {}),
@@ -546,6 +653,58 @@ export class RemoteBackend implements Backend {
     this.meta = {
       get: () => rpc("workspace.info").then(readMeta),
       set: (patch) => rpc("workspace.setInfo", patch).then(readMeta),
+    };
+
+    // The generic RPC arm answers for the conduct domain; only `pulse` needs a
+    // ceiling of its own, set in RPC_TIMEOUTS above the server's 120 s wait.
+    // A pulse torn by a reconnect rejects like any other in-flight call, and
+    // the caller's loop asks again with the cursor it already holds.
+    this.conduct = {
+      record: (moment) => rpc("conduct.record", moment).then((r) => ({ seq: (r?.seq as number) ?? 0 })),
+      pulse: (params) => rpc("conduct.pulse", params),
+      post: (params) =>
+        rpc("orchestrator.post", params).then((r) => ({
+          messageId: (r?.messageId as string) ?? "",
+        })),
+      messages: (params) =>
+        rpc("orchestrator.messages", params).then(
+          (r) => (r?.messages ?? []) as OrchestratorMessage[],
+        ),
+      start: (params) =>
+        rpc("orchestrator.start", params).then((r) => ({
+          threadId: (r?.threadId as string) ?? "",
+        })),
+      status: (params) =>
+        rpc("orchestrator.status", params).then((r) => ({
+          threadId: (r?.threadId as string | null) ?? null,
+          state: (r?.state as string) ?? "off",
+        })),
+      actions: (params) =>
+        rpc("orchestrator.actions", params).then(
+          (r) => (r?.actions ?? []) as OrchestratorAction[],
+        ),
+      undo: (params) =>
+        rpc("orchestrator.undo", params).then((r) => ({
+          done: r?.done === true,
+        })),
+      acceptDispatch: (params) =>
+        rpc("thread.acceptDispatch", params).then((r) => ({
+          threadId: (r?.threadId as string) ?? params.threadId,
+          accept: (r?.accept as boolean) ?? params.accept,
+          dropped: (r?.dropped as number) ?? 0,
+        })),
+      drainDispatches: (params) =>
+        rpc("dispatch.drain", params).then(
+          (r) => (r?.dispatches ?? []) as DispatchLine[],
+        ),
+      settleDispatch: (params) =>
+        rpc("dispatch.settle", params).then((r) => ({
+          settled: r?.settled === true,
+        })),
+      transcribe: (params) =>
+        rpc("voice.transcribe", params).then((r) => ({
+          text: (r?.text as string) ?? "",
+        })),
     };
 
     this.pairing = {

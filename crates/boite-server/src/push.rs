@@ -244,9 +244,8 @@ fn load_or_generate_keys(data_dir: &Path) -> (String, String) {
     }
 
     let (private_b64, public_b64) = generate_keys();
-    match fs::write(&private_path, &private_b64) {
-        Ok(()) => set_key_permissions(&private_path),
-        Err(e) => tracing::warn!("push: cannot persist VAPID private key: {e}"),
+    if let Err(e) = crate::secret_file::write(&private_path, &private_b64) {
+        tracing::warn!("push: cannot persist VAPID private key: {e}");
     }
     if let Err(e) = fs::write(&public_path, &public_b64) {
         tracing::warn!("push: cannot persist VAPID public key: {e}");
@@ -272,15 +271,6 @@ fn generate_keys() -> (String, String) {
     let public_b64 = URL_SAFE_NO_PAD.encode(point.as_bytes());
     (private_b64, public_b64)
 }
-
-#[cfg(unix)]
-fn set_key_permissions(path: &Path) {
-    use std::os::unix::fs::PermissionsExt;
-    let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
-}
-
-#[cfg(not(unix))]
-fn set_key_permissions(_path: &Path) {}
 
 #[cfg(test)]
 mod tests {

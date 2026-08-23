@@ -1,5 +1,6 @@
 <script lang="ts">
   import { app } from "$lib/app/store.svelte";
+  import { tip } from "$lib/shared/actions/tooltip";
   import { editorStore } from "./store.svelte";
   import EditorTabStrip from "./EditorTabStrip.svelte";
   import CodeMirror from "./CodeMirror.svelte";
@@ -99,7 +100,7 @@
     </div>
   {:else if active.kind === "preview"}
     <div class="flex h-7 shrink-0 items-center gap-2 border-b border-border bg-[var(--color-titlebar)] px-3 text-xs text-muted-foreground">
-      <span class="truncate flex-1" title={active.path}>{active.path}</span>
+      <span class="truncate flex-1" use:tip={active.path}>{active.path}</span>
       <!-- Reveal, not open: `opener:allow-open-path` is not among the app's
            capabilities, and handing the OS an arbitrary path to run its default
            handler on is a wider door than a preview button needs.
@@ -110,7 +111,7 @@
           type="button"
           class="rounded p-1 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground"
           onclick={() => active && void revealItemInDir(active.path)}
-          title={t("explorer.revealInFileManager")}
+          use:tip={t("explorer.revealInFileManager")}
           aria-label={t("explorer.revealInFileManager")}
         >
           <FolderOpen class="size-3.5" />
@@ -133,14 +134,14 @@
     {/if}
   {:else if active.kind === "file"}
     <div class="flex h-7 shrink-0 items-center gap-2 border-b border-border bg-[var(--color-titlebar)] px-3 text-xs text-muted-foreground">
-      <span class="truncate flex-1" title={active.path}>{active.path}</span>
+      <span class="truncate flex-1" use:tip={active.path}>{active.path}</span>
       {#if active.isReadonly}
         <span class="rounded bg-[var(--color-surface-2)] px-1.5 py-0.5 text-2xs uppercase">{t("editor.readonly")}</span>
       {/if}
       {#if active.externalChange}
         <span
           class="rounded bg-[var(--color-warning)]/15 px-1.5 py-0.5 text-2xs uppercase text-[var(--color-warning)]"
-          title={t("editor.staleWarning")}
+          use:tip={t("editor.staleWarning")}
         >
           {t("editor.changedOnDisk")}
         </span>
@@ -148,7 +149,7 @@
           type="button"
           class="rounded p-1 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground"
           onclick={() => active && void editorStore.reloadFromDisk(active.id)}
-          title={t("editor.reloadFromDisk")}
+          use:tip={t("editor.reloadFromDisk")}
           aria-label={t("editor.reload")}
         >
           <RotateCw class="size-3.5" />
@@ -159,7 +160,7 @@
           class="text-foreground/80"
           role="img"
           aria-label={t("editor.unsaved")}
-          title={t("editor.unsaved")}>●</span
+          use:tip={t("editor.unsaved")}>●</span
         >
       {/if}
       <button
@@ -167,7 +168,7 @@
         class="rounded p-1 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:opacity-40"
         onclick={save}
         disabled={active.isReadonly || !active.dirty || active.saving}
-        title={t("editor.saveWithShortcut")}
+        use:tip={t("editor.saveWithShortcut")}
         aria-label={t("editor.save")}
       >
         <Save class="size-3.5 {active.saving ? 'animate-pulse' : ''}" />

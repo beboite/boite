@@ -1,6 +1,14 @@
 import { invoke } from "./ipc";
 import type {
   ApprovalsApi,
+  SyncApi,
+  TelemetryApi,
+  TelemetryState,
+  SyncConflict,
+  SyncJob,
+  SyncProbe,
+  SyncSource,
+  SyncStatus,
   PendingApproval,
   Checkpoint,
   CheckpointApi,
@@ -9,6 +17,14 @@ import type {
   EditorApi,
   ExplorerApi,
   CodexSwitcherApi,
+  CliApi,
+  CliDataPath,
+  CliLatest,
+  CliJob,
+  CliRow,
+  FastMcpSshApi,
+  KebaccSwitcherApi,
+  KebaccSwitcherList,
   CodexSwitcherList,
   FastpickApi,
   FastpickListing,
@@ -179,6 +195,37 @@ export const tauriCodexSwitcher: CodexSwitcherApi = {
   version: () => invoke<string | null>("codex_switcher_version"),
 };
 
+export const tauriFastMcpSsh: FastMcpSshApi = {
+  version: () => invoke<string | null>("fast_mcp_ssh_version"),
+};
+
+export const tauriKebaccSwitcher: KebaccSwitcherApi = {
+  async list(provider) {
+    const raw = await invoke<string>("kebacc_switcher_list", { provider: provider ?? null });
+    return JSON.parse(raw) as KebaccSwitcherList;
+  },
+  async add(provider) {
+    const raw = await invoke<string>("kebacc_switcher_add", { provider });
+    return JSON.parse(raw) as KebaccSwitcherList;
+  },
+  async switchTo(provider, email) {
+    const raw = await invoke<string>("kebacc_switcher_switch", { provider, email });
+    return JSON.parse(raw) as KebaccSwitcherList;
+  },
+  version: () => invoke<string | null>("kebacc_switcher_version"),
+};
+
+export const tauriCli: CliApi = {
+  catalog: (probeVersions) => invoke<CliRow[]>("cli_catalog", { probeVersions: probeVersions ?? false }),
+  latest: () => invoke<CliLatest[]>("cli_latest"),
+  jobs: () => invoke<CliJob[]>("cli_jobs"),
+  dataPaths: (id) => invoke<CliDataPath[]>("cli_data_paths", { id }),
+  install: (id) => invoke<CliJob>("cli_install", { id }),
+  uninstall: (id, purgeData) => invoke<CliJob>("cli_uninstall", { id, purgeData }),
+  cancel: (id) => invoke<boolean>("cli_cancel", { id }),
+  dismiss: (id) => invoke<void>("cli_dismiss", { id }),
+};
+
 export const tauriScope: ScopeApi = {
   registerProjectRoots: (roots) => invoke("register_project_roots", { roots }),
   // Desktop uses the native folder dialog, not a server-side browser.
@@ -198,7 +245,8 @@ const SESSION_COMMANDS: Record<SessionKind, string> = {
 };
 
 export const tauriSession: SessionApi = {
-  usage: (cwds, days) => invoke<UsageReport>("agent_token_usage", { cwds, days }),
+  usage: (cwds, days, orchestratorSessions) =>
+    invoke<UsageReport>("agent_token_usage", { cwds, days, orchestratorSessions }),
   liveClaude: () => invoke<LiveClaudeSession[]>("live_claude_sessions"),
   agentTurns: (queries) => invoke<AgentTurn[]>("agent_turns", { queries }),
   stopClaude: (sessionId) => invoke<boolean>("stop_claude_session", { sessionId }),
@@ -235,12 +283,12 @@ export const tauriSession: SessionApi = {
     // The rest answer with an id and the activity timestamp their own store
     // keeps, which is null when that store had none to give — never a zero,
     // which attribution would read as 1970 and refuse.
-    const hit = await invoke<{ id: string; modifiedMs: number | null } | null>(command, {
+    const hit = await invoke<{ id: string; modifiedMs: number | null; title?: string | null } | null>(command, {
       cwd,
       afterUnixMs,
       excludeIds,
     });
-    return hit ? { id: hit.id, mtimeMs: hit.modifiedMs } : null;
+    return hit ? { id: hit.id, mtimeMs: hit.modifiedMs, title: hit.title } : null;
   },
 };
 
@@ -270,4 +318,42 @@ export const tauriLog: LogApi = {
   read: (scope) => invoke<LogEntry[]>("read_app_log", { scope }),
   clear: () => invoke<void>("clear_app_log"),
   filePath: () => invoke<string>("log_file_path"),
+};
+
+/**
+ * Carrying the agent configuration between computers.
+ *
+ * Every one of these is the same bus command the remote asks for by name; the
+ * desktop reads the answer bare, and the envelopes belong to the WebSocket
+ * protocol. The address and the switches are not passed: the host reads them out
+ * of the settings row, so what is on screen and what the next sync uses cannot
+ * disagree.
+ */
+export const tauriTelemetry: TelemetryApi = {
+  state: () => invoke<TelemetryState>("telemetry_state"),
+  setModeA: (enabled) => invoke("telemetry_set_mode_a", { params: { enabled } }),
+  setModeB: (enabled) => invoke("telemetry_set_mode_b", { params: { enabled } }),
+  completeOnboarding: (modeA, modeB) =>
+    invoke("telemetry_complete_onboarding", { params: { modeA, modeB } }),
+  export: () => invoke<unknown>("telemetry_export"),
+  retryForget: () => invoke("telemetry_retry_forget"),
+  trackUpdate: ({ stage, targetVersion, errorCode }) =>
+    invoke("telemetry_track_update", { params: { stage, targetVersion, errorCode } }),
+  trackPane: (paneKind) => invoke("telemetry_track_pane", { params: { paneKind } }),
+  trackSettingsSnapshot: (args) =>
+    invoke("telemetry_track_settings_snapshot", { params: args }),
+};
+
+export const tauriSync: SyncApi = {
+  sources: () => invoke<SyncSource[]>("sync_sources"),
+  status: () => invoke<SyncStatus>("sync_status"),
+  probe: (remoteUrl) => invoke<SyncProbe>("sync_probe", { params: { remoteUrl } }),
+  pull: () => invoke<SyncConflict[]>("sync_pull"),
+  conflicts: () => invoke<SyncConflict[]>("sync_conflicts"),
+  resolve: (path, content) => invoke<SyncJob>("sync_resolve", { params: { path, content } }),
+  skip: (path) => invoke<SyncJob>("sync_skip", { params: { path } }),
+  push: () => invoke<SyncJob>("sync_push"),
+  cancel: () => invoke<boolean>("sync_cancel"),
+  dismiss: () => invoke<void>("sync_dismiss"),
+  repair: () => invoke<void>("sync_repair"),
 };

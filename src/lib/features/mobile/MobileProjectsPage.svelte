@@ -19,6 +19,7 @@
   import LayoutDashboard from "@lucide/svelte/icons/layout-dashboard";
   import X from "@lucide/svelte/icons/x";
   import Unlink2 from "@lucide/svelte/icons/unlink-2";
+  import { rowFlip } from "$lib/shared/actions/rowFlip.svelte";
 
   const projects = $derived(app.sortedProjects);
 
@@ -93,13 +94,16 @@
     </button>
   </header>
 
-  <div class="min-h-0 flex-1 overflow-y-auto p-2.5">
+  <div class="min-h-0 flex-1 scroll-pane overflow-y-auto p-2.5">
     {#if projects.length === 0}
       <div class="flex flex-col items-center gap-3 px-4 py-12 text-center text-sm text-muted-foreground">
         {t("mobile.noProjects")}
       </div>
     {:else}
-      <div class="flex flex-col gap-2.5">
+      <div
+        class="flex flex-col gap-2.5"
+        use:rowFlip={{ key: () => projects.map((p) => p.id).join(",") }}
+      >
         {#each projects as project (project.id)}
           {@const threads = liveThreads(project.id)}
           {@const isCurrent = app.currentProjectId === project.id}
@@ -160,7 +164,10 @@
             </div>
 
             {#if threads.length > 0}
-              <ul class="border-t border-border">
+              <ul
+                class="border-t border-border"
+                use:rowFlip={{ key: () => threads.map((x) => x.id).join(",") }}
+              >
                 {#each threads as thread (thread.id)}
                   {@const isActive = app.activeThreadId === thread.id}
                   <li class="flex min-h-11 items-center gap-3 px-3 py-2.5 {isActive ? 'bg-[var(--color-surface-2)]' : ''}">

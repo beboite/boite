@@ -1,5 +1,6 @@
 <script module lang="ts">
   import type { McpRegistration } from "$lib/features/thread/agentMcp";
+  import { tip } from "$lib/shared/actions/tooltip";
 
   type AgentRow = {
     key: string;
@@ -201,13 +202,24 @@
     // their agent — so nothing here would ever hear about it. Re-reading a
     // handful of small config files is the cheapest way to notice, and it stops
     // as soon as every agent is wired.
+    const settled = () => agentsHere.length > 0 && agentsHere.every((a) => a.reg === "this");
     const timer = setInterval(() => {
-      if (agentsHere.length > 0 && agentsHere.every((a) => a.reg === "this")) return;
+      // A hidden window is a laptop lid or a phone in a pocket, and a tick
+      // there reads config files off disk for a panel nobody is looking at.
+      // The catch-up below covers what the pause missed, so nothing is lost by
+      // skipping: the poll exists to notice a change made outside Boite, and
+      // noticing it on the way back is soon enough.
+      if (document.hidden || settled()) return;
       run();
     }, 5000);
+    const wake = () => {
+      if (!document.hidden && !settled()) run();
+    };
+    document.addEventListener("visibilitychange", wake);
     return () => {
       cancelled = true;
       clearInterval(timer);
+      document.removeEventListener("visibilitychange", wake);
     };
   });
 
@@ -294,7 +306,7 @@
         {agent.label}
       </span>
       {#if agent.auto || agent.reg === "this"}
-        <span class="shrink-0 text-xs text-muted-foreground" title={t("todo.agentReadyHint")}>
+        <span class="shrink-0 text-xs text-muted-foreground" use:tip={t("todo.agentReadyHint")}>
           {t("todo.agentActive")}
         </span>
       {:else if agent.cli}
@@ -309,8 +321,9 @@
       {:else}
         <!-- No verified way to register this one from a command line. Inventing
              `<agent> mcp add …` from the label was wrong twice over: the binary
-             is not always the label (copilot runs as `gh copilot`) and the
-             subcommand is not always non-interactive (copilot's opens a form).
+             is not always the label (cursor runs as `cursor-agent`, antigravity
+             as `agy`) and the subcommand is not always non-interactive
+             (copilot's opens a form).
              So offer the path and let the user register it the way their agent
              documents. -->
         <button

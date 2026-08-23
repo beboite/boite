@@ -66,12 +66,164 @@ with the new thread id; terminal_transcript and thread_wait take that id.
 Answers are TOON: `key: value` for a single record, and `name(N):` followed by a \
 header row then one row per item for a list.";
 
+/// Who a global orchestrator is. One paragraph, swapped for the scoped one
+/// when the row carries a project: everything after it is the same craft.
+const ORCHESTRATOR_GLOBAL: &str = "\
+You are this workspace's orchestrator: the one thread the user talks to. \
+Everything else here is a worker, and you see them from the outside.";
+
+/// What an orchestrator session reads after its opening paragraph.
+///
+/// Written as moments, short, because it is paid on every connection. The
+/// autonomy level rides in `BOITE_AUTONOMY`; enforcement is Boite's, this text
+/// only tells the agent not to look for a detour.
+pub const ORCHESTRATOR_INSTRUCTIONS: &str = "\
+You do not do the work. A request that needs edits, a build or a review gets \
+a terminal of its own via thread_spawn, with a prompt written for someone who \
+was not in this conversation.
+
+A worker that needs one more line at its prompt gets thread_dispatch. The \
+line is typed by the device, only at the worker's prompt, visibly marked as \
+yours; the pulse tells you whether it was delivered, dropped or refused. A \
+finished worker you are done with gets thread_dismiss.
+
+You wait by sleeping in workspace_pulse. Never a loop, never a timer. If \
+nothing happened, nothing happened. The pulse already carries each terminal's \
+phase; read a transcript only when the pulse is not enough — a transcript \
+costs a hundred pulses.
+
+If a worker is waiting on the user, tell the user instead of answering in \
+their place. A permission request belongs to the user, never to you.
+
+Answer with exactly one say of urgency answer per turn. Before anything you \
+expect to be long, send a say of urgency ack: thirty seconds of silence reads \
+as a failure on a phone. Put in aloud one or two sentences written to be \
+heard, not read. Speak the user's language.
+
+Your autonomy level is in BOITE_AUTONOMY. As observer you watch and answer \
+and open nothing. Asked for something your level forbids, say so and offer to \
+raise it. When Boite refuses you, report the refusal as it was said.";
+
 pub fn tools() -> Value {
     let mut list = common_tools();
     if let (Some(all), Value::Array(tail)) = (list.as_array_mut(), thread_tools()) {
         all.extend(tail);
     }
     list
+}
+
+/// The list a given role reads. Only `orchestrator` adds anything: a worker
+/// handed the pulse would be a worker taught to idle in a long-poll.
+pub fn tools_for_role(role: Option<&str>) -> Value {
+    let mut list = tools();
+    if role == Some("orchestrator") {
+        if let (Some(all), Value::Array(tail)) = (list.as_array_mut(), orchestrator_tools()) {
+            all.extend(tail);
+        }
+    }
+    list
+}
+
+/// The instructions a given role reads, same selection as [`tools_for_role`].
+///
+/// The scope names the project a scoped orchestrator answers for, so its
+/// opening paragraph says whose it is and what stays with the workspace one.
+/// A scope without the role means nothing: workers carry no instructions of
+/// their own whatever their row says about projects.
+pub fn instructions_for_role(role: Option<&str>, scope: Option<&str>) -> String {
+    match role {
+        Some("orchestrator") => {
+            let opening = match scope {
+                Some(project) => format!(
+                    "You are project {project}'s orchestrator: the one thread the user talks \
+                     to about this project. Every worker you see lives here. Anything beyond \
+                     it, another project or the workspace as a whole, belongs to the user or \
+                     to the workspace orchestrator: do not reach for it, say whose it is."
+                ),
+                None => ORCHESTRATOR_GLOBAL.to_string(),
+            };
+            format!("{INSTRUCTIONS}\n\n{opening}\n\n{ORCHESTRATOR_INSTRUCTIONS}")
+        }
+        _ => INSTRUCTIONS.to_string(),
+    }
+}
+
+/// Orchestrator only, selected on the role Boite stamped into the row and the
+/// environment. The endpoint re-checks the row on every call, so a process
+/// that exports `BOITE_ROLE` by hand reads a longer menu of refusals.
+fn orchestrator_tools() -> Value {
+    json!([
+        {
+            "name": "workspace_pulse",
+            "description": "Wait here. Answers what changed since your cursor — worker phases, \
+                            user messages — or nothing when the wait ran out, which is an answer \
+                            too. This is how you wait: never call anything in a loop. Pass the \
+                            seq you were last given.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "sinceSeq": { "type": "number", "description": "Your cursor: the seq of the last answer. 0 the first time." },
+                    "timeoutMs": { "type": "number", "description": "How long to wait when nothing changed. Default 30000, max 120000; 0 answers now." },
+                    "project": { "type": "string", "description": "One project id. Omit for the whole workspace." }
+                },
+                "additionalProperties": false
+            },
+            "annotations": { "title": "Pulse", "readOnlyHint": true, "idempotentHint": false, "openWorldHint": false }
+        },
+        {
+            "name": "say",
+            "description": "Your reply to the user. text goes into the chat; aloud is the one-or-two \
+                            sentence version to be read out loud. A turn ends with exactly one say \
+                            of urgency answer; a say of urgency ack in the middle of a turn says \
+                            you are working.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "text": { "type": "string", "description": "The reply, one short paragraph." },
+                    "aloud": { "type": "string", "description": "One or two sentences written to be heard. Omit to stay silent." },
+                    "urgency": { "type": "string", "enum": ["ack", "answer", "alert"], "description": "answer ends the turn; ack says you are on it; alert interrupts." }
+                },
+                "required": ["text"],
+                "additionalProperties": false
+            },
+            "annotations": { "title": "Say", "destructiveHint": false, "openWorldHint": false }
+        },
+        {
+            "name": "thread_dispatch",
+            "description": "Queue one line for a worker terminal's prompt. It is typed by the \
+                            device that owns that terminal, only when the worker is at its \
+                            prompt, with a visible mark saying it came from you — never during \
+                            a permission dialog, never into a muted thread, never into another \
+                            orchestrator. You learn the outcome on the pulse as \
+                            dispatch.settled: delivered, dropped or refused with the reason.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "threadId": { "type": "string", "description": "The target worker's thread id." },
+                    "text": { "type": "string", "description": "The line to type, written for someone who was not in this conversation." },
+                    "mode": { "type": "string", "enum": ["queue", "now"], "description": "queue waits for the prompt; now lands only if the worker is at it right now." }
+                },
+                "required": ["threadId", "text"],
+                "additionalProperties": false
+            },
+            "annotations": { "title": "Dispatch", "destructiveHint": false, "openWorldHint": false }
+        },
+        {
+            "name": "thread_dismiss",
+            "description": "Put a finished worker away. Refused while the worker is running or \
+                            waiting on the user — the same rule as the user's own settle. The \
+                            terminal is not killed; it leaves the active list.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "threadId": { "type": "string", "description": "The worker's thread id." }
+                },
+                "required": ["threadId"],
+                "additionalProperties": false
+            },
+            "annotations": { "title": "Dismiss", "destructiveHint": false, "openWorldHint": false }
+        }
+    ])
 }
 
 fn common_tools() -> Value {
@@ -141,7 +293,7 @@ fn common_tools() -> Value {
             "description": "Where this terminal works: its own detached worktree of the project, \
                             isolated from the user's checkout and from other terminals, sharing one \
                             history. Reports path, repo, branch if one was taken, uncommitted \
-                            changes, and the existing branches.",
+                            changes, what the remote has of the branch, and the existing branches.",
             "inputSchema": { "type": "object" },
             "annotations": { "title": "Worktree", "readOnlyHint": true, "idempotentHint": true, "openWorldHint": false }
         },
@@ -356,15 +508,15 @@ fn thread_tools() -> Value {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "agent": { "type": "string", "description": "claude, codex, opencode, cursor, copilot, grok, hermes, antigravity, pi, muse, or one of the user's shortcut labels. For fastpick agents, use the format 'fastpick:provider:model' (e.g., 'fastpick:crof:deepseek-v4-pro'). Defaults to yours." },
+                    "agent": { "type": "string", "description": "claude, codex, opencode, cursor, copilot, grok, hermes, antigravity, pi, muse, or one of the user's shortcut labels. For fastpick agents, use the format 'fastpick:provider:model' (e.g., 'fastpick:crof:deepseek-v4-pro'), or 'fastpick:provider.key:model' to name one credential of a provider that holds several. Defaults to yours." },
                     "project": { "type": "string", "description": "Id, name or folder. Defaults to this project." },
                     "prompt": {
                         "type": "string",
                         "description": "Its opening instruction, written for someone who was not in \
-                                        this conversation. Only claude and codex take one on the \
-                                        command line; ask for one of those if it must start knowing \
-                                        something. The rest open bare and Boite shows the user what \
-                                        was meant to be said."
+                                        this conversation. claude, codex, pi, grok and antigravity \
+                                        take one on the command line; ask for one of those if it \
+                                        must start knowing something. The rest open bare and Boite \
+                                        shows the user what was meant to be said."
                     }
                 },
                 "additionalProperties": false
@@ -486,6 +638,86 @@ mod tests {
         assert!(names.iter().any(|n| n == "whereami"), "{names:?}");
         assert!(names.iter().any(|n| n == "thread_wait"), "{names:?}");
         assert_eq!(names.len(), 20, "{names:?}");
+    }
+
+    /// Pinned like the count above: the orchestrator tier is four tools, an
+    /// ordinary thread never sees them, and an unknown role is an ordinary
+    /// thread rather than a wider one.
+    #[test]
+    fn the_orchestrator_tier_is_four_tools_nobody_else_sees() {
+        let plain: Vec<String> = tools_for_role(None)
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|t| t.get("name").and_then(|v| v.as_str()).map(str::to_string))
+            .collect();
+        assert_eq!(plain.len(), 20, "{plain:?}");
+        assert!(!plain.iter().any(|n| n == "workspace_pulse"));
+        assert!(!plain.iter().any(|n| n == "say"));
+        assert!(!plain.iter().any(|n| n == "thread_dispatch"));
+        assert!(!plain.iter().any(|n| n == "thread_dismiss"));
+        assert_eq!(tools_for_role(Some("supervisor")).as_array().unwrap().len(), 20);
+
+        let raised: Vec<String> = tools_for_role(Some("orchestrator"))
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|t| t.get("name").and_then(|v| v.as_str()).map(str::to_string))
+            .collect();
+        assert_eq!(raised.len(), 24, "{raised:?}");
+        assert!(raised.iter().any(|n| n == "workspace_pulse"));
+        assert!(raised.iter().any(|n| n == "say"));
+        assert!(raised.iter().any(|n| n == "thread_dispatch"));
+        assert!(raised.iter().any(|n| n == "thread_dismiss"));
+
+        assert!(instructions_for_role(Some("orchestrator"), None).contains("workspace_pulse"));
+        assert!(!instructions_for_role(None, None).contains("orchestrator"));
+
+        // The scoped opening names its project and drops the workspace claim;
+        // the craft below the opening is the same text either way.
+        let scoped = instructions_for_role(Some("orchestrator"), Some("p1"));
+        assert!(scoped.contains("project p1's orchestrator"), "{scoped}");
+        assert!(!scoped.contains("workspace's orchestrator"), "{scoped}");
+        assert!(scoped.contains("workspace_pulse"));
+        assert!(instructions_for_role(None, Some("p1")) == instructions_for_role(None, None));
+    }
+
+    /// Configuration sync is not something an agent may reach, and the reason it
+    /// cannot is that nothing here names it — not the capability check, which
+    /// `Grant::Owner` passes.
+    ///
+    /// Three of the calls write into `~/.gemini/config/mcp_config.json`, which
+    /// decides which MCP servers an agent may talk to, and into `~/.agents`,
+    /// which is the instruction tree every agent on the machine reads and which
+    /// this feature then pushes to a git remote and onto every other computer
+    /// the user owns. An agent that could write those could grant itself tools
+    /// and write its own future instructions, everywhere, at once.
+    ///
+    /// Reading is left out too. It is harmless on its own, and a tool list is
+    /// paid for in every session that connects and again in the context window
+    /// that reads it — for an answer no agent workflow needs.
+    ///
+    /// Deleting this test to add one is the point: it should take a sentence
+    /// saying why.
+    #[test]
+    fn no_sync_tool_is_offered_to_an_agent() {
+        for name in names() {
+            assert!(!name.contains("sync"), "{name} puts configuration sync in reach of an agent");
+        }
+    }
+
+    /// Telemetry consent, export and forget are `Grant::Local`. An agent that
+    /// saw a tool named after them would try, get refused, and still learn
+    /// that the methods exist. The bus already blocks `Grant::Owner`; this
+    /// keeps the tool list from advertising the door.
+    #[test]
+    fn no_telemetry_tool_is_offered_to_an_agent() {
+        for name in names() {
+            assert!(
+                !name.contains("telemetry"),
+                "{name} puts telemetry in reach of an agent"
+            );
+        }
     }
 }
 

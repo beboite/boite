@@ -1,5 +1,6 @@
 import { app } from "$lib/app/store.svelte";
 import { settings } from "$lib/features/settings/store.svelte";
+import { homeAvailable } from "$lib/features/settings/homeAvailable";
 import { projectDisplayName } from "$lib/shared/project-label";
 import {
   closeThreadWithConfirm,
@@ -184,6 +185,25 @@ export function buildPaletteCommands(): PaletteCommand[] {
       app.mobileTab = "settings";
     },
   });
+  commands.push({
+    id: "action:plugins",
+    section: "actions",
+    labelKey: "plugins.title",
+    run: () => {
+      app.view = "plugins";
+    },
+  });
+  if (homeAvailable(settings.state)) {
+    commands.push({
+      id: "action:home",
+      section: "actions",
+      labelKey: "home.title",
+      run: () => {
+        app.view = "home";
+        app.mobileTab = "home";
+      },
+    });
+  }
 
   // What the project itself says it can run. The list is read when the palette
   // opens, so a script added to package.json five minutes ago is offered

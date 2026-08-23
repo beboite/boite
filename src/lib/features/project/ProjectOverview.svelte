@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { tip } from "$lib/shared/actions/tooltip";
   import { app } from "$lib/app/store.svelte";
   import { gitStore, gitScope } from "$lib/features/git/store.svelte";
   import { todos } from "$lib/features/todo/store.svelte";
@@ -25,6 +26,7 @@
   import ArrowUp from "@lucide/svelte/icons/arrow-up";
   import ArrowDown from "@lucide/svelte/icons/arrow-down";
   import { t } from "$lib/i18n/index.svelte";
+  import { settings } from "$lib/features/settings/store.svelte";
   import type { Project, Thread } from "$lib/types";
 
   /**
@@ -133,10 +135,31 @@
         </span>
       {/if}
     {/snippet}
+    {#snippet actions()}
+      <!-- The per-project override, three states: absent inherits the global
+           answer. Only drawn while that experiment is armed, so switching it
+           off restores one global orchestrator without erasing the choices. -->
+      {#if settings.state.experimentOrchestrator && settings.state.experimentOrchestratorPerProject}
+        <select
+          class="rounded-md border border-border bg-[var(--color-surface-2)] px-1.5 py-0.5 text-xs text-muted-foreground outline-none focus:border-foreground/30"
+          aria-label={t("project.orchestrator")}
+          value={settings.state.orchestratorByProject[project.id] ?? ""}
+          onchange={(e) =>
+            void settings.setOrchestratorForProject(
+              project.id,
+              (e.currentTarget.value || null) as "on" | "off" | null,
+            )}
+        >
+          <option value="">{t("project.orchestratorInherit")}</option>
+          <option value="on">{t("project.orchestratorOn")}</option>
+          <option value="off">{t("project.orchestratorOff")}</option>
+        </select>
+      {/if}
+    {/snippet}
     {#if threads.length === 0}
       <p class="px-3.5 pb-3 text-sm text-muted-foreground">{t("project.noThreads")}</p>
     {:else}
-      <ul class="flex max-h-64 flex-col overflow-y-auto px-2 pb-2">
+      <ul class="flex max-h-64 flex-col scroll-pane overflow-y-auto px-2 pb-2">
         {#each threads as thread (thread.id)}
           <li>
             <button
@@ -183,7 +206,7 @@
       <div class="flex items-baseline gap-2">
         <p
           class="min-w-0 flex-1 truncate font-medium text-md text-foreground"
-          title={git.branch ?? ""}
+          use:tip={git.branch ?? ""}
         >
           {git.branch ?? t("project.detached")}
         </p>
@@ -204,7 +227,7 @@
       {#if git.log.length > 0}
         <ul class="mt-2.5 flex flex-col gap-1 border-t border-border pt-2">
           {#each git.log.slice(0, 5) as commit (commit.sha)}
-            <li class="flex items-baseline gap-2 text-sm" title={commit.summary}>
+            <li class="flex items-baseline gap-2 text-sm" use:tip={commit.summary}>
               <span class="min-w-0 flex-1 truncate text-foreground/80">
                 {commit.summary}
               </span>
@@ -242,7 +265,7 @@
         class="rounded p-1 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:opacity-40"
         onclick={() => todos.clearDone(project.id)}
         disabled={doneTodos.length === 0}
-        title={doneTodos.length === 0
+        use:tip={doneTodos.length === 0
           ? t("todo.nothingDone")
           : t("todo.clearDone", { count: doneTodos.length })}
         aria-label={t("todo.clearDoneLabel")}
@@ -256,7 +279,7 @@
            card beside it is. -->
       <TodoList
         projectId={project.id}
-        class="max-h-80 min-h-0 flex-1 overflow-y-auto border-t border-border"
+        class="max-h-80 min-h-0 flex-1 scroll-pane overflow-y-auto border-t border-border"
       />
       <!-- Creation lives on the card either way: an empty list is exactly where
            the first todo gets written. -->
@@ -302,7 +325,7 @@
        strings was room the rest of the page wanted. -->
   <p
     class="truncate px-1 text-xs text-muted-foreground/70 lg:col-span-3"
-    title={project.cwd}
+    use:tip={project.cwd}
   >
     {project.cwd}{#if project.gitRoot && project.gitRoot !== project.cwd}
       · {t("project.repoAt", { path: project.gitRoot })}

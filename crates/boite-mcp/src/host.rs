@@ -117,8 +117,14 @@ impl Host {
     }
 }
 
-impl Backend for Host {
-    fn send(&self, method: &str, path: &str, body: Option<Value>) -> Result<Value, String> {
+impl Host {
+    fn dispatch(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<Value>,
+        read_secs: Option<u64>,
+    ) -> Result<Value, String> {
         let body = body.map(|b| b.to_string().into_bytes());
         // Bound before the header list, so they outlive the borrows in it.
         let (auth, stamp, signature);
@@ -147,11 +153,36 @@ impl Backend for Host {
         if let Some(agent) = &self.agent {
             headers.push((boite_identity::header::AGENT, agent));
         }
-        let res = self.endpoint.send(method, path, &headers, body)?;
+        let res = match read_secs {
+            Some(secs) => self.endpoint.send_with_read_timeout(
+                method,
+                path,
+                &headers,
+                body,
+                std::time::Duration::from_secs(secs),
+            )?,
+            None => self.endpoint.send(method, path, &headers, body)?,
+        };
         if !(200..300).contains(&res.status) {
             return Err(refusal_for(path, res.status));
         }
         serde_json::from_slice(&res.body).map_err(|e| format!("bad response: {e}"))
+    }
+}
+
+impl Backend for Host {
+    fn send(&self, method: &str, path: &str, body: Option<Value>) -> Result<Value, String> {
+        self.dispatch(method, path, body, None)
+    }
+
+    fn send_long(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<Value>,
+        read_secs: u64,
+    ) -> Result<Value, String> {
+        self.dispatch(method, path, body, Some(read_secs))
     }
 
     fn remember(&self, short: &str, full: &str) {

@@ -100,6 +100,9 @@ class FastpickStore {
       const listing = await from.fastpick.list();
       if (this.#answeredBy !== from) return;
       this.listing = listing;
+      // Since schema 3 the listing says which fastpick answered, which is the same number
+      // `--version` would have cost a second process to ask for.
+      if (listing.fastpick) this.version = listing.fastpick;
     } catch (err) {
       // fastpick puts a usable sentence on stderr and the backend carries it through, so
       // this is worth showing rather than replacing with a generic failure.
@@ -176,6 +179,27 @@ class FastpickStore {
    */
   providerById(id: string) {
     return this.listing?.providers.find((p) => p.id === id) ?? null;
+  }
+
+  /**
+   * Every file in the prompts folder, whether or not it matches a model.
+   *
+   * fastpick's own menu puts this behind `a`, and the options pane behind the same kind of
+   * toggle: the matching files are the useful default, and the folder is what a user
+   * reaches for when the file they wrote is not among them.
+   */
+  get allPrompts() {
+    return this.listing?.prompts ?? [];
+  }
+
+  /** The config file that answered, on that machine. Absent before schema 3. */
+  get configPath(): string | null {
+    return this.listing?.config ?? null;
+  }
+
+  /** Where that machine resolves `--md` names. Absent before schema 3. */
+  get promptsDir(): string | null {
+    return this.listing?.systemPromptsDir ?? null;
   }
 
   /** Only the harnesses whose binary is on that machine, the way fastpick's own menu does. */

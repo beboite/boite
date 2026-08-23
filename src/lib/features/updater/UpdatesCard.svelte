@@ -133,7 +133,7 @@
 
     {#if status.kind === "ready" && status.notes}
       <pre
-        class="mt-2 max-h-32 overflow-y-auto whitespace-pre-wrap rounded-md bg-[var(--color-surface-3)] p-2 text-xs leading-relaxed text-muted-foreground">{status.notes}</pre>
+        class="mt-2 max-h-32 scroll-pane overflow-y-auto whitespace-pre-wrap rounded-md bg-[var(--color-surface-3)] p-2 text-xs leading-relaxed text-muted-foreground">{status.notes}</pre>
     {/if}
   </div>
 </SettingsCard>

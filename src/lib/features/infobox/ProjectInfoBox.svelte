@@ -1,5 +1,6 @@
 <script lang="ts">
   import { app } from "$lib/app/store.svelte";
+  import { tip } from "$lib/shared/actions/tooltip";
   import { workspace } from "$lib/backend";
   import { threadGitRoot } from "$lib/features/thread/cwd";
   import { gitStore, gitScope } from "$lib/features/git/store.svelte";
@@ -8,8 +9,8 @@
   import {
     INFO_BOX_ANCHORS,
     INFO_BOX_GUTTER_REM,
+    anchorForPoint,
     clampToPane,
-    nearestAnchor,
     snapPoint,
     toastAlignFor,
     toastStackFor,
@@ -293,6 +294,8 @@
     startY: number;
     originX: number;
     originY: number;
+    paneX: number;
+    paneY: number;
     armed: boolean;
   };
   let session: DragSession | null = null;
@@ -306,12 +309,15 @@
     if (pointerFromButton(e.target)) return;
     if (!hostEl) return;
     e.preventDefault();
+    const host = hostEl.getBoundingClientRect();
     session = {
       pointerId: e.pointerId,
       startX: e.clientX,
       startY: e.clientY,
       originX: left,
       originY: top,
+      paneX: host.left,
+      paneY: host.top,
       armed: false,
     };
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
@@ -334,13 +340,21 @@
       session.originY + dy,
     );
     dragPos = next;
-    hoverSnap = nearestAnchor(pane, boxSize, gutter, next.x, next.y);
+    // Aimed at the pointer, not at the box: the card is clamped inside the pane
+    // and is wide, so its own centre barely moves near an edge. Throw the
+    // cursor at the corner you want and release, the card follows.
+    hoverSnap = anchorForPoint(
+      pane,
+      e.clientX - session.paneX,
+      e.clientY - session.paneY,
+      dock,
+    );
   }
 
   function onPointerUp(e: PointerEvent) {
     if (!session || e.pointerId !== session.pointerId) return;
     const snap = session.armed
-      ? nearestAnchor(pane, boxSize, gutter, dragPos.x, dragPos.y)
+      ? anchorForPoint(pane, e.clientX - session.paneX, e.clientY - session.paneY, dock)
       : null;
     session = null;
     dragging = false;
@@ -413,7 +427,7 @@
     >
       <div class="shell">
         <div class="toolbar">
-          <span class="grip" aria-hidden="true" title={t("infoBox.drag")}>
+          <span class="grip" aria-hidden="true" use:tip={t("infoBox.drag")}>
             <GripVertical class="size-3" />
           </span>
           <button
@@ -421,7 +435,7 @@
             class="fold"
             aria-expanded={!collapsed}
             aria-label={collapsed ? t("infoBox.expand") : t("infoBox.collapse")}
-            title={collapsed ? t("infoBox.expand") : t("infoBox.collapse")}
+            use:tip={collapsed ? t("infoBox.expand") : t("infoBox.collapse")}
             onclick={() => settings.setInfoBoxCollapsed(!collapsed)}
           >
             {#if collapsed}
@@ -455,7 +469,7 @@
             {#if conflictsCount > 0}
               <span
                 class="flex shrink-0 items-center gap-0.5 rounded bg-[var(--color-danger)]/15 px-1 text-2xs font-semibold text-[var(--color-danger)]"
-                title={t("infoBox.conflicts", { count: conflictsCount })}
+                use:tip={t("infoBox.conflicts", { count: conflictsCount })}
               >
                 <AlertTriangle class="size-2.5" />{conflictsCount}
               </span>
@@ -473,7 +487,7 @@
             {#if isWorktree}
               <span
                 class="ml-auto flex shrink-0 items-center gap-1 rounded bg-[var(--color-surface-3)] px-1.5 py-0.5 text-2xs text-muted-foreground"
-                title={threadHere?.worktreePath ?? ""}
+                use:tip={threadHere?.worktreePath ?? ""}
               >
                 <FolderGit2 class="size-3 text-muted-foreground/80" />
                 <span class="max-w-[4.5rem] truncate">
@@ -546,7 +560,7 @@
         {#if claimed.length > 0 && (!collapsed || !isRepo)}
           <div
             class="row"
-            title={t("infoBox.claimedTitle", { agent: claimed[0].claimedBy ?? "" })}
+            use:tip={t("infoBox.claimedTitle", { agent: claimed[0].claimedBy ?? "" })}
           >
             <span class="relative flex size-3.5 shrink-0 items-center justify-center">
               <ShortcutIcon iconKey={claimed[0].claimedBy as IconKey} size={14} />
@@ -602,7 +616,7 @@
                   {#each claimed.slice(1) as item (item.id)}
                     <div
                       class="row dim"
-                      title={t("infoBox.claimedTitle", { agent: item.claimedBy ?? "" })}
+                      use:tip={t("infoBox.claimedTitle", { agent: item.claimedBy ?? "" })}
                     >
                       <span class="flex size-3.5 shrink-0 items-center justify-center">
                         <ShortcutIcon iconKey={item.claimedBy as IconKey} size={14} />

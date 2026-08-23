@@ -23,6 +23,7 @@ import { dropThreadCheckpoints, forgetThreadTurns } from "./checkpoints.svelte";
 import { samePromotion, type Promotion } from "./promote";
 import { carryTranscript, releaseClaudeSession } from "./session";
 import { cancelRelease, releaseAfterGrace } from "./worktree-grace";
+import { noteProjectWork } from "./work-activity.svelte";
 import type { IconKey, Project, Shortcut, Thread } from "$lib/types";
 import type { ShellOption } from "$lib/storage/platform.svelte";
 
@@ -404,7 +405,7 @@ function createThread(
   args: string[],
   labelPrefix: string,
   iconKey: IconKey,
-  opts: { fresh?: boolean; iconColor?: string | null; focus?: boolean; parentThreadId?: string | null; delegationMode?: 'normal' | 'delegation' } = {},
+  opts: { fresh?: boolean; iconColor?: string | null; focus?: boolean; parentThreadId?: string | null; delegationMode?: 'normal' | 'delegation'; deferActivation?: boolean } = {},
 ): Thread {
   const count = nextLabelSuffix(project.id, labelPrefix);
   const thread = buildThread(
@@ -418,13 +419,22 @@ function createThread(
     opts.delegationMode,
   );
   if (opts.fresh) app.markFresh(thread.id);
+  // Opening a thread here is the user starting work on this project, and it is
+  // the one bump that does not wait for an agent to pick anything up: a blank
+  // shell never reaches `running`, and a project the user just launched into
+  // belongs at the top of a recency order whatever runs in it.
+  noteProjectWork(thread.projectId);
   // Not awaited. The thread is in the store the moment this returns, which is
   // all the sidebar and the terminal need; waiting for the INSERT to come back
   // put an IPC round trip and a WAL commit between the click and the pane. A
   // row that fails to land still gives a working thread for this session, and
   // says so.
   void app.upsertThread(thread).catch((err) => recordUnsavedThread(thread, err));
-  if (opts.focus === false) {
+  if (opts.deferActivation) {
+    // Nothing mounts yet. Mounting the Terminal is what spawns the PTY, and the
+    // caller has a write that must land on the row before that spawn reads it —
+    // the orchestrator role stamp. It calls `app.requestActivation` itself.
+  } else if (opts.focus === false) {
     // Nobody clicked, so nobody moves. Mounting the Terminal is what spawns the
     // PTY, and that is the only reason the screen had to follow a launch: the
     // activation queue does it without taking the user off the thread they are
@@ -529,7 +539,7 @@ export async function launchAgent(
     iconKey: IconKey;
     iconColor?: string | null;
   },
-  opts: { focus?: boolean; parentThreadId?: string | null; delegationMode?: 'normal' | 'delegation' } = {},
+  opts: { focus?: boolean; parentThreadId?: string | null; delegationMode?: 'normal' | 'delegation'; deferActivation?: boolean } = {},
 ): Promise<Thread | null> {
   return createThread(
     project,
@@ -543,6 +553,7 @@ export async function launchAgent(
       focus: opts.focus ?? true,
       parentThreadId: opts.parentThreadId,
       delegationMode: opts.delegationMode,
+      deferActivation: opts.deferActivation,
     },
   );
 }

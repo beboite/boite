@@ -41,12 +41,24 @@ pub use routes::router;
 /// Two kinds, because the two of them refresh different things. The server used
 /// to announce a claimed branch as a todo change, which is not wrong so much as
 /// a device being told to re-read the wrong list.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Change {
     Todos,
     Worktrees,
     /// Something is waiting on the user. See `boite_core::approval`.
     Approvals,
+    /// The orchestrator conversation moved: a reply landed through `/v1/say`.
+    /// Every open chat re-reads by cursor rather than receiving the row.
+    Orchestrator,
+    /// A line was queued for a thread's prompt. Carries the ids because the
+    /// one device that owns the target PTY flushes on it, and a bare "reload"
+    /// would send every device to drain the same queue.
+    DispatchQueued {
+        to_thread_id: String,
+        dispatch_id: String,
+    },
+    /// An orchestrator put a finished worker away; thread lists re-read.
+    ThreadDismissed { thread_id: String },
 }
 
 /// What an agent is told when it asks for something no device is there to do.
@@ -76,6 +88,13 @@ pub trait Workspace: Send + Sync + 'static {
     /// The filesystem trust boundary, so where a project may be created is one
     /// rule rather than two that drift.
     fn roots(&self) -> &ProjectRoots;
+
+    /// The live `conduct.pulse` waits of this process, when the host keeps
+    /// one. `None` answers a `GET /v1/pulse` immediately, which is honest on a
+    /// host with no writer to wake it.
+    fn pulse_waiters(&self) -> Option<std::sync::Arc<boite_core::pulse::Waiters>> {
+        None
+    }
 
     /// The workspace secret. Never handed to anybody as it is.
     ///

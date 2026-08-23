@@ -5,11 +5,22 @@ import {
   noteStatusChange,
   resetFinished,
 } from "./finished.svelte";
-import { forgetWorkStarted, workStartedSince } from "./work-activity.svelte";
+import {
+  clearWaking,
+  forgetProjectWork,
+  forgetWorkStarted,
+  noteThreadWaking,
+  projectWorkSince,
+  workStartedSince,
+} from "./work-activity.svelte";
 
 beforeEach(() => {
   resetFinished();
-  for (const id of ["a", "b"]) forgetWorkStarted(id);
+  for (const id of ["a", "b"]) {
+    forgetWorkStarted(id);
+    clearWaking(id);
+  }
+  forgetProjectWork("p");
 });
 
 describe("which transitions light a row up", () => {
@@ -24,9 +35,34 @@ describe("which transitions light a row up", () => {
     expect(justFinished("b")).toBe(true);
   });
 
-  /** A thread put to sleep has ended too; the colour is the caller's business. */
-  it("marks a thread stopped from anywhere alive", () => {
-    noteStatusChange("a", "ready", "stopped");
+  /**
+   * Sleep is the far end of the mark, not another way to earn one. The idle
+   * timer takes minutes to reclaim a PTY, so a row that reaches `stopped` has
+   * had its news on screen for that long and stops claiming to be news.
+   */
+  it("lifts the mark when the idle timer parks the thread", () => {
+    noteStatusChange("a", "running", "done");
+    expect(justFinished("a")).toBe(true);
+    noteStatusChange("a", "done", "stopped");
+    expect(justFinished("a")).toBe(false);
+  });
+
+  /** A thread back at work has nothing left to say about its last turn. */
+  it("lifts the mark when the thread starts working again", () => {
+    noteStatusChange("a", "running", "done");
+    noteStatusChange("a", "done", "running");
+    expect(justFinished("a")).toBe(false);
+  });
+
+  /**
+   * No clock behind it: the mark used to expire after six seconds, which lost
+   * every turn that ended while the user was in another window.
+   */
+  it("keeps the mark for as long as nobody has looked", () => {
+    noteStatusChange("a", "running", "exited");
+    for (let sweep = 0; sweep < 100; sweep += 1) {
+      noteStatusChange("a", "exited", "exited");
+    }
     expect(justFinished("a")).toBe(true);
   });
 
@@ -88,6 +124,48 @@ describe("which transitions the sidebar's order follows", () => {
   it("says nothing while a turn is merely still going", () => {
     noteStatusChange("a", "running", "running");
     expect(workStartedSince("a")).toBeNull();
+  });
+
+  /** The project the turn happened in moves up with it, and it is told which
+      one rather than asked to look it up. */
+  it("stamps the project a turn started in", () => {
+    noteStatusChange("a", "ready", "running", "p");
+    expect(projectWorkSince("p")).not.toBeNull();
+  });
+
+  /**
+   * Waking is not working. A thread coming back replays its conversation, the
+   * replay draws a spinner, and out here that reads exactly like a turn: an app
+   * restart resumes every thread at once and used to reshuffle the sidebar
+   * around nothing.
+   */
+  it("says nothing about the running a resume replays", () => {
+    noteThreadWaking("a");
+    noteStatusChange("a", "ready", "running", "p");
+    expect(workStartedSince("a")).toBeNull();
+    expect(projectWorkSince("p")).toBeNull();
+  });
+
+  /** One `running` per resume: whatever the agent does next is its own. */
+  it("counts the turn after the replay", () => {
+    noteThreadWaking("a");
+    noteStatusChange("a", "ready", "running", "p");
+    noteStatusChange("a", "ready", "running", "p");
+    expect(workStartedSince("a")).not.toBeNull();
+    expect(projectWorkSince("p")).not.toBeNull();
+  });
+
+  /**
+   * A live reattach re-asserts `running` without a transition. The mark stays
+   * armed, and the next real turn would be swallowed. The pane must not arm on
+   * reattach; this locks what happens if it does.
+   */
+  it("leaves a wake mark unspent when running is re-asserted", () => {
+    noteThreadWaking("a");
+    noteStatusChange("a", "running", "running", "p");
+    noteStatusChange("a", "ready", "running", "p");
+    expect(workStartedSince("a")).toBeNull();
+    expect(projectWorkSince("p")).toBeNull();
   });
 });
 

@@ -78,6 +78,9 @@ struct ServerWorkspace {
     /// answers with. Shared with [`AgentApi::answer`] so the RPC can resolve
     /// them without knowing about this struct.
     pending: Arc<Mutex<HashMap<String, oneshot::Sender<Value>>>>,
+    /// The same wait registry the RPC's `conduct.record` notifies, so an
+    /// orchestrator sleeping on `GET /v1/pulse` wakes on a device's write.
+    pulse: Arc<boite_core::pulse::Waiters>,
 }
 
 impl Workspace for ServerWorkspace {
@@ -171,7 +174,20 @@ impl Workspace for ServerWorkspace {
         let _ = self.events.send(match change {
             Change::Approvals => AppEvent::ApprovalsChanged,
             Change::Todos | Change::Worktrees => AppEvent::TodosChanged,
+            Change::Orchestrator => AppEvent::OrchestratorChanged,
+            Change::DispatchQueued {
+                to_thread_id,
+                dispatch_id,
+            } => AppEvent::DispatchQueued {
+                thread_id: to_thread_id,
+                dispatch_id,
+            },
+            Change::ThreadDismissed { thread_id } => AppEvent::ThreadDismissed { thread_id },
         });
+    }
+
+    fn pulse_waiters(&self) -> Option<Arc<boite_core::pulse::Waiters>> {
+        Some(self.pulse.clone())
     }
 }
 
@@ -182,11 +198,13 @@ pub async fn start(
     store: Arc<Store>,
     events: broadcast::Sender<AppEvent>,
     roots: Arc<ProjectRoots>,
-    workspace_dir: Option<PathBuf>,
+    config: &crate::config::Config,
     devices: Arc<AtomicUsize>,
-    data_dir: PathBuf,
     registry: Arc<crate::registry::Registry>,
+    pulse: Arc<boite_core::pulse::Waiters>,
 ) -> Option<AgentApi> {
+    let workspace_dir = config.workspace_dir.clone();
+    let data_dir = config.data_dir.clone();
     // In memory for the life of the process and written nowhere. Every
     // credential this workspace issues is derived from it, so a copy on disk
     // would be the one file worth stealing.
@@ -218,6 +236,7 @@ pub async fn start(
         workspace_dir,
         registry,
         pending: pending.clone(),
+        pulse,
     });
     let router = boite_agent_api::router(workspace.clone());
 

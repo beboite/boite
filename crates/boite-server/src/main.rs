@@ -11,6 +11,7 @@ mod protocol;
 mod push;
 mod registry;
 mod rpc;
+mod secret_file;
 mod state;
 mod ws;
 
@@ -24,7 +25,9 @@ use axum::routing::{get, post};
 use axum::Router;
 use tokio::sync::broadcast;
 use tokio::sync::broadcast::error::RecvError;
+use axum::http::{header, HeaderValue};
 use tower_http::services::{ServeDir, ServeFile};
+use tower_http::set_header::SetResponseHeaderLayer;
 
 use auth::Auth;
 use boite_core::scope::ProjectRoots;
@@ -35,6 +38,7 @@ use state::AppState;
 use boite_core::store::{ColVal, Store, ThreadCol};
 
 const EVENT_CHANNEL_CAP: usize = 1024;
+const MAX_WS_MESSAGE: usize = 1024 * 1024;
 
 #[tokio::main]
 async fn main() {
@@ -61,6 +65,13 @@ async fn main() {
             std::process::exit(1);
         }
     };
+    let app_start = std::time::Instant::now();
+    let telemetry = Some(Arc::new(boite_core::telemetry::TelemetryRuntime::spawn(
+        &config.data_dir,
+        env!("CARGO_PKG_VERSION"),
+        "server",
+        app_start,
+    )));
 
     let db_path = config.data_dir.join("boite.db");
     let store = match Store::open(&db_path) {
@@ -120,14 +131,17 @@ async fn main() {
     // routable interface, and an agent appending to a checklist is not the same
     // principal as a device driving the workspace.
     let devices = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    // One wait registry for the whole process: the RPC's writes wake the agent
+    // endpoint's long-polls, so the two must hold the same one.
+    let pulse = boite_core::pulse::Waiters::new();
     let agent_api = agent_api::start(
         store.clone(),
         events.clone(),
         roots.clone(),
-        config.workspace_dir.clone(),
+        &config,
         devices.clone(),
-        config.data_dir.clone(),
         registry.clone(),
+        pulse.clone(),
     )
     .await;
 
@@ -148,6 +162,8 @@ async fn main() {
         data_dir: config.data_dir,
         public_url: config.public_url,
         claimed_requests: Default::default(),
+        pulse,
+        telemetry,
     });
 
     if let Err(e) = state.refresh_roots() {
@@ -212,11 +228,54 @@ async fn main() {
     if let Some(dir) = &config.static_dir {
         let index = dir.join("index.html");
         let serve = ServeDir::new(dir).fallback(ServeFile::new(index));
-        app = app.fallback_service(serve);
+        // The same SPA the desktop window runs, served to a phone or a browser
+        // — and until now with none of the protection the desktop window has.
+        // Tauri hands the webview a strict CSP from tauri.conf.json; this door
+        // sent the identical files with no CSP, no nosniff and no framing rule
+        // at all.
+        //
+        // What is set here is the half that cannot break a page: no
+        // `script-src`, no `style-src`, no `connect-src`. That is deliberate
+        // rather than lazy. adapter-static emits one inline `<script>` of about
+        // 320 bytes to start the app, its hash changes every build, and a
+        // `script-src 'self'` here would leave a phone staring at a blank page
+        // with the reason only in a console it cannot open. Locking the script
+        // side down properly means SvelteKit's own `kit.csp` in hash mode, so
+        // the hash is generated with the file it covers — its own change, with
+        // the desktop CSP checked against it, not a line snuck in here.
+        //
+        // `frame-ancestors 'none'` and `X-Frame-Options` say the same thing to
+        // two generations of browser: a boite is not something to embed. It
+        // drives terminals, and a click landing on one through a transparent
+        // overlay is a real command in a real shell.
+        app = app
+            .fallback_service(serve)
+            .layer(SetResponseHeaderLayer::overriding(
+                header::CONTENT_SECURITY_POLICY,
+                HeaderValue::from_static(
+                    "object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
+                ),
+            ))
+            .layer(SetResponseHeaderLayer::overriding(
+                header::X_FRAME_OPTIONS,
+                HeaderValue::from_static("DENY"),
+            ))
+            .layer(SetResponseHeaderLayer::overriding(
+                header::X_CONTENT_TYPE_OPTIONS,
+                HeaderValue::from_static("nosniff"),
+            ))
+            // A boite is reached over plain http on a LAN as often as not, and
+            // the referrer of a page served from one leaks the host and port it
+            // lives at to anything it links out to.
+            .layer(SetResponseHeaderLayer::overriding(
+                header::REFERRER_POLICY,
+                HeaderValue::from_static("no-referrer"),
+            ));
     }
 
     let registry_for_shutdown = state.registry.clone();
-    let app = app.with_state(state);
+    let telemetry_for_shutdown = state.telemetry.clone();
+    let app = app.with_state(state.clone());
 
     let listener = match tokio::net::TcpListener::bind(&config.bind).await {
         Ok(l) => l,
@@ -225,6 +284,12 @@ async fn main() {
             std::process::exit(1);
         }
     };
+
+    if let Some(telemetry) = &state.telemetry {
+        telemetry.on_boot_complete();
+        let live = state.registry.pty_manager().live_count() as u64;
+        telemetry.track_workspace_from(&state.store, live);
+    }
 
     let serve = axum::serve(
         listener,
@@ -238,6 +303,10 @@ async fn main() {
             // kill_all spawns + joins one OS thread per PTY; keep it off the
             // async worker so a slow killer syscall can't stall the runtime.
             let _ = tokio::task::spawn_blocking(move || {
+                if let Some(telemetry) = telemetry_for_shutdown {
+                    telemetry.on_session_end();
+                    telemetry.shutdown();
+                }
                 registry_for_shutdown.pty_manager().kill_all();
             })
             .await;
@@ -319,7 +388,16 @@ async fn ws_upgrade(
                 .into_response();
         }
     }
-    ws.on_upgrade(move |socket| ws::handle_socket(socket, state, addr))
+    // tungstenite defaults to a 64 MiB message and a 16 MiB frame, and the
+    // first frame on this socket arrives before the ticket is checked: an
+    // unauthenticated peer could make the process buffer that much, times
+    // `max_connections`, before anything decided who it was. Nothing a client
+    // sends is anywhere near it — the widest legitimate message is a paste on
+    // its way to a PTY — so a megabyte leaves room to spare and takes the
+    // pre-auth cost down by a factor of sixty-four.
+    ws.max_message_size(MAX_WS_MESSAGE)
+        .max_frame_size(MAX_WS_MESSAGE)
+        .on_upgrade(move |socket| ws::handle_socket(socket, state, addr))
         .into_response()
 }
 

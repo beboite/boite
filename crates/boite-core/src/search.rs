@@ -108,21 +108,40 @@ pub(crate) fn index(conn: &Connection, kind: Kind, project_id: &str, ref_id: &st
     if !ensure(conn) {
         return;
     }
-    let _ = conn.execute(
+    let deleted = conn.execute(
         "DELETE FROM search WHERE kind = ?1 AND ref_id = ?2",
         rusqlite::params![kind.as_str(), ref_id],
     );
-    let _ = conn.execute(
+    let inserted = conn.execute(
         "INSERT INTO search (kind, project_id, ref_id, body) VALUES (?1, ?2, ?3, ?4)",
         rusqlite::params![kind.as_str(), project_id, ref_id, body],
     );
+    // Indexing is deliberately not fatal: a todo that saved is saved, and
+    // failing the write because the index refused it would lose the thing the
+    // user typed to protect the thing that finds it again. Saying so is not
+    // optional though. Silence here is how a todo comes to exist and be
+    // unfindable, with the search returning nothing and nothing anywhere
+    // explaining why.
+    if let Err(e) = deleted.and(inserted) {
+        eprintln!(
+            "[boite/search] {} {ref_id} is saved but not indexed: {e}. It will not come back from a search until it is written again.",
+            kind.as_str()
+        );
+    }
 }
 
 pub(crate) fn forget(conn: &Connection, kind: Kind, ref_id: &str) {
-    let _ = conn.execute(
+    // A row left behind here is worse than a missing one: the search answers
+    // with something that is gone, and whoever follows the hit lands nowhere.
+    if let Err(e) = conn.execute(
         "DELETE FROM search WHERE kind = ?1 AND ref_id = ?2",
         rusqlite::params![kind.as_str(), ref_id],
-    );
+    ) {
+        eprintln!(
+            "[boite/search] {} {ref_id} is gone but stayed in the index: {e}. A search can still return it.",
+            kind.as_str()
+        );
+    }
 }
 
 /// What the index has for this text.
@@ -130,21 +149,31 @@ pub(crate) fn rows(conn: &Connection, needle: &str, limit: usize) -> Vec<Hit> {
     if !ensure(conn) {
         return Vec::new();
     }
-    let Ok(mut stmt) = conn.prepare(
+    // No hits and a broken index look the same from the search box, so the
+    // difference is said here or nowhere.
+    let mut stmt = match conn.prepare(
         "SELECT kind, project_id, ref_id, snippet(search, 3, '', '', '…', 20)
          FROM search WHERE search MATCH ?1 ORDER BY rank LIMIT ?2",
-    ) else {
-        return Vec::new();
+    ) {
+        Ok(stmt) => stmt,
+        Err(e) => {
+            eprintln!("[boite/search] the index cannot be queried: {e}");
+            return Vec::new();
+        }
     };
-    let Ok(found) = stmt.query_map(rusqlite::params![query_for(needle), limit as i64], |r| {
+    let found = match stmt.query_map(rusqlite::params![query_for(needle), limit as i64], |r| {
         Ok(Hit {
             kind: Kind::parse(&r.get::<_, String>(0)?),
             project_id: r.get(1)?,
             ref_id: r.get(2)?,
             excerpt: r.get(3)?,
         })
-    }) else {
-        return Vec::new();
+    }) {
+        Ok(found) => found,
+        Err(e) => {
+            eprintln!("[boite/search] the index refused the query: {e}");
+            return Vec::new();
+        }
     };
     found.filter_map(Result::ok).collect()
 }

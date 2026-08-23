@@ -134,14 +134,33 @@ impl Workspace for DesktopWorkspace {
     }
 
     fn announce(&self, change: Change) {
-        let _ = self.app.emit(
-            match change {
-                Change::Todos => "boite://todos-changed",
-                Change::Worktrees => "boite://worktrees-changed",
-                Change::Approvals => "boite://approvals-changed",
-            },
-            (),
-        );
+        let _ = match change {
+            Change::Todos => self.app.emit("boite://todos-changed", ()),
+            Change::Worktrees => self.app.emit("boite://worktrees-changed", ()),
+            Change::Approvals => self.app.emit("boite://approvals-changed", ()),
+            Change::Orchestrator => self.app.emit("boite://orchestrator-changed", ()),
+            // Carries the ids: the window that owns the target PTY flushes,
+            // every other one ignores it.
+            Change::DispatchQueued {
+                to_thread_id,
+                dispatch_id,
+            } => self.app.emit(
+                "boite://dispatch-queued",
+                json!({ "threadId": to_thread_id, "dispatchId": dispatch_id }),
+            ),
+            Change::ThreadDismissed { thread_id } => self
+                .app
+                .emit("boite://thread-dismissed", json!({ "threadId": thread_id })),
+        };
+    }
+
+    fn pulse_waiters(&self) -> Option<std::sync::Arc<boite_core::pulse::Waiters>> {
+        Some(
+            self.app
+                .state::<crate::commands::conduct::PulseWaiters>()
+                .0
+                .clone(),
+        )
     }
 
     fn transcripts_dir(&self) -> Option<std::path::PathBuf> {

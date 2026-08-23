@@ -11,6 +11,15 @@ import type { IconKey } from "$lib/types";
 export interface FastpickCombo {
   harness: string;
   provider: string;
+  /**
+   * Which credential of that provider, when it holds more than one. The id alone, without
+   * the `<provider>.` prefix `--key` is written with: the provider is already named here,
+   * and carrying it twice is a second place for the two to disagree.
+   *
+   * Undefined or null means the provider resolves it, which is what a single-key provider
+   * does and what every combo written before schema 3 says.
+   */
+  key?: string | null;
   model: string;
   effort?: string | null;
   /**
@@ -56,6 +65,8 @@ export function iconKeyForKind(kind: string): IconKey {
       return "opencode";
     case "codex":
       return "codex";
+    case "pi":
+      return "pi";
     default:
       return null;
   }
@@ -77,6 +88,13 @@ export function comboArgs(combo: FastpickCombo): string[] {
     "--model",
     combo.model,
   ];
+  // `--key` names the provider too, so it makes `--provider` redundant rather than
+  // conflicting, and both are written: the pair is what `parseCombo` reads back.
+  //
+  // Only ever set from a listing that declared several keys, which is a fastpick that knows
+  // the flag. A fastpick that did not would forward `--key` to the agent instead of
+  // refusing it, the way it forwards everything it does not recognise.
+  if (combo.key) args.push("--key", `${combo.provider}.${combo.key}`);
   if (combo.effort) args.push("--effort", combo.effort);
   if (combo.prompts) {
     // Passing nothing lets fastpick check the file matching the model. Saying "none" has
@@ -99,6 +117,7 @@ export function parseCombo(cmd: string, args: readonly string[]): FastpickCombo 
 
   let harness: string | null = null;
   let provider: string | null = null;
+  let key: string | null = null;
   let model: string | null = null;
   let effort: string | null = null;
   let prompts: string[] | undefined;
@@ -119,6 +138,21 @@ export function parseCombo(cmd: string, args: readonly string[]): FastpickCombo 
         provider = value ?? null;
         i++;
         break;
+      // `--key` is written `<provider>.<key>` and names the provider on its own, so a
+      // thread typed by hand may carry it without `--provider`. Both halves are read: the
+      // provider only when nothing else said it, the key always.
+      case "--key": {
+        if (value !== undefined) {
+          const dot = value.indexOf(".");
+          if (dot < 0) key = value;
+          else {
+            provider ??= value.slice(0, dot);
+            key = value.slice(dot + 1);
+          }
+        }
+        i++;
+        break;
+      }
       case "--model":
         model = value ?? null;
         i++;
@@ -140,7 +174,7 @@ export function parseCombo(cmd: string, args: readonly string[]): FastpickCombo 
   // Anything short of all three still opens a menu, so it is not a resolved combo and
   // describing it as one would put a model name in the UI that nothing confirmed.
   if (!harness || !provider || !model) return null;
-  return { harness, provider, model, effort, prompts };
+  return { harness, provider, key, model, effort, prompts };
 }
 
 /**
@@ -197,7 +231,17 @@ function labelKey(label: string): string {
   return label.replace(/\s+/g, " ").toLowerCase();
 }
 
-/** How a combo reads in a tooltip or a sidebar row: the model, then where it runs. */
+/**
+ * How a combo reads in a tooltip or a sidebar row: the model, then where it runs.
+ *
+ * The credential is part of where it runs when there is one, two keys of a site being two
+ * different accounts and often two different bills. It is left out when it repeats the
+ * provider, which is what a single-key provider names its only key.
+ */
 export function comboLabel(combo: FastpickCombo): string {
-  return `${combo.model} · ${combo.provider}`;
+  const where =
+    combo.key && combo.key !== combo.provider
+      ? `${combo.provider}.${combo.key}`
+      : combo.provider;
+  return `${combo.model} · ${where}`;
 }

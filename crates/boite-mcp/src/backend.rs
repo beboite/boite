@@ -19,6 +19,20 @@ pub trait Backend {
     /// transport failures into one rather than leaking a status code.
     fn send(&self, method: &str, path: &str, body: Option<Value>) -> Result<Value, String>;
 
+    /// [`Backend::send`] for the one route that legitimately holds: the pulse
+    /// long-poll. `read_secs` bounds how long the door may sit quiet before
+    /// calling the workspace gone. Doors with no socket to tune ignore it.
+    fn send_long(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<Value>,
+        read_secs: u64,
+    ) -> Result<Value, String> {
+        let _ = read_secs;
+        self.send(method, path, body)
+    }
+
     /// Keeps a short id next to the full one it stands for.
     fn remember(&self, short: &str, full: &str);
 

@@ -5,14 +5,28 @@ import { settings } from "$lib/features/settings/store.svelte";
 import { logger } from "$lib/shared/services/logger.svelte";
 import { ptyKill, ptyOpen, ptyWrite } from "$lib/storage/pty";
 import { t } from "$lib/i18n/index.svelte";
-import { installCommand, uninstallCommand, updateCommand } from "./install";
+import {
+  installCommand as codexInstall,
+  uninstallCommand as codexUninstall,
+  updateCommand as codexUpdate,
+} from "./install";
+import {
+  kebaccInstallCommand,
+  kebaccUninstallCommand,
+  kebaccUpdateCommand,
+} from "./install-kebacc";
+import {
+  installCommand as sshInstall,
+  uninstallCommand as sshUninstall,
+  updateCommand as sshUpdate,
+} from "./fast-mcp-ssh";
 import { InstallOutput, TerminalQueries } from "$lib/features/fastpick/install-output";
-import { codexSwitcher } from "./store.svelte";
+import { codexSwitcher, fastMcpSsh, kebaccSwitcher } from "./store.svelte";
 import type { PtyEvent } from "$lib/backend/types";
 import type { Project } from "$lib/types";
 
 /**
- * Installing `codex-account-switcher` without leaving the settings panel.
+ * Installing a plugin's CLI without leaving the settings panel.
  *
  * It used to open a thread. That was defensible while the only place a build's
  * output could go was a terminal, and it cost more than it bought: a pane, a
@@ -26,18 +40,23 @@ import type { Project } from "$lib/types";
  * error text and nothing else, and it has to be killable. What changes is only
  * where the bytes are drawn.
  *
- * Only the first install is a compiler now. `update` hands the job to fastpick,
- * which fetches a signed release, so it is seconds and needs no toolchain.
+ * Every action here is cargo, install and update alike, so all three are builds
+ * and all three are watched the same way. One instance per plugin: they hold a
+ * PTY and a thread id, and two cards sharing one would draw the same log twice.
  */
 
 /**
- * One id for every run, rather than a fresh one per launch.
+ * One id per plugin for every run, rather than a fresh one per launch.
  *
  * `pty.open` is attach-or-spawn keyed on it, so a panel closed mid-build and
  * reopened lands back on the same process with its scrollback replayed instead
- * of starting a second `cargo install` beside the first.
+ * of starting a second `cargo install` beside the first. Per plugin rather than
+ * one for all of them: two cards installing at once are two builds, and a
+ * shared id would attach the second to the first and draw its log under both.
  */
-const INSTALL_THREAD_ID = "codex-switcher-install";
+function threadIdFor(plugin: string): string {
+  return `${plugin}-install`;
+}
 
 /**
  * Wide enough that cargo's own line wrapping is not what a reader has to fight,
@@ -56,12 +75,30 @@ const REPAINT_MS = 120;
 
 export type InstallAction = "install" | "update" | "uninstall";
 
-const COMMANDS: Record<InstallAction, () => { cmd: string; args: string[] }> = {
-  install: installCommand,
-  update: updateCommand,
-  uninstall: uninstallCommand,
-};
+export type CommandSet = Record<InstallAction, () => { cmd: string; args: string[] }>;
+
 export type InstallStatus = "idle" | "running" | "done" | "failed" | "cancelled";
+
+/**
+ * What PluginInstallCard reads. Fastpick's installer is a sibling class with
+ * the same surface, so the card is typed against this rather than the cargo
+ * class.
+ */
+export type PluginInstallDriver = {
+  status: InstallStatus;
+  action: InstallAction | null;
+  busy: boolean;
+  lines: string[];
+  failure: string | null;
+  exitCode: number | null;
+  hasOutput: boolean;
+  install(): Promise<void>;
+  update(): Promise<void>;
+  uninstall(): Promise<void>;
+  cancel(): void;
+  retry(): Promise<void>;
+  dismiss(): void;
+};
 
 /**
  * Where to run it. Any project will do: this installs a binary, not something
@@ -76,7 +113,21 @@ function target(): Project | null {
   return app.projects.find((p) => p.id === app.currentProjectId) ?? app.projects[0] ?? null;
 }
 
-class CodexSwitcherInstaller {
+class PluginInstaller {
+  /**
+   * Which plugin this one installs: the thread id it holds, the commands it
+   * runs, and who to tell when a run has settled.
+   */
+  readonly #plugin: string;
+  readonly #commands: CommandSet;
+  readonly #settled: () => void;
+
+  constructor(plugin: string, commands: CommandSet, settled: () => void) {
+    this.#plugin = plugin;
+    this.#commands = commands;
+    this.#settled = settled;
+  }
+
   /** Which of the two is running, or the one that last ran. */
   action = $state<InstallAction | null>(null);
   status = $state<InstallStatus>("idle");
@@ -175,7 +226,7 @@ class CodexSwitcherInstaller {
     this.#closing = closing;
     await closing;
     if (this.#closing === closing) this.#closing = null;
-    void codexSwitcher.probe();
+    this.#settled();
     void this.#forgetRow();
   }
 
@@ -186,7 +237,7 @@ class CodexSwitcherInstaller {
       notifications.error(t("fastpick.addProjectFirst"));
       return;
     }
-    const command = COMMANDS[action]();
+    const command = this.#commands[action]();
     // The same plan a thread launch builds, so the decision about whether this
     // needs a shell is the one the runner already makes everywhere else. It
     // only ever offers the shell: the machine owning the PTY decides.
@@ -214,7 +265,7 @@ class CodexSwitcherInstaller {
       if (this.#closing) await this.#closing;
       const key = await ptyOpen(
         {
-          threadId: INSTALL_THREAD_ID,
+          threadId: threadIdFor(this.#plugin),
           spec: {
             cwd: project.cwd,
             cmd: plan.cmd,
@@ -223,7 +274,7 @@ class CodexSwitcherInstaller {
             rows: ROWS,
             wrap: plan.wrap,
           },
-          meta: { projectId: project.id, label: `codex-account-switcher ${action}`, iconKey: null },
+          meta: { projectId: project.id, label: `${this.#plugin} ${action}`, iconKey: null },
         },
         (event) => this.#absorb(run, event),
         project.origin,
@@ -321,7 +372,7 @@ class CodexSwitcherInstaller {
     // Asked after either outcome. An install that failed may still have put a
     // binary down, and an uninstall that failed because there was nothing to
     // remove has moved the panel's answer just as much as one that worked.
-    void codexSwitcher.probe();
+    this.#settled();
     void this.#forgetRow();
   }
 
@@ -347,13 +398,52 @@ class CodexSwitcherInstaller {
    * would be this panel's.
    */
   async #forgetRow(): Promise<void> {
-    if (!app.hasThread(INSTALL_THREAD_ID)) return;
+    const id = threadIdFor(this.#plugin);
+    if (!app.hasThread(id)) return;
     try {
-      await app.removeThread(INSTALL_THREAD_ID);
+      await app.removeThread(id);
     } catch (err) {
       logger.warn("plugin", "the install thread row stayed behind", { error: String(err) });
     }
   }
 }
 
-export const installer = new CodexSwitcherInstaller();
+export const installer = new PluginInstaller(
+  "codex-account-switcher",
+  { install: codexInstall, update: codexUpdate, uninstall: codexUninstall },
+  () => void codexSwitcher.probe(),
+);
+
+export const fastMcpSshInstaller = new PluginInstaller(
+  "fast-mcp-ssh",
+  { install: sshInstall, update: sshUpdate, uninstall: sshUninstall },
+  () => void fastMcpSsh.probe(),
+);
+
+export const kebaccInstaller = new PluginInstaller(
+  "kebacc-switch",
+  {
+    install: kebaccInstallCommand,
+    update: kebaccUpdateCommand,
+    uninstall: kebaccUninstallCommand,
+  },
+  () => void kebaccSwitcher.probe(),
+);
+
+/**
+ * One installer for something that is not one of the three plugins.
+ *
+ * The CLI manager needs the same machine — a hidden PTY, a log, a stop button —
+ * for the agents that ship on a package manager rather than as a binary, and
+ * their command lines come from the Rust catalogue at runtime rather than from a
+ * module here. The class is what is shared; the singletons above are not.
+ */
+export function makeInstaller(
+  plugin: string,
+  commands: CommandSet,
+  settled: () => void,
+): PluginInstaller {
+  return new PluginInstaller(plugin, commands, settled);
+}
+
+export type { PluginInstaller };

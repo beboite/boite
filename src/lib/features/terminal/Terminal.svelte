@@ -1,5 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
+  import { tip } from "$lib/shared/actions/tooltip";
+  import { edgeFade } from "$lib/shared/actions/edgeFade";
   import { Terminal } from "@xterm/xterm";
   import { FitAddon } from "@xterm/addon-fit";
   import { WebglAddon } from "@xterm/addon-webgl";
@@ -14,6 +16,7 @@
   import { installMobileInput } from "./mobile-input";
   import { Touches } from "./touch";
   import { registerTerminal, unregisterTerminal } from "$lib/shared/terminals";
+  import { registerDispatchSink } from "$lib/app/dispatches";
   import { openUrl } from "$lib/platform/opener";
   import { readText, writeText } from "$lib/platform/clipboard";
   import {
@@ -26,6 +29,12 @@
   import type { PtyEvent } from "$lib/storage/pty";
   import { backendFor } from "$lib/backend";
   import { parkedLocal } from "$lib/backend/tauri/parked";
+  import {
+    clearWaking,
+    noteProjectWork,
+    noteThreadWaking,
+    noteWorkStarted,
+  } from "$lib/features/thread/work-activity.svelte";
   import { app } from "$lib/app/store.svelte";
   import { isFinished } from "$lib/domain/thread-status";
   import { settings } from "$lib/features/settings/store.svelte";
@@ -75,6 +84,7 @@
 
   let container: HTMLDivElement;
   let term: Terminal | null = null;
+  let unregisterDispatchSink: (() => void) | null = null;
   let fit: FitAddon | null = null;
   let resizeObserver: ResizeObserver | null = null;
   let ptyId: string | null = null;
@@ -183,12 +193,28 @@
     { id: "~", label: "~" },
     { id: "-", label: "-" },
   ];
+  // What a terminal sends when the user presses Enter. Named because the order
+  // reads it: a line submitted is work asked for, and a carriage return is the
+  // only part of a keystroke stream that says one was.
+  const SUBMIT = "\r";
+
   function rawWrite(s: string) {
     if (!shouldUsePty(ptyId)) return;
     // The one funnel every keystroke passes through, xterm's onData and the
     // phone's key bar alike. What the terminal answers on its own goes out
     // through `sendReport` instead, so it never reads as the user being here.
     lastInputAt = Date.now();
+    // A submitted line is the user giving this thread work, and the only kind
+    // of input the sidebar's order is allowed to read: it comes from the
+    // keystroke funnel, so the focus reports and mouse reports the terminal
+    // writes back on its own (they go out through `sendReport`) never reach it.
+    // It is also what tells a woken thread apart from a working one: waking a
+    // thread to type into it is two events, and this is the one that counts.
+    if (s.includes(SUBMIT)) {
+      clearWaking(thread.id);
+      noteWorkStarted(thread.id);
+      noteProjectWork(thread.projectId);
+    }
     void ptyWrite(ptyId, encoder.encode(s));
   }
 
@@ -931,6 +957,19 @@
 
     spawning = true;
 
+    // A pane opening onto a conversation that already exists is a thread coming
+    // back, not one starting. Its replay draws the same spinner a turn draws,
+    // so the `running` that follows is held rather than counted as work: an app
+    // restart resumes every thread at once, and that used to reshuffle the whole
+    // sidebar around nothing the user had asked for.
+    //
+    // Not a live reattach. Parking the window, or attaching from a phone, opens
+    // onto a PTY whose status is already `running`. `noteStatusChange` returns
+    // before it can spend the mark (`previous === next`), and the next real
+    // turn is then swallowed. `sessionId` alone still covers resume from
+    // idle/stopped, which is the reshuffle this exists to stop.
+    if (thread.sessionId && !reattaching) noteThreadWaking(thread.id);
+
     // A relaunch landing on a pane whose previous launch never printed a byte:
     // that measurement is over, and leaving it pending would let the older
     // launch write the line for the newer one's first output.
@@ -1223,6 +1262,14 @@
     // log cannot say which one is being looked at.
     logger.info("terminal", `${thread.label}: pane mounted`);
     mountedAt = Date.now();
+    // The queue's device half: an orchestrator's line for this thread is typed
+    // here, behind a notice line so the terminal says who wrote. `sendReport`
+    // on purpose — a dispatch is not the user being present, so it must not
+    // stamp `lastInputAt`.
+    unregisterDispatchSink = registerDispatchSink(thread.id, {
+      notice: (line) => term?.write(`\r\n\x1b[2m● ${line}\x1b[0m\r\n`),
+      type: (text) => sendReport(text),
+    });
     term = new Terminal({
       cursorBlink: true,
       cursorStyle: "bar",
@@ -1530,6 +1577,8 @@
 
   onDestroy(() => {
     destroyed = true;
+    unregisterDispatchSink?.();
+    unregisterDispatchSink = null;
     statusEngine.forget(thread.id);
     stopSessionMonitor();
     disposeMobileInput?.();
@@ -1629,7 +1678,7 @@
         onpointercancel={fabCancel}
         onpointerleave={fabCancel}
         aria-label={t("terminal.keyboardLabel")}
-        title={t("terminal.keyboardHint")}
+        use:tip={t("terminal.keyboardHint")}
       >
         <Keyboard class="size-5" />
       </button>
@@ -1641,7 +1690,10 @@
       class="flex shrink-0 items-stretch gap-1 border-t border-border bg-[var(--color-surface)] px-1 py-1"
       style="padding-left: max(env(safe-area-inset-left, 0px), 0.25rem); padding-right: max(env(safe-area-inset-right, 0px), 0.25rem);"
     >
-      <div class="hide-scrollbar flex flex-1 items-stretch gap-1 overflow-x-auto">
+      <div
+        class="edge-fade hide-scrollbar flex flex-1 items-stretch gap-1 overflow-x-auto"
+        use:edgeFade
+      >
         {#each BAR_KEYS as k (k.id)}
           {@const armed =
             k.id === "ctrl" ? ctrlArmed : k.id === "alt" ? altArmed : false}

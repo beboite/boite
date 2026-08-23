@@ -1,8 +1,15 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { tip } from "$lib/shared/actions/tooltip";
   import { workspace } from "$lib/backend";
   import { settings } from "./store.svelte";
-  import { CLI_PRESETS } from "./cliPresets";
+  import {
+    CLI_PRESETS,
+    findPresetForCommand,
+    hasYoloFlag,
+    withYoloFlag,
+    withoutYoloFlag,
+  } from "./cliPresets";
   import { cliDetection } from "./cliDetection.svelte";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
   import { resolveIconKey } from "$lib/shared/icons/detect";
@@ -15,6 +22,7 @@
   import GripVertical from "@lucide/svelte/icons/grip-vertical";
   import ExternalLink from "@lucide/svelte/icons/external-link";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
+  import Zap from "@lucide/svelte/icons/zap";
   import { t } from "$lib/i18n/index.svelte";
   import type { IconKey, Shortcut } from "$lib/types";
 
@@ -314,6 +322,35 @@
     if (!preset) return false;
     return shortcuts.some((s) => s.label === preset.label && s.command === preset.command);
   }
+
+  async function toggleShortcutYolo(shortcut: Shortcut) {
+    const preset = findPresetForCommand(shortcut.command);
+    if (!preset?.yoloFlag) return;
+    const active = hasYoloFlag(shortcut.command, preset.yoloFlag);
+    if (active) {
+      const newCmd = withoutYoloFlag(shortcut.command, preset.yoloFlag);
+      const newLabel = shortcut.label.replace(/\s*\(YOLO\)$/i, "").trim();
+      onUpdate(shortcut.id, {
+        command: newCmd,
+        label: newLabel || shortcut.label,
+      });
+    } else {
+      const ok = await confirmDialog.ask({
+        title: t("shortcuts.yoloWarningTitle", { label: shortcut.label || preset.label }),
+        message: t("shortcuts.yoloWarningMessage", {
+          label: shortcut.label || preset.label,
+          flag: preset.yoloFlag,
+        }),
+        confirmLabel: t("shortcuts.enableYolo"),
+        danger: true,
+      });
+      if (!ok) return;
+      const newCmd = withYoloFlag(shortcut.command, preset.yoloFlag);
+      onUpdate(shortcut.id, {
+        command: newCmd,
+      });
+    }
+  }
 </script>
 
 <div class="flex items-center justify-end gap-1.5">
@@ -321,7 +358,7 @@
     type="button"
     class="flex items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-1.5 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
     onclick={() => void onReset()}
-    title={t("shortcuts.resetTitle")}
+    use:tip={t("shortcuts.resetTitle")}
   >
     <RotateCcw class="size-3" />
     {t("common.reset")}
@@ -348,13 +385,17 @@
   {#each shortcuts as shortcut, i (shortcut.id)}
     {@const isDragged = drag?.active && drag.fromIndex === i}
     {@const iconKey = resolveIconKey(shortcut.iconKey, shortcut.label, shortcut.command)}
+    {@const matchingPreset = findPresetForCommand(shortcut.command)}
+    {@const isYolo = matchingPreset?.yoloFlag
+      ? hasYoloFlag(shortcut.command, matchingPreset.yoloFlag)
+      : false}
     <div
       data-row={shortcut.id}
       role="listitem"
       onpointerdown={(e) => rowPointerDown(shortcut.id, i, e)}
       style:transform={drag ? `translateY(${rowOffset(i)}px)` : undefined}
       style:z-index={isDragged ? 10 : colorPickerFor === shortcut.id ? 20 : undefined}
-      class="relative grid grid-cols-[16px_24px_120px_1fr_28px] touch-none items-center gap-2 border-b border-border/60 px-3 py-2 last:border-b-0 {drag?.active
+      class="relative grid grid-cols-[16px_24px_110px_1fr_auto_28px] touch-none items-center gap-2 border-b border-border/60 px-3 py-2 last:border-b-0 {drag?.active
         ? 'select-none'
         : ''} {drag && drag.fromIndex !== i
         ? 'row-slide'
@@ -372,7 +413,7 @@
         aria-label={t("shortcuts.dragToReorder")}
         aria-pressed={grabbedId === shortcut.id}
         aria-keyshortcuts="ArrowUp ArrowDown"
-        title={t("shortcuts.reorderHint")}
+        use:tip={t("shortcuts.reorderHint")}
         onkeydown={(e) => gripKeydown(shortcut, i, e)}
         onblur={() => {
           if (grabbedId === shortcut.id) grabbedId = null;
@@ -398,7 +439,7 @@
           onclick={() => (colorPickerFor = colorPickerFor === shortcut.id ? null : shortcut.id)}
           aria-label={t("shortcuts.changeIconColor")}
           aria-expanded={colorPickerFor === shortcut.id}
-          title={t("shortcuts.changeIconColor")}
+          use:tip={t("shortcuts.changeIconColor")}
         >
           <ShortcutIcon {iconKey} size={16} color={shortcut.iconColor ?? null} />
         </button>
@@ -418,7 +459,7 @@
                   style:background-color={c}
                   onclick={() => setIconColor(shortcut.id, c)}
                   aria-label={t("shortcuts.setColor", { color: c })}
-                  title={c}
+                  use:tip={c}
                 ></button>
               {/each}
             </div>
@@ -448,12 +489,28 @@
           onUpdate(shortcut.id, { command: (e.currentTarget as HTMLInputElement).value })}
         class="rounded-md border border-transparent bg-transparent px-2 py-1 font-mono text-sm text-foreground outline-none transition focus:border-border focus:bg-[var(--color-surface)]"
       />
+      {#if matchingPreset?.yoloFlag}
+        <button
+          type="button"
+          onclick={() => void toggleShortcutYolo(shortcut)}
+          class="flex h-6 items-center gap-1 rounded border px-1.5 text-2xs font-semibold transition {isYolo
+            ? 'border-[var(--color-warning)] bg-[var(--color-warning)]/15 text-[var(--color-warning)] hover:bg-[var(--color-warning)]/25'
+            : 'border-border/60 text-muted-foreground/50 hover:border-border hover:text-foreground'}"
+          title={isYolo ? t("shortcuts.yoloActive") : t("shortcuts.yoloInactive")}
+          aria-label={t("shortcuts.yoloMode")}
+        >
+          <Zap class="size-2.5" />
+          <span>{t("shortcuts.yoloBadge")}</span>
+        </button>
+      {:else}
+        <div></div>
+      {/if}
       <button
         type="button"
         class="flex size-7 items-center justify-center rounded-md text-muted-foreground/60 transition hover:bg-danger/15 hover:text-danger"
         onclick={() => void onRemove(shortcut)}
         aria-label={t("shortcuts.removeShortcut")}
-        title={t("shortcuts.remove")}
+        use:tip={t("shortcuts.remove")}
       >
         <Trash2 class="size-3" />
       </button>
@@ -526,7 +583,7 @@
               target="_blank"
               rel="noopener noreferrer"
               class="flex size-7 cursor-pointer items-center justify-center rounded-md border border-border/60 bg-[var(--color-surface-3)] text-muted-foreground transition hover:bg-[var(--color-surface)] hover:text-foreground"
-              title={t("shortcuts.documentation")}
+              use:tip={t("shortcuts.documentation")}
               aria-label={t("shortcuts.documentation")}
             >
               <ExternalLink class="size-3.5" />
@@ -537,7 +594,7 @@
             disabled={added}
             onclick={() => addPreset(preset.id)}
             class="flex h-7 cursor-pointer items-center gap-1 rounded-md bg-foreground px-2.5 text-xs font-semibold text-background transition hover:bg-neutral-200 disabled:cursor-not-allowed disabled:border disabled:border-border/60 disabled:bg-transparent disabled:text-muted-foreground/60"
-            title={added ? t("shortcuts.alreadyAdded") : t("shortcuts.addToShortcuts")}
+            use:tip={added ? t("shortcuts.alreadyAdded") : t("shortcuts.addToShortcuts")}
           >
             {#if added}
               <Check class="size-3" />

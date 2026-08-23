@@ -120,8 +120,8 @@ and the ticker belongs to the window rather than to a pane: it starts once in
 `Terminal` components and closing the last local pane stops the only thing that
 could notice.
 
-**First source: what the agent declares.** Three of the ten do, each somewhere
-else, and `boite-core/src/session.rs` reduces the three to the shape
+**First source: what the agent declares.** Four of the ten do, each somewhere
+else, and `boite-core/src/session.rs` reduces the four to the shape
 `declaredTurn` reads.
 
 - claude rewrites `status` in `~/.claude/sessions/<pid>.json`: `busy`, `waiting`,
@@ -133,13 +133,18 @@ else, and `boite-core/src/session.rs` reduces the three to the shape
 - opencode serves `GET /session/status`, but a plain TUI runs its server in a
   worker thread and binds no port. Its database answers: an assistant message
   gains `time.completed` when its turn ends.
+- grok appends ACP session updates to
+  `~/.grok/sessions/<cwd>/<id>/updates.jsonl`. A turn opens on
+  `user_message_chunk` and closes on `turn_completed`. `active_sessions.json`
+  names the pid, so a killed grok does not stay busy.
 
 An answer counts only while whatever wrote it is still there. Claude's entries
-are filtered by `pid_alive`, the other two age out after half an hour, generous
-because one long tool call appends nothing while it runs. Killed mid-turn, either
-would otherwise read `busy` for good. **No `status` key produces no answer, never
-a default**: absence is not a state, and a default of `busy` would pin every
-claude thread Running with nothing able to clear it.
+and grok's `active_sessions.json` are filtered by `pid_alive`. Codex and
+opencode age out after half an hour, generous because one long tool call
+appends nothing while it runs. Killed mid-turn, either would otherwise read
+`busy` for good. **No `status` key produces no answer, never a default**:
+absence is not a state, and a default of `busy` would pin every claude thread
+Running with nothing able to clear it.
 
 **Second source: the emulator's bottom rows** (`terminalScreenRows`), for
 everyone else. Level by construction, the footer being on screen or not. Never
@@ -157,7 +162,7 @@ for as long as the agent prints anything.
   banner push the spinner out of it.
 
 **With no answer from either, a clock decides, and only there.** A thread whose
-pane is gone has no emulator, and seven agents declare nothing. It keeps its
+pane is gone has no emulator, and six agents declare nothing. It keeps its
 status until every activity stamp ages out, then drops to `ready`
 (`UNREAD_TTL_MS`, 2s, mirroring the server's `WORKING_TTL`), silently, being an
 absence of evidence rather than a turn that ended. Without it a thread frozen on
@@ -289,6 +294,66 @@ loads and the driver answers the whole time.
   photographing somebody else's (`Pane::shown()`, absent from an older build's
   description and read as visible). `browser_snapshot` reads the page wherever
   it is.
+
+## The orchestrator is a role, not a claim
+
+A thread is an orchestrator because the workspace stamped `role` on its row
+(`orchestrator.start`, a `Grant::Local` command), never because it says so. The
+bus checks the row on every conducted verb (`conducted_target`), so an agent
+cannot promote itself, arm a second orchestrator, or dispatch into another
+orchestrator's scope. Arming is device-side (the user's own window writes the
+stamp); which projects carry one is workspace-side configuration
+(`orchestratorEnabledFor`). Undoing what one caused is Local-only too
+(`orchestrator.undo`): taking an action back is the user's, and nothing
+committed is ever destroyed — a spawn is put away, a dismissal brought back,
+both stamps on rows.
+
+A dispatch is a line, not a byte: `thread.dispatch` writes a row the target's
+own device drains and types at its prompt (`dispatch.drain`), never a write to
+the PTY from the bus — `crate::reply` forbids that on purpose, and the queue
+does not go around it. The line never lands while the worker is waiting on the
+user, because a question asked to the user is the user's.
+
+`home` is not a pane an agent can open: the orchestrator chat lives there, and
+an agent that could put its own conversation on screen would be an agent
+taking the screen.
+
+## Sync is an allowlist, and a pull never overwrites
+
+Five rules in `boite_core::sync`, each of which ships broken if it is forgotten
+and none of which the compiler will remind you about.
+
+- **The manifest is an allowlist of named files plus one tree, never a directory
+  minus a denylist.** `~/.claude` is not a source; `~/.claude/settings.json` is.
+  A denylist drifts the moment a vendor adds a directory, and `~/.claude/plugins`
+  is 820 files and nine megabytes of absolute paths that would have been in it.
+  `~/.claude.json` is refused by name as well, because fifty kilobytes of which
+  twenty-six are a launch-time cache would conflict at every start.
+- **A file is parsed only if it declares a field rule, and it is never written
+  back.** `serde_json` here has no `preserve_order`, so a parse and reserialise
+  alphabetises every object, and `~/.copilot/config.json` is JSONC. Redaction
+  substitutes a value's own text — in its *escaped* form, because the bytes in
+  the file are not the parsed value. `commands/agents.rs` already states this
+  refusal for the same class of file; this extends it rather than departing.
+- **Create atomically, update in place.** `~/.agents/AGENTS.md` is one inode with
+  four names, `~/.gemini/GEMINI.md` among them. Tmp-file-then-rename severs all
+  of them silently. In place is not atomic, so a copy of the old bytes is written
+  first and its directory is reported.
+- **The scanner reads links and never follows, makes or removes one.**
+  `~/.claude/{skills,commands,agents}` point into `~/.agents`, so a walk that
+  followed them would sync the same content twice. `symlink_metadata` and
+  `is_symlink()` come before any `is_dir()`, because a Windows junction reports
+  `is_dir() == false`. `remove_dir_all` appears nowhere in the module.
+- **A divergence is the frontend's to merge.** Rust reports three sides and
+  applies whatever bytes come back. There is no pick-a-side path and no automatic
+  overwrite, the first sync on a machine with existing configuration included —
+  which falls out of the base ref being absent rather than from a special case.
+
+Two more that are not in `sync` and belong to it. Nothing in `boite-mcp` names a
+sync tool, and a test there asserts it: the capability check is not the guard,
+because `Grant::Owner` allows everything. And the sync store imports no
+`@codemirror`, asserted by a test in the slice, because the launch pull puts it
+on the boot path and one import would drag the editor stack in behind it.
 
 ## Hit every surface
 

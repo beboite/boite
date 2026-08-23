@@ -15,6 +15,8 @@ on:
 
 permissions:
   contents: write
+  # The preflight job below reads this repository's workflow runs.
+  actions: read
 
 jobs:
   # Runs first and alone: the version lives in one manifest per crate plus the
@@ -70,15 +72,63 @@ jobs:
             exit 1
           fi
 
+  # Has ci already gone green on this exact commit?
+  #
+  # It usually has. The release doc says to bump the version, commit, then tag
+  # that commit and push, so the same tree goes through ci on the master push
+  # and again here: six jobs, two of them platform runners, rerun on a tree
+  # already proven byte for byte. The tag carries no result of its own, hence
+  # the probe rather than an assumption either way.
+  #
+  # A run is only accepted if it succeeded on this sha. Anything else, no run
+  # at all, a failure, a tag pushed on a commit that never touched a branch,
+  # leaves this empty and the suite below runs.
+  preflight:
+    runs-on: ubuntu-latest
+    outputs:
+      ci: ${{ steps.probe.outputs.state }}
+    steps:
+      - name: Look for a green ci on this sha
+        id: probe
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          runs="repos/$GH_REPO/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&per_page=100"
+          green='[.workflow_runs[] | select(.conclusion == "success")] | length'
+          count=$(gh api "$runs" -q "$green")
+          if [ "${count:-0}" -gt 0 ]; then
+            echo "ci already passed on $GITHUB_SHA, skipping the rerun"
+            echo "state=green" >> "$GITHUB_OUTPUT"
+          else
+            echo "no green ci on $GITHUB_SHA, running it"
+            echo "state=missing" >> "$GITHUB_OUTPUT"
+          fi
+
   # The whole ci suite, on the tagged tree. A tag is pushed on the same commit
   # as the version bump, and ci only listens to branches, so nothing here used
   # to prove that what gets signed compiles, lints or passes a test. Reusing
   # ci.yml rather than restating it keeps one definition of "green".
+  #
+  # Skipped when preflight found that same proof already on this sha. Nothing
+  # below is allowed to read a skip as a pass by accident: bundle spells both
+  # outcomes out.
   tests:
+    needs: preflight
+    if: needs.preflight.outputs.ci != 'green'
     uses: ./.github/workflows/ci.yml
 
   bundle:
-    needs: [verify, tests]
+    needs: [verify, preflight, tests]
+    # `needs` alone would drop this job the moment tests is skipped, and a
+    # release that quietly builds nothing is the worst of the three outcomes.
+    # Skipped is a pass here, and only here, because preflight is what put it
+    # in that state.
+    if: >-
+      !cancelled()
+      && needs.verify.result == 'success'
+      && (needs.tests.result == 'success' || needs.tests.result == 'skipped')
     strategy:
       fail-fast: false
       matrix:
@@ -112,14 +162,25 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      # Root `target/` and root `Cargo.lock`. This is one cargo workspace: there
+      # is no src-tauri/target to save and no src-tauri/Cargo.lock to hash, so
+      # the key was the hash of a file that does not exist and the path held
+      # nothing. Four platform runners recompiled from zero on every release
+      # while a cache step reported success. ci.yml already carried the same
+      # correction, with the comment explaining it, and this half never got it.
+      #
+      # restore-keys too: the key changes on any dependency bump, and a release
+      # tag usually follows one, which is exactly when a from-scratch build of
+      # the whole tree costs the most.
       - name: Cache cargo
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            src-tauri/target
-          key: ${{ matrix.platform }}-${{ matrix.target }}-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
+            target
+          key: ${{ matrix.platform }}-${{ matrix.target }}-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ matrix.platform }}-${{ matrix.target }}-cargo-
 
       - name: System deps
         if: startsWith(matrix.platform, 'ubuntu')
@@ -132,6 +193,15 @@ jobs:
             librsvg2-dev \
             libsoup-3.0-dev \
             libjavascriptcoregtk-4.1-dev
+
+      # Same global install cache as ci.yml: setup-bun caches the binary, not
+      # the packages, and this install runs once per platform runner.
+      - name: Cache bun deps
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ matrix.platform }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: ${{ matrix.platform }}-bun-
 
       - name: Install frontend deps
         run: bun install --frozen-lockfile
@@ -148,6 +218,10 @@ jobs:
           # anchor — never echo them, never move them out of repo secrets.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Compiled into the binary (`option_env!`). Empty or unset falls back
+          # to https://telemetry.invalid, so a tag without this secret ships a
+          # fleet that cannot report. Never echo it.
+          BOITE_TELEMETRY_URL: ${{ secrets.BOITE_TELEMETRY_URL }}
         with:
           tagName: v__VERSION__
           releaseName: Boite v__VERSION__

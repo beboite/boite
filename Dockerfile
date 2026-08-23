@@ -16,13 +16,28 @@ RUN --mount=type=cache,target=/root/.bun/install/cache \
 FROM rust:1-bookworm AS server
 WORKDIR /app
 COPY . .
+# Same compile-time URL as the desktop release (`option_env!`). Empty, which is
+# a local `docker compose build` without the arg, compiles against
+# https://telemetry.invalid and the host sends nothing. image.yml injects the
+# repository secret.
+ARG BOITE_TELEMETRY_URL=
+ENV BOITE_TELEMETRY_URL=$BOITE_TELEMETRY_URL
 # Cache the cargo registry/git and the target dir across builds: a source-only
 # change then recompiles just the changed crates instead of every dependency
 # (the slow part on arm64). target/ is an ephemeral cache mount and is NOT kept
 # in the layer, so copy the binary out within the same RUN.
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/usr/local/cargo/git \
-    --mount=type=cache,target=/app/target \
+#
+# The registry and git caches carry an id of their own, one per stage. Cargo
+# guards a shared registry with a lock on `$CARGO_HOME/.package-cache`, which
+# sits in the layer rather than in the mount, so this stage and the rtk stage
+# below each take their own lock and neither sees the other. buildkit runs the
+# two in parallel, and two unlocked cargos unpacking one registry raced on
+# `.cargo-ok`: "failed to unpack package `vcpkg`: File exists". Separate ids
+# rather than `sharing=locked`, which would queue the rtk build behind the long
+# one to save a download it does once per runner anyway.
+RUN --mount=type=cache,id=cargo-registry-server,target=/usr/local/cargo/registry \
+    --mount=type=cache,id=cargo-git-server,target=/usr/local/cargo/git \
+    --mount=type=cache,id=cargo-target-server,target=/app/target \
     cargo build -p boite-server -p boite-mcp --release \
     && cp target/release/boite-server /boite-server \
     && cp target/release/boite-mcp /boite-mcp
@@ -30,8 +45,8 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # ---- rtk (Rust Token Killer): pinned to the same commit as the author's host ----
 # No prebuilt arm64 release exists; build from the exact git rev (rtk-ai/rtk).
 FROM rust:1-bookworm AS rtk
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/usr/local/cargo/git \
+RUN --mount=type=cache,id=cargo-registry-rtk,target=/usr/local/cargo/registry \
+    --mount=type=cache,id=cargo-git-rtk,target=/usr/local/cargo/git \
     cargo install --git https://github.com/rtk-ai/rtk \
       --rev d8c550eefba41e112bd174d58844a803db6e432f rtk --root /usr/local
 
@@ -40,6 +55,21 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # zombies (every spawned shell/agent is a child); git + ripgrep are what the
 # PTY and explorer shell out to; chromium + xvfb give axi a headful browser.
 FROM node:26-bookworm-slim
+
+# This stage runs as root, and the image ships that way. It is worth saying why
+# rather than leaving it to look like nobody thought about it: everything in
+# here — the npm globals, the agent CLIs, the chromium profile, the mounted
+# credentials — lives under /root, and every deployment that already pulled this
+# image has host directories owned by root behind /data and /workspace. A `USER`
+# line added now breaks each of them on the next `docker compose pull`, silently,
+# at the first write.
+#
+# It is still the right change: the process in here runs whatever an agent
+# decides to run, and root in the container is one fewer boundary between that
+# and the host. Doing it properly means a non-root user, an entrypoint that
+# chowns the volumes while it still can and drops privileges before exec, and a
+# note in the release that says so. That is its own change, not a line in this
+# one.
 
 # Base tools + gh (GitHub CLI, arm64 from official apt repo) + headful browser.
 RUN apt-get update \
@@ -100,6 +130,18 @@ ENV BOITE_BIND=0.0.0.0:7337 \
 # Codex/opencode configs are mounted from the host compose dir (see compose).
 VOLUME ["/data", "/workspace", "/root/.claude"]
 EXPOSE 7337
+
+# `restart: unless-stopped` in the compose file restarts a container that exits.
+# A server that is up and answering nothing exits never, and that is the failure
+# an agent host actually has: the process lives, the port listens, and every
+# request hangs. Without this the restart policy covers the one case that
+# already fixes itself and none of the case it was written for.
+#
+# /api/health is the one route that answers before pairing, which is what makes
+# it usable from here: a check that needed a credential would report a healthy
+# server unhealthy the moment the token rotated.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD curl -fsS http://127.0.0.1:7337/api/health || exit 1
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["boite-entry"]

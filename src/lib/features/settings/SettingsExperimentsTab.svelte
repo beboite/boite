@@ -1,8 +1,13 @@
 <script lang="ts">
+  import { app } from "$lib/app/store.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
+  import { tip } from "$lib/shared/actions/tooltip";
   import ToggleSetting from "$lib/shared/components/ToggleSetting.svelte";
+  import { confirmDialog } from "$lib/shared/components/confirm.svelte";
   import { t, type MessageKey } from "$lib/i18n/index.svelte";
+  import VoiceSettings from "$lib/features/voice/VoiceSettings.svelte";
   import type { SmartSortBy, SortDirection, WhipSound } from "$lib/types";
+  import { CLI_PRESETS } from "$lib/features/settings/cliPresets";
 
   const SORT_MODES: { id: SmartSortBy; labelKey: MessageKey }[] = [
     { id: "manual", labelKey: "experiments.smartSortManual" },
@@ -17,7 +22,7 @@
 
   const WHIP_SOUNDS: { id: WhipSound; labelKey: MessageKey }[] = [
     { id: "synth", labelKey: "experiments.whipSoundSynth" },
-    { id: "meme", labelKey: "experiments.whipSoundMeme" },
+    { id: "sampled", labelKey: "experiments.whipSoundMeme" },
   ];
 
   const RADIO =
@@ -27,6 +32,13 @@
 
   const sortManual = $derived(settings.state.smartSortBy === "manual");
 
+  function whipSoundOn(id: WhipSound): boolean {
+    if (id === "sampled") {
+      return settings.state.whipSound === "sampled" || settings.state.whipSound === "meme";
+    }
+    return settings.state.whipSound === id;
+  }
+
   /**
    * Cracks once so the choice is audible.
    *
@@ -35,6 +47,32 @@
    * the sample is awaited: previewing `meme` and hearing the synth because the
    * fetch had not landed is the one thing this button must not do.
    */
+  /**
+   * Turning the experiment off unmounts the surface, and asks once whether the
+   * live orchestrator threads should be put away with it. Their workers are
+   * not touched either way: a spawned terminal belongs to the workspace, not
+   * to the conductor that opened it, and "put away" is the sidebar's own
+   * settle, reversible from there.
+   */
+  async function toggleOrchestrator() {
+    const next = !settings.state.experimentOrchestrator;
+    settings.setExperimentOrchestrator(next);
+    if (next) return;
+    const live = app.threads.filter(
+      (thread) => thread.role === "orchestrator" && !thread.settledAt,
+    );
+    if (live.length === 0) return;
+    const close = await confirmDialog.ask({
+      title: t("experiments.orchestratorCloseTitle"),
+      message: t("experiments.orchestratorCloseAsk", { count: live.length }),
+      confirmLabel: t("experiments.orchestratorCloseConfirm"),
+    });
+    if (!close) return;
+    for (const thread of live) {
+      await app.settleThread(thread.id, true);
+    }
+  }
+
   async function playPreview(sound: WhipSound) {
     const { playCrack, primeCrackSound } = await import("$lib/features/whip/crack");
     await primeCrackSound(sound);
@@ -43,6 +81,74 @@
 </script>
 
 <p class="px-3 text-sm text-muted-foreground">{t("experiments.intro")}</p>
+
+<ToggleSetting
+  label={t("experiments.home")} anchor="experiments.home"
+  description={t("experiments.homeDesc")}
+  enabled={settings.state.experimentHome}
+  onToggle={() => settings.setExperimentHome(!settings.state.experimentHome)}
+/>
+
+<ToggleSetting
+  label={t("experiments.orchestrator")} anchor="experiments.orchestrator"
+  description={t("experiments.orchestratorDesc")}
+  enabled={settings.state.experimentOrchestrator}
+  onToggle={() => void toggleOrchestrator()}
+/>
+
+{#if settings.state.experimentOrchestrator}
+  <div class="flex flex-col gap-1.5 pl-3">
+    <div
+      class="flex flex-wrap items-center gap-1.5"
+      role="radiogroup"
+      aria-label={t("experiments.orchestratorAgent")}
+    >
+      <span class="w-20 shrink-0 text-xs text-muted-foreground">
+        {t("experiments.orchestratorAgent")}
+      </span>
+      {#each CLI_PRESETS as preset (preset.id)}
+        <button
+          type="button"
+          role="radio"
+          aria-checked={settings.state.orchestratorAgent === preset.id}
+          class={settings.state.orchestratorAgent === preset.id ? RADIO_ON : RADIO}
+          onclick={() =>
+            settings.setOrchestratorAgent(
+              settings.state.orchestratorAgent === preset.id ? null : preset.id,
+            )}
+        >
+          {preset.label}
+        </button>
+      {/each}
+    </div>
+    <!-- A shortcut can also name the agent, and a shortcut may point at a
+         brokered endpoint; the warning follows the value, not the buttons. -->
+    {#if settings.state.orchestratorAgent?.startsWith("fastpick:")}
+      <p class="text-xs text-amber-500">{t("experiments.orchestratorBrokered")}</p>
+    {/if}
+    <ToggleSetting
+      label={t("experiments.orchestratorPerProject")}
+      anchor="experiments.orchestratorPerProject"
+      description={t("experiments.orchestratorPerProjectDesc")}
+      enabled={settings.state.experimentOrchestratorPerProject}
+      onToggle={() =>
+        settings.setExperimentOrchestratorPerProject(
+          !settings.state.experimentOrchestratorPerProject,
+        )}
+    />
+  </div>
+{/if}
+
+<ToggleSetting
+  label={t("experiments.voice")} anchor="experiments.voice"
+  description={t("experiments.voiceDesc")}
+  enabled={settings.state.experimentVoice}
+  onToggle={() => settings.setExperimentVoice(!settings.state.experimentVoice)}
+/>
+
+{#if settings.state.experimentVoice}
+  <VoiceSettings />
+{/if}
 
 <ToggleSetting
   label={t("experiments.infoBox")} anchor="experiments.infoBox"
@@ -88,7 +194,7 @@
       class:opacity-50={sortManual}
       role="radiogroup"
       aria-label={t("experiments.smartSortDirection")}
-      title={sortManual ? t("experiments.smartSortDirManual") : undefined}
+      use:tip={sortManual ? t("experiments.smartSortDirManual") : undefined}
     >
       <span class="w-20 shrink-0 text-xs text-muted-foreground">
         {t("experiments.smartSortDirection")}
@@ -133,8 +239,8 @@
         <button
           type="button"
           role="radio"
-          aria-checked={settings.state.whipSound === sound.id}
-          class={settings.state.whipSound === sound.id ? RADIO_ON : RADIO}
+          aria-checked={whipSoundOn(sound.id)}
+          class={whipSoundOn(sound.id) ? RADIO_ON : RADIO}
           onclick={() => {
             settings.setWhipSound(sound.id);
             // The click is the gesture that unlocks audio, so picking a noise

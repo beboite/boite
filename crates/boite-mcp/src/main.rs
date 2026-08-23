@@ -28,7 +28,7 @@ use serde_json::Value;
 
 use boite_mcp::host::Host;
 use boite_mcp::backend::Backend;
-use boite_mcp::{call_blocks, call_tool, hook, rpc, tools, write_line, INSTRUCTIONS};
+use boite_mcp::{call_blocks, call_tool, hook, rpc, write_line};
 
 fn run_stop_hook() {
     if std::env::args().nth(2).as_deref().unwrap_or("stop") != "stop" {
@@ -79,11 +79,17 @@ fn main() {
         Ok(h) => call_blocks(h, name, args),
         Err(_) => None,
     };
+    // The role is a hint from the environment Boite stamped at spawn; the
+    // endpoint re-checks the row on every privileged call, so exporting it by
+    // hand widens the menu and nothing else.
+    let role = std::env::var(boite_identity::env::ROLE).ok();
+    let scope = std::env::var(boite_identity::env::ORCHESTRATOR_SCOPE).ok();
+    let instructions = boite_mcp::instructions_for_role(role.as_deref(), scope.as_deref());
     let service = rpc::Service {
         call: &call,
         blocks: Some(&blocks),
-        tools: tools(),
-        instructions: INSTRUCTIONS,
+        tools: boite_mcp::tools_for_role(role.as_deref()),
+        instructions: &instructions,
     };
 
     let stdin = std::io::stdin();

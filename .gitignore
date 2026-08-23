@@ -18,3 +18,11 @@ vite.config.ts.timestamp-*
 # Written by a locally started boite-server (smoke runs). Holds a database, transcripts
 # and a VAPID keypair, none of which belong to anybody but the machine that ran it.
 boite-data/
+
+# Third-party plugins cloned or installed into the workspace. They belong to
+# whoever wrote them and carry their own history; a copy checked in here goes
+# stale the day upstream moves.
+/plugins/
+
+# Wrangler local secrets for telemetry/ (`npx wrangler dev`).
+telemetry/.dev.vars

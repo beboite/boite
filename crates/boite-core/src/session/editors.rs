@@ -1,10 +1,11 @@
-//! The six stores Boite can only read.
+//! The six stores Boite can only read for which conversation.
 //!
 //! Copilot, cursor, antigravity, grok, hermes and pi. Grouped because they are
 //! the same shape of answer: open whatever the editor keeps, find the newest
 //! session recorded for this directory, hand back an id and when it was last
-//! touched. None of them says whether a turn is in flight, so none of them
-//! contributes to the sidebar's activity dot.
+//! touched. Grok is the one that also says whether a turn is in flight, from
+//! the same `updates.jsonl` the finder already walks. The other five still do
+//! not, so they still do not contribute to the sidebar's activity dot.
 //!
 //! Four are sqlite and two are directories of files, and that is the whole
 //! variation. What differs beyond it is where the store lives per platform,
@@ -115,6 +116,7 @@ fn find_copilot_session_in(
         return Some(SessionHit {
             id,
             modified_ms: ts,
+            title: None,
         });
     }
     None
@@ -172,7 +174,268 @@ pub fn find_cursor_session_blocking(
     best.map(|(id, modified_ms)| SessionHit {
         id,
         modified_ms: Some(modified_ms),
+        title: None,
     })
+}
+
+const ANTIGRAVITY_TITLE_MAX_CHARS: usize = 60;
+
+/// Cleans raw prompt text or XML into a concise conversation title.
+pub(crate) fn clean_antigravity_prompt_title(text: &str) -> Option<String> {
+    let mut s = text.trim();
+    if s.is_empty() {
+        return None;
+    }
+
+    // Extract text within <USER_REQUEST>...</USER_REQUEST> if present.
+    if let Some(start) = s.find("<USER_REQUEST>") {
+        let after = &s[start + "<USER_REQUEST>".len()..];
+        if let Some(end) = after.find("</USER_REQUEST>") {
+            s = after[..end].trim();
+        } else {
+            s = after.trim();
+        }
+    }
+
+    // Strip leading slash commands (e.g. /plan, /tasks, /model, /artifact, /clear, /new)
+    if s.starts_with('/') {
+        if let Some((cmd, rest)) = s.split_once(' ') {
+            let cmd_lower = cmd.to_lowercase();
+            if matches!(
+                cmd_lower.as_str(),
+                "/plan" | "/tasks" | "/model" | "/artifact" | "/clear" | "/new" | "/test" | "/init"
+            ) {
+                s = rest.trim();
+            }
+        } else {
+            let cmd_lower = s.to_lowercase();
+            if matches!(
+                cmd_lower.as_str(),
+                "/plan" | "/tasks" | "/model" | "/artifact" | "/clear" | "/new" | "/test" | "/init"
+            ) {
+                return None;
+            }
+        }
+    }
+
+    // Take the first line
+    let first_line = s.lines().map(str::trim).find(|l| !l.is_empty())?;
+    if first_line.is_empty() {
+        return None;
+    }
+
+    // Strip any residual HTML/XML tags
+    let mut clean = String::with_capacity(first_line.len());
+    let mut in_tag = false;
+    for c in first_line.chars() {
+        if c == '<' {
+            in_tag = true;
+        } else if c == '>' {
+            in_tag = false;
+        } else if !in_tag {
+            clean.push(c);
+        }
+    }
+    let trimmed = clean.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    if trimmed.chars().count() > ANTIGRAVITY_TITLE_MAX_CHARS {
+        let mut truncated: String = trimmed.chars().take(ANTIGRAVITY_TITLE_MAX_CHARS).collect();
+        truncated.push_str("...");
+        Some(truncated)
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+pub(crate) fn read_antigravity_title(cli_dir: &Path, id: &str) -> Option<String> {
+    // 1. Try brain/<id>/.system_generated/logs/transcript.jsonl
+    let transcript_path = cli_dir
+        .join("brain")
+        .join(id)
+        .join(".system_generated")
+        .join("logs")
+        .join("transcript.jsonl");
+    if let Ok(file) = fs::File::open(&transcript_path) {
+        let reader = BufReader::new(file);
+        for line in reader.lines().take(20).map_while(Result::ok) {
+            if !line.contains("\"USER_INPUT\"") {
+                continue;
+            }
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&line) {
+                if val.get("type").and_then(|t| t.as_str()) == Some("USER_INPUT") {
+                    if let Some(content) = val.get("content").and_then(|c| c.as_str()) {
+                        if let Some(title) = clean_antigravity_prompt_title(content) {
+                            return Some(title);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. Try history.jsonl
+    let history_path = cli_dir.join("history.jsonl");
+    if let Ok(file) = fs::File::open(&history_path) {
+        let reader = BufReader::new(file);
+        let mut lines = Vec::new();
+        for line in reader.lines().map_while(Result::ok) {
+            lines.push(line);
+        }
+        for line in lines.into_iter().rev().take(100) {
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&line) {
+                if val.get("conversationId").and_then(|c| c.as_str()) == Some(id) {
+                    if let Some(display) = val.get("display").and_then(|d| d.as_str()) {
+                        if let Some(title) = clean_antigravity_prompt_title(display) {
+                            return Some(title);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Try conversation_summaries.db
+    let summaries_db = cli_dir.join("conversation_summaries.db");
+    if summaries_db.is_file() {
+        if let Ok(conn) = Connection::open_with_flags(&summaries_db, OpenFlags::SQLITE_OPEN_READ_ONLY) {
+            let stmt = conn
+                .prepare("SELECT preview FROM conversation_summaries WHERE conversation_id = ?1")
+                .ok();
+            if let Some(mut stmt) = stmt {
+                let preview: Option<String> = stmt
+                    .query_row([id], |row| row.get(0))
+                    .ok();
+                if let Some(preview) = preview {
+                    if let Some(title) = clean_antigravity_prompt_title(&preview) {
+                        return Some(title);
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// True when `haystack` names this cwd, not a longer path that merely contains it.
+fn names_this_cwd(haystack: &str, target_norm: &str) -> bool {
+    if target_norm.is_empty() {
+        return false;
+    }
+    let text = normalize(haystack);
+    if workspace_eq(&text, target_norm) {
+        return true;
+    }
+    let mut from = 0;
+    while let Some(rel) = text[from..].find(target_norm) {
+        let at = from + rel;
+        let before = at
+            .checked_sub(1)
+            .and_then(|i| text.as_bytes().get(i).copied());
+        let after = text.as_bytes().get(at + target_norm.len()).copied();
+        if is_cwd_delim(before) && is_cwd_end(after) {
+            return true;
+        }
+        from = at + 1;
+    }
+    false
+}
+
+fn workspace_eq(text: &str, target: &str) -> bool {
+    if text == target {
+        return true;
+    }
+    let rest = text.strip_prefix("file://").unwrap_or(text);
+    normalize(rest) == target
+}
+
+fn is_cwd_delim(c: Option<u8>) -> bool {
+    match c {
+        None => true,
+        Some(b) => !b.is_ascii_alphanumeric() && !matches!(b, b'_' | b'-' | b'.'),
+    }
+}
+
+fn is_cwd_end(c: Option<u8>) -> bool {
+    match c {
+        None => true,
+        Some(b) => !b.is_ascii_alphanumeric() && !matches!(b, b'_' | b'-' | b'.' | b'/'),
+    }
+}
+
+fn antigravity_conversation_matches_cwd(cli_dir: &Path, id: &str, target_norm: &str) -> bool {
+    // 1. Check conversations/<id>.db
+    let db_path = cli_dir.join("conversations").join(format!("{id}.db"));
+    if db_path.is_file() {
+        if let Ok(conn) = Connection::open_with_flags(&db_path, OpenFlags::SQLITE_OPEN_READ_ONLY) {
+            let _ = conn.busy_timeout(Duration::from_millis(100));
+            let data_blob: Option<Vec<u8>> = conn
+                .query_row(
+                    "SELECT data FROM trajectory_metadata_blob WHERE id = 'main'",
+                    [],
+                    |row| row.get(0),
+                )
+                .ok();
+            if let Some(data) = data_blob {
+                if names_this_cwd(&String::from_utf8_lossy(&data), target_norm) {
+                    return true;
+                }
+            }
+        }
+    }
+
+    // 2. Check history.jsonl
+    let history_path = cli_dir.join("history.jsonl");
+    if let Ok(file) = fs::File::open(&history_path) {
+        let reader = BufReader::new(file);
+        for line in reader.lines().map_while(Result::ok) {
+            if !line.contains(id) {
+                continue;
+            }
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&line) {
+                if val.get("conversationId").and_then(|c| c.as_str()) == Some(id) {
+                    if let Some(ws) = val.get("workspace").and_then(|w| w.as_str()) {
+                        if normalize(ws) == target_norm {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Check conversation_summaries.db
+    let summaries_db = cli_dir.join("conversation_summaries.db");
+    if summaries_db.is_file() {
+        if let Ok(conn) = Connection::open_with_flags(&summaries_db, OpenFlags::SQLITE_OPEN_READ_ONLY) {
+            let ws_uris: Option<String> = conn
+                .query_row(
+                    "SELECT workspace_uris FROM conversation_summaries WHERE conversation_id = ?1",
+                    [id],
+                    |row| row.get(0),
+                )
+                .ok();
+            if let Some(uris) = ws_uris {
+                if names_this_cwd(&uris, target_norm) {
+                    return true;
+                }
+            }
+        }
+    }
+
+    false
+}
+
+pub(crate) fn antigravity_cli_dir() -> Option<PathBuf> {
+    if let Ok(dir) = env::var("ANTIGRAVITY_CLI_DIR") {
+        if !dir.trim().is_empty() {
+            return Some(PathBuf::from(dir));
+        }
+    }
+    Some(dirs::home_dir()?.join(".gemini").join("antigravity-cli"))
 }
 
 pub fn find_antigravity_session_blocking(
@@ -180,38 +443,161 @@ pub fn find_antigravity_session_blocking(
     after_unix_ms: i64,
     exclude: &HashSet<String>,
 ) -> Option<SessionHit> {
-    let home = dirs::home_dir()?;
-    let cli_dir = home.join(".gemini").join("antigravity-cli");
-    let cache_file = cli_dir.join("cache").join("last_conversations.json");
-    let brain_dir = cli_dir.join("brain");
-
-    let content = fs::read_to_string(&cache_file).ok()?;
-    let parsed: serde_json::Value = serde_json::from_str(&content).ok()?;
-    let map = parsed.as_object()?;
-
-    let target = normalize(&cwd);
-    for (key, val) in map {
-        if normalize(key) != target {
-            continue;
-        }
-        let Some(id) = val.as_str() else { continue };
-        if exclude.contains(id) {
-            continue;
-        }
-        let brain = brain_dir.join(id);
-        let mtime = brain
-            .metadata()
-            .and_then(|m| m.modified())
-            .map(ms_since_epoch)
-            .ok();
-        if mtime.unwrap_or(0) < after_unix_ms {
-            continue;
-        }
-        return Some(SessionHit {
-            id: id.to_string(),
-            modified_ms: mtime,
-        });
+    let cli_dir = antigravity_cli_dir()?;
+    if !cli_dir.is_dir() {
+        return None;
     }
+    find_antigravity_session_in(&cli_dir, &cwd, after_unix_ms, exclude)
+}
+
+pub(super) fn find_antigravity_session_in(
+    cli_dir: &Path,
+    cwd: &str,
+    after_unix_ms: i64,
+    exclude: &HashSet<String>,
+) -> Option<SessionHit> {
+    let target = normalize(cwd);
+    let mut candidates: Vec<(String, i64)> = Vec::new();
+    let mut seen_ids: HashSet<String> = HashSet::new();
+
+    // 1. Scan conversations/*.db
+    let conv_dir = cli_dir.join("conversations");
+    if let Ok(entries) = fs::read_dir(&conv_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("db") {
+                continue;
+            }
+            let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            let id = stem.to_string();
+            if exclude.contains(&id) {
+                continue;
+            }
+            let Ok(meta) = entry.metadata() else { continue };
+            let Ok(modified) = meta.modified() else { continue };
+            let mtime = ms_since_epoch(modified);
+            if mtime < after_unix_ms {
+                continue;
+            }
+            if seen_ids.insert(id.clone()) {
+                candidates.push((id, mtime));
+            }
+        }
+    }
+
+    // 2. Scan brain/*/
+    let brain_dir = cli_dir.join("brain");
+    if let Ok(entries) = fs::read_dir(&brain_dir) {
+        for entry in entries.flatten() {
+            let Ok(ft) = entry.file_type() else { continue };
+            if !ft.is_dir() {
+                continue;
+            }
+            let id = entry.file_name().to_string_lossy().into_owned();
+            if exclude.contains(&id) || seen_ids.contains(&id) {
+                continue;
+            }
+            let Ok(meta) = entry.metadata() else { continue };
+            let Ok(modified) = meta.modified() else { continue };
+            let mtime = ms_since_epoch(modified);
+            if mtime < after_unix_ms {
+                continue;
+            }
+            if seen_ids.insert(id.clone()) {
+                candidates.push((id, mtime));
+            }
+        }
+    }
+
+    // Sort newest first
+    candidates.sort_by_key(|b| std::cmp::Reverse(b.1));
+
+    // Test candidates
+    for (id, mtime) in candidates {
+        if antigravity_conversation_matches_cwd(cli_dir, &id, &target) {
+            let title = read_antigravity_title(cli_dir, &id);
+            return Some(SessionHit {
+                id,
+                modified_ms: Some(mtime),
+                title,
+            });
+        }
+    }
+
+    // Fallback: history.jsonl
+    let history_path = cli_dir.join("history.jsonl");
+    if let Ok(file) = fs::File::open(&history_path) {
+        let mut lines = Vec::new();
+        for line in BufReader::new(file).lines().map_while(Result::ok) {
+            lines.push(line);
+        }
+        for line in lines.into_iter().rev().take(100) {
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&line) {
+                let Some(id) = val.get("conversationId").and_then(|c| c.as_str()) else {
+                    continue;
+                };
+                if exclude.contains(id) {
+                    continue;
+                }
+                let Some(ws) = val.get("workspace").and_then(|w| w.as_str()) else {
+                    continue;
+                };
+                if normalize(ws) != target {
+                    continue;
+                }
+                let ts = val.get("timestamp").and_then(|t| t.as_i64()).unwrap_or(0);
+                if ts < after_unix_ms {
+                    continue;
+                }
+                let title = val
+                    .get("display")
+                    .and_then(|d| d.as_str())
+                    .and_then(clean_antigravity_prompt_title)
+                    .or_else(|| read_antigravity_title(cli_dir, id));
+                return Some(SessionHit {
+                    id: id.to_string(),
+                    modified_ms: (ts > 0).then_some(ts),
+                    title,
+                });
+            }
+        }
+    }
+
+    // Fallback: cache/last_conversations.json
+    let cache_file = cli_dir.join("cache").join("last_conversations.json");
+    if let Ok(content) = fs::read_to_string(&cache_file) {
+        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&content) {
+            if let Some(map) = parsed.as_object() {
+                for (key, val) in map {
+                    if normalize(key) != target {
+                        continue;
+                    }
+                    let Some(id) = val.as_str() else { continue };
+                    if exclude.contains(id) {
+                        continue;
+                    }
+                    let mtime = brain_dir
+                        .join(id)
+                        .metadata()
+                        .and_then(|m| m.modified())
+                        .map(ms_since_epoch)
+                        .ok();
+                    if mtime.unwrap_or(0) < after_unix_ms {
+                        continue;
+                    }
+                    let title = read_antigravity_title(cli_dir, id);
+                    return Some(SessionHit {
+                        id: id.to_string(),
+                        modified_ms: mtime,
+                        title,
+                    });
+                }
+            }
+        }
+    }
+
     None
 }
 
@@ -402,7 +788,11 @@ fn find_grok_session_in(
             }
         }
     }
-    best.map(|(id, modified_ms)| SessionHit { id, modified_ms })
+    best.map(|(id, modified_ms)| SessionHit {
+        id,
+        modified_ms,
+        title: None,
+    })
 }
 
 fn copy_tree(from: &Path, to: &Path) -> Result<(), String> {
@@ -478,6 +868,211 @@ fn migrate_grok_transcript_in(
     }
     copy_tree(&source, &target)?;
     Ok(true)
+}
+
+/// How far back through a grok `updates.jsonl` to look for a turn marker.
+///
+/// Same ceiling as a codex rollout: a turn that wrote nothing in this window
+/// is not an answer, and the terminal's own rows decide.
+const GROK_TAIL_BYTES: u64 = 256 * 1024;
+
+/// How long an `updates.jsonl` can go untouched before an open turn stops counting.
+///
+/// Grok killed mid-turn leaves `user_message_chunk` as the last marker it wrote.
+/// `active_sessions.json` names the pid when grok is still there, so a live
+/// process never ages out. This bound is only for a session the registry no
+/// longer holds, the same 30 minutes as a codex rollout.
+const GROK_FILE_TTL: Duration = Duration::from_secs(30 * 60);
+
+#[derive(Deserialize)]
+struct GrokUpdateLine {
+    params: Option<GrokUpdateParams>,
+}
+
+#[derive(Deserialize)]
+struct GrokUpdateParams {
+    update: Option<GrokUpdateBody>,
+}
+
+#[derive(Deserialize)]
+struct GrokUpdateBody {
+    #[serde(rename = "sessionUpdate")]
+    session_update: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct GrokActiveSession {
+    session_id: String,
+    pid: u32,
+}
+
+/// Whether a grok turn is in flight, read off the ACP stream it appends to.
+///
+/// Grok has no live status file. Each turn opens on `user_message_chunk` and
+/// stays open across thought, tool calls and the streamed answer, then closes
+/// on `turn_completed`. Reading the last of those backwards is the whole answer.
+///
+/// `live_pid` is whether `active_sessions.json` still names a living process
+/// for this session. A live one never ages out (a long tool call appends
+/// nothing). A dead one, or a session the registry dropped, is bounded by
+/// [`GROK_FILE_TTL`].
+fn grok_updates_state(path: &Path, live_pid: bool) -> Option<&'static str> {
+    let mut file = fs::File::open(path).ok()?;
+    let meta = file.metadata().ok()?;
+    let len = meta.len();
+    let age = meta
+        .modified()
+        .ok()
+        .and_then(|m| SystemTime::now().duration_since(m).ok());
+    let from = len.saturating_sub(GROK_TAIL_BYTES);
+    file.seek(SeekFrom::Start(from)).ok()?;
+    let mut buf = String::new();
+    file.read_to_string(&mut buf).ok()?;
+    let body = if from > 0 {
+        buf.split_once('\n').map(|(_, rest)| rest).unwrap_or("")
+    } else {
+        &buf
+    };
+    for line in body.lines().rev() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let Ok(event) = serde_json::from_str::<GrokUpdateLine>(line) else {
+            continue;
+        };
+        match event
+            .params
+            .and_then(|p| p.update)
+            .and_then(|u| u.session_update)
+            .as_deref()
+        {
+            Some("turn_completed") => return Some("idle"),
+            Some(
+                "user_message_chunk"
+                | "agent_thought_chunk"
+                | "agent_message_chunk"
+                | "tool_call"
+                | "tool_call_update",
+            ) => {
+                if live_pid {
+                    return Some("busy");
+                }
+                return grok_bound_open_turn(age);
+            }
+            _ => continue,
+        }
+    }
+    None
+}
+
+fn grok_bound_open_turn(age: Option<Duration>) -> Option<&'static str> {
+    match age {
+        Some(age) if age >= GROK_FILE_TTL => None,
+        _ => Some("busy"),
+    }
+}
+
+fn grok_live_pids() -> std::collections::HashMap<String, u32> {
+    let Some(path) = dirs::home_dir().map(|h| h.join(".grok").join("active_sessions.json")) else {
+        return std::collections::HashMap::new();
+    };
+    let Ok(bytes) = fs::read(&path) else {
+        return std::collections::HashMap::new();
+    };
+    let Ok(rows) = serde_json::from_slice::<Vec<GrokActiveSession>>(&bytes) else {
+        return std::collections::HashMap::new();
+    };
+    rows.into_iter().map(|r| (r.session_id, r.pid)).collect()
+}
+
+fn grok_updates_path(root: &Path, cwd: &str, session_id: Option<&str>) -> Option<PathBuf> {
+    if let Some(id) = session_id {
+        if let Some(dir) = grok_dir_for(root, cwd) {
+            let path = dir.join(id).join("updates.jsonl");
+            if path.is_file() {
+                return Some(path);
+            }
+        }
+        let encoded = root.join(grok_dir_name(cwd)).join(id).join("updates.jsonl");
+        if encoded.is_file() {
+            return Some(encoded);
+        }
+        for entry in fs::read_dir(root).ok()?.flatten() {
+            let path = entry.path().join(id).join("updates.jsonl");
+            if path.is_file() {
+                return Some(path);
+            }
+        }
+        return None;
+    }
+    let dir = grok_dir_for(root, cwd)?;
+    grok_newest_updates(&dir)
+}
+
+fn grok_newest_updates(group: &Path) -> Option<PathBuf> {
+    let mut best: Option<(PathBuf, SystemTime)> = None;
+    for entry in fs::read_dir(group).ok()?.flatten() {
+        let path = entry.path().join("updates.jsonl");
+        let Ok(meta) = path.metadata() else {
+            continue;
+        };
+        let Ok(modified) = meta.modified() else {
+            continue;
+        };
+        if best.as_ref().is_none_or(|(_, seen)| modified > *seen) {
+            best = Some((path, modified));
+        }
+    }
+    best.map(|(path, _)| path)
+}
+
+/// What grok says about the sessions behind these threads.
+///
+/// One file tail per query, not a walk of every conversation grok has ever
+/// recorded. The path is the captured id when the thread has one, otherwise
+/// the newest session of that folder, same rule as [`find_grok_session_in`].
+pub(super) fn grok_turns(queries: &[TurnQuery]) -> Vec<AgentTurn> {
+    let Some(root) = grok_sessions_dir() else {
+        return Vec::new();
+    };
+    if !root.is_dir() {
+        return Vec::new();
+    }
+    let live = grok_live_pids();
+    let mut out = Vec::new();
+    for query in queries.iter().filter(|q| q.kind == "grok") {
+        let Some(path) = grok_updates_path(&root, &query.cwd, query.id()) else {
+            continue;
+        };
+        let session_id = query
+            .id()
+            .map(str::to_string)
+            .or_else(|| {
+                path.parent()
+                    .and_then(|p| p.file_name())
+                    .map(|n| n.to_string_lossy().into_owned())
+            })
+            .unwrap_or_default();
+        if session_id.is_empty() {
+            continue;
+        }
+        let live_pid = live
+            .get(&session_id)
+            .copied()
+            .is_some_and(pid_alive);
+        let Some(state) = grok_updates_state(&path, live_pid) else {
+            continue;
+        };
+        out.push(AgentTurn {
+            kind: "grok".into(),
+            session_id,
+            cwd: query.cwd.clone(),
+            state: state.into(),
+            waiting_for: None,
+        });
+    }
+    out
 }
 
 fn hermes_db_path() -> Option<PathBuf> {
@@ -572,6 +1167,7 @@ pub fn find_hermes_session_blocking(
         return Some(SessionHit {
             id,
             modified_ms: activity,
+            title: None,
         });
     }
     None
@@ -789,6 +1385,7 @@ pub fn find_pi_session_blocking(
     best.map(|(id, modified_ms)| SessionHit {
         id,
         modified_ms: Some(modified_ms),
+        title: None,
     })
 }
 
@@ -991,5 +1588,203 @@ mod tests {
     fn nothing_to_carry_for_grok_reads_as_nothing_to_resume() {
         let root = grok_fixture("empty");
         assert!(!migrate_grok_transcript_in(&root, "ghost", "/w/from", "/w/to").unwrap());
+    }
+
+    fn write_grok_updates(dir: &Path, name: &str, lines: &[&str]) -> PathBuf {
+        let path = dir.join(name);
+        fs::write(&path, lines.join("\n")).unwrap();
+        path
+    }
+
+    #[test]
+    fn grok_update_markers_decide_the_turn() {
+        let dir = grok_fixture("turns");
+        let busy = write_grok_updates(
+            &dir,
+            "busy.jsonl",
+            &[
+                r#"{"method":"session/update","params":{"update":{"sessionUpdate":"user_message_chunk"}}}"#,
+                r#"{"method":"session/update","params":{"update":{"sessionUpdate":"tool_call"}}}"#,
+            ],
+        );
+        assert_eq!(grok_updates_state(&busy, false), Some("busy"));
+
+        let done = write_grok_updates(
+            &dir,
+            "done.jsonl",
+            &[
+                r#"{"method":"session/update","params":{"update":{"sessionUpdate":"user_message_chunk"}}}"#,
+                r#"{"method":"_x.ai/session/update","params":{"update":{"sessionUpdate":"turn_completed"}}}"#,
+            ],
+        );
+        assert_eq!(grok_updates_state(&done, false), Some("idle"));
+
+        let again = write_grok_updates(
+            &dir,
+            "again.jsonl",
+            &[
+                r#"{"method":"session/update","params":{"update":{"sessionUpdate":"turn_completed"}}}"#,
+                r#"{"method":"session/update","params":{"update":{"sessionUpdate":"user_message_chunk"}}}"#,
+            ],
+        );
+        assert_eq!(grok_updates_state(&again, false), Some("busy"));
+
+        let hook_only = write_grok_updates(
+            &dir,
+            "hook.jsonl",
+            &[r#"{"method":"_x.ai/session/update","params":{"update":{"sessionUpdate":"hook_execution"}}}"#],
+        );
+        assert_eq!(grok_updates_state(&hook_only, false), None);
+        assert_eq!(grok_updates_state(&dir.join("missing.jsonl"), false), None);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_open_grok_turn_stops_counting_once_the_file_goes_stale() {
+        assert_eq!(grok_bound_open_turn(Some(Duration::from_secs(0))), Some("busy"));
+        assert_eq!(
+            grok_bound_open_turn(Some(GROK_FILE_TTL - Duration::from_secs(1))),
+            Some("busy")
+        );
+        assert_eq!(grok_bound_open_turn(Some(GROK_FILE_TTL)), None);
+        assert_eq!(grok_bound_open_turn(None), Some("busy"));
+    }
+
+    fn antigravity_fixture(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir()
+            .join(format!("boite-agy-store-{}-{name}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::create_dir_all(dir.join("conversations")).unwrap();
+        fs::create_dir_all(dir.join("brain")).unwrap();
+        dir
+    }
+
+    fn seed_antigravity_conv_db(root: &Path, id: &str, workspace: &str) -> PathBuf {
+        let db_path = root.join("conversations").join(format!("{id}.db"));
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute(
+            "CREATE TABLE trajectory_metadata_blob (id TEXT PRIMARY KEY, data BLOB)",
+            [],
+        )
+        .unwrap();
+        let uri = format!("file://{workspace}");
+        conn.execute(
+            "INSERT INTO trajectory_metadata_blob (id, data) VALUES ('main', ?1)",
+            [uri.as_bytes()],
+        )
+        .unwrap();
+        db_path
+    }
+
+    fn seed_antigravity_transcript(root: &Path, id: &str, prompt: &str) {
+        let logs_dir = root.join("brain").join(id).join(".system_generated").join("logs");
+        fs::create_dir_all(&logs_dir).unwrap();
+        let line = serde_json::json!({
+            "type": "USER_INPUT",
+            "source": "USER_EXPLICIT",
+            "content": prompt
+        });
+        fs::write(logs_dir.join("transcript.jsonl"), format!("{line}\n")).unwrap();
+    }
+
+    #[test]
+    fn antigravity_cleans_prompt_titles() {
+        assert_eq!(
+            clean_antigravity_prompt_title("<USER_REQUEST>\nFix the PTY read loop\n</USER_REQUEST>"),
+            Some("Fix the PTY read loop".to_string())
+        );
+        assert_eq!(
+            clean_antigravity_prompt_title("/plan Implement new feature"),
+            Some("Implement new feature".to_string())
+        );
+        assert_eq!(
+            clean_antigravity_prompt_title("/clear"),
+            None
+        );
+        let long_prompt = "A".repeat(100);
+        let cleaned = clean_antigravity_prompt_title(&long_prompt).unwrap();
+        assert_eq!(cleaned.chars().count(), 63);
+        assert!(cleaned.ends_with("..."));
+    }
+
+    #[test]
+    fn antigravity_finds_the_newest_session_of_this_folder_with_title() {
+        let root = antigravity_fixture("newest");
+        let _old_db = seed_antigravity_conv_db(&root, "old-sess", "/w/proj");
+        seed_antigravity_transcript(&root, "old-sess", "Old task");
+
+        let new_db = seed_antigravity_conv_db(&root, "new-sess", "/w/proj");
+        seed_antigravity_transcript(&root, "new-sess", "<USER_REQUEST>\nNew shiny task\n</USER_REQUEST>");
+
+        let later = SystemTime::now() + Duration::from_secs(2);
+        fs::File::options()
+            .write(true)
+            .open(&new_db)
+            .unwrap()
+            .set_modified(later)
+            .unwrap();
+
+        seed_antigravity_conv_db(&root, "other-sess", "/w/other");
+
+        let hit = find_antigravity_session_in(&root, "/w/proj", 0, &HashSet::new());
+        assert!(hit.is_some());
+        let h = hit.unwrap();
+        assert_eq!(h.id, "new-sess");
+        assert_eq!(h.title, Some("New shiny task".to_string()));
+    }
+
+    #[test]
+    fn antigravity_skips_excluded_session_and_returns_sibling() {
+        let root = antigravity_fixture("exclude");
+        seed_antigravity_conv_db(&root, "old-sess", "/w/proj");
+        seed_antigravity_transcript(&root, "old-sess", "Old task");
+
+        let new_db = seed_antigravity_conv_db(&root, "new-sess", "/w/proj");
+        seed_antigravity_transcript(&root, "new-sess", "New task");
+
+        let later = SystemTime::now() + Duration::from_secs(2);
+        fs::File::options()
+            .write(true)
+            .open(&new_db)
+            .unwrap()
+            .set_modified(later)
+            .unwrap();
+
+        let mut exclude = HashSet::new();
+        exclude.insert("new-sess".to_string());
+
+        let hit = find_antigravity_session_in(&root, "/w/proj", 0, &exclude);
+        assert!(hit.is_some());
+        let h = hit.unwrap();
+        assert_eq!(h.id, "old-sess");
+        assert_eq!(h.title, Some("Old task".to_string()));
+    }
+
+    #[test]
+    fn antigravity_history_fallback_finds_session() {
+        let root = antigravity_fixture("history_fallback");
+        let line = serde_json::json!({
+            "conversationId": "hist-sess",
+            "workspace": "/w/fallback",
+            "timestamp": 1234567890i64,
+            "display": "/plan Refactor everything"
+        });
+        fs::write(root.join("history.jsonl"), format!("{line}\n")).unwrap();
+
+        let hit = find_antigravity_session_in(&root, "/w/fallback", 0, &HashSet::new());
+        assert!(hit.is_some());
+        let h = hit.unwrap();
+        assert_eq!(h.id, "hist-sess");
+        assert_eq!(h.title, Some("Refactor everything".to_string()));
+    }
+
+    #[test]
+    fn antigravity_does_not_bind_a_conversation_from_a_path_that_merely_contains_cwd() {
+        let root = antigravity_fixture("prefix");
+        seed_antigravity_conv_db(&root, "other", "/w/project");
+        seed_antigravity_transcript(&root, "other", "Other project");
+        assert!(find_antigravity_session_in(&root, "/w/proj", 0, &HashSet::new()).is_none());
     }
 }

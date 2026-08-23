@@ -10,6 +10,7 @@
   import { app } from "$lib/app/store.svelte";
   import { workspace } from "$lib/backend";
   import { settings } from "$lib/features/settings/store.svelte";
+  import { homeAvailable } from "$lib/features/settings/homeAvailable";
   import { platform } from "$lib/storage/platform.svelte";
   import {
     launchShortcut,
@@ -27,6 +28,7 @@
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
   import MobileSheet from "./MobileSheet.svelte";
   import TerminalIcon from "@lucide/svelte/icons/square-terminal";
+  import Boxes from "@lucide/svelte/icons/boxes";
 
   type Props = { open: boolean; onClose: () => void };
   let { open, onClose }: Props = $props();
@@ -47,6 +49,12 @@
   function goTerminal() {
     onClose();
     app.mobileTab = "terminal";
+  }
+
+  function goProjects() {
+    onClose();
+    app.mobileTab = "projects";
+    app.view = "terminal";
   }
 
   async function runShortcut(id: string, forceScratch = false) {
@@ -81,6 +89,16 @@
 </script>
 
 <MobileSheet {open} {onClose} title={t("mobile.newTerminal")}>
+  {#if homeAvailable(settings.state)}
+    <button
+      type="button"
+      class="mb-3 flex w-full items-center gap-3 rounded-xl border border-border bg-[var(--color-surface-2)] px-3 py-3 text-left text-sm text-foreground/90 transition active:scale-[0.98] active:bg-[var(--color-surface-3)]"
+      onclick={goProjects}
+    >
+      <Boxes class="size-5 text-muted-foreground" />
+      <span class="font-medium">{t("sidebar.projects")}</span>
+    </button>
+  {/if}
   {#if settings.state.shortcuts.length > 0}
     <div class="grid grid-cols-2 gap-2">
       {#each settings.state.shortcuts as shortcut (shortcut.id)}

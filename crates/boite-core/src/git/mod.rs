@@ -738,6 +738,14 @@ pub fn fetch_blocking(path: &str) -> Result<(), String> {
     run_with_timeout(cmd, FETCH_TIMEOUT)
 }
 
+/// Whether the repository has any remote configured. A project that never had
+/// one is not behind on pushing, so callers reporting a push state say nothing
+/// rather than point at a remote that does not exist.
+pub fn has_remote_blocking(path: &str) -> bool {
+    let p = Path::new(path);
+    p.is_dir() && has_remote(p)
+}
+
 fn has_remote(path: &Path) -> bool {
     let mut cmd = git(path);
     cmd.arg("remote");

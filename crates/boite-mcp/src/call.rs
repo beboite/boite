@@ -10,8 +10,8 @@ use serde_json::{json, Value};
 use crate::backend::Backend;
 use crate::render::{
     format_acted, format_artifacts, format_browser_panes, format_drove, format_hits,
-    format_moments, format_page_settled, format_projects, format_snapshot, format_todos,
-    format_wait, format_whereami, format_worktree, prefix,
+    format_moments, format_page_settled, format_projects, format_pulse, format_snapshot,
+    format_todos, format_wait, format_whereami, format_worktree, prefix,
 };
 use crate::toon::Toon;
 use crate::{encode_query, MAX_BRANCHES};
@@ -245,6 +245,83 @@ pub fn call_tool<B: Backend>(host: &B, name: &str, args: &Value) -> Result<Strin
                 return Err(error.to_string());
             }
             Ok(format_wait(&out))
+        }
+        "workspace_pulse" => {
+            let mut path = String::from("/v1/pulse?");
+            if let Some(seq) = args.get("sinceSeq").and_then(|v| v.as_i64()) {
+                path.push_str(&format!("sinceSeq={seq}&"));
+            }
+            let timeout_ms = args
+                .get("timeoutMs")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(30_000);
+            path.push_str(&format!("timeoutMs={timeout_ms}"));
+            if let Some(p) = args.get("project").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+                path.push_str("&project=");
+                path.push_str(&encode_query(p));
+            }
+            // The socket's patience sits above the endpoint's hold, so a full
+            // wait comes back as `timedOut: true` and never as a dead door.
+            let out = host.send_long("GET", &path, None, timeout_ms / 1000 + 15)?;
+            if let Some(error) = out.get("error").and_then(|v| v.as_str()) {
+                return Err(error.to_string());
+            }
+            Ok(format_pulse(&out))
+        }
+        "say" => {
+            let text = args
+                .get("text")
+                .and_then(|v| v.as_str())
+                .ok_or("say needs text")?;
+            let mut body = json!({ "text": text });
+            for key in ["aloud", "urgency"] {
+                if let Some(v) = args.get(key).and_then(|v| v.as_str()) {
+                    body[key] = json!(v);
+                }
+            }
+            let out = host.send("POST", "/v1/say", Some(body))?;
+            if let Some(error) = out.get("error").and_then(|v| v.as_str()) {
+                return Err(error.to_string());
+            }
+            let mut w = Toon::new();
+            w.field("said", out.get("messageId").and_then(|v| v.as_str()).unwrap_or("?"));
+            Ok(w.into_string())
+        }
+        "thread_dispatch" => {
+            let to = args
+                .get("threadId")
+                .and_then(|v| v.as_str())
+                .ok_or("thread_dispatch needs a threadId")?;
+            let text = args
+                .get("text")
+                .and_then(|v| v.as_str())
+                .ok_or("thread_dispatch needs text")?;
+            let mut body = json!({ "toThreadId": to, "text": text });
+            if let Some(mode) = args.get("mode").and_then(|v| v.as_str()) {
+                body["mode"] = json!(mode);
+            }
+            let out = host.send("POST", "/v1/dispatch", Some(body))?;
+            if let Some(error) = out.get("error").and_then(|v| v.as_str()) {
+                return Err(error.to_string());
+            }
+            let mut w = Toon::new();
+            w.field("queued", out.get("dispatchId").and_then(|v| v.as_str()).unwrap_or("?"))
+                .field("to", to)
+                .hint("the pulse says what became of it: dispatch.settled with delivered, dropped or refused");
+            Ok(w.into_string())
+        }
+        "thread_dismiss" => {
+            let id = args
+                .get("threadId")
+                .and_then(|v| v.as_str())
+                .ok_or("thread_dismiss needs a threadId")?;
+            let out = host.send("POST", "/v1/thread/dismiss", Some(json!({ "threadId": id })))?;
+            if let Some(error) = out.get("error").and_then(|v| v.as_str()) {
+                return Err(error.to_string());
+            }
+            let mut w = Toon::new();
+            w.field("dismissed", id);
+            Ok(w.into_string())
         }
         "pane_open" => {
             let mut body = json!({});

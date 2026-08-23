@@ -6,6 +6,7 @@ import { device } from "$lib/features/settings/device.svelte";
 import { isFinished } from "$lib/domain/thread-status";
 import { isRenamed } from "$lib/features/thread/renamed";
 import { noteStatusChange } from "$lib/features/thread/finished.svelte";
+import { noteProjectWork } from "$lib/features/thread/work-activity.svelte";
 import { announceStatus } from "$lib/features/thread/statusEngine";
 import { todos } from "$lib/features/todo/store.svelte";
 import { approvals } from "$lib/features/approvals/store.svelte";
@@ -23,7 +24,8 @@ import type { AppState } from "./store.svelte";
  * and persisting here would write the client's copy back over the state the
  * server owns. The cost of that is one thing having to be remembered twice, and
  * it has already been forgotten once: `noteStatusChange` lives in `setThreadStatus`
- * for the local path and has to be repeated here, or a boite's threads would
+ * for the local path and has to be repeated here (with `projectId`, or a remote
+ * turn stamps the thread and never the project), or a boite's threads would
  * never glow when they finish.
  */
 export function applyControlEvent(app: AppState, ev: ControlEvent, envId?: string) {
@@ -48,7 +50,7 @@ export function applyControlEvent(app: AppState, ev: ControlEvent, envId?: strin
       const thread = app.threadById(id);
       if (!thread) return;
       const incomingStatus = (data?.status as Thread["status"]) ?? thread.status;
-      noteStatusChange(thread.id, thread.status, incomingStatus);
+      noteStatusChange(thread.id, thread.status, incomingStatus, thread.projectId);
       // The other half of the same repetition. `statusEngine` skips every
       // thread whose backend owns its own status, so the two notifications it
       // raises were unreachable for a boite's threads: a desktop connected to
@@ -80,6 +82,10 @@ export function applyControlEvent(app: AppState, ev: ControlEvent, envId?: strin
       if (incoming?.id && !app.hasThread(incoming.id)) {
         if (workspace.isDynamic) incoming.origin = "remote";
         app.threads.push(incoming);
+        // Local `createThread` stamps here. A remote or MCP spawn is the same
+        // fact: work started in this project, and a blank shell never reaches
+        // `running` to say so later.
+        noteProjectWork(incoming.projectId);
       }
       break;
     }
@@ -146,6 +152,34 @@ export function applyControlEvent(app: AppState, ev: ControlEvent, envId?: strin
       void import("./agent-requests")
         .then((m) => m.handleRemoteAgentRequest(ev.data))
         .catch((err) => logger.error("app", "agent.request failed", err));
+      break;
+    }
+    // The orchestrator log grew, or an orchestrator was armed. The store pulls
+    // from its cursor, so a burst of moments costs one cheap fetch, not a
+    // re-read. Imported late for the same reason agent-requests is.
+    case "moment.appended":
+    case "orchestrator.changed": {
+      void import("$lib/features/orchestrator/store.svelte")
+        .then((m) => m.orchestrator.onWorkspaceEvent())
+        .catch(() => {});
+      break;
+    }
+    // A line was queued for a thread whose PTY may be this device's; the
+    // dispatch module drains and decides. Dismissed is the boite putting a
+    // row away, mirrored locally. Imported late like agent-requests: the
+    // module pulls in the store this is called from.
+    case "dispatch.queued": {
+      void import("./dispatches")
+        .then((m) => m.flushDispatches())
+        .catch((err) => logger.error("app", "dispatch.queued failed", err));
+      break;
+    }
+    case "thread.dismissed": {
+      const id = data?.threadId as string | undefined;
+      if (id)
+        void import("./dispatches")
+          .then((m) => m.onThreadDismissed(id))
+          .catch(() => {});
       break;
     }
     // The server lost track of which control events we missed (broadcast lag);

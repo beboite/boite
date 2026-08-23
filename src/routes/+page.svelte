@@ -2,8 +2,11 @@
   import { onMount, untrack } from "svelte";
   import { app } from "$lib/app/store.svelte";
   import { isFinished } from "$lib/domain/thread-status";
-  import { workspace } from "$lib/backend";
+  import { clearFinished } from "$lib/features/thread/finished.svelte";
+  import { workspace, backend } from "$lib/backend";
+  import { reportSettingsSnapshot } from "$lib/features/setup/telemetry";
   import { settings } from "$lib/features/settings/store.svelte";
+  import { homeAvailable } from "$lib/features/settings/homeAvailable";
   import { pickAndAddProject } from "$lib/features/project/api";
   import { ptyKill } from "$lib/storage/pty";
   import { reloadThread, warmWorktreeFor } from "$lib/features/thread/api";
@@ -41,6 +44,7 @@
   import MobileBottomBar from "$lib/features/mobile/MobileBottomBar.svelte";
   import MobileProjectsPage from "$lib/features/mobile/MobileProjectsPage.svelte";
   import { lazyComponent, prefetchWhenIdle } from "$lib/shared/lazy.svelte";
+  import { syncStore } from "$lib/features/sync/store.svelte";
   import { t } from "$lib/i18n/index.svelte";
   import type { MessageKey } from "$lib/i18n/messages";
   import { fade, fly } from "svelte/transition";
@@ -76,11 +80,32 @@
   const SetupView = lazyComponent(
     () => import("$lib/features/setup/SetupWizard.svelte"),
   );
+  const TelemetryOverlayView = lazyComponent(
+    () => import("$lib/features/setup/TelemetryOverlay.svelte"),
+  );
+
+  let telemetryOnboarding = $state<"unknown" | "pending" | "done">("unknown");
   const ProjectView = lazyComponent(
     () => import("$lib/features/project/ProjectPage.svelte"),
   );
+  // Four cards read once a machine is set up, and the fastpick table behind
+  // one of them. Behind import() like every other page opened on purpose.
+  const PluginsView = lazyComponent(
+    () => import("$lib/features/plugin/PluginsPage.svelte"),
+  );
+  // Behind import(): a boot that never arms the experiment never fetches it.
+  const HomeView = lazyComponent(
+    () => import("$lib/features/home/HomePage.svelte"),
+  );
   // A canvas and a rope simulation, for an experiment that is off by default.
   // Behind import(), a boot that never switches it on never fetches it.
+  // Behind import(): a machine whose configuration never differs never fetches
+  // the merge tool, and it drags @codemirror/merge and the language table in
+  // behind it. The sync store itself imports none of that, on purpose — a test
+  // asserts it — because the launch pull puts the store on the boot graph.
+  const SyncMergeView = lazyComponent(
+    () => import("$lib/features/sync/SyncMergeOverlay.svelte"),
+  );
   const WhipView = lazyComponent(
     () => import("$lib/features/whip/WhipOverlay.svelte"),
   );
@@ -101,6 +126,12 @@
   );
   const settingsActive = $derived(
     mobile ? app.mobileTab === "settings" : app.view === "settings",
+  );
+  // Nothing arming home: always false, so every branch below collapses to
+  // today's chrome.
+  const homeActive = $derived(
+    homeAvailable(settings.state) &&
+      (mobile ? app.mobileTab === "home" : app.view === "home"),
   );
 
   // Colored inset outline marks the PURE remote workspace: green connected,
@@ -191,6 +222,12 @@
   function activateThread(id: string) {
     const t = app.threadById(id);
     const finished = !!t && isFinished(t.status);
+
+    // Reading it is what takes the unread mark back, and every way in has to
+    // do it: the sidebar row cleared its own, so a thread reached from the
+    // palette, a keyboard jump or a pane kept blinking behind the terminal the
+    // user was already looking at.
+    clearFinished(id);
 
     if (app.activeThreadId === id && app.view === "terminal" && !finished) {
       return;
@@ -388,7 +425,15 @@
   });
 
   $effect(() => {
+    if (homeActive) void HomeView.ensure();
+  });
+
+  $effect(() => {
     if (settingsActive) void SettingsView.ensure();
+  });
+
+  $effect(() => {
+    if (app.view === "plugins") void PluginsView.ensure();
   });
 
   $effect(() => {
@@ -397,12 +442,59 @@
     }
   });
 
+  $effect(() => {
+    if (!app.ready || !settings.ready) return;
+    if (!settings.state.setupCompleted) {
+      telemetryOnboarding = "done";
+      return;
+    }
+    untrack(() => {
+      void backend()
+        .telemetry.state()
+        .then((state) => {
+          telemetryOnboarding = state.onboardingCompleted ? "done" : "pending";
+          if (state.onboardingCompleted) void reportSettingsSnapshot();
+        })
+        .catch(() => {
+          telemetryOnboarding = "done";
+        });
+    });
+  });
+
+  $effect(() => {
+    if (telemetryOnboarding === "pending") void TelemetryOverlayView.ensure();
+  });
+
   // Fetched when the experiment is armed rather than when the button is
   // pressed: the chunk has to be mounted and listening for the pointer before
   // the first throw, or the rope spawns wherever the pointer was at boot.
   $effect(() => {
     if (settings.state.experimentWhip) void WhipView.ensure();
     if (settings.state.experimentInfoBox) void InfoBoxView.ensure();
+  });
+
+  // The launch pull, and deliberately not part of the boot.
+  //
+  // After `app.ready`, which is after the boot timing has been reported: a git
+  // fetch sitting inside `app.init` would land between two boot marks and blame
+  // sync for a slow open. It is not a boot phase and must never look like one.
+  //
+  // `untrack` because pullAtLaunch reads settings and writes its own store, and
+  // without it the effect would subscribe to what it just wrote. The store
+  // itself does nothing when the switch is off or no repository is named, and
+  // once per transport identity, so a workspace grafted later gets its own.
+  $effect(() => {
+    if (!app.ready || !settings.ready) return;
+    if (!settings.state.syncOnLaunch || !settings.state.syncRemoteUrl) return;
+    untrack(() => {
+      void SyncMergeView.ensure().then(() => syncStore.pullAtLaunch());
+    });
+  });
+
+  // Opening the Sync tab with something waiting is the strongest signal the
+  // merge view is about to be needed.
+  $effect(() => {
+    if (syncStore.pending > 0) prefetchWhenIdle(SyncMergeView);
   });
 
   // Opening the Files or Git panel is the strongest signal that a file or a
@@ -463,8 +555,19 @@
       {@const SetupComp = SetupView.current}
       <SetupComp />
     {/if}
+  {:else if app.ready && settings.state.setupCompleted && telemetryOnboarding === "pending"}
+    {#if TelemetryOverlayView.current}
+      {@const Overlay = TelemetryOverlayView.current}
+      <Overlay onDone={() => (telemetryOnboarding = "done")} />
+    {/if}
+  {:else if app.ready && settings.state.setupCompleted && telemetryOnboarding === "unknown"}
+    <div class="flex min-h-0 flex-1"></div>
   {:else}
     <div class="flex min-h-0 flex-1">
+    <!-- Home keeps the sidebar. It used to drop it, which made the one view a
+         user lands on the one view with no way to reach a thread: the door in
+         was a click and the way back was the titlebar. The threads are what the
+         workspace is, and home is a page about them, not a mode without them. -->
     {#if !mobile && !settings.state.sidebarCollapsed}
       <ProjectSidebar
         onActivateThread={activateThread}
@@ -670,6 +773,32 @@
           </div>
         {/if}
 
+        {#if homeActive}
+          <div class="absolute inset-0 z-10 bg-[var(--color-background)]">
+            {#if HomeView.current}
+              {@const HomeComp = HomeView.current}
+              <HomeComp />
+            {:else}
+              <div class="flex h-full items-center justify-center text-xs text-muted-foreground/70">
+                {t("common.loading")}
+              </div>
+            {/if}
+          </div>
+        {/if}
+
+        {#if app.view === "plugins"}
+          <div class="absolute inset-0 z-10 bg-[var(--color-background)]">
+            {#if PluginsView.current}
+              {@const PluginsComp = PluginsView.current}
+              <PluginsComp />
+            {:else}
+              <div class="flex h-full items-center justify-center text-xs text-muted-foreground/70">
+                {t("common.loading")}
+              </div>
+            {/if}
+          </div>
+        {/if}
+
         {#if app.view === "editor"}
           <div class="absolute inset-0 z-10 bg-[var(--color-background)]">
             {#if EditorView.current}
@@ -708,7 +837,7 @@
           </div>
         {/if}
 
-        {#if mobile && app.view === "terminal" && app.mobileTab === "projects"}
+        {#if mobile && app.mobileTab === "projects" && (app.view === "terminal" || app.view === "home")}
           <div class="absolute inset-0 z-10 bg-[var(--color-background)]">
             <MobileProjectsPage />
           </div>
@@ -725,7 +854,7 @@
 
     <!-- Outside <main>, beside it: the column describes the project rather than
          whatever view is up. -->
-    {#if !mobile && app.ready && !settings.state.experimentInfoBox && settings.rightPanelFor(app.currentProjectId)}
+    {#if !mobile && app.ready && !homeActive && !settings.state.experimentInfoBox && settings.rightPanelFor(app.currentProjectId)}
       <SidePanel />
     {/if}
   </div>
@@ -754,6 +883,13 @@
   {#if settings.state.experimentWhip && WhipView.current}
     {@const WhipComp = WhipView.current}
     <WhipComp />
+  {/if}
+
+  <!-- Over everything, because a configuration that differs is the user's to
+       settle before anything else reads it. -->
+  {#if syncStore.mergeOpen && SyncMergeView.current}
+    {@const SyncMergeComp = SyncMergeView.current}
+    <SyncMergeComp />
   {/if}
 </div>
 

@@ -19,6 +19,14 @@ against each other and against the tag before a single runner starts building.
 It globs the Cargo manifests rather than listing them, so a crate added to the
 workspace is covered the day it lands.
 
+## The test suite, once
+
+Nothing gets signed without a green ci on that exact tree, and nothing runs it
+twice for the privilege. A `preflight` job asks the API whether ci has already
+succeeded on the tagged sha, which it has whenever the bump commit went through
+master first, and the `tests` job is skipped when the answer is yes. Tag a
+commit no branch ever carried and the whole suite runs on the tag instead.
+
 ## Signing
 
 No key is needed on your machine. The keypair already exists: its public half is
@@ -35,6 +43,19 @@ ends updates forever. An offline copy is held outside GitHub.
 A `prune` job removes the `.sig` assets once every platform has uploaded. They
 are duplicates: `latest.json` carries each signature inline and is the only file
 the updater fetches.
+
+## Telemetry
+
+The desktop jobs and the GHCR image both compile `BOITE_TELEMETRY_URL` into
+the binary (`option_env!` in `boite-core`). The value is the Worker base URL,
+no `/track`. It lives in the `BOITE_TELEMETRY_URL` repository secret, the
+same one `release.yml` and `image.yml` inject. Empty or unset compiles
+against `https://telemetry.invalid`: the host sends nothing, and export or
+deletion fail instead of returning empty success.
+
+A local `docker compose build` without `--build-arg BOITE_TELEMETRY_URL`
+is that inert image on purpose. Do not bake a Worker URL into a laptop
+build you will then push.
 
 ## Sidecar
 

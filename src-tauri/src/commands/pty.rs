@@ -46,6 +46,7 @@ pub async fn pty_open(
     app: AppHandle,
     manager: State<'_, PtyManager>,
     sessions: State<'_, LocalSessions>,
+    rows: State<'_, super::records::Rows>,
     thread_id: String,
     on_event: Channel<WirePtyEvent>,
     mut spec: PtySpawnArgs,
@@ -78,6 +79,27 @@ pub async fn pty_open(
                 "agent-api",
                 &format!("thread {thread_id} spawns without tools: {e}"),
             ),
+        }
+    }
+    // The role hint for the shim's tool tier, read off the row Boite stamped.
+    // A hint only: the endpoint re-checks the row on every privileged call.
+    if let Ok(store) = rows.get(&app) {
+        if let Some((Some(role), scope, _)) = store.thread_orchestration(&thread_id) {
+            let env = spec.env.get_or_insert_with(Default::default);
+            env.insert(boite_agent_api::env::ROLE.into(), role);
+            if let Some(scope) = scope {
+                env.insert(boite_agent_api::env::ORCHESTRATOR_SCOPE.into(), scope);
+            }
+            let autonomy = store
+                .load_settings()
+                .ok()
+                .and_then(|s| {
+                    s.get("orchestratorAutonomy")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string)
+                })
+                .unwrap_or_else(|| "observer".to_string());
+            env.insert(boite_agent_api::env::AUTONOMY.into(), autonomy);
         }
     }
     // Beside the database, so a terminal's whole run outlives the process that

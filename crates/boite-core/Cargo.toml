@@ -1,6 +1,6 @@
 [package]
 name = "boite-core"
-version = "1.2.0"
+version = "1.3.1"
 description = "Portable core for boite: PTY orchestration, git, fs, session detection"
 edition = "2021"
 
@@ -23,8 +23,26 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 # parsed URL, and both endpoints ask the same module (`browser`).
 url = "2"
 # SHA-256 for the event journal's hash chain, and SHA-384 in one test, which is
-# the digest sqlx keys its migration ledger on.
+# the digest sqlx keys its migration ledger on. Also the digest an installed CLI
+# is checked against, where its vendor publishes one (`cli_manager`).
 sha2 = "0.11"
+
+# Fetching the agent CLIs themselves (`cli_manager`). The blocking client, so
+# this crate stays free of an async runtime of its own: an install runs on a
+# thread and the panel reads snapshots. rustls with the bundled roots, which is
+# the stack `tauri-plugin-updater` already brings, so a boite carries one TLS
+# implementation rather than two.
+reqwest = { version = "0.12", default-features = false, features = [
+    "blocking",
+    "json",
+    "rustls-tls",
+    "gzip",
+] }
+# The two archive formats every one of those vendors publishes. Not `.zst`, which
+# two of them also publish and neither publishes only.
+zip = { version = "4", default-features = false, features = ["deflate"] }
+tar = "0.4"
+flate2 = "1"
 
 # kill(pid, 0) to tell a live claude session from a registry entry left behind
 # by one that died. Windows uses OpenProcess from windows-sys below.
@@ -42,11 +60,13 @@ harness = false
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
+    "Win32_Globalization",
     "Win32_Security",
     # A PTY's agent may be a grandchild (a launcher, a wrap shell), so session
     # ownership is decided on the process tree. ToolHelp is the pid-to-parent map.
     "Win32_System_Diagnostics_ToolHelp",
     "Win32_System_JobObjects",
+    "Win32_System_Registry",
     "Win32_System_Threading",
 ] }
 

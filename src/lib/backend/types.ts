@@ -494,10 +494,27 @@ export interface ShellApi {
  */
 export interface FastpickListing {
   schema: number;
+  /** The version that answered. Absent before schema 3. */
+  fastpick?: string;
+  /** The config file it read, as an absolute path on the machine that answered. */
+  config?: string;
+  /** Where `--md` names are resolved, on that same machine. */
+  systemPromptsDir?: string;
   harnesses: FastpickHarness[];
   providers: FastpickProvider[];
+  /**
+   * Every file in the prompts folder, not only the ones matching a model. fastpick's own
+   * menu puts this behind `a`, and the options pane behind the same kind of toggle.
+   */
+  prompts?: FastpickPrompt[];
   /** Only present when a provider was asked for. */
   models?: FastpickModels;
+}
+
+/** A system prompt file: `stem` is what `--md` takes, `name` is what it is called on disk. */
+export interface FastpickPrompt {
+  name: string;
+  stem: string;
 }
 
 export interface FastpickHarness {
@@ -506,8 +523,12 @@ export interface FastpickHarness {
   /**
    * Which agent this is, whatever the config named it. `id` is the user's word and can be
    * anything, so the icon and the session machinery key off this instead.
+   *
+   * Open rather than a closed union: fastpick grows a kind whenever it learns an agent,
+   * and a listing naming one boite has never heard of is a row with no icon, not a parse
+   * that has to fail. `iconKeyForKind` decides what an unknown one looks like.
    */
-  kind: "claude-code" | "opencode" | "codex";
+  kind: "claude-code" | "opencode" | "codex" | "pi" | (string & {});
   /** Whether the agent's binary is on the machine that would run it. */
   installed: boolean;
   supportsEffort: boolean;
@@ -516,18 +537,49 @@ export interface FastpickHarness {
   providers: string[];
 }
 
+/**
+ * One entry of fastpick's config, which since schema 3 holds several credentials.
+ *
+ * A site reached with two keys is one provider with two `keys`, each with its own key file,
+ * its own bindings and its own model catalogue. The fields that used to sit here moved onto
+ * the key; `providerKeys` in `fastpick/keys.ts` reads either shape, and nothing else should
+ * touch the legacy ones.
+ */
 export interface FastpickProvider {
   id: string;
   name: string;
   /** Heading several providers share, typically the site they belong to. */
   group: string | null;
+  /** Schema 3 and up. One entry when the provider holds a single credential. */
+  keys?: FastpickKey[];
+  /** Schema 2 and below, where a provider held exactly one credential. */
+  needsKey?: boolean;
+  /** Schema 2 and below. See `FastpickKey.keyPresent`. */
+  keyPresent?: boolean;
+  /** Schema 2 and below. See `FastpickKey.harnesses`. */
+  harnesses?: Record<string, FastpickBinding>;
+  /** Schema 2 and below. See `FastpickKey.proxyPort`. */
+  proxyPort?: number | null;
+}
+
+/**
+ * One credential of a provider, which is what a launch actually resolves against.
+ *
+ * `id` is what `--key <provider>.<id>` names. It is what makes `--model` unambiguous when
+ * two keys of one site serve a model of the same name, and it is why every model carries
+ * the key it came from.
+ */
+export interface FastpickKey {
+  id: string;
+  /** What fastpick draws for it. Null means the id is the name. */
+  label: string | null;
   needsKey: boolean;
   /**
    * Whether that key file is there. fastpick never reports where it is or what is in it,
    * and boite never asks: the credential is read at spawn time, on the machine that spawns.
    */
   keyPresent: boolean;
-  /** What each wired harness reaches this provider through, keyed by harness id. */
+  /** What each wired harness reaches this credential through, keyed by harness id. */
   harnesses?: Record<string, FastpickBinding>;
   /** Set when fastpick has to start a local proxy first. */
   proxyPort?: number | null;
@@ -545,12 +597,35 @@ export interface FastpickBinding {
 export interface FastpickModels {
   provider: string;
   /** Where the list came from, so a cached one is never shown as live. */
-  source: { kind: "live" | "cache" | "config" | "failed"; ageSecs?: number; error?: string };
+  source: FastpickSource;
   items: FastpickModel[];
+}
+
+/**
+ * How that list was obtained.
+ *
+ * `several` is a provider with several credentials answering differently: some catalogues
+ * were fetched and others were not, and `failed` names the ones that were not. Reporting
+ * that as a plain success hides a key whose models are silently missing from the list.
+ */
+export interface FastpickSource {
+  kind: "live" | "cache" | "config" | "failed" | "several" | (string & {});
+  ageSecs?: number;
+  /** How many models the list holds, fastpick's own count. */
+  count?: number;
+  error?: string;
+  /** One line per credential that could not be reached, already carrying its key's name. */
+  failed?: string[];
 }
 
 export interface FastpickModel {
   id: string;
+  /**
+   * Which credential of the provider serves it. Absent before schema 3, where a provider
+   * held one. It is what `--key` names at launch, and what tells two models sharing an id
+   * apart.
+   */
+  key?: string | null;
   label: string | null;
   contextWindow: number | null;
   effort: string[];
@@ -600,6 +675,174 @@ export interface CodexSwitcherApi {
   save(): Promise<unknown>;
   activate(accountId: string): Promise<unknown>;
   version(): Promise<string | null>;
+}
+
+/**
+ * `fast-mcp-ssh`, the MCP server the agents reach their machines through:
+ * https://github.com/klNuno/fast-mcp-ssh
+ *
+ * Only its version, because that is the only question the plugins panel has.
+ * Whatever an agent does with the server afterwards is between the two of them,
+ * and its hosts file is never read here.
+ */
+export interface FastMcpSshApi {
+  /**
+   * What `fast-mcp-ssh --version` reports on the machine the agents run on, or
+   * null when there is none. Never rejects: absence is one of the two answers.
+   */
+  version(): Promise<string | null>;
+}
+
+/**
+ * What Boite makes of `kebacc-switch list`. Usage windows keep the labels the
+ * CLI printed (or the keys of its JSON), so a new quota window shows up without
+ * a Boite change.
+ */
+export interface KebaccSwitcherList {
+  providers: KebaccSwitcherProvider[];
+}
+
+export interface KebaccSwitcherProvider {
+  provider: string;
+  label: string;
+  accounts: KebaccSwitcherAccount[];
+}
+
+export interface KebaccUsageWindow {
+  label: string;
+  used_percent: number | null;
+  remaining_percent: number | null;
+  reset: string | null;
+}
+
+export interface KebaccSwitcherAccount {
+  email: string;
+  active: boolean;
+  windows: KebaccUsageWindow[];
+}
+
+export interface KebaccSwitcherApi {
+  list(provider?: string): Promise<KebaccSwitcherList>;
+  add(provider: string): Promise<KebaccSwitcherList>;
+  switchTo(provider: string, email: string): Promise<KebaccSwitcherList>;
+  version(): Promise<string | null>;
+}
+
+/**
+ * One agent CLI, as the machine that runs the agents describes it.
+ *
+ * The shape comes from `boite_core::cli_manager`, which is where the install
+ * recipes and the data directories live: the webview holds no package names and
+ * no paths of its own, so there is one table to correct when a vendor moves
+ * something.
+ */
+export interface CliRow {
+  id: string;
+  exe: string;
+  installed: boolean;
+  path: string | null;
+  /** Whether Boite installed it, which is what decides who may remove it. */
+  managed: boolean;
+  /**
+   * A complete copy the vendor's own installer left behind, when the executable
+   * resolves nowhere. Set with `installed: false` and nothing else: a broken
+   * install, not an absent one.
+   */
+  unlinked: string | null;
+  version: string | null;
+  /** `download` is Boite's to do; `managed` runs in a terminal; `manual` is a link. */
+  source: "download" | "managed" | "manual";
+  installable: boolean;
+  requires: string | null;
+  requiresPresent: boolean | null;
+  /** Where to get the missing tool, so a blocked row is not a dead end. */
+  requiresUrl: string | null;
+  installCommand: string[] | null;
+  updateCommand: string[] | null;
+  uninstallCommand: string[] | null;
+  /** The CLI's data directories that exist right now. Paths only; sizes cost a walk. */
+  dataPaths: string[];
+}
+
+export type CliJobPhase =
+  | "resolving"
+  | "downloading"
+  | "verifying"
+  | "unpacking"
+  | "installing"
+  | "removing"
+  | "purging"
+  | "done"
+  | "failed"
+  | "cancelled";
+
+export interface CliJob {
+  id: string;
+  kind: "install" | "uninstall";
+  phase: CliJobPhase;
+  received: number;
+  /** Null while the vendor sends no length: a bar with no end, not a made-up one. */
+  total: number | null;
+  version: string | null;
+  message: string | null;
+  startedAt: number;
+  updatedAt: number;
+}
+
+export interface CliDataPath {
+  path: string;
+  bytes: number;
+}
+
+/**
+ * What one vendor publishes right now.
+ *
+ * Read separately from the catalogue because it costs a request to somebody
+ * else's web server per CLI, and the rows are drawn before it lands. Only the
+ * CLIs Boite downloads are here: what a package manager considers current is its
+ * own to answer, and asking it is the update itself.
+ */
+export interface CliLatest {
+  id: string;
+  version: string | null;
+  /**
+   * Why the vendor could not be asked. Kept rather than dropped: "you are up to
+   * date" and "nobody could tell you" are different rows.
+   */
+  error: string | null;
+}
+
+/**
+ * Installing and removing the agent CLIs, on the machine the agents run on.
+ *
+ * Progress is polled rather than pushed. One call answers for every job, so the
+ * desktop and a phone talking to a `boite-server` read the same progress through
+ * the same path, and a panel opened halfway through an install sees where it got
+ * to rather than nothing at all.
+ */
+export interface CliApi {
+  /**
+   * Every CLI and what this machine says about it. `probeVersions` costs one
+   * process spawn per installed CLI, so it is asked for when the tab opens and
+   * left off when only presence is being refreshed.
+   */
+  catalog(probeVersions?: boolean): Promise<CliRow[]>;
+  /**
+   * What each downloadable CLI's vendor publishes right now, so a row can say it
+   * is up to date instead of offering an update nobody needs. One request per
+   * vendor, which is why it is not folded into `catalog`.
+   */
+  latest(): Promise<CliLatest[]>;
+  jobs(): Promise<CliJob[]>;
+  /** The data directories with their sizes, for the uninstall dialogue's sentence. */
+  dataPaths(id: string): Promise<CliDataPath[]>;
+  /** Starts a download and answers with the job it started. */
+  install(id: string): Promise<CliJob>;
+  /** Takes back what Boite installed, and the CLI's own data when asked. */
+  uninstall(id: string, purgeData: boolean): Promise<CliJob>;
+  cancel(id: string): Promise<boolean>;
+  /** Forgets a settled job, which is how a failure is dismissed. */
+  dismiss(id: string): Promise<void>;
 }
 
 export interface ScopeApi {
@@ -731,6 +974,13 @@ export interface UsageReport {
   /** Ascending by day. */
   days: DayUsage[];
   sessions: number;
+  /**
+   * The orchestrators' own share of the totals, split out by the session ids
+   * the caller named. Zero when it named none, or when none matched.
+   */
+  orchestratorTotal: number;
+  /** How many of `sessions` belonged to an orchestrator thread. */
+  orchestratorSessions: number;
   /** Agents whose store is not on this machine at all, by icon key. */
   missing: string[];
   /**
@@ -761,7 +1011,7 @@ export interface SessionApi {
    * rejection: the caller's own catch flattens a rejection into an empty
    * report, so the reason has to travel inside the answer to survive it.
    */
-  usage(cwds: string[], days: number): Promise<UsageReport>;
+  usage(cwds: string[], days: number, orchestratorSessions?: string[]): Promise<UsageReport>;
   /**
    * `ptyId` names the PTY asking. Its process holds the session the caller is
    * trying to bind, and that one alone is exempt from the liveness filter —
@@ -1050,6 +1300,324 @@ export interface SearchApi {
   query(text: string, limit: number): Promise<WorkspaceHit[]>;
 }
 
+/** One row of the workspace pulse. Mirrors `boite_core::pulse::Moment`. */
+export interface Moment {
+  seq: number;
+  kind: string;
+  projectId: string | null;
+  objectId: string | null;
+  detail: string;
+  source: string;
+  at: number;
+}
+
+/** What `conduct.pulse` answers with. */
+export interface PulseAnswer {
+  /** The cursor to pass back as `sinceSeq` next time. */
+  seq: number;
+  moments: Moment[];
+  /** True when the wait lapsed with nothing to show. An answer, not an error. */
+  timedOut: boolean;
+  /** True when `sinceSeq` fell out of the ring: re-read state, do not replay. */
+  truncated: boolean;
+}
+
+/** One line of the orchestrator conversation. */
+/** One thing an orchestrator caused, as the undo list reads it back. */
+export interface OrchestratorAction {
+  id: string;
+  orchestratorThreadId: string;
+  kind: string;
+  objectId: string | null;
+  projectId: string | null;
+  undoable: boolean;
+  at: number;
+  undoneAt: number | null;
+}
+
+export interface OrchestratorMessage {
+  id: string;
+  role: string;
+  text: string;
+  aloud: string | null;
+  urgency: string | null;
+  at: number;
+}
+
+/**
+ * The conduct domain: the workspace pulse and the orchestrator conversation.
+ *
+ * `record` is fire-and-forget by design — the status engine writes a phase
+ * transition and moves on, and a moment lost to a torn connection is a moment
+ * the next roster read covers anyway. `say` is not here: only the orchestrator
+ * process speaks, through the agent API, never the window.
+ */
+export interface ConductApi {
+  record(moment: {
+    kind: string;
+    projectId?: string | null;
+    objectId?: string | null;
+    detail?: string;
+    source?: string;
+  }): Promise<{ seq: number }>;
+  pulse(params: {
+    sinceSeq: number;
+    timeoutMs?: number;
+    project?: string | null;
+    waiter?: string;
+  }): Promise<PulseAnswer>;
+  post(params: { scope?: string | null; text: string }): Promise<{ messageId: string }>;
+  messages(params: {
+    scope?: string | null;
+    sinceId?: string | null;
+    limit?: number;
+  }): Promise<OrchestratorMessage[]>;
+  /**
+   * Stamps a thread as the orchestrator for a scope. Local grant only: the
+   * remote arm exists so a paired window can arm the server-side workspace,
+   * but an agent key is refused by the bus itself.
+   */
+  start(params: { threadId: string; scope?: string | null }): Promise<{ threadId: string }>;
+  status(params: { scope?: string | null }): Promise<{ threadId: string | null; state: string }>;
+  /** What the orchestrators caused, newest first, for the inbox's undo list. */
+  actions(params: { limit?: number }): Promise<OrchestratorAction[]>;
+  /**
+   * Un-does one recorded action. Local grant only on the bus: taking an
+   * action back is the user's, never an agent covering its tracks. Nothing
+   * committed is destroyed — a spawn is put away, a dismissal brought back.
+   */
+  undo(params: { actionId: string }): Promise<{ done: boolean }>;
+  /**
+   * The user's mute switch. Local grant on the bus: an agent never rearms a
+   * thread the user cut. Muting also drops the thread's queued lines.
+   */
+  acceptDispatch(params: {
+    threadId: string;
+    accept: boolean;
+  }): Promise<{ threadId: string; accept: boolean; dropped: number }>;
+  /** The device half: sweep expired lines, answer with what is still open. */
+  drainDispatches(params: { ttlMs?: number }): Promise<DispatchLine[]>;
+  /** Report one line's fate. First writer wins; `settled: false` means lost the race. */
+  settleDispatch(params: {
+    dispatchId: string;
+    state: string;
+    reason?: string;
+  }): Promise<{ settled: boolean }>;
+  /**
+   * One recorded utterance turned into text by the host's local whisper.cpp.
+   * A bounded body (WAV, base64) on the ordinary bus, never a stream: how a
+   * webview without a speech engine borrows the machine that has one.
+   */
+  transcribe(params: {
+    audio: string;
+    mime: string;
+    provider: string;
+  }): Promise<{ text: string }>;
+}
+
+/** One queued dispatch, as `dispatch.drain` answers it. */
+export interface DispatchLine {
+  id: string;
+  fromThreadId: string;
+  toThreadId: string;
+  text: string;
+  mode: string;
+  createdAt: number;
+}
+
+/** What a file's contents can be checked against, and whether stacking is legal. */
+export type SyncSyntax = "json" | "jsonc" | "markdown" | "text";
+
+/** One agent's configuration, or `agents` for the shared instruction tree. */
+export interface SyncSource {
+  /** An agent id, or `agents`. */
+  id: string;
+  /** The files this source covers, home-relative. Empty when unsupported. */
+  paths: string[];
+  /**
+   * False when Boite does not know where this agent keeps its configuration.
+   * A declared answer rather than a gap: ten agents, ten answers.
+   */
+  supported: boolean;
+  /**
+   * Whether anything is here now. Absence does not disable the switch — a
+   * configuration arriving before its agent is how a new machine is set up.
+   */
+  presentHere: boolean;
+}
+
+/** One file that differs on both sides, with nothing written yet. */
+export interface SyncConflict {
+  /** The repository path, which is also what `resolve` and `skip` name. */
+  path: string;
+  /** Which switch owns it, so the panel can group and label. */
+  sourceId: string;
+  /**
+   * What the merged file has to still be readable as. The backend decides it,
+   * because the extension lies: ~/.copilot/config.json is JSONC.
+   */
+  syntax: SyncSyntax;
+  /** The last agreed content, when there was one. Absent on a first sync. */
+  base: string | null;
+  /** This machine's side. Null when the file is not here at all. */
+  local: string | null;
+  /** The repository's side. Null when the repository has no such file. */
+  remote: string | null;
+  /**
+   * Either side is not text. Stacking bytes is meaningless, so the panel offers
+   * a side rather than a merge.
+   */
+  binary: boolean;
+}
+
+export type SyncPhase =
+  | "idle"
+  | "opening"
+  | "fetching"
+  | "reading"
+  | "comparing"
+  | "writing"
+  | "committing"
+  | "pushing"
+  | "done"
+  /** Settled, and not a failure: files differ and it is the user's turn. */
+  | "needsMerge"
+  | "failed"
+  | "cancelled";
+
+/** A rule that reached a value on the way out, or a value with nothing to put back. */
+export interface SyncField {
+  pointer: string;
+  field: "secret" | "machineLocal";
+}
+
+/** Everything a run decided not to do, so the panel can say so. */
+export interface SyncNotes {
+  skippedLinks: string[];
+  throughLink: string[];
+  notText: string[];
+  denied: string[];
+  rulesSkipped: { pointer: string; reason: string }[];
+  unreadable: string[];
+}
+
+/** What the run is doing. Polled, never pushed. */
+export interface SyncJob {
+  phase: SyncPhase;
+  /** False when the machine the threads run on has no git Boite can find. */
+  supported: boolean;
+  filesRead: number;
+  /** Null while the count is unknown, which is a bar with no end. */
+  filesTotal: number | null;
+  path: string | null;
+  message: string | null;
+  pushedSha: string | null;
+  lastSyncedAt: number | null;
+  /** Files still waiting on a person. */
+  pending: number;
+  startedAt: number;
+  updatedAt: number;
+  notes: SyncNotes;
+  /** Placeholders this machine had no value to put back for. */
+  needed: SyncField[];
+  refused: { path: string; reason: string }[];
+  /** Where replaced contents were kept, when anything was replaced. */
+  backupDir: string | null;
+}
+
+export interface SyncStatus {
+  supported: boolean;
+  remoteUrl: string | null;
+  branch: string | null;
+  /** Whether this machine has ever finished a sync. */
+  hasBase: boolean;
+  job: SyncJob;
+}
+
+/** What `git ls-remote` said, so the address field can be honest with no token. */
+export interface SyncProbe {
+  reachable: boolean;
+  /** It answers and holds nothing. The first sync fills it. */
+  empty: boolean;
+  /** It refused. The fix is a git credential on the host, not a field here. */
+  needsAuth: boolean;
+  message: string | null;
+}
+
+/**
+ * Carrying the agent configuration between computers, through a repository the
+ * user owns.
+ *
+ * Everything happens on the machine the threads spawn on, which for a remote
+ * boite is the server rather than the device drawing the panel. Progress is
+ * polled rather than pushed, so a panel opened half way through sees where it
+ * got to.
+ *
+ * The configuration itself — the address and the per-source switches — is not
+ * here. It lives in the settings blob both hosts already read, and the host
+ * reads it out of that row on every call, so turning a source off stops the next
+ * sync rather than the next session.
+ */
+export interface SyncApi {
+  /** Every source and what this machine says about it. */
+  sources(): Promise<SyncSource[]>;
+  status(): Promise<SyncStatus>;
+  /** `git ls-remote` on the host, for the address field's verdict. */
+  probe(remoteUrl: string): Promise<SyncProbe>;
+  /** Fetches and compares. Sends nothing. Answers with what diverged. */
+  pull(): Promise<SyncConflict[]>;
+  /** What is still waiting, for a panel opened after the pull. */
+  conflicts(): Promise<SyncConflict[]>;
+  /**
+   * Arbitrary bytes for one file — the merge tool can keep both sides, so this
+   * is not a pick-a-side call. It writes that file and nothing else, which is
+   * what makes an abandoned merge safe to walk away from.
+   */
+  resolve(path: string, content: string): Promise<SyncJob>;
+  /** Leaves the file as both sides have it. The next pull asks again. */
+  skip(path: string): Promise<SyncJob>;
+  /** Sends what this machine settled. */
+  push(): Promise<SyncJob>;
+  cancel(): Promise<boolean>;
+  /** Forgets a settled run, which is how a failure is dismissed. */
+  dismiss(): Promise<void>;
+  /** Resets the local mirror, and nothing outside it. */
+  repair(): Promise<void>;
+}
+
+export interface TelemetryState {
+  modeAEnabled: boolean;
+  modeBEnabled: boolean;
+  installIdSet: boolean;
+  forgetPending: boolean;
+  onboardingCompleted: boolean;
+}
+
+export interface TelemetryApi {
+  state(): Promise<TelemetryState>;
+  setModeA(enabled: boolean): Promise<void>;
+  setModeB(enabled: boolean): Promise<void>;
+  completeOnboarding(modeA: boolean, modeB: boolean): Promise<void>;
+  export(): Promise<unknown>;
+  retryForget(): Promise<void>;
+  trackUpdate(args: {
+    stage: string;
+    targetVersion?: string;
+    errorCode?: string;
+  }): Promise<void>;
+  trackPane(paneKind: string): Promise<void>;
+  trackSettingsSnapshot(args: {
+    uiLanguage: string;
+    theme: string;
+    threadWorktrees: boolean;
+    animations: string;
+    mcpYolo: boolean;
+    idleAutoclose: boolean;
+    orchestrator: boolean;
+    voice: boolean;
+  }): Promise<void>;
+}
+
 export interface Backend {
   readonly kind: "tauri" | "remote";
   readonly caps: BackendCaps;
@@ -1068,11 +1636,19 @@ export interface Backend {
   readonly shell: ShellApi;
   readonly fastpick: FastpickApi;
   readonly codexSwitcher: CodexSwitcherApi;
+  readonly fastMcpSsh: FastMcpSshApi;
+  readonly kebaccSwitcher: KebaccSwitcherApi;
+  readonly cli: CliApi;
   readonly scope: ScopeApi;
   readonly session: SessionApi;
   readonly log: LogApi;
   readonly approvals: ApprovalsApi;
   readonly search: SearchApi;
+  // The workspace pulse and the orchestrator conversation. Optional while the
+  // orchestrator is an experiment; a backend without it just writes no moments.
+  readonly conduct?: ConductApi;
+  readonly sync: SyncApi;
+  readonly telemetry: TelemetryApi;
   // Web Push registration. Present only on remote (web/PWA); undefined on
   // desktop, which notifies through the OS directly.
   readonly push?: PushApi;

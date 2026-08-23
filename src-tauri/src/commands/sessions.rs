@@ -59,8 +59,10 @@ pub async fn agent_token_usage(
     scope: State<'_, ProjectRoots>,
     cwds: Vec<String>,
     days: u32,
+    orchestrator_sessions: Option<Vec<String>>,
 ) -> Result<Value, String> {
-    on_bus(scope.inner(), Sessions::Usage { cwds, days }.into()).await
+    let orchestrator_sessions = orchestrator_sessions.unwrap_or_default();
+    on_bus(scope.inner(), Sessions::Usage { cwds, days, orchestrator_sessions }.into()).await
 }
 
 /// Carries a captured conversation to the folder its agent will look for it in

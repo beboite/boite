@@ -135,6 +135,10 @@ const RPC_TIMEOUTS: Record<string, number> = {
   "worktree.open": 120_000,
   // Walks every file of every checkout of the repository.
   "worktree.sizes": 120_000,
+  // A long-poll by design: the server may hold it open for up to 120 s
+  // (`boite_core::pulse::MAX_TIMEOUT_MS`) before answering "nothing happened".
+  // The ceiling sits just above that, so only a genuinely dead socket trips it.
+  "conduct.pulse": 130_000,
 };
 
 function rpcTimeout(method: string): number {

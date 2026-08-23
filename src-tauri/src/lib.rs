@@ -6,9 +6,12 @@ mod local_pty;
 mod logging;
 
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::Instant;
 
 use boite_core::pty::PtyManager;
 use boite_core::scope::ProjectRoots;
+use boite_core::telemetry::TelemetryRuntime;
 use tauri::Manager;
 use tauri_plugin_sql::{Migration, MigrationKind};
 
@@ -156,6 +159,7 @@ fn show_main_window(handle: &tauri::AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let app_start = Instant::now();
     // Before the first which() or PTY: launched from Finder we start with
     // launchd's bare PATH, which hides Homebrew and every agent CLI.
     boite_core::env::hydrate_login_path();
@@ -246,7 +250,10 @@ pub fn run() {
         .manage(commands::app::LastScreen::default())
         .manage(agent_api::DeviceAnswers::default())
         .manage(commands::records::Rows::default())
-        .setup(|app| {
+        // One wait registry for the whole app: the window's conduct writes
+        // wake the agent endpoint's `GET /v1/pulse` long-polls.
+        .manage(commands::conduct::PulseWaiters::default())
+        .setup(move |app| {
             // Built here rather than declared in tauri.conf.json, for exactly
             // one reason: an initialization script can only be attached to a
             // webview while it is being built, and the pane driver has to run
@@ -346,6 +353,15 @@ pub fn run() {
                 });
             }
             agent_api::start(&setup_handle);
+            if let Ok(dir) = setup_handle.path().app_config_dir() {
+                let version = setup_handle.package_info().version.to_string();
+                setup_handle.manage(Arc::new(TelemetryRuntime::spawn(
+                    &dir,
+                    version,
+                    "desktop",
+                    app_start,
+                )));
+            }
             let _ = logging::append_app_log(
                 &setup_handle,
                 "info",
@@ -370,6 +386,7 @@ pub fn run() {
                     );
                     state.mark_completed();
                     show_main_window(&handle);
+                    commands::app::report_boot_telemetry(&handle);
                 }
             });
             Ok(())
@@ -470,6 +487,39 @@ pub fn run() {
             commands::app::codex_switcher_save,
             commands::app::codex_switcher_activate,
             commands::app::codex_switcher_version,
+            commands::app::fast_mcp_ssh_version,
+            commands::app::kebacc_switcher_list,
+            commands::app::kebacc_switcher_add,
+            commands::app::kebacc_switcher_switch,
+            commands::app::kebacc_switcher_version,
+            commands::sync::sync_sources,
+            commands::sync::sync_status,
+            commands::sync::sync_probe,
+            commands::sync::sync_pull,
+            commands::sync::sync_conflicts,
+            commands::sync::sync_resolve,
+            commands::sync::sync_skip,
+            commands::sync::sync_push,
+            commands::sync::sync_cancel,
+            commands::sync::sync_dismiss,
+            commands::sync::sync_repair,
+            commands::telemetry::telemetry_state,
+            commands::telemetry::telemetry_set_mode_a,
+            commands::telemetry::telemetry_set_mode_b,
+            commands::telemetry::telemetry_complete_onboarding,
+            commands::telemetry::telemetry_export,
+            commands::telemetry::telemetry_retry_forget,
+            commands::telemetry::telemetry_track_update,
+            commands::telemetry::telemetry_track_pane,
+            commands::telemetry::telemetry_track_settings_snapshot,
+            commands::app::cli_catalog,
+            commands::app::cli_latest,
+            commands::app::cli_jobs,
+            commands::app::cli_data_paths,
+            commands::app::cli_install,
+            commands::app::cli_uninstall,
+            commands::app::cli_cancel,
+            commands::app::cli_dismiss,
             commands::records::records_project_list,
             commands::records::records_project_create,
             commands::records::records_project_archive,
@@ -488,12 +538,29 @@ pub fn run() {
             commands::records::records_workspace_info,
             commands::records::records_workspace_set_info,
             commands::records::records_search,
+            commands::conduct::conduct_pulse,
+            commands::conduct::conduct_record,
+            commands::conduct::conduct_orchestrator_post,
+            commands::conduct::conduct_orchestrator_say,
+            commands::conduct::conduct_orchestrator_messages,
+            commands::conduct::conduct_orchestrator_start,
+            commands::conduct::conduct_orchestrator_status,
+            commands::conduct::conduct_orchestrator_actions,
+            commands::conduct::conduct_orchestrator_undo,
+            commands::conduct::conduct_thread_accept_dispatch,
+            commands::conduct::conduct_dispatch_drain,
+            commands::conduct::conduct_dispatch_settle,
+            commands::conduct::conduct_voice_transcribe,
             commands::window::set_keep_backdrop_active,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app_handle, event| {
             if let tauri::RunEvent::ExitRequested { .. } = event {
+                if let Some(runtime) = app_handle.try_state::<Arc<TelemetryRuntime>>() {
+                    runtime.on_session_end();
+                    runtime.shutdown();
+                }
                 let manager = app_handle.state::<PtyManager>();
                 manager.kill_all();
             }

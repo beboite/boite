@@ -70,6 +70,10 @@ fn verbs() -> Router<Shared> {
         .route("/v1/browser/type", post(browser_type))
         .route("/v1/browser/press", post(browser_press))
         .route("/v1/browser/scroll", post(browser_scroll))
+        .route("/v1/pulse", get(pulse))
+        .route("/v1/say", post(say))
+        .route("/v1/dispatch", post(dispatch))
+        .route("/v1/thread/dismiss", post(thread_dismiss))
         .route("/v1/snapshot", get(snapshot))
         .route("/v1/transcript", get(transcript))
         .route("/v1/search", get(search))
@@ -109,6 +113,9 @@ fn now_ms() -> i64 {
 
 /// How long a device has to claim and answer a request the agent will read.
 const SETTLE_MS: u64 = 8_000;
+
+/// How many live workers one orchestrator may hold open at once.
+const MAX_ORCHESTRATOR_WORKERS: i64 = 3;
 
 /// Dispatch and wait for the device, so an unclaimed request is not success.
 async fn settle(workspace: &dyn Workspace, request: Value) -> Result<Value, String> {
@@ -441,6 +448,177 @@ async fn claim(
 /// holding a dead PTY is exactly the kind of thing the caller needs to see. It
 /// carries no secret — no token, no environment, no file contents — so it is
 /// meant to be pasted into an issue.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PulseIn {
+    since_seq: Option<i64>,
+    timeout_ms: Option<u64>,
+    project: Option<String>,
+}
+
+/// The orchestrator's wait. Anyone with a thread key may read the pulse — it
+/// is the same feed the timeline shows — but only the orchestrator tier is
+/// ever told the tool exists.
+async fn pulse(
+    State(workspace): State<Shared>,
+    Extension(caller): Extension<Caller>,
+    axum::extract::Query(q): axum::extract::Query<PulseIn>,
+) -> Result<Json<Value>, StatusCode> {
+    // One wait per caller, keyed on who is asking: the thread for a spawned
+    // agent, the project for a credentials file.
+    let waiter = format!(
+        "agent-{}",
+        caller.thread_id.as_deref().unwrap_or(&caller.project_id)
+    );
+    // A scoped orchestrator reads its own project's pulse whatever it asks
+    // for. The clamp is the read side of the dispatch guard: one project,
+    // never a window into the rest of the workspace.
+    let clamp = caller
+        .thread_id
+        .as_deref()
+        .and_then(|id| workspace.store().thread_orchestration(id))
+        .filter(|(role, _, _)| role.as_deref() == Some(boite_core::orchestrator::ROLE))
+        .and_then(|(_, scope, _)| scope);
+    let project = clamp.or(q.project);
+    let answered = tokio::task::spawn_blocking(move || {
+        boite_core::command::conduct::read_pulse(
+            workspace.store(),
+            workspace.pulse_waiters().as_ref(),
+            q.since_seq.unwrap_or(0),
+            q.timeout_ms.unwrap_or(30_000),
+            project.as_deref(),
+            &waiter,
+        )
+    })
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(match answered {
+        Ok(v) => v,
+        Err(e) => json!({ "error": e }),
+    }))
+}
+
+#[derive(Deserialize)]
+struct SayIn {
+    text: String,
+    aloud: Option<String>,
+    urgency: Option<String>,
+}
+
+/// The orchestrator's reply. The thread row is the proof of the role;
+/// `boite_core::command::conduct::say` refuses anyone else by name.
+async fn say(
+    State(workspace): State<Shared>,
+    Extension(caller): Extension<Caller>,
+    Json(body): Json<SayIn>,
+) -> Result<Json<Value>, StatusCode> {
+    let thread = caller.thread()?.to_string();
+    let answered = boite_core::command::conduct::say(
+        workspace.store(),
+        workspace.pulse_waiters().as_ref(),
+        &thread,
+        &body.text,
+        body.aloud.as_deref(),
+        body.urgency.as_deref(),
+    );
+    Ok(Json(match answered {
+        Ok(v) => {
+            workspace.announce(Change::Orchestrator);
+            workspace.touched(&thread, "say");
+            v
+        }
+        Err(e) => json!({ "error": e }),
+    }))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DispatchIn {
+    to_thread_id: String,
+    text: String,
+    mode: Option<String>,
+}
+
+/// One line queued for another thread's prompt. The static guards — role,
+/// mute, scope — are `boite_core::command::conduct::dispatch`'s; the live
+/// ones belong to the device that flushes.
+async fn dispatch(
+    State(workspace): State<Shared>,
+    Extension(caller): Extension<Caller>,
+    Json(body): Json<DispatchIn>,
+) -> Result<Json<Value>, StatusCode> {
+    let thread = caller.thread()?.to_string();
+    let answered = boite_core::command::conduct::dispatch(
+        workspace.store(),
+        workspace.pulse_waiters().as_ref(),
+        &thread,
+        &body.to_thread_id,
+        &body.text,
+        body.mode.as_deref().unwrap_or("queue"),
+    );
+    Ok(Json(match answered {
+        Ok(v) => {
+            let dispatch_id = v
+                .get("dispatchId")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string();
+            workspace.announce(Change::DispatchQueued {
+                to_thread_id: body.to_thread_id,
+                dispatch_id,
+            });
+            workspace.touched(&thread, "dispatch");
+            v
+        }
+        Err(e) => json!({ "error": e }),
+    }))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DismissIn {
+    thread_id: String,
+}
+
+/// Puts a finished worker away on the orchestrator's word. The same busy rule
+/// as the user's own settle, gated on the caller's role.
+async fn thread_dismiss(
+    State(workspace): State<Shared>,
+    Extension(caller): Extension<Caller>,
+    Json(body): Json<DismissIn>,
+) -> Result<Json<Value>, StatusCode> {
+    let thread = caller.thread()?.to_string();
+    let answered = boite_core::command::conduct::dismiss(
+        workspace.store(),
+        workspace.pulse_waiters().as_ref(),
+        &thread,
+        &body.thread_id,
+    );
+    Ok(Json(match answered {
+        Ok(v) => {
+            // The dismissal on the undo list, beside the spawns. Same rule as
+            // the spawn's row: a failed write never fails the dismissal.
+            let project = workspace.store().project_of_thread(&body.thread_id).ok();
+            if let Err(e) = workspace.store().record_orchestrator_action(
+                &thread,
+                "thread.dismiss",
+                Some(&body.thread_id),
+                project.as_deref(),
+                true,
+                now_ms(),
+            ) {
+                eprintln!("[boite/agent-api] orchestrator action write failed: {e}");
+            }
+            workspace.announce(Change::ThreadDismissed {
+                thread_id: body.thread_id,
+            });
+            workspace.touched(&thread, "dismiss");
+            v
+        }
+        Err(e) => json!({ "error": e }),
+    }))
+}
+
 async fn snapshot(
     State(workspace): State<Shared>,
     Extension(_caller): Extension<Caller>,
@@ -597,19 +775,29 @@ async fn worktree_status(
         blocking(move || {
             let hold = git::worktree_hold_blocking(&worktree);
             let branches = git::branches_blocking(&repo).unwrap_or_default();
-            let current = git::repo_info_blocking(&worktree).ok().and_then(|i| i.branch);
-            (hold, branches, current)
+            let info = git::repo_info_blocking(&worktree).ok();
+            let has_remote = git::has_remote_blocking(&worktree);
+            (hold, branches, info, has_remote)
         })
         .await?
     };
-    let (hold, branches, current) = read;
+    let (hold, branches, info, has_remote) = read;
     let hold = hold.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let current = info.as_ref().and_then(|i| i.branch.clone());
+    // The push state is reported here rather than objected to at the end of a
+    // turn: closing the thread keeps the commits, so it is something to know
+    // when asked, not something to be held open for.
+    let upstream = info.as_ref().and_then(|i| i.upstream.clone());
+    let ahead = info.as_ref().map(|i| i.ahead).unwrap_or(0);
     Ok(Json(json!({
         "path": worktree,
         "repo": repo,
         "branch": current,
         "detached": current.is_none(),
         "uncommittedChanges": hold.dirty,
+        "hasRemote": has_remote,
+        "upstream": upstream,
+        "ahead": ahead,
         "branches": branches.iter().map(|b| &b.name).collect::<Vec<_>>(),
     })))
 }
@@ -987,6 +1175,23 @@ async fn thread_spawn(
         None => own_project.clone(),
     };
     let elsewhere = project_id != own_project;
+    let asking_thread = caller.thread_or_empty().to_string();
+    // A scoped orchestrator spawns inside its project or not at all: crossing
+    // over is MutateAcross, and that capability is exactly what its scope
+    // withholds. Named, not escalated, so the agent reports it as it is.
+    if elsewhere && !asking_thread.is_empty() {
+        if let Some((Some(role), Some(own), _)) =
+            workspace.store().thread_orchestration(&asking_thread)
+        {
+            if role == boite_core::orchestrator::ROLE && own != project_id {
+                return Ok(refused(format!(
+                    "OUT_OF_SCOPE: this orchestrator is scoped to {own}, and spawning into \
+                     {project_id} would mutate across it. That belongs to the workspace \
+                     orchestrator or to the user."
+                )));
+            }
+        }
+    }
     // Only when it lands somewhere else. Opening a second terminal beside your
     // own is what an agent splitting a job does, and asking for a wider grant
     // for it would make the capability mean "spawn", not "across".
@@ -1001,7 +1206,25 @@ async fn thread_spawn(
             return Ok(refusal);
         }
     }
-    let asking_thread = caller.thread_or_empty().to_string();
+    // Non-negotiable cap for an orchestrator: the workers run on the user's
+    // machine, and an unattended thread multiplying terminals is exactly the
+    // process nobody is watching. Named so the agent reports it as it is.
+    let is_orchestrator = !asking_thread.is_empty()
+        && workspace
+            .store()
+            .thread_orchestration(&asking_thread)
+            .and_then(|(role, _, _)| role)
+            .as_deref()
+            == Some(boite_core::orchestrator::ROLE);
+    if is_orchestrator {
+        let live = workspace.store().live_children(&asking_thread);
+        if live >= MAX_ORCHESTRATOR_WORKERS {
+            return Ok(refused(format!(
+                "TOO_MANY_WORKERS: {live} of your workers are still live, and the cap is \
+                 {MAX_ORCHESTRATOR_WORKERS}. Wait for one to settle, or tell the user."
+            )));
+        }
+    }
     let request = json!({
         "kind": "thread.spawn",
         "projectId": project_id,
@@ -1045,6 +1268,21 @@ async fn thread_spawn(
         .get("threadId")
         .and_then(|v| v.as_str())
         .unwrap_or("");
+    // One row per spawn an orchestrator caused, so the inbox can offer to put
+    // the worker away. A failed write is a gap in the undo list, never a
+    // failed spawn: the terminal is already open.
+    if is_orchestrator && !thread_id.is_empty() {
+        if let Err(e) = workspace.store().record_orchestrator_action(
+            &asking_thread,
+            "thread.spawn",
+            Some(thread_id),
+            Some(&project_id),
+            true,
+            now_ms(),
+        ) {
+            eprintln!("[boite/agent-api] orchestrator action write failed: {e}");
+        }
+    }
     Ok(Json(json!({ "ok": true, "threadId": thread_id })))
 }
 

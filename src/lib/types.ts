@@ -87,6 +87,19 @@ export interface Thread {
   delegationMode?: DelegationMode;
   /** Lifecycle status for delegation threads. */
   delegationStatus?: DelegationStatus | null;
+  /**
+   * `"orchestrator"` on a thread Boite armed as one, absent on every worker.
+   * Read-only on this side: the row is the proof and only `orchestrator.start`
+   * (a local-grant command) writes it.
+   */
+  role?: string | null;
+  /** The project an orchestrator answers for, or null for the global one. */
+  orchestratorScope?: string | null;
+  /**
+   * Whether this thread still accepts dispatched lines. Absent means yes.
+   * The user mutes; no agent-reachable write rearms it.
+   */
+  acceptDispatch?: boolean;
   origin?: WorkspaceOrigin;
 }
 
@@ -115,6 +128,15 @@ export interface Shortcut {
 }
 
 export type LocaleSetting = "system" | "en" | "fr";
+
+/**
+ * Where the window goes when Boite starts.
+ *
+ * `home` only lands while `experimentHome` is on. `last` leaves the existing
+ * boot path alone. `project` is also what a launch resolves to whenever the
+ * experiment is off, whatever this field says.
+ */
+export type OpenOnLaunch = "home" | "project" | "last";
 
 export interface Settings {
   shortcuts: Shortcut[];
@@ -183,6 +205,23 @@ export interface Settings {
   idleAutocloseByIcon: Record<string, boolean>;
   confirmCloseThread: boolean;
   /**
+   * Where the configuration sync pushes and pulls. Null: not set up.
+   *
+   * In this blob rather than the device one because it describes the machine the
+   * threads run on — whose ~/.claude is read, whose git credentials are used —
+   * not the glass in front of the user. A phone on a boite-server that kept its
+   * own copy here would push an empty address over the server's.
+   */
+  syncRemoteUrl: string | null;
+  /** Whether opening Boite pulls. Off keeps the address and the button. */
+  syncOnLaunch: boolean;
+  /**
+   * Per source: an agent id, or `agents` for the shared instruction tree. An id
+   * that is absent is off, so nothing syncs until it is asked for — the only
+   * safe default for something that writes into a home directory.
+   */
+  syncSources: Record<string, boolean>;
+  /**
    * Which of git, files and todo the side panel is showing, or null when it is
    * closed.
    *
@@ -239,6 +278,13 @@ export interface Settings {
    * every entry fails is worse than no menu.
    */
   fastpickEnabled: boolean;
+  /**
+   * Which kebacc-switch providers Home draws. Device-scoped: the dashboard is
+   * this window's, and a phone hiding Codex must not hide it on the desktop.
+   */
+  kebaccClaude: boolean;
+  kebaccCodex: boolean;
+  kebaccAntigravity: boolean;
   /**
    * Tint a thread's agent icon with what is actually answering it. A fastpick thread keeps
    * the agent's own glyph, so without this nothing on screen tells a stock Claude apart
@@ -299,7 +345,88 @@ export interface Settings {
   whipSound: WhipSound;
   smartSortBy: SmartSortBy;
   smartSortDirection: SortDirection;
+  /**
+   * Experiment: a workspace home with live agents, token use, and an inbox.
+   * Off keeps launch on a project, whatever `openOnLaunch` says.
+   */
+  experimentHome: boolean;
+  /**
+   * Where the window goes when Boite starts. Resolved by `resolveLaunchView`.
+   */
+  openOnLaunch: OpenOnLaunch;
+  /**
+   * Experiment: the orchestrator layer. Device-scoped on purpose: arming is a
+   * per-device decision (this glass shows the chat), while everything the
+   * orchestrator *is* — its agent, its autonomy, its caps — is workspace
+   * configuration below, because the thread runs on the workspace and every
+   * device must agree on what it may do.
+   */
+  experimentOrchestrator: boolean;
+  /**
+   * Experiment: per-project orchestrators. Read by `orchestratorEnabledFor`
+   * only while `experimentOrchestrator` is on. Device-scoped like its parent.
+   */
+  experimentOrchestratorPerProject: boolean;
+  /**
+   * The harness the orchestrator runs, in `thread_spawn`'s agent vocabulary
+   * (a plain key or a `fastpick:provider:model` combo). Null means none was
+   * picked and the chat shows the selector instead of a composer: no default,
+   * every provider decision is explicit.
+   */
+  orchestratorAgent: string | null;
+  /** Per-project override: "on" | "off", absent inherits the global answer. */
+  orchestratorByProject: Record<string, "on" | "off">;
+  /** observer: answers only. dispatcher: may queue lines. autopilot: later. */
+  orchestratorAutonomy: "observer" | "dispatcher" | "autopilot";
+  /** Minutes of silence before the orchestrator session is put to sleep. */
+  orchestratorIdleMinutes: number;
+  /** Daily token budget; 0 means uncapped. Past it, the orchestrator sleeps. */
+  orchestratorDailyTokenCap: number;
+  /** Hours before a session is restarted fresh on a Boite-built briefing. */
+  orchestratorSessionHours: number;
+  /** Minutes a queued dispatch survives with no device to flush it. */
+  dispatchTtlMinutes: number;
+  /**
+   * Projects the orchestrator must not see at all: absent from its roster,
+   * search and transcripts. The refusal is named, never an empty answer.
+   */
+  orchestratorBlindProjects: string[];
+  /**
+   * Experiment: voice in and out of the orchestrator chat. Device-scoped, and
+   * so is every knob under it: a microphone and a speaker are properties of
+   * this glass, not of the workspace.
+   */
+  experimentVoice: boolean;
+  /** How speech becomes text. Off means the mic button is not drawn at all. */
+  voiceStt: VoiceStt;
+  /** How the orchestrator's `aloud` line becomes sound. */
+  voiceTts: VoiceTts;
+  /**
+   * The synthesis voice, by `SpeechSynthesisVoice.name`. Null means none was
+   * picked and nothing is spoken: no silent fall back to an English voice.
+   */
+  voiceName: string | null;
+  /** Hold Ctrl+Space to talk while the home chat is on screen. */
+  voicePushToTalk: boolean;
+  /**
+   * Send a transcription on a short countdown instead of waiting for Enter.
+   * False by default: a misheard sentence must not open work on its own.
+   */
+  voiceAutoSend: boolean;
+  /** Speak with the window unfocused too. Off, speech follows the eyes. */
+  voiceSpeakWhenUnfocused: boolean;
 }
+
+/**
+ * Speech-to-text provider. `webspeech` is the page's own SpeechRecognition;
+ * `whisper` records here and transcribes on the paired host's own whisper.cpp
+ * (`voice.transcribe` on the bus), for the webviews that cannot hear on their
+ * own.
+ */
+export type VoiceStt = "off" | "webspeech" | "whisper";
+
+/** Text-to-speech provider. `webspeech` is the page's own speechSynthesis. */
+export type VoiceTts = "off" | "webspeech";
 
 /**
  * What the smart-sort experiment orders the sidebar by.
@@ -315,11 +442,12 @@ export type SmartSortBy = "manual" | "activity" | "alphabetical";
  * What the whip cracks with.
  *
  * `synth` is the WebAudio burst `crack.ts` builds, which costs no asset and
- * varies on its own. `meme` is one sampled crack, `static/sounds/whip-meme.mp3`,
+ * varies on its own. `sampled` is six cracks in `static/sounds/whip-cracks.mp3`,
  * fetched on the first crack after it is picked and never before: a mode nobody
- * selects costs the same nothing it did before this existed.
+ * selects costs the same nothing it did before this existed. `meme` is the
+ * name a row written before the sprite still carries; it plays the same file.
  */
-export type WhipSound = "synth" | "meme";
+export type WhipSound = "synth" | "sampled" | "meme";
 
 export type SortDirection = "asc" | "desc";
 
@@ -429,7 +557,7 @@ export interface TodoItem {
   updatedAt: number;
 }
 
-export type View = "terminal" | "settings" | "editor" | "project";
+export type View = "terminal" | "settings" | "editor" | "project" | "home" | "plugins";
 
 // Bottom-bar destinations in the phone layout. Independent of `View`: the
 // terminal/editor/settings desktop views still drive the shared viewport and
@@ -440,4 +568,5 @@ export type MobileTab =
   | "terminal"
   | "todo"
   | "projects"
-  | "settings";
+  | "settings"
+  | "home";

@@ -5,6 +5,8 @@
 //! command exists, and what fastpick has to offer.
 
 
+use std::sync::Arc;
+
 use tauri::{
     AppHandle, Manager, State,
 };
@@ -14,6 +16,7 @@ use serde_json::Value;
 use boite_core::command::Sessions;
 use boite_core::pty::PtyManager;
 use boite_core::scope::ProjectRoots;
+use boite_core::telemetry::TelemetryRuntime;
 
 use crate::BootState;
 use crate::local_pty::LocalSessions;
@@ -110,6 +113,21 @@ pub fn finish_boot(app: AppHandle, boot: State<'_, BootState>) {
         // First paint of the row the client area does not reach; the window
         // event hook keeps it painted from here on.
         crate::paint_frame_gap(&win);
+    }
+    report_boot_telemetry(&app);
+}
+
+/// First frame is up: `app_launched`, and a Mode B workspace snapshot if the
+/// rows have been attached. Called from `finish_boot` and from the failsafe
+/// that shows the window if the frontend never does.
+pub(crate) fn report_boot_telemetry(app: &AppHandle) {
+    let Some(runtime) = app.try_state::<Arc<TelemetryRuntime>>() else {
+        return;
+    };
+    runtime.on_boot_complete();
+    let live = app.state::<PtyManager>().live_count() as u64;
+    if let Ok(store) = app.state::<super::records::Rows>().get(app) {
+        runtime.track_workspace_from(&store, live);
     }
 }
 
@@ -251,4 +269,115 @@ pub async fn codex_switcher_activate(
 #[tauri::command]
 pub async fn codex_switcher_version(scope: State<'_, ProjectRoots>) -> Result<Value, String> {
     on_bus(scope.inner(), Sessions::CodexSwitcherVersion.into()).await
+}
+
+// Null means fast-mcp-ssh is not on this machine, which the plugins panel reads
+// as "offer the install" rather than as a failure.
+#[tauri::command]
+pub async fn fast_mcp_ssh_version(scope: State<'_, ProjectRoots>) -> Result<Value, String> {
+    on_bus(scope.inner(), Sessions::FastMcpSshVersion.into()).await
+}
+
+#[tauri::command]
+pub async fn kebacc_switcher_list(
+    scope: State<'_, ProjectRoots>,
+    provider: Option<String>,
+) -> Result<Value, String> {
+    on_bus(scope.inner(), Sessions::KebaccSwitcherList { provider }.into()).await
+}
+
+#[tauri::command]
+pub async fn kebacc_switcher_add(
+    scope: State<'_, ProjectRoots>,
+    provider: String,
+) -> Result<Value, String> {
+    on_bus(scope.inner(), Sessions::KebaccSwitcherAdd { provider }.into()).await
+}
+
+#[tauri::command]
+pub async fn kebacc_switcher_switch(
+    scope: State<'_, ProjectRoots>,
+    provider: String,
+    email: String,
+) -> Result<Value, String> {
+    on_bus(
+        scope.inner(),
+        Sessions::KebaccSwitcherSwitch { provider, email }.into(),
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn kebacc_switcher_version(scope: State<'_, ProjectRoots>) -> Result<Value, String> {
+    on_bus(scope.inner(), Sessions::KebaccSwitcherVersion.into()).await
+}
+
+// The CLI manager. Every one of these answers for the machine the threads spawn
+// on, which for a remote boite is the server rather than the device drawing the
+// panel — the same rule `command_exists` follows.
+#[tauri::command]
+pub async fn cli_catalog(
+    scope: State<'_, ProjectRoots>,
+    probe_versions: Option<bool>,
+) -> Result<Value, String> {
+    on_bus(
+        scope.inner(),
+        Sessions::CliCatalog {
+            probe_versions: probe_versions.unwrap_or(false),
+        }
+        .into(),
+    )
+    .await
+}
+
+// What each vendor publishes right now. Its own call rather than a field on the
+// catalogue: this one waits on somebody else's web server, and the panel draws
+// its rows before it has an answer.
+#[tauri::command]
+pub async fn cli_latest(scope: State<'_, ProjectRoots>) -> Result<Value, String> {
+    on_bus(scope.inner(), Sessions::CliLatest.into()).await
+}
+
+// An install takes minutes and this call takes milliseconds: it starts the job
+// and the panel polls `cli_jobs`, which is the one progress path both hosts share.
+#[tauri::command]
+pub async fn cli_jobs(scope: State<'_, ProjectRoots>) -> Result<Value, String> {
+    on_bus(scope.inner(), Sessions::CliJobs.into()).await
+}
+
+#[tauri::command]
+pub async fn cli_data_paths(scope: State<'_, ProjectRoots>, id: String) -> Result<Value, String> {
+    on_bus(scope.inner(), Sessions::CliDataPaths { id }.into()).await
+}
+
+#[tauri::command]
+pub async fn cli_install(scope: State<'_, ProjectRoots>, id: String) -> Result<Value, String> {
+    on_bus(scope.inner(), Sessions::CliInstall { id }.into()).await
+}
+
+#[tauri::command]
+pub async fn cli_uninstall(
+    scope: State<'_, ProjectRoots>,
+    id: String,
+    purge_data: Option<bool>,
+) -> Result<Value, String> {
+    on_bus(
+        scope.inner(),
+        Sessions::CliUninstall {
+            id,
+            purge_data: purge_data.unwrap_or(false),
+        }
+        .into(),
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn cli_cancel(scope: State<'_, ProjectRoots>, id: String) -> Result<Value, String> {
+    on_bus(scope.inner(), Sessions::CliCancel { id }.into()).await
+}
+
+#[tauri::command]
+pub async fn cli_dismiss(scope: State<'_, ProjectRoots>, id: String) -> Result<Value, String> {
+    on_bus(scope.inner(), Sessions::CliDismiss { id }.into()).await
 }

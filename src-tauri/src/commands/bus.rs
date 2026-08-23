@@ -20,8 +20,7 @@ use boite_core::command::Command;
 use boite_core::pty::PtyManager;
 use boite_core::scope::ProjectRoots;
 use boite_core::store::Store;
-
-
+use boite_core::telemetry::TelemetryRuntime;
 
 /// The desktop's answer to what a command may reach.
 ///
@@ -36,6 +35,8 @@ pub(super) struct DesktopHost<'a> {
     legacy_worktree_base: Option<PathBuf>,
     transcripts: Option<PathBuf>,
     store: Option<Arc<Store>>,
+    pulse: Option<Arc<boite_core::pulse::Waiters>>,
+    telemetry: Option<Arc<TelemetryRuntime>>,
 }
 
 impl<'a> DesktopHost<'a> {
@@ -46,7 +47,16 @@ impl<'a> DesktopHost<'a> {
             legacy_worktree_base: None,
             transcripts: None,
             store: None,
+            pulse: None,
+            telemetry: None,
         }
+    }
+
+    /// The app's wait registry, so a conduct write here wakes the agent
+    /// endpoint's long-polls. Only the conduct commands attach it.
+    pub(super) fn with_pulse(mut self, pulse: Arc<boite_core::pulse::Waiters>) -> Self {
+        self.pulse = Some(pulse);
+        self
     }
 
     /// Where this app writes what its terminals print. Built from the app
@@ -78,6 +88,11 @@ impl<'a> DesktopHost<'a> {
         self.store = Some(store);
         self
     }
+
+    pub(super) fn with_telemetry(mut self, telemetry: Arc<TelemetryRuntime>) -> Self {
+        self.telemetry = Some(telemetry);
+        self
+    }
 }
 
 impl boite_core::command::Host for DesktopHost<'_> {
@@ -99,6 +114,14 @@ impl boite_core::command::Host for DesktopHost<'_> {
 
     fn store(&self) -> Option<Arc<Store>> {
         self.store.clone()
+    }
+
+    fn pulse_waiters(&self) -> Option<Arc<boite_core::pulse::Waiters>> {
+        self.pulse.clone()
+    }
+
+    fn telemetry(&self) -> Option<Arc<TelemetryRuntime>> {
+        self.telemetry.clone()
     }
 }
 

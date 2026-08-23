@@ -1,5 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { tip } from "$lib/shared/actions/tooltip";
+  import { edgeFade } from "$lib/shared/actions/edgeFade";
   import { app } from "$lib/app/store.svelte";
   import { workspace } from "$lib/backend";
   import { platform } from "$lib/storage/platform.svelte";
@@ -170,7 +172,7 @@
         class="flex items-center rounded p-0.5 transition hover:bg-accent hover:text-foreground"
         onclick={() => (pane = "root")}
         aria-label={t("fastpick.back")}
-        title={t("fastpick.back")}
+        use:tip={t("fastpick.back")}
       >
         <ChevronLeft class="size-3.5" />
       </button>
@@ -183,7 +185,7 @@
         </span>
       {/if}
     </div>
-    <div class="flex min-h-0 flex-col overflow-y-auto p-1.5">
+    <div class="flex min-h-0 flex-col scroll-pane overflow-y-auto p-1.5">
       {#if shells.length === 0}
         <div class="px-2 py-1.5 text-xs text-muted-foreground">
           {t("shell.noneDetected")}
@@ -210,8 +212,9 @@
          instead: a sidebar that scrolls sideways hides half its own buttons. -->
     <div
       class={compact
-        ? "flex min-h-0 flex-col gap-0.5 overflow-y-auto"
-        : "hide-scrollbar flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto"}
+        ? "flex min-h-0 flex-col gap-0.5 scroll-pane overflow-y-auto"
+        : "edge-fade hide-scrollbar flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto"}
+      use:edgeFade
     >
       {#each settings.state.shortcuts as shortcut (shortcut.id)}
         {@const iconKey = resolveIconKey(shortcut.iconKey, shortcut.label, shortcut.command)}
@@ -219,7 +222,7 @@
           type="button"
           class={compact
             ? rowClass
-            : "group flex shrink-0 items-center gap-1.5 rounded-md border border-transparent bg-[var(--color-surface-2)] px-2.5 py-1 text-xs text-foreground/85 transition hover:border-border hover:bg-[var(--color-surface-3)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"}
+            : "press group flex shrink-0 items-center gap-1.5 rounded-md border border-transparent bg-[var(--color-surface-2)] px-2.5 py-1 text-xs text-foreground/85 hover:border-border hover:bg-[var(--color-surface-3)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"}
           disabled={!shortcut.command.trim()}
           onclick={(e) => void launch(shortcut.id, e.shiftKey)}
           oncontextmenu={(e) => {
@@ -227,7 +230,7 @@
             openMenu(shortcut.id, e.clientX, e.clientY);
           }}
           use:longPress={{ onLongPress: (x, y) => openMenu(shortcut.id, x, y) }}
-          title={tooltip(shortcut.label, shortcut.command)}
+          use:tip={tooltip(shortcut.label, shortcut.command)}
         >
           <ShortcutIcon {iconKey} size={15} color={shortcut.iconColor ?? null} />
           <!-- Truncated rather than wrapped: the popover is as wide as the project
@@ -262,7 +265,7 @@
             type="button"
             class="{rowClass} text-muted-foreground"
             onclick={() => (pane = "fastpick")}
-            title={t("fastpick.tooltip")}
+            use:tip={t("fastpick.tooltip")}
           >
             <Sparkles class="size-3.5 shrink-0" />
             <span class="min-w-0 truncate">{t("fastpick.label")}</span>
@@ -274,7 +277,7 @@
             type="button"
             class="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1 text-left text-xs text-muted-foreground transition group-hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none"
             onclick={(e) => void launchDefaultShell(e.shiftKey)}
-            title={defaultShell
+            use:tip={defaultShell
               ? t("shell.launchNamed", { name: defaultShell.label })
               : t("shell.newBlank")}
           >
@@ -287,7 +290,7 @@
             disabled={shells.length === 0}
             onclick={() => (pane = "shell")}
             aria-label={t("shell.pick")}
-            title={t("shell.pick")}
+            use:tip={t("shell.pick")}
           >
             <ChevronRight class="size-3.5" />
           </button>

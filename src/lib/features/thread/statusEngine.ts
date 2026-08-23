@@ -306,7 +306,7 @@ function read(t: Thread, iconKey: IconKey): Reading | null {
   const term = liveTerminal(t.id);
   const rows = term ? terminalScreenRows(term, LIVE_ROW_COUNT) : null;
   const question = rows ? detectWaitingOnScreen(rows, iconKey) : null;
-  // The agent's own answer first, where it has one. Three of them do, each in a
+  // The agent's own answer first, where it has one. Four of them do, each in a
   // different place (see `agent-registry.ts`), and all three state that a turn
   // ended rather than merely stopping to say it continues. That is what stays
   // right through a quiet tool call, a subagent, a compaction and a hidden pane.
@@ -376,6 +376,27 @@ export function settleUnread(
   return "ready";
 }
 
+/**
+ * A phase transition, written onto the workspace pulse.
+ *
+ * Fire-and-forget on purpose: the sweep must never wait on a network write,
+ * and a moment lost to a torn connection is covered by the orchestrator's next
+ * roster read. Only the device that owns the PTY passes through here, so each
+ * transition is written once, not once per window.
+ */
+function recordPhase(backend: Backend, t: Thread, next: ThreadStatus): void {
+  if (!settings.state.experimentOrchestrator) return;
+  backend.conduct
+    ?.record({
+      kind: "thread.phase",
+      projectId: t.projectId,
+      objectId: t.id,
+      detail: next,
+      source: "phase",
+    })
+    .catch(() => {});
+}
+
 function tick() {
   const now = Date.now();
   // Before anything writes into `prevStatus`, so a pass that follows a switch
@@ -441,6 +462,7 @@ function tick() {
       const next = reading.status;
       if (t.status !== next) {
         app.setThreadStatus(t.id, next);
+        recordPhase(backend, t, next);
       }
       // The same call the control-event path makes for a thread this sweep is
       // not allowed to judge, so the two say the same things on the same terms.

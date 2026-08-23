@@ -86,17 +86,20 @@ pub fn folder_state_blocking(path: &str) -> FolderState {
 /// without needing a list of the ones that matter.
 ///
 /// `roots` is the parent folder of every project the workspace knows, plus the
-/// home directory. Comparison is textual and case-insensitive, on separators
-/// normalized to `/`: these are paths the app itself stored, not links to
-/// resolve, and a symlink that escapes them is a machine the user set up that
-/// way. A root that is only the top of a volume is dropped instead of matching
-/// everything on it, which `names_a_folder` explains.
+/// home directory. Both sides are resolved as far as they exist on disk and
+/// then compared textually, case-insensitively, on separators normalized to
+/// `/`. Resolving is what makes the comparison mean anything: the roots reach
+/// here canonicalized and the path arrives spelled however the caller reached
+/// it, and the two spellings of one folder differ for ordinary reasons — a link
+/// in the way, `/var` for `/private/var`, an 8.3 name on Windows. A root that
+/// is only the top of a volume is dropped instead of matching everything on it,
+/// which `names_a_folder` explains.
 pub fn may_create_project_at(path: &str, roots: &[String]) -> bool {
     let Some(target) = comparable_target(path) else {
         return false;
     };
     roots.iter().any(|root| {
-        let root = normalize_folder(root);
+        let root = normalize_folder(&resolve_what_exists(root));
         // Equal is refused on purpose: a project rooted at the home directory
         // itself, or on top of an existing project's parent, is never what was
         // meant.
@@ -121,7 +124,7 @@ pub fn may_create_project_in(parent: &str, roots: &[String]) -> bool {
         return false;
     };
     roots.iter().any(|root| {
-        let root = normalize_folder(root);
+        let root = normalize_folder(&resolve_what_exists(root));
         names_a_folder(&root) && (target == root || target.starts_with(&format!("{root}/")))
     })
 }
@@ -133,8 +136,52 @@ fn comparable_target(path: &str) -> Option<String> {
     if path.split(['/', '\\']).any(|seg| seg == "..") {
         return None;
     }
-    let target = normalize_folder(path);
+    let target = normalize_folder(&resolve_what_exists(path));
     (!target.is_empty()).then_some(target)
+}
+
+/// The path with whatever part of it exists on disk resolved, and the rest left
+/// as it was written.
+///
+/// The roots this ends up compared against come from
+/// `ProjectRoots::new_project_parents`, which stores what
+/// `std::fs::canonicalize` returned. A textual test between a resolved root and
+/// an unresolved target answers the wrong question whenever the two spellings
+/// differ, and they differ for ordinary reasons: a home folder reached through
+/// a symlink, `/var` standing in for `/private/var` on macOS, an 8.3 short name
+/// on Windows. What comes out of that is "a new project has to go under your
+/// home folder or beside a project you already have", said about a folder that
+/// is under the home folder.
+///
+/// The folder being asked about usually does not exist yet — creating it is the
+/// whole point — so the path cannot simply be canonicalized. What can be
+/// resolved is the deepest ancestor that does exist; the segments below it are
+/// names nothing has claimed yet, and a name nothing has claimed cannot be a
+/// link to somewhere else. Where no part of the path exists, which is every
+/// path in the tests below, it stands as written and the comparison is the
+/// textual one it always was.
+///
+/// This narrows the rule rather than widening it. A link sitting inside a root
+/// and pointing out of it passed the textual test; it now resolves to where it
+/// actually goes, which is outside, and is refused.
+fn resolve_what_exists(path: &str) -> String {
+    let original = Path::new(path);
+    let mut unclaimed: Vec<&std::ffi::OsStr> = Vec::new();
+    let mut here = original;
+    loop {
+        if let Ok(resolved) = std::fs::canonicalize(here) {
+            let mut out = resolved;
+            for name in unclaimed.iter().rev() {
+                out.push(name);
+            }
+            return out.to_string_lossy().to_string();
+        }
+        let (Some(parent), Some(name)) = (here.parent(), here.file_name()) else {
+            return path.to_string();
+        };
+        unclaimed.push(name);
+        here = parent;
+    }
 }
 
 /// Whether a normalized root names a folder rather than a whole volume.
@@ -909,5 +956,96 @@ mod new_project_tests {
             FolderState::Occupied
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn scratch(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "boite-project-{tag}-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // The temp directory is itself reached through a link on macOS, where
+        // `/var` stands for `/private/var`, so the scratch this test compares
+        // against has to be the resolved spelling or the test is measuring that
+        // instead of what it means to.
+        std::fs::canonicalize(&dir).unwrap()
+    }
+
+    /// The refusal a user with a linked home folder used to get.
+    ///
+    /// The roots are stored canonicalized, the path is spelled however the
+    /// caller reached it, and a textual prefix test between the two says a
+    /// folder under the home folder is not under the home folder.
+    #[cfg(unix)]
+    #[test]
+    fn a_root_reached_through_a_link_still_holds_what_is_under_it() {
+        let base = scratch("linked-root");
+        std::fs::create_dir_all(base.join("real/dev/thing")).unwrap();
+        std::os::unix::fs::symlink(base.join("real"), base.join("link")).unwrap();
+
+        // What `ProjectRoots::new_project_parents` would hand over: the parent
+        // of a registered project, canonicalized.
+        let roots = vec![
+            std::fs::canonicalize(base.join("real/dev"))
+                .unwrap()
+                .to_string_lossy()
+                .into_owned(),
+        ];
+        let through_the_link = base.join("link/dev/newproj").to_string_lossy().into_owned();
+
+        assert!(may_create_project_at(&through_the_link, &roots));
+        assert!(may_create_project_in(
+            &base.join("link/dev").to_string_lossy(),
+            &roots
+        ));
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// The same resolution read from the other direction: a link sitting inside
+    /// a root and pointing out of it is where it points, not where it sits.
+    #[cfg(unix)]
+    #[test]
+    fn a_link_out_of_a_root_is_outside_it() {
+        let base = scratch("escaping-link");
+        std::fs::create_dir_all(base.join("dev/thing")).unwrap();
+        std::fs::create_dir_all(base.join("elsewhere")).unwrap();
+        std::os::unix::fs::symlink(base.join("elsewhere"), base.join("dev/out")).unwrap();
+
+        let roots = vec![base.join("dev").to_string_lossy().into_owned()];
+
+        assert!(!may_create_project_at(
+            &base.join("dev/out/newproj").to_string_lossy(),
+            &roots
+        ));
+        assert!(!may_create_project_in(
+            &base.join("dev/out").to_string_lossy(),
+            &roots
+        ));
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// A folder nothing has created yet is the ordinary case, and it is the one
+    /// with nothing on disk to resolve.
+    #[test]
+    fn a_path_that_does_not_exist_yet_is_still_placed() {
+        let base = scratch("unborn");
+        std::fs::create_dir_all(base.join("dev/thing")).unwrap();
+        let roots = vec![base.join("dev").to_string_lossy().into_owned()];
+
+        assert!(may_create_project_at(
+            &base.join("dev/newproj").to_string_lossy(),
+            &roots
+        ));
+        assert!(may_create_project_at(
+            &base.join("dev/newproj/deeper").to_string_lossy(),
+            &roots
+        ));
+        assert!(!may_create_project_at(
+            &base.join("elsewhere/newproj").to_string_lossy(),
+            &roots
+        ));
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

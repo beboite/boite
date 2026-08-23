@@ -37,18 +37,25 @@ use serde_json::Value;
 use crate::capability::{Capability, Grant};
 use crate::scope::ProjectRoots;
 use crate::store::Store;
+use crate::telemetry::TelemetryRuntime;
 
 pub mod checkpoint;
+pub mod conduct;
 pub mod files;
 pub mod git;
 pub mod records;
 pub mod sessions;
+pub mod sync;
+pub mod telemetry;
 
 pub use checkpoint::Checkpoints;
+pub use conduct::Conduct;
 pub use files::Files;
 pub use git::Git;
 pub use records::{Records, ThreadPatch};
 pub use sessions::Sessions;
+pub use sync::Sync;
+pub use telemetry::Telemetry;
 
 /// What a command wants to do with a path the caller handed it.
 ///
@@ -135,6 +142,15 @@ pub trait Host {
             .unwrap_or_default()
     }
 
+    /// The live pulse waits of this process, when it keeps any.
+    ///
+    /// `None` is honest for a test and for a host that never long-polls: a
+    /// `conduct.pulse` there answers immediately with `timedOut: true` rather
+    /// than parking a thread nothing will ever wake.
+    fn pulse_waiters(&self) -> Option<Arc<crate::pulse::Waiters>> {
+        None
+    }
+
     /// The rows this host keeps: projects, threads, todos, settings.
     ///
     /// `None` means it keeps none, and the record commands say so rather than
@@ -145,6 +161,15 @@ pub trait Host {
     /// purpose: a transport hands it to its own blocking pool, and a `&Store`
     /// would tie the whole bus to the lifetime of the call that built it.
     fn store(&self) -> Option<Arc<Store>> {
+        None
+    }
+
+    /// The process-wide telemetry runtime, when this host has one.
+    ///
+    /// `None` is honest for a test and for a host that never queued an event.
+    /// The queue cannot be derived from the other answers, which is why this
+    /// is its own method rather than something `prepare` rebuilds.
+    fn telemetry(&self) -> Option<Arc<TelemetryRuntime>> {
         None
     }
 }
@@ -162,6 +187,9 @@ pub fn methods() -> impl Iterator<Item = &'static str> {
         .chain(sessions::ALL_METHODS)
         .chain(records::ALL_METHODS)
         .chain(checkpoint::ALL_METHODS)
+        .chain(conduct::ALL_METHODS)
+        .chain(sync::ALL_METHODS)
+        .chain(telemetry::ALL_METHODS)
         .copied()
 }
 
@@ -224,6 +252,16 @@ fn probe_params() -> Value {
         "id": "p", "todoId": "d", "settings": {}, "q": "q",
         "edge": "start", "to": "0",
         "status": "idle", "ids": [], "settled": true,
+        "text": "t",
+        "toThreadId": "t", "dispatchId": "d", "state": "delivered",
+        "audio": "", "actionId": "a",
+        "remoteUrl": "https://example.invalid/x.git",
+        "provider": "claude", "email": "you@example.com",
+        "enabled": true, "modeA": true, "modeB": false, "stage": "available",
+        "targetVersion": "1.0.0", "errorCode": "io", "paneKind": "editor",
+        "uiLanguage": "en", "theme": "dark", "threadWorktrees": true,
+        "animations": "system", "mcpYolo": false, "idleAutoclose": true,
+        "orchestrator": false, "voice": false,
     })
 }
 
@@ -234,10 +272,19 @@ fn probe_params() -> Value {
 #[derive(Debug, Clone)]
 pub enum Command {
     Checkpoints(Checkpoints),
+    Conduct(Conduct),
     Files(Files),
     Git(Git),
     Records(Records),
     Sessions(Sessions),
+    Sync(Sync),
+    Telemetry(Telemetry),
+}
+
+impl From<Conduct> for Command {
+    fn from(conduct: Conduct) -> Self {
+        Command::Conduct(conduct)
+    }
 }
 
 impl From<Checkpoints> for Command {
@@ -264,9 +311,21 @@ impl From<Files> for Command {
     }
 }
 
+impl From<Sync> for Command {
+    fn from(value: Sync) -> Self {
+        Command::Sync(value)
+    }
+}
+
 impl From<Sessions> for Command {
     fn from(sessions: Sessions) -> Self {
         Command::Sessions(sessions)
+    }
+}
+
+impl From<Telemetry> for Command {
+    fn from(telemetry: Telemetry) -> Self {
+        Command::Telemetry(telemetry)
     }
 }
 
@@ -298,6 +357,15 @@ impl Command {
         if checkpoint::ALL_METHODS.contains(&method) {
             return Checkpoints::decode(method, params).map(Command::Checkpoints);
         }
+        if conduct::ALL_METHODS.contains(&method) {
+            return Conduct::decode(method, params).map(Command::Conduct);
+        }
+        if sync::ALL_METHODS.contains(&method) {
+            return Sync::decode(method, params).map(Command::Sync);
+        }
+        if telemetry::ALL_METHODS.contains(&method) {
+            return Telemetry::decode(method, params).map(Command::Telemetry);
+        }
         Err(format!("unknown method: {method}"))
     }
 
@@ -305,10 +373,13 @@ impl Command {
     pub fn name(&self) -> &'static str {
         match self {
             Command::Checkpoints(c) => c.name(),
+            Command::Conduct(c) => c.name(),
             Command::Files(f) => f.name(),
             Command::Git(g) => g.name(),
             Command::Records(r) => r.name(),
             Command::Sessions(s) => s.name(),
+            Command::Sync(s) => s.name(),
+            Command::Telemetry(t) => t.name(),
         }
     }
 
@@ -316,10 +387,13 @@ impl Command {
     pub fn wire(&self) -> Wire {
         match self {
             Command::Checkpoints(c) => c.wire(),
+            Command::Conduct(c) => c.wire(),
             Command::Files(f) => f.wire(),
             Command::Git(g) => g.wire(),
             Command::Records(r) => r.wire(),
             Command::Sessions(s) => s.wire(),
+            Command::Sync(s) => s.wire(),
+            Command::Telemetry(t) => t.wire(),
         }
     }
 
@@ -332,10 +406,13 @@ impl Command {
     pub fn capability(&self) -> Capability {
         match self {
             Command::Checkpoints(c) => c.capability(),
+            Command::Conduct(c) => c.capability(),
             Command::Files(f) => f.capability(),
             Command::Git(g) => g.capability(),
             Command::Records(r) => r.capability(),
             Command::Sessions(s) => s.capability(),
+            Command::Sync(s) => s.capability(),
+            Command::Telemetry(t) => t.capability(),
         }
     }
 
@@ -353,10 +430,13 @@ impl Command {
         grant.ensure(self.capability())?;
         match self {
             Command::Checkpoints(c) => c.prepare(host),
+            Command::Conduct(c) => c.prepare(host, grant),
             Command::Files(f) => f.prepare(host),
             Command::Git(g) => g.prepare(host),
             Command::Records(r) => r.prepare(host),
             Command::Sessions(s) => s.prepare(host),
+            Command::Sync(s) => s.prepare(host),
+            Command::Telemetry(t) => t.prepare(host, grant),
         }
     }
 }
@@ -378,7 +458,13 @@ pub enum Ready {
     /// `prepare` and travels here rather than being fetched later — which keeps
     /// "a host that keeps no records" a refusal at the boundary instead of an
     /// error thrown from inside the work.
-    Records(Records, Arc<Store>),
+    Records(Records, Arc<Store>, Option<Arc<TelemetryRuntime>>),
+    /// An orchestration command, with the store and the live-wait registry the
+    /// host resolved for it. Same reasoning as [`Ready::Records`]; the registry
+    /// is optional because a host with no long-poll answers honestly without.
+    Conduct(Conduct, Arc<Store>, Option<Arc<crate::pulse::Waiters>>),
+    /// A telemetry command, with the runtime `prepare` resolved for it.
+    Telemetry(Telemetry, Arc<TelemetryRuntime>),
 }
 
 impl Ready {
@@ -390,12 +476,21 @@ impl Ready {
             Ready::Work(Command::Files(f)) => f.run(),
             Ready::Work(Command::Git(g)) => g.run(),
             Ready::Work(Command::Sessions(s)) => s.run(),
+            Ready::Work(Command::Sync(s)) => s.run(),
             // `prepare` turns every record command into the arm below, so this
             // is unreachable rather than a case with an answer.
             Ready::Work(Command::Records(r)) => {
                 Err(format!("{} was not prepared with a store", r.name()))
             }
-            Ready::Records(r, store) => r.run(&store),
+            Ready::Work(Command::Conduct(c)) => {
+                Err(format!("{} was not prepared with a store", c.name()))
+            }
+            Ready::Work(Command::Telemetry(t)) => {
+                Err(format!("{} was not prepared with a telemetry runtime", t.name()))
+            }
+            Ready::Records(r, store, telemetry) => r.run(&store, telemetry.as_deref()),
+            Ready::Conduct(c, store, waiters) => c.run(&store, waiters),
+            Ready::Telemetry(t, runtime) => t.run(&runtime),
         }
     }
 }
@@ -627,7 +722,20 @@ mod tests {
             ("codexSwitcher.save", MutateProject),
             ("codexSwitcher.activate", MutateProject),
             ("codexSwitcher.version", ReadProject),
+            ("fastMcpSsh.version", ReadProject),
+            ("kebaccSwitcher.list", ReadProject),
+            ("kebaccSwitcher.add", MutateProject),
+            ("kebaccSwitcher.switch", MutateProject),
+            ("kebaccSwitcher.version", ReadProject),
             ("session.transcript", ReadProject),
+            ("cli.catalog", ReadProject),
+            ("cli.latest", ReadProject),
+            ("cli.jobs", ReadProject),
+            ("cli.dataPaths", ReadProject),
+            ("cli.install", MutateAcross),
+            ("cli.uninstall", MutateAcross),
+            ("cli.cancel", MutateProject),
+            ("cli.dismiss", MutateProject),
             ("project.list", ReadProject),
             ("project.create", MutateAcross),
             ("project.archive", MutateProject),
@@ -652,6 +760,40 @@ mod tests {
             ("checkpoint.fileVersions", ReadProject),
             ("checkpoint.restore", MutateProject),
             ("checkpoint.forget", MutateProject),
+            ("conduct.pulse", ReadProject),
+            ("conduct.record", MutateProject),
+            ("orchestrator.post", MutateProject),
+            ("orchestrator.say", MutateProject),
+            ("orchestrator.messages", ReadProject),
+            ("orchestrator.start", MutateProject),
+            ("orchestrator.status", ReadProject),
+            ("orchestrator.actions", ReadProject),
+            ("orchestrator.undo", MutateProject),
+            ("thread.dispatch", MutateProject),
+            ("thread.acceptDispatch", MutateProject),
+            ("dispatch.drain", MutateProject),
+            ("dispatch.settle", MutateProject),
+            ("voice.transcribe", ReadProject),
+            ("sync.sources", ReadProject),
+            ("sync.status", ReadProject),
+            ("sync.probe", ReadProject),
+            ("sync.pull", MutateAcross),
+            ("sync.conflicts", ReadProject),
+            ("sync.resolve", MutateAcross),
+            ("sync.skip", MutateProject),
+            ("sync.push", MutateAcross),
+            ("sync.cancel", MutateProject),
+            ("sync.dismiss", MutateProject),
+            ("sync.repair", MutateAcross),
+            ("telemetry.state", ReadProject),
+            ("telemetry.setModeA", MutateProject),
+            ("telemetry.setModeB", MutateProject),
+            ("telemetry.completeOnboarding", MutateProject),
+            ("telemetry.export", ReadProject),
+            ("telemetry.retryForget", MutateProject),
+            ("telemetry.trackUpdate", MutateProject),
+            ("telemetry.trackPane", MutateProject),
+            ("telemetry.trackSettingsSnapshot", MutateProject),
         ];
         let actual: Vec<(&str, Capability)> = every_command()
             .iter()
@@ -677,6 +819,8 @@ mod tests {
             "thread.delete",
             "todo.save", "todo.delete", "settings.set", "workspace.setInfo",
             "checkpoint.capture", "checkpoint.restore", "checkpoint.forget",
+            "sync.pull", "sync.push", "sync.resolve", "sync.repair",
+            "sync.skip", "sync.cancel", "sync.dismiss",
         ] {
             let command = every_command()
                 .into_iter()
@@ -686,19 +830,39 @@ mod tests {
         }
     }
 
-    /// Exactly three commands reach past the project they were called in, and a
-    /// credentials file can use everything else.
+    /// The calls that reach past the project they were called in, written out so
+    /// that an arrival is a diff somebody has to agree with rather than a
+    /// silently widened grant.
     ///
-    /// This test used to assert that the number was zero, with a note saying
-    /// that it failing would be the notice that the endpoint's own check is no
-    /// longer the only one. That is what happened: the record domain brought
-    /// creating a project, deleting one and deleting a thread onto the bus, and
-    /// those are the calls the capability doc names as reaching past. So the
-    /// list is written out rather than counted, and a fourth arrival is a diff
-    /// somebody has to agree with instead of a silently widened grant.
+    /// This test used to assert the number was zero, with a note saying that it
+    /// failing would be the notice that the endpoint's own check is no longer
+    /// the only one. That is what happened twice. First the record domain
+    /// brought creating a project, deleting one and deleting a thread. Then sync
+    /// brought four more, and they are the sharpest of the lot: they write into
+    /// `~/.claude` and `~/.agents`, which is every agent's own configuration and
+    /// the instructions every agent reads. Then the CLI manager brought two more,
+    /// which do not reach past a project so much as past every project:
+    /// installing a binary onto the machine, and deleting an agent's own data
+    /// directory. A grant scoped to one project — the credentials file the todo
+    /// panel hands to agents — must not reach them, and `Grant::Project.allows`
+    /// refusing each one is asserted below.
+    ///
+    /// The capability check is not the whole guard for sync, and is not meant to
+    /// be: `Grant::Owner` allows everything. What keeps an agent away from these
+    /// is that `boite-mcp` does not offer them, which its own test asserts.
     #[test]
-    fn only_the_three_calls_that_change_where_work_happens_reach_across() {
-        const ACROSS: &[&str] = &["project.create", "project.delete", "thread.delete"];
+    fn only_the_calls_that_change_the_machine_reach_across() {
+        const ACROSS: &[&str] = &[
+            "project.create",
+            "project.delete",
+            "thread.delete",
+            "sync.pull",
+            "sync.push",
+            "sync.resolve",
+            "sync.repair",
+            "cli.install",
+            "cli.uninstall",
+        ];
         for command in every_command() {
             let across = command.capability() == Capability::MutateAcross;
             assert_eq!(

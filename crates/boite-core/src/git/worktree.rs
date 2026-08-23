@@ -80,7 +80,15 @@ pub fn ensure_boite_excluded(repo: &Path) {
     if existing.is_err() {
         let _ = fs::create_dir_all(exclude.parent().unwrap_or(&exclude));
     }
-    let _ = fs::write(&exclude, text);
+    // Not fatal — the worktrees work either way — but the user sees the result
+    // as their own repository suddenly full of untracked directories, and
+    // nothing connects that to this.
+    if let Err(e) = fs::write(&exclude, text) {
+        eprintln!(
+            "[boite/worktree] {} could not be written: {e}. Worktree directories will show up as untracked.",
+            exclude.display()
+        );
+    }
 }
 
 /// One directory named after an id, directly under `base` and never elsewhere.
@@ -352,9 +360,12 @@ fn take_marker(dir: &Path) -> bool {
     spare_marker(dir).is_some_and(|marker| fs::remove_file(marker).is_ok())
 }
 
-/// Same directory, whatever the platform spelled it as. Compared as text rather
-/// than canonicalized: canonicalizing costs syscalls per call and resolves
-/// symlinks, and both paths here were written by this app.
+/// Same directory, whatever the platform spelled it as.
+///
+/// Text first: both paths were usually written by this app. Git's porcelain
+/// list is the exception. It prints the canonical form, so `/var` becomes
+/// `/private/var` on macOS and Windows may 8.3-shorten a name. Canonicalize
+/// only when the strings disagree, and only then.
 fn same_dir(a: &Path, b: &Path) -> bool {
     let norm = |p: &Path| {
         p.to_string_lossy()
@@ -362,7 +373,13 @@ fn same_dir(a: &Path, b: &Path) -> bool {
             .trim_end_matches('/')
             .to_lowercase()
     };
-    norm(a) == norm(b)
+    if norm(a) == norm(b) {
+        return true;
+    }
+    match (fs::canonicalize(a), fs::canonicalize(b)) {
+        (Ok(ca), Ok(cb)) => norm(&ca) == norm(&cb),
+        _ => false,
+    }
 }
 
 struct Spare {
@@ -590,8 +607,17 @@ fn rename_claimed(repo: &Path, from: &Path, label: &str) -> Option<String> {
     repair.args(["worktree", "repair", &to.to_string_lossy()]);
     if run(repair).is_err() {
         // Back where git still believes it is, rather than left at a path git
-        // was never told about.
-        let _ = fs::rename(&to, from);
+        // was never told about. If even that fails the checkout is at a path
+        // nothing knows, which is the one outcome here that a person has to
+        // sort out by hand, so it says where it left it.
+        if let Err(e) = fs::rename(&to, from) {
+            eprintln!(
+                "[boite/worktree] {} was moved to {} and could not be put back: {e}. \
+                 git still expects it at the first path; `git worktree repair` there fixes it.",
+                from.display(),
+                to.display()
+            );
+        }
         return None;
     }
     Some(to.to_string_lossy().into_owned())
@@ -2471,6 +2497,11 @@ mod worktree_tests {
 
     /// The whole point of the fallback: the dependency artifacts arrive without
     /// costing disk, and nothing a build rewrites comes with them.
+    ///
+    /// macOS takes `clonefile` first, which is copy-on-write: a write through
+    /// the main checkout does not appear in the worktree. This assertion is
+    /// about hard links, the path Linux and Windows actually take.
+    #[cfg(not(target_os = "macos"))]
     #[test]
     fn build_output_arrives_as_links_for_dependencies_only() {
         let f = Fixture::new();
@@ -2534,6 +2565,10 @@ mod worktree_tests {
     /// The fallback refuses rather than guesses. A manifest that names no
     /// package leaves no way to tell a local artifact from a vendored one, and
     /// linking the wrong one is the failure this whole design exists to avoid.
+    ///
+    /// macOS never reaches this path: `clonefile` clones the whole tree before
+    /// package names are asked, and a CoW clone does not need them.
+    #[cfg(not(target_os = "macos"))]
     #[test]
     fn build_output_is_left_alone_when_the_packages_cannot_be_identified() {
         let f = Fixture::new();

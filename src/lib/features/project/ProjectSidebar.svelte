@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
-  import { scale } from "svelte/transition";
+  import { tip } from "$lib/shared/actions/tooltip";
+  import { scale, slide } from "svelte/transition";
+  import { DUR, easeOutQuint } from "$lib/theme/motion";
   import { app } from "$lib/app/store.svelte";
   import { visibleStatus } from "$lib/domain/thread-status";
   import { workspace } from "$lib/backend";
@@ -19,6 +21,11 @@
     stopThread,
   } from "$lib/features/thread/api";
   import { moveThreadToProject } from "$lib/features/thread/move";
+  import {
+    muteProjectDispatches,
+    setThreadAcceptDispatch,
+  } from "$lib/app/dispatches";
+  import { orchestrator } from "$lib/features/orchestrator/store.svelte";
   import { notifications } from "$lib/features/notifications/store.svelte";
   import { refreshProjectIcon } from "$lib/features/project/api";
   import { openProjectDashboard } from "$lib/features/project/dashboard";
@@ -41,6 +48,7 @@
   import RemoteProjectPicker from "./RemoteProjectPicker.svelte";
   import { confirmDialog } from "$lib/shared/components/confirm.svelte";
   import { resizeHandle } from "$lib/shared/actions/resizeHandle";
+  import { rowFlip } from "$lib/shared/actions/rowFlip.svelte";
   import { longPress } from "$lib/shared/actions/longPress";
   import ContextMenu from "$lib/shared/components/ContextMenu.svelte";
   import type { ContextMenuItem } from "$lib/shared/components/ContextMenu.svelte";
@@ -110,6 +118,27 @@
   let filterTerm = $state("");
   let filterEl: HTMLInputElement | null = $state(null);
   let remotePicker = $state(false);
+
+  /**
+   * How a project card or a thread row arrives and leaves.
+   *
+   * The only list in the app whose rows appeared and vanished in one frame:
+   * everything the sidebar moves is drag, and a drag animates itself through
+   * `rowShift`. So a thread launched, a thread closed, a project added and a
+   * project archived all popped, on the surface the user looks at most.
+   *
+   * `slide` rather than `fly` or `scale`: the row is taking the column's height
+   * with it, and the thing to show is the space opening or closing. A transform
+   * would also fight the drag's own, which is written inline on the same nodes.
+   *
+   * Off while the filter is being typed. Each keystroke rewrites the list, and
+   * rows collapsing out under the caret while more are still leaving reads as
+   * the sidebar struggling to keep up rather than as an answer.
+   */
+  const rowMotion = $derived({
+    duration: filterTerm ? 0 : DUR.base,
+    easing: easeOutQuint,
+  });
 
   /**
    * The signal design, and what it does to the glyph.
@@ -783,6 +812,19 @@
         app.toggleThreadKeepAwake(thread.id);
       },
     });
+    // The dispatch mute, user-only by construction: the bus refuses this
+    // write to any agent grant, so this menu is the one way back on.
+    if (orchestrator.enabled && !thread.role) {
+      items.push({
+        label:
+          thread.acceptDispatch === false
+            ? t("sidebar.unmuteDispatch")
+            : t("sidebar.muteDispatch"),
+        action: () => {
+          void setThreadAcceptDispatch(thread.id, thread.acceptDispatch === false);
+        },
+      });
+    }
     items.push({ separator: true });
     items.push({
       label: t("sidebar.reloadThread"),
@@ -878,6 +920,33 @@
         if (p) void refreshProjectIcon(p);
       },
     });
+    // The project-wide cut: every worker muted at once, and muting empties
+    // each thread's queued lines on the boite.
+    if (orchestrator.enabled) {
+      items.push({
+        label: t("sidebar.muteProjectDispatch"),
+        action: () => void muteProjectDispatches(project.id),
+      });
+    }
+    // The per-project override, cycled: inherit, on, off. The label carries
+    // where it stands; the overview holds the same choice as a select.
+    if (
+      settings.state.experimentOrchestrator &&
+      settings.state.experimentOrchestratorPerProject
+    ) {
+      const own = settings.state.orchestratorByProject[project.id] ?? null;
+      const state =
+        own === "on"
+          ? t("project.orchestratorOn")
+          : own === "off"
+            ? t("project.orchestratorOff")
+            : t("project.orchestratorInherit");
+      const next = own === null ? "on" : own === "on" ? "off" : null;
+      items.push({
+        label: t("sidebar.orchestratorTriState", { state }),
+        action: () => void settings.setOrchestratorForProject(project.id, next),
+      });
+    }
     items.push({ separator: true });
     items.push({
       label: t("sidebar.removeProject"),
@@ -1029,13 +1098,26 @@
   const filtered = $derived(
     filterSidebar(
       showArchived ? app.archivedProjects : app.sortedProjects,
-      (id: string) => app.threadsByProjectSorted(id),
+      // An orchestrator is not one of the project's terminals; the home chat
+      // is its surface, so a role-bearing row stays out of the sidebar.
+      (id: string) => app.threadsByProjectSorted(id).filter((th) => !th.role),
       projectDisplayName,
       filterTerm,
     ),
   );
 
   const visibleProjects = $derived(filtered.projects);
+
+  /**
+   * The order itself, as one string, for the lists that animate their moves.
+   *
+   * The ids and nothing else: a project's threads, its status and its title all
+   * change constantly, and every one of those would have the sidebar measure
+   * itself twice for rows that have not moved. A drag is left out of it because
+   * it slides the rows by hand (`dragShiftStyle`), and two owners of one
+   * transform is a row that fights itself.
+   */
+  const projectOrderKey = $derived(visibleProjects.map((p) => p.id).join(","));
   const filtering = $derived(normaliseTerm(filterTerm).length > 0);
 
   /**
@@ -1164,7 +1246,7 @@
         class="section-label flex items-center gap-1.5 rounded transition hover:text-foreground"
         onclick={() => (showArchived = false)}
         aria-label={t("sidebar.backToProjects")}
-        title={t("sidebar.backToProjects")}
+        use:tip={t("sidebar.backToProjects")}
       >
         <ArrowLeft class="size-3.5" />
         {t("sidebar.archives")}
@@ -1188,7 +1270,7 @@
           else queueMicrotask(() => filterEl?.focus());
         }}
         aria-label={t("sidebar.filterThreads")}
-        title={t("sidebar.filterThreads")}
+        use:tip={t("sidebar.filterThreads")}
       >
         <SearchIcon class="size-4" />
       </button>
@@ -1199,7 +1281,7 @@
           : ''}"
         onclick={() => (showArchived = !showArchived)}
         aria-label={t("sidebar.showArchived")}
-        title={t("sidebar.archivedProjects")}
+        use:tip={t("sidebar.archivedProjects")}
       >
         <FolderArchive class="size-4" />
       </button>
@@ -1209,7 +1291,7 @@
           class="rounded-md p-1 text-muted-foreground transition hover:bg-accent hover:text-foreground"
           onclick={addProjectClick}
           aria-label={t("sidebar.addProject")}
-          title={t("sidebar.addProjectFromFolder")}
+          use:tip={t("sidebar.addProjectFromFolder")}
         >
           <Plus class="size-4" />
         </button>
@@ -1227,7 +1309,7 @@
             onclick={() => (remotePicker = true)}
             aria-label={t("sidebar.remoteProjects")}
             aria-expanded={remotePicker}
-            title={t("sidebar.remoteProjectsOn", {
+            use:tip={t("sidebar.remoteProjectsOn", {
               name: workspace.info.name || "boite",
             })}
           >
@@ -1270,9 +1352,10 @@
        other, so it is still one click away by being clicked. -->
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
   <div
-    class="flex-1 overflow-y-auto px-2 pb-2"
+    class="flex-1 scroll-pane overflow-y-auto px-2 pb-2"
     role="list"
     onkeydown={onListKeydown}
+    use:rowFlip={{ key: () => projectOrderKey, enabled: () => !liveDrag }}
   >
     {#if showArchived && visibleProjects.length === 0}
       <div
@@ -1316,6 +1399,7 @@
       )}
       <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
       <div
+        transition:slide={rowMotion}
         class="project-block group/block mb-2"
         class:launching={launcher?.projectId === project.id}
         class:scratch-block={isScratchRow}
@@ -1341,7 +1425,7 @@
           class="project-row group/project relative flex items-center gap-2 px-2 py-1.5 transition hover:text-foreground {showArchived
             ? ''
             : 'cursor-pointer'}"
-          title={isRemoteOrigin
+          use:tip={isRemoteOrigin
             ? boiteOffline
               ? t("sidebar.onBoiteOffline", {
                   name: workspace.info.name || "boite",
@@ -1389,7 +1473,7 @@
               type="button"
               data-nav-row
               class="min-w-0 flex-1 truncate-safe text-left text-base font-medium leading-[19px] text-foreground/90 transition group-hover/project:text-foreground"
-              title={project.cwd}
+              use:tip={project.cwd}
               onclick={() => {
                 if (consumeDragClick(project.id)) return;
                 if (showArchived) return;
@@ -1410,7 +1494,7 @@
               }}
               data-drag-block
               aria-label={t("sidebar.unarchiveProject")}
-              title={t("sidebar.unarchive")}
+              use:tip={t("sidebar.unarchive")}
             >
               <FolderUp class="size-3.5" />
             </button>
@@ -1435,7 +1519,7 @@
               data-drag-block
               data-launcher-trigger
               aria-label={t("sidebar.launchHere")}
-              title={t("sidebar.launchHere")}
+              use:tip={t("sidebar.launchHere")}
               aria-expanded={launcher?.projectId === project.id}
             >
               <Plus class="size-3.5" />
@@ -1446,7 +1530,7 @@
               onclick={(e) => openProjectContextMenu(project, e)}
               data-drag-block
               aria-label={t("sidebar.projectOptions")}
-              title={t("sidebar.more")}
+              use:tip={t("sidebar.more")}
             >
               <MoreHorizontal class="size-3.5" />
             </button>
@@ -1506,6 +1590,7 @@
                   : null}
               <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
               <li
+                transition:slide={rowMotion}
                 class="thread-row group/thread"
                 class:source={isThreadSource}
                 data-thread-row={thread.id}
@@ -1626,19 +1711,11 @@
                          carries this name. -->
                     <span
                       class="pointer-events-none relative min-w-0 flex-1 truncate-safe text-left text-base leading-[19px]"
-                      title={thread.title ?? thread.label}
+                      use:tip={thread.title ?? thread.label}
                       aria-hidden="true"
                     >
                       {thread.title ?? thread.label}
                     </span>
-                  {/if}
-                  {#if expandable}
-                    <DelegationStack
-                      {stack}
-                      count={foldedCount}
-                      expanded={!!stacksOpen[thread.id]}
-                      onToggle={() => toggleStack(thread.id)}
-                    />
                   {/if}
                   <!-- The logo used to live here, opposite the status dot, and
                        swapped for the close button on hover. The glyph on the
@@ -1659,12 +1736,33 @@
                     aria-label={t("sidebar.closeThreadNamed", {
                       name: thread.title ?? thread.label,
                     })}
-                    title={t("sidebar.closeThread")}
+                    use:tip={t("sidebar.closeThread")}
                   >
                     <X class="size-3.5" />
                   </button>
                 </div>
               </li>
+              {#if expandable}
+                <!-- Its own row under the parent, indented where the children
+                     themselves land, rather than a pile of faces inside the
+                     parent's card. No data-thread-row on it: the reorder
+                     measures those rects to place a drop slot, and a row that
+                     is not a thread must not take a slot. -->
+                <li
+                  class="delegation-row"
+                  class:source={isThreadSource}
+                  style:margin-left={`${(depth + 1) * 16}px`}
+                  style:transform={threadSlide.transform}
+                  style:transition={threadSlide.transition}
+                >
+                  <DelegationStack
+                    {stack}
+                    count={foldedCount}
+                    expanded={!!stacksOpen[thread.id]}
+                    onToggle={() => toggleStack(thread.id)}
+                  />
+                </li>
+              {/if}
           {/snippet}
 
           <!-- No rail down the left any more: the card's own outline is what
@@ -1676,13 +1774,18 @@
                now `0 0 12px -3px`, which is a nine-pixel bloom rather than a
                thirteen-pixel one, and every pixel of gap is a thread the
                sidebar stops showing. -->
+          {@const liveRows = visibleDelegationRows(live, stacksOpen)}
           {#if live.length > 0}
             <ul
               class="px-1 {settledCount > 0 ? 'pb-0.5' : 'pb-1'} {rowGapClass}"
               data-thread-list
               data-project-id={project.id}
+              use:rowFlip={{
+                key: () => liveRows.map((r) => r.thread.id).join(","),
+                enabled: () => !liveDrag,
+              }}
             >
-              {#each visibleDelegationRows(live, stacksOpen) as { thread, depth, stack, foldedCount, expandable }, threadIdx (thread.id)}
+              {#each liveRows as { thread, depth, stack, foldedCount, expandable }, threadIdx (thread.id)}
                 {@render threadItem(thread, threadIdx, true, depth, stack, foldedCount, expandable)}
               {/each}
             </ul>
@@ -1713,7 +1816,7 @@
                 }}
                 aria-expanded={open}
                 aria-controls={`settled-${project.id}`}
-                title={open ? t("sidebar.hideSettled") : t("sidebar.showSettled")}
+                use:tip={open ? t("sidebar.hideSettled") : t("sidebar.showSettled")}
               >
                 <ChevronRight
                   class="size-3 shrink-0 transition-transform {open ? 'rotate-90' : ''}"
@@ -1721,8 +1824,15 @@
                 {t("sidebar.settledCount", { count: String(settledCount) })}
               </button>
               {#if open}
-                <ul class="px-0.5 pb-0.5 {rowGapClass}">
-                  {#each visibleDelegationRows(settled, stacksOpen) as { thread, depth, stack, foldedCount, expandable }, threadIdx (thread.id)}
+                {@const settledRows = visibleDelegationRows(settled, stacksOpen)}
+                <ul
+                  class="px-0.5 pb-0.5 {rowGapClass}"
+                  use:rowFlip={{
+                    key: () => settledRows.map((r) => r.thread.id).join(","),
+                    enabled: () => !liveDrag,
+                  }}
+                >
+                  {#each settledRows as { thread, depth, stack, foldedCount, expandable }, threadIdx (thread.id)}
                     {@render threadItem(thread, threadIdx, false, depth, stack, foldedCount, expandable)}
                   {/each}
                 </ul>
@@ -1743,7 +1853,7 @@
       onStateChange: (r) => (resizing = r),
     }}
     aria-label={t("sidebar.resizeSidebar")}
-    title={t("sidebar.resizeSidebar")}
+    use:tip={t("sidebar.resizeSidebar")}
     tabindex="-1"
   ></button>
 </aside>
@@ -1799,7 +1909,7 @@
     />
     <span
       class="min-w-0 flex-1 truncate-safe text-left text-base leading-[19px]"
-      title={threadDragGhost.thread.title ?? threadDragGhost.thread.label}
+      use:tip={threadDragGhost.thread.title ?? threadDragGhost.thread.label}
     >
       {threadDragGhost.thread.title ?? threadDragGhost.thread.label}
     </span>
@@ -1941,6 +2051,12 @@
   .thread-row {
     transform-origin: left center;
   }
+  /* The dragged thread's card is hidden while the ghost carries it; its
+     delegation row belongs to that card and goes with it. */
+  .delegation-row.source {
+    opacity: 0;
+    pointer-events: none;
+  }
   /* A well under the live list, not a faded copy of the same rows. The cut
      is the well's top edge, so opening grows down from the toggle instead of
      inserting names above it. */
@@ -2018,13 +2134,21 @@
       0 0 12px -4px color-mix(in srgb, var(--color-foreground) 60%, transparent);
   }
 
-  /* A thread that has just finished. Green drains out of the card over six
-     seconds, which is long enough to be caught by a glance that arrives late
-     and short enough that the row goes back to being a row. `forwards` matters:
-     without it the box-shadow snaps back to the 0% keyframe for one frame
-     before the class drops, and the card flashes green on its way out. */
+  /* A thread that finished and has not been read. It blinks green to violet
+     until something takes the mark back — see `boite-finish-blink`. */
   .thread-card.just-finished {
-    animation: boite-finish-glow 6s var(--ease-out-quint) forwards;
+    animation: boite-finish-blink 2.4s ease-in-out infinite;
+  }
+
+  /* Reduced motion still needs the answer, just not the movement: the card
+     holds the green ring the blink starts on. */
+  @media (prefers-reduced-motion: reduce) {
+    .thread-card.just-finished {
+      animation: none;
+      box-shadow:
+        inset 0 0 0 1px color-mix(in srgb, var(--color-success) 70%, transparent),
+        0 0 12px 1px color-mix(in srgb, var(--color-success) 24%, transparent);
+    }
   }
 
   /* This agent just changed something in Boite itself rather than in its own
@@ -2123,21 +2247,38 @@
     --lit: 0.8;
     --wash: 16%;
   }
+  /* Unread, in the glow design's own terms: the halo it already draws swaps
+     hue instead of a second ring being stacked over it. `--tone` is the state's
+     own colour written by the markup, so the green half is whatever the theme
+     calls success and only the violet is named here.
+
+     This is the one animation in the design that repaints, and it is the
+     exception the rest of the file argues against on purpose: a hue cannot
+     travel on the compositor. What keeps it affordable is how few rows can be
+     in this state at once — a row leaves it on the first click, on the next
+     turn, or when the idle timer parks it — against `working`, which is what
+     the no-repaint rule was written for and can hold half a column. */
   .thread-card.glow.fresh[data-state="finished"]::before {
-    animation: card-finish 1.4s var(--ease-out-quint) forwards;
+    animation: card-finish 2.4s ease-in-out infinite;
   }
-  /* `forwards` pins the last keyframe for as long as `.fresh` is on the card, so
-     a literal here is not a starting point the state rule can correct: it is the
-     state rule, overriding it for the whole flash. It reads `--lit` for that
-     reason. */
   @keyframes card-finish {
-    0% {
-      opacity: 1;
-      transform: scale(1.015);
-    }
+    0%,
     100% {
-      opacity: var(--lit);
-      transform: scale(1);
+      box-shadow:
+        inset 0 0 0 1px color-mix(in srgb, var(--tone) 75%, transparent),
+        0 0 10px -2px color-mix(in srgb, var(--tone) 70%, transparent);
+    }
+    50% {
+      box-shadow:
+        inset 0 0 0 1px color-mix(in srgb, var(--color-awake) 75%, transparent),
+        0 0 10px -2px color-mix(in srgb, var(--color-awake) 70%, transparent);
+    }
+  }
+  /* No movement, and still an answer: the row keeps the halo its state already
+     draws, which is the green half of the blink. */
+  @media (prefers-reduced-motion: reduce) {
+    .thread-card.glow.fresh[data-state="finished"]::before {
+      animation: none;
     }
   }
 

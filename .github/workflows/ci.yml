@@ -24,6 +24,16 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
+      # This job, the two below it and the four release runners all run
+      # `bun install --frozen-lockfile`, and setup-bun caches the bun binary,
+      # never the packages. This is the global install cache, keyed on the
+      # lockfile, so an unchanged tree resolves from disk.
+      - name: Cache bun deps
+        uses: actions/cache@v6
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: ${{ runner.os }}-bun-
       - name: Install
         run: bun install --frozen-lockfile
       - name: Sync + svelte-check + oxlint
@@ -79,12 +89,79 @@ jobs:
           mkdir -p src-tauri/binaries
           cp target/debug/boite-mcp \
             "src-tauri/binaries/boite-mcp-$(rustc -vV | sed -n 's/^host: //p')"
-      - name: cargo check
-        run: cargo check --workspace --all-targets
+      # No `cargo check` step ahead of this one. It was there, with the same
+      # `--workspace --all-targets`, and it bought nothing: clippy runs through
+      # `clippy-driver`, which fingerprints differently from rustc, so it never
+      # reused a single unit of what check had just built. It type-checked the
+      # whole workspace a second time and reported the same errors plus the
+      # lints. One pass, and it is this one.
+      #
+      # `--all-targets` covers `crates/boite-core/benches/hot_paths.rs` too, so
+      # a bench that stopped compiling fails here rather than the day somebody
+      # wants a number. There used to be a `cargo bench --workspace --no-run`
+      # below for that, justified by benches building "only under the default
+      # features". They build under the same ones: `criterion` is a plain
+      # dev-dependency with `default-features = false` pinned in the manifest,
+      # not something a feature flag turns on. Running the benchmarks is a
+      # local job either way: on a shared runner the numbers measure the runner.
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets --no-deps -- -D warnings
       - name: cargo test
         run: cargo test --workspace
+
+  # What the two lockfiles are known to be vulnerable to.
+  #
+  # dependabot already opens the version bumps, and version drift is not the
+  # question this asks: a dependency can be current and still be the one with
+  # the advisory against it, and nothing here has ever looked. For an app that
+  # signs its own binaries and ships a server that listens, "nobody checked" is
+  # not a posture.
+  #
+  # It gates, and that is deliberate even though an advisory filed against a
+  # transitive crate turns an unrelated pull request red. Release calls this
+  # workflow before it builds anything, so a gate here is the difference between
+  # knowing before the tag and knowing after the binary is signed. The fix for a
+  # red one is the bump dependabot is already offering.
+  advisories:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Cache bun deps
+        uses: actions/cache@v6
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: ${{ runner.os }}-bun-
+      - name: Install
+        run: bun install --frozen-lockfile
+      # Moderate and up. The one advisory below that line today is a `cookie`
+      # transitive of @sveltejs/kit with no fixed version published, and a gate
+      # that is red for something nobody can act on is a gate people learn to
+      # ignore. Raising the floor is a decision to make out loud rather than by
+      # adding an ignore entry per advisory.
+      - name: bun audit
+        run: bun audit --audit-level=moderate
+      - uses: dtolnay/rust-toolchain@stable
+      # The rustsec advisory database against Cargo.lock. The action caches the
+      # database and the binary, which a `cargo install cargo-audit` does not.
+      #
+      # This half reports and does not gate, which is the opposite of the bun
+      # half above and is not an oversight. `cargo-audit` has no severity floor
+      # to raise: it reports what it finds. What it finds today is six
+      # advisories, every one of them transitive through tauri or web-push and
+      # none of them fixable from this repository — and RUSTSEC-2023-0071
+      # against `rsa` (via web-push-native -> jwt-simple -> superboring) has no
+      # patched version published at all. Gating on that is gating on a
+      # condition nobody here can clear, which trains people to merge past a red
+      # check. The output is in the job log and dependabot moves the versions
+      # when upstream does.
+      - uses: rustsec/audit-check@v2
+        continue-on-error: true
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
   # The desktop code the job above never compiles. `paint_frame_gap` is
   # `#[cfg(windows)]` and the fullscreen observer is `#[cfg(target_os = "macos")]`,
@@ -93,7 +170,14 @@ jobs:
   # key already in play. A `windows` bump to a version tauri is not on did
   # exactly that — every `win.hwnd()` call stopped compiling while ci stayed
   # green — and nothing would have said so before the four platform runners
-  # started. Two `cargo check`s are cheaper than a release that fails half way.
+  # started. Two runs here are cheaper than a release that fails half way.
+  #
+  # It runs the workspace, not just `-p boite`, and it lints and tests rather
+  # than checking. `boite-core` carries twenty-odd `cfg(windows)` and
+  # `cfg(target_os = "macos")` sites of its own — the shell it spawns, the paths
+  # it joins, the editor it opens — and its three hundred tests only ever ran on
+  # Linux, where none of those arms exist. Clippy subsumes the `cargo check`
+  # this replaces: it type-checks everything it lints.
   desktop:
     strategy:
       fail-fast: false
@@ -123,14 +207,17 @@ jobs:
           triple=$(rustc -vV | sed -n 's/^host: //p')
           if [ "${{ runner.os }}" = "Windows" ]; then ext=".exe"; else ext=""; fi
           cp "target/debug/boite-mcp$ext" "src-tauri/binaries/boite-mcp-$triple$ext"
-      - name: cargo check
-        run: cargo check -p boite --all-targets
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets --no-deps -- -D warnings
+      - name: cargo test
+        run: cargo test --workspace
 
   # The real-time path — spawn, live output, detach, replay on reattach, two
-  # devices on one thread — is what a broken release breaks first, and no
-  # #[test] covers it: rpc.rs, ws.rs and auth.rs have none between them. The
-  # script that does cover it has existed since the server did and was never
-  # run by anything. This job is that missing call.
+  # devices on one thread — is what a broken release breaks first, and the unit
+  # tests in rpc.rs, ws.rs and auth.rs do not reach it: they cover routing,
+  # scopes and the ticket, none of which needs a live PTY. The script that does
+  # cover it has existed since the server did and was never run by anything.
+  # This job is that missing call.
   smoke:
     runs-on: ubuntu-latest
     steps:
@@ -141,8 +228,31 @@ jobs:
           # server-smoke.mjs is dependency-free and leans on a global
           # WebSocket, which lands in Node 22.
           node-version: 22
-      # Same key as the rust job so this reuses whatever it just compiled
-      # rather than building the workspace a second time from scratch.
+      # remote-smoke.ts imports the backend's own TypeScript, which bun runs
+      # directly and node does not.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Cache bun deps
+        uses: actions/cache@v6
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: ${{ runner.os }}-bun-
+      - name: Install
+        run: bun install --frozen-lockfile
+      # Its own key, with the rust job's as a fallback. It used to carry that
+      # job's exact key, described as reusing "whatever it just compiled".
+      # There is no `needs: rust` here, the two run at the same time, so the
+      # restore happened before rust had written anything and boite-server was
+      # built from scratch on every run. Worse, an identical key means only
+      # whichever job finishes first ever saves: the other is refused as a
+      # duplicate, so the entry never held both trees.
+      #
+      # Keeping them parallel is worth more than the serialisation a `needs:`
+      # would buy, so this saves under its own name and falls back through
+      # `restore-keys` to the rust job's entry from an earlier run, which does
+      # contain boite-server's dependencies.
       - name: Cache cargo
         uses: actions/cache@v6
         with:
@@ -150,8 +260,10 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+          key: ${{ runner.os }}-cargo-smoke-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-smoke-
+            ${{ runner.os }}-cargo-
       - name: Build the server
         run: cargo build -p boite-server
       - name: Start it
@@ -179,6 +291,41 @@ jobs:
           SMOKE_URL: ws://127.0.0.1:7337/ws
           SMOKE_CWD: ${{ github.workspace }}
         run: node scripts/server-smoke.mjs
+      # The client half. server-smoke speaks the wire protocol itself, which
+      # tests the server and nothing that talks to it; RemoteBackend is what
+      # every phone and browser session actually runs, it has no unit test worth
+      # the name, and the script that drives it against a live server has been
+      # sitting in scripts/ unrun since it was written. It wants its own server
+      # on the port it was written against.
+      - name: Start a server for the client gate
+        env:
+          BOITE_TOKEN: test
+          BOITE_BIND: 127.0.0.1:7399
+          BOITE_DATA_DIR: ${{ runner.temp }}/boite-remote
+        run: |
+          set -euo pipefail
+          ./target/debug/boite-server > "${{ runner.temp }}/remote.log" 2>&1 &
+          echo $! > "${{ runner.temp }}/remote.pid"
+          for _ in $(seq 1 50); do
+            if (echo > /dev/tcp/127.0.0.1/7399) 2>/dev/null; then
+              echo "listening"
+              exit 0
+            fi
+            sleep 0.2
+          done
+          echo "::error::boite-server never started listening on 127.0.0.1:7399" >&2
+          cat "${{ runner.temp }}/remote.log" >&2
+          exit 1
+      - name: Smoke the remote backend
+        env:
+          BOITE_TOKEN: test
+        run: bun scripts/remote-smoke.ts
+      - name: Client gate server log
+        if: always()
+        run: cat "${{ runner.temp }}/remote.log" || true
+      - name: Stop the client gate server
+        if: always()
+        run: kill "$(cat "${{ runner.temp }}/remote.pid")" 2>/dev/null || true
       # The server's own stderr is the only place a spawn refusal or a store
       # error says why, and a failed smoke gives no hint on its own.
       - name: Server log

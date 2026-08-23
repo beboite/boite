@@ -1,23 +1,33 @@
+// The probe_params `json!` literal in command/mod.rs grew past the default
+// macro recursion limit when the conduct domain filled out; the limit is the
+// only thing this raises.
+#![recursion_limit = "256"]
+
 pub mod approval;
 pub mod awareness;
 pub mod browser;
 pub mod capability;
 pub mod checkpoint;
+pub mod cli_manager;
 pub mod codex_switcher;
 pub mod command;
 pub mod editor;
 pub mod env;
 pub mod explorer;
+pub mod fast_mcp_ssh;
 pub mod fastpick;
 pub mod finish;
 pub mod mcp_launch;
 pub mod git;
+pub mod kebacc_switcher;
 pub mod journal;
 pub mod migrations;
 pub mod model;
 pub mod pairing;
+pub mod orchestrator;
 pub mod project;
 pub mod pty;
+pub mod pulse;
 pub mod reply;
 pub mod scope;
 pub mod screen;
@@ -31,7 +41,10 @@ pub mod status;
 pub mod timeline;
 pub mod transcript;
 pub mod store;
+pub mod sync;
+pub mod telemetry;
 pub mod usage;
+pub mod voice;
 
 /// Now, in milliseconds since the epoch.
 ///

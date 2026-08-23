@@ -1,11 +1,13 @@
 <script lang="ts">
   import ThreadGlyph from "$lib/features/thread/ThreadGlyph.svelte";
+  import { tip } from "$lib/shared/actions/tooltip";
   import { visibleStatus } from "$lib/domain/thread-status";
   import { threadIconColor } from "$lib/features/fastpick/threadAccent";
   import { settings } from "$lib/features/settings/store.svelte";
   import { t } from "$lib/i18n/index.svelte";
   import type { Thread } from "$lib/types";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
+  import CornerDownRight from "@lucide/svelte/icons/corner-down-right";
 
   type Props = {
     stack: Thread[];
@@ -26,22 +28,26 @@
   );
 </script>
 
+<!-- The children's own row, under the parent and indented like them, rather
+     than a pile of faces crammed into the parent's card. A thread row is the
+     unit this sidebar reads in, so the thing standing in for threads takes one
+     too: same height, same padding, same rounding. -->
 <button
   type="button"
   data-no-drag
-  class="pile relative flex shrink-0 items-center"
+  class="pile flex w-full cursor-pointer items-center gap-1.5 rounded-sm px-1.5 py-1 text-left transition"
   class:open={expanded}
+  class:glow
   aria-expanded={expanded}
   aria-label={label}
-  title={label}
+  use:tip={label}
   onclick={(e) => {
     e.stopPropagation();
     onToggle();
   }}
 >
-  {#if expanded}
-    <ChevronRight class="size-3 rotate-90 text-muted-foreground" />
-  {:else}
+  <CornerDownRight class="size-3 shrink-0 text-muted-foreground/60" />
+  {#if !expanded && shown.length > 0}
     <span class="faces" aria-hidden="true">
       {#each shown as child, i (child.id)}
         <span class="face" style:z-index={i + 1}>
@@ -59,32 +65,41 @@
         </span>
       {/each}
     </span>
-    <span
-      class="relative ml-1 text-2xs font-medium tabular-nums leading-none {glow
-        ? 'text-foreground/80'
-        : 'text-muted-foreground'}"
-    >
-      {count}
-    </span>
   {/if}
+  <span
+    class="min-w-0 flex-1 truncate-safe text-2xs font-medium leading-[19px] {glow
+      ? 'text-foreground/80'
+      : 'text-muted-foreground'}"
+  >
+    {label}
+  </span>
+  <ChevronRight
+    class="size-3 shrink-0 text-muted-foreground/70 transition-transform {expanded
+      ? 'rotate-90'
+      : ''}"
+  />
 </button>
 
 <style>
   .pile {
-    height: 20px;
-    padding: 0 3px 0 2px;
     border: 0;
-    border-radius: var(--radius-xs);
-    background: transparent;
+    background: color-mix(in srgb, var(--color-foreground) 4%, transparent);
     color: inherit;
-    cursor: pointer;
   }
   .pile:hover {
-    background: color-mix(in srgb, var(--color-foreground) 8%, transparent);
+    background: color-mix(in srgb, var(--color-foreground) 9%, transparent);
+  }
+  .pile.glow {
+    background: transparent;
+    box-shadow: inset 0 0 0 1px var(--color-border);
+  }
+  .pile.glow:hover {
+    background: color-mix(in srgb, var(--color-foreground) 6%, transparent);
   }
   .faces {
     display: flex;
     align-items: center;
+    flex-shrink: 0;
   }
   .face {
     display: flex;

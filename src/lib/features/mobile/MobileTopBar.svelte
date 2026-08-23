@@ -1,5 +1,6 @@
 <script lang="ts">
   import { getCurrentWindow } from "@tauri-apps/api/window";
+  import { tip } from "$lib/shared/actions/tooltip";
   import { platform as detectPlatform } from "@tauri-apps/plugin-os";
   import { app } from "$lib/app/store.svelte";
   import { projectDisplayName } from "$lib/shared/project-label";
@@ -84,7 +85,7 @@
       onclick={() => (launchSheet.open = true)}
       disabled={!project}
       aria-label={t("mobile.newTerminal")}
-      title={t("mobile.newTerminal")}
+      use:tip={t("mobile.newTerminal")}
     >
       <Plus class="size-5" />
     </button>
@@ -94,7 +95,7 @@
       onclick={() => (threadsOpen = true)}
       disabled={!project}
       aria-label={t("mobile.terminals")}
-      title={t("mobile.terminals")}
+      use:tip={t("mobile.terminals")}
     >
       <MoreVertical class="size-5" />
     </button>

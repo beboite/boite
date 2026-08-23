@@ -53,6 +53,12 @@ pub struct AppState {
     /// running the same move would kill one PTY twice and leave a second
     /// worktree behind.
     pub claimed_requests: parking_lot::Mutex<std::collections::VecDeque<String>>,
+    /// The live `conduct.pulse` waits of this process. Shared with the agent
+    /// endpoint, so an orchestrator's long-poll wakes on a moment whichever
+    /// door wrote it.
+    pub pulse: Arc<boite_core::pulse::Waiters>,
+    /// Process-wide telemetry queue. None in tests, which never send.
+    pub telemetry: Option<Arc<boite_core::telemetry::TelemetryRuntime>>,
 }
 
 /// How many claims are remembered. Each is a uuid a client either took or lost
@@ -215,6 +221,10 @@ impl boite_core::command::Host for ServerHost<'_> {
         Some(self.state.store.clone())
     }
 
+    fn pulse_waiters(&self) -> Option<Arc<boite_core::pulse::Waiters>> {
+        Some(self.state.pulse.clone())
+    }
+
     /// Which process one of this server's PTYs is running right now, so the
     /// session it holds open is not mistaken for someone else's live one.
     fn child_pid(&self, pty_id: &str) -> Option<u32> {
@@ -223,6 +233,10 @@ impl boite_core::command::Host for ServerHost<'_> {
 
     fn transcripts_dir(&self) -> Option<PathBuf> {
         self.state.registry.transcripts_dir()
+    }
+
+    fn telemetry(&self) -> Option<Arc<boite_core::telemetry::TelemetryRuntime>> {
+        self.state.telemetry.clone()
     }
 }
 
@@ -268,6 +282,8 @@ pub fn state_for_test(dir: &Path) -> AppState {
         data_dir: dir.to_path_buf(),
         public_url: None,
         claimed_requests: Default::default(),
+        pulse: boite_core::pulse::Waiters::new(),
+        telemetry: None,
     };
     // The dispatcher tests drive real calls, and a real call reads the pairing
     // row behind the session that sent it. `Session::for_test` names this one.
@@ -357,6 +373,8 @@ mod tests {
             data_dir: dir.clone(),
             public_url: None,
             claimed_requests: Default::default(),
+        pulse: boite_core::pulse::Waiters::new(),
+            telemetry: None,
         };
 
         state.refresh_roots().unwrap();
@@ -397,6 +415,8 @@ mod tests {
             data_dir: dir.clone(),
             public_url: None,
             claimed_requests: Default::default(),
+        pulse: boite_core::pulse::Waiters::new(),
+            telemetry: None,
         };
 
         assert!(state.ensure_project_path(inside.to_str().unwrap()).is_ok());

@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { ThreadStatus } from "$lib/types";
+  import { tip } from "$lib/shared/actions/tooltip";
   import { t, type MessageKey } from "$lib/i18n/index.svelte";
   import UnicodeSpinner from "./UnicodeSpinner.svelte";
 
@@ -38,7 +39,7 @@
     <span
       class="inline-flex size-2.5 shrink-0 items-center justify-center text-awake"
       aria-label={t("status.keptAwake")}
-      title={t("status.keptAwakeHint")}
+      use:tip={t("status.keptAwakeHint")}
     >
       <UnicodeSpinner size={12} />
     </span>
@@ -46,14 +47,14 @@
     <span
       class="inline-block size-2.5 shrink-0 rounded-full bg-awake"
       aria-label={t("status.keptAwake")}
-      title={t("status.keptAwakeHint")}
+      use:tip={t("status.keptAwakeHint")}
     ></span>
   {/if}
 {:else if asleep}
   <span
     class="inline-flex size-2.5 shrink-0 items-center justify-center text-success"
     aria-label={t("status.asleep")}
-    title={t("status.asleepHint")}
+    use:tip={t("status.asleepHint")}
   >
     <UnicodeSpinner
       size={12}
@@ -65,7 +66,7 @@
   <span
     class="inline-flex size-2.5 shrink-0 items-center justify-center text-warning"
     aria-label={statusLabel}
-    title={statusLabel}
+    use:tip={statusLabel}
   >
     <UnicodeSpinner size={12} />
   </span>
@@ -76,13 +77,13 @@
   <span
     class="dot-waiting inline-block size-2.5 shrink-0 rounded-full bg-warning"
     aria-label={status}
-    title={status}
+    use:tip={status}
   ></span>
 {:else}
   <span
     class="inline-block size-2.5 shrink-0 rounded-full {colorByStatus[status]}"
     aria-label={statusLabel}
-    title={statusLabel}
+    use:tip={statusLabel}
   ></span>
 {/if}
 

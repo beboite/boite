@@ -40,7 +40,8 @@ export default defineConfig(async () => ({
       // rewritten by the worktree pool while the dev server is up. Watched,
       // every spare warm is a source tree appearing under the root and the page
       // reloads on work nobody did.
-      ignored: ["**/src-tauri/**", "**/.boite/**"],
+      // `target/**` holds Rust build outputs and DLLs that Windows locks while compiling.
+      ignored: ["**/src-tauri/**", "**/.boite/**", "**/target/**"],
     },
   },
 }));

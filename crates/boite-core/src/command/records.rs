@@ -446,14 +446,28 @@ impl Records {
         let store = host
             .store()
             .ok_or("this Boite keeps no records, so there is nothing to read or write")?;
-        Ok(Ready::Records(self, store))
+        Ok(Ready::Records(self, store, host.telemetry()))
     }
 
-    pub(super) fn run(self, store: &Store) -> Result<Value, String> {
+    pub(super) fn run(
+        self,
+        store: &Store,
+        telemetry: Option<&crate::telemetry::TelemetryRuntime>,
+    ) -> Result<Value, String> {
         Ok(match self {
             Records::ProjectList => value_of(store.load_projects()?),
             Records::ProjectCreate { project } => {
+                let is_new = store
+                    .load_projects()
+                    .ok()
+                    .map(|projects| projects.iter().all(|p| p.id != project.id))
+                    .unwrap_or(true);
                 store.save_project(&project, crate::now_ms())?;
+                if is_new {
+                    if let Some(telemetry) = telemetry {
+                        telemetry.track(crate::telemetry::Event::ProjectAdded);
+                    }
+                }
                 value_of(*project)
             }
             Records::ProjectArchive { id, archived } => {
@@ -467,6 +481,7 @@ impl Records {
             Records::ThreadList => value_of(store.load_threads()?),
             Records::ThreadCreate { thread } => {
                 let mut thread = *thread;
+                let is_new = store.thread_status(&thread.id).is_none();
                 if thread.created_at == 0 {
                     thread.created_at = crate::now_ms();
                 }
@@ -487,7 +502,36 @@ impl Records {
                 // another device may have settled it since. A new row has no
                 // answer at all, which is what an ordinary live thread is.
                 thread.settled_at = store.thread_settled_at(&thread.id);
+                // The orchestration columns are never the caller's to state.
+                // `role` selects the orchestrator tool tier, so a create that
+                // took the caller's word for it would let any agent promote a
+                // row; a re-save keeps what the row says, and a new row is a
+                // worker until `orchestrator.start` (Grant::Local) stamps it.
+                match store.thread_orchestration(&thread.id) {
+                    Some((role, scope, accept)) => {
+                        thread.role = role;
+                        thread.orchestrator_scope = scope;
+                        thread.accept_dispatch = accept;
+                    }
+                    None => {
+                        thread.role = None;
+                        thread.orchestrator_scope = None;
+                        thread.accept_dispatch = true;
+                    }
+                }
                 store.save_thread(&thread)?;
+                if is_new {
+                    if let Some(telemetry) = telemetry {
+                        let (kind, provider) = crate::telemetry::classify_thread(
+                            &thread.cmd,
+                            thread.icon_key.as_deref(),
+                        );
+                        telemetry.track(crate::telemetry::Event::ThreadSpawned {
+                            kind: kind.to_string(),
+                            provider: provider.to_string(),
+                        });
+                    }
+                }
                 // The row keeps the mark of its last run; the caller is told what
                 // that mark means, which for a row still naming a process is
                 // `stopped` rather than the word itself.
@@ -525,8 +569,18 @@ impl Records {
                 json!(null)
             }
             Records::ThreadDelete { id } => {
+                let kind = store.load_threads().ok().and_then(|threads| {
+                    threads.into_iter().find(|t| t.id == id).map(|t| {
+                        crate::telemetry::classify_thread(&t.cmd, t.icon_key.as_deref()).0
+                    })
+                });
                 store.delete_thread(&id)?;
                 store.forget_thread_identity(&id)?;
+                if let (Some(kind), Some(telemetry)) = (kind, telemetry) {
+                    telemetry.track(crate::telemetry::Event::ThreadClosed {
+                        kind: kind.to_string(),
+                    });
+                }
                 json!(null)
             }
             Records::TodoList => value_of(store.load_todos()?),
@@ -758,6 +812,58 @@ mod tests {
         ask(&host, "thread.update", json!({ "threadId": "t", "title": null })).unwrap();
         let threads = ask(&host, "thread.list", json!({})).unwrap();
         assert_eq!(threads[0]["title"], json!(null));
+    }
+
+    /// The role barrier, named column by column: `role`, `orchestrator_scope`
+    /// and `accept_dispatch` are not writable through any record command. The
+    /// stamp selects the orchestrator tool tier, so a write path here would be
+    /// an agent promoting itself; the only write is
+    /// `Store::stamp_orchestrator_role`, reached by a `Grant::Local` command.
+    #[test]
+    fn the_orchestration_columns_are_not_claimable_through_records() {
+        let host = Rows::new("role-barrier");
+        let store = host.store().unwrap();
+
+        // A create that claims the role lands as a worker.
+        ask(
+            &host,
+            "thread.create",
+            json!({ "thread": { "id": "t", "projectId": "p", "label": "l", "cmd": "c",
+                                "args": [], "role": "orchestrator",
+                                "orchestratorScope": "p", "acceptDispatch": false } }),
+        )
+        .unwrap();
+        assert_eq!(
+            store.thread_orchestration("t"),
+            Some((None, None, true)),
+            "a caller stated the stamp and it must not land"
+        );
+
+        // An update that names the columns changes nothing: the patch does not
+        // carry them, by construction.
+        ask(
+            &host,
+            "thread.update",
+            json!({ "threadId": "t", "role": "orchestrator",
+                    "orchestratorScope": "p", "acceptDispatch": false }),
+        )
+        .unwrap();
+        assert_eq!(store.thread_orchestration("t"), Some((None, None, true)));
+
+        // And a re-save cannot wash a real stamp away either: the row's answer
+        // wins in both directions.
+        store.stamp_orchestrator_role("t", Some("p")).unwrap();
+        ask(
+            &host,
+            "thread.create",
+            json!({ "thread": { "id": "t", "projectId": "p", "label": "l", "cmd": "c",
+                                "args": [] } }),
+        )
+        .unwrap();
+        assert_eq!(
+            store.thread_orchestration("t"),
+            Some((Some("orchestrator".into()), Some("p".into()), true))
+        );
     }
 
     /// A blank name clears the override rather than storing a blank one, and a
