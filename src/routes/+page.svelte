@@ -15,7 +15,6 @@
   import ProjectSidebar from "$lib/features/project/ProjectSidebar.svelte";
   import Toaster from "$lib/features/notifications/Toaster.svelte";
   import { toastArea } from "$lib/features/notifications/anchor.svelte";
-  import TodoAchievement from "$lib/features/todo/TodoAchievement.svelte";
   import ConfirmHost from "$lib/shared/components/ConfirmHost.svelte";
   import BoiteLogo from "$lib/shared/components/BoiteLogo.svelte";
   import RemoteLogin from "$lib/features/workspace/RemoteLogin.svelte";
@@ -827,7 +826,6 @@
           </div>
         {/if}
 
-
         <!-- No `projectId` prop: with no pane around it the page follows the
              project the bottom bar is showing, which is what the panel already
              falls back to. -->
@@ -843,13 +841,6 @@
           </div>
         {/if}
       {/if}
-      <!-- Between the panes and the dialogs: an agent's news must not sit on
-           top of a question the user is being asked. --z-dropdown decides that
-           now rather than DOM order, which is why the confirm and toast hosts
-           could move out of <main> without this following them: they belong to
-           the whole app, this one belongs to the pane area. -->
-      <TodoAchievement />
-
     </main>
 
     <!-- Outside <main>, beside it: the column describes the project rather than

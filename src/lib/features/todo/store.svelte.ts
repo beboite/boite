@@ -101,8 +101,7 @@ class TodoStore {
         // The list before the outside changed it. Only a reload can see this:
         // every local mutation writes one row and never comes through here, so
         // diffing at this point announces an agent's work and stays silent
-        // about the user's own clicks, which is exactly the distinction the
-        // card in the middle of the window depends on.
+        // about the user's own clicks.
         const before = $state.snapshot(this.items) as TodoItem[];
         do {
           this.stale = false;
@@ -111,9 +110,8 @@ class TodoStore {
         // Not on the first load: every row is new to an empty list, and a boot
         // with eight open todos would queue eight announcements.
         //
-        // Only this project's: the card takes the middle of the window for two
-        // and a half seconds, and an agent finishing a task in a repo the user
-        // is not looking at has nothing to say to them right now.
+        // Only this project's: an agent finishing a task in a repo the user is
+        // not looking at has nothing to say to them right now.
         if (this.loaded && this.announce) {
           const projectId = app.currentProjectId;
           todoAnnouncer.push(

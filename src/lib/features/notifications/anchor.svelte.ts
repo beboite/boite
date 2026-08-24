@@ -6,12 +6,14 @@
  * terminal instead, the docked git, files or todo column, and covered the
  * commit button of a panel the toast had nothing to say about.
  *
- * Client coordinates, because the toaster is `position: fixed`: `right` is the
- * gap from the right edge of the window, which is what CSS wants.
+ * Client coordinates, because the toaster is `position: fixed`. Placement
+ * itself is always `top` + `left` (see `place.ts`); `right` here is only how
+ * the work-area gutter is stored.
  */
 
-export type ToastStack = "above" | "below";
-export type ToastAlign = "left" | "center" | "right";
+import type { ToastAlign, ToastStack } from "./place";
+
+export type { ToastAlign, ToastStack };
 
 export type ToastClaim = {
   top: number;
@@ -53,6 +55,7 @@ class ToastAnchor {
 
   clear() {
     this.box = null;
+    stopFollow();
     remeasureToastClaims();
   }
 }
@@ -117,7 +120,7 @@ const claims = new Map<
   { el: HTMLElement; standing: boolean; focused: boolean; stack: ToastStack; align: ToastAlign }
 >();
 
-function readRect(el: HTMLElement): ToastClaim | null {
+function readRect(el: HTMLElement): Omit<ToastClaim, "stack" | "align"> | null {
   const rect = el.getBoundingClientRect();
   // A box under `display: none`, which is every pane while a view is drawn
   // over the terminals, measures zero. Zero is the right answer there.
@@ -129,8 +132,6 @@ function readRect(el: HTMLElement): ToastClaim | null {
     bottom: rect.bottom,
     width: rect.width,
     height: rect.height,
-    stack: "below",
-    align: "right",
   };
 }
 
@@ -191,6 +192,41 @@ function resolveClaim() {
 /** Ask every claim again. A drag moves a box without resizing it. */
 export function remeasureToastClaims() {
   resolveClaim();
+}
+
+let followRaf = 0;
+let followUntil = 0;
+
+function stopFollow() {
+  if (followRaf) {
+    cancelAnimationFrame(followRaf);
+    followRaf = 0;
+  }
+  followUntil = 0;
+}
+
+function tickFollow(now: number) {
+  followRaf = 0;
+  resolveClaim();
+  if (now < followUntil) {
+    followRaf = requestAnimationFrame(tickFollow);
+  }
+}
+
+/**
+ * Keep reading the card through its snap animation.
+ *
+ * ResizeObserver does not fire on `left`/`top` CSS transitions, and a single
+ * remeasure at pointer-up still sees the drop point. Without this the stack
+ * sits in the middle of the pane while the box eases to its dock.
+ */
+export function followToastSnap(durationMs: number) {
+  if (typeof requestAnimationFrame !== "function") {
+    resolveClaim();
+    return;
+  }
+  followUntil = performance.now() + durationMs;
+  if (!followRaf) followRaf = requestAnimationFrame(tickFollow);
 }
 
 /**
