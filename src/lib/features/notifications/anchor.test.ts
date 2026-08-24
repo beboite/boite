@@ -43,6 +43,8 @@ function box(rect: Rect) {
       width: live.width,
       height: live.height,
     }),
+    addEventListener() {},
+    removeEventListener() {},
   } as unknown as HTMLElement;
   return {
     el,

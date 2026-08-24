@@ -405,6 +405,11 @@ and not visible, and nothing else reports that; `screen.at` far behind
 `workspace_timeline` answer where and when, `terminal_transcript` reads any
 thread's output back from the end, stopped threads included.
 
+A fresh worktree has no `.svelte-kit/`, and `vitest` reads the tsconfig
+generated there: every suite fails at transform with `Tsconfig not found` until
+`bun x svelte-kit sync` has run once in that worktree. `bun run check` and
+`bun run dev` run it for you, a bare `vitest` does not.
+
 ## Measure before claiming
 
 An optimisation with no measurement attached does not stay.

@@ -215,6 +215,13 @@ export function toastInset(el: HTMLElement, params: ToastInsetParams) {
   });
   const observer = new ResizeObserver(remeasureToastClaims);
   observer.observe(el);
+  // The card animates `left` and `top` when it folds or changes dock. The
+  // ResizeObserver and the owner's effect both fire at the start of that
+  // animation, so without this the claim is the rectangle the box was leaving,
+  // and the stack ends up a fold's width off its centre.
+  const settle = () => remeasureToastClaims();
+  el.addEventListener("transitionend", settle);
+  el.addEventListener("transitioncancel", settle);
   remeasureToastClaims();
   return {
     update(next: ToastInsetParams) {
@@ -228,6 +235,8 @@ export function toastInset(el: HTMLElement, params: ToastInsetParams) {
     },
     destroy() {
       observer.disconnect();
+      el.removeEventListener("transitionend", settle);
+      el.removeEventListener("transitioncancel", settle);
       claims.delete(token);
       resolveClaim();
     },
