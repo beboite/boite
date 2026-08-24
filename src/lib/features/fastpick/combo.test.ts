@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { FastpickModel } from "$lib/backend/types";
-import { comboArgs, iconKeyForKind, modelLabels, parseCombo } from "./combo";
+import {
+  comboArgs,
+  iconKeyForKind,
+  modelLabels,
+  parseCombo,
+  parseFastpickAgent,
+} from "./combo";
 
 function model(id: string, label: string | null): FastpickModel {
   return { id, label, contextWindow: null, effort: [], effortDefault: null, prompts: [] };
@@ -130,6 +136,50 @@ describe("parseCombo", () => {
       "--harness", "h", "--provider", "p", "--model", "m", "--no-md",
     ]);
     expect(combo?.prompts).toEqual([]);
+  });
+});
+
+describe("parseFastpickAgent", () => {
+  it("reads a three-part name as claude-code, which is what it always meant", () => {
+    expect(parseFastpickAgent("fastpick:crof:crof-deepseek-v4-pro")).toEqual({
+      harness: "claude-code",
+      provider: "crof",
+      key: null,
+      model: "crof-deepseek-v4-pro",
+    });
+  });
+
+  it("takes the harness when the name opens with one", () => {
+    expect(parseFastpickAgent("fastpick:pi:crof:crof-deepseek-v4-pro")).toEqual({
+      harness: "pi",
+      provider: "crof",
+      key: null,
+      model: "crof-deepseek-v4-pro",
+    });
+  });
+
+  it("keeps a colon in the model rather than reading it as a harness", () => {
+    expect(parseFastpickAgent("fastpick:acme:some:model")).toEqual({
+      harness: "claude-code",
+      provider: "acme",
+      key: null,
+      model: "some:model",
+    });
+  });
+
+  it("names one credential of a provider that holds several", () => {
+    expect(parseFastpickAgent("fastpick:codex:codex-everywhere.openai:gpt-5.4")).toEqual({
+      harness: "codex",
+      provider: "codex-everywhere",
+      key: "openai",
+      model: "gpt-5.4",
+    });
+  });
+
+  it("is not a fastpick name without a provider and a model", () => {
+    expect(parseFastpickAgent("fastpick:crof")).toBeNull();
+    expect(parseFastpickAgent("fastpick::model")).toBeNull();
+    expect(parseFastpickAgent("claude")).toBeNull();
   });
 });
 
