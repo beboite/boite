@@ -167,7 +167,7 @@
 
 <style>
   .modal {
-    animation: modalIn 260ms cubic-bezier(0.22, 1, 0.36, 1);
+    animation: modalIn 260ms var(--ease-out-quint);
   }
   .step {
     animation: stepIn 200ms ease-out;

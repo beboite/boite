@@ -26,14 +26,18 @@
   $effect(() => {
     if (!dealTitleEl) return;
     if (motionReduced()) {
-      dealTitleEl.style.color = "#ef4444";
+      dealTitleEl.style.color = "var(--color-danger)";
       return () => dealTitleEl?.style.removeProperty("color");
     }
     const anim = dealTitleEl.animate(
       [
-        { color: "#ffffff", textShadow: "0 0 0px rgba(239, 68, 68, 0)" },
-        { color: "#f0a3a3", textShadow: "0 0 6px rgba(239, 68, 68, 0.2)", offset: 0.4 },
-        { color: "#ef4444", textShadow: "0 0 18px rgba(239, 68, 68, 0.6)" },
+        { color: "var(--color-foreground)", textShadow: "0 0 0px rgba(239, 68, 68, 0)" },
+        {
+          color: "color-mix(in srgb, var(--color-danger) 65%, var(--color-foreground))",
+          textShadow: "0 0 6px rgba(239, 68, 68, 0.2)",
+          offset: 0.4,
+        },
+        { color: "var(--color-danger)", textShadow: "0 0 18px rgba(239, 68, 68, 0.6)" },
       ],
       { duration: 10000, easing: "linear", fill: "forwards" },
     );
@@ -135,10 +139,10 @@
 
   .deal-title {
     text-align: center;
-    font-size: clamp(16px, min(5vw, 3.4vh), 24px);
+    font-size: clamp(var(--text-lg), min(5vw, 3.4vh), var(--text-xl));
     font-weight: 900;
     letter-spacing: 0.08em;
-    color: #ffffff;
+    color: var(--color-foreground);
     margin: 0;
   }
 
@@ -159,14 +163,14 @@
   .intro {
     margin: 0 auto;
     max-width: 46ch;
-    font-size: 12.5px;
+    font-size: var(--text-sm);
     line-height: 1.6;
     color: var(--color-muted-foreground);
     text-align: center;
   }
   .question {
     margin: 2px 0 0;
-    font-size: clamp(14px, min(4vw, 2.6vh), 17px);
+    font-size: clamp(var(--text-md), min(4vw, 2.6vh), var(--text-lg));
     font-weight: 800;
     text-align: center;
     letter-spacing: 0.01em;
@@ -184,9 +188,9 @@
     align-items: flex-start;
     gap: 3px;
     padding: 11px 16px;
-    border-radius: 12px;
+    border-radius: var(--radius-lg);
     border: 1px solid var(--color-border);
-    background: color-mix(in srgb, var(--color-surface-2) 88%, #fff 12%);
+    background: color-mix(in srgb, var(--color-surface-2) 88%, var(--color-foreground) 12%);
     color: var(--color-foreground);
     text-align: left;
     cursor: pointer;
@@ -200,7 +204,7 @@
   .deal-row:hover:not(:disabled) {
     transform: translateY(-1px);
     border-color: color-mix(in srgb, var(--color-foreground) 45%, var(--color-border));
-    background: color-mix(in srgb, var(--color-surface-2) 80%, #fff 20%);
+    background: color-mix(in srgb, var(--color-surface-2) 80%, var(--color-foreground) 20%);
   }
   .deal-row:disabled {
     opacity: 0.5;
@@ -208,7 +212,7 @@
   }
 
   .deal-row-label {
-    font-size: 13px;
+    font-size: var(--text-base);
     font-weight: 700;
     display: inline-flex;
     align-items: baseline;
@@ -216,62 +220,62 @@
     flex-wrap: wrap;
   }
   .default-inline {
-    font-size: 11px;
+    font-size: var(--text-xs);
     font-weight: 500;
     color: color-mix(in srgb, var(--color-muted-foreground) 80%, transparent);
   }
   .deal-row-body {
-    font-size: 11.5px;
+    font-size: var(--text-xs);
     line-height: 1.5;
     color: var(--color-muted-foreground);
   }
 
   .opt-out-note {
     margin: 0;
-    font-size: 11px;
+    font-size: var(--text-xs);
     line-height: 1.5;
     color: color-mix(in srgb, var(--color-muted-foreground) 85%, transparent);
     text-align: center;
   }
 
   .no-btn:hover:not(:disabled) {
-    background: color-mix(in srgb, #ef4444 14%, var(--color-surface-2));
-    border-color: color-mix(in srgb, #ef4444 55%, var(--color-border));
-    color: #ef4444;
+    background: color-mix(in srgb, var(--color-danger) 14%, var(--color-surface-2));
+    border-color: color-mix(in srgb, var(--color-danger) 55%, var(--color-border));
+    color: var(--color-danger);
   }
   .no-btn:hover:not(:disabled) .deal-row-body {
-    color: #ef4444;
+    color: var(--color-danger);
   }
   .no-btn.no-clicked,
   .no-btn.no-clicked:disabled {
-    background: #ef4444 !important;
-    border-color: #ef4444 !important;
+    background: var(--color-danger) !important;
+    border-color: var(--color-danger) !important;
     color: #ffffff !important;
     opacity: 1 !important;
-    box-shadow: 0 10px 28px color-mix(in srgb, #ef4444 35%, transparent);
+    box-shadow: 0 10px 28px color-mix(in srgb, var(--color-danger) 35%, transparent);
   }
   .no-btn.no-clicked .deal-row-body {
     color: #ffffff !important;
   }
 
   .deal-row.deal-accent {
-    border-color: rgba(255, 255, 255, 0.65);
-    background: color-mix(in srgb, var(--color-surface-2) 86%, #fff 14%);
+    border-color: color-mix(in srgb, var(--color-foreground) 65%, transparent);
+    background: color-mix(in srgb, var(--color-surface-2) 86%, var(--color-foreground) 14%);
     box-shadow:
-      0 0 0 1px rgba(255, 255, 255, 0.18),
-      0 6px 22px rgba(255, 255, 255, 0.08);
+      0 0 0 1px color-mix(in srgb, var(--color-foreground) 18%, transparent),
+      0 6px 22px color-mix(in srgb, var(--color-foreground) 8%, transparent);
   }
   .deal-row.deal-accent .deal-row-label {
-    color: #ffffff;
+    color: var(--color-foreground);
     letter-spacing: 0.04em;
   }
   .deal-row.deal-accent:hover:not(:disabled) {
     transform: translateY(-2px);
-    border-color: #ffffff;
-    background: color-mix(in srgb, var(--color-surface-2) 78%, #fff 22%);
+    border-color: var(--color-foreground);
+    background: color-mix(in srgb, var(--color-surface-2) 78%, var(--color-foreground) 22%);
     box-shadow:
-      0 0 0 1px rgba(255, 255, 255, 0.45),
-      0 14px 32px rgba(255, 255, 255, 0.16);
+      0 0 0 1px color-mix(in srgb, var(--color-foreground) 45%, transparent),
+      0 14px 32px color-mix(in srgb, var(--color-foreground) 16%, transparent);
   }
 
   .learn-more {
@@ -279,7 +283,7 @@
     background: transparent;
     color: var(--color-muted-foreground);
     padding: 0;
-    font-size: 12px;
+    font-size: var(--text-sm);
     text-decoration: underline;
     cursor: pointer;
     align-self: center;

@@ -97,7 +97,7 @@
             })}
             class="flex flex-wrap items-center gap-1.5"
           >
-            <span class="mr-1 text-[11px] uppercase tracking-wider text-muted-foreground">
+            <span class="mr-1 text-xs uppercase tracking-wider text-muted-foreground">
               {t("syncMerge.differenceOf", { index: hunk.id + 1, total: hunks.length })}
             </span>
             {#each LABELS as option (option.choice)}
@@ -105,7 +105,7 @@
                 type="button"
                 role="radio"
                 aria-checked={current[hunk.id] === option.choice}
-                class="rounded-md border px-2 py-0.5 text-[11px] transition"
+                class="rounded-md border px-2 py-0.5 text-xs transition"
                 class:border-foreground={current[hunk.id] === option.choice}
                 class:bg-foreground={current[hunk.id] === option.choice}
                 class:text-[var(--color-surface)]={current[hunk.id] === option.choice}
@@ -119,10 +119,10 @@
           </div>
           <div class="mt-1.5 grid gap-1 md:grid-cols-2">
             <pre
-              class="max-h-24 overflow-auto whitespace-pre-wrap break-words rounded bg-[var(--color-surface-2)] p-1.5 font-mono text-[11px] text-foreground">{hunk.mineText ||
+              class="max-h-24 overflow-auto whitespace-pre-wrap break-words rounded bg-[var(--color-surface-2)] p-1.5 font-mono text-xs text-foreground">{hunk.mineText ||
                 t("syncMerge.nothingHere")}</pre>
             <pre
-              class="max-h-24 overflow-auto whitespace-pre-wrap break-words rounded bg-[var(--color-surface-2)] p-1.5 font-mono text-[11px] text-foreground">{hunk.theirsText ||
+              class="max-h-24 overflow-auto whitespace-pre-wrap break-words rounded bg-[var(--color-surface-2)] p-1.5 font-mono text-xs text-foreground">{hunk.theirsText ||
                 t("syncMerge.nothingHere")}</pre>
           </div>
         </div>
@@ -132,7 +132,7 @@
 
   <div class="shrink-0 rounded-lg border border-border p-2.5">
     <div class="mb-1.5 flex items-center justify-between gap-3">
-      <span class="text-[11px] uppercase tracking-wider text-muted-foreground">
+      <span class="text-xs uppercase tracking-wider text-muted-foreground">
         {t("syncMerge.result")}
       </span>
       <div class="flex items-center gap-2">
@@ -142,7 +142,7 @@
           </span>
           <button
             type="button"
-            class="rounded-md border border-border px-2 py-0.5 text-[11px] text-foreground transition hover:bg-[var(--color-surface-3)]"
+            class="rounded-md border border-border px-2 py-0.5 text-xs text-foreground transition hover:bg-[var(--color-surface-3)]"
             onclick={() => onChoices(fillUndecided(current, "both"))}
           >
             {t("syncMerge.keepAllBoth")}
@@ -150,14 +150,14 @@
         {/if}
         <button
           type="button"
-          class="rounded-md border border-border px-2 py-0.5 text-[11px] text-muted-foreground transition hover:bg-[var(--color-surface-3)]"
+          class="rounded-md border border-border px-2 py-0.5 text-xs text-muted-foreground transition hover:bg-[var(--color-surface-3)]"
           onclick={onSkip}
         >
           {t("syncMerge.skip")}
         </button>
         <button
           type="button"
-          class="rounded-md bg-foreground px-2.5 py-0.5 text-[11px] text-[var(--color-surface)] transition disabled:opacity-50"
+          class="rounded-md bg-foreground px-2.5 py-0.5 text-xs text-[var(--color-surface)] transition disabled:opacity-50"
           disabled={!ready}
           onclick={() => onApply(merged)}
         >
@@ -175,7 +175,7 @@
       </p>
     {/if}
     <pre
-      class="max-h-28 overflow-auto whitespace-pre-wrap break-words rounded bg-[var(--color-surface-2)] p-2 font-mono text-[11px] text-foreground"
+      class="max-h-28 overflow-auto whitespace-pre-wrap break-words rounded bg-[var(--color-surface-2)] p-2 font-mono text-xs text-foreground"
       aria-label={t("syncMerge.result")}>{merged}</pre>
   </div>
 </div>

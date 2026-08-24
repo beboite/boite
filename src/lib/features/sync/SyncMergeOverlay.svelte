@@ -105,7 +105,7 @@
         <div class="mt-1.5 flex items-center gap-2">
           <button
             type="button"
-            class="rounded-md bg-foreground px-2 py-0.5 text-[11px] text-[var(--color-surface)]"
+            class="rounded-md bg-foreground px-2 py-0.5 text-xs text-[var(--color-surface)]"
             onclick={() => {
               confirmingClose = false;
               syncStore.closeMerge();
@@ -115,7 +115,7 @@
           </button>
           <button
             type="button"
-            class="rounded-md border border-border px-2 py-0.5 text-[11px] text-foreground"
+            class="rounded-md border border-border px-2 py-0.5 text-xs text-foreground"
             onclick={() => (confirmingClose = false)}
           >
             {t("syncMerge.abandonCancel")}
@@ -150,10 +150,10 @@
               {/if}
             </span>
             <span class="min-w-0">
-              <span class="block truncate font-mono text-[11px] text-foreground">
+              <span class="block truncate font-mono text-xs text-foreground">
                 {shortPath(item.path)}
               </span>
-              <span class="block text-[11px] text-muted-foreground">
+              <span class="block text-xs text-muted-foreground">
                 {verdict === "resolved"
                   ? t("syncMerge.statusResolved")
                   : verdict === "skipped"
@@ -178,21 +178,21 @@
             <div class="mt-2 flex items-center gap-2">
               <button
                 type="button"
-                class="rounded-md border border-border px-2 py-0.5 text-[11px] text-foreground"
+                class="rounded-md border border-border px-2 py-0.5 text-xs text-foreground"
                 onclick={() => void syncStore.resolve(active.path, active.local ?? "")}
               >
                 {t("syncMerge.keepMine")}
               </button>
               <button
                 type="button"
-                class="rounded-md border border-border px-2 py-0.5 text-[11px] text-foreground"
+                class="rounded-md border border-border px-2 py-0.5 text-xs text-foreground"
                 onclick={() => void syncStore.resolve(active.path, active.remote ?? "")}
               >
                 {t("syncMerge.takeTheirs")}
               </button>
               <button
                 type="button"
-                class="rounded-md border border-border px-2 py-0.5 text-[11px] text-muted-foreground"
+                class="rounded-md border border-border px-2 py-0.5 text-xs text-muted-foreground"
                 onclick={() => void syncStore.skip(active.path)}
               >
                 {t("syncMerge.skip")}
