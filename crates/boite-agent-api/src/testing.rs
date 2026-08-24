@@ -66,6 +66,7 @@ impl Fake {
                     archived: false,
                     git_root: None,
                     worktrees: None,
+                    mcp_server_ids: None,
                 },
                 1,
             )

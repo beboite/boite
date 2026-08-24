@@ -38,6 +38,8 @@ import type {
   AgentTurn,
   UsageReport,
   LogApi,
+  McpApi,
+  McpServerRow,
   PendingApproval,
   DispatchLine,
   OrchestratorAction,
@@ -110,6 +112,7 @@ export class RemoteBackend implements Backend {
   readonly fastMcpSsh: FastMcpSshApi;
   readonly kebaccSwitcher: KebaccSwitcherApi;
   readonly cli: CliApi;
+  readonly mcp: McpApi;
   readonly scope: ScopeApi;
   readonly session: SessionApi;
   readonly search: SearchApi;
@@ -500,6 +503,11 @@ export class RemoteBackend implements Backend {
         rpc("cli.uninstall", { id, purgeData }).then((r) => r.job as CliJob),
       cancel: (id) => rpc("cli.cancel", { id }).then((r) => r.cancelled as boolean),
       dismiss: (id) => rpc("cli.dismiss", { id }).then(() => undefined),
+    };
+
+    this.mcp = {
+      catalog: () =>
+        rpc("mcp.catalog", {}).then((r) => (r.servers as McpServerRow[] | null) ?? []),
     };
 
     // The server derives its filesystem trust boundary from persisted projects;

@@ -421,6 +421,13 @@ pub const ALL: &[Migration] = &[
         "add_orchestrator_actions_undone",
         "ALTER TABLE orchestrator_actions ADD COLUMN undone_at INTEGER;",
     ),
+    // Null leaves the agent's global MCP configuration alone. Once a project
+    // has an explicit JSON list, that list is the complete allow-list, with an
+    // empty list meaning no MCP server at all.
+    both(
+        "add_project_mcp_servers",
+        "ALTER TABLE projects ADD COLUMN mcp_server_ids TEXT;",
+    ),
 ];
 
 /// The desktop's list: `(version, description, sql)`, versions from 1.
@@ -454,7 +461,7 @@ mod tests {
     #[test]
     fn the_shipped_order_is_preserved_on_both_sides() {
         let desktop = desktop();
-        assert_eq!(desktop.len(), 29);
+        assert_eq!(desktop.len(), 30);
         assert_eq!(desktop[0], (1, "create_projects", ALL[0].sql));
         assert_eq!(desktop[4].1, "add_thread_session_and_icon");
         assert_eq!(desktop[8].1, "add_project_git_root", "no push table here");
@@ -467,7 +474,7 @@ mod tests {
         assert_eq!(desktop[21].1, "add_thread_ageing");
 
         let server = server();
-        assert_eq!(server.len(), 29);
+        assert_eq!(server.len(), 30);
         assert_eq!(server[8].description, "create_push_subscriptions");
         assert_eq!(server[9].description, "add_project_git_root");
         assert_eq!(
@@ -571,7 +578,7 @@ mod tests {
         }
         assert_eq!(
             columns(&conn, "projects"),
-            ["id", "name", "cwd", "default_cmd", "default_args", "created_at", "icon", "archived", "git_root", "worktrees"]
+            ["id", "name", "cwd", "default_cmd", "default_args", "created_at", "icon", "archived", "git_root", "worktrees", "mcp_server_ids"]
         );
         assert_eq!(
             columns(&conn, "threads"),

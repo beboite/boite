@@ -16,6 +16,7 @@ import {
   tauriFastpick,
   tauriGit,
   tauriLog,
+  tauriMcp,
   tauriProject,
   tauriScope,
   tauriSearch,
@@ -45,6 +46,7 @@ export class TauriBackend implements Backend {
   readonly fastMcpSsh = tauriFastMcpSsh;
   readonly kebaccSwitcher = tauriKebaccSwitcher;
   readonly cli = tauriCli;
+  readonly mcp = tauriMcp;
   readonly scope = tauriScope;
   readonly session = tauriSession;
   readonly search = tauriSearch;

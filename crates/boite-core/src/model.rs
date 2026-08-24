@@ -51,6 +51,11 @@ pub struct Project {
     /// setting, which is what every project did before the column existed.
     #[serde(default)]
     pub worktrees: Option<bool>,
+    /// MCP servers explicitly enabled for this project. None preserves the
+    /// agent's own global configuration, which is how projects behaved before
+    /// this setting existed. An empty list deliberately disables every server.
+    #[serde(default)]
+    pub mcp_server_ids: Option<Vec<String>>,
 }
 
 // Mirrors the frontend Thread type. `pty_id` and `status` reflect live server

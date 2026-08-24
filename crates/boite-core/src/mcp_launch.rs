@@ -10,6 +10,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde_json::json;
+use sha2::{Digest, Sha256};
+
+use crate::mcp_catalog::{self, BOITE_MCP_ID};
 
 /// Where the generated MCP files live, and the binary they name.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -93,6 +96,83 @@ pub fn flags_for(cmd: &str, paths: &McpPaths) -> Vec<String> {
     }
 }
 
+/// Launch flags for one project's explicit MCP allow-list.
+///
+/// `None` is the compatibility path: leave every global server alone and only
+/// add Boite when the app-wide setting says so. `Some`, including an empty
+/// slice, is authoritative. Codex receives an enabled override for every
+/// discovered global server; Claude receives a strict generated config.
+pub fn project_flags_for(
+    cmd: &str,
+    paths: &McpPaths,
+    project_id: &str,
+    selected_ids: Option<&[String]>,
+    default_boite: bool,
+) -> Result<Vec<String>, String> {
+    let Some(selected_ids) = selected_ids else {
+        return Ok(if default_boite {
+            flags_for(cmd, paths)
+        } else {
+            Vec::new()
+        });
+    };
+    let boite_selected = selected_ids.iter().any(|id| id == BOITE_MCP_ID);
+
+    match agent_name(cmd) {
+        "claude" => {
+            let mut servers = mcp_catalog::claude_servers(selected_ids)?;
+            if boite_selected {
+                servers.insert(
+                    BOITE_MCP_ID.into(),
+                    json!({ "command": paths.sidecar.to_string_lossy() }),
+                );
+            }
+            let digest = Sha256::digest(project_id.as_bytes());
+            let suffix: String = digest[..8].iter().map(|b| format!("{b:02x}")).collect();
+            let config = paths
+                .config
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .join(format!("mcp-project-{suffix}.json"));
+            let document = json!({ "mcpServers": servers });
+            fs::write(
+                &config,
+                serde_json::to_vec_pretty(&document)
+                    .map_err(|e| format!("serialize project mcp config: {e}"))?,
+            )
+            .map_err(|e| format!("write project mcp config: {e}"))?;
+
+            let mut args = vec![
+                "--mcp-config".into(),
+                config.to_string_lossy().into_owned(),
+                "--strict-mcp-config".into(),
+            ];
+            if boite_selected {
+                args.push("--settings".into());
+                args.push(paths.settings.to_string_lossy().into_owned());
+            }
+            Ok(args)
+        }
+        "codex" => {
+            let mut args = mcp_catalog::codex_selection_flags(selected_ids)?;
+            if boite_selected {
+                args.extend([
+                    "-c".into(),
+                    format!(
+                        "mcp_servers.boite.command={}",
+                        serde_json::to_string(&paths.sidecar.to_string_lossy().as_ref())
+                            .unwrap_or_else(|_| format!("\"{}\"", paths.sidecar.display()))
+                    ),
+                    "-c".into(),
+                    "mcp_servers.boite.enabled=true".into(),
+                ]);
+            }
+            Ok(args)
+        }
+        _ => Ok(Vec::new()),
+    }
+}
+
 /// Insert the flags in front of the first `--`, so a Claude opening prompt
 /// is not read as a second config file.
 pub fn inject(cmd: &str, args: Vec<String>, paths: &McpPaths) -> Vec<String> {
@@ -108,6 +188,66 @@ pub fn inject(cmd: &str, args: Vec<String>, paths: &McpPaths) -> Vec<String> {
         out.splice(i..i, extra);
     } else {
         out.extend(extra);
+    }
+    out
+}
+
+/// Project-aware form of [`inject`]. The row keeps its original argv; callers
+/// apply this to the spawn copy so changing the checkboxes affects a relaunch.
+pub fn inject_project(
+    cmd: &str,
+    args: Vec<String>,
+    paths: &McpPaths,
+    project_id: &str,
+    selected_ids: Option<&[String]>,
+    default_boite: bool,
+) -> Result<Vec<String>, String> {
+    let args = if selected_ids.is_some() {
+        without_legacy_wiring(args, paths)
+    } else {
+        args
+    };
+    if already_wired(&args) {
+        return Ok(args);
+    }
+    let extra = project_flags_for(cmd, paths, project_id, selected_ids, default_boite)?;
+    if extra.is_empty() {
+        return Ok(args);
+    }
+    let mut out = args;
+    if let Some(i) = out.iter().position(|a| a == "--") {
+        out.splice(i..i, extra);
+    } else {
+        out.extend(extra);
+    }
+    Ok(out)
+}
+
+fn without_legacy_wiring(args: Vec<String>, paths: &McpPaths) -> Vec<String> {
+    let config = paths.config.to_string_lossy();
+    let settings = paths.settings.to_string_lossy();
+    let mut out = Vec::with_capacity(args.len());
+    let mut index = 0;
+    while index < args.len() {
+        let arg = &args[index];
+        if (arg == "--mcp-config"
+            && args.get(index + 1).map(String::as_str) == Some(config.as_ref()))
+            || (arg == "--settings"
+                && args.get(index + 1).map(String::as_str) == Some(settings.as_ref()))
+        {
+            index += 2;
+            continue;
+        }
+        if arg == "-c"
+            && args
+                .get(index + 1)
+                .is_some_and(|value| value.contains("mcp_servers.boite.command="))
+        {
+            index += 2;
+            continue;
+        }
+        out.push(arg.clone());
+        index += 1;
     }
     out
 }
@@ -221,6 +361,25 @@ mod tests {
             assert!(flags[1].contains("mcp_servers.boite.command="), "{flags:?}");
             assert!(flags[1].contains("boite-mcp"), "{flags:?}");
         }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn explicit_empty_claude_selection_is_strict() {
+        let dir = std::env::temp_dir().join(format!("boite-mcp-empty-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let p = paths(&dir);
+        let flags = project_flags_for("claude", &p, "project", Some(&[]), true).unwrap();
+        assert!(flags.contains(&"--strict-mcp-config".to_string()));
+        assert!(!flags.contains(&"--settings".to_string()));
+        let config = flags
+            .iter()
+            .position(|arg| arg == "--mcp-config")
+            .and_then(|at| flags.get(at + 1))
+            .unwrap();
+        let body = fs::read_to_string(config).unwrap();
+        assert!(body.contains("\"mcpServers\": {}"), "{body}");
         let _ = fs::remove_dir_all(&dir);
     }
 }

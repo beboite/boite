@@ -124,6 +124,7 @@ fn a_project_already_there_is_reused_rather_than_refused() {
                     archived: false,
                     git_root: None,
                     worktrees: None,
+                    mcp_server_ids: None,
                 },
                 1,
             )
@@ -185,6 +186,7 @@ fn a_name_two_projects_answer_to_is_refused() {
                     archived: false,
                     git_root: None,
                     worktrees: None,
+                    mcp_server_ids: None,
                 },
                 1,
             )
