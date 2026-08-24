@@ -174,7 +174,11 @@ fn opencode_db_path() -> Option<PathBuf> {
 
     if let Ok(data_home) = env::var("XDG_DATA_HOME") {
         if !data_home.trim().is_empty() {
-            candidates.push(PathBuf::from(data_home).join("opencode").join("opencode.db"));
+            candidates.push(
+                PathBuf::from(data_home)
+                    .join("opencode")
+                    .join("opencode.db"),
+            );
         }
     }
 
@@ -202,27 +206,55 @@ fn opencode_db_path() -> Option<PathBuf> {
         .or_else(|| candidates.into_iter().next())
 }
 
+/// Whether `table` exists and has a `time_updated` column.
+///
+/// OpenCode has renamed the row that carries a session's activity twice
+/// (`session_entry` then `session_message`). Naming one of those in SQL
+/// made `prepare` fail on every other schema, and a switch to an already
+/// created session (old `time_created`, recent `time_updated`) went
+/// unseen. `pragma_table_info` is empty for a missing table, so one check
+/// covers both.
+fn has_time_updated(conn: &Connection, table: &str) -> bool {
+    conn.query_row(
+        "SELECT 1 FROM pragma_table_info(?1) WHERE name = 'time_updated'",
+        [table],
+        |_| Ok(()),
+    )
+    .is_ok()
+}
+
+fn session_activity_sql(conn: &Connection) -> String {
+    let mut parts = vec![
+        "coalesce(s.time_updated, 0)".to_string(),
+        "coalesce(s.time_created, 0)".to_string(),
+    ];
+    for table in ["message", "part", "session_message", "session_entry"] {
+        if has_time_updated(conn, table) {
+            parts.push(format!(
+                "coalesce((SELECT max(time_updated) FROM {table} WHERE session_id = s.id), 0)"
+            ));
+        }
+    }
+    format!("max({})", parts.join(", "))
+}
+
 fn find_opencode_session_by_activity(
     conn: &Connection,
     target: &str,
     after_unix_ms: i64,
     exclude: &HashSet<String>,
 ) -> Option<SessionHit> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT s.id, s.directory, \
-                    max( \
-                        coalesce(s.time_updated, 0), \
-                        coalesce(s.time_created, 0), \
-                        coalesce((SELECT max(m.time_updated) FROM message m WHERE m.session_id = s.id), 0), \
-                        coalesce((SELECT max(p.time_updated) FROM part p WHERE p.session_id = s.id), 0), \
-                        coalesce((SELECT max(se.time_updated) FROM session_entry se WHERE se.session_id = s.id), 0) \
-                    ) AS activity \
-             FROM session s \
-             ORDER BY activity DESC \
-             LIMIT 100",
-        )
-        .ok()?;
+    let activity = session_activity_sql(conn);
+    // `parent_id IS NULL` is the same cut `opencode_turns` makes: a subagent
+    // session shares the directory and is often the row that last moved.
+    let sql = format!(
+        "SELECT s.id, s.directory, {activity} AS activity \
+         FROM session s \
+         WHERE s.parent_id IS NULL \
+         ORDER BY activity DESC \
+         LIMIT 100"
+    );
+    let mut stmt = conn.prepare(&sql).ok()?;
     let rows = stmt
         .query_map([], |row| {
             Ok((
@@ -235,9 +267,7 @@ fn find_opencode_session_by_activity(
 
     for row in rows.flatten() {
         let (id, directory, activity_ms) = row;
-        if activity_ms >= after_unix_ms
-            && normalize(&directory) == target
-            && !exclude.contains(&id)
+        if activity_ms >= after_unix_ms && normalize(&directory) == target && !exclude.contains(&id)
         {
             // The query already folded every table's timestamp into one; a row
             // whose columns were all null lands on 0, which is no timestamp.
@@ -262,6 +292,7 @@ fn find_opencode_session_by_created(
             "SELECT id, directory, time_created \
              FROM session \
              WHERE time_created >= ? \
+               AND parent_id IS NULL \
              ORDER BY time_created DESC \
              LIMIT 50",
         )
@@ -292,6 +323,18 @@ fn find_opencode_session_by_created(
     None
 }
 
+fn find_opencode_session_in(
+    conn: &Connection,
+    cwd: &str,
+    after_unix_ms: i64,
+    exclude: &HashSet<String>,
+) -> Option<SessionHit> {
+    let target = normalize(cwd);
+    find_opencode_session_by_activity(conn, &target, after_unix_ms, exclude)
+        .or_else(|| find_opencode_session_by_created(conn, &target, after_unix_ms, exclude))
+        .or_else(|| find_opencode_session_by_activity(conn, &target, 0, exclude))
+}
+
 pub fn find_opencode_session_blocking(
     cwd: String,
     after_unix_ms: i64,
@@ -304,11 +347,7 @@ pub fn find_opencode_session_blocking(
 
     let conn = open_readonly(&db_path).ok()?;
     let _ = conn.busy_timeout(Duration::from_millis(250));
-    let target = normalize(&cwd);
-
-    find_opencode_session_by_activity(&conn, &target, after_unix_ms, exclude)
-        .or_else(|| find_opencode_session_by_created(&conn, &target, after_unix_ms, exclude))
-        .or_else(|| find_opencode_session_by_activity(&conn, &target, 0, exclude))
+    find_opencode_session_in(&conn, &cwd, after_unix_ms, exclude)
 }
 
 #[cfg(test)]
@@ -353,22 +392,26 @@ mod tests {
         let row = |role: &str, created: i64| {
             format!(r#"{{"role":"{role}","time":{{"created":{created}}}}}"#)
         };
-        assert_eq!(opencode_message_state(&row("assistant", fresh), now), Some("busy"));
+        assert_eq!(
+            opencode_message_state(&row("assistant", fresh), now),
+            Some("busy")
+        );
         assert_eq!(opencode_message_state(&row("assistant", stale), now), None);
-        assert_eq!(opencode_message_state(&row("user", fresh), now), Some("busy"));
+        assert_eq!(
+            opencode_message_state(&row("user", fresh), now),
+            Some("busy")
+        );
         assert_eq!(opencode_message_state(&row("user", stale), now), None);
 
         // `time_updated` is what moves while a reply is being written, so it is
         // what keeps a long turn alive even though `created` has aged out.
-        let touched = format!(
-            r#"{{"role":"assistant","time":{{"created":{stale},"updated":{fresh}}}}}"#
-        );
+        let touched =
+            format!(r#"{{"role":"assistant","time":{{"created":{stale},"updated":{fresh}}}}}"#);
         assert_eq!(opencode_message_state(&touched, now), Some("busy"));
 
         // A finished turn is good forever; only the open side is bounded.
-        let done = format!(
-            r#"{{"role":"assistant","time":{{"created":{stale},"completed":{stale}}}}}"#
-        );
+        let done =
+            format!(r#"{{"role":"assistant","time":{{"created":{stale},"completed":{stale}}}}}"#);
         assert_eq!(opencode_message_state(&done, now), Some("idle"));
 
         // A row with no timestamp at all cannot be aged, and inventing one would
@@ -377,7 +420,10 @@ mod tests {
             opencode_message_state(r#"{"role":"assistant","time":{}}"#, now),
             Some("busy")
         );
-        assert_eq!(opencode_message_state(r#"{"role":"assistant"}"#, now), Some("busy"));
+        assert_eq!(
+            opencode_message_state(r#"{"role":"assistant"}"#, now),
+            Some("busy")
+        );
     }
 
     #[test]
@@ -437,5 +483,83 @@ mod tests {
             cwd: "D:/Work/One".into(),
         };
         assert!(opencode_turns_in(&conn, &[other]).is_empty());
+    }
+
+    #[test]
+    fn opencode_finds_a_switch_to_an_existing_session() {
+        // OpenCode dropped `session_entry` (replaced by `session_message`, then
+        // by the original `message`/`part` pair plus `session.time_updated`).
+        // The activity query named that table unconditionally, so `prepare`
+        // failed and the only remaining path was `time_created >= after`.
+        // Switching to a conversation that already existed never matched:
+        // its created timestamp is old, its `time_updated` is what moved.
+        let conn = Connection::open_in_memory().expect("in-memory database");
+        conn.execute_batch(
+            "CREATE TABLE session (
+                 id TEXT PRIMARY KEY,
+                 parent_id TEXT,
+                 directory TEXT NOT NULL,
+                 title TEXT NOT NULL,
+                 time_created INTEGER NOT NULL,
+                 time_updated INTEGER NOT NULL
+             );
+             CREATE TABLE message (
+                 id TEXT PRIMARY KEY,
+                 session_id TEXT NOT NULL,
+                 time_created INTEGER NOT NULL,
+                 time_updated INTEGER NOT NULL,
+                 data TEXT NOT NULL
+             );
+             INSERT INTO session VALUES
+                 ('bound', NULL, 'D:/Work/One', 'first', 1000, 2000),
+                 ('switched', NULL, 'D:/Work/One', 'other', 1500, 9000),
+                 ('child', 'switched', 'D:/Work/One', 'sub', 1600, 9500),
+                 ('elsewhere', NULL, 'D:/Work/Two', 'nope', 1700, 9800);
+             INSERT INTO message VALUES
+                 ('m1', 'bound', 1000, 2000, '{}'),
+                 ('m2', 'switched', 1500, 9000, '{}');",
+        )
+        .expect("fixture");
+
+        let mut exclude = HashSet::new();
+        exclude.insert("bound".into());
+        let hit = find_opencode_session_in(&conn, r"D:\Work\One", 8000, &exclude)
+            .expect("the session the thread switched to");
+        assert_eq!(hit.id, "switched");
+        assert_eq!(hit.modified_ms, Some(9000));
+    }
+
+    #[test]
+    fn opencode_still_reads_session_entry_when_the_table_exists() {
+        // The table OpenCode later dropped. Ignoring it on a store that still
+        // has it would miss the only timestamp that moved.
+        let conn = Connection::open_in_memory().expect("in-memory database");
+        conn.execute_batch(
+            "CREATE TABLE session (
+                 id TEXT PRIMARY KEY,
+                 parent_id TEXT,
+                 directory TEXT NOT NULL,
+                 title TEXT NOT NULL,
+                 time_created INTEGER NOT NULL,
+                 time_updated INTEGER NOT NULL
+             );
+             CREATE TABLE session_entry (
+                 id TEXT PRIMARY KEY,
+                 session_id TEXT NOT NULL,
+                 time_updated INTEGER NOT NULL
+             );
+             INSERT INTO session VALUES
+                 ('bound', NULL, 'D:/Work/One', 'first', 1000, 2000),
+                 ('switched', NULL, 'D:/Work/One', 'other', 1500, 2000);
+             INSERT INTO session_entry VALUES ('e1', 'switched', 9000);",
+        )
+        .expect("fixture");
+
+        let mut exclude = HashSet::new();
+        exclude.insert("bound".into());
+        let hit = find_opencode_session_in(&conn, "D:/Work/One", 8000, &exclude)
+            .expect("activity on session_entry");
+        assert_eq!(hit.id, "switched");
+        assert_eq!(hit.modified_ms, Some(9000));
     }
 }
