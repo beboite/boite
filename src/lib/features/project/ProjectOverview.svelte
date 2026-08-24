@@ -7,6 +7,7 @@
   import TodoList from "$lib/features/todo/TodoList.svelte";
   import DashboardCard from "./DashboardCard.svelte";
   import ProjectWorktrees from "./ProjectWorktrees.svelte";
+  import ProjectMcpSettings from "./ProjectMcpSettings.svelte";
   import ProjectUsage from "./ProjectUsage.svelte";
   import ProjectStats from "./ProjectStats.svelte";
   import ThreadTurns from "$lib/features/thread/ThreadTurns.svelte";
@@ -319,6 +320,8 @@
        they were a full-width card of their own holding two lines of text, and
        three columns of nothing under it. -->
   <ProjectWorktrees {project} />
+
+  <ProjectMcpSettings {project} />
 
   <!-- The paths, as a line rather than a card. They are the one thing here
        that never changes, and a card's worth of chrome around two static

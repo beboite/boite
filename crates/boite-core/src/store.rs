@@ -537,7 +537,7 @@ impl Store {
     pub fn load_projects(&self) -> Result<Vec<Project>, String> {
         let conn = self.conn.lock();
         let mut stmt = conn
-            .prepare("SELECT id, name, cwd, icon, archived, git_root, worktrees FROM projects ORDER BY created_at ASC")
+            .prepare("SELECT id, name, cwd, icon, archived, git_root, worktrees, mcp_server_ids FROM projects ORDER BY created_at ASC")
             .map_err(|e| e.to_string())?;
         let rows = stmt
             .query_map([], |r| {
@@ -549,6 +549,9 @@ impl Store {
                     archived: r.get::<_, i64>(4)? == 1,
                     git_root: r.get(5)?,
                     worktrees: r.get::<_, Option<i64>>(6)?.map(|v| v == 1),
+                    mcp_server_ids: r
+                        .get::<_, Option<String>>(7)?
+                        .and_then(|raw| serde_json::from_str(&raw).ok()),
                 })
             })
             .map_err(|e| e.to_string())?;
@@ -558,8 +561,8 @@ impl Store {
     pub fn save_project(&self, p: &Project, created_at: i64) -> Result<(), String> {
         let conn = self.conn.lock();
         conn.execute(
-            "INSERT OR REPLACE INTO projects (id, name, cwd, default_cmd, default_args, icon, archived, git_root, worktrees, created_at)
-             VALUES (?1, ?2, ?3, '', '[]', ?4, ?5, ?6, ?7, ?8)",
+            "INSERT OR REPLACE INTO projects (id, name, cwd, default_cmd, default_args, icon, archived, git_root, worktrees, mcp_server_ids, created_at)
+             VALUES (?1, ?2, ?3, '', '[]', ?4, ?5, ?6, ?7, ?8, ?9)",
             rusqlite::params![
                 p.id,
                 p.name,
@@ -568,6 +571,11 @@ impl Store {
                 p.archived as i64,
                 p.git_root,
                 p.worktrees.map(|v| v as i64),
+                p.mcp_server_ids
+                    .as_ref()
+                    .map(serde_json::to_string)
+                    .transpose()
+                    .map_err(|e| e.to_string())?,
                 created_at
             ],
         )

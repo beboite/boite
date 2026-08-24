@@ -80,6 +80,25 @@ export async function setProjectWorktrees(app: AppState, id: string, enabled: bo
   }
 }
 
+/** Replaces this project's MCP allow-list, or clears it back to global defaults. */
+export async function setProjectMcpServers(
+  app: AppState,
+  id: string,
+  serverIds: string[] | null,
+) {
+  const p = app.projects.find((x) => x.id === id);
+  if (!p) return;
+  const current = p.mcpServerIds ?? null;
+  if (JSON.stringify(current) === JSON.stringify(serverIds)) return;
+  p.mcpServerIds = serverIds;
+  try {
+    await saveProject($state.snapshot(p) as Project);
+  } catch (err) {
+    logger.error("app", "setProjectMcpServers failed", err);
+    notifications.error(t("app.mcpSettingFailed"));
+  }
+}
+
 /**
  * The Scratch row, made and persisted if this workspace has none.
  *

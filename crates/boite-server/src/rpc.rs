@@ -181,12 +181,25 @@ pub async fn dispatch(state: &AppState, request: Authorized) -> Result<Value, St
                 thread.created_at = now_ms();
             }
             thread.status = "running".to_string();
+            let mut spawn_args = thread.args.clone();
             // The sidecar lives on this host. A client on another machine
             // cannot name it, so the flags are added here, once, in front of
             // `--` so a Claude prompt is not read as a second config file.
             if let Some(paths) = state.agent_api.as_ref().and_then(|api| api.mcp.as_ref()) {
-                thread.args =
-                    boite_core::mcp_launch::inject(&thread.cmd, std::mem::take(&mut thread.args), paths);
+                let selected = state
+                    .store
+                    .load_projects()?
+                    .into_iter()
+                    .find(|project| project.id == thread.project_id)
+                    .and_then(|project| project.mcp_server_ids);
+                spawn_args = boite_core::mcp_launch::inject_project(
+                    &thread.cmd,
+                    spawn_args,
+                    paths,
+                    &thread.project_id,
+                    selected.as_deref(),
+                    true,
+                )?;
             }
             // Before the key is minted: `bind_thread_identity` updates a row,
             // and there is no row until this runs.
@@ -240,7 +253,7 @@ pub async fn dispatch(state: &AppState, request: Authorized) -> Result<Value, St
             let spec = PtySpawnArgs {
                 cwd,
                 cmd: thread.cmd.clone(),
-                args: thread.args.clone(),
+                args: spawn_args,
                 cols,
                 rows,
                 env,

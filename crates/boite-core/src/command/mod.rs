@@ -736,6 +736,7 @@ mod tests {
             ("cli.uninstall", MutateAcross),
             ("cli.cancel", MutateProject),
             ("cli.dismiss", MutateProject),
+            ("mcp.catalog", ReadProject),
             ("project.list", ReadProject),
             ("project.create", MutateAcross),
             ("project.archive", MutateProject),

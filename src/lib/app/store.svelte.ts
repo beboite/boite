@@ -850,6 +850,8 @@ export class AppState {
   renameProject = (id: string, name: string) => projectWrites.renameProject(this, id, name);
   setProjectWorktrees = (id: string, enabled: boolean) =>
     projectWrites.setProjectWorktrees(this, id, enabled);
+  setProjectMcpServers = (id: string, serverIds: string[] | null) =>
+    projectWrites.setProjectMcpServers(this, id, serverIds);
   ensureScratch = () => projectWrites.ensureScratch(this);
   addProject = (project: Project) => projectWrites.addProject(this, project);
   archiveProject = (id: string) => projectWrites.archiveProject(this, id);

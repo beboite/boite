@@ -43,6 +43,37 @@ pub struct AgentMcpConfig {
 /// file would point an agent at a binary that is no longer there.
 #[tauri::command]
 pub async fn agent_mcp_config(app: AppHandle) -> Result<AgentMcpConfig, String> {
+    let written = local_mcp_paths(&app)?;
+
+    Ok(AgentMcpConfig {
+        sidecar_path: written.sidecar.to_string_lossy().into_owned(),
+        config_path: written.config.to_string_lossy().into_owned(),
+        settings_path: written.settings.to_string_lossy().into_owned(),
+    })
+}
+
+/// Project-aware launch flags for agents spawned by this desktop. The remote
+/// backend returns no client-side flags; its server applies the same core rule
+/// immediately before spawning its PTY.
+#[tauri::command]
+pub async fn agent_mcp_args(
+    app: AppHandle,
+    cmd: String,
+    project_id: String,
+    mcp_server_ids: Option<Vec<String>>,
+    default_boite: bool,
+) -> Result<Vec<String>, String> {
+    let written = local_mcp_paths(&app)?;
+    boite_core::mcp_launch::project_flags_for(
+        &cmd,
+        &written,
+        &project_id,
+        mcp_server_ids.as_deref(),
+        default_boite,
+    )
+}
+
+fn local_mcp_paths(app: &AppHandle) -> Result<boite_core::mcp_launch::McpPaths, String> {
     let exe = std::env::current_exe().map_err(|e| format!("current_exe: {e}"))?;
     let dir = exe
         .parent()
@@ -62,13 +93,7 @@ pub async fn agent_mcp_config(app: AppHandle) -> Result<AgentMcpConfig, String> 
         .path()
         .app_config_dir()
         .map_err(|e| format!("app_config_dir: {e}"))?;
-    let written = boite_core::mcp_launch::write_files(&config_dir, &sidecar)?;
-
-    Ok(AgentMcpConfig {
-        sidecar_path: written.sidecar.to_string_lossy().into_owned(),
-        config_path: written.config.to_string_lossy().into_owned(),
-        settings_path: written.settings.to_string_lossy().into_owned(),
-    })
+    boite_core::mcp_launch::write_files(&config_dir, &sidecar)
 }
 
 /// Registers the shim with an agent that keeps its MCP servers in a config

@@ -237,6 +237,7 @@ export async function buildResumeArgsAsync(thread: Thread, cwd: string): Promise
   // what it actually produced.
   let argv = buildResumeArgv(thread);
   const key = resolveKey(thread);
+  const project = app.projects.find((candidate) => candidate.id === thread.projectId);
   // Every agent that can take it gets todo access, resume or not: the endpoint
   // serves the project, and a fresh thread wants it as much as a resumed one.
   // The cwd names the machine that will run this command line, which in dynamic
@@ -245,7 +246,12 @@ export async function buildResumeArgsAsync(thread: Thread, cwd: string): Promise
     key,
     settings.state.agentTodoAccess,
     workspace.pathOriginResolver?.(cwd) ?? "local",
-    { cwd, worktree: !!thread.worktreePath },
+    {
+      cwd,
+      worktree: !!thread.worktreePath,
+      projectId: thread.projectId,
+      mcpServerIds: project?.mcpServerIds ?? null,
+    },
   );
   argv = withMcpArgs(argv, mcp);
   argv = withPendingPrompt(thread, key, argv);

@@ -845,6 +845,21 @@ export interface CliApi {
   dismiss(id: string): Promise<void>;
 }
 
+export interface McpServerRow {
+  id: string;
+  name: string;
+  source: "boite" | "codex";
+  transport: "stdio" | "http";
+  enabled: boolean;
+  /** Whether Boite can safely translate this definition for Claude. */
+  claudeCompatible: boolean;
+}
+
+export interface McpApi {
+  /** Names and capabilities only. Server definitions stay on the agent host. */
+  catalog(): Promise<McpServerRow[]>;
+}
+
 export interface ScopeApi {
   registerProjectRoots(roots: string[]): Promise<void>;
   // The server's browsable base dir for adding projects via the web folder
@@ -1639,6 +1654,7 @@ export interface Backend {
   readonly fastMcpSsh: FastMcpSshApi;
   readonly kebaccSwitcher: KebaccSwitcherApi;
   readonly cli: CliApi;
+  readonly mcp: McpApi;
   readonly scope: ScopeApi;
   readonly session: SessionApi;
   readonly log: LogApi;
