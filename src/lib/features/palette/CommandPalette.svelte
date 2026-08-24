@@ -309,7 +309,7 @@
             class="flex w-full items-center gap-2 px-4 py-1.5 text-left text-base
               {i === activeIndex
                 ? 'bg-[var(--color-surface-3)] text-foreground'
-                : 'text-foreground/85 hover:bg-[var(--color-surface-2)]'}"
+                : 'text-foreground/80 hover:bg-[var(--color-surface-2)]'}"
             onpointerenter={() => (activeIndex = i)}
             onclick={() => runCommand(row.c)}
           >

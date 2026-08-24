@@ -302,7 +302,7 @@
 {:else}
   {#each agentsHere as agent (agent.key)}
     <div class="flex items-center gap-2 py-0.5">
-      <span class="min-w-0 flex-1 truncate text-sm text-foreground/85">
+      <span class="min-w-0 flex-1 truncate text-sm text-foreground/80">
         {agent.label}
       </span>
       {#if agent.auto || agent.reg === "this"}

@@ -43,7 +43,7 @@
   <div class="overflow-hidden rounded-lg border border-border bg-[var(--color-surface-2)]">
     <button
       type="button"
-      class="flex w-full items-center justify-between gap-3 border-b border-border/60 px-3 py-2 text-left transition hover:bg-[var(--color-surface-3)]"
+      class="flex w-full items-center justify-between gap-3 border-b border-border/60 px-3 py-2 text-left transition hover:bg-accent"
       onclick={() => pickDefault(null)}
     >
       <div class="min-w-0">
@@ -60,7 +60,7 @@
       {@const active = settings.state.defaultShellId === shell.id}
       <button
         type="button"
-        class="flex w-full items-center justify-between gap-3 border-b border-border/60 px-3 py-2 text-left transition last:border-b-0 hover:bg-[var(--color-surface-3)]"
+        class="flex w-full items-center justify-between gap-3 border-b border-border/60 px-3 py-2 text-left transition last:border-b-0 hover:bg-accent"
         onclick={() => pickDefault(shell.id)}
       >
         <div class="min-w-0">
@@ -253,7 +253,7 @@
     {#each SUPPORTED_AUTOCLOSE as row (row.iconKey)}
       {@const enabled = settings.state.idleAutocloseByIcon[row.iconKey] ?? false}
       <label
-        class="flex cursor-pointer items-center justify-between gap-3 border-b border-border/60 px-3 py-2 transition last:border-b-0 hover:bg-[var(--color-surface-3)]"
+        class="flex cursor-pointer items-center justify-between gap-3 border-b border-border/60 px-3 py-2 transition last:border-b-0 hover:bg-accent"
       >
         <span class="flex items-center gap-2">
           <ShortcutIcon iconKey={row.iconKey as never} size={14} />

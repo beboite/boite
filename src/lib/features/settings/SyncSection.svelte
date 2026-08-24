@@ -276,12 +276,12 @@
             <span class="text-xs text-foreground">{row.label}</span>
           </span>
           {#if row.id === AGENTS_ID}
-            <span class="text-[11px] text-muted-foreground/80">{t("sync.agentsRowDesc")}</span>
+            <span class="text-xs text-muted-foreground/80">{t("sync.agentsRowDesc")}</span>
           {:else if absent}
-            <span class="text-[11px] text-muted-foreground/80">{t("sync.sourceAbsent")}</span>
+            <span class="text-xs text-muted-foreground/80">{t("sync.sourceAbsent")}</span>
           {/if}
           {#if row.source && row.source.paths.length > 0}
-            <span class="truncate font-mono text-[11px] text-muted-foreground/70">
+            <span class="truncate font-mono text-xs text-muted-foreground/70">
               {row.source.paths.join("  ")}
             </span>
           {/if}
@@ -297,7 +297,7 @@
     {/each}
   </div>
   {#if notYet.length > 0}
-    <p class="mt-2 text-[11px] text-muted-foreground/80">
+    <p class="mt-2 text-xs text-muted-foreground/80">
       {t("sync.sourcesNotYet", { names: notYet.join(", ") })}
     </p>
   {/if}

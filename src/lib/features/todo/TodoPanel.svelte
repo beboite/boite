@@ -142,7 +142,7 @@
              a number. -->
         {#if agentsPending > 0}
           <span
-            class="shrink-0 rounded-full bg-[var(--color-surface-2)] px-1.5 text-2xs text-foreground/75"
+            class="shrink-0 rounded-full bg-[var(--color-surface-2)] px-1.5 text-2xs text-foreground/70"
           >
             {agentsPending}
           </span>

@@ -66,7 +66,7 @@
   // otherwise revealed by a pointer over the row or by the keyboard reaching
   // them, which is the half that was missing.
   const ROW_ACTION = $derived(
-    `grid size-[22px] shrink-0 place-items-center rounded text-muted-foreground/50 transition ${
+    `grid size-[22px] shrink-0 place-items-center rounded text-muted-foreground/60 transition ${
       mobile
         ? ""
         : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
@@ -379,7 +379,7 @@
   // The same box the Confirm/Reopen buttons draw, minus its resting border, so
   // the strip stays a line of text until a pointer is on it.
   const CHIP =
-    "rounded border border-transparent px-1 py-0.5 transition hover:border-border hover:bg-[var(--color-surface-2)] hover:text-foreground";
+    "rounded border border-transparent px-1 py-0.5 transition hover:border-border hover:bg-accent hover:text-foreground";
 
   onMount(() => {
     void todos.ensureLoaded();
@@ -452,7 +452,7 @@
       class="group cursor-pointer border-b border-border/50 px-3 py-1.5 transition {item.id ===
       draggingId
         ? 'opacity-40'
-        : 'hover:bg-[var(--color-surface-2)]'} {item.state === 'claimed'
+        : 'hover:bg-accent'} {item.state === 'claimed'
         ? 'bg-[var(--color-surface-2)]/60'
         : ''} {openId === item.id ? 'bg-[var(--color-surface-2)]/50' : ''}"
       onpointerdown={(e) => cardPointerDown(item, e)}
@@ -515,7 +515,7 @@
                  when the card is open, where the description is right
                  there. -->
             <span
-              class="shrink-0 text-muted-foreground/50"
+              class="shrink-0 text-muted-foreground/60"
               use:tip={t("todo.hasDescription")}
             >
               <AlignLeft class="size-3" />
@@ -524,7 +524,7 @@
         {/if}
         <button
           type="button"
-          class="{ROW_ACTION} hover:bg-[var(--color-surface-3)] hover:text-foreground disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-muted-foreground/50"
+          class="{ROW_ACTION} hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-muted-foreground/50"
           onclick={() => handOff(item)}
           disabled={!canSend}
           use:tip={canSend
@@ -653,14 +653,14 @@
                   `${item.id}:commit`,
                 )}
               </button>
-              <span class="shrink-0 text-muted-foreground/40">·</span>
+              <span class="shrink-0 text-muted-foreground/60">·</span>
               <span
                 class="shrink-0 px-1 {g.commit.pushed ? '' : 'text-muted-foreground/70'}"
               >
                 {g.commit.pushed ? t("todo.gitPushed") : t("todo.gitLocal")}
               </span>
               {#if g.pr.kind === "found"}
-                <span class="shrink-0 text-muted-foreground/40">·</span>
+                <span class="shrink-0 text-muted-foreground/60">·</span>
                 <button
                   type="button"
                   class="group/tip relative shrink-0 {CHIP}"
@@ -675,7 +675,7 @@
                 <!-- gh was there and refused. Said, because unlike a missing
                      gh this is a state the user can be in without knowing —
                      and the signed-out case they can fix in one command. -->
-                <span class="shrink-0 text-muted-foreground/40">·</span>
+                <span class="shrink-0 text-muted-foreground/60">·</span>
                 <button
                   type="button"
                   class="group/tip relative shrink-0 text-warning/80 {CHIP}"
