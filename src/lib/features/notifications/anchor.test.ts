@@ -1,8 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 /**
- * Who the toast stack attaches to, now that the info box can sit on any of
- * the eight docks rather than only the top-right corner.
+ * Which standing info box the toaster must not cover.
  *
  * Every group in the window keeps its boxes mounted and hides the ones nobody
  * is looking at with `visibility`, which lays them out anyway: they have a real
