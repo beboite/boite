@@ -69,9 +69,17 @@ describe("tooltip", () => {
     expect(css).toContain(".boite-tip[data-open]");
   });
 
-  it("hangs the box under the popover layer", () => {
+  it("hangs the box on its own layer above the popovers", () => {
     const block = css.match(/\.boite-tip \{([^}]*)\}/);
-    expect(block?.[1]).toContain("z-index: var(--z-popover)");
+    // Not --z-popover: the tip node and a portaled panel are both fixed
+    // children of <body>, and at an equal z-index the last one appended wins.
+    // The tip is built once and stays, so every panel opened after the first
+    // tooltip painted over the box explaining its own buttons.
+    expect(block?.[1]).toContain("z-index: var(--z-tooltip)");
+    const layer = (name: string) =>
+      Number(css.split(`--z-${name}: `)[1]?.split(";")[0]);
+    expect(layer("tooltip")).toBeGreaterThan(layer("popover"));
+    expect(layer("tooltip")).toBeLessThan(layer("toast"));
     // A box explaining a control must not become the thing the pointer is on.
     expect(block?.[1]).toContain("pointer-events: none");
   });
