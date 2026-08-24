@@ -577,7 +577,7 @@ dependencies = [
 
 [[package]]
 name = "boite"
-version = "1.3.1"
+version = "1.3.2"
 dependencies = [
  "axum",
  "base64 0.23.1",
@@ -614,7 +614,7 @@ dependencies = [
 
 [[package]]
 name = "boite-agent-api"
-version = "1.3.1"
+version = "1.3.2"
 dependencies = [
  "axum",
  "boite-core",
@@ -631,7 +631,7 @@ dependencies = [
 
 [[package]]
 name = "boite-core"
-version = "1.3.1"
+version = "1.3.2"
 dependencies = [
  "base64 0.23.1",
  "criterion",
@@ -657,7 +657,7 @@ dependencies = [
 
 [[package]]
 name = "boite-identity"
-version = "1.3.1"
+version = "1.3.2"
 dependencies = [
  "ed25519-compact",
  "hex",
@@ -667,7 +667,7 @@ dependencies = [
 
 [[package]]
 name = "boite-mcp"
-version = "1.3.1"
+version = "1.3.2"
 dependencies = [
  "boite-identity",
  "serde",
@@ -676,7 +676,7 @@ dependencies = [
 
 [[package]]
 name = "boite-server"
-version = "1.3.1"
+version = "1.3.2"
 dependencies = [
  "axum",
  "base64 0.23.1",
