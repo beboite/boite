@@ -694,7 +694,7 @@ export interface FastMcpSshApi {
 }
 
 /**
- * What Boite makes of `kebacc-switch list`. Usage windows keep the labels the
+ * What Boite makes of `kebacc list`. Usage windows keep the labels the
  * CLI printed (or the keys of its JSON), so a new quota window shows up without
  * a Boite change.
  */

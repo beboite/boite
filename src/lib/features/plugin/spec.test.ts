@@ -13,7 +13,7 @@ describe("plugin catalogue", () => {
   it("names the published kebacc-switch repo", () => {
     const kebacc = PLUGINS.find((plugin) => plugin.id === "kebacc-switch");
     expect(kebacc?.repo).toBe(KEBACC_SWITCH_REPO);
-    expect(KEBACC_SWITCH_CMD).toBe("kebacc-switch");
+    expect(KEBACC_SWITCH_CMD).toBe("kebacc");
   });
 
   it("names the real Codex CLI", () => {

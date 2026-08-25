@@ -1,4 +1,4 @@
-//! Asking `kebacc-switch` what it holds, and telling it to flip.
+//! Asking `kebacc` what it holds, and telling it to flip.
 //!
 //! That binary is [kebab1337420/kebacc-switch](https://github.com/kebab1337420/kebacc-switch).
 //! Boite does not snapshot credentials. It runs the published CLI and returns a
@@ -10,24 +10,26 @@ use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
 
 const MAX_OUTPUT: usize = 4 * 1024 * 1024;
-const BIN: &str = "kebacc-switch";
+const BIN: &str = "kebacc";
 
-fn tools_dir_binary() -> Option<PathBuf> {
+/// The CLI was called `kebacc-switch` until its 1.0.0, and machines that have
+/// not updated still carry that name. Newest first.
+const NAMES: [&str; 2] = ["kebacc", "kebacc-switch"];
+
+fn tools_dir_binary(name: &str) -> Option<PathBuf> {
     let home = dirs::home_dir()?;
-    let dir = home.join(".claude-tools");
-    let exe = if cfg!(windows) {
-        dir.join("kebacc-switch.exe")
-    } else {
-        dir.join("kebacc-switch")
-    };
+    let exe = home
+        .join(".claude-tools")
+        .join(format!("{name}{}", std::env::consts::EXE_SUFFIX));
     exe.is_file().then_some(exe)
 }
 
+/// On Windows the installer puts the binary in `~/.claude-tools` and reaches it
+/// from a shell profile function, so PATH alone finds nothing.
 fn resolve() -> Option<PathBuf> {
-    if let Ok(path) = which::which(BIN) {
-        return Some(path);
-    }
-    tools_dir_binary()
+    NAMES
+        .iter()
+        .find_map(|name| which::which(name).ok().or_else(|| tools_dir_binary(name)))
 }
 
 fn tool() -> Result<Command, String> {
@@ -103,6 +105,12 @@ fn provider_id(label: &str) -> String {
 }
 
 fn split_header(line: &str) -> Option<(&str, &str)> {
+    // A pool with no numbers read yet prints them as a dash, so an account row
+    // carries the same separator a header does. The email is what tells them
+    // apart: a header names a store, never an account.
+    if line.contains('@') {
+        return None;
+    }
     for sep in [" — ", " – ", " - "] {
         if let Some(i) = line.find(sep) {
             return Some((line[..i].trim(), line[i + sep.len()..].trim()));
@@ -296,8 +304,13 @@ fn list_document(provider: &str) -> Result<String, String> {
     let json_out = run(&["list", "-Provider", provider, "-Json"])?;
     if let Ok(text) = stdout_text(&json_out) {
         let stripped = strip_ansi(&text);
+        // kebacc 2.x prints one object per pool, on its own line, with no
+        // `providers` key and no per-window reset. Text is the richer of the
+        // two there, so JSON this cannot read falls through instead of failing.
         if looks_json(&stripped) {
-            return normalize_list(&stripped);
+            if let Ok(doc) = normalize_list(&stripped) {
+                return Ok(doc);
+            }
         }
     }
     let text_out = run(&["list", "-Provider", provider, "-Countdown"])?;
@@ -324,13 +337,13 @@ fn run_then_list(args: &[&str], list_provider: &str) -> Result<String, String> {
     list_document(list_provider)
 }
 
-/// `kebacc-switch list -Provider <p>` as a normalised JSON string.
+/// `kebacc list -Provider <p>` as a normalised JSON string.
 pub fn list_blocking(provider: Option<&str>) -> Result<String, String> {
     let p = provider.filter(|s| !s.is_empty()).unwrap_or("all");
     list_document(p)
 }
 
-/// `kebacc-switch add -Provider <p>`.
+/// `kebacc add -Provider <p>`.
 pub fn add_blocking(provider: &str) -> Result<String, String> {
     if provider.is_empty() || provider == "all" {
         return Err("add needs a provider".into());
@@ -338,7 +351,7 @@ pub fn add_blocking(provider: &str) -> Result<String, String> {
     run_then_list(&["add", "-Provider", provider], provider)
 }
 
-/// `kebacc-switch switch -Provider <p> -Email <email> -Yes`.
+/// `kebacc switch -Provider <p> -Email <email> -Yes`.
 pub fn switch_blocking(provider: &str, email: &str) -> Result<String, String> {
     if provider.is_empty() || provider == "all" {
         return Err("switch needs a provider".into());
@@ -443,6 +456,29 @@ Codex — C:\\Users\\mtsu\\.kebacc-switch-codex-accounts
         assert_eq!(seven["used_percent"], 94.0);
         assert_eq!(seven["remaining_percent"], 6.0);
         assert_eq!(doc["providers"][1]["accounts"].as_array().unwrap().len(), 0);
+    }
+
+    const POOL_JSON: &str = r#"{"pool":"Claude Code","store":"/home/a/.kebacc-switch-accounts","caps":{"fiveHour":98.0,"sevenDay":98.0},"accounts":[{"email":"you@example.com","live":true,"fiveHour":0.0,"sevenDay":28.0,"usable":true,"readyAt":null}]}"#;
+
+    const NO_NUMBERS_YET: &str = "\
+Antigravity — /home/a/.kebacc-switch-antigravity-accounts
+* you@example.com                 5h —  |  7d —
+";
+
+    #[test]
+    fn a_pool_document_with_no_providers_is_left_to_the_text_path() {
+        let err = normalize_list(POOL_JSON).expect_err("kebacc 2.x prints one pool per line");
+        assert!(err.contains("providers"));
+    }
+
+    #[test]
+    fn a_pool_whose_numbers_were_never_read_still_lists_its_account() {
+        let doc: Value = serde_json::from_str(&parse_text_list(NO_NUMBERS_YET)).unwrap();
+        let accounts = doc["providers"][0]["accounts"].as_array().unwrap();
+        assert_eq!(accounts.len(), 1);
+        assert_eq!(accounts[0]["email"], "you@example.com");
+        assert_eq!(accounts[0]["active"], true);
+        assert!(accounts[0]["windows"].as_array().unwrap().is_empty());
     }
 
     #[test]
