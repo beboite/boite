@@ -72,3 +72,7 @@ looked at without a release. Signing stays on a machine holding the keystore.
 out of version control. Restore them locally before a release build. The
 release keystore SHA-256 has to match the fingerprint baked into
 `assetlinks.json`, otherwise the TWA falls back to a Custom Tab with a URL bar.
+
+`release.yml` signs the APK it attaches to a release from the same keystore,
+held as repository secrets, and refuses one whose certificate is not the
+fingerprint in `assetlinks.json`: [docs/releasing.md](../docs/releasing.md).

@@ -351,14 +351,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: 17
       # Caches the wrapper distribution and the dependency jars, keyed on the
       # gradle files. The runner image carries the Android SDK already, with
       # the licences accepted, and AGP downloads a platform it is missing.
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
       - name: Build the APK
         working-directory: mobile
         run: ./gradlew assembleRelease
@@ -372,7 +372,7 @@ jobs:
           test -f "$src"
           mkdir -p "${{ runner.temp }}/apk"
           cp "$src" "${{ runner.temp }}/apk/boite-$version-unsigned.apk"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: boite-android-unsigned
           path: ${{ runner.temp }}/apk/*.apk
