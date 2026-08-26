@@ -346,14 +346,25 @@ async function handleSpawn(req: SpawnRequest) {
       focus: false,
       parentThreadId: req.parentThreadId,
       delegationMode: req.delegationMode,
+      // Mounting the Terminal is what builds the argv, and the argv is where
+      // the briefing goes. Queueing the prompt after the mount hands it to
+      // nobody: `withPendingPrompt` has already read an empty queue, and the
+      // agent opens at a bare prompt while the caller is told the hand-off
+      // worked. A worktree hid it, because that mount waits for git and the
+      // staging below wins, so it only bit projects that spawn threads in
+      // place.
+      deferActivation: !!prompt,
     },
   );
   if (!thread) {
     await answerRequest(req, { error: "the terminal did not open" });
     return;
   }
+  if (prompt) {
+    app.setPendingPrompt(thread.id, prompt);
+    app.requestActivation(thread.id);
+  }
   await answerRequest(req, { ok: true, threadId: thread.id });
-  if (prompt) app.setPendingPrompt(thread.id, prompt);
   notifications.success(
     t("thread.spawnedIn", { label: launch.label, project: project.name }),
   );
