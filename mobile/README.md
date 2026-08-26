@@ -61,6 +61,11 @@ cd mobile
 
 Then sign with `apksigner` / `jarsigner` using the release keystore.
 
+The `android` job in `.github/workflows/ci.yml` runs `assembleRelease` on every
+push and pull request and keeps the unsigned APK as a run artifact
+(`boite-android-unsigned`), so a change to the wrapper can be installed and
+looked at without a release. Signing stays on a machine holding the keystore.
+
 ## Signing secrets (not in the repo)
 
 `android.keystore` and `KEYSTORE_PASSWORD.txt` are gitignored and must be kept
