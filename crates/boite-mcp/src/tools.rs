@@ -57,6 +57,10 @@ works if they are reading this one.
 - A page you opened: browser action=status|snapshot|click|type|press|scroll|\
 navigate|reload|wait_for|close|screenshot. Desktop window only for read/drive; \
 a pane drawn by a browser or a phone cannot be reached into.
+- A page you are done with: browser action=close, before you answer. A frame \
+left standing takes half the user's terminal for nothing. Leave it open only \
+when the page itself is what you are showing them; the window closes the ones \
+you forget, but only once they are off the screen and only after a wait.
 - The pane is theirs, not yours: it carries a mark saying you are driving it and \
 a button that takes it back, and after they press it your calls at that pane are \
 refused. That is the user deciding, not a fault to work around.

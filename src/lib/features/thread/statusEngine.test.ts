@@ -18,6 +18,10 @@ const h = vi.hoisted(() => ({
   notified: [] as string[],
   emulators: new Set<string>(),
   turn: null as { state: string } | null,
+  // One fake group per test, holding the browser leaves the sweep reads.
+  leaves: [] as Array<{ paneId: string; content: Record<string, unknown> }>,
+  shown: new Set<string>(),
+  closed: [] as string[],
 }));
 
 vi.mock("$lib/app/store.svelte", () => ({
@@ -50,8 +54,24 @@ vi.mock("$lib/features/settings/store.svelte", () => ({
 }));
 
 vi.mock("$lib/features/panes/store.svelte", () => ({
-  paneStore: { groupOf: () => null },
+  paneStore: {
+    groupOf: () => null,
+    get groups() {
+      return h.leaves.length > 0 ? [{ id: "g1", root: { leaves: h.leaves } }] : [];
+    },
+    closePane: (paneId: string) => {
+      h.closed.push(paneId);
+      h.leaves = h.leaves.filter((l) => l.paneId !== paneId);
+      return true;
+    },
+  },
   leavesOf: () => [],
+  threadLeavesOf: () => [],
+  leafNodesOf: (root: { leaves: unknown[] }) => root.leaves,
+}));
+
+vi.mock("$lib/features/panes/visible", () => ({
+  paneIsShown: (paneId: string) => h.shown.has(paneId),
 }));
 
 vi.mock("$lib/backend/tauri/parked", () => ({ parkedLocal: new Map() }));
@@ -115,6 +135,9 @@ beforeEach(async () => {
   h.notified = [];
   h.emulators = new Set();
   h.turn = null;
+  h.leaves = [];
+  h.shown = new Set();
+  h.closed = [];
   vi.useFakeTimers();
   vi.setSystemTime(T0);
   vi.resetModules();
@@ -252,5 +275,70 @@ describe("notifications", () => {
     vi.advanceTimersByTime(TICK_MS);
     expect(t.status).toBe("ready");
     expect(h.notified).toEqual(["awareness.detail.completed"]);
+  });
+});
+
+describe("the browser panes an agent leaves behind", () => {
+  const GRACE_MS = 15_000;
+
+  function browserLeaf(paneId: string, drivenBy: string | null) {
+    return { paneId, content: { kind: "browser", url: "http://localhost:1/", drivenBy } };
+  }
+
+  it("closes one its agent has finished with, once the wait is up", () => {
+    const t = thread({ status: "ready" });
+    h.threads = [t];
+    h.leaves = [browserLeaf("pane1", t.id)];
+    mod.statusEngine.start();
+
+    vi.advanceTimersByTime(GRACE_MS - TICK_MS);
+    expect(h.closed).toEqual([]);
+
+    vi.advanceTimersByTime(TICK_MS * 2);
+    expect(h.closed).toEqual(["pane1"]);
+  });
+
+  it("leaves a pane the user is looking at", () => {
+    const t = thread({ status: "ready" });
+    h.threads = [t];
+    h.leaves = [browserLeaf("pane1", t.id)];
+    h.shown.add("pane1");
+    mod.statusEngine.start();
+
+    vi.advanceTimersByTime(GRACE_MS * 3);
+    expect(h.closed).toEqual([]);
+  });
+
+  it("leaves a pane the user took back", () => {
+    // `drivenBy` cleared is the hand-back button. The pane is the user's from
+    // that moment, and nothing here closes a pane the user owns.
+    const t = thread({ status: "ready" });
+    h.threads = [t];
+    h.leaves = [browserLeaf("pane1", null)];
+    mod.statusEngine.start();
+
+    vi.advanceTimersByTime(GRACE_MS * 3);
+    expect(h.closed).toEqual([]);
+  });
+
+  it("starts the wait again when the agent picks the page back up", () => {
+    // A turn ending is not the same as the thread being done: an agent that
+    // opens a page, answers, then is asked to look again would otherwise lose
+    // the pane out from under its next call.
+    const t = thread({ status: "ready" });
+    h.threads = [t];
+    h.leaves = [browserLeaf("pane1", t.id)];
+    mod.statusEngine.start();
+
+    vi.advanceTimersByTime(GRACE_MS - TICK_MS);
+    t.status = "running";
+    vi.advanceTimersByTime(TICK_MS * 2);
+    expect(h.closed).toEqual([]);
+
+    t.status = "ready";
+    vi.advanceTimersByTime(GRACE_MS - TICK_MS);
+    expect(h.closed).toEqual([]);
+    vi.advanceTimersByTime(TICK_MS * 2);
+    expect(h.closed).toEqual(["pane1"]);
   });
 });

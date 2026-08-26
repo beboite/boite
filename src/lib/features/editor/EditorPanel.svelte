@@ -2,6 +2,7 @@
   import { app } from "$lib/app/store.svelte";
   import { tip } from "$lib/shared/actions/tooltip";
   import { editorStore } from "./store.svelte";
+  import { paneStore } from "$lib/features/panes/store.svelte";
   import EditorTabStrip from "./EditorTabStrip.svelte";
   import CodeMirror from "./CodeMirror.svelte";
   import PdfView from "./PdfView.svelte";
@@ -17,9 +18,12 @@
    * `inPane` is the editor living inside a pane rather than covering the whole
    * main area. It stops the empty-buffer effect from changing the app view out
    * from under a layout that never set it.
+   *
+   * `paneId` and `paneProjectId` are that pane's own, and only the pane passes
+   * them: they are what lets the last tab closing take the pane with it.
    */
-  type Props = { inPane?: boolean };
-  let { inPane = false }: Props = $props();
+  type Props = { inPane?: boolean; paneId?: string | null; paneProjectId?: string | null };
+  let { inPane = false, paneId = null, paneProjectId = null }: Props = $props();
 
   const here = $derived(editorStore.forProject(app.currentProjectId));
 
@@ -42,6 +46,30 @@
     if (here.length === 0 && app.view === "editor") {
       app.view = "terminal";
     }
+  });
+
+  /**
+   * An editor pane whose last file was closed goes with it.
+   *
+   * The empty state below is an instruction to the file panel, which is fine
+   * when the editor is the whole surface and useless in a pane an agent opened
+   * to show one image: closing the preview left a rectangle saying "pick a
+   * file" with no tab, no close button of its own and nothing to pick from.
+   *
+   * Counted on the pane's OWN project rather than the selected one, so walking
+   * to another project does not close the editor panes of the one left behind,
+   * and latched on having held something: a pane opened empty from the palette
+   * is a place the user is about to open a file into, not a leftover.
+   */
+  const mine = $derived(editorStore.forProject(paneProjectId ?? app.currentProjectId));
+  let held = $state(false);
+  $effect(() => {
+    if (!inPane || !paneId) return;
+    if (mine.length > 0) {
+      held = true;
+      return;
+    }
+    if (held) paneStore.closePane(paneId);
   });
 
   function onChange(next: string) {

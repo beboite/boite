@@ -5,7 +5,8 @@ import { workspace } from "$lib/backend";
 import type { Backend } from "$lib/backend";
 import type { AgentTurnQuery } from "$lib/backend/types";
 import { settings } from "$lib/features/settings/store.svelte";
-import { paneStore, threadLeavesOf } from "$lib/features/panes/store.svelte";
+import { paneStore, threadLeavesOf, leafNodesOf } from "$lib/features/panes/store.svelte";
+import { paneIsShown } from "$lib/features/panes/visible";
 import { parkedLocal } from "$lib/backend/tauri/parked";
 import { liveTerminal, terminalScreenRows } from "$lib/shared/terminals";
 import { notifyWhenUnfocused } from "$lib/storage/notify";
@@ -119,6 +120,7 @@ function forgetThread(threadId: string) {
   prevStatus.delete(threadId);
   idleSince.delete(threadId);
   waitingReason.delete(threadId);
+  drivenPaneSince.delete(threadId);
 }
 
 /**
@@ -254,6 +256,70 @@ function maybeAutoClose(threadId: string, iconKey: string | null | undefined) {
     idleMs,
     ptyId: pid,
   });
+}
+
+/**
+ * How long a browser pane its agent has finished with is left standing.
+ *
+ * A turn ends twice a minute in a busy thread, and an agent that opened a page
+ * to read it once has no reason to say so. What the user is left with is half
+ * their terminal taken by a frame nobody is driving any more, in a thread they
+ * are not even looking at.
+ *
+ * The wait is what keeps a glance at another thread from being fatal: coming
+ * back inside it finds the page where it was left.
+ */
+const DRIVEN_PANE_GRACE_MS = 15_000;
+
+/** When a thread's leftover browser panes started being leftovers. */
+const drivenPaneSince = new Map<string, number>();
+
+/**
+ * Take back the browser panes a finished agent is still holding.
+ *
+ * Three things have to be true, and each one is somebody's decision rather than
+ * this file's:
+ *
+ * - the pane still carries the agent's mark. A user who pressed "take it back"
+ *   owns it (`drivenBy` cleared, `setBrowser`), and it is then no more this
+ *   sweep's to close than any other pane the user opened;
+ * - the pane is off the screen. Every group stays mounted, so being in the tree
+ *   says nothing (`paneIsShown`). A page the user is reading is a page the user
+ *   is reading, whatever its agent is doing;
+ * - the turn is over. `running` and `waiting` are both mid-turn, the second one
+ *   being an agent stuck on a dialog rather than one that is done.
+ *
+ * The thread itself is left alone. This closes a pane, never a terminal, and
+ * the transcript of what the agent did with the page is still in the thread.
+ */
+function maybeCloseDrivenPanes(threadId: string, now: number) {
+  const closable = paneStore.groups.flatMap((g) =>
+    leafNodesOf(g.root).flatMap((leaf) =>
+      leaf.content.kind === "browser" &&
+      leaf.content.drivenBy === threadId &&
+      !paneIsShown(leaf.paneId)
+        ? [leaf.paneId]
+        : [],
+    ),
+  );
+  if (closable.length === 0) {
+    drivenPaneSince.delete(threadId);
+    return;
+  }
+  const armed = drivenPaneSince.get(threadId);
+  if (armed === undefined) {
+    drivenPaneSince.set(threadId, now);
+    return;
+  }
+  if (now - armed < DRIVEN_PANE_GRACE_MS) return;
+  drivenPaneSince.delete(threadId);
+  for (const paneId of closable) {
+    paneStore.closePane(paneId);
+    logger.info("panes", "closed a browser pane its agent had finished with", {
+      thread: threadId,
+      paneId,
+    });
+  }
 }
 
 function visibleThreadIds(): Set<string> {
@@ -411,6 +477,12 @@ function tick() {
   const queries: AgentTurnQuery[] = [];
 
   for (const t of app.threads) {
+    // Before the backend check below, and that is the point: a thread whose
+    // status is pushed rather than measured still has its panes drawn in this
+    // window, and the pages it left open are this window's to tidy. Every
+    // branch further down can leave the pass early, this one cannot.
+    if (t.status === "running" || t.status === "waiting") drivenPaneSince.delete(t.id);
+    else maybeCloseDrivenPanes(t.id, now);
     // Server-owned threads (remote origin in dynamic mode) get their status
     // pushed as control events; ticking them would clobber it.
     const backend = workspace.backendFor(t.origin);
