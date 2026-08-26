@@ -136,11 +136,11 @@ pub enum Sessions {
     CodexSwitcherVersion,
     /// Null means `fast-mcp-ssh` is not on this machine.
     FastMcpSshVersion,
-    /// `kebacc-switch list`, normalised to `{ providers: [...] }`.
+    /// `kebacc list`, normalised to `{ providers: [...] }`.
     KebaccSwitcherList { provider: Option<String> },
-    /// `kebacc-switch add -Provider <p>`.
+    /// `kebacc add -Provider <p>`.
     KebaccSwitcherAdd { provider: String },
-    /// `kebacc-switch switch -Provider <p> -Email <email> -Yes`.
+    /// `kebacc switch -Provider <p> -Email <email> -Yes`.
     KebaccSwitcherSwitch { provider: String, email: String },
     /// Null means the binary is not on this machine.
     KebaccSwitcherVersion,
