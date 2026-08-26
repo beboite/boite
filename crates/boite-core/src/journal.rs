@@ -64,6 +64,8 @@ pub enum Action {
     TodoClaimed,
     ProjectCreated,
     ThreadSpawned,
+    /// A worker put away by the thread that spawned it, its job done.
+    ThreadClosed,
     ThreadMoved,
     WorktreeBranchClaimed,
     WorktreeReserved,
@@ -88,6 +90,7 @@ impl Action {
             Action::TodoClaimed => "todo.claimed",
             Action::ProjectCreated => "project.created",
             Action::ThreadSpawned => "thread.spawned",
+            Action::ThreadClosed => "thread.closed",
             Action::ThreadMoved => "thread.moved",
             Action::WorktreeBranchClaimed => "worktree.branch_claimed",
             Action::WorktreeReserved => "worktree.reserved",

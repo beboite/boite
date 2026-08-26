@@ -55,6 +55,7 @@ fn verbs() -> Router<Shared> {
         .route("/v1/projects", get(projects).post(project_create))
         .route("/v1/thread/move", post(thread_move))
         .route("/v1/threads", post(thread_spawn))
+        .route("/v1/thread/close", post(thread_close))
         .route("/v1/thread/wait", get(thread_wait))
         .route("/v1/whereami", get(whereami))
         .route("/v1/finish", get(finish))
@@ -1284,6 +1285,88 @@ async fn thread_spawn(
         }
     }
     Ok(Json(json!({ "ok": true, "threadId": thread_id })))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CloseIn {
+    thread_id: String,
+}
+
+/// Closes a terminal this thread spawned, once it has what it asked for.
+///
+/// Its own workers and nothing else: `parent_thread_id` is written by the spawn
+/// and read back off the row here, so the relationship is the store's word
+/// rather than the caller's. Without that an agent could close the terminal the
+/// user is reading, which is the one thing a delegation must never do.
+///
+/// The busy rule is `settle`'s, unchanged: a worker mid-turn or sitting on a
+/// permission dialog is not finished business, and closing it would throw away
+/// a turn nobody has read. Wait for it with `thread_wait` and close it after.
+async fn thread_close(
+    State(workspace): State<Shared>,
+    Extension(caller): Extension<Caller>,
+    Json(body): Json<CloseIn>,
+) -> Result<Json<Value>, StatusCode> {
+    let asking_thread = caller.thread()?.to_string();
+    let target = body.thread_id.trim().to_string();
+    if target.is_empty() {
+        return Ok(refused("thread_close needs a threadId"));
+    }
+    if target == asking_thread {
+        return Ok(refused(
+            "CLOSE_SELF: this is your own terminal. Finish your turn instead.",
+        ));
+    }
+    let Some(thread) = workspace
+        .store()
+        .load_thread(&target)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    else {
+        return Ok(refused(format!("no thread '{target}' in this workspace")));
+    };
+    if workspace.store().thread_parent(&target).as_deref() != Some(asking_thread.as_str()) {
+        return Ok(refused(format!(
+            "NOT_YOURS: {target} is not a terminal you spawned. Only the thread that opened a \
+             worker may close it."
+        )));
+    }
+    // The row's own column, not the loaded thread's: `load_thread` answers with
+    // the display status, which reads a worker with no live PTY as stopped and
+    // would let the busy rule through. Same read as `conduct::dismiss`.
+    let status = workspace
+        .store()
+        .thread_status(&target)
+        .map(|(status, _)| status)
+        .unwrap_or_else(|| "idle".to_string());
+    if !boite_core::settle::can_settle(&status) {
+        return Ok(refused(boite_core::settle::refusal(&status)));
+    }
+    let request = json!({
+        "kind": "thread.close",
+        "projectId": thread.project_id,
+        "threadId": target,
+        "callerThreadId": asking_thread,
+    });
+    match settle(&*workspace, request).await {
+        Ok(_) => {
+            record(
+                &*workspace,
+                Entry::new(&thread.project_id, actor(&caller), Action::ThreadClosed)
+                    .with("thread", &target),
+            );
+            workspace.touched(&asking_thread, "thread");
+            Ok(Json(json!({ "ok": true, "threadId": target })))
+        }
+        Err(reason) => Ok(deny(
+            &*workspace,
+            &caller,
+            &thread.project_id,
+            "thread.close",
+            &target,
+            &reason,
+        )),
+    }
 }
 
 #[derive(Deserialize)]

@@ -785,6 +785,22 @@ impl Store {
         .ok()
     }
 
+    /// Who spawned this thread, or None for one the user opened themselves.
+    ///
+    /// The row is the proof of the relationship, never the caller's word: it is
+    /// what says an agent closing a terminal is closing its own worker and not
+    /// one somebody is reading.
+    pub fn thread_parent(&self, id: &str) -> Option<String> {
+        let conn = self.conn.lock();
+        conn.query_row(
+            "SELECT parent_thread_id FROM threads WHERE id = ?1",
+            [id],
+            |r| r.get::<_, Option<String>>(0),
+        )
+        .ok()
+        .flatten()
+    }
+
     /// How many live threads this one has spawned. Live means not settled: a
     /// worker whose job ended and was filed no longer counts against a cap.
     pub fn live_children(&self, parent_id: &str) -> i64 {
