@@ -88,6 +88,15 @@ impl Fake {
         self
     }
 
+    /// A spawned worker mid-turn, for anything that refuses to touch one.
+    pub fn with_busy_child(self, id: &str, project_id: &str, parent: &str) -> Fake {
+        let mut thread = thread_row(id, project_id);
+        thread.parent_thread_id = Some(parent.into());
+        thread.status = "running".into();
+        self.store.save_thread(&thread).unwrap();
+        self
+    }
+
     pub fn scratch(&self) -> &PathBuf {
         &self.dir
     }

@@ -632,6 +632,75 @@ async fn spawn_without_a_device_is_not_success() {
     assert_ne!(out.0.get("ok"), Some(&json!(true)));
 }
 
+/// The spawn's other half. A worker nobody closes is a terminal the user has to
+/// sweep by hand, and the thread that opened it is the one that knows it is done.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_thread_closes_the_worker_it_spawned() {
+    let fake = Fake::new("close-own")
+        .with_project("p1", "/w/one")
+        .with_thread("t1", "p1")
+        .with_child("w1", "p1", "t1");
+    *fake.answer_with.lock().unwrap() = Some(json!({ "ok": true }));
+    let shared: Shared = std::sync::Arc::new(fake);
+    let out = thread_close(
+        State(shared),
+        Extension(agent("p1", "t1")),
+        Json(CloseIn { thread_id: "w1".into() }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(out.0["ok"], json!(true), "{:?}", out.0);
+    assert_eq!(out.0["threadId"], json!("w1"));
+}
+
+/// The refusal that matters: the row says who spawned what, so an agent cannot
+/// close the terminal the user is reading by naming its id.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_thread_it_never_spawned_is_refused() {
+    let fake = Fake::new("close-stranger")
+        .with_project("p1", "/w/one")
+        .with_thread("t1", "p1")
+        .with_thread("t2", "p1");
+    *fake.answer_with.lock().unwrap() = Some(json!({ "ok": true }));
+    let shared: Shared = std::sync::Arc::new(fake);
+    let out = thread_close(
+        State(shared),
+        Extension(agent("p1", "t1")),
+        Json(CloseIn { thread_id: "t2".into() }),
+    )
+    .await
+    .unwrap();
+    assert!(
+        out.0["error"].as_str().unwrap().contains("NOT_YOURS"),
+        "{:?}",
+        out.0
+    );
+}
+
+/// Closing a worker mid-turn throws away the answer it is writing, so the busy
+/// rule is the user's own: wait for it, then put it away.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_worker_still_running_is_refused() {
+    let fake = Fake::new("close-busy")
+        .with_project("p1", "/w/one")
+        .with_thread("t1", "p1")
+        .with_busy_child("w1", "p1", "t1");
+    *fake.answer_with.lock().unwrap() = Some(json!({ "ok": true }));
+    let shared: Shared = std::sync::Arc::new(fake);
+    let out = thread_close(
+        State(shared),
+        Extension(agent("p1", "t1")),
+        Json(CloseIn { thread_id: "w1".into() }),
+    )
+    .await
+    .unwrap();
+    assert!(
+        out.0["error"].as_str().unwrap().contains("running"),
+        "{:?}",
+        out.0
+    );
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn pane_open_forwards_the_path() {
     let fake = std::sync::Arc::new(

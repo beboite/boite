@@ -231,6 +231,19 @@ pub fn call_tool<B: Backend>(host: &B, name: &str, args: &Value) -> Result<Strin
                 .hint("terminal_transcript threadId=<id> reads what it printed; thread_wait waits for it");
             Ok(w.into_string())
         }
+        "thread_close" => {
+            let id = args
+                .get("threadId")
+                .and_then(|v| v.as_str())
+                .ok_or("thread_close needs a threadId")?;
+            let out = refusable(host, "/v1/thread/close", json!({ "threadId": id }))?;
+            if let Some(waiting) = awaiting(&out) {
+                return Ok(waiting);
+            }
+            let mut w = Toon::new();
+            w.field("closed", id);
+            Ok(w.into_string())
+        }
         "thread_wait" => {
             let id = args
                 .get("threadId")

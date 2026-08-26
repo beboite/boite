@@ -62,6 +62,10 @@ a button that takes it back, and after they press it your calls at that pane are
 refused. That is the user deciding, not a fault to work around.
 - Independent work that should run at the same time: thread_spawn. It answers \
 with the new thread id; terminal_transcript and thread_wait take that id.
+- A worker you have finished reading: thread_close, with the id the spawn gave \
+you. You opened it, so you put it away, and a worker left behind sits in the \
+user's sidebar until they sweep it by hand. Claim its branch first if it wrote \
+anything: the close takes its detached worktree with it.
 
 Answers are TOON: `key: value` for a single record, and `name(N):` followed by a \
 header row then one row per item for a list.";
@@ -524,6 +528,25 @@ fn thread_tools() -> Value {
             "annotations": { "title": "New thread", "destructiveHint": false, "openWorldHint": false }
         },
         {
+            "name": "thread_close",
+            "description": "Close a terminal you spawned, once you have read what you needed from \
+                            it. Do this every time: a worker nobody closes stays in the user's \
+                            sidebar forever, and the ones you opened are yours to put away. Only \
+                            your own workers, and only when the worker has stopped — a running \
+                            one or one sitting on a permission dialog is refused, so wait for it \
+                            with thread_wait first. The terminal goes, and its detached worktree \
+                            with it, so claim a branch before closing anything that wrote code.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "threadId": { "type": "string", "description": "The thread id thread_spawn answered with." }
+                },
+                "required": ["threadId"],
+                "additionalProperties": false
+            },
+            "annotations": { "title": "Close thread", "destructiveHint": true, "openWorldHint": false }
+        },
+        {
             "name": "pane_open",
             "description": "Put something on screen next to this terminal, in a split pane. Use it                             when you have just made something worth looking at: a dev server                             (browser), a diff you want reviewed (git), the file tree after a big                             move (explorer), the project's state (dashboard). The user keeps your                             terminal in view either way. Opening a pane that is already open just                             focuses it, so calling twice is safe and does nothing the second time.",
             "inputSchema": {
@@ -637,7 +660,7 @@ mod tests {
         assert!(names.iter().any(|n| n == "browser"), "{names:?}");
         assert!(names.iter().any(|n| n == "whereami"), "{names:?}");
         assert!(names.iter().any(|n| n == "thread_wait"), "{names:?}");
-        assert_eq!(names.len(), 20, "{names:?}");
+        assert_eq!(names.len(), 21, "{names:?}");
     }
 
     /// Pinned like the count above: the orchestrator tier is four tools, an
@@ -651,12 +674,12 @@ mod tests {
             .iter()
             .filter_map(|t| t.get("name").and_then(|v| v.as_str()).map(str::to_string))
             .collect();
-        assert_eq!(plain.len(), 20, "{plain:?}");
+        assert_eq!(plain.len(), 21, "{plain:?}");
         assert!(!plain.iter().any(|n| n == "workspace_pulse"));
         assert!(!plain.iter().any(|n| n == "say"));
         assert!(!plain.iter().any(|n| n == "thread_dispatch"));
         assert!(!plain.iter().any(|n| n == "thread_dismiss"));
-        assert_eq!(tools_for_role(Some("supervisor")).as_array().unwrap().len(), 20);
+        assert_eq!(tools_for_role(Some("supervisor")).as_array().unwrap().len(), 21);
 
         let raised: Vec<String> = tools_for_role(Some("orchestrator"))
             .as_array()
@@ -664,7 +687,7 @@ mod tests {
             .iter()
             .filter_map(|t| t.get("name").and_then(|v| v.as_str()).map(str::to_string))
             .collect();
-        assert_eq!(raised.len(), 24, "{raised:?}");
+        assert_eq!(raised.len(), 25, "{raised:?}");
         assert!(raised.iter().any(|n| n == "workspace_pulse"));
         assert!(raised.iter().any(|n| n == "say"));
         assert!(raised.iter().any(|n| n == "thread_dispatch"));

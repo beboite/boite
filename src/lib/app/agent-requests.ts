@@ -29,7 +29,8 @@ import { resolveIconKey } from "$lib/shared/icons/detect";
 import { createProject } from "$lib/features/project/api";
 import { moveThreadToProject } from "$lib/features/thread/move";
 import { takesOpeningPrompt, withUnattendedArgs } from "$lib/features/thread/session";
-import { launchAgent } from "$lib/features/thread/api";
+import { closeThread, launchAgent } from "$lib/features/thread/api";
+import { canSettle } from "$lib/domain/thread-settle";
 import {
   comboArgs,
   comboLabel,
@@ -83,6 +84,16 @@ interface SpawnRequest {
   delegationMode?: 'normal' | 'delegation';
   agent?: string | null;
   prompt?: string | null;
+}
+
+interface CloseRequest {
+  kind: "thread.close";
+  projectId: string;
+  requestId?: string;
+  /** The worker to put away. The endpoint has already checked it is the
+      caller's own, and that it is not mid-turn. */
+  threadId: string;
+  callerThreadId?: string | null;
 }
 
 interface PaneOpenRequest {
@@ -158,6 +169,7 @@ type AgentRequest =
   | MoveRequest
   | CreateRequest
   | SpawnRequest
+  | CloseRequest
   | PaneOpenRequest
   | BrowserDriveRequest
   | BrowserAskRequest;
@@ -377,6 +389,35 @@ async function handleSpawn(req: SpawnRequest) {
       t("thread.spawnNoPrompt", { label: launch.label, prompt }),
     );
   }
+}
+
+/**
+ * Puts away a worker the caller opened, which is the other half of a spawn.
+ *
+ * The endpoint owns the two refusals worth making (not yours, still working),
+ * so what is left here is the close itself, and it is the user's own close: the
+ * PTY dies, the row goes, and the detached worktree is released after the same
+ * grace a click gets. No confirm dialog, because nobody clicked and there is
+ * nobody to answer it.
+ */
+async function handleClose(req: CloseRequest) {
+  const thread = app.threadById(req.threadId);
+  if (!thread) {
+    await answerRequest(req, { error: "that thread is already gone" });
+    return;
+  }
+  // Asked twice on purpose. The endpoint reads the row, which records that
+  // there was a run; the window derives the status from the session files and
+  // the PTY, and a worker that started a turn between the two checks is only
+  // visible here.
+  if (!canSettle(thread.status)) {
+    await answerRequest(req, {
+      error: `that worker is ${thread.status}, so it stays where it can be seen`,
+    });
+    return;
+  }
+  await closeThread(req.threadId);
+  await answerRequest(req, { ok: true, threadId: req.threadId });
 }
 
 /**
@@ -732,6 +773,8 @@ async function handle(req: AgentRequest, from: RequestSource) {
       return handleCreate(req);
     case "thread.spawn":
       return handleSpawn(req);
+    case "thread.close":
+      return handleClose(req);
     case "pane.open":
       return handlePaneOpen(req, from);
     case "browser.navigate":
