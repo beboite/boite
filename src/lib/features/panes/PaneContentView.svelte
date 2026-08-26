@@ -57,7 +57,7 @@
   {:else if content.kind === "editor"}
     {#if EditorView.current}
       {@const EditorComp = EditorView.current}
-      <EditorComp inPane />
+      <EditorComp inPane {paneId} paneProjectId={projectId} />
     {:else}
       <div class="flex h-full items-center justify-center text-xs text-muted-foreground/70">
         {t("common.loading")}
