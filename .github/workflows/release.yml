@@ -287,24 +287,80 @@ jobs:
   # not match what the server publishes opens in a Custom Tab with a URL bar,
   # silently, on every phone, and nothing but this comparison would notice a
   # release signed with the wrong keystore.
+  #
+  # Most releases leave mobile/ alone, and the wrapper is a shell whose whole
+  # UI comes from the server, so a rebuild from unchanged sources produces the
+  # same bits — except versionName and versionCode, which gradle bakes in from
+  # package.json. Those releases reuse the previous release's APK instead of
+  # rebuilding, under its original name: boite-1.3.1.apk on the v1.3.3 page is
+  # an APK truthfully naming the tag it was built from, where a renamed copy
+  # would claim a version it does not carry. Only a published release with a
+  # *signed* APK is reused; a history of unsigned ones builds again, since the
+  # keystore may have arrived since.
   android:
     needs: bundle
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The reuse probe below diffs mobile/ against the previous release's
+          # tag, which a depth-1 checkout does not carry.
+          fetch-depth: 0
+
+      # Decides between the two paths and, on reuse, already places the file
+      # where the upload step reads. Drafts are skipped: the draft this very
+      # run is filling is first on the list.
+      - name: Reuse the previous APK when mobile/ is untouched
+        id: probe
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${{ runner.temp }}/apk"
+          state=build
+
+          found=$(gh release list --limit 20 --json tagName,isDraft \
+            -q '.[] | select(.isDraft | not) | .tagName' | while read -r t; do
+              n=$(gh release view "$t" --json assets \
+                -q '.assets[].name' | grep -E '^boite-[0-9]+\.[0-9]+\.[0-9]+\.apk$' | head -1 || true)
+              if [ -n "$n" ]; then
+                echo "$t $n"
+                break
+              fi
+            done)
+
+          tag=${found% *}
+          name=${found#* }
+          if [ -n "$tag" ] \
+            && git rev-parse -q --verify "refs/tags/$tag" >/dev/null \
+            && git diff --quiet "$tag" HEAD -- mobile/; then
+            gh release download "$tag" --pattern "$name" --dir "${{ runner.temp }}/apk"
+            echo "mobile/ untouched since $tag, reusing $name"
+            state=reuse
+          elif [ -n "$tag" ]; then
+            echo "mobile/ changed since $tag (or its git tag is gone), building"
+          else
+            echo "no published release carries a signed APK yet, building"
+          fi
+          echo "state=$state" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
+        if: steps.probe.outputs.state == 'build'
         with:
           distribution: temurin
           java-version: 17
 
       - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        if: steps.probe.outputs.state == 'build'
 
       - name: Build the APK
+        if: steps.probe.outputs.state == 'build'
         working-directory: mobile
         run: ./gradlew assembleRelease
 
       - name: Sign it
+        if: steps.probe.outputs.state == 'build'
         env:
           KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE }}
           KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
