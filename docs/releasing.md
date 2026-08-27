@@ -44,6 +44,34 @@ A `prune` job removes the `.sig` assets once every platform has uploaded. They
 are duplicates: `latest.json` carries each signature inline and is the only file
 the updater fetches.
 
+## Android
+
+The `android` job builds `mobile/` after every platform has uploaded and puts
+`boite-X.Y.Z.apk` on the same release. Three repository secrets sign it:
+
+| Secret | Value |
+|---|---|
+| `ANDROID_KEYSTORE` | the release keystore, base64: `base64 -w0 android.keystore` |
+| `ANDROID_KEYSTORE_PASSWORD` | its password |
+| `ANDROID_KEY_PASSWORD` | the key's own password, only when it differs |
+
+The alias is read from `mobile/twa-manifest.json`. With no keystore secret the
+job uploads `boite-X.Y.Z-unsigned.apk` and says so as a warning, so a release
+is not held back for it.
+
+A release that leaves `mobile/` untouched does not rebuild: the job takes the
+signed APK from the newest published release that carries one, under its
+original name, since the version gradle baked into it names the tag it was
+built from. `boite-1.3.1.apk` sitting on a later release page is that reuse,
+not a mistake. Touch anything under `mobile/`, or publish no signed APK yet,
+and it builds.
+
+The job compares the certificate it just signed with against the fingerprint
+in `mobile/assetlinks.json` and fails on a mismatch. That file is what
+`boite-server` publishes at `/.well-known/assetlinks.json`, and an APK signed
+with any other key opens in a Custom Tab with a URL bar on every phone, with
+nothing else to say why.
+
 ## Telemetry
 
 The desktop jobs and the GHCR image both compile `BOITE_TELEMETRY_URL` into
