@@ -215,6 +215,57 @@ fn permitted(
     Err(Json(body))
 }
 
+/// The project this caller's reads are confined to, when they are.
+///
+/// `None` is the workspace-wide answer, and it is what a terminal Boite opened
+/// gets: a user is watching that terminal, and "why did the thread next door
+/// stop" is the question this endpoint exists to answer. `Some` is a
+/// credentials file, issued for one project by a workspace that never launched
+/// the process holding it.
+///
+/// One function rather than a `match` in each of the five reads that need it:
+/// `/v1/projects`, `/v1/timeline`, `/v1/search`, `/v1/snapshot` and
+/// `/v1/transcript` were each written with their own idea of scope, which is
+/// how four of them ended up with none. The grant answers, in
+/// `boite_core::capability`.
+fn confined_to(caller: &Caller) -> Option<&str> {
+    (!caller.grant.reads_across()).then_some(caller.project_id.as_str())
+}
+
+/// Refuses a read that lands outside the project this caller may read, and says
+/// so in the log.
+///
+/// The read side of [`permitted`], and separate from it because a capability
+/// cannot answer this: a credentials file holds `ReadProject`, and the question
+/// here is *which* project. `project_of` is called only when there is a scope
+/// to check against, so a caller that reads the workspace pays for no lookup.
+fn reachable(
+    workspace: &dyn Workspace,
+    caller: &Caller,
+    of: &str,
+    about: &str,
+    project_of: impl FnOnce() -> String,
+) -> Result<(), Json<Value>> {
+    let Some(mine) = confined_to(caller) else {
+        return Ok(());
+    };
+    if project_of() == mine {
+        return Ok(());
+    }
+    // The same sentence a capability refusal carries, for the same reason: the
+    // credential is the thing that is wrong, and asking again changes nothing.
+    let Json(mut body) = deny(
+        workspace,
+        caller,
+        &caller.project_id,
+        of,
+        about,
+        Capability::ReadProject.refusal(),
+    );
+    body["retryable"] = json!(false);
+    Err(Json(body))
+}
+
 /// Puts a dispatch in front of the user instead of carrying it out, and answers
 /// the agent.
 ///
@@ -622,12 +673,15 @@ async fn thread_dismiss(
 
 async fn snapshot(
     State(workspace): State<Shared>,
-    Extension(_caller): Extension<Caller>,
+    Extension(caller): Extension<Caller>,
 ) -> Result<Json<Value>, StatusCode> {
     let live = workspace.live_ptys();
     // Read here rather than inside the blocking closure: it is a lock on this
     // process's own state, and the point of that closure is the database.
     let screen = workspace.on_screen();
+    // A credentials file gets the same snapshot of its own project: every
+    // section cut to it, rather than the workspace with a caveat.
+    let only = confined_to(&caller).map(str::to_string);
     let taken = blocking({
         let workspace = workspace.clone();
         move || {
@@ -637,6 +691,7 @@ async fn snapshot(
                 workspace.roots(),
                 live,
                 screen,
+                only.as_deref(),
             ))
         }
     })
@@ -646,7 +701,8 @@ async fn snapshot(
 
 #[derive(Deserialize)]
 struct TranscriptIn {
-    /// Which terminal. Any thread in the workspace, not only the caller's.
+    /// Which terminal. Any thread the caller may read, which for a terminal
+    /// Boite opened is any thread in the workspace.
     #[serde(rename = "threadId")]
     thread_id: Option<String>,
     bytes: Option<u32>,
@@ -659,6 +715,13 @@ struct TranscriptIn {
 /// with the process. It carries no credential — the key files are not in the
 /// workspace and a transcript is what was on somebody's screen — and it is the
 /// single most useful thing an agent can be handed when something is wrong.
+///
+/// Not scoped to the caller's own *project* either, for a terminal Boite
+/// opened. A credentials file is another matter: it is held by a process the
+/// workspace never launched, and a transcript is the most detailed thing this
+/// endpoint hands out, so it reads its own project's terminals and is refused
+/// the rest, a thread id that names nothing included: that answers the same
+/// way rather than saying which ids exist.
 ///
 /// Defaults to the caller's own terminal, which is the other half of it: an
 /// agent that lost track of what it printed can re-read itself.
@@ -676,6 +739,14 @@ async fn transcript(
         Some(id) => id,
         None => caller.thread()?.to_string(),
     };
+    if let Err(refusal) = reachable(&*workspace, &caller, "transcript", &thread_id, || {
+        workspace
+            .store()
+            .project_of_thread(&thread_id)
+            .unwrap_or_default()
+    }) {
+        return Ok(refusal);
+    }
     // A terminal prints more in a minute than anybody reads, and this answer
     // goes into a context window.
     let bytes = query.bytes.unwrap_or(16_384).min(1024 * 1024) as usize;
@@ -698,9 +769,13 @@ struct SearchIn {
 /// terminals printed. An agent looking for where an error came from should not
 /// have to know which of the three it is in, and until this existed the answer
 /// was "none of them, because nothing was written down".
+///
+/// A caller confined to one project searches that project, and the scope goes
+/// into both queries rather than over the answer: the limit is then spent on
+/// hits the caller may read instead of on ones it is about to be shown none of.
 async fn search(
     State(workspace): State<Shared>,
-    Extension(_caller): Extension<Caller>,
+    Extension(caller): Extension<Caller>,
     axum::extract::Query(query): axum::extract::Query<SearchIn>,
 ) -> Result<Json<Value>, StatusCode> {
     let needle = query.q.unwrap_or_default().trim().to_string();
@@ -709,11 +784,22 @@ async fn search(
     }
     let limit = query.limit.unwrap_or(20).clamp(1, 100) as usize;
     let dir = workspace.transcripts_dir();
+    let scope = confined_to(&caller).map(str::to_string);
     let hits = blocking({
         let workspace = workspace.clone();
         move || {
-            let mut hits = workspace.store().search(&needle, limit);
+            let mut hits = workspace.store().search(&needle, limit, scope.as_deref());
             if let Some(dir) = dir {
+                // A transcript is a file named after the thread that wrote it
+                // and says nothing about a project, so the terminals a confined
+                // caller may read are worked out here and handed over.
+                let only = scope.as_deref().map(|project| {
+                    workspace
+                        .store()
+                        .thread_ids_of_project(project)
+                        .into_iter()
+                        .collect::<std::collections::HashSet<String>>()
+                });
                 // The rows first: a todo or a refusal is a shorter answer than
                 // a line of terminal output, and a caller reading a list wants
                 // the short ones at the top.
@@ -721,6 +807,7 @@ async fn search(
                     &dir,
                     &needle,
                     limit.saturating_sub(hits.len()),
+                    only.as_ref(),
                 ));
             }
             hits
@@ -745,11 +832,16 @@ struct TimelineIn {
 /// row, and a terminal being opened is only on the thread.
 async fn timeline(
     State(workspace): State<Shared>,
-    Extension(_caller): Extension<Caller>,
+    Extension(caller): Extension<Caller>,
     axum::extract::Query(query): axum::extract::Query<TimelineIn>,
 ) -> Result<Json<Value>, StatusCode> {
     let limit = query.limit.unwrap_or(40).clamp(1, 200) as usize;
-    let project = query.project.filter(|p| !p.is_empty());
+    // A caller confined to one project reads its own timeline whatever it asks
+    // for, the same clamp `pulse` applies to a scoped orchestrator: naming
+    // another project is not an error, it simply is not a way to read it.
+    let project = confined_to(&caller)
+        .map(str::to_string)
+        .or_else(|| query.project.filter(|p| !p.is_empty()));
     let moments = blocking({
         let workspace = workspace.clone();
         move || workspace.store().timeline(project.as_deref(), limit)
@@ -924,17 +1016,24 @@ async fn artifacts_set(
 /// project the user put away is still the right place to go back to, and leaving
 /// it off the list is how an agent ends up creating a second one on top of the
 /// first.
+///
+/// Every project the *caller* has, which for a credentials file is the one it
+/// was issued for. It cannot move into another or spawn there, `MutateAcross`
+/// stops that, so a list of the rest is names and folder paths handed to a
+/// process Boite never launched, and nothing it could act on.
 async fn projects(
     State(workspace): State<Shared>,
     Extension(caller): Extension<Caller>,
 ) -> Result<Json<Value>, StatusCode> {
     let current = caller.project_id.clone();
+    let mine_only = confined_to(&caller).is_some();
     let projects = workspace
         .store()
         .load_projects()
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let rows: Vec<Value> = projects
         .into_iter()
+        .filter(|p| !mine_only || p.id == current)
         .map(|p| {
             json!({
                 "id": p.id,

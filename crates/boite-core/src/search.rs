@@ -20,6 +20,7 @@
 //! that ledger would brick every install whose build has FTS5 compiled out.
 //! Created from here it is only ever touched by the connection that made it.
 
+use std::collections::HashSet;
 use std::path::Path;
 
 use rusqlite::Connection;
@@ -144,8 +145,17 @@ pub(crate) fn forget(conn: &Connection, kind: Kind, ref_id: &str) {
     }
 }
 
-/// What the index has for this text.
-pub(crate) fn rows(conn: &Connection, needle: &str, limit: usize) -> Vec<Hit> {
+/// What the index has for this text, within one project or across them all.
+///
+/// The project is part of the query rather than a filter over the answer: the
+/// limit is spent inside the scope, so a caller confined to one project reads
+/// its own hits instead of whatever survives a workspace-wide top twenty.
+pub(crate) fn rows(
+    conn: &Connection,
+    needle: &str,
+    limit: usize,
+    project_id: Option<&str>,
+) -> Vec<Hit> {
     if !ensure(conn) {
         return Vec::new();
     }
@@ -153,7 +163,8 @@ pub(crate) fn rows(conn: &Connection, needle: &str, limit: usize) -> Vec<Hit> {
     // difference is said here or nowhere.
     let mut stmt = match conn.prepare(
         "SELECT kind, project_id, ref_id, snippet(search, 3, '', '', '…', 20)
-         FROM search WHERE search MATCH ?1 ORDER BY rank LIMIT ?2",
+         FROM search WHERE search MATCH ?1 AND (?3 IS NULL OR project_id = ?3)
+         ORDER BY rank LIMIT ?2",
     ) {
         Ok(stmt) => stmt,
         Err(e) => {
@@ -161,14 +172,17 @@ pub(crate) fn rows(conn: &Connection, needle: &str, limit: usize) -> Vec<Hit> {
             return Vec::new();
         }
     };
-    let found = match stmt.query_map(rusqlite::params![query_for(needle), limit as i64], |r| {
-        Ok(Hit {
-            kind: Kind::parse(&r.get::<_, String>(0)?),
-            project_id: r.get(1)?,
-            ref_id: r.get(2)?,
-            excerpt: r.get(3)?,
-        })
-    }) {
+    let found = match stmt.query_map(
+        rusqlite::params![query_for(needle), limit as i64, project_id],
+        |r| {
+            Ok(Hit {
+                kind: Kind::parse(&r.get::<_, String>(0)?),
+                project_id: r.get(1)?,
+                ref_id: r.get(2)?,
+                excerpt: r.get(3)?,
+            })
+        },
+    ) {
         Ok(found) => found,
         Err(e) => {
             eprintln!("[boite/search] the index refused the query: {e}");
@@ -197,9 +211,25 @@ fn query_for(needle: &str) -> String {
 /// A plain substring match, case-insensitively, rather than the FTS grammar:
 /// what people look for in terminal output is a path, an error string or a
 /// command, and tokenising those loses more than it finds.
-pub fn transcripts(dir: &Path, needle: &str, limit: usize) -> Vec<Hit> {
+///
+/// `only` names the threads a caller may read. `None` is every transcript in
+/// the directory, which is what the user's own search and a terminal Boite
+/// opened get. A caller confined to one project passes its threads: the files
+/// are one per thread and nothing in them says which project wrote them, so
+/// the scope has to arrive with the question.
+pub fn transcripts(
+    dir: &Path,
+    needle: &str,
+    limit: usize,
+    only: Option<&HashSet<String>>,
+) -> Vec<Hit> {
     let needle = needle.trim().to_lowercase();
     if needle.is_empty() {
+        return Vec::new();
+    }
+    // An empty scope is a caller with no thread of its own to read, not a
+    // caller reading everything. Answered before the directory is opened.
+    if only.is_some_and(|ids| ids.is_empty()) {
         return Vec::new();
     }
     let Ok(entries) = std::fs::read_dir(dir) else {
@@ -219,6 +249,9 @@ pub fn transcripts(dir: &Path, needle: &str, limit: usize) -> Vec<Hit> {
         let Some(thread_id) = path.file_stem().and_then(|s| s.to_str()) else {
             continue;
         };
+        if only.is_some_and(|ids| !ids.contains(thread_id)) {
+            continue;
+        }
         let Ok(text) = transcript::tail(dir, thread_id, TRANSCRIPT_TAIL) else {
             continue;
         };
@@ -264,7 +297,7 @@ mod tests {
     #[test]
     fn a_word_finds_the_rows_that_carry_it() {
         let conn = indexed();
-        let found = rows(&conn, "worktree", 10);
+        let found = rows(&conn, "worktree", 10, None);
         assert_eq!(found.len(), 2);
         assert!(found.iter().any(|h| h.ref_id == "t1" && h.kind == Kind::Todo));
         assert!(found.iter().any(|h| h.ref_id == "e1" && h.kind == Kind::Event));
@@ -276,17 +309,17 @@ mod tests {
     fn a_row_that_changed_is_not_found_under_both_texts() {
         let conn = indexed();
         index(&conn, Kind::Todo, "p1", "t1", "rewrite the branch reserve");
-        assert!(rows(&conn, "pool", 10).is_empty());
-        assert_eq!(rows(&conn, "reserve", 10).len(), 1);
+        assert!(rows(&conn, "pool", 10, None).is_empty());
+        assert_eq!(rows(&conn, "reserve", 10, None).len(), 1);
     }
 
     #[test]
     fn forgetting_a_row_takes_it_out_of_the_index() {
         let conn = indexed();
         forget(&conn, Kind::Todo, "t2");
-        assert!(rows(&conn, "redaction", 10).is_empty());
+        assert!(rows(&conn, "redaction", 10, None).is_empty());
         // And leaves its neighbours alone.
-        assert_eq!(rows(&conn, "worktree", 10).len(), 2);
+        assert_eq!(rows(&conn, "worktree", 10, None).len(), 2);
     }
 
     /// The reason every word is quoted: FTS5 reads punctuation as its own
@@ -297,10 +330,26 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         ensure(&conn);
         index(&conn, Kind::Event, "p1", "e1", "fix/ci-gate-and-smoke landed");
-        assert_eq!(rows(&conn, "fix/ci-gate-and-smoke", 10).len(), 1);
-        assert_eq!(rows(&conn, "ci-gate", 10).len(), 1);
+        assert_eq!(rows(&conn, "fix/ci-gate-and-smoke", 10, None).len(), 1);
+        assert_eq!(rows(&conn, "ci-gate", 10, None).len(), 1);
         // And a quote in the needle does not end up unbalanced in the query.
-        assert!(rows(&conn, "it\"s", 10).is_empty());
+        assert!(rows(&conn, "it\"s", 10, None).is_empty());
+    }
+
+    /// A caller confined to one project reads that project's rows and nothing
+    /// else, and the limit is spent inside the scope rather than on hits it is
+    /// never shown.
+    #[test]
+    fn a_scoped_search_answers_for_one_project_only() {
+        let conn = indexed();
+        index(&conn, Kind::Todo, "p2", "t3", "rewrite the worktree pool next door");
+
+        assert_eq!(rows(&conn, "worktree", 10, None).len(), 3);
+        let mine = rows(&conn, "worktree", 10, Some("p1"));
+        assert_eq!(mine.len(), 2);
+        assert!(mine.iter().all(|h| h.project_id == "p1"), "{mine:?}");
+        assert_eq!(rows(&conn, "worktree", 10, Some("p2")).len(), 1);
+        assert!(rows(&conn, "worktree", 10, Some("p3")).is_empty());
     }
 
     #[test]
@@ -314,15 +363,37 @@ mod tests {
         )
         .unwrap();
 
-        let found = transcripts(&dir, "E0432", 10);
+        let found = transcripts(&dir, "E0432", 10, None);
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].ref_id, "t1");
         assert!(found[0].excerpt.contains("unresolved import"));
 
         // Case-insensitively, because nobody types an error code the way the
         // compiler did.
-        assert_eq!(transcripts(&dir, "e0432", 10).len(), 1);
-        assert!(transcripts(&dir, "nothing here", 10).is_empty());
+        assert_eq!(transcripts(&dir, "e0432", 10, None).len(), 1);
+        assert!(transcripts(&dir, "nothing here", 10, None).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The transcripts a caller may read are named by the caller, because a
+    /// `.log` file says which thread wrote it and never which project.
+    #[test]
+    fn a_scoped_search_reads_only_the_terminals_it_was_given() {
+        let dir = std::env::temp_dir()
+            .join(format!("boite-search-scope-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("mine.log"), "error[E0432]: unresolved import\n").unwrap();
+        std::fs::write(dir.join("theirs.log"), "error[E0432]: unresolved import\n").unwrap();
+
+        assert_eq!(transcripts(&dir, "E0432", 10, None).len(), 2);
+        let only: HashSet<String> = ["mine".to_string()].into_iter().collect();
+        let found = transcripts(&dir, "E0432", 10, Some(&only));
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].ref_id, "mine");
+        // A caller with no terminals of its own reads none of them, rather
+        // than falling through to all of them.
+        assert!(transcripts(&dir, "E0432", 10, Some(&HashSet::new())).is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

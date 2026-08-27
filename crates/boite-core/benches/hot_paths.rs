@@ -146,10 +146,10 @@ fn search_transcripts(c: &mut Criterion) {
     // A needle that is there, and one that is not: a miss reads every file to
     // the end, so it is the honest worst case rather than the happy path.
     group.bench_function("20 terminals, hit", |b| {
-        b.iter(|| boite_core::search::transcripts(black_box(&dir), "statusEngine", 50))
+        b.iter(|| boite_core::search::transcripts(black_box(&dir), "statusEngine", 50, None))
     });
     group.bench_function("20 terminals, miss", |b| {
-        b.iter(|| boite_core::search::transcripts(black_box(&dir), "zzzznothing", 50))
+        b.iter(|| boite_core::search::transcripts(black_box(&dir), "zzzznothing", 50, None))
     });
     group.finish();
     let _ = std::fs::remove_dir_all(&dir);

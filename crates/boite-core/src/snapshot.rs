@@ -97,25 +97,42 @@ pub struct ThreadLine {
 /// A section that cannot be read is named in `problems` and left out. An agent
 /// reaching for this is already looking at something broken; answering it with
 /// an error would be the second thing that does not work.
+///
+/// `only` is the project a caller is confined to, `None` being the workspace.
+/// Confined, every section is cut to that project on the way out rather than
+/// at the caller: a snapshot is one answer built from four reads, and a filter
+/// applied afterwards is a filter the next section added is written without.
+/// The window is left as it is — what is on the user's screen is the same thing
+/// `browser_status` already answers to anyone, deliberately (see
+/// `crate::screen`).
 pub fn take(
     host: &'static str,
     store: &Store,
     roots: &ProjectRoots,
     live_ptys: Vec<LivePty>,
     screen: Option<crate::screen::Screen>,
+    only: Option<&str>,
 ) -> Snapshot {
     let mut problems = Vec::new();
 
-    let projects = match store.load_projects() {
-        Ok(rows) => rows.into_iter().map(project_line).collect(),
+    let projects: Vec<ProjectLine> = match store.load_projects() {
+        Ok(rows) => rows
+            .into_iter()
+            .filter(|p| only.is_none_or(|id| p.id == id))
+            .map(project_line)
+            .collect(),
         Err(e) => {
             problems.push(format!("projects could not be read: {e}"));
             Vec::new()
         }
     };
 
-    let threads = match store.load_threads() {
-        Ok(rows) => rows.into_iter().map(thread_line).collect(),
+    let threads: Vec<ThreadLine> = match store.load_threads() {
+        Ok(rows) => rows
+            .into_iter()
+            .filter(|t| only.is_none_or(|id| t.project_id == id))
+            .map(thread_line)
+            .collect(),
         Err(e) => {
             problems.push(format!("threads could not be read: {e}"));
             Vec::new()
@@ -126,6 +143,9 @@ pub fn take(
     match store.load_todos() {
         Ok(rows) => {
             for todo in rows {
+                if only.is_some_and(|id| todo.project_id != id) {
+                    continue;
+                }
                 *todos
                     .entry(todo.project_id)
                     .or_default()
@@ -136,19 +156,57 @@ pub fn take(
         Err(e) => problems.push(format!("todos could not be read: {e}")),
     }
 
+    // A PTY belongs to a thread, so the threads decide which ones are visible.
+    // Read off the lines above rather than the rows again: a thread the caller
+    // cannot see must not come back as a live process either.
+    let live_ptys = match only {
+        None => live_ptys,
+        Some(_) => {
+            let mine: std::collections::HashSet<&str> =
+                threads.iter().map(|t| t.id.as_str()).collect();
+            live_ptys
+                .into_iter()
+                .filter(|p| mine.contains(p.thread_id.as_str()))
+                .collect()
+        }
+    };
+
     Snapshot {
         host,
         version: env!("CARGO_PKG_VERSION"),
         platform: platform(),
         taken_at_ms: now_ms(),
+        roots: match only {
+            None => roots.registered(),
+            Some(_) => registered_for(roots, projects.first()),
+        },
         projects,
         threads,
         live_ptys,
-        roots: roots.registered(),
         todos,
         screen,
         problems,
     }
+}
+
+/// The trust boundary as a confined caller may see it.
+///
+/// The roots its own project sits under and no others: the list is a list of
+/// folders on the user's disk, and the ones holding somebody else's work are
+/// not this caller's to read. An empty answer is the honest one for a project
+/// nobody registered a root for, and for a caller whose project is not there.
+fn registered_for(roots: &ProjectRoots, project: Option<&ProjectLine>) -> Vec<String> {
+    let Some(project) = project else {
+        return Vec::new();
+    };
+    let registered = roots.registered();
+    let cwd = std::fs::canonicalize(&project.cwd)
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|_| project.cwd.clone());
+    registered
+        .into_iter()
+        .filter(|root| cwd.starts_with(root.as_str()))
+        .collect()
 }
 
 fn project_line(p: Project) -> ProjectLine {
@@ -214,7 +272,7 @@ mod tests {
         store.drop_table_for_test("todos");
 
         let roots = ProjectRoots::default();
-        let snapshot = take("test", &store, &roots, Vec::new(), None);
+        let snapshot = take("test", &store, &roots, Vec::new(), None, None);
         assert!(snapshot.todos.is_empty());
         assert_eq!(snapshot.problems.len(), 1);
         assert!(snapshot.problems[0].starts_with("todos could not be read"));
@@ -263,6 +321,7 @@ mod tests {
                 child_pid: Some(1234),
             }],
             None,
+            None,
         );
 
         assert_eq!(snapshot.projects.len(), 1);
@@ -270,6 +329,112 @@ mod tests {
         assert_eq!(snapshot.live_ptys.len(), 1);
         assert_eq!(snapshot.roots.len(), 1);
         assert!(snapshot.problems.is_empty());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn project_at(store: &Store, id: &str, cwd: &std::path::Path) {
+        store
+            .save_project(
+                &Project {
+                    id: id.into(),
+                    name: id.into(),
+                    cwd: cwd.to_string_lossy().to_string(),
+                    icon: None,
+                    archived: false,
+                    git_root: None,
+                    worktrees: None,
+                    mcp_server_ids: None,
+                },
+                1,
+            )
+            .unwrap();
+    }
+
+    fn thread_in(store: &Store, id: &str, project_id: &str) {
+        store
+            .save_thread(&Thread {
+                id: id.into(),
+                project_id: project_id.into(),
+                pty_id: None,
+                label: id.into(),
+                title: None,
+                cmd: "sh".into(),
+                args: Vec::new(),
+                icon_key: None,
+                icon_color: None,
+                session_id: None,
+                status: "idle".into(),
+                exit_code: None,
+                created_at: 1,
+                auto_slept: false,
+                keep_awake: false,
+                worktree_path: None,
+                settled_at: None,
+                parent_thread_id: None,
+                delegation_mode: None,
+                delegation_status: None,
+                role: None,
+                orchestrator_scope: None,
+                accept_dispatch: true,
+            })
+            .unwrap();
+    }
+
+    /// A snapshot taken for one project is a snapshot of that project: the one
+    /// next door is not in any of the four sections, and neither is the folder
+    /// it lives in.
+    #[test]
+    fn a_scoped_snapshot_stops_at_its_own_project() {
+        let dir = scratch("scoped");
+        let mine = dir.join("mine");
+        let theirs = dir.join("theirs");
+        std::fs::create_dir_all(&mine).unwrap();
+        std::fs::create_dir_all(&theirs).unwrap();
+        let store = Store::open(&dir.join("boite.db")).unwrap();
+        project_at(&store, "p1", &mine);
+        project_at(&store, "p2", &theirs);
+        thread_in(&store, "t1", "p1");
+        thread_in(&store, "t2", "p2");
+        store.add_todo("p1", "mine", None, 1).unwrap();
+        store.add_todo("p2", "theirs", None, 1).unwrap();
+
+        let roots = ProjectRoots::default();
+        roots.replace(vec![
+            mine.to_string_lossy().to_string(),
+            theirs.to_string_lossy().to_string(),
+        ]);
+        let live = || {
+            vec![
+                LivePty { thread_id: "t1".into(), pty_id: "pty-1".into(), child_pid: None },
+                LivePty { thread_id: "t2".into(), pty_id: "pty-2".into(), child_pid: None },
+            ]
+        };
+
+        let scoped = take("test", &store, &roots, live(), None, Some("p1"));
+        assert_eq!(
+            scoped.projects.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(),
+            ["p1"]
+        );
+        assert_eq!(
+            scoped.threads.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(),
+            ["t1"]
+        );
+        assert_eq!(scoped.todos.keys().collect::<Vec<_>>(), ["p1"]);
+        assert_eq!(
+            scoped.live_ptys.iter().map(|p| p.thread_id.as_str()).collect::<Vec<_>>(),
+            ["t1"]
+        );
+        assert_eq!(scoped.roots.len(), 1, "{:?}", scoped.roots);
+        assert!(!scoped.roots[0].contains("theirs"), "{:?}", scoped.roots);
+
+        // And the workspace-wide answer still holds every one of them.
+        let whole = take("test", &store, &roots, live(), None, None);
+        assert_eq!(whole.projects.len(), 2);
+        assert_eq!(whole.threads.len(), 2);
+        assert_eq!(whole.todos.len(), 2);
+        assert_eq!(whole.live_ptys.len(), 2);
+        assert_eq!(whole.roots.len(), 2);
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -295,7 +460,7 @@ mod tests {
                 1,
             )
             .unwrap();
-        let snapshot = take("test", &store, &ProjectRoots::default(), Vec::new(), None);
+        let snapshot = take("test", &store, &ProjectRoots::default(), Vec::new(), None, None);
         assert!(!snapshot.projects[0].cwd_exists);
         let _ = std::fs::remove_dir_all(&dir);
     }

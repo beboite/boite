@@ -97,6 +97,18 @@ impl Fake {
         self
     }
 
+    /// What a terminal printed, where the PTY reader would have left it.
+    ///
+    /// Writing one is also what makes this host keep transcripts at all: a
+    /// `Fake` nobody wrote one on answers `None`, which is the real behaviour
+    /// of a Boite that keeps none rather than an unset field.
+    pub fn with_transcript(self, thread_id: &str, text: &str) -> Fake {
+        let dir = self.dir.join("transcripts");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(format!("{thread_id}.log")), text).unwrap();
+        self
+    }
+
     pub fn scratch(&self) -> &PathBuf {
         &self.dir
     }
@@ -181,6 +193,11 @@ impl Workspace for Fake {
 
     fn announce(&self, change: Change) {
         self.announced.lock().unwrap().push(change);
+    }
+
+    fn transcripts_dir(&self) -> Option<PathBuf> {
+        let dir = self.dir.join("transcripts");
+        dir.is_dir().then_some(dir)
     }
 
     fn on_screen(&self) -> Option<boite_core::screen::Screen> {

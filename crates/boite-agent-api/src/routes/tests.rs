@@ -934,3 +934,243 @@ async fn a_scoped_orchestrator_cannot_spawn_across() {
         out.0
     );
 }
+
+// ------------------------------------------------ what a credential may read
+
+/// Two projects with something to find in each: a terminal, a todo, an entry
+/// in the log and a transcript. Every read this endpoint offers then has an
+/// answer on both sides of the line a credential draws.
+fn side_by_side(tag: &str) -> std::sync::Arc<Fake> {
+    let fake = Fake::new(tag)
+        .with_project("p1", "/w/one")
+        .with_project("p2", "/w/two")
+        .with_thread("t1", "p1")
+        .with_thread("t2", "p2")
+        .with_transcript("t1", "cargo build\ngremlin in one\n")
+        .with_transcript("t2", "cargo build\ngremlin in two\n");
+    fake.store.add_todo("p1", "gremlin in one", None, 1).unwrap();
+    fake.store.add_todo("p2", "gremlin in two", None, 2).unwrap();
+    for (project, thread) in [("p1", "t1"), ("p2", "t2")] {
+        fake.store
+            .record(
+                Entry::new(project, Actor::Thread(thread.into()), Action::Denied)
+                    .with("reason", "gremlin"),
+            )
+            .unwrap();
+    }
+    std::sync::Arc::new(fake)
+}
+
+/// A credentials file, as `auth::identify` builds one: one project, and no
+/// terminal behind it.
+fn issued(project_id: &str) -> Caller {
+    Caller {
+        project_id: project_id.into(),
+        thread_id: None,
+        grant: boite_core::capability::Grant::Project,
+        agent: None,
+    }
+}
+
+/// The blocker in one pass. A token issued for one project used to be a way to
+/// read every other: the list of projects, their log, their todos, their
+/// terminals and what those terminals printed all came back in full.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_credentials_file_reads_its_own_project_and_no_other() {
+    let fake = side_by_side("read-scope");
+
+    let out = projects(State(fake.clone() as Shared), Extension(issued("p1")))
+        .await
+        .unwrap();
+    let listed: Vec<&str> = out.0["projects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(listed, ["p1"], "{:?}", out.0);
+
+    // Naming another project is not a way to read it, and not an error either:
+    // it reads its own, the way a scoped orchestrator's pulse does.
+    let out = timeline(
+        State(fake.clone() as Shared),
+        Extension(issued("p1")),
+        axum::extract::Query(TimelineIn {
+            project: Some("p2".into()),
+            limit: Some(50),
+        }),
+    )
+    .await
+    .unwrap();
+    let moments = out.0["moments"].as_array().unwrap().clone();
+    assert!(!moments.is_empty(), "its own project still answers");
+    assert!(
+        moments.iter().all(|m| m["projectId"] == json!("p1")),
+        "{moments:?}"
+    );
+
+    let out = search(
+        State(fake.clone() as Shared),
+        Extension(issued("p1")),
+        axum::extract::Query(SearchIn {
+            q: Some("gremlin".into()),
+            limit: Some(50),
+        }),
+    )
+    .await
+    .unwrap();
+    let hits = out.0["hits"].as_array().unwrap().clone();
+    assert!(!hits.is_empty(), "its own rows still answer");
+    for hit in &hits {
+        // A row carries its project; a transcript carries the thread that
+        // wrote it, and t2 is the one next door.
+        assert_ne!(hit["projectId"], json!("p2"), "{hit}");
+        assert_ne!(hit["refId"], json!("t2"), "{hit}");
+    }
+    assert!(
+        hits.iter().any(|h| h["refId"] == json!("t1")),
+        "its own terminal is still searched: {hits:?}"
+    );
+
+    let out = snapshot(State(fake.clone() as Shared), Extension(issued("p1")))
+        .await
+        .unwrap();
+    assert_eq!(
+        out.0["projects"].as_array().unwrap().len(),
+        1,
+        "{}",
+        out.0["projects"]
+    );
+    let threads: Vec<&str> = out.0["threads"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(threads, ["t1"], "{}", out.0["threads"]);
+    assert_eq!(out.0["todos"].as_object().unwrap().len(), 1);
+    assert!(out.0["todos"].get("p1").is_some(), "{}", out.0["todos"]);
+}
+
+/// The transcript is the most detailed thing this endpoint hands out, so it is
+/// the one that answers by name: another project's terminal is refused, an id
+/// that names nothing is refused the same way rather than saying so, and the
+/// caller's own project still reads.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_credentials_file_reads_no_terminal_outside_its_project() {
+    let fake = side_by_side("transcript-scope");
+    let read = |thread: &str| {
+        let fake = fake.clone();
+        let thread = thread.to_string();
+        async move {
+            transcript(
+                State(fake as Shared),
+                Extension(issued("p1")),
+                axum::extract::Query(TranscriptIn {
+                    thread_id: Some(thread),
+                    bytes: Some(4096),
+                }),
+            )
+            .await
+            .unwrap()
+            .0
+        }
+    };
+
+    let mine = read("t1").await;
+    assert!(
+        mine["text"].as_str().unwrap().contains("gremlin in one"),
+        "{mine}"
+    );
+
+    for thread in ["t2", "no-such-thread"] {
+        let refused = read(thread).await;
+        assert!(refused.get("text").is_none(), "{refused}");
+        assert_eq!(refused["retryable"], json!(false), "{refused}");
+        assert!(
+            refused["error"]
+                .as_str()
+                .unwrap()
+                .contains("issued it for another one"),
+            "{refused}"
+        );
+    }
+
+    // And the refusal is answerable afterwards: who tried what and was turned
+    // away is the question a stuck multi-agent run asks.
+    let denials = fake.store.timeline(Some("p1"), 50);
+    assert_eq!(
+        denials
+            .iter()
+            .filter(|m| m.text.contains("of=transcript"))
+            .count(),
+        2,
+        "{denials:?}"
+    );
+}
+
+/// The other half, and the one a scope this narrow could quietly break: an
+/// agent in a terminal the user opened still reads the whole workspace.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_terminal_boite_opened_still_reads_the_whole_workspace() {
+    let fake = side_by_side("owner-scope");
+
+    let out = projects(State(fake.clone() as Shared), Extension(agent("p1", "t1")))
+        .await
+        .unwrap();
+    assert_eq!(out.0["projects"].as_array().unwrap().len(), 2);
+
+    let out = timeline(
+        State(fake.clone() as Shared),
+        Extension(agent("p1", "t1")),
+        axum::extract::Query(TimelineIn {
+            project: Some("p2".into()),
+            limit: Some(50),
+        }),
+    )
+    .await
+    .unwrap();
+    let moments = out.0["moments"].as_array().unwrap().clone();
+    assert!(!moments.is_empty(), "{moments:?}");
+    assert!(
+        moments.iter().all(|m| m["projectId"] == json!("p2")),
+        "the project it asked for is the project it reads: {moments:?}"
+    );
+
+    let out = search(
+        State(fake.clone() as Shared),
+        Extension(agent("p1", "t1")),
+        axum::extract::Query(SearchIn {
+            q: Some("gremlin".into()),
+            limit: Some(50),
+        }),
+    )
+    .await
+    .unwrap();
+    let hits = out.0["hits"].as_array().unwrap().clone();
+    assert!(hits.iter().any(|h| h["projectId"] == json!("p2")), "{hits:?}");
+    assert!(hits.iter().any(|h| h["refId"] == json!("t2")), "{hits:?}");
+
+    let out = snapshot(State(fake.clone() as Shared), Extension(agent("p1", "t1")))
+        .await
+        .unwrap();
+    assert_eq!(out.0["projects"].as_array().unwrap().len(), 2);
+    assert_eq!(out.0["threads"].as_array().unwrap().len(), 2);
+
+    // Including the terminal next door, which is why the route exists.
+    let out = transcript(
+        State(fake.clone() as Shared),
+        Extension(agent("p1", "t1")),
+        axum::extract::Query(TranscriptIn {
+            thread_id: Some("t2".into()),
+            bytes: Some(4096),
+        }),
+    )
+    .await
+    .unwrap();
+    assert!(
+        out.0["text"].as_str().unwrap().contains("gremlin in two"),
+        "{:?}",
+        out.0
+    );
+}
