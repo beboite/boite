@@ -132,6 +132,30 @@ describe("a line whose write never left the device", () => {
     stop();
     expect(term.notices).toEqual(["dispatch.notice", "orchestrator.postFailed"]);
   });
+
+  it("retries the write when reporting its failure also fails", async () => {
+    const order: string[] = [];
+    const term = sink(false, order);
+    const stop = term.register();
+    conduct.settleDispatch.mockRejectedValueOnce(new Error("settle failed"));
+
+    await flushDispatches();
+    await flushDispatches();
+    stop();
+
+    expect(term.typed).toEqual(["carry on\r", "carry on\r"]);
+    expect(conduct.settleDispatch).toHaveBeenCalledTimes(2);
+    expect(conduct.settleDispatch).toHaveBeenNthCalledWith(1, {
+      dispatchId: "d-1",
+      state: "dropped",
+      reason: "write_failed",
+    });
+    expect(conduct.settleDispatch).toHaveBeenNthCalledWith(2, {
+      dispatchId: "d-1",
+      state: "dropped",
+      reason: "write_failed",
+    });
+  });
 });
 
 describe("a line that did land", () => {
@@ -150,6 +174,30 @@ describe("a line that did land", () => {
     expect(term.typed).toEqual(["carry on\r"]);
     expect(order).toEqual(["type", "settle"]);
     expect(world.settles).toEqual([{ dispatchId: "d-1", state: "delivered" }]);
+  });
+
+  it("retries only the settle when its response fails after the write", async () => {
+    const order: string[] = [];
+    const term = sink(true, order);
+    const stop = term.register();
+    conduct.settleDispatch.mockRejectedValueOnce(new Error("settle failed"));
+
+    await flushDispatches();
+    stop();
+    world.threads = [thread({ status: "running" })];
+    await flushDispatches();
+
+    expect(term.typed).toEqual(["carry on\r"]);
+    expect(term.notices).toEqual(["dispatch.notice"]);
+    expect(conduct.settleDispatch).toHaveBeenCalledTimes(2);
+    expect(conduct.settleDispatch).toHaveBeenNthCalledWith(1, {
+      dispatchId: "d-1",
+      state: "delivered",
+    });
+    expect(conduct.settleDispatch).toHaveBeenNthCalledWith(2, {
+      dispatchId: "d-1",
+      state: "delivered",
+    });
   });
 
   /** Newlines would split the prompt; the submit is the one \r. */

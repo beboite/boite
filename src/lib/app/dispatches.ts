@@ -41,15 +41,13 @@ export interface DispatchSink {
 const sinks = new Map<string, DispatchSink>();
 
 /**
- * The local half of first-writer-wins, held while a line is being typed.
+ * Local state for queued lines this device has taken responsibility for.
  *
- * The row stays `queued` on the boite until the bytes have landed now, which is
- * the whole fix, and that opens a window where a second drain in this window
- * would see the same line still queued and type it twice. This closes it
- * without a server round trip: an id in here is one this device has already
- * taken responsibility for.
+ * `typing` blocks another drain while bytes are in flight. `typed` survives a
+ * failed settle, so a later drain retries only the state report. A failed write
+ * removes the entry, leaving the still-queued row eligible for retry.
  */
-const typing = new Set<string>();
+const deliveries = new Map<string, "typing" | "typed">();
 
 /** A mounted Terminal owning a live PTY. Registering looks at the queue. */
 export function registerDispatchSink(threadId: string, sink: DispatchSink): () => void {
@@ -115,8 +113,27 @@ export async function flushDispatches(): Promise<void> {
   flushing = true;
   try {
     const lines = await conduct.drainDispatches({});
+    // A settle can commit before its response is lost. A later drain that no
+    // longer returns the row is the confirmation that releases the local mark.
+    const open = new Set(lines.map((line) => line.id));
+    for (const id of deliveries.keys()) {
+      if (!open.has(id)) deliveries.delete(id);
+    }
     let held = false;
     for (const line of lines) {
+      const delivery = deliveries.get(line.id);
+      if (delivery === "typing") continue;
+      if (delivery === "typed") {
+        const { settled } = await conduct.settleDispatch({
+          dispatchId: line.id,
+          state: "delivered",
+        });
+        deliveries.delete(line.id);
+        if (!settled) {
+          logger.warn("dispatch", "another device settled this line first", { id: line.id });
+        }
+        continue;
+      }
       const thread = app.threadById(line.toThreadId);
       const sink = sinks.get(line.toThreadId);
       // Not this device's PTY: leave the row queued for the window that has it.
@@ -127,19 +144,9 @@ export async function flushDispatches(): Promise<void> {
         continue;
       }
       if (verdict === "type") {
-        // Type first, settle on what the write answered. This used to settle
-        // `delivered` ahead of the write, which reads as safe — a window dying
-        // mid-type could not have the line typed twice — and cost the line
-        // every time the write failed instead: `settle_dispatch` only moves a
-        // row out of `queued`, so a line marked delivered can never come back,
-        // and over a boite whose socket had just dropped the orchestrator was
-        // told its instruction had landed in a terminal that never saw a byte.
-        //
-        // The double-type it guarded against is covered by `typing` above, and
-        // the residual window is now one RPC wide and on the right side of the
-        // trade: bytes that are in the PTY, settled a round trip later.
-        if (typing.has(line.id)) continue;
-        typing.add(line.id);
+        // Type first, then retain `typed` until the boite confirms the row is no
+        // longer queued. This keeps a lost settle response from replaying bytes.
+        deliveries.set(line.id, "typing");
         let landed = false;
         try {
           sink.notice(t("dispatch.notice"));
@@ -148,9 +155,9 @@ export async function flushDispatches(): Promise<void> {
           landed = await sink.type(oneLine + "\r");
         } catch (err) {
           logger.warn("dispatch", "the line was not typed", String(err));
-        } finally {
-          typing.delete(line.id);
         }
+        if (landed) deliveries.set(line.id, "typed");
+        else deliveries.delete(line.id);
         // Nothing left the device. Settled `dropped` rather than left queued:
         // a row still queued is one the next drain types, and by then the
         // orchestrator has moved on and the line is stale input arriving out of
@@ -162,6 +169,7 @@ export async function flushDispatches(): Promise<void> {
             ? { dispatchId: line.id, state: "delivered" }
             : { dispatchId: line.id, state: "dropped", reason: "write_failed" },
         );
+        deliveries.delete(line.id);
         // The one thing settling afterwards gives up: a second device attached
         // to the same thread can be typing the same line right now, and the
         // loser of the settle finds out only here. Worth a line in the log,
