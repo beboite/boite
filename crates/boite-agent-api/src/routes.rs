@@ -522,16 +522,20 @@ async fn pulse(
         "agent-{}",
         caller.thread_id.as_deref().unwrap_or(&caller.project_id)
     );
-    // A scoped orchestrator reads its own project's pulse whatever it asks
-    // for. The clamp is the read side of the dispatch guard: one project,
-    // never a window into the rest of the workspace.
-    let clamp = caller
-        .thread_id
-        .as_deref()
-        .and_then(|id| workspace.store().thread_orchestration(id))
-        .filter(|(role, _, _)| role.as_deref() == Some(boite_core::orchestrator::ROLE))
-        .and_then(|(_, scope, _)| scope);
-    let project = clamp.or(q.project);
+    // A project credential has no thread to carry the orchestrator scope, so
+    // apply the grant-level read boundary before checking the optional thread
+    // scope. Otherwise `?project=` would let it select a neighbouring project.
+    let project = confined_to(&caller)
+        .map(str::to_string)
+        .or_else(|| {
+            caller
+                .thread_id
+                .as_deref()
+                .and_then(|id| workspace.store().thread_orchestration(id))
+                .filter(|(role, _, _)| role.as_deref() == Some(boite_core::orchestrator::ROLE))
+                .and_then(|(_, scope, _)| scope)
+        })
+        .or(q.project);
     let answered = tokio::task::spawn_blocking(move || {
         boite_core::command::conduct::read_pulse(
             workspace.store(),

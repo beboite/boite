@@ -906,6 +906,38 @@ async fn a_scoped_orchestrator_reads_its_own_project_whatever_it_asks() {
     assert_eq!(moments[0]["detail"], json!("own"), "{moments:?}");
 }
 
+/// A project credential cannot select another project's pulse with the query
+/// parameter, even though it has no thread row from which to derive a scope.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_project_credential_cannot_read_another_projects_pulse() {
+    let fake = std::sync::Arc::new(
+        Fake::new("pulse-project-grant")
+            .with_project("p1", "/w/one")
+            .with_project("p2", "/w/two"),
+    );
+    fake.store()
+        .append_moment("thread.phase", Some("p1"), None, "own", "phase", 1)
+        .unwrap();
+    fake.store()
+        .append_moment("thread.phase", Some("p2"), None, "other", "phase", 2)
+        .unwrap();
+
+    let out = pulse(
+        State(fake.clone() as Shared),
+        Extension(issued("p1")),
+        axum::extract::Query(PulseIn {
+            since_seq: Some(0),
+            timeout_ms: Some(0),
+            project: Some("p2".into()),
+        }),
+    )
+    .await
+    .unwrap();
+    let moments = out.0["moments"].as_array().unwrap().clone();
+    assert_eq!(moments.len(), 1, "{moments:?}");
+    assert_eq!(moments[0]["detail"], json!("own"), "{moments:?}");
+}
+
 /// A scoped orchestrator spawning outside its project is refused by name,
 /// before any permission is asked: crossing over is the one capability its
 /// scope withholds.
