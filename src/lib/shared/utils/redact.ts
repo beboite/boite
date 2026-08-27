@@ -7,15 +7,27 @@ const SECRET_FLAGS = new Set([
   "--secret",
   "--password",
   "--pass",
-  "--key",
   "--access-token",
   "--bearer",
   "--client-secret",
   "--anthropic-api-key",
   "--openai-api-key",
-  "-p",
   "-k",
 ]);
+
+// Two flags that used to sit in that list and never carried a value worth
+// hiding, on any command this app spawns:
+//
+// - `--key` is how fastpick names *which* credential to launch on, written
+//   `<provider>.<key>` (`comboArgs` writes it itself). It is an identifier, not
+//   a secret, and redacting it relaunched the thread as
+//   `fastpick --key *** …`, which fastpick answers with
+//   `no provider or key with id '***', see --list`.
+// - `-p` is the prompt flag of claude, codex and fastpick alike, so a thread
+//   carrying `-- -p "<prompt>"` came back with `***` as its prompt.
+//
+// A real secret handed to either one is still caught: SECRET_VALUE_RE tests
+// every argument whatever flag precedes it.
 
 // Anchored on each provider's real separator, not on the bare prefix. `sk`
 // and `ghp` alone matched ordinary words ("skip", "ghost"), and because these
