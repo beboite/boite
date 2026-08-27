@@ -92,6 +92,7 @@ grant is everything except `admin`.
 | `BOITE_MAX_CONNECTIONS` | `64` | Max concurrent WebSocket connections. |
 | `BOITE_WEBHOOK_URL` | _(none)_ | Notification webhook, fired on ready / waiting / exit. Must be `http(s)`. |
 | `BOITE_WEBHOOK_FORMAT` | `json` | `ntfy`, `discord`, or `json`. |
+| `BOITE_PUSH_ALLOWED_HOSTS` | _(none)_ | Comma-separated hosts a Web Push endpoint may be registered on, subdomains included. Empty takes any public HTTPS host, which is what a workspace whose users are on browsers nobody enumerated needs. The whole browser field today is `fcm.googleapis.com,push.services.mozilla.com,web.push.apple.com,notify.windows.com`. |
 
 ## Security
 
@@ -139,6 +140,20 @@ Native PWA Web Push (VAPID, RFC 8291) is wired in too: a keypair is generated on
 first run and the same transitions are pushed down. It uses `web-push-native`
 (pure RustCrypto: aes-gcm + hkdf + p256), so there is no OpenSSL dependency and
 it cross-compiles cleanly.
+
+**Where a push endpoint may point.** Registering one tells the server to POST to
+an address of the client's choosing, unprompted, on every thread transition, and
+in a remote workspace the server is bound to a routable interface on purpose. So
+the endpoint is judged on shape when it is registered and again at the send:
+HTTPS, default port, a host that is not this machine, and no address literal
+inside the network. That leaves what a name resolves to, which no check at
+registration can settle, so the push client resolves through a resolver that
+hands the connector public addresses and nothing else; hyper connects to exactly
+those and resolves nothing a second time, which closes the rebinding window
+rather than moving it. The same client follows no redirects, since a 302 on a
+POST replaces a judged URL with one nobody judged, and gives a service ten
+seconds to answer. `BOITE_PUSH_ALLOWED_HOSTS` narrows it further to named hosts
+when the deployment knows them.
 
 Both are built from one value, `boite_core::awareness`: a phase
 (`starting | running | waiting_for_approval | waiting_for_input | completed |
