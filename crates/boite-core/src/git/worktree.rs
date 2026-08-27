@@ -378,14 +378,19 @@ fn same_dir(a: &Path, b: &Path) -> bool {
 
 /// One spelling of a directory, for the comparisons here that are text.
 ///
-/// Separators, case and a trailing slash are three things two paths naming one
-/// directory disagree about on Windows, and a verbatim path disagrees with the
-/// same path written by hand.
+/// Separators and a trailing slash are normalized everywhere. Windows paths
+/// can also name the same directory with different case.
 fn norm_dir(p: &Path) -> String {
-    p.to_string_lossy()
-        .replace('\\', "/")
-        .trim_end_matches('/')
-        .to_lowercase()
+    let text = p.to_string_lossy().replace('\\', "/");
+    let text = text.trim_end_matches('/');
+    #[cfg(windows)]
+    {
+        text.to_lowercase()
+    }
+    #[cfg(not(windows))]
+    {
+        text.to_owned()
+    }
 }
 
 struct Spare {
@@ -3315,6 +3320,47 @@ mod worktree_tests {
 
         let _ = fs::remove_dir_all(&here);
         let _ = fs::remove_dir_all(&legacy);
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn a_case_changed_sibling_is_not_under_the_migration_base() {
+        let base = scratch("classify-case-base");
+        fs::create_dir_all(&base).unwrap();
+        let sibling = base.with_file_name(
+            base.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_uppercase(),
+        );
+
+        assert_eq!(
+            classify_migration_source(&base, &sibling.join("thread-1")),
+            Ok(MigrationSource::Elsewhere),
+            "a case-sensitive sibling was classified as inside the base"
+        );
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn migration_path_comparisons_remain_case_insensitive_on_windows() {
+        let base = scratch("classify-case-base");
+        fs::create_dir_all(&base).unwrap();
+        let other_case = PathBuf::from(base.to_string_lossy().to_uppercase());
+
+        assert!(
+            same_dir(&base, &other_case),
+            "Windows spellings of one directory compared as different"
+        );
+        assert_eq!(
+            classify_migration_source(&base, &other_case.join("thread-1")),
+            Ok(MigrationSource::Legacy),
+            "a Windows path under the base was classified as elsewhere"
+        );
+
+        let _ = fs::remove_dir_all(&base);
     }
 
     /// The source of a migration is the one path in this domain that arrives
