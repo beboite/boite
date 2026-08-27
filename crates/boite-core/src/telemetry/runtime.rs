@@ -318,11 +318,20 @@ impl TelemetryRuntime {
         });
     }
 
+    /// Applies a consent mutation, on disk first and in memory only if that
+    /// worked.
+    ///
+    /// The mutation used to land in memory before the write was attempted, so a
+    /// full disk or a read-only data directory left the window showing Mode B
+    /// on and the queue sending under it, while the file said the opposite and
+    /// won at the next launch. A refused write must now leave nothing behind.
     fn update(&self, f: impl FnOnce(&mut Sidecar)) -> Result<(), String> {
         {
             let mut cfg = self.sidecar.lock().unwrap_or_else(|e| e.into_inner());
-            f(&mut cfg);
-            sidecar::save(&self.sidecar_path, &cfg)?;
+            let mut next = cfg.clone();
+            f(&mut next);
+            sidecar::save(&self.sidecar_path, &next)?;
+            *cfg = next;
         }
         self.refresh_consent();
         Ok(())
@@ -436,6 +445,29 @@ mod tests {
     const OLD_ID: &str = "550e8400-e29b-41d4-a716-446655440000";
     const NEW_ID: &str = "797f20fe-94de-4e89-98a2-ae3a3273ad1e";
 
+    /// A data directory whose parent is a regular file, so every
+    /// `sidecar::save` fails at `create_dir_all` on any platform.
+    fn unwritable_data_dir() -> PathBuf {
+        let base = std::env::temp_dir().join(format!(
+            "boite-telemetry-runtime-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&base).expect("temp base");
+        let blocker = base.join("blocked");
+        std::fs::write(&blocker, b"a file where a directory would have to be").expect("blocker");
+        blocker.join("data")
+    }
+
+    fn cleanup(data_dir: &Path) {
+        if let Some(base) = data_dir.parent().and_then(|p| p.parent()) {
+            let _ = std::fs::remove_dir_all(base);
+        }
+    }
+
     #[test]
     fn consent_from_sidecar_strips_mode_b_when_install_id_empty() {
         let cfg = Sidecar {
@@ -533,6 +565,56 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(telemetry_install_ids(&cfg), [NEW_ID, OLD_ID]);
+    }
+
+    #[test]
+    fn a_refused_sidecar_write_leaves_the_opt_in_undone() {
+        let data_dir = unwritable_data_dir();
+        let runtime = TelemetryRuntime::spawn(&data_dir, "0.0.0", "test", Instant::now());
+        assert!(!runtime.ui_state().mode_b_enabled);
+
+        let err = runtime
+            .set_mode_b(true)
+            .expect_err("the sidecar cannot be written in this directory");
+        assert!(err.contains("sidecar"), "unexpected error: {err}");
+
+        // The window must not show an opt-in the file never recorded: the file
+        // is what the next launch reads.
+        let state = runtime.ui_state();
+        assert!(
+            !state.mode_b_enabled,
+            "memory kept a write that never landed"
+        );
+        assert!(
+            !state.install_id_set,
+            "an install_id was minted for nothing"
+        );
+        assert!(sidecar::load(&sidecar::path_in(&data_dir))
+            .install_id
+            .is_empty());
+        cleanup(&data_dir);
+    }
+
+    #[test]
+    fn a_refused_sidecar_write_leaves_onboarding_open() {
+        let data_dir = unwritable_data_dir();
+        let runtime = TelemetryRuntime::spawn(&data_dir, "0.0.0", "test", Instant::now());
+        let before = runtime.ui_state();
+
+        let err = runtime
+            .complete_onboarding(true, true)
+            .expect_err("the sidecar cannot be written in this directory");
+        assert!(err.contains("sidecar"), "unexpected error: {err}");
+
+        let state = runtime.ui_state();
+        assert!(
+            !state.onboarding_completed,
+            "the overlay would never be shown again while consent was never stored"
+        );
+        assert_eq!(state.mode_a_enabled, before.mode_a_enabled);
+        assert!(!state.mode_b_enabled);
+        assert!(!state.install_id_set);
+        cleanup(&data_dir);
     }
 
     #[test]
