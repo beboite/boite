@@ -52,6 +52,35 @@ describe("redactArgs", () => {
     }
   });
 
+  it("keeps a fastpick --key id, which names a credential without carrying one", () => {
+    // Regression: the id was replaced on persist, so the respawn ran
+    // `fastpick --key *** …` and died on `no provider or key with id '***'`.
+    const { args, redacted } = redactArgs([
+      "--harness",
+      "claude",
+      "--provider",
+      "codex-everywhere",
+      "--key",
+      "codex-everywhere.openai",
+      "--model",
+      "gpt-5.6-sol",
+    ]);
+    expect(args).toContain("codex-everywhere.openai");
+    expect(redacted).toBe(false);
+  });
+
+  it("keeps a -p prompt, which is the agent's prompt flag and not a password", () => {
+    const { args, redacted } = redactArgs(["--harness", "claude", "--", "-p", "hello"]);
+    expect(args).toEqual(["--harness", "claude", "--", "-p", "hello"]);
+    expect(redacted).toBe(false);
+  });
+
+  it("still redacts a real secret handed to a kept flag", () => {
+    const { args, redacted } = redactArgs(["--key", "sk-ant-api03-xxxxx"]);
+    expect(args).toEqual(["--key", REDACTED]);
+    expect(redacted).toBe(true);
+  });
+
   it("redacts only the value, not a following flag, when a secret ends the list", () => {
     const { args } = redactArgs(["run", "--secret"]);
     expect(args).toEqual(["run", "--secret"]);

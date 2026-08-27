@@ -1,5 +1,6 @@
 import type { IconKey } from "$lib/types";
 import { isFastpick, parseCombo } from "$lib/features/fastpick/combo";
+import { REDACTED } from "$lib/shared/utils/redact";
 
 /**
  * What to relaunch a thread with, decided without touching a store or a clock.
@@ -95,6 +96,31 @@ function withoutBarColor(argv: AgentArgv): AgentArgv {
   if (!argv.viaFastpick) return argv;
   const agent = argv.agent.filter((a) => !BAR_COLOR_PROMPT.test(a));
   return agent.length === argv.agent.length ? argv : { ...argv, agent };
+}
+
+/**
+ * Drops a `--key ***` an older Boite wrote into the row.
+ *
+ * `--key <provider>.<id>` names which credential fastpick launches on, and the
+ * persistence guard used to read the flag as a secret one and replace the id
+ * with `***` on the way into the DB. What came back out was a command line
+ * fastpick refuses outright: `no provider or key with id '***', see --list`.
+ *
+ * The id is gone from the row and nothing here can invent it, so the pair is
+ * dropped instead: `--provider` and `--model` are still there, and fastpick
+ * resolves the key from the model when only one key of that provider serves it.
+ * Same treatment as the `/color` above, and for the same reason: a row is not
+ * rewritten underneath the user, it is fixed on the way through.
+ */
+function withoutRedactedKey(argv: AgentArgv): AgentArgv {
+  if (!argv.viaFastpick) return argv;
+  const at = argv.own.findIndex(
+    (a, i) =>
+      (a === "--key" && argv.own[i + 1] === REDACTED) || a === `--key=${REDACTED}`,
+  );
+  if (at < 0) return argv;
+  const drop = argv.own[at] === "--key" ? 2 : 1;
+  return { ...argv, own: [...argv.own.slice(0, at), ...argv.own.slice(at + drop)] };
 }
 
 function stripFlag(args: string[], flags: string[], takesValue: boolean): string[] {
@@ -298,7 +324,7 @@ export function resumeArgv(input: ResumeInput): {
   argv: AgentArgv;
   outcome: ResumeOutcome;
 } {
-  const argv = withoutBarColor(splitArgv(input.cmd, input.args));
+  const argv = withoutRedactedKey(withoutBarColor(splitArgv(input.cmd, input.args)));
   const { key, sessionId } = input;
   if (!key) return { argv, outcome: "no-builder" };
   const builder = builders[key];

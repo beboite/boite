@@ -113,6 +113,53 @@ describe("resumeArgv", () => {
     }
   });
 
+  it("drops a --key the persistence guard redacted, keeping provider and model", () => {
+    // The row of a thread saved while `--key` counted as a secret flag. Replayed
+    // as is, fastpick answers `no provider or key with id '***', see --list`.
+    const args = [
+      "--harness",
+      "claude-code",
+      "--provider",
+      "codex-everywhere",
+      "--model",
+      "gpt-5.6-sol",
+      "--key",
+      "***",
+    ];
+    const { argv } = relaunch("fastpick", args, "claude");
+    expect(argv.own).toEqual([
+      "--harness",
+      "claude-code",
+      "--provider",
+      "codex-everywhere",
+      "--model",
+      "gpt-5.6-sol",
+    ]);
+    expect(joinArgv(argv)).not.toContain("***");
+  });
+
+  it("drops a redacted --key=*** written as one argument", () => {
+    const args = ["--harness", "claude-code", "--provider", "p", "--key=***", "--model", "m"];
+    const { argv } = relaunch("fastpick", args, "claude");
+    expect(argv.own).toEqual(["--harness", "claude-code", "--provider", "p", "--model", "m"]);
+  });
+
+  it("keeps a --key that still carries its id", () => {
+    const args = [
+      "--harness",
+      "claude-code",
+      "--provider",
+      "codex-everywhere",
+      "--key",
+      "codex-everywhere.openai",
+      "--model",
+      "gpt-5.6-sol",
+    ];
+    const { argv } = relaunch("fastpick", args, "claude");
+    expect(argv.own).toEqual(args);
+    expect(parseCombo("fastpick", argv.own)?.key).toBe("openai");
+  });
+
   it("leaves a prompt the user typed themselves alone", () => {
     // Boite only ever wrote it on a fastpick passthrough, so a direct launch
     // keeps whatever its owner put there.
