@@ -334,3 +334,46 @@ jobs:
       - name: Stop it
         if: always()
         run: kill "$(cat "${{ runner.temp }}/server.pid")" 2>/dev/null || true
+
+  # The Android wrapper. `mobile/` is a gradle project that reads its version
+  # out of package.json and its host out of app/build.gradle, and until now the
+  # only thing that ever compiled it was a laptop with a keystore on it: a
+  # dependency bump, a manifest edit or a Bubblewrap regeneration could break
+  # the build and nothing would say so before somebody wanted an APK. This is
+  # the same shape as the `desktop` job above, code that ci never compiled.
+  #
+  # Unsigned on purpose. The release keystore is the one secret this workflow
+  # must never hold (see mobile/README.md), and an unsigned APK is enough to
+  # prove the wrapper builds and to sideload onto a device with `apksigner`
+  # run by hand. It is kept as a run artifact so a pull request that touches
+  # the wrapper can be installed and looked at without a release.
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 17
+      # Caches the wrapper distribution and the dependency jars, keyed on the
+      # gradle files. The runner image carries the Android SDK already, with
+      # the licences accepted, and AGP downloads a platform it is missing.
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Build the APK
+        working-directory: mobile
+        run: ./gradlew assembleRelease
+      # One file, named after the version the gradle script read, so the
+      # artifact says what it is once it is downloaded and renamed by nobody.
+      - name: Name it
+        run: |
+          set -euo pipefail
+          version=$(jq -r .version package.json)
+          src=mobile/app/build/outputs/apk/release/app-release-unsigned.apk
+          test -f "$src"
+          mkdir -p "${{ runner.temp }}/apk"
+          cp "$src" "${{ runner.temp }}/apk/boite-$version-unsigned.apk"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: boite-android-unsigned
+          path: ${{ runner.temp }}/apk/*.apk
+          if-no-files-found: error

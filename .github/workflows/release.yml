@@ -268,3 +268,153 @@ jobs:
             gh release delete-asset "$tag" "$name" --yes
             echo "deleted $name"
           done
+
+  # The Android wrapper, signed. ci builds it unsigned on every push to prove
+  # it compiles; this is the copy a phone installs, and it goes on the release
+  # page next to the desktop bundles.
+  #
+  # After bundle rather than beside it: tauri-action opens the draft release,
+  # and two jobs creating one for the same tag at the same moment would open
+  # two. Three minutes of gradle after the slowest platform is the price.
+  #
+  # The keystore rides in as base64 in ANDROID_KEYSTORE, with its password in
+  # ANDROID_KEYSTORE_PASSWORD (ANDROID_KEY_PASSWORD when the key's own differs).
+  # No keystore means an unsigned APK on the page, said out loud as a warning:
+  # a release is not held back for the one asset that has a manual fallback.
+  #
+  # What is checked and not just done: the certificate the APK carries has to
+  # be the fingerprint in mobile/assetlinks.json. A TWA whose signature does
+  # not match what the server publishes opens in a Custom Tab with a URL bar,
+  # silently, on every phone, and nothing but this comparison would notice a
+  # release signed with the wrong keystore.
+  #
+  # Most releases leave mobile/ alone, and the wrapper is a shell whose whole
+  # UI comes from the server, so a rebuild from unchanged sources produces the
+  # same bits — except versionName and versionCode, which gradle bakes in from
+  # package.json. Those releases reuse the previous release's APK instead of
+  # rebuilding, under its original name: boite-1.3.1.apk on the v1.3.3 page is
+  # an APK truthfully naming the tag it was built from, where a renamed copy
+  # would claim a version it does not carry. Only a published release with a
+  # *signed* APK is reused; a history of unsigned ones builds again, since the
+  # keystore may have arrived since.
+  android:
+    needs: bundle
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The reuse probe below diffs mobile/ against the previous release's
+          # tag, which a depth-1 checkout does not carry.
+          fetch-depth: 0
+
+      # Decides between the two paths and, on reuse, already places the file
+      # where the upload step reads. Drafts are skipped: the draft this very
+      # run is filling is first on the list.
+      - name: Reuse the previous APK when mobile/ is untouched
+        id: probe
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${{ runner.temp }}/apk"
+          state=build
+
+          found=$(gh release list --limit 20 --json tagName,isDraft \
+            -q '.[] | select(.isDraft | not) | .tagName' | while read -r t; do
+              n=$(gh release view "$t" --json assets \
+                -q '.assets[].name' | grep -E '^boite-[0-9]+\.[0-9]+\.[0-9]+\.apk$' | head -1 || true)
+              if [ -n "$n" ]; then
+                echo "$t $n"
+                break
+              fi
+            done)
+
+          tag=${found% *}
+          name=${found#* }
+          if [ -n "$tag" ] \
+            && git rev-parse -q --verify "refs/tags/$tag" >/dev/null \
+            && git diff --quiet "$tag" HEAD -- mobile/; then
+            gh release download "$tag" --pattern "$name" --dir "${{ runner.temp }}/apk"
+            echo "mobile/ untouched since $tag, reusing $name"
+            state=reuse
+          elif [ -n "$tag" ]; then
+            echo "mobile/ changed since $tag (or its git tag is gone), building"
+          else
+            echo "no published release carries a signed APK yet, building"
+          fi
+          echo "state=$state" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
+        if: steps.probe.outputs.state == 'build'
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        if: steps.probe.outputs.state == 'build'
+
+      - name: Build the APK
+        if: steps.probe.outputs.state == 'build'
+        working-directory: mobile
+        run: ./gradlew assembleRelease
+
+      - name: Sign it
+        if: steps.probe.outputs.state == 'build'
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD || secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          version=$(jq -r .version package.json)
+          alias=$(jq -r .signingKey.alias mobile/twa-manifest.json)
+          src=mobile/app/build/outputs/apk/release/app-release-unsigned.apk
+          test -f "$src"
+          out="${{ runner.temp }}/apk"
+          mkdir -p "$out"
+
+          if [ -z "${KEYSTORE_B64:-}" ]; then
+            echo "::warning::ANDROID_KEYSTORE is unset: the release carries an unsigned APK, which no phone installs as is"
+            cp "$src" "$out/boite-$version-unsigned.apk"
+            exit 0
+          fi
+
+          # The build-tools AGP just pulled for this compileSdk, newest wins.
+          bt="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          ks="${{ runner.temp }}/android.keystore"
+          printf '%s' "$KEYSTORE_B64" | base64 -d > "$ks"
+
+          # apksigner wants an aligned input and reads the passwords from the
+          # environment, so neither one lands in a process list.
+          "$bt/zipalign" -f -p 4 "$src" "$out/aligned.apk"
+          "$bt/apksigner" sign \
+            --ks "$ks" --ks-pass env:KEYSTORE_PASSWORD \
+            --ks-key-alias "$alias" --key-pass env:KEY_PASSWORD \
+            --out "$out/boite-$version.apk" "$out/aligned.apk"
+          rm -f "$out/aligned.apk" "$ks"
+
+          # `Signer #1 certificate SHA-256 digest:` on build-tools 35, `V3.0
+          # Signer: certificate SHA-256 digest:` on 37, so the prefix is not
+          # anchored. The first scheme printed is the one every Android reads.
+          got=$("$bt/apksigner" verify --print-certs "$out/boite-$version.apk" \
+            | sed -n 's/.*certificate SHA-256 digest: *//p' | head -1 | tr -d ': \r' | tr 'A-F' 'a-f')
+          want=$(jq -r '.[0].target.sha256_cert_fingerprints[0]' mobile/assetlinks.json | tr -d ':' | tr 'A-F' 'a-f')
+          echo "signed with $got"
+          if [ "$got" != "$want" ]; then
+            echo "::error::the APK is signed with $got but mobile/assetlinks.json publishes $want: the TWA would open with a URL bar on every phone" >&2
+            exit 1
+          fi
+
+      - name: Upload to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
+            tag="$GITHUB_REF_NAME"
+          else
+            tag="v$(jq -r .version src-tauri/tauri.conf.json)"
+          fi
+          gh release upload "$tag" "${{ runner.temp }}"/apk/*.apk --clobber
