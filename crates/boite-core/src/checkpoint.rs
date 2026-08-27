@@ -141,28 +141,53 @@ pub struct FileAtEdges {
     pub binary: bool,
 }
 
+/// What an encoded namespace starts with.
+///
+/// It has to be a prefix no id kept verbatim can carry, or the two halves of
+/// [`thread_ref_prefix`] would overlap and the injectivity would be a claim
+/// rather than a property. Ids Boite mints are uuids, hexadecimal and dashes,
+/// so nothing it writes begins with `x_`; an id that does is encoded like any
+/// other id that cannot be kept as it is.
+const ENCODED_PREFIX: &str = "x_";
+
 /// The ref namespace one thread's checkpoints live under.
 ///
 /// A thread id is Boite's own, but a ref name is a filesystem path on most
-/// platforms and git rejects a long list of shapes in one. Anything outside a
-/// conservative alphabet becomes `-` rather than being refused, because a
-/// checkpoint that silently does not happen is worse than two threads sharing a
-/// namespace — which cannot happen anyway, since Boite mints the ids.
+/// platforms and git rejects a long list of shapes in one. That used to be
+/// handled by replacing anything outside a conservative alphabet with `-`, which
+/// is not injective: `a.b`, `a/b` and `a-b` all named `a-b`, so two threads
+/// shared one namespace. Nothing about that is theoretical once an id can come
+/// off the wire — `checkpoint.forget` deletes a namespace whole, and `restore`
+/// writes into one — and the ids do come off the wire, from a remote client and
+/// from an agent's own tools.
+///
+/// So: an id already made of the alphabet a ref accepts is kept exactly as it
+/// is, and anything else is hex-encoded under a prefix the first half can never
+/// produce. Two different ids cannot meet in either half, and cannot meet across
+/// them either.
+///
+/// Nothing on disk moves. Every id Boite has ever minted — a v4 uuid, hyphenated
+/// or simple — is in the first half and keeps the ref path it already had, so
+/// existing checkpoints are found where they were written. The ids whose
+/// namespace changes are exactly the ones that were ambiguous, and renaming
+/// those would mean guessing which thread each ambiguous ref belonged to, which
+/// is the bug rather than the repair: they are left where they are and go with
+/// the repository's own `gc` once nothing points at them.
 fn thread_ref_prefix(thread_id: &str) -> Result<String, String> {
-    let safe: String = thread_id
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-                c
-            } else {
-                '-'
-            }
-        })
-        .collect();
-    if safe.trim_matches('-').is_empty() {
+    if thread_id.is_empty() {
         return Err("a checkpoint needs a thread id".into());
     }
-    Ok(format!("{REF_PREFIX}/{safe}"))
+    let verbatim = !thread_id.starts_with(ENCODED_PREFIX)
+        && thread_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    if verbatim {
+        return Ok(format!("{REF_PREFIX}/{thread_id}"));
+    }
+    // The bytes rather than the characters: an id is a string, and two of them
+    // that differ only outside ASCII have to differ here too.
+    let hex: String = thread_id.bytes().map(|b| format!("{b:02x}")).collect();
+    Ok(format!("{REF_PREFIX}/{ENCODED_PREFIX}{hex}"))
 }
 
 /// Refuses anything that is not an object name before it reaches git's argv.
@@ -1066,14 +1091,88 @@ mod tests {
         }
     }
 
+    /// A ref name is a filesystem path on most platforms, so an id that is not
+    /// one still has to get a namespace, and no two ids may get the same one.
+    /// The mangling this replaced answered both questions with `-`, which made
+    /// `a/b..c.lock` and `a-b--c-lock` one thread.
     #[test]
-    fn a_thread_id_that_is_not_a_ref_name_still_gets_a_namespace() {
+    fn a_thread_id_that_is_not_a_ref_name_gets_a_namespace_of_its_own() {
         assert_eq!(
             thread_ref_prefix("a/b..c.lock").unwrap(),
-            "refs/boite/ckpt/a-b--c-lock"
+            "refs/boite/ckpt/x_612f622e2e632e6c6f636b"
         );
         assert!(thread_ref_prefix("").is_err());
-        assert!(thread_ref_prefix("///").is_err());
+
+        // Ids that used to land on one name, plus both shapes of the escape
+        // prefix, which is the only place the two halves could ever meet.
+        let mut taken = std::collections::HashSet::new();
+        for id in [
+            "a.b", "a-b", "a/b", "a b", "a_b", "abc", "x_616263", "x_x", "///", "é", "e",
+        ] {
+            let prefix = thread_ref_prefix(id).unwrap();
+            assert!(
+                taken.insert(prefix.clone()),
+                "{id} was given {prefix}, which another id already has"
+            );
+        }
+    }
+
+    /// Nothing on disk moves for the ids Boite actually mints. A checkpoint
+    /// written before this change has to be read back after it, or every thread
+    /// in the workspace loses its history at once.
+    #[test]
+    fn a_uuid_keeps_the_namespace_it_was_already_written_under() {
+        for id in [
+            "b3d4b2f1-6c1e-4a4e-9a0a-7f1c2d3e4f50",
+            "b3d4b2f16c1e4a4e9a0a7f1c2d3e4f50",
+            "thread-1",
+        ] {
+            assert_eq!(
+                thread_ref_prefix(id).unwrap(),
+                format!("refs/boite/ckpt/{id}"),
+                "{id} would look for its checkpoints somewhere new"
+            );
+        }
+    }
+
+    /// The collision, end to end. Two ids the old namespace could not tell
+    /// apart, through every call that reads or writes one: a list counting the
+    /// other thread's turns, a restore filing its undo in the wrong thread, and
+    /// a forget deleting a thread nobody asked about.
+    #[test]
+    fn two_thread_ids_that_used_to_collide_keep_their_own_checkpoints() {
+        let repo = Repo::with_commit("collide");
+        capture_blocking(repo.path(), "a.b", Edge::Start).unwrap();
+        repo.write("a.txt", "moved\n");
+        capture_blocking(repo.path(), "a.b", Edge::End).unwrap();
+
+        let theirs = capture_blocking(repo.path(), "a-b", Edge::Start)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            theirs.index, 1,
+            "the first checkpoint of a thread carried on from another thread's list"
+        );
+        assert_eq!(list_blocking(repo.path(), "a.b").unwrap().len(), 2);
+        assert_eq!(list_blocking(repo.path(), "a-b").unwrap().len(), 1);
+
+        // A restore checkpoints the tree it is about to overwrite, in the list
+        // of the thread it was asked about and no other.
+        restore_blocking(repo.path(), "a-b", &theirs.sha).unwrap();
+        assert_eq!(list_blocking(repo.path(), "a-b").unwrap().len(), 2);
+        assert_eq!(
+            list_blocking(repo.path(), "a.b").unwrap().len(),
+            2,
+            "a restore wrote into another thread's list"
+        );
+
+        forget_blocking(repo.path(), "a-b").unwrap();
+        assert!(list_blocking(repo.path(), "a-b").unwrap().is_empty());
+        assert_eq!(
+            list_blocking(repo.path(), "a.b").unwrap().len(),
+            2,
+            "forgetting one thread deleted another thread's checkpoints"
+        );
     }
 
     /// A ref under this namespace that Boite did not write is skipped rather

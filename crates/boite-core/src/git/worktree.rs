@@ -367,19 +367,25 @@ fn take_marker(dir: &Path) -> bool {
 /// `/private/var` on macOS and Windows may 8.3-shorten a name. Canonicalize
 /// only when the strings disagree, and only then.
 fn same_dir(a: &Path, b: &Path) -> bool {
-    let norm = |p: &Path| {
-        p.to_string_lossy()
-            .replace('\\', "/")
-            .trim_end_matches('/')
-            .to_lowercase()
-    };
-    if norm(a) == norm(b) {
+    if norm_dir(a) == norm_dir(b) {
         return true;
     }
     match (fs::canonicalize(a), fs::canonicalize(b)) {
-        (Ok(ca), Ok(cb)) => norm(&ca) == norm(&cb),
+        (Ok(ca), Ok(cb)) => norm_dir(&ca) == norm_dir(&cb),
         _ => false,
     }
+}
+
+/// One spelling of a directory, for the comparisons here that are text.
+///
+/// Separators, case and a trailing slash are three things two paths naming one
+/// directory disagree about on Windows, and a verbatim path disagrees with the
+/// same path written by hand.
+fn norm_dir(p: &Path) -> String {
+    p.to_string_lossy()
+        .replace('\\', "/")
+        .trim_end_matches('/')
+        .to_lowercase()
 }
 
 struct Spare {
@@ -1198,26 +1204,10 @@ pub fn adopt_worktree_blocking(repo: &str, thread_id: &str) -> Option<String> {
     if !dir.is_dir() {
         return None;
     }
-    // A worktree's `.git` is a file pointing at `<repo>/.git/worktrees/<name>`,
-    // so its grandparent is the repository's own git directory. A directory of
-    // the right name that does not say that belongs to something else, and
-    // handing it over would start an agent inside it.
-    let owner = git_dir(&dir)?;
-    let common = owner.parent()?.parent()?;
-    let mine = git_dir(r)?;
-    // `same_dir` compares text, which is the right default everywhere else here
-    // because both sides were written by this app. Not on this side: one path is
-    // built by joining and the other is read out of a `.git` file that git may
-    // have written relative to the worktree. Asking the filesystem is what
-    // settles a `..` in the middle, and it is one syscall in a boot-time pass.
-    let ours = same_dir(common, &mine)
-        || match (fs::canonicalize(common), fs::canonicalize(&mine)) {
-            (Ok(a), Ok(b)) => a == b,
-            _ => false,
-        };
-    if !ours {
-        return None;
-    }
+    // A directory of the right name that does not say it belongs to this
+    // repository belongs to something else, and handing it over would start an
+    // agent inside it.
+    let owner = worktree_owner_of(r, &dir)?;
     // Ours, and git no longer knows it. The administrative entry holds the
     // worktree's HEAD and index, so without it every git command run in there
     // answers `fatal: not a git repository` — which is what the panel reports
@@ -1229,6 +1219,148 @@ pub fn adopt_worktree_blocking(repo: &str, thread_id: &str) -> Option<String> {
         return None;
     }
     Some(dir.to_string_lossy().into_owned())
+}
+
+/// Where git keeps the administrative entry of `dir`, when `dir` is a linked
+/// worktree of `repo`.
+///
+/// A worktree's `.git` is a file pointing at `<repo>/.git/worktrees/<name>`, so
+/// its grandparent is the repository's own git directory. Nothing else on disk
+/// says who a checkout belongs to, and every caller here is about to start an
+/// agent in that directory or move what is inside it.
+///
+/// `same_dir` settles the comparison rather than string equality: one path is
+/// built by joining and the other is read out of a `.git` file git may have
+/// written relative to the worktree, and a `..` in the middle only goes away by
+/// asking the filesystem.
+fn worktree_owner_of(repo: &Path, dir: &Path) -> Option<PathBuf> {
+    let owner = git_dir(dir)?;
+    let common = owner.parent()?.parent()?;
+    let mine = git_dir(repo)?;
+    same_dir(common, &mine).then_some(owner)
+}
+
+/// Whether `dir` is one of `repo`'s worktrees, asked from both ends.
+///
+/// The pointer inside the checkout is the cheap answer and the usual one. It is
+/// also absolute, so a repository that was moved since the worktree was cut no
+/// longer matches it — and a worktree of a moved repository is exactly what is
+/// waiting to be migrated. Git's own list is read from the other end, out of the
+/// repository's administrative entries, which is the half that survives the
+/// move.
+fn is_worktree_of(repo: &Path, dir: &Path) -> bool {
+    if worktree_owner_of(repo, dir).is_some() {
+        return true;
+    }
+    list_worktrees_blocking(repo.to_string_lossy().as_ref()).is_ok_and(|entries| {
+        entries
+            .iter()
+            .any(|entry| !entry.main && same_dir(Path::new(&entry.path), dir))
+    })
+}
+
+/// Refuses a path that is not plainly a directory name.
+///
+/// `from` on `worktree.migrate` is the one path in that domain that comes from
+/// the caller and is never checked against the registered roots: the base it has
+/// to live under is an app-data directory of an earlier release, which is no
+/// project's root. That makes the shape of the path the whole boundary, and no
+/// prefix test resolves anything: `<base>/../..` is under `<base>` to any of
+/// them, and lands wherever the caller wanted.
+///
+/// A relative step is refused here rather than normalised away: every path Boite
+/// ever stored is a plain join, and what the check reads has to be exactly what
+/// the move touches. Normalising would leave the two disagreeing.
+fn plain_worktree_path(p: &Path) -> Result<(), String> {
+    if !p.is_absolute() {
+        return Err(format!("'{}' is not an absolute path", p.display()));
+    }
+    // Read off the text rather than off `Path::components`. A Windows verbatim
+    // path — `\\?\C:\...`, which is what `canonicalize` hands back and what half
+    // the paths in this app are — is documented as unnormalised, and its
+    // components never come back as `ParentDir`: a `..` inside one is an
+    // ordinary name as far as the iterator is concerned. The check would have
+    // passed exactly where it matters most.
+    let text = p.to_string_lossy();
+    if text
+        .split(['/', '\\'])
+        .any(|segment| segment == ".." || segment == ".")
+    {
+        return Err(format!("'{}' is not a worktree path", p.display()));
+    }
+    Ok(())
+}
+
+/// What is left of `p` once `base` has been taken off the front, or nothing at
+/// all when `p` is not under it.
+///
+/// Text rather than [`Path::starts_with`], for the reason `plain_worktree_path`
+/// does not read components either: a verbatim path is compared component by
+/// component against one spelled by hand, and a segment written with the other
+/// platform's separator swallows the whole tail into one component. Both
+/// spellings of the base are tried, because the host holds it as it was built
+/// and the source it is checked against may have been canonicalised.
+fn under_base(base: &Path, p: &Path) -> Option<String> {
+    let text = norm_dir(p);
+    let mut bases = vec![norm_dir(base)];
+    if let Ok(real) = fs::canonicalize(base) {
+        let real = norm_dir(&real);
+        if real != bases[0] {
+            bases.push(real);
+        }
+    }
+    bases.iter().find_map(|base| {
+        text.strip_prefix(base.as_str())?
+            .strip_prefix('/')
+            .map(str::to_string)
+    })
+}
+
+/// Where a source handed to `worktree.migrate` sits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MigrationSource {
+    /// Directly under the base this host left behind. There is something to
+    /// carry across.
+    Legacy,
+    /// Under no base of this host's. Nothing to move, and nothing wrong either:
+    /// the caller asked whether an old worktree needs carrying across, and the
+    /// answer is no.
+    Elsewhere,
+}
+
+/// What a caller is allowed to name as a source, decided before anything moves.
+///
+/// The front door owns this half because it is the only side that knows which
+/// base an earlier release left behind. The refusals are the point: a source
+/// that is the base itself, one climbing out of it with `..`, one two levels
+/// down, and one that is a link wearing a worktree's name all reach
+/// [`migrate_worktree_blocking`], which unlinks shared artifacts, deletes
+/// provisioned directories and then renames the whole tree away.
+pub fn classify_migration_source(base: &Path, from: &Path) -> Result<MigrationSource, String> {
+    plain_worktree_path(from)?;
+    if same_dir(from, base) {
+        return Err("the worktree base is not a worktree".into());
+    }
+    // Under no base of this host's, which is the ordinary answer on a fresh
+    // install and for every worktree made since the layout changed.
+    let Some(name) = under_base(base, from) else {
+        return Ok(MigrationSource::Elsewhere);
+    };
+    if name.contains('/') {
+        return Err(format!(
+            "'{}' is not directly under the worktree base",
+            from.display()
+        ));
+    }
+    // A link with the right name in the right place is not the directory it
+    // stands for: `is_dir` follows it, `rename` moves the link rather than the
+    // tree, and the artifact sweep walks into whatever it points at and deletes
+    // there. Refused rather than resolved — a worktree Boite made is a real
+    // directory, so a link in its place is never the thing being migrated.
+    if fs::symlink_metadata(from).is_ok_and(|meta| meta.file_type().is_symlink()) {
+        return Err(format!("'{}' is a link, not a worktree", from.display()));
+    }
+    Ok(MigrationSource::Legacy)
 }
 
 pub fn migrate_worktree_blocking(
@@ -1243,12 +1375,30 @@ pub fn migrate_worktree_blocking(
     if !r.is_dir() {
         return Err("Not a directory".into());
     }
+    // The source came from a caller and nothing on the way here resolved it.
+    // Everything below unlinks, deletes and renames, so the refusals happen
+    // first and all of them happen here as well as at the front door: the door
+    // checks the shape against the base it knows, this checks the half only the
+    // repository can answer, and neither is reachable without the other having
+    // run in the paths that matter.
+    plain_worktree_path(from)?;
+    if fs::symlink_metadata(from).is_ok_and(|meta| meta.file_type().is_symlink()) {
+        return Err(format!("'{old}' is a link, not a worktree"));
+    }
     // Gone rather than failed. A directory deleted by hand has nothing left to
     // move, and reporting that as an error left the thread pointing at it: every
     // start retried the same move, and the launch in between spawned its PTY in
     // a directory that is not there.
     if !from.is_dir() {
         return Ok(None);
+    }
+    // On disk, of the right shape, and still nothing to do with this
+    // repository: the project's own folder, a worktree cut from somewhere else,
+    // a directory a user keeps their own files in. Moving one is the same
+    // damage whichever it is, and the sweep of provisioned directories that runs
+    // two lines down happens inside it first.
+    if !is_worktree_of(r, from) {
+        return Err(format!("'{old}' is not a worktree of this repository"));
     }
     if to.exists() {
         return Err(format!("'{new}' already exists."));
@@ -3143,8 +3293,13 @@ mod worktree_tests {
         let f = Fixture::new();
         let here = scratch("occupied");
         fs::create_dir_all(&here).unwrap();
+        // Absolute and never created. A path with no root at all is a different
+        // refusal — it would resolve against whatever directory the process
+        // happens to be in — and `/nowhere` is one of those on Windows, where a
+        // path without a drive is relative to the current one.
+        let nowhere = scratch("nowhere-at-all");
         assert_eq!(
-            migrate_worktree_blocking(f.path(), "/nowhere/at/all", here.to_str().unwrap()),
+            migrate_worktree_blocking(f.path(), nowhere.to_str().unwrap(), here.to_str().unwrap()),
             Ok(None),
             "a source that is not there has to read as gone, not as a failure"
         );
@@ -3160,6 +3315,178 @@ mod worktree_tests {
 
         let _ = fs::remove_dir_all(&here);
         let _ = fs::remove_dir_all(&legacy);
+    }
+
+    /// The source of a migration is the one path in this domain that arrives
+    /// from a caller and is never checked against the registered roots, so its
+    /// shape is the whole boundary. Everything the front door has to refuse
+    /// before it hands the path to something that unlinks, deletes and renames.
+    #[test]
+    fn a_migration_source_is_one_directory_directly_under_the_base() {
+        let base = scratch("classify-base");
+        fs::create_dir_all(&base).unwrap();
+
+        // The base holds every thread's worktree. Moving it moves all of them,
+        // and `git worktree repair` is then pointed at a directory full of
+        // directories.
+        assert!(
+            classify_migration_source(&base, &base).is_err(),
+            "the base itself was accepted as a worktree"
+        );
+
+        // `Path::starts_with` compares components without resolving them, so
+        // this one reads as inside the base and lands anywhere on the disk.
+        let out = base.join("..").join("anything");
+        assert!(
+            classify_migration_source(&base, &out).is_err(),
+            "a source climbing out of the base with `..` was accepted"
+        );
+        assert!(
+            classify_migration_source(&base, Path::new("relative/enough")).is_err(),
+            "a relative source was accepted, and it resolves against whatever the process's cwd is"
+        );
+
+        // One level down and no further: the check is what makes the name the
+        // whole of the path.
+        assert!(
+            classify_migration_source(&base, &base.join("thread").join("deeper")).is_err(),
+            "a source two levels under the base was accepted"
+        );
+
+        // Not ours, and not an error either: the caller asked whether an old
+        // worktree needs carrying across, and the answer is no.
+        let elsewhere = scratch("classify-elsewhere");
+        assert_eq!(
+            classify_migration_source(&base, &elsewhere.join("t")),
+            Ok(MigrationSource::Elsewhere),
+            "a path under nobody's base has to read as nothing to do"
+        );
+
+        // A junction wearing a worktree's name. `is_dir` follows it, `rename`
+        // moves the link, and the sweep of provisioned directories deletes
+        // inside whatever it points at.
+        let target = scratch("classify-target");
+        fs::create_dir_all(&target).unwrap();
+        // A junction on Windows and a symlink everywhere else, which is what
+        // the provisioner writes: neither needs elevation, so this is a real
+        // assertion rather than one that quietly skips.
+        let link = base.join("linked");
+        super::super::artifacts::link_dir(&target, &link).unwrap();
+        assert!(
+            classify_migration_source(&base, &link).is_err(),
+            "a link in the base was accepted as the directory it points at"
+        );
+
+        let real = base.join("thread-1");
+        fs::create_dir_all(&real).unwrap();
+        assert_eq!(
+            classify_migration_source(&base, &real),
+            Ok(MigrationSource::Legacy),
+            "the shape every migration has was refused"
+        );
+
+        let _ = fs::remove_dir_all(&base);
+        let _ = fs::remove_dir_all(&target);
+    }
+
+    /// The same refusals again, at the other end.
+    ///
+    /// The front door knows which base an earlier release left behind and this
+    /// does not; what this knows is which repository a directory belongs to.
+    /// Neither check is the other's, and the mutation is on this side, so what
+    /// matters in each case is that the directory named is still there
+    /// afterwards.
+    #[test]
+    fn migration_refuses_anything_that_is_not_this_repository_s_worktree() {
+        let f = Fixture::new();
+        let base = scratch("guard-base");
+        fs::create_dir_all(&base).unwrap();
+        let to = scoped_dir_for(&worktree_base_for(&f.repo), "thread-1");
+
+        // Somebody's files, beside the base rather than under it, reached the
+        // old way: `<base>/../victim`.
+        let victim = base.parent().unwrap().join(format!(
+            "{}-victim",
+            base.file_name().unwrap().to_string_lossy()
+        ));
+        fs::create_dir_all(victim.join("node_modules")).unwrap();
+        fs::write(victim.join("node_modules").join("theirs.txt"), "mine\n").unwrap();
+        let traversal = base
+            .join("..")
+            .join(victim.file_name().unwrap())
+            .to_string_lossy()
+            .into_owned();
+        assert!(
+            migrate_worktree_blocking(f.path(), &traversal, to.to_str().unwrap()).is_err(),
+            "a source with `..` in it was moved"
+        );
+        assert!(
+            victim.join("node_modules").join("theirs.txt").is_file(),
+            "a directory outside the base was swept by a migration"
+        );
+
+        // The right place, the right shape, and not a checkout at all.
+        let plain = base.join("thread-2");
+        fs::create_dir_all(plain.join("target")).unwrap();
+        fs::write(plain.join("target").join("keep.txt"), "mine\n").unwrap();
+        assert!(
+            migrate_worktree_blocking(f.path(), plain.to_str().unwrap(), to.to_str().unwrap())
+                .is_err(),
+            "a directory that is not a worktree was moved"
+        );
+        assert!(
+            plain.join("target").join("keep.txt").is_file(),
+            "a directory that is not a worktree had its build output swept"
+        );
+
+        // A worktree, of somebody else's repository.
+        let other = Fixture::new();
+        let theirs = base.join("thread-3");
+        add_detached_worktree_blocking(other.path(), theirs.to_str().unwrap()).unwrap();
+        assert!(
+            migrate_worktree_blocking(f.path(), theirs.to_str().unwrap(), to.to_str().unwrap())
+                .is_err(),
+            "another repository's worktree was migrated into this one"
+        );
+        assert!(theirs.join("a.txt").is_file(), "another repository's worktree was moved");
+
+        // A junction, which `is_dir` cannot tell from the directory it names.
+        let target = scratch("guard-target");
+        fs::create_dir_all(&target).unwrap();
+        fs::write(target.join("theirs.txt"), "mine\n").unwrap();
+        let link = base.join("thread-4");
+        super::super::artifacts::link_dir(&target, &link).unwrap();
+        assert!(
+            migrate_worktree_blocking(f.path(), link.to_str().unwrap(), to.to_str().unwrap())
+                .is_err(),
+            "a link was migrated as though it were the directory it points at"
+        );
+        assert!(
+            target.join("theirs.txt").is_file(),
+            "the directory a link pointed at was emptied"
+        );
+
+        // And the one that still has to work, plus the one that still has to
+        // read as nothing left to move rather than as a failure.
+        let mine = base.join("thread-5");
+        add_detached_worktree_blocking(f.path(), mine.to_str().unwrap()).unwrap();
+        assert_eq!(
+            migrate_worktree_blocking(f.path(), mine.to_str().unwrap(), to.to_str().unwrap()),
+            Ok(Some(to.to_string_lossy().into_owned())),
+            "a worktree of this repository, one level under a base, was refused"
+        );
+        assert!(to.join("a.txt").is_file(), "the migration carried nothing across");
+        assert_eq!(
+            migrate_worktree_blocking(f.path(), mine.to_str().unwrap(), to.to_str().unwrap()),
+            Ok(None),
+            "a source that is no longer there has to read as gone"
+        );
+
+        let _ = remove_worktree_blocking(f.path(), to.to_str().unwrap(), true);
+        let _ = remove_worktree_blocking(other.path(), theirs.to_str().unwrap(), true);
+        let _ = fs::remove_dir_all(&base);
+        let _ = fs::remove_dir_all(&victim);
+        let _ = fs::remove_dir_all(&target);
     }
 
     #[test]
