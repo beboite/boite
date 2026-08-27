@@ -201,11 +201,10 @@ fn registered_for(roots: &ProjectRoots, project: Option<&ProjectLine>) -> Vec<St
     };
     let registered = roots.registered();
     let cwd = std::fs::canonicalize(&project.cwd)
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|_| project.cwd.clone());
+        .unwrap_or_else(|_| std::path::PathBuf::from(&project.cwd));
     registered
         .into_iter()
-        .filter(|root| cwd.starts_with(root.as_str()))
+        .filter(|root| cwd.starts_with(std::path::Path::new(root)))
         .collect()
 }
 
@@ -262,6 +261,51 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    fn project_line_at(cwd: &std::path::Path) -> ProjectLine {
+        ProjectLine {
+            id: "p".into(),
+            name: "p".into(),
+            cwd: cwd.to_string_lossy().into_owned(),
+            archived: false,
+            cwd_exists: cwd.is_dir(),
+        }
+    }
+
+    #[test]
+    fn a_scoped_snapshot_does_not_expose_a_sibling_root_with_the_same_prefix() {
+        let dir = scratch("root-prefix");
+        let root = dir.join("app");
+        let sibling = dir.join("app-two");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&sibling).unwrap();
+        let roots = ProjectRoots::default();
+        roots.replace(vec![root.to_string_lossy().into_owned()]);
+
+        assert!(registered_for(&roots, Some(&project_line_at(&sibling))).is_empty());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_scoped_snapshot_includes_the_root_containing_its_project() {
+        let dir = scratch("containing-root");
+        let root = dir.join("app");
+        let project = root.join("nested");
+        std::fs::create_dir_all(&project).unwrap();
+        let roots = ProjectRoots::default();
+        roots.replace(vec![root.to_string_lossy().into_owned()]);
+        let registered = roots.registered();
+
+        #[cfg(windows)]
+        assert!(registered[0].starts_with(r"\\?\"), "{registered:?}");
+        assert_eq!(
+            registered_for(&roots, Some(&project_line_at(&project))),
+            registered
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
