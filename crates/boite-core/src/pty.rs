@@ -907,60 +907,210 @@ mod tests {
         }
     }
 
+    /// Longer than any query below, so a split one is always held whole.
+    const QUERY_MAX: usize = 8;
+
+    /// The questions ConPTY asks before it will let the child print, and the
+    /// shortest true answer to each. Same set as `TerminalQueries` in
+    /// `install-output.ts`: unanswered `[6n` leaves the child stopped, which is
+    /// how the kill-hook tests used to panic on a loaded Windows runner.
+    #[derive(Default)]
+    struct ConptyQueries {
+        carry: Vec<u8>,
+    }
+
+    impl ConptyQueries {
+        fn answer(&mut self, chunk: &[u8]) -> Vec<u8> {
+            let mut text = std::mem::take(&mut self.carry);
+            text.extend_from_slice(chunk);
+            let mut reply = Vec::new();
+            let mut consumed = 0;
+            while let Some((_start, end, r)) = next_query(&text, consumed) {
+                reply.extend_from_slice(r);
+                consumed = end;
+            }
+            let keep_from = consumed.max(text.len().saturating_sub(QUERY_MAX - 1));
+            self.carry = text[keep_from..].to_vec();
+            reply
+        }
+    }
+
+    fn next_query(text: &[u8], from: usize) -> Option<(usize, usize, &'static [u8])> {
+        let mut i = from;
+        while i < text.len() {
+            if text[i] != 0x1b {
+                i += 1;
+                continue;
+            }
+            if i + 1 >= text.len() {
+                return None;
+            }
+            if text[i + 1] != b'[' {
+                i += 1;
+                continue;
+            }
+            let body = i + 2;
+            if body >= text.len() {
+                return None;
+            }
+            if matches!(text[body], b'5' | b'6') {
+                if body + 1 >= text.len() {
+                    return None;
+                }
+                if text[body + 1] == b'n' {
+                    let reply: &'static [u8] = if text[body] == b'6' {
+                        b"\x1b[1;1R"
+                    } else {
+                        b"\x1b[0n"
+                    };
+                    return Some((i, body + 2, reply));
+                }
+                i += 1;
+                continue;
+            }
+            let mut j = body;
+            let secondary = text[j] == b'>';
+            if secondary {
+                j += 1;
+            }
+            while j < text.len() && text[j].is_ascii_digit() {
+                j += 1;
+            }
+            if j >= text.len() {
+                return None;
+            }
+            if text[j] == b'c' {
+                let reply: &'static [u8] = if secondary {
+                    b"\x1b[>0;0;0c"
+                } else {
+                    b"\x1b[?1;2c"
+                };
+                return Some((i, j + 1, reply));
+            }
+            i += 1;
+        }
+        None
+    }
+
+    #[test]
+    fn a_cursor_report_is_answered_at_the_origin() {
+        let mut q = ConptyQueries::default();
+        assert_eq!(q.answer(b"\x1b[6n"), b"\x1b[1;1R");
+    }
+
+    #[test]
+    fn a_dsr_split_across_two_chunks_is_still_answered() {
+        let mut q = ConptyQueries::default();
+        assert!(q.answer(b"\x1b[").is_empty());
+        assert_eq!(q.answer(b"6n"), b"\x1b[1;1R");
+    }
+
+    #[test]
+    fn a_second_query_in_the_same_chunk_is_answered_too() {
+        let mut q = ConptyQueries::default();
+        assert_eq!(q.answer(b"\x1b[6n\x1b[5n"), b"\x1b[1;1R\x1b[0n");
+    }
+
+    #[test]
+    fn colour_is_not_a_query() {
+        let mut q = ConptyQueries::default();
+        assert!(q.answer(b"\x1b[32mready\x1b[0m\n").is_empty());
+    }
+
+    #[test]
+    fn device_attributes_get_the_vt100_reply() {
+        let mut q = ConptyQueries::default();
+        assert_eq!(q.answer(b"\x1b[c"), b"\x1b[?1;2c");
+        assert_eq!(q.answer(b"\x1b[>c"), b"\x1b[>0;0;0c");
+    }
+
+    /// One ConPTY at a time: two of these on a loaded Windows runner is how
+    /// both kill tests used to miss the child's first line in the same pass.
+    fn with_conpty_probe<T>(f: impl FnOnce() -> T) -> T {
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        f()
+    }
+
+    /// Drive the PTY as a terminal until `needle` shows up, or the timeout.
+    ///
+    /// Writes are retried: `PtyManager::write` is `try_send`, and marking a
+    /// DSR answered after a failed send is how the probe used to sit until it
+    /// panicked with the child still waiting on `[6n`.
+    fn wait_for_output(
+        m: &PtyManager,
+        id: &str,
+        seen: &Arc<Mutex<Vec<u8>>>,
+        needle: &str,
+        timeout: std::time::Duration,
+    ) -> String {
+        let deadline = std::time::Instant::now() + timeout;
+        let mut queries = ConptyQueries::default();
+        let mut pending = Vec::new();
+        let mut cursor = 0;
+        let mut got = String::new();
+        while std::time::Instant::now() < deadline {
+            let bytes = seen.lock().clone();
+            if bytes.len() > cursor {
+                pending.extend_from_slice(&queries.answer(&bytes[cursor..]));
+                cursor = bytes.len();
+            }
+            got = String::from_utf8_lossy(&bytes).into_owned();
+            if got.contains(needle) {
+                return got;
+            }
+            if !pending.is_empty() && m.write(id, &pending).is_ok() {
+                pending.clear();
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        got
+    }
+
     // The one that would catch a wrapping that only looks right: a real shell,
     // a real PTY, and a command that has to reach it as an argument.
     #[test]
     fn the_wrapped_command_actually_runs_in_the_pty() {
-        let (shell_id, name, expected) = if cfg!(windows) {
-            ("cmd", "ver", "Windows")
-        } else {
-            ("bash", "pwd", "/")
-        };
-        let Some(shell) = crate::shell::available_shells_blocking()
-            .into_iter()
-            .find(|s| s.id == shell_id)
-        else {
-            return;
-        };
-        if crate::shell::wrap_argv(&shell.cmd, &shell.args, false, name, &[]).is_none() {
-            return;
-        }
-
-        let m = PtyManager::new();
-        // Force the wrap: the point under test is the shell path, not the
-        // decision that leads to it (covered above).
-        m.shell_names
-            .lock()
-            .insert(shell_id.into(), Arc::new(ShellProbe { names: HashSet::from([name.to_string()]), ..Default::default() }));
-
-        let seen = Arc::new(Mutex::new(Vec::new()));
-        let sink: Arc<dyn EventSink> = Arc::new(Collector(seen.clone()));
-        let mut args = spec(name, Some(shell_id));
-        args.cwd = std::env::temp_dir().to_string_lossy().into_owned();
-        let id = m.spawn(sink, args).expect("wrapped spawn");
-
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
-        let mut got = String::new();
-        let mut answered = false;
-        while std::time::Instant::now() < deadline {
-            got = String::from_utf8_lossy(&seen.lock()).into_owned();
-            if got.contains(expected) {
-                break;
+        with_conpty_probe(|| {
+            let (shell_id, name, expected) = if cfg!(windows) {
+                ("cmd", "ver", "Windows")
+            } else {
+                ("bash", "pwd", "/")
+            };
+            let Some(shell) = crate::shell::available_shells_blocking()
+                .into_iter()
+                .find(|s| s.id == shell_id)
+            else {
+                return;
+            };
+            if crate::shell::wrap_argv(&shell.cmd, &shell.args, false, name, &[]).is_none() {
+                return;
             }
-            // ConPTY opens by asking the terminal where the cursor is and will
-            // not go on until something answers. xterm.js answers on its own;
-            // in here we are the terminal.
-            if !answered && got.contains("\u{1b}[6n") {
-                answered = true;
-                let _ = m.write(&id, b"\x1b[1;1R");
-            }
-            std::thread::sleep(std::time::Duration::from_millis(50));
-        }
-        let _ = m.kill(&id, false);
-        assert!(
-            got.contains(expected),
-            "wrapped `{name}` produced no {expected:?}; got: {got:?}"
-        );
+
+            let m = PtyManager::new();
+            // Force the wrap: the point under test is the shell path, not the
+            // decision that leads to it (covered above).
+            m.shell_names.lock().insert(
+                shell_id.into(),
+                Arc::new(ShellProbe {
+                    names: HashSet::from([name.to_string()]),
+                    ..Default::default()
+                }),
+            );
+
+            let seen = Arc::new(Mutex::new(Vec::new()));
+            let sink: Arc<dyn EventSink> = Arc::new(Collector(seen.clone()));
+            let mut args = spec(name, Some(shell_id));
+            args.cwd = std::env::temp_dir().to_string_lossy().into_owned();
+            let id = m.spawn(sink, args).expect("wrapped spawn");
+
+            let got = wait_for_output(&m, &id, &seen, expected, std::time::Duration::from_secs(15));
+            let _ = m.kill(&id, false);
+            assert!(
+                got.contains(expected),
+                "wrapped `{name}` produced no {expected:?}; got: {got:?}"
+            );
+        });
     }
 
     // The frontend hands this object straight to invoke()/the socket, so the
@@ -1038,8 +1188,9 @@ mod tests {
     fn exit_hook_probe(m: &PtyManager, name: &str) -> Option<(String, std::path::PathBuf)> {
         which::which("node").ok()?;
         let dir = std::env::temp_dir();
-        let script = dir.join(format!("boite_exit_hook_{name}.js"));
-        let marker = dir.join(format!("boite_exit_hook_{name}.txt"));
+        let tag = format!("{name}_{}", std::process::id());
+        let script = dir.join(format!("boite_exit_hook_{tag}.js"));
+        let marker = dir.join(format!("boite_exit_hook_{tag}.txt"));
         let _ = std::fs::remove_file(&marker);
         std::fs::write(
             &script,
@@ -1060,19 +1211,12 @@ mod tests {
         // ConPTY opens by asking the terminal where the cursor is and hands the
         // child nothing until something answers. In here we are the terminal,
         // and a child still stuck on that question proves nothing about a kill.
-        let mut answered = false;
-        for _ in 0..100 {
-            std::thread::sleep(std::time::Duration::from_millis(50));
-            let got = String::from_utf8_lossy(&seen.lock()).into_owned();
-            if got.contains("ready") {
-                return Some((id, marker));
-            }
-            if !answered && got.contains("\x1b[6n") {
-                answered = true;
-                let _ = m.write(&id, b"\x1b[1;1R");
-            }
+        let got = wait_for_output(m, &id, &seen, "ready", std::time::Duration::from_secs(15));
+        if got.contains("ready") {
+            return Some((id, marker));
         }
-        panic!("the probe child never reached its own first line");
+        let _ = m.kill(&id, false);
+        panic!("the probe child never reached its own first line; got: {got:?}");
     }
 
     /// Measured on Windows, and the whole point of the grace: a job-object kill
@@ -1081,30 +1225,34 @@ mod tests {
     /// renderer they chose.
     #[test]
     fn a_background_kill_reaches_the_child_exit_hook() {
-        let m = PtyManager::new();
-        let Some((id, marker)) = exit_hook_probe(&m, "background") else {
-            return;
-        };
+        with_conpty_probe(|| {
+            let m = PtyManager::new();
+            let Some((id, marker)) = exit_hook_probe(&m, "background") else {
+                return;
+            };
 
-        let started = std::time::Instant::now();
-        m.kill(&id, false).expect("background kill");
-        let returned = started.elapsed();
-        // The caller is a UI thread closing a pane. It waits for nothing.
-        assert!(
-            returned < std::time::Duration::from_millis(250),
-            "kill(wait=false) held its caller for {returned:?}"
-        );
+            let started = std::time::Instant::now();
+            m.kill(&id, false).expect("background kill");
+            let returned = started.elapsed();
+            // The caller is a UI thread closing a pane. It waits for nothing.
+            assert!(
+                returned < std::time::Duration::from_millis(250),
+                "kill(wait=false) held its caller for {returned:?}"
+            );
 
-        assert!(
-            m.wait_until_reaped(&id, GRACE + REAP_TIMEOUT),
-            "the child outlived both the grace and the hard kill behind it"
-        );
-        // The hook may still be writing as the process object goes away.
-        std::thread::sleep(std::time::Duration::from_millis(200));
-        assert!(
-            !std::fs::read_to_string(&marker).unwrap_or_default().is_empty(),
-            "the child was killed without being told it was time to go"
-        );
+            assert!(
+                m.wait_until_reaped(&id, GRACE + REAP_TIMEOUT),
+                "the child outlived both the grace and the hard kill behind it"
+            );
+            // The hook may still be writing as the process object goes away.
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            assert!(
+                !std::fs::read_to_string(&marker)
+                    .unwrap_or_default()
+                    .is_empty(),
+                "the child was killed without being told it was time to go"
+            );
+        });
     }
 
     /// The other half, stated so a later refactor cannot quietly make every
@@ -1112,28 +1260,30 @@ mod tests {
     /// same session, and a grace there is two `--resume` racing on one file.
     #[test]
     fn a_foreground_kill_does_not_wait_for_anyone() {
-        let m = PtyManager::new();
-        let Some((id, marker)) = exit_hook_probe(&m, "foreground") else {
-            return;
-        };
+        with_conpty_probe(|| {
+            let m = PtyManager::new();
+            let Some((id, marker)) = exit_hook_probe(&m, "foreground") else {
+                return;
+            };
 
-        let started = std::time::Instant::now();
-        // Not unwrapped: the 5s reap deadline is a property of the machine
-        // under load, and a box that cannot reap in five seconds has nothing to
-        // say about whether this path is polite.
-        let reaped = m.kill(&id, true).is_ok();
-        let took = started.elapsed();
-        if reaped {
-            assert!(!m.is_alive(&id), "kill(wait=true) returned on a live PTY");
+            let started = std::time::Instant::now();
+            // Not unwrapped: the 5s reap deadline is a property of the machine
+            // under load, and a box that cannot reap in five seconds has nothing to
+            // say about whether this path is polite.
+            let reaped = m.kill(&id, true).is_ok();
+            let took = started.elapsed();
+            if reaped {
+                assert!(!m.is_alive(&id), "kill(wait=true) returned on a live PTY");
+                assert!(
+                    took < GRACE,
+                    "kill(wait=true) took {took:?}, which is the grace it is meant to skip"
+                );
+            }
+            std::thread::sleep(std::time::Duration::from_millis(200));
             assert!(
-                took < GRACE,
-                "kill(wait=true) took {took:?}, which is the grace it is meant to skip"
+                std::fs::read_to_string(&marker).unwrap_or_default().is_empty(),
+                "the hard kill ran the exit hook, so the grace the other path pays for proves nothing"
             );
-        }
-        std::thread::sleep(std::time::Duration::from_millis(200));
-        assert!(
-            std::fs::read_to_string(&marker).unwrap_or_default().is_empty(),
-            "the hard kill ran the exit hook, so the grace the other path pays for proves nothing"
-        );
+        });
     }
 }
