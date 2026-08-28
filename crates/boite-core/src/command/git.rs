@@ -444,16 +444,23 @@ impl Git {
         for path in self.caller_paths() {
             host.roots().ensure_allowed(path)?;
         }
-        // The one command with something left for the host to say. A source
-        // outside the layout this host actually left behind is not refused, it
-        // is left where it is: the caller asked whether an old worktree needs
-        // moving, and the answer is no.
+        // The one command with something left for the host to say, and the one
+        // path here that is not checked against the registered roots: the base a
+        // source has to sit under is an app-data directory of an earlier
+        // release, so being under it *is* the boundary. A source outside the
+        // layout this host actually left behind is not refused, it is left where
+        // it is: the caller asked whether an old worktree needs moving, and the
+        // answer is no. A source that claims to be under it and is not one of
+        // ours — the base itself, a `..` climbing out, a link, a directory two
+        // levels down — is refused before a single byte moves.
         if let Git::WorktreeMigrate { from, .. } = &self {
-            let left_behind = host
-                .legacy_worktree_base()
-                .is_some_and(|base| Path::new(from).starts_with(base));
-            if !left_behind {
-                return Ok(Ready::Settled(json!({ "path": null, "gone": false })));
+            let settled = Ok(Ready::Settled(json!({ "path": null, "gone": false })));
+            let Some(base) = host.legacy_worktree_base() else {
+                return settled;
+            };
+            match git::classify_migration_source(&base, Path::new(from))? {
+                git::MigrationSource::Legacy => {}
+                git::MigrationSource::Elsewhere => return settled,
             }
         }
         Ok(Ready::Work(Command::Git(self)))
@@ -741,6 +748,61 @@ mod tests {
                 other => panic!("a worktree outside the old layout was moved: {other:?}"),
             }
         }
+    }
+
+    /// The source of a migration is the one path in this domain that is never
+    /// checked against the registered roots: the base it has to sit under is an
+    /// app-data directory of an earlier release, which is no project's root. So
+    /// being under that base *is* the boundary, and no prefix test resolves
+    /// anything: `<base>/../..` reads as inside it and lands wherever the caller
+    /// wanted. What comes after this refuses nothing — it unlinks, deletes and
+    /// renames.
+    #[test]
+    fn a_migration_source_that_is_not_one_of_ours_never_reaches_the_mover() {
+        let root = scratch("migrate-guard-root");
+        let legacy = scratch("migrate-guard-legacy");
+        let roots = ProjectRoots::default();
+        roots.replace(vec![root.to_string_lossy().to_string()]);
+        let host = Scoped::new(&roots).with_legacy_worktree_base(Some(legacy.clone()));
+
+        // Built as text rather than by joining: a source arrives as a string on
+        // the wire, and `PathBuf::join` would quietly fold the `..` away here
+        // and test a path no client ever sends.
+        let base = legacy.to_string_lossy().into_owned();
+        let refused = [
+            // Out of the base entirely, and anywhere on the disk.
+            format!("{base}/../anything"),
+            // The base itself holds every thread's worktree.
+            base.clone(),
+            // Two levels down is not a directory this layout ever named.
+            format!("{base}/thread-1/deeper"),
+        ];
+        for from in refused {
+            let params = json!({
+                "repo": root.to_str().unwrap(),
+                "threadId": "thread-1",
+                "from": from,
+            });
+            let ready = Command::decode("worktree.migrate", &params)
+                .unwrap()
+                .prepare(&host, Grant::Local);
+            assert!(ready.is_err(), "{from} was handed to the mover");
+        }
+
+        // And the shape a real migration has still goes through.
+        let params = json!({
+            "repo": root.to_str().unwrap(),
+            "threadId": "thread-1",
+            "from": legacy.join("thread-1").to_str().unwrap(),
+        });
+        let ready = Command::decode("worktree.migrate", &params)
+            .unwrap()
+            .prepare(&host, Grant::Local)
+            .unwrap();
+        assert!(
+            matches!(ready, Ready::Work(_)),
+            "a worktree under the old layout was left where it is"
+        );
     }
 
     /// The shape a remote client reads. These keys are the WebSocket protocol,

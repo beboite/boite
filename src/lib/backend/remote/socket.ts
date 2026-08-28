@@ -68,10 +68,26 @@ export function httpBase(wsUrl: string): string {
  *
  * A `401` is the one failure the login form can fix, so it is the only one that
  * raises the gate. Anything else is a boite that was not reached.
+ *
+ * `abandon` is the caller giving up on this dial — `close()`, or a newer dial
+ * taking over. The round trip is cancelled rather than left to finish into a
+ * socket nobody is waiting for, and the reason it reports is never "timeout":
+ * only the timer above writes that word.
  */
-async function buyTicket(wsUrl: string, credential: string): Promise<string> {
+async function buyTicket(
+  wsUrl: string,
+  credential: string,
+  abandon?: AbortSignal,
+): Promise<string> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TICKET_TIMEOUT);
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, TICKET_TIMEOUT);
+  const relay = () => controller.abort();
+  if (abandon?.aborted) controller.abort();
+  else abandon?.addEventListener("abort", relay);
   let res: Response;
   try {
     res = await fetch(`${httpBase(wsUrl)}/api/ticket`, {
@@ -81,11 +97,12 @@ async function buyTicket(wsUrl: string, credential: string): Promise<string> {
     });
   } catch (e) {
     throw new ConnectError(
-      controller.signal.aborted ? "timeout" : "unreachable",
+      timedOut ? "timeout" : "unreachable",
       e instanceof Error ? e.message : "could not reach the boite",
     );
   } finally {
     clearTimeout(timer);
+    abandon?.removeEventListener("abort", relay);
   }
   if (res.status === 401) {
     throw new ConnectError("auth", "this device is not paired with that boite");
@@ -248,6 +265,15 @@ export class Socket {
   // bought. `#ws` is null for that whole window, so without this a manual retry
   // lands on top of an attempt already running.
   #dialing = false;
+  // Which dial is the live one. A dial is two awaited steps and the first has
+  // no socket to close, so `close()` used to have nothing to act on: the ticket
+  // came back afterwards and opened a WebSocket onto a socket object the caller
+  // had already let go of, reconnect loop and all. Bumped by every dial and by
+  // `close()`, so an attempt that lands late can see it is no longer the one.
+  #dialGen = 0;
+  // Cancels the ticket round trip of the live dial, so abandoning it costs the
+  // fetch as well as its result.
+  #dialAbort: AbortController | null = null;
   #ws: WebSocket | null = null;
   #state: ConnState = "disconnected";
   #stateCb: (s: ConnState) => void;
@@ -331,6 +357,12 @@ export class Socket {
 
   close(): void {
     this.#closed = true;
+    // Retires whatever dial is in flight. Without this a ticket bought a
+    // moment ago still had a socket waiting behind it.
+    this.#dialGen++;
+    this.#dialAbort?.abort();
+    this.#dialAbort = null;
+    this.#dialing = false;
     if (this.#reconnectTimer) {
       clearTimeout(this.#reconnectTimer);
       this.#reconnectTimer = null;
@@ -370,12 +402,21 @@ export class Socket {
   // banner exists at all.
   sendInput(threadId: string, data: Uint8Array): boolean {
     const ws = this.#ws;
-    if (!ws || this.#state !== "connected") return false;
+    // `#state` is this side's reading and it lags the socket by an event loop
+    // turn: `onclose` has not run yet while the browser is already in CLOSING,
+    // and a send there is bytes into a bin. The readyState is the only thing
+    // that answers "will this leave the device" in the present tense.
+    if (!ws || this.#state !== "connected" || ws.readyState !== WebSocket.OPEN) return false;
     const frame = new Uint8Array(17 + data.length);
     frame[0] = FRAME_INPUT;
     frame.set(uuidToBytes(threadId), 1);
     frame.set(data, 17);
-    ws.send(frame);
+    try {
+      ws.send(frame);
+    } catch {
+      // The socket moved out of OPEN between the check and the call.
+      return false;
+    }
     return true;
   }
 
@@ -429,12 +470,21 @@ export class Socket {
   }
 
   async #open(): Promise<void> {
+    const gen = ++this.#dialGen;
+    // A dial that is no longer the live one touches no shared state: its state
+    // callbacks are about a link the caller has left, and clearing `#dialing`
+    // would tell `retryNow` a newer attempt is not running.
+    const stale = () => gen !== this.#dialGen;
+    this.#dialAbort?.abort();
+    const abandon = new AbortController();
+    this.#dialAbort = abandon;
     this.#setState("connecting");
     this.#dialing = true;
     let ticket: string;
     try {
-      ticket = await buyTicket(this.#url, this.#token);
+      ticket = await buyTicket(this.#url, this.#token, abandon.signal);
     } catch (e) {
+      if (stale()) throw e;
       this.#dialing = false;
       this.#setState("disconnected");
       if (e instanceof ConnectError && e.reason === "auth") {
@@ -445,10 +495,18 @@ export class Socket {
       }
       throw e;
     }
+    // The ticket is in hand and the socket it was for is gone: `close()` ran
+    // during the round trip, or a newer dial took over. Constructing a
+    // WebSocket here is the resurrection this guard exists to stop — it would
+    // reattach threads, publish states and run a backoff loop of its own.
+    if (stale() || this.#closed) {
+      if (!stale()) this.#dialing = false;
+      throw new ConnectError("unreachable", "the dial was abandoned before its socket opened");
+    }
     try {
       return await this.#openWith(ticket);
     } finally {
-      this.#dialing = false;
+      if (!stale()) this.#dialing = false;
     }
   }
 

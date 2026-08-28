@@ -94,7 +94,7 @@ pub async fn workspace_snapshot(
         let scope = ProjectRoots::default();
         scope.replace(roots);
         Ok::<_, String>(serde_json::to_value(boite_core::snapshot::take(
-            "desktop", &store, &scope, live, screen,
+            "desktop", &store, &scope, live, screen, None,
         )))
     })
     .await

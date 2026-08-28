@@ -215,7 +215,9 @@
       noteWorkStarted(thread.id);
       noteProjectWork(thread.projectId);
     }
-    void ptyWrite(ptyId, encoder.encode(s));
+    void ptyWrite(ptyId, encoder.encode(s)).catch((err: unknown) => {
+      logger.warn("terminal", "a keystroke did not reach the pty", String(err));
+    });
   }
 
   /**
@@ -225,10 +227,20 @@
    * is not the user doing anything, so it leaves no trace on `lastInputAt`,
    * which is half of what tells a silent thread from a busy one
    * (`settleUnread`).
+   *
+   * Answers whether the bytes left the device, because one caller has to know:
+   * a dispatch settles its row on this, and a remote write rejects outright
+   * when the socket is not open rather than queueing anything.
    */
-  function sendReport(s: string) {
-    if (!shouldUsePty(ptyId)) return;
-    void ptyWrite(ptyId, encoder.encode(s));
+  async function sendReport(s: string): Promise<boolean> {
+    if (!shouldUsePty(ptyId)) return false;
+    try {
+      await ptyWrite(ptyId, encoder.encode(s));
+      return true;
+    } catch (err) {
+      logger.warn("terminal", "a report did not reach the pty", String(err));
+      return false;
+    }
   }
 
   /** The two armed modifiers, as `keys` wants them. */
@@ -802,7 +814,9 @@
     e.stopPropagation();
     if (ptyId) {
       lastInputAt = Date.now();
-      void ptyWrite(ptyId, LF);
+      void ptyWrite(ptyId, LF).catch((err: unknown) => {
+        logger.warn("terminal", "the newline did not reach the pty", String(err));
+      });
     }
     queueMicrotask(() => term?.focus());
     return false;
@@ -1351,7 +1365,7 @@
       // agent made arrive here too, and they must not consume an armed
       // modifier or count as the user being at this thread.
       if (isTerminalReport(data)) {
-        sendReport(data);
+        void sendReport(data);
         return;
       }
       sendInputText(data);

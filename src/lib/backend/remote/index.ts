@@ -210,8 +210,19 @@ export class RemoteBackend implements Backend {
           return await attach();
         }
       },
+      // A write that did not leave the device rejects, and that is the whole
+      // point: `sendInput` answers false for a socket that is not open, and
+      // resolving anyway told every caller the bytes had landed. The dispatch
+      // queue believed it and settled the row `delivered`; the terminal
+      // believed it and drew nothing. The frame is not queued for later on
+      // purpose — replaying a keystroke into a live agent minutes afterwards is
+      // worse than losing it — so this rejection IS the news.
       write: (key, data) => {
-        socket.sendInput(threadIdOf(key), data);
+        if (!socket.sendInput(threadIdOf(key), data)) {
+          return Promise.reject(
+            new Error("the boite is not connected, so those bytes were not sent"),
+          );
+        }
         return Promise.resolve();
       },
       resize: (key, cols, rows) => {

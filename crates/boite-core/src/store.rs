@@ -299,6 +299,24 @@ impl Store {
         .map_err(|_| "unknown thread".to_string())
     }
 
+    /// Every terminal of one project, by id.
+    ///
+    /// The set a scoped read is allowed to touch. A transcript file is named
+    /// after the thread that wrote it and says nothing about a project, so
+    /// anything reading those files is handed this rather than left to work it
+    /// out from a filename. An unreadable table answers empty, which refuses
+    /// the read instead of widening it.
+    pub fn thread_ids_of_project(&self, project_id: &str) -> Vec<String> {
+        let conn = self.conn.lock();
+        let Ok(mut stmt) = conn.prepare("SELECT id FROM threads WHERE project_id = ?1") else {
+            return Vec::new();
+        };
+        let Ok(rows) = stmt.query_map([project_id], |r| r.get::<_, String>(0)) else {
+            return Vec::new();
+        };
+        rows.filter_map(Result::ok).collect()
+    }
+
     /// Puts a request in front of the user, and hands back the record.
     ///
     /// The dispatch is stored whole, so allowing one replays exactly what was
@@ -430,9 +448,18 @@ impl Store {
     /// Everything a caller might type when looking for one entry, and nothing
     /// that is only meaningful to the chain: a hash is not something anyone
     /// searches by, and indexing it would put two hex strings in every row.
-    pub fn search(&self, needle: &str, limit: usize) -> Vec<search::Hit> {
+    ///
+    /// `project_id` is the scope a caller may read, `None` being the whole
+    /// workspace. See `crate::capability::Grant::reads_across` for who gets
+    /// which.
+    pub fn search(
+        &self,
+        needle: &str,
+        limit: usize,
+        project_id: Option<&str>,
+    ) -> Vec<search::Hit> {
         let conn = self.conn.lock();
-        search::rows(&conn, needle, limit)
+        search::rows(&conn, needle, limit, project_id)
     }
 
     /// What happened here, newest first. See `crate::timeline`.
