@@ -110,10 +110,22 @@ pub fn detect_os_version() -> String {
     "Linux".to_string()
 }
 
+/// Reads `PRETTY_NAME` out of an `/etc/os-release` body.
+///
+/// Everything that is not an assignment is skipped rather than fatal: the file
+/// is allowed to carry comments and blank lines, and several distributions ship
+/// one before `PRETTY_NAME`. Aborting on the first such line reported plain
+/// "Linux" for a machine whose name was right there in the file.
 #[cfg(any(target_os = "linux", test))]
 fn parse_os_release_pretty_name(content: &str) -> Option<String> {
     for line in content.lines() {
-        let (key, value) = line.split_once('=')?;
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
         if key.trim() != "PRETTY_NAME" {
             continue;
         }
@@ -249,6 +261,50 @@ mod tests {
         assert_eq!(
             parse_os_release_pretty_name(content).as_deref(),
             Some("Ubuntu 24.04.1 LTS")
+        );
+    }
+
+    #[test]
+    fn os_release_comments_and_blank_lines_do_not_stop_the_scan() {
+        let content = "# /etc/os-release\n\nNAME=\"CachyOS Linux\"\n\n# the name shown to humans\nPRETTY_NAME=\"CachyOS Linux\"\nID=cachyos\n";
+        assert_eq!(
+            parse_os_release_pretty_name(content).as_deref(),
+            Some("CachyOS Linux")
+        );
+    }
+
+    #[test]
+    fn os_release_non_assignment_line_does_not_stop_the_scan() {
+        // A stray line with no `=` used to abort the whole parse and report
+        // plain "Linux" for a distribution that named itself two lines below.
+        let content = "NAME=\"Fedora Linux\"\nnot an assignment\nPRETTY_NAME=\"Fedora Linux 40 (Workstation Edition)\"\n";
+        assert_eq!(
+            parse_os_release_pretty_name(content).as_deref(),
+            Some("Fedora Linux 40 (Workstation Edition)")
+        );
+    }
+
+    #[test]
+    fn os_release_indented_key_is_still_read() {
+        let content = "  \n\t# comment\n\tPRETTY_NAME='Alpine Linux v3.20'\n";
+        assert_eq!(
+            parse_os_release_pretty_name(content).as_deref(),
+            Some("Alpine Linux v3.20")
+        );
+    }
+
+    #[test]
+    fn os_release_without_pretty_name_yields_nothing() {
+        let content = "# only comments\n\nNAME=\"Ubuntu\"\nID=ubuntu\n";
+        assert!(parse_os_release_pretty_name(content).is_none());
+    }
+
+    #[test]
+    fn os_release_empty_pretty_name_falls_through_to_the_next_one() {
+        let content = "PRETTY_NAME=\"\"\nPRETTY_NAME=\"Debian GNU/Linux 12 (bookworm)\"\n";
+        assert_eq!(
+            parse_os_release_pretty_name(content).as_deref(),
+            Some("Debian GNU/Linux 12 (bookworm)")
         );
     }
 

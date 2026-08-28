@@ -27,6 +27,50 @@ fn u16_param(params: &Value, key: &str) -> Result<u16, String> {
         .ok_or_else(|| format!("missing param: {key}"))
 }
 
+/// A thread id, or a refusal.
+///
+/// Boite mints uuids for these — `crypto.randomUUID` on the client,
+/// `Uuid::new_v4` on every side that makes one without a client — and the
+/// binary input frames on this protocol already pack the id as sixteen raw
+/// bytes, so anything that is not a uuid could never have addressed a terminal
+/// anyway. What it can do is name something else: a key file, a ref namespace, a
+/// directory. Both spellings are accepted because both are minted, hyphenated by
+/// the client and simple by the store.
+fn checked_thread_id(id: &str) -> Result<(), String> {
+    if uuid::Uuid::try_parse(id).is_ok() {
+        Ok(())
+    } else {
+        Err(format!("{id} is not a thread id"))
+    }
+}
+
+/// The one place a client's idea of a thread id becomes this server's.
+///
+/// Per method rather than inside each arm, because the arms are not where the id
+/// is spent: it reaches `boite_agent_api::keys` as a filename, `boite_core::
+/// checkpoint` as a ref namespace, and the store as a row key, and every one of
+/// those defends itself differently. A shape checked once at the door is what
+/// makes those agree.
+///
+/// A method that carries no id at all is not this function's business — the arm
+/// that needs one says so itself, with the error it has always given.
+fn checked_thread_ids(method: &str, params: &Value) -> Result<(), String> {
+    let id = match method {
+        "thread.spawn" | "thread.create" => params
+            .get("thread")
+            .and_then(|thread| thread.get("id"))
+            .and_then(|v| v.as_str()),
+        // `checkpoint.diff` and `checkpoint.fileVersions` name two commits and
+        // no thread; the four that write or read a namespace name one.
+        m if m.starts_with("checkpoint.") => params.get("threadId").and_then(|v| v.as_str()),
+        _ => return Ok(()),
+    };
+    match id {
+        Some(id) => checked_thread_id(id),
+        None => Ok(()),
+    }
+}
+
 /// Which OS the threads run on.
 ///
 /// Decided at compile time rather than probed: this binary was built for one
@@ -110,6 +154,7 @@ pub async fn dispatch(state: &AppState, request: Authorized) -> Result<Value, St
     let method = request.method().to_string();
     let caller = request.caller();
     let params = request.into_params();
+    checked_thread_ids(&method, &params)?;
     match method.as_str() {
         // Who answered, not just that something did. The protocol number keeps
         // its place at the front; the three beside it are here because a
@@ -407,7 +452,7 @@ pub async fn dispatch(state: &AppState, request: Authorized) -> Result<Value, St
                 // No window on this side, so nothing describes one. A device
                 // attached to this server has its own, and answers for it from
                 // its own snapshot.
-                boite_core::snapshot::take("server", &store, &roots, live, None)
+                boite_core::snapshot::take("server", &store, &roots, live, None, None)
             })
             .await?;
             Ok(serde_json::to_value(taken).unwrap())
@@ -1035,9 +1080,12 @@ mod tests {
     async fn re_saving_a_thread_keeps_how_it_ended_and_not_what_it_claims() {
         let dir = scratch("thread");
         let state = state_for_test(&dir);
+        // A uuid rather than a name: the door refuses anything else, and a test
+        // that went around it would be testing a call no client can make.
+        let id = "e2d6c0f8-0f57-4d3a-9a11-2b8f4c6d7e90";
         let row = |status: &str| {
             json!({ "thread": {
-                "id": "t1", "projectId": "p", "label": "one", "cmd": "bash",
+                "id": id, "projectId": "p", "label": "one", "cmd": "bash",
                 "args": [], "status": status, "createdAt": 0,
             }})
         };
@@ -1049,11 +1097,11 @@ mod tests {
         // How it ended is the server's, and a re-save cannot rewrite it.
         state
             .store
-            .update_thread_field("t1", ThreadCol::Status, ColVal::Text("exited".into()))
+            .update_thread_field(id, ThreadCol::Status, ColVal::Text("exited".into()))
             .unwrap();
         state
             .store
-            .update_thread_field("t1", ThreadCol::ExitCode, ColVal::Int(3))
+            .update_thread_field(id, ThreadCol::ExitCode, ColVal::Int(3))
             .unwrap();
         let again = call(&state, "thread.create", row("idle")).await.unwrap();
         assert_eq!(again["thread"]["status"], json!("exited"));
@@ -1065,10 +1113,76 @@ mod tests {
         // server went away drawn like one nobody has ever started.
         state
             .store
-            .update_thread_field("t1", ThreadCol::Status, ColVal::Text("running".into()))
+            .update_thread_field(id, ThreadCol::Status, ColVal::Text("running".into()))
             .unwrap();
         let restarted = call(&state, "thread.create", row("running")).await.unwrap();
         assert_eq!(restarted["thread"]["status"], json!("stopped"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A thread id off the wire is spent as a filename, as a git ref namespace
+    /// and as a row key, and each of those defends itself differently. Boite
+    /// mints uuids and this protocol already packs the id as sixteen raw bytes
+    /// on its binary frames, so anything else was never a thread — it was a
+    /// name for something else.
+    #[tokio::test]
+    async fn a_thread_id_that_is_not_a_uuid_never_reaches_a_handler() {
+        let dir = scratch("thread-id");
+        let state = state_for_test(&dir);
+        let bad = ["t1", "../../etc", "a.b", "", "not-a-uuid"];
+
+        for id in bad {
+            let row = json!({ "thread": {
+                "id": id, "projectId": "p", "label": "one", "cmd": "bash",
+                "args": [], "status": "idle", "createdAt": 0,
+            }});
+            let created = call(&state, "thread.create", row.clone()).await.unwrap_err();
+            assert!(created.contains("is not a thread id"), "{id}: {created}");
+            assert!(state.store.thread_status(id).is_none(), "{id} left a row");
+
+            let mut spawn = row.clone();
+            spawn["cwd"] = json!(dir.to_str().unwrap());
+            let spawned = call(&state, "thread.spawn", spawn).await.unwrap_err();
+            assert!(spawned.contains("is not a thread id"), "{id}: {spawned}");
+
+            // The four that name a namespace. The refusal has to be this one
+            // rather than the path check behind it, or the guard is being
+            // credited for something the roots did.
+            for method in [
+                "checkpoint.capture",
+                "checkpoint.list",
+                "checkpoint.forget",
+                "checkpoint.restore",
+            ] {
+                let asked = call(
+                    &state,
+                    method,
+                    json!({
+                        "repo": dir.to_str().unwrap(),
+                        "threadId": id,
+                        "edge": "start",
+                        "sha": "abc1234",
+                    }),
+                )
+                .await
+                .unwrap_err();
+                assert!(asked.contains("is not a thread id"), "{method}, {id}: {asked}");
+            }
+        }
+
+        // The two checkpoint calls that name commits and no thread are none of
+        // this check's business, and still answer for themselves.
+        let diff = call(
+            &state,
+            "checkpoint.diff",
+            json!({ "repo": dir.to_str().unwrap(), "from": "abc1234", "to": "def5678" }),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            !diff.contains("is not a thread id"),
+            "a call that names no thread was refused for its thread id: {diff}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

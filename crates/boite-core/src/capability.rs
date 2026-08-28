@@ -98,6 +98,26 @@ impl Grant {
         }
     }
 
+    /// Whether a read may look past the project the caller is in.
+    ///
+    /// [`Capability`] answers what a call *changes*, and that is not the same
+    /// question as what it may *see*: a credentials file holds
+    /// [`Capability::MutateProject`] for its own project and must still not
+    /// read the one next door. Every workspace-wide read is a list of projects,
+    /// a timeline, a search or somebody else's transcript, and each of them
+    /// used to be answered in full to whoever asked.
+    ///
+    /// `Owner` and `Local` are a terminal the user opened and the user's own
+    /// window, both of which see the workspace. `Project` is a file Boite
+    /// handed to a process it did not launch, and `Conduct` is the terminal the
+    /// user is deliberately *not* watching: neither reaches past one project.
+    pub fn reads_across(self) -> bool {
+        match self {
+            Grant::Owner | Grant::Local => true,
+            Grant::Project | Grant::Conduct => false,
+        }
+    }
+
     /// The check, in the shape a caller wants it: `Ok(())` or the sentence.
     pub fn ensure(self, capability: Capability) -> Result<(), String> {
         if self.allows(capability) {
@@ -141,6 +161,19 @@ mod tests {
         assert!(Grant::Conduct.allows(Capability::MutateProject));
         assert!(!Grant::Conduct.allows(Capability::MutateAcross));
         assert!(Grant::Conduct.ensure(Capability::MutateAcross).is_err());
+    }
+
+    /// The other half of a grant, and the one a capability cannot answer: a
+    /// credentials file writes its own project and still sees only that one.
+    /// An orchestrator is the same, for the same reason it never crosses.
+    #[test]
+    fn only_a_watched_terminal_and_the_user_read_the_whole_workspace() {
+        assert!(Grant::Owner.reads_across());
+        assert!(Grant::Local.reads_across());
+        assert!(!Grant::Project.reads_across());
+        assert!(!Grant::Conduct.reads_across());
+        // And writing inside a project says nothing about reading past it.
+        assert!(Grant::Project.allows(Capability::MutateProject));
     }
 
     /// The refusal is what the agent reads, so it has to say what to do next

@@ -46,8 +46,8 @@ import { paneLabel } from "$lib/features/panes/label";
 import { classifyBrowserUrl, isLoopbackHost } from "$lib/features/browser/url";
 import { browserPanes } from "$lib/features/browser/state.svelte";
 import { paneDriver } from "$lib/features/browser/driver";
-import { backend } from "$lib/backend/active.svelte";
 import { confirmDialog } from "$lib/shared/components/confirm.svelte";
+import { answerBackend, answerRequest, type RequestSource } from "./agent-answer";
 import type { DropSide, PaneContent } from "$lib/features/panes/types";
 import type { IconKey } from "$lib/types";
 
@@ -139,8 +139,9 @@ interface BrowserDriveRequest {
  *
  * Unlike the drive verbs these carry a `requestId` and OWE an answer: the
  * host keeps the asking HTTP handler on the line until the webview resolves
- * it through `backend().answerAgentRequest`. Every refusal therefore answers
- * too — a dropped question here is an agent staring at a timeout.
+ * it through the answer channel of the transport that carried the question
+ * here (`answerBackend`). Every refusal therefore answers too — a dropped
+ * question here is an agent staring at a timeout.
  */
 interface BrowserAskRequest {
   kind:
@@ -173,15 +174,6 @@ type AgentRequest =
   | PaneOpenRequest
   | BrowserDriveRequest
   | BrowserAskRequest;
-
-/**
- * Which machine's process wrote the request.
- *
- * "boite" is the control plane: another machine's agent, whose idea of a path,
- * a port or loopback is not this window's. Carried rather than inferred from
- * `workspace.mode`, because in dynamic mode both arrive at the same handler.
- */
-type RequestSource = "device" | "boite";
 
 /**
  * Whether an address in the request was written on the machine reading it.
@@ -318,22 +310,11 @@ async function handleCreate(req: CreateRequest) {
   }
 }
 
-async function answerRequest(req: { requestId?: string }, payload: Record<string, unknown>) {
-  const id = req.requestId;
-  if (!id) return;
-  const fn =
-    backend().answerAgentRequest ?? workspace.remoteBackend?.answerAgentRequest;
-  if (!fn) return;
-  await fn(id, payload).catch((err) => {
-    logger.warn("agent-request", "could not answer", String(err));
-  });
-}
-
-async function handleSpawn(req: SpawnRequest) {
+async function handleSpawn(req: SpawnRequest, from: RequestSource) {
   const project = app.projects.find((p) => p.id === req.projectId);
   if (!project) {
     notifications.error(t("thread.spawnProjectGone"));
-    await answerRequest(req, { error: "that project is gone" });
+    await answerRequest(req, { error: "that project is gone" }, from);
     return;
   }
   // The caller, not the thread on screen: an agent that says nothing about
@@ -343,7 +324,7 @@ async function handleSpawn(req: SpawnRequest) {
   const launch = resolveLaunch(req.agent, caller?.iconKey ?? "claude");
   if (!launch) {
     notifications.error(t("thread.spawnNoAgent", { agent: req.agent ?? "" }));
-    await answerRequest(req, { error: "no agent matches that name" });
+    await answerRequest(req, { error: "no agent matches that name" }, from);
     return;
   }
   const prompt = req.prompt?.trim();
@@ -369,14 +350,14 @@ async function handleSpawn(req: SpawnRequest) {
     },
   );
   if (!thread) {
-    await answerRequest(req, { error: "the terminal did not open" });
+    await answerRequest(req, { error: "the terminal did not open" }, from);
     return;
   }
   if (prompt) {
     app.setPendingPrompt(thread.id, prompt);
     app.requestActivation(thread.id);
   }
-  await answerRequest(req, { ok: true, threadId: thread.id });
+  await answerRequest(req, { ok: true, threadId: thread.id }, from);
   notifications.success(
     t("thread.spawnedIn", { label: launch.label, project: project.name }),
   );
@@ -400,10 +381,10 @@ async function handleSpawn(req: SpawnRequest) {
  * grace a click gets. No confirm dialog, because nobody clicked and there is
  * nobody to answer it.
  */
-async function handleClose(req: CloseRequest) {
+async function handleClose(req: CloseRequest, from: RequestSource) {
   const thread = app.threadById(req.threadId);
   if (!thread) {
-    await answerRequest(req, { error: "that thread is already gone" });
+    await answerRequest(req, { error: "that thread is already gone" }, from);
     return;
   }
   // Asked twice on purpose. The endpoint reads the row, which records that
@@ -413,11 +394,11 @@ async function handleClose(req: CloseRequest) {
   if (!canSettle(thread.status)) {
     await answerRequest(req, {
       error: `that worker is ${thread.status}, so it stays where it can be seen`,
-    });
+    }, from);
     return;
   }
   await closeThread(req.threadId);
-  await answerRequest(req, { ok: true, threadId: req.threadId });
+  await answerRequest(req, { ok: true, threadId: req.threadId }, from);
 }
 
 /**
@@ -449,12 +430,12 @@ async function handlePaneOpen(req: PaneOpenRequest, from: RequestSource) {
       "pane asked for a project that is not the one on screen, dropping it",
       { asked: req.projectId },
     );
-    await answerRequest(req, { error: "the window is showing another project" });
+    await answerRequest(req, { error: "the window is showing another project" }, from);
     return;
   }
   const content = await paneContentOf(req, from);
   if (!content) {
-    await answerRequest(req, { error: "the pane was not opened" });
+    await answerRequest(req, { error: "the pane was not opened" }, from);
     return;
   }
   // Half the width for a browser, a third for a panel: a page needs room to be
@@ -462,7 +443,7 @@ async function handlePaneOpen(req: PaneOpenRequest, from: RequestSource) {
   const ratio = req.pane === "browser" ? 0.5 : 0.35;
   const paneId = openPane(content, req.side ?? "right", ratio, anchor);
   if (!paneId) {
-    await answerRequest(req, { error: "the pane was not opened" });
+    await answerRequest(req, { error: "the pane was not opened" }, from);
     return;
   }
   // Filed under the project that asked, not under the one the path happens to
@@ -472,10 +453,10 @@ async function handlePaneOpen(req: PaneOpenRequest, from: RequestSource) {
   // project of its own.
   const failed = req.pane === "editor" && req.path ? await showFile(req.path, req.projectId) : null;
   if (failed) {
-    await answerRequest(req, { error: failed });
+    await answerRequest(req, { error: failed }, from);
     return;
   }
-  await answerRequest(req, { ok: true });
+  await answerRequest(req, { ok: true }, from);
   // Said out loud when it landed off the screen, for the same reason a spawn
   // is: the agent has been told its pane is open, and without this the user
   // would find it the next time they happened to click that thread. Read off
@@ -658,12 +639,17 @@ async function handleBrowserDrive(req: BrowserDriveRequest, from: RequestSource)
  * old, and the pane store is the present tense. A refusal is an answer like
  * any other: the agent reads the sentence instead of waiting out a timeout.
  */
-async function handleBrowserAsk(req: BrowserAskRequest) {
+async function handleBrowserAsk(req: BrowserAskRequest, from: RequestSource) {
   const answer = (payload: Record<string, unknown>) => {
-    const be = backend();
-    if (!be.answerAgentRequest) {
+    // Same routing as `answerRequest`, and it matters more here: every path
+    // through this function answers, so sending them all down the wrong
+    // transport in dynamic mode meant an agent on the boite never heard back
+    // about a page it is holding a call open for.
+    const be = answerBackend(from);
+    if (!be?.answerAgentRequest) {
       logger.warn("agent-request", "a page question landed on a device with no answer channel", {
         kind: req.kind,
+        from,
       });
       return;
     }
@@ -695,7 +681,9 @@ async function handleBrowserAsk(req: BrowserAskRequest) {
   // hand to a page. The OS paints them instead, through the backend, and the
   // driver only contributes the crop rectangle when one element was asked.
   if (verb === "screenshot") {
-    const be = backend();
+    // This device, whatever the mode and whoever asked: the pixels being
+    // photographed are this window's, and a boite has no camera on them.
+    const be = workspace.local();
     if (!be.capturePane) {
       answer({
         error:
@@ -772,9 +760,9 @@ async function handle(req: AgentRequest, from: RequestSource) {
     case "project.create":
       return handleCreate(req);
     case "thread.spawn":
-      return handleSpawn(req);
+      return handleSpawn(req, from);
     case "thread.close":
-      return handleClose(req);
+      return handleClose(req, from);
     case "pane.open":
       return handlePaneOpen(req, from);
     case "browser.navigate":
@@ -787,7 +775,7 @@ async function handle(req: AgentRequest, from: RequestSource) {
     case "browser.type":
     case "browser.press":
     case "browser.scroll":
-      return handleBrowserAsk(req);
+      return handleBrowserAsk(req, from);
   }
 }
 

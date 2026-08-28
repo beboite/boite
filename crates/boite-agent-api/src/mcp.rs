@@ -319,6 +319,15 @@ mod tests {
     }
 
     async fn hit(workspace: Shared, headers: &[(&str, &str)], body: Value) -> (u16, Value) {
+        hit_as(workspace, caller(), headers, body).await
+    }
+
+    async fn hit_as(
+        workspace: Shared,
+        caller: Caller,
+        headers: &[(&str, &str)],
+        body: Value,
+    ) -> (u16, Value) {
         let mut map = HeaderMap::new();
         for (name, value) in headers {
             map.insert(
@@ -328,7 +337,7 @@ mod tests {
         }
         let response = endpoint(
             State(workspace),
-            Extension(caller()),
+            Extension(caller),
             map,
             Bytes::from(body.to_string()),
         )
@@ -390,6 +399,59 @@ mod tests {
         .await;
         assert_eq!(status, 200);
         assert_eq!(out["result"]["protocolVersion"], "2025-06-18");
+    }
+
+
+    /// The same clamp through the other door. `/mcp` dispatches into the very
+    /// `/v1` handlers with the caller it already proved, so a credential that
+    /// cannot read the project next door over HTTP cannot read it by speaking
+    /// MCP either. The tool answers with the refusal rather than an empty
+    /// list, which is what an agent needs to stop asking.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_credentials_file_reads_one_project_through_the_mcp_door() {
+        let fake = Fake::new("mcp-scope")
+            .with_project("p1", "/w/one")
+            .with_project("p2", "/w/two")
+            .with_thread("t1", "p1")
+            .with_thread("t2", "p2")
+            .with_transcript("t2", "gremlin in two\n");
+        let workspace: Shared = Arc::new(fake);
+        let issued = Caller {
+            project_id: "p1".into(),
+            thread_id: None,
+            grant: Grant::Project,
+            agent: None,
+        };
+        let call = |name: &'static str, arguments: Value| {
+            let workspace = workspace.clone();
+            let issued = issued.clone();
+            async move {
+                hit_as(
+                    workspace,
+                    issued,
+                    &[
+                        ("mcp-protocol-version", "2026-07-28"),
+                        ("mcp-method", "tools/call"),
+                        ("mcp-name", name),
+                    ],
+                    json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                            "params": { "name": name, "arguments": arguments, "_meta": meta() } }),
+                )
+                .await
+            }
+        };
+
+        let (status, out) = call("projects_list", json!({})).await;
+        assert_eq!(status, 200);
+        let text = out["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("/w/one"), "{text}");
+        assert!(!text.contains("/w/two"), "{text}");
+
+        let (status, out) = call("terminal_transcript", json!({ "threadId": "t2" })).await;
+        assert_eq!(status, 200);
+        assert_eq!(out["result"]["isError"], true, "{out}");
+        let text = out["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("issued it for another one"), "{text}");
     }
 
     /// The transport's own rejections: a mirrored header that disagrees with

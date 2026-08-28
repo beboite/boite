@@ -1,7 +1,7 @@
 use super::client::{self, Mode};
 use super::events::{Event, TelemetryContext};
 use serde_json::Value;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
@@ -42,6 +42,8 @@ fn resolve_mode(state: &ConsentState) -> Option<(Mode, Option<String>)> {
 /// Internal messages consumed by the worker thread.
 enum Message {
     Event(Event, SystemTime),
+    /// Wake-up only. The authority on "stop now" is the `shutting_down` flag:
+    /// this message can be dropped when the queue is full, the flag cannot.
     Shutdown,
 }
 
@@ -103,12 +105,19 @@ pub struct Handle {
     tx: SyncSender<Message>,
     consent: Arc<Mutex<ConsentState>>,
     dropped: Arc<AtomicU64>,
+    /// Set once `Worker::shutdown` has been called. Read by the worker as its
+    /// control signal, and by `track` so a late event cannot refill the queue
+    /// the worker is trying to drain.
+    shutting_down: Arc<AtomicBool>,
 }
 
 impl Handle {
     /// Enqueues an event. No-op when telemetry is fully disabled.
     /// Never blocks.
     pub fn track(&self, event: Event) {
+        if self.shutting_down.load(Ordering::Acquire) {
+            return;
+        }
         {
             let state = self.consent.lock().unwrap_or_else(|e| e.into_inner());
             if !state.mode_a && !state.mode_b {
@@ -149,10 +158,21 @@ impl Worker {
         let consent_clone = consent.clone();
         let dropped = Arc::new(AtomicU64::new(0));
         let dropped_clone = dropped.clone();
+        let shutting_down = Arc::new(AtomicBool::new(false));
+        let shutting_down_clone = shutting_down.clone();
 
         let join = thread::Builder::new()
             .name("boite-telemetry".into())
-            .spawn(move || run(rx, ctx, consent_clone, params, dropped_clone))
+            .spawn(move || {
+                run(
+                    rx,
+                    ctx,
+                    consent_clone,
+                    params,
+                    dropped_clone,
+                    shutting_down_clone,
+                )
+            })
             .expect("telemetry thread spawn failed");
 
         Self {
@@ -160,6 +180,7 @@ impl Worker {
                 tx,
                 consent,
                 dropped,
+                shutting_down,
             },
             join: Some(join),
         }
@@ -173,12 +194,20 @@ impl Worker {
     /// The final flush is best-effort. This runs on the UI thread during
     /// window close; an unbounded join would freeze the window for up to the
     /// HTTP timeout (10s) when the endpoint is slow or unreachable.
+    ///
+    /// The stop order travels on a flag, not on the event channel. The channel
+    /// is bounded and shares its slots with `track`, so a worker stuck in a
+    /// slow flush leaves it full: a blocking `send` here waited for that flush
+    /// to end before the deadline loop below had even started, which is exactly
+    /// the freeze the deadline exists to prevent. The message is still sent,
+    /// without blocking, purely to wake a worker parked in `recv_timeout`.
     pub fn shutdown(mut self, deadline: Duration) {
-        let _ = self.handle.tx.send(Message::Shutdown);
+        let start = Instant::now();
+        self.handle.shutting_down.store(true, Ordering::Release);
+        let _ = self.handle.tx.try_send(Message::Shutdown);
         let Some(join) = self.join.take() else {
             return;
         };
-        let start = Instant::now();
         while start.elapsed() < deadline {
             if join.is_finished() {
                 let _ = join.join();
@@ -205,6 +234,7 @@ fn run(
     consent: Arc<Mutex<ConsentState>>,
     params: QueueParams,
     dropped: Arc<AtomicU64>,
+    shutting_down: Arc<AtomicBool>,
 ) {
     let http = match reqwest::blocking::Client::builder()
         .user_agent(client::user_agent(&ctx.app_version))
@@ -234,6 +264,14 @@ fn run(
     let mut next_interval = params.first_flush_interval;
 
     loop {
+        // Checked before the blocking receive so a stop order that could not
+        // fit in a full channel is still honoured on the next iteration.
+        if shutting_down.load(Ordering::Acquire) {
+            drain_pending(&rx, &mut state.buffer, &dropped);
+            flush(&http, &params, &ua, &ctx, &consent, &mut state, &dropped);
+            return;
+        }
+
         let remaining = next_interval
             .checked_sub(last_flush.elapsed())
             .unwrap_or(Duration::ZERO);
@@ -248,6 +286,7 @@ fn run(
                 }
             }
             Ok(Message::Shutdown) => {
+                drain_pending(&rx, &mut state.buffer, &dropped);
                 flush(&http, &params, &ua, &ctx, &consent, &mut state, &dropped);
                 return;
             }
@@ -261,6 +300,26 @@ fn run(
                 flush(&http, &params, &ua, &ctx, &consent, &mut state, &dropped);
                 return;
             }
+        }
+    }
+}
+
+/// Moves everything already queued into the buffer, without blocking, so the
+/// final flush covers the events the stop order overtook.
+///
+/// Bounded by the channel capacity rather than looping until empty: `track`
+/// already refuses once shutdown started, and a bound is what keeps this from
+/// racing a producer that has not yet observed the flag.
+fn drain_pending(
+    rx: &Receiver<Message>,
+    buffer: &mut Vec<(Event, SystemTime)>,
+    dropped: &Arc<AtomicU64>,
+) {
+    for _ in 0..QUEUE_CAPACITY {
+        match rx.try_recv() {
+            Ok(Message::Event(ev, at)) => push_bounded(buffer, (ev, at), dropped),
+            Ok(Message::Shutdown) => {}
+            Err(_) => return,
         }
     }
 }
@@ -400,6 +459,8 @@ fn trim_to_capacity(buffer: &mut Vec<(Event, SystemTime)>, dropped: &Arc<AtomicU
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
+    use std::net::{TcpListener, TcpStream};
 
     fn test_ctx() -> TelemetryContext {
         TelemetryContext {
@@ -418,6 +479,110 @@ mod tests {
             endpoint: "http://127.0.0.1:1/track".into(),
             ..Default::default()
         }
+    }
+
+    fn mode_a_consent() -> ConsentState {
+        ConsentState {
+            mode_a: true,
+            mode_b: false,
+            install_id: None,
+            anonymous_id: Some("797f20fe-94de-4e89-98a2-ae3a3273ad1e".into()),
+        }
+    }
+
+    /// Params that never flush on their own, so every flush a test observes is
+    /// one the test asked for.
+    fn quiet_params(endpoint: String) -> QueueParams {
+        QueueParams {
+            first_flush_interval: Duration::from_secs(3600),
+            flush_interval: Duration::from_secs(3600),
+            max_backoff: Duration::from_secs(3600),
+            max_batch_size: usize::MAX,
+            endpoint,
+            emit_ping: false,
+        }
+    }
+
+    /// Socket that accepts and never answers: a flush against it blocks on the
+    /// client's 10s timeout, which is the slow-flush case shutdown must survive.
+    /// The accepted sockets are held open on purpose.
+    fn hanging_endpoint() -> (String, Arc<AtomicU64>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let connections = Arc::new(AtomicU64::new(0));
+        let seen = connections.clone();
+        thread::spawn(move || {
+            let mut held = Vec::new();
+            for stream in listener.incoming().flatten() {
+                seen.fetch_add(1, Ordering::SeqCst);
+                held.push(stream);
+            }
+        });
+        (format!("http://{addr}/track"), connections)
+    }
+
+    /// Socket that answers `200` and counts the batches it received.
+    fn recording_endpoint() -> (String, Arc<AtomicU64>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let batches = Arc::new(AtomicU64::new(0));
+        let seen = batches.clone();
+        thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                serve_one_batch(stream, &seen);
+            }
+        });
+        (format!("http://{addr}/track"), batches)
+    }
+
+    fn serve_one_batch(mut stream: TcpStream, seen: &Arc<AtomicU64>) {
+        let mut raw = Vec::new();
+        let mut chunk = [0u8; 2048];
+        loop {
+            match stream.read(&mut chunk) {
+                Ok(0) => return,
+                Ok(n) => {
+                    raw.extend_from_slice(&chunk[..n]);
+                    if request_is_complete(&raw) {
+                        break;
+                    }
+                }
+                Err(_) => return,
+            }
+        }
+        seen.fetch_add(1, Ordering::SeqCst);
+        let _ =
+            stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+        let _ = stream.flush();
+    }
+
+    /// True once headers and the announced body have all arrived. Answering
+    /// before the body is read would reset the connection on some platforms and
+    /// turn a success into a failed flush.
+    fn request_is_complete(raw: &[u8]) -> bool {
+        let Some(head_end) = raw.windows(4).position(|w| w == b"\r\n\r\n").map(|i| i + 4) else {
+            return false;
+        };
+        let head = String::from_utf8_lossy(&raw[..head_end]).to_ascii_lowercase();
+        let body_len = head
+            .lines()
+            .find_map(|line| line.strip_prefix("content-length:"))
+            .and_then(|value| value.trim().parse::<usize>().ok())
+            .unwrap_or(0);
+        raw.len() >= head_end + body_len
+    }
+
+    /// Spins until `ready` holds, with a ceiling so a broken build fails the
+    /// test instead of hanging the suite.
+    fn wait_for(ready: impl Fn() -> bool, what: &str) {
+        let start = Instant::now();
+        while start.elapsed() < Duration::from_secs(10) {
+            if ready() {
+                return;
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
+        panic!("timed out waiting for {what}");
     }
 
     fn new_state(buffer: Vec<(Event, SystemTime)>) -> WorkerState {
@@ -680,5 +845,91 @@ mod tests {
         // Oldest first: the five discarded events are the five oldest.
         let first = &buffer[0].0;
         assert!(matches!(first, Event::AppLaunched { duration_ms: 5 }));
+    }
+
+    #[test]
+    fn shutdown_stays_within_its_deadline_when_the_queue_is_full_and_the_flush_hangs() {
+        let (endpoint, connections) = hanging_endpoint();
+        let params = QueueParams {
+            // One event per batch: the very first `track` puts the worker
+            // inside a flush that will never come back.
+            max_batch_size: 1,
+            ..quiet_params(endpoint)
+        };
+        let worker = Worker::spawn(test_ctx(), mode_a_consent(), params);
+        let handle = worker.handle();
+
+        handle.track(Event::ProjectAdded);
+        wait_for(
+            || connections.load(Ordering::SeqCst) > 0,
+            "the worker to enter the hanging flush",
+        );
+
+        // Fill the channel behind the stuck worker. Once `track` starts
+        // dropping, every slot is taken and a blocking send would have to wait
+        // for the flush to end.
+        for _ in 0..(QUEUE_CAPACITY * 2) {
+            handle.track(Event::ProjectAdded);
+            if handle.dropped.load(Ordering::Relaxed) > 0 {
+                break;
+            }
+        }
+        assert!(
+            handle.dropped.load(Ordering::Relaxed) > 0,
+            "the queue never filled, the test is not exercising a full channel"
+        );
+
+        let deadline = Duration::from_millis(200);
+        let start = Instant::now();
+        worker.shutdown(deadline);
+        let elapsed = start.elapsed();
+
+        // The flush in flight lasts 10s (HTTP timeout). Anything close to that
+        // means the stop order went through the full channel again.
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "shutdown took {elapsed:?}, deadline was {deadline:?}"
+        );
+    }
+
+    #[test]
+    fn a_normal_shutdown_flushes_what_is_still_queued() {
+        let (endpoint, batches) = recording_endpoint();
+        let worker = Worker::spawn(test_ctx(), mode_a_consent(), quiet_params(endpoint));
+        let handle = worker.handle();
+
+        // Nothing flushes on its own here: this event only leaves if the
+        // shutdown path picks it up, whether it landed in the buffer first or
+        // was still sitting in the channel.
+        handle.track(Event::ProjectAdded);
+
+        let start = Instant::now();
+        worker.shutdown(Duration::from_secs(10));
+        let elapsed = start.elapsed();
+
+        assert_eq!(
+            batches.load(Ordering::SeqCst),
+            1,
+            "the final flush must send the queued event exactly once"
+        );
+        assert!(elapsed < Duration::from_secs(10), "joined at {elapsed:?}");
+    }
+
+    #[test]
+    fn track_after_shutdown_cannot_refill_the_queue() {
+        let (endpoint, batches) = recording_endpoint();
+        let worker = Worker::spawn(test_ctx(), mode_a_consent(), quiet_params(endpoint));
+        let handle = worker.handle();
+
+        worker.shutdown(Duration::from_secs(10));
+        let after_shutdown = batches.load(Ordering::SeqCst);
+
+        handle.track(Event::ProjectAdded);
+        assert_eq!(
+            batches.load(Ordering::SeqCst),
+            after_shutdown,
+            "no worker is left to send this, and it must not be queued either"
+        );
+        assert_eq!(handle.dropped.load(Ordering::Relaxed), 0);
     }
 }

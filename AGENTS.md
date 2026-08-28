@@ -328,6 +328,29 @@ loads and the driver answers the whole time.
   description and read as visible). `browser_snapshot` reads the page wherever
   it is.
 
+## A grant says what may be seen, not only what may be changed
+
+`Capability` answers what a call changes. Which project a read lands in is a
+second question, and for a while nothing asked it: a credentials file holds
+`ReadProject` for its own project, and `GET /v1/projects`, `/v1/timeline`,
+`/v1/search`, `/v1/snapshot` and `/v1/transcript` each answered for the whole
+workspace. `/mcp` too, because that door dispatches into the very same
+handlers with the caller it already proved.
+
+`Grant::reads_across` is that second question and `routes::confined_to` is the
+one place it is asked. A terminal Boite opened reads everything, which is what
+`/v1/transcript` is for: the user is watching that terminal, and "why did the
+thread next door stop" is the question the route exists to answer. A
+credentials file reads the one project it was issued for.
+
+**The scope goes into the query, never over the answer.** `store.search`,
+`search::transcripts` and `snapshot::take` each take it, so a confined caller
+spends its limit on rows it may read, and a section added to the snapshot later
+is cut by the same argument rather than by a filter somebody has to remember to
+apply. A transcript file is named after the thread that wrote it and says
+nothing about a project, so whatever reads those files is handed
+`store.thread_ids_of_project` rather than left to work it out from a filename.
+
 ## The orchestrator is a role, not a claim
 
 A thread is an orchestrator because the workspace stamped `role` on its row

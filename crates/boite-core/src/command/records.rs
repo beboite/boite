@@ -641,7 +641,9 @@ impl Records {
                 limit,
                 transcripts,
             } => {
-                let mut hits = store.search(&needle, limit);
+                // The user's own search, so the whole workspace: this arm is
+                // only ever reached on a `Grant::Local` command.
+                let mut hits = store.search(&needle, limit, None);
                 // The rows first and the transcripts with whatever budget is
                 // left: an index lookup ranks, a substring scan does not, so a
                 // shared cap spent on transcripts would push the ranked half
@@ -651,6 +653,7 @@ impl Records {
                         &dir,
                         &needle,
                         limit.saturating_sub(hits.len()),
+                        None,
                     ));
                 }
                 value_of(hits)

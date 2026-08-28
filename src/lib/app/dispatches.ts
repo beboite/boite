@@ -19,16 +19,35 @@ import type { Thread } from "$lib/types";
  * Ownership is the sink: every mounted Terminal registers one, and a window
  * without the target's terminal leaves the row queued for the window that has
  * it. Settling is first-writer-wins on the boite, so two windows racing the
- * same line deliver it once.
+ * same line settle it once — and it happens after the write, never before, so
+ * a row is only marked delivered by a device whose bytes actually left.
  */
 
 /** What a Terminal hands over: a dim notice line, and typed-then-submitted text. */
 export interface DispatchSink {
   notice(line: string): void;
-  type(text: string): void;
+  /**
+   * Types the line, and answers whether the bytes left this device.
+   *
+   * False is a write the transport refused — a boite whose socket is down is
+   * the everyday case. It is not a maybe: the frame is dropped rather than
+   * queued, on purpose, because replaying a keystroke into a live agent minutes
+   * later is worse than losing it. So the caller has to settle the row on this
+   * answer rather than ahead of it.
+   */
+  type(text: string): Promise<boolean>;
 }
 
 const sinks = new Map<string, DispatchSink>();
+
+/**
+ * Local state for queued lines this device has taken responsibility for.
+ *
+ * `typing` blocks another drain while bytes are in flight. `typed` survives a
+ * failed settle, so a later drain retries only the state report. A failed write
+ * removes the entry, leaving the still-queued row eligible for retry.
+ */
+const deliveries = new Map<string, "typing" | "typed">();
 
 /** A mounted Terminal owning a live PTY. Registering looks at the queue. */
 export function registerDispatchSink(threadId: string, sink: DispatchSink): () => void {
@@ -94,8 +113,27 @@ export async function flushDispatches(): Promise<void> {
   flushing = true;
   try {
     const lines = await conduct.drainDispatches({});
+    // A settle can commit before its response is lost. A later drain that no
+    // longer returns the row is the confirmation that releases the local mark.
+    const open = new Set(lines.map((line) => line.id));
+    for (const id of deliveries.keys()) {
+      if (!open.has(id)) deliveries.delete(id);
+    }
     let held = false;
     for (const line of lines) {
+      const delivery = deliveries.get(line.id);
+      if (delivery === "typing") continue;
+      if (delivery === "typed") {
+        const { settled } = await conduct.settleDispatch({
+          dispatchId: line.id,
+          state: "delivered",
+        });
+        deliveries.delete(line.id);
+        if (!settled) {
+          logger.warn("dispatch", "another device settled this line first", { id: line.id });
+        }
+        continue;
+      }
       const thread = app.threadById(line.toThreadId);
       const sink = sinks.get(line.toThreadId);
       // Not this device's PTY: leave the row queued for the window that has it.
@@ -106,18 +144,39 @@ export async function flushDispatches(): Promise<void> {
         continue;
       }
       if (verdict === "type") {
-        // Settle first: if this window dies mid-type the line is marked
-        // delivered rather than typed twice by the next drain. First writer
-        // wins, so a row another device already settled is skipped.
-        const { settled } = await conduct.settleDispatch({
-          dispatchId: line.id,
-          state: "delivered",
-        });
-        if (!settled) continue;
-        sink.notice(t("dispatch.notice"));
-        // Any newline would split the prompt; the submit is the one \r below.
-        const oneLine = line.text.replace(/\s*[\r\n]+\s*/g, " ").trim();
-        sink.type(oneLine + "\r");
+        // Type first, then retain `typed` until the boite confirms the row is no
+        // longer queued. This keeps a lost settle response from replaying bytes.
+        deliveries.set(line.id, "typing");
+        let landed = false;
+        try {
+          sink.notice(t("dispatch.notice"));
+          // Any newline would split the prompt; the submit is the one \r below.
+          const oneLine = line.text.replace(/\s*[\r\n]+\s*/g, " ").trim();
+          landed = await sink.type(oneLine + "\r");
+        } catch (err) {
+          logger.warn("dispatch", "the line was not typed", String(err));
+        }
+        if (landed) deliveries.set(line.id, "typed");
+        else deliveries.delete(line.id);
+        // Nothing left the device. Settled `dropped` rather than left queued:
+        // a row still queued is one the next drain types, and by then the
+        // orchestrator has moved on and the line is stale input arriving out of
+        // nowhere. This way the pulse says what became of it, and the terminal
+        // says it too rather than leaving a notice above nothing.
+        if (!landed) sink.notice(t("orchestrator.postFailed"));
+        const { settled } = await conduct.settleDispatch(
+          landed
+            ? { dispatchId: line.id, state: "delivered" }
+            : { dispatchId: line.id, state: "dropped", reason: "write_failed" },
+        );
+        deliveries.delete(line.id);
+        // The one thing settling afterwards gives up: a second device attached
+        // to the same thread can be typing the same line right now, and the
+        // loser of the settle finds out only here. Worth a line in the log,
+        // because it is the shape of a duplicated instruction.
+        if (!settled) {
+          logger.warn("dispatch", "another device settled this line first", { id: line.id });
+        }
       } else {
         await conduct.settleDispatch({
           dispatchId: line.id,
@@ -174,8 +233,13 @@ export async function typeIntoOrchestrator(
     if (!thread || thread.settledAt) return false;
     if (sink && thread.ptyId && (thread.status === "ready" || thread.status === "idle")) {
       sink.notice(t("orchestrator.typedNotice"));
-      sink.type(line + "\r");
-      return true;
+      // The answer is the write's, not the loop's: a socket that dropped
+      // between the status read and the send has typed nothing, and the chat
+      // has to say so instead of drawing the line as sent.
+      if (await sink.type(line + "\r")) return true;
+      sink.notice(t("orchestrator.postFailed"));
+      logger.warn("orchestrator", "the line did not leave this device", { threadId });
+      return false;
     }
     if (Date.now() >= deadline) {
       logger.warn("orchestrator", "no prompt to type at", { threadId, status: thread.status });
