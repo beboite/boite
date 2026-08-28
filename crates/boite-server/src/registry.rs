@@ -8,6 +8,7 @@ use parking_lot::Mutex;
 use tokio::sync::broadcast;
 
 use boite_core::checkpoint::{self, Edge};
+use boite_core::git;
 use boite_core::pty::{EventSink, PtyEvent, PtyManager, PtySpawnArgs};
 use boite_core::session::{self, AgentTurn, DeclaredTurn, TurnQuery};
 use boite_core::status::{self, ThreadStatus};
@@ -36,11 +37,17 @@ const REGISTRY_TTL: Duration = Duration::from_secs(1);
 pub struct ThreadIdentity {
     pub icon_key: Option<String>,
     pub session_id: Option<String>,
+    pub repo: String,
+    pub project_cwd: String,
+    pub worktree_path: Option<String>,
 }
 
 /// Reads a thread's identity out of the store. Returns None for a thread the
 /// store has never heard of.
 pub type IdentityLookup = Arc<dyn Fn(&str) -> Option<ThreadIdentity> + Send + Sync>;
+
+/// Persist a worktree an agent opened on its own: thread id, repository, path.
+pub type WorktreePersist = Arc<dyn Fn(String, String, String) + Send + Sync>;
 
 /// One connected client, for the length of one websocket connection.
 ///
@@ -283,6 +290,7 @@ struct Shared {
     threads: Mutex<HashMap<String, Arc<LiveThread>>>,
     events: Arc<dyn Fn(AppEvent) + Send + Sync>,
     identity: IdentityLookup,
+    persist_worktree: Option<WorktreePersist>,
 }
 
 pub struct Registry {
@@ -315,11 +323,13 @@ impl Registry {
         transcripts: Option<PathBuf>,
         events: Arc<dyn Fn(AppEvent) + Send + Sync>,
         identity: IdentityLookup,
+        persist_worktree: Option<WorktreePersist>,
     ) -> Arc<Registry> {
         let shared = Arc::new(Shared {
             threads: Mutex::new(HashMap::new()),
             events,
             identity,
+            persist_worktree,
         });
         let registry = Arc::new(Registry {
             pty: PtyManager::new(),
@@ -340,6 +350,7 @@ impl Registry {
             threads: Mutex::new(HashMap::new()),
             events,
             identity: Arc::new(|_| None),
+            persist_worktree: None,
         });
         Arc::new(Registry {
             pty: PtyManager::new(),
@@ -668,6 +679,11 @@ impl EventSink for ThreadSink {
     }
 }
 
+fn same_path(a: &str, b: &str) -> bool {
+    let norm = |p: &str| p.replace('\\', "/").trim_end_matches('/').to_lowercase();
+    norm(a) == norm(b)
+}
+
 /// What a thread's status should become, or None to leave it alone.
 ///
 /// Claude answers for itself:
@@ -733,6 +749,7 @@ fn spawn_ticker(shared: Arc<Shared>) {
         // loop would query the thread table once per live thread twice a second,
         // forever, to re-learn two columns that almost never change.
         let mut identities: HashMap<String, Option<ThreadIdentity>> = HashMap::new();
+        let mut noticed: HashMap<String, String> = HashMap::new();
         loop {
             interval.tick().await;
             let now = Instant::now();
@@ -787,6 +804,44 @@ fn spawn_ticker(shared: Arc<Shared>) {
                         .unwrap_or_default()
                 };
                 turns_read_at = Some(now);
+            }
+
+            if let Some(persist) = shared.persist_worktree.clone() {
+                for lt in &live_threads {
+                    let who = identities
+                        .entry(lt.thread_id.clone())
+                        .or_insert_with(|| (shared.identity)(&lt.thread_id));
+                    let Some(id) = who.as_ref() else { continue };
+                    let Some(kind) = id.icon_key.as_deref() else { continue };
+                    let Some(session) = id.session_id.as_deref() else { continue };
+                    let Some(turn) = turns
+                        .iter()
+                        .find(|t| t.kind == kind && t.session_id == session)
+                    else {
+                        continue;
+                    };
+                    let declared = turn.cwd.trim();
+                    if declared.is_empty() {
+                        continue;
+                    }
+                    let current = id.worktree_path.as_deref().unwrap_or(&id.project_cwd);
+                    if same_path(declared, current) || same_path(declared, &id.project_cwd) {
+                        continue;
+                    }
+                    if noticed.get(&lt.thread_id).is_some_and(|p| same_path(p, declared)) {
+                        continue;
+                    }
+                    noticed.insert(lt.thread_id.clone(), declared.to_string());
+                    let thread_id = lt.thread_id.clone();
+                    let repo = id.repo.clone();
+                    let path = declared.to_string();
+                    let persist = persist.clone();
+                    tokio::task::spawn_blocking(move || {
+                        if let Some(found) = git::recognize_worktree_blocking(&repo, &path) {
+                            persist(thread_id, repo, found);
+                        }
+                    });
+                }
             }
 
             let mut changed = Vec::new();
@@ -1179,6 +1234,7 @@ mod sink_tests {
             threads: Mutex::new(HashMap::new()),
             events: Arc::new(move |e| sink.lock().push(e)),
             identity: Arc::new(|_| None),
+            persist_worktree: None,
         });
         (shared, seen)
     }

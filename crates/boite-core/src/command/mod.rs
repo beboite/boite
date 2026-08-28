@@ -692,6 +692,7 @@ mod tests {
             ("worktree.warm", MutateProject),
             ("worktree.migrate", MutateProject),
             ("worktree.adopt", MutateProject),
+            ("worktree.recognize", MutateProject),
             ("worktree.list", ReadProject),
             ("worktree.claim", MutateProject),
             ("worktree.reserve", MutateProject),

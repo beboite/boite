@@ -92,6 +92,7 @@ export const tauriWorktree: WorktreeApi = {
   migrate: (repo, threadId, from) =>
     invoke<WorktreeMigration>("worktree_migrate", { repo, threadId, from }),
   adopt: (repo, threadId) => invoke<string | null>("worktree_adopt", { repo, threadId }),
+  recognize: (repo, path) => invoke<string | null>("worktree_recognize", { repo, path }),
   list: (repo) => invoke<WorktreeEntry[]>("worktree_list", { repo }),
   claim: (path, name) => invoke("worktree_claim", { path, name }),
   reserve: (path, name) => invoke("worktree_reserve", { path, name }),

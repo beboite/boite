@@ -35,6 +35,7 @@ use config::Config;
 use events::AppEvent;
 use registry::Registry;
 use state::AppState;
+use boite_core::session;
 use boite_core::store::{ColVal, Store, ThreadCol};
 
 const EVENT_CHANNEL_CAP: usize = 1024;
@@ -99,15 +100,36 @@ async fn main() {
     let identity = {
         let store = store.clone();
         Arc::new(move |thread_id: &str| {
-            store
-                .load_thread(thread_id)
-                .ok()
-                .flatten()
-                .map(|t| registry::ThreadIdentity {
-                    icon_key: t.icon_key,
-                    session_id: t.session_id,
-                })
+            store.thread_placement(thread_id).map(|p| registry::ThreadIdentity {
+                icon_key: p.icon_key,
+                session_id: p.session_id,
+                repo: p.repo,
+                project_cwd: p.project_cwd,
+                worktree_path: p.worktree_path,
+            })
         }) as registry::IdentityLookup
+    };
+    let persist_worktree = {
+        let store = store.clone();
+        let emit = emit.clone();
+        Some(Arc::new(move |thread_id: String, repo: String, path: String| {
+            if store
+                .update_thread_field(
+                    &thread_id,
+                    ThreadCol::WorktreePath,
+                    ColVal::Text(path.clone()),
+                )
+                .is_err()
+            {
+                return;
+            }
+            session::share_session_stores(&repo, &path);
+            if let Ok(Some(updated)) = store.load_thread(&thread_id) {
+                emit(AppEvent::ThreadUpdated(
+                    serde_json::to_value(&updated).unwrap_or_default(),
+                ));
+            }
+        }) as registry::WorktreePersist)
     };
     // Beside the database. A transcript is the only record of what an agent
     // actually did in its terminal, and it used to die with the process.
@@ -119,7 +141,13 @@ async fn main() {
             None
         }
     };
-    let registry = Registry::new(config.scrollback_bytes, transcripts, emit, identity);
+    let registry = Registry::new(
+        config.scrollback_bytes,
+        transcripts,
+        emit,
+        identity,
+        persist_worktree,
+    );
     // Shared rather than owned by the state: the agent endpoint decides where a
     // project may be created, and it has to read the same boundary the RPC does,
     // including every refresh after a project is added.

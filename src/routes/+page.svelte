@@ -159,13 +159,12 @@
     // four and launch four and it reads 60 both times — and a group this never
     // made is a thread with no terminal drawn at all, since the wrapper below
     // needs a group and a rect. Nothing then mounts, nothing spawns, and
-    // nothing is logged.
-    //
-    // Widened rather than proven: removal happens to reassign the array today,
-    // which re-runs this on its own, so the count is not known to have missed
-    // anything. It is one property away from missing everything, and this costs
-    // an iteration of ids per mutation.
-    for (const t of app.threads) void t.id;
+    // nothing is logged. `projectId` too: a move keeps the same id, and without
+    // it the group stays stamped on the project the thread just left.
+    for (const t of app.threads) {
+      void t.id;
+      void t.projectId;
+    }
     // untrack: syncWithThreads reads AND writes paneStore.groups/rects;
     // tracked, this effect re-ran on its own writes and on every
     // ResizeObserver tick during pane drags.

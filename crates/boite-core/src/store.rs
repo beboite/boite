@@ -19,6 +19,16 @@ pub struct ThreadContext {
     pub project: Option<String>,
 }
 
+/// Where a live thread runs, for the status ticker that has to recognise an
+/// agent-created worktree without loading the whole row.
+pub struct ThreadPlacement {
+    pub icon_key: Option<String>,
+    pub session_id: Option<String>,
+    pub repo: String,
+    pub project_cwd: String,
+    pub worktree_path: Option<String>,
+}
+
 /// Names itself and stops there.
 ///
 /// `Ready` derives `Debug` and one of its arms carries a store, so this has to
@@ -539,6 +549,33 @@ impl Store {
             .map_err(|e| e.to_string())?;
         search::forget(&conn, search::Kind::Todo, id);
         Ok(())
+    }
+
+    /// Icon, session, repository and worktree for a live status pass.
+    ///
+    /// One join rather than a thread load plus a project walk: the server's
+    /// ticker asks this once a second per live thread, and those two columns
+    /// almost never change.
+    pub fn thread_placement(&self, thread_id: &str) -> Option<ThreadPlacement> {
+        let conn = self.conn.lock();
+        conn.query_row(
+            "SELECT t.icon_key, t.session_id, t.worktree_path, p.cwd, p.git_root
+             FROM threads t JOIN projects p ON p.id = t.project_id
+             WHERE t.id = ?1",
+            [thread_id],
+            |r| {
+                let cwd: String = r.get(3)?;
+                let git_root: Option<String> = r.get(4)?;
+                Ok(ThreadPlacement {
+                    icon_key: r.get(0)?,
+                    session_id: r.get(1)?,
+                    worktree_path: r.get(2)?,
+                    project_cwd: cwd.clone(),
+                    repo: git_root.unwrap_or(cwd),
+                })
+            },
+        )
+        .ok()
     }
 
     /// The repository and worktree a thread runs in, when it has a worktree of
@@ -1692,6 +1729,7 @@ pub enum ThreadCol {
     SessionId,
     KeepAwake,
     SettledAt,
+    WorktreePath,
 }
 
 impl ThreadCol {
@@ -1705,6 +1743,7 @@ impl ThreadCol {
             ThreadCol::SessionId => "session_id",
             ThreadCol::KeepAwake => "keep_awake",
             ThreadCol::SettledAt => "settled_at",
+            ThreadCol::WorktreePath => "worktree_path",
         }
     }
 }

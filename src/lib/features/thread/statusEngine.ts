@@ -16,6 +16,7 @@ import { detectIconKey } from "$lib/shared/icons/detect";
 import { ptyKill } from "$lib/storage/pty";
 import { logger } from "$lib/shared/services/logger.svelte";
 import { agentTurns } from "./agent-turns";
+import { noticeDeclaredCwd } from "./agent-cwd";
 import { turnIsActive } from "./agent-registry";
 import type { AgentTurn } from "./agent-registry";
 import { noteDeclaredTurn } from "./checkpoints.svelte";
@@ -516,6 +517,14 @@ function tick() {
         kind: iconKey,
         sessionId: t.sessionId ?? null,
         cwd: threadCwd(t, app.projectById(t.projectId)) ?? "",
+      });
+      noticeDeclaredCwd({
+        thread: t,
+        project: app.projectById(t.projectId),
+        declared: agentTurns.cwdOf(iconKey, t.sessionId),
+        recognize: (repo, path) => backend.worktree.recognize(repo, path),
+        persist: (path) =>
+          app.upsertThread({ ...t, args: [...t.args], worktreePath: path }),
       });
     }
     const reading = read(t, iconKey);

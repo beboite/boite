@@ -97,7 +97,7 @@ vi.mock("$lib/shared/services/logger.svelte", () => ({
   logger: { debug() {}, info() {}, warn() {}, error() {} },
 }));
 vi.mock("./agent-turns", () => ({
-  agentTurns: { stateOf: () => h.turn, poll: () => {} },
+  agentTurns: { stateOf: () => h.turn, poll: () => {}, cwdOf: () => null },
 }));
 
 type Module = typeof import("./statusEngine");

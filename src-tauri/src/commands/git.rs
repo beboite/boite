@@ -1,6 +1,6 @@
 //! Git and worktrees, as the webview asks for them.
 //!
-//! Twenty-seven commands and not one of them does any work: each names a
+//! Twenty-eight commands and not one of them does any work: each names a
 //! `boite_core::command::Git` variant and hands over what the webview sent. The
 //! boundary is applied once, in `prepare`, and the desktop reads answers bare
 //! because the envelopes in `command::Wire` belong to the WebSocket protocol.
@@ -188,6 +188,15 @@ pub async fn worktree_adopt(
     thread_id: String,
 ) -> Result<Value, String> {
     on_bus(scope.inner(), Git::WorktreeAdopt { repo, thread_id }.into()).await
+}
+
+#[tauri::command]
+pub async fn worktree_recognize(
+    scope: State<'_, ProjectRoots>,
+    repo: String,
+    path: String,
+) -> Result<Value, String> {
+    on_bus(scope.inner(), Git::WorktreeRecognize { repo, path }.into()).await
 }
 
 #[tauri::command]

@@ -304,6 +304,14 @@ export interface WorktreeApi {
    */
   adopt(repo: string, threadId: string): Promise<string | null>;
   /**
+   * Whether this path is a worktree of the repository, walking up so a cwd
+   * inside one still answers. Null for the main checkout, another repo, or
+   * a folder git does not know. The caller persists the path; this call
+   * also points the worktree's session stores at the project's, the way
+   * `open` does for a worktree Boite created.
+   */
+  recognize(repo: string, path: string): Promise<string | null>;
+  /**
    * Every worktree of a repository, the main checkout included, each with what
    * removing it would destroy. One call rather than a list plus a `hold` per
    * entry: each flag costs a git process, and on Windows those round trips are

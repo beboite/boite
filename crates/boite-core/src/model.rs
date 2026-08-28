@@ -48,7 +48,8 @@ pub struct Project {
     #[serde(default)]
     pub git_root: Option<String>,
     /// Whether new threads here open their own worktree. None follows the app
-    /// setting, which is what every project did before the column existed.
+    /// setting. New projects stamp false, so a later flip of that setting
+    /// does not start isolating threads nobody asked to isolate.
     #[serde(default)]
     pub worktrees: Option<bool>,
     /// MCP servers explicitly enabled for this project. None preserves the
