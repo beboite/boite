@@ -237,8 +237,17 @@ jobs:
   # nobody downloads is most of the release page, so they go once every platform
   # has finished uploading. Deleting them cannot break an update; deleting a
   # payload would, hence the suffix match rather than a count.
+  #
+  # `needs: bundle` alone never ran. The implicit condition is `success()`, and
+  # that reads the whole needs graph rather than the job named: `tests` is
+  # skipped whenever preflight found a green ci, so every job downstream of it
+  # inherited the skip. bundle carries the same override for the same reason.
+  # v1.3.3 shipped with its six `.sig` assets still on the page because of this.
   prune:
     needs: bundle
+    if: >-
+      !cancelled()
+      && needs.bundle.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -299,6 +308,12 @@ jobs:
   # keystore may have arrived since.
   android:
     needs: bundle
+    # Same override as prune above, and for the same reason: a bare `needs`
+    # inherits `success()` over the whole graph, which the skipped `tests` job
+    # never satisfies.
+    if: >-
+      !cancelled()
+      && needs.bundle.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
