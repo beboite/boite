@@ -223,10 +223,27 @@ impl ProcessTree {
     /// that has already been recycled onto a different one, and an unbounded
     /// walk over a cycle built that way would never return.
     pub(super) fn contains(&self, pid: u32) -> bool {
+        let me = std::process::id();
         let mut current = pid;
         for _ in 0..16 {
             if current == self.root {
                 return true;
+            }
+            // Reaching ourselves means the walk has left our own subtree. Every
+            // PTY child is our child, so a real descendant of the root meets the
+            // root first; meeting us first can only happen through a parent pid
+            // that no longer means anything. Windows keeps the parent pid of an
+            // exited parent and hands that number to a new process, so our own
+            // stale ppid can name a process that is itself one of our
+            // descendants. The walk then goes up to us, jumps sideways through
+            // that recycled number, and comes back down into another thread's
+            // agent, which closes a cycle: `contains` answered true for every
+            // claude on the machine, two threads claimed one session id, and
+            // they traded it back and forth every 12s for as long as both ran.
+            // The check has to sit after the root test, or a tree rooted at
+            // this very process would own nothing.
+            if current == me {
+                return false;
             }
             match self.parents.get(&current) {
                 // pid 0 is the idle process on Windows and the reaper's parent
@@ -773,6 +790,48 @@ mod tests {
         // Its own parent, which is the shortest cycle there is.
         let tree = ProcessTree::from_parents(1, &[(10, 10)]);
         assert!(!tree.contains(10));
+    }
+
+    /// The chain that was actually observed: a claude walks up to boite.exe,
+    /// boite.exe's parent pid is stale (Windows keeps it after the parent exits
+    /// and gives the number to somebody new), and the process now wearing that
+    /// number is a descendant of boite.exe. The walk therefore comes back down
+    /// into another thread's claude, and if that claude happens to be the root
+    /// it is answered as ours. Both threads then held the same session id.
+    #[test]
+    fn a_stale_parent_pid_does_not_make_a_foreign_agent_ours() {
+        let me = std::process::id();
+        // Above any plausible live pid, so none of these collide with `me`.
+        let (ours_claude, foreign_claude) = (4_000_001, 4_000_002);
+        let (recycled, middle, semble) = (4_000_003, 4_000_004, 4_000_005);
+        let tree = ProcessTree::from_parents(
+            ours_claude,
+            &[
+                (ours_claude, me),
+                (foreign_claude, me),
+                (me, recycled),
+                (recycled, middle),
+                (middle, semble),
+                (semble, ours_claude),
+            ],
+        );
+        assert!(tree.contains(ours_claude), "the pty's own process");
+        assert!(
+            !tree.contains(foreign_claude),
+            "another thread's claude, reachable only through our stale ppid"
+        );
+        // The launcher case still works: a grandchild of the pty is ours, and it
+        // never passes through us to prove it.
+        let (shell, launcher) = (4_000_006, 4_000_007);
+        let tree = ProcessTree::from_parents(
+            shell,
+            &[(shell, me), (launcher, shell), (ours_claude, launcher)],
+        );
+        assert!(tree.contains(ours_claude));
+        // And a tree rooted at this very process still owns its children,
+        // because the root is tested before we are.
+        let tree = ProcessTree::from_parents(me, &[(ours_claude, me)]);
+        assert!(tree.contains(ours_claude));
     }
 
     /// pid 0 is the idle process on Windows and the top of the chain on unix.
