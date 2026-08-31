@@ -163,6 +163,14 @@ export interface Settings {
    * rebuilt, so a worktree costs its source tree and nothing else.
    */
   threadWorktrees: boolean;
+  /**
+   * When an agent calls thread_spawn without naming an agent, replay the
+   * caller's resolved fastpick combo instead of the native CLI matching its
+   * icon. On by default: a caller running through fastpick would otherwise
+   * open a different program, account and model. Off restores the native
+   * preset.
+   */
+  spawnReplayCombo: boolean;
   defaultShellId: string | null;
   sidebarWidth: number;
   sidebarCollapsed: boolean;

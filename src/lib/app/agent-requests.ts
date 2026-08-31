@@ -37,6 +37,7 @@ import {
   FASTPICK_CMD,
   iconKeyForKind,
   parseFastpickAgent,
+  replayCombo,
 } from "$lib/features/fastpick/combo";
 import { editorStore } from "$lib/features/editor/store.svelte";
 import { anchorProjectId, openPane } from "$lib/features/panes/open";
@@ -205,6 +206,10 @@ function writtenOnThisMachine(from: RequestSource): boolean {
 export function resolveLaunch(
   agent: string | null | undefined,
   fallbackIcon: IconKey,
+  opts?: {
+    caller?: { cmd: string; args: readonly string[] } | null;
+    replayCombo?: boolean;
+  },
 ): { cmd: string; args: string[]; label: string; iconKey: IconKey; iconColor: string | null } | null {
   const needle = agent?.trim().toLowerCase() ?? "";
 
@@ -239,6 +244,15 @@ export function resolveLaunch(
         };
       }
     }
+  }
+
+  // Named no agent: another of the caller, which for a fastpick thread is the
+  // combo, not the native binary its icon happens to share. The icon used to
+  // pick the preset, so a caller on `fastpick --harness claude-code --provider
+  // crof` opened plain `claude`: different program, account and model.
+  if (!needle && opts?.replayCombo && opts.caller) {
+    const replayed = replayCombo(opts.caller.cmd, opts.caller.args);
+    if (replayed) return { ...replayed, iconColor: null };
   }
 
   const key = needle || fallbackIcon || "claude";
@@ -321,7 +335,10 @@ async function handleSpawn(req: SpawnRequest, from: RequestSource) {
   // which CLI to start means another of itself, and the user may be looking
   // somewhere else entirely by the time the request lands.
   const caller = app.threadById(req.callerThreadId);
-  const launch = resolveLaunch(req.agent, caller?.iconKey ?? "claude");
+  const launch = resolveLaunch(req.agent, caller?.iconKey ?? "claude", {
+    caller: caller ? { cmd: caller.cmd, args: caller.args } : null,
+    replayCombo: settings.state.spawnReplayCombo,
+  });
   if (!launch) {
     notifications.error(t("thread.spawnNoAgent", { agent: req.agent ?? "" }));
     await answerRequest(req, { error: "no agent matches that name" }, from);

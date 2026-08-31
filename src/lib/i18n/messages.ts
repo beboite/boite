@@ -1103,6 +1103,8 @@ export const EN_MESSAGES = {
   "terminalTab.agentLaunchDesc": "Applies to threads started after the change.",
   "terminalTab.threadWorktrees": "Own worktree per agent thread",
   "terminalTab.threadWorktreesDesc": "Each agent thread runs in its own detached worktree instead of the project folder.",
+  "terminalTab.spawnReplayCombo": "Reuse the caller's fastpick launch",
+  "terminalTab.spawnReplayComboDesc": "When thread_spawn names no agent, start the same fastpick provider, credential and model as the caller. Off, start the native CLI matching the icon.",
   "terminalTab.agentTodoAccess": "Let agents reach the todo list",
   "terminalTab.agentTodoAccessDesc": "An agent can read its tasks and report back, in its own project.",
   "terminalTab.mcpYolo": "Yolo mode for the Boite MCP",

@@ -1096,6 +1096,8 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "terminalTab.agentLaunchDesc": "S'applique aux terminaux lancés après le changement.",
   "terminalTab.threadWorktrees": "Une worktree par terminal d'agent",
   "terminalTab.threadWorktreesDesc": "Chaque terminal d'agent s'exécute dans sa propre worktree détachée au lieu du dossier du projet.",
+  "terminalTab.spawnReplayCombo": "Reprendre le lancement fastpick de l'appelant",
+  "terminalTab.spawnReplayComboDesc": "Quand thread_spawn ne nomme pas d'agent, relancer le même provider, identifiant et modèle fastpick que l'appelant. Désactivé, Boite lance le CLI natif de cette icône.",
   "terminalTab.agentTodoAccess": "Donner aux agents accès aux tâches",
   "terminalTab.agentTodoAccessDesc": "Un agent peut lire ses tâches et rendre compte, dans son propre projet.",
   "terminalTab.mcpYolo": "Mode yolo pour le MCP Boite",
