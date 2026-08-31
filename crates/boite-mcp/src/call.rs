@@ -250,10 +250,14 @@ pub fn call_tool<B: Backend>(host: &B, name: &str, args: &Value) -> Result<Strin
                 .and_then(|v| v.as_str())
                 .ok_or("thread_wait needs a threadId")?;
             let mut path = format!("/v1/thread/wait?threadId={}", crate::encode_query(id));
-            if let Some(ms) = args.get("timeoutMs").and_then(|v| v.as_u64()) {
-                path.push_str(&format!("&timeoutMs={ms}"));
-            }
-            let out = host.send("GET", &path, None)?;
+            let timeout_ms = args
+                .get("timeoutMs")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            path.push_str(&format!("&timeoutMs={timeout_ms}"));
+            // The socket's patience sits above the endpoint's hold, so a full
+            // wait comes back as `waitedMs` and never as a dead door.
+            let out = host.send_long("GET", &path, None, timeout_ms / 1000 + 15)?;
             if let Some(error) = out.get("error").and_then(|v| v.as_str()) {
                 return Err(error.to_string());
             }
@@ -587,6 +591,7 @@ mod tests {
     struct MapHost {
         replies: HashMap<String, Value>,
         posts: RefCell<Vec<(String, Value)>>,
+        long: RefCell<Vec<(String, u64)>>,
         ids: IdCache,
     }
 
@@ -595,6 +600,7 @@ mod tests {
             Self {
                 replies,
                 posts: RefCell::new(Vec::new()),
+                long: RefCell::new(Vec::new()),
                 ids: IdCache::new(),
             }
         }
@@ -616,6 +622,19 @@ mod tests {
                         .map(|(_, v)| v.clone())
                 })
                 .ok_or_else(|| format!("no reply for {key}"))
+        }
+
+        fn send_long(
+            &self,
+            method: &str,
+            path: &str,
+            body: Option<Value>,
+            read_secs: u64,
+        ) -> Result<Value, String> {
+            self.long
+                .borrow_mut()
+                .push((format!("{method} {path}"), read_secs));
+            self.send(method, path, body)
         }
 
         fn remember(&self, short: &str, full: &str) {
@@ -653,6 +672,26 @@ mod tests {
         .unwrap();
         assert!(text.contains("status: ready"), "{text}");
         assert!(text.contains("live: false") || text.contains("live:"), "{text}");
+    }
+
+    /// `send` caps the socket at 20 s; the endpoint holds up to 30. Pulse
+    /// already lifts it with `send_long`. Wait has to, or a real wait dies
+    /// on the socket before the endpoint answers.
+    #[test]
+    fn wait_holds_the_socket_past_the_endpoint() {
+        let host = MapHost::new(HashMap::from([(
+            "/v1/thread/wait".into(),
+            json!({ "threadId": "new-1", "status": "running", "live": true, "waitedMs": 30_000 }),
+        )]));
+        call_tool(
+            &host,
+            "thread_wait",
+            &json!({ "threadId": "new-1", "timeoutMs": 30_000 }),
+        )
+        .unwrap();
+        let long = host.long.borrow();
+        assert_eq!(long.len(), 1, "thread_wait must use send_long, not send");
+        assert_eq!(long[0].1, 30_000 / 1000 + 15, "{long:?}");
     }
 
     #[test]

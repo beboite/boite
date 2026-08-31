@@ -31,6 +31,10 @@ pub struct Fake {
     /// What the device answers a question with. `None` is a host whose devices
     /// cannot answer, which is the trait's own default.
     pub answer_with: Mutex<Option<Value>>,
+    /// PTYs this host still has a process for. Empty is the trait default and
+    /// the honest answer for a workspace with none; a wait test that needs a
+    /// live worker fills this, because the stored `running` mark is not that.
+    pub live_ptys: Mutex<Vec<boite_core::snapshot::LivePty>>,
     dir: PathBuf,
 }
 
@@ -51,6 +55,7 @@ impl Fake {
             touched: Mutex::new(Vec::new()),
             screen: Mutex::new(None),
             answer_with: Mutex::new(None),
+            live_ptys: Mutex::new(Vec::new()),
             dir,
         }
     }
@@ -106,6 +111,17 @@ impl Fake {
         let dir = self.dir.join("transcripts");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join(format!("{thread_id}.log")), text).unwrap();
+        self
+    }
+
+    /// The host still has a process for this thread. The stored status is not
+    /// that: `load_thread` maps a live mark to `stopped` for restart.
+    pub fn with_live_pty(self, thread_id: &str) -> Fake {
+        self.live_ptys.lock().unwrap().push(boite_core::snapshot::LivePty {
+            thread_id: thread_id.into(),
+            pty_id: format!("pty-{thread_id}"),
+            child_pid: Some(1),
+        });
         self
     }
 
@@ -202,6 +218,10 @@ impl Workspace for Fake {
 
     fn on_screen(&self) -> Option<boite_core::screen::Screen> {
         self.screen.lock().unwrap().clone()
+    }
+
+    fn live_ptys(&self) -> Vec<boite_core::snapshot::LivePty> {
+        self.live_ptys.lock().unwrap().clone()
     }
 
     fn touched(&self, thread_id: &str, surface: &str) {

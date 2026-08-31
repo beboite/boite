@@ -1480,7 +1480,8 @@ struct ThreadWaitIn {
     timeout_ms: Option<u64>,
 }
 
-/// A sibling's status, optionally waited on until it is no longer live.
+/// A sibling's status, optionally waited on until it is no longer live or
+/// its raw status is settled.
 async fn thread_wait(
     State(workspace): State<Shared>,
     Extension(caller): Extension<Caller>,
@@ -1503,20 +1504,25 @@ async fn thread_wait(
         if thread.project_id != caller.project_id {
             return Ok(refused("that thread is in another project"));
         }
+        // The row's own column, not the loaded thread's: `load_thread` answers
+        // with the display status, which maps a live mark to `stopped` and
+        // would make wait return while the PTY is still up. Same read as
+        // `thread_close`.
+        let status = workspace
+            .store()
+            .thread_status(&id)
+            .map(|(status, _)| status)
+            .unwrap_or_else(|| "idle".to_string());
         let live = workspace
             .live_ptys()
             .iter()
             .any(|p| p.thread_id == id);
         let waited = started.elapsed().as_millis() as u64;
-        let done = !live
-            || matches!(
-                thread.status.as_str(),
-                "ready" | "idle" | "stopped"
-            );
+        let done = !live || boite_core::settle::can_settle(&status);
         if done || waited >= timeout {
             return Ok(Json(json!({
                 "threadId": id,
-                "status": thread.status,
+                "status": status,
                 "live": live,
                 "waitedMs": waited,
             })));
