@@ -28,7 +28,7 @@ import { CLI_PRESETS } from "$lib/features/settings/cliPresets";
 import { resolveIconKey } from "$lib/shared/icons/detect";
 import { createProject } from "$lib/features/project/api";
 import { moveThreadToProject } from "$lib/features/thread/move";
-import { takesOpeningPrompt, withUnattendedArgs } from "$lib/features/thread/session";
+import { withUnattendedArgs } from "$lib/features/thread/session";
 import { closeThread, launchAgent } from "$lib/features/thread/api";
 import { canSettle } from "$lib/domain/thread-settle";
 import {
@@ -371,22 +371,16 @@ async function handleSpawn(req: SpawnRequest, from: RequestSource) {
     return;
   }
   if (prompt) {
-    app.setPendingPrompt(thread.id, prompt);
+    // Submit is for the CLIs that cannot take a positional: Boite types the
+    // briefing and presses Enter once the PTY is up. The ones that can take
+    // one consume this as argv and ignore the flag.
+    app.setPendingPrompt(thread.id, prompt, { submit: true });
     app.requestActivation(thread.id);
   }
   await answerRequest(req, { ok: true, threadId: thread.id }, from);
   notifications.success(
     t("thread.spawnedIn", { label: launch.label, project: project.name }),
   );
-  // Said out loud rather than logged. Only some CLIs take an opening
-  // instruction on the command line; for the rest the new thread starts at a
-  // bare prompt with no idea what it was opened for, and the agent that asked
-  // for it has already been told the hand-off worked.
-  if (prompt && !takesOpeningPrompt(launch.iconKey)) {
-    notifications.error(
-      t("thread.spawnNoPrompt", { label: launch.label, prompt }),
-    );
-  }
 }
 
 /**

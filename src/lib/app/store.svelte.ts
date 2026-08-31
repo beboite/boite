@@ -122,7 +122,8 @@ export class AppState {
   bumpRespawn = (id: string) => this.signals.bumpRespawn(id);
   markFresh = (id: string) => this.signals.markFresh(id);
   consumeFresh = (id: string) => this.signals.consumeFresh(id);
-  setPendingPrompt = (id: string, prompt: string) => this.signals.setPendingPrompt(id, prompt);
+  setPendingPrompt = (id: string, prompt: string, opts?: { submit?: boolean }) =>
+    this.signals.setPendingPrompt(id, prompt, opts);
   consumePendingPrompt = (id: string) => this.signals.consumePendingPrompt(id);
   flushPendingWrites = () => this.titleWrites.flush();
 

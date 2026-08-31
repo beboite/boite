@@ -1209,7 +1209,6 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "thread.spawnProjectGone": "Un agent a demandé un terminal dans un projet qui n'existe plus",
   "thread.spawnNoAgent": "Aucun agent nommé « {agent} » à démarrer",
   "thread.spawnedIn": "{label} ouvert dans {project}",
-  "thread.spawnNoPrompt": "{label} n'accepte pas de prompt d'ouverture, il a donc démarré sans. Ses instructions étaient : {prompt}",
   "thread.sessionCaptured": "Session capturée ({name})",
   "thread.sessionUpdated": "Session mise à jour ({name})",
   "thread.sessionReassigned": "Session déplacée de {from} vers {to}",

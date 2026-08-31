@@ -219,14 +219,16 @@ async function liveClaudeSession(sessionId: string, cwd: string) {
  * first-spawn latch and both have to be read exactly once per spawn.
  */
 function withPendingPrompt(thread: Thread, key: IconKey, argv: AgentArgv): AgentArgv {
-  const prompt = app.consumePendingPrompt(thread.id);
-  if (!prompt) return argv;
-  const next = withPromptArg(argv, key, prompt);
+  const pending = app.consumePendingPrompt(thread.id);
+  if (!pending) return argv;
+  const next = withPromptArg(argv, key, pending.text);
   if (next.typed) {
     // Typed into the PTY once the terminal is up instead. Worse than a
     // positional — it races the CLI's own startup — but a thread that was
     // opened for something specific and never told what is worse still.
-    stageTypedPrompt(thread.id, prompt);
+    // `submit` is the spawn path: the caller already got ok, so Boite
+    // presses Enter after the text lands. A move note does not.
+    stageTypedPrompt(thread.id, pending.text, pending.submit);
   }
   return next.argv;
 }

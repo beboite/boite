@@ -1192,18 +1192,25 @@
           });
         }
         // A thread whose CLI takes no positional prompt carries its opening line
-        // here instead. Typed, never submitted — the same rule the Todo panel
-        // follows, and for the same reason: an agent turn is expensive and hard
-        // to call back, so the Enter is the user's.
+        // here instead. Agent-initiated spawns submit after the text lands; a
+        // move note or a todo hand-off still leaves Enter to the user.
         //
         // Only on a real spawn. Reattaching means the agent is already mid-
         // conversation, and claiming is one-shot so a respawn cannot repeat it.
         if (!reattaching) {
           const opening = claimTypedPrompt(thread.id);
-          if (opening && ptyId) {
-            void ptyWrite(ptyId, encoder.encode(opening)).catch((err) => {
-              logger.warn("spawn", `could not type the opening prompt`, String(err));
-            });
+          const id = ptyId;
+          if (opening && id) {
+            void (async () => {
+              try {
+                await ptyWrite(id, encoder.encode(opening.text));
+                if (!opening.submit) return;
+                if (destroyed || generation !== spawnGeneration || ptyId !== id) return;
+                await ptyWrite(id, encoder.encode("\r"));
+              } catch (err) {
+                logger.warn("spawn", `could not type the opening prompt`, String(err));
+              }
+            })();
           }
         }
         // The line is written on the first byte rather than here, because a PTY

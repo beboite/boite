@@ -1217,7 +1217,6 @@ export const EN_MESSAGES = {
   "thread.spawnProjectGone": "An agent asked for a terminal in a project that is gone",
   "thread.spawnNoAgent": "No agent called '{agent}' to start",
   "thread.spawnedIn": "{label} opened in {project}",
-  "thread.spawnNoPrompt": "{label} takes no opening prompt, so it started without one. Its instructions were: {prompt}",
   "thread.sessionCaptured": "Session captured ({name})",
   "thread.sessionUpdated": "Session updated ({name})",
   "thread.sessionReassigned": "Session moved from {from} to {to}",
