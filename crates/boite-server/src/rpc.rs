@@ -291,13 +291,10 @@ pub async fn dispatch(state: &AppState, request: Authorized) -> Result<Value, St
             Ok(json!({ "thread": thread }))
         }
 
-        "thread.resize" => {
-            let id = str_param(&params, "threadId")?;
-            let cols = u16_param(&params, "cols")?;
-            let rows = u16_param(&params, "rows")?;
-            state.registry.resize(&id, cols, rows)?;
-            Ok(json!({ "ok": true }))
-        }
+        // `thread.resize` is not here. It is served by `ws.rs`, next to attach
+        // and detach, because the answer depends on which socket asked: several
+        // devices can be attached to one PTY, and only the one driving it may
+        // move its size. Nothing reaches this function carrying that.
 
         "thread.kill" => {
             let id = str_param(&params, "threadId")?;

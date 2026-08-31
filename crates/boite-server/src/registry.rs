@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -41,6 +42,184 @@ pub struct ThreadIdentity {
 /// store has never heard of.
 pub type IdentityLookup = Arc<dyn Fn(&str) -> Option<ThreadIdentity> + Send + Sync>;
 
+/// One connected client, for the length of one websocket connection.
+///
+/// Per connection rather than per attachment: a device holds one socket and
+/// watches several terminals through it, and it is the same pair of eyes at the
+/// same size in all of them.
+pub type ClientId = u64;
+
+/// Hands out the next client id. Process-wide and never reused, so a
+/// reconnecting device is a new client and cannot inherit the ownership its
+/// previous socket held.
+pub fn new_client_id() -> ClientId {
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    NEXT.fetch_add(1, Ordering::Relaxed)
+}
+
+/// What one attached client last told us about itself.
+struct ClientView {
+    size: (u16, u16),
+    /// Tick of this client's last keystroke, on [`Sizing::clock`]. `None` until
+    /// it types.
+    typed_at: Option<u64>,
+    /// Tick of its last attach, on the same clock.
+    attached_at: u64,
+}
+
+impl ClientView {
+    /// How this client ranks for taking the terminal over. Somebody who has
+    /// typed always beats somebody who has only ever watched, however recently
+    /// the watcher arrived: opening a terminal is not a claim on its shape,
+    /// which is the whole rule this file exists to hold.
+    fn standing(&self) -> (Option<u64>, u64) {
+        (self.typed_at, self.attached_at)
+    }
+}
+
+/// Who the PTY is sized for, when several devices are watching it.
+///
+/// A PTY has one size and a thread can have a laptop and a phone attached to it
+/// at once. Sizing it to whoever attached last meant a phone opening a terminal
+/// just to read it reflowed the laptop that was typing into it, mid-command.
+///
+/// So the size follows whoever is *driving*: the client that last sent input,
+/// and until anybody has typed, the one that attached last. Everyone else is
+/// watching, and a watcher may never move the PTY. Their size is still recorded,
+/// because a watcher that starts typing becomes the driver and the PTY has to
+/// fit it immediately.
+///
+/// Every method returns the size the caller must push to the PTY, or `None`
+/// when nothing moved. That keeps the whole rule pure and testable without a
+/// process on the other end, and keeps the `resize` syscall off this lock.
+struct Sizing {
+    /// The size the PTY is at right now.
+    pty: (u16, u16),
+    clients: HashMap<ClientId, ClientView>,
+    owner: Option<ClientId>,
+    /// Monotonic and local: ordering activity is all this needs, and a wall
+    /// clock stepping backwards would reorder it.
+    clock: u64,
+}
+
+impl Sizing {
+    fn new(cols: u16, rows: u16) -> Sizing {
+        Sizing {
+            pty: (cols.max(1), rows.max(1)),
+            clients: HashMap::new(),
+            owner: None,
+            clock: 0,
+        }
+    }
+
+    fn tick(&mut self) -> u64 {
+        self.clock += 1;
+        self.clock
+    }
+
+    /// Moves the PTY, whether or not it is already that size. What a client
+    /// driving the terminal asked for is passed on as asked: a redundant
+    /// SIGWINCH is what the single-client path has always sent, and a full-screen
+    /// app redrawing on one is not this layer's business.
+    fn set(&mut self, size: (u16, u16)) -> Option<(u16, u16)> {
+        self.pty = size;
+        Some(size)
+    }
+
+    /// Moves the PTY only if it is not already there. For the handovers, which
+    /// nobody asked for: a client taking over at the size the terminal already
+    /// has must not shake every attached view for nothing.
+    fn set_if_changed(&mut self, size: (u16, u16)) -> Option<(u16, u16)> {
+        (self.pty != size).then(|| {
+            self.pty = size;
+            size
+        })
+    }
+
+    /// A client opened this terminal. Alone it owns the size, which is what a
+    /// single-client attach has always done. Joining others it only registers
+    /// its shape and adopts theirs.
+    fn attach(&mut self, client: ClientId, cols: u16, rows: u16) -> Option<(u16, u16)> {
+        let at = self.tick();
+        let size = (cols.max(1), rows.max(1));
+        // A re-attach keeps whatever this client had already earned by typing.
+        let typed_at = self.clients.get(&client).and_then(|v| v.typed_at);
+        self.clients.insert(
+            client,
+            ClientView {
+                size,
+                typed_at,
+                attached_at: at,
+            },
+        );
+        if self.clients.len() == 1 || self.owner == Some(client) {
+            self.owner = Some(client);
+            return self.set(size);
+        }
+        None
+    }
+
+    /// An explicit resize. The owner's applies; anybody else's is recorded and
+    /// goes no further, so a phone refitting its xterm cannot shrink the laptop.
+    fn resize(&mut self, client: ClientId, cols: u16, rows: u16) -> Option<(u16, u16)> {
+        let size = (cols.max(1), rows.max(1));
+        let Some(view) = self.clients.get_mut(&client) else {
+            // Nobody is attached, so there is nobody to protect and no recorded
+            // size to protect them with. With an owner in place this is a stale
+            // frame from a client that has already detached: drop it.
+            return self.owner.is_none().then(|| self.set(size)).flatten();
+        };
+        view.size = size;
+        (self.owner == Some(client))
+            .then(|| self.set(size))
+            .flatten()
+    }
+
+    /// A keystroke. Typing is what makes a client the one driving, so it takes
+    /// the size with it.
+    fn input(&mut self, client: ClientId) -> Option<(u16, u16)> {
+        let at = self.tick();
+        // Not attached: `thread.reply` reaches a PTY from a device that never
+        // opened this terminal, and a device with no view of it has no size to
+        // impose on the ones that do.
+        let view = self.clients.get_mut(&client)?;
+        view.typed_at = Some(at);
+        let size = view.size;
+        if self.owner == Some(client) {
+            return None;
+        }
+        self.owner = Some(client);
+        self.set_if_changed(size)
+    }
+
+    /// A client left. If it was the owner, the client with the best standing
+    /// left takes over (last keystroke, or failing that last attach) and the PTY
+    /// goes back to that client's own size.
+    fn detach(&mut self, client: ClientId) -> Option<(u16, u16)> {
+        self.clients.remove(&client);
+        if self.owner != Some(client) {
+            return None;
+        }
+        // Tie-broken on the id so the successor is deterministic; a tie only
+        // happens between clients that have done nothing since attaching.
+        let next = self
+            .clients
+            .iter()
+            .max_by_key(|(id, view)| (view.standing(), **id))
+            .map(|(id, view)| (*id, view.size));
+        match next {
+            Some((id, size)) => {
+                self.owner = Some(id);
+                self.set_if_changed(size)
+            }
+            None => {
+                self.owner = None;
+                None
+            }
+        }
+    }
+}
+
 struct StatusState {
     status: ThreadStatus,
     last_working: Option<Instant>,
@@ -58,7 +237,8 @@ pub struct LiveThread {
     output: broadcast::Sender<Arc<Vec<u8>>>,
     title: Mutex<String>,
     status: Mutex<StatusState>,
-    size: Mutex<(u16, u16)>,
+    /// The PTY's size and who among the attached clients gets to decide it.
+    sizing: Mutex<Sizing>,
     cwd: String,
     /// Held for the length of one capture, so this thread never has two in
     /// flight at once.
@@ -236,7 +416,7 @@ impl Registry {
                 last_working: Some(Instant::now()),
                 turn_open: false,
             }),
-            size: Mutex::new((spec.cols.max(1), spec.rows.max(1))),
+            sizing: Mutex::new(Sizing::new(spec.cols, spec.rows)),
             cwd: spec.cwd.clone(),
             capture_lock: Arc::new(tokio::sync::Mutex::new(())),
         });
@@ -259,6 +439,7 @@ impl Registry {
     pub fn attach(
         &self,
         thread_id: &str,
+        client: ClientId,
         cols: u16,
         rows: u16,
         since: Option<u64>,
@@ -274,10 +455,20 @@ impl Registry {
             };
             (bytes, total, reset, live.output.subscribe())
         };
-        // Resize the PTY to the attaching client (last attacher wins).
-        let _ = self.pty.resize(&pty_id, cols, rows);
-        *live.size.lock() = (cols.max(1), rows.max(1));
-        let (c, r) = *live.size.lock();
+        // The PTY is sized for whoever is driving it, not for whoever arrived
+        // last. Alone, that is this client and the PTY takes its size. Joining
+        // a terminal somebody else is typing into, it adopts the size already
+        // there and gets it back in the snapshot, so a phone opening a terminal
+        // to read it cannot reflow the laptop's command. See `Sizing`.
+        let (want, c, r) = {
+            let mut sizing = live.sizing.lock();
+            let want = sizing.attach(client, cols, rows);
+            let (c, r) = sizing.pty;
+            (want, c, r)
+        };
+        if let Some((cols, rows)) = want {
+            let _ = self.pty.resize(&pty_id, cols, rows);
+        }
         Some(AttachSnapshot {
             cols: c,
             rows: r,
@@ -288,15 +479,57 @@ impl Registry {
         })
     }
 
+    /// Bytes into a PTY from something that is not a terminal a client is
+    /// looking at: `thread.reply`, which a device that never attached is
+    /// allowed to make. It moves no size, because the caller has no view of
+    /// this terminal to move it to.
     pub fn write(&self, thread_id: &str, bytes: &[u8]) -> Result<(), String> {
         let live = self.live(thread_id).ok_or("thread not live")?;
         self.pty.write(&live.pty_id(), bytes)
     }
 
-    pub fn resize(&self, thread_id: &str, cols: u16, rows: u16) -> Result<(), String> {
+    /// Keystrokes from an attached client. Typing is what makes a client the
+    /// one driving the terminal, so it takes the size with it: the PTY moves to
+    /// this client's own size before the bytes go in.
+    pub fn input(&self, thread_id: &str, client: ClientId, bytes: &[u8]) -> Result<(), String> {
         let live = self.live(thread_id).ok_or("thread not live")?;
-        *live.size.lock() = (cols.max(1), rows.max(1));
-        self.pty.resize(&live.pty_id(), cols, rows)
+        let want = live.sizing.lock().input(client);
+        if let Some((cols, rows)) = want {
+            let _ = self.pty.resize(&live.pty_id(), cols, rows);
+        }
+        self.pty.write(&live.pty_id(), bytes)
+    }
+
+    /// A client's terminal changed shape. The one driving moves the PTY; a
+    /// watcher's new size is recorded and applied only if it later starts
+    /// typing.
+    pub fn resize(
+        &self,
+        thread_id: &str,
+        client: ClientId,
+        cols: u16,
+        rows: u16,
+    ) -> Result<(), String> {
+        let live = self.live(thread_id).ok_or("thread not live")?;
+        let want = live.sizing.lock().resize(client, cols, rows);
+        match want {
+            Some((cols, rows)) => self.pty.resize(&live.pty_id(), cols, rows),
+            None => Ok(()),
+        }
+    }
+
+    /// A client closed this terminal, or its socket went away. If it was the
+    /// one driving, the most recently active client left takes over and the PTY
+    /// goes back to that client's size. The last one out changes nothing: the
+    /// PTY keeps the shape it had, as it always has.
+    pub fn detach(&self, thread_id: &str, client: ClientId) {
+        let Some(live) = self.live(thread_id) else {
+            return;
+        };
+        let want = live.sizing.lock().detach(client);
+        if let Some((cols, rows)) = want {
+            let _ = self.pty.resize(&live.pty_id(), cols, rows);
+        }
     }
 
     /// Kill the PTY. Blocking up to 5s when wait=true; call from a blocking
@@ -658,6 +891,166 @@ fn turn_edge(open: bool, declared: DeclaredTurn) -> Option<Edge> {
 
 
 #[cfg(test)]
+mod sizing_tests {
+    use super::*;
+
+    const LAPTOP: ClientId = 1;
+    const PHONE: ClientId = 2;
+    const TABLET: ClientId = 3;
+
+    /// One device, which is every terminal in the workspace most of the time.
+    /// Attaching sizes the PTY and every resize it sends lands, exactly as
+    /// before any of this existed.
+    #[test]
+    fn one_client_still_owns_its_terminal_outright() {
+        let mut s = Sizing::new(80, 24);
+        assert_eq!(s.attach(LAPTOP, 160, 50), Some((160, 50)));
+        assert_eq!(s.resize(LAPTOP, 120, 40), Some((120, 40)));
+        // Even to the size it already is: a client driving its own terminal
+        // gets the SIGWINCH it asked for.
+        assert_eq!(s.resize(LAPTOP, 120, 40), Some((120, 40)));
+        assert_eq!(s.pty, (120, 40));
+        // Nothing to hand over to, and nothing to undo.
+        assert_eq!(s.detach(LAPTOP), None);
+        assert_eq!(s.pty, (120, 40));
+    }
+
+    /// The bug. A phone opening a terminal to watch it used to resize the PTY
+    /// under the laptop that was typing into it.
+    #[test]
+    fn a_second_client_attaching_does_not_shrink_the_first() {
+        let mut s = Sizing::new(80, 24);
+        s.attach(LAPTOP, 160, 50);
+        assert_eq!(s.attach(PHONE, 40, 20), None, "a watcher moves nothing");
+        assert_eq!(s.pty, (160, 50));
+        assert_eq!(s.owner, Some(LAPTOP));
+    }
+
+    /// A watcher's refit is remembered and goes no further. The web client
+    /// fits its xterm on mount and sends one within a few hundred milliseconds
+    /// of attaching, so this is the ordinary path rather than an edge.
+    #[test]
+    fn a_watcher_resize_is_recorded_and_never_reaches_the_pty() {
+        let mut s = Sizing::new(80, 24);
+        s.attach(LAPTOP, 160, 50);
+        s.attach(PHONE, 40, 20);
+        assert_eq!(s.resize(PHONE, 30, 15), None);
+        assert_eq!(s.pty, (160, 50), "the laptop's command kept its width");
+        assert_eq!(s.clients[&PHONE].size, (30, 15), "but we know its shape");
+        // And the recorded shape is the one it gets the moment it types.
+        assert_eq!(s.input(PHONE), Some((30, 15)));
+    }
+
+    /// Typing is what makes a client the one driving, and the PTY follows it
+    /// the same tick.
+    #[test]
+    fn input_takes_ownership_and_the_pty_with_it() {
+        let mut s = Sizing::new(80, 24);
+        s.attach(LAPTOP, 160, 50);
+        s.attach(PHONE, 40, 20);
+        assert_eq!(s.input(PHONE), Some((40, 20)));
+        assert_eq!(s.owner, Some(PHONE));
+        // Already driving: every further keystroke is free.
+        assert_eq!(s.input(PHONE), None);
+        // And now the laptop is the watcher, so its refit stays local.
+        assert_eq!(s.resize(LAPTOP, 200, 60), None);
+        assert_eq!(s.pty, (40, 20));
+        // A handover to a client the PTY already fits shakes nobody.
+        s.attach(TABLET, 40, 20);
+        assert_eq!(s.input(TABLET), None);
+        assert_eq!(s.owner, Some(TABLET));
+    }
+
+    /// The owner leaving hands the terminal to whoever was busiest, and the PTY
+    /// goes back to that client's own size rather than sitting at the departed
+    /// one's.
+    #[test]
+    fn the_owner_leaving_hands_over_to_the_most_recently_active_client() {
+        let mut s = Sizing::new(80, 24);
+        s.attach(LAPTOP, 160, 50);
+        s.attach(PHONE, 40, 20);
+        s.attach(TABLET, 100, 30);
+        s.input(PHONE);
+        assert_eq!(s.owner, Some(PHONE));
+
+        assert_eq!(s.detach(PHONE), Some((100, 30)), "the tablet attached last");
+        assert_eq!(s.owner, Some(TABLET));
+        assert_eq!(s.pty, (100, 30));
+
+        // A watcher leaving is nobody's business.
+        assert_eq!(s.detach(LAPTOP), None);
+        assert_eq!(s.owner, Some(TABLET));
+        // Last one out: the PTY keeps whatever it had.
+        assert_eq!(s.detach(TABLET), None);
+        assert_eq!(s.owner, None);
+        assert_eq!(s.pty, (100, 30));
+    }
+
+    /// Having typed beats having just arrived, however late the arrival. A
+    /// device that only ever watched must not inherit the terminal's shape over
+    /// one that was using it, or the original bug comes back through the
+    /// handover instead of through the attach.
+    #[test]
+    fn handover_prefers_the_client_that_typed_over_the_one_that_only_watched() {
+        let mut s = Sizing::new(80, 24);
+        s.attach(LAPTOP, 160, 50);
+        s.attach(PHONE, 40, 20);
+        s.input(PHONE);
+        s.attach(TABLET, 100, 30);
+        // The tablet arrived after the phone typed, and neither of those moved
+        // ownership: the phone is still driving.
+        assert_eq!(s.owner, Some(PHONE));
+        s.input(LAPTOP);
+        assert_eq!(s.owner, Some(LAPTOP));
+        assert_eq!(
+            s.detach(LAPTOP),
+            Some((40, 20)),
+            "the phone typed; the tablet only opened the terminal"
+        );
+        assert_eq!(s.owner, Some(PHONE));
+    }
+
+    /// A client re-attaching (a reconnect, or a second `thread.attach` on the
+    /// same socket) is not a new watcher. Still driving, it still moves the PTY.
+    #[test]
+    fn the_owner_reattaching_still_sizes_the_pty() {
+        let mut s = Sizing::new(80, 24);
+        s.attach(LAPTOP, 160, 50);
+        s.attach(PHONE, 40, 20);
+        assert_eq!(s.attach(LAPTOP, 120, 40), Some((120, 40)));
+        assert_eq!(s.clients.len(), 2, "the same client, not a third one");
+        assert_eq!(s.owner, Some(LAPTOP));
+    }
+
+    /// A resize from a socket with no attachment. Nobody attached means nobody
+    /// to protect; an owner in place means this is a frame from a client that
+    /// has already gone, and it has no say.
+    #[test]
+    fn a_resize_from_an_unattached_client_only_lands_on_an_empty_terminal() {
+        let mut s = Sizing::new(80, 24);
+        assert_eq!(s.resize(LAPTOP, 100, 30), Some((100, 30)));
+        assert_eq!(s.clients.len(), 0, "nothing was recorded for it");
+
+        s.attach(PHONE, 40, 20);
+        assert_eq!(s.resize(LAPTOP, 200, 60), None);
+        assert_eq!(s.pty, (40, 20));
+        // Same for a stray keystroke: `thread.reply` reaches a PTY from a
+        // device that never opened this terminal.
+        assert_eq!(s.input(LAPTOP), None);
+        assert_eq!(s.owner, Some(PHONE));
+    }
+
+    /// Zero is not a terminal size, whichever door it comes in through.
+    #[test]
+    fn a_degenerate_size_is_clamped_rather_than_passed_on() {
+        let mut s = Sizing::new(0, 0);
+        assert_eq!(s.pty, (1, 1));
+        assert_eq!(s.attach(LAPTOP, 0, 0), Some((1, 1)));
+        assert_eq!(s.resize(LAPTOP, 0, 30), Some((1, 30)));
+    }
+}
+
+#[cfg(test)]
 mod status_tests {
     use super::*;
 
@@ -773,7 +1166,7 @@ mod sink_tests {
                 last_working: Some(Instant::now()),
                 turn_open: false,
             }),
-            size: Mutex::new((80, 24)),
+            sizing: Mutex::new(Sizing::new(80, 24)),
             cwd: String::new(),
             capture_lock: Arc::new(tokio::sync::Mutex::new(())),
         })

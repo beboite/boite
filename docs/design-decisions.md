@@ -60,10 +60,12 @@ philosophy.
 ## The PTY follows the client that is driving it
 
 Several devices can watch the same thread. The PTY has one size, so someone
-has to win. The rule: the client actually sending input owns the size; a
-device that attaches to watch does not resize anything unless it is alone.
-When the owner leaves, the most recently active client inherits. A phone
-opening a terminal read-only never shrinks the laptop's view.
+has to win. The rule: the client that last sent input owns the size, and
+until anybody has typed, the last to attach does; every other client is a
+watcher whose reported size is recorded but never pushed to the PTY. When the
+owner leaves, the client with the best standing inherits, having typed
+outranking having merely attached. A phone opening a terminal read-only never
+shrinks the laptop's view.
 
 Rendering a distinct viewport per client would mean server-side terminal
 emulation per device, which is a heavier machine than the problem deserves.

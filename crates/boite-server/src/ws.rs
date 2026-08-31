@@ -16,6 +16,7 @@ use crate::auth::Session;
 use crate::authz::Authorized;
 use crate::events::AppEvent;
 use crate::protocol::{self, Event, Request, Response};
+use crate::registry::{self, ClientId};
 use crate::rpc;
 use crate::state::AppState;
 
@@ -222,6 +223,10 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<AppState>, addr: Socket
     });
 
     let mut attached: HashMap<String, tokio::task::JoinHandle<()>> = HashMap::new();
+    // Who this connection is, as far as terminal sizing is concerned. A PTY has
+    // one size and several devices can be watching it, so the registry has to
+    // be able to tell them apart: see `registry::Sizing`.
+    let client: ClientId = registry::new_client_id();
 
     while let Some(Ok(msg)) = stream.next().await {
         match msg {
@@ -264,8 +269,32 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<AppState>, addr: Socket
                             &tx,
                             &mut attached,
                             &liveness,
+                            client,
                         )
                         .await;
+                    }
+                    // Served here rather than in `rpc::dispatch` for the same
+                    // reason attach and detach are: the answer depends on which
+                    // socket asked. A PTY has one size and several devices can
+                    // be attached to it, so a resize from a client that is only
+                    // watching is recorded and goes no further. The size
+                    // follows whoever is typing. See `registry::Sizing`.
+                    "thread.resize" => {
+                        let p = request.params();
+                        let resp = match (
+                            p.get("threadId").and_then(|v| v.as_str()),
+                            p.get("cols").and_then(|v| v.as_u64()),
+                            p.get("rows").and_then(|v| v.as_u64()),
+                        ) {
+                            (Some(tid), Some(cols), Some(rows)) => {
+                                match state.registry.resize(tid, client, cols as u16, rows as u16) {
+                                    Ok(()) => Response::ok(id, json!({ "ok": true })),
+                                    Err(e) => Response::err(id, e),
+                                }
+                            }
+                            _ => Response::err(id, "missing param: threadId, cols or rows".into()),
+                        };
+                        let _ = tx.send(WsOut::Text(json_str(&resp))).await;
                     }
                     "thread.detach" => {
                         if let Some(tid) = request.params().get("threadId").and_then(|v| v.as_str())
@@ -273,6 +302,11 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<AppState>, addr: Socket
                             if let Some(h) = attached.remove(tid) {
                                 h.abort();
                             }
+                            // Told before the reply goes out: if this client was
+                            // the one the PTY was sized for, another attached
+                            // device takes it over now rather than at its next
+                            // keystroke.
+                            state.registry.detach(tid, client);
                         }
                         let _ = tx
                             .send(WsOut::Text(json_str(&Response::ok(id, json!({ "ok": true })))))
@@ -304,7 +338,10 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<AppState>, addr: Socket
                     // terminal scope, so this set is empty for a device that
                     // does not hold one.
                     if op == protocol::FRAME_INPUT && attached.contains_key(&tid.to_string()) {
-                        let _ = state.registry.write(&tid.to_string(), payload);
+                        // `input` rather than `write`: typing is what makes a
+                        // client the one the PTY is sized for, so this is also
+                        // where a watching device becomes the driving one.
+                        let _ = state.registry.input(&tid.to_string(), client, payload);
                     }
                 }
             }
@@ -313,8 +350,12 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<AppState>, addr: Socket
         }
     }
 
-    for (_, h) in attached {
+    // A socket that just went away is a client that detached from everything it
+    // held. Said out loud, or a laptop closing its lid would leave every PTY it
+    // was driving sized for a device that is no longer there.
+    for (thread_id, h) in attached {
         h.abort();
+        state.registry.detach(&thread_id, client);
     }
     control.abort();
     writer.abort();
@@ -327,6 +368,7 @@ async fn handle_attach(
     tx: &mpsc::Sender<WsOut>,
     attached: &mut HashMap<String, tokio::task::JoinHandle<()>>,
     liveness: &Arc<Liveness>,
+    client: ClientId,
 ) {
     let thread_id = match params.get("threadId").and_then(|v| v.as_str()) {
         Some(s) => s.to_string(),
@@ -360,7 +402,10 @@ async fn handle_attach(
         h.abort();
     }
 
-    match state.registry.attach(&thread_id, cols, rows, since) {
+    // Not a detach: the same client re-attaching to the same terminal keeps
+    // whatever standing it had, and handing the size to somebody else only to
+    // take it straight back would resize the PTY twice for nothing.
+    match state.registry.attach(&thread_id, client, cols, rows, since) {
         Some(snap) => {
             // Replay marker carries the PTY size (so the client sizes its
             // terminal first), the end offset (tracked for the next reattach),
