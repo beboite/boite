@@ -392,9 +392,15 @@ pub fn find_claude_session_blocking(
     // guess below and its own live session was skipped by the filter after it.
     let tree = own_pid.map(ProcessTree::rooted_at);
     let ours = |pid: u32| tree.as_ref().is_some_and(|t| t.contains(pid));
-    let own_session: Option<String> = registry
-        .iter()
-        .find(|s| ours(s.pid))
+    // The registry naming the exact pid the PTY reports is the unambiguous
+    // answer, so it is asked first and the walk is only a fallback for the
+    // launcher case. Order matters twice over: the tree can be wrong when a
+    // recycled parent pid links two subtrees, and even when it is right,
+    // `find` returns whichever entry `read_dir` happened to hand back first,
+    // so two "ours" entries made the binding a coin flip.
+    let own_session: Option<String> = own_pid
+        .and_then(|pid| registry.iter().find(|s| s.pid == pid))
+        .or_else(|| registry.iter().find(|s| ours(s.pid)))
         .map(|s| s.id.clone());
 
     // A session held by our own PTY's process is not a reason to skip: it is
