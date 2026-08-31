@@ -745,6 +745,37 @@ async fn wait_reports_a_known_sibling() {
     assert!(out.0.get("status").is_some(), "{:?}", out.0);
 }
 
+/// `load_thread` maps a stored `running` to the display word `stopped`, so wait
+/// used to answer done on the first loop while the PTY was still live. Close
+/// already reads the raw column; a live running worker must sit out the wait.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn wait_does_not_treat_a_live_running_thread_as_done() {
+    let fake = Fake::new("wait-live")
+        .with_project("p1", "/w/one")
+        .with_busy_child("w1", "p1", "t1")
+        .with_live_pty("w1");
+    let shared: Shared = std::sync::Arc::new(fake);
+    let out = thread_wait(
+        State(shared),
+        Extension(agent("p1", "t1")),
+        axum::extract::Query(ThreadWaitIn {
+            thread_id: "w1".into(),
+            timeout_ms: Some(300),
+        }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(out.0["threadId"], json!("w1"));
+    assert_eq!(out.0["live"], json!(true), "{:?}", out.0);
+    assert_eq!(out.0["status"], json!("running"), "{:?}", out.0);
+    let waited = out.0["waitedMs"].as_u64().expect("waitedMs");
+    assert!(
+        waited > 0,
+        "done on the first loop while the PTY is live: waitedMs={waited} {:?}",
+        out.0
+    );
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn whereami_names_this_thread_and_project() {
     let fake = Fake::new("where").with_project("p1", "/w/one").with_thread("t1", "p1");
