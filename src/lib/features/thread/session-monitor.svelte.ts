@@ -142,6 +142,15 @@ export function startSessionMonitor(opts: {
   let deferrals = 0;
   let emptyScans = 0;
 
+  // Which session ids this monitor has already taken off which sibling. A
+  // handover happens once; taking the same id off the same thread a second time
+  // means the two of them disagree about who owns it, and the pair below is
+  // what stops that from running forever.
+  const takenFromSibling = new Map<string, Set<string>>();
+  // The (id, sibling) pairs already reported as contested, so the standing down
+  // is said once instead of on every 12s scan.
+  const contestedSaid = new Set<string>();
+
   // The guess, for the agents whose store cannot answer who owns what. Claude
   // can — `hit.ownPid` is its registry naming the process behind this very PTY
   // — and a fact is never put to a vote below.
@@ -267,6 +276,31 @@ export function startSessionMonitor(opts: {
         (x) => x.id !== threadId && x.sessionId === id,
       );
       if (sibling) {
+        // Claiming an id off a sibling is legitimate exactly once: the user
+        // moved a conversation, or a relaunch landed it in another thread. The
+        // second time, the sibling has taken it back, which means its own
+        // detector is just as sure the session is its own, and neither side
+        // will ever concede. That is what the recycled-parent-pid bug produced:
+        // both threads were told by the backend that the pid behind their PTY
+        // owned the same session, and they traded it every 12s, each swap
+        // firing a reassignment toast and a capture toast and blinking one
+        // thread's running dot. Whoever asks for the same id off the same
+        // sibling twice stands down instead, and the sibling keeps it.
+        const alreadyTaken = takenFromSibling.get(id);
+        if (alreadyTaken?.has(sibling.id)) {
+          const pair = `${id}|${sibling.id}`;
+          if (!contestedSaid.has(pair)) {
+            contestedSaid.add(pair);
+            logger.warn(
+              "session",
+              `${thread.label}: ${id} is contested with ${sibling.label}, which already took it back once; standing down so the two of them stop swapping it every scan`,
+              { id, sibling: sibling.label, cwd },
+            );
+          }
+          return false;
+        }
+        if (alreadyTaken) alreadyTaken.add(sibling.id);
+        else takenFromSibling.set(id, new Set([sibling.id]));
         logger.warn(
           "session",
           `${thread.label}: claiming ${id} from sibling ${sibling.label}`,
