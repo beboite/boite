@@ -1,3 +1,17 @@
+<script module lang="ts">
+  const stampers = new Map<string, Intl.DateTimeFormat>();
+
+  function stamper(locale: string, options: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
+    const key = `${locale}:${JSON.stringify(options)}`;
+    let fmt = stampers.get(key);
+    if (!fmt) {
+      fmt = new Intl.DateTimeFormat(locale, { ...options, timeZone: "UTC" });
+      stampers.set(key, fmt);
+    }
+    return fmt;
+  }
+</script>
+
 <script lang="ts">
   import { untrack } from "svelte";
   import { tip } from "$lib/shared/actions/tooltip";
@@ -10,6 +24,7 @@
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import Coins from "@lucide/svelte/icons/coins";
   import { activeLocale, t } from "$lib/i18n/index.svelte";
+  import { relativeClock } from "$lib/shared/utils/clock.svelte";
   import type { IconKey, Project } from "$lib/types";
 
   /**
@@ -66,15 +81,22 @@
   // Reads once per project. Nothing polls: a scan walks every transcript the
   // project has, and the answer only moves while an agent is mid-turn.
   //
-  // The call is untracked. It reads `cwds`, which moves every time a thread gets
-  // a worktree, and writes the store it also reads — tracked, the effect would
-  // re-scan on its own writes and on thread churn.
+  // `cwds.length` is tracked so a thread that gains a worktree after arrival
+  // asks again. The store write stays untracked: it writes the report this
+  // effect also reads, and without the untrack that write would re-scan.
   $effect(() => {
     void project.id;
+    void cwds.length;
     untrack(() => projectUsage.ensure(project, $state.snapshot(cwds)));
   });
 
-  const total = $derived(report?.models.reduce((sum, m) => sum + m.total, 0) ?? 0);
+  // totals() is the models sum, and that is the headline: the rows below are
+  // the same number broken up, and a second figure taken off the squares
+  // would make the two disagree. Days older than the grid still sit in it
+  // (the scan windows by mtime); they are dropped from peak and from the
+  // map so they cannot dim a year they are not on. The calendar is a window
+  // of this number, not a second total.
+  const total = $derived(projectUsage.totals(project.id).total);
 
   /**
    * A model string down to the part that tells two of them apart. The stores
@@ -124,16 +146,13 @@
    * Built in UTC because the backend buckets in UTC: it takes the date off the
    * transcript's own ISO timestamp rather than converting it, and a grid built
    * in local time would look up days that store never wrote.
+   *
+   * `relativeClock.now` is the day, not `new Date()`. The parent tree already
+   * ticks that clock; a snapshot of wall time left "today" sitting on yesterday
+   * after UTC midnight until something else reran this derived.
    */
   const cells = $derived.by(() => {
-    const totals = new Map<string, number>();
-    let peak = 1;
-    for (const d of report?.days ?? []) {
-      totals.set(d.day, d.total);
-      if (d.total > peak) peak = d.total;
-    }
-    const ceiling = Math.log10(1 + peak);
-    const now = new Date();
+    const now = new Date(relativeClock.now);
     const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
     // The last column is the week we are in, whole. Anchoring the span on today
     // and only then backing up to a Sunday dropped the rest of the current week
@@ -141,6 +160,19 @@
     // today's own square was not on it.
     const endSaturday = today + (6 - new Date(today).getUTCDay()) * DAY_MS;
     const start = endSaturday - (WEEKS * 7 - 1) * DAY_MS;
+    const firstDay = new Date(start).toISOString().slice(0, 10);
+    const totals = new Map<string, number>();
+    let peak = 1;
+    for (const d of report?.days ?? []) {
+      // The scan windows transcripts by file mtime, so a file touched this
+      // week can carry a day from last year. Those days never land on a
+      // square; counting them in peak dims every visible one against a day
+      // nobody can see.
+      if (d.day < firstDay) continue;
+      totals.set(d.day, d.total);
+      if (d.total > peak) peak = d.total;
+    }
+    const ceiling = Math.log10(1 + peak);
     const out: Cell[] = [];
     for (let i = 0; i < WEEKS * 7; i++) {
       const at = start + i * DAY_MS;
@@ -192,7 +224,7 @@
   );
 
   function stamp(at: number, options: Intl.DateTimeFormatOptions): string {
-    return new Date(at).toLocaleDateString(activeLocale(), { ...options, timeZone: "UTC" });
+    return stamper(activeLocale(), options).format(at);
   }
 
   /**
@@ -226,6 +258,7 @@
   let cardW = $state(150);
   let cardH = $state(48);
   let openTimer: ReturnType<typeof setTimeout> | null = null;
+  let sizeKey = "";
 
   /**
    * Long enough not to fire on a cursor crossing the calendar on its way
@@ -272,12 +305,52 @@
     hovered = null;
   }
 
-  $effect(() => {
-    void hovered;
-    if (!cardEl) return;
-    cardW = cardEl.offsetWidth;
-    cardH = cardEl.offsetHeight;
-  });
+  function down(event: PointerEvent) {
+    // A mouse down still dismisses, the way a click on a hover card does.
+    // Pointerdown on touch used to fire the same hide and kill the tap that
+    // had just opened it; a tap now toggles, and pointerleave is ignored for
+    // the same pointers so lifting the finger does not close it.
+    if (event.pointerType === "mouse") {
+      hide();
+      event.preventDefault();
+      return;
+    }
+    const target = (event.target as HTMLElement | null)?.closest<HTMLElement>(".cal-cell");
+    if (!target) return;
+    const cell = cells[Number(target.dataset.i)];
+    if (!cell || cell.future) return;
+    if (hovered?.cell.day === cell.day) {
+      hide();
+      return;
+    }
+    if (openTimer) {
+      clearTimeout(openTimer);
+      openTimer = null;
+    }
+    aim(target, cell);
+  }
+
+  function leave(event: PointerEvent) {
+    if (event.pointerType !== "mouse") return;
+    hide();
+  }
+
+  function onCellFocus(event: FocusEvent) {
+    const target = event.currentTarget as HTMLElement;
+    const cell = cells[Number(target.dataset.i)];
+    if (!cell || cell.future) return;
+    if (openTimer) {
+      clearTimeout(openTimer);
+      openTimer = null;
+    }
+    aim(target, cell);
+  }
+
+  function onCellBlur(event: FocusEvent) {
+    const next = event.relatedTarget as HTMLElement | null;
+    if (next?.closest(".cal-grid")) return;
+    hide();
+  }
 
   // A pending open outlives the pane it was armed in otherwise: leaving the
   // project page mid-sweep left a timer that fired into a component nobody was
@@ -325,6 +398,21 @@
       ? stamp(hovered.cell.at, { weekday: "short", day: "numeric", month: "short", year: "numeric" })
       : "",
   );
+
+  // The card's size only moves with the day string and whether that day spent
+  // anything. Sweeping the heat map used to reread offsetWidth on every square
+  // for a number that had not changed.
+  $effect(() => {
+    if (!hovered || !cardEl) {
+      sizeKey = "";
+      return;
+    }
+    const key = `${cardDay.length}:${hovered.cell.total > 0 ? 1 : 0}`;
+    if (key === sizeKey) return;
+    sizeKey = key;
+    cardW = cardEl.offsetWidth;
+    cardH = cardEl.offsetHeight;
+  });
 </script>
 
 <DashboardCard title={t("project.tokens")} class="lg:col-span-2">
@@ -415,9 +503,9 @@
       {/each}
     </ul>
 
-    <!-- The grid stays hidden from assistive tech: 371 squares whose only
-         label is a title read as nothing at all. This is the same year, as
-         rows, and it is the only path to it without a cursor. -->
+    <!-- The year as rows, for anything that cannot point at a square. The grid
+         itself is now a tab stop: a keyboard opens the same card the cursor
+         does, so this list is no longer the only path without a pointer. -->
     <ul class="sr-only" aria-label={t("project.tokensCalendar")}>
       {#each activeDays as day (day.day)}
         <li>{t("project.tokensDay", { total: fmt(day.total), day: day.day })}</li>
@@ -426,14 +514,14 @@
 
     <!-- Sized by the card, not by the year: every column is a fraction of the
          width, so the calendar ends where the card does. -->
-    <div class="cal mt-3" aria-hidden="true">
+    <div class="cal mt-3">
       <span></span>
-      <div class="cal-months">
+      <div class="cal-months" aria-hidden="true">
         {#each monthMarks as label, w (w)}
           <span class="text-2xs whitespace-nowrap text-muted-foreground/60">{label ?? ""}</span>
         {/each}
       </div>
-      <div class="cal-weekdays">
+      <div class="cal-weekdays" aria-hidden="true">
         {#each weekdayMarks as label, row (row)}
           <span class="text-2xs leading-none text-muted-foreground/60">{label ?? ""}</span>
         {/each}
@@ -443,22 +531,30 @@
            would fire per pixel for the same answer. -->
       <div
         class="cal-grid"
-        role="presentation"
+        role="group"
+        aria-label={t("project.tokensCalendar")}
         onpointerover={point}
-        onpointerleave={hide}
-        onpointerdown={hide}
+        onpointerleave={leave}
+        onpointerdown={down}
       >
         {#each cells as cell, i (cell.day)}
-          <span
-            class={[
-              "cal-cell",
-              cell.future && "invisible",
-              cell.today && "cal-today",
-              hovered?.cell.day === cell.day && "cal-on",
-            ]}
-            data-i={i}
-            style:background-color={cell.color}
-          ></span>
+          {#if cell.future}
+            <span class="cal-cell invisible" data-i={i} style:background-color={cell.color}></span>
+          {:else}
+            <button
+              type="button"
+              class={[
+                "cal-cell",
+                cell.today && "cal-today",
+                hovered?.cell.day === cell.day && "cal-on",
+              ]}
+              data-i={i}
+              style:background-color={cell.color}
+              aria-label={t("project.tokensDay", { total: fmt(cell.total), day: cell.day })}
+              onfocus={onCellFocus}
+              onblur={onCellBlur}
+            ></button>
+          {/if}
         {/each}
       </div>
     </div>
@@ -522,9 +618,19 @@
     aspect-ratio: 1;
     border-radius: 2px;
     min-width: 0;
+    width: 100%;
+    padding: 0;
+    border: 0;
+    margin: 0;
+    display: block;
+    appearance: none;
+    font: inherit;
     /* Only the ring moves, so pointing at a square never reflows the grid. */
     box-shadow: 0 0 0 0 transparent;
     transition: box-shadow 80ms ease-out;
+  }
+  .cal-cell:focus {
+    outline: none;
   }
   .cal-today {
     box-shadow: 0 0 0 1px var(--color-muted-foreground);

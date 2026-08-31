@@ -66,6 +66,12 @@
   // The switch writes to the database. Left free, a second click during that
   // write raced the first and the row could settle on the value nobody picked.
   let togglingAuto = $state(false);
+  // A click or a project switch while a list is in flight used to be dropped:
+  // `loading` was a mutex, so the new project's first read never started, and
+  // the old project's answer landed on the new one. The token is which call is
+  // still wanted; bumping it while a read is in flight makes that read retry
+  // with the project now on screen rather than apply under the new one.
+  let gen = 0;
 
   const repo = $derived(project.gitRoot ?? project.cwd);
   // Which thread is standing in which directory, so a row can say who is using
@@ -97,20 +103,43 @@
   }
 
   async function load() {
+    gen++;
     if (loading) return;
     loading = true;
-    failed = null;
+    let token = gen;
     try {
-      entries = await backendForPath(project.cwd).worktree.list(repo);
-      void measure();
-    } catch (err) {
-      // A project that is not a repository has no worktrees rather than an
-      // error worth a toast, but the panel still has to say which it is.
-      failed = String(err);
-      entries = [];
-      sizes = {};
+      for (;;) {
+        token = gen;
+        // Scratch is not a repository. Asking git anyway printed its fatal in
+        // the card, and the panel already knew it had nothing to list.
+        if (!canToggle) {
+          entries = [];
+          sizes = {};
+          failed = null;
+          break;
+        }
+        const cwd = project.cwd;
+        const root = repo;
+        try {
+          const listed = await backendForPath(cwd).worktree.list(root);
+          if (token !== gen) continue;
+          entries = listed;
+          failed = null;
+          void measure(token, cwd);
+        } catch (err) {
+          if (token !== gen) continue;
+          // A project that is not a repository has no worktrees rather than an
+          // error worth a toast, but the panel still has to say which it is.
+          failed = String(err);
+          entries = [];
+          sizes = {};
+        }
+        if (token !== gen) continue;
+        break;
+      }
     } finally {
       loading = false;
+      if (token !== gen) void load();
     }
   }
 
@@ -122,22 +151,40 @@
    * later. A failure leaves the button on its wordless label rather than
    * raising anything — the sweep works either way, it just cannot promise a
    * number.
+   *
+   * Paths already weighed stay put: a single remove used to rewalk every
+   * remaining checkout, and two overlapping walks could resolve out of order
+   * and write the older totals over the newer list.
    */
-  async function measure() {
+  async function measure(token: number, cwd: string) {
+    if (token !== gen) return;
     const paths = entries.filter((w) => !w.main).map((w) => w.path);
     if (paths.length === 0) {
       sizes = {};
       return;
     }
+    const present = new Set(paths);
+    const kept: Record<string, number> = {};
+    for (const [path, size] of Object.entries(sizes)) {
+      if (present.has(path)) kept[path] = size;
+    }
+    const missing = paths.filter((path) => !(path in kept));
+    if (missing.length === 0) {
+      sizes = kept;
+      return;
+    }
     try {
-      const measured = await backendForPath(project.cwd).worktree.sizes(paths);
-      const next: Record<string, number> = {};
-      paths.forEach((path, i) => {
+      const measured = await backendForPath(cwd).worktree.sizes(missing);
+      if (token !== gen) return;
+      const next = { ...kept };
+      missing.forEach((path, i) => {
         next[path] = measured[i] ?? 0;
       });
       sizes = next;
     } catch (err) {
+      if (token !== gen) return;
       logger.info("worktree", "could not measure worktrees", String(err));
+      sizes = kept;
     }
   }
 
@@ -147,9 +194,18 @@
   // Untracked, because `load` reads `loading` and then writes it: tracked, the
   // effect takes a dependency on its own write and re-runs the moment the read
   // finishes.
+  //
+  // The list is emptied here, not in `load`: a token only discards the answer,
+  // and until it arrives the card would keep showing the previous project's
+  // rows.
   $effect(() => {
     void project.id;
-    untrack(() => void load());
+    untrack(() => {
+      entries = [];
+      sizes = {};
+      failed = null;
+      void load();
+    });
   });
 
   async function toggleAuto() {
@@ -177,6 +233,12 @@
    * cleanup safe, so a panel that always forced would quietly undo that.
    */
   async function remove(w: WorktreeEntry) {
+    // Captured now: the confirm dialog can sit across a project switch, and
+    // reading `repo` / `cwd` after the await would point git at the project
+    // currently on screen rather than the one this row belongs to.
+    const cwd = project.cwd;
+    const root = repo;
+    const target = project;
     const holder = holders.get(pathKey(w.path));
     const detail = w.dirty && w.orphanCommits
       ? t("worktree.holdsBoth")
@@ -196,11 +258,11 @@
     if (!ok) return;
     busy[w.path] = true;
     try {
-      await backendForPath(project.cwd).worktree.remove(repo, w.path, holdsWork(w));
+      await backendForPath(cwd).worktree.remove(root, w.path, holdsWork(w));
       // The pool is primed once per project and has no way to notice a spare
       // going away from here. Without this the project runs without one until
       // the app is restarted.
-      if (w.spare) forgetWarmedWorktree(project);
+      if (w.spare) forgetWarmedWorktree(target);
       drop(w.path);
       await load();
     } catch (err) {
@@ -222,6 +284,9 @@
    */
   async function sweep() {
     if (sweeping) return;
+    const cwd = project.cwd;
+    const root = repo;
+    const target = project;
     const targets = sweepable;
     if (targets.length === 0) return;
     const ok = await confirmDialog.ask({
@@ -241,7 +306,7 @@
       for (const w of targets) {
         busy[w.path] = true;
         try {
-          await backendForPath(project.cwd).worktree.remove(repo, w.path, false);
+          await backendForPath(cwd).worktree.remove(root, w.path, false);
           if (w.spare) spareGone = true;
           drop(w.path);
         } catch (err) {
@@ -253,7 +318,7 @@
           delete busy[w.path];
         }
       }
-      if (spareGone) forgetWarmedWorktree(project);
+      if (spareGone) forgetWarmedWorktree(target);
       if (kept > 0) notifications.error(t("worktree.sweepKept", { count: kept }));
     } finally {
       sweeping = false;
@@ -285,11 +350,13 @@
     type="button"
     class="mt-1.5 flex w-full items-center justify-center gap-2 rounded-md border border-border bg-[var(--color-surface-2)] px-3 py-2 text-sm text-foreground transition hover:bg-[var(--color-surface-3)] disabled:cursor-default disabled:opacity-45 disabled:hover:bg-[var(--color-surface-2)]"
     onclick={() => void sweep()}
-    disabled={sweeping || sweepable.length === 0}
+    disabled={sweeping || loading || sweepable.length === 0}
   >
     <Eraser class="size-3.5 {sweeping ? 'animate-pulse' : ''}" />
     {#if sweeping}
       {t("worktree.sweeping")}
+    {:else if loading}
+      {t("worktree.sweepLoading")}
     {:else if sweepable.length === 0}
       {t("worktree.sweepNothing")}
     {:else if sweepableBytes > 0}
@@ -341,12 +408,18 @@
     </button>
   {/snippet}
 
-  <!-- Dimmed while the switch is off, list and all. The worktrees already on
-       disk are still real and still removable — the setting only decides what
-       the next thread does — so this reads as "not what happens here any more"
-       rather than as a disabled control. -->
-  <div class:opacity-50={canToggle && !autoWorktrees}>
-    {#if failed}
+  <!-- The switch being off does not make the rows a lie: they are still on
+       disk and still removable. A notice says so instead of dimming the list,
+       which also dimmed the delete controls and the warning badges. -->
+  <div>
+    {#if canToggle && !autoWorktrees}
+      <p class="px-3.5 pb-2 text-xs text-muted-foreground">{t("worktree.offNotice")}</p>
+    {/if}
+    {#if !canToggle}
+      <p class="px-3.5 pb-4 text-center text-sm text-muted-foreground">
+        {t("worktree.scratch")}
+      </p>
+    {:else if failed}
       <!-- git's own words, kept: "not a repository" and "git: command not found"
            are different problems with different fixes, and one generic line made
            them look like the same one. -->
@@ -398,7 +471,9 @@
                   </span>
                 {/if}
                 {#if w.locked}
-                  <Lock class="size-3 shrink-0 text-muted-foreground" />
+                  <span use:tip={t("worktree.lockedHint")}>
+                    <Lock class="size-3 shrink-0 text-muted-foreground" />
+                  </span>
                 {/if}
               </div>
 
