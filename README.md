@@ -1,5 +1,5 @@
 <h1 align="center">Boite</h1>
-<p align="center">A lightweight multi-agent terminal multiplexer. Run Claude Code, Codex, Opencode, Cursor, Antigravity, Copilot, Grok, Hermes, Pi and Muse Code side by side, grouped by project.</p>
+<p align="center">Mission control for coding agents. Run Claude Code, Codex, Opencode, Cursor, Antigravity, Copilot, Grok, Hermes, Pi and Muse Code side by side, each in its own git worktree, and see at a glance which one needs you.</p>
 
 <p align="center">
   <img src="./static/icons/icon-512.png" alt="Boite logo" width="140" />
@@ -15,16 +15,30 @@
   <a href="https://svelte.dev/"><img src="https://img.shields.io/badge/Svelte-5-FF3E00?logo=svelte" alt="Svelte" /></a>
 </p>
 
+<p align="center">
+  <a href="#why">Why</a> |
+  <a href="#supported-agents">Agents</a> |
+  <a href="#a-worktree-per-thread">Worktrees</a> |
+  <a href="#install">Install</a> |
+  <a href="#remote-and-mobile">Remote &amp; mobile</a> |
+  <a href="#agent-access-mcp">MCP</a> |
+  <a href="docs/design-decisions.md">Design decisions</a>
+</p>
+
 ## Why
 
 Half a dozen coding agents on one repo means half a dozen terminals, and no way
 to tell at a glance which one is waiting for you. Boite gives every agent a
-persistent thread inside a project, measures its working/ready state from what
-the agent declares and from the terminal's bottom rows, and remembers the
-command and the last session id.
+persistent thread inside a project, its own git worktree so no two agents fight
+over one checkout, a working/ready state measured from what the agent declares
+and from the terminal's bottom rows, and the command and last session id
+remembered across restarts. The job is supervision: know what your agents are
+doing, read what they produced, answer the one that is blocked.
 
-It is a terminal multiplexer first: everything is a real PTY, nothing is
-wrapped, and a blank shell is one keystroke away.
+Underneath sits a real terminal multiplexer: everything is a real PTY, nothing
+is wrapped, and a blank shell is one keystroke away. The tradeoffs behind the
+big calls, shared dependency directories, status heuristics, scope model, are
+argued in [docs/design-decisions.md](docs/design-decisions.md).
 
 ## Features
 
@@ -61,10 +75,12 @@ won't get status or resume detection.
 | Muse Code      | `muse`                  | ✅          | `resume <id>`     | ❌            | ❌         |
 | Plain shell    | your default shell      | n/a         | n/a               | n/a           | n/a        |
 
-- **Live status** is the working/ready dot. Claude, Codex and Opencode each
-  record what they are doing in a store of their own; the other seven are read
-  off the shape of the terminal's bottom rows. Neither source expires, so a
-  finished turn reads as finished rather than as the absence of noise.
+- **Live status** is the working/ready dot. Claude, Codex, Opencode and Grok
+  each record what they are doing in a store of their own; the other six are
+  read off the shape of the terminal's bottom rows. Neither source expires, so
+  a finished turn reads as finished rather than as the absence of noise. Every
+  source collapses to one declared-turn shape before the UI sees it; the
+  reasoning is in [docs/design-decisions.md](docs/design-decisions.md).
 - **Resume flag** is what Boite appends once it has found the conversation
   matching the thread's cwd. Muse has no Windows build, so its row is read off
   its documented CLI and it has no session detection yet.
@@ -346,7 +362,9 @@ need. This is a Cargo workspace, so bundles land in the repo-root
 
 [`docs/development.md`](docs/development.md) covers running a dev window beside
 a release install, [`docs/releasing.md`](docs/releasing.md) cutting a release,
-and [`AGENTS.md`](AGENTS.md) the rules that are easy to break.
+[`docs/design-decisions.md`](docs/design-decisions.md) the tradeoffs and why
+they were chosen, and [`AGENTS.md`](AGENTS.md) the rules that are easy to
+break.
 
 ## Stack
 
