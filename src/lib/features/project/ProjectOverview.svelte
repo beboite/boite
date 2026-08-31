@@ -1,9 +1,11 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import { tip } from "$lib/shared/actions/tooltip";
   import { app } from "$lib/app/store.svelte";
   import { gitStore, gitScope } from "$lib/features/git/store.svelte";
   import { todos } from "$lib/features/todo/store.svelte";
+  import { notifications } from "$lib/features/notifications/store.svelte";
+  import { confirmDialog } from "$lib/shared/components/confirm.svelte";
   import TodoList from "$lib/features/todo/TodoList.svelte";
   import DashboardCard from "./DashboardCard.svelte";
   import ProjectWorktrees from "./ProjectWorktrees.svelte";
@@ -28,7 +30,7 @@
   import ArrowDown from "@lucide/svelte/icons/arrow-down";
   import { t } from "$lib/i18n/index.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
-  import type { Project, Thread } from "$lib/types";
+  import type { Project, Thread, TodoItem } from "$lib/types";
 
   /**
    * What is true about a project right now.
@@ -49,25 +51,48 @@
 
   // Minus what the project put away. The sidebar's own drawer is the one place
   // a settled thread shows up, so a card here that still counted them would be
-  // the putting-away looking like it did not take.
-  const threads = $derived(
-    app.threadsByProjectSorted(project.id).filter((x) => !isSettled(x)),
-  );
-  const running = $derived(
-    threads.filter((x) => x.status === "running" || x.status === "waiting").length,
-  );
+  // the putting-away looking like it did not take. The unfiltered list stays
+  // because an empty card has two meanings: nothing was ever started, or
+  // everything here was put away, and those are not the same sentence.
+  const listed = $derived(app.threadsByProjectSorted(project.id));
+  const threads = $derived(listed.filter((x) => !isSettled(x)));
+  // Waiting is its own count. Folded into "N working" it contradicted the row
+  // below that already said "waiting on you".
+  const running = $derived(threads.filter((x) => x.status === "running").length);
+  const waiting = $derived(threads.filter((x) => x.status === "waiting").length);
   // The page is about the project, so it watches the project's own checkout.
   // The git panel may be pointed at a thread's worktree at the same time; the
   // two are separate scopes and no longer reset each other.
   const gitTarget = $derived(gitScope(project.id, project.gitRoot ?? project.cwd));
   const git = $derived(gitStore.get(gitTarget));
   // One pass over the todo table, filtered three ways, instead of three passes.
-  const projectTodos = $derived(todos.forProject(project.id));
-  const openTodos = $derived(projectTodos.filter((x) => x.state !== "done"));
-  const claimedTodos = $derived(projectTodos.filter((x) => x.state === "claimed"));
-  const doneTodos = $derived(projectTodos.filter((x) => x.state === "done"));
-  const changed = $derived(
-    git ? git.staged.length + git.unstaged.length + git.conflicts.length : 0,
+  const { openTodos, claimedTodos, doneTodos } = $derived.by(() => {
+    const openTodos: TodoItem[] = [];
+    const claimedTodos: TodoItem[] = [];
+    const doneTodos: TodoItem[] = [];
+    for (const item of todos.forProject(project.id)) {
+      if (item.state === "done") doneTodos.push(item);
+      else {
+        openTodos.push(item);
+        if (item.state === "claimed") claimedTodos.push(item);
+      }
+    }
+    return { openTodos, claimedTodos, doneTodos };
+  });
+  // git-status lists a partially staged file in both staged and unstaged, so
+  // summing the three arrays counted one path twice.
+  const changed = $derived.by(() => {
+    if (!git) return 0;
+    const paths = new Set<string>();
+    for (const entry of git.staged) paths.add(entry.path);
+    for (const entry of git.unstaged) paths.add(entry.path);
+    for (const entry of git.conflicts) paths.add(entry.path);
+    return paths.size;
+  });
+  const pathTip = $derived(
+    project.gitRoot && project.gitRoot !== project.cwd
+      ? `${project.cwd} · ${t("project.repoAt", { path: project.gitRoot })}`
+      : project.cwd,
   );
 
   // Every relative label on this page moves off one clock, which stops while the
@@ -81,11 +106,49 @@
   // The git panel refreshes while it is open; this page may be the only thing
   // looking, so it asks once on arrival rather than drawing an empty card.
   // `ensure` first, always: `refresh` reads the directory the store was told
-  // about and returns silently when nobody has told it one.
+  // about and returns silently when nobody has told it one. The log is asked
+  // for only when the store has none: the git panel may already have filled
+  // it, and forcing a reload on every visit walks the same commits this card
+  // is about to draw. Untracked so filling the log does not fire the effect
+  // again.
   $effect(() => {
     const registered = gitStore.ensure(project.id, project.gitRoot ?? project.cwd);
-    void gitStore.refresh(registered, { reloadLog: true }).catch(() => {});
+    const reloadLog = untrack(() => (gitStore.get(registered)?.log.length ?? 0) === 0);
+    void gitStore.refresh(registered, { reloadLog }).catch(() => {});
   });
+
+  // The dashboard is where a task occurs to you, so it takes one here rather
+  // than sending you to the panel. Adding keeps the focus: a list is usually
+  // written as a burst of lines, not one. The input is emptied on submit so
+  // the next line can be typed without waiting; a failure has to put it back,
+  // otherwise the only copy of what was typed is gone and the list never grew.
+  let todoDraft = $state("");
+  async function addTodo() {
+    const title = todoDraft.trim();
+    if (!title) return;
+    todoDraft = "";
+    try {
+      await todos.add(project.id, title);
+    } catch {
+      todoDraft = title;
+      notifications.error(t("todo.saveFailed"));
+    }
+  }
+
+  // Same door as a single remove: the rows do not come back, and the eraser
+  // used to skip the question the rest of this surface asks.
+  async function clearDone() {
+    const count = doneTodos.length;
+    if (count === 0) return;
+    const ok = await confirmDialog.ask({
+      title: t("todo.clearDoneConfirmTitle", { count }),
+      message: t("todo.clearDoneConfirmMessage", { count }),
+      confirmLabel: t("todo.clearDoneConfirmAction"),
+      danger: true,
+    });
+    if (!ok) return;
+    await todos.clearDone(project.id);
+  }
 
   /**
    * How long this terminal has been doing what it is doing.
@@ -95,26 +158,17 @@
    * was made, so a thread that has not moved since the app started still reads
    * as old rather than as brand new.
    */
-  // The dashboard is where a task occurs to you, so it takes one here rather
-  // than sending you to the panel. Adding keeps the focus: a list is usually
-  // written as a burst of lines, not one.
-  let todoDraft = $state("");
-  async function addTodo() {
-    const title = todoDraft.trim();
-    if (!title) return;
-    todoDraft = "";
-    await todos.add(project.id, title);
-  }
-
   function activity(thread: Thread): string {
     const since = threadActivitySince(thread.id) ?? thread.createdAt;
     const span = Math.max(0, relativeClock.now - since);
     // The status the dot shows, not the one the row stores: a thread parked by a
     // workspace switch still holds its PTY, and calling that one "never started"
-    // would contradict the green dot beside it.
+    // would contradict the green dot beside it. `ready` is that parked-alive
+    // case; falling through would print "done", which is the other lie.
     const status = visibleStatus(thread.status, !!thread.ptyId);
     if (status === "running") return t("project.threadWorking", { span: formatSpan(span) });
     if (status === "waiting") return t("project.threadWaiting", { span: formatSpan(span) });
+    if (status === "ready") return t("project.threadReady", { span: formatSpan(span) });
     if (status === "idle") return t("project.threadIdle", { span: formatSpan(span) });
     return t("project.threadFinished", { ago: formatAgo(span) });
   }
@@ -130,9 +184,18 @@
   >
     {#snippet icon()}<TerminalIcon class="size-3.5" />{/snippet}
     {#snippet lead()}
-      {#if running > 0}
-        <span class="text-xs text-[var(--color-success)]">
-          {t("project.threadsRunning", { count: running })}
+      {#if running > 0 || waiting > 0}
+        <span class="inline-flex items-center justify-end gap-2">
+          {#if running > 0}
+            <span class="text-xs text-[var(--color-success)]">
+              {t("project.threadsRunning", { count: running })}
+            </span>
+          {/if}
+          {#if waiting > 0}
+            <span class="text-xs text-[var(--color-warning)]">
+              {t("project.threadsWaiting", { count: waiting })}
+            </span>
+          {/if}
         </span>
       {/if}
     {/snippet}
@@ -158,7 +221,9 @@
       {/if}
     {/snippet}
     {#if threads.length === 0}
-      <p class="px-3.5 pb-3 text-sm text-muted-foreground">{t("project.noThreads")}</p>
+      <p class="px-3.5 pb-3 text-sm text-muted-foreground">
+        {listed.length > 0 ? t("project.noThreadsSettled") : t("project.noThreads")}
+      </p>
     {:else}
       <ul class="flex max-h-64 flex-col scroll-pane overflow-y-auto px-2 pb-2">
         {#each threads as thread (thread.id)}
@@ -181,7 +246,10 @@
                 />
               </span>
               <span class="min-w-0 flex-1">
-                <span class="block truncate text-base text-foreground/80">
+                <span
+                  class="block truncate text-base text-foreground/80"
+                  use:tip={thread.title ?? thread.label}
+                >
                   {thread.title ?? thread.label}
                 </span>
                 <span class="block truncate text-xs text-muted-foreground/80">
@@ -201,6 +269,10 @@
     {#snippet icon()}<GitBranch class="size-3.5" />{/snippet}
     {#if !git?.loaded}
       <p class="text-sm text-muted-foreground">{t("common.loading")}</p>
+    {:else if git.error}
+      <!-- The store keeps the last good lists when a refresh fails, so without
+           this branch a moved folder or a missing git still looked clean. -->
+      <p class="text-sm text-[var(--color-danger)]">{git.error}</p>
     {:else if !git.isRepo}
       <p class="text-sm text-muted-foreground">{t("project.notARepo")}</p>
     {:else}
@@ -212,13 +284,19 @@
           {git.branch ?? t("project.detached")}
         </p>
         {#if git.ahead > 0}
-          <span class="flex shrink-0 items-center text-xs text-muted-foreground">
-            <ArrowUp class="size-3" />{git.ahead}
+          <span
+            class="flex shrink-0 items-center text-xs text-muted-foreground"
+            aria-label={t("project.gitAhead", { count: git.ahead })}
+          >
+            <ArrowUp class="size-3" aria-hidden="true" />{git.ahead}
           </span>
         {/if}
         {#if git.behind > 0}
-          <span class="flex shrink-0 items-center text-xs text-muted-foreground">
-            <ArrowDown class="size-3" />{git.behind}
+          <span
+            class="flex shrink-0 items-center text-xs text-muted-foreground"
+            aria-label={t("project.gitBehind", { count: git.behind })}
+          >
+            <ArrowDown class="size-3" aria-hidden="true" />{git.behind}
           </span>
         {/if}
       </div>
@@ -264,7 +342,7 @@
       <button
         type="button"
         class="rounded p-1 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:opacity-40"
-        onclick={() => todos.clearDone(project.id)}
+        onclick={() => void clearDone()}
         disabled={doneTodos.length === 0}
         use:tip={doneTodos.length === 0
           ? t("todo.nothingDone")
@@ -312,7 +390,14 @@
        calendar wants the width, the figures beside it do not. -->
   <ProjectUsage {project} />
 
-  <ProjectStats {project} openTodos={openTodos.length} commits={git?.commitCount ?? 0} />
+  <ProjectStats
+    {project}
+    threadCount={threads.length}
+    openTodos={openTodos.length}
+    commits={git?.commitCount ?? 0}
+    gitLoaded={!!git?.loaded}
+    gitIsRepo={!!git?.isRepo}
+  />
 
   <!-- Where the agents actually are, and what this project does with them.
        Two cards from one component, because the switch decides what the list
@@ -328,7 +413,7 @@
        strings was room the rest of the page wanted. -->
   <p
     class="truncate px-1 text-xs text-muted-foreground/70 lg:col-span-3"
-    use:tip={project.cwd}
+    use:tip={pathTip}
   >
     {project.cwd}{#if project.gitRoot && project.gitRoot !== project.cwd}
       · {t("project.repoAt", { path: project.gitRoot })}

@@ -2,7 +2,6 @@
   import DashboardCard from "./DashboardCard.svelte";
   import { tip } from "$lib/shared/actions/tooltip";
   import { formatTokens as fmt, projectUsage } from "./usage.svelte";
-  import { app } from "$lib/app/store.svelte";
   import ChartNoAxesColumn from "@lucide/svelte/icons/chart-no-axes-column";
   import { t } from "$lib/i18n/index.svelte";
   import type { Project } from "$lib/types";
@@ -19,11 +18,18 @@
    * Nothing here is fetched: the usage store is already loaded by the card
    * beside this one, and the rest is counted off state the app holds.
    */
-  type Props = { project: Project; openTodos: number; commits: number };
-  let { project, openTodos, commits }: Props = $props();
+  type Props = {
+    project: Project;
+    openTodos: number;
+    commits: number;
+    /** The same list the Threads card draws, settled ones already gone. */
+    threadCount: number;
+    gitLoaded: boolean;
+    gitIsRepo: boolean;
+  };
+  let { project, openTodos, commits, threadCount, gitLoaded, gitIsRepo }: Props = $props();
 
   const report = $derived(projectUsage.report(project.id));
-  const threads = $derived(app.threadsByProject(project.id));
 
   const totals = $derived.by(() => {
     const acc = { input: 0, output: 0, cacheWrite: 0, cacheRead: 0, total: 0 };
@@ -38,18 +44,24 @@
   });
 
   // The transcripts were never read, so the two rows that come out of them
-  // have no number behind them. `0` is what they used to show, which reads as
-  // an agent count that was measured; the dash is the same nothing this card
-  // already draws for a commit count it does not have.
-  const unread = $derived(report?.unreachable === true);
+  // have no number behind them. A missing report is the same unknown as an
+  // unreachable one: `0` is a count we never made, and the first scan used
+  // to print that fake zero until the usage card landed.
+  const unread = $derived(!report || report.unreachable);
   const unreadHint = $derived(unread ? t("project.tokensUnreachable") : null);
 
   // Two groups, because they answer different questions: what the project is,
-  // and what its agents have burned reading it.
+  // and what its agents have burned reading it. A real empty repo has zero
+  // commits; the dash is for when we have not read one, not for a count of
+  // zero.
   const rows = $derived([
-    { label: t("stats.threads"), value: String(threads.length), hint: null },
+    { label: t("stats.threads"), value: String(threadCount), hint: null },
     { label: t("stats.openTodos"), value: String(openTodos), hint: null },
-    { label: t("stats.commits"), value: commits > 0 ? String(commits) : "—", hint: null },
+    {
+      label: t("stats.commits"),
+      value: gitLoaded && gitIsRepo ? String(commits) : "—",
+      hint: null,
+    },
     {
       label: t("stats.sessions"),
       value: unread ? "—" : String(report?.sessions ?? 0),
