@@ -6,6 +6,7 @@ import {
   modelLabels,
   parseCombo,
   parseFastpickAgent,
+  replayCombo,
 } from "./combo";
 
 function model(id: string, label: string | null): FastpickModel {
@@ -136,6 +137,42 @@ describe("parseCombo", () => {
       "--harness", "h", "--provider", "p", "--model", "m", "--no-md",
     ]);
     expect(combo?.prompts).toEqual([]);
+  });
+});
+
+describe("replayCombo", () => {
+  it("rebuilds the combo and drops whatever sat behind --", () => {
+    const launch = replayCombo("fastpick", [
+      "--harness", "claude-code", "--provider", "crof", "--model", "deepseek-v4-pro",
+      "--key", "crof.work", "--effort", "high", "--md", "work",
+      "--", "--resume", "old-session", "--mcp-config", "C:/stale.json",
+    ]);
+    expect(launch).toEqual({
+      cmd: "fastpick",
+      args: [
+        "--harness", "claude-code", "--provider", "crof", "--model", "deepseek-v4-pro",
+        "--key", "crof.work", "--effort", "high", "--md", "work",
+      ],
+      label: "deepseek-v4-pro · crof.work",
+      iconKey: "claude",
+    });
+  });
+
+  it("picks the icon from the harness, not from the binary name", () => {
+    expect(replayCombo("fastpick", [
+      "--harness", "pi", "--provider", "acme", "--model", "acme-large",
+    ])?.iconKey).toBe("pi");
+  });
+
+  it("recognises the launcher however the thread spells it", () => {
+    const args = ["--harness", "claude-code", "--provider", "p", "--model", "m"];
+    expect(replayCombo("fastpick.exe", args)?.cmd).toBe("fastpick");
+    expect(replayCombo("C:\\Users\\x\\.cargo\\bin\\fastpick.exe", args)?.cmd).toBe("fastpick");
+  });
+
+  it("leaves a native CLI alone, which is what the preset path is for", () => {
+    expect(replayCombo("claude", ["--dangerously-skip-permissions"])).toBeNull();
+    expect(replayCombo("fastpick", ["--harness", "claude-code"])).toBeNull();
   });
 });
 

@@ -50,7 +50,7 @@ export class ThreadSignals {
    * describes one launch, and replaying it on a later relaunch would re-brief an
    * agent about a move it already knows about.
    */
-  #prompts = new Map<string, string>();
+  #prompts = new Map<string, { text: string; submit: boolean }>();
 
   bumpRespawn(threadId: string) {
     this.respawnNonce[threadId] = (this.respawnNonce[threadId] ?? 0) + 1;
@@ -81,12 +81,12 @@ export class ThreadSignals {
     return this.#fresh.delete(threadId);
   }
 
-  setPendingPrompt(threadId: string, prompt: string) {
+  setPendingPrompt(threadId: string, prompt: string, opts?: { submit?: boolean }) {
     const text = prompt.trim();
-    if (text) this.#prompts.set(threadId, text);
+    if (text) this.#prompts.set(threadId, { text, submit: opts?.submit === true });
   }
 
-  consumePendingPrompt(threadId: string): string | null {
+  consumePendingPrompt(threadId: string): { text: string; submit: boolean } | null {
     const prompt = this.#prompts.get(threadId) ?? null;
     this.#prompts.delete(threadId);
     return prompt;

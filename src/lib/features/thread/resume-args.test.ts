@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseCombo } from "$lib/features/fastpick/combo";
+import { parseCombo, replayCombo } from "$lib/features/fastpick/combo";
 import {
   joinArgv,
   resumeArgv,
@@ -185,6 +185,15 @@ describe("resumeArgv", () => {
     const out = joinArgv(withMcpArgs(argv, ["--mcp-config", "C:/cfg.json"]));
     expect(out.indexOf("--mcp-config")).toBeGreaterThan(out.indexOf("--"));
     expect(out.filter((a) => a === "--")).toHaveLength(1);
+  });
+
+  it("does the same for a combo replayed from the caller, which has no -- of its own", () => {
+    const launch = replayCombo("fastpick", FASTPICK_CLAUDE);
+    expect(launch).not.toBeNull();
+    const argv = splitArgv(launch!.cmd, launch!.args);
+    const out = joinArgv(withMcpArgs(argv, ["--mcp-config", "C:/cfg.json"]));
+    expect(launch!.args).not.toContain("--");
+    expect(out.indexOf("--mcp-config")).toBeGreaterThan(out.indexOf("--"));
   });
 
   it("names the model again on a codex resume through fastpick", () => {
