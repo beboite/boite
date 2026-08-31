@@ -1168,26 +1168,43 @@ pub fn remove_worktree_blocking(
     Ok(())
 }
 
-/// Moves an existing worktree into its project's `.boite/worktrees`, keeping
-/// everything in it.
+/// Whether `dir` is a live worktree of `repo`.
 ///
-/// `git worktree move` is not used, because it cannot do this job: it renames,
-/// and a rename across volumes fails with `Improper link`. Migrating from a
-/// base beside the database to one inside the project is precisely the
-/// cross-volume case, and it is the case that matters most, since a shared
-/// volume is the whole reason to migrate. What works instead is the sequence
-/// git documents for a relocated worktree: put the directory where you want it,
-/// then `git worktree repair`.
+/// A worktree's `.git` is a file pointing at `<repo>/.git/worktrees/<name>`,
+/// so its grandparent is the repository's own git directory. A directory that
+/// does not say that belongs to something else, and handing it over would
+/// start an agent inside it.
 ///
-/// The provisioned directories are removed rather than carried across. They are
-/// reproducible by definition — that is what puts them in the policy — and they
-/// are also the only thing here big enough to make the copy slow. Removing them
-/// first is what turns migrating a 20 GB worktree into copying its source, and
-/// `provision_shared_artifacts` puts them back at the far end for nothing.
-///
-/// Links go before the copy for a harder reason: a junction copied by value is
-/// the main checkout's `node_modules` duplicated into the worktree, and a
-/// junction followed by a delete is that same directory emptied.
+/// Ours, and git no longer knows it: the administrative entry holds the
+/// worktree's HEAD and index, so without it every git command run in there
+/// answers `fatal: not a git repository`. That is not a checkout to start a
+/// thread in.
+fn owned_worktree_dir(repo: &Path, dir: &Path) -> Option<PathBuf> {
+    if !dir.is_dir() {
+        return None;
+    }
+    let owner = git_dir(dir)?;
+    // `.git/worktrees/<name>`, not `.git/modules/<name>`: a submodule's git
+    // dir has the same grandparent and is not a checkout to hand a thread.
+    let worktrees_dir = owner.parent()?;
+    if worktrees_dir.file_name() != Some(std::ffi::OsStr::new("worktrees")) {
+        return None;
+    }
+    let common = worktrees_dir.parent()?;
+    let mine = git_dir(repo)?;
+    // `same_dir` compares text first, then asks the filesystem: one path is
+    // built by joining and the other is read out of a `.git` file that git may
+    // have written relative to the worktree. Asking the filesystem is what
+    // settles a `..` in the middle.
+    if !same_dir(common, &mine) {
+        return None;
+    }
+    if !owner.is_dir() {
+        return None;
+    }
+    Some(dir.to_path_buf())
+}
+
 /// Gives a thread back the worktree it lost the path to.
 ///
 /// The database row is the only record of which directory a thread runs in, and
@@ -1206,24 +1223,7 @@ pub fn remove_worktree_blocking(
 pub fn adopt_worktree_blocking(repo: &str, thread_id: &str) -> Option<String> {
     let r = Path::new(repo);
     let dir = scoped_dir_for(&worktree_base_for(r), thread_id);
-    if !dir.is_dir() {
-        return None;
-    }
-    // A directory of the right name that does not say it belongs to this
-    // repository belongs to something else, and handing it over would start an
-    // agent inside it.
-    let owner = worktree_owner_of(r, &dir)?;
-    // Ours, and git no longer knows it. The administrative entry holds the
-    // worktree's HEAD and index, so without it every git command run in there
-    // answers `fatal: not a git repository` — which is what the panel reports
-    // as "this folder is not a repository" while the agent's files sit in it.
-    // Handing that back would put a thread in a directory where nothing it does
-    // can be committed, so it starts in the project folder instead and the
-    // directory is left exactly as it is, to be recovered rather than swept.
-    if !owner.is_dir() {
-        return None;
-    }
-    Some(dir.to_string_lossy().into_owned())
+    owned_worktree_dir(r, &dir).map(|p| p.to_string_lossy().into_owned())
 }
 
 /// Where git keeps the administrative entry of `dir`, when `dir` is a linked
@@ -1240,7 +1240,13 @@ pub fn adopt_worktree_blocking(repo: &str, thread_id: &str) -> Option<String> {
 /// asking the filesystem.
 fn worktree_owner_of(repo: &Path, dir: &Path) -> Option<PathBuf> {
     let owner = git_dir(dir)?;
-    let common = owner.parent()?.parent()?;
+    // `.git/worktrees/<name>`, not `.git/modules/<name>`: a submodule's git dir
+    // has the same grandparent and is not a checkout to migrate or hand over.
+    let worktrees_dir = owner.parent()?;
+    if worktrees_dir.file_name() != Some(std::ffi::OsStr::new("worktrees")) {
+        return None;
+    }
+    let common = worktrees_dir.parent()?;
     let mine = git_dir(repo)?;
     same_dir(common, &mine).then_some(owner)
 }
@@ -1368,6 +1374,43 @@ pub fn classify_migration_source(base: &Path, from: &Path) -> Result<MigrationSo
     Ok(MigrationSource::Legacy)
 }
 
+/// Whether `path` is a worktree of this repository, walking up so a cwd
+/// inside one still answers. The main checkout is not: that is already
+/// where the thread runs when worktrees are off.
+pub fn recognize_worktree_blocking(repo: &str, path: &str) -> Option<String> {
+    let r = Path::new(repo);
+    let mut dir = PathBuf::from(path);
+    for _ in 0..16 {
+        if let Some(found) = owned_worktree_dir(r, &dir) {
+            return Some(found.to_string_lossy().into_owned());
+        }
+        if !dir.pop() {
+            break;
+        }
+    }
+    None
+}
+
+/// Moves an existing worktree into its project's `.boite/worktrees`, keeping
+/// everything in it.
+///
+/// `git worktree move` is not used, because it cannot do this job: it renames,
+/// and a rename across volumes fails with `Improper link`. Migrating from a
+/// base beside the database to one inside the project is precisely the
+/// cross-volume case, and it is the case that matters most, since a shared
+/// volume is the whole reason to migrate. What works instead is the sequence
+/// git documents for a relocated worktree: put the directory where you want it,
+/// then `git worktree repair`.
+///
+/// The provisioned directories are removed rather than carried across. They are
+/// reproducible by definition, which is what puts them in the policy, and they
+/// are also the only thing here big enough to make the copy slow. Removing them
+/// first is what turns migrating a 20 GB worktree into copying its source, and
+/// `provision_shared_artifacts` puts them back at the far end for nothing.
+///
+/// Links go before the copy for a harder reason: a junction copied by value is
+/// the main checkout's `node_modules` duplicated into the worktree, and a
+/// junction followed by a delete is that same directory emptied.
 pub fn migrate_worktree_blocking(
     repo: &str,
     old: &str,
@@ -1756,6 +1799,51 @@ mod worktree_tests {
             adopt_worktree_blocking(f.path(), "thread-4"),
             None,
             "a checkout git has lost track of is not one to start a thread in"
+        );
+    }
+
+    /// An agent that opened its own worktree (grok `-w`, claude's
+    /// `.claude/worktrees`, `git worktree add`) is recognised from any path
+    /// inside that checkout, and the main folder is not: that is already
+    /// where the thread runs when worktrees are off.
+    #[test]
+    fn a_foreign_worktree_of_this_repository_is_recognised() {
+        let f = Fixture::new();
+        assert_eq!(
+            recognize_worktree_blocking(f.path(), f.path()),
+            None,
+            "the main checkout is not a worktree to adopt"
+        );
+
+        let inside = f.repo.join("src");
+        fs::create_dir_all(&inside).unwrap();
+        assert_eq!(
+            recognize_worktree_blocking(f.path(), inside.to_str().unwrap()),
+            None,
+            "a folder of the main checkout is still the main checkout"
+        );
+
+        let agent = scratch("agent-wt");
+        add_detached_worktree_blocking(f.path(), agent.to_str().unwrap()).unwrap();
+        assert_eq!(
+            recognize_worktree_blocking(f.path(), agent.to_str().unwrap()).as_deref(),
+            agent.to_str(),
+            "a worktree git knows, wherever it lives"
+        );
+
+        let nested = agent.join("src");
+        fs::create_dir_all(&nested).unwrap();
+        assert_eq!(
+            recognize_worktree_blocking(f.path(), nested.to_str().unwrap()).as_deref(),
+            agent.to_str(),
+            "a cwd inside the worktree still names the checkout"
+        );
+
+        let other = Fixture::new();
+        assert_eq!(
+            recognize_worktree_blocking(f.path(), other.path()),
+            None,
+            "another repository is never this project's worktree"
         );
     }
 

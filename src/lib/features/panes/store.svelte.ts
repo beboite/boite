@@ -166,6 +166,15 @@ class PaneStore {
       }
     }
 
+    // A move changes `projectId` on a row whose group already exists.
+    // Creating a group is skipped above, and unsplit no-ops on a solo
+    // thread, so without this the git panel keeps operating on the
+    // project the thread just left.
+    for (const t of app.threads) {
+      const g = this.groupOf(t.id);
+      if (g && g.projectId !== t.projectId) this.rehome(t.id, t.projectId);
+    }
+
     for (let i = this.groups.length - 1; i >= 0; i--) {
       const g = this.groups[i];
       // Only thread panes can go stale: a git or browser pane is not backed by
@@ -442,6 +451,50 @@ class PaneStore {
     if (!next) return false;
     targetGroup.root = next;
     targetGroup.focusedPaneId = draggedThreadId;
+    this.saveSoon();
+    return true;
+  }
+
+  /**
+   * Puts this thread's group on the project the thread now belongs to.
+   *
+   * A solo group is retagged and the old project's panels are dropped: those
+   * were the source project's git and explorer, and keeping them would show
+   * the wrong tree next to a terminal that has moved. A split extracts the
+   * thread into a group of its own, the way unsplit does, so its former
+   * neighbours stay where they were.
+   */
+  rehome(threadId: string, projectId: string): boolean {
+    const g = this.groupOf(threadId);
+    if (!g || g.projectId === projectId) return false;
+    const others = threadLeavesOf(g.root).filter((id) => id !== threadId);
+    if (others.length > 0) {
+      const next = pruneLeaf(g.root, threadId);
+      if (!next) return false;
+      g.root = next;
+      if (g.focusedPaneId === threadId) {
+        g.focusedPaneId = leavesOf(next)[0];
+      }
+      this.groups.push({
+        id: uid(),
+        projectId,
+        root: threadPane(threadId),
+        focusedPaneId: threadId,
+      });
+      this.saveSoon();
+      return true;
+    }
+    const dropped: string[] = [];
+    let root: LayoutNode | null = g.root;
+    for (const leaf of leafNodesOf(g.root)) {
+      if (leaf.content.kind === "thread") continue;
+      dropped.push(leaf.paneId);
+      root = root ? pruneLeaf(root, leaf.paneId) : null;
+    }
+    g.root = root ?? threadPane(threadId);
+    g.projectId = projectId;
+    g.focusedPaneId = threadId;
+    for (const id of dropped) delete this.rects[id];
     this.saveSoon();
     return true;
   }

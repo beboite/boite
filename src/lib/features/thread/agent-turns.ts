@@ -96,15 +96,16 @@ export const agentTurns = {
   },
 
   /**
-   * Refresh, at most once per `POLL_MS`. Safe to call on every status tick: it
-   * returns immediately when the last read is still fresh or one is already in
-   * flight and under its deadline.
-   *
-   * `queries` names the threads worth asking about, which is what keeps the cost
-   * proportional to what is open rather than to every session these agents have
-   * ever recorded. `backend` is whichever one derives status client-side, which is
-   * the local one: the boite runs its own copy of this for the threads it owns.
+   * The directory this session recorded, once a poll has answered. Null
+   * until then, and null when the id has not been captured: matching by
+   * folder would pick a neighbour's cwd the moment two agents share one.
    */
+  cwdOf(kind: string, sessionId: string | null | undefined): string | null {
+    if (!answered || !sessionId) return null;
+    const hit = turns.find((t) => t.kind === kind && t.sessionId === sessionId);
+    return hit?.cwd ? hit.cwd : null;
+  },
+
   /**
    * Drops the throttle, so the next tick reads rather than waiting out the rest
    * of an interval.
@@ -118,6 +119,16 @@ export const agentTurns = {
     lastPollAt = 0;
   },
 
+  /**
+   * Refresh, at most once per `POLL_MS`. Safe to call on every status tick: it
+   * returns immediately when the last read is still fresh or one is already in
+   * flight and under its deadline.
+   *
+   * `queries` names the threads worth asking about, which is what keeps the cost
+   * proportional to what is open rather than to every session these agents have
+   * ever recorded. `backend` is whichever one derives status client-side, which is
+   * the local one: the boite runs its own copy of this for the threads it owns.
+   */
   poll(backend: Backend, queries: AgentTurnQuery[]) {
     const now = Date.now();
     if (inFlight) {

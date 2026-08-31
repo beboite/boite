@@ -140,9 +140,14 @@ rule everywhere else; deleting `~/.claude` is where it stops.
 
 ## A worktree per thread
 
-Every agent thread opens in its own detached git worktree instead of sharing the
-project folder. Detached means nothing is named: no branch appears until the
-agent claims one through the MCP.
+Off by default on a new project. Turn it on per project, or with the app-wide
+switch, and each agent thread opens in its own detached git worktree instead of
+sharing the project folder. Detached means nothing is named: no branch appears
+until the agent claims one through the MCP.
+
+An agent that puts itself in a worktree on its own (grok `-w`, Claude's
+`.claude/worktrees`, `git worktree add`) is recognised from the directory it
+records, and the thread then runs, resumes and closes against that checkout.
 
 - `node_modules`, `target`, `.venv` and `vendor` are linked to the main checkout
   rather than copied (a junction on Windows, a symlink elsewhere), or a worktree

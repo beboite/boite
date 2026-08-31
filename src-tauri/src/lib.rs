@@ -456,6 +456,7 @@ pub fn run() {
             commands::git::worktree_warm,
             commands::git::worktree_migrate,
             commands::git::worktree_adopt,
+            commands::git::worktree_recognize,
             commands::git::worktree_list,
             commands::git::worktree_claim,
             commands::git::worktree_reserve,

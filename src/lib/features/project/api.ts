@@ -76,6 +76,10 @@ export async function addProjectByPath(
     cwd: path,
     icon: iconFromInspection(inspection),
     archived: false,
+    // Stamped, not left null: a null follows the global switch, and a later
+    // flip would start handing every new project a worktree it never asked
+    // for. Off is the decision a new project makes until someone turns it on.
+    worktrees: false,
     origin: workspace.isDynamic ? origin ?? "local" : undefined,
   };
   try {
@@ -222,6 +226,7 @@ export async function createProject(
     cwd: path,
     icon: iconFromInspection(inspection),
     archived: false,
+    worktrees: false,
     origin,
   };
   try {

@@ -22,6 +22,7 @@ import { logger } from "$lib/shared/services/logger.svelte";
 import { t } from "$lib/i18n/index.svelte";
 import { paneStore } from "$lib/features/panes/store.svelte";
 import { parkedLocal } from "$lib/backend/tauri/parked";
+import { isScratch } from "$lib/domain/project";
 import { openWorktreeFor } from "./api";
 import { carryTranscript, releaseClaudeSession } from "./session";
 import { threadCwd } from "./cwd";
@@ -165,10 +166,6 @@ export async function moveThreadToProject(
   const wasAlive = !!thread.ptyId;
   const wasWorking = thread.status === "running" || thread.status === "waiting";
 
-  // A pane split holds threads of one project side by side. This one is about
-  // to belong to another, so it leaves the group before anything else moves.
-  if (paneStore.groupOf(thread.id)) paneStore.unsplit(thread.id);
-
   // The session has to be nobody's before it can be resumed anywhere. Same
   // reasoning as an explicit reload: a background agent still holding it makes
   // claude refuse `--resume` and the thread lands in the agent picker instead.
@@ -198,10 +195,26 @@ export async function moveThreadToProject(
 
   const keptWorktree = await releaseSourceWorktree(thread, source);
   let worktreePath: string | null = null;
-  try {
-    worktreePath = await openWorktreeFor(target, thread.id, thread.iconKey);
-  } catch (err) {
-    logger.warn("move", `${thread.id}: no worktree in ${target.name}`, String(err));
+  const wantsWorktree =
+    !isScratch(target) &&
+    (target.worktrees ?? settings.state.threadWorktrees) &&
+    thread.iconKey !== "terminal";
+  if (wantsWorktree) {
+    try {
+      worktreePath = await backendForPath(target.cwd).worktree.adopt(
+        target.gitRoot ?? target.cwd,
+        thread.id,
+      );
+    } catch (err) {
+      logger.warn("move", `${thread.id}: adopt failed in ${target.name}`, String(err));
+    }
+  }
+  if (!worktreePath) {
+    try {
+      worktreePath = await openWorktreeFor(target, thread.id, thread.iconKey);
+    } catch (err) {
+      logger.warn("move", `${thread.id}: no worktree in ${target.name}`, String(err));
+    }
   }
   const toCwd = worktreePath ?? target.cwd;
 
@@ -228,6 +241,7 @@ export async function moveThreadToProject(
     logger.error("move", `${thread.id}: could not persist the move`, String(err));
     return { ok: false, reason: `could not save the move: ${String(err)}` };
   }
+  paneStore.rehome(thread.id, target.id);
   // The row is the thread's home; a failed reorder is cosmetic and must not
   // read as a failed move.
   await reorderAcross(thread.id, source.id, target.id).catch((err) => {

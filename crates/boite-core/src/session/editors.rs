@@ -986,6 +986,32 @@ fn grok_live_pids() -> std::collections::HashMap<String, u32> {
     rows.into_iter().map(|r| (r.session_id, r.pid)).collect()
 }
 
+/// The working directory grok filed this session under, decoded from the
+/// group folder that holds it. `query.cwd` is where Boite launched the
+/// process, and grok `-w` (or a `cd` into a worktree) files the session
+/// somewhere else; reporting the launch folder would hide that move.
+fn grok_cwd_of(updates: &Path) -> Option<String> {
+    let group = updates.parent()?.parent()?;
+    let name = group.file_name()?.to_string_lossy();
+    let decoded = percent_decode(&name);
+    // A percent-encoded path looks like one after decoding. A slug+hash
+    // group does not, and keeps the real path in `.cwd` instead.
+    if decoded.contains('/') || decoded.contains('\\') || decoded.contains(':') {
+        return Some(decoded);
+    }
+    if let Ok(c) = fs::read_to_string(group.join(".cwd")) {
+        let trimmed = c.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+    }
+    if decoded.is_empty() {
+        None
+    } else {
+        Some(decoded)
+    }
+}
+
 fn grok_updates_path(root: &Path, cwd: &str, session_id: Option<&str>) -> Option<PathBuf> {
     if let Some(id) = session_id {
         if let Some(dir) = grok_dir_for(root, cwd) {
@@ -1067,7 +1093,7 @@ pub(super) fn grok_turns(queries: &[TurnQuery]) -> Vec<AgentTurn> {
         out.push(AgentTurn {
             kind: "grok".into(),
             session_id,
-            cwd: query.cwd.clone(),
+            cwd: grok_cwd_of(&path).unwrap_or_else(|| query.cwd.clone()),
             state: state.into(),
             waiting_for: None,
         });
@@ -1490,6 +1516,30 @@ mod tests {
         assert_eq!(
             grok_dir_name(r"D:\Dev\boite\"),
             grok_dir_name(r"D:\Dev\boite")
+        );
+    }
+
+    /// `grok -w` files the session under the worktree, not the launch folder.
+    /// The turn has to name that checkout or Boite never notices the move.
+    #[test]
+    fn grok_cwd_of_a_session_is_the_decoded_group_folder() {
+        let root = grok_fixture("cwd-of");
+        let wt = r"D:\repo\.claude\worktrees\job";
+        let dir = root.join(grok_dir_name(wt)).join("sess");
+        fs::create_dir_all(&dir).unwrap();
+        let updates = dir.join("updates.jsonl");
+        fs::write(&updates, "").unwrap();
+        assert_eq!(grok_cwd_of(&updates).as_deref(), Some(wt));
+
+        let group = root.join("proj-ab12");
+        let sess = group.join("sess");
+        fs::create_dir_all(&sess).unwrap();
+        fs::write(group.join(".cwd"), "D:/long/path/that/was/hashed\n").unwrap();
+        let hashed = sess.join("updates.jsonl");
+        fs::write(&hashed, "").unwrap();
+        assert_eq!(
+            grok_cwd_of(&hashed).as_deref(),
+            Some("D:/long/path/that/was/hashed")
         );
     }
 

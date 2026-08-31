@@ -138,6 +138,37 @@ describe("syncWithThreads", () => {
     paneStore.syncWithThreads();
     expect(paneStore.groups.length).toBe(1);
   });
+
+  /**
+   * A move used to leave the group stamped with the source project. Git,
+   * explorer and the todo list then operated over there, and a solo thread
+   * could not even unsplit because unsplit no-ops on a group of one.
+   */
+  it("retags a solo thread whose project changed, and drops the old project's panels", () => {
+    threads(["t1", "p"]);
+    paneStore.openBeside("t1", { kind: "git" });
+    expect(kindsOf("t1")).toEqual(["thread", "git"]);
+
+    app.threads[0].projectId = "q";
+    paneStore.syncWithThreads();
+
+    expect(paneStore.groups.length).toBe(1);
+    expect(paneStore.groupOf("t1")?.projectId).toBe("q");
+    expect(kindsOf("t1")).toEqual(["thread"]);
+  });
+
+  it("extracts a split thread whose project changed, leaving the rest behind", () => {
+    threads(["t1", "p"], ["t2", "p"]);
+    paneStore.splitInto("t1", "t2", "right");
+    expect(paneStore.groupOf("t1")).toBe(paneStore.groupOf("t2"));
+
+    app.threads[0].projectId = "q";
+    paneStore.syncWithThreads();
+
+    expect(paneStore.groupOf("t1")?.projectId).toBe("q");
+    expect(paneStore.groupOf("t2")?.projectId).toBe("p");
+    expect(paneStore.groupOf("t1")).not.toBe(paneStore.groupOf("t2"));
+  });
 });
 
 describe("openBeside", () => {

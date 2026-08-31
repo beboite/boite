@@ -121,7 +121,7 @@ const DEFAULTS: Settings = {
   keybindings: DEFAULT_KEYBINDINGS,
   powershellNewline: true,
   powershellNoProfile: false,
-  threadWorktrees: true,
+  threadWorktrees: false,
   spawnReplayCombo: true,
   defaultShellId: null,
   sidebarWidth: 240,

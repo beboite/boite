@@ -1,6 +1,6 @@
 //! The git and worktree surface, as commands.
 //!
-//! Twenty-seven capabilities that were written out twice, once as a Tauri
+//! Twenty-nine capabilities that were written out twice, once as a Tauri
 //! command and once as a WebSocket arm, with the trust boundary re-applied by
 //! hand in each copy. They are one list now. What is left in the two front doors
 //! is decoding and, on the server, the envelope the protocol wraps an answer in.
@@ -48,6 +48,7 @@ pub const ALL_METHODS: &[&str] = &[
     "worktree.warm",
     "worktree.migrate",
     "worktree.adopt",
+    "worktree.recognize",
     "worktree.list",
     "worktree.claim",
     "worktree.reserve",
@@ -164,6 +165,13 @@ pub enum Git {
         repo: String,
         thread_id: String,
     },
+    /// Whether an arbitrary path is a worktree of this repository. The path
+    /// is the caller's, so both ends sit on the boundary, the way
+    /// `worktree.remove` already does.
+    WorktreeRecognize {
+        repo: String,
+        path: String,
+    },
     /// Every worktree of a repository, read from the repository itself. The
     /// paths come back from git rather than going in.
     WorktreeList {
@@ -264,6 +272,10 @@ impl Git {
                 repo: repo()?,
                 thread_id: thread_id()?,
             },
+            "worktree.recognize" => Git::WorktreeRecognize {
+                repo: repo()?,
+                path: path()?,
+            },
             "worktree.list" => Git::WorktreeList { repo: repo()? },
             "worktree.claim" => Git::WorktreeClaim {
                 path: path()?,
@@ -310,6 +322,7 @@ impl Git {
             Git::WorktreeWarm { .. } => "worktree.warm",
             Git::WorktreeMigrate { .. } => "worktree.migrate",
             Git::WorktreeAdopt { .. } => "worktree.adopt",
+            Git::WorktreeRecognize { .. } => "worktree.recognize",
             Git::WorktreeList { .. } => "worktree.list",
             Git::WorktreeClaim { .. } => "worktree.claim",
             Git::WorktreeReserve { .. } => "worktree.reserve",
@@ -339,6 +352,7 @@ impl Git {
             // object is the answer rather than a wrapper around one.
             Git::WorktreeOpen { .. } => Wire::Bare,
             Git::WorktreeAdopt { .. } => Wire::Key("path"),
+            Git::WorktreeRecognize { .. } => Wire::Key("path"),
             Git::WorktreeList { .. } => Wire::Key("worktrees"),
             Git::WorktreeSizes { .. } => Wire::Key("sizes"),
 
@@ -390,6 +404,7 @@ impl Git {
             | Git::WorktreeWarm { .. }
             | Git::WorktreeMigrate { .. }
             | Git::WorktreeAdopt { .. }
+            | Git::WorktreeRecognize { .. }
             | Git::WorktreeClaim { .. }
             | Git::WorktreeReserve { .. }
             | Git::WorktreeRemove { .. } => Capability::MutateProject,
@@ -432,7 +447,8 @@ impl Git {
             | Git::WorktreeAdopt { repo, .. }
             | Git::WorktreeList { repo } => vec![repo],
 
-            Git::WorktreeRemove { repo, path, .. } => vec![repo, path],
+            Git::WorktreeRemove { repo, path, .. }
+            | Git::WorktreeRecognize { repo, path } => vec![repo, path],
 
             // Every one of them, for the same reason `worktree.remove` offers
             // both of its own: a list is not a weaker claim than a single path.
@@ -582,6 +598,13 @@ impl Git {
             Git::WorktreeAdopt { repo, thread_id } => {
                 value_of(git::adopt_worktree_blocking(&repo, &thread_id))
             }
+            Git::WorktreeRecognize { repo, path } => {
+                let found = git::recognize_worktree_blocking(&repo, &path);
+                if let Some(ref wt) = found {
+                    session::share_session_stores(&repo, wt);
+                }
+                value_of(found)
+            }
             Git::WorktreeList { repo } => value_of(git::list_worktrees_blocking(&repo)?),
             Git::WorktreeClaim { path, name } => {
                 git::claim_worktree_branch_blocking(&path, &name)?;
@@ -718,6 +741,13 @@ mod tests {
         )
         .unwrap();
         assert!(command.prepare(&host, Grant::Local).is_err());
+
+        let recognize = Command::decode(
+            "worktree.recognize",
+            &json!({ "repo": root.to_str().unwrap(), "path": outside.to_str().unwrap() }),
+        )
+        .unwrap();
+        assert!(recognize.prepare(&host, Grant::Local).is_err());
     }
 
     /// A worktree that never lived under this host's old layout is left where it
@@ -834,6 +864,7 @@ mod tests {
             ("worktree.warm", Wire::Ok),
             ("worktree.migrate", Wire::Bare),
             ("worktree.adopt", Wire::Key("path")),
+            ("worktree.recognize", Wire::Key("path")),
             ("worktree.list", Wire::Key("worktrees")),
             ("worktree.claim", Wire::Ok),
             ("worktree.reserve", Wire::Ok),

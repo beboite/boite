@@ -20,10 +20,10 @@ export interface Project {
   /**
    * Whether a new agent thread here opens its own detached worktree.
    *
-   * Undefined or null follows `settings.threadWorktrees`, which is what every
-   * project did before this existed. Only a project the user has had an opinion
-   * about carries a boolean, so moving the app-wide default still moves the
-   * ones nobody has touched.
+   * Undefined or null follows `settings.threadWorktrees`. New projects stamp
+   * `false` so a later flip of that switch does not start isolating threads
+   * that were added while the default was off. Only a project the user has
+   * turned on, or one that predates the stamp, still follows the global.
    */
   worktrees?: boolean | null;
   /**
