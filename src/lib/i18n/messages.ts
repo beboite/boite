@@ -583,6 +583,7 @@ export const EN_MESSAGES = {
   "worktree.refresh": "Read the repository again",
   "worktree.loading": "Reading the repository…",
   "worktree.none": "No worktree in this repository.",
+  "worktree.scratch": "Scratch is a folder, not a repository, so it has no worktrees.",
   "worktree.unreadable": "This folder is not a git repository.",
   "worktree.main": "checkout",
   "worktree.detachedAt": "detached at {head}",
@@ -593,6 +594,8 @@ export const EN_MESSAGES = {
   "worktree.spare": "standing by",
   "worktree.spareHint":
     "Made ahead of time so the next agent thread here starts instantly. Removing it only costs that head start.",
+  "worktree.lockedHint":
+    "Locked, so git will not prune it even if the directory goes missing.",
   "worktree.dirtyCount": "{count} holding work",
   "worktree.mainDirty":
     "{project} has uncommitted changes, so this thread runs in the project folder.",
@@ -614,10 +617,13 @@ export const EN_MESSAGES = {
   "worktree.autoOffHint":
     "New agent threads in this project start in the project folder itself.",
   "worktree.offHere": "Worktrees are off for this project.",
+  "worktree.offNotice":
+    "New threads start in the project folder. Worktrees already here stay until they are removed.",
   "worktree.sweepFree": "Free {size}",
   "worktree.sweepCount": "Remove {count} spare worktrees",
   "worktree.sweepNothing": "Nothing to free",
   "worktree.sweeping": "Removing…",
+  "worktree.sweepLoading": "Reading…",
   "worktree.sweepHint": "{count} hold nothing and nobody is in them.",
   "worktree.sweepTitle": "Remove {count} worktrees?",
   "worktree.sweepMessage": "None of them holds work. This gives back {size}.",
