@@ -1,6 +1,8 @@
 <h1 align="center">Boite</h1>
 <p align="center">Mission control for coding agents. Run Claude Code, Codex, Opencode, Cursor, Antigravity, Copilot, Grok, Hermes, Pi and Muse Code side by side, each in its own git worktree, and see at a glance which one needs you.</p>
 
+<p align="center">Desktop on <a href="#install">Windows, Linux and macOS</a>, a phone via <a href="#remote-and-mobile">PWA</a>. It runs the CLIs you already have, on the subscriptions you already pay for: no account, nothing in between.</p>
+
 <p align="center">
   <img src="./static/icons/icon-512.png" alt="Boite logo" width="140" />
 </p>
