@@ -67,14 +67,19 @@ export async function renameProject(app: AppState, id: string, name: string) {
  * has said, moving the app-wide default must not silently move this project with
  * it. Only threads started after this see it, because a thread's directory is
  * decided when it is born and never again.
+ *
+ * Rolled back if the persist fails: a switch the user then acts on (launching a
+ * thread they think will get a worktree) is not a name they can see is wrong.
  */
 export async function setProjectWorktrees(app: AppState, id: string, enabled: boolean) {
   const p = app.projects.find((x) => x.id === id);
   if (!p || (p.worktrees ?? null) === enabled) return;
+  const previous = p.worktrees;
   p.worktrees = enabled;
   try {
     await saveProject($state.snapshot(p) as Project);
   } catch (err) {
+    p.worktrees = previous;
     logger.error("app", "setProjectWorktrees failed", err);
     notifications.error(t("app.worktreeSettingFailed"));
   }

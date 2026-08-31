@@ -595,6 +595,7 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "worktree.refresh": "Relire le dépôt",
   "worktree.loading": "Lecture du dépôt…",
   "worktree.none": "Aucun worktree dans ce dépôt.",
+  "worktree.scratch": "Brouillon est un dossier, pas un dépôt, donc aucun worktree.",
   "worktree.unreadable": "Ce dossier n'est pas un dépôt git.",
   "worktree.main": "checkout",
   "worktree.detachedAt": "détaché sur {head}",
@@ -605,6 +606,8 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "worktree.spare": "en attente",
   "worktree.spareHint":
     "Préparé à l'avance pour que le prochain thread d'agent démarre instantanément. Le supprimer ne coûte que cette avance.",
+  "worktree.lockedHint":
+    "Verrouillé : git ne le retirera pas tout seul, même si le dossier disparaît.",
   "worktree.dirtyCount": "{count} avec du travail dedans",
   "worktree.mainDirty":
     "{project} a des modifications non commitées, ce terminal démarre donc dans le dossier du projet.",
@@ -626,10 +629,13 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "worktree.autoOffHint":
     "Les prochains terminaux d'agent de ce projet démarrent dans le dossier du projet.",
   "worktree.offHere": "Les worktrees sont désactivés pour ce projet.",
+  "worktree.offNotice":
+    "Les nouveaux terminaux démarrent dans le dossier du projet. Les worktrees déjà là restent jusqu'à ce qu'on les retire.",
   "worktree.sweepFree": "Libérer {size}",
   "worktree.sweepCount": "Supprimer {count} worktrees inutiles",
   "worktree.sweepNothing": "Rien à libérer",
   "worktree.sweeping": "Suppression…",
+  "worktree.sweepLoading": "Lecture…",
   "worktree.sweepHint": "{count} ne contiennent rien et personne n'est dedans.",
   "worktree.sweepTitle": "Supprimer {count} worktrees ?",
   "worktree.sweepMessage": "Aucun ne contient de travail. Cela rend {size}.",
