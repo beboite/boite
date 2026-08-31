@@ -122,6 +122,7 @@ const DEFAULTS: Settings = {
   powershellNewline: true,
   powershellNoProfile: false,
   threadWorktrees: true,
+  spawnReplayCombo: true,
   defaultShellId: null,
   sidebarWidth: 240,
   sidebarCollapsed: false,
@@ -538,6 +539,10 @@ class SettingsStore {
           typeof stored.threadWorktrees === "boolean"
             ? stored.threadWorktrees
             : DEFAULTS.threadWorktrees,
+        spawnReplayCombo:
+          typeof stored.spawnReplayCombo === "boolean"
+            ? stored.spawnReplayCombo
+            : DEFAULTS.spawnReplayCombo,
         defaultShellId:
           typeof stored.defaultShellId === "string"
             ? stored.defaultShellId
@@ -1442,6 +1447,12 @@ class SettingsStore {
   async setThreadWorktrees(value: boolean) {
     if (this.state.threadWorktrees === value) return;
     this.state.threadWorktrees = value;
+    await this.persist();
+  }
+
+  async setSpawnReplayCombo(value: boolean) {
+    if (this.state.spawnReplayCombo === value) return;
+    this.state.spawnReplayCombo = value;
     await this.persist();
   }
 

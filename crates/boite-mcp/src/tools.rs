@@ -522,9 +522,8 @@ fn thread_tools() -> Value {
                         "type": "string",
                         "description": "Its opening instruction, written for someone who was not in \
                                         this conversation. claude, codex, pi, grok and antigravity \
-                                        take one on the command line; ask for one of those if it \
-                                        must start knowing something. The rest open bare and Boite \
-                                        shows the user what was meant to be said."
+                                        take one on the command line; the rest get it typed and \
+                                        submitted once the terminal is up."
                     }
                 },
                 "additionalProperties": false

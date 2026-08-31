@@ -172,6 +172,12 @@
     onToggle={() => void settings.setThreadWorktrees(!settings.state.threadWorktrees)}
   />
   <ToggleSetting
+    label={t("terminalTab.spawnReplayCombo")} anchor="terminalTab.spawnReplayCombo"
+    description={t("terminalTab.spawnReplayComboDesc")}
+    enabled={settings.state.spawnReplayCombo}
+    onToggle={() => void settings.setSpawnReplayCombo(!settings.state.spawnReplayCombo)}
+  />
+  <ToggleSetting
     label={t("terminalTab.agentTodoAccess")} anchor="terminalTab.agentTodoAccess"
     description={t("terminalTab.agentTodoAccessDesc")}
     enabled={settings.state.agentTodoAccess}

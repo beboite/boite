@@ -286,3 +286,25 @@ export function comboLabel(combo: FastpickCombo): string {
       : combo.provider;
   return `${combo.model} · ${where}`;
 }
+
+/**
+ * The launch a spawn with no `agent` should open when the caller is a resolved
+ * fastpick combo: same harness, provider, credential and model.
+ *
+ * MCP flags are not copied. The caller's `--` region is a resume, an old
+ * sidecar path, a colour prompt. `session.ts` injects MCP from `iconKey`
+ * through `mcpArgsFor`, which is the path that already knows fastpick.
+ */
+export function replayCombo(
+  cmd: string,
+  args: readonly string[],
+): { cmd: string; args: string[]; label: string; iconKey: IconKey } | null {
+  const combo = parseCombo(cmd, args);
+  if (!combo) return null;
+  return {
+    cmd: FASTPICK_CMD,
+    args: comboArgs(combo),
+    label: comboLabel(combo),
+    iconKey: iconKeyForKind(combo.harness),
+  };
+}

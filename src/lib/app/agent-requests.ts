@@ -28,7 +28,7 @@ import { CLI_PRESETS } from "$lib/features/settings/cliPresets";
 import { resolveIconKey } from "$lib/shared/icons/detect";
 import { createProject } from "$lib/features/project/api";
 import { moveThreadToProject } from "$lib/features/thread/move";
-import { takesOpeningPrompt, withUnattendedArgs } from "$lib/features/thread/session";
+import { withUnattendedArgs } from "$lib/features/thread/session";
 import { closeThread, launchAgent } from "$lib/features/thread/api";
 import { canSettle } from "$lib/domain/thread-settle";
 import {
@@ -37,6 +37,7 @@ import {
   FASTPICK_CMD,
   iconKeyForKind,
   parseFastpickAgent,
+  replayCombo,
 } from "$lib/features/fastpick/combo";
 import { editorStore } from "$lib/features/editor/store.svelte";
 import { anchorProjectId, openPane } from "$lib/features/panes/open";
@@ -205,6 +206,10 @@ function writtenOnThisMachine(from: RequestSource): boolean {
 export function resolveLaunch(
   agent: string | null | undefined,
   fallbackIcon: IconKey,
+  opts?: {
+    caller?: { cmd: string; args: readonly string[] } | null;
+    replayCombo?: boolean;
+  },
 ): { cmd: string; args: string[]; label: string; iconKey: IconKey; iconColor: string | null } | null {
   const needle = agent?.trim().toLowerCase() ?? "";
 
@@ -239,6 +244,15 @@ export function resolveLaunch(
         };
       }
     }
+  }
+
+  // Named no agent: another of the caller, which for a fastpick thread is the
+  // combo, not the native binary its icon happens to share. The icon used to
+  // pick the preset, so a caller on `fastpick --harness claude-code --provider
+  // crof` opened plain `claude`: different program, account and model.
+  if (!needle && opts?.replayCombo && opts.caller) {
+    const replayed = replayCombo(opts.caller.cmd, opts.caller.args);
+    if (replayed) return { ...replayed, iconColor: null };
   }
 
   const key = needle || fallbackIcon || "claude";
@@ -321,7 +335,10 @@ async function handleSpawn(req: SpawnRequest, from: RequestSource) {
   // which CLI to start means another of itself, and the user may be looking
   // somewhere else entirely by the time the request lands.
   const caller = app.threadById(req.callerThreadId);
-  const launch = resolveLaunch(req.agent, caller?.iconKey ?? "claude");
+  const launch = resolveLaunch(req.agent, caller?.iconKey ?? "claude", {
+    caller: caller ? { cmd: caller.cmd, args: caller.args } : null,
+    replayCombo: settings.state.spawnReplayCombo,
+  });
   if (!launch) {
     notifications.error(t("thread.spawnNoAgent", { agent: req.agent ?? "" }));
     await answerRequest(req, { error: "no agent matches that name" }, from);
@@ -354,22 +371,16 @@ async function handleSpawn(req: SpawnRequest, from: RequestSource) {
     return;
   }
   if (prompt) {
-    app.setPendingPrompt(thread.id, prompt);
+    // Submit is for the CLIs that cannot take a positional: Boite types the
+    // briefing and presses Enter once the PTY is up. The ones that can take
+    // one consume this as argv and ignore the flag.
+    app.setPendingPrompt(thread.id, prompt, { submit: true });
     app.requestActivation(thread.id);
   }
   await answerRequest(req, { ok: true, threadId: thread.id }, from);
   notifications.success(
     t("thread.spawnedIn", { label: launch.label, project: project.name }),
   );
-  // Said out loud rather than logged. Only some CLIs take an opening
-  // instruction on the command line; for the rest the new thread starts at a
-  // bare prompt with no idea what it was opened for, and the agent that asked
-  // for it has already been told the hand-off worked.
-  if (prompt && !takesOpeningPrompt(launch.iconKey)) {
-    notifications.error(
-      t("thread.spawnNoPrompt", { label: launch.label, prompt }),
-    );
-  }
 }
 
 /**
