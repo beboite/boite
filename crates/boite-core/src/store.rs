@@ -667,86 +667,28 @@ impl Store {
     pub fn load_threads(&self) -> Result<Vec<Thread>, String> {
         let conn = self.conn.lock();
         let mut stmt = conn
-            .prepare(
-                "SELECT id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, status, keep_awake, created_at, icon_color, worktree_path, settled_at, parent_thread_id, delegation_mode, delegation_status, role, orchestrator_scope, accept_dispatch
-                 FROM threads ORDER BY created_at ASC",
-            )
+            .prepare(&format!(
+                "SELECT {THREAD_COLUMNS} FROM threads ORDER BY created_at ASC"
+            ))
             .map_err(|e| e.to_string())?;
         let rows = stmt
-            .query_map([], |r| {
-                let args_raw: String = r.get(5)?;
-                let args = serde_json::from_str::<Vec<String>>(&args_raw).unwrap_or_default();
-                Ok(Thread {
-                    id: r.get(0)?,
-                    project_id: r.get(1)?,
-                    pty_id: None,
-                    label: r.get(2)?,
-                    title: r.get(3)?,
-                    cmd: r.get(4)?,
-                    args,
-                    icon_key: r.get(8)?,
-                    icon_color: r.get(12)?,
-                    session_id: r.get(7)?,
-                    status: normalize_status(r.get::<_, Option<String>>(9)?),
-                    exit_code: r.get(6)?,
-                    created_at: r.get(11)?,
-                    auto_slept: false,
-                    keep_awake: r.get::<_, i64>(10)? == 1,
-                    worktree_path: r.get(13)?,
-                    settled_at: r.get(14)?,
-                    parent_thread_id: r.get(15)?,
-                    delegation_mode: r.get(16)?,
-                    delegation_status: r.get(17)?,
-                    role: r.get(18)?,
-                    orchestrator_scope: r.get(19)?,
-                    accept_dispatch: r.get::<_, i64>(20)? == 1,
-                })
-            })
+            .query_map([], thread_from_row)
             .map_err(|e| e.to_string())?;
         rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
     }
 
     pub fn load_thread(&self, id: &str) -> Result<Option<Thread>, String> {
         let conn = self.conn.lock();
-        conn.query_row(
-            "SELECT id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, status, keep_awake, created_at, icon_color, worktree_path, settled_at, parent_thread_id, delegation_mode, delegation_status, role, orchestrator_scope, accept_dispatch
-             FROM threads WHERE id = ?1",
+        let row = conn.query_row(
+            &format!("SELECT {THREAD_COLUMNS} FROM threads WHERE id = ?1"),
             [id],
-            |r| {
-                let args_raw: String = r.get(5)?;
-                let args = serde_json::from_str::<Vec<String>>(&args_raw).unwrap_or_default();
-                Ok(Thread {
-                    id: r.get(0)?,
-                    project_id: r.get(1)?,
-                    pty_id: None,
-                    label: r.get(2)?,
-                    title: r.get(3)?,
-                    cmd: r.get(4)?,
-                    args,
-                    icon_key: r.get(8)?,
-                    icon_color: r.get(12)?,
-                    session_id: r.get(7)?,
-                    status: normalize_status(r.get::<_, Option<String>>(9)?),
-                    exit_code: r.get(6)?,
-                    created_at: r.get(11)?,
-                    auto_slept: false,
-                    keep_awake: r.get::<_, i64>(10)? == 1,
-                    worktree_path: r.get(13)?,
-                    settled_at: r.get(14)?,
-                    parent_thread_id: r.get(15)?,
-                    delegation_mode: r.get(16)?,
-                    delegation_status: r.get(17)?,
-                    role: r.get(18)?,
-                    orchestrator_scope: r.get(19)?,
-                    accept_dispatch: r.get::<_, i64>(20)? == 1,
-                })
-            },
-        )
-        .map(Some)
-        .or_else(|e| match e {
-            rusqlite::Error::QueryReturnedNoRows => Ok(None),
-            other => Err(other.to_string()),
-        })
+            thread_from_row,
+        );
+        match row {
+            Ok(thread) => Ok(Some(thread)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(other) => Err(other.to_string()),
+        }
     }
 
     /// Persisted (status, exit_code) for a thread, or None if the row is absent.
@@ -1327,9 +1269,10 @@ impl Store {
         let conn = self.conn.lock();
         let args = serde_json::to_string(&t.args).unwrap_or_else(|_| "[]".to_string());
         conn.execute(
-            "INSERT OR REPLACE INTO threads
-             (id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, status, keep_awake, created_at, icon_color, worktree_path, settled_at, parent_thread_id, delegation_mode, delegation_status, role, orchestrator_scope, accept_dispatch)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
+            &format!(
+                "INSERT OR REPLACE INTO threads ({THREAD_COLUMNS})
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)"
+            ),
             rusqlite::params![
                 t.id, t.project_id, t.label, t.title, t.cmd, args, t.exit_code,
                 t.session_id, t.icon_key, t.status, t.keep_awake as i64, t.created_at,
@@ -1748,6 +1691,61 @@ impl ThreadCol {
     }
 }
 
+/// Every persisted column of a thread, in the order [`Store::save_thread`] binds
+/// them.
+///
+/// One list for the two readers and the writer. Written out three times it drifts
+/// the moment a column is added, and the shapes that drift produces are quiet: a
+/// reader that never sees the new column, or an `INSERT OR REPLACE` that nulls it
+/// on every save.
+const THREAD_COLUMNS: &str = "id, project_id, label, title, cmd, args, exit_code, session_id, \
+     icon_key, status, keep_awake, created_at, icon_color, worktree_path, settled_at, \
+     parent_thread_id, delegation_mode, delegation_status, role, orchestrator_scope, \
+     accept_dispatch";
+
+/// Builds a [`Thread`] out of a row selected with [`THREAD_COLUMNS`].
+///
+/// Columns are read by name, not by index. The index form made the mapper a
+/// second copy of the column list, and one insertion in the middle of the SELECT
+/// silently slid every field after it onto its neighbour.
+///
+/// `args` is the only column that forgives its own content: it holds JSON some
+/// other host wrote, and a row whose JSON no longer parses reads back with no
+/// arguments rather than failing the read. In bulk that matters: a single bad
+/// row would otherwise take every other thread out of the sidebar with it. Every
+/// other column propagates its error to the caller.
+///
+/// `pty_id` and `auto_slept` are live state, never stored, so they always start
+/// empty here and are filled from the registry on the way out.
+fn thread_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Thread> {
+    let args_raw: String = r.get("args")?;
+    Ok(Thread {
+        id: r.get("id")?,
+        project_id: r.get("project_id")?,
+        pty_id: None,
+        label: r.get("label")?,
+        title: r.get("title")?,
+        cmd: r.get("cmd")?,
+        args: serde_json::from_str(&args_raw).unwrap_or_default(),
+        icon_key: r.get("icon_key")?,
+        icon_color: r.get("icon_color")?,
+        session_id: r.get("session_id")?,
+        status: normalize_status(r.get::<_, Option<String>>("status")?),
+        exit_code: r.get("exit_code")?,
+        created_at: r.get("created_at")?,
+        auto_slept: false,
+        keep_awake: r.get::<_, i64>("keep_awake")? == 1,
+        worktree_path: r.get("worktree_path")?,
+        settled_at: r.get("settled_at")?,
+        parent_thread_id: r.get("parent_thread_id")?,
+        delegation_mode: r.get("delegation_mode")?,
+        delegation_status: r.get("delegation_status")?,
+        role: r.get("role")?,
+        orchestrator_scope: r.get("orchestrator_scope")?,
+        accept_dispatch: r.get::<_, i64>("accept_dispatch")? == 1,
+    })
+}
+
 /// How a run ended, which is still true after a restart.
 const TERMINAL_STATUSES: &[&str] = &["done", "exited", "error", "stopped"];
 
@@ -1973,6 +1971,56 @@ mod tests {
         store.settle_last_run().unwrap();
         assert_eq!(status_of("live"), "idle");
         assert_eq!(status_of("ended"), "exited", "how a run ended is not news to decay");
+    }
+
+    /// The two readers are one reader. Both build their row through
+    /// `thread_from_row`, so a malformed row has to cost the same whichever door
+    /// it came through, and a row that is not there has to be an absence rather
+    /// than an error.
+    #[test]
+    fn a_thread_reads_the_same_one_at_a_time_and_in_bulk() {
+        let (store, _dir) = scratch_store("thread-rows");
+        store
+            .conn
+            .lock()
+            .execute(
+                "INSERT INTO threads
+                 (id, project_id, label, title, cmd, args, status, keep_awake,
+                  accept_dispatch, created_at, role, orchestrator_scope)
+                 VALUES ('t1', 'p1', 'a label', 'a title', 'sh', 'not json',
+                         'running', 1, 0, 7, 'orchestrator', 'p1')",
+                [],
+            )
+            .unwrap();
+
+        let one = store.load_thread("t1").unwrap().expect("the row is there");
+        let all = store.load_threads().unwrap();
+        let bulk = all.iter().find(|t| t.id == "t1").expect("the row is there");
+
+        // `args` holds JSON another host wrote. One that no longer parses reads
+        // back with no arguments and the load carries on, rather than taking
+        // every other thread out of the sidebar with it.
+        assert!(one.args.is_empty(), "{:?}", one.args);
+        // A status still naming a process is what the host that died left behind.
+        assert_eq!(one.status, "stopped");
+        // Two integer columns are flags, and only 1 reads as true.
+        assert!(one.keep_awake);
+        assert!(!one.accept_dispatch);
+        assert_eq!(one.role.as_deref(), Some("orchestrator"));
+        assert_eq!(one.title.as_deref(), Some("a title"));
+        assert_eq!(one.created_at, 7);
+        // Live state is never stored, so both doors hand it back empty.
+        assert_eq!(one.pty_id, None);
+        assert!(!one.auto_slept);
+
+        assert_eq!(
+            serde_json::to_value(&one).unwrap(),
+            serde_json::to_value(bulk).unwrap(),
+            "one reader answering differently from the other"
+        );
+
+        // A row that is not there is an absence, never an error.
+        assert!(store.load_thread("missing").unwrap().is_none());
     }
 
     fn a_pairing(id: &str, scopes: pairing::ScopeSet) -> pairing::Pairing {
