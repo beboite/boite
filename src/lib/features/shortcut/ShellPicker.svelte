@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount, onDestroy, tick } from "svelte";
   import { tip } from "$lib/shared/actions/tooltip";
   import { scale } from "svelte/transition";
   import { app } from "$lib/app/store.svelte";
@@ -14,11 +13,7 @@
   import { launchTargetMenu } from "./launchMenu";
   import ContextMenu from "$lib/shared/components/ContextMenu.svelte";
   import type { ContextMenuItem } from "$lib/shared/components/ContextMenu.svelte";
-  import {
-    registerEscape,
-    restoreFocus,
-    viewportHeight,
-  } from "$lib/shared/keyboard/overlay";
+  import { AnchoredMenu } from "$lib/shared/keyboard/anchoredMenu.svelte";
   import { longPress } from "$lib/shared/actions/longPress";
   import type { ShellOption } from "$lib/storage/platform.svelte";
   import Plus from "@lucide/svelte/icons/plus";
@@ -36,11 +31,10 @@
   };
   let { projectId = null, onLaunched }: Props = $props();
 
-  let open = $state(false);
-  let triggerRoot: HTMLDivElement | null = $state(null);
-  let menu: HTMLDivElement | null = $state(null);
-  let menuPos = $state({ x: 0, y: 0 });
-  const EDGE_GAP = 4;
+  // Where it hangs, how it stays on screen, Escape and the click elsewhere. The
+  // rows are buttons and this is a `role="menu"`, so the keyboard has to land
+  // inside it the moment it opens.
+  const menu = new AnchoredMenu((surface) => (menuItems()[0] ?? surface).focus());
 
   // Which machine this menu is about. A shell list belongs to one machine and
   // dynamic mode has two, so the rows come from the one the launch would land
@@ -60,74 +54,11 @@
       : null,
   );
 
-  function toggle(e: MouseEvent) {
-    e.stopPropagation();
-    if (!open) anchor();
-    open = !open;
-  }
-
-  // Fixed positioning: the shortcut bar is overflow-x-auto, which clips
-  // (or scrolls) an absolutely-positioned dropdown inside it. First guess only,
-  // taken before the menu exists and refined by `place` once it can be measured.
-  function anchor() {
-    if (!triggerRoot) return;
-    const r = triggerRoot.getBoundingClientRect();
-    menuPos = { x: r.left, y: r.bottom + 4 };
-  }
-
-  async function place() {
-    anchor();
-    await tick();
-    if (!menu || !triggerRoot) return;
-    const r = triggerRoot.getBoundingClientRect();
-    // Layout box, not the painted one: the open transition scales the menu, and
-    // a measurement taken mid-transition is smaller than what has to fit.
-    const w = menu.offsetWidth;
-    const h = menu.offsetHeight;
-    const vw = window.innerWidth;
-    const vh = viewportHeight();
-    const below = r.bottom + 4;
-    menuPos = {
-      // The trigger sits in a bar that scrolls sideways, so near the right edge
-      // the menu used to hang off screen entirely.
-      x: Math.max(EDGE_GAP, Math.min(r.left, vw - w - EDGE_GAP)),
-      // Above the trigger rather than clamped when there is no room under it:
-      // clamping alone parks the menu over the button it belongs to.
-      y: below + h + EDGE_GAP <= vh ? below : Math.max(EDGE_GAP, r.top - 4 - h),
-    };
-  }
-
-  $effect(() => {
-    if (!open) return;
-    void place();
-    const replace = () => void place();
-    window.addEventListener("resize", replace);
-    // A soft keyboard shrinks the visual viewport without always resizing the
-    // window, and the room under the trigger changes with it.
-    window.visualViewport?.addEventListener("resize", replace);
-    return () => {
-      window.removeEventListener("resize", replace);
-      window.visualViewport?.removeEventListener("resize", replace);
-    };
-  });
-
-  $effect(() => {
-    if (!open) return;
-    return registerEscape(() => (open = false));
-  });
-
-  $effect(() => {
-    if (!open) return;
-    const previous = document.activeElement as HTMLElement | null;
-    const surface = menu;
-    (menuItems()[0] ?? menu)?.focus();
-    return () => restoreFocus(previous, surface);
-  });
-
   function menuItems(): HTMLButtonElement[] {
     return Array.from(
-      menu?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ??
-        [],
+      menu.surface?.querySelectorAll<HTMLButtonElement>(
+        '[role="menuitem"]:not(:disabled)',
+      ) ?? [],
     );
   }
 
@@ -170,7 +101,7 @@
   // the current project, the same as on a shortcut. On no project the plain
   // click already lands there.
   async function launchDefault(forceScratch: boolean) {
-    open = false;
+    menu.open = false;
     const target = projectId ?? (await launchTargetProjectId(forceScratch));
     if (!target) return;
     if (defaultShell) {
@@ -182,7 +113,7 @@
   }
 
   async function pick(shell: ShellOption, forceScratch: boolean) {
-    open = false;
+    menu.open = false;
     const target = projectId ?? (await launchTargetProjectId(forceScratch));
     if (!target) return;
     await launchShell(shell, target);
@@ -200,27 +131,9 @@
       items: launchTargetMenu((forceScratch) => void launchDefault(forceScratch)),
     };
   }
-
-  // `pointerdown`, not `click`: a right-click never fires one, so with this
-  // dropdown open a right-click on the button beside it raised a context menu
-  // while the dropdown stayed up, two menus stacked on the same point.
-  function handleDocPointerDown(e: PointerEvent) {
-    if (!open) return;
-    const target = e.target as Node;
-    if (triggerRoot?.contains(target) || menu?.contains(target)) return;
-    open = false;
-  }
-
-  onMount(() => {
-    document.addEventListener("pointerdown", handleDocPointerDown);
-  });
-
-  onDestroy(() => {
-    document.removeEventListener("pointerdown", handleDocPointerDown);
-  });
 </script>
 
-<div bind:this={triggerRoot} class="relative flex shrink-0 items-stretch">
+<div bind:this={menu.trigger} class="relative flex shrink-0 items-stretch">
   <button
     type="button"
     class="flex shrink-0 items-center gap-1.5 rounded-l-md border border-r-0 border-dashed border-border px-2.5 py-1 text-xs text-muted-foreground transition hover:border-foreground/30 hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
@@ -242,23 +155,23 @@
     type="button"
     class="flex shrink-0 items-center justify-center rounded-r-md border border-dashed border-border px-1.5 py-1 text-muted-foreground transition hover:border-foreground/30 hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
     disabled={shells.length === 0}
-    onclick={toggle}
+    onclick={(e) => menu.toggle(e)}
     aria-haspopup="menu"
-    aria-expanded={open}
+    aria-expanded={menu.open}
     use:tip={t("shell.pick")}
     aria-label={t("shell.pick")}
   >
     <ChevronDown class="size-3.5" />
   </button>
 
-  {#if open}
+  {#if menu.open}
     <div
-      bind:this={menu}
+      bind:this={menu.surface}
       role="menu"
       tabindex="-1"
       class="surface-popover fixed z-[var(--z-popover)] flex min-w-44 flex-col p-1"
-      style:left="{menuPos.x}px"
-      style:top="{menuPos.y}px"
+      style:left="{menu.pos.x}px"
+      style:top="{menu.pos.y}px"
       style:transform-origin="top left"
       onkeydown={handleMenuKeydown}
       transition:scale={{ duration: 90, start: 0.96 }}
