@@ -288,8 +288,10 @@ jobs:
   #
   # The keystore rides in as base64 in ANDROID_KEYSTORE, with its password in
   # ANDROID_KEYSTORE_PASSWORD (ANDROID_KEY_PASSWORD when the key's own differs).
-  # No keystore means an unsigned APK on the page, said out loud as a warning:
-  # a release is not held back for the one asset that has a manual fallback.
+  # Both have to be set: an unsigned APK on the page is not a fallback, it is a
+  # file no phone will install (v1.3.4 shipped `boite-1.3.4-unsigned.apk` and
+  # PackageInstaller refused it as invalid). Missing secrets fail this job.
+  # Desktop assets already uploaded stay; this job is a sibling of prune.
   #
   # What is checked and not just done: the certificate the APK carries has to
   # be the fingerprint in mobile/assetlinks.json. A TWA whose signature does
@@ -389,10 +391,9 @@ jobs:
           out="${{ runner.temp }}/apk"
           mkdir -p "$out"
 
-          if [ -z "${KEYSTORE_B64:-}" ]; then
-            echo "::warning::ANDROID_KEYSTORE is unset: the release carries an unsigned APK, which no phone installs as is"
-            cp "$src" "$out/boite-$version-unsigned.apk"
-            exit 0
+          if [ -z "${KEYSTORE_B64:-}" ] || [ -z "${KEYSTORE_PASSWORD:-}" ]; then
+            echo "::error::ANDROID_KEYSTORE or ANDROID_KEYSTORE_PASSWORD is unset: refusing to attach an unsigned APK" >&2
+            exit 1
           fi
 
           # The build-tools AGP just pulled for this compileSdk, newest wins.
@@ -432,4 +433,18 @@ jobs:
           else
             tag="v$(jq -r .version src-tauri/tauri.conf.json)"
           fi
-          gh release upload "$tag" "${{ runner.temp }}"/apk/*.apk --clobber
+          shopt -s nullglob
+          files=("${{ runner.temp }}"/apk/*.apk)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "::error::no APK to upload" >&2
+            exit 1
+          fi
+          for f in "${files[@]}"; do
+            case "$(basename "$f")" in
+              *-unsigned.apk)
+                echo "::error::refusing to attach $(basename "$f")" >&2
+                exit 1
+                ;;
+            esac
+          done
+          gh release upload "$tag" "${files[@]}" --clobber

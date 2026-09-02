@@ -55,9 +55,11 @@ The `android` job builds `mobile/` after every platform has uploaded and puts
 | `ANDROID_KEYSTORE_PASSWORD` | its password |
 | `ANDROID_KEY_PASSWORD` | the key's own password, only when it differs |
 
-The alias is read from `mobile/twa-manifest.json`. With no keystore secret the
-job uploads `boite-X.Y.Z-unsigned.apk` and says so as a warning, so a release
-is not held back for it.
+The alias is read from `mobile/twa-manifest.json`. Both `ANDROID_KEYSTORE` and
+`ANDROID_KEYSTORE_PASSWORD` are required. Missing either fails the android job
+rather than attaching `boite-X.Y.Z-unsigned.apk`: v1.3.4 shipped that file and
+PackageInstaller refused it as an invalid package. Desktop assets already on
+the release stay, the android job being a sibling of `prune`.
 
 A release that leaves `mobile/` untouched does not rebuild: the job takes the
 signed APK from the newest published release that carries one, under its
