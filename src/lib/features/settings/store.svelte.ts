@@ -159,6 +159,7 @@ const DEFAULTS: Settings = {
   kebaccCodex: true,
   kebaccAntigravity: true,
   colorByModel: true,
+  sidebarUnfoldedProjects: [],
   infoBoxAnchor: "top-right",
   infoBoxCollapsed: false,
   experimentWhip: false,
@@ -407,6 +408,11 @@ const DEVICE_FIELDS = [
   "terminalFontScalePercent",
   "locale",
   "colorByModel",
+  // Which sidebar groups are unfolded is a fact about this column, like its
+  // width: a phone showing ten rows per project must not unfold the desktop's.
+  // New in this blob rather than promoted from the workspace, so it is absent
+  // from PROMOTED_TO_DEVICE and an old blob simply reads the default.
+  "sidebarUnfoldedProjects",
   "infoBoxAnchor",
   "infoBoxCollapsed",
   "experimentWhip",
@@ -668,6 +674,7 @@ class SettingsStore {
           typeof stored.colorByModel === "boolean"
             ? stored.colorByModel
             : DEFAULTS.colorByModel,
+        sidebarUnfoldedProjects: readStringList(stored.sidebarUnfoldedProjects),
         infoBoxAnchor: isInfoBoxAnchor(stored.infoBoxAnchor)
           ? stored.infoBoxAnchor
           : DEFAULTS.infoBoxAnchor,
@@ -1024,6 +1031,22 @@ class SettingsStore {
   setColorByModel(value: boolean) {
     if (this.state.colorByModel === value) return;
     this.state.colorByModel = value;
+    this.persistDeviceNow();
+  }
+
+  /** Whether this project draws its whole thread list past the tenth row. */
+  sidebarUnfolded(projectId: string): boolean {
+    return this.state.sidebarUnfoldedProjects.includes(projectId);
+  }
+
+  setSidebarUnfolded(projectId: string, unfolded: boolean) {
+    const current = this.state.sidebarUnfoldedProjects;
+    if (current.includes(projectId) === unfolded) return;
+    // A fresh array rather than a push or a splice: the sidebar reads this list
+    // inside a `$derived`, and the reference is what tells it to redraw.
+    this.state.sidebarUnfoldedProjects = unfolded
+      ? [...current, projectId]
+      : current.filter((id) => id !== projectId);
     this.persistDeviceNow();
   }
 

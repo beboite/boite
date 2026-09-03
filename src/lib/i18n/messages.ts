@@ -338,6 +338,12 @@ export const EN_MESSAGES = {
   "sidebar.settledCount": "{count} put away",
   "sidebar.showSettled": "Show what this project put away",
   "sidebar.hideSettled": "Hide what this project put away",
+  "sidebar.showMore": "Show {count} more",
+  "sidebar.showMoreOne": "Show 1 more",
+  "sidebar.showFewer": "Show fewer",
+  "sidebar.foldedRows":
+    "This project has more threads than the sidebar shows at once",
+  "sidebar.threadRowJump": "{name}, {chord}",
   "sidebar.busyCannotSettle":
     "That thread is working, it stays where you can see it",
   "sidebar.settleThreadFailed": "Could not put that thread away",

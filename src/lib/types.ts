@@ -279,6 +279,21 @@ export interface Settings {
    */
   colorByModel: boolean;
   /**
+   * Which projects are drawing their whole thread list rather than the first
+   * ten rows.
+   *
+   * Persisted rather than session-scoped, unlike the settled drawer and the
+   * delegation piles: those hide threads the user filed away themselves, while
+   * this one is the sidebar deciding on its own that a project is too long. A
+   * user who says "no, show me all 24" is correcting the app, and an answer
+   * that has to be given again on every launch is not an answer.
+   *
+   * Ids of the unfolded projects rather than a map of booleans: a project the
+   * user removes then leaves nothing behind but a dead id, and the list is
+   * read as a set on every draw anyway.
+   */
+  sidebarUnfoldedProjects: string[];
+  /**
    * Where the info box sits on every terminal. One value for the window, not per
    * thread: a drag on any pane is the next pane's position too.
    */

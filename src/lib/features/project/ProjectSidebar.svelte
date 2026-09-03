@@ -36,6 +36,7 @@
   import { isScratch } from "$lib/domain/project";
   import { projectDisplayName } from "$lib/shared/project-label";
   import { filterSidebar, normaliseTerm } from "./sidebar-filter";
+  import { FOLD_LIMIT, foldRows } from "./sidebar-fold";
   import { visibleDelegationRows } from "./delegation-stack";
   import DelegationStack from "./DelegationStack.svelte";
   import SearchIcon from "@lucide/svelte/icons/search";
@@ -46,6 +47,9 @@
   } from "$lib/features/thread/finished.svelte";
   import { mcpPulse } from "$lib/features/thread/agentActivity.svelte";
   import { jumpDigit, jumpModifier } from "$lib/shared/keyboard/held.svelte";
+  import { keybindings } from "$lib/features/settings/keybindings.svelte";
+  import { formatCombo } from "$lib/shared/keyboard/combo";
+  import { isDeviceMacOS } from "$lib/storage/platform.svelte";
   import { waitingReasonFor } from "$lib/features/thread/statusEngine";
   import { threadIconColor } from "$lib/features/fastpick/threadAccent";
   import { TONE_COLOR, threadVisual } from "$lib/features/thread/threadVisual";
@@ -607,10 +611,7 @@
       // list. The order that gets saved is still the whole one, see
       // `reorderedAmongVisible`, so a pinned or filed thread keeps its place.
       const ids = app.threadsByProjectSorted(drag.projectId).map((t) => t.id);
-      const drawn = visibleDelegationRows(
-        threadsByProject.get(drag.projectId) ?? [],
-        stacksOpen,
-      ).map((r) => r.thread.id);
+      const drawn = foldedRows(drag.projectId).rows.map((r) => r.thread.id);
       const next = reorderedAmongVisible(ids, drawn, drag.id, drag.slotIndex);
       if (next) void settings.setThreadOrder(drag.projectId, next);
       return;
@@ -654,12 +655,87 @@
     return thread.keepAwake ? t("sidebar.keepAwakeOn") : t("sidebar.keepAwakeOff");
   }
 
+  /**
+   * The chord that jumps to this position, spelled the way the platform spells
+   * it, or null when the user has unbound it.
+   *
+   * Read off the bindings that exist rather than off a constant: the digits are
+   * `mod+digit1..9` by default and a user is free to move them, and a screen
+   * reader announcing a chord the keyboard no longer answers to is worse than
+   * announcing none.
+   */
+  function jumpChord(digit: number): string | null {
+    const binding = keybindings.byCommand[`thread.jump${digit}`]?.[0];
+    return binding ? formatCombo(binding.key, isDeviceMacOS) : null;
+  }
+
+  /**
+   * A row the fold may never hide.
+   *
+   * Work in flight and the row the user is looking at. Everything else is
+   * furniture, and furniture is what the fold is for.
+   */
+  function pinnedRow(row: { thread: Thread }): boolean {
+    const status = displayThreadStatus(row.thread);
+    if (status === "running" || status === "waiting") return true;
+    return app.activeThreadId === row.thread.id;
+  }
+
+  /**
+   * What a project's live list actually draws, fold included.
+   *
+   * One function rather than a `$derived` per project: the drag reads it too,
+   * and a slot index is an index into the rows on screen. Computing the fold in
+   * the template and the drag's own copy separately is how the two would drift
+   * the first time either grew a condition.
+   *
+   * `slot` is the row's place in the unfolded list, which is what Ctrl+digit
+   * counts: a row pulled above the fold keeps its own number.
+   */
+  function foldedRows(projectId: string) {
+    const rows = visibleDelegationRows(
+      threadsByProject.get(projectId) ?? [],
+      stacksOpen,
+    ).map((row, slot) => ({ ...row, slot }));
+    // The fold is off while a term is typed: the filter's whole job is to
+    // answer "which of these forty", and hiding the fortieth match behind a
+    // second click would make it answer half the question.
+    const foldable = !filtering && rows.length > FOLD_LIMIT;
+    const unfolded = settings.sidebarUnfolded(projectId);
+    return {
+      ...foldRows(rows, pinnedRow, !foldable || unfolded),
+      foldable,
+      unfolded,
+    };
+  }
+
   function displayThreadStatus(thread: Thread): ThreadStatus {
     if (app.unboundByDedup.includes(thread.id)) return "error";
     return visibleStatus(thread.status, !!thread.ptyId);
   }
 
-  let ctxMenu = $state<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
+  let ctxMenu = $state<{
+    x: number;
+    y: number;
+    items: ContextMenuItem[];
+    avoid: { top: number; bottom: number } | null;
+  } | null>(null);
+
+  /**
+   * The band of screen the row occupies, so the menu can step off it.
+   *
+   * Measured from the DOM rather than taken off the event: a long press hands
+   * over a point and nothing else, and the two ways of opening a menu have to
+   * put it in the same place.
+   */
+  function rowBand(attr: string, id: string): { top: number; bottom: number } | null {
+    if (typeof document === "undefined") return null;
+    const value = typeof CSS !== "undefined" && CSS.escape ? CSS.escape(id) : id;
+    const el = document.querySelector(`[${attr}="${value}"]`);
+    if (!el) return null;
+    const rect = el.getBoundingClientRect();
+    return { top: rect.top, bottom: rect.bottom };
+  }
 
   // Inline rename: one row at a time swaps its label for an input. Kept here
   // rather than per-row so opening a second rename closes the first.
@@ -805,7 +881,7 @@
       action: () => requestRemoveThread(thread.id),
       danger: true,
     });
-    ctxMenu = { x, y, items };
+    ctxMenu = { x, y, items, avoid: rowBand("data-thread-row", thread.id) };
   }
   function closeContextMenu() {
     ctxMenu = null;
@@ -932,7 +1008,9 @@
       action: () => void requestRemoveProject(project.id),
       danger: true,
     });
-    ctxMenu = { x, y, items };
+    // The header line, not `data-project-row`: that one wraps the whole card,
+    // threads included, and dodging it would throw the menu a screen away.
+    ctxMenu = { x, y, items, avoid: rowBand("data-project-header", project.id) };
   }
 
   /**
@@ -1162,8 +1240,9 @@
 
   const threadSourceIdx = $derived.by(() => {
     if (!liveDrag || liveDrag.kind !== "thread") return -1;
-    const list = threadsByProject.get(liveDrag.projectId) ?? [];
-    return visibleDelegationRows(list, stacksOpen).findIndex(
+    // Among the rows on screen, fold included: `rowShift` slides the drawn
+    // rows, and a row behind the fold has no rect to slide.
+    return foldedRows(liveDrag.projectId).rows.findIndex(
       (r) => r.thread.id === liveDrag.id,
     );
   });
@@ -1404,6 +1483,7 @@
           class="project-row group/project relative flex items-center gap-2 px-2 py-1.5 transition hover:text-foreground {showArchived
             ? ''
             : 'cursor-pointer'}"
+          data-project-header={project.id}
           use:tip={isRemoteOrigin
             ? boiteOffline
               ? t("sidebar.onBoiteOffline", {
@@ -1531,6 +1611,7 @@
           {#snippet threadItem(
             thread: Thread,
             threadIdx: number,
+            jumpIndex: number | null,
             reorderable: boolean,
             depth: number,
             stack: Thread[],
@@ -1561,11 +1642,22 @@
               {@const fresh = justFinished(thread.id)}
               <!-- Ctrl+1..9 only ever meant the current project's live
                    threads. Numbering the drawer would put two rows labelled 1
-                   on screen, and numbering every project would put four. -->
-              {@const digit =
-                reorderable && jumpModifier.down && project.id === app.currentProjectId
-                  ? jumpDigit(threadIdx)
+                   on screen, and numbering every project would put four.
+                   `jumpIndex` is the row's place in the unfolded list, so
+                   folding a group past the tenth row renumbers nothing. -->
+              {@const slot =
+                reorderable && jumpIndex !== null && project.id === app.currentProjectId
+                  ? jumpDigit(jumpIndex)
                   : null}
+              <!-- The badge is the modifier's business; the chord itself stays
+                   in the row's accessible name whether or not a key is down,
+                   because a screen reader has no modifier to hold. -->
+              {@const digit = jumpModifier.down ? slot : null}
+              {@const rowName = thread.title ?? thread.label}
+              {@const chord = slot === null ? null : jumpChord(slot)}
+              {@const rowLabel = chord
+                ? t("sidebar.threadRowJump", { name: rowName, chord })
+                : rowName}
               <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
               <li
                 transition:slide={rowMotion}
@@ -1621,7 +1713,7 @@
                       type="button"
                       data-nav-row
                       class="absolute inset-0 cursor-pointer rounded-sm"
-                      aria-label={thread.title ?? thread.label}
+                      aria-label={rowLabel}
                       onclick={() => {
                         if (consumeDragClick(thread.id)) return;
                         // Opening it is reading it: the arrival flash has said
@@ -1744,21 +1836,55 @@
                now `0 0 12px -3px`, which is a nine-pixel bloom rather than a
                thirteen-pixel one, and every pixel of gap is a thread the
                sidebar stops showing. -->
-          {@const liveRows = visibleDelegationRows(live, stacksOpen)}
+          {@const fold = foldedRows(project.id)}
           {#if live.length > 0}
             <ul
               class="px-1 {settledCount > 0 ? 'pb-0.5' : 'pb-1'} space-y-1"
               data-thread-list
               data-project-id={project.id}
+              id={`threads-${project.id}`}
               use:rowFlip={{
-                key: () => liveRows.map((r) => r.thread.id).join(","),
+                key: () => fold.rows.map((r) => r.thread.id).join(","),
                 enabled: () => !liveDrag,
               }}
             >
-              {#each liveRows as { thread, depth, stack, foldedCount, expandable }, threadIdx (thread.id)}
-                {@render threadItem(thread, threadIdx, true, depth, stack, foldedCount, expandable)}
+              {#each fold.rows as { thread, depth, stack, foldedCount, expandable, slot }, threadIdx (thread.id)}
+                {@render threadItem(thread, threadIdx, slot, true, depth, stack, foldedCount, expandable)}
               {/each}
             </ul>
+          {/if}
+
+          <!-- The cut a long project gets. Spelled like the settled drawer's
+               toggle below it because it is the same gesture on the same list,
+               and two ways of saying "there is more under here" in one column
+               is one too many. The difference is who decided: that drawer holds
+               what the user filed away, this one holds what the sidebar ran out
+               of room for, which is why the count is on the label. -->
+          {#if fold.foldable}
+            <div class="mx-1 mb-1">
+              <button
+                type="button"
+                data-drag-block
+                class="flex w-full items-center gap-1 rounded-sm px-1.5 py-1 text-2xs text-muted-foreground transition hover:bg-accent/40 hover:text-foreground"
+                class:text-foreground={fold.unfolded}
+                onclick={(e) => {
+                  e.stopPropagation();
+                  settings.setSidebarUnfolded(project.id, !fold.unfolded);
+                }}
+                aria-expanded={fold.unfolded}
+                aria-controls={`threads-${project.id}`}
+                use:tip={t("sidebar.foldedRows")}
+              >
+                <ChevronRight
+                  class="size-3 shrink-0 transition-transform {fold.unfolded ? 'rotate-90' : ''}"
+                />
+                {fold.unfolded
+                  ? t("sidebar.showFewer")
+                  : fold.hidden === 1
+                    ? t("sidebar.showMoreOne")
+                    : t("sidebar.showMore", { count: String(fold.hidden) })}
+              </button>
+            </div>
           {/if}
 
           <!-- The cut between the two piles. It used to sit under the whole
@@ -1803,7 +1929,7 @@
                   }}
                 >
                   {#each settledRows as { thread, depth, stack, foldedCount, expandable }, threadIdx (thread.id)}
-                    {@render threadItem(thread, threadIdx, false, depth, stack, foldedCount, expandable)}
+                    {@render threadItem(thread, threadIdx, null, false, depth, stack, foldedCount, expandable)}
                   {/each}
                 </ul>
               {/if}
@@ -1910,6 +2036,7 @@
     items={ctxMenu.items}
     x={ctxMenu.x}
     y={ctxMenu.y}
+    avoid={ctxMenu.avoid}
     onClose={closeContextMenu}
   />
 {/if}

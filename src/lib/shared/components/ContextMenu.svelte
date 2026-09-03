@@ -21,14 +21,25 @@
   import { tip } from "$lib/shared/actions/tooltip";
   import { onMount, onDestroy, tick } from "svelte";
   import { settings } from "$lib/features/settings/store.svelte";
+  import { menuTop } from "./context-menu-position";
 
   type Props = {
     items: ContextMenuItem[];
     x: number;
     y: number;
+    /**
+     * A band of the viewport the menu must not cover, in client coordinates.
+     *
+     * The row a menu was called on is the one thing on screen that says what
+     * the menu is about, and a menu anchored to the pointer lands on top of it:
+     * every thread menu in the sidebar hid its own thread's name. Given this,
+     * the menu goes under the band when there is room and over it otherwise,
+     * keeping the pointer's x. Omitted, it stays where it was called.
+     */
+    avoid?: { top: number; bottom: number } | null;
     onClose: () => void;
   };
-  let { items, x, y, onClose }: Props = $props();
+  let { items, x, y, avoid = null, onClose }: Props = $props();
 
   let menuRef = $state<HTMLDivElement | null>(null);
   let adjustedX = $state(0);
@@ -51,13 +62,16 @@
     const vw = window.innerWidth;
     const vh = viewportHeight();
     adjustedX = Math.max(EDGE_GAP, Math.min(x, vw - w - EDGE_GAP));
-    adjustedY = Math.max(EDGE_GAP, Math.min(y, vh - h - EDGE_GAP));
+    // The pointer's x, the row's y: horizontally the menu hangs off where the
+    // click landed, vertically it steps off the row so the row stays readable.
+    adjustedY = menuTop(y, h, vh, EDGE_GAP, avoid);
     positioned = true;
   }
 
   $effect(() => {
     void x;
     void y;
+    void avoid;
     void positionMenu();
   });
 
