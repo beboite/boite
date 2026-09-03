@@ -499,7 +499,7 @@
     {#if project?.gitRoot}
       <button
         type="button"
-        class="group/root flex min-w-0 shrink items-center gap-1 rounded-full border border-edge bg-[var(--color-surface-2)] px-1.5 py-0.5 text-2xs text-muted-foreground transition hover:text-foreground"
+        class="group/root flex min-w-0 shrink items-center gap-1 rounded-full border border-edge bg-[var(--color-surface-2)] px-1.5 py-0.5 text-xs text-muted-foreground transition hover:text-foreground"
         use:tip={t("git.nestedRepo", { path: project.gitRoot })}
         onclick={clearGitRoot}
       >
@@ -580,12 +580,12 @@
           class="flex h-7 shrink-0 items-center gap-1.5 border-y border-border px-3"
         >
           <span
-            class="text-2xs font-semibold uppercase tracking-wider text-muted-foreground"
+            class="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
           >
             {t("git.repositoriesFound")}
           </span>
           <span
-            class="rounded-full bg-[var(--color-surface-2)] px-1.5 text-2xs text-muted-foreground"
+            class="rounded-full bg-[var(--color-surface-2)] px-1.5 text-xs text-muted-foreground"
           >
             {gs.repos.length}
           </span>
@@ -617,13 +617,13 @@
           class="flex h-7 shrink-0 items-center gap-1.5 border-b border-border px-3"
         >
           <span
-            class="text-2xs font-semibold uppercase tracking-wider text-muted-foreground"
+            class="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
           >
             {t("git.changes")}
           </span>
           {#if totalChanges > 0}
             <span
-              class="rounded-full bg-[var(--color-surface-2)] px-1.5 text-2xs text-muted-foreground"
+              class="rounded-full bg-[var(--color-surface-2)] px-1.5 text-xs text-muted-foreground"
             >
               {totalChanges}
             </span>
@@ -746,13 +746,13 @@
         >
           <ChevronDown class="size-3 text-muted-foreground transition {commitsOpen ? '' : '-rotate-90'}" />
           <span
-            class="text-2xs font-semibold uppercase tracking-wider text-muted-foreground"
+            class="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
           >
             {t("git.commits")}
           </span>
           {#if gs.log.length > 0}
             <span
-              class="rounded-full bg-[var(--color-surface-2)] px-1.5 text-2xs text-muted-foreground"
+              class="rounded-full bg-[var(--color-surface-2)] px-1.5 text-xs text-muted-foreground"
             >
               {gs.commitCount || gs.log.length}{gs.commitCount
                 ? ""
@@ -810,7 +810,7 @@
     <div class="flex items-center gap-1 px-2 py-1">
       <button
         type="button"
-        class="flex flex-1 items-center gap-1 text-2xs font-semibold uppercase tracking-wider text-muted-foreground transition hover:text-foreground"
+        class="flex flex-1 items-center gap-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground transition hover:text-foreground"
         onclick={toggle}
       >
         <ChevronDown class="size-3 transition {open ? '' : '-rotate-90'}" />

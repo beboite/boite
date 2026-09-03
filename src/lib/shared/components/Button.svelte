@@ -65,7 +65,7 @@
   }: Props = $props();
 
   const SIZES: Record<Size, string> = {
-    sm: "h-6 text-2xs gap-1",
+    sm: "h-6 text-xs gap-1",
     md: "h-7 text-xs gap-1.5",
     lg: "h-9 text-sm gap-2",
   };

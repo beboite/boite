@@ -55,7 +55,7 @@
           title={path.value}
         >
           <span class="shrink-0">{path.label}</span>
-          <span class="min-w-0 truncate font-mono text-2xs">{path.value}</span>
+          <span class="min-w-0 truncate font-mono text-xs">{path.value}</span>
           <Copy class="size-3 shrink-0 opacity-0 transition group-hover:opacity-100" />
         </button>
       {/each}

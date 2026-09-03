@@ -180,7 +180,7 @@
       {#if onBoite}
         <!-- The list changed machine when the project did, and nothing else on
              screen says which one these shells belong to. -->
-        <span class="ml-auto shrink-0 text-2xs text-muted-2">
+        <span class="ml-auto shrink-0 text-xs text-muted-2">
           {t("sidebar.onBoite", { name: workspace.info.name || "boite" })}
         </span>
       {/if}
@@ -194,7 +194,7 @@
       {#each shells as shell (shell.id)}
         <button type="button" class={rowClass} onclick={(e) => void pickShell(shell, e.shiftKey)}>
           <span class="min-w-0 truncate font-medium">{shell.label}</span>
-          <span class="ml-auto shrink-0 text-2xs text-muted-2">
+          <span class="ml-auto shrink-0 text-xs text-muted-2">
             {shell.id}
           </span>
         </button>

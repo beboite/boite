@@ -353,7 +353,7 @@
       {/if}
     </div>
     {#if filterActive}
-      <div class="mt-1 px-1 text-2xs text-muted-2">
+      <div class="mt-1 px-1 text-xs text-muted-2">
         {#if searching}
           {t("explorer.searching")}
         {:else if hitCount === 0}

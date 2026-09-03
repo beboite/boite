@@ -385,14 +385,14 @@
                 </span>
                 {#if w.main}
                   <span
-                    class="shrink-0 rounded-full border border-border px-1.5 py-px text-2xs uppercase tracking-wide text-muted-foreground"
+                    class="shrink-0 rounded-full border border-border px-1.5 py-px text-xs uppercase tracking-wide text-muted-foreground"
                   >
                     {t("worktree.main")}
                   </span>
                 {/if}
                 {#if w.spare}
                   <span
-                    class="shrink-0 rounded-full border border-border px-1.5 py-px text-2xs uppercase tracking-wide text-muted-foreground"
+                    class="shrink-0 rounded-full border border-border px-1.5 py-px text-xs uppercase tracking-wide text-muted-foreground"
                     use:tip={t("worktree.spareHint")}
                   >
                     {t("worktree.spare")}

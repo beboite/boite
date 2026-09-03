@@ -1735,7 +1735,7 @@
                          the moment the modifier goes down, and a list that
                          jumps under a held key is worse than no hint. -->
                     <span
-                      class="pointer-events-none absolute left-1.5 z-[var(--z-chrome)] flex size-4 items-center justify-center rounded-xs bg-[var(--color-surface-3)] text-2xs font-semibold tabular-nums text-foreground shadow-e1"
+                      class="pointer-events-none absolute left-1.5 z-[var(--z-chrome)] flex size-[18px] items-center justify-center rounded-xs bg-[var(--color-surface-3)] text-xs font-semibold tabular-nums text-foreground shadow-e1"
                       aria-hidden="true"
                     >
                       {digit}
@@ -1865,7 +1865,7 @@
               <button
                 type="button"
                 data-drag-block
-                class="flex w-full items-center gap-1 rounded-sm px-1.5 py-1 text-2xs text-muted-foreground transition hover:bg-accent/40 hover:text-foreground"
+                class="flex w-full items-center gap-1 rounded-sm px-1.5 py-1 text-xs text-muted-foreground transition hover:bg-accent/40 hover:text-foreground"
                 class:text-foreground={fold.unfolded}
                 onclick={(e) => {
                   e.stopPropagation();
@@ -1903,7 +1903,7 @@
               <button
                 type="button"
                 data-drag-block
-                class="flex w-full items-center gap-1 rounded-sm px-1.5 py-1 text-2xs text-muted-foreground transition hover:bg-accent/40 hover:text-foreground"
+                class="flex w-full items-center gap-1 rounded-sm px-1.5 py-1 text-xs text-muted-foreground transition hover:bg-accent/40 hover:text-foreground"
                 class:text-foreground={open}
                 onclick={(e) => {
                   e.stopPropagation();

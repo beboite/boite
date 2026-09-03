@@ -266,7 +266,7 @@
       {#if onBoite}
         <!-- The list changed machine when the project did, and nothing else on
              screen says which one these shells belong to. -->
-        <div class="px-2 py-1 text-2xs text-muted-2">
+        <div class="px-2 py-1 text-xs text-muted-2">
           {t("sidebar.onBoite", { name: workspace.info.name || "boite" })}
         </div>
       {/if}
@@ -283,7 +283,7 @@
           onclick={(e) => void pick(shell, e.shiftKey)}
         >
           <span class="font-medium">{shell.label}</span>
-          <span class="text-2xs text-muted-2">{shell.id}</span>
+          <span class="text-xs text-muted-2">{shell.id}</span>
         </button>
       {/each}
     </div>

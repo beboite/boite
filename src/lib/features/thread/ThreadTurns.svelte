@@ -207,7 +207,7 @@
                       onclick={() => openFile(turn, file)}
                     >
                       <span
-                        class="w-3 shrink-0 text-center text-2xs font-semibold text-muted-2"
+                        class="w-3 shrink-0 text-center text-xs font-semibold text-muted-2"
                       >
                         {file.status}
                       </span>

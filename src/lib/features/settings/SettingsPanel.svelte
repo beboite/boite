@@ -479,7 +479,7 @@
                 <span class="min-w-0 truncate text-xs font-medium text-foreground">
                   <Highlight text={hit.label} ranges={hit.matchedField === "label" ? hit.ranges : undefined} />
                 </span>
-                <span class="shrink-0 text-2xs uppercase tracking-wider text-muted-2">
+                <span class="shrink-0 text-xs uppercase tracking-wider text-muted-2">
                   <Highlight text={t(TAB_LABELS[hit.entry.tab])} ranges={hit.matchedField === "tab" ? hit.ranges : undefined} />
                 </span>
               </span>

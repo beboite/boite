@@ -164,11 +164,11 @@
     <div class="flex h-7 shrink-0 items-center gap-2 border-b border-border bg-[var(--color-titlebar)] px-3 text-xs text-muted-foreground">
       <span class="truncate flex-1" use:tip={active.path}>{active.path}</span>
       {#if active.isReadonly}
-        <span class="rounded bg-[var(--color-surface-2)] px-1.5 py-0.5 text-2xs uppercase">{t("editor.readonly")}</span>
+        <span class="rounded bg-[var(--color-surface-2)] px-1.5 py-0.5 text-xs uppercase">{t("editor.readonly")}</span>
       {/if}
       {#if active.externalChange}
         <span
-          class="rounded bg-[var(--color-warning)]/15 px-1.5 py-0.5 text-2xs uppercase text-[var(--color-warning)]"
+          class="rounded bg-[var(--color-warning)]/15 px-1.5 py-0.5 text-xs uppercase text-[var(--color-warning)]"
           use:tip={t("editor.staleWarning")}
         >
           {t("editor.changedOnDisk")}

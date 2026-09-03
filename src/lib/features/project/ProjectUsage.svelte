@@ -547,12 +547,12 @@
       <span></span>
       <div class="cal-months" aria-hidden="true">
         {#each monthMarks as label, w (w)}
-          <span class="text-2xs whitespace-nowrap text-muted-2">{label ?? ""}</span>
+          <span class="text-xs whitespace-nowrap text-muted-2">{label ?? ""}</span>
         {/each}
       </div>
       <div class="cal-weekdays" aria-hidden="true">
         {#each weekdayMarks as label, row (row)}
-          <span class="text-2xs leading-none text-muted-2">{label ?? ""}</span>
+          <span class="text-xs leading-none text-muted-2">{label ?? ""}</span>
         {/each}
       </div>
       <!-- One listener for the year rather than 371. `pointerover` fires once
@@ -588,7 +588,7 @@
       </div>
     </div>
     <div
-      class="mt-1.5 flex items-center justify-end gap-1 text-2xs text-muted-2"
+      class="mt-1.5 flex items-center justify-end gap-1 text-xs text-muted-2"
       aria-hidden="true"
     >
       <span>{t("project.tokensLess")}</span>
@@ -616,7 +616,7 @@
     style:top="{cardTop}px"
     style:left="{cardLeft}px"
   >
-    <p class="whitespace-nowrap text-2xs text-muted-foreground">{cardDay}</p>
+    <p class="whitespace-nowrap text-xs text-muted-foreground">{cardDay}</p>
     <p class="whitespace-nowrap tabular-nums text-sm font-medium text-foreground">
       {hovered.cell.total > 0
         ? t("project.tokensSpent", { total: fmt(hovered.cell.total) })

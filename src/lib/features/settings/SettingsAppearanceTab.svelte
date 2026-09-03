@@ -204,7 +204,7 @@
   </div>
 
   {#if anyAcrylic}
-    <p class="mt-2 text-2xs leading-relaxed text-muted-foreground">
+    <p class="mt-2 text-xs leading-relaxed text-muted-foreground">
       {t("appearance.themeAcrylicNote")}
     </p>
   {/if}
@@ -228,10 +228,10 @@
   {/snippet}
 
   <div class="flex items-center gap-3">
-    <span class="w-9 shrink-0 tabular-nums text-2xs text-muted-2">75%</span>
+    <span class="w-9 shrink-0 tabular-nums text-xs text-muted-2">75%</span>
     <div class="relative min-w-0 flex-1 pt-5">
       <span
-        class="pointer-events-none absolute top-0 text-2xs font-semibold tabular-nums text-foreground"
+        class="pointer-events-none absolute top-0 text-xs font-semibold tabular-nums text-foreground"
         style:left="{uiThumbPct}%"
         style:transform="translateX(-{uiThumbPct}%)"
       >
@@ -248,7 +248,7 @@
         aria-label={t("appearance.uiScale")}
       />
     </div>
-    <span class="w-9 shrink-0 text-right tabular-nums text-2xs text-muted-2">150%</span>
+    <span class="w-9 shrink-0 text-right tabular-nums text-xs text-muted-2">150%</span>
   </div>
 </SettingsCard>
 
@@ -324,12 +324,12 @@
   {/snippet}
 
   <div class="flex items-center gap-3">
-    <span class="w-9 shrink-0 tabular-nums text-2xs text-muted-2">
+    <span class="w-9 shrink-0 tabular-nums text-xs text-muted-2">
       {TERMINAL_SCALE_MIN}%
     </span>
     <div class="relative min-w-0 flex-1 pt-5">
       <span
-        class="pointer-events-none absolute top-0 text-2xs font-semibold tabular-nums text-foreground"
+        class="pointer-events-none absolute top-0 text-xs font-semibold tabular-nums text-foreground"
         style:left="{terminalThumbPct}%"
         style:transform="translateX(-{terminalThumbPct}%)"
       >
@@ -346,7 +346,7 @@
         aria-label={t("appearance.terminalSize")}
       />
     </div>
-    <span class="w-9 shrink-0 text-right tabular-nums text-2xs text-muted-2">
+    <span class="w-9 shrink-0 text-right tabular-nums text-xs text-muted-2">
       {TERMINAL_SCALE_MAX}%
     </span>
   </div>
@@ -605,7 +605,7 @@
 
   .swatch-label {
     padding: 0 2px 1px;
-    font-size: var(--text-2xs);
+    font-size: var(--text-xs);
     color: var(--color-muted-foreground);
   }
   .theme-swatch.selected .swatch-label {

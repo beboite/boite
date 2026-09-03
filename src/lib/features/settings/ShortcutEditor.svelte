@@ -478,7 +478,7 @@
             </div>
             <button
               type="button"
-              class="mt-2 w-full rounded-md border border-edge px-2 py-1 text-2xs text-muted-foreground transition hover:text-foreground"
+              class="mt-2 w-full rounded-md border border-edge px-2 py-1 text-xs text-muted-foreground transition hover:text-foreground"
               onclick={() => setIconColor(shortcut.id, null)}
             >
               {t("shortcuts.defaultColor")}
@@ -515,7 +515,7 @@
         <button
           type="button"
           onclick={() => void toggleShortcutYolo(shortcut)}
-          class="flex h-6 items-center gap-1 rounded border px-1.5 text-2xs font-semibold transition {isYolo
+          class="flex h-6 items-center gap-1 rounded border px-1.5 text-xs font-semibold transition {isYolo
             ? 'border-[var(--color-warning)] bg-[var(--color-warning)]/15 text-[var(--color-warning)] hover:bg-[var(--color-warning)]/25'
             : 'border-border/60 text-muted-2 hover:border-border hover:text-foreground'}"
           title={isYolo ? t("shortcuts.yoloActive") : t("shortcuts.yoloInactive")}
@@ -544,7 +544,7 @@
 
 <div class="mt-4 border-t border-border/40 pt-4">
   <div class="mb-3 flex items-end justify-between gap-3">
-    <p class="text-2xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+    <p class="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
       {t("shortcuts.addFromPreset")}
     </p>
     <button
@@ -576,7 +576,7 @@
             <span class="truncate text-xs font-semibold text-foreground">{preset.label}</span>
             {#if cliDetection.probed}
               <span
-                class="mt-0.5 flex items-center gap-1 text-2xs {installed
+                class="mt-0.5 flex items-center gap-1 text-xs {installed
                   ? 'text-[var(--color-success)]'
                   : 'text-muted-2'}"
               >
@@ -592,7 +592,7 @@
                 </span>
               </span>
             {:else}
-              <span class="mt-0.5 truncate text-2xs text-muted-2">
+              <span class="mt-0.5 truncate text-xs text-muted-2">
                 {preset.command}
               </span>
             {/if}

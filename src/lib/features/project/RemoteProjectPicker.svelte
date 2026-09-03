@@ -169,7 +169,7 @@
                   draggable="false"
                 />
               {:else}
-                <span class="text-2xs font-semibold text-muted-foreground">
+                <span class="text-xs font-semibold text-muted-foreground">
                   {projectDisplayName(project).charAt(0).toUpperCase()}
                 </span>
               {/if}
@@ -178,7 +178,7 @@
               <span class="block truncate text-base leading-tight text-foreground">
                 {projectDisplayName(project)}
               </span>
-              <span class="block truncate text-2xs text-muted-2">
+              <span class="block truncate text-xs text-muted-2">
                 {project.cwd}
               </span>
             </span>
