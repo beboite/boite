@@ -41,8 +41,13 @@
    * freed the calendar to take the whole width — it was a fixed 636px grid in a
    * flexible column, so a card the width of two others ended in dead space.
    */
-  type Props = { project: Project };
-  let { project }: Props = $props();
+  /**
+   * `hideCalendar` is the page saying the card is too narrow for a year: a
+   * 53-column grid under 400px is a smear, not a picture, and the figures on
+   * the line above it are the part that still reads.
+   */
+  type Props = { project: Project; hideCalendar?: boolean; class?: string };
+  let { project, hideCalendar = false, class: klass = "" }: Props = $props();
 
   const WEEKS = 53;
   const DAY_MS = 86_400_000;
@@ -236,6 +241,18 @@
    */
   const activeDays = $derived(cells.filter((c) => !c.future && c.total > 0));
 
+  /**
+   * A year of empty squares is not a picture of anything.
+   *
+   * With one coloured cell in it the calendar was still the largest element on
+   * the dashboard of a project that had been run twice, and every square in it
+   * was an assertion that nothing happened that day, made 370 times. Under two
+   * the card keeps its totals and offers the year rather than insisting on it.
+   */
+  const sparse = $derived(activeDays.length < 2);
+  let showYear = $state(false);
+  const calendar = $derived(!hideCalendar && (!sparse || showYear));
+
   const missingLabel = $derived(
     (report?.missing ?? []).map((m) => m.charAt(0).toUpperCase() + m.slice(1)).join(", "),
   );
@@ -415,7 +432,7 @@
   });
 </script>
 
-<DashboardCard title={t("project.tokens")} class="lg:col-span-2">
+<DashboardCard title={t("project.tokens")} class={klass}>
   {#snippet icon()}<Coins class="size-3.5" />{/snippet}
   {#snippet actions()}
     <button
@@ -512,6 +529,18 @@
       {/each}
     </ul>
 
+    {#if sparse && !hideCalendar}
+      <button
+        type="button"
+        class="mt-2 text-xs text-muted-foreground underline-offset-2 transition hover:text-foreground hover:underline"
+        onclick={() => (showYear = !showYear)}
+        aria-expanded={showYear}
+      >
+        {showYear ? t("project.tokensHideYear") : t("project.tokensShowYear")}
+      </button>
+    {/if}
+
+    {#if calendar}
     <!-- Sized by the card, not by the year: every column is a fraction of the
          width, so the calendar ends where the card does. -->
     <div class="cal mt-3">
@@ -568,6 +597,7 @@
       {/each}
       <span>{t("project.tokensMore")}</span>
     </div>
+    {/if}
     {#if missingLabel}
       <p class="mt-1 text-xs text-muted-2">
         {t("project.tokensMissing", { agents: missingLabel })}

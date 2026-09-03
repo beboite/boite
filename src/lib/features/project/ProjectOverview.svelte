@@ -2,16 +2,23 @@
   import { onMount, untrack } from "svelte";
   import { tip } from "$lib/shared/actions/tooltip";
   import { app } from "$lib/app/store.svelte";
+  import { backendFor } from "$lib/backend";
+  import type { FolderState } from "$lib/backend/types";
   import { gitStore, gitScope } from "$lib/features/git/store.svelte";
   import { notifications } from "$lib/features/notifications/store.svelte";
+  import { logger } from "$lib/shared/services/logger.svelte";
   import { todos } from "$lib/features/todo/store.svelte";
   import { confirmDialog } from "$lib/shared/components/confirm.svelte";
   import TodoList from "$lib/features/todo/TodoList.svelte";
+  import CardError from "./CardError.svelte";
   import DashboardCard from "./DashboardCard.svelte";
+  import ProjectHealthBanner from "./ProjectHealthBanner.svelte";
+  import ProjectRepoSettings from "./ProjectRepoSettings.svelte";
   import ProjectWorktrees from "./ProjectWorktrees.svelte";
   import ProjectMcpSettings from "./ProjectMcpSettings.svelte";
   import ProjectUsage from "./ProjectUsage.svelte";
   import ProjectStats from "./ProjectStats.svelte";
+  import { gitFailure, projectHealth, repoCardsVisible } from "./health";
   import ThreadTurns from "$lib/features/thread/ThreadTurns.svelte";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
   import { threadIconColor } from "$lib/features/fastpick/threadAccent";
@@ -47,6 +54,25 @@
    */
   type Props = { project: Project; onOpenThread: (threadId: string) => void };
   let { project, onOpenThread }: Props = $props();
+
+  /**
+   * How wide the page actually is, rather than how wide the window is.
+   *
+   * This dashboard is drawn in two places: the main area, and a pane. At 300px
+   * (the pane's minimum) the viewport breakpoints it used to carry were still
+   * reading "large", so three columns of 90px were laid out and every card
+   * became one word per line with the labels drawn over each other. The
+   * measurement is the page's own box, so the same component answers correctly
+   * in both.
+   *
+   * Unmeasured is three columns on purpose: it is what the main area resolves
+   * to a frame later, and starting narrow would reflow the common case.
+   */
+  let width = $state(0);
+  const columns = $derived(width === 0 || width >= 900 ? 3 : width >= 560 ? 2 : 1);
+  // A year of squares needs about a pixel per day plus the gutters. Under this
+  // it is a smear, so the tokens card keeps its figures and drops the picture.
+  const tinyWidth = $derived(width > 0 && width < 400);
 
   // Minus what the project put away. The sidebar's own drawer is the one place
   // a settled thread shows up, so a card here that still counted them would be
@@ -116,12 +142,62 @@
     const reloadLog = untrack(() => (gitStore.get(registered)?.log.length ?? 0) === 0);
     void gitStore.refresh(registered, { reloadLog, notifyErrors: true }).catch((err) => {
       const msg = err instanceof Error ? err.message : String(err);
+      // Silent for the two failures the banner is already about. A toast
+      // saying "Git could not read this folder" over a banner saying the
+      // folder is gone is the same sentence twice, and the toast is the one
+      // with no action on it.
+      const kind = gitFailure(msg);
+      if (kind === "pathMissing" || kind === "notARepo") {
+        lastGitError = msg;
+        return;
+      }
       if (lastGitError !== msg) {
         lastGitError = msg;
         notifications.error(t("git.readFolderFailed"), undefined, msg);
       }
     });
   });
+
+  /**
+   * Is the folder still there, asked once per project rather than inferred
+   * from whichever card failed first.
+   *
+   * `project.folderState` is on the bus already (`Files::FolderState`) and both
+   * hosts route it, so nothing new was added to Rust for this. It answers
+   * `missing` for a path that is not there and never throws for one, which is
+   * the whole question; a refusal (a path outside a server's workspace root)
+   * leaves the answer null and the page reads as ordinary.
+   */
+  let folder = $state<FolderState | null>(null);
+  $effect(() => {
+    const cwd = project.cwd;
+    const origin = project.origin;
+    folder = null;
+    let live = true;
+    void backendFor(origin)
+      .project.folderState(cwd)
+      .then((state) => {
+        if (live) folder = state;
+      })
+      .catch((err) => {
+        logger.warn("project", `folder probe refused ${cwd}`, String(err));
+      });
+    return () => {
+      live = false;
+    };
+  });
+
+  const health = $derived(
+    projectHealth({
+      folder,
+      gitLoaded: !!git?.loaded,
+      gitIsRepo: !!git?.isRepo,
+      gitError: git?.error ?? null,
+    }),
+  );
+  // Git, Tours and Worktrees each read the repository, so in the two banner
+  // states they have nothing to say that the banner has not said better.
+  const repoCards = $derived(repoCardsVisible(health));
 
   // Same door as a single remove: the rows do not come back, and the eraser
   // used to skip the question the rest of this surface asks.
@@ -162,9 +238,23 @@
   }
 </script>
 
-<div class="grid gap-3 lg:grid-cols-3">
+<div class="flex flex-col gap-3" bind:clientWidth={width}>
+  <ProjectHealthBanner {project} {health} />
+
+  <!-- `items-start` is what lets an empty card be short. A grid row stretches
+       its children to the tallest of them by default, which is how a card
+       holding one line of "nothing here" ended up as a full-height box with
+       the line floating at the top of it. -->
+  <div
+    class={[
+      "grid items-start gap-3",
+      columns === 3 && "grid-cols-3",
+      columns === 2 && "grid-cols-2",
+    ]}
+  >
   <!-- Terminals. The list is the whole card: starting one is the shortcut bar's
-       job, one row up. -->
+       job, one row up. It leads the page: it is what the user came for, and it
+       used to be the smallest card under the one they look at once a month. -->
   <DashboardCard
     title={t("project.threads")}
     badge={threads.length || null}
@@ -253,15 +343,20 @@
   </DashboardCard>
 
   <!-- Git. A summary, not a panel: branch, how far from upstream, what is
-       uncommitted, and the last few commits with when they landed. -->
+       uncommitted, and the last few commits with when they landed. Absent
+       entirely while the banner is up: a folder that is gone has no branch,
+       and the card used to answer that with an OS error in red. -->
+  {#if repoCards}
   <DashboardCard title={t("project.git")}>
     {#snippet icon()}<GitBranch class="size-3.5" />{/snippet}
     {#if !git?.loaded}
       <p class="text-sm text-muted-foreground">{t("common.loading")}</p>
     {:else if git.error}
       <!-- The store keeps the last good lists when a refresh fails, so without
-           this branch a moved folder or a missing git still looked clean. -->
-      <p class="text-sm text-[var(--color-danger)]">{git.error}</p>
+           this branch a moved folder or a missing git still looked clean. The
+           two failures with a banner never reach here; what does is the rest,
+           and the rest is not copy. -->
+      <CardError error={git.error} />
     {:else if !git.isRepo}
       <p class="text-sm text-muted-foreground">{t("project.notARepo")}</p>
     {:else}
@@ -310,6 +405,11 @@
       {/if}
     {/if}
   </DashboardCard>
+  {/if}
+
+  <!-- What this project does to every thread launched in it. Third, because
+       the two above it are what is happening and this is what was decided. -->
+  <ProjectRepoSettings {project} />
 
   <!-- Todos. The list itself, not a summary of it: this card used to be six
        truncated titles with an input under them, which is the right shape only
@@ -346,14 +446,23 @@
     </div>
   </DashboardCard>
 
-  <!-- What the agent did, turn by turn, and the way back out of one. Beside the
-       git card on purpose: they read the same repository and answer the two
-       halves of "what changed here". -->
-  <ThreadTurns {project} />
+  <!-- Where the agents actually are. Read from the repository, so it goes with
+       the git card rather than with the switch that decides what it will hold
+       tomorrow. -->
+  {#if repoCards}
+    <ProjectWorktrees
+      {project}
+      class={columns === 3 ? "col-span-2" : columns === 2 ? "col-span-2" : ""}
+    />
+  {/if}
 
-  <!-- Two cards' worth of grid, and each component places itself: the token
-       calendar wants the width, the figures beside it do not. -->
-  <ProjectUsage {project} />
+  <ProjectMcpSettings {project} />
+
+  <!-- What the agent did, turn by turn, and the way back out of one. Reads the
+       same repository as the git card, so it goes away with it. -->
+  {#if repoCards}
+    <ThreadTurns {project} />
+  {/if}
 
   <ProjectStats
     {project}
@@ -364,24 +473,21 @@
     gitIsRepo={!!git?.isRepo}
   />
 
-  <!-- Where the agents actually are, and what this project does with them.
-       Two cards from one component, because the switch decides what the list
-       below it will hold. The MCP access rows are inside the first of them:
-       they were a full-width card of their own holding two lines of text, and
-       three columns of nothing under it. -->
-  <ProjectWorktrees {project} />
-
-  <ProjectMcpSettings {project} />
+  <!-- Last, and it used to be first by size: the thing looked at once a month
+       was the largest element on the page. -->
+  <ProjectUsage
+    {project}
+    hideCalendar={tinyWidth}
+    class={columns === 3 ? "col-span-2" : columns === 2 ? "col-span-2" : ""}
+  />
 
   <!-- The paths, as a line rather than a card. They are the one thing here
        that never changes, and a card's worth of chrome around two static
        strings was room the rest of the page wanted. -->
-  <p
-    class="truncate px-1 text-xs text-muted-2 lg:col-span-3"
-    use:tip={pathTip}
-  >
+  <p class="col-span-full truncate px-1 text-xs text-muted-2" use:tip={pathTip}>
     {project.cwd}{#if project.gitRoot && project.gitRoot !== project.cwd}
       · {t("project.repoAt", { path: project.gitRoot })}
     {/if}
   </p>
+  </div>
 </div>

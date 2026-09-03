@@ -460,7 +460,15 @@
         </button>
       </div>
     {:else if items.length === 0 && !todos.loading}
-      <p class="px-3 py-6 text-center text-xs text-muted-foreground">
+      <!-- One line on the dashboard, where this card sits beside seven others
+           and a centred block of air is the card claiming a height it has no
+           content for. The pane has the room and keeps the breathing space. -->
+      <p
+        class={[
+          "text-xs text-muted-foreground",
+          compact ? "px-3.5 py-2" : "px-3 py-6 text-center",
+        ]}
+      >
         {t("todo.empty")}
       </p>
     {/if}

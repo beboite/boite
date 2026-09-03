@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ThreadStatus } from "$lib/types";
-import { hasNoProcess, isFinished, isParked } from "./thread-status";
+import { hasNoProcess, isFinished, isParked, neverStarted } from "./thread-status";
 
 const ALL: ThreadStatus[] = [
   "idle",
@@ -38,4 +38,12 @@ describe("thread status", () => {
     expect(ALL.filter(isParked)).toEqual(["idle", "stopped"]);
   });
 
+  it("separates a spawn that failed from a process that died", () => {
+    // No ptyId: the spawn catch wrote the error and nothing ever ran, so the
+    // title bar must not count this row as a terminal.
+    expect(neverStarted("error", false)).toBe(true);
+    // A PTY that came up and then failed did run.
+    expect(neverStarted("error", true)).toBe(false);
+    expect(ALL.filter((status) => neverStarted(status, false))).toEqual(["error"]);
+  });
 });

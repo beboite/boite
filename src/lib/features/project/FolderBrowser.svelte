@@ -126,13 +126,25 @@
   async function addHere() {
     if (busy || !path) return;
     busy = true;
+    // A caller that asked for a folder gets the folder; nobody else's job
+    // changed, so the default is still "add a project here".
+    const pick = folderBrowser.onPick;
+    if (pick) {
+      try {
+        await pick(path);
+      } finally {
+        busy = false;
+      }
+      folderBrowser.close();
+      return;
+    }
     const p = await addProjectByPath(path, "remote");
     busy = false;
-    if (p) folderBrowser.open = false;
+    if (p) folderBrowser.close();
   }
 
   function close() {
-    folderBrowser.open = false;
+    folderBrowser.close();
   }
 </script>
 
@@ -214,7 +226,11 @@
             onclick={addHere}
             disabled={busy || !path}
           >
-            {busy ? t("folderBrowser.adding") : t("folderBrowser.addThisFolder")}
+            {busy
+              ? t("folderBrowser.adding")
+              : folderBrowser.onPick
+                ? t("folderBrowser.useThisFolder")
+                : t("folderBrowser.addThisFolder")}
           </button>
         </div>
       {/if}

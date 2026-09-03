@@ -3,6 +3,7 @@
   import { tip } from "$lib/shared/actions/tooltip";
   import { backendForPath } from "$lib/backend";
   import type { CheckpointFile } from "$lib/backend/types";
+  import CardError from "$lib/features/project/CardError.svelte";
   import DashboardCard from "$lib/features/project/DashboardCard.svelte";
   import { editorStore } from "$lib/features/editor/store.svelte";
   import { revealEditor } from "$lib/features/editor/reveal";
@@ -145,9 +146,10 @@
   {/snippet}
 
   {#if error}
-    <p class="px-3.5 pb-3 text-sm text-muted-foreground">
-      {t("turns.loadFailed", { error })}
-    </p>
+    <!-- `turns.loadFailed` used to interpolate git's own words into a
+         sentence, so a project whose folder had moved printed the OS error
+         here as well as in the two cards beside it. -->
+    <CardError {error} class="px-3.5 pb-3" />
   {:else if !thread || !repo}
     <p class="px-3.5 pb-3 text-sm text-muted-foreground">{t("turns.noThread")}</p>
   {:else if turns.length === 0}
