@@ -146,6 +146,15 @@
       Number((e.currentTarget as HTMLInputElement).value),
     );
   }
+
+  const uiThumbPct = $derived(
+    ((settings.state.uiScalePercent - 75) / (150 - 75)) * 100,
+  );
+  const terminalThumbPct = $derived(
+    ((settings.state.terminalFontScalePercent - TERMINAL_SCALE_MIN) /
+      (TERMINAL_SCALE_MAX - TERMINAL_SCALE_MIN)) *
+      100,
+  );
 </script>
 
 {#snippet preview(theme: ThemeId)}
@@ -219,20 +228,27 @@
   {/snippet}
 
   <div class="flex items-center gap-3">
-    <span class="w-9 tabular-nums text-2xs text-muted-2">75%</span>
-    <input
-      type="range"
-      min="75"
-      max="150"
-      step="5"
-      value={settings.state.uiScalePercent}
-      oninput={onSlider}
-      class="ui-slider min-w-0 flex-1"
-      aria-label={t("appearance.uiScale")}
-    />
-    <span class="w-12 text-right tabular-nums text-xs font-semibold text-foreground">
-      {settings.state.uiScalePercent}%
-    </span>
+    <span class="w-9 shrink-0 tabular-nums text-2xs text-muted-2">75%</span>
+    <div class="relative min-w-0 flex-1 pt-5">
+      <span
+        class="pointer-events-none absolute top-0 text-2xs font-semibold tabular-nums text-foreground"
+        style:left="{uiThumbPct}%"
+        style:transform="translateX(-{uiThumbPct}%)"
+      >
+        {settings.state.uiScalePercent}%
+      </span>
+      <input
+        type="range"
+        min="75"
+        max="150"
+        step="5"
+        value={settings.state.uiScalePercent}
+        oninput={onSlider}
+        class="ui-slider min-w-0 w-full"
+        aria-label={t("appearance.uiScale")}
+      />
+    </div>
+    <span class="w-9 shrink-0 text-right tabular-nums text-2xs text-muted-2">150%</span>
   </div>
 </SettingsCard>
 
@@ -308,21 +324,30 @@
   {/snippet}
 
   <div class="flex items-center gap-3">
-    <span class="w-9 tabular-nums text-2xs text-muted-2">
+    <span class="w-9 shrink-0 tabular-nums text-2xs text-muted-2">
       {TERMINAL_SCALE_MIN}%
     </span>
-    <input
-      type="range"
-      min={TERMINAL_SCALE_MIN}
-      max={TERMINAL_SCALE_MAX}
-      step="5"
-      value={settings.state.terminalFontScalePercent}
-      oninput={onTerminalScale}
-      class="ui-slider min-w-0 flex-1"
-      aria-label={t("appearance.terminalSize")}
-    />
-    <span class="w-12 text-right tabular-nums text-xs font-semibold text-foreground">
-      {settings.state.terminalFontScalePercent}%
+    <div class="relative min-w-0 flex-1 pt-5">
+      <span
+        class="pointer-events-none absolute top-0 text-2xs font-semibold tabular-nums text-foreground"
+        style:left="{terminalThumbPct}%"
+        style:transform="translateX(-{terminalThumbPct}%)"
+      >
+        {settings.state.terminalFontScalePercent}%
+      </span>
+      <input
+        type="range"
+        min={TERMINAL_SCALE_MIN}
+        max={TERMINAL_SCALE_MAX}
+        step="5"
+        value={settings.state.terminalFontScalePercent}
+        oninput={onTerminalScale}
+        class="ui-slider min-w-0 w-full"
+        aria-label={t("appearance.terminalSize")}
+      />
+    </div>
+    <span class="w-9 shrink-0 text-right tabular-nums text-2xs text-muted-2">
+      {TERMINAL_SCALE_MAX}%
     </span>
   </div>
 </SettingsCard>
