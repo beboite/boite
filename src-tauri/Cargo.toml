@@ -32,6 +32,9 @@ base64 = "0.23"
 png = "0.18"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# The macros only: the layer that turns an event into a log record is installed
+# once, in `boite_core::log`, from `logging::begin_log_session`.
+tracing = "0.1"
 # Agent-facing todo endpoint. Loopback only, and deliberately not the dev
 # mcp-bridge: that one answers execute_js, this one answers three verbs on one
 # table.

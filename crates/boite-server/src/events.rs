@@ -65,6 +65,16 @@ pub enum AppEvent {
     ThreadDismissed {
         thread_id: String,
     },
+    /// Records this process just wrote, for the devices that asked.
+    ///
+    /// Coalesced upstream, in batches of at most fifty or every 250 ms: one
+    /// event per record would put a broadcast on the log's own write path, and
+    /// a busy second writes hundreds. Fanned out like everything else, and
+    /// filtered per connection: a device that never called `logs.subscribe`
+    /// pays nothing for the ones that did.
+    LogRecords {
+        records: std::sync::Arc<Vec<serde_json::Value>>,
+    },
     /// One device is out, as of now.
     ///
     /// Broadcast rather than left to the next call, and this is the half that
@@ -128,6 +138,10 @@ impl AppEvent {
             AppEvent::ThreadDismissed { thread_id } => Event::new(
                 "thread.dismissed",
                 serde_json::json!({ "threadId": thread_id }),
+            ),
+            AppEvent::LogRecords { records } => Event::new(
+                "log.record",
+                serde_json::json!({ "records": records.as_ref() }),
             ),
             // Named on the wire so every *other* device can refresh its list.
             // The one being revoked never reads it: its socket is closed by the

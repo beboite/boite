@@ -43,6 +43,7 @@ pub mod checkpoint;
 pub mod conduct;
 pub mod files;
 pub mod git;
+pub mod logs;
 pub mod records;
 pub mod sessions;
 pub mod sync;
@@ -52,6 +53,7 @@ pub use checkpoint::Checkpoints;
 pub use conduct::Conduct;
 pub use files::Files;
 pub use git::Git;
+pub use logs::Logs;
 pub use records::{Records, ThreadPatch};
 pub use sessions::Sessions;
 pub use sync::Sync;
@@ -190,6 +192,7 @@ pub fn methods() -> impl Iterator<Item = &'static str> {
         .chain(conduct::ALL_METHODS)
         .chain(sync::ALL_METHODS)
         .chain(telemetry::ALL_METHODS)
+        .chain(logs::ALL_METHODS)
         .copied()
 }
 
@@ -275,6 +278,7 @@ pub enum Command {
     Conduct(Conduct),
     Files(Files),
     Git(Git),
+    Logs(Logs),
     Records(Records),
     Sessions(Sessions),
     Sync(Sync),
@@ -323,6 +327,12 @@ impl From<Sessions> for Command {
     }
 }
 
+impl From<Logs> for Command {
+    fn from(logs: Logs) -> Self {
+        Command::Logs(logs)
+    }
+}
+
 impl From<Telemetry> for Command {
     fn from(telemetry: Telemetry) -> Self {
         Command::Telemetry(telemetry)
@@ -363,6 +373,9 @@ impl Command {
         if sync::ALL_METHODS.contains(&method) {
             return Sync::decode(method, params).map(Command::Sync);
         }
+        if logs::ALL_METHODS.contains(&method) {
+            return Logs::decode(method, params).map(Command::Logs);
+        }
         if telemetry::ALL_METHODS.contains(&method) {
             return Telemetry::decode(method, params).map(Command::Telemetry);
         }
@@ -376,6 +389,7 @@ impl Command {
             Command::Conduct(c) => c.name(),
             Command::Files(f) => f.name(),
             Command::Git(g) => g.name(),
+            Command::Logs(l) => l.name(),
             Command::Records(r) => r.name(),
             Command::Sessions(s) => s.name(),
             Command::Sync(s) => s.name(),
@@ -390,6 +404,7 @@ impl Command {
             Command::Conduct(c) => c.wire(),
             Command::Files(f) => f.wire(),
             Command::Git(g) => g.wire(),
+            Command::Logs(l) => l.wire(),
             Command::Records(r) => r.wire(),
             Command::Sessions(s) => s.wire(),
             Command::Sync(s) => s.wire(),
@@ -409,6 +424,7 @@ impl Command {
             Command::Conduct(c) => c.capability(),
             Command::Files(f) => f.capability(),
             Command::Git(g) => g.capability(),
+            Command::Logs(l) => l.capability(),
             Command::Records(r) => r.capability(),
             Command::Sessions(s) => s.capability(),
             Command::Sync(s) => s.capability(),
@@ -433,6 +449,7 @@ impl Command {
             Command::Conduct(c) => c.prepare(host, grant),
             Command::Files(f) => f.prepare(host),
             Command::Git(g) => g.prepare(host),
+            Command::Logs(l) => l.prepare(host),
             Command::Records(r) => r.prepare(host),
             Command::Sessions(s) => s.prepare(host),
             Command::Sync(s) => s.prepare(host),
@@ -475,6 +492,7 @@ impl Ready {
             Ready::Work(Command::Checkpoints(c)) => c.run(),
             Ready::Work(Command::Files(f)) => f.run(),
             Ready::Work(Command::Git(g)) => g.run(),
+            Ready::Work(Command::Logs(l)) => l.run(),
             Ready::Work(Command::Sessions(s)) => s.run(),
             Ready::Work(Command::Sync(s)) => s.run(),
             // `prepare` turns every record command into the arm below, so this
@@ -796,6 +814,11 @@ mod tests {
             ("telemetry.trackUpdate", MutateProject),
             ("telemetry.trackPane", MutateProject),
             ("telemetry.trackSettingsSnapshot", MutateProject),
+            ("logs.tail", ReadProject),
+            ("logs.query", ReadProject),
+            ("logs.level", MutateProject),
+            ("logs.write", MutateProject),
+            ("logs.subscribe", ReadProject),
         ];
         let actual: Vec<(&str, Capability)> = every_command()
             .iter()

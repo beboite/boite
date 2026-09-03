@@ -133,6 +133,13 @@ pub struct Authorized {
     /// the caller's own set travels with the call rather than being looked up
     /// again from a session the dispatcher does not have.
     caller: ScopeSet,
+    /// Which device sent it, by pairing id.
+    ///
+    /// The arms that tag what a client wrote need it — a record whose `device`
+    /// came out of the body would let one phone file its lines under another —
+    /// and it is read here rather than looked up again, because the dispatcher
+    /// does not hold the session.
+    device: String,
 }
 
 impl Authorized {
@@ -162,6 +169,7 @@ impl Authorized {
             method: method.to_string(),
             params,
             caller: session.scopes(),
+            device: session.pairing_id().to_string(),
         })
     }
 
@@ -176,6 +184,11 @@ impl Authorized {
     /// What the device that sent this call was paired with.
     pub fn caller(&self) -> ScopeSet {
         self.caller
+    }
+
+    /// Which device sent this call.
+    pub fn device(&self) -> &str {
+        &self.device
     }
 
     pub fn into_params(self) -> Value {

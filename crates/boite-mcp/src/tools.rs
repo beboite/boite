@@ -337,6 +337,35 @@ fn common_tools() -> Value {
             "annotations": { "title": "Timeline", "readOnlyHint": true, "idempotentHint": false, "openWorldHint": false }
         },
         {
+            "name": "logs",
+            "description": "What this boite logged, across its desktop window, its server, this \
+                            MCP shim and the webview, on one clock. Read it when something \
+                            failed and the terminal does not say why: a command the bus refused, \
+                            a child that exited, a request that never came back. `tail` is the \
+                            last few hundred records this host still has in memory and is \
+                            instant; `query` reads the files and is the only way back past a \
+                            restart. Filter by `thread` to follow one terminal, by `level` for \
+                            this level and worse, by `since` for the last few minutes. Every \
+                            record is already redacted, so what comes back can be pasted into \
+                            an issue.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "action": { "type": "string", "description": "tail (memory, this host) or query (files, every host). Default query." },
+                    "level": { "type": "string", "description": "This level and worse: trace, debug, info, warn, error." },
+                    "host": { "type": "string", "description": "desktop, server, mcp or webview. Omit for all of them." },
+                    "thread": { "type": "string", "description": "One terminal, by thread id." },
+                    "turn": { "type": "string", "description": "One agent turn." },
+                    "target": { "type": "string", "description": "A module prefix, such as boite_core::command." },
+                    "text": { "type": "string", "description": "Case-insensitive, matched against the message and the fields." },
+                    "since": { "type": "number", "description": "Unix milliseconds, inclusive." },
+                    "until": { "type": "number", "description": "Unix milliseconds, inclusive." },
+                    "limit": { "type": "number", "description": "How many records. Default 100, max 1000." }
+                }
+            },
+            "annotations": { "title": "Logs", "readOnlyHint": true, "idempotentHint": false, "openWorldHint": false }
+        },
+        {
             "name": "workspace_search",
             "description": "Find text anywhere in this workspace: the todo list, the log of what                             agents did and were refused, and what the terminals printed. Use it                             before asking a human where something is, and before assuming a                             failure is new — the same error is often already in another                             terminal or already in the log with the reason attached.",
             "inputSchema": {
@@ -663,7 +692,7 @@ mod tests {
         assert!(names.iter().any(|n| n == "browser"), "{names:?}");
         assert!(names.iter().any(|n| n == "whereami"), "{names:?}");
         assert!(names.iter().any(|n| n == "thread_wait"), "{names:?}");
-        assert_eq!(names.len(), 21, "{names:?}");
+        assert_eq!(names.len(), 22, "{names:?}");
     }
 
     /// Pinned like the count above: the orchestrator tier is four tools, an
@@ -677,12 +706,12 @@ mod tests {
             .iter()
             .filter_map(|t| t.get("name").and_then(|v| v.as_str()).map(str::to_string))
             .collect();
-        assert_eq!(plain.len(), 21, "{plain:?}");
+        assert_eq!(plain.len(), 22, "{plain:?}");
         assert!(!plain.iter().any(|n| n == "workspace_pulse"));
         assert!(!plain.iter().any(|n| n == "say"));
         assert!(!plain.iter().any(|n| n == "thread_dispatch"));
         assert!(!plain.iter().any(|n| n == "thread_dismiss"));
-        assert_eq!(tools_for_role(Some("supervisor")).as_array().unwrap().len(), 21);
+        assert_eq!(tools_for_role(Some("supervisor")).as_array().unwrap().len(), 22);
 
         let raised: Vec<String> = tools_for_role(Some("orchestrator"))
             .as_array()
@@ -690,7 +719,7 @@ mod tests {
             .iter()
             .filter_map(|t| t.get("name").and_then(|v| v.as_str()).map(str::to_string))
             .collect();
-        assert_eq!(raised.len(), 25, "{raised:?}");
+        assert_eq!(raised.len(), 26, "{raised:?}");
         assert!(raised.iter().any(|n| n == "workspace_pulse"));
         assert!(raised.iter().any(|n| n == "say"));
         assert!(raised.iter().any(|n| n == "thread_dispatch"));

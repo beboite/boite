@@ -41,14 +41,84 @@ use boite_core::store::{ColVal, Store, ThreadCol};
 const EVENT_CHANNEL_CAP: usize = 1024;
 const MAX_WS_MESSAGE: usize = 1024 * 1024;
 
+/// Where this server writes its log.
+///
+/// `--log-dir` when it is given, `BOITE_LOG_DIR` when it is set, and otherwise
+/// the directory the desktop app uses on this machine, so one boite's three
+/// hosts land in one place and a query merges them. A machine with no such
+/// directory falls back to the data directory, which is the one place a server
+/// is always allowed to write.
+fn log_dir_from(args: &[String]) -> std::path::PathBuf {
+    if let Some(at) = args.iter().position(|a| a == "--log-dir") {
+        if let Some(dir) = args.get(at + 1).filter(|d| !d.starts_with("--")) {
+            return std::path::PathBuf::from(dir);
+        }
+    }
+    if let Ok(dir) = std::env::var("BOITE_LOG_DIR") {
+        if !dir.trim().is_empty() {
+            return std::path::PathBuf::from(dir);
+        }
+    }
+    boite_core::log::desktop_log_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("./boite-data").join("logs"))
+}
+
+/// Pushes what this process logs at the devices that asked for it.
+///
+/// Two hops on purpose. The `boite_core::log` subscriber runs on whichever
+/// thread logged, inside the write path, so all it does is put the record on a
+/// channel. The task below is what batches: fifty records or 250 ms, whichever
+/// comes first, because one broadcast per record would put the fanout on the
+/// log's own write path and a busy second writes hundreds.
+fn spawn_log_fanout(state: Arc<AppState>) {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<serde_json::Value>();
+    boite_core::log::subscribe(Box::new(move |record| {
+        // A record that will not serialize is dropped rather than logged
+        // about: logging from inside the log's own subscriber is a loop.
+        if let Ok(value) = serde_json::to_value(record) {
+            let _ = tx.send(value);
+        }
+    }));
+    tokio::spawn(async move {
+        const MAX_BATCH: usize = 50;
+        const WINDOW: std::time::Duration = std::time::Duration::from_millis(250);
+        let mut batch: Vec<serde_json::Value> = Vec::new();
+        loop {
+            let Some(first) = rx.recv().await else { break };
+            batch.clear();
+            batch.push(first);
+            let deadline = tokio::time::Instant::now() + WINDOW;
+            while batch.len() < MAX_BATCH {
+                match tokio::time::timeout_at(deadline, rx.recv()).await {
+                    Ok(Some(record)) => batch.push(record),
+                    // The channel is closed: send what is in hand and stop.
+                    Ok(None) => break,
+                    Err(_) => break,
+                }
+            }
+            if state.anyone_reads_logs() {
+                let _ = state.events.send(AppEvent::LogRecords {
+                    records: Arc::new(std::mem::take(&mut batch)),
+                });
+            }
+        }
+    });
+}
+
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "boite_server=info".into()),
-        )
-        .init();
+    // The same layer the desktop and the MCP shim install, so `logs.query`
+    // merges three hosts on one clock instead of one host and two stderrs. The
+    // compact `fmt` layer stays beside it: a server is watched from a console,
+    // and taking that away would be a regression for whoever is running it.
+    let log_dir = log_dir_from(&std::env::args().skip(1).collect::<Vec<_>>());
+    if let Err(e) = boite_core::log::init(boite_core::log::LogConfig {
+        dir: log_dir.clone(),
+        host: "server".to_string(),
+        extra_stderr: true,
+    }) {
+        eprintln!("[boite-server] the log could not be opened at {}: {e}", log_dir.display());
+    }
 
     // A headless box with nothing paired to it has no screen to pair the first
     // device from. These verbs are that screen; they touch the database and
@@ -192,7 +262,10 @@ async fn main() {
         claimed_requests: Default::default(),
         pulse,
         telemetry,
+        log_subscribers: Default::default(),
     });
+
+    spawn_log_fanout(state.clone());
 
     if let Err(e) = state.refresh_roots() {
         tracing::warn!("failed to load project roots: {e}");

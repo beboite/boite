@@ -79,6 +79,7 @@ fn verbs() -> Router<Shared> {
         .route("/v1/transcript", get(transcript))
         .route("/v1/search", get(search))
         .route("/v1/timeline", get(timeline))
+        .route("/v1/logs", get(logs))
 }
 
 /// Every route an agent has. Bound by each host to its own listener: the two
@@ -852,6 +853,56 @@ async fn timeline(
     })
     .await?;
     Ok(Json(json!({ "moments": moments })))
+}
+
+#[derive(Deserialize)]
+struct LogsIn {
+    /// `tail` reads this host's memory, `query` reads every host's files.
+    action: Option<String>,
+    since: Option<u64>,
+    until: Option<u64>,
+    level: Option<String>,
+    host: Option<String>,
+    thread: Option<String>,
+    turn: Option<String>,
+    target: Option<String>,
+    text: Option<String>,
+    limit: Option<u32>,
+}
+
+/// What this boite logged, for an agent that has to work out what happened.
+///
+/// Deliberately not confined to a project: a log record names a thread and a
+/// host, never a project, and the question it answers — why did that terminal
+/// stop — is about a machine rather than a folder. What keeps it honest is the
+/// redaction, which happens on the way in: what is in the file is already safe
+/// to read, which is the only reason this route can exist at all.
+async fn logs(
+    State(workspace): State<Shared>,
+    axum::extract::Query(query): axum::extract::Query<LogsIn>,
+) -> Result<Json<Value>, StatusCode> {
+    let _ = &workspace;
+    let limit = query.limit.unwrap_or(100).clamp(1, 1_000) as usize;
+    let tailing = query.action.as_deref() == Some("tail");
+    let records = blocking(move || {
+        if tailing {
+            boite_core::log::tail(limit, query.level.as_deref(), query.host.as_deref())
+        } else {
+            boite_core::log::query(&boite_core::log::Query {
+                since: query.since,
+                until: query.until,
+                level: query.level,
+                host: query.host,
+                thread: query.thread,
+                turn: query.turn,
+                target: query.target,
+                text: query.text,
+                limit: Some(limit),
+            })
+        }
+    })
+    .await?;
+    Ok(Json(json!({ "records": records })))
 }
 
 // ------------------------------------------------------------ worktrees

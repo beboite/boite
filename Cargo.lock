@@ -608,6 +608,7 @@ dependencies = [
  "tauri-plugin-updater",
  "tauri-plugin-window-state",
  "tokio",
+ "tracing",
  "url",
  "windows",
 ]
@@ -647,6 +648,8 @@ dependencies = [
  "sha2 0.11.0",
  "tar",
  "toml 1.1.2+spec-1.1.0",
+ "tracing",
+ "tracing-subscriber",
  "url",
  "uuid",
  "vte",
@@ -669,9 +672,11 @@ dependencies = [
 name = "boite-mcp"
 version = "1.3.4"
 dependencies = [
+ "boite-core",
  "boite-identity",
  "serde",
  "serde_json",
+ "tracing",
 ]
 
 [[package]]

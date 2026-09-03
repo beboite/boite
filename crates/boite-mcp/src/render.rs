@@ -398,6 +398,111 @@ pub(crate) fn format_pulse(out: &Value) -> String {
     w.into_string()
 }
 
+/// One log record per line, oldest first.
+///
+/// The columns are what a reader filters on next: the time to bound a window,
+/// the level to decide whether it matters, the host and target to know which
+/// half of the app said it. The four ids come last and only when they are set,
+/// because most records carry none of them and a column of dashes is bytes
+/// spent saying nothing.
+pub(crate) fn format_log_records(out: &Value) -> String {
+    let records = out
+        .get("records")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let mut w = Toon::new();
+    if records.is_empty() {
+        w.field("records", "none");
+        w.hint("widen it: drop the level, or ask again with action=query, which reads the files");
+        return w.into_string();
+    }
+    let rows: Vec<Vec<String>> = records
+        .iter()
+        .map(|record| {
+            let at = |key: &str| {
+                record
+                    .get(key)
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string()
+            };
+            let ts = record.get("ts").and_then(|v| v.as_u64()).unwrap_or(0);
+            let mut msg = at("msg");
+            // The ids the record carries, appended to the message rather than
+            // given columns of their own: a record has at most a couple set and
+            // which ones differ line by line.
+            let mut ids = Vec::new();
+            for key in ["thread", "turn", "request", "device", "span"] {
+                let value = at(key);
+                if !value.is_empty() {
+                    ids.push(format!("{key}={value}"));
+                }
+            }
+            if let Some(fields) = record.get("fields").and_then(|v| v.as_object()) {
+                for (key, value) in fields {
+                    let text = match value {
+                        Value::String(s) => s.clone(),
+                        other => other.to_string(),
+                    };
+                    ids.push(format!("{key}={text}"));
+                }
+            }
+            if !ids.is_empty() {
+                msg.push_str(" [");
+                msg.push_str(&ids.join(" "));
+                msg.push(']');
+            }
+            vec![
+                iso_time(ts),
+                at("level"),
+                at("host"),
+                clip(&at("target"), 48),
+                clip(&msg, MAX_CELL),
+            ]
+        })
+        .collect();
+    w.table("records", &["ts", "level", "host", "target", "msg"], &rows);
+    w.hint("oldest first; narrow with thread=<id>, level=warn, or since=<unix ms>");
+    w.into_string()
+}
+
+/// Unix milliseconds as an ISO time, in UTC.
+///
+/// Hand-rolled rather than a date crate: this shim links serde and nothing
+/// else on purpose, and the one thing a reader does with a timestamp is line
+/// two records up against each other.
+fn iso_time(ms: u64) -> String {
+    let secs = (ms / 1000) as i64;
+    let millis = ms % 1000;
+    let days = secs.div_euclid(86_400);
+    let rest = secs.rem_euclid(86_400);
+    let (year, month, day) = civil_from_days(days);
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}.{millis:03}Z",
+        rest / 3600,
+        (rest % 3600) / 60,
+        rest % 60
+    )
+}
+
+/// Days since 1970-01-01 to a calendar date.
+///
+/// Howard Hinnant's `civil_from_days`, which is the shortest correct answer:
+/// the era arithmetic handles every leap rule without a table.
+fn civil_from_days(days: i64) -> (i64, u32, u32) {
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    (if m <= 2 { y + 1 } else { y }, m as u32, d as u32)
+}
+
 /// What a search found, one row each.
 ///
 /// The kind is the first column on purpose: a hit in the log carries a reason
@@ -637,6 +742,44 @@ mod tests {
 
     fn host() -> Host {
         Host::probe()
+    }
+
+    /// One record per line, with the ids that are set and none of the ones
+    /// that are not.
+    ///
+    /// The time is the part worth pinning: an agent lines two records up
+    /// against each other, and a millisecond count would make it do arithmetic
+    /// to find out whether something happened before or after.
+    #[test]
+    fn a_log_reads_as_one_line_per_record_with_the_ids_that_are_set() {
+        let text = format_log_records(&json!({
+            "records": [
+                {
+                    "ts": 1_756_000_000_000u64, "seq": 1, "host": "server",
+                    "level": "warn", "target": "boite_server::ws",
+                    "msg": "rpc.failed", "thread": "t-7", "device": "phone-1",
+                    "fields": { "method": "git.commit" }
+                },
+                {
+                    "ts": 1_756_000_000_500u64, "seq": 2, "host": "desktop",
+                    "level": "info", "target": "boite_core::pty", "msg": "pty.exited"
+                }
+            ]
+        }));
+        assert!(text.contains("records(2):"), "{text}");
+        assert!(text.contains("2025-08-24T01:46:40.000Z"), "{text}");
+        assert!(text.contains("thread=t-7"), "{text}");
+        assert!(text.contains("device=phone-1"), "{text}");
+        assert!(text.contains("method=git.commit"), "{text}");
+        // A record with no ids carries no empty brackets: bytes spent saying
+        // nothing are bytes out of the agent's window.
+        let last = text.lines().find(|l| l.contains("pty.exited")).unwrap();
+        assert!(!last.contains('['), "{last}");
+
+        // Nothing found says so, and says what to widen.
+        let empty = format_log_records(&json!({ "records": [] }));
+        assert!(empty.contains("records: none"), "{empty}");
+        assert!(empty.contains("action=query"), "{empty}");
     }
 
     #[test]
