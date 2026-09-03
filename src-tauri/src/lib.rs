@@ -3,6 +3,7 @@ mod app_data;
 mod commands;
 mod fullscreen;
 mod local_pty;
+mod log_feed;
 mod logging;
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -308,6 +309,10 @@ pub fn run() {
             if let Err(e) = logging::begin_log_session(&setup_handle) {
                 eprintln!("[boite/logging] begin_log_session failed: {e}");
             }
+            // Right after the layer is installed and before anything else logs,
+            // so the Logs section can follow a boot rather than opening on the
+            // first record written after somebody clicked.
+            log_feed::start(setup_handle.clone());
             match data_move {
                 Ok(app_data::Outcome::Nothing) => {}
                 Ok(app_data::Outcome::Moved { entries, from }) => {
