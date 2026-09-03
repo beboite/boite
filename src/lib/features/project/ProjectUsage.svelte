@@ -440,12 +440,12 @@
          year of the lightest square is an assertion about every one of those
          days. The refresh in the header is the way out and is already there. -->
     <p class="text-sm text-muted-foreground">{t("project.tokensUnreachable")}</p>
-    <p class="mt-1 text-xs text-muted-foreground/70">
+    <p class="mt-1 text-xs text-muted-2">
       {t("project.tokensUnreachableHint")}
     </p>
   {:else if total === 0}
     <p class="text-sm text-muted-foreground">{t("project.tokensNone")}</p>
-    <p class="mt-1 text-xs text-muted-foreground/70">
+    <p class="mt-1 text-xs text-muted-2">
       {missingLabel
         ? t("project.tokensMissing", { agents: missingLabel })
         : t("project.tokensOnly")}
@@ -456,10 +456,10 @@
          put the headline figure at the bottom of the hole. -->
     <div class="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
       <p class="font-semibold tabular-nums text-2xl leading-none text-foreground">{fmt(total)}</p>
-      <p class="text-xs text-muted-foreground/70">{t("project.tokensRange")}</p>
+      <p class="text-xs text-muted-2">{t("project.tokensRange")}</p>
       <span class="flex-1"></span>
       {#if report.sessions > 0}
-        <p class="tabular-nums text-xs text-muted-foreground/70">
+        <p class="tabular-nums text-xs text-muted-2">
           {t("project.tokensSessions", { count: report.sessions })}
         </p>
       {/if}
@@ -474,7 +474,7 @@
         <li class="flex min-w-0 items-center gap-2">
           <ShortcutIcon iconKey={providerIcon(model.provider)} size={13} />
           <span
-            class="w-24 shrink-0 truncate text-sm text-foreground/80"
+            class="w-24 shrink-0 truncate text-sm text-foreground"
             use:tip={model.model}
             aria-hidden="true"
           >
@@ -518,12 +518,12 @@
       <span></span>
       <div class="cal-months" aria-hidden="true">
         {#each monthMarks as label, w (w)}
-          <span class="text-2xs whitespace-nowrap text-muted-foreground/60">{label ?? ""}</span>
+          <span class="text-2xs whitespace-nowrap text-muted-2">{label ?? ""}</span>
         {/each}
       </div>
       <div class="cal-weekdays" aria-hidden="true">
         {#each weekdayMarks as label, row (row)}
-          <span class="text-2xs leading-none text-muted-foreground/60">{label ?? ""}</span>
+          <span class="text-2xs leading-none text-muted-2">{label ?? ""}</span>
         {/each}
       </div>
       <!-- One listener for the year rather than 371. `pointerover` fires once
@@ -559,7 +559,7 @@
       </div>
     </div>
     <div
-      class="mt-1.5 flex items-center justify-end gap-1 text-2xs text-muted-foreground/70"
+      class="mt-1.5 flex items-center justify-end gap-1 text-2xs text-muted-2"
       aria-hidden="true"
     >
       <span>{t("project.tokensLess")}</span>
@@ -569,7 +569,7 @@
       <span>{t("project.tokensMore")}</span>
     </div>
     {#if missingLabel}
-      <p class="mt-1 text-xs text-muted-foreground/70">
+      <p class="mt-1 text-xs text-muted-2">
         {t("project.tokensMissing", { agents: missingLabel })}
       </p>
     {/if}

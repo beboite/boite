@@ -348,7 +348,7 @@
        chore, "free 4.2 GB" is a reason. -->
   <button
     type="button"
-    class="mt-1.5 flex w-full items-center justify-center gap-2 rounded-md border border-border bg-[var(--color-surface-2)] px-3 py-2 text-sm text-foreground transition hover:bg-[var(--color-surface-3)] disabled:cursor-default disabled:opacity-45 disabled:hover:bg-[var(--color-surface-2)]"
+    class="mt-1.5 flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-[var(--color-surface-2)] px-3 py-2 text-sm text-foreground transition hover:bg-[var(--color-surface-3)] disabled:cursor-default disabled:opacity-45 disabled:hover:bg-[var(--color-surface-2)]"
     onclick={() => void sweep()}
     disabled={sweeping || loading || sweepable.length === 0}
   >
@@ -366,7 +366,7 @@
     {/if}
   </button>
   {#if sweepable.length > 0 && !sweeping}
-    <p class="mt-1 text-center text-xs text-muted-foreground/70">
+    <p class="mt-1 text-center text-xs text-muted-2">
       {t("worktree.sweepHint", { count: sweepable.length })}
     </p>
   {/if}
@@ -425,7 +425,7 @@
            them look like the same one. -->
       <div class="px-3.5 pb-4 text-center" role="status">
         <p class="text-sm text-muted-foreground">{t("worktree.unreadable")}</p>
-        <p class="mt-1 break-words font-mono text-xs leading-snug text-muted-foreground/70">
+        <p class="mt-1 break-words font-mono text-xs leading-snug text-muted-2">
           {failed}
         </p>
       </div>
@@ -452,7 +452,7 @@
           >
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-1.5">
-                <span class="truncate text-base text-foreground/90" use:tip={w.path}>
+                <span class="truncate text-base text-foreground" use:tip={w.path}>
                   {basename(w.path)}
                 </span>
                 {#if w.main}
@@ -482,7 +482,7 @@
                   {w.branch ?? t("worktree.detachedAt", { head: w.head.slice(0, 7) })}
                 </span>
                 {#if size > 0}
-                  <span class="tabular-nums text-muted-foreground/70" in:fade={{ duration: DUR.fast }}>
+                  <span class="tabular-nums text-muted-2" in:fade={{ duration: DUR.fast }}>
                     {formatBytes(size)}
                   </span>
                 {/if}

@@ -44,7 +44,7 @@
   description={t("general.openOnLaunchDesc")}
 >
   <select
-    class="w-full rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-1.5 text-sm text-foreground"
+    class="w-full rounded-md border border-edge bg-[var(--color-surface-2)] px-2.5 py-1.5 text-sm text-foreground"
     value={settings.state.openOnLaunch}
     aria-label={t("general.openOnLaunch")}
     onchange={(e) => {
@@ -70,12 +70,12 @@
            that would do nothing. -->
       <p class="text-sm text-warning">{t("general.pushBlocked")}</p>
     {:else if permission === "unsupported"}
-      <p class="text-sm text-muted-foreground/80">{t("general.pushUnsupported")}</p>
+      <p class="text-sm text-muted-2">{t("general.pushUnsupported")}</p>
     {:else}
       <button
         type="button"
         disabled={asking}
-        class="rounded-md border border-border bg-[var(--color-surface-2)] px-3 py-1.5 text-sm text-foreground transition hover:bg-[var(--color-surface-3)] disabled:opacity-50"
+        class="rounded-md border border-edge bg-[var(--color-surface-2)] px-3 py-1.5 text-sm text-foreground transition hover:bg-[var(--color-surface-3)] disabled:opacity-50"
         onclick={ask}
       >
         {t("general.pushEnable")}

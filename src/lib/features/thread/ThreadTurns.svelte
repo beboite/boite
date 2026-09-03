@@ -138,7 +138,7 @@
   {#snippet icon()}<History class="size-3.5" />{/snippet}
   {#snippet lead()}
     {#if thread}
-      <span class="text-xs text-muted-foreground/80">
+      <span class="text-xs text-muted-2">
         {thread.title ?? thread.label}
       </span>
     {/if}
@@ -164,14 +164,14 @@
               aria-expanded={expanded === turn.id}
             >
               <span class="flex items-baseline gap-2">
-                <span class="min-w-0 flex-1 truncate text-base text-foreground/80">
+                <span class="min-w-0 flex-1 truncate text-base text-foreground">
                   {t("turns.files", { count: turn.files })}
                 </span>
-                <span class="shrink-0 tabular-nums text-xs text-muted-foreground/70">
+                <span class="shrink-0 tabular-nums text-xs text-muted-2">
                   {formatAgo(Math.max(0, relativeClock.now - turn.endedAt))}
                 </span>
               </span>
-              <span class="block truncate text-xs text-muted-foreground/80">
+              <span class="block truncate text-xs text-muted-2">
                 {t("turns.ran", {
                   span: formatSpan(Math.max(0, turn.endedAt - turn.startedAt)),
                 })}
@@ -183,7 +183,7 @@
             </button>
             <button
               type="button"
-              class="shrink-0 rounded-sm p-1.5 text-muted-foreground/70 transition hover:bg-accent hover:text-foreground disabled:opacity-40"
+              class="shrink-0 rounded-sm p-1.5 text-muted-2 transition hover:bg-accent hover:text-foreground disabled:opacity-40"
               onclick={() => revert(turn)}
               disabled={reverting}
               use:tip={t("turns.revert")}
@@ -194,7 +194,7 @@
           </div>
           {#if expanded === turn.id}
             {#if files.length === 0}
-              <p class="px-3 pb-2 text-xs text-muted-foreground/70">{t("turns.empty")}</p>
+              <p class="px-3 pb-2 text-xs text-muted-2">{t("turns.empty")}</p>
             {:else}
               <ul class="mb-1 flex flex-col border-l border-border pl-2 ml-2">
                 {#each files as file (file.path)}
@@ -205,11 +205,11 @@
                       onclick={() => openFile(turn, file)}
                     >
                       <span
-                        class="w-3 shrink-0 text-center text-2xs font-semibold text-muted-foreground/80"
+                        class="w-3 shrink-0 text-center text-2xs font-semibold text-muted-2"
                       >
                         {file.status}
                       </span>
-                      <span class="min-w-0 flex-1 truncate text-xs text-foreground/80">
+                      <span class="min-w-0 flex-1 truncate text-xs text-foreground">
                         {file.path}
                       </span>
                     </button>

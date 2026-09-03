@@ -14,11 +14,11 @@
   <div
     class="max-w-[85%] rounded-md px-2.5 py-1.5 text-sm whitespace-pre-wrap break-words {mine
       ? 'bg-accent text-foreground'
-      : 'bg-[var(--color-surface-2)] text-foreground/90'}"
+      : 'bg-[var(--color-surface-2)] text-foreground'}"
   >
     {message.text}
   </div>
-  <span class="px-1 text-2xs text-muted-foreground/70">
+  <span class="px-1 text-2xs text-muted-2">
     {mine ? t("orchestrator.you") : t("orchestrator.them")} · {ago}
   </span>
 </li>

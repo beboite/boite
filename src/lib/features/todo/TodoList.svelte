@@ -66,7 +66,7 @@
   // otherwise revealed by a pointer over the row or by the keyboard reaching
   // them, which is the half that was missing.
   const ROW_ACTION = $derived(
-    `grid size-[22px] shrink-0 place-items-center rounded text-muted-foreground/60 transition ${
+    `grid size-[22px] shrink-0 place-items-center rounded text-muted-2 transition ${
       mobile
         ? ""
         : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
@@ -379,7 +379,7 @@
   // The same box the Confirm/Reopen buttons draw, minus its resting border, so
   // the strip stays a line of text until a pointer is on it.
   const CHIP =
-    "rounded border border-transparent px-1 py-0.5 transition hover:border-border hover:bg-accent hover:text-foreground";
+    "rounded border border-transparent px-1 py-0.5 transition hover:border-edge hover:bg-accent hover:text-foreground";
 
   onMount(() => {
     void todos.ensureLoaded();
@@ -423,7 +423,7 @@
       <p class="text-xs text-muted-foreground">{todos.loadError}</p>
       <button
         type="button"
-        class="rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
+        class="rounded-md border border-edge px-2.5 py-1 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
         onclick={() => void todos.reload()}
       >
         {t("common.retry")}
@@ -471,7 +471,7 @@
           class="grid size-[15px] shrink-0 place-items-center rounded-[4px] border transition {item.state ===
           'done'
             ? 'border-foreground/30 bg-foreground/80 text-[var(--color-surface)]'
-            : 'border-border text-transparent hover:border-foreground/40'}"
+            : 'border-edge text-transparent hover:border-foreground/40'}"
           onclick={() =>
             todos.setState(item.id, item.state === "done" ? "open" : "done")}
         >
@@ -493,7 +493,7 @@
               todos.setTitle(item.id, (e.currentTarget as HTMLInputElement).value)}
             class="min-w-0 flex-1 rounded border border-transparent bg-transparent px-1 py-0.5 text-sm leading-snug outline-none transition focus:border-border focus:bg-[var(--color-surface)] {item.state ===
             'done'
-              ? 'text-muted-foreground/60 line-through'
+              ? 'text-muted-2 line-through'
               : 'text-foreground'}"
           />
         {:else}
@@ -505,7 +505,7 @@
             onclick={(e) => toggleCard(item, e.detail === 0)}
             class="min-w-0 flex-1 truncate px-1 py-0.5 text-left text-sm leading-snug {item.state ===
             'done'
-              ? 'text-muted-foreground/60 line-through'
+              ? 'text-muted-2 line-through'
               : 'text-foreground'}"
           >
             {item.title}
@@ -515,7 +515,7 @@
                  when the card is open, where the description is right
                  there. -->
             <span
-              class="shrink-0 text-muted-foreground/60"
+              class="shrink-0 text-muted-2"
               use:tip={t("todo.hasDescription")}
             >
               <AlignLeft class="size-3" />
@@ -524,7 +524,7 @@
         {/if}
         <button
           type="button"
-          class="{ROW_ACTION} hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-muted-foreground/50"
+          class="{ROW_ACTION} hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-muted-2"
           onclick={() => handOff(item)}
           disabled={!canSend}
           use:tip={canSend
@@ -564,7 +564,7 @@
                 item.id,
                 (e.currentTarget as HTMLTextAreaElement).value,
               )}
-            class="w-full resize-none rounded border border-border bg-[var(--color-surface)] px-1.5 py-1 text-sm leading-relaxed text-foreground/90 outline-none transition placeholder:text-muted-foreground/60 focus:border-foreground/30"
+            class="w-full resize-none rounded border border-border bg-[var(--color-surface)] px-1.5 py-1 text-sm leading-relaxed text-foreground outline-none transition placeholder:text-muted-2 focus:border-foreground/30"
           ></textarea>
         </div>
       {/if}
@@ -595,17 +595,17 @@
               <!-- Claimed through a credentials file, which names a project
                    and no thread: Boite did not launch this one and cannot
                    say which agent it was. -->
-              <Bot class="size-3 shrink-0 text-muted-foreground/70" />
+              <Bot class="size-3 shrink-0 text-muted-2" />
             {/if}
           </span>
           {#await gitState(item) then g}
             {#if !item.commitSha}
-              <span class="px-1 text-muted-foreground/70">{t("todo.gitNoCommit")}</span>
+              <span class="px-1 text-muted-2">{t("todo.gitNoCommit")}</span>
             {:else if !g}
               <!-- Nowhere to look it up: no project folder to run git in.
                    Shown bare rather than judged — not finding a repository
                    is not the same as not finding the commit. -->
-              <code class="px-1 tabular-nums text-muted-foreground/70">
+              <code class="px-1 tabular-nums text-muted-2">
                 {item.commitSha.slice(0, 7)}
               </code>
             {:else if g.commit.unreachable}
@@ -616,7 +616,7 @@
                    Muted, not warning: git has contradicted nothing. -->
               <button
                 type="button"
-                class="group/tip relative text-muted-foreground/70 {CHIP}"
+                class="group/tip relative text-muted-2 {CHIP}"
                 aria-expanded={openTip === `${item.id}:sha`}
                 onclick={() => toggleTip(`${item.id}:sha`)}
               >
@@ -645,7 +645,7 @@
                 aria-expanded={openTip === `${item.id}:commit`}
                 onclick={() => toggleTip(`${item.id}:commit`)}
               >
-                <span class="block truncate text-foreground/80">
+                <span class="block truncate text-foreground">
                   {g.commit.branch ?? g.commit.short}
                 </span>
                 {@render chipDetail(
@@ -653,14 +653,14 @@
                   `${item.id}:commit`,
                 )}
               </button>
-              <span class="shrink-0 text-muted-foreground/60">·</span>
+              <span class="shrink-0 text-muted-2">·</span>
               <span
-                class="shrink-0 px-1 {g.commit.pushed ? '' : 'text-muted-foreground/70'}"
+                class="shrink-0 px-1 {g.commit.pushed ? '' : 'text-muted-2'}"
               >
                 {g.commit.pushed ? t("todo.gitPushed") : t("todo.gitLocal")}
               </span>
               {#if g.pr.kind === "found"}
-                <span class="shrink-0 text-muted-foreground/60">·</span>
+                <span class="shrink-0 text-muted-2">·</span>
                 <button
                   type="button"
                   class="group/tip relative shrink-0 {CHIP}"
@@ -675,7 +675,7 @@
                 <!-- gh was there and refused. Said, because unlike a missing
                      gh this is a state the user can be in without knowing —
                      and the signed-out case they can fix in one command. -->
-                <span class="shrink-0 text-muted-foreground/60">·</span>
+                <span class="shrink-0 text-muted-2">·</span>
                 <button
                   type="button"
                   class="group/tip relative shrink-0 text-warning/80 {CHIP}"
@@ -701,7 +701,7 @@
         <div class="mt-1 flex gap-1 pl-[23px]">
           <button
             type="button"
-            class="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
+            class="flex items-center gap-1 rounded border border-edge px-1.5 py-0.5 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
             onclick={() => todos.setState(item.id, "done")}
           >
             <Check class="size-3" />
@@ -709,7 +709,7 @@
           </button>
           <button
             type="button"
-            class="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
+            class="flex items-center gap-1 rounded border border-edge px-1.5 py-0.5 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
             onclick={() => todos.setState(item.id, "open")}
           >
             <Undo2 class="size-3" />

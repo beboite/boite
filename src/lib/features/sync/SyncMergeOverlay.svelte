@@ -115,7 +115,7 @@
           </button>
           <button
             type="button"
-            class="rounded-md border border-border px-2 py-0.5 text-xs text-foreground"
+            class="rounded-md border border-edge px-2 py-0.5 text-xs text-foreground"
             onclick={() => (confirmingClose = false)}
           >
             {t("syncMerge.abandonCancel")}
@@ -178,21 +178,21 @@
             <div class="mt-2 flex items-center gap-2">
               <button
                 type="button"
-                class="rounded-md border border-border px-2 py-0.5 text-xs text-foreground"
+                class="rounded-md border border-edge px-2 py-0.5 text-xs text-foreground"
                 onclick={() => void syncStore.resolve(active.path, active.local ?? "")}
               >
                 {t("syncMerge.keepMine")}
               </button>
               <button
                 type="button"
-                class="rounded-md border border-border px-2 py-0.5 text-xs text-foreground"
+                class="rounded-md border border-edge px-2 py-0.5 text-xs text-foreground"
                 onclick={() => void syncStore.resolve(active.path, active.remote ?? "")}
               >
                 {t("syncMerge.takeTheirs")}
               </button>
               <button
                 type="button"
-                class="rounded-md border border-border px-2 py-0.5 text-xs text-muted-foreground"
+                class="rounded-md border border-edge px-2 py-0.5 text-xs text-muted-foreground"
                 onclick={() => void syncStore.skip(active.path)}
               >
                 {t("syncMerge.skip")}

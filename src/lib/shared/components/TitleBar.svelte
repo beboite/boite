@@ -355,7 +355,7 @@
     >
       <PanelLeft class="size-[15px]" />
     </button>
-    <span class="ml-1.5 hidden text-xs text-muted-foreground/70 md:inline">
+    <span class="ml-1.5 hidden text-xs text-muted-2 md:inline">
       {t("titlebar.status", {
         threadsCount: app.threads.length,
         threadsLabel: t(

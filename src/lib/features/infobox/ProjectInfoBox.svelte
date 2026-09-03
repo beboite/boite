@@ -498,7 +498,7 @@
                 class="ml-auto flex shrink-0 items-center gap-1 rounded bg-[var(--color-surface-3)] px-1.5 py-0.5 text-2xs text-muted-foreground"
                 use:tip={threadHere?.worktreePath ?? ""}
               >
-                <FolderGit2 class="size-3 text-muted-foreground/80" />
+                <FolderGit2 class="size-3 text-muted-2" />
                 <span class="max-w-[4.5rem] truncate">
                   {worktreeName || t("infoBox.worktreeTag")}
                 </span>
@@ -514,7 +514,7 @@
             <span class="relative flex size-3.5 shrink-0 items-center justify-center">
               <ShortcutIcon iconKey={agentIconKey} size={14} color={agentColor} />
             </span>
-            <span class="max-w-[9rem] truncate font-medium text-foreground/90">{agentName}</span>
+            <span class="max-w-[9rem] truncate font-medium text-foreground">{agentName}</span>
 
             {#if threadStatus === "running"}
               <span
@@ -574,7 +574,7 @@
             <span class="relative flex size-3.5 shrink-0 items-center justify-center">
               <ShortcutIcon iconKey={claimed[0].claimedBy as IconKey} size={14} />
             </span>
-            <span class="min-w-0 flex-1 truncate text-foreground/90">{claimed[0].title}</span>
+            <span class="min-w-0 flex-1 truncate text-foreground">{claimed[0].title}</span>
             <!-- What this row is. An agent's title can be anything, a test name
                  included, and the agent's own icon beside it says who without
                  ever saying what: the line read as a stray message sitting above
@@ -587,7 +587,7 @@
         {:else if !collapsed && openTodos.length > 0}
           <div class="row">
             <ListTodo class="size-3.5 shrink-0 text-muted-foreground" />
-            <span class="min-w-0 flex-1 truncate text-foreground/80">{openTodos[0].title}</span>
+            <span class="min-w-0 flex-1 truncate text-foreground">{openTodos[0].title}</span>
             <span class="tag">{t("infoBox.openTag")}</span>
             {#if openTodos.length > 1}
               <span class="tag">{t("infoBox.moreClaimed", { count: openTodos.length - 1 })}</span>
@@ -601,10 +601,10 @@
             <span class="shrink-0 font-mono text-2xs text-muted-foreground">
               {commits[0].shortSha}
             </span>
-            <span class="min-w-0 flex-1 truncate text-foreground/90">
+            <span class="min-w-0 flex-1 truncate text-foreground">
               {commits[0].summary}
             </span>
-            <span class="shrink-0 text-2xs text-muted-foreground/70">
+            <span class="shrink-0 text-2xs text-muted-2">
               {ago(commits[0].time)}
             </span>
           </div>
@@ -630,7 +630,7 @@
                       <span class="flex size-3.5 shrink-0 items-center justify-center">
                         <ShortcutIcon iconKey={item.claimedBy as IconKey} size={14} />
                       </span>
-                      <span class="truncate text-foreground/80">{item.title}</span>
+                      <span class="truncate text-foreground">{item.title}</span>
                     </div>
                   {/each}
                 </div>
@@ -643,8 +643,8 @@
                   <div class="border-t border-border/60 py-0.5">
                     {#each nextOpen as item (item.id)}
                       <div class="row dim text-muted-foreground">
-                        <Circle class="size-3 shrink-0 text-muted-foreground/60" />
-                        <span class="truncate text-foreground/80">{item.title}</span>
+                        <Circle class="size-3 shrink-0 text-muted-2" />
+                        <span class="truncate text-foreground">{item.title}</span>
                       </div>
                     {/each}
                   </div>
@@ -653,7 +653,7 @@
 
               {#if allTodos.length > 0}
                 <div class="row dim border-t border-border/40">
-                  <span class="flex items-center gap-2 text-2xs text-muted-foreground/70">
+                  <span class="flex items-center gap-2 text-2xs text-muted-2">
                     <span>{claimed.length} {t("infoBox.claimedSummary")}</span>
                     <span>·</span>
                     <span>{openTodos.length} {t("infoBox.openSummary")}</span>
@@ -673,10 +673,10 @@
                       <span class="shrink-0 font-mono text-2xs text-muted-foreground">
                         {commit.shortSha}
                       </span>
-                      <span class="min-w-0 flex-1 truncate text-foreground/80">
+                      <span class="min-w-0 flex-1 truncate text-foreground">
                         {commit.summary}
                       </span>
-                      <span class="shrink-0 text-2xs text-muted-foreground/70">
+                      <span class="shrink-0 text-2xs text-muted-2">
                         {ago(commit.time)}
                       </span>
                     </div>

@@ -129,7 +129,7 @@
               >
                 {account.email}
               </span>
-              <span class="ml-auto flex min-w-0 shrink-0 flex-wrap justify-end gap-x-2 text-muted-foreground/70">
+              <span class="ml-auto flex min-w-0 shrink-0 flex-wrap justify-end gap-x-2 text-muted-2">
                 {#each account.windows as window (window.label)}
                   {@const percent = windowPercent(window)}
                   {@const reset = formatReset(window.reset, relativeClock.now)}

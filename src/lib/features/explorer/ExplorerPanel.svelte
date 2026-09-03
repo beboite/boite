@@ -299,7 +299,7 @@
   <header class="flex h-9 shrink-0 items-center gap-2 border-b border-border px-3">
     <FolderTree class="size-4 text-muted-foreground" />
     {#if project}
-      <span class="truncate text-xs font-medium text-foreground/90">
+      <span class="truncate text-xs font-medium text-foreground">
         {projectDisplayName(project)}
       </span>
     {:else}
@@ -336,7 +336,7 @@
     <div
       class="flex items-center gap-1.5 rounded bg-[var(--color-surface)] px-2 py-1 text-sm focus-within:bg-[var(--color-surface-2)]"
     >
-      <Search class="size-3 shrink-0 text-muted-foreground/70" />
+      <Search class="size-3 shrink-0 text-muted-2" />
       <input
         bind:this={filterInput}
         type="text"
@@ -345,12 +345,12 @@
         oninput={onFilterInput}
         onkeydown={onFilterKey}
         disabled={!root}
-        class="min-w-0 flex-1 bg-transparent text-foreground/90 outline-none placeholder:text-muted-foreground/60 disabled:opacity-40"
+        class="min-w-0 flex-1 bg-transparent text-foreground outline-none placeholder:text-muted-2 disabled:opacity-40"
       />
       {#if filterActive}
         <button
           type="button"
-          class="shrink-0 rounded p-0.5 text-muted-foreground/70 transition hover:bg-accent hover:text-foreground"
+          class="shrink-0 rounded p-0.5 text-muted-2 transition hover:bg-accent hover:text-foreground"
           onclick={clearFilter}
           use:tip={t("explorer.clearFilterTitle")}
           aria-label={t("explorer.clearFilter")}
@@ -360,7 +360,7 @@
       {/if}
     </div>
     {#if filterActive}
-      <div class="mt-1 px-1 text-2xs text-muted-foreground/70">
+      <div class="mt-1 px-1 text-2xs text-muted-2">
         {#if searching}
           {t("explorer.searching")}
         {:else if hitCount === 0}
@@ -388,7 +388,7 @@
     onfocusout={onTreeFocusOut}
   >
     {#if !project}
-      <div class="px-3 py-4 text-center text-xs text-muted-foreground/70">
+      <div class="px-3 py-4 text-center text-xs text-muted-2">
         {t("explorer.pickProject")}
       </div>
     {:else if err && !entries}
@@ -408,7 +408,7 @@
            only thing left to say the rows are still coming. -->
       <span class="sr-only">{t("common.loading")}</span>
     {:else if entries.length === 0}
-      <div class="px-3 py-4 text-center text-xs text-muted-foreground/70">
+      <div class="px-3 py-4 text-center text-xs text-muted-2">
         {t("explorer.emptyFolder")}
       </div>
     {:else}

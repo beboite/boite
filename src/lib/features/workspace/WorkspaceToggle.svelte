@@ -459,7 +459,7 @@
                    showing a blank, which reads as "up to date". -->
               {#if version}
                 <span
-                  class={`shrink-0 tabular-nums text-2xs ${behind ? "rounded bg-warning/15 px-1 font-medium text-warning" : "text-muted-foreground/70"}`}
+                  class={`shrink-0 tabular-nums text-2xs ${behind ? "rounded bg-warning/15 px-1 font-medium text-warning" : "text-muted-2"}`}
                   use:tip={behind
                     ? t("workspace.versionBehind", {
                         version,
@@ -470,7 +470,7 @@
                   v{version}
                 </span>
               {:else}
-                <span class="shrink-0 text-2xs text-muted-foreground/60">
+                <span class="shrink-0 text-2xs text-muted-2">
                   {t("workspace.versionUnknown")}
                 </span>
               {/if}
@@ -507,7 +507,7 @@
         {#if !active}
           <button
             type="button"
-            class={`flex shrink-0 items-center justify-center rounded-lg transition hover:bg-accent ${mobile ? "w-11" : "w-9"} ${b.enabled ? "text-foreground" : "text-muted-foreground/60"}`}
+            class={`flex shrink-0 items-center justify-center rounded-lg transition hover:bg-accent ${mobile ? "w-11" : "w-9"} ${b.enabled ? "text-foreground" : "text-muted-2"}`}
             onclick={() => toggleKeepConnected(b)}
             aria-label={t("workspace.keepConnected")}
             use:tip={b.enabled
@@ -589,7 +589,7 @@
             spellcheck="false"
             autocapitalize="off"
             autocomplete="off"
-            class="w-full rounded-md border border-border bg-[var(--color-background)] px-3 py-2.5 font-mono text-sm normal-case tracking-normal text-foreground outline-none focus:border-foreground/40"
+            class="w-full rounded-md border border-edge bg-[var(--color-background)] px-3 py-2.5 font-mono text-sm normal-case tracking-normal text-foreground outline-none focus:border-foreground/40"
           />
         </label>
         <label class="flex flex-col gap-1 text-2xs uppercase tracking-wide text-muted-foreground">
@@ -600,7 +600,7 @@
             placeholder="••••••••"
             spellcheck="false"
             autocomplete="off"
-            class="w-full rounded-md border border-border bg-[var(--color-background)] px-3 py-2.5 text-sm normal-case tracking-normal text-foreground outline-none focus:border-foreground/40"
+            class="w-full rounded-md border border-edge bg-[var(--color-background)] px-3 py-2.5 text-sm normal-case tracking-normal text-foreground outline-none focus:border-foreground/40"
           />
         </label>
 
@@ -627,13 +627,13 @@
       </div>
     {:else}
       {#if device.boites.length === 0 && !isTauri}
-        <p class={`text-muted-foreground/70 ${mobile ? "px-3 py-2 text-sm" : "px-2.5 py-2 text-sm"}`}>
+        <p class={`text-muted-2 ${mobile ? "px-3 py-2 text-sm" : "px-2.5 py-2 text-sm"}`}>
           {t("workspace.noServers")}
         </p>
       {/if}
       <button
         type="button"
-        class={`mt-0.5 flex items-center gap-2.5 rounded-lg border border-dashed border-border text-left text-muted-foreground transition hover:border-foreground/30 hover:bg-accent hover:text-foreground ${mobile ? "px-3 py-3 text-sm" : "px-2.5 py-2 text-base"}`}
+        class={`mt-0.5 flex items-center gap-2.5 rounded-lg border border-dashed border-edge text-left text-muted-foreground transition hover:border-foreground/30 hover:bg-accent hover:text-foreground ${mobile ? "px-3 py-3 text-sm" : "px-2.5 py-2 text-base"}`}
         onclick={openAdd}
       >
         <Plus class="size-4 shrink-0" />
@@ -646,7 +646,7 @@
 <div bind:this={triggerRoot} class="pointer-events-auto relative flex items-center">
   <button
     type="button"
-    class="flex max-w-[40vw] items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface)] px-2 py-0.5 text-xs text-foreground transition hover:bg-[var(--color-surface-2)]"
+    class="flex max-w-[40vw] items-center gap-1.5 rounded-md border border-edge bg-[var(--color-surface)] px-2 py-0.5 text-xs text-foreground transition hover:bg-[var(--color-surface-2)]"
     onclick={toggle}
     aria-haspopup="dialog"
     aria-expanded={open}

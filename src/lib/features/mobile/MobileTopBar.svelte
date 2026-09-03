@@ -81,7 +81,7 @@
   {#if onTerminal}
     <button
       type="button"
-      class="flex size-11 shrink-0 items-center justify-center rounded-lg text-foreground/80 transition hover:bg-accent active:bg-accent/70 disabled:opacity-40"
+      class="flex size-11 shrink-0 items-center justify-center rounded-lg text-foreground transition hover:bg-accent active:bg-accent/70 disabled:opacity-40"
       onclick={() => (launchSheet.open = true)}
       disabled={!project}
       aria-label={t("mobile.newTerminal")}
@@ -91,7 +91,7 @@
     </button>
     <button
       type="button"
-      class="flex size-11 shrink-0 items-center justify-center rounded-lg text-foreground/80 transition hover:bg-accent active:bg-accent/70 disabled:opacity-40"
+      class="flex size-11 shrink-0 items-center justify-center rounded-lg text-foreground transition hover:bg-accent active:bg-accent/70 disabled:opacity-40"
       onclick={() => (threadsOpen = true)}
       disabled={!project}
       aria-label={t("mobile.terminals")}

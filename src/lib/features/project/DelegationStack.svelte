@@ -46,7 +46,7 @@
     onToggle();
   }}
 >
-  <CornerDownRight class="size-3 shrink-0 text-muted-foreground/60" />
+  <CornerDownRight class="size-3 shrink-0 text-muted-2" />
   {#if !expanded && shown.length > 0}
     <span class="faces" aria-hidden="true">
       {#each shown as child, i (child.id)}
@@ -68,13 +68,13 @@
   {/if}
   <span
     class="min-w-0 flex-1 truncate-safe text-2xs font-medium leading-[19px] {glow
-      ? 'text-foreground/80'
+      ? 'text-foreground'
       : 'text-muted-foreground'}"
   >
     {label}
   </span>
   <ChevronRight
-    class="size-3 shrink-0 text-muted-foreground/70 transition-transform {expanded
+    class="size-3 shrink-0 text-muted-2 transition-transform {expanded
       ? 'rotate-90'
       : ''}"
   />

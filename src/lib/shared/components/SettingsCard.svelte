@@ -30,7 +30,7 @@
         {title}
       </h3>
       {#if description}
-        <p class="mt-0.5 text-sm leading-snug text-muted-foreground/80">
+        <p class="mt-0.5 text-sm leading-snug text-muted-2">
           {description}
         </p>
       {/if}

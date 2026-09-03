@@ -199,7 +199,7 @@ ${cmd}` : cmd;
       <span class="flex items-baseline gap-1.5">
         <span class="truncate text-xs font-medium text-foreground">{label}</span>
         {#if row.version}
-          <span class="shrink-0 tabular-nums text-xs text-muted-foreground/70">v{row.version}</span>
+          <span class="shrink-0 tabular-nums text-xs text-muted-2">v{row.version}</span>
         {/if}
         {#if primaryAction === "update" && latest}
           <span class="shrink-0 tabular-nums text-xs text-[var(--color-warning)]">v{latest}</span>
@@ -284,7 +284,7 @@ ${cmd}` : cmd;
        twice over, and ten rows repeating either is the noise this drops. What is
        left is the one case a reader has to act on: the manager is missing. -->
   {#if blocked}
-    <p class="flex flex-wrap items-baseline gap-2 text-xs leading-snug text-muted-foreground/70">
+    <p class="flex flex-wrap items-baseline gap-2 text-xs leading-snug text-muted-2">
       <span>{t(blocked.key, { tool: blocked.tool ?? "" })}</span>
       {#if blocked.url}
         <a
@@ -366,7 +366,7 @@ ${cmd}` : cmd;
       class="max-h-40 overflow-y-auto rounded-md border border-border bg-[var(--color-titlebar)] p-2 font-mono text-xs leading-snug"
     >
       {#each installer.lines as line}
-        <div class="break-words whitespace-pre-wrap text-foreground/80">{line}</div>
+        <div class="break-words whitespace-pre-wrap text-foreground">{line}</div>
       {/each}
     </div>
   {/if}

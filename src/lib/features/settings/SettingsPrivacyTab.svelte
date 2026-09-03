@@ -130,7 +130,7 @@
       <button
         type="button"
         disabled={exportBusy || (!telemetry.installIdSet && !telemetry.forgetPending)}
-        class="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground transition hover:border-foreground/30 disabled:opacity-50"
+        class="rounded-lg border border-edge px-3 py-1.5 text-xs font-medium text-foreground transition hover:border-foreground/30 disabled:opacity-50"
         onclick={() => void exportEvents()}
       >
         {t("privacy.exportAction")}
@@ -139,7 +139,7 @@
         <button
           type="button"
           disabled={forgetBusy}
-          class="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground transition hover:border-foreground/30 disabled:opacity-50"
+          class="rounded-lg border border-edge px-3 py-1.5 text-xs font-medium text-foreground transition hover:border-foreground/30 disabled:opacity-50"
           onclick={() => void retryForget()}
         >
           {t("privacy.forgetRetry")}
@@ -155,7 +155,7 @@
 <SettingsCard title={t("privacy.doc")} anchor="privacy.doc" description={t("privacy.docDesc")}>
   <button
     type="button"
-    class="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground transition hover:border-foreground/30"
+    class="rounded-lg border border-edge px-3 py-1.5 text-xs font-medium text-foreground transition hover:border-foreground/30"
     onclick={() => void openUrl(DOC_URL)}
   >
     {t("privacy.docLink")}

@@ -7,7 +7,9 @@
   --color-foreground: #fafafa;
   --color-muted: #1f1f1f;
   --color-muted-foreground: #a1a1aa;
-  --color-border: #27272a;
+  --color-muted-2: #6b6b74;
+  --color-border: #3a3a41;
+  --color-edge: #5c5c64;
   --color-accent: #2a2a2a;
 
   /* A card that has to read as a container rather than as a hairline. The
@@ -271,7 +273,9 @@
   --color-foreground: #fafafa;
   --color-muted: #1f1f1f;
   --color-muted-foreground: #a1a1aa;
-  --color-border: #27272a;
+  --color-muted-2: #6b6b74;
+  --color-border: #3a3a41;
+  --color-edge: #5c5c64;
   --color-accent: #2a2a2a;
   --color-border-strong: #3a3a40;
   --color-success: #4ade80;
@@ -346,7 +350,9 @@
   --color-foreground: #18181b;
   --color-muted: #f1f1f4;
   --color-muted-foreground: #63636e;
-  --color-border: #e3e3e8;
+  --color-muted-2: #8a8a94;
+  --color-border: #cdcdd5;
+  --color-edge: #8f8f98;
   --color-accent: #ececf0;
   --color-border-strong: #c4c4cd;
 
@@ -432,7 +438,9 @@
   --color-foreground: #e4e8f0;
   --color-muted: #141c30;
   --color-muted-foreground: #8892a8;
-  --color-border: #1c2744;
+  --color-muted-2: #6a7390;
+  --color-border: #2a3556;
+  --color-edge: #5a6580;
   --color-accent: #1c2744;
   --color-border-strong: #2d3d5f;
 
@@ -469,12 +477,14 @@
   --color-surface-2: rgb(26 26 30 / 0.82);
   --color-surface-3: rgb(38 38 43 / 0.9);
   --color-muted: rgb(28 28 32 / 0.72);
+  --color-muted-2: #7a7a84;
   --color-accent: rgb(38 38 44 / 0.75);
 
   /* Lifted off the opaque ramp's #27272a: a hairline at 55% of a colour two
      steps above a translucent surface is a hairline nobody sees, and these
      palettes have no shadow to fall back on either. */
   --color-border: rgb(78 78 88 / 0.55);
+  --color-edge: #8a8a94;
   --color-border-strong: rgb(112 112 124 / 0.6);
 
   --color-scrim: rgba(0, 0, 0, 0.5);
@@ -487,9 +497,11 @@
   --color-surface-2: rgb(248 248 250 / 0.84);
   --color-surface-3: rgb(238 238 242 / 0.9);
   --color-muted: rgb(241 241 244 / 0.75);
+  --color-muted-2: #7c7c88;
   --color-accent: rgb(236 236 240 / 0.78);
 
   --color-border: rgb(150 150 165 / 0.5);
+  --color-edge: #82828c;
   --color-border-strong: rgb(110 110 128 / 0.55);
 
   --color-scrim: rgba(24, 24, 27, 0.28);

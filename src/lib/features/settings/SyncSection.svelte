@@ -159,7 +159,7 @@
       </Button>
       <Button variant="danger" onclick={forget}>{t("sync.remoteForget")}</Button>
     </div>
-    <p class="mt-1.5 text-xs text-muted-foreground/80">{t("sync.remoteForgetAsk")}</p>
+    <p class="mt-1.5 text-xs text-muted-2">{t("sync.remoteForgetAsk")}</p>
   {:else}
     <label class="block text-xs font-medium text-foreground" for="sync-remote">
       {t("sync.remoteLabel")}
@@ -172,7 +172,7 @@
         autocomplete="off"
         bind:value={draft}
         placeholder={t("sync.remotePlaceholder")}
-        class="min-w-0 flex-1 rounded-md border border-border bg-[var(--color-surface-2)] px-2 py-1 font-mono text-xs text-foreground"
+        class="min-w-0 flex-1 rounded-md border border-edge bg-[var(--color-surface-2)] px-2 py-1 font-mono text-xs text-foreground"
       />
       <Button disabled={probing || draft.trim() === ""} onclick={check}>
         {probing ? t("sync.remoteChecking") : t("sync.remoteCheck")}
@@ -191,7 +191,7 @@
       </p>
     {/if}
   {/if}
-  <p class="mt-2 text-xs text-muted-foreground/80">{t("sync.secretsNote")}</p>
+  <p class="mt-2 text-xs text-muted-2">{t("sync.secretsNote")}</p>
 </SettingsCard>
 
 <SettingsCard
@@ -214,7 +214,7 @@
 
   {#if !supported}
     <p class="text-xs text-foreground">{t("sync.unsupportedHere")}</p>
-    <p class="mt-0.5 text-xs text-muted-foreground/80">{t("sync.unsupportedHereDetail")}</p>
+    <p class="mt-0.5 text-xs text-muted-2">{t("sync.unsupportedHereDetail")}</p>
   {:else}
     {#if syncStore.error}
       <p class="mb-1.5 text-xs text-[var(--color-danger)]">{syncStore.error}</p>
@@ -276,12 +276,12 @@
             <span class="text-xs text-foreground">{row.label}</span>
           </span>
           {#if row.id === AGENTS_ID}
-            <span class="text-xs text-muted-foreground/80">{t("sync.agentsRowDesc")}</span>
+            <span class="text-xs text-muted-2">{t("sync.agentsRowDesc")}</span>
           {:else if absent}
-            <span class="text-xs text-muted-foreground/80">{t("sync.sourceAbsent")}</span>
+            <span class="text-xs text-muted-2">{t("sync.sourceAbsent")}</span>
           {/if}
           {#if row.source && row.source.paths.length > 0}
-            <span class="truncate font-mono text-xs text-muted-foreground/70">
+            <span class="truncate font-mono text-xs text-muted-2">
               {row.source.paths.join("  ")}
             </span>
           {/if}
@@ -297,7 +297,7 @@
     {/each}
   </div>
   {#if notYet.length > 0}
-    <p class="mt-2 text-xs text-muted-foreground/80">
+    <p class="mt-2 text-xs text-muted-2">
       {t("sync.sourcesNotYet", { names: notYet.join(", ") })}
     </p>
   {/if}

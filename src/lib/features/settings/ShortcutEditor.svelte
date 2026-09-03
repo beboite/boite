@@ -356,7 +356,7 @@
 <div class="flex items-center justify-end gap-1.5">
   <button
     type="button"
-    class="flex items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-1.5 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
+    class="flex items-center gap-1.5 rounded-md border border-edge bg-[var(--color-surface-2)] px-2.5 py-1.5 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
     onclick={() => void onReset()}
     use:tip={t("shortcuts.resetTitle")}
   >
@@ -409,7 +409,7 @@
         class="flex size-4 cursor-grab items-center justify-center rounded transition hover:text-muted-foreground focus-visible:text-foreground active:cursor-grabbing {grabbedId ===
         shortcut.id
           ? 'text-foreground'
-          : 'text-muted-foreground/50'}"
+          : 'text-muted-2'}"
         aria-label={t("shortcuts.dragToReorder")}
         aria-pressed={grabbedId === shortcut.id}
         aria-keyshortcuts="ArrowUp ArrowDown"
@@ -435,7 +435,7 @@
         <button
           type="button"
           data-color-trigger
-          class="flex size-6 items-center justify-center rounded-md border border-transparent transition hover:border-border hover:bg-[var(--color-surface-3)]"
+          class="flex size-6 items-center justify-center rounded-md border border-transparent transition hover:border-edge hover:bg-[var(--color-surface-3)]"
           onclick={() => (colorPickerFor = colorPickerFor === shortcut.id ? null : shortcut.id)}
           aria-label={t("shortcuts.changeIconColor")}
           aria-expanded={colorPickerFor === shortcut.id}
@@ -465,7 +465,7 @@
             </div>
             <button
               type="button"
-              class="mt-2 w-full rounded-md border border-border px-2 py-1 text-2xs text-muted-foreground transition hover:text-foreground"
+              class="mt-2 w-full rounded-md border border-edge px-2 py-1 text-2xs text-muted-foreground transition hover:text-foreground"
               onclick={() => setIconColor(shortcut.id, null)}
             >
               {t("shortcuts.defaultColor")}
@@ -495,7 +495,7 @@
           onclick={() => void toggleShortcutYolo(shortcut)}
           class="flex h-6 items-center gap-1 rounded border px-1.5 text-2xs font-semibold transition {isYolo
             ? 'border-[var(--color-warning)] bg-[var(--color-warning)]/15 text-[var(--color-warning)] hover:bg-[var(--color-warning)]/25'
-            : 'border-border/60 text-muted-foreground/60 hover:border-border hover:text-foreground'}"
+            : 'border-border/60 text-muted-2 hover:border-border hover:text-foreground'}"
           title={isYolo ? t("shortcuts.yoloActive") : t("shortcuts.yoloInactive")}
           aria-label={t("shortcuts.yoloMode")}
         >
@@ -507,7 +507,7 @@
       {/if}
       <button
         type="button"
-        class="flex size-7 items-center justify-center rounded-md text-muted-foreground/60 transition hover:bg-danger/15 hover:text-danger"
+        class="flex size-7 items-center justify-center rounded-md text-muted-2 transition hover:bg-danger/15 hover:text-danger"
         onclick={() => void onRemove(shortcut)}
         aria-label={t("shortcuts.removeShortcut")}
         use:tip={t("shortcuts.remove")}
@@ -556,7 +556,7 @@
               <span
                 class="mt-0.5 flex items-center gap-1 text-2xs {installed
                   ? 'text-[var(--color-success)]'
-                  : 'text-muted-foreground/70'}"
+                  : 'text-muted-2'}"
               >
                 <span
                   class="size-1.5 shrink-0 rounded-full {installed
@@ -570,7 +570,7 @@
                 </span>
               </span>
             {:else}
-              <span class="mt-0.5 truncate text-2xs text-muted-foreground/70">
+              <span class="mt-0.5 truncate text-2xs text-muted-2">
                 {preset.command}
               </span>
             {/if}
@@ -593,7 +593,7 @@
             type="button"
             disabled={added}
             onclick={() => addPreset(preset.id)}
-            class="flex h-7 cursor-pointer items-center gap-1 rounded-md bg-foreground px-2.5 text-xs font-semibold text-background transition hover:bg-foreground/90 disabled:cursor-not-allowed disabled:border disabled:border-border/60 disabled:bg-transparent disabled:text-muted-foreground/60"
+            class="flex h-7 cursor-pointer items-center gap-1 rounded-md bg-foreground px-2.5 text-xs font-semibold text-background transition hover:bg-foreground/90 disabled:cursor-not-allowed disabled:border disabled:border-border/60 disabled:bg-transparent disabled:text-muted-2"
             use:tip={added ? t("shortcuts.alreadyAdded") : t("shortcuts.addToShortcuts")}
           >
             {#if added}

@@ -89,18 +89,18 @@
       </h2>
       <p class="mt-1.5 text-xs leading-relaxed text-muted-foreground">
         {creating ? t("branchDialog.descriptionCreating") : t("branchDialog.descriptionSwitching")}
-        <span class="font-medium text-foreground/90">{branch}</span> {t("branchDialog.descriptionSuffix")}
+        <span class="font-medium text-foreground">{branch}</span> {t("branchDialog.descriptionSuffix")}
       </p>
 
       <div class="mt-4 grid gap-2">
         <button
           bind:this={carryButton}
           type="button"
-          class="flex min-h-14 items-center gap-3 rounded-md border border-border bg-[var(--color-surface-2)] px-3 py-2 text-left transition hover:bg-[var(--color-surface-3)] disabled:opacity-50"
+          class="flex min-h-14 items-center gap-3 rounded-md border border-edge bg-[var(--color-surface-2)] px-3 py-2 text-left transition hover:bg-[var(--color-surface-3)] disabled:opacity-50"
           onclick={onCarry}
           disabled={busy}
         >
-          <ArrowRight class="size-4 shrink-0 text-foreground/80" />
+          <ArrowRight class="size-4 shrink-0 text-foreground" />
           <span class="min-w-0">
             <span class="block text-xs font-medium text-foreground">{t("branchDialog.bringChanges")}</span>
             <span class="mt-0.5 block text-xs leading-snug text-muted-foreground">
@@ -111,7 +111,7 @@
         {#if canStash}
         <button
           type="button"
-          class="flex min-h-14 items-center gap-3 rounded-md border border-border px-3 py-2 text-left transition hover:bg-[var(--color-surface-2)] disabled:opacity-50"
+          class="flex min-h-14 items-center gap-3 rounded-md border border-edge px-3 py-2 text-left transition hover:bg-[var(--color-surface-2)] disabled:opacity-50"
           onclick={onStash}
           disabled={busy}
         >

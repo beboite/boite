@@ -302,7 +302,7 @@
 {:else}
   {#each agentsHere as agent (agent.key)}
     <div class="flex items-center gap-2 py-0.5">
-      <span class="min-w-0 flex-1 truncate text-sm text-foreground/80">
+      <span class="min-w-0 flex-1 truncate text-sm text-foreground">
         {agent.label}
       </span>
       {#if agent.auto || agent.reg === "this"}
@@ -312,7 +312,7 @@
       {:else if agent.cli}
         <button
           type="button"
-          class="shrink-0 rounded border border-border px-1.5 py-0.5 text-2xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground disabled:opacity-40"
+          class="shrink-0 rounded border border-edge px-1.5 py-0.5 text-2xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground disabled:opacity-40"
           onclick={() => addToAgent(agent.label, agent.cli!)}
           disabled={adding !== null}
         >
@@ -328,7 +328,7 @@
              documents. -->
         <button
           type="button"
-          class="shrink-0 rounded border border-border px-1.5 py-0.5 text-2xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
+          class="shrink-0 rounded border border-edge px-1.5 py-0.5 text-2xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
           onclick={() => copySetup(agent)}
         >
           {agentSetupSnippet(agent.key as never, "x", "y")
@@ -345,7 +345,7 @@
     <p class="text-xs leading-snug text-muted-foreground">{t("todo.agentNone")}</p>
     <button
       type="button"
-      class="mt-1 rounded border border-border px-1.5 py-0.5 text-2xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
+      class="mt-1 rounded border border-edge px-1.5 py-0.5 text-2xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
       onclick={copyPath}
     >
       {t("todo.agentCopyPath")}

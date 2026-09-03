@@ -92,7 +92,7 @@
   {#if homeAvailable(settings.state)}
     <button
       type="button"
-      class="mb-3 flex w-full items-center gap-3 rounded-xl border border-border bg-[var(--color-surface-2)] px-3 py-3 text-left text-sm text-foreground/90 transition active:scale-[0.98] active:bg-[var(--color-surface-3)]"
+      class="mb-3 flex w-full items-center gap-3 rounded-xl border border-edge bg-[var(--color-surface-2)] px-3 py-3 text-left text-sm text-foreground transition active:scale-[0.98] active:bg-[var(--color-surface-3)]"
       onclick={goProjects}
     >
       <Boxes class="size-5 text-muted-foreground" />
@@ -105,7 +105,7 @@
         {@const iconKey = resolveIconKey(shortcut.iconKey, shortcut.label, shortcut.command)}
         <button
           type="button"
-          class="flex items-center gap-3 rounded-xl border border-border bg-[var(--color-surface-2)] px-3 py-3 text-left text-sm text-foreground/90 transition active:scale-[0.98] active:bg-[var(--color-surface-3)] disabled:opacity-40"
+          class="flex items-center gap-3 rounded-xl border border-edge bg-[var(--color-surface-2)] px-3 py-3 text-left text-sm text-foreground transition active:scale-[0.98] active:bg-[var(--color-surface-3)] disabled:opacity-40"
           disabled={!shortcut.command.trim()}
           onclick={() => runShortcut(shortcut.id)}
           use:longPress={{
@@ -127,7 +127,7 @@
     {#if onBoite}
       <!-- The list changed machine when the project did, and nothing else on
            screen says which one these shells belong to. -->
-      <span class="ml-auto normal-case tracking-normal text-muted-foreground/70">
+      <span class="ml-auto normal-case tracking-normal text-muted-2">
         {t("sidebar.onBoite", { name: workspace.info.name || "boite" })}
       </span>
     {/if}
@@ -135,7 +135,7 @@
   <div class="flex flex-col gap-1.5">
     <button
       type="button"
-      class="flex items-center gap-3 rounded-xl border border-border bg-[var(--color-surface-2)] px-3 py-3 text-left text-sm text-foreground/90 transition active:scale-[0.98] active:bg-[var(--color-surface-3)] disabled:opacity-40"
+      class="flex items-center gap-3 rounded-xl border border-edge bg-[var(--color-surface-2)] px-3 py-3 text-left text-sm text-foreground transition active:scale-[0.98] active:bg-[var(--color-surface-3)] disabled:opacity-40"
       onclick={() => runBlank()}
       use:longPress={{
         onLongPress: (x, y) => openMenu(x, y, (scratch) => void runBlank(scratch)),
@@ -147,7 +147,7 @@
     {#each shells as shell (shell.id)}
       <button
         type="button"
-        class="flex items-center justify-between gap-3 rounded-xl border border-border bg-[var(--color-surface-2)] px-3 py-3 text-left text-sm text-foreground/90 transition active:scale-[0.98] active:bg-[var(--color-surface-3)] disabled:opacity-40"
+        class="flex items-center justify-between gap-3 rounded-xl border border-edge bg-[var(--color-surface-2)] px-3 py-3 text-left text-sm text-foreground transition active:scale-[0.98] active:bg-[var(--color-surface-3)] disabled:opacity-40"
         onclick={() => runShell(shell)}
         use:longPress={{
           onLongPress: (x, y) =>
@@ -155,7 +155,7 @@
         }}
       >
         <span class="min-w-0 flex-1 truncate font-medium">{shell.label}</span>
-        <span class="shrink-0 text-xs text-muted-foreground/70">{shell.id}</span>
+        <span class="shrink-0 text-xs text-muted-2">{shell.id}</span>
       </button>
     {/each}
   </div>

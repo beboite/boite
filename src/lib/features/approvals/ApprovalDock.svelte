@@ -124,7 +124,7 @@
                 <span class="shrink-0 text-2xs text-muted-foreground">{card.where}</span>
               {/if}
             </p>
-            <p class="mt-1 text-sm leading-relaxed text-foreground/90">{card.message}</p>
+            <p class="mt-1 text-sm leading-relaxed text-foreground">{card.message}</p>
             {#if card.note}
               <p class="mt-1.5 text-2xs leading-snug text-muted-foreground">{card.note}</p>
             {/if}
@@ -135,7 +135,7 @@
         >
           <button
             type="button"
-            class="rounded-md border border-border bg-[var(--color-surface-2)] px-3 py-1.5 text-xs text-muted-foreground transition hover:bg-[var(--color-surface-3)] hover:text-foreground disabled:opacity-50"
+            class="rounded-md border border-edge bg-[var(--color-surface-2)] px-3 py-1.5 text-xs text-muted-foreground transition hover:bg-[var(--color-surface-3)] hover:text-foreground disabled:opacity-50"
             disabled={approvals.deciding.includes(item.id)}
             onclick={() => void approvals.decide(item.id, false)}
           >

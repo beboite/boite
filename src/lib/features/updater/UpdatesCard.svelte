@@ -60,7 +60,7 @@
     {:else}
       <button
         type="button"
-        class="flex items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-1.5 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+        class="flex items-center gap-1.5 rounded-md border border-edge bg-[var(--color-surface-2)] px-2.5 py-1.5 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
         onclick={() => updater.checkNow()}
         disabled={updater.busy || !updater.enabled}
       >
@@ -76,7 +76,7 @@
       <span class="tabular-nums text-xs text-muted-foreground">v{__APP_VERSION__}</span>
     </div>
 
-    <p class="mt-1 text-sm leading-snug text-muted-foreground/80">
+    <p class="mt-1 text-sm leading-snug text-muted-2">
       {#if !updater.enabled}
         {t("updater.devBuild")}
       {:else if status.kind === "checking"}

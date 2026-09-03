@@ -176,7 +176,7 @@
   {#snippet actions()}
     <button
       type="button"
-      class="flex items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-1 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
+      class="flex items-center gap-1.5 rounded-md border border-edge bg-[var(--color-surface-2)] px-2.5 py-1 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
       onclick={reset}
       use:tip={t("appearance.resetScale")}
     >
@@ -186,7 +186,7 @@
   {/snippet}
 
   <div class="flex items-center gap-3">
-    <span class="w-9 tabular-nums text-2xs text-muted-foreground/70">75%</span>
+    <span class="w-9 tabular-nums text-2xs text-muted-2">75%</span>
     <input
       type="range"
       min="75"
@@ -265,7 +265,7 @@
   {#snippet actions()}
     <button
       type="button"
-      class="flex items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-1 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
+      class="flex items-center gap-1.5 rounded-md border border-edge bg-[var(--color-surface-2)] px-2.5 py-1 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
       onclick={() => settings.setTerminalFontScalePercent(100)}
       use:tip={t("appearance.resetTerminalSize")}
     >
@@ -275,7 +275,7 @@
   {/snippet}
 
   <div class="flex items-center gap-3">
-    <span class="w-9 tabular-nums text-2xs text-muted-foreground/70">
+    <span class="w-9 tabular-nums text-2xs text-muted-2">
       {TERMINAL_SCALE_MIN}%
     </span>
     <input
@@ -313,7 +313,7 @@
         class="rounded-md border px-3 py-1 text-xs transition
           {on
             ? 'border-foreground/40 bg-[var(--color-surface-3)] text-foreground'
-            : 'border-border bg-[var(--color-surface-2)] text-muted-foreground hover:border-foreground/30 hover:text-foreground'}"
+            : 'border-edge bg-[var(--color-surface-2)] text-muted-foreground hover:border-foreground/30 hover:text-foreground'}"
         onclick={() => {
           if (mode.id === "auto") settings.unpinLayout();
           else settings.setMobileLayout(mode.id === "mobile");
@@ -356,7 +356,7 @@
         class="rounded-md border px-3 py-1 text-xs transition
           {settings.state.motionMode === mode.id
             ? 'border-foreground/40 bg-[var(--color-surface-3)] text-foreground'
-            : 'border-border bg-[var(--color-surface-2)] text-muted-foreground hover:border-foreground/30 hover:text-foreground'}"
+            : 'border-edge bg-[var(--color-surface-2)] text-muted-foreground hover:border-foreground/30 hover:text-foreground'}"
         onclick={() => settings.setMotionMode(mode.id)}
       >
         {t(mode.labelKey)}
@@ -375,7 +375,7 @@
         class="rounded-md border px-3 py-1 text-xs transition
           {settings.state.locale === option.id
             ? 'border-foreground/40 bg-[var(--color-surface-3)] text-foreground'
-            : 'border-border bg-[var(--color-surface-2)] text-muted-foreground hover:border-foreground/30 hover:text-foreground'}"
+            : 'border-edge bg-[var(--color-surface-2)] text-muted-foreground hover:border-foreground/30 hover:text-foreground'}"
         onclick={() => settings.setLocale(option.id)}
       >
         {t(option.labelKey)}
