@@ -167,7 +167,7 @@ to `webview` by whichever host answers, and so is `device` on the server: a
 client says what happened, never who it was.
 
 **Nothing goes out one line at a time.** Records are queued and flushed every
-500 ms, at once when fifty are waiting, and on `pagehide` — a window going away
+500 ms, at once when fifty are waiting, and on `pagehide`: a window going away
 is when its last lines matter most. A flush that fails is dropped in silence,
 because a line about a failed flush rides the next flush, which fails for the
 same reason.
@@ -176,7 +176,7 @@ same reason.
 `window.onerror` and `unhandledrejection` become `error` records at
 `webview.unhandled`, keeping the first three stack frames rather than twenty
 `file:///` URLs of bundled chunks; and `console.error` and `console.warn` are
-**mirrored** at their own level under `webview.console`. Mirrored, not replaced —
+**mirrored** at their own level under `webview.console`. Mirrored, not replaced:
 replacing the console costs the devtools their source location, which is the one
 thing a console line is good for.
 
