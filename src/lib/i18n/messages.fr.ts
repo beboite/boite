@@ -255,7 +255,7 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "voice.sending": "Envoi imminent. Une touche annule.",
   "experiments.whip": "Fouet",
   "experiments.whipDesc":
-    "Met un fouet dans la barre de titre. On le lance, on le claque, un clic le lâche. Il claque et il fait du bruit, et il n'atteint aucun terminal : rien n'est envoyé, rien n'est interrompu.",
+    "Met un fouet dans la barre de titre. Un clic, il claque à travers la fenêtre puis s'enroule dans son bouton. Il fait du bruit et il n'atteint aucun terminal : rien n'est envoyé, rien n'est interrompu.",
   "experiments.whipSound": "Claquement",
   "experiments.whipSoundSynth": "Synthèse",
   "experiments.whipSoundMeme": "Échantillon",

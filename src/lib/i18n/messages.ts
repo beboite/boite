@@ -253,7 +253,7 @@ export const EN_MESSAGES = {
   "voice.sending": "Sending shortly. Any keystroke cancels.",
   "experiments.whip": "Whip",
   "experiments.whipDesc":
-    "Puts a whip in the titlebar. Throw it, flick it, click to let go. It cracks and it makes a noise, and it reaches no terminal: nothing is sent, nothing is interrupted.",
+    "Puts a whip in the titlebar. Click it, it cracks across the window and coils back into its button. It makes a noise and it reaches no terminal: nothing is sent, nothing is interrupted.",
   "experiments.whipSound": "Crack",
   "experiments.whipSoundSynth": "Synth",
   "experiments.whipSoundMeme": "Sampled",

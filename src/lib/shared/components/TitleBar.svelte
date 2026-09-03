@@ -35,7 +35,7 @@
   import { editorStore } from "$lib/features/editor/store.svelte";
   import { revealEditor } from "$lib/features/editor/reveal";
   import FileCode from "@lucide/svelte/icons/file-code";
-  import Spline from "@lucide/svelte/icons/spline";
+  import Lasso from "@lucide/svelte/icons/lasso";
   import { whip } from "$lib/features/whip/store.svelte";
   import { neverStarted } from "$lib/domain/thread-status";
   import type { MessageKey } from "$lib/i18n/messages";
@@ -390,7 +390,9 @@
         <Icon class="size-[15px]" />
       </button>
     {/each}
-    <!-- The whip experiment's only handle. Last in the row, and drawn only
+    <!-- The whip experiment's only handle, and the whip itself at rest: the
+         coil is where the rope lives between throws, so nothing is drawn
+         outside this box once a throw is over. Last in the row, and drawn only
          while the experiment is on: it is the one button here that does
          nothing to the app. -->
     {#if settings.state.experimentWhip}
@@ -404,7 +406,7 @@
         aria-label={whip.active ? t("titlebar.whipDrop") : t("titlebar.whip")}
         aria-pressed={whip.active}
       >
-        <Spline class="size-[15px]" />
+        <Lasso class="size-5" />
       </button>
     {/if}
   </div>
