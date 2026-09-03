@@ -38,6 +38,7 @@
   import FileCode from "@lucide/svelte/icons/file-code";
   import Spline from "@lucide/svelte/icons/spline";
   import { whip } from "$lib/features/whip/store.svelte";
+  import { neverStarted } from "$lib/domain/thread-status";
   import type { MessageKey } from "$lib/i18n/messages";
   import {
     mcpPulse,
@@ -254,6 +255,13 @@
   const homeShown = $derived(homeAvailable(settings.state));
   const onHome = $derived(homeShown && app.view === "home");
 
+  // A launch that died in the spawn catch never had a process, so counting it
+  // as a terminal made the folder-is-gone case read as "1 terminal" for a
+  // terminal nobody could see.
+  const liveThreads = $derived(
+    app.threads.filter((thread) => !neverStarted(thread.status, !!thread.ptyId)).length,
+  );
+
   function showTerminal() {
     app.view = "terminal";
     app.mobileTab = "terminal";
@@ -338,9 +346,9 @@
     </button>
     <span class="ml-1.5 hidden text-xs text-muted-2 md:inline">
       {t("titlebar.status", {
-        threadsCount: app.threads.length,
+        threadsCount: liveThreads,
         threadsLabel: t(
-          app.threads.length === 1 ? "titlebar.threadSingle" : "titlebar.threadPlural",
+          liveThreads === 1 ? "titlebar.threadSingle" : "titlebar.threadPlural",
         ),
         projectsCount: app.projects.length,
         projectsLabel: t(

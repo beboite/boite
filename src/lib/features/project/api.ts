@@ -5,6 +5,9 @@ import type { WorkspaceOrigin } from "$lib/types";
 import { app } from "$lib/app/store.svelte";
 import { notifications } from "$lib/features/notifications/store.svelte";
 import { logger } from "$lib/shared/services/logger.svelte";
+import { confirmDialog } from "$lib/shared/components/confirm.svelte";
+import { ptyKill } from "$lib/storage/pty";
+import { projectDisplayName } from "$lib/shared/project-label";
 import { t } from "$lib/i18n/index.svelte";
 import { basename, dirname } from "$lib/shared/utils/path";
 import { folderNameFor, joinPath, samePath } from "./path";
@@ -93,6 +96,84 @@ export async function addProjectByPath(
   notifications.success(t("project.added", { name: project.name }));
   logger.info("project", `added project ${project.name}`, { cwd: project.cwd });
   return project;
+}
+
+/**
+ * Point a project at another folder.
+ *
+ * The one action a project whose folder is gone needs, and the reason the
+ * dashboard banner exists: until now the row went on naming a directory that
+ * was not there, every card printed the OS error about it, and the only way
+ * out was to remove the project and add it again under a new id, losing its
+ * threads.
+ *
+ * The same two doors as adding one: the native dialog where there is one, and
+ * the server-side browser everywhere else. The browser is asynchronous — the
+ * dialog stays up until the user confirms — so this returns once the picker is
+ * open rather than once the folder is chosen.
+ *
+ * `gitRoot` is cleared with the move. It named a repository under the old
+ * folder, and carrying it across would point the git card at a path that has
+ * nothing to do with the new one.
+ */
+export async function relocateProject(project: Project): Promise<void> {
+  const origin = project.origin;
+  const remoteTarget =
+    workspace.isRemote ||
+    !hasTauri() ||
+    (workspace.isDynamic && (origin ?? "local") === "remote");
+  if (remoteTarget) {
+    folderBrowser.choose((path) => moveProjectTo(project, path));
+    return;
+  }
+  let selected: string | string[] | null;
+  try {
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    selected = await open({ directory: true, multiple: false });
+  } catch (err) {
+    logger.error("project", "folder dialog failed", String(err));
+    notifications.error(t("project.pickerFailed"));
+    return;
+  }
+  if (!selected || Array.isArray(selected)) return;
+  await moveProjectTo(project, selected);
+}
+
+async function moveProjectTo(project: Project, path: string): Promise<void> {
+  if (samePath(project.cwd, path)) return;
+  try {
+    await app.updateProject({ ...project, cwd: path, gitRoot: null });
+  } catch (err) {
+    logger.error("project", "relocate failed", String(err));
+    notifications.error(t("project.relocateFailed"));
+    return;
+  }
+  logger.info("project", `relocated ${project.name}`, { from: project.cwd, to: path });
+  notifications.success(t("project.relocated", { path }));
+}
+
+/**
+ * The remove the sidebar asks for, from anywhere else.
+ *
+ * Same question and same wording, because it is the same act: the rows do not
+ * come back, and a second door with its own phrasing is how two surfaces end
+ * up meaning different things by "remove". The PTYs go first — a project whose
+ * threads are dropped while their processes run leaves them holding their
+ * worktrees with nothing left in the app naming them.
+ */
+export async function removeProjectWithConfirm(project: Project): Promise<boolean> {
+  const ok = await confirmDialog.ask({
+    title: t("sidebar.removeProjectTitle"),
+    message: t("sidebar.removeProjectMsg", { name: projectDisplayName(project) }),
+    confirmLabel: t("sidebar.removeProject"),
+    danger: true,
+  });
+  if (!ok) return false;
+  for (const thread of app.threadsByProject(project.id)) {
+    if (thread.ptyId) void ptyKill(thread.ptyId, false).catch(() => {});
+  }
+  await app.removeProject(project.id);
+  return true;
 }
 
 /**
