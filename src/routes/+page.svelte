@@ -187,11 +187,19 @@
     );
   });
 
+  // Selecting a thread focuses its pane, and that is all: the write is
+  // untracked because it used to read the field it writes, which subscribed the
+  // effect to its own output (AGENTS.md, rule 4). Every later focus change in
+  // that group — a panel opened beside the terminal, a chip tapped on the
+  // phone's pane strip — re-ran this and was put straight back on the thread.
   $effect(() => {
     const id = app.activeThreadId;
     if (!id) return;
     const g = paneStore.groupOf(id);
-    if (g && g.focusedPaneId !== id) g.focusedPaneId = id;
+    if (!g) return;
+    untrack(() => {
+      if (g.focusedPaneId !== id) g.focusedPaneId = id;
+    });
   });
 
   // The project the app came up on. Nobody asked for a thread in it — it is
@@ -682,14 +690,20 @@
                 style:visibility={visible ? "visible" : "hidden"}
                 aria-hidden={!visible}
               >
-                <PaneShell {group} />
+                <PaneShell {group} {mobile} />
               </div>
             {/each}
 
             {#each app.threads as thread (thread.id)}
               {@const group = paneStore.groupOf(thread.id)}
+              <!-- On a phone the group draws one pane at a time, so being in the
+                   group on screen is no longer enough to be on the screen: the
+                   terminals of the other panes are laid out at the same
+                   rectangle and would stack on top of the one being read. -->
               {@const visible =
-                group?.id === activeGroupId && terminalActive}
+                group?.id === activeGroupId &&
+                terminalActive &&
+                (!mobile || group.focusedPaneId === thread.id)}
               {@const focused =
                 visible && group?.focusedPaneId === thread.id}
               {@const rect = group ? paneStore.rectFor(thread.id, group, visible) : null}

@@ -644,9 +644,13 @@
 {/snippet}
 
 <div bind:this={triggerRoot} class="pointer-events-auto relative flex items-center">
+  <!-- 44px and a third of the width on a phone: the pill is the first thing in
+       the one bar that layout gets, and at 24px tall it was the smallest target
+       in the app. The desktop keeps the row height it shares with the title
+       bar's other controls. -->
   <button
     type="button"
-    class="flex max-w-[40vw] items-center gap-1.5 rounded-md border border-edge bg-[var(--color-surface)] px-2 py-0.5 text-xs text-foreground transition hover:bg-[var(--color-surface-2)]"
+    class={`flex items-center gap-1.5 rounded-md border border-edge bg-[var(--color-surface)] text-foreground transition hover:bg-[var(--color-surface-2)] ${mobile ? "min-h-11 max-w-[32vw] px-2.5 py-1 text-sm" : "max-w-[40vw] px-2 py-0.5 text-xs"}`}
     onclick={toggle}
     aria-haspopup="dialog"
     aria-expanded={open}

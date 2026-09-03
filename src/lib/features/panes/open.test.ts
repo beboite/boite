@@ -44,6 +44,7 @@ vi.mock("$lib/features/notifications/store.svelte", () => ({
 import {
   anchorPaneId,
   anchorProjectId,
+  closeMobilePane,
   closePanelPane,
   openPane,
   panePresence,
@@ -268,6 +269,31 @@ describe("panelRatio", () => {
     paneStore.setViewport(600, 800);
     expect(panelRatio()).toBeLessThanOrEqual(0.6);
     expect(panelRatio()).toBeGreaterThanOrEqual(0.12);
+  });
+});
+
+describe("closeMobilePane", () => {
+  it("leaves the group's other panes, which is what the strip then shows", () => {
+    threads(["t1", "p"]);
+    app.activeThreadId = "t1";
+    const git = openPane({ kind: "git" })!;
+
+    expect(closeMobilePane(git)).toBe(true);
+    expect(paneStore.groupOf("t1")).toBeTruthy();
+    expect(panePresence("git")).toBeNull();
+    expect(countLeaves(paneStore.groupOf("t1")!.root)).toBe(1);
+  });
+
+  it("puts the project overview where the last pane was, never an empty tab", () => {
+    app.selectedProjectId = "p";
+    const todo = openPane({ kind: "todo" })!;
+    expect(paneStore.groups).toHaveLength(1);
+
+    expect(closeMobilePane(todo)).toBe(true);
+    expect(paneStore.groups).toHaveLength(1);
+    const root = paneStore.groups[0].root;
+    expect(leafNodesOf(root).map((l) => l.content.kind)).toEqual(["dashboard"]);
+    expect(paneStore.groups[0].projectId).toBe("p");
   });
 });
 

@@ -3,12 +3,34 @@
   import type { LayoutNode, PaneGroup } from "./types";
   import { MIN_PANE_PX, MIN_RATIO, SPLITTER_PX } from "./types";
   import PaneContentView from "./PaneContentView.svelte";
+  import PaneStrip from "./PaneStrip.svelte";
   import { paneLabel } from "./label";
-  import { findSplit } from "./tree";
+  import { findSplit, leafNodesOf } from "./tree";
   import { t } from "$lib/i18n/index.svelte";
 
-  type Props = { group: PaneGroup };
-  let { group }: Props = $props();
+  /**
+   * `mobile` comes from the page rather than the settings store: the shell is
+   * the one component that has to draw the same group two ways, and a prop is
+   * what lets the desktop branch below stay exactly what it was.
+   */
+  type Props = { group: PaneGroup; mobile?: boolean };
+  let { group, mobile = false }: Props = $props();
+
+  const leaves = $derived(leafNodesOf(group.root));
+  // The chip strip earns its 44px when there is a choice to make, and when the
+  // one pane on screen is a panel the user has no other way out of. A phone
+  // showing a single terminal keeps the whole screen, which is what it is for.
+  const stripShown = $derived(
+    mobile && (leaves.length > 1 || leaves[0]?.content.kind !== "thread"),
+  );
+  // `focusedPaneId` is the group's own answer to "which pane", persisted with
+  // the tree and already moved by every opener; the phone reuses it rather than
+  // keeping a second idea of the active pane that the two could disagree about.
+  const activePaneId = $derived(
+    leaves.some((l) => l.paneId === group.focusedPaneId)
+      ? group.focusedPaneId
+      : (leaves[0]?.paneId ?? group.focusedPaneId),
+  );
 
   // The rect is the pane's BODY, not the pane: a thread's terminal is positioned
   // over this rectangle from the page, and including the header would slide
@@ -267,9 +289,53 @@
   {/if}
 {/snippet}
 
-<div class="pane-shell-root">
-  {@render renderNode(group.root)}
-</div>
+{#if mobile}
+  <!-- One pane on screen, the rest behind the strip. Stacked rather than
+       unmounted, and hidden with `visibility` like every other group in the
+       app: a terminal the user swapped away from goes on running, a browser
+       pane an agent is driving goes on loading, and a chip tap is a repaint
+       rather than a mount. Each pane is laid out at the full body either way,
+       so switching costs no measurement and no reflow of the terminal. -->
+  <div class="pane-shell-mobile">
+    {#if stripShown}
+      <PaneStrip {group} {leaves} {activePaneId} />
+    {/if}
+    <div class="mobile-body">
+      {#each leaves as leaf (leaf.paneId)}
+        {@const shown = leaf.paneId === activePaneId}
+        <!-- The mark goes on the leaf only to say no. `visible.ts` reads the
+             nearest one, so a pane the phone has switched away from answers no
+             to the screenshot and to the window's description of itself, while
+             the one on screen carries nothing and the question reaches the
+             group wrapper — which is where "is this group the one being drawn"
+             is still answered. -->
+        <div
+          class="mobile-pane"
+          data-pane-leaf={leaf.paneId}
+          data-pane-shown={shown ? undefined : "false"}
+          role="group"
+          aria-label={paneLabel(leaf.content)}
+          aria-hidden={!shown}
+          style:visibility={shown ? "visible" : "hidden"}
+        >
+          <div class="pane-body" use:measure={leaf.paneId}>
+            {#if leaf.content.kind !== "thread"}
+              <PaneContentView
+                content={leaf.content}
+                projectId={group.projectId}
+                paneId={leaf.paneId}
+              />
+            {/if}
+          </div>
+        </div>
+      {/each}
+    </div>
+  </div>
+{:else}
+  <div class="pane-shell-root">
+    {@render renderNode(group.root)}
+  </div>
+{/if}
 
 <style>
   /* Nothing between the viewport and a lone leaf: no padding, no border, no
@@ -287,6 +353,30 @@
   }
   .pane-shell-root > :global(*) {
     flex: 1;
+    min-width: 0;
+    min-height: 0;
+  }
+  /* The phone's shell: the strip keeps its own height and the body takes what
+     is left, and every pane in that body is the same rectangle. */
+  .pane-shell-mobile {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+  }
+  .mobile-body {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+  }
+  .mobile-pane {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
     min-width: 0;
     min-height: 0;
   }
