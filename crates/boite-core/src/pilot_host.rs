@@ -178,6 +178,76 @@ pub async fn execute(ready: PilotReady) -> Result<Value, String> {
     }
 }
 
+/// The deltas waiting to go out, joined per item.
+///
+/// One `item.delta` per token is what a WebSocket cannot afford and what a
+/// frame cannot paint, so both hosts hold text here and flush it on a 30 ms
+/// tick. Keyed by thread and item rather than by thread alone: a turn can have
+/// an assistant message and a reasoning block open at once, and joining those
+/// two into one string would paint each other's text.
+///
+/// No timer of its own on purpose. `boite-core` declares no executor, so the
+/// tick belongs to the host that already has one, and this is the part the two
+/// hosts share.
+#[derive(Debug, Default)]
+pub struct Coalescer {
+    pending: parking_lot::Mutex<std::collections::BTreeMap<(String, String), String>>,
+}
+
+impl Coalescer {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Holds one delta. Nothing goes out until [`Coalescer::drain`].
+    pub fn push(&self, thread_id: &str, item_id: &str, text: &str) {
+        let mut pending = self.pending.lock();
+        pending
+            .entry((thread_id.to_string(), item_id.to_string()))
+            .or_default()
+            .push_str(text);
+    }
+
+    /// Everything held, as one `item.delta` per item, oldest thread first.
+    ///
+    /// Empty when nothing streamed, which is what the tick checks before it
+    /// touches a channel.
+    pub fn drain(&self) -> Vec<(String, boite_pilot::PilotEvent)> {
+        let mut pending = self.pending.lock();
+        std::mem::take(&mut *pending)
+            .into_iter()
+            .map(|((thread_id, item_id), text)| {
+                (
+                    thread_id,
+                    boite_pilot::PilotEvent::ItemDelta { item_id, text },
+                )
+            })
+            .collect()
+    }
+
+    /// What one thread streamed, for the flush that has to happen before a
+    /// complete item or a request goes out: those leave at once, and a delta
+    /// arriving after the card it belongs to would paint text twice.
+    pub fn drain_thread(&self, thread_id: &str) -> Vec<boite_pilot::PilotEvent> {
+        let mut pending = self.pending.lock();
+        let keys: Vec<(String, String)> = pending
+            .keys()
+            .filter(|(thread, _)| thread == thread_id)
+            .cloned()
+            .collect();
+        keys.into_iter()
+            .filter_map(|key| {
+                pending
+                    .remove(&key)
+                    .map(|text| boite_pilot::PilotEvent::ItemDelta {
+                        item_id: key.1,
+                        text,
+                    })
+            })
+            .collect()
+    }
+}
+
 /// One item row as the chat pane reads it.
 ///
 /// `body` is parsed back out of its column rather than shipped as a string: the

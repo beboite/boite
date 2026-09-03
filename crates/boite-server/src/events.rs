@@ -75,6 +75,16 @@ pub enum AppEvent {
     LogRecords {
         records: std::sync::Arc<Vec<serde_json::Value>>,
     },
+    /// One canonical pilot event, for the devices watching that thread.
+    ///
+    /// Beside `thread.updated` and filtered the way `LogRecords` is: a turn
+    /// emits hundreds of these and a device that never called
+    /// `pilot.subscribe` for that thread pays nothing for the ones that did.
+    /// Text deltas are already coalesced when they get here.
+    PilotEvent {
+        thread_id: String,
+        event: std::sync::Arc<serde_json::Value>,
+    },
     /// One device is out, as of now.
     ///
     /// Broadcast rather than left to the next call, and this is the half that
@@ -142,6 +152,10 @@ impl AppEvent {
             AppEvent::LogRecords { records } => Event::new(
                 "log.record",
                 serde_json::json!({ "records": records.as_ref() }),
+            ),
+            AppEvent::PilotEvent { thread_id, event } => Event::new(
+                "pilot.event",
+                serde_json::json!({ "threadId": thread_id, "event": event.as_ref() }),
             ),
             // Named on the wire so every *other* device can refresh its list.
             // The one being revoked never reads it: its socket is closed by the

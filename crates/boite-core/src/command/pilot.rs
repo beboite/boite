@@ -326,7 +326,7 @@ fn open_spec(
         .pilot_instance
         .as_deref()
         .filter(|text| !text.is_empty())
-        .map(|text| serde_json::from_str(text))
+        .map(serde_json::from_str)
         .transpose()
         .map_err(|e| format!("thread {thread_id} has an unreadable pilot instance: {e}"))?
         .unwrap_or_default();
@@ -334,7 +334,7 @@ fn open_spec(
         .pilot_options
         .as_deref()
         .filter(|text| !text.is_empty())
-        .map(|text| serde_json::from_str(text))
+        .map(serde_json::from_str)
         .transpose()
         .map_err(|e| format!("thread {thread_id} has unreadable pilot options: {e}"))?
         .unwrap_or_default();

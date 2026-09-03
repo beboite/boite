@@ -64,6 +64,10 @@ flate2 = "1"
 # into a CI job that compiles `--all-targets`.
 [dev-dependencies]
 criterion = { version = "0.8", default-features = false }
+# The projection is proved against a real `boite_pilot::Runtime` driven by the
+# scripted driver, which is async. Tests only: nothing in this crate's own code
+# awaits anything.
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 
 [[bench]]
 name = "hot_paths"

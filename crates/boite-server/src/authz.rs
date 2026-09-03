@@ -92,6 +92,23 @@ const NON_BUS: &[(&str, Option<Scope>)] = &[
     ("pairing.revoke", Some(Scope::Admin)),
 ];
 
+/// The bus methods whose device scope is not the one their capability implies.
+///
+/// The mapping below is total for everything else and deliberately so. These
+/// four are the pilot domain's, and they draw the same two distinctions
+/// [`NON_BUS`] draws for a PTY and for an approval: starting or stopping an
+/// agent process is [`Scope::Terminal`], because a child is arbitrary code on
+/// the machine rather than a change to a project; answering a request is
+/// [`Scope::Approve`], reachable from a locked screen the way a reply is. Both
+/// are narrower than the `Write` their `MutateProject` would otherwise map to.
+const BUS_SCOPE_OVERRIDES: &[(&str, Scope)] = &[
+    ("pilot.thread.open", Scope::Terminal),
+    ("pilot.turn.start", Scope::Terminal),
+    ("pilot.turn.interrupt", Scope::Terminal),
+    ("pilot.session.stop", Scope::Terminal),
+    ("pilot.request.respond", Scope::Approve),
+];
+
 /// The device scope a bus capability asks for.
 ///
 /// The whole mapping, and it is deliberately not a fourth vocabulary: the bus
@@ -110,6 +127,9 @@ pub fn scope_of(capability: Capability) -> Scope {
 pub fn required(method: &str) -> Result<Option<Scope>, String> {
     if let Some((_, scope)) = NON_BUS.iter().find(|(name, _)| *name == method) {
         return Ok(*scope);
+    }
+    if let Some((_, scope)) = BUS_SCOPE_OVERRIDES.iter().find(|(name, _)| *name == method) {
+        return Ok(Some(*scope));
     }
     if let Some(capability) = command::capability_of(method) {
         return Ok(Some(scope_of(capability)));

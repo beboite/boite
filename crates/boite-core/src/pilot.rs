@@ -730,4 +730,104 @@ mod tests {
             RequestAnswer::Deny { .. }
         ));
     }
+    /// The whole path, with a real runtime and no host in it: open a session,
+    /// run a turn that opens an approval, answer it from the store the way the
+    /// dock does, stop.
+    ///
+    /// Driven by the scripted driver rather than by hand-built events, because
+    /// what is being checked is that the runtime, the sink and the projection
+    /// agree on the order things happen in.
+    #[tokio::test]
+    async fn a_scripted_turn_lands_in_the_rows_through_a_runtime() {
+        use boite_pilot::{EventSink, OpenSpec, Runtime, TurnInput};
+        use std::sync::Arc;
+
+        struct Projecting {
+            store: Arc<Store>,
+            buffer: DeltaBuffer,
+        }
+        impl EventSink for Projecting {
+            fn emit(&self, thread_id: &str, event: PilotEvent) {
+                project(&self.store, thread_id, &event, &self.buffer).expect("project");
+            }
+        }
+
+        let store = Arc::new(store());
+        let sink = Arc::new(Projecting {
+            store: store.clone(),
+            buffer: DeltaBuffer::new(),
+        });
+        let runtime = Runtime::new(sink);
+        runtime.register(Arc::new(
+            boite_pilot::scripted::ScriptedDriver::with_scenario(
+                boite_pilot::scripted::Scenario {
+                    native_session_id: Some("native-1".into()),
+                    model: Some("claude-fable-5-1".into()),
+                    slash_commands: vec![],
+                    steps: vec![boite_pilot::scripted::Step {
+                        deltas: vec!["o".into(), "k".into()],
+                        request: Some(boite_pilot::scripted::ScenarioRequest {
+                            tool_name: "Bash".into(),
+                            input: json!({ "command": "ls" }),
+                            title: None,
+                        }),
+                        duration_ms: 12,
+                        ..Default::default()
+                    }],
+                },
+            ),
+        ));
+
+        runtime
+            .open(OpenSpec {
+                thread_id: "t1".into(),
+                cwd: std::env::temp_dir(),
+                driver: "scripted".into(),
+                ..Default::default()
+            })
+            .await
+            .expect("open");
+
+        runtime
+            .prompt("t1", TurnInput::text("hi"))
+            .await
+            .expect("prompt");
+
+        // The turn is parked on the approval, which is the state the dock draws.
+        assert_eq!(runtime.status("t1"), Some(Status::Waiting));
+        let open = store.open_approvals().expect("approvals");
+        assert_eq!(open.len(), 1, "one card, not one per event");
+        assert_eq!(open[0].action, PILOT_APPROVAL_ACTION);
+        let request_id = open[0].detail.clone();
+
+        runtime
+            .respond("t1", &request_id, boite_pilot::RequestAnswer::allow())
+            .await
+            .expect("respond");
+
+        assert!(store.open_approvals().unwrap().is_empty(), "answered once");
+        assert_eq!(runtime.status("t1"), Some(Status::Idle), "the turn ran on");
+
+        let items = store.pilot_items("t1", 0, 50).unwrap();
+        let kinds: Vec<&str> = items.iter().map(|row| row.kind.as_str()).collect();
+        assert!(kinds.contains(&"turn"), "{kinds:?}");
+        assert!(kinds.contains(&"assistant_text"), "{kinds:?}");
+        assert!(kinds.contains(&"request"), "{kinds:?}");
+        let text = items
+            .iter()
+            .find(|row| row.kind == "assistant_text")
+            .expect("the message");
+        assert!(text.body.contains("ok"), "{}", text.body);
+
+        // The journal kept the turn edges and no delta at all.
+        let events = store.pilot_events("t1", 0, 100).unwrap();
+        assert!(
+            !events.iter().any(|row| row.kind == "item.delta"),
+            "a delta is never journaled"
+        );
+        assert!(events.iter().any(|row| row.kind == "turn.completed"));
+
+        runtime.stop("t1").await.expect("stop");
+        assert_eq!(runtime.status("t1"), None);
+    }
 }

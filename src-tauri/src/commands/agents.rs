@@ -73,7 +73,7 @@ pub async fn agent_mcp_args(
     )
 }
 
-fn local_mcp_paths(app: &AppHandle) -> Result<boite_core::mcp_launch::McpPaths, String> {
+pub(super) fn local_mcp_paths(app: &AppHandle) -> Result<boite_core::mcp_launch::McpPaths, String> {
     let exe = std::env::current_exe().map_err(|e| format!("current_exe: {e}"))?;
     let dir = exe
         .parent()

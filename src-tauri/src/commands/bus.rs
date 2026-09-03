@@ -37,6 +37,8 @@ pub(super) struct DesktopHost<'a> {
     store: Option<Arc<Store>>,
     pulse: Option<Arc<boite_core::pulse::Waiters>>,
     telemetry: Option<Arc<TelemetryRuntime>>,
+    pilot: Option<Arc<boite_pilot::Runtime>>,
+    mcp: Option<boite_core::mcp_launch::McpPaths>,
 }
 
 impl<'a> DesktopHost<'a> {
@@ -49,7 +51,24 @@ impl<'a> DesktopHost<'a> {
             store: None,
             pulse: None,
             telemetry: None,
+            pilot: None,
+            mcp: None,
         }
+    }
+
+    /// This app's pilot runtime, attached by the `pilot.*` codec alone. Every
+    /// other command answers `None` and the domain refuses by name, which is
+    /// what keeps a chat call off a host that has no children to drive.
+    pub(super) fn with_pilot(mut self, pilot: Arc<boite_pilot::Runtime>) -> Self {
+        self.pilot = Some(pilot);
+        self
+    }
+
+    /// Where this app wrote the sidecar and its generated config, so a pilot
+    /// thread is launched with the same boite-mcp a terminal thread gets.
+    pub(super) fn with_mcp(mut self, paths: boite_core::mcp_launch::McpPaths) -> Self {
+        self.mcp = Some(paths);
+        self
     }
 
     /// The app's wait registry, so a conduct write here wakes the agent
@@ -122,6 +141,26 @@ impl boite_core::command::Host for DesktopHost<'_> {
 
     fn telemetry(&self) -> Option<Arc<TelemetryRuntime>> {
         self.telemetry.clone()
+    }
+
+    fn pilot(&self) -> Option<Arc<boite_pilot::Runtime>> {
+        self.pilot.clone()
+    }
+
+    /// boite-mcp first, with the environment this app already stamps into a
+    /// PTY so the sidecar knows which thread is calling it.
+    fn pilot_mcp(&self, thread_id: &str) -> Vec<boite_pilot::McpServer> {
+        let Some(paths) = &self.mcp else {
+            return Vec::new();
+        };
+        vec![boite_core::command::pilot::boite_mcp_server(
+            paths.sidecar.to_string_lossy().into_owned(),
+            Vec::new(),
+            vec![(
+                boite_identity::env::THREAD.to_string(),
+                thread_id.to_string(),
+            )],
+        )]
     }
 }
 
