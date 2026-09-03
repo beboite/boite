@@ -586,7 +586,7 @@
     <main class="relative flex min-w-0 flex-1 flex-col" use:toastArea>
       {#if !app.ready}
         <div class="flex h-full items-center justify-center">
-          <p class="text-xs text-muted-2">{t("common.loading")}</p>
+          <p class="text-sm text-muted-2">{t("common.loading")}</p>
         </div>
       {:else}
         <div
@@ -800,7 +800,7 @@
               {@const HomeComp = HomeView.current}
               <HomeComp />
             {:else}
-              <div class="flex h-full items-center justify-center text-xs text-muted-2">
+              <div class="flex h-full items-center justify-center text-sm text-muted-2">
                 {t("common.loading")}
               </div>
             {/if}
@@ -813,7 +813,7 @@
               {@const PluginsComp = PluginsView.current}
               <PluginsComp />
             {:else}
-              <div class="flex h-full items-center justify-center text-xs text-muted-2">
+              <div class="flex h-full items-center justify-center text-sm text-muted-2">
                 {t("common.loading")}
               </div>
             {/if}
@@ -826,7 +826,7 @@
               {@const EditorComp = EditorView.current}
               <EditorComp />
             {:else}
-              <div class="flex h-full items-center justify-center text-xs text-muted-2">
+              <div class="flex h-full items-center justify-center text-sm text-muted-2">
                 {t("common.loading")}
               </div>
             {/if}
