@@ -50,12 +50,12 @@
       {#each paths as path (path.label)}
         <button
           type="button"
-          class="group flex min-w-0 items-baseline gap-2 text-left text-xs text-muted-2 transition hover:text-foreground"
+          class="group flex min-w-0 items-baseline gap-2 text-left text-sm text-muted-2 transition hover:text-foreground"
           onclick={() => copyPath(path.value)}
           title={path.value}
         >
           <span class="shrink-0">{path.label}</span>
-          <span class="min-w-0 truncate font-mono text-xs">{path.value}</span>
+          <span class="min-w-0 truncate font-mono text-sm">{path.value}</span>
           <Copy class="size-3 shrink-0 opacity-0 transition group-hover:opacity-100" />
         </button>
       {/each}

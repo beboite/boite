@@ -133,7 +133,7 @@
                   <span class="shrink-0 text-xs text-danger">{t("devices.revoked")}</span>
                 {/if}
               </div>
-              <p class="truncate text-xs text-muted-2">
+              <p class="truncate text-sm text-muted-2">
                 {row.scopes.join(", ") || t("devices.noScopes")}
                 &middot;
                 {row.lastSeenAt
@@ -168,7 +168,7 @@
     anchor="devices.inviteTitle"
     description={t("devices.inviteDesc")}
   >
-    <label class="flex flex-col gap-1 text-xs text-muted-foreground">
+    <label class="flex flex-col gap-1 text-sm text-muted-foreground">
       {t("devices.inviteLabel")}
       <input
         class="rounded-md border border-edge bg-[var(--color-surface)] px-3 py-2 text-sm text-foreground outline-none focus:border-[var(--color-success)]"
@@ -192,7 +192,7 @@
         </button>
       {/each}
     </div>
-    <p class="text-xs text-muted-2">{t("devices.scopeHint")}</p>
+    <p class="text-sm text-muted-2">{t("devices.scopeHint")}</p>
 
     <button
       type="button"
@@ -225,8 +225,8 @@
             {/each}
           </svg>
         {/if}
-        <p class="text-xs text-muted-foreground">{t("devices.inviteOnce")}</p>
-        <code class="w-full break-all rounded bg-[var(--color-surface-3)] px-2 py-1 text-xs text-foreground">
+        <p class="text-sm text-muted-foreground">{t("devices.inviteOnce")}</p>
+        <code class="w-full break-all rounded bg-[var(--color-surface-3)] px-2 py-1 text-sm text-foreground">
           {invite.url}
         </code>
         <button

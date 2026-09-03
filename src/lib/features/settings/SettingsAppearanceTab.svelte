@@ -80,9 +80,9 @@
   const sortManual = $derived(settings.state.smartSortBy === "manual");
 
   const RADIO =
-    "rounded-md border px-3 py-1 text-xs transition border-border bg-[var(--color-surface-2)] text-muted-foreground hover:border-foreground/30 hover:text-foreground";
+    "rounded-md border px-3 py-1 text-sm transition border-border bg-[var(--color-surface-2)] text-muted-foreground hover:border-foreground/30 hover:text-foreground";
   const RADIO_ON =
-    "rounded-md border px-3 py-1 text-xs transition border-foreground/40 bg-[var(--color-surface-3)] text-foreground";
+    "rounded-md border px-3 py-1 text-sm transition border-foreground/40 bg-[var(--color-surface-3)] text-foreground";
 
   const MOTION_MODES: { id: MotionMode; labelKey: MessageKey }[] = [
     { id: "system", labelKey: "appearance.motionSystem" },
@@ -204,7 +204,7 @@
   </div>
 
   {#if anyAcrylic}
-    <p class="mt-2 text-xs leading-relaxed text-muted-foreground">
+    <p class="mt-2 text-sm text-muted-foreground">
       {t("appearance.themeAcrylicNote")}
     </p>
   {/if}
@@ -218,7 +218,7 @@
   {#snippet actions()}
     <button
       type="button"
-      class="flex items-center gap-1.5 rounded-md border border-edge bg-[var(--color-surface-2)] px-2.5 py-1 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
+      class="flex items-center gap-1.5 rounded-md border border-edge bg-[var(--color-surface-2)] px-2.5 py-1 text-sm text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
       onclick={reset}
       use:tip={t("appearance.resetScale")}
     >
@@ -258,8 +258,8 @@
   description={t("appearance.fontsDesc")}
 >
   <div class="flex flex-col gap-2.5">
-    <label class="flex items-center gap-3 text-xs text-muted-foreground">
-      <span class="w-24 shrink-0">{t("appearance.fontUi")}</span>
+    <label class="flex items-center gap-3 text-sm text-muted-foreground">
+      <span class="w-24 shrink-0 truncate">{t("appearance.fontUi")}</span>
       <select
         class="font-select min-w-0 flex-1"
         value={settings.state.uiFontFamily ?? ""}
@@ -275,8 +275,8 @@
       </select>
     </label>
 
-    <label class="flex items-center gap-3 text-xs text-muted-foreground">
-      <span class="w-24 shrink-0">{t("appearance.fontTerminal")}</span>
+    <label class="flex items-center gap-3 text-sm text-muted-foreground">
+      <span class="w-24 shrink-0 truncate">{t("appearance.fontTerminal")}</span>
       <select
         class="font-select min-w-0 flex-1"
         value={settings.state.terminalFontFamily ?? ""}
@@ -314,7 +314,7 @@
   {#snippet actions()}
     <button
       type="button"
-      class="flex items-center gap-1.5 rounded-md border border-edge bg-[var(--color-surface-2)] px-2.5 py-1 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
+      class="flex items-center gap-1.5 rounded-md border border-edge bg-[var(--color-surface-2)] px-2.5 py-1 text-sm text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
       onclick={() => settings.setTerminalFontScalePercent(100)}
       use:tip={t("appearance.resetTerminalSize")}
     >
@@ -368,7 +368,7 @@
         type="button"
         role="radio"
         aria-checked={on}
-        class="rounded-md border px-3 py-1 text-xs transition
+        class="rounded-md border px-3 py-1 text-sm transition
           {on
             ? 'border-foreground/40 bg-[var(--color-surface-3)] text-foreground'
             : 'border-edge bg-[var(--color-surface-2)] text-muted-foreground hover:border-foreground/30 hover:text-foreground'}"
@@ -394,7 +394,7 @@
       role="radiogroup"
       aria-label={t("appearance.sort")}
     >
-      <span class="w-20 shrink-0 text-xs text-muted-foreground">
+      <span class="w-20 shrink-0 truncate text-sm text-muted-foreground">
         {t("appearance.sortOrder")}
       </span>
       {#each SORT_MODES as mode (mode.id)}
@@ -418,7 +418,7 @@
       aria-label={t("appearance.sortDirection")}
       use:tip={sortManual ? t("appearance.sortDirManual") : undefined}
     >
-      <span class="w-20 shrink-0 text-xs text-muted-foreground">
+      <span class="w-20 shrink-0 truncate text-sm text-muted-foreground">
         {t("appearance.sortDirection")}
       </span>
       {#each SORT_DIRECTIONS as direction (direction.id)}
@@ -450,7 +450,7 @@
 {#if settings.state.colorByModel}
   <div class="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-3 pb-1">
     {#each ACCENTS as accent (accent.id)}
-      <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
+      <span class="flex items-center gap-1.5 text-sm text-muted-foreground">
         <span
           class="size-2 shrink-0 rounded-full"
           style:background-color={ACCENT_COLOR[accent.id]}
@@ -468,7 +468,7 @@
         type="button"
         role="radio"
         aria-checked={settings.state.motionMode === mode.id}
-        class="rounded-md border px-3 py-1 text-xs transition
+        class="rounded-md border px-3 py-1 text-sm transition
           {settings.state.motionMode === mode.id
             ? 'border-foreground/40 bg-[var(--color-surface-3)] text-foreground'
             : 'border-edge bg-[var(--color-surface-2)] text-muted-foreground hover:border-foreground/30 hover:text-foreground'}"
@@ -487,7 +487,7 @@
         type="button"
         role="radio"
         aria-checked={settings.state.locale === option.id}
-        class="rounded-md border px-3 py-1 text-xs transition
+        class="rounded-md border px-3 py-1 text-sm transition
           {settings.state.locale === option.id
             ? 'border-foreground/40 bg-[var(--color-surface-3)] text-foreground'
             : 'border-edge bg-[var(--color-surface-2)] text-muted-foreground hover:border-foreground/30 hover:text-foreground'}"
@@ -507,7 +507,7 @@
     background: var(--color-surface-2);
     color: var(--color-foreground);
     padding: 3px 8px;
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     font-family: inherit;
   }
   .font-select:hover {
@@ -605,7 +605,7 @@
 
   .swatch-label {
     padding: 0 2px 1px;
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     color: var(--color-muted-foreground);
   }
   .theme-swatch.selected .swatch-label {

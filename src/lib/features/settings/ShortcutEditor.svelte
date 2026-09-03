@@ -368,7 +368,7 @@
 <div class="flex items-center justify-end gap-1.5">
   <button
     type="button"
-    class="flex items-center gap-1.5 rounded-md border border-edge bg-[var(--color-surface-2)] px-2.5 py-1.5 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
+    class="flex items-center gap-1.5 rounded-md border border-edge bg-[var(--color-surface-2)] px-2.5 py-1.5 text-sm text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
     onclick={() => void onReset()}
     use:tip={t("shortcuts.resetTitle")}
   >
@@ -377,7 +377,7 @@
   </button>
   <button
     type="button"
-    class="flex items-center gap-1.5 rounded-md bg-foreground px-2.5 py-1.5 text-xs font-medium text-background transition hover:bg-foreground/90"
+    class="flex items-center gap-1.5 rounded-md bg-foreground px-2.5 py-1.5 text-sm font-medium text-background transition hover:bg-foreground/90"
     onclick={() => onAdd({ label: t("shortcuts.newShortcut"), command: "" })}
   >
     <Plus class="size-3" />
@@ -390,7 +390,7 @@
   class="mt-2 rounded-lg border border-border bg-[var(--color-surface-2)]"
 >
   {#if shortcuts.length === 0}
-    <p class="px-4 py-6 text-center text-xs text-muted-foreground">
+    <p class="px-4 py-6 text-center text-sm text-muted-foreground">
       {t("shortcuts.noShortcuts")}
     </p>
   {/if}
@@ -478,7 +478,7 @@
             </div>
             <button
               type="button"
-              class="mt-2 w-full rounded-md border border-edge px-2 py-1 text-xs text-muted-foreground transition hover:text-foreground"
+              class="mt-2 w-full rounded-md border border-edge px-2 py-1 text-sm text-muted-foreground transition hover:text-foreground"
               onclick={() => setIconColor(shortcut.id, null)}
             >
               {t("shortcuts.defaultColor")}
@@ -493,7 +493,7 @@
         aria-label={t("shortcuts.labelName")}
         onchange={(e) =>
           onUpdate(shortcut.id, { label: (e.currentTarget as HTMLInputElement).value })}
-        class="rounded-md border border-transparent bg-transparent px-2 py-1 text-xs text-foreground outline-none transition focus:border-border focus:bg-[var(--color-surface)]"
+        class="min-w-0 truncate rounded-md border border-transparent bg-transparent px-2 py-1 text-sm text-foreground outline-none transition focus:border-border focus:bg-[var(--color-surface)]"
       />
       <input
         type="text"
@@ -509,7 +509,7 @@
         class="rounded-md border border-transparent bg-transparent px-2 py-1 text-foreground outline-none transition focus:border-border focus:bg-[var(--color-surface)] {editingCommandId ===
         shortcut.id
           ? 'font-mono text-sm'
-          : 'text-xs'}"
+          : 'text-sm'}"
       />
       {#if matchingPreset?.yoloFlag}
         <button
@@ -551,7 +551,7 @@
       type="button"
       onclick={() => void cliDetection.refreshAll()}
       disabled={cliDetection.checking}
-      class="flex items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2 py-1 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground disabled:cursor-wait disabled:opacity-60"
+      class="flex items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2 py-1 text-sm text-muted-foreground transition hover:border-foreground/30 hover:text-foreground disabled:cursor-wait disabled:opacity-60"
     >
       <RefreshCw class="size-3 {cliDetection.checking ? 'animate-spin' : ''}" />
       {cliDetection.checking ? t("shortcuts.checking") : t("shortcuts.recheck")}
@@ -573,7 +573,7 @@
             <ShortcutIcon iconKey={(preset.iconKey as IconKey) ?? null} size={14} />
           </div>
           <div class="flex min-w-0 flex-col">
-            <span class="truncate text-xs font-semibold text-foreground">{preset.label}</span>
+            <span class="truncate text-sm font-semibold text-foreground">{preset.label}</span>
             {#if cliDetection.probed}
               <span
                 class="mt-0.5 flex items-center gap-1 text-xs {installed
@@ -592,7 +592,7 @@
                 </span>
               </span>
             {:else}
-              <span class="mt-0.5 truncate text-xs text-muted-2">
+              <span class="mt-0.5 truncate text-sm text-muted-2">
                 {preset.command}
               </span>
             {/if}
@@ -623,7 +623,7 @@
             <button
               type="button"
               onclick={() => addPreset(preset.id)}
-              class="flex h-7 cursor-pointer items-center gap-1 rounded-md bg-foreground px-2.5 text-xs font-semibold text-background transition hover:bg-foreground/90"
+              class="flex h-7 cursor-pointer items-center gap-1 rounded-md bg-foreground px-2.5 text-sm font-semibold text-background transition hover:bg-foreground/90"
               use:tip={t("shortcuts.addToShortcuts")}
             >
               <Plus class="size-3" />

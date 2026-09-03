@@ -15,9 +15,9 @@
   import { t } from "$lib/i18n/index.svelte";
 
   const RADIO =
-    "rounded-md border px-3 py-1 text-xs transition border-border bg-[var(--color-surface-2)] text-muted-foreground hover:border-foreground/30 hover:text-foreground";
+    "rounded-md border px-3 py-1 text-sm transition border-border bg-[var(--color-surface-2)] text-muted-foreground hover:border-foreground/30 hover:text-foreground";
   const RADIO_ON =
-    "rounded-md border px-3 py-1 text-xs transition border-foreground/40 bg-[var(--color-surface-3)] text-foreground";
+    "rounded-md border px-3 py-1 text-sm transition border-foreground/40 bg-[var(--color-surface-3)] text-foreground";
 
   const WHIP_SOUNDS: { id: WhipSound; labelKey: MessageKey }[] = [
     { id: "synth", labelKey: "experiments.whipSoundSynth" },
@@ -104,7 +104,7 @@
 <SettingsCard title={t("about.title")} anchor="about.title" description={t("about.description")}>
   <div class="flex items-center gap-3 rounded-lg border border-border bg-[var(--color-surface-2)] px-3 py-2.5">
     <span class="shrink-0 text-muted-2"><BoiteLogo size={32} /></span>
-    <dl class="grid min-w-0 flex-1 grid-cols-[auto_1fr] items-baseline gap-x-3 gap-y-1 text-xs">
+    <dl class="grid min-w-0 flex-1 grid-cols-[auto_1fr] items-baseline gap-x-3 gap-y-1 text-sm">
       <!-- Unqualified while this device is the only machine there is. The label
            only has to name a machine once there are two of them to confuse. -->
       <dt class="text-muted-foreground">
@@ -178,7 +178,7 @@
       role="radiogroup"
       aria-label={t("experiments.whipSound")}
     >
-      <span class="w-20 shrink-0 text-xs text-muted-foreground">
+      <span class="w-20 shrink-0 truncate text-sm text-muted-foreground">
         {t("experiments.whipSound")}
       </span>
       {#each WHIP_SOUNDS as sound (sound.id)}
@@ -199,6 +199,6 @@
         </button>
       {/each}
     </div>
-    <p class="text-xs text-muted-foreground">{t("experiments.whipSoundDesc")}</p>
+    <p class="text-sm text-muted-foreground">{t("experiments.whipSoundDesc")}</p>
   </div>
 {/if}

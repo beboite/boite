@@ -191,7 +191,7 @@
       <select
         bind:value={levelFilter}
         aria-label={t("logs.levelAll")}
-        class="rounded-md border border-edge bg-[var(--color-surface)] px-2 py-1 text-xs"
+        class="rounded-md border border-edge bg-[var(--color-surface)] px-2 py-1 text-sm"
       >
         {#each LEVELS as level (level.id)}
           <option value={level.id}>{t(level.labelKey)}</option>
@@ -201,11 +201,11 @@
         oninput={(e) => applySourceFilter(e.currentTarget.value)}
         placeholder={t("logs.sourceFilter")}
         aria-label={t("logs.sourceFilter")}
-        class="w-32 rounded-md border border-border bg-[var(--color-surface)] px-2 py-1 text-xs outline-none focus:border-foreground/30"
+        class="w-32 min-w-0 rounded-md border border-border bg-[var(--color-surface)] px-2 py-1 text-sm outline-none focus:border-foreground/30"
       />
       <button
         type="button"
-        class="flex items-center gap-1 rounded-md border border-edge px-2 py-1 text-xs text-muted-foreground transition hover:bg-accent hover:text-foreground"
+        class="flex items-center gap-1 rounded-md border border-edge px-2 py-1 text-sm text-muted-foreground transition hover:bg-accent hover:text-foreground"
         onclick={refresh}
         use:tip={t("logs.refresh")}
       >
@@ -214,7 +214,7 @@
       </button>
       <button
         type="button"
-        class="flex items-center gap-1 rounded-md border border-edge px-2 py-1 text-xs text-muted-foreground transition hover:bg-accent hover:text-foreground"
+        class="flex items-center gap-1 rounded-md border border-edge px-2 py-1 text-sm text-muted-foreground transition hover:bg-accent hover:text-foreground"
         onclick={copyAll}
         use:tip={t("logs.copyFiltered")}
       >
@@ -224,7 +224,7 @@
       {#if scope === "current"}
         <button
           type="button"
-          class="flex items-center gap-1 rounded-md border border-edge px-2 py-1 text-xs text-muted-foreground transition hover:bg-danger/15 hover:text-danger"
+          class="flex items-center gap-1 rounded-md border border-edge px-2 py-1 text-sm text-muted-foreground transition hover:bg-danger/15 hover:text-danger"
           onclick={clear}
           use:tip={t("logs.clearTitle")}
         >
@@ -237,7 +237,7 @@
   </header>
 
   <div
-    class="max-h-[60vh] min-h-[200px] scroll-pane overflow-y-auto rounded-md border border-border bg-[var(--color-titlebar)] p-2 font-mono text-xs"
+    class="max-h-[60vh] min-h-[200px] scroll-pane overflow-y-auto rounded-md border border-border bg-[var(--color-titlebar)] p-2 font-mono text-sm"
   >
     {#if deviceLocal}
       <p class="py-4 text-center text-muted-2">{t("logs.deviceLocalOnly")}</p>

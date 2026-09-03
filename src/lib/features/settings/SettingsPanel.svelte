@@ -362,7 +362,7 @@
         autocomplete="off"
         placeholder={t("settings.searchPlaceholder")}
         aria-label={t("settings.searchPlaceholder")}
-        class="w-full rounded-md border border-edge bg-[var(--color-surface-2)] py-1 pl-7 pr-2 text-xs text-foreground outline-none transition placeholder:text-muted-2 focus:border-foreground/30"
+        class="w-full rounded-md border border-edge bg-[var(--color-surface-2)] py-1 pl-7 pr-2 text-sm text-foreground outline-none transition placeholder:text-muted-2 focus:border-foreground/30"
         onkeydown={(e) => {
           if (e.key === "Escape" && query) {
             e.stopPropagation();
@@ -476,7 +476,7 @@
               onclick={() => void goToSetting(hit.entry.tab, hit.entry.key)}
             >
               <span class="flex w-full items-baseline gap-2">
-                <span class="min-w-0 truncate text-xs font-medium text-foreground">
+                <span class="min-w-0 truncate text-sm font-medium text-foreground">
                   <Highlight text={hit.label} ranges={hit.matchedField === "label" ? hit.ranges : undefined} />
                 </span>
                 <span class="shrink-0 text-xs uppercase tracking-wider text-muted-2">
@@ -484,13 +484,13 @@
                 </span>
               </span>
               {#if hit.desc}
-                <span class="line-clamp-2 text-xs leading-snug text-muted-foreground">
+                <span class="line-clamp-2 text-sm text-muted-foreground">
                   <Highlight text={hit.desc} ranges={hit.matchedField === "desc" ? hit.ranges : undefined} />
                 </span>
               {/if}
             </button>
           {:else}
-            <p class="px-1 py-6 text-center text-xs text-muted-foreground">
+            <p class="px-1 py-6 text-center text-sm text-muted-foreground">
               {t("settings.searchNoMatch")}
             </p>
           {/each}
