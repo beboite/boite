@@ -137,5 +137,5 @@
     </div>
   {/if}
 
-  <p class="mt-2 text-xs text-muted-foreground/70">{t("project.mcpNextLaunch")}</p>
+  <p class="mt-2 text-xs text-muted-2">{t("project.mcpNextLaunch")}</p>
 </DashboardCard>

@@ -138,7 +138,7 @@
         type="button"
         role="switch"
         aria-checked={keepData}
-        class="mt-3 flex w-full items-start gap-3 rounded-md border border-border bg-[var(--color-surface-2)] px-3 py-2 text-left transition hover:border-foreground/30"
+        class="mt-3 flex w-full items-start gap-3 rounded-md border border-edge bg-[var(--color-surface-2)] px-3 py-2 text-left transition hover:border-foreground/30"
         onclick={() => (keepData = !keepData)}
       >
         <span
@@ -175,7 +175,7 @@
                 >
                   {entry.path}
                 </span>
-                <span class="shrink-0 tabular-nums text-muted-foreground/70">
+                <span class="shrink-0 tabular-nums text-muted-2">
                   {size(entry.bytes)}
                 </span>
               </li>

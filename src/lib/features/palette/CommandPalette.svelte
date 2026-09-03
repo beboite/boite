@@ -271,7 +271,7 @@
         placeholder={t(PLACEHOLDER[liveMode])}
         spellcheck="false"
         autocomplete="off"
-        class="w-full border-b border-border bg-transparent px-4 py-3 text-sm text-foreground outline-none placeholder:text-muted-foreground/60"
+        class="w-full border-b border-edge bg-transparent px-4 py-3 text-sm text-foreground outline-none placeholder:text-muted-2"
         role="combobox"
         aria-expanded="true"
         aria-controls="palette-list"
@@ -297,7 +297,7 @@
         {#each visible as row, i (row.c.id)}
           {@const title = sectionTitleAt(i)}
           {#if title}
-            <p class="px-4 pt-2.5 pb-1 text-2xs font-semibold tracking-wider text-muted-foreground/60 uppercase">
+            <p class="px-4 pt-2.5 pb-1 text-2xs font-semibold tracking-wider text-muted-2 uppercase">
               {title}
             </p>
           {/if}
@@ -309,7 +309,7 @@
             class="flex w-full items-center gap-2 px-4 py-1.5 text-left text-base
               {i === activeIndex
                 ? 'bg-[var(--color-surface-3)] text-foreground'
-                : 'text-foreground/80 hover:bg-[var(--color-surface-2)]'}"
+                : 'text-foreground hover:bg-[var(--color-surface-2)]'}"
             onpointerenter={() => (activeIndex = i)}
             onclick={() => runCommand(row.c)}
           >
@@ -324,19 +324,19 @@
                  command's name, so the excerpt takes the room and the badge
                  says which of the three places it came from. -->
             {#if row.c.badgeKey}
-              <span class="shrink-0 text-2xs font-semibold tracking-wider text-muted-foreground/60 uppercase">
+              <span class="shrink-0 text-2xs font-semibold tracking-wider text-muted-2 uppercase">
                 {t(row.c.badgeKey)}
               </span>
               <span class="min-w-0 flex-1 truncate text-sm">{row.label}</span>
               {#if row.hint}
-                <span class="max-w-[40%] shrink-0 truncate text-xs text-muted-foreground/70">
+                <span class="max-w-[40%] shrink-0 truncate text-xs text-muted-2">
                   {row.hint}
                 </span>
               {/if}
             {:else}
               <span class="min-w-0 truncate">{row.label}</span>
               {#if row.hint}
-                <span class="min-w-0 flex-1 truncate text-xs text-muted-foreground/70">
+                <span class="min-w-0 flex-1 truncate text-xs text-muted-2">
                   {row.hint}
                 </span>
               {/if}

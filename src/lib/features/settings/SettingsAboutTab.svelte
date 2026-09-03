@@ -68,7 +68,7 @@
 
 <SettingsCard title={t("about.title")} anchor="about.title" description={t("about.description")}>
   <div class="flex items-center gap-3 rounded-lg border border-border bg-[var(--color-surface-2)] px-3 py-2.5">
-    <span class="shrink-0 text-muted-foreground/60"><BoiteLogo size={32} /></span>
+    <span class="shrink-0 text-muted-2"><BoiteLogo size={32} /></span>
     <dl class="grid min-w-0 flex-1 grid-cols-[auto_1fr] items-baseline gap-x-3 gap-y-1 text-xs">
       <!-- Unqualified while this device is the only machine there is. The label
            only has to name a machine once there are two of them to confuse. -->
@@ -78,7 +78,7 @@
       <dd class="justify-self-end tabular-nums text-foreground">v{__APP_VERSION__}</dd>
 
       <dt class="text-muted-foreground">{t("about.platform")}</dt>
-      <dd class="justify-self-end text-foreground/90">
+      <dd class="justify-self-end text-foreground">
         {canUpdate ? t("about.platformDesktop") : t("about.platformBrowser")}
       </dd>
 
@@ -87,16 +87,16 @@
         <dd class="justify-self-end tabular-nums text-foreground">{boiteVersion}</dd>
 
         <dt class="text-muted-foreground">{t("about.boitePlatform")}</dt>
-        <dd class="justify-self-end text-foreground/90">{boiteOs}</dd>
+        <dd class="justify-self-end text-foreground">{boiteOs}</dd>
 
         <dt class="text-muted-foreground">{t("about.boiteHost")}</dt>
-        <dd class="min-w-0 justify-self-end truncate text-foreground/90">
+        <dd class="min-w-0 justify-self-end truncate text-foreground">
           {boiteHost}
         </dd>
       {/if}
 
       <dt class="text-muted-foreground">{t("about.workspace")}</dt>
-      <dd class="min-w-0 justify-self-end truncate text-foreground/90">
+      <dd class="min-w-0 justify-self-end truncate text-foreground">
         {workspace.isRemote ? t("about.workspaceRemote") : t("about.workspaceLocal")}
       </dd>
 
@@ -106,7 +106,7 @@
              link navigates the app window itself, and there is no way back. -->
         <button
           type="button"
-          class="truncate text-foreground/90 underline decoration-border underline-offset-2 transition hover:decoration-foreground"
+          class="truncate text-foreground underline decoration-border underline-offset-2 transition hover:decoration-foreground"
           onclick={() => void openUrl(REPO_URL)}
         >
           beboite/boite

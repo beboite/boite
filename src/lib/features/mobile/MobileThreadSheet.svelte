@@ -68,7 +68,7 @@
               keepAwake={(thread.keepAwake ?? false) && !!thread.ptyId}
             />
             <ShortcutIcon iconKey={thread.iconKey} size={16} color={threadIconColor(thread)} />
-            <span class="min-w-0 flex-1 truncate text-sm text-foreground/90">
+            <span class="min-w-0 flex-1 truncate text-sm text-foreground">
               {thread.title ?? thread.label}
             </span>
           </button>
@@ -78,7 +78,7 @@
           {#if isDelegated(thread)}
             <button
               type="button"
-              class="flex size-11 shrink-0 items-center justify-center rounded-lg text-muted-foreground/70 transition hover:bg-accent hover:text-foreground active:bg-accent/70"
+              class="flex size-11 shrink-0 items-center justify-center rounded-lg text-muted-2 transition hover:bg-accent hover:text-foreground active:bg-accent/70"
               onclick={() => app.detachDelegation(thread.id)}
               aria-label={t("sidebar.detachDelegation")}
             >
@@ -87,7 +87,7 @@
           {/if}
           <button
             type="button"
-            class="ml-2 flex size-11 shrink-0 items-center justify-center rounded-lg border-l border-border/60 text-muted-foreground/70 transition hover:bg-danger/20 hover:text-danger active:bg-danger/30"
+            class="ml-2 flex size-11 shrink-0 items-center justify-center rounded-lg border-l border-border/60 text-muted-2 transition hover:bg-danger/20 hover:text-danger active:bg-danger/30"
             onclick={() => close_(thread.id)}
             aria-label={t("mobile.closeTerminal", { name: thread.label })}
           >

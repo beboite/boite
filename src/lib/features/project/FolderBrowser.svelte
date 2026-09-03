@@ -182,11 +182,11 @@
 
         <div class="min-h-0 flex-1 overflow-auto p-1">
           {#if loading}
-            <p class="p-3 text-xs text-muted-foreground/60">{t("common.loading")}</p>
+            <p class="p-3 text-xs text-muted-2">{t("common.loading")}</p>
           {:else if err}
             <p class="p-3 text-xs text-danger">{err}</p>
           {:else if entries.length === 0}
-            <p class="p-3 text-xs text-muted-foreground/60">
+            <p class="p-3 text-xs text-muted-2">
               {t("folderBrowser.noSubfolders")}
             </p>
           {:else}
@@ -195,7 +195,7 @@
                 class="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-xs text-foreground transition hover:bg-[var(--color-surface-2)]"
                 onclick={() => go(e.path)}
               >
-                <span class="text-muted-foreground/60">▸</span>
+                <span class="text-muted-2">▸</span>
                 {e.name}
               </button>
             {/each}

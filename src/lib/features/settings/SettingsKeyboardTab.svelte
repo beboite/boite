@@ -67,7 +67,7 @@
   <p class="text-sm text-muted-foreground">{t("keybindings.intro")}</p>
   <button
     type="button"
-    class="shrink-0 rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground disabled:opacity-40"
+    class="shrink-0 rounded-md border border-edge px-2.5 py-1 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground disabled:opacity-40"
     disabled={!keybindings.customized}
     onclick={resetAll}
   >
@@ -100,7 +100,7 @@
           type="button"
           class="rounded-md border px-2 py-0.5 text-xs transition {recording
             ? 'border-foreground/50 bg-[var(--color-surface-3)] text-foreground'
-            : 'border-transparent text-muted-foreground hover:border-border hover:text-foreground'}"
+            : 'border-transparent text-muted-foreground hover:border-edge hover:text-foreground'}"
           aria-label={t("keybindings.record")}
           onclick={() => (recording ? (keybindings.recording = null) : startRecording(command.id))}
         >
@@ -120,7 +120,7 @@
         {#if recording}
           <button
             type="button"
-            class="rounded-md border border-border px-2 py-0.5 text-xs text-muted-foreground transition hover:text-foreground"
+            class="rounded-md border border-edge px-2 py-0.5 text-xs text-muted-foreground transition hover:text-foreground"
             onclick={() => (keybindings.recording = null)}
           >
             {t("keybindings.recordCancel")}

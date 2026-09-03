@@ -1637,7 +1637,7 @@
     ></div>
     {#if thread.status === "stopped"}
       <div
-        class="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-[var(--color-background)] text-xs text-muted-foreground/60"
+        class="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-[var(--color-background)] text-xs text-muted-2"
         role="status"
       >
         <!-- Decoration only: the readable state lives in the sibling span. -->
@@ -1648,7 +1648,7 @@
       <div class="absolute inset-x-0 bottom-3 z-10 flex justify-center">
         <button
           type="button"
-          class="rounded-md border border-border bg-[var(--color-surface)] px-3 py-1 text-xs text-muted-foreground shadow-lg transition hover:bg-[var(--color-surface-2)] hover:text-foreground"
+          class="rounded-md border border-edge bg-[var(--color-surface)] px-3 py-1 text-xs text-muted-foreground shadow-lg transition hover:bg-[var(--color-surface-2)] hover:text-foreground"
           onclick={() => void reloadThread(thread.id)}
         >
           {thread.status === "done"
@@ -1701,7 +1701,7 @@
                and h-9 puts them under the touch-target floor. -->
           <button
             type="button"
-            class="flex h-11 min-w-11 shrink-0 items-center justify-center rounded-md border border-border px-2 text-base font-medium transition active:scale-95"
+            class="flex h-11 min-w-11 shrink-0 items-center justify-center rounded-md border border-edge px-2 text-base font-medium transition active:scale-95"
             style:background-color={armed
               ? "var(--color-foreground)"
               : "var(--color-surface-2)"}

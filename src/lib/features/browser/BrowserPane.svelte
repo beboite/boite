@@ -169,7 +169,7 @@
       {t("browser.previewChip")}
     </span>
     <span class="min-w-0 flex-1 truncate text-2xs" use:tip={url}>
-      <span class="text-foreground/80">{address.host}</span><span
+      <span class="text-foreground">{address.host}</span><span
         class="text-muted-foreground">{address.rest}</span
       >
     </span>
@@ -237,7 +237,7 @@
       <div class="mt-2 flex flex-wrap items-center gap-1.5">
         <button
           type="button"
-          class="rounded-md border border-border bg-[var(--color-surface)] px-2 py-1 text-2xs text-foreground transition hover:bg-[var(--color-surface-3)]"
+          class="rounded-md border border-edge bg-[var(--color-surface)] px-2 py-1 text-2xs text-foreground transition hover:bg-[var(--color-surface-3)]"
           onclick={() => void openUrl(url)}
         >
           {t("browser.openExternal")}
@@ -275,7 +275,7 @@
       <div
         class="absolute inset-0 flex items-center justify-center bg-[var(--color-surface)]"
       >
-        <p class="text-2xs text-muted-foreground/70">{t("common.loading")}</p>
+        <p class="text-2xs text-muted-2">{t("common.loading")}</p>
       </div>
     {/if}
 
@@ -295,7 +295,7 @@
         <div class="mt-1.5 flex flex-wrap items-center gap-1.5">
           <button
             type="button"
-            class="rounded-md border border-border bg-[var(--color-surface-2)] px-2 py-1 text-2xs text-foreground transition hover:bg-[var(--color-surface-3)]"
+            class="rounded-md border border-edge bg-[var(--color-surface-2)] px-2 py-1 text-2xs text-foreground transition hover:bg-[var(--color-surface-3)]"
             onclick={() => void openUrl(url)}
           >
             {t("browser.openExternal")}

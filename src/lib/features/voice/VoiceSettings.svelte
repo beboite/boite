@@ -107,7 +107,7 @@
     <div class="flex flex-wrap items-center gap-1.5">
       <span class="w-20 shrink-0 text-xs text-muted-foreground">{t("voice.voice")}</span>
       <select
-        class="max-w-64 rounded-md border border-border bg-[var(--color-surface-2)] px-1.5 py-0.5 text-xs text-foreground outline-none focus:border-foreground/30"
+        class="max-w-64 rounded-md border border-edge bg-[var(--color-surface-2)] px-1.5 py-0.5 text-xs text-foreground outline-none focus:border-foreground/30"
         aria-label={t("voice.voice")}
         value={settings.state.voiceName ?? ""}
         onchange={(e) => settings.setVoiceName(e.currentTarget.value || null)}
@@ -126,7 +126,7 @@
   <div class="flex items-center gap-2">
     <button
       type="button"
-      class="rounded-md border border-border px-3 py-1 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
+      class="rounded-md border border-edge px-3 py-1 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
       onclick={() => void testMic()}
     >
       {t("voice.testMic")}

@@ -142,7 +142,7 @@
            off restores one global orchestrator without erasing the choices. -->
       {#if settings.state.experimentOrchestrator && settings.state.experimentOrchestratorPerProject}
         <select
-          class="rounded-md border border-border bg-[var(--color-surface-2)] px-1.5 py-0.5 text-xs text-muted-foreground outline-none focus:border-foreground/30"
+          class="rounded-md border border-edge bg-[var(--color-surface-2)] px-1.5 py-0.5 text-xs text-muted-foreground outline-none focus:border-foreground/30"
           aria-label={t("project.orchestrator")}
           value={settings.state.orchestratorByProject[project.id] ?? ""}
           onchange={(e) =>
@@ -181,10 +181,10 @@
                 />
               </span>
               <span class="min-w-0 flex-1">
-                <span class="block truncate text-base text-foreground/80">
+                <span class="block truncate text-base text-foreground">
                   {thread.title ?? thread.label}
                 </span>
-                <span class="block truncate text-xs text-muted-foreground/80">
+                <span class="block truncate text-xs text-muted-2">
                   {activity(thread)}
                 </span>
               </span>
@@ -229,12 +229,12 @@
         <ul class="mt-2.5 flex flex-col gap-1 border-t border-border pt-2">
           {#each git.log.slice(0, 5) as commit (commit.sha)}
             <li class="flex items-baseline gap-2 text-sm" use:tip={commit.summary}>
-              <span class="min-w-0 flex-1 truncate text-foreground/80">
+              <span class="min-w-0 flex-1 truncate text-foreground">
                 {commit.summary}
               </span>
               <!-- The one thing the sha never said. A dashboard is read for
                    "when did anything last happen here". -->
-              <span class="shrink-0 text-xs text-muted-foreground/70">
+              <span class="shrink-0 text-xs text-muted-2">
                 {formatAgo(relativeClock.now - commit.time * 1000)}
               </span>
             </li>
@@ -291,13 +291,13 @@
           void addTodo();
         }}
       >
-        <Plus class="size-3.5 shrink-0 text-muted-foreground/70" />
+        <Plus class="size-3.5 shrink-0 text-muted-2" />
         <input
           type="text"
           bind:value={todoDraft}
           placeholder={t("project.addTodo")}
           aria-label={t("project.addTodo")}
-          class="min-w-0 flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
+          class="min-w-0 flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-2 focus:outline-none"
         />
       </form>
     </div>
@@ -327,7 +327,7 @@
        that never changes, and a card's worth of chrome around two static
        strings was room the rest of the page wanted. -->
   <p
-    class="truncate px-1 text-xs text-muted-foreground/70 lg:col-span-3"
+    class="truncate px-1 text-xs text-muted-2 lg:col-span-3"
     use:tip={project.cwd}
   >
     {project.cwd}{#if project.gitRoot && project.gitRoot !== project.cwd}

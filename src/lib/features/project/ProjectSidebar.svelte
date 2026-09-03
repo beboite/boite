@@ -1330,7 +1330,7 @@
         autocomplete="off"
         placeholder={t("sidebar.filterThreads")}
         aria-label={t("sidebar.filterThreads")}
-        class="w-full rounded-md border border-border bg-[var(--color-surface-2)] px-2 py-1 text-xs text-foreground outline-none transition placeholder:text-muted-foreground/60 focus:border-foreground/30"
+        class="w-full rounded-md border border-edge bg-[var(--color-surface-2)] px-2 py-1 text-xs text-foreground outline-none transition placeholder:text-muted-2 focus:border-foreground/30"
         onkeydown={(e) => {
           if (e.key !== "Escape") return;
           e.stopPropagation();
@@ -1367,7 +1367,7 @@
     {:else if !showArchived && app.projects.every((p) => isScratch(p))}
       <button
         type="button"
-        class="mx-1 mt-2 mb-2 flex w-[calc(100%-0.5rem)] flex-col items-center gap-2 rounded-lg border border-dashed border-border bg-transparent px-3 py-7 text-xs text-muted-foreground transition hover:border-foreground/30 hover:bg-accent/30 hover:text-foreground"
+        class="mx-1 mt-2 mb-2 flex w-[calc(100%-0.5rem)] flex-col items-center gap-2 rounded-lg border border-dashed border-edge bg-transparent px-3 py-7 text-xs text-muted-foreground transition hover:border-foreground/30 hover:bg-accent/30 hover:text-foreground"
         onclick={addProjectClick}
       >
         <FolderOpen class="size-5 opacity-70" />
@@ -1472,7 +1472,7 @@
             <button
               type="button"
               data-nav-row
-              class="min-w-0 flex-1 truncate-safe text-left text-base font-medium leading-[19px] text-foreground/90 transition group-hover/project:text-foreground"
+              class="min-w-0 flex-1 truncate-safe text-left text-base font-medium leading-[19px] text-foreground transition group-hover/project:text-foreground"
               use:tip={project.cwd}
               onclick={() => {
                 if (consumeDragClick(project.id)) return;
@@ -1513,7 +1513,7 @@
                  The card is the thing you are in. -->
             <button
               type="button"
-              class="row-action touch-reveal rounded p-1 text-muted-foreground/0 transition hover:bg-accent hover:text-foreground focus-visible:text-foreground group-hover/block:text-muted-foreground group-focus-within/block:text-muted-foreground"
+              class="row-action touch-reveal rounded p-1 text-muted-2 transition hover:bg-accent hover:text-foreground focus-visible:text-foreground group-hover/block:text-muted-foreground group-focus-within/block:text-muted-foreground"
               class:is-open={launcher?.projectId === project.id}
               onclick={(e) => toggleLauncher(project.id, e)}
               data-drag-block
@@ -1526,7 +1526,7 @@
             </button>
             <button
               type="button"
-              class="row-action touch-reveal rounded p-1 text-muted-foreground/0 transition hover:bg-accent hover:text-foreground focus-visible:text-foreground group-hover/block:text-muted-foreground group-focus-within/block:text-muted-foreground"
+              class="row-action touch-reveal rounded p-1 text-muted-2 transition hover:bg-accent hover:text-foreground focus-visible:text-foreground group-hover/block:text-muted-foreground group-focus-within/block:text-muted-foreground"
               onclick={(e) => openProjectContextMenu(project, e)}
               data-drag-block
               aria-label={t("sidebar.projectOptions")}
@@ -1728,7 +1728,7 @@
                   <button
                     type="button"
                     data-no-drag
-                    class="touch-reveal relative flex size-4 shrink-0 items-center justify-center rounded-xs text-muted-foreground/70 opacity-0 transition hover:bg-danger/20 hover:text-danger focus-visible:opacity-100 group-hover/thread:opacity-100 group-focus-within/thread:opacity-100"
+                    class="touch-reveal relative flex size-4 shrink-0 items-center justify-center rounded-xs text-muted-2 opacity-0 transition hover:bg-danger/20 hover:text-danger focus-visible:opacity-100 group-hover/thread:opacity-100 group-focus-within/thread:opacity-100"
                     onclick={(e) => {
                       e.stopPropagation();
                       requestRemoveThread(thread.id);
@@ -1963,7 +1963,7 @@
      Reaching the popover means leaving the card, and the card is what reveals
      them — so the `+` you just pressed faded out from under your own pointer,
      taking the `…` next to it along. Written here rather than as a conditional
-     utility because it has to beat `text-muted-foreground/0`, and two Tailwind
+     utility because it has to beat `text-muted-2`, and two Tailwind
      classes setting the same property are resolved by stylesheet order, not by
      the order they appear in the attribute. */
   .project-block.launching .row-action {

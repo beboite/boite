@@ -33,7 +33,7 @@
 
 <div class="flex h-full min-h-0 flex-col">
   <header class="flex h-9 shrink-0 items-center gap-1.5 border-b border-border px-3">
-    <span class="truncate text-xs font-medium text-foreground/90">{t("home.title")}</span>
+    <span class="truncate text-xs font-medium text-foreground">{t("home.title")}</span>
     <span class="flex-1"></span>
     {#if orchestrator.enabled}
       <!-- The kill switch the plan promises: every worker muted, every queued

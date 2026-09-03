@@ -334,7 +334,7 @@
          box sitting on top of one page's list reads as filtering that list. -->
     <label class="relative mx-4 min-w-0 max-w-xs flex-1">
       <Search
-        class="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/70"
+        class="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-2"
       />
       <input
         bind:this={searchEl}
@@ -344,7 +344,7 @@
         autocomplete="off"
         placeholder={t("settings.searchPlaceholder")}
         aria-label={t("settings.searchPlaceholder")}
-        class="w-full rounded-md border border-border bg-[var(--color-surface-2)] py-1 pl-7 pr-2 text-xs text-foreground outline-none transition placeholder:text-muted-foreground/60 focus:border-foreground/30"
+        class="w-full rounded-md border border-edge bg-[var(--color-surface-2)] py-1 pl-7 pr-2 text-xs text-foreground outline-none transition placeholder:text-muted-2 focus:border-foreground/30"
         onkeydown={(e) => {
           if (e.key === "Escape" && query) {
             e.stopPropagation();
@@ -454,14 +454,14 @@
           {#each results as hit (hit.entry.key)}
             <button
               type="button"
-              class="flex w-full flex-col items-start gap-0.5 rounded-lg border border-border bg-[var(--color-surface)] px-3 py-2 text-left transition hover:border-foreground/25"
+              class="flex w-full flex-col items-start gap-0.5 rounded-lg border border-edge bg-[var(--color-surface)] px-3 py-2 text-left transition hover:border-foreground/25"
               onclick={() => void goToSetting(hit.entry.tab, hit.entry.key)}
             >
               <span class="flex w-full items-baseline gap-2">
                 <span class="min-w-0 truncate text-xs font-medium text-foreground">
                   {hit.label}
                 </span>
-                <span class="shrink-0 text-2xs uppercase tracking-wider text-muted-foreground/70">
+                <span class="shrink-0 text-2xs uppercase tracking-wider text-muted-2">
                   {t(TAB_LABELS[hit.entry.tab])}
                 </span>
               </span>

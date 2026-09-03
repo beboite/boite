@@ -50,7 +50,7 @@
       {#each paths as path (path.label)}
         <button
           type="button"
-          class="group flex min-w-0 items-baseline gap-2 text-left text-xs text-muted-foreground/70 transition hover:text-foreground"
+          class="group flex min-w-0 items-baseline gap-2 text-left text-xs text-muted-2 transition hover:text-foreground"
           onclick={() => copyPath(path.value)}
           title={path.value}
         >

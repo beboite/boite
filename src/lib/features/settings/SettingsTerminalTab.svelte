@@ -68,7 +68,7 @@
           <div class="truncate text-xs text-muted-foreground">
             {shell.cmd}
             {#if shell.args.length > 0}
-              <span class="text-muted-foreground/70">{" " + shell.args.join(" ")}</span>
+              <span class="text-muted-2">{" " + shell.args.join(" ")}</span>
             {/if}
           </div>
         </div>
@@ -210,7 +210,7 @@
     ></textarea>
     <button
       type="button"
-      class="self-start rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
+      class="self-start rounded-md border border-edge px-2.5 py-1 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
       onclick={() => void settings.setTodoPromptTemplate("")}
     >
       {t("common.reset")}

@@ -75,8 +75,8 @@
   );
 
   const levelClass: Record<string, string> = {
-    debug: "text-muted-foreground/70",
-    info: "text-foreground/80",
+    debug: "text-muted-2",
+    info: "text-foreground",
     warn: "text-warning",
     error: "text-danger",
   };
@@ -191,7 +191,7 @@
       <select
         bind:value={levelFilter}
         aria-label={t("logs.levelAll")}
-        class="rounded-md border border-border bg-[var(--color-surface)] px-2 py-1 text-xs"
+        class="rounded-md border border-edge bg-[var(--color-surface)] px-2 py-1 text-xs"
       >
         {#each LEVELS as level (level.id)}
           <option value={level.id}>{t(level.labelKey)}</option>
@@ -205,7 +205,7 @@
       />
       <button
         type="button"
-        class="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground transition hover:bg-accent hover:text-foreground"
+        class="flex items-center gap-1 rounded-md border border-edge px-2 py-1 text-xs text-muted-foreground transition hover:bg-accent hover:text-foreground"
         onclick={refresh}
         use:tip={t("logs.refresh")}
       >
@@ -214,7 +214,7 @@
       </button>
       <button
         type="button"
-        class="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground transition hover:bg-accent hover:text-foreground"
+        class="flex items-center gap-1 rounded-md border border-edge px-2 py-1 text-xs text-muted-foreground transition hover:bg-accent hover:text-foreground"
         onclick={copyAll}
         use:tip={t("logs.copyFiltered")}
       >
@@ -224,7 +224,7 @@
       {#if scope === "current"}
         <button
           type="button"
-          class="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground transition hover:bg-danger/15 hover:text-danger"
+          class="flex items-center gap-1 rounded-md border border-edge px-2 py-1 text-xs text-muted-foreground transition hover:bg-danger/15 hover:text-danger"
           onclick={clear}
           use:tip={t("logs.clearTitle")}
         >
@@ -240,17 +240,17 @@
     class="max-h-[60vh] min-h-[200px] scroll-pane overflow-y-auto rounded-md border border-border bg-[var(--color-titlebar)] p-2 font-mono text-xs"
   >
     {#if deviceLocal}
-      <p class="py-4 text-center text-muted-foreground/60">{t("logs.deviceLocalOnly")}</p>
+      <p class="py-4 text-center text-muted-2">{t("logs.deviceLocalOnly")}</p>
     {:else if loading && entries.length === 0}
-      <p class="py-4 text-center text-muted-foreground/60">{t("common.loading")}</p>
+      <p class="py-4 text-center text-muted-2">{t("common.loading")}</p>
     {:else if filtered.length === 0}
-      <p class="py-4 text-center text-muted-foreground/60">
+      <p class="py-4 text-center text-muted-2">
         {scope === "previous" ? t("logs.noPreviousSession") : t("logs.empty")}
       </p>
     {:else}
       {#each visible as entry, i (`${entry.tsMs}-${i}`)}
-        <div class="flex gap-2 py-0.5 {levelClass[entry.level] ?? 'text-foreground/80'}">
-          <span class="shrink-0 text-muted-foreground/60">{formatTime(entry.tsMs)}</span>
+        <div class="flex gap-2 py-0.5 {levelClass[entry.level] ?? 'text-foreground'}">
+          <span class="shrink-0 text-muted-2">{formatTime(entry.tsMs)}</span>
           <span class="w-12 shrink-0 uppercase">{entry.level}</span>
           <span class="w-32 shrink-0 truncate text-muted-foreground" use:tip={entry.source}>
             [{entry.source}]
@@ -258,7 +258,7 @@
           <span class="min-w-0 flex-1 break-words">
             {entry.message}
             {#if entry.details}
-              <span class="text-muted-foreground/60"> {entry.details}</span>
+              <span class="text-muted-2"> {entry.details}</span>
             {/if}
           </span>
         </div>
@@ -266,7 +266,7 @@
     {/if}
   </div>
 
-  <div class="flex items-center justify-between text-xs text-muted-foreground/60">
+  <div class="flex items-center justify-between text-xs text-muted-2">
     <span>{t("logs.entryCount", { shown: visible.length, total: entries.length })}</span>
     {#if logPath}
       <button

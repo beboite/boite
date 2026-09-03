@@ -77,7 +77,7 @@
   <header class="flex h-9 shrink-0 items-center gap-2 border-b border-border px-3">
     <ListTodo class="size-4 text-muted-foreground" />
     {#if project}
-      <span class="truncate text-xs font-medium text-foreground/90">{projectDisplayName(project)}</span>
+      <span class="truncate text-xs font-medium text-foreground">{projectDisplayName(project)}</span>
     {:else}
       <span class="truncate text-xs text-muted-foreground">No project</span>
     {/if}
@@ -112,13 +112,13 @@
       class="flex shrink-0 items-center gap-1.5 border-t border-border p-2"
       onsubmit={submitDraft}
     >
-      <Plus class="size-3.5 shrink-0 text-muted-foreground/70" />
+      <Plus class="size-3.5 shrink-0 text-muted-2" />
       <input
         type="text"
         bind:value={draft}
         placeholder={t("todo.newItem")}
         aria-label={t("todo.newItem")}
-        class="min-w-0 flex-1 rounded-md border border-border bg-[var(--color-surface-2)] px-2 py-1 text-sm text-foreground outline-none transition placeholder:text-muted-foreground/60 focus:border-foreground/30"
+        class="min-w-0 flex-1 rounded-md border border-edge bg-[var(--color-surface-2)] px-2 py-1 text-sm text-foreground outline-none transition placeholder:text-muted-2 focus:border-foreground/30"
       />
     </form>
 
@@ -142,7 +142,7 @@
              a number. -->
         {#if agentsPending > 0}
           <span
-            class="shrink-0 rounded-full bg-[var(--color-surface-2)] px-1.5 text-2xs text-foreground/70"
+            class="shrink-0 rounded-full bg-[var(--color-surface-2)] px-1.5 text-2xs text-muted-foreground"
           >
             {agentsPending}
           </span>

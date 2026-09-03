@@ -42,10 +42,10 @@
               <ShortcutIcon iconKey={thread.iconKey} size={13} color={threadIconColor(thread)} />
             </span>
             <span class="min-w-0 flex-1">
-              <span class="block truncate text-base text-foreground/80">
+              <span class="block truncate text-base text-foreground">
                 {thread.title ?? thread.label}
               </span>
-              <span class="block truncate text-xs text-muted-foreground/80">
+              <span class="block truncate text-xs text-muted-2">
                 {phaseWord(thread)}
               </span>
             </span>
@@ -54,12 +54,12 @@
                 <!-- The dispatch mute, visible from the dashboard: this row no
                      longer takes the orchestrator's lines. -->
                 <span
-                  class="rounded-sm border border-border px-1 text-2xs text-muted-foreground/80"
+                  class="rounded-sm border border-border px-1 text-2xs text-muted-2"
                 >
                   {t("home.dispatchMuted")}
                 </span>
               {/if}
-              <span class="truncate text-2xs text-muted-foreground/70">
+              <span class="truncate text-2xs text-muted-2">
                 {app.projectById(thread.projectId)?.name ?? ""}
               </span>
             </span>

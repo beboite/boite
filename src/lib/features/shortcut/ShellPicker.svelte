@@ -223,7 +223,7 @@
 <div bind:this={triggerRoot} class="relative flex shrink-0 items-stretch">
   <button
     type="button"
-    class="flex shrink-0 items-center gap-1.5 rounded-l-md border border-r-0 border-dashed border-border px-2.5 py-1 text-xs text-muted-foreground transition hover:border-foreground/30 hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+    class="flex shrink-0 items-center gap-1.5 rounded-l-md border border-r-0 border-dashed border-edge px-2.5 py-1 text-xs text-muted-foreground transition hover:border-foreground/30 hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
     onclick={(e) => void launchDefault(e.shiftKey)}
     oncontextmenu={(e) => {
       e.preventDefault();
@@ -240,7 +240,7 @@
   </button>
   <button
     type="button"
-    class="flex shrink-0 items-center justify-center rounded-r-md border border-dashed border-border px-1.5 py-1 text-muted-foreground transition hover:border-foreground/30 hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+    class="flex shrink-0 items-center justify-center rounded-r-md border border-dashed border-edge px-1.5 py-1 text-muted-foreground transition hover:border-foreground/30 hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
     disabled={shells.length === 0}
     onclick={toggle}
     aria-haspopup="menu"
@@ -266,7 +266,7 @@
       {#if onBoite}
         <!-- The list changed machine when the project did, and nothing else on
              screen says which one these shells belong to. -->
-        <div class="px-2 py-1 text-2xs text-muted-foreground/70">
+        <div class="px-2 py-1 text-2xs text-muted-2">
           {t("sidebar.onBoite", { name: workspace.info.name || "boite" })}
         </div>
       {/if}
@@ -279,11 +279,11 @@
         <button
           type="button"
           role="menuitem"
-          class="flex items-center justify-between gap-3 rounded px-2 py-1.5 text-left text-sm text-foreground/80 transition hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none"
+          class="flex items-center justify-between gap-3 rounded px-2 py-1.5 text-left text-sm text-foreground transition hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none"
           onclick={(e) => void pick(shell, e.shiftKey)}
         >
           <span class="font-medium">{shell.label}</span>
-          <span class="text-2xs text-muted-foreground/70">{shell.id}</span>
+          <span class="text-2xs text-muted-2">{shell.id}</span>
         </button>
       {/each}
     </div>

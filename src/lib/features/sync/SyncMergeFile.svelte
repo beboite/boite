@@ -109,7 +109,7 @@
                 class:border-foreground={current[hunk.id] === option.choice}
                 class:bg-foreground={current[hunk.id] === option.choice}
                 class:text-[var(--color-surface)]={current[hunk.id] === option.choice}
-                class:border-border={current[hunk.id] !== option.choice}
+                class:border-edge={current[hunk.id] !== option.choice}
                 class:text-foreground={current[hunk.id] !== option.choice}
                 onclick={() => decide(hunk.id, option.choice)}
               >
@@ -142,7 +142,7 @@
           </span>
           <button
             type="button"
-            class="rounded-md border border-border px-2 py-0.5 text-xs text-foreground transition hover:bg-[var(--color-surface-3)]"
+            class="rounded-md border border-edge px-2 py-0.5 text-xs text-foreground transition hover:bg-[var(--color-surface-3)]"
             onclick={() => onChoices(fillUndecided(current, "both"))}
           >
             {t("syncMerge.keepAllBoth")}
@@ -150,7 +150,7 @@
         {/if}
         <button
           type="button"
-          class="rounded-md border border-border px-2 py-0.5 text-xs text-muted-foreground transition hover:bg-[var(--color-surface-3)]"
+          class="rounded-md border border-edge px-2 py-0.5 text-xs text-muted-foreground transition hover:bg-[var(--color-surface-3)]"
           onclick={onSkip}
         >
           {t("syncMerge.skip")}

@@ -213,7 +213,7 @@
       ? 'bg-[var(--color-surface-2)]'
       : ''} {mobile
       ? 'min-h-11 gap-2 py-2 text-base'
-      : 'gap-1 py-0.5 text-sm'} {entry.isHidden ? 'text-foreground/50' : 'text-foreground/80'}"
+      : 'gap-1 py-0.5 text-sm'} {entry.isHidden ? 'text-muted-foreground' : 'text-foreground'}"
     style:padding-left="{depth * 12 + 4}px"
     role="treeitem"
     aria-expanded={entry.isDir ? isOpen : undefined}
@@ -230,9 +230,9 @@
         class="size-3 shrink-0 text-muted-foreground transition {isOpen ? 'rotate-90' : ''}"
       />
       {#if isOpen}
-        <FolderOpen class="size-3.5 shrink-0 text-foreground/70" />
+        <FolderOpen class="size-3.5 shrink-0 text-muted-foreground" />
       {:else}
-        <Folder class="size-3.5 shrink-0 text-foreground/70" />
+        <Folder class="size-3.5 shrink-0 text-muted-foreground" />
       {/if}
     {:else}
       <span class="size-3 shrink-0"></span>
@@ -257,7 +257,7 @@
     <div id={groupId} role="group">
       {#if isLoading && !children}
         <div
-          class="px-1 py-0.5 text-xs text-muted-foreground/70"
+          class="px-1 py-0.5 text-xs text-muted-2"
           style:padding-left="{depth * 12 + 24}px"
         >
           {t("common.loading")}
@@ -275,7 +275,7 @@
         {/each}
         {#if children.length === 0}
           <div
-            class="px-1 py-0.5 text-xs text-muted-foreground/60 italic"
+            class="px-1 py-0.5 text-xs text-muted-2 italic"
             style:padding-left="{depth * 12 + 24}px"
           >
             {t("explorer.empty")}

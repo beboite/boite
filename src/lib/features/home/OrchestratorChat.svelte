@@ -87,7 +87,7 @@
   {#snippet actions()}
     {#if scopes.length > 0}
       <select
-        class="max-w-36 rounded-md border border-border bg-[var(--color-surface-2)] px-1.5 py-0.5 text-xs text-muted-foreground outline-none focus:border-foreground/30"
+        class="max-w-36 rounded-md border border-edge bg-[var(--color-surface-2)] px-1.5 py-0.5 text-xs text-muted-foreground outline-none focus:border-foreground/30"
         aria-label={t("orchestrator.scopeLabel")}
         bind:value={orchestrator.scope}
       >
@@ -131,7 +131,7 @@
       {/if}
       <textarea
         rows="1"
-        class="max-h-24 min-h-9 flex-1 resize-none rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-1.5 text-sm text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-foreground/30"
+        class="max-h-24 min-h-9 flex-1 resize-none rounded-md border border-edge bg-[var(--color-surface-2)] px-2.5 py-1.5 text-sm text-foreground outline-none placeholder:text-muted-2 focus:border-foreground/30"
         placeholder={t("orchestrator.placeholder")}
         bind:value={draft}
         onkeydown={onKeydown}

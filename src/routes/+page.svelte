@@ -580,7 +580,7 @@
     <main class="relative flex min-w-0 flex-1 flex-col" use:toastArea>
       {#if !app.ready}
         <div class="flex h-full items-center justify-center">
-          <p class="text-xs text-muted-foreground/60">{t("common.loading")}</p>
+          <p class="text-xs text-muted-2">{t("common.loading")}</p>
         </div>
       {:else}
         <div
@@ -593,7 +593,7 @@
           {#if app.threads.length === 0 && !activeGroupId}
             <div class="flex h-full items-center justify-center">
               <div class="flex flex-col items-center gap-4 text-center">
-                <span class="text-muted-foreground/40">
+                <span class="text-muted-2">
                   <BoiteLogo size={64} />
                 </span>
                 <p class="text-sm text-muted-foreground">
@@ -606,7 +606,7 @@
                 {#if app.projects.length === 0}
                   <button
                     type="button"
-                    class="rounded-md border border-border bg-[var(--color-surface)] px-3 py-1.5 text-sm text-foreground transition hover:bg-[var(--color-surface-2)]"
+                    class="rounded-md border border-edge bg-[var(--color-surface)] px-3 py-1.5 text-sm text-foreground transition hover:bg-[var(--color-surface-2)]"
                     onclick={() => addProject()}
                   >
                     {t("common.chooseFolder")}
@@ -630,11 +630,11 @@
                 class="flex flex-col items-center gap-5 rounded-lg border border-border bg-[var(--color-surface)]/60 px-10 py-8 shadow-e2"
                 in:fade={{ duration: DUR.slow, easing: easeOutQuint }}
               >
-                <span class="text-muted-foreground/30"><BoiteLogo size={40} /></span>
+                <span class="text-muted-2"><BoiteLogo size={40} /></span>
                 <p class="text-base text-muted-foreground">
                   {t("welcome.pickThread")}
                 </p>
-                <div class="grid grid-cols-[auto_auto] gap-x-6 gap-y-2 text-xs text-muted-foreground/70">
+                <div class="grid grid-cols-[auto_auto] gap-x-6 gap-y-2 text-xs text-muted-2">
                   {#each WELCOME_KEYS as row, i (row.label)}
                     <span
                       class="text-right"
@@ -778,7 +778,7 @@
               {@const HomeComp = HomeView.current}
               <HomeComp />
             {:else}
-              <div class="flex h-full items-center justify-center text-xs text-muted-foreground/70">
+              <div class="flex h-full items-center justify-center text-xs text-muted-2">
                 {t("common.loading")}
               </div>
             {/if}
@@ -791,7 +791,7 @@
               {@const PluginsComp = PluginsView.current}
               <PluginsComp />
             {:else}
-              <div class="flex h-full items-center justify-center text-xs text-muted-foreground/70">
+              <div class="flex h-full items-center justify-center text-xs text-muted-2">
                 {t("common.loading")}
               </div>
             {/if}
@@ -804,7 +804,7 @@
               {@const EditorComp = EditorView.current}
               <EditorComp />
             {:else}
-              <div class="flex h-full items-center justify-center text-xs text-muted-foreground/70">
+              <div class="flex h-full items-center justify-center text-xs text-muted-2">
                 {t("common.loading")}
               </div>
             {/if}

@@ -113,7 +113,7 @@
                   class="rounded-md border px-2.5 py-1 text-xs transition {settings.state
                     .locale === lang.id
                     ? 'border-foreground/40 bg-[var(--color-surface-3)] text-foreground'
-                    : 'border-border bg-[var(--color-surface-2)] text-muted-foreground hover:border-foreground/30 hover:text-foreground'}"
+                    : 'border-edge bg-[var(--color-surface-2)] text-muted-foreground hover:border-foreground/30 hover:text-foreground'}"
                   onclick={() => settings.setLocale(lang.id)}
                 >
                   {t(lang.labelKey)}

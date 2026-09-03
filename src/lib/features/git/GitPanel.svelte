@@ -393,7 +393,7 @@
       <div bind:this={branchMenuEl} class="relative min-w-0">
         <button
           type="button"
-          class="flex max-w-44 items-center gap-1.5 rounded px-1.5 py-1 text-xs font-medium text-foreground/90 transition hover:bg-accent disabled:opacity-50"
+          class="flex max-w-44 items-center gap-1.5 rounded px-1.5 py-1 text-xs font-medium text-foreground transition hover:bg-accent disabled:opacity-50"
           onclick={toggleBranchMenu}
           disabled={gs.switchingBranch}
           aria-haspopup="menu"
@@ -416,7 +416,7 @@
             <form class="flex gap-1.5 border-b border-border p-2" onsubmit={createBranch}>
               <input
                 bind:this={newBranchInput}
-                class="min-w-0 flex-1 rounded border border-border bg-[var(--color-background)] px-2 py-1 text-xs text-foreground placeholder:text-muted-foreground/60 focus:border-foreground/30 focus:outline-none"
+                class="min-w-0 flex-1 rounded border border-edge bg-[var(--color-background)] px-2 py-1 text-xs text-foreground placeholder:text-muted-2 focus:border-foreground/30 focus:outline-none"
                 placeholder={t("git.newBranchPlaceholder")}
                 aria-label={t("git.newBranchPlaceholder")}
                 bind:value={newBranchName}
@@ -424,7 +424,7 @@
               />
               <button
                 type="submit"
-                class="rounded border border-border bg-[var(--color-surface-2)] p-1.5 text-muted-foreground transition hover:bg-accent hover:text-foreground disabled:opacity-40"
+                class="rounded border border-edge bg-[var(--color-surface-2)] p-1.5 text-muted-foreground transition hover:bg-accent hover:text-foreground disabled:opacity-40"
                 disabled={!newBranchName.trim() || gs.switchingBranch}
                 use:tip={t("git.createBranch")}
                 aria-label={t("git.createBranch")}
@@ -484,7 +484,7 @@
     {#if project?.gitRoot}
       <button
         type="button"
-        class="group/root flex min-w-0 shrink items-center gap-1 rounded-full border border-border bg-[var(--color-surface-2)] px-1.5 py-0.5 text-2xs text-muted-foreground transition hover:text-foreground"
+        class="group/root flex min-w-0 shrink items-center gap-1 rounded-full border border-edge bg-[var(--color-surface-2)] px-1.5 py-0.5 text-2xs text-muted-foreground transition hover:text-foreground"
         use:tip={t("git.nestedRepo", { path: project.gitRoot })}
         onclick={clearGitRoot}
       >
@@ -551,13 +551,13 @@
       >
         <span>{t("git.notRepoDesc")}</span>
         {#if gs.scanning}
-          <span class="text-xs text-muted-foreground/70">
+          <span class="text-xs text-muted-2">
             {t("git.scanningNested")}
           </span>
         {/if}
         <button
           type="button"
-          class="rounded-md border border-border bg-[var(--color-surface-2)] px-3 py-1.5 text-xs text-foreground/80 transition hover:bg-accent hover:text-foreground"
+          class="rounded-md border border-edge bg-[var(--color-surface-2)] px-3 py-1.5 text-xs text-foreground transition hover:bg-accent hover:text-foreground"
           onclick={initRepo}
         >
           {t("git.initRepo")}
@@ -573,7 +573,7 @@
             {t("git.repositoriesFound")}
           </span>
           <span
-            class="rounded-full bg-[var(--color-surface-2)] px-1.5 text-2xs text-foreground/70"
+            class="rounded-full bg-[var(--color-surface-2)] px-1.5 text-2xs text-muted-foreground"
           >
             {gs.repos.length}
           </span>
@@ -581,7 +581,7 @@
         {#each gs.repos as repo (repo)}
           <button
             type="button"
-            class="flex items-center gap-2 px-3 py-1.5 text-left text-xs text-foreground/80 transition hover:bg-accent hover:text-foreground"
+            class="flex items-center gap-2 px-3 py-1.5 text-left text-xs text-foreground transition hover:bg-accent hover:text-foreground"
             use:tip={repo}
             onclick={() => selectRepo(repo)}
           >
@@ -611,7 +611,7 @@
           </span>
           {#if totalChanges > 0}
             <span
-              class="rounded-full bg-[var(--color-surface-2)] px-1.5 text-2xs text-foreground/70"
+              class="rounded-full bg-[var(--color-surface-2)] px-1.5 text-2xs text-muted-foreground"
             >
               {totalChanges}
             </span>
@@ -620,7 +620,7 @@
 
         <div class="shrink-0 border-b border-border p-2">
           <textarea
-            class="w-full resize-none rounded-md border border-border bg-[var(--color-background)] px-2 py-1.5 text-xs text-foreground placeholder:text-muted-foreground/60 focus:border-foreground/30 focus:outline-none"
+            class="w-full resize-none rounded-md border border-edge bg-[var(--color-background)] px-2 py-1.5 text-xs text-foreground placeholder:text-muted-2 focus:border-foreground/30 focus:outline-none"
             rows="2"
             placeholder={t("git.commitPlaceholder")}
             bind:value={gs.message}
@@ -630,7 +630,7 @@
           {#if totalChanges > 0}
             <button
               type="button"
-              class="mt-1.5 flex w-full items-center justify-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2 py-1 text-xs font-medium text-foreground/80 transition hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+              class="mt-1.5 flex w-full items-center justify-center gap-1.5 rounded-md border border-edge bg-[var(--color-surface-2)] px-2 py-1 text-xs font-medium text-foreground transition hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
               onclick={doCommit}
               disabled={gs.committing ||
                 gs.staged.length === 0 ||
@@ -642,7 +642,7 @@
             {@const canPush = gs.upstream === null || gs.ahead > 0}
             <button
               type="button"
-              class="mt-1.5 flex w-full items-center justify-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2 py-1 text-xs font-medium text-foreground/80 transition hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+              class="mt-1.5 flex w-full items-center justify-center gap-1.5 rounded-md border border-edge bg-[var(--color-surface-2)] px-2 py-1 text-xs font-medium text-foreground transition hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
               onclick={push}
               disabled={gs.pushing || !canPush}
             >
@@ -690,7 +690,7 @@
           {/if}
           {#if totalChanges === 0}
             <div
-              class="px-3 py-4 text-center text-xs text-muted-foreground/70"
+              class="px-3 py-4 text-center text-xs text-muted-2"
             >
               {t("git.workingTreeClean")}
             </div>
@@ -716,7 +716,7 @@
       <section class="flex min-h-0 min-w-0 w-full flex-col border-t border-border">
         <button
           type="button"
-          class="flex h-7 shrink-0 items-center gap-1.5 px-3 text-left transition hover:bg-accent {commitsOpen ? 'border-b border-border' : ''}"
+          class="flex h-7 shrink-0 items-center gap-1.5 px-3 text-left transition hover:bg-accent {commitsOpen ? 'border-b border-edge' : ''}"
           onclick={() => (commitsOpen = !commitsOpen)}
           aria-expanded={commitsOpen}
         >
@@ -728,7 +728,7 @@
           </span>
           {#if gs.log.length > 0}
             <span
-              class="rounded-full bg-[var(--color-surface-2)] px-1.5 text-2xs text-foreground/70"
+              class="rounded-full bg-[var(--color-surface-2)] px-1.5 text-2xs text-muted-foreground"
             >
               {gs.commitCount || gs.log.length}{gs.commitCount
                 ? ""
@@ -742,7 +742,7 @@
           <div class="flex min-h-0 min-w-0 w-full flex-1 flex-col scroll-pane overflow-y-auto overflow-x-hidden">
             {#if gs.log.length === 0}
               <div
-                class="px-3 py-4 text-center text-xs text-muted-foreground/70"
+                class="px-3 py-4 text-center text-xs text-muted-2"
               >
                 {t("git.noCommits")}
               </div>
@@ -752,7 +752,7 @@
                 <div class="border-t border-border p-2 shrink-0">
                   <button
                     type="button"
-                    class="w-full rounded-md border border-border bg-[var(--color-surface-2)] px-2 py-1 text-xs text-muted-foreground transition hover:bg-accent hover:text-foreground disabled:opacity-50"
+                    class="w-full rounded-md border border-edge bg-[var(--color-surface-2)] px-2 py-1 text-xs text-muted-foreground transition hover:bg-accent hover:text-foreground disabled:opacity-50"
                     onclick={loadMoreCommits}
                     disabled={gs.logLoadingMore}
                   >
@@ -791,7 +791,7 @@
       >
         <ChevronDown class="size-3 transition {open ? '' : '-rotate-90'}" />
         <span>{label}</span>
-        <span class="text-muted-foreground/60">{entries.length}</span>
+        <span class="text-muted-2">{entries.length}</span>
       </button>
       {#if mode === "staged"}
         <button
@@ -832,14 +832,14 @@
                middle of it. -->
           <button
             type="button"
-            class="min-w-0 flex-1 truncate text-left text-foreground/80 hover:text-foreground {mobile
+            class="min-w-0 flex-1 truncate text-left text-foreground hover:text-foreground {mobile
               ? 'py-3'
               : ''}"
             onclick={() => openDiff(entry)}
           >
             {basename(entry.path)}
             {#if dirname(entry.path)}
-              <span class="ml-1 text-muted-foreground/60"
+              <span class="ml-1 text-muted-2"
                 >{dirname(entry.path)}</span
               >
             {/if}
