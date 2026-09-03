@@ -28,6 +28,7 @@ use boite_pilot::{
 };
 
 use crate::approval;
+use crate::checkpoint::{self, Edge};
 use crate::store::{ColVal, PilotItemRow, Store, ThreadCol, PILOT_APPROVAL_ACTION};
 
 /// The text a turn has streamed so far, per item, for one host.
@@ -159,15 +160,15 @@ pub fn project(
         }
 
         PilotEvent::TurnStarted { turn_id } => {
-            // The checkpoint `start` edge belongs here and is a later job: the
-            // turn item is the row it would be written onto, so the seam is one
-            // field on this body rather than a second table.
-            write_item(
-                store,
-                thread_id,
-                seq,
-                &turn_item(turn_id, "running", json!({ "turnId": turn_id })),
-            )?;
+            // The checkpoint `start` edge: what the tree looked like before the
+            // agent touched anything. It rides on the turn item rather than in a
+            // second table, so `turn.completed` finds it by reading the row it
+            // is about to overwrite.
+            let mut body = json!({ "turnId": turn_id });
+            if let Some(sha) = capture(store, thread_id, Edge::Start) {
+                body["checkpointStart"] = json!(sha);
+            }
+            write_item(store, thread_id, seq, &turn_item(turn_id, "running", body))?;
             out.thread_updated = true;
         }
 
@@ -176,11 +177,24 @@ pub fn project(
             duration_ms,
             usage,
         } => {
-            let body = json!({
+            let mut body = json!({
                 "turnId": turn_id,
                 "durationMs": duration_ms,
                 "usage": usage,
             });
+            // The `end` edge, and what the two edges say the turn changed. The
+            // start is read back off the running row rather than held in memory:
+            // a host that restarted mid-turn still finds the edge its
+            // predecessor took.
+            if let Some(from) = started_at(store, turn_id) {
+                body["checkpointStart"] = json!(from);
+                if let Some(to) = capture(store, thread_id, Edge::End) {
+                    body["checkpointEnd"] = json!(to);
+                    if let Some(diff) = turn_diff(store, thread_id, &from, &to) {
+                        body["diff"] = diff;
+                    }
+                }
+            }
             write_item(store, thread_id, seq, &turn_item(turn_id, "completed", body))?;
             out.thread_updated = true;
         }
@@ -343,9 +357,103 @@ pub fn request_item_id(request_id: &str) -> String {
     format!("request:{request_id}")
 }
 
+/// Writes one boite-authored line onto a thread's timeline.
+///
+/// Goes through [`project`] rather than straight at the store so the notice
+/// takes a journal sequence like every other item and a cursor read finds it in
+/// order. Nothing pushes it live, and nothing has to: the only thing that writes
+/// one is a restart, and the `session.started` right behind it is what wakes the
+/// pane.
+pub fn write_notice(store: &Store, thread_id: &str, text: &str) -> Result<(), String> {
+    let item = Item::new(format!("notice-{}", now_ms()), ItemKind::Notice, None)
+        .with_body(json!({ "text": text }));
+    project(
+        store,
+        thread_id,
+        &PilotEvent::ItemCompleted { item },
+        &DeltaBuffer::new(),
+    )
+    .map(|_| ())
+}
+
+/// The item id a turn's row carries, so both edges write the same row.
+pub fn turn_item_id(turn_id: &str) -> String {
+    format!("turn:{turn_id}")
+}
+
+/// The repository a thread's turns are checkpointed in.
+///
+/// Its own worktree when it has one, the project's folder otherwise: the same
+/// answer `command::pilot::thread_cwd` hands the child, so a turn is measured in
+/// the checkout it ran in.
+fn thread_repo(store: &Store, thread_id: &str) -> Option<String> {
+    let thread = store.load_thread(thread_id).ok().flatten()?;
+    if let Some(worktree) = thread.worktree_path.filter(|path| !path.is_empty()) {
+        return Some(worktree);
+    }
+    store
+        .load_projects()
+        .ok()?
+        .into_iter()
+        .find(|project| project.id == thread.project_id)
+        .map(|project| project.cwd)
+}
+
+/// Takes one edge of a turn, or answers that there was nothing to take.
+///
+/// A capture never blocks a turn: a directory that is not a repository answers
+/// `None` quietly, and anything that actually failed is logged and dropped. The
+/// turn item is written either way, without a summary under it.
+fn capture(store: &Store, thread_id: &str, edge: Edge) -> Option<String> {
+    let repo = thread_repo(store, thread_id)?;
+    match checkpoint::capture_blocking(&repo, thread_id, edge) {
+        Ok(taken) => taken.map(|point| point.sha),
+        Err(failure) => {
+            tracing::warn!(thread = thread_id, reason = %failure, "pilot.checkpoint.failed");
+            None
+        }
+    }
+}
+
+/// The `start` edge a running turn already recorded.
+fn started_at(store: &Store, turn_id: &str) -> Option<String> {
+    let row = store.pilot_item(&turn_item_id(turn_id)).ok().flatten()?;
+    serde_json::from_str::<Value>(&row.body)
+        .ok()?
+        .get("checkpointStart")
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
+}
+
+/// What one turn changed, as the timeline footer reads it.
+///
+/// The three counts and the file list, and no patch: the footer draws names and
+/// a click opens the editor pane on `fileVersions`, which reads the contents
+/// itself. A whole unified diff through the IPC for every turn is what the
+/// budget table forbids.
+fn turn_diff(store: &Store, thread_id: &str, from: &str, to: &str) -> Option<Value> {
+    let repo = thread_repo(store, thread_id)?;
+    match checkpoint::diff_blocking(&repo, from, to, false) {
+        Ok(diff) => {
+            let additions: u32 = diff.files.iter().map(|file| file.additions).sum();
+            let deletions: u32 = diff.files.iter().map(|file| file.deletions).sum();
+            Some(json!({
+                "files": diff.files.len(),
+                "additions": additions,
+                "deletions": deletions,
+                "fileList": diff.files,
+            }))
+        }
+        Err(failure) => {
+            tracing::warn!(thread = thread_id, reason = %failure, "pilot.checkpoint.diff.failed");
+            None
+        }
+    }
+}
+
 fn turn_item(turn_id: &str, state: &str, body: Value) -> PilotItemRow {
     PilotItemRow {
-        id: format!("turn:{turn_id}"),
+        id: turn_item_id(turn_id),
         thread_id: String::new(),
         seq: 0,
         turn_id: Some(turn_id.to_string()),
@@ -449,6 +557,7 @@ fn item_kind(kind: ItemKind) -> &'static str {
         ItemKind::Plan => "plan",
         ItemKind::UserMessage => "user_message",
         ItemKind::Error => "error",
+        ItemKind::Notice => "notice",
     }
 }
 

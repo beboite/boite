@@ -1816,6 +1816,41 @@ impl Store {
         Ok(())
     }
 
+    /// One item by its id, or `None` when nothing carries it.
+    ///
+    /// The turn item is read back this way between the two edges of a turn: the
+    /// `start` checkpoint is written onto it at `turn.started` and read off it
+    /// at `turn.completed`, so the pair survives a host that restarted in
+    /// between.
+    pub fn pilot_item(&self, id: &str) -> Result<Option<PilotItemRow>, String> {
+        let conn = self.conn.lock();
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, thread_id, seq, turn_id, kind, state, body, created_ms, updated_ms
+                 FROM pilot_items WHERE id = ?1",
+            )
+            .map_err(|e| e.to_string())?;
+        let mut rows = stmt
+            .query_map([id], |r| {
+                Ok(PilotItemRow {
+                    id: r.get(0)?,
+                    thread_id: r.get(1)?,
+                    seq: r.get(2)?,
+                    turn_id: r.get(3)?,
+                    kind: r.get(4)?,
+                    state: r.get(5)?,
+                    body: r.get(6)?,
+                    created_ms: r.get(7)?,
+                    updated_ms: r.get(8)?,
+                })
+            })
+            .map_err(|e| e.to_string())?;
+        match rows.next() {
+            Some(row) => row.map(Some).map_err(|e| e.to_string()),
+            None => Ok(None),
+        }
+    }
+
     /// The timeline of a thread by cursor, oldest first.
     ///
     /// `after_seq` is exclusive, so a client arriving mid-turn reads what it

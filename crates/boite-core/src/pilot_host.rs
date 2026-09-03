@@ -13,9 +13,11 @@
 
 use serde_json::{json, Value};
 
+use boite_pilot::{Instance, OpenSpec, SwitchKind};
+
 use crate::command::pilot::{catalog, turn_input, Pilot, PilotReady};
-use crate::pilot::answer_of_option;
-use crate::store::{ColVal, ThreadCol};
+use crate::pilot::{answer_of_option, write_notice};
+use crate::store::{ColVal, Store, ThreadCol};
 
 /// Runs one prepared pilot call and answers the JSON the front doors wrap.
 ///
@@ -100,23 +102,38 @@ pub async fn execute(ready: PilotReady) -> Result<Value, String> {
             Ok(json!({ "ok": true }))
         }
 
-        Pilot::ModelSet { thread_id, model } => {
+        Pilot::ModelSet {
+            thread_id,
+            model,
+            instance,
+        } => {
             let selection = boite_pilot::ModelSelection {
                 model: model.clone(),
-                instance: None,
+                instance: instance.clone(),
             };
             let kind = runtime
                 .set_model(&thread_id, selection)
                 .await
                 .map_err(|e| e.to_string())?;
-            match &model {
-                Some(model) => store.update_thread_field(
-                    &thread_id,
-                    ThreadCol::PilotModel,
-                    ColVal::Text(model.clone()),
-                )?,
-                None => {
-                    store.update_thread_field(&thread_id, ThreadCol::PilotModel, ColVal::Null)?
+            match kind {
+                // Nothing stopped: the row records what answers now and the
+                // session carries on mid-conversation.
+                SwitchKind::InSession => {
+                    write_model(&store, &thread_id, model.as_deref())?;
+                }
+                // The credentials are read at launch, so another account is
+                // another process. The session is stopped politely, which keeps
+                // the native id resumable, and reopened on it.
+                SwitchKind::Restart => {
+                    restart(&store, &runtime, &thread_id, spec, &model, &instance).await?;
+                }
+                // Answered as an error rather than as a switch that did
+                // nothing: the picker has to be able to say so.
+                SwitchKind::Unsupported => {
+                    return Err(format!(
+                        "this thread's driver cannot change model, so {} stays what answers",
+                        model.as_deref().unwrap_or("the session default")
+                    ));
                 }
             }
             serde_json::to_value(json!({ "switch": kind })).map_err(|e| e.to_string())
@@ -175,6 +192,85 @@ pub async fn execute(ready: PilotReady) -> Result<Value, String> {
         // the call reached here, and the bus's answer is whether it was allowed
         // to. Same shape as `logs.subscribe`.
         Pilot::Subscribe { .. } => Ok(json!(null)),
+    }
+}
+
+/// What now answers, on the row.
+///
+/// `None` is the session's own default rather than an empty string: a column
+/// carrying `""` would read as a model named nothing.
+fn write_model(store: &Store, thread_id: &str, model: Option<&str>) -> Result<(), String> {
+    match model {
+        Some(model) => store.update_thread_field(
+            thread_id,
+            ThreadCol::PilotModel,
+            ColVal::Text(model.to_string()),
+        ),
+        None => store.update_thread_field(thread_id, ThreadCol::PilotModel, ColVal::Null),
+    }
+}
+
+/// Stops the session and reopens it on the account and model asked for.
+///
+/// The native session id is what makes this cheap: the polite stop leaves the
+/// conversation on disk, the reopen passes it as `resume`, and the same
+/// transcript carries on under a different process. A second of silence, and a
+/// `notice` on the timeline saying what changed, because a chat pane that
+/// swapped accounts without a word is a pane that lies about who answered.
+async fn restart(
+    store: &Store,
+    runtime: &boite_pilot::Runtime,
+    thread_id: &str,
+    spec: Option<Box<OpenSpec>>,
+    model: &Option<String>,
+    instance: &Option<Instance>,
+) -> Result<(), String> {
+    let mut spec = *spec.ok_or("pilot.model.set was prepared without a spec")?;
+    // Polite: the failure to stop a session that already went is not a reason
+    // to refuse to open the next one.
+    let _ = runtime.stop(thread_id).await;
+
+    if let Some(instance) = instance.clone() {
+        spec.instance = instance;
+    }
+    if model.is_some() {
+        spec.model = model.clone();
+    }
+    // Read now rather than trusted from the spec built before the stop: the
+    // session that just ended may have been the one that first minted the id.
+    spec.resume = store
+        .load_thread(thread_id)
+        .ok()
+        .flatten()
+        .and_then(|thread| thread.session_id)
+        .filter(|id| !id.is_empty());
+
+    let driver = spec.driver.clone();
+    let label = instance_label(&spec.instance);
+    let named = spec.model.clone();
+    runtime.open(spec).await.map_err(|e| e.to_string())?;
+
+    let encoded = serde_json::to_string(instance).map_err(|e| e.to_string())?;
+    if instance.is_some() {
+        store.update_thread_field(thread_id, ThreadCol::PilotInstance, ColVal::Text(encoded))?;
+    }
+    write_model(store, thread_id, named.as_deref())?;
+    let text = format!(
+        "{driver} on {label} now answers, model {}",
+        named.as_deref().unwrap_or("default")
+    );
+    tracing::info!(thread = thread_id, instance = label, "pilot.model.restart");
+    write_notice(store, thread_id, &text)
+}
+
+/// What an instance is called in a sentence a user reads.
+fn instance_label(instance: &Instance) -> String {
+    match instance {
+        Instance::Native { config_dir } => match config_dir {
+            Some(dir) => format!("the account in {}", dir.display()),
+            None => "the default account".to_string(),
+        },
+        Instance::Fastpick { provider, model } => format!("fastpick:{provider}:{model}"),
     }
 }
 
@@ -271,7 +367,7 @@ fn item_json(row: &crate::store::PilotItemRow) -> Value {
 /// An empty list is the honest answer for a request boite never saw, and
 /// [`answer_of_option`] then refuses anything but the two words it knows.
 fn offered_options(
-    store: &crate::store::Store,
+    store: &Store,
     thread_id: &str,
     request_id: &str,
 ) -> Vec<boite_pilot::RequestOption> {
@@ -286,7 +382,7 @@ fn offered_options(
         .unwrap_or_default()
 }
 
-fn stored_options(store: &crate::store::Store, thread_id: &str) -> boite_pilot::Options {
+fn stored_options(store: &Store, thread_id: &str) -> boite_pilot::Options {
     store
         .load_thread(thread_id)
         .ok()

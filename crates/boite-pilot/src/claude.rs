@@ -120,6 +120,22 @@ fn env_for(spec: &OpenSpec) -> BTreeMap<String, String> {
     env
 }
 
+/// The models a native claude instance can be asked for.
+///
+/// A list to extend per release, not a fetch: the CLI has no endpoint that
+/// answers what an account may use, and a menu that opened on a network call
+/// would be empty whenever the network is. The three aliases are what the CLI
+/// itself accepts, and the full ids are the ones the SDK's `sdk.d.ts` names for
+/// the same generation.
+pub const NATIVE_MODELS: &[&str] = &[
+    "opus",
+    "sonnet",
+    "haiku",
+    "claude-opus-4-1-20250805",
+    "claude-sonnet-4-5-20250929",
+    "claude-haiku-4-5-20251001",
+];
+
 pub struct ClaudeDriver;
 
 #[async_trait]

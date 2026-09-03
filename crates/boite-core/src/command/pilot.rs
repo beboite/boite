@@ -72,6 +72,9 @@ pub enum Pilot {
     ModelSet {
         thread_id: String,
         model: Option<String>,
+        /// The account to answer on. Absent is the one the thread already runs
+        /// on, which is the only case a driver can do without stopping.
+        instance: Option<Instance>,
     },
     ModeSet { thread_id: String, mode: ExecMode },
     /// Polite stop. The native session stays resumable, which is what makes
@@ -146,6 +149,7 @@ impl Pilot {
             "pilot.model.set" => Pilot::ModelSet {
                 thread_id: str_param(params, "threadId")?,
                 model: opt_str_param(params, "model"),
+                instance: instance_param(params)?,
             },
             "pilot.mode.set" => Pilot::ModeSet {
                 thread_id: str_param(params, "threadId")?,
@@ -257,7 +261,10 @@ impl Pilot {
         if let Some(thread_id) = self.thread_id() {
             let cwd = thread_cwd(&store, thread_id)?;
             host.roots().ensure_allowed(&cwd.to_string_lossy())?;
-            if matches!(self, Pilot::Open { .. }) {
+            // `pilot.model.set` gets one too: a selection naming another
+            // account is a restart, and the spec it reopens on is the thread's
+            // own row, read at the boundary where the host is still in hand.
+            if matches!(self, Pilot::Open { .. } | Pilot::ModelSet { .. }) {
                 spec = Some(Box::new(open_spec(&store, thread_id, cwd, host)?));
             }
         }
@@ -356,23 +363,58 @@ fn open_spec(
     })
 }
 
+/// How long one catalog answer is reused.
+///
+/// A menu opens more than once a minute and every fastpick provider costs a
+/// process; a model list does not move between two clicks. `refresh: true` is
+/// the door out, and it is what the picker's own refresh button sends.
+const CATALOG_TTL_MS: i64 = 60_000;
+
+/// The last answer and when it was built. Per process, which is per host: two
+/// hosts asking fastpick a minute apart is what the tool is for.
+static CATALOG_CACHE: parking_lot::Mutex<Option<(i64, Value)>> = parking_lot::Mutex::new(None);
+
 /// What the catalog answers with, built where the runtime is.
+///
+/// One shape:
+///
+/// ```json
+/// { "drivers":   [{ "id", "capabilities", "models": ["opus", ...] }],
+///   "instances": [{ "name", "driver", "kind", "configDir"?, "provider"?,
+///                   "model"?, "label" }] }
+/// ```
 ///
 /// Native instances come from the settings blob key `pilotInstances`, shaped
 /// `{ "<name>": { "driver": "claude", "configDir": "..." } }`. A driver with no
 /// entry gets one default instance with no config directory, so a fresh install
-/// has something to open a thread on without a settings write first.
+/// has something to open a thread on without a settings write first. fastpick
+/// routes are merged in as `kind: "fastpick"`, named the way the launcher names
+/// them so one string works in both menus.
 pub fn catalog(
     store: &Store,
     runtime: &boite_pilot::Runtime,
     refresh: bool,
 ) -> Result<Value, String> {
+    if !refresh {
+        let held = CATALOG_CACHE.lock();
+        if let Some((at, answer)) = held.as_ref() {
+            if crate::now_ms() - *at < CATALOG_TTL_MS {
+                return Ok(answer.clone());
+            }
+        }
+    }
+    let answer = build_catalog(store, runtime, refresh);
+    *CATALOG_CACHE.lock() = Some((crate::now_ms(), answer.clone()));
+    Ok(answer)
+}
+
+fn build_catalog(store: &Store, runtime: &boite_pilot::Runtime, refresh: bool) -> Value {
     let drivers: Vec<Value> = runtime
         .drivers()
         .into_iter()
         .map(|id| {
             let capabilities = runtime.capabilities(&id);
-            json!({ "id": id, "capabilities": capabilities })
+            json!({ "id": id, "capabilities": capabilities, "models": native_models(&id) })
         })
         .collect();
 
@@ -385,14 +427,11 @@ pub fn catalog(
                 .get("driver")
                 .and_then(|v| v.as_str())
                 .unwrap_or("claude");
-            let config_dir = body.get("configDir").and_then(|v| v.as_str());
-            instances.push(json!({
-                "name": name,
-                "driver": driver,
-                "instance": Instance::Native {
-                    config_dir: config_dir.map(PathBuf::from),
-                },
-            }));
+            instances.push(native_instance(
+                name,
+                driver,
+                body.get("configDir").and_then(|v| v.as_str()),
+            ));
         }
     }
     for id in runtime.drivers() {
@@ -400,22 +439,105 @@ pub fn catalog(
             .iter()
             .any(|entry| entry["driver"].as_str() == Some(id.as_str()));
         if !named {
-            instances.push(json!({
-                "name": id,
-                "driver": id,
-                "instance": Instance::Native { config_dir: None },
+            instances.push(native_instance(&id, &id, None));
+        }
+    }
+    instances.extend(fastpick_instances(refresh));
+
+    json!({ "drivers": drivers, "instances": instances })
+}
+
+/// One native account, as the picker draws it.
+fn native_instance(name: &str, driver: &str, config_dir: Option<&str>) -> Value {
+    json!({
+        "name": name,
+        "driver": driver,
+        "kind": "native",
+        "configDir": config_dir,
+        "label": name,
+    })
+}
+
+/// The models a driver ships a list for.
+///
+/// Static and per driver rather than fetched: no CLI here answers what an
+/// account may use, and a menu that opened on a network call would be empty
+/// whenever the network is.
+fn native_models(driver: &str) -> Vec<&'static str> {
+    match driver {
+        "claude" => boite_pilot::claude::NATIVE_MODELS.to_vec(),
+        _ => Vec::new(),
+    }
+}
+
+/// Every fastpick route, as a virtual instance per provider and model.
+///
+/// The name is `fastpick:<provider>:<model>`, the same string the launcher's
+/// combo carries, so a thread opened from either menu reads the same. Never
+/// stored on a row as anything else: the credential is read at spawn, on the
+/// machine that spawns.
+///
+/// Absence of fastpick is not a failure. A machine without it simply offers the
+/// native instances, which is what the menu already does for the terminal
+/// runtime.
+fn fastpick_instances(refresh: bool) -> Vec<Value> {
+    let Ok(listing) = crate::fastpick::list_blocking(None, refresh) else {
+        return Vec::new();
+    };
+    let Ok(listing) = serde_json::from_str::<Value>(&listing) else {
+        return Vec::new();
+    };
+    let providers = listing
+        .get("providers")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let mut out = Vec::new();
+    for provider in providers {
+        let Some(id) = provider.get("id").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let name = provider
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or(id)
+            .to_string();
+        // One call per provider: fastpick answers a model list from its own
+        // cache unless `refresh` is set, and the minute of cache above is what
+        // keeps a menu opening twice from paying for it twice.
+        let Ok(models) = crate::fastpick::list_blocking(Some(id.to_string()), refresh) else {
+            continue;
+        };
+        let Ok(models) = serde_json::from_str::<Value>(&models) else {
+            continue;
+        };
+        let items = models
+            .get("models")
+            .and_then(|v| v.get("items"))
+            .or_else(|| models.get("items"))
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        for model in items {
+            let Some(model_id) = model.get("id").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            let label = model
+                .get("label")
+                .and_then(|v| v.as_str())
+                .unwrap_or(model_id);
+            out.push(json!({
+                "name": format!("fastpick:{id}:{model_id}"),
+                "driver": "claude",
+                "kind": "fastpick",
+                "provider": id,
+                "model": model_id,
+                "label": format!("{name} {label}"),
             }));
         }
     }
-
-    // A fastpick route is virtual and never stored on a row. Absence of
-    // fastpick is not a failure: the menu simply offers the native instances.
-    let routes = crate::fastpick::list_blocking(None, refresh).ok();
-    Ok(json!({
-        "drivers": drivers,
-        "instances": instances,
-        "fastpick": routes,
-    }))
+    out
 }
 
 /// The turn input a `pilot.turn.start` carries.
@@ -434,6 +556,21 @@ pub fn boite_mcp_server(command: String, args: Vec<String>, env: Vec<(String, St
         command,
         args,
         env: env.into_iter().collect(),
+    }
+}
+
+/// The instance a selection names, when it names one.
+///
+/// Absent means the account the thread already runs on, which is the only case
+/// a driver can change model without stopping. Present is a restart whatever
+/// the driver answers: credentials are read at launch, so another account is
+/// another process.
+fn instance_param(params: &Value) -> Result<Option<Instance>, String> {
+    match params.get("instance") {
+        None | Some(Value::Null) => Ok(None),
+        Some(value) => serde_json::from_value(value.clone())
+            .map(Some)
+            .map_err(|e| format!("unreadable pilot instance: {e}")),
     }
 }
 

@@ -41,6 +41,14 @@ pub enum ItemKind {
     Plan,
     UserMessage,
     Error,
+    /// A line boite wrote itself: which instance and model now answer after a
+    /// restart, and nothing an agent said.
+    ///
+    /// Its own kind rather than an `assistant_text`, which a client draws as an
+    /// answer, and not `error`, which is what a failure reads as. The rename is
+    /// written out because `notice` is what lands in `pilot_items.kind`.
+    #[serde(rename = "notice")]
+    Notice,
 }
 
 /// One entry of the projected timeline.
