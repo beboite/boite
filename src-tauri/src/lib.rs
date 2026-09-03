@@ -299,6 +299,14 @@ pub fn run() {
             {
                 main_window.transparent = false;
             }
+            // An unattended launch takes no focus. `boite-mcp --dev` starts
+            // this window while somebody is working on the machine, and a
+            // window that grabs the keyboard mid-sentence is an interruption
+            // no agent is allowed to cause. Read only from the environment and
+            // only when it is set, so a launch by a person is untouched.
+            if std::env::var("BOITE_DEV_UNATTENDED").is_ok_and(|v| !v.is_empty() && v != "0") {
+                main_window.focus = false;
+            }
             tauri::WebviewWindowBuilder::from_config(app, &main_window)?
                 .initialization_script_for_all_frames(include_str!(
                     "../scripts/pane-driver.js"

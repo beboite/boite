@@ -17,6 +17,7 @@ pub mod explorer;
 pub mod fast_mcp_ssh;
 pub mod fastpick;
 pub mod finish;
+pub mod job;
 pub mod mcp_launch;
 pub mod mcp_catalog;
 pub mod git;

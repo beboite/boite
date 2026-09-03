@@ -12,6 +12,7 @@
 
 pub mod backend;
 mod call;
+pub mod dev;
 pub mod hook;
 pub mod host;
 mod http;
