@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  dropRetiredKeys,
   readExperimentWorkspace,
   RETIRED_SETTINGS_KEYS,
 } from "./store.svelte";
@@ -78,7 +79,45 @@ describe("readExperimentWorkspace", () => {
         "sidebarDesign",
         "sidebarHarnessLogos",
         "sidebarThreadGlow",
+        "experimentInfoBox",
+        "rightPanel",
+        "rightPanelByProject",
+        "rightPanelWidth",
       ].sort(),
     );
+  });
+});
+
+/**
+ * The read side of the same rule, for the flag that graduated.
+ *
+ * `experimentInfoBox` was a device field, so a blob written before it graduated
+ * still names it, and so do the three the docked column it removed left behind.
+ * A key that survives a read survives a write: `persist` spreads the state it
+ * was given.
+ */
+describe("dropRetiredKeys", () => {
+  it("takes the graduated flag and the column's three fields off a stored blob", () => {
+    const blob = {
+      v: 6,
+      experimentInfoBox: true,
+      rightPanel: "git",
+      rightPanelByProject: { p: "todo" },
+      rightPanelWidth: 420,
+      sidebarWidth: 240,
+    };
+    expect(dropRetiredKeys(blob)).toEqual({ v: 6, sidebarWidth: 240 });
+  });
+
+  it("leaves a blob that names none of them alone", () => {
+    expect(dropRetiredKeys({ sidebarWidth: 240 })).toEqual({ sidebarWidth: 240 });
+  });
+
+  it("is the same object, so a caller reading the fold first still can", () => {
+    const blob = { experimentHome: true, experimentInfoBox: true };
+    const folded = readExperimentWorkspace(blob);
+    expect(folded).toBe(true);
+    expect(dropRetiredKeys(blob)).toBe(blob);
+    expect(blob).toEqual({});
   });
 });

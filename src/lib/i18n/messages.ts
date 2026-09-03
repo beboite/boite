@@ -198,9 +198,6 @@ export const EN_MESSAGES = {
   "experiments.workspace": "Workspace",
   "experiments.workspaceDesc":
     "Turns on Home, the orchestrator you talk to from it, its per-project scopes, and voice in and out of that chat.",
-  "experiments.infoBox": "Project info box",
-  "experiments.infoBoxDesc":
-    "Replaces the side panel's tabs with one box over the terminals: the branch you are on, the todo an agent claimed, the latest commit — and the last ten when you hover it.",
 
   "infoBox.label": "Project info",
   "infoBox.claimedTitle": "Claimed by {agent}",
@@ -489,7 +486,6 @@ export const EN_MESSAGES = {
   "project.clean": "nothing uncommitted",
   "project.changedFiles": "{count} changed",
   "project.todos": "Todos",
-  "project.addTodo": "Add a todo…",
   "project.awaitingYou": "{count} waiting for you to confirm",
   "project.repoAt": "repository at {path}",
   "project.scratchNotice": "Temporary. Nothing here is a project yet.",
@@ -1273,7 +1269,7 @@ export const EN_MESSAGES = {
   "panes.kindTodo": "Todo",
   "panes.kindEditor": "Editor",
   "panes.needProject": "Pick a project first: a pane belongs to one.",
-  "panes.groupFull": "This group already holds {count} panes.",
+  "panes.groupFull": "No room for another pane here: {count} at most, and each one needs its width.",
   "panes.openedOffScreen": "{agent} opened {pane} beside its own terminal",
   "panes.openGit": "Show git",
   "panes.openExplorer": "Show the files",
@@ -1288,8 +1284,6 @@ export const EN_MESSAGES = {
   "editor.pdfPages": "{count} page(s)",
   "editor.zoomIn": "Zoom in",
   "editor.zoomOut": "Zoom out",
-  "panel.close": "Close the panel",
-  "panel.resize": "Resize the panel",
   "project.tokensCalendar": "Daily tokens, last 12 months",
   "explorer.fileTree": "File tree",
   "explorer.pickProject": "Pick a project.",

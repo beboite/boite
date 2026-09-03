@@ -6,7 +6,15 @@ import type {
   PaneGroup,
   SplitDir,
 } from "./types";
-import { MAX_LEAVES, MIN_RATIO, sameContent, threadPane } from "./types";
+import {
+  MAX_LEAVES,
+  MIN_COLUMN_PX,
+  MIN_PANE_PX,
+  MIN_RATIO,
+  SPLITTER_PX,
+  sameContent,
+  threadPane,
+} from "./types";
 import {
   countLeaves,
   findContent,
@@ -279,12 +287,40 @@ class PaneStore {
   }
 
   /**
+   * Whether a pane cut out of `targetPaneId` has the room to be a column, and
+   * whether it has the room to be stacked.
+   *
+   * Both halves are checked, not only the new one: `ratio` is the new pane's
+   * share, the target keeps the rest, and a 0.9 split starves the target
+   * instead. The splitter itself comes off the top because it takes its 4px
+   * from the same box.
+   *
+   * Unmeasured is a yes. Nothing has been laid out yet at that point, so there
+   * is no width to refuse against, and refusing on a missing number would mean
+   * the first pane of a session could not be opened.
+   */
+  private roomBeside(
+    targetPaneId: string,
+    ratio: number,
+  ): { row: boolean; column: boolean } {
+    const rect = this.rects[targetPaneId];
+    if (!rect) return { row: true, column: true };
+    const share = Math.min(ratio, 1 - ratio);
+    return {
+      row: (rect.w - SPLITTER_PX) * share >= MIN_COLUMN_PX,
+      column: (rect.h - SPLITTER_PX) * share >= MIN_PANE_PX,
+    };
+  }
+
+  /**
    * Put `content` in a new pane beside `targetPaneId`.
    *
    * The one entry point for everything that is not a thread being dragged: the
    * keyboard, the palette, the pane header's own button, and the MCP verb an
    * agent calls to show what it just did. Returns the new pane's id, or null
-   * when the group is full or the target is gone.
+   * when the target is gone, when the group is full, or when the window has no
+   * room left for the pane either way round (see `roomBeside`). `side` is a
+   * preference rather than an instruction for the same reason.
    *
    * `focus` is what the agent path turns off. A user who opened a pane meant to
    * work in it; an agent that opened one is showing something to somebody who
@@ -315,8 +351,21 @@ class PaneStore {
 
     const paneId =
       content.kind === "thread" ? content.threadId : `pane-${uid()}`;
-    const dir: SplitDir = side === "left" || side === "right" ? "row" : "column";
+    let dir: SplitDir = side === "left" || side === "right" ? "row" : "column";
     const before = side === "left" || side === "top";
+    if (dir === "row") {
+      const room = this.roomBeside(targetPaneId, ratio);
+      // Side by side is what the caller asked for, and on a wide window it is
+      // what it gets. On a narrow one the same call used to hand back two
+      // unreadable strips, so the split turns on its side instead: the new pane
+      // goes under its neighbour, where the width is the one thing it keeps.
+      // Neither fits, and the caller says the group is full — which it is, of
+      // this window.
+      if (!room.row) {
+        if (!room.column) return null;
+        dir = "column";
+      }
+    }
     const next = injectSibling(
       group.root,
       targetPaneId,

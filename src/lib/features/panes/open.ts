@@ -156,18 +156,40 @@ export function panePresence(kind: PaneKind): string | null {
 }
 
 /**
- * Close an agent-opened panel, wherever in the tree it ended up.
+ * Close a panel's pane, wherever in the tree it ended up.
  *
- * The docked column is the normal home for these three, so this is only about
- * the copy someone detached: the titlebar button reads the column, and a panel
- * left behind in a pane would keep answering for a button that no longer means
- * it.
+ * A pane is the only home these three have now that the docked column is gone,
+ * so this is the whole way out rather than a special case for a detached copy.
  */
 export function closePanelPane(kind: PanelKind): boolean {
   const open = panePresence(kind);
   if (!open) return false;
   paneStore.closePane(open);
   return true;
+}
+
+/**
+ * What the titlebar's Git, Fichiers and Todo buttons do, in one call.
+ *
+ * Three states rather than two, because a panel that is open is not necessarily
+ * the panel you are looking at. Closed, it opens. Open and focused, a second
+ * press closes it — which is what a toggle means. Open behind another pane, it
+ * takes the focus: closing it there would answer a press aimed at a panel the
+ * user cannot see with the panel disappearing, and the column this replaced had
+ * no such case to get wrong.
+ */
+export function togglePanelPane(kind: PanelKind): void {
+  const open = panePresence(kind);
+  const group = open ? paneStore.groupOf(open) : null;
+  if (!open || !group) {
+    openPane({ kind });
+    return;
+  }
+  if (group.focusedPaneId === open) {
+    paneStore.closePane(open);
+    return;
+  }
+  paneStore.setFocused(group.id, open);
 }
 
 /**

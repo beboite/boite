@@ -12,7 +12,6 @@ import type {
   Keybinding,
   LocaleSetting,
   OpenOnLaunch,
-  RightPanelTab,
   Settings,
   Shortcut,
   SmartSortBy,
@@ -28,11 +27,6 @@ import {
   mergeDefaultKeybindings,
   sanitizeKeybindings,
 } from "$lib/shared/keyboard/merge";
-import {
-  clampRightPanelWidth,
-  isRightPanelTab,
-  readRightPanelMap,
-} from "./right-panel";
 import { cliDetection } from "./cliDetection.svelte";
 import { CLI_PRESETS, type CliPreset } from "./cliPresets";
 
@@ -148,9 +142,6 @@ const DEFAULTS: Settings = {
     muse: true,
   },
   confirmCloseThread: true,
-  rightPanel: null,
-  rightPanelByProject: {},
-  rightPanelWidth: 320,
   gitSplitFraction: 0.5,
   gitAutoFetch: true,
   gitAutoFetchSeconds: 180,
@@ -168,7 +159,6 @@ const DEFAULTS: Settings = {
   kebaccCodex: true,
   kebaccAntigravity: true,
   colorByModel: true,
-  experimentInfoBox: false,
   infoBoxAnchor: "top-right",
   infoBoxCollapsed: false,
   experimentWhip: false,
@@ -268,11 +258,19 @@ function readMinutes(value: unknown, fallback: number): number {
 /**
  * Keys a stored blob may still carry that nothing reads any more.
  *
- * The first four folded into `experimentWorkspace`; the last four graduated,
+ * The first four folded into `experimentWorkspace`; the next four graduated,
  * their behaviour now unconditional (glow rows, agent logos, sidebar ordering)
- * — `sidebarThreadGlow` is the boolean `sidebarDesign` itself replaced. Listed
- * rather than merely ignored so `RETIRED_SETTINGS_KEYS` can be asserted absent
- * from what a save writes: a key nothing reads is a key that ships forever.
+ * — `sidebarThreadGlow` is the boolean `sidebarDesign` itself replaced. The
+ * last four went with the docked column: `experimentInfoBox` graduated, so git,
+ * files and the todo list are pane leaves for everyone and there is no column
+ * left for `rightPanel`, `rightPanelByProject` and `rightPanelWidth` to
+ * describe. Listed rather than merely ignored so `RETIRED_SETTINGS_KEYS` can be
+ * asserted absent from what a save writes: a key nothing reads is a key that
+ * ships forever.
+ *
+ * Dropping one is `hydrate` and `persistDeviceNow` between them: neither reads
+ * a key that is not a field, and both rebuild their blob from the field lists,
+ * so the first write after an upgrade is what takes these off disk.
  */
 export const RETIRED_SETTINGS_KEYS = [
   "experimentHome",
@@ -283,7 +281,27 @@ export const RETIRED_SETTINGS_KEYS = [
   "sidebarDesign",
   "sidebarThreadGlow",
   "sidebarHarnessLogos",
+  "experimentInfoBox",
+  "rightPanel",
+  "rightPanelByProject",
+  "rightPanelWidth",
 ] as const;
+
+/**
+ * A stored blob with the retired keys taken out of it.
+ *
+ * The field lists already decide what a save writes, so this changes no
+ * behaviour on its own — it says the rule in code rather than leaving it to the
+ * absence of a read, and it is what a test can hold onto. `experimentInfoBox`
+ * is the case it was written for: the flag was a device field, so a blob
+ * written by an older build still names it, and the answer is to forget it
+ * rather than to look at it.
+ */
+export function dropRetiredKeys<T extends object>(stored: T): T {
+  const raw = stored as Record<string, unknown>;
+  for (const key of RETIRED_SETTINGS_KEYS) delete raw[key];
+  return stored;
+}
 
 /**
  * The workspace experiment, from a blob that may predate the fold.
@@ -305,13 +323,6 @@ export function readExperimentWorkspace(stored: Record<string, unknown>): boolea
     stored.experimentVoice === true
   );
 }
-
-// The column's own two rules live beside it, not in here: see right-panel.ts.
-export {
-  clampRightPanelWidth,
-  RIGHT_PANEL_MIN_WIDTH,
-  RIGHT_PANEL_MAX_WIDTH,
-} from "./right-panel";
 
 const MOBILE_LAYOUT_QUERY = "(pointer: coarse) and (max-width: 899px)";
 
@@ -377,9 +388,6 @@ const DEVICE_KEY = "boite.layout";
 const DEVICE_FIELDS = [
   "sidebarWidth",
   "sidebarCollapsed",
-  "rightPanel",
-  "rightPanelByProject",
-  "rightPanelWidth",
   "uiScalePercent",
   "gitSplitFraction",
   "mobileLayout",
@@ -391,7 +399,6 @@ const DEVICE_FIELDS = [
   "terminalFontScalePercent",
   "locale",
   "colorByModel",
-  "experimentInfoBox",
   "infoBoxAnchor",
   "infoBoxCollapsed",
   "experimentWhip",
@@ -471,6 +478,9 @@ function applyDeviceOverrides(state: Settings, dev: DeviceBlob): void {
   const raw = dev as unknown as Record<string, unknown>;
   const foldedOnThisDevice =
     raw.experimentWorkspace === undefined && readExperimentWorkspace(raw);
+  // After the fold has been read off it, never before: four of the keys it
+  // drops are the fold's own inputs.
+  dropRetiredKeys(dev);
   for (const k of DEVICE_FIELDS) {
     if (dev[k] !== undefined) {
       target[k] = dev[k];
@@ -481,11 +491,6 @@ function applyDeviceOverrides(state: Settings, dev: DeviceBlob): void {
     if (staleBlob && PROMOTED_TO_DEVICE.includes(k)) continue;
     target[k] = structuredClone(DEFAULTS[k]);
   }
-  state.rightPanelByProject = readRightPanelMap(state.rightPanelByProject);
-  // The stored width was chosen in whatever window was open at the time, and
-  // this one may be smaller. Clamped on the way in rather than only in the
-  // setter, which a boot never calls.
-  state.rightPanelWidth = clampRightPanelWidth(state.rightPanelWidth);
   if (!isInfoBoxAnchor(state.infoBoxAnchor)) {
     state.infoBoxAnchor = DEFAULTS.infoBoxAnchor;
   }
@@ -616,14 +621,6 @@ class SettingsStore {
           stored.syncSources && typeof stored.syncSources === "object"
             ? { ...stored.syncSources }
             : structuredClone(DEFAULTS.syncSources),
-        rightPanel: isRightPanelTab(stored.rightPanel)
-          ? stored.rightPanel
-          : DEFAULTS.rightPanel,
-        rightPanelByProject: readRightPanelMap(stored.rightPanelByProject),
-        rightPanelWidth:
-          typeof stored.rightPanelWidth === "number" && stored.rightPanelWidth > 0
-            ? stored.rightPanelWidth
-            : DEFAULTS.rightPanelWidth,
         gitSplitFraction:
           typeof stored.gitSplitFraction === "number" &&
           stored.gitSplitFraction > 0 &&
@@ -663,10 +660,6 @@ class SettingsStore {
           typeof stored.colorByModel === "boolean"
             ? stored.colorByModel
             : DEFAULTS.colorByModel,
-        experimentInfoBox:
-          typeof stored.experimentInfoBox === "boolean"
-            ? stored.experimentInfoBox
-            : DEFAULTS.experimentInfoBox,
         infoBoxAnchor: isInfoBoxAnchor(stored.infoBoxAnchor)
           ? stored.infoBoxAnchor
           : DEFAULTS.infoBoxAnchor,
@@ -913,56 +906,6 @@ class SettingsStore {
     this.persistDeviceNow();
   }
 
-  /**
-   * Which panel this project has open, or null for none.
-   *
-   * A project nobody has opened a panel on yet inherits the last choice made
-   * anywhere, which is also the answer while on no project at all. That is not a
-   * fallback for lack of data: arriving in a new project with git already up is
-   * what somebody who works with git open means, and the first close is what
-   * makes it that project's own answer.
-   */
-  rightPanelFor(projectId: string | null): RightPanelTab {
-    if (projectId && projectId in this.state.rightPanelByProject) {
-      return this.state.rightPanelByProject[projectId];
-    }
-    return this.state.rightPanel;
-  }
-
-  /**
-   * What the three titlebar buttons do: show this panel, or close the column
-   * when it is the one already showing.
-   *
-   * Clicking Todo while Git is up switches tabs rather than closing anything,
-   * which is the whole point of the column — the second click on a panel you
-   * are already looking at is the only one that changes the layout.
-   */
-  toggleRightPanel(projectId: string | null, tab: Exclude<RightPanelTab, null>) {
-    this.setRightPanel(projectId, this.rightPanelFor(projectId) === tab ? null : tab);
-  }
-
-  setRightPanel(projectId: string | null, tab: RightPanelTab) {
-    if (this.rightPanelFor(projectId) === tab && this.state.rightPanel === tab) return;
-    this.state.rightPanel = tab;
-    if (projectId) this.state.rightPanelByProject[projectId] = tab;
-    this.persistDeviceNow();
-  }
-
-  /** A project that is gone keeps no memory: its entry would sit in the device
-      blob forever, growing by one per project ever deleted. */
-  forgetRightPanel(projectId: string) {
-    if (!(projectId in this.state.rightPanelByProject)) return;
-    delete this.state.rightPanelByProject[projectId];
-    this.persistDeviceNow();
-  }
-
-  setRightPanelWidth(px: number) {
-    const clamped = clampRightPanelWidth(px);
-    if (this.state.rightPanelWidth === clamped) return;
-    this.state.rightPanelWidth = clamped;
-    this.persistDeviceSoon();
-  }
-
   // A choice, unlike the first-run guess: from here the layout stops following
   // the form factor.
   setMobileLayout(value: boolean) {
@@ -1073,12 +1016,6 @@ class SettingsStore {
   setColorByModel(value: boolean) {
     if (this.state.colorByModel === value) return;
     this.state.colorByModel = value;
-    this.persistDeviceNow();
-  }
-
-  setExperimentInfoBox(value: boolean) {
-    if (this.state.experimentInfoBox === value) return;
-    this.state.experimentInfoBox = value;
     this.persistDeviceNow();
   }
 

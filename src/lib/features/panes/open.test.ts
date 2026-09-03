@@ -49,8 +49,9 @@ import {
   panePresence,
   panelRatio,
   splitFocused,
+  togglePanelPane,
 } from "./open";
-import { paneStore, countLeaves, leafNodesOf } from "./store.svelte";
+import { paneStore, countLeaves, leafNodesOf, MAX_LEAVES } from "./store.svelte";
 
 function threads(...rows: [string, string][]) {
   app.threads = rows.map(([id, projectId]) => ({ id, projectId }));
@@ -123,8 +124,9 @@ describe("openPane", () => {
   it("says the group is full rather than failing quietly", () => {
     threads(["t1", "p"]);
     app.activeThreadId = "t1";
-    for (const kind of ["git", "todo"] as const) openPane({ kind });
-    openPane({ kind: "browser", url: "http://localhost:1/" });
+    for (let i = 1; i < MAX_LEAVES; i++) {
+      openPane({ kind: "browser", url: `http://localhost:${i}/` });
+    }
     expect(errors).toEqual([]);
 
     expect(openPane({ kind: "dashboard" })).toBe(null);
@@ -197,8 +199,8 @@ describe("panePresence and closePanelPane", () => {
   it("says so when there is no detached panel to close", () => {
     threads(["t1", "p"]);
     app.activeThreadId = "t1";
-    // What tells the titlebar button to fall through to the docked column
-    // instead of swallowing the click.
+    // What tells a caller holding a panel kind that there was nothing of it on
+    // screen, rather than that it closed something.
     expect(closePanelPane("todo")).toBe(false);
   });
 
@@ -220,6 +222,40 @@ describe("panePresence and closePanelPane", () => {
     expect(panePresence("todo")).toBe(null);
   });
 
+});
+
+/**
+ * The title bar's three buttons. They used to toggle a docked column, which is
+ * gone, and a button that only ever opened would have been a button you could
+ * not undo.
+ */
+describe("togglePanelPane", () => {
+  it("opens it, then closes it when the second press finds it focused", () => {
+    threads(["t1", "p"]);
+    app.activeThreadId = "t1";
+
+    togglePanelPane("git");
+    const pane = panePresence("git");
+    expect(pane).toBeTruthy();
+    expect(paneStore.groupOf("t1")!.focusedPaneId).toBe(pane);
+
+    togglePanelPane("git");
+    expect(panePresence("git")).toBe(null);
+    expect(countLeaves(paneStore.groupOf("t1")!.root)).toBe(1);
+  });
+
+  it("focuses a pane that is open but not focused, rather than closing it", () => {
+    threads(["t1", "p"]);
+    app.activeThreadId = "t1";
+
+    togglePanelPane("git");
+    const pane = panePresence("git")!;
+    paneStore.setFocused(paneStore.groupOf("t1")!.id, "t1");
+
+    togglePanelPane("git");
+    expect(panePresence("git")).toBe(pane);
+    expect(paneStore.groupOf("t1")!.focusedPaneId).toBe(pane);
+  });
 });
 
 describe("panelRatio", () => {

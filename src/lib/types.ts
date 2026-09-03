@@ -234,32 +234,6 @@ export interface Settings {
    * safe default for something that writes into a home directory.
    */
   syncSources: Record<string, boolean>;
-  /**
-   * Which of git, files and todo the side panel is showing, or null when it is
-   * closed.
-   *
-   * These three describe the project you are on rather than a document you are
-   * working in, so they share one column and one width instead of each taking
-   * a slice of the layout: picking a tab changes what the panel holds and never
-   * where anything is. A panel that has to sit beside one particular terminal
-   * is detached into a pane from the panel's own header, which is the case the
-   * column cannot serve.
-   *
-   * This field is the last choice made, and it answers for a project that has
-   * never been on screen and for being on no project at all. What a project
-   * remembers is in `rightPanelByProject`.
-   */
-  rightPanel: RightPanelTab;
-  /**
-   * What each project had open, keyed by project id.
-   *
-   * One column for the whole window meant a repository with nothing to commit
-   * still opened on git because the last project had, and closing it there lost
-   * it for the project that wanted it. The panels describe a project, so which
-   * one is up is the project's own answer.
-   */
-  rightPanelByProject: Record<string, RightPanelTab>;
-  rightPanelWidth: number;
   gitSplitFraction: number;
   gitAutoFetch: boolean;
   gitAutoFetchSeconds: number;
@@ -305,13 +279,7 @@ export interface Settings {
    */
   colorByModel: boolean;
   /**
-   * Experiment: replace the side panel's three tabs with one anchored info box
-   * over the terminals: current branch, the todo an agent claimed, the last
-   * commit, and up to ten of them on hover. Off draws the classic column.
-   */
-  experimentInfoBox: boolean;
-  /**
-   * Where that box sits on every terminal. One value for the window, not per
+   * Where the info box sits on every terminal. One value for the window, not per
    * thread: a drag on any pane is the next pane's position too.
    */
   infoBoxAnchor: InfoBoxAnchor;
@@ -474,15 +442,6 @@ export type ThemeId =
  * site. `theme/appearance.ts` resolves it.
  */
 export type ThemeMode = "system" | ThemeId;
-
-/**
- * Which tab the side panel is on, or null when it is closed.
- *
- * The same three names as `PanelKind` in the pane tree, and deliberately so: a
- * panel is the same panel whether it is docked in the column or detached into a
- * pane, and the detach button hands one straight to the other.
- */
-export type RightPanelTab = "git" | "explorer" | "todo" | null;
 
 /**
  * Where a todo stands. `claimed` exists because an agent that can tick its own
