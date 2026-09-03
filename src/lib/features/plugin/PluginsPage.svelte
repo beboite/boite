@@ -28,7 +28,7 @@
 <div class="flex h-full min-h-0 flex-col">
   <header class="flex h-9 shrink-0 items-center gap-1.5 border-b border-border px-3">
     <span class="truncate text-xs font-medium text-foreground">{t("plugins.title")}</span>
-    <span class="truncate text-xs text-muted-2">{t("plugins.description")}</span>
+    <span class="truncate text-sm text-muted-2">{t("plugins.description")}</span>
     <span class="flex-1"></span>
     <Button variant="ghost" onclick={close}>{t("common.close")}</Button>
   </header>

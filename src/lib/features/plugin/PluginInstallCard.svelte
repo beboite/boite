@@ -119,7 +119,7 @@
   {#snippet actions()}
     <button
       type="button"
-      class="flex items-center gap-1.5 rounded-md border border-edge bg-[var(--color-surface-2)] px-2.5 py-1 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground disabled:opacity-50"
+      class="flex items-center gap-1.5 rounded-md border border-edge bg-[var(--color-surface-2)] px-2.5 py-1 text-sm text-muted-foreground transition hover:border-foreground/30 hover:text-foreground disabled:opacity-50"
       onclick={() => probe.probe()}
       disabled={probe.probing || installer.busy}
       use:tip={t("plugin.recheck")}
@@ -129,7 +129,7 @@
     </button>
   {/snippet}
 
-  <div class="flex items-center gap-2 text-xs">
+  <div class="flex items-center gap-2 text-sm">
     <span
       class="size-1.5 shrink-0 rounded-full"
       style:background-color={installed ? "var(--color-success)" : "var(--color-border)"}
@@ -149,7 +149,7 @@
   <div class="flex flex-wrap items-center gap-1.5 pt-1">
     <button
       type="button"
-      class="flex items-center gap-1.5 rounded-md border border-edge bg-[var(--color-surface-2)] px-2.5 py-1 text-xs text-foreground transition hover:border-foreground/30 disabled:cursor-not-allowed disabled:opacity-40"
+      class="flex items-center gap-1.5 rounded-md border border-edge bg-[var(--color-surface-2)] px-2.5 py-1 text-sm text-foreground transition hover:border-foreground/30 disabled:cursor-not-allowed disabled:opacity-40"
       onclick={() => (installed ? installer.update() : installer.install())}
       disabled={installer.busy || (primary.cmd === "cargo" && cargoMissing)}
       use:tip={line(primary)}
@@ -160,7 +160,7 @@
     {#if installed}
       <button
         type="button"
-        class="flex items-center gap-1.5 rounded-md border border-edge bg-[var(--color-surface-2)] px-2.5 py-1 text-xs text-muted-foreground transition hover:border-[var(--color-danger)] hover:text-[var(--color-danger)] disabled:cursor-not-allowed disabled:opacity-40"
+        class="flex items-center gap-1.5 rounded-md border border-edge bg-[var(--color-surface-2)] px-2.5 py-1 text-sm text-muted-foreground transition hover:border-[var(--color-danger)] hover:text-[var(--color-danger)] disabled:cursor-not-allowed disabled:opacity-40"
         onclick={() => installer.uninstall()}
         disabled={installer.busy || (uninstall.cmd === "cargo" && cargoMissing)}
         use:tip={line(uninstall)}
@@ -172,7 +172,7 @@
     {#if installer.busy}
       <button
         type="button"
-        class="flex items-center gap-1.5 rounded-md border border-edge px-2.5 py-1 text-xs text-muted-foreground transition hover:border-[var(--color-danger)] hover:text-[var(--color-danger)]"
+        class="flex items-center gap-1.5 rounded-md border border-edge px-2.5 py-1 text-sm text-muted-foreground transition hover:border-[var(--color-danger)] hover:text-[var(--color-danger)]"
         onclick={() => installer.cancel()}
       >
         <Square class="size-3" />
@@ -181,7 +181,7 @@
     {:else if installer.status === "failed" || installer.status === "cancelled"}
       <button
         type="button"
-        class="flex items-center gap-1.5 rounded-md border border-edge px-2.5 py-1 text-xs text-foreground transition hover:border-foreground/30"
+        class="flex items-center gap-1.5 rounded-md border border-edge px-2.5 py-1 text-sm text-foreground transition hover:border-foreground/30"
         onclick={() => installer.retry()}
       >
         <RotateCw class="size-3" />
@@ -191,13 +191,13 @@
   </div>
 
   {#if verdict}
-    <div class="flex items-center justify-between gap-2 pt-1 text-xs">
+    <div class="flex items-center justify-between gap-2 pt-1 text-sm">
       <span class={verdictClass}>{verdict}</span>
       {#if !installer.busy && installer.hasOutput}
         <div class="flex shrink-0 items-center gap-1.5">
           <button
             type="button"
-            class="flex items-center gap-1 text-xs text-muted-2 transition hover:text-foreground"
+            class="flex items-center gap-1 text-sm text-muted-2 transition hover:text-foreground"
             onclick={copyLog}
           >
             <Copy class="size-3" />
@@ -205,7 +205,7 @@
           </button>
           <button
             type="button"
-            class="text-xs text-muted-2 transition hover:text-foreground"
+            class="text-sm text-muted-2 transition hover:text-foreground"
             onclick={() => installer.dismiss()}
           >
             {t("plugin.clearLog")}
@@ -219,7 +219,7 @@
     <div
       bind:this={logBox}
       onscroll={onLogScroll}
-      class="max-h-52 min-h-24 scroll-pane overflow-y-auto rounded-md border border-border bg-[var(--color-titlebar)] p-2 font-mono text-xs leading-snug"
+      class="max-h-52 min-h-24 scroll-pane overflow-y-auto rounded-md border border-border bg-[var(--color-titlebar)] p-2 font-mono text-sm"
     >
       {#each installer.lines as text}
         <div class="break-words whitespace-pre-wrap text-foreground">{text}</div>
@@ -228,16 +228,16 @@
   {/if}
 
   {#if cargoMissing && !installed && install.cmd === "cargo"}
-    <p class="text-xs leading-snug text-[var(--color-warning)]">
+    <p class="text-sm text-[var(--color-warning)]">
       {t("plugin.needsCargo")}
     </p>
   {/if}
 
   {#if probe.error}
-    <p class="text-xs leading-snug text-[var(--color-danger)]">{probe.error}</p>
+    <p class="text-sm text-[var(--color-danger)]">{probe.error}</p>
   {/if}
 
   {@render children?.()}
 
-  <p class="pt-0.5 text-xs text-muted-2">{repo}</p>
+  <p class="pt-0.5 text-sm text-muted-2">{repo}</p>
 </SettingsCard>
