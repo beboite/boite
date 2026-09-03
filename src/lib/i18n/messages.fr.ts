@@ -210,7 +210,7 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "infoBox.moreClaimed": "+{count}",
   "infoBox.collapse": "Replier",
   "infoBox.expand": "Déplier",
-  "infoBox.drag": "Déplacer",
+  "infoBox.log": "Derniers commits",
   "infoBox.openTag": "à faire",
   "infoBox.worktreeTag": "worktree",
   "infoBox.conflicts": "{count} conflits",

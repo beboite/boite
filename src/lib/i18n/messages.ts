@@ -208,7 +208,7 @@ export const EN_MESSAGES = {
   "infoBox.moreClaimed": "+{count}",
   "infoBox.collapse": "Collapse",
   "infoBox.expand": "Expand",
-  "infoBox.drag": "Move",
+  "infoBox.log": "Recent commits",
   "infoBox.openTag": "to do",
   "infoBox.worktreeTag": "worktree",
   "infoBox.conflicts": "{count} conflicts",

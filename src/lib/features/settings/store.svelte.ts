@@ -8,7 +8,6 @@ import { clampTerminalScale } from "$lib/theme/fonts";
 import { uuid } from "$lib/shared/utils/uuid";
 import { isThemeId } from "$lib/theme/themes";
 import type {
-  InfoBoxAnchor,
   Keybinding,
   LocaleSetting,
   OpenOnLaunch,
@@ -20,7 +19,6 @@ import type {
   VoiceTts,
   WhipSound,
 } from "$lib/types";
-import { isInfoBoxAnchor } from "$lib/features/infobox/anchor";
 import { orchestratorEnabledFor } from "./orchestratorEnabledFor";
 import { DEFAULT_KEYBINDINGS } from "$lib/shared/keyboard/defaults";
 import {
@@ -160,7 +158,6 @@ const DEFAULTS: Settings = {
   kebaccAntigravity: true,
   colorByModel: true,
   sidebarUnfoldedProjects: [],
-  infoBoxAnchor: "top-right",
   infoBoxCollapsed: false,
   experimentWhip: false,
   whipSound: "synth",
@@ -413,7 +410,6 @@ const DEVICE_FIELDS = [
   // New in this blob rather than promoted from the workspace, so it is absent
   // from PROMOTED_TO_DEVICE and an old blob simply reads the default.
   "sidebarUnfoldedProjects",
-  "infoBoxAnchor",
   "infoBoxCollapsed",
   "experimentWhip",
   "whipSound",
@@ -504,9 +500,6 @@ function applyDeviceOverrides(state: Settings, dev: DeviceBlob): void {
     // workspace and is the migration source for exactly one load.
     if (staleBlob && PROMOTED_TO_DEVICE.includes(k)) continue;
     target[k] = structuredClone(DEFAULTS[k]);
-  }
-  if (!isInfoBoxAnchor(state.infoBoxAnchor)) {
-    state.infoBoxAnchor = DEFAULTS.infoBoxAnchor;
   }
   if (typeof state.infoBoxCollapsed !== "boolean") {
     state.infoBoxCollapsed = DEFAULTS.infoBoxCollapsed;
@@ -675,9 +668,6 @@ class SettingsStore {
             ? stored.colorByModel
             : DEFAULTS.colorByModel,
         sidebarUnfoldedProjects: readStringList(stored.sidebarUnfoldedProjects),
-        infoBoxAnchor: isInfoBoxAnchor(stored.infoBoxAnchor)
-          ? stored.infoBoxAnchor
-          : DEFAULTS.infoBoxAnchor,
         infoBoxCollapsed:
           typeof stored.infoBoxCollapsed === "boolean"
             ? stored.infoBoxCollapsed
@@ -1047,12 +1037,6 @@ class SettingsStore {
     this.state.sidebarUnfoldedProjects = unfolded
       ? [...current, projectId]
       : current.filter((id) => id !== projectId);
-    this.persistDeviceNow();
-  }
-
-  setInfoBoxAnchor(value: InfoBoxAnchor) {
-    if (!isInfoBoxAnchor(value) || this.state.infoBoxAnchor === value) return;
-    this.state.infoBoxAnchor = value;
     this.persistDeviceNow();
   }
 
