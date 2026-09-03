@@ -464,11 +464,11 @@
          "nothing to do here" was also what a broken database looked like. -->
     {#if todos.loadError}
       <div class="flex flex-col items-center gap-2 px-3 py-6 text-center">
-        <p class="text-xs text-danger">{t("todo.loadFailed")}</p>
-        <p class="text-xs text-muted-foreground">{todos.loadError}</p>
+        <p class="text-sm text-danger">{t("todo.loadFailed")}</p>
+        <p class="text-sm text-muted-foreground">{todos.loadError}</p>
         <button
           type="button"
-          class="rounded-md border border-edge px-2.5 py-1 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
+          class="rounded-md border border-edge px-2.5 py-1 text-sm text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
           onclick={() => void todos.reload()}
         >
           {t("common.retry")}
@@ -480,7 +480,7 @@
            content for. The pane has the room and keeps the breathing space. -->
       <p
         class={[
-          "text-xs text-muted-foreground",
+          "text-sm text-muted-foreground",
           compact ? "px-3.5 py-2" : "px-3 py-6 text-center",
         ]}
       >
@@ -758,7 +758,7 @@
           <div class="mt-1 flex gap-1 pl-[23px]">
             <button
               type="button"
-              class="flex items-center gap-1 rounded border border-edge px-1.5 py-0.5 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
+              class="flex items-center gap-1 rounded border border-edge px-1.5 py-0.5 text-sm text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
               onclick={() => todos.setState(item.id, "done")}
             >
               <Check class="size-3" />
@@ -766,7 +766,7 @@
             </button>
             <button
               type="button"
-              class="flex items-center gap-1 rounded border border-edge px-1.5 py-0.5 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
+              class="flex items-center gap-1 rounded border border-edge px-1.5 py-0.5 text-sm text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
               onclick={() => todos.setState(item.id, "open")}
             >
               <Undo2 class="size-3" />

@@ -286,19 +286,19 @@
 </script>
 
 {#if !settings.state.agentTodoAccess}
-  <p class="text-xs text-muted-foreground">{t("todo.agentOff")}</p>
+  <p class="text-sm text-muted-foreground">{t("todo.agentOff")}</p>
 {:else if host !== "here"}
   <!-- Said rather than answered. The shim, the credentials file and the
        endpoint are three files on the machine that spawns, and nothing in the
        transport carries any of the three, so every row below would have been
        this device's answer wearing the boite's name. -->
-  <p class="text-xs leading-snug text-muted-foreground">
+  <p class="text-sm text-muted-foreground">
     {t("todo.agentOnBoite", { name: workspace.info.name || "boite" })}
   </p>
 {:else if shimPath === null}
-  <p class="text-xs text-muted-foreground">{t("todo.agentUnavailable")}</p>
+  <p class="text-sm text-muted-foreground">{t("todo.agentUnavailable")}</p>
 {:else if !endpointUp}
-  <p class="text-xs text-muted-foreground">{t("todo.agentEndpointDown")}</p>
+  <p class="text-sm text-muted-foreground">{t("todo.agentEndpointDown")}</p>
 {:else}
   {#each agentsHere as agent (agent.key)}
     <div class="flex items-center gap-2 py-0.5">
@@ -342,7 +342,7 @@
     <!-- Nothing to wire automatically: a project of plain shells, or one whose
          first agent has not been launched. The shim still exists, so say where
          it is rather than leave the panel silent. -->
-    <p class="text-xs leading-snug text-muted-foreground">{t("todo.agentNone")}</p>
+    <p class="text-sm text-muted-foreground">{t("todo.agentNone")}</p>
     <button
       type="button"
       class="mt-1 rounded border border-edge px-1.5 py-0.5 text-2xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
