@@ -106,6 +106,15 @@
     if (!settings.state.voicePushToTalk || !availability.ok) return;
     return new PushToTalk(begin, end).watch();
   });
+
+  // The chord used to be written in the experiments tab only, so the one
+  // visible voice control never said a key existed.
+  const hold = $derived(
+    settings.state.voicePushToTalk ? t("voice.holdChord") : t("voice.hold"),
+  );
+  const label = $derived(
+    busy ? t("voice.transcribing") : availability.ok ? hold : t(availability.reasonKey),
+  );
 </script>
 
 <!-- The composer's own metrics: the mic, the box and the send button are one
@@ -115,12 +124,8 @@
   icon
   variant={listening ? "danger" : "secondary"}
   disabled={!availability.ok || busy}
-  ariaLabel={t("voice.hold")}
-  title={busy
-    ? t("voice.transcribing")
-    : availability.ok
-      ? t("voice.hold")
-      : t(availability.reasonKey)}
+  ariaLabel={hold}
+  tip={label}
   class={listening ? "border-red-500/60 bg-red-500/10 text-foreground" : ""}
   onpointerdown={begin}
   onpointerup={end}
@@ -130,5 +135,5 @@
   {busy}
 >
   <MicIcon class="size-4 {busy ? 'animate-pulse' : ''}" />
-  <span class="sr-only">{listening ? t("voice.listening") : t("voice.hold")}</span>
+  <span class="sr-only">{listening ? t("voice.listening") : hold}</span>
 </Button>

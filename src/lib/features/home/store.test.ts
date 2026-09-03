@@ -29,7 +29,16 @@ vi.mock("$lib/features/project/dashboard", () => ({
   openProjectDashboard: () => {},
 }));
 
-const { inboxOf, liveThreadCount, liveThreadsOf, WAITING_INBOX_MS } = await import("./store.svelte");
+const {
+  inboxOf,
+  isQuiet,
+  liveThreadCount,
+  liveThreadsOf,
+  QUIET_ORCHESTRATOR_MS,
+  recentThreadsOf,
+  threadRecency,
+  WAITING_INBOX_MS,
+} = await import("./store.svelte");
 
 function thread(over: Partial<Thread> = {}): Thread {
   return {
@@ -134,5 +143,72 @@ describe("inboxOf", () => {
       now,
     });
     expect(items.map((item) => item.id)).toEqual(["waiting:w"]);
+  });
+});
+
+describe("isQuiet", () => {
+  const now = 10_000_000;
+
+  it("is quiet with no thread and no orchestrator line", () => {
+    expect(isQuiet({ threads: [], lastOrchestratorAt: null, now })).toBe(true);
+  });
+
+  it("is not quiet while a thread runs or waits", () => {
+    expect(
+      isQuiet({ threads: [thread({ status: "running" })], lastOrchestratorAt: null, now }),
+    ).toBe(false);
+    expect(
+      isQuiet({ threads: [thread({ status: "waiting" })], lastOrchestratorAt: null, now }),
+    ).toBe(false);
+  });
+
+  it("stays quiet with only settled threads", () => {
+    expect(
+      isQuiet({
+        threads: [thread({ status: "done" }), thread({ id: "b", status: "idle" })],
+        lastOrchestratorAt: null,
+        now,
+      }),
+    ).toBe(true);
+  });
+
+  it("waits an hour after the last orchestrator line", () => {
+    expect(
+      isQuiet({ threads: [], lastOrchestratorAt: now - QUIET_ORCHESTRATOR_MS + 1, now }),
+    ).toBe(false);
+    expect(
+      isQuiet({ threads: [], lastOrchestratorAt: now - QUIET_ORCHESTRATOR_MS, now }),
+    ).toBe(true);
+  });
+});
+
+describe("recentThreadsOf", () => {
+  const since = (id: string) => (id === "stamped" ? 900 : null);
+
+  it("orders on the activity stamp, then settledAt, then createdAt", () => {
+    const rows = recentThreadsOf({
+      threads: [
+        thread({ id: "old", createdAt: 100 }),
+        thread({ id: "settled", createdAt: 100, settledAt: 500 }),
+        thread({ id: "stamped", createdAt: 0 }),
+      ],
+      since,
+    });
+    expect(rows.map((row) => row.id)).toEqual(["stamped", "settled", "old"]);
+  });
+
+  it("keeps ten rows at most and leaves the input alone", () => {
+    const threads = Array.from({ length: 14 }, (_, i) =>
+      thread({ id: `t${i}`, createdAt: i }),
+    );
+    const rows = recentThreadsOf({ threads, since: () => null });
+    expect(rows).toHaveLength(10);
+    expect(rows[0].id).toBe("t13");
+    expect(threads[0].id).toBe("t0");
+  });
+
+  it("reads a settled stamp over the creation date", () => {
+    expect(threadRecency(thread({ createdAt: 1, settledAt: 7 }), () => null)).toBe(7);
+    expect(threadRecency(thread({ createdAt: 1 }), () => 9)).toBe(9);
   });
 });
