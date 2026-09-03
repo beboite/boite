@@ -1,4 +1,14 @@
+import { log } from "$lib/shared/log";
 import type {
+  PilotCatalog,
+  PilotEvent,
+  PilotEventRow,
+  PilotItemRow,
+  PilotOpened,
+  PilotSwitchKind,
+} from "$lib/features/pilot/types";
+import type {
+  PilotApi,
   ApprovalsApi,
   SyncApi,
   TelemetryApi,
@@ -122,6 +132,7 @@ export class RemoteBackend implements Backend {
   readonly telemetry: TelemetryApi;
   readonly log: LogApi;
   readonly logs: LogsApi;
+  readonly pilot: PilotApi;
   readonly approvals: ApprovalsApi;
   readonly push: PushApi;
   readonly meta: WorkspaceMetaApi;
@@ -648,6 +659,84 @@ export class RemoteBackend implements Backend {
           logFeedOff?.();
           logFeedOff = null;
           void rpc("logs.subscribe", { on: false }).catch(() => {});
+        };
+      },
+    };
+
+    // The chat runtime. Every method is the `pilot.*` command of the same
+    // name, so a phone drives a chat thread through the door the desktop drives
+    // it through, and the host holding the process is the one that checks an
+    // answer against what the driver offered.
+    const pilotHandlers = new Map<string, Set<(event: PilotEvent) => void>>();
+    let pilotFeedOff: (() => void) | null = null;
+    this.pilot = {
+      catalog: (refresh = false) => rpc("pilot.catalog", { refresh }) as Promise<PilotCatalog>,
+      open: (threadId) => rpc("pilot.thread.open", { threadId }) as Promise<PilotOpened>,
+      startTurn: (threadId, text, selection) =>
+        rpc("pilot.turn.start", { threadId, text, model: selection ?? null }).then(
+          (r) => (r.turnId as string) ?? "",
+        ),
+      interrupt: (threadId) => rpc("pilot.turn.interrupt", { threadId }).then(() => {}),
+      respond: (threadId, requestId, answer) =>
+        rpc("pilot.request.respond", { threadId, requestId, option: answer }).then(() => {}),
+      setModel: (threadId, selection) =>
+        rpc("pilot.model.set", {
+          threadId,
+          model: selection.model ?? null,
+          instance: selection.instance ?? null,
+        }).then((r) => r.switch as PilotSwitchKind),
+      setMode: (threadId, mode) => rpc("pilot.mode.set", { threadId, mode }).then(() => {}),
+      stop: (threadId) => rpc("pilot.session.stop", { threadId }).then(() => {}),
+      items: (threadId, afterSeq = 0, limit) =>
+        rpc("pilot.items", { threadId, afterSeq, limit }).then(
+          (r) => (r.items ?? []) as PilotItemRow[],
+        ),
+      events: (threadId, afterSeq = 0, limit) =>
+        rpc("pilot.events", { threadId, afterSeq, limit }).then(
+          (r) => (r.events ?? []) as PilotEventRow[],
+        ),
+      // One `pilot.subscribe` per thread, not per handler: the server keys the
+      // feed on the pairing id and the thread, so a second call says nothing
+      // new and a second unsubscribe would take the feed away from a pane still
+      // drawing it.
+      subscribe: (threadId, handler) => {
+        let handlers = pilotHandlers.get(threadId);
+        if (!handlers) {
+          handlers = new Set();
+          pilotHandlers.set(threadId, handlers);
+          void rpc("pilot.subscribe", { threadId }).catch((err) => {
+            log.warn("backend.pilot", "pilot.subscribe.refused", {
+              thread: threadId,
+              reason: String(err),
+            });
+          });
+        }
+        handlers.add(handler);
+        if (!pilotFeedOff) {
+          pilotFeedOff = this.subscribe((event) => {
+            if (event.event !== "pilot.event") return;
+            const data = event.data as { threadId?: string; event?: PilotEvent } | null;
+            const id = data?.threadId;
+            const payload = data?.event;
+            if (!id || !payload) return;
+            for (const cb of pilotHandlers.get(id) ?? []) cb(payload);
+          });
+        }
+        return () => {
+          const held = pilotHandlers.get(threadId);
+          if (!held) return;
+          held.delete(handler);
+          if (held.size > 0) return;
+          pilotHandlers.delete(threadId);
+          void rpc("pilot.unsubscribe", { threadId }).catch((err) => {
+            log.warn("backend.pilot", "pilot.unsubscribe.refused", {
+              thread: threadId,
+              reason: String(err),
+            });
+          });
+          if (pilotHandlers.size > 0) return;
+          pilotFeedOff?.();
+          pilotFeedOff = null;
         };
       },
     };

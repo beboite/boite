@@ -1,4 +1,14 @@
 import { invoke } from "./ipc";
+import { log } from "$lib/shared/log";
+import type { PilotApi } from "../types";
+import type {
+  PilotCatalog,
+  PilotEvent,
+  PilotEventRow,
+  PilotItemRow,
+  PilotOpened,
+  PilotSwitchKind,
+} from "$lib/features/pilot/types";
 import type {
   ApprovalsApi,
   LogsApi,
@@ -389,6 +399,114 @@ function stopDesktopLogFeed() {
   desktopLogStop?.();
   desktopLogStop = null;
   void invoke<void>("logs_subscribe", { params: { on: false } }).catch(() => {});
+}
+
+/**
+ * The chat runtime, through this app's twelve commands.
+ *
+ * Every one of them is `boite_core::command::pilot` reached by name, so what
+ * the desktop drives and what a phone drives over the WebSocket is the same
+ * domain answering. The desktop reads the answers bare; the envelopes belong to
+ * the WebSocket protocol.
+ */
+export const tauriPilot: PilotApi = {
+  catalog: (refresh = false) =>
+    invoke<PilotCatalog>("pilot_catalog", { params: { refresh } }),
+  open: (threadId) => invoke<PilotOpened>("pilot_thread_open", { params: { threadId } }),
+  startTurn: (threadId, text, selection) =>
+    invoke<{ turnId: string }>("pilot_turn_start", {
+      params: { threadId, text, model: selection ?? null },
+    }).then((r) => r.turnId ?? ""),
+  interrupt: (threadId) =>
+    invoke<unknown>("pilot_turn_interrupt", { params: { threadId } }).then(() => {}),
+  respond: (threadId, requestId, answer) =>
+    invoke<unknown>("pilot_request_respond", {
+      params: { threadId, requestId, option: answer },
+    }).then(() => {}),
+  setModel: (threadId, selection) =>
+    invoke<{ switch: PilotSwitchKind }>("pilot_model_set", {
+      params: {
+        threadId,
+        model: selection.model ?? null,
+        instance: selection.instance ?? null,
+      },
+    }).then((r) => r.switch),
+  setMode: (threadId, mode) =>
+    invoke<unknown>("pilot_mode_set", { params: { threadId, mode } }).then(() => {}),
+  stop: (threadId) =>
+    invoke<unknown>("pilot_session_stop", { params: { threadId } }).then(() => {}),
+  items: (threadId, afterSeq = 0, limit) =>
+    invoke<PilotItemRow[]>("pilot_items", { params: { threadId, afterSeq, limit } }),
+  events: (threadId, afterSeq = 0, limit) =>
+    invoke<PilotEventRow[]>("pilot_events", { params: { threadId, afterSeq, limit } }),
+  // One window event for every thread, carrying `{threadId, event}`: a pane
+  // filters on the id it draws. A channel per pane would mean the sink knowing
+  // which panes exist, which is the window's business and not the host's.
+  subscribe: (threadId, handler) => {
+    let handlers = pilotHandlers.get(threadId);
+    if (!handlers) {
+      handlers = new Set();
+      pilotHandlers.set(threadId, handlers);
+      void invoke<void>("pilot_subscribe", { params: { threadId } }).catch((err) => {
+        log.warn("backend.pilot", "pilot.subscribe.refused", {
+          thread: threadId,
+          reason: String(err),
+        });
+      });
+    }
+    handlers.add(handler);
+    startPilotFeed();
+    return () => {
+      const held = pilotHandlers.get(threadId);
+      if (!held) return;
+      held.delete(handler);
+      if (held.size > 0) return;
+      pilotHandlers.delete(threadId);
+      void invoke<void>("pilot_unsubscribe", { params: { threadId } }).catch((err) => {
+        log.warn("backend.pilot", "pilot.unsubscribe.refused", {
+          thread: threadId,
+          reason: String(err),
+        });
+      });
+      if (pilotHandlers.size === 0) stopPilotFeed();
+    };
+  },
+};
+
+/** Handlers per thread. The window listens once, whatever is open. */
+const pilotHandlers = new Map<string, Set<(event: PilotEvent) => void>>();
+let pilotStop: (() => void) | null = null;
+let pilotEpoch = 0;
+
+function startPilotFeed() {
+  if (pilotStop) return;
+  const epoch = ++pilotEpoch;
+  void import("@tauri-apps/api/event")
+    .then(({ listen }) =>
+      listen<{ threadId?: string; event?: PilotEvent }>("pilot://event", (message) => {
+        const threadId = message.payload?.threadId;
+        const event = message.payload?.event;
+        if (!threadId || !event) return;
+        const handlers = pilotHandlers.get(threadId);
+        if (!handlers) return;
+        for (const handler of handlers) handler(event);
+      }),
+    )
+    .then((un) => {
+      // Unsubscribed while the dynamic import was in flight: drop the listener
+      // rather than leaving one nothing can reach.
+      if (epoch !== pilotEpoch) un();
+      else pilotStop = un;
+    })
+    .catch((err) => {
+      log.warn("backend.pilot", "pilot.feed.failed", { reason: String(err) });
+    });
+}
+
+function stopPilotFeed() {
+  pilotEpoch += 1;
+  pilotStop?.();
+  pilotStop = null;
 }
 
 /**

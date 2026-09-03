@@ -81,9 +81,15 @@
     "eagerBytes moved to 942080 on the ux audit wave: the sidebar fold, the",
     "palette sections and their settings rows, the home launcher cards and the",
     "info box strip are all drawn by +page or the layout before first paint.",
-    "Measured at 912.5 KB, 7.5 KB spare."
+    "Measured at 912.5 KB, 7.5 KB spare.",
+    "",
+    "eagerBytes moved to 952320 for the pilot door: backend().pilot is a method",
+    "of the Backend contract, so the remote transport builds its twelve calls and",
+    "its per-thread feed in the constructor, before anything is drawn. The store",
+    "and the reducer stay off it, the chat pane being lazy. Measured at 920.6 KB,",
+    "9.4 KB spare."
   ],
-  "eagerBytes": 942080,
+  "eagerBytes": 952320,
   "totalBytes": 6553600,
   "largestEagerChunkBytes": 262144
 }

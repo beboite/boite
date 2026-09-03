@@ -1,3 +1,15 @@
+import type {
+  PilotCatalog,
+  PilotEvent,
+  PilotEventRow,
+  PilotExecMode,
+  PilotItemRow,
+  PilotModelSelection,
+  PilotOpened,
+  PilotRequestAnswer,
+  PilotSwitchKind,
+} from "$lib/features/pilot/types";
+
 // The single contract every workspace transport implements. TauriBackend
 // drives the local desktop via invoke; RemoteBackend (later) drives a
 // boite-server over a WebSocket. Façades under storage/ and features/*/api.ts
@@ -1724,6 +1736,60 @@ export interface TelemetryApi {
   }): Promise<void>;
 }
 
+/**
+ * The chat runtime, one door for both transports.
+ *
+ * Every method is a `pilot.*` command of `boite_core::command`: locally a
+ * `pilot_*` Tauri command, over the wire the RPC of the same name. The JSON
+ * types are the crate's own and are written once in
+ * `$lib/features/pilot/types.ts`, so a field the Rust renames is one edit there.
+ *
+ * `subscribe` is the only one that is not a call: it hands back the
+ * unsubscribe, and a caller that drops a thread must call it or the host keeps
+ * pushing at a pane nobody is drawing.
+ */
+export interface PilotApi {
+  /**
+   * The drivers installed, their models, and every account a thread can open
+   * on. Cached for a minute on the host; `refresh` is what the picker's own
+   * refresh button sends.
+   */
+  catalog(refresh?: boolean): Promise<PilotCatalog>;
+  /** Start or resume the native session of a `runtime = pilot` row. */
+  open(threadId: string): Promise<PilotOpened>;
+  /**
+   * A user turn. A turn already running receives the text as steering rather
+   * than queuing behind it. `selection` switches model before the turn runs.
+   */
+  startTurn(threadId: string, text: string, selection?: string): Promise<string>;
+  /** Escape. Reaches a running turn where the driver declares `interrupt`. */
+  interrupt(threadId: string): Promise<void>;
+  /**
+   * The answer to an open request, by the option value the driver offered.
+   * Anything the driver did not offer is a refusal on the machine holding the
+   * process, never a tool that runs on a value nobody recognised.
+   */
+  respond(threadId: string, requestId: string, answer: PilotRequestAnswer): Promise<void>;
+  /**
+   * Model, and optionally the account to answer on. Answers what the switch
+   * actually did: nothing stopped, or the session was reopened on the same
+   * native conversation.
+   */
+  setModel(threadId: string, selection: PilotModelSelection): Promise<PilotSwitchKind>;
+  setMode(threadId: string, mode: PilotExecMode): Promise<void>;
+  /** Polite stop. The native session stays resumable, which is what sleep is. */
+  stop(threadId: string): Promise<void>;
+  /** The projected timeline by cursor, oldest first. `afterSeq` is exclusive. */
+  items(threadId: string, afterSeq?: number, limit?: number): Promise<PilotItemRow[]>;
+  /** The raw journal by cursor, for what the driver actually said. */
+  events(threadId: string, afterSeq?: number, limit?: number): Promise<PilotEventRow[]>;
+  /**
+   * Live events for one thread. Returns the unsubscribe, which also tells the
+   * host to stop pushing when it was the last handler on that thread.
+   */
+  subscribe(threadId: string, handler: (event: PilotEvent) => void): () => void;
+}
+
 export interface Backend {
   readonly kind: "tauri" | "remote";
   readonly caps: BackendCaps;
@@ -1750,6 +1816,7 @@ export interface Backend {
   readonly session: SessionApi;
   readonly log: LogApi;
   readonly logs: LogsApi;
+  readonly pilot: PilotApi;
   readonly approvals: ApprovalsApi;
   readonly search: SearchApi;
   // The workspace pulse and the orchestrator conversation. Optional while the

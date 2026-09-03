@@ -105,6 +105,23 @@ export interface Thread {
    * The user mutes; no agent-reachable write rearms it.
    */
   acceptDispatch?: boolean;
+  /**
+   * Which runtime drives this thread: `"terminal"` (a PTY boite watches from
+   * the outside) or `"pilot"` (an agent process it talks to over the agent's
+   * own protocol). Absent reads as terminal, which is every row written before
+   * the pilot existed.
+   */
+  runtime?: string;
+  /** The pilot driver id: `"claude"`, later `"codex"`, `"acp:cursor"`. */
+  pilotDriver?: string | null;
+  /**
+   * `PilotInstance` as JSON: a native config directory, or a fastpick route.
+   * A string here rather than the object, because it is what the column holds.
+   */
+  pilotInstance?: string | null;
+  pilotModel?: string | null;
+  /** `PilotOptions` as JSON: effort and execution mode. */
+  pilotOptions?: string | null;
   origin?: WorkspaceOrigin;
 }
 
