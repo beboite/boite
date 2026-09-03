@@ -46,6 +46,28 @@ events" and its own table lists fourteen: `session.started`, `session.exited`,
 `model.changed`, `usage.updated`, `error`. The fourteen in the table are what is
 implemented; the heading is the thing that is wrong.
 
+## What exists
+
+`lib.rs` exports `Runtime`, and `driver.rs` the traits and the value types the
+bus builds: `OpenSpec`, `Opened`, `Instance`, `Options`, `ExecMode`,
+`ModelSelection`, `SwitchKind`, `Capabilities`, `RequestAnswer`, `PilotError`.
+`event.rs` has the fourteen `PilotEvent` kinds and `Item`, `ItemKind`,
+`Request`, `RequestOption`, `RequestOutcome`, `Usage`, `Status`, `ExitReason`.
+
+Two names to know outside the crate:
+
+- `ItemKind::Notice`, serialized `notice`. A line boite wrote itself, not an
+  agent: which instance and model answer after a restart. Its own kind rather
+  than an `assistant_text`, which a pane draws as an answer, and not `error`,
+  which is what a failure reads as. `boite_core::pilot::write_notice` is what
+  writes one.
+- `claude::NATIVE_MODELS`, the models a native claude instance can be asked
+  for. A `const` slice to extend per release, never a fetch: the CLI has no
+  endpoint that answers what an account may use, and a menu that opened on a
+  network call would be empty whenever the network is. `pilot.catalog` reads it
+  for the `claude` driver and answers an empty list for a driver that ships
+  none.
+
 ## Item identity
 
 An item id has to survive the gap between the frame that opens a card and the

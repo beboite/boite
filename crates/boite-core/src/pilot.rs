@@ -587,6 +587,41 @@ mod tests {
         project(store, "t1", &event, buffer).expect("project")
     }
 
+    /// A `runtime = pilot` row on project `p1`, for the tests that need the
+    /// projection to be able to find a directory.
+    fn pilot_thread_row() -> crate::model::Thread {
+        crate::model::Thread {
+            id: "t1".into(),
+            project_id: "p1".into(),
+            pty_id: None,
+            label: "chat".into(),
+            title: None,
+            cmd: "claude".into(),
+            args: vec![],
+            icon_key: None,
+            icon_color: None,
+            session_id: None,
+            status: "idle".into(),
+            exit_code: None,
+            created_at: 0,
+            auto_slept: false,
+            keep_awake: false,
+            worktree_path: None,
+            settled_at: None,
+            parent_thread_id: None,
+            delegation_mode: None,
+            delegation_status: None,
+            role: None,
+            orchestrator_scope: None,
+            accept_dispatch: true,
+            runtime: crate::model::RUNTIME_PILOT.into(),
+            pilot_driver: Some("claude".into()),
+            pilot_instance: None,
+            pilot_model: None,
+            pilot_options: None,
+        }
+    }
+
     /// The assertion the budget table names: a turn of two hundred deltas costs
     /// the database nothing at all.
     #[test]
@@ -795,6 +830,152 @@ mod tests {
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].kind, "error");
         assert!(items[0].body.contains("protocol broke"));
+    }
+
+    /// The two edges of a turn, against a repository that really exists.
+    ///
+    /// What is being checked is the seam: `turn.started` leaves a start edge on
+    /// the turn item, `turn.completed` takes the end edge and writes what the
+    /// two bound onto the same row. A scripted event pair rather than a driver,
+    /// because the driver's part of this is already covered and what can break
+    /// here is the projection reading its own row back.
+    #[test]
+    fn a_turn_carries_the_diff_its_two_edges_bound() {
+        let dir = std::env::temp_dir().join(format!(
+            "boite-pilot-ckpt-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let git = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .current_dir(&dir)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "git {args:?}: {out:?}");
+        };
+        git(&["init", "--quiet"]);
+        git(&["config", "user.name", "Boite Test"]);
+        git(&["config", "user.email", "boite@example.test"]);
+        git(&["config", "core.autocrlf", "false"]);
+        std::fs::write(dir.join("a.txt"), "one\n").unwrap();
+        git(&["add", "a.txt"]);
+        git(&["commit", "--quiet", "-m", "initial"]);
+
+        let store = store();
+        store
+            .save_project(
+                &crate::model::Project {
+                    id: "p1".into(),
+                    name: "p".into(),
+                    cwd: dir.to_string_lossy().to_string(),
+                    icon: None,
+                    archived: false,
+                    git_root: None,
+                    worktrees: None,
+                    mcp_server_ids: None,
+                },
+                0,
+            )
+            .unwrap();
+        let mut thread = pilot_thread_row();
+        thread.worktree_path = Some(dir.to_string_lossy().to_string());
+        store.save_thread(&thread).unwrap();
+
+        let buffer = DeltaBuffer::new();
+        apply(
+            &store,
+            &buffer,
+            PilotEvent::TurnStarted {
+                turn_id: "turn-1".into(),
+            },
+        );
+        let running = store.pilot_item("turn:turn-1").unwrap().expect("the turn");
+        let body: Value = serde_json::from_str(&running.body).unwrap();
+        let start = body["checkpointStart"]
+            .as_str()
+            .expect("the start edge")
+            .to_string();
+        assert!(!start.is_empty());
+
+        // What the agent did, from the checkpoint's point of view.
+        std::fs::write(dir.join("a.txt"), "one\ntwo\n").unwrap();
+        std::fs::write(dir.join("b.txt"), "new\n").unwrap();
+
+        apply(
+            &store,
+            &buffer,
+            PilotEvent::TurnCompleted {
+                turn_id: "turn-1".into(),
+                duration_ms: 5,
+                usage: Usage::default(),
+            },
+        );
+        let done = store.pilot_item("turn:turn-1").unwrap().expect("the turn");
+        assert_eq!(done.state, "completed");
+        let body: Value = serde_json::from_str(&done.body).unwrap();
+        assert_eq!(
+            body["checkpointStart"].as_str(),
+            Some(start.as_str()),
+            "the start edge survived the second write"
+        );
+        assert!(body["checkpointEnd"].is_string(), "{body}");
+        let diff = &body["diff"];
+        assert_eq!(diff["files"].as_u64(), Some(2), "{diff}");
+        assert_eq!(diff["additions"].as_u64(), Some(2), "{diff}");
+        assert_eq!(diff["deletions"].as_u64(), Some(0), "{diff}");
+        let names: Vec<&str> = diff["fileList"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|file| file["path"].as_str())
+            .collect();
+        assert!(names.contains(&"b.txt"), "{names:?}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A turn in a directory that is not a repository still writes its item.
+    ///
+    /// A capture must never be able to stop a turn, so the absent summary is
+    /// the whole of the difference.
+    #[test]
+    fn a_turn_outside_a_repository_still_lands() {
+        let store = store();
+        let buffer = DeltaBuffer::new();
+        apply(
+            &store,
+            &buffer,
+            PilotEvent::TurnStarted {
+                turn_id: "turn-1".into(),
+            },
+        );
+        apply(
+            &store,
+            &buffer,
+            PilotEvent::TurnCompleted {
+                turn_id: "turn-1".into(),
+                duration_ms: 1,
+                usage: Usage::default(),
+            },
+        );
+        let row = store.pilot_item("turn:turn-1").unwrap().expect("the turn");
+        assert_eq!(row.state, "completed");
+        let body: Value = serde_json::from_str(&row.body).unwrap();
+        assert!(body.get("diff").is_none(), "{body}");
+    }
+
+    /// A notice is boite's own line: its own kind, on the timeline, in order.
+    #[test]
+    fn a_notice_lands_on_the_timeline_under_its_own_kind() {
+        let store = store();
+        write_notice(&store, "t1", "claude on fastpick:crof:x now answers").unwrap();
+        let items = store.pilot_items("t1", 0, 10).unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].kind, "notice");
+        assert!(items[0].body.contains("now answers"), "{}", items[0].body);
     }
 
     /// A cursor read is exclusive on both tables, so a client that subscribes

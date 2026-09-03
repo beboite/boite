@@ -144,6 +144,18 @@ pub trait Session: Send + Sync {
 | `model.changed`, `usage.updated` | what actually answers, tokens and context left | `model.changed` yes |
 | `error` | a driver or process error the timeline shows | yes |
 
+**What exists.** `boite-pilot` is the crate above, minus `codex` and the ACP
+drivers: `lib.rs` holds `Runtime` with `open`, `prompt`, `interrupt`, `respond`,
+`set_model`, `set_mode`, `stop`, `stop_all`, `status`, `drivers`,
+`capabilities`, `native_session_id`, `pid` and `open_threads`; `driver.rs` holds
+`Driver`, `Session`, `OpenSpec`, `Opened`, `Instance`, `Options`, `ExecMode`,
+`ModelSelection`, `SwitchKind`, `Capabilities`, `RequestAnswer` and
+`PilotError`; `event.rs` holds `PilotEvent` and its fourteen kinds, `Item`,
+`ItemKind` (with `notice`, boite's own line), `Request`, `Usage` and `Status`;
+`claude.rs` is the stream-json driver and carries `NATIVE_MODELS`;
+`scripted.rs` replays a scenario file. `proc.rs` owns the spawn, the Windows job
+object and the fastpick wrapper.
+
 ### Store
 
 Two tables, five columns.
@@ -174,6 +186,16 @@ request, turn, with its final text and state. A client arriving mid-turn reads
 items by cursor, then subscribes. The text transcript for `terminal_transcript`
 and search is rendered from items, not a third store.
 
+**What exists.** `boite_core::store` holds `pilot_append_event`,
+`pilot_upsert_item`, `pilot_item`, `pilot_items`, `pilot_events`,
+`pilot_counts` and `pilot_approval_of_request`, and `delete_thread` purges both
+tables. `boite_core::pilot` is the projection: `project`, `Projection`,
+`DeltaBuffer`, `status_word`, `answer_of_option`, `request_item_id`,
+`turn_item_id` and `write_notice`. The five columns are on
+`boite_core::model::Thread` as `runtime`, `pilot_driver`, `pilot_instance`,
+`pilot_model` and `pilot_options`, with `RUNTIME_TERMINAL` and `RUNTIME_PILOT`
+beside them.
+
 ### The `pilot.*` domain
 
 | Method | Does | Device scope |
@@ -192,6 +214,22 @@ Push follows the two existing doors. Desktop: a Tauri channel per open pane.
 Server: an event `pilot.event` next to `thread.updated`, sent to subscribers
 only, text deltas coalesced per thread every 30 ms. Complete items and
 requests go out at once.
+
+**What exists.** `boite_core::command::pilot` decodes the twelve methods of
+`ALL_METHODS` into `Pilot` and hands the host a `PilotReady`;
+`boite_core::pilot_host::execute` runs it, with `Coalescer` holding deltas for
+the 30 ms tick. The desktop's door is `src-tauri/src/commands/pilot.rs`
+(`pilot_catalog`, `pilot_thread_open`, `pilot_turn_start`,
+`pilot_turn_interrupt`, `pilot_request_respond`, `pilot_model_set`,
+`pilot_mode_set`, `pilot_session_stop`, `pilot_items`, `pilot_events`,
+`pilot_subscribe`, `pilot_unsubscribe`, pushing `pilot://event`); the server's
+is `crates/boite-server/src/pilot.rs`, pushing `AppEvent::PilotEvent` as
+`pilot.event`. The webview reaches both through `backend().pilot`
+(`src/lib/backend/types.ts`), implemented in `backend/tauri/rpc.ts` as
+`tauriPilot` and in `backend/remote/index.ts`; the JSON types are
+`src/lib/features/pilot/types.ts`, the reduction is
+`src/lib/features/pilot/reduce.ts` and the live store is
+`src/lib/features/pilot/store.svelte.ts`.
 
 ### Model selection, instances, fastpick
 
@@ -213,6 +251,19 @@ before the click:
    a brief written from `pilot_items` (the goal as the user wrote it, the last
    turns, the files touched). An item `provider.changed` marks the timeline.
    Native context does not travel and the interface says so. Phase 4.
+
+**What exists.** `pilot.catalog` answers `{ drivers: [{ id, capabilities,
+models }], instances: [{ name, driver, kind, configDir?, provider?, model?,
+label }] }`, built by `command::pilot::catalog` and cached for `CATALOG_TTL_MS`,
+which `refresh: true` walks past. Native models are
+`boite_pilot::claude::NATIVE_MODELS`, a list to extend per release. fastpick
+routes come from `boite_core::fastpick::list_blocking`, one call per provider,
+merged as `kind: "fastpick"` instances named `fastpick:<provider>:<model>`, the
+same string `fastpick/combo.ts` parses. A selection naming another instance
+answers `SwitchKind::Restart`, and `pilot_host::restart` stops politely,
+reopens on `threads.session_id`, writes `pilot_instance` and `pilot_model` and
+leaves an `ItemKind::Notice` on the timeline; `SwitchKind::Unsupported` is an
+error the picker shows.
 
 ### Modes, requests, status, checkpoints
 
@@ -236,6 +287,16 @@ keeps `session_id`; waking is `pilot.thread.open` with resume.
 writes what `checkpoint.diff` answers onto the turn item: files, additions,
 deletions. The timeline shows that summary under every answer, a click opens the
 editor pane on `fileVersions`.
+
+**What exists.** `boite_core::pilot::project` takes the `start` edge at
+`turn.started` and the `end` edge at `turn.completed`, both through
+`checkpoint::capture_blocking` on the thread's own worktree, and writes
+`checkpointStart`, `checkpointEnd` and a `diff` of `{ files, additions,
+deletions, fileList }` from `checkpoint::diff_blocking` onto the turn item. A
+capture never blocks a turn: a directory that is not a repository writes the
+item without a summary. Modes, requests and status are `pilot.mode.set`,
+`PilotEvent::RequestOpened` mirrored into `approvals` with
+`PILOT_APPROVAL_ACTION`, and `status.changed` alone.
 
 ### The chat pane
 

@@ -800,6 +800,80 @@ mod tests {
         assert!(!refusal.is_empty());
     }
 
+    /// The catalog is answered from a cache for a minute, and `refresh` is the
+    /// door out of it.
+    ///
+    /// Proved by moving the settings under it: a second call inside the window
+    /// answers the old shape, and the one asking for a refresh answers the new
+    /// one. Reading the same value twice would prove nothing, the builder being
+    /// deterministic.
+    #[test]
+    fn the_catalog_is_cached_for_a_minute_and_refresh_walks_past_it() {
+        let host = Rows::new("catalog");
+        let runtime = host.pilot().expect("a runtime");
+        let first = catalog(&host.store, &runtime, true).expect("catalog");
+        let named: Vec<&str> = first["instances"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|entry| entry["name"].as_str())
+            .collect();
+        assert!(named.contains(&"claude"), "{named:?}");
+        assert!(
+            first["drivers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|driver| driver["models"]
+                    .as_array()
+                    .map(|models| !models.is_empty())
+                    .unwrap_or(false)),
+            "a driver ships a model list"
+        );
+
+        host.store
+            .save_settings(&json!({
+                "pilotInstances": { "work": { "driver": "claude", "configDir": "/tmp/work" } }
+            }))
+            .unwrap();
+        let cached = catalog(&host.store, &runtime, false).expect("catalog");
+        assert_eq!(cached, first, "inside the minute, the old answer stands");
+
+        let fresh = catalog(&host.store, &runtime, true).expect("catalog");
+        let named: Vec<&str> = fresh["instances"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|entry| entry["name"].as_str())
+            .collect();
+        assert!(named.contains(&"work"), "{named:?}");
+    }
+
+    /// A model set that names another account is prepared with the spec it will
+    /// reopen on, the same one `pilot.thread.open` is given.
+    #[test]
+    fn a_model_set_is_prepared_with_the_spec_a_restart_needs() {
+        let host = Rows::new("modelset");
+        host.thread("t1", RUNTIME_PILOT, Some("claude"));
+        let Ready::Pilot(ready) = ready(
+            &host,
+            "pilot.model.set",
+            json!({
+                "threadId": "t1",
+                "model": "sonnet",
+                "instance": { "type": "fastpick", "provider": "crof", "model": "x" }
+            }),
+        )
+        .expect("prepared") else {
+            panic!("not a pilot ready");
+        };
+        assert!(ready.spec.is_some(), "a restart has nothing to reopen without one");
+        let Pilot::ModelSet { instance, .. } = ready.call else {
+            panic!("not a model set");
+        };
+        assert!(matches!(instance, Some(Instance::Fastpick { .. })));
+    }
+
     /// A cursor read is clamped rather than refused: a client asking for a
     /// hundred thousand items is asking for the host's memory.
     #[test]
