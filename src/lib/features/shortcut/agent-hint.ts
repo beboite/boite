@@ -40,9 +40,8 @@ function unwrapShell(cmd: string, args: string[]): { cmd: string; args: string[]
 /**
  * What a "Launch X" row should show as its hint: the agent, not the wrapper.
  *
- * `parseCombo` here is fastpick's, not a new parser. Nobody had wired it to a
- * shortcut command line yet (the General tab still prints the raw string), so
- * this is the first call site.
+ * `parseCombo` here is fastpick's, not a new parser. The palette and the
+ * General tab's shortcut list both print this rather than the wrapper.
  */
 export function shortcutAgentHint(command: string): string {
   const parsed = parseCommand(command);

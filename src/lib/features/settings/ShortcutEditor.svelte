@@ -26,6 +26,7 @@
   import Zap from "@lucide/svelte/icons/zap";
   import { t } from "$lib/i18n/index.svelte";
   import type { IconKey, Shortcut } from "$lib/types";
+  import { shortcutAgentHint } from "$lib/features/shortcut/agent-hint";
 
   const shortcuts = $derived(settings.state.shortcuts);
 
@@ -264,6 +265,7 @@
    * either way, and Escape puts it back down.
    */
   let grabbedId = $state<string | null>(null);
+  let editingCommandId = $state<string | null>(null);
   // Read aloud after a move: the rows swap silently, and the one that moved is
   // no longer where the reader last was. Position rather than a sentence, so it
   // needs no translation of its own.
@@ -323,7 +325,14 @@
   function presetAlreadyAdded(presetId: string): boolean {
     const preset = CLI_PRESETS.find((p) => p.id === presetId);
     if (!preset) return false;
-    return shortcuts.some((s) => s.label === preset.label && s.command === preset.command);
+    // Label-and-exact-command missed a wrapper (`pwsh -NoLogo -Command claude`)
+    // and a renamed row. `shortcutAgentHint` is how the launcher names the
+    // same command line, so a hit on the preset's label is the same identity.
+    return shortcuts.some(
+      (s) =>
+        findPresetForCommand(s.command)?.id === preset.id ||
+        shortcutAgentHint(s.command) === preset.label,
+    );
   }
 
   async function toggleShortcutYolo(shortcut: Shortcut) {
@@ -488,12 +497,19 @@
       />
       <input
         type="text"
-        value={shortcut.command}
+        value={editingCommandId === shortcut.id
+          ? shortcut.command
+          : shortcutAgentHint(shortcut.command)}
         placeholder={t("shortcuts.commandPlaceholder")}
         aria-label={t("shortcuts.commandName")}
+        onfocus={() => (editingCommandId = shortcut.id)}
+        onblur={() => (editingCommandId = null)}
         onchange={(e) =>
           onUpdate(shortcut.id, { command: (e.currentTarget as HTMLInputElement).value })}
-        class="rounded-md border border-transparent bg-transparent px-2 py-1 font-mono text-sm text-foreground outline-none transition focus:border-border focus:bg-[var(--color-surface)]"
+        class="rounded-md border border-transparent bg-transparent px-2 py-1 text-foreground outline-none transition focus:border-border focus:bg-[var(--color-surface)] {editingCommandId ===
+        shortcut.id
+          ? 'font-mono text-sm'
+          : 'text-xs'}"
       />
       {#if matchingPreset?.yoloFlag}
         <button
@@ -595,20 +611,25 @@
               <ExternalLink class="size-3.5" />
             </a>
           {/if}
-          <button
-            type="button"
-            disabled={added}
-            onclick={() => addPreset(preset.id)}
-            class="flex h-7 cursor-pointer items-center gap-1 rounded-md bg-foreground px-2.5 text-xs font-semibold text-background transition hover:bg-foreground/90 disabled:cursor-not-allowed disabled:border disabled:border-border/60 disabled:bg-transparent disabled:text-muted-2"
-            use:tip={added ? t("shortcuts.alreadyAdded") : t("shortcuts.addToShortcuts")}
-          >
-            {#if added}
+          {#if added}
+            <span
+              class="flex h-7 items-center gap-1 rounded-md border border-border px-2.5 text-xs text-muted-2"
+              use:tip={t("shortcuts.alreadyAdded")}
+            >
               <Check class="size-3" />
-            {:else}
+              <span>{t("shortcuts.added")}</span>
+            </span>
+          {:else}
+            <button
+              type="button"
+              onclick={() => addPreset(preset.id)}
+              class="flex h-7 cursor-pointer items-center gap-1 rounded-md bg-foreground px-2.5 text-xs font-semibold text-background transition hover:bg-foreground/90"
+              use:tip={t("shortcuts.addToShortcuts")}
+            >
               <Plus class="size-3" />
-            {/if}
-            <span>{added ? t("shortcuts.added") : t("shortcuts.add")}</span>
-          </button>
+              <span>{t("shortcuts.add")}</span>
+            </button>
+          {/if}
         </div>
       </div>
     {/each}
