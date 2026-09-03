@@ -59,6 +59,15 @@ pub struct AppState {
     pub pulse: Arc<boite_core::pulse::Waiters>,
     /// Process-wide telemetry queue. None in tests, which never send.
     pub telemetry: Option<Arc<boite_core::telemetry::TelemetryRuntime>>,
+    /// The devices that asked to be pushed log records, by pairing id.
+    ///
+    /// Server-side rather than on the bus, because who to push to is a property
+    /// of the socket rather than of the call: the bus answers whether a device
+    /// may subscribe, and this is where the answer is kept. A device that
+    /// disconnects stays in the set until it says otherwise, which costs one
+    /// string: the fanout is filtered per connection, so a stale id pushes to
+    /// nobody.
+    pub log_subscribers: parking_lot::Mutex<std::collections::HashSet<String>>,
 }
 
 /// How many claims are remembered. Each is a uuid a client either took or lost
@@ -68,6 +77,27 @@ pub struct AppState {
 const CLAIM_MEMORY: usize = 256;
 
 impl AppState {
+    /// Starts or stops pushing `log.record` at one device.
+    pub fn subscribe_logs(&self, device: &str, on: bool) {
+        let mut subscribers = self.log_subscribers.lock();
+        if on {
+            subscribers.insert(device.to_string());
+        } else {
+            subscribers.remove(device);
+        }
+    }
+
+    /// Whether this device asked for live records.
+    pub fn logs_subscribed(&self, device: &str) -> bool {
+        self.log_subscribers.lock().contains(device)
+    }
+
+    /// Whether anybody at all did, which is what the coalescing task asks
+    /// before building a batch nobody would read.
+    pub fn anyone_reads_logs(&self) -> bool {
+        !self.log_subscribers.lock().is_empty()
+    }
+
     /// Whether this caller is the one that carries the request out.
     ///
     /// True exactly once per id. Every other device asking gets false and drops
@@ -284,6 +314,7 @@ pub fn state_for_test(dir: &Path) -> AppState {
         claimed_requests: Default::default(),
         pulse: boite_core::pulse::Waiters::new(),
         telemetry: None,
+        log_subscribers: Default::default(),
     };
     // The dispatcher tests drive real calls, and a real call reads the pairing
     // row behind the session that sent it. `Session::for_test` names this one.
@@ -377,6 +408,7 @@ mod tests {
             claimed_requests: Default::default(),
         pulse: boite_core::pulse::Waiters::new(),
             telemetry: None,
+            log_subscribers: Default::default(),
         };
 
         state.refresh_roots().unwrap();
@@ -419,6 +451,7 @@ mod tests {
             claimed_requests: Default::default(),
         pulse: boite_core::pulse::Waiters::new(),
             telemetry: None,
+            log_subscribers: Default::default(),
         };
 
         assert!(state.ensure_project_path(inside.to_str().unwrap()).is_ok());

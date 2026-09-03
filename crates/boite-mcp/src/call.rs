@@ -11,7 +11,7 @@ use crate::backend::Backend;
 use crate::render::{
     format_acted, format_artifacts, format_browser_panes, format_drove, format_hits,
     format_moments, format_page_settled, format_projects, format_pulse, format_snapshot,
-    format_todos, format_wait, format_whereami, format_worktree, prefix,
+    format_log_records, format_todos, format_wait, format_whereami, format_worktree, prefix,
 };
 use crate::toon::Toon;
 use crate::{encode_query, MAX_BRANCHES};
@@ -92,6 +92,46 @@ pub fn call_tool<B: Backend>(host: &B, name: &str, args: &Value) -> Result<Strin
                 return Err(error.to_string());
             }
             Ok(format_moments(&out))
+        }
+        // What every host of this boite logged, on one clock. `tail` is this
+        // host's memory and answers instantly; `query` reads the files, which
+        // is the only way back past a restart.
+        "logs" => {
+            let action = args
+                .get("action")
+                .and_then(|v| v.as_str())
+                .unwrap_or("query");
+            if !matches!(action, "tail" | "query") {
+                return Err("action is tail or query".into());
+            }
+            let limit = args
+                .get("limit")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(100)
+                .clamp(1, 1000);
+            let mut path = format!("/v1/logs?action={action}&limit={limit}");
+            for key in [
+                "level", "host", "thread", "turn", "target", "text", "since", "until",
+            ] {
+                let Some(value) = args.get(key) else { continue };
+                let text = match value {
+                    Value::String(s) => s.clone(),
+                    Value::Number(n) => n.to_string(),
+                    _ => continue,
+                };
+                if text.is_empty() {
+                    continue;
+                }
+                path.push('&');
+                path.push_str(key);
+                path.push('=');
+                path.push_str(&encode_query(&text));
+            }
+            let out = host.send("GET", &path, None)?;
+            if let Some(error) = out.get("error").and_then(|v| v.as_str()) {
+                return Err(error.to_string());
+            }
+            Ok(format_log_records(&out))
         }
         "workspace_search" => {
             let needle = args.get("q").and_then(|v| v.as_str()).unwrap_or("").trim();

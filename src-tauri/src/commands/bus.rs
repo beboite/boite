@@ -134,12 +134,27 @@ impl boite_core::command::Host for DesktopHost<'_> {
 /// — the envelopes in `command::Wire` are the WebSocket protocol's, and `invoke`
 /// already carries the shape the frontend types.
 pub(super) async fn through(host: DesktopHost<'_>, command: Command) -> Result<Value, String> {
+    let method = command.name();
     // `Local`: this door is the user's own window. An agent never reaches it —
     // it goes through the agent endpoint, which carries its own grant.
-    let ready = command.prepare(&host, Grant::Local)?;
-    tauri::async_runtime::spawn_blocking(move || ready.run())
+    let ready = match command.prepare(&host, Grant::Local) {
+        Ok(ready) => ready,
+        Err(refusal) => {
+            // Once, at the codec, so a refusal is on the same clock as whatever
+            // the window did next. `src/lib/backend/tauri/ipc.ts` already writes
+            // its own `warn` on this side of the boundary; this is the half
+            // that says which command and why, in Rust's own words.
+            tracing::warn!(method, reason = %refusal, "bus.refused");
+            return Err(refusal);
+        }
+    };
+    let answer = tauri::async_runtime::spawn_blocking(move || ready.run())
         .await
-        .map_err(|e| format!("command task failed: {e}"))?
+        .map_err(|e| format!("command task failed: {e}"))?;
+    if let Err(failure) = &answer {
+        tracing::warn!(method, reason = %failure, "bus.failed");
+    }
+    answer
 }
 
 /// The common form: a command that needs nothing but the roots.

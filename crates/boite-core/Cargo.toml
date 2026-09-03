@@ -18,6 +18,13 @@ which = "8"
 dirs = "6"
 base64 = "0.23"
 uuid = { version = "1", features = ["v4"] }
+# The logging module. Every host writes through one `tracing` layer here, so the
+# format, the redaction and the rotation are decided once rather than per binary.
+# `env-filter` is what `BOITE_LOG` is written in; `registry` is what carries a
+# span's fields down to the events inside it, which is the whole reason a thread
+# id is named once per call rather than once per line.
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "registry"] }
 parking_lot = "0.12"
 rusqlite = { version = "0.32", features = ["bundled"] }
 # Parsing, not string matching: what a browser pane may frame is decided on a

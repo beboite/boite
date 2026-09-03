@@ -139,7 +139,8 @@ pub fn log_app_event(
     message: String,
     details: Option<String>,
 ) -> Result<(), String> {
-    logging::append_app_log(&app, &level, &source, &message, details.as_deref())
+    let _ = app;
+    logging::append_webview_log(&level, &source, &message, details.as_deref())
 }
 
 /// What happened here, newest first, with this app's own log merged in.

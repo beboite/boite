@@ -15,3 +15,9 @@ path = "src/main.rs"
 boite-identity = { path = "../boite-identity" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# The log. This shim is one of the four hosts writing into a boite's log
+# directory, and the format, the redaction and the rotation are decided in one
+# place rather than reimplemented for a sidecar. It costs this binary the rest
+# of `boite-core`, which is the price of not having a fourth log format.
+boite-core = { path = "../boite-core" }
+tracing = "0.1"

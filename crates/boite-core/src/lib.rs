@@ -21,6 +21,7 @@ pub mod mcp_launch;
 pub mod mcp_catalog;
 pub mod git;
 pub mod kebacc_switcher;
+pub mod log;
 pub mod journal;
 pub mod migrations;
 pub mod model;

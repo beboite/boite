@@ -153,7 +153,18 @@ async fn on_bus(state: &AppState, method: &str, params: &Value) -> Result<Value,
 pub async fn dispatch(state: &AppState, request: Authorized) -> Result<Value, String> {
     let method = request.method().to_string();
     let caller = request.caller();
-    let params = request.into_params();
+    let device = request.device().to_string();
+    let mut params = request.into_params();
+    // Who wrote a record is the socket's answer, never the body's: a client
+    // naming another device would file its lines under that device, and a
+    // filter by device would then be a lie. Stamped before the decode, so the
+    // bus reads it the same way it reads everything else.
+    if method == "logs.write" {
+        if let Some(object) = params.as_object_mut() {
+            object.insert("device".to_string(), json!(device));
+        }
+    }
+    let params = params;
     checked_thread_ids(&method, &params)?;
     match method.as_str() {
         // Who answered, not just that something did. The protocol number keeps
@@ -777,6 +788,13 @@ pub async fn dispatch(state: &AppState, request: Authorized) -> Result<Value, St
         m if command::handles(m) => {
             let command = Command::decode(m, &params)?;
             let wire = command.wire();
+            // The one bus method whose effect is on this side: which socket to
+            // push at is a property of the connection, so the bus says whether
+            // the device may subscribe and the registration happens here.
+            if m == "logs.subscribe" {
+                let on = params.get("on").and_then(|v| v.as_bool()).unwrap_or(true);
+                state.subscribe_logs(&device, on);
+            }
             // `Local`: this is a device that authenticated on the workspace's
             // own token, which is the user, not an agent. Agents reach the bus
             // through their own endpoint and carry a narrower grant.
@@ -812,6 +830,9 @@ pub async fn dispatch(state: &AppState, request: Authorized) -> Result<Value, St
                     }
                 }
             }
+            // A handler that refused has already answered; one that failed
+            // says so here with the device attached, because "it works from my
+            // phone" is the whole of what a bug report usually carries.
             Ok(wire.wrap(answer))
         }
 

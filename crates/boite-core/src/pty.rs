@@ -88,6 +88,20 @@ pub struct PtySpawnArgs {
     pub wrap: Option<WrapSpec>,
 }
 
+/// Which thread a spawn belongs to, for the log.
+///
+/// Read out of the environment rather than taken as an argument: every host
+/// already stamps `BOITE_THREAD_ID` into a thread's PTY, and adding a field
+/// would mean every caller of `spawn` filling in something the environment
+/// already carries. Empty for a PTY nobody claimed, which is honest.
+fn thread_of(spec: &PtySpawnArgs) -> String {
+    spec.env
+        .as_ref()
+        .and_then(|env| env.get("BOITE_THREAD_ID"))
+        .cloned()
+        .unwrap_or_default()
+}
+
 #[derive(Clone, Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct WrapSpec {
@@ -460,8 +474,21 @@ impl PtyManager {
         drop(pair.slave);
 
         let killer = child.clone_killer();
+        let pid = child.process_id();
 
         let id = Uuid::new_v4().to_string();
+        // Every child this process starts, with the pid it started as. The one
+        // fact that is impossible to recover afterwards: a PTY that died gives
+        // its exit code and nothing else, and "which process was that" is the
+        // first question anyone asks about a terminal that stopped.
+        tracing::info!(
+            thread = %thread_of(&spec),
+            pty = %id,
+            pid = pid.unwrap_or(0),
+            cwd = %spec.cwd,
+            cmd = %spec.cmd,
+            "pty.spawned"
+        );
 
         let mut writer = pair
             .master
@@ -508,6 +535,7 @@ impl PtyManager {
         let inner_clone = self.inner.clone();
         let id_clone = id.clone();
         let sink_clone = sink.clone();
+        let thread_for_exit = thread_of(&spec);
         std::thread::spawn(move || {
             read_loop(reader, sink_clone.clone());
             let exit_code = match child.wait() {
@@ -515,6 +543,13 @@ impl PtyManager {
                 Err(_) => -1,
             };
             inner_clone.lock().remove(&id_clone);
+            tracing::info!(
+                thread = %thread_for_exit,
+                pty = %id_clone,
+                pid = pid.unwrap_or(0),
+                code = exit_code,
+                "pty.exited"
+            );
             sink_clone.send(PtyEvent::Exit(Some(exit_code)));
         });
 

@@ -185,6 +185,7 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<AppState>, addr: Socket
     // Fan control-plane events out to this client.
     let mut events_rx = state.events.subscribe();
     let tx_ctrl = tx.clone();
+    let state_ctrl = state.clone();
     let my_pairing = session.pairing_id().to_string();
     let liveness_ctrl = liveness.clone();
     let control = tokio::spawn(async move {
@@ -199,6 +200,11 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<AppState>, addr: Socket
                     hang_up(&tx_ctrl).await;
                     break;
                 }
+                // A live log feed goes only to the devices that asked. Every
+                // other event is for everyone: this is the one whose volume
+                // makes "fan out and let the client filter" the wrong shape.
+                Ok(AppEvent::LogRecords { .. })
+                    if !state_ctrl.logs_subscribed(&my_pairing) => {}
                 Ok(ev) => {
                     if let Ok(s) = serde_json::to_string(&ev.to_event()) {
                         if tx_ctrl.send(WsOut::Text(s)).await.is_err() {
@@ -313,9 +319,30 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<AppState>, addr: Socket
                             .await;
                     }
                     _ => {
+                        // Which device, because "it works from my phone" is the
+                        // whole of what a bug report usually carries, and a
+                        // refusal with no device in it cannot be told from a
+                        // failure everyone is seeing.
+                        let refused_method = request.method().to_string();
+                        let refused_thread = request
+                            .params()
+                            .get("threadId")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let refused_device = request.device().to_string();
                         let resp = match rpc::dispatch(&state, request).await {
                             Ok(v) => Response::ok(id, v),
-                            Err(e) => Response::err(id, e),
+                            Err(e) => {
+                                tracing::warn!(
+                                    method = %refused_method,
+                                    thread = %refused_thread,
+                                    device = %refused_device,
+                                    reason = %e,
+                                    "rpc.failed"
+                                );
+                                Response::err(id, e)
+                            }
                         };
                         let _ = tx.send(WsOut::Text(json_str(&resp))).await;
                     }
