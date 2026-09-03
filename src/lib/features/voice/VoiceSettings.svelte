@@ -8,9 +8,9 @@
   import { captureAvailability, testMicrophone } from "./capture";
 
   const RADIO =
-    "rounded-md border px-3 py-1 text-xs transition border-border bg-[var(--color-surface-2)] text-muted-foreground hover:border-foreground/30 hover:text-foreground";
+    "rounded-md border px-3 py-1 text-sm transition border-border bg-[var(--color-surface-2)] text-muted-foreground hover:border-foreground/30 hover:text-foreground";
   const RADIO_ON =
-    "rounded-md border px-3 py-1 text-xs transition border-foreground/40 bg-[var(--color-surface-3)] text-foreground";
+    "rounded-md border px-3 py-1 text-sm transition border-foreground/40 bg-[var(--color-surface-3)] text-foreground";
 
   const stt = sttAvailability();
   const capture = captureAvailability();
@@ -56,7 +56,7 @@
 
 <div class="flex flex-col gap-2 pl-3">
   <div class="flex flex-wrap items-center gap-1.5" role="radiogroup" aria-label={t("voice.stt")}>
-    <span class="w-20 shrink-0 text-xs text-muted-foreground">{t("voice.stt")}</span>
+    <span class="w-20 shrink-0 text-sm text-muted-foreground">{t("voice.stt")}</span>
     {#each STT_MODES as mode (mode.id)}
       <button
         type="button"
@@ -76,16 +76,16 @@
   <!-- Honesty over hope: the same build hears on Android Chrome and not in
        WebKitGTK, and the line says so instead of a mic that silently fails. -->
   {#if !stt.ok}
-    <p class="text-xs text-muted-foreground">{t(stt.reasonKey)}</p>
+    <p class="text-sm text-muted-foreground">{t(stt.reasonKey)}</p>
   {/if}
   {#if !capture.ok}
-    <p class="text-xs text-muted-foreground">{t(capture.reasonKey)}</p>
+    <p class="text-sm text-muted-foreground">{t(capture.reasonKey)}</p>
   {:else if settings.state.voiceStt === "whisper"}
-    <p class="text-xs text-muted-foreground">{t("voice.whisperDesc")}</p>
+    <p class="text-sm text-muted-foreground">{t("voice.whisperDesc")}</p>
   {/if}
 
   <div class="flex flex-wrap items-center gap-1.5" role="radiogroup" aria-label={t("voice.tts")}>
-    <span class="w-20 shrink-0 text-xs text-muted-foreground">{t("voice.tts")}</span>
+    <span class="w-20 shrink-0 text-sm text-muted-foreground">{t("voice.tts")}</span>
     {#each TTS_MODES as mode (mode.id)}
       <button
         type="button"
@@ -105,9 +105,9 @@
 
   {#if settings.state.voiceTts === "webspeech" && ttsSupported()}
     <div class="flex flex-wrap items-center gap-1.5">
-      <span class="w-20 shrink-0 text-xs text-muted-foreground">{t("voice.voice")}</span>
+      <span class="w-20 shrink-0 text-sm text-muted-foreground">{t("voice.voice")}</span>
       <select
-        class="max-w-64 rounded-md border border-edge bg-[var(--color-surface-2)] px-1.5 py-0.5 text-xs text-foreground outline-none focus:border-foreground/30"
+        class="max-w-64 rounded-md border border-edge bg-[var(--color-surface-2)] px-1.5 py-0.5 text-sm text-foreground outline-none focus:border-foreground/30"
         aria-label={t("voice.voice")}
         value={settings.state.voiceName ?? ""}
         onchange={(e) => settings.setVoiceName(e.currentTarget.value || null)}
@@ -119,20 +119,20 @@
       </select>
     </div>
     {#if noneMatch}
-      <p class="text-xs text-amber-500">{t("voice.voiceNoneMatch")}</p>
+      <p class="text-sm text-amber-500">{t("voice.voiceNoneMatch")}</p>
     {/if}
   {/if}
 
   <div class="flex items-center gap-2">
     <button
       type="button"
-      class="rounded-md border border-edge px-3 py-1 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
+      class="rounded-md border border-edge px-3 py-1 text-sm text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
       onclick={() => void testMic()}
     >
       {t("voice.testMic")}
     </button>
     {#if micResult}
-      <span class="text-xs text-muted-foreground">{micResult}</span>
+      <span class="text-sm text-muted-foreground">{micResult}</span>
     {/if}
   </div>
 
