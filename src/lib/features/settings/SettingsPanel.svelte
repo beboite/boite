@@ -1,6 +1,6 @@
 <script lang="ts">
   import { app } from "$lib/app/store.svelte";
-  import { backend, workspace } from "$lib/backend";
+  import { workspace } from "$lib/backend";
   import { tip } from "$lib/shared/actions/tooltip";
   import { edgeFade } from "$lib/shared/actions/edgeFade";
   import SettingsGeneralTab from "./SettingsGeneralTab.svelte";
@@ -29,15 +29,14 @@
   import { t, type MessageKey } from "$lib/i18n/index.svelte";
   import Search from "@lucide/svelte/icons/search";
   import { fuzzyScore } from "$lib/features/palette/fuzzy";
-  import { pushSupported } from "$lib/features/push/api";
-  import { platform } from "$lib/storage/platform.svelte";
+  import Highlight from "$lib/features/palette/Highlight.svelte";
   import {
     SETTINGS_CATALOGUE,
     SETTINGS_TABS,
     settingAnchorId,
-    type SettingCondition,
     type SettingsTabId,
   } from "./catalogue";
+  import { goToSetting, settingEntryVisible, settingsNav } from "./navigate.svelte";
 
   /**
    * The settings, as a rail and a page rather than a strip and a form.
@@ -109,7 +108,7 @@
 
   const TABS = ALL_TABS;
 
-  let activeTab = $state<TabId>("general");
+  const activeTab = $derived(settingsNav.tab);
 
   /**
    * The boite these settings belong to, when it is not this device.
@@ -137,7 +136,7 @@
   // A page that stops applying under the user (a boite switch, a disconnect)
   // must not leave the rail pointing at nothing.
   $effect(() => {
-    if (!TABS.some((tab) => tab.id === activeTab)) activeTab = "general";
+    if (!TABS.some((tab) => tab.id === settingsNav.tab)) settingsNav.tab = "general";
   });
   let railEl: HTMLElement | null = $state(null);
   let stripEl: HTMLElement | null = $state(null);
@@ -167,20 +166,6 @@
   let landed = $state.raw<{ id: string } | null>(null);
   let landedTimer: ReturnType<typeof setTimeout> | null = null;
 
-  /**
-   * What has to be true for a page to draw a catalogue entry's control.
-   *
-   * The catalogue names its condition rather than holding a function, so the
-   * answers live here where the stores already are. Without this, "powershell"
-   * on a Linux desktop answered with three hits that changed page and
-   * highlighted nothing, because the card they name is inside an `{#if}`.
-   */
-  const CONDITIONS: Record<SettingCondition, () => boolean> = {
-    push: pushSupported,
-    windowsHost: () => platform.isHostWindows,
-    pairing: () => backend().pairing !== null,
-  };
-
   const TAB_LABELS: Record<TabId, MessageKey> = Object.fromEntries(
     ALL_TABS.map((tab) => [tab.id, tab.labelKey]),
   ) as Record<TabId, MessageKey>;
@@ -195,18 +180,49 @@
   const results = $derived.by(() => {
     const q = query.trim();
     if (!q) return [];
-    const scored: { entry: (typeof SETTINGS_CATALOGUE)[number]; label: string; desc: string; score: number }[] = [];
+    const scored: {
+      entry: (typeof SETTINGS_CATALOGUE)[number];
+      label: string;
+      desc: string;
+      score: number;
+      matchedField: "label" | "desc" | "tab";
+      ranges: [number, number][];
+    }[] = [];
     for (const entry of SETTINGS_CATALOGUE) {
       // A control this build never draws is not a result: a hit that jumps to a
       // page and points at nothing is worse than one hit fewer.
-      if (entry.when && !CONDITIONS[entry.when]()) continue;
+      if (!settingEntryVisible(entry)) continue;
       const label = t(entry.key);
       const desc = entry.descKey ? t(entry.descKey) : "";
       const tab = t(TAB_LABELS[entry.tab]);
-      // The page name is searched too: somebody typing "terminal shell" is
-      // naming where it is as much as what it is.
-      const score = fuzzyScore(q, `${label} ${desc} ${tab}`);
-      if (score !== null) scored.push({ entry, label, desc, score });
+
+      const labelRes = fuzzyScore(q, label, { fuzzy: true });
+      const descRes = desc ? fuzzyScore(q, desc, { fuzzy: false }) : null;
+      const tabRes = fuzzyScore(q, tab, { fuzzy: false });
+
+      if (labelRes === null && descRes === null && tabRes === null) continue;
+
+      let bestScore = -Infinity;
+      let matchedField: "label" | "desc" | "tab" = "label";
+      let ranges: [number, number][] = [];
+
+      if (labelRes !== null && labelRes.score > bestScore) {
+        bestScore = labelRes.score;
+        matchedField = "label";
+        ranges = labelRes.ranges;
+      }
+      if (descRes !== null && descRes.score > bestScore) {
+        bestScore = descRes.score;
+        matchedField = "desc";
+        ranges = descRes.ranges;
+      }
+      if (tabRes !== null && tabRes.score > bestScore) {
+        bestScore = tabRes.score;
+        matchedField = "tab";
+        ranges = tabRes.ranges;
+      }
+
+      scored.push({ entry, label, desc, score: bestScore, matchedField, ranges });
     }
     scored.sort((a, b) => b.score - a.score);
     return scored;
@@ -221,13 +237,16 @@
    * emptied by hand.
    */
   function showTab(id: TabId) {
-    activeTab = id;
+    settingsNav.tab = id;
+    settingsNav.land = null;
     query = "";
   }
 
-  async function goToSetting(tab: TabId, key: string) {
-    showTab(tab);
-    const id = settingAnchorId(key);
+  $effect(() => {
+    const land = settingsNav.land;
+    if (!land) return;
+    query = "";
+    const id = settingAnchorId(land.key);
     landed = { id };
     if (landedTimer) clearTimeout(landedTimer);
     landedTimer = setTimeout(() => (landed = null), 1600);
@@ -235,11 +254,10 @@
     // is on is the page being drawn. `tick()` is the promise that says so; a
     // microtask only ever worked because Svelte happened to have queued its
     // flush first, which is true today and is not a contract.
-    await tick();
-    // A jump the user asked for is still a jump, and `scrollIntoViewSmooth`
-    // is where reduced motion gets the position without the travel.
-    scrollIntoViewSmooth(document.getElementById(id), { block: "center" });
-  }
+    void tick().then(() => {
+      scrollIntoViewSmooth(document.getElementById(id), { block: "center" });
+    });
+  });
 
   // The timer outlives the panel otherwise, and fires into a component that is
   // no longer on screen.
@@ -334,7 +352,7 @@
          box sitting on top of one page's list reads as filtering that list. -->
     <label class="relative mx-4 min-w-0 max-w-xs flex-1">
       <Search
-        class="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/70"
+        class="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-2"
       />
       <input
         bind:this={searchEl}
@@ -344,7 +362,7 @@
         autocomplete="off"
         placeholder={t("settings.searchPlaceholder")}
         aria-label={t("settings.searchPlaceholder")}
-        class="w-full rounded-md border border-border bg-[var(--color-surface-2)] py-1 pl-7 pr-2 text-xs text-foreground outline-none transition placeholder:text-muted-foreground/60 focus:border-foreground/30"
+        class="w-full rounded-md border border-edge bg-[var(--color-surface-2)] py-1 pl-7 pr-2 text-sm text-foreground outline-none transition placeholder:text-muted-2 focus:border-foreground/30"
         onkeydown={(e) => {
           if (e.key === "Escape" && query) {
             e.stopPropagation();
@@ -454,25 +472,25 @@
           {#each results as hit (hit.entry.key)}
             <button
               type="button"
-              class="flex w-full flex-col items-start gap-0.5 rounded-lg border border-border bg-[var(--color-surface)] px-3 py-2 text-left transition hover:border-foreground/25"
+              class="flex w-full flex-col items-start gap-0.5 rounded-lg border border-edge bg-[var(--color-surface)] px-3 py-2 text-left transition hover:border-foreground/25"
               onclick={() => void goToSetting(hit.entry.tab, hit.entry.key)}
             >
               <span class="flex w-full items-baseline gap-2">
-                <span class="min-w-0 truncate text-xs font-medium text-foreground">
-                  {hit.label}
+                <span class="min-w-0 truncate text-sm font-medium text-foreground">
+                  <Highlight text={hit.label} ranges={hit.matchedField === "label" ? hit.ranges : undefined} />
                 </span>
-                <span class="shrink-0 text-2xs uppercase tracking-wider text-muted-foreground/70">
-                  {t(TAB_LABELS[hit.entry.tab])}
+                <span class="shrink-0 text-xs uppercase tracking-wider text-muted-2">
+                  <Highlight text={t(TAB_LABELS[hit.entry.tab])} ranges={hit.matchedField === "tab" ? hit.ranges : undefined} />
                 </span>
               </span>
               {#if hit.desc}
-                <span class="line-clamp-2 text-xs leading-snug text-muted-foreground">
-                  {hit.desc}
+                <span class="line-clamp-2 text-sm text-muted-foreground">
+                  <Highlight text={hit.desc} ranges={hit.matchedField === "desc" ? hit.ranges : undefined} />
                 </span>
               {/if}
             </button>
           {:else}
-            <p class="px-1 py-6 text-center text-xs text-muted-foreground">
+            <p class="px-1 py-6 text-center text-sm text-muted-foreground">
               {t("settings.searchNoMatch")}
             </p>
           {/each}

@@ -123,7 +123,7 @@
   <div bind:this={triggerRoot} class="relative flex shrink-0 items-stretch">
     <button
       type="button"
-      class="flex shrink-0 items-center gap-1.5 rounded-md border border-dashed border-border px-2.5 py-1 text-xs text-muted-foreground transition hover:border-foreground/30 hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+      class="flex shrink-0 items-center gap-1.5 rounded-md border border-dashed border-edge px-2.5 py-1 text-sm text-muted-foreground transition hover:border-foreground/30 hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
       onclick={toggle}
       aria-haspopup="menu"
       aria-expanded={open}

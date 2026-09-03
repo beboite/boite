@@ -47,6 +47,13 @@
     worktreeWaitTimedOut,
   } from "$lib/features/thread/api";
   import {
+    spawnFailure,
+    spawnFailureKey,
+    spawnPillKey,
+    type SpawnFailure,
+  } from "$lib/features/thread/spawn-error";
+  import { openProjectDashboard } from "$lib/features/project/dashboard";
+  import {
     buildResumeArgsAsync,
     getDetector,
     resolveKey,
@@ -89,6 +96,10 @@
   let resizeObserver: ResizeObserver | null = null;
   let ptyId: string | null = null;
   let spawned = $state(false);
+  // What the last launch failed on, so the pill under a dead terminal can offer
+  // the thing that would actually help. A folder that is gone does not come
+  // back because somebody pressed relaunch.
+  let lastSpawnFailure = $state<SpawnFailure | null>(null);
   let spawning = false;
   let destroyed = false;
   // Detached for visibility (remote + mobile): the PTY lives on, but its output
@@ -991,6 +1002,9 @@
     const timing = new SpawnTiming(thread.label);
     launchTiming = timing;
     timing.start();
+    // The previous attempt's verdict, cleared as this one starts: the pill is
+    // about the launch on screen, not about the one before it.
+    lastSpawnFailure = null;
     // Whether this launch got as far as installing its PTY, which is what tells
     // an abandoned launch apart from one still on its way to a line of its own.
     let installed = false;
@@ -1221,7 +1235,18 @@
         if (sawOutput) reportLaunch();
         else timing.opened(() => reportLaunch({ output: "none" }));
       } catch (err) {
-        term?.write(`\r\n[boite] spawn failed: ${err}\r\n`);
+        // Translated before it is written. The backend keeps its own wording —
+        // it is a bus answer every host reads and it goes in the log — but the
+        // terminal is where the user reads it, and `spawn failed: this
+        // directory is not there` was English in a French window, drawn where
+        // a line of text looks like the program's own output.
+        const kind = spawnFailure(String(err));
+        term?.write(`\r\n[boite] ${t(spawnFailureKey(kind))}\r\n`);
+        // The words the backend used, for the one case nothing was made of
+        // them. A terminal is where a log belongs; a mapped failure has
+        // already said everything the raw line would.
+        if (kind === "unknown") term?.write(`[boite] ${String(err)}\r\n`);
+        lastSpawnFailure = kind;
         // Not for a launch that has already been superseded: an error status is
         // a finished thread, and the relaunch waiting behind this one would be
         // refused for the failure of the attempt it replaced.
@@ -1658,7 +1683,7 @@
     ></div>
     {#if thread.status === "stopped"}
       <div
-        class="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-[var(--color-background)] text-xs text-muted-foreground/60"
+        class="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-[var(--color-background)] text-xs text-muted-2"
         role="status"
       >
         <!-- Decoration only: the readable state lives in the sibling span. -->
@@ -1669,13 +1694,16 @@
       <div class="absolute inset-x-0 bottom-3 z-10 flex justify-center">
         <button
           type="button"
-          class="rounded-md border border-border bg-[var(--color-surface)] px-3 py-1 text-xs text-muted-foreground shadow-lg transition hover:bg-[var(--color-surface-2)] hover:text-foreground"
-          onclick={() => void reloadThread(thread.id)}
+          class="rounded-md border border-edge bg-[var(--color-surface)] px-3 py-1 text-xs text-muted-foreground shadow-lg transition hover:bg-[var(--color-surface-2)] hover:text-foreground"
+          onclick={() =>
+            lastSpawnFailure === "folderGone" && thread.status === "error"
+              ? openProjectDashboard(thread.projectId)
+              : void reloadThread(thread.id)}
         >
           {thread.status === "done"
             ? t("terminal.finishedRelaunch")
             : thread.status === "error"
-              ? t("terminal.spawnFailedRelaunch")
+              ? t(spawnPillKey(lastSpawnFailure ?? "unknown"))
               : t("terminal.exitedRelaunch", { code: thread.exitCode ?? "?" })}
         </button>
       </div>
@@ -1722,7 +1750,7 @@
                and h-9 puts them under the touch-target floor. -->
           <button
             type="button"
-            class="flex h-11 min-w-11 shrink-0 items-center justify-center rounded-md border border-border px-2 text-base font-medium transition active:scale-95"
+            class="flex h-11 min-w-11 shrink-0 items-center justify-center rounded-md border border-edge px-2 text-base font-medium transition active:scale-95"
             style:background-color={armed
               ? "var(--color-foreground)"
               : "var(--color-surface-2)"}

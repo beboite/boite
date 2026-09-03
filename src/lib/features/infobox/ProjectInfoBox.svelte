@@ -7,22 +7,16 @@
   import { todos } from "$lib/features/todo/store.svelte";
   import { ownsPoll, releasePoll } from "./poll-owner";
   import {
-    INFO_BOX_ANCHORS,
-    INFO_BOX_GUTTER_REM,
-    anchorForPoint,
-    clampToPane,
-    snapPoint,
-    toastAlignFor,
-    toastStackFor,
-  } from "./anchor";
+    INFO_BOX_GUTTER_PX,
+    INFO_BOX_LOG,
+    INFO_BOX_POPOVER_PX,
+    INFO_BOX_ROW_PX,
+    popoverLeft,
+  } from "./strip";
   import { settings } from "$lib/features/settings/store.svelte";
-  import { DUR } from "$lib/theme/motion";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
-  import {
-    followToastSnap,
-    remeasureToastClaims,
-    toastInset,
-  } from "$lib/features/notifications/anchor.svelte";
+  import StatusDot from "$lib/shared/components/StatusDot.svelte";
+  import { remeasureToastClaims, toastInset } from "$lib/features/notifications/anchor.svelte";
   import { relativeClock } from "$lib/shared/utils/clock.svelte";
   import { formatAgo, formatSpan } from "$lib/shared/utils/relative-time";
   import { t } from "$lib/i18n/index.svelte";
@@ -32,56 +26,57 @@
   import { threadActivitySince } from "$lib/features/thread/activity.svelte";
   import { projectUsage, formatTokens } from "$lib/features/project/usage.svelte";
   import { basename } from "$lib/shared/utils/path";
-  import type { IconKey, InfoBoxAnchor, Thread } from "$lib/types";
+  import type { IconKey, Thread } from "$lib/types";
   import GitBranch from "@lucide/svelte/icons/git-branch";
   import GitCommitHorizontal from "@lucide/svelte/icons/git-commit-horizontal";
   import ArrowUp from "@lucide/svelte/icons/arrow-up";
   import ArrowDown from "@lucide/svelte/icons/arrow-down";
   import ChevronsDownUp from "@lucide/svelte/icons/chevrons-down-up";
   import ChevronsUpDown from "@lucide/svelte/icons/chevrons-up-down";
-  import GripVertical from "@lucide/svelte/icons/grip-vertical";
   import FolderGit2 from "@lucide/svelte/icons/folder-git-2";
   import AlertTriangle from "@lucide/svelte/icons/alert-triangle";
   import ListTodo from "@lucide/svelte/icons/list-todo";
   import Circle from "@lucide/svelte/icons/circle";
-  import Loader2 from "@lucide/svelte/icons/loader-2";
-  import Clock from "@lucide/svelte/icons/clock";
   import Zap from "@lucide/svelte/icons/zap";
 
   /**
-   * The project's vitals, in one box over the terminals.
+   * The project's vitals, in one row above the terminals.
    *
    * This replaces the docked column for whoever turned the experiment on: not a
    * place to operate on the repository, a place to know where you are. Which
-   * branch this thread is on, which agent and model is active, which todo is in
-   * progress or next up, the dirty count, worktree isolation and the latest
-   * commit, read at a glance and never clicked. Hovering (or focusing) the box
-   * unfolds the rest of the backlog, the log and the token count, and leaving
-   * folds it back. A button folds the whole card to its header; a drag docks it
-   * on any of the eight edges.
+   * branch this thread is on, which agent and model is active, and the latest
+   * commit, read at a glance and never clicked. The rest of the backlog, the
+   * log and the token count are one click on the commit cell away, and a hover
+   * over it opens the same thing.
+   *
+   * It is a strip rather than a card on purpose. The card floated over the
+   * terminal's top-right corner and covered the first 330 px of the first four
+   * lines of output for the whole session (audit finding 4), which is where a
+   * command's own first lines land. The strip takes 32 px off the top of the
+   * column instead, so nothing is ever drawn over output. There is one
+   * position, so the eight docks and the drag that picked between them are
+   * gone, `infoBoxAnchor` with them.
    *
    * It reads the same stores the panels read, scoped the same way GitPanel is:
    * the thread's worktree when it has one, so an agent committing in its own
    * checkout is what the box describes, not the project folder it forked from.
    *
-   * `thread` is what makes it a per-pane box: split view mounts one over every
-   * terminal, each describing the checkout that terminal actually runs in.
-   * Without it the box falls back to the selected project and its active
-   * thread, which is what a single mount over the whole pane area wants.
+   * `thread` is what makes it a per-pane strip: split view mounts one over
+   * every terminal, each describing the checkout that terminal actually runs
+   * in, and each spanning its own column rather than the group. Without it the
+   * box falls back to the selected project and its active thread.
    *
-   * Position and folded state live on the device settings, so every thread and
-   * every group draws the same dock.
+   * The folded state lives on the device settings, so every thread and every
+   * group draws the same row.
    */
 
   const AUTO_REFRESH_MS = 10_000;
-  const HOVER_LOG = 6;
-  const DRAG_THRESHOLD = 4;
 
   /**
    * `visible` is false for a box whose pane is off screen, another group, or
    * a view drawn over the terminals. Those panes stay mounted, so without it
    * every thread in the window would poll git for a pane nobody is looking at.
-   * `focused` is which pane the toast stack should follow when several boxes
+   * `focused` is which pane the toast stack should follow when several strips
    * are standing.
    */
   type Props = { thread?: Thread | null; visible?: boolean; focused?: boolean };
@@ -169,7 +164,7 @@
 
   // Git state helpers
   const mine = $derived(scope !== null && readScope === scope);
-  const commits = $derived(mine ? gs?.log.slice(0, HOVER_LOG) ?? [] : []);
+  const commits = $derived(mine ? gs?.log.slice(0, INFO_BOX_LOG) ?? [] : []);
   const isRepo = $derived(mine && (gs?.isRepo ?? false));
   const stagedCount = $derived(mine ? (gs?.staged.length ?? 0) : 0);
   const unstagedCount = $derived(mine ? (gs?.unstaged.length ?? 0) : 0);
@@ -203,6 +198,25 @@
   const statusSpan = $derived(
     activitySince > 0 ? Math.max(0, relativeClock.now - activitySince) : 0,
   );
+  // The span reads as the state's age, so it only replaces the plain label
+  // while the state is one that is being waited out.
+  const statusLabel = $derived.by(() => {
+    if (threadStatus === "running") {
+      return statusSpan > 0
+        ? t("project.threadWorking", { span: formatSpan(statusSpan) })
+        : t("status.running");
+    }
+    if (threadStatus === "waiting") {
+      return statusSpan > 0
+        ? t("project.threadWaiting", { span: formatSpan(statusSpan) })
+        : t("status.waiting");
+    }
+    if (threadStatus === "ready") return t("status.ready");
+    if (threadStatus === "idle") return t("status.idle");
+    if (threadStatus === "stopped") return t("status.asleep");
+    if (threadStatus === "error" || threadStatus === "exited") return t("status.error");
+    return "";
+  });
 
   // Todo helpers: active claimed, open backlog, done summary
   const allTodos = $derived(todos.forProject(project?.id ?? null));
@@ -227,63 +241,54 @@
     return report.models.reduce((acc, m) => acc + m.total, 0);
   });
 
-  // Nothing to say, no box: a project with no repository and no tasks or thread
-  const hasContent = $derived(
-    isRepo || claimed.length > 0 || openTodos.length > 0 || threadHere !== null,
+  const collapsed = $derived(settings.state.infoBoxCollapsed);
+
+  let stripEl = $state<HTMLElement | null>(null);
+  let logEl = $state<HTMLElement | null>(null);
+  let columnWidth = $state(0);
+  let anchorX = $state(0);
+
+  /**
+   * The log is pinned by a click and shown by a hover.
+   *
+   * The audit could not verify the ten-commit hover at all: it opened on a
+   * pointer resting over a floating card and closed the moment the pointer
+   * left, so there was no way to read it and no way to reach it with a
+   * keyboard. The click is the way in that stays, Escape is the way out, and
+   * the hover is the one that was already there.
+   */
+  let pinned = $state(false);
+  let hovering = $state(false);
+  const logOpen = $derived(commits.length > 0 && (pinned || hovering));
+
+  // The task the row shows when there is no repository to hang a commit off.
+  const topTodo = $derived(claimed[0] ?? openTodos[0] ?? null);
+
+  const popLeft = $derived(
+    popoverLeft(columnWidth, INFO_BOX_POPOVER_PX, anchorX, INFO_BOX_GUTTER_PX),
   );
 
-  const collapsed = $derived(settings.state.infoBoxCollapsed);
-  const dock = $derived(settings.state.infoBoxAnchor);
-
-  let hostEl = $state<HTMLElement | null>(null);
-  let cardEl = $state<HTMLElement | null>(null);
-  let pane = $state({ w: 0, h: 0 });
-  let boxSize = $state({ w: 320, h: 40 });
-
-  const gutter = $derived.by(() => {
-    if (typeof window === "undefined") return INFO_BOX_GUTTER_REM * 16;
-    const root = Number.parseFloat(getComputedStyle(document.documentElement).fontSize);
-    return INFO_BOX_GUTTER_REM * (Number.isFinite(root) ? root : 16);
-  });
-
-  let dragging = $state(false);
-  let dragPos = $state({ x: 0, y: 0 });
-  let hoverSnap = $state<InfoBoxAnchor | null>(null);
-  // The dock the pointer is aiming at while dragging, so the stack flips to
-  // above/left before the drop rather than jumping after it.
-  const liveDock = $derived(hoverSnap ?? dock);
-  const stack = $derived(toastStackFor(liveDock));
-  const align = $derived(toastAlignFor(liveDock));
-
-  const settled = $derived(snapPoint(pane, boxSize, gutter, dock));
-  const left = $derived(dragging ? dragPos.x : settled.x);
-  const top = $derived(dragging ? dragPos.y : settled.y);
-
   $effect(() => {
-    const host = hostEl;
-    const card = cardEl;
-    if (!host || !card) return;
+    const el = stripEl;
+    if (!el) return;
     const read = () => {
-      const hr = host.getBoundingClientRect();
-      const cr = card.getBoundingClientRect();
-      if (hr.width > 0 && hr.height > 0) pane = { w: hr.width, h: hr.height };
-      if (cr.width > 0 && cr.height > 0) boxSize = { w: cr.width, h: cr.height };
+      const r = el.getBoundingClientRect();
+      if (r.width > 0) columnWidth = r.width;
+      const trigger = logEl;
+      if (trigger) anchorX = trigger.getBoundingClientRect().left - r.left;
     };
     const observer = new ResizeObserver(read);
-    observer.observe(host);
-    observer.observe(card);
+    observer.observe(el);
     read();
     return () => observer.disconnect();
   });
 
+  // The strip never moves, but it appears, folds and unfolds, and the toast
+  // stack sits under whichever one is standing.
   $effect(() => {
-    void left;
-    void top;
-    void boxSize.h;
+    void collapsed;
     void visible;
     void focused;
-    void stack;
-    void align;
     remeasureToastClaims();
   });
 
@@ -296,564 +301,364 @@
     return formatAgo(relativeClock.now - tsSeconds * 1000);
   }
 
-  type DragSession = {
-    pointerId: number;
-    startX: number;
-    startY: number;
-    originX: number;
-    originY: number;
-    paneX: number;
-    paneY: number;
-    armed: boolean;
-  };
-  let session: DragSession | null = null;
-
-  function pointerFromButton(target: EventTarget | null): boolean {
-    return target instanceof Element && Boolean(target.closest("button"));
+  function measureAnchor() {
+    const el = stripEl;
+    const trigger = logEl;
+    if (!el || !trigger) return;
+    anchorX = trigger.getBoundingClientRect().left - el.getBoundingClientRect().left;
   }
 
-  function onPointerDown(e: PointerEvent) {
-    if (e.button !== 0) return;
-    if (pointerFromButton(e.target)) return;
-    if (!hostEl) return;
-    e.preventDefault();
-    const host = hostEl.getBoundingClientRect();
-    session = {
-      pointerId: e.pointerId,
-      startX: e.clientX,
-      startY: e.clientY,
-      originX: left,
-      originY: top,
-      paneX: host.left,
-      paneY: host.top,
-      armed: false,
-    };
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  function toggleLog() {
+    measureAnchor();
+    pinned = !pinned;
   }
 
-  function onPointerMove(e: PointerEvent) {
-    if (!session || e.pointerId !== session.pointerId) return;
-    const dx = e.clientX - session.startX;
-    const dy = e.clientY - session.startY;
-    if (!session.armed) {
-      if (dx * dx + dy * dy < DRAG_THRESHOLD * DRAG_THRESHOLD) return;
-      session.armed = true;
-      dragging = true;
-    }
-    const next = clampToPane(
-      pane,
-      boxSize,
-      gutter,
-      session.originX + dx,
-      session.originY + dy,
-    );
-    dragPos = next;
-    // Aimed at the pointer, not at the box: the card is clamped inside the pane
-    // and is wide, so its own centre barely moves near an edge. Throw the
-    // cursor at the corner you want and release, the card follows.
-    hoverSnap = anchorForPoint(
-      pane,
-      e.clientX - session.paneX,
-      e.clientY - session.paneY,
-      dock,
-    );
-  }
-
-  function onPointerUp(e: PointerEvent) {
-    if (!session || e.pointerId !== session.pointerId) return;
-    const armed = session.armed;
-    const snap = armed
-      ? anchorForPoint(pane, e.clientX - session.paneX, e.clientY - session.paneY, dock)
-      : null;
-    session = null;
-    dragging = false;
-    hoverSnap = null;
-    if (snap) settings.setInfoBoxAnchor(snap);
-    // The card eases to the dock over --dur-3. ResizeObserver ignores left/top,
-    // so without this the stack stays at the drop point while the box leaves.
-    if (armed) followToastSnap(DUR.slow);
-  }
-
-  function ghostStyle(anchor: InfoBoxAnchor): string {
-    const p = snapPoint(pane, boxSize, gutter, anchor);
-    return `left:${p.x}px;top:${p.y}px;width:${boxSize.w}px;height:${boxSize.h}px`;
+  // Escape closes what a click opened. Hover and focus close themselves.
+  function onKeyDown(e: KeyboardEvent) {
+    if (e.key !== "Escape" || !pinned) return;
+    e.stopPropagation();
+    pinned = false;
+    logEl?.focus();
   }
 
   const toastParams = $derived({
-    standing: visible && hasContent,
+    standing: visible,
     focused,
-    stack,
-    align,
+    // The strip is at the top of the column and spans it, so the stack hangs
+    // under it and lines up with its right edge.
+    stack: "below" as const,
+    align: "right" as const,
   });
 </script>
 
-{#if hasContent}
-  <div class="host" bind:this={hostEl}>
-    {#if dragging}
-      <div class="snaps" aria-hidden="true">
-        {#each INFO_BOX_ANCHORS as anchor (anchor)}
-          {@const p = snapPoint(pane, boxSize, gutter, anchor)}
-          <div
-            class="dot"
-            class:near={anchor === hoverSnap}
-            style:left="{p.x + boxSize.w / 2}px"
-            style:top="{p.y + boxSize.h / 2}px"
-          ></div>
-          {#if anchor === hoverSnap}
-            <div class="ghost" style={ghostStyle(anchor)}></div>
+<div
+  bind:this={stripEl}
+  class="strip"
+  class:collapsed
+  role="group"
+  aria-label={t("infoBox.label")}
+  style:height="{INFO_BOX_ROW_PX}px"
+  use:toastInset={toastParams}
+>
+  <!-- Branch, ahead and behind, what is dirty, and the worktree this thread
+       runs in. The cell a folded row keeps: it is the answer to "where am I",
+       and the rest is detail beside it. -->
+  {#if isRepo}
+    <span class="cell">
+      <GitBranch class="size-3.5 shrink-0 text-muted-foreground" />
+      <span class="max-w-[10rem] truncate font-medium text-foreground">
+        {gs?.branch ?? t("git.detached")}
+      </span>
+      {#if (gs?.ahead ?? 0) > 0}
+        <span class="flex shrink-0 items-center text-xs text-muted-foreground">
+          <ArrowUp class="size-3" />{gs?.ahead}
+        </span>
+      {/if}
+      {#if (gs?.behind ?? 0) > 0}
+        <span class="flex shrink-0 items-center text-xs text-muted-foreground">
+          <ArrowDown class="size-3" />{gs?.behind}
+        </span>
+      {/if}
+
+      {#if conflictsCount > 0}
+        <span
+          class="flex shrink-0 items-center gap-0.5 rounded bg-[var(--color-danger)]/15 px-1 text-xs font-semibold text-[var(--color-danger)]"
+          use:tip={t("infoBox.conflicts", { count: conflictsCount })}
+        >
+          <AlertTriangle class="size-2.5" />{conflictsCount}
+        </span>
+      {:else if stagedCount > 0 || unstagedCount > 0}
+        <span class="flex shrink-0 items-center gap-1 font-mono text-xs">
+          {#if stagedCount > 0}
+            <span class="font-medium text-[var(--color-success)]">+{stagedCount}</span>
           {/if}
-        {/each}
-      </div>
-    {/if}
+          {#if unstagedCount > 0}
+            <span class="font-medium text-[var(--color-warning)]">~{unstagedCount}</span>
+          {/if}
+        </span>
+      {/if}
+    </span>
+  {/if}
 
-    <!-- role=group, not status: status is a live region, and a box that refreshes
-         every ten seconds would re-announce itself to a screen reader on every
-         branch or commit change, unprompted. The tabindex is what makes the hover
-         expansion reachable from a keyboard (focus-within), which is exactly the
-         combination the a11y rule cannot see. -->
-    <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-    <!-- use:toastInset: the toast stack attaches to this box, below it, or
-         above it when the box is on a bottom edge. On the card, so the unfolded
-         log is measured too. Given `visible` and `focused` because a box in
-         another group is laid out and measures the same way while nobody can
-         see it. -->
-    <div
-      bind:this={cardEl}
-      class="card"
-      class:dragging
-      class:collapsed
-      class:group={!dragging && !collapsed}
-      role="group"
-      aria-label={t("infoBox.label")}
-      tabindex="0"
-      style:left="{left}px"
-      style:top="{top}px"
-      use:toastInset={toastParams}
-      onpointerdown={onPointerDown}
-      onpointermove={onPointerMove}
-      onpointerup={onPointerUp}
-      onpointercancel={onPointerUp}
+  <!-- Which agent is behind this terminal, and what it is doing right now. The
+       dot survives the fold: it is the one live datum, and the card that this
+       replaced dropped it exactly when it was folded out of the way. -->
+  {#if threadHere && threadStatus}
+    <span class="cell state">
+      <span class="relative flex size-3.5 shrink-0 items-center justify-center">
+        <ShortcutIcon iconKey={agentIconKey} size={14} color={agentColor} />
+      </span>
+      {#if !collapsed}
+        <span class="max-w-[9rem] truncate font-medium text-foreground">{agentName}</span>
+      {/if}
+      <StatusDot status={threadStatus} />
+      {#if !collapsed && statusLabel}
+        <span class="shrink-0 text-xs text-muted-foreground">{statusLabel}</span>
+      {/if}
+    </span>
+  {/if}
+
+  {#if !collapsed && isWorktree}
+    <span
+      class="cell rounded bg-[var(--color-surface-3)] px-1.5 text-xs text-muted-foreground"
+      use:tip={threadHere?.worktreePath ?? ""}
     >
-      <div class="shell">
-        <div class="toolbar">
-          <span class="grip" aria-hidden="true" use:tip={t("infoBox.drag")}>
-            <GripVertical class="size-3" />
-          </span>
-          <button
-            type="button"
-            class="fold"
-            aria-expanded={!collapsed}
-            aria-label={collapsed ? t("infoBox.expand") : t("infoBox.collapse")}
-            use:tip={collapsed ? t("infoBox.expand") : t("infoBox.collapse")}
-            onclick={() => settings.setInfoBoxCollapsed(!collapsed)}
-          >
-            {#if collapsed}
-              <ChevronsUpDown class="size-3.5" />
-            {:else}
-              <ChevronsDownUp class="size-3.5" />
-            {/if}
-          </button>
-        </div>
+      <FolderGit2 class="size-3 text-muted-2" />
+      <span class="max-w-[6rem] truncate">
+        {worktreeName || t("infoBox.worktreeTag")}
+      </span>
+    </span>
+  {/if}
 
-        <!-- Branch, ahead and behind, what is dirty, and the worktree this
-             thread runs in. The one row a folded card keeps: it is the answer
-             to "where am I", and the rest is detail under it. -->
-        {#if isRepo}
-          <div class="row">
-            <GitBranch class="size-3.5 shrink-0 text-muted-foreground" />
-            <span class="max-w-[8rem] truncate font-medium text-foreground">
-              {gs?.branch ?? t("git.detached")}
-            </span>
-            {#if (gs?.ahead ?? 0) > 0}
-              <span class="flex shrink-0 items-center text-2xs text-muted-foreground">
-                <ArrowUp class="size-3" />{gs?.ahead}
-              </span>
-            {/if}
-            {#if (gs?.behind ?? 0) > 0}
-              <span class="flex shrink-0 items-center text-2xs text-muted-foreground">
-                <ArrowDown class="size-3" />{gs?.behind}
-              </span>
-            {/if}
+  <!-- The last commit, and the way into everything the row has no space for.
+       Hover keeps working; the click is what makes it readable and reachable. -->
+  {#if !collapsed && commits.length > 0}
+    <div
+      class="log"
+      role="group"
+      aria-label={t("infoBox.log")}
+      onpointerenter={() => {
+        measureAnchor();
+        hovering = true;
+      }}
+      onpointerleave={() => (hovering = false)}
+    >
+      <button
+        bind:this={logEl}
+        type="button"
+        class="trigger"
+        aria-expanded={logOpen}
+        aria-label={t("infoBox.log")}
+        onclick={toggleLog}
+        onkeydown={onKeyDown}
+      >
+        <GitCommitHorizontal class="size-3.5 shrink-0 text-muted-foreground" />
+        <span class="shrink-0 font-mono text-xs text-muted-foreground">
+          {commits[0].shortSha}
+        </span>
+        <span class="min-w-0 flex-1 truncate text-left text-foreground">
+          {commits[0].summary}
+        </span>
+        <span class="shrink-0 text-xs text-muted-2">{ago(commits[0].time)}</span>
+      </button>
 
-            {#if conflictsCount > 0}
-              <span
-                class="flex shrink-0 items-center gap-0.5 rounded bg-[var(--color-danger)]/15 px-1 text-2xs font-semibold text-[var(--color-danger)]"
-                use:tip={t("infoBox.conflicts", { count: conflictsCount })}
-              >
-                <AlertTriangle class="size-2.5" />{conflictsCount}
-              </span>
-            {:else if stagedCount > 0 || unstagedCount > 0}
-              <span class="flex shrink-0 items-center gap-1 font-mono text-2xs">
-                {#if stagedCount > 0}
-                  <span class="font-medium text-[var(--color-success)]">+{stagedCount}</span>
-                {/if}
-                {#if unstagedCount > 0}
-                  <span class="font-medium text-[var(--color-warning)]">~{unstagedCount}</span>
-                {/if}
-              </span>
-            {/if}
-
-            {#if isWorktree}
-              <span
-                class="ml-auto flex shrink-0 items-center gap-1 rounded bg-[var(--color-surface-3)] px-1.5 py-0.5 text-2xs text-muted-foreground"
-                use:tip={threadHere?.worktreePath ?? ""}
-              >
-                <FolderGit2 class="size-3 text-muted-foreground/80" />
-                <span class="max-w-[4.5rem] truncate">
-                  {worktreeName || t("infoBox.worktreeTag")}
-                </span>
-              </span>
-            {/if}
-          </div>
-        {/if}
-
-        <!-- Which agent is behind this terminal, and what it is doing right
-             now. Off while folded: a card folded to its header is one line. -->
-        {#if !collapsed && threadHere}
-          <div class="row">
-            <span class="relative flex size-3.5 shrink-0 items-center justify-center">
-              <ShortcutIcon iconKey={agentIconKey} size={14} color={agentColor} />
-            </span>
-            <span class="max-w-[9rem] truncate font-medium text-foreground/90">{agentName}</span>
-
-            {#if threadStatus === "running"}
-              <span
-                class="ml-auto flex shrink-0 items-center gap-1 text-2xs text-[var(--color-success)]"
-              >
-                <Loader2 class="size-3 animate-spin" />
-                <span>
-                  {statusSpan > 0
-                    ? t("project.threadWorking", { span: formatSpan(statusSpan) })
-                    : t("status.running")}
-                </span>
-              </span>
-            {:else if threadStatus === "waiting"}
-              <span
-                class="ml-auto flex shrink-0 items-center gap-1 text-2xs font-medium text-[var(--color-warning)]"
-              >
-                <Clock class="size-3 animate-pulse" />
-                <span>
-                  {statusSpan > 0
-                    ? t("project.threadWaiting", { span: formatSpan(statusSpan) })
-                    : t("status.waiting")}
-                </span>
-              </span>
-            {:else if threadStatus === "ready"}
-              <span class="ml-auto flex shrink-0 items-center gap-1 text-2xs text-muted-foreground">
-                <span class="size-1.5 rounded-full bg-[var(--color-success)]"></span>
-                <span>{t("status.ready")}</span>
-              </span>
-            {:else if threadStatus === "idle"}
-              <span class="ml-auto flex shrink-0 items-center gap-1 text-2xs text-muted-foreground">
-                <span class="size-1.5 rounded-full bg-muted-foreground/40"></span>
-                <span>{t("status.idle")}</span>
-              </span>
-            {:else if threadStatus === "stopped"}
-              <span class="ml-auto flex shrink-0 items-center gap-1 text-2xs text-muted-foreground">
-                <span class="font-mono">z</span>
-                <span>{t("status.asleep")}</span>
-              </span>
-            {:else if threadStatus === "error" || threadStatus === "exited"}
-              <span
-                class="ml-auto flex shrink-0 items-center gap-1 text-2xs text-[var(--color-danger)]"
-              >
-                <span>{t("status.error")}</span>
-              </span>
-            {/if}
-          </div>
-        {/if}
-
-        <!-- The work in progress: what an agent claimed, or the next open task
-             when nothing is claimed. A folded card keeps it only when there is
-             no repository, since then it is the only line the box has. -->
-        {#if claimed.length > 0 && (!collapsed || !isRepo)}
-          <div
-            class="row"
-            use:tip={t("infoBox.claimedTitle", { agent: claimed[0].claimedBy ?? "" })}
-          >
-            <span class="relative flex size-3.5 shrink-0 items-center justify-center">
-              <ShortcutIcon iconKey={claimed[0].claimedBy as IconKey} size={14} />
-            </span>
-            <span class="min-w-0 flex-1 truncate text-foreground/90">{claimed[0].title}</span>
-            <!-- What this row is. An agent's title can be anything, a test name
-                 included, and the agent's own icon beside it says who without
-                 ever saying what: the line read as a stray message sitting above
-                 the commit. The tag is the one part that cannot truncate. -->
-            <span class="tag">{t("infoBox.claimedTag")}</span>
-            {#if claimed.length > 1}
-              <span class="tag">{t("infoBox.moreClaimed", { count: claimed.length - 1 })}</span>
-            {/if}
-          </div>
-        {:else if !collapsed && openTodos.length > 0}
-          <div class="row">
-            <ListTodo class="size-3.5 shrink-0 text-muted-foreground" />
-            <span class="min-w-0 flex-1 truncate text-foreground/80">{openTodos[0].title}</span>
-            <span class="tag">{t("infoBox.openTag")}</span>
-            {#if openTodos.length > 1}
-              <span class="tag">{t("infoBox.moreClaimed", { count: openTodos.length - 1 })}</span>
-            {/if}
-          </div>
-        {/if}
-
-        {#if !collapsed && commits.length > 0}
-          <div class="row">
-            <GitCommitHorizontal class="size-3.5 shrink-0 text-muted-foreground" />
-            <span class="shrink-0 font-mono text-2xs text-muted-foreground">
-              {commits[0].shortSha}
-            </span>
-            <span class="min-w-0 flex-1 truncate text-foreground/90">
-              {commits[0].summary}
-            </span>
-            <span class="shrink-0 text-2xs text-muted-foreground/70">
-              {ago(commits[0].time)}
-            </span>
-          </div>
-        {/if}
-
-        <!-- The unfold: the rest of the claimed work, the next open tasks, the
-             task counts, the rest of the log and what the project has spent. A
-             grid row going 0fr to 1fr animates height without measuring
-             anything. Off while folded or while a drag is live, so the card
-             does not grow under the pointer. -->
-        {#if !collapsed && (commits.length > 1 || claimed.length > 1 || openTodos.length > (claimed.length > 0 ? 0 : 1) || totalTokens > 0)}
-          <div
-            class="grid grid-rows-[0fr] transition-[grid-template-rows] duration-200 group-hover:grid-rows-[1fr] group-focus-within:grid-rows-[1fr]"
-          >
-            <div class="min-h-0 overflow-hidden">
-              {#if claimed.length > 1}
-                <div class="border-t border-border/60 py-0.5">
-                  {#each claimed.slice(1) as item (item.id)}
-                    <div
-                      class="row dim"
-                      use:tip={t("infoBox.claimedTitle", { agent: item.claimedBy ?? "" })}
-                    >
-                      <span class="flex size-3.5 shrink-0 items-center justify-center">
-                        <ShortcutIcon iconKey={item.claimedBy as IconKey} size={14} />
-                      </span>
-                      <span class="truncate text-foreground/80">{item.title}</span>
-                    </div>
-                  {/each}
-                </div>
-              {/if}
-
-              {#if openTodos.length > 0}
-                {@const nextOpen =
-                  claimed.length > 0 ? openTodos.slice(0, 3) : openTodos.slice(1, 4)}
-                {#if nextOpen.length > 0}
-                  <div class="border-t border-border/60 py-0.5">
-                    {#each nextOpen as item (item.id)}
-                      <div class="row dim text-muted-foreground">
-                        <Circle class="size-3 shrink-0 text-muted-foreground/60" />
-                        <span class="truncate text-foreground/80">{item.title}</span>
-                      </div>
-                    {/each}
-                  </div>
-                {/if}
-              {/if}
-
-              {#if allTodos.length > 0}
-                <div class="row dim border-t border-border/40">
-                  <span class="flex items-center gap-2 text-2xs text-muted-foreground/70">
-                    <span>{claimed.length} {t("infoBox.claimedSummary")}</span>
-                    <span>·</span>
-                    <span>{openTodos.length} {t("infoBox.openSummary")}</span>
-                    {#if doneTodos.length > 0}
-                      <span>·</span>
-                      <span>{doneTodos.length} {t("infoBox.doneSummary")}</span>
-                    {/if}
-                  </span>
-                </div>
-              {/if}
-
-              {#if commits.length > 1}
-                <div class="border-t border-border/60 py-0.5">
-                  {#each commits.slice(1) as commit (commit.sha)}
-                    <div class="row dim">
-                      <span class="w-3.5 shrink-0"></span>
-                      <span class="shrink-0 font-mono text-2xs text-muted-foreground">
-                        {commit.shortSha}
-                      </span>
-                      <span class="min-w-0 flex-1 truncate text-foreground/80">
-                        {commit.summary}
-                      </span>
-                      <span class="shrink-0 text-2xs text-muted-foreground/70">
-                        {ago(commit.time)}
-                      </span>
-                    </div>
-                  {/each}
-                </div>
-              {/if}
-
-              {#if totalTokens > 0}
+      {#if logOpen}
+        <!-- Anchored to the strip rather than to the pointer: it is the same
+             list the hover showed, and it stays put while it is read. -->
+        <div
+          class="popover"
+          style:left="{popLeft}px"
+          style:width="{INFO_BOX_POPOVER_PX}px"
+        >
+          {#if claimed.length > 0}
+            <div class="section">
+              {#each claimed as item (item.id)}
                 <div
-                  class="row dim justify-between border-t border-border/60 bg-[var(--color-surface-2)]"
+                  class="line"
+                  use:tip={t("infoBox.claimedTitle", { agent: item.claimedBy ?? "" })}
                 >
-                  <span class="flex items-center gap-1 text-2xs text-muted-foreground">
-                    <Zap class="size-3 text-muted-foreground" />
-                    <span>{t("infoBox.tokensUsed", { tokens: formatTokens(totalTokens) })}</span>
+                  <span class="flex size-3.5 shrink-0 items-center justify-center">
+                    <ShortcutIcon iconKey={item.claimedBy as IconKey} size={14} />
                   </span>
-                  {#if (report?.sessions ?? 0) > 0}
-                    <span class="text-2xs text-muted-foreground">
-                      {report?.sessions} {t("stats.sessions")}
-                    </span>
-                  {/if}
+                  <span class="min-w-0 flex-1 truncate text-foreground">{item.title}</span>
+                  <span class="tag">{t("infoBox.claimedTag")}</span>
+                </div>
+              {/each}
+            </div>
+          {/if}
+
+          {#if openTodos.length > 0}
+            <div class="section">
+              {#each openTodos.slice(0, 4) as item (item.id)}
+                <div class="line">
+                  <ListTodo class="size-3.5 shrink-0 text-muted-foreground" />
+                  <span class="min-w-0 flex-1 truncate text-foreground">{item.title}</span>
+                  <span class="tag">{t("infoBox.openTag")}</span>
+                </div>
+              {/each}
+              {#if openTodos.length > 4}
+                <div class="line">
+                  <Circle class="size-3 shrink-0 text-muted-2" />
+                  <span class="text-xs text-muted-2">
+                    {t("infoBox.moreClaimed", { count: openTodos.length - 4 })}
+                  </span>
                 </div>
               {/if}
             </div>
+          {/if}
+
+          {#if allTodos.length > 0}
+            <div class="section">
+              <div class="line">
+                <span class="flex items-center gap-2 text-xs text-muted-2">
+                  <span>{claimed.length} {t("infoBox.claimedSummary")}</span>
+                  <span>·</span>
+                  <span>{openTodos.length} {t("infoBox.openSummary")}</span>
+                  {#if doneTodos.length > 0}
+                    <span>·</span>
+                    <span>{doneTodos.length} {t("infoBox.doneSummary")}</span>
+                  {/if}
+                </span>
+              </div>
+            </div>
+          {/if}
+
+          <div class="section">
+            {#each commits as commit (commit.sha)}
+              <div class="line">
+                <span class="shrink-0 font-mono text-xs text-muted-foreground">
+                  {commit.shortSha}
+                </span>
+                <span class="min-w-0 flex-1 truncate text-foreground">{commit.summary}</span>
+                <span class="shrink-0 text-xs text-muted-2">{ago(commit.time)}</span>
+              </div>
+            {/each}
           </div>
-        {/if}
-      </div>
+
+          {#if totalTokens > 0}
+            <div class="section">
+              <div class="line justify-between">
+                <span class="flex items-center gap-1 text-xs text-muted-foreground">
+                  <Zap class="size-3 text-muted-foreground" />
+                  <span>{t("infoBox.tokensUsed", { tokens: formatTokens(totalTokens) })}</span>
+                </span>
+                {#if (report?.sessions ?? 0) > 0}
+                  <span class="text-xs text-muted-foreground">
+                    {report?.sessions} {t("stats.sessions")}
+                  </span>
+                {/if}
+              </div>
+            </div>
+          {/if}
+        </div>
+      {/if}
     </div>
-  </div>
-{/if}
+  {:else if !collapsed && topTodo}
+    <!-- No repository, so no commit cell and no log to open. The work in
+         progress is what the row has left to say, and it says it flat. -->
+    <div class="log">
+      <span
+        class="cell min-w-0 flex-1 justify-end"
+        use:tip={claimed.length > 0
+          ? t("infoBox.claimedTitle", { agent: topTodo.claimedBy ?? "" })
+          : t("infoBox.openTag")}
+      >
+        <ListTodo class="size-3.5 shrink-0 text-muted-foreground" />
+        <span class="min-w-0 truncate text-foreground">{topTodo.title}</span>
+        <span class="tag">
+          {claimed.length > 0 ? t("infoBox.claimedTag") : t("infoBox.openTag")}
+        </span>
+      </span>
+    </div>
+  {/if}
+
+  <button
+    type="button"
+    class="fold"
+    aria-expanded={!collapsed}
+    aria-label={collapsed ? t("infoBox.expand") : t("infoBox.collapse")}
+    use:tip={collapsed ? t("infoBox.expand") : t("infoBox.collapse")}
+    onclick={() => settings.setInfoBoxCollapsed(!collapsed)}
+  >
+    {#if collapsed}
+      <ChevronsUpDown class="size-3.5" />
+    {:else}
+      <ChevronsDownUp class="size-3.5" />
+    {/if}
+  </button>
+</div>
 
 <style>
-  .host {
+  /* One row across the top of the column the terminal is drawn in. The
+     terminal is inset by exactly `INFO_BOX_ROW_PX` in `+page.svelte`, which is
+     what makes "no output under the box" a fact rather than a hope. */
+  .strip {
     position: absolute;
-    inset: 0;
-    pointer-events: none;
+    top: 0;
+    left: 0;
+    right: 0;
     z-index: var(--z-pane-overlay);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+    padding: 0 0.25rem 0 0.5rem;
+    border-bottom: 1px solid var(--color-border);
+    background: var(--color-surface);
+    font-size: var(--text-xs);
+    white-space: nowrap;
   }
 
-  .snaps {
+  /* Shrinkable rather than fixed: a 420px column holds the branch, the agent
+     and the worktree tag only if each of them gives up its own slack first,
+     and every one of them has a `truncate` span to give it with. */
+  .cell {
+    display: inline-flex;
+    flex: 0 1 auto;
+    align-items: center;
+    gap: 0.375rem;
+    min-width: 0;
+  }
+
+  /* The row folds to the branch and the state, and both stay where they were:
+     a fold that moved them would read as two different rows. */
+  .strip.collapsed .state {
+    gap: 0.25rem;
+  }
+
+  .log {
+    position: relative;
+    display: flex;
+    min-width: 0;
+    flex: 1 1 auto;
+    align-items: center;
+    justify-content: flex-end;
+  }
+
+  .trigger {
+    display: flex;
+    min-width: 0;
+    max-width: 100%;
+    align-items: center;
+    gap: 0.375rem;
+    border-radius: var(--radius-xs);
+    padding: 0.125rem 0.375rem;
+    color: inherit;
+    transition: background-color var(--dur-1) ease;
+  }
+
+  .trigger:hover {
+    background: var(--color-surface-2);
+  }
+
+  .trigger:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--color-foreground) 45%, transparent);
+    outline-offset: 1px;
+  }
+
+  .popover {
     position: absolute;
-    inset: 0;
-  }
-
-  .dot {
-    position: absolute;
-    width: 6px;
-    height: 6px;
-    margin: -3px 0 0 -3px;
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--color-foreground) 28%, transparent);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-surface) 55%, transparent);
-    transition:
-      transform var(--dur-2) ease,
-      background-color var(--dur-2) ease;
-  }
-
-  .dot.near {
-    transform: scale(1.45);
-    background: var(--color-foreground);
-  }
-
-  .ghost {
-    position: absolute;
-    border-radius: var(--radius-lg);
-    border: 1px solid color-mix(in srgb, var(--color-foreground) 28%, transparent);
-    background: color-mix(in srgb, var(--color-surface-2) 55%, transparent);
-    box-shadow: var(--shadow-e2);
-  }
-
-  .card {
-    position: absolute;
-    pointer-events: auto;
-    width: 20rem;
-    max-width: calc(100% - 1.5rem);
-    outline: none;
-    user-select: none;
-    cursor: grab;
-    touch-action: none;
-    transition:
-      left var(--dur-3) ease,
-      top var(--dur-3) ease,
-      box-shadow var(--dur-2) ease;
-  }
-
-  .card.dragging {
-    cursor: grabbing;
-    transition: none;
+    top: calc(100% + 0.25rem);
     z-index: 1;
-  }
-
-  .card.collapsed {
-    width: auto;
-    min-width: 10rem;
-  }
-
-  .shell {
     overflow: hidden;
     border-radius: var(--radius-lg);
     border: 1px solid var(--color-border);
-    background: color-mix(in srgb, var(--color-surface) 95%, transparent);
-    box-shadow: var(--shadow-e2);
-    backdrop-filter: blur(12px);
-    transition: box-shadow var(--dur-2) ease;
-  }
-
-  .card:hover .shell,
-  .card:focus-visible .shell,
-  .card.dragging .shell {
+    background: color-mix(in srgb, var(--color-surface) 96%, transparent);
     box-shadow: var(--shadow-e3);
+    backdrop-filter: blur(12px);
+    white-space: nowrap;
   }
 
-  .card.dragging .shell {
-    transform: scale(1.015);
+  .section + .section {
+    border-top: 1px solid var(--color-border);
   }
 
-  .toolbar {
-    position: absolute;
-    inset: 0 0 auto 0;
-    z-index: 1;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    height: 1.5rem;
-    padding: 0 0.35rem 0 0.4rem;
-    pointer-events: none;
-  }
-
-  .grip {
-    display: inline-flex;
-    color: var(--color-muted-foreground);
-    opacity: 0;
-    transition: opacity var(--dur-1) ease;
-  }
-
-  .fold {
-    pointer-events: auto;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 1.25rem;
-    height: 1.25rem;
-    border-radius: var(--radius-xs);
-    color: var(--color-muted-foreground);
-    opacity: 0;
-    transition:
-      opacity var(--dur-1) ease,
-      background-color var(--dur-1) ease,
-      color var(--dur-1) ease;
-  }
-
-  .card:hover .grip,
-  .card:focus-within .grip,
-  .card:hover .fold,
-  .card:focus-within .fold,
-  .card.collapsed .fold,
-  .card.dragging .grip {
-    opacity: 1;
-  }
-
-  .fold:hover,
-  .fold:focus-visible {
-    background: var(--color-surface-3);
-    color: var(--color-foreground);
-    opacity: 1;
-  }
-
-  .row {
+  .line {
     display: flex;
     align-items: center;
     gap: 0.375rem;
-    padding: 0.3rem 1.75rem 0.3rem 1.4rem;
-    font-size: var(--text-xs);
-  }
-
-  .row.dim {
-    padding-top: 0.125rem;
-    padding-bottom: 0.125rem;
+    padding: 0.2rem 0.5rem;
+    font-size: var(--text-sm);
   }
 
   .tag {
@@ -861,7 +666,32 @@
     border-radius: var(--radius-xs);
     background: var(--color-surface-3);
     padding: 0 0.25rem;
-    font-size: var(--text-2xs);
+    font-size: var(--text-xs);
     color: var(--color-muted-foreground);
+  }
+
+  .fold {
+    display: inline-flex;
+    flex-shrink: 0;
+    margin-left: auto;
+    align-items: center;
+    justify-content: center;
+    width: 1.25rem;
+    height: 1.25rem;
+    border-radius: var(--radius-xs);
+    color: var(--color-muted-foreground);
+    transition:
+      background-color var(--dur-1) ease,
+      color var(--dur-1) ease;
+  }
+
+  .fold:hover {
+    background: var(--color-surface-3);
+    color: var(--color-foreground);
+  }
+
+  .fold:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--color-foreground) 45%, transparent);
+    outline-offset: 1px;
   }
 </style>

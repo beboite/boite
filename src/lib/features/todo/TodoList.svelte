@@ -21,30 +21,32 @@
   import Check from "@lucide/svelte/icons/check";
   import Undo2 from "@lucide/svelte/icons/undo-2";
   import Bot from "@lucide/svelte/icons/bot";
+  import Plus from "@lucide/svelte/icons/plus";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
 
   /**
-   * The cards themselves, and everything you can do to one.
+   * The todo list: the cards, everything you can do to one, the line that adds
+   * the next one, and what is drawn when there are none.
    *
-   * Its own component because the list has two homes rather than one. The docked
-   * column is the obvious one; the project dashboard is the other, and until now
-   * its todo card was six truncated titles with an input under them. That was
-   * the whole todo surface for anyone running the info-box experiment, which
-   * takes the column away: no tick, no confirm, no delete, no reorder, no
-   * description. A summary is the right thing for a card that has a panel behind
-   * it, and there is no panel behind it any more.
+   * One component because the list has two homes and they used to disagree. The
+   * pane and the project dashboard each drew their own input with their own
+   * placeholder, and only one of the two put a failed save back in the box, so
+   * whether a todo you typed survived a database error depended on which of the
+   * two you had typed it into. The empty state was the visible half of the same
+   * split: "nothing noted for this project" was on the dashboard twice, once
+   * from this list and once from the docked column beside it.
    *
-   * Everything the panel could do lives here, so the two cannot drift: ticking,
-   * confirming an agent's claim, editing, reordering, deleting and handing a
-   * card to the terminal in front. What stays outside is what belongs to a
-   * surface rather than to the list — the header, the add form, the agent
-   * section — because a card and a column disagree about all three.
+   * So everything about the list is here — ticking, confirming an agent's
+   * claim, editing, reordering, deleting, handing a card to the terminal in
+   * front, and adding one. What stays outside is what belongs to the surface
+   * rather than to the list: the header naming the project, the eraser, the
+   * agent-access section a column has room for and a card does not.
    *
-   * `class` is the scroller's, not decoration: the column gives it the room it
-   * has left, the dashboard card caps it and lets the grid stay even.
+   * `compact` is the dashboard card: the same list, capped so a project with
+   * forty todos does not decide how tall the two cards beside it are.
    */
-  type Props = { projectId: string | null; class?: string };
-  let { projectId, class: klass = "" }: Props = $props();
+  type Props = { projectId: string | null; compact?: boolean };
+  let { projectId, compact = false }: Props = $props();
 
   const encoder = new TextEncoder();
 
@@ -52,6 +54,23 @@
     projectId ? app.projects.find((p) => p.id === projectId) ?? null : null,
   );
   const items = $derived(todos.forProject(projectId));
+
+  // A todo is written where it occurs to you, so both homes take one. The box
+  // is emptied on submit because a list is usually written as a burst of lines
+  // rather than one, and a failed save puts the line back: otherwise the only
+  // copy of what was typed is gone and the list never grew.
+  let draft = $state("");
+  async function addTodo() {
+    const title = draft.trim();
+    if (!title || !projectId) return;
+    draft = "";
+    try {
+      await todos.add(projectId, title);
+    } catch {
+      draft = title;
+      notifications.error(t("todo.saveFailed"));
+    }
+  }
 
   // Handing an item over writes into whatever thread is in front. A thread with
   // no live PTY (never started, or exited) has nothing to receive it.
@@ -66,7 +85,7 @@
   // otherwise revealed by a pointer over the row or by the keyboard reaching
   // them, which is the half that was missing.
   const ROW_ACTION = $derived(
-    `grid size-[22px] shrink-0 place-items-center rounded text-muted-foreground/60 transition ${
+    `grid size-[22px] shrink-0 place-items-center rounded text-muted-2 transition ${
       mobile
         ? ""
         : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
@@ -163,6 +182,21 @@
     if (suppressClick === item.id) return;
     if ((e.target as HTMLElement | null)?.closest("button, input, textarea, a")) return;
     toggleCard(item, false);
+  }
+
+  /**
+   * The same toggle from the keyboard, so the row is a control rather than a
+   * shape only a mouse can use.
+   *
+   * Guarded on the event's own target: the row wraps a checkbox, a title, two
+   * icon buttons and, once it is open, a field and a textarea, and a Space in
+   * the description would otherwise close the card it is being typed into.
+   */
+  function cardKeydown(item: TodoItem, e: KeyboardEvent) {
+    if (e.target !== e.currentTarget) return;
+    if (e.key !== "Enter" && e.key !== " ") return;
+    e.preventDefault();
+    toggleCard(item, true);
   }
 
   /**
@@ -379,7 +413,7 @@
   // The same box the Confirm/Reopen buttons draw, minus its resting border, so
   // the strip stays a line of text until a pointer is on it.
   const CHIP =
-    "rounded border border-transparent px-1 py-0.5 transition hover:border-border hover:bg-accent hover:text-foreground";
+    "rounded border border-transparent px-1 py-0.5 transition hover:border-edge hover:bg-accent hover:text-foreground";
 
   onMount(() => {
     void todos.ensureLoaded();
@@ -414,314 +448,362 @@
   }
 </script>
 
-<div bind:this={listEl} class="{klass} {liveDrag ? 'select-none' : ''}">
-  <!-- The error branch comes first. A failed load left the list empty, so
-       "nothing to do here" was also what a broken database looked like. -->
-  {#if todos.loadError}
-    <div class="flex flex-col items-center gap-2 px-3 py-6 text-center">
-      <p class="text-xs text-danger">{t("todo.loadFailed")}</p>
-      <p class="text-xs text-muted-foreground">{todos.loadError}</p>
-      <button
-        type="button"
-        class="rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
-        onclick={() => void todos.reload()}
-      >
-        {t("common.retry")}
-      </button>
-    </div>
-  {:else if items.length === 0 && !todos.loading}
-    <p class="px-3 py-6 text-center text-xs text-muted-foreground">
-      {t("todo.empty")}
-    </p>
-  {/if}
-  {#each items as item, i (item.id)}
-    <!-- Index into the list as it reads without the card being carried,
-         which is the list the drop slot counts in. -->
-    {@const slotIndex = dragIndex >= 0 && i > dragIndex ? i - 1 : i}
-    {#if dropSlot === slotIndex && item.id !== draggingId}
-      {@render dropLine()}
-    {/if}
-    <!-- The row's click is a pointer convenience on top of the controls
-         inside it: the title is a button, so opening a card and reading its
-         description no longer needs a mouse, and a key handler here would
-         fight the fields the open card holds. -->
-    <!-- svelte-ignore a11y_click_events_have_key_events -->
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div
-      data-todo-row={item.id}
-      class="group cursor-pointer border-b border-border/50 px-3 py-1.5 transition {item.id ===
-      draggingId
-        ? 'opacity-40'
-        : 'hover:bg-accent'} {item.state === 'claimed'
-        ? 'bg-[var(--color-surface-2)]/60'
-        : ''} {openId === item.id ? 'bg-[var(--color-surface-2)]/50' : ''}"
-      onpointerdown={(e) => cardPointerDown(item, e)}
-      onclick={(e) => cardClick(item, e)}
+<!-- `flex-1` for a surface that lays its children out in a column, `h-full` for
+     one that just gives it a box: the list is drawn in both. -->
+<div class="flex h-full min-h-0 flex-1 flex-col">
+  <!-- Capped on the dashboard: that card sits in a grid row with two others,
+       and a project with forty todos would otherwise decide how tall every card
+       beside it is. In a pane it takes the room the pane has. -->
+  <div
+    bind:this={listEl}
+    class="min-h-0 flex-1 scroll-pane overflow-y-auto {compact
+      ? 'max-h-80 border-t border-border'
+      : ''} {liveDrag ? 'select-none' : ''}"
     >
-      <div class="flex items-center gap-2">
-        <!-- The native control was the one white rectangle in the app: it
-             draws itself, ignores the border and surface tokens, and sits on
-             its own baseline rather than the row's. This is the same box the
-             rest of Boite draws. -->
+    <!-- The error branch comes first. A failed load left the list empty, so
+         "nothing to do here" was also what a broken database looked like. -->
+    {#if todos.loadError}
+      <div class="flex flex-col items-center gap-2 px-3 py-6 text-center">
+        <p class="text-sm text-danger">{t("todo.loadFailed")}</p>
+        <p class="text-sm text-muted-foreground">{todos.loadError}</p>
         <button
           type="button"
-          role="checkbox"
-          aria-checked={item.state === "done"}
-          aria-label={item.state === "done" ? t("todo.markNotDone") : t("todo.markDone")}
-          class="grid size-[15px] shrink-0 place-items-center rounded-[4px] border transition {item.state ===
-          'done'
-            ? 'border-foreground/30 bg-foreground/80 text-[var(--color-surface)]'
-            : 'border-border text-transparent hover:border-foreground/40'}"
-          onclick={() =>
-            todos.setState(item.id, item.state === "done" ? "open" : "done")}
+          class="rounded-md border border-edge px-2.5 py-1 text-sm text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
+          onclick={() => void todos.reload()}
         >
-          <Check class="size-2.5" strokeWidth={3.5} />
-        </button>
-        <!-- Closed, the title is text and the whole row is the button that
-             opens the card. Open, it becomes the field it always was.
-             Keeping the input on show cost a click to read a description
-             and gave the panel one editable line per row to tab through,
-             which is not what a list of cards is for. -->
-        {#if openId === item.id}
-          <input
-            type="text"
-            value={item.title}
-            placeholder={t("todo.titlePlaceholder")}
-            use:keepFocus={`title:${item.id}`}
-            onkeydown={(e) => fieldKeydown(item, e)}
-            onchange={(e) =>
-              todos.setTitle(item.id, (e.currentTarget as HTMLInputElement).value)}
-            class="min-w-0 flex-1 rounded border border-transparent bg-transparent px-1 py-0.5 text-sm leading-snug outline-none transition focus:border-border focus:bg-[var(--color-surface)] {item.state ===
-            'done'
-              ? 'text-muted-foreground/60 line-through'
-              : 'text-foreground'}"
-          />
-        {:else}
-          <button
-            type="button"
-            data-card-title
-            aria-expanded={false}
-            use:keepFocus={`row:${item.id}`}
-            onclick={(e) => toggleCard(item, e.detail === 0)}
-            class="min-w-0 flex-1 truncate px-1 py-0.5 text-left text-sm leading-snug {item.state ===
-            'done'
-              ? 'text-muted-foreground/60 line-through'
-              : 'text-foreground'}"
-          >
-            {item.title}
-          </button>
-          {#if item.description}
-            <!-- The only sign that there is more behind the line. Dropped
-                 when the card is open, where the description is right
-                 there. -->
-            <span
-              class="shrink-0 text-muted-foreground/60"
-              use:tip={t("todo.hasDescription")}
-            >
-              <AlignLeft class="size-3" />
-            </span>
-          {/if}
-        {/if}
-        <button
-          type="button"
-          class="{ROW_ACTION} hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-muted-foreground/50"
-          onclick={() => handOff(item)}
-          disabled={!canSend}
-          use:tip={canSend
-            ? t("todo.sendTo", {
-                target: target?.title ?? target?.label ?? "the terminal",
-              })
-            : t("todo.sendNoTerminal")}
-          aria-label={t("todo.sendLabel")}
-        >
-          <CornerDownRight class="size-3.5" />
-        </button>
-        <button
-          type="button"
-          class="{ROW_ACTION} hover:bg-danger/15 hover:text-danger"
-          onclick={() => void remove(item)}
-          use:tip={t("todo.remove")}
-          aria-label={t("todo.removeLabel")}
-        >
-          <Trash2 class="size-3.5" />
+          {t("common.retry")}
         </button>
       </div>
-
-      {#if openId === item.id}
-        <!-- Aligned under the title rather than the checkbox: the box is
-             the same object as the line above it, and a description that
-             started at the tick would read as a second column. -->
-        <div class="mt-1 pl-[23px]">
-          <textarea
-            value={item.description ?? ""}
-            rows="2"
-            placeholder={t("todo.descriptionPlaceholder")}
-            use:descriptionBox
-            onkeydown={(e) => fieldKeydown(item, e)}
-            oninput={(e) => autosize(e.currentTarget as HTMLTextAreaElement)}
-            onchange={(e) =>
-              todos.setDescription(
-                item.id,
-                (e.currentTarget as HTMLTextAreaElement).value,
-              )}
-            class="w-full resize-none rounded border border-border bg-[var(--color-surface)] px-1.5 py-1 text-sm leading-relaxed text-foreground/90 outline-none transition placeholder:text-muted-foreground/60 focus:border-foreground/30"
-          ></textarea>
-        </div>
+    {:else if items.length === 0 && !todos.loading}
+      <!-- One line on the dashboard, where this card sits beside seven others
+           and a centred block of air is the card claiming a height it has no
+           content for. The pane has the room and keeps the breathing space. -->
+      <p
+        class={[
+          "text-sm text-muted-foreground",
+          compact ? "px-3.5 py-2" : "px-3 py-6 text-center",
+        ]}
+      >
+        {t("todo.empty")}
+      </p>
+    {/if}
+    {#each items as item, i (item.id)}
+      <!-- Index into the list as it reads without the card being carried,
+           which is the list the drop slot counts in. -->
+      {@const slotIndex = dragIndex >= 0 && i > dragIndex ? i - 1 : i}
+      {#if dropSlot === slotIndex && item.id !== draggingId}
+        {@render dropLine()}
       {/if}
-
-      <!-- Shown while the task is still live — claimed, or reopened after a
-           claim — because that is when where the work landed is something
-           you act on. A ticked box is a closed matter and collapses back to
-           one line. Nothing is cleared either way: unticking brings the same
-           strip back rather than an empty one. -->
-      {#if item.state !== "done" && (item.claimedBy || item.commitSha || item.note)}
-        <!-- What the agent said, reduced to what can be checked. The
-             sentence it wrote is not shown at all: it is the one part of a
-             claim nothing can back, and the badge next to it says who by.
-             It is still stored, and still what a reopened task is judged on.
-
-             Not selectable: this is a readout, and every chip on it is a
-             hover target, so dragging across one only produced a highlight
-             nobody asked for. -->
-        <div
-          class="mt-1 flex select-none items-center gap-1 pl-[23px] text-xs text-muted-foreground"
-        >
-          <!-- A label, not a control: nothing hides behind it, so it gets
-               no box and no hover of its own. -->
-          <span class="flex shrink-0 items-center px-0.5">
-            {#if item.claimedBy}
-              <ShortcutIcon iconKey={item.claimedBy} size={12} />
-            {:else}
-              <!-- Claimed through a credentials file, which names a project
-                   and no thread: Boite did not launch this one and cannot
-                   say which agent it was. -->
-              <Bot class="size-3 shrink-0 text-muted-foreground/70" />
-            {/if}
-          </span>
-          {#await gitState(item) then g}
-            {#if !item.commitSha}
-              <span class="px-1 text-muted-foreground/70">{t("todo.gitNoCommit")}</span>
-            {:else if !g}
-              <!-- Nowhere to look it up: no project folder to run git in.
-                   Shown bare rather than judged — not finding a repository
-                   is not the same as not finding the commit. -->
-              <code class="px-1 tabular-nums text-muted-foreground/70">
-                {item.commitSha.slice(0, 7)}
-              </code>
-            {:else if g.commit.unreachable}
-              <!-- The repository was never reached, so nothing below this
-                   line has been checked. Ahead of the `known` test because
-                   an unreached clone answers `known: false` too, and that
-                   used to draw "commit not found" over work that is there.
-                   Muted, not warning: git has contradicted nothing. -->
-              <button
-                type="button"
-                class="group/tip relative text-muted-foreground/70 {CHIP}"
-                aria-expanded={openTip === `${item.id}:sha`}
-                onclick={() => toggleTip(`${item.id}:sha`)}
-              >
-                {t("todo.gitUnreachable")}
-                {@render chipDetail(item.commitSha, `${item.id}:sha`)}
-              </button>
-            {:else if !g.commit.known}
-              <!-- Reported a sha the repository has never heard of. Said
-                   plainly: this is the one claim git can flatly contradict. -->
-              <button
-                type="button"
-                class="group/tip relative text-warning {CHIP}"
-                aria-expanded={openTip === `${item.id}:sha`}
-                onclick={() => toggleTip(`${item.id}:sha`)}
-              >
-                {t("todo.gitUnknownCommit")}
-                {@render chipDetail(item.commitSha, `${item.id}:sha`)}
-              </button>
-            {:else}
-              <!-- The branch first: it says where the work is, which is the
-                   question being asked. The sha is what was verified, so it
-                   stays reachable rather than on show. -->
-              <button
-                type="button"
-                class="group/tip relative min-w-0 text-left {CHIP}"
-                aria-expanded={openTip === `${item.id}:commit`}
-                onclick={() => toggleTip(`${item.id}:commit`)}
-              >
-                <span class="block truncate text-foreground/80">
-                  {g.commit.branch ?? g.commit.short}
-                </span>
-                {@render chipDetail(
-                  `${g.commit.short}${g.commit.subject ? ` — ${g.commit.subject}` : ""}`,
-                  `${item.id}:commit`,
-                )}
-              </button>
-              <span class="shrink-0 text-muted-foreground/60">·</span>
+      <!-- The whole row toggles the card, and says so: it was a bare div with a
+           click on it, which meant the pointer had a shortcut the keyboard and
+           a screen reader could not see. The name comes from the line inside
+           it, and `cardKeydown` ignores keys aimed at the controls it wraps. -->
+      <div
+        data-todo-row={item.id}
+        role="button"
+        tabindex="0"
+        aria-expanded={openId === item.id}
+        class="group cursor-pointer border-b border-border/50 px-3 py-1.5 transition focus-visible:focus-ring-inset {item.id ===
+        draggingId
+          ? 'opacity-40'
+          : 'hover:bg-accent'} {item.state === 'claimed'
+          ? 'bg-[var(--color-surface-2)]/60'
+          : ''} {openId === item.id ? 'bg-[var(--color-surface-2)]/50' : ''}"
+        onpointerdown={(e) => cardPointerDown(item, e)}
+        onclick={(e) => cardClick(item, e)}
+        onkeydown={(e) => cardKeydown(item, e)}
+      >
+        <div class="flex items-center gap-2">
+          <!-- The native control was the one white rectangle in the app: it
+               draws itself, ignores the border and surface tokens, and sits on
+               its own baseline rather than the row's. This is the same box the
+               rest of Boite draws. -->
+          <button
+            type="button"
+            role="checkbox"
+            aria-checked={item.state === "done"}
+            aria-label={item.state === "done" ? t("todo.markNotDone") : t("todo.markDone")}
+            class="grid size-[15px] shrink-0 place-items-center rounded-[4px] border transition {item.state ===
+            'done'
+              ? 'border-foreground/30 bg-foreground/80 text-[var(--color-surface)]'
+              : 'border-edge text-transparent hover:border-foreground/40'}"
+            onclick={() =>
+              todos.setState(item.id, item.state === "done" ? "open" : "done")}
+          >
+            <Check class="size-2.5" strokeWidth={3.5} />
+          </button>
+          <!-- Closed, the title is text and the whole row is the button that
+               opens the card. Open, it becomes the field it always was.
+               Keeping the input on show cost a click to read a description
+               and gave the panel one editable line per row to tab through,
+               which is not what a list of cards is for. -->
+          {#if openId === item.id}
+            <input
+              type="text"
+              value={item.title}
+              placeholder={t("todo.titlePlaceholder")}
+              aria-label={t("todo.titleLabel")}
+              use:keepFocus={`title:${item.id}`}
+              onkeydown={(e) => fieldKeydown(item, e)}
+              onchange={(e) =>
+                todos.setTitle(item.id, (e.currentTarget as HTMLInputElement).value)}
+              class="min-w-0 flex-1 rounded border border-transparent bg-transparent px-1 py-0.5 text-sm leading-snug outline-none transition focus:border-border focus:bg-[var(--color-surface)] {item.state ===
+              'done'
+                ? 'text-muted-2 line-through'
+                : 'text-foreground'}"
+            />
+          {:else}
+            <button
+              type="button"
+              data-card-title
+              aria-expanded={false}
+              use:keepFocus={`row:${item.id}`}
+              onclick={(e) => toggleCard(item, e.detail === 0)}
+              class="min-w-0 flex-1 truncate px-1 py-0.5 text-left text-sm leading-snug {item.state ===
+              'done'
+                ? 'text-muted-2 line-through'
+                : 'text-foreground'}"
+            >
+              {item.title}
+            </button>
+            {#if item.description}
+              <!-- The only sign that there is more behind the line. Dropped
+                   when the card is open, where the description is right
+                   there. -->
               <span
-                class="shrink-0 px-1 {g.commit.pushed ? '' : 'text-muted-foreground/70'}"
+                class="shrink-0 text-muted-2"
+                use:tip={t("todo.hasDescription")}
               >
-                {g.commit.pushed ? t("todo.gitPushed") : t("todo.gitLocal")}
+                <AlignLeft class="size-3" />
               </span>
-              {#if g.pr.kind === "found"}
-                <span class="shrink-0 text-muted-foreground/60">·</span>
+            {/if}
+          {/if}
+          <button
+            type="button"
+            class="{ROW_ACTION} hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-muted-2"
+            onclick={() => handOff(item)}
+            disabled={!canSend}
+            use:tip={canSend
+              ? t("todo.sendTo", {
+                  target: target?.title ?? target?.label ?? "the terminal",
+                })
+              : t("todo.sendNoTerminal")}
+            aria-label={t("todo.sendLabel")}
+          >
+            <CornerDownRight class="size-3.5" />
+          </button>
+          <button
+            type="button"
+            class="{ROW_ACTION} hover:bg-danger/15 hover:text-danger"
+            onclick={() => void remove(item)}
+            use:tip={t("todo.remove")}
+            aria-label={t("todo.removeLabel")}
+          >
+            <Trash2 class="size-3.5" />
+          </button>
+        </div>
+
+        {#if openId === item.id}
+          <!-- Aligned under the title rather than the checkbox: the box is
+               the same object as the line above it, and a description that
+               started at the tick would read as a second column. -->
+          <div class="mt-1 pl-[23px]">
+            <textarea
+              value={item.description ?? ""}
+              rows="2"
+              placeholder={t("todo.descriptionPlaceholder")}
+              aria-label={t("todo.descriptionLabel")}
+              use:descriptionBox
+              onkeydown={(e) => fieldKeydown(item, e)}
+              oninput={(e) => autosize(e.currentTarget as HTMLTextAreaElement)}
+              onchange={(e) =>
+                todos.setDescription(
+                  item.id,
+                  (e.currentTarget as HTMLTextAreaElement).value,
+                )}
+              class="w-full resize-none rounded border border-border bg-[var(--color-surface)] px-1.5 py-1 text-sm leading-relaxed text-foreground outline-none transition placeholder:text-muted-2 focus:border-foreground/30"
+            ></textarea>
+          </div>
+        {/if}
+
+        <!-- Shown while the task is still live — claimed, or reopened after a
+             claim — because that is when where the work landed is something
+             you act on. A ticked box is a closed matter and collapses back to
+             one line. Nothing is cleared either way: unticking brings the same
+             strip back rather than an empty one. -->
+        {#if item.state !== "done" && (item.claimedBy || item.commitSha || item.note)}
+          <!-- What the agent said, reduced to what can be checked. The
+               sentence it wrote is not shown at all: it is the one part of a
+               claim nothing can back, and the badge next to it says who by.
+               It is still stored, and still what a reopened task is judged on.
+
+               Not selectable: this is a readout, and every chip on it is a
+               hover target, so dragging across one only produced a highlight
+               nobody asked for. -->
+          <div
+            class="mt-1 flex select-none items-center gap-1 pl-[23px] text-xs text-muted-foreground"
+          >
+            <!-- A label, not a control: nothing hides behind it, so it gets
+                 no box and no hover of its own. -->
+            <span class="flex shrink-0 items-center px-0.5">
+              {#if item.claimedBy}
+                <ShortcutIcon iconKey={item.claimedBy} size={12} />
+              {:else}
+                <!-- Claimed through a credentials file, which names a project
+                     and no thread: Boite did not launch this one and cannot
+                     say which agent it was. -->
+                <Bot class="size-3 shrink-0 text-muted-2" />
+              {/if}
+            </span>
+            {#await gitState(item) then g}
+              {#if !item.commitSha}
+                <span class="px-1 text-muted-2">{t("todo.gitNoCommit")}</span>
+              {:else if !g}
+                <!-- Nowhere to look it up: no project folder to run git in.
+                     Shown bare rather than judged — not finding a repository
+                     is not the same as not finding the commit. -->
+                <code class="px-1 tabular-nums text-muted-2">
+                  {item.commitSha.slice(0, 7)}
+                </code>
+              {:else if g.commit.unreachable}
+                <!-- The repository was never reached, so nothing below this
+                     line has been checked. Ahead of the `known` test because
+                     an unreached clone answers `known: false` too, and that
+                     used to draw "commit not found" over work that is there.
+                     Muted, not warning: git has contradicted nothing. -->
                 <button
                   type="button"
-                  class="group/tip relative shrink-0 {CHIP}"
-                  onclick={() => openPr(g.pr.kind === "found" ? g.pr.pr.url : "")}
+                  class="group/tip relative text-muted-2 {CHIP}"
+                  aria-expanded={openTip === `${item.id}:sha`}
+                  onclick={() => toggleTip(`${item.id}:sha`)}
                 >
-                  {t("todo.gitPr", { number: String(g.pr.pr.number) })}
-                  <!-- No toggle on this one: pressing it opens the PR, which
-                       is more than the url it would have shown. -->
-                  {@render chipDetail(g.pr.pr.url, null)}
+                  {t("todo.gitUnreachable")}
+                  {@render chipDetail(item.commitSha, `${item.id}:sha`)}
                 </button>
-              {:else if g.pr.kind === "failed"}
-                <!-- gh was there and refused. Said, because unlike a missing
-                     gh this is a state the user can be in without knowing —
-                     and the signed-out case they can fix in one command. -->
-                <span class="shrink-0 text-muted-foreground/60">·</span>
+              {:else if !g.commit.known}
+                <!-- Reported a sha the repository has never heard of. Said
+                     plainly: this is the one claim git can flatly contradict. -->
                 <button
                   type="button"
-                  class="group/tip relative shrink-0 text-warning/80 {CHIP}"
-                  aria-expanded={openTip === `${item.id}:pr`}
-                  onclick={() => toggleTip(`${item.id}:pr`)}
+                  class="group/tip relative text-warning {CHIP}"
+                  aria-expanded={openTip === `${item.id}:sha`}
+                  onclick={() => toggleTip(`${item.id}:sha`)}
                 >
-                  {g.pr.auth ? t("todo.gitPrNoAuth") : t("todo.gitPrFailed")}
+                  {t("todo.gitUnknownCommit")}
+                  {@render chipDetail(item.commitSha, `${item.id}:sha`)}
+                </button>
+              {:else}
+                <!-- The branch first: it says where the work is, which is the
+                     question being asked. The sha is what was verified, so it
+                     stays reachable rather than on show. -->
+                <button
+                  type="button"
+                  class="group/tip relative min-w-0 text-left {CHIP}"
+                  aria-expanded={openTip === `${item.id}:commit`}
+                  onclick={() => toggleTip(`${item.id}:commit`)}
+                >
+                  <span class="block truncate text-foreground">
+                    {g.commit.branch ?? g.commit.short}
+                  </span>
                   {@render chipDetail(
-                    g.pr.auth ? t("todo.gitPrNoAuthHint") : g.pr.detail,
-                    `${item.id}:pr`,
+                    `${g.commit.short}${g.commit.subject ? ` — ${g.commit.subject}` : ""}`,
+                    `${item.id}:commit`,
                   )}
                 </button>
+                <span class="shrink-0 text-muted-2">·</span>
+                <span
+                  class="shrink-0 px-1 {g.commit.pushed ? '' : 'text-muted-2'}"
+                >
+                  {g.commit.pushed ? t("todo.gitPushed") : t("todo.gitLocal")}
+                </span>
+                {#if g.pr.kind === "found"}
+                  <span class="shrink-0 text-muted-2">·</span>
+                  <button
+                    type="button"
+                    class="group/tip relative shrink-0 {CHIP}"
+                    onclick={() => openPr(g.pr.kind === "found" ? g.pr.pr.url : "")}
+                  >
+                    {t("todo.gitPr", { number: String(g.pr.pr.number) })}
+                    <!-- No toggle on this one: pressing it opens the PR, which
+                         is more than the url it would have shown. -->
+                    {@render chipDetail(g.pr.pr.url, null)}
+                  </button>
+                {:else if g.pr.kind === "failed"}
+                  <!-- gh was there and refused. Said, because unlike a missing
+                       gh this is a state the user can be in without knowing —
+                       and the signed-out case they can fix in one command. -->
+                  <span class="shrink-0 text-muted-2">·</span>
+                  <button
+                    type="button"
+                    class="group/tip relative shrink-0 text-warning/80 {CHIP}"
+                    aria-expanded={openTip === `${item.id}:pr`}
+                    onclick={() => toggleTip(`${item.id}:pr`)}
+                  >
+                    {g.pr.auth ? t("todo.gitPrNoAuth") : t("todo.gitPrFailed")}
+                    {@render chipDetail(
+                      g.pr.auth ? t("todo.gitPrNoAuthHint") : g.pr.detail,
+                      `${item.id}:pr`,
+                    )}
+                  </button>
+                {/if}
               {/if}
-            {/if}
-          {/await}
-        </div>
-      {/if}
+            {/await}
+          </div>
+        {/if}
 
-      {#if item.state === "claimed"}
-        <!-- An agent said it finished, and it stops here on purpose: a model
-             that can tick its own boxes will, and the list would then record
-             assertions instead of verified work. -->
-        <div class="mt-1 flex gap-1 pl-[23px]">
-          <button
-            type="button"
-            class="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
-            onclick={() => todos.setState(item.id, "done")}
-          >
-            <Check class="size-3" />
-            {t("todo.confirm")}
-          </button>
-          <button
-            type="button"
-            class="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
-            onclick={() => todos.setState(item.id, "open")}
-          >
-            <Undo2 class="size-3" />
-            {t("todo.reopen")}
-          </button>
-        </div>
-      {/if}
-    </div>
-  {/each}
-  <!-- The one slot no row can draw: past the last card. -->
-  {#if dropSlot !== null && dropSlot === items.length - 1}
-    {@render dropLine()}
+        {#if item.state === "claimed"}
+          <!-- An agent said it finished, and it stops here on purpose: a model
+               that can tick its own boxes will, and the list would then record
+               assertions instead of verified work. -->
+          <div class="mt-1 flex gap-1 pl-[23px]">
+            <button
+              type="button"
+              class="flex items-center gap-1 rounded border border-edge px-1.5 py-0.5 text-sm text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
+              onclick={() => todos.setState(item.id, "done")}
+            >
+              <Check class="size-3" />
+              {t("todo.confirm")}
+            </button>
+            <button
+              type="button"
+              class="flex items-center gap-1 rounded border border-edge px-1.5 py-0.5 text-sm text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
+              onclick={() => todos.setState(item.id, "open")}
+            >
+              <Undo2 class="size-3" />
+              {t("todo.reopen")}
+            </button>
+          </div>
+        {/if}
+      </div>
+    {/each}
+    <!-- The one slot no row can draw: past the last card. -->
+    {#if dropSlot !== null && dropSlot === items.length - 1}
+      {@render dropLine()}
+    {/if}
+  </div>
+
+  <!-- Right under the list it appends to, in both homes: the input parked at
+       the bottom of the old panel, below the agent section, read as chrome, and
+       "where do I add one" was that panel's most asked question. An empty list
+       is also exactly where the first todo gets written, so it is drawn even
+       when there is nothing above it. -->
+  {#if projectId}
+    <form
+      class="flex shrink-0 items-center gap-1.5 border-t border-border p-2"
+      onsubmit={(e) => {
+        e.preventDefault();
+        void addTodo();
+      }}
+    >
+      <Plus class="size-3.5 shrink-0 text-muted-2" />
+      <input
+        type="text"
+        bind:value={draft}
+        placeholder={t("todo.newItem")}
+        aria-label={t("todo.newItem")}
+        class="min-w-0 flex-1 rounded-md border border-edge bg-[var(--color-surface-2)] px-2 py-1 text-sm text-foreground outline-none transition placeholder:text-muted-2 focus:border-foreground/30"
+      />
+    </form>
   {/if}
 </div>
 

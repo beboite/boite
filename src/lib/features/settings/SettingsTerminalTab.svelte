@@ -47,8 +47,8 @@
       onclick={() => pickDefault(null)}
     >
       <div class="min-w-0">
-        <div class="text-xs font-medium text-foreground">{t("terminalTab.shellNone")}</div>
-        <div class="text-xs text-muted-foreground">
+        <div class="text-sm font-medium text-foreground">{t("terminalTab.shellNone")}</div>
+        <div class="text-sm text-muted-foreground">
           {t("terminalTab.shellNoneDesc")}
         </div>
       </div>
@@ -64,11 +64,11 @@
         onclick={() => pickDefault(shell.id)}
       >
         <div class="min-w-0">
-          <div class="text-xs font-medium text-foreground">{shell.label}</div>
-          <div class="truncate text-xs text-muted-foreground">
+          <div class="text-sm font-medium text-foreground">{shell.label}</div>
+          <div class="truncate text-sm text-muted-foreground">
             {shell.cmd}
             {#if shell.args.length > 0}
-              <span class="text-muted-foreground/70">{" " + shell.args.join(" ")}</span>
+              <span class="text-muted-2">{" " + shell.args.join(" ")}</span>
             {/if}
           </div>
         </div>
@@ -132,7 +132,7 @@
   >
     <label
       for="autofetch-period"
-      class="min-w-[140px] text-xs font-medium text-foreground"
+      class="min-w-[140px] truncate text-sm font-medium text-foreground"
     >
       {t("terminalTab.fetchEvery")}
     </label>
@@ -192,16 +192,16 @@
   {#if settings.state.mcpYolo}
     <!-- Said on the card rather than in the description: the line that matters
          is the one you read while it is on, not the one you read deciding. -->
-    <p class="-mt-0.5 text-xs leading-snug text-warning">
+    <p class="-mt-0.5 text-sm text-warning">
       {t("terminalTab.mcpYoloOn")}
     </p>
   {/if}
 
   <div class="flex flex-col gap-1.5" class:opacity-50={!settings.state.agentTodoAccess}>
-    <label for="todo-template" class="text-xs font-medium text-foreground">
+    <label for="todo-template" class="text-sm font-medium text-foreground">
       {t("terminalTab.todoTemplate")}
     </label>
-    <p class="text-xs leading-snug text-muted-foreground">
+    <p class="text-sm text-muted-foreground">
       {t("terminalTab.todoTemplateDesc")}
     </p>
     <textarea
@@ -216,7 +216,7 @@
     ></textarea>
     <button
       type="button"
-      class="self-start rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
+      class="self-start rounded-md border border-edge px-2.5 py-1 text-sm text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
       onclick={() => void settings.setTodoPromptTemplate("")}
     >
       {t("common.reset")}
@@ -231,7 +231,7 @@
   <div class="flex items-center gap-3">
     <label
       for="idle-timeout"
-      class="min-w-[140px] text-xs font-medium text-foreground"
+      class="min-w-[140px] truncate text-sm font-medium text-foreground"
     >
       {t("terminalTab.idleTimeout")}
     </label>
@@ -261,9 +261,9 @@
       <label
         class="flex cursor-pointer items-center justify-between gap-3 border-b border-border/60 px-3 py-2 transition last:border-b-0 hover:bg-accent"
       >
-        <span class="flex items-center gap-2">
+        <span class="flex min-w-0 items-center gap-2">
           <ShortcutIcon iconKey={row.iconKey as never} size={14} />
-          <span class="text-xs text-foreground">{row.label}</span>
+          <span class="min-w-0 truncate text-sm text-foreground">{row.label}</span>
         </span>
         <input
           type="checkbox"

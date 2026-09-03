@@ -14,7 +14,8 @@
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
   import { resolveIconKey } from "$lib/shared/icons/detect";
   import { confirmDialog } from "$lib/shared/components/confirm.svelte";
-  import { registerEscape, restoreFocus } from "$lib/shared/keyboard/overlay";
+  import { registerEscape } from "$lib/shared/keyboard/overlay";
+  import { focusTrap } from "$lib/shared/actions/focusTrap";
   import Plus from "@lucide/svelte/icons/plus";
   import Check from "@lucide/svelte/icons/check";
   import Trash2 from "@lucide/svelte/icons/trash-2";
@@ -25,6 +26,7 @@
   import Zap from "@lucide/svelte/icons/zap";
   import { t } from "$lib/i18n/index.svelte";
   import type { IconKey, Shortcut } from "$lib/types";
+  import { shortcutAgentHint } from "$lib/features/shortcut/agent-hint";
 
   const shortcuts = $derived(settings.state.shortcuts);
 
@@ -98,10 +100,13 @@
    * Escape through the shared stack, and a pointer landing anywhere else. It
    * used to be dismissed only by picking a colour, so tabbing away or opening
    * something else left it hanging over the rows below.
+   *
+   * Where the keyboard goes and comes back from is `use:focusTrap` on the box
+   * itself, not here: this effect runs on the id, and the element it would have
+   * to focus does not exist until the render that id causes.
    */
   $effect(() => {
     if (!colorPickerFor) return;
-    const previous = document.activeElement as HTMLElement | null;
     const release = registerEscape(() => (colorPickerFor = null));
     // Capture phase: the swatches stop their own click, and a pointerdown on the
     // trigger has to reach the trigger so it can toggle rather than reopen.
@@ -115,7 +120,6 @@
     return () => {
       release();
       window.removeEventListener("pointerdown", onPointerDown, true);
-      restoreFocus(previous, colorPopoverEl);
     };
   });
 
@@ -261,6 +265,7 @@
    * either way, and Escape puts it back down.
    */
   let grabbedId = $state<string | null>(null);
+  let editingCommandId = $state<string | null>(null);
   // Read aloud after a move: the rows swap silently, and the one that moved is
   // no longer where the reader last was. Position rather than a sentence, so it
   // needs no translation of its own.
@@ -320,7 +325,14 @@
   function presetAlreadyAdded(presetId: string): boolean {
     const preset = CLI_PRESETS.find((p) => p.id === presetId);
     if (!preset) return false;
-    return shortcuts.some((s) => s.label === preset.label && s.command === preset.command);
+    // Label-and-exact-command missed a wrapper (`pwsh -NoLogo -Command claude`)
+    // and a renamed row. `shortcutAgentHint` is how the launcher names the
+    // same command line, so a hit on the preset's label is the same identity.
+    return shortcuts.some(
+      (s) =>
+        findPresetForCommand(s.command)?.id === preset.id ||
+        shortcutAgentHint(s.command) === preset.label,
+    );
   }
 
   async function toggleShortcutYolo(shortcut: Shortcut) {
@@ -356,7 +368,7 @@
 <div class="flex items-center justify-end gap-1.5">
   <button
     type="button"
-    class="flex items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-1.5 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
+    class="flex items-center gap-1.5 rounded-md border border-edge bg-[var(--color-surface-2)] px-2.5 py-1.5 text-sm text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
     onclick={() => void onReset()}
     use:tip={t("shortcuts.resetTitle")}
   >
@@ -365,7 +377,7 @@
   </button>
   <button
     type="button"
-    class="flex items-center gap-1.5 rounded-md bg-foreground px-2.5 py-1.5 text-xs font-medium text-background transition hover:bg-foreground/90"
+    class="flex items-center gap-1.5 rounded-md bg-foreground px-2.5 py-1.5 text-sm font-medium text-background transition hover:bg-foreground/90"
     onclick={() => onAdd({ label: t("shortcuts.newShortcut"), command: "" })}
   >
     <Plus class="size-3" />
@@ -378,7 +390,7 @@
   class="mt-2 rounded-lg border border-border bg-[var(--color-surface-2)]"
 >
   {#if shortcuts.length === 0}
-    <p class="px-4 py-6 text-center text-xs text-muted-foreground">
+    <p class="px-4 py-6 text-center text-sm text-muted-foreground">
       {t("shortcuts.noShortcuts")}
     </p>
   {/if}
@@ -409,7 +421,7 @@
         class="flex size-4 cursor-grab items-center justify-center rounded transition hover:text-muted-foreground focus-visible:text-foreground active:cursor-grabbing {grabbedId ===
         shortcut.id
           ? 'text-foreground'
-          : 'text-muted-foreground/50'}"
+          : 'text-muted-2'}"
         aria-label={t("shortcuts.dragToReorder")}
         aria-pressed={grabbedId === shortcut.id}
         aria-keyshortcuts="ArrowUp ArrowDown"
@@ -435,7 +447,7 @@
         <button
           type="button"
           data-color-trigger
-          class="flex size-6 items-center justify-center rounded-md border border-transparent transition hover:border-border hover:bg-[var(--color-surface-3)]"
+          class="flex size-6 items-center justify-center rounded-md border border-transparent transition hover:border-edge hover:bg-[var(--color-surface-3)]"
           onclick={() => (colorPickerFor = colorPickerFor === shortcut.id ? null : shortcut.id)}
           aria-label={t("shortcuts.changeIconColor")}
           aria-expanded={colorPickerFor === shortcut.id}
@@ -447,6 +459,7 @@
           <div
             bind:this={colorPopoverEl}
             class="surface-popover absolute left-0 top-7 z-[var(--z-popover)] w-max p-2"
+            use:focusTrap
           >
             <div class="grid grid-cols-6 gap-1">
               {#each iconColors as c (c)}
@@ -465,7 +478,7 @@
             </div>
             <button
               type="button"
-              class="mt-2 w-full rounded-md border border-border px-2 py-1 text-2xs text-muted-foreground transition hover:text-foreground"
+              class="mt-2 w-full rounded-md border border-edge px-2 py-1 text-sm text-muted-foreground transition hover:text-foreground"
               onclick={() => setIconColor(shortcut.id, null)}
             >
               {t("shortcuts.defaultColor")}
@@ -477,25 +490,34 @@
         type="text"
         value={shortcut.label}
         placeholder={t("shortcuts.labelPlaceholder")}
+        aria-label={t("shortcuts.labelName")}
         onchange={(e) =>
           onUpdate(shortcut.id, { label: (e.currentTarget as HTMLInputElement).value })}
-        class="rounded-md border border-transparent bg-transparent px-2 py-1 text-xs text-foreground outline-none transition focus:border-border focus:bg-[var(--color-surface)]"
+        class="min-w-0 truncate rounded-md border border-transparent bg-transparent px-2 py-1 text-sm text-foreground outline-none transition focus:border-border focus:bg-[var(--color-surface)]"
       />
       <input
         type="text"
-        value={shortcut.command}
+        value={editingCommandId === shortcut.id
+          ? shortcut.command
+          : shortcutAgentHint(shortcut.command)}
         placeholder={t("shortcuts.commandPlaceholder")}
+        aria-label={t("shortcuts.commandName")}
+        onfocus={() => (editingCommandId = shortcut.id)}
+        onblur={() => (editingCommandId = null)}
         onchange={(e) =>
           onUpdate(shortcut.id, { command: (e.currentTarget as HTMLInputElement).value })}
-        class="rounded-md border border-transparent bg-transparent px-2 py-1 font-mono text-sm text-foreground outline-none transition focus:border-border focus:bg-[var(--color-surface)]"
+        class="rounded-md border border-transparent bg-transparent px-2 py-1 text-foreground outline-none transition focus:border-border focus:bg-[var(--color-surface)] {editingCommandId ===
+        shortcut.id
+          ? 'font-mono text-sm'
+          : 'text-sm'}"
       />
       {#if matchingPreset?.yoloFlag}
         <button
           type="button"
           onclick={() => void toggleShortcutYolo(shortcut)}
-          class="flex h-6 items-center gap-1 rounded border px-1.5 text-2xs font-semibold transition {isYolo
+          class="flex h-6 items-center gap-1 rounded border px-1.5 text-xs font-semibold transition {isYolo
             ? 'border-[var(--color-warning)] bg-[var(--color-warning)]/15 text-[var(--color-warning)] hover:bg-[var(--color-warning)]/25'
-            : 'border-border/60 text-muted-foreground/60 hover:border-border hover:text-foreground'}"
+            : 'border-border/60 text-muted-2 hover:border-border hover:text-foreground'}"
           title={isYolo ? t("shortcuts.yoloActive") : t("shortcuts.yoloInactive")}
           aria-label={t("shortcuts.yoloMode")}
         >
@@ -507,7 +529,7 @@
       {/if}
       <button
         type="button"
-        class="flex size-7 items-center justify-center rounded-md text-muted-foreground/60 transition hover:bg-danger/15 hover:text-danger"
+        class="flex size-7 items-center justify-center rounded-md text-muted-2 transition hover:bg-danger/15 hover:text-danger"
         onclick={() => void onRemove(shortcut)}
         aria-label={t("shortcuts.removeShortcut")}
         use:tip={t("shortcuts.remove")}
@@ -522,14 +544,14 @@
 
 <div class="mt-4 border-t border-border/40 pt-4">
   <div class="mb-3 flex items-end justify-between gap-3">
-    <p class="text-2xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+    <p class="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
       {t("shortcuts.addFromPreset")}
     </p>
     <button
       type="button"
       onclick={() => void cliDetection.refreshAll()}
       disabled={cliDetection.checking}
-      class="flex items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2 py-1 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground disabled:cursor-wait disabled:opacity-60"
+      class="flex items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2 py-1 text-sm text-muted-foreground transition hover:border-foreground/30 hover:text-foreground disabled:cursor-wait disabled:opacity-60"
     >
       <RefreshCw class="size-3 {cliDetection.checking ? 'animate-spin' : ''}" />
       {cliDetection.checking ? t("shortcuts.checking") : t("shortcuts.recheck")}
@@ -551,12 +573,12 @@
             <ShortcutIcon iconKey={(preset.iconKey as IconKey) ?? null} size={14} />
           </div>
           <div class="flex min-w-0 flex-col">
-            <span class="truncate text-xs font-semibold text-foreground">{preset.label}</span>
+            <span class="truncate text-sm font-semibold text-foreground">{preset.label}</span>
             {#if cliDetection.probed}
               <span
-                class="mt-0.5 flex items-center gap-1 text-2xs {installed
+                class="mt-0.5 flex items-center gap-1 text-xs {installed
                   ? 'text-[var(--color-success)]'
-                  : 'text-muted-foreground/70'}"
+                  : 'text-muted-2'}"
               >
                 <span
                   class="size-1.5 shrink-0 rounded-full {installed
@@ -570,7 +592,7 @@
                 </span>
               </span>
             {:else}
-              <span class="mt-0.5 truncate text-2xs text-muted-foreground/70">
+              <span class="mt-0.5 truncate text-sm text-muted-2">
                 {preset.command}
               </span>
             {/if}
@@ -589,20 +611,25 @@
               <ExternalLink class="size-3.5" />
             </a>
           {/if}
-          <button
-            type="button"
-            disabled={added}
-            onclick={() => addPreset(preset.id)}
-            class="flex h-7 cursor-pointer items-center gap-1 rounded-md bg-foreground px-2.5 text-xs font-semibold text-background transition hover:bg-foreground/90 disabled:cursor-not-allowed disabled:border disabled:border-border/60 disabled:bg-transparent disabled:text-muted-foreground/60"
-            use:tip={added ? t("shortcuts.alreadyAdded") : t("shortcuts.addToShortcuts")}
-          >
-            {#if added}
+          {#if added}
+            <span
+              class="flex h-7 items-center gap-1 rounded-md border border-border px-2.5 text-xs text-muted-2"
+              use:tip={t("shortcuts.alreadyAdded")}
+            >
               <Check class="size-3" />
-            {:else}
+              <span>{t("shortcuts.added")}</span>
+            </span>
+          {:else}
+            <button
+              type="button"
+              onclick={() => addPreset(preset.id)}
+              class="flex h-7 cursor-pointer items-center gap-1 rounded-md bg-foreground px-2.5 text-sm font-semibold text-background transition hover:bg-foreground/90"
+              use:tip={t("shortcuts.addToShortcuts")}
+            >
               <Plus class="size-3" />
-            {/if}
-            <span>{added ? t("shortcuts.added") : t("shortcuts.add")}</span>
-          </button>
+              <span>{t("shortcuts.add")}</span>
+            </button>
+          {/if}
         </div>
       </div>
     {/each}

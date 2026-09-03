@@ -111,18 +111,18 @@
   >
   {#if !active}
     <div
-      class="flex flex-1 flex-col items-center justify-center gap-2 text-muted-foreground/70"
+      class="flex flex-1 flex-col items-center justify-center gap-2 text-muted-2"
     >
       <FileText class="size-8 opacity-40" />
-      <p class="text-xs">{t("editor.pickAFile")}</p>
+      <p class="text-sm">{t("editor.pickAFile")}</p>
     </div>
   {:else if active.loading}
-    <div class="flex flex-1 items-center justify-center text-xs text-muted-foreground/70">
+    <div class="flex flex-1 items-center justify-center text-sm text-muted-2">
       {t("common.loading")}
     </div>
   {:else if active.error}
     <div
-      class="flex flex-1 items-center justify-center px-4 text-center text-xs text-[var(--color-danger)]"
+      class="flex flex-1 items-center justify-center px-4 text-center text-sm text-[var(--color-danger)]"
     >
       {active.error}
     </div>
@@ -164,11 +164,11 @@
     <div class="flex h-7 shrink-0 items-center gap-2 border-b border-border bg-[var(--color-titlebar)] px-3 text-xs text-muted-foreground">
       <span class="truncate flex-1" use:tip={active.path}>{active.path}</span>
       {#if active.isReadonly}
-        <span class="rounded bg-[var(--color-surface-2)] px-1.5 py-0.5 text-2xs uppercase">{t("editor.readonly")}</span>
+        <span class="rounded bg-[var(--color-surface-2)] px-1.5 py-0.5 text-xs uppercase">{t("editor.readonly")}</span>
       {/if}
       {#if active.externalChange}
         <span
-          class="rounded bg-[var(--color-warning)]/15 px-1.5 py-0.5 text-2xs uppercase text-[var(--color-warning)]"
+          class="rounded bg-[var(--color-warning)]/15 px-1.5 py-0.5 text-xs uppercase text-[var(--color-warning)]"
           use:tip={t("editor.staleWarning")}
         >
           {t("editor.changedOnDisk")}
@@ -185,7 +185,7 @@
       {/if}
       {#if active.dirty}
         <span
-          class="text-foreground/80"
+          class="text-foreground"
           role="img"
           aria-label={t("editor.unsaved")}
           use:tip={t("editor.unsaved")}>●</span
@@ -216,7 +216,7 @@
   {:else if active.kind === "diff"}
     {#if active.binary}
       <div
-        class="flex flex-1 items-center justify-center px-4 text-center text-xs text-muted-foreground"
+        class="flex flex-1 items-center justify-center px-4 text-center text-sm text-muted-foreground"
       >
         {t("editor.binaryDiff")}
       </div>

@@ -10,15 +10,13 @@
   import { logger } from "$lib/shared/services/logger.svelte";
   import { confirmDialog } from "$lib/shared/components/confirm.svelte";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
-  import ToggleSetting from "$lib/shared/components/ToggleSetting.svelte";
-  import AgentAccess from "$lib/features/todo/AgentAccess.svelte";
+  import CardError from "./CardError.svelte";
   import DashboardCard from "./DashboardCard.svelte";
   import { formatBytes, heldKeys, reclaimable, reclaimableBytes } from "./worktree-flush";
   import { pathKey } from "./path";
   import { basename } from "$lib/shared/utils/path";
   import { t } from "$lib/i18n/index.svelte";
   import FolderGit2 from "@lucide/svelte/icons/folder-git-2";
-  import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import Eraser from "@lucide/svelte/icons/eraser";
@@ -29,28 +27,28 @@
   import type { IconKey, Project } from "$lib/types";
 
   /**
-   * Two cards: what this project does with worktrees, and which ones exist.
+   * Which worktrees exist, and the sweep that gives back the ones that cost
+   * nothing to lose.
    *
-   * They are one component because they are one answer. The switch decides what
-   * the list will hold tomorrow, the sweep empties it today, and both have to
-   * see the same rows — the sweep's button says how much disk it will give
-   * back, and the list is where that space is watched leaving.
+   * The sweep is in this card rather than in the project's settings card next
+   * to the switch, where it used to live: its button says how much disk it
+   * will give back, and this is the list where that space is watched leaving.
+   * Splitting the two also let the dashboard put the todo card between them,
+   * which a single component drawing both could not.
    *
    * The list is read from the repository rather than from Boite's thread rows:
    * a thread that was deleted leaves its worktree on disk, holding whatever the
    * agent had not committed, and nothing in Boite showed it.
    */
-  type Props = { project: Project };
-  let { project }: Props = $props();
+  type Props = { project: Project; class?: string };
+  let { project, class: klass = "" }: Props = $props();
 
   /**
    * Whether the next agent thread here opens its own worktree.
    *
-   * The project's answer when it has one, the app's otherwise — a project
-   * nobody has decided for still follows the global default, so moving that
-   * still moves it. Unchecking is not retroactive and cannot be: a thread's
-   * directory is fixed when it is born, and moving a running one out from under
-   * its agent would lose whatever is in it.
+   * Read, never written: the switch is on the project's settings card. The list
+   * needs it for the one line that says an empty list is a choice rather than a
+   * sweep that already ran.
    */
   const autoWorktrees = $derived(project.worktrees ?? settings.state.threadWorktrees);
   // Scratch is the home folder, not a repository. It never opened a worktree
@@ -63,9 +61,6 @@
   let failed = $state<string | null>(null);
   let busy = $state<Record<string, true>>({});
   let sweeping = $state(false);
-  // The switch writes to the database. Left free, a second click during that
-  // write raced the first and the row could settle on the value nobody picked.
-  let togglingAuto = $state(false);
   // A click or a project switch while a list is in flight used to be dropped:
   // `loading` was a mutex, so the new project's first read never started, and
   // the old project's answer landed on the new one. The token is which call is
@@ -208,16 +203,6 @@
     });
   });
 
-  async function toggleAuto() {
-    if (togglingAuto || !canToggle) return;
-    togglingAuto = true;
-    try {
-      await app.setProjectWorktrees(project.id, !autoWorktrees);
-    } finally {
-      togglingAuto = false;
-    }
-  }
-
   /** Takes the row out of the list now, so the card empties as the sweep runs
       rather than all at once when it is over. */
   function drop(path: string) {
@@ -327,64 +312,10 @@
   }
 </script>
 
-<!-- The project's own settings, which until now were a checkbox wedged into the
-     worktree list's header: a control that decides what every future thread
-     does, drawn as an afterthought beside a refresh button. -->
-<DashboardCard title={t("project.repoSettings")}>
-  {#snippet icon()}<SlidersHorizontal class="size-3.5" />{/snippet}
-
-  {#if canToggle}
-    <ToggleSetting
-      label={t("worktree.autoLabel")}
-      description={autoWorktrees ? t("worktree.autoOnHint") : t("worktree.autoOffHint")}
-      enabled={autoWorktrees}
-      onToggle={() => void toggleAuto()}
-    />
-  {:else}
-    <p class="text-sm text-muted-foreground">{t("project.repoSettingsScratch")}</p>
-  {/if}
-
-  <!-- The number is the whole point of the button: "clean up worktrees" is a
-       chore, "free 4.2 GB" is a reason. -->
-  <button
-    type="button"
-    class="mt-1.5 flex w-full items-center justify-center gap-2 rounded-md border border-border bg-[var(--color-surface-2)] px-3 py-2 text-sm text-foreground transition hover:bg-[var(--color-surface-3)] disabled:cursor-default disabled:opacity-45 disabled:hover:bg-[var(--color-surface-2)]"
-    onclick={() => void sweep()}
-    disabled={sweeping || loading || sweepable.length === 0}
-  >
-    <Eraser class="size-3.5 {sweeping ? 'animate-pulse' : ''}" />
-    {#if sweeping}
-      {t("worktree.sweeping")}
-    {:else if loading}
-      {t("worktree.sweepLoading")}
-    {:else if sweepable.length === 0}
-      {t("worktree.sweepNothing")}
-    {:else if sweepableBytes > 0}
-      {t("worktree.sweepFree", { size: formatBytes(sweepableBytes) })}
-    {:else}
-      {t("worktree.sweepCount", { count: sweepable.length })}
-    {/if}
-  </button>
-  {#if sweepable.length > 0 && !sweeping}
-    <p class="mt-1 text-center text-xs text-muted-foreground/70">
-      {t("worktree.sweepHint", { count: sweepable.length })}
-    </p>
-  {/if}
-
-  <!-- Which agents can reach this project's MCP endpoint. A card of its own
-       until now, full width, holding one line per agent — three columns of
-       chrome around six words. It belongs here anyway: everything in this card
-       is a thing this project does to every thread launched in it. -->
-  <div class="mt-3 border-t border-border/60 pt-2.5">
-    <p class="section-label mb-1">{t("project.agents")}</p>
-    <AgentAccess {project} />
-  </div>
-</DashboardCard>
-
 <DashboardCard
   title={t("worktree.title")}
   badge={entries.length || null}
-  class="lg:col-span-2"
+  class={klass}
   flush
 >
   {#snippet icon()}<FolderGit2 class="size-3.5" />{/snippet}
@@ -413,24 +344,21 @@
        which also dimmed the delete controls and the warning badges. -->
   <div>
     {#if canToggle && !autoWorktrees}
-      <p class="px-3.5 pb-2 text-xs text-muted-foreground">{t("worktree.offNotice")}</p>
+      <p class="px-3.5 pb-2 text-sm text-muted-foreground">{t("worktree.offNotice")}</p>
     {/if}
     {#if !canToggle}
-      <p class="px-3.5 pb-4 text-center text-sm text-muted-foreground">
+      <p class="px-3.5 pb-3 text-sm text-muted-foreground">
         {t("worktree.scratch")}
       </p>
     {:else if failed}
-      <!-- git's own words, kept: "not a repository" and "git: command not found"
-           are different problems with different fixes, and one generic line made
-           them look like the same one. -->
-      <div class="px-3.5 pb-4 text-center" role="status">
-        <p class="text-sm text-muted-foreground">{t("worktree.unreadable")}</p>
-        <p class="mt-1 break-words font-mono text-xs leading-snug text-muted-foreground/70">
-          {failed}
-        </p>
-      </div>
+      <!-- The raw text is behind the disclosure rather than under the line:
+           "not a repository" and "git: command not found" are different
+           problems with different fixes, and only git's own words tell them
+           apart — but neither of them is copy, and both used to be drawn as
+           if they were. -->
+      <CardError error={failed} class="px-3.5 pb-3" />
     {:else if entries.length === 0}
-      <p class="px-3.5 pb-4 text-center text-sm text-muted-foreground">
+      <p class="px-3.5 pb-3 text-sm text-muted-foreground">
         {loading
           ? t("worktree.loading")
           : canToggle && !autoWorktrees
@@ -452,19 +380,19 @@
           >
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-1.5">
-                <span class="truncate text-base text-foreground/90" use:tip={w.path}>
+                <span class="truncate text-base text-foreground" use:tip={w.path}>
                   {basename(w.path)}
                 </span>
                 {#if w.main}
                   <span
-                    class="shrink-0 rounded-full border border-border px-1.5 py-px text-2xs uppercase tracking-wide text-muted-foreground"
+                    class="shrink-0 rounded-full border border-border px-1.5 py-px text-xs uppercase tracking-wide text-muted-foreground"
                   >
                     {t("worktree.main")}
                   </span>
                 {/if}
                 {#if w.spare}
                   <span
-                    class="shrink-0 rounded-full border border-border px-1.5 py-px text-2xs uppercase tracking-wide text-muted-foreground"
+                    class="shrink-0 rounded-full border border-border px-1.5 py-px text-xs uppercase tracking-wide text-muted-foreground"
                     use:tip={t("worktree.spareHint")}
                   >
                     {t("worktree.spare")}
@@ -477,12 +405,12 @@
                 {/if}
               </div>
 
-              <div class="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
+              <div class="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-sm">
                 <span class="text-muted-foreground">
                   {w.branch ?? t("worktree.detachedAt", { head: w.head.slice(0, 7) })}
                 </span>
                 {#if size > 0}
-                  <span class="tabular-nums text-muted-foreground/70" in:fade={{ duration: DUR.fast }}>
+                  <span class="tabular-nums text-muted-2" in:fade={{ duration: DUR.fast }}>
                     {formatBytes(size)}
                   </span>
                 {/if}
@@ -501,7 +429,7 @@
               </div>
 
               {#if holder}
-                <p class="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+                <p class="mt-0.5 flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground">
                   <ShortcutIcon iconKey={holder.iconKey} size={11} />
                   <span class="truncate">{t("worktree.heldBy", { thread: holder.label })}</span>
                 </p>
@@ -525,6 +453,36 @@
           </li>
         {/each}
       </ul>
+    {/if}
+
+    <!-- The number is the whole point of the button: "clean up worktrees" is a
+         chore, "free 4.2 GB" is a reason. Drawn only when there is something to
+         free: it used to sit here permanently, greyed out, saying "nothing to
+         free" — a control offering an action it refuses, on the one card that
+         is already telling you the list is empty. -->
+    {#if sweeping || sweepable.length > 0}
+      <div class="px-3.5 pb-3 pt-1">
+        <button
+          type="button"
+          class="flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-[var(--color-surface-2)] px-3 py-2 text-sm text-foreground transition hover:bg-[var(--color-surface-3)] disabled:cursor-default disabled:opacity-45"
+          onclick={() => void sweep()}
+          disabled={sweeping || loading}
+        >
+          <Eraser class="size-3.5 {sweeping ? 'animate-pulse' : ''}" />
+          {#if sweeping}
+            {t("worktree.sweeping")}
+          {:else if sweepableBytes > 0}
+            {t("worktree.sweepFree", { size: formatBytes(sweepableBytes) })}
+          {:else}
+            {t("worktree.sweepCount", { count: sweepable.length })}
+          {/if}
+        </button>
+        {#if !sweeping}
+          <p class="mt-1 text-center text-sm text-muted-2">
+            {t("worktree.sweepHint", { count: sweepable.length })}
+          </p>
+        {/if}
+      </div>
     {/if}
   </div>
 </DashboardCard>

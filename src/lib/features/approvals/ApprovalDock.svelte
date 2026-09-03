@@ -85,12 +85,12 @@
         class="pointer-events-auto flex items-center justify-between gap-3 self-stretch px-1"
         transition:fly={{ y: mobile ? -12 : 12, duration: DUR.base, easing: easeOutQuint }}
       >
-        <span class="text-2xs font-medium uppercase tracking-wider text-muted-foreground">
+        <span class="text-xs font-medium uppercase tracking-wider text-muted-foreground">
           {t("approval.waitingCount", { count: String(approvals.items.length) })}
         </span>
         <button
           type="button"
-          class="rounded-sm px-1.5 py-0.5 text-2xs text-muted-foreground transition hover:bg-[var(--color-surface-3)] hover:text-foreground"
+          class="rounded-sm px-1.5 py-0.5 text-xs text-muted-foreground transition hover:bg-[var(--color-surface-3)] hover:text-foreground"
           onclick={() => void approvals.decideAll(true)}
         >
           {t("approval.allowAll")}
@@ -119,14 +119,14 @@
           </span>
           <div class="min-w-0 flex-1">
             <p class="flex items-baseline justify-between gap-2">
-              <span class="truncate text-xs font-semibold text-foreground">{card.title}</span>
+              <span class="truncate text-sm font-semibold text-foreground">{card.title}</span>
               {#if card.where}
-                <span class="shrink-0 text-2xs text-muted-foreground">{card.where}</span>
+                <span class="shrink-0 text-xs text-muted-foreground">{card.where}</span>
               {/if}
             </p>
-            <p class="mt-1 text-sm leading-relaxed text-foreground/90">{card.message}</p>
+            <p class="mt-1 text-sm leading-relaxed text-foreground">{card.message}</p>
             {#if card.note}
-              <p class="mt-1.5 text-2xs leading-snug text-muted-foreground">{card.note}</p>
+              <p class="mt-1.5 text-xs leading-snug text-muted-foreground">{card.note}</p>
             {/if}
           </div>
         </div>
@@ -135,7 +135,7 @@
         >
           <button
             type="button"
-            class="rounded-md border border-border bg-[var(--color-surface-2)] px-3 py-1.5 text-xs text-muted-foreground transition hover:bg-[var(--color-surface-3)] hover:text-foreground disabled:opacity-50"
+            class="rounded-md border border-edge bg-[var(--color-surface-2)] px-3 py-1.5 text-sm text-muted-foreground transition hover:bg-[var(--color-surface-3)] hover:text-foreground disabled:opacity-50"
             disabled={approvals.deciding.includes(item.id)}
             onclick={() => void approvals.decide(item.id, false)}
           >
@@ -143,7 +143,7 @@
           </button>
           <button
             type="button"
-            class="rounded-md px-3 py-1.5 text-xs font-medium transition disabled:opacity-50 {card.tone ===
+            class="rounded-md px-3 py-1.5 text-sm font-medium transition disabled:opacity-50 {card.tone ===
             'danger'
               ? 'bg-danger text-white hover:bg-danger/90'
               : 'bg-foreground text-background hover:bg-foreground/90'}"
@@ -159,7 +159,7 @@
     {#if hidden > 0}
       <!-- Said rather than stacked: forty cards cover the window they are
            asking about, and answering one uncovers the next. -->
-      <p class="pointer-events-none text-center text-2xs text-muted-foreground">
+      <p class="pointer-events-none text-center text-xs text-muted-foreground">
         {t("approval.more", { count: String(hidden) })}
       </p>
     {/if}

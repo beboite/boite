@@ -97,7 +97,7 @@
         <!-- The hint is only ever on a dash, and only when the dash stands for
              a read that never happened. Absent otherwise, so nothing here
              grows a tooltip that says what the number already says. -->
-        <dd class="shrink-0 font-medium tabular-nums text-base text-foreground/90" use:tip={row.hint}>
+        <dd class="shrink-0 font-medium tabular-nums text-base text-foreground" use:tip={row.hint}>
           {row.value}
         </dd>
       </div>
@@ -111,7 +111,7 @@
         {#each tokenRows as row (row.label)}
           <div class="flex items-baseline justify-between gap-3">
             <dt class="truncate text-sm text-muted-foreground">{row.label}</dt>
-            <dd class="shrink-0 font-medium tabular-nums text-sm text-foreground/80">{fmt(row.value)}</dd>
+            <dd class="shrink-0 font-medium tabular-nums text-sm text-foreground">{fmt(row.value)}</dd>
           </div>
         {/each}
       </dl>

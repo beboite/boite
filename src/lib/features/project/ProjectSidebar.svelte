@@ -6,7 +6,11 @@
   import { app } from "$lib/app/store.svelte";
   import { visibleStatus } from "$lib/domain/thread-status";
   import { workspace } from "$lib/backend";
-  import { settings } from "$lib/features/settings/store.svelte";
+  import {
+    settings,
+    SIDEBAR_MAX_WIDTH,
+    SIDEBAR_MIN_WIDTH,
+  } from "$lib/features/settings/store.svelte";
   import { device } from "$lib/features/settings/device.svelte";
   import {
     paneStore,
@@ -32,6 +36,7 @@
   import { isScratch } from "$lib/domain/project";
   import { projectDisplayName } from "$lib/shared/project-label";
   import { filterSidebar, normaliseTerm } from "./sidebar-filter";
+  import { FOLD_LIMIT, foldRows } from "./sidebar-fold";
   import { visibleDelegationRows } from "./delegation-stack";
   import DelegationStack from "./DelegationStack.svelte";
   import SearchIcon from "@lucide/svelte/icons/search";
@@ -42,12 +47,16 @@
   } from "$lib/features/thread/finished.svelte";
   import { mcpPulse } from "$lib/features/thread/agentActivity.svelte";
   import { jumpDigit, jumpModifier } from "$lib/shared/keyboard/held.svelte";
+  import { keybindings } from "$lib/features/settings/keybindings.svelte";
+  import { formatCombo } from "$lib/shared/keyboard/combo";
+  import { isDeviceMacOS } from "$lib/storage/platform.svelte";
   import { waitingReasonFor } from "$lib/features/thread/statusEngine";
   import { threadIconColor } from "$lib/features/fastpick/threadAccent";
   import { TONE_COLOR, threadVisual } from "$lib/features/thread/threadVisual";
   import RemoteProjectPicker from "./RemoteProjectPicker.svelte";
   import { confirmDialog } from "$lib/shared/components/confirm.svelte";
   import { resizeHandle } from "$lib/shared/actions/resizeHandle";
+  import { focusTrap } from "$lib/shared/actions/focusTrap";
   import { rowFlip } from "$lib/shared/actions/rowFlip.svelte";
   import { longPress } from "$lib/shared/actions/longPress";
   import ContextMenu from "$lib/shared/components/ContextMenu.svelte";
@@ -139,31 +148,6 @@
     duration: filterTerm ? 0 : DUR.base,
     easing: easeOutQuint,
   });
-
-  /**
-   * The signal design, and what it does to the glyph.
-   *
-   * Two separate answers on purpose: where the state is painted is the design,
-   * and whether the agent's logo stays on the row is a second question that only
-   * exists once the glyph has something else to show. With the classic design
-   * the logo is all the glyph ever holds, so the second toggle does not apply.
-   */
-  const glowDesign = $derived(settings.state.sidebarDesign === "glow");
-  const showLogos = $derived(!glowDesign || settings.state.sidebarHarnessLogos);
-
-  /**
-   * Hovering a row brings its agent's logo back.
-   *
-   * It used to be a 260ms press, which cost the row's own click: letting go
-   * after asking "which agent is this" had to be swallowed, so the answer and
-   * the opening were the same gesture and only one of them could win. On touch
-   * it was worse, because `longPress` opened the context menu on top of the
-   * reveal at 500ms. The list already tracks the hovered row for the panels, and
-   * a hover costs nothing.
-   */
-  const revealedThreadId = $derived(
-    showLogos ? null : paneStore.hoveredThreadId,
-  );
 
   /**
    * Arrow keys over the projects and their threads.
@@ -585,15 +569,13 @@
     paneStore.dropPreview = null;
   }
 
-  // While smart sort is armed, the rendered order IS the smart order, so
+  // While a computed order is picked, the rendered order IS that order, so
   // persisting it through setProjectOrder/setThreadOrder would overwrite the
   // hand-made order with a computed one — silently, since the visible list is
-  // re-sorted right back. The experiment is device-scoped and the orders are
+  // re-sorted right back. The choice is device-scoped and the orders are
   // workspace-scoped, so one device would clobber every other's arrangement.
   function smartSortArmed(): boolean {
-    return (
-      settings.state.experimentSmartSort && settings.state.smartSortBy !== "manual"
-    );
+    return settings.state.smartSortBy !== "manual";
   }
 
   function commitProjectDrag(drag: DragState) {
@@ -629,10 +611,7 @@
       // list. The order that gets saved is still the whole one, see
       // `reorderedAmongVisible`, so a pinned or filed thread keeps its place.
       const ids = app.threadsByProjectSorted(drag.projectId).map((t) => t.id);
-      const drawn = visibleDelegationRows(
-        threadsByProject.get(drag.projectId) ?? [],
-        stacksOpen,
-      ).map((r) => r.thread.id);
+      const drawn = foldedRows(drag.projectId).rows.map((r) => r.thread.id);
       const next = reorderedAmongVisible(ids, drawn, drag.id, drag.slotIndex);
       if (next) void settings.setThreadOrder(drag.projectId, next);
       return;
@@ -676,12 +655,87 @@
     return thread.keepAwake ? t("sidebar.keepAwakeOn") : t("sidebar.keepAwakeOff");
   }
 
+  /**
+   * The chord that jumps to this position, spelled the way the platform spells
+   * it, or null when the user has unbound it.
+   *
+   * Read off the bindings that exist rather than off a constant: the digits are
+   * `mod+digit1..9` by default and a user is free to move them, and a screen
+   * reader announcing a chord the keyboard no longer answers to is worse than
+   * announcing none.
+   */
+  function jumpChord(digit: number): string | null {
+    const binding = keybindings.byCommand[`thread.jump${digit}`]?.[0];
+    return binding ? formatCombo(binding.key, isDeviceMacOS) : null;
+  }
+
+  /**
+   * A row the fold may never hide.
+   *
+   * Work in flight and the row the user is looking at. Everything else is
+   * furniture, and furniture is what the fold is for.
+   */
+  function pinnedRow(row: { thread: Thread }): boolean {
+    const status = displayThreadStatus(row.thread);
+    if (status === "running" || status === "waiting") return true;
+    return app.activeThreadId === row.thread.id;
+  }
+
+  /**
+   * What a project's live list actually draws, fold included.
+   *
+   * One function rather than a `$derived` per project: the drag reads it too,
+   * and a slot index is an index into the rows on screen. Computing the fold in
+   * the template and the drag's own copy separately is how the two would drift
+   * the first time either grew a condition.
+   *
+   * `slot` is the row's place in the unfolded list, which is what Ctrl+digit
+   * counts: a row pulled above the fold keeps its own number.
+   */
+  function foldedRows(projectId: string) {
+    const rows = visibleDelegationRows(
+      threadsByProject.get(projectId) ?? [],
+      stacksOpen,
+    ).map((row, slot) => ({ ...row, slot }));
+    // The fold is off while a term is typed: the filter's whole job is to
+    // answer "which of these forty", and hiding the fortieth match behind a
+    // second click would make it answer half the question.
+    const foldable = !filtering && rows.length > FOLD_LIMIT;
+    const unfolded = settings.sidebarUnfolded(projectId);
+    return {
+      ...foldRows(rows, pinnedRow, !foldable || unfolded),
+      foldable,
+      unfolded,
+    };
+  }
+
   function displayThreadStatus(thread: Thread): ThreadStatus {
     if (app.unboundByDedup.includes(thread.id)) return "error";
     return visibleStatus(thread.status, !!thread.ptyId);
   }
 
-  let ctxMenu = $state<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
+  let ctxMenu = $state<{
+    x: number;
+    y: number;
+    items: ContextMenuItem[];
+    avoid: { top: number; bottom: number } | null;
+  } | null>(null);
+
+  /**
+   * The band of screen the row occupies, so the menu can step off it.
+   *
+   * Measured from the DOM rather than taken off the event: a long press hands
+   * over a point and nothing else, and the two ways of opening a menu have to
+   * put it in the same place.
+   */
+  function rowBand(attr: string, id: string): { top: number; bottom: number } | null {
+    if (typeof document === "undefined") return null;
+    const value = typeof CSS !== "undefined" && CSS.escape ? CSS.escape(id) : id;
+    const el = document.querySelector(`[${attr}="${value}"]`);
+    if (!el) return null;
+    const rect = el.getBoundingClientRect();
+    return { top: rect.top, bottom: rect.bottom };
+  }
 
   // Inline rename: one row at a time swaps its label for an input. Kept here
   // rather than per-row so opening a second rename closes the first.
@@ -794,23 +848,12 @@
       });
       items.push({ separator: true });
     }
-    // Same call middle-click makes; the shortcut is undiscoverable, and on a
-    // trackpad there is no middle button to make it with. Already stopped
-    // means there is no PTY left to put down.
     items.push({
-      label: t("sidebar.putToSleep"),
-      action: () => {
-        void stopThread(thread.id);
-      },
-      disabled: !thread.ptyId,
-    });
-    items.push({
-      label: thread.keepAwake
-        ? t("sidebar.allowAutoSleep")
-        : t("sidebar.keepAwake"),
+      label: t("sidebar.stayAwake"),
       action: () => {
         app.toggleThreadKeepAwake(thread.id);
       },
+      checked: !!thread.keepAwake,
     });
     // The dispatch mute, user-only by construction: the bus refuses this
     // write to any agent grant, so this menu is the one way back on.
@@ -838,7 +881,7 @@
       action: () => requestRemoveThread(thread.id),
       danger: true,
     });
-    ctxMenu = { x, y, items };
+    ctxMenu = { x, y, items, avoid: rowBand("data-thread-row", thread.id) };
   }
   function closeContextMenu() {
     ctxMenu = null;
@@ -848,6 +891,21 @@
     if (!asideEl) return;
     const rect = asideEl.getBoundingClientRect();
     void settings.setSidebarWidth(e.clientX - rect.left);
+  }
+
+  // The handle was `tabindex="-1"`, so the sidebar's width was a pointer-only
+  // setting. 24px a press, 96 with Shift, which is roughly a word and roughly a
+  // column; the store clamps both ends.
+  const RESIZE_STEP_PX = 24;
+  const RESIZE_BIG_STEP_PX = 96;
+
+  function onResizeKeydown(e: KeyboardEvent) {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault();
+    const step = e.shiftKey ? RESIZE_BIG_STEP_PX : RESIZE_STEP_PX;
+    void settings.setSidebarWidth(
+      settings.state.sidebarWidth + (e.key === "ArrowRight" ? step : -step),
+    );
   }
 
   function consumeDragClick(id: string): boolean {
@@ -930,10 +988,7 @@
     }
     // The per-project override, cycled: inherit, on, off. The label carries
     // where it stands; the overview holds the same choice as a select.
-    if (
-      settings.state.experimentOrchestrator &&
-      settings.state.experimentOrchestratorPerProject
-    ) {
+    if (settings.state.experimentWorkspace) {
       const own = settings.state.orchestratorByProject[project.id] ?? null;
       const state =
         own === "on"
@@ -953,7 +1008,9 @@
       action: () => void requestRemoveProject(project.id),
       danger: true,
     });
-    ctxMenu = { x, y, items };
+    // The header line, not `data-project-row`: that one wraps the whole card,
+    // threads included, and dodging it would throw the menu a screen away.
+    ctxMenu = { x, y, items, avoid: rowBand("data-project-header", project.id) };
   }
 
   /**
@@ -1183,8 +1240,9 @@
 
   const threadSourceIdx = $derived.by(() => {
     if (!liveDrag || liveDrag.kind !== "thread") return -1;
-    const list = threadsByProject.get(liveDrag.projectId) ?? [];
-    return visibleDelegationRows(list, stacksOpen).findIndex(
+    // Among the rows on screen, fold included: `rowShift` slides the drawn
+    // rows, and a row behind the fold has no rect to slide.
+    return foldedRows(liveDrag.projectId).rows.findIndex(
       (r) => r.thread.id === liveDrag.id,
     );
   });
@@ -1330,7 +1388,7 @@
         autocomplete="off"
         placeholder={t("sidebar.filterThreads")}
         aria-label={t("sidebar.filterThreads")}
-        class="w-full rounded-md border border-border bg-[var(--color-surface-2)] px-2 py-1 text-xs text-foreground outline-none transition placeholder:text-muted-foreground/60 focus:border-foreground/30"
+        class="w-full rounded-md border border-edge bg-[var(--color-surface-2)] px-2 py-1 text-sm text-foreground outline-none transition placeholder:text-muted-2 focus:border-foreground/30"
         onkeydown={(e) => {
           if (e.key !== "Escape") return;
           e.stopPropagation();
@@ -1359,7 +1417,7 @@
   >
     {#if showArchived && visibleProjects.length === 0}
       <div
-        class="mx-1 mt-2 mb-2 flex w-[calc(100%-0.5rem)] flex-col items-center gap-2 rounded-lg border border-dashed border-border bg-transparent px-3 py-7 text-xs text-muted-foreground"
+        class="mx-1 mt-2 mb-2 flex w-[calc(100%-0.5rem)] flex-col items-center gap-2 rounded-lg border border-dashed border-border bg-transparent px-3 py-7 text-sm text-muted-foreground"
       >
         <FolderArchive class="size-5 opacity-70" />
         <span>{t("sidebar.noArchived")}</span>
@@ -1367,7 +1425,7 @@
     {:else if !showArchived && app.projects.every((p) => isScratch(p))}
       <button
         type="button"
-        class="mx-1 mt-2 mb-2 flex w-[calc(100%-0.5rem)] flex-col items-center gap-2 rounded-lg border border-dashed border-border bg-transparent px-3 py-7 text-xs text-muted-foreground transition hover:border-foreground/30 hover:bg-accent/30 hover:text-foreground"
+        class="mx-1 mt-2 mb-2 flex w-[calc(100%-0.5rem)] flex-col items-center gap-2 rounded-lg border border-dashed border-edge bg-transparent px-3 py-7 text-sm text-muted-foreground transition hover:border-foreground/30 hover:bg-accent/30 hover:text-foreground"
         onclick={addProjectClick}
       >
         <FolderOpen class="size-5 opacity-70" />
@@ -1425,6 +1483,7 @@
           class="project-row group/project relative flex items-center gap-2 px-2 py-1.5 transition hover:text-foreground {showArchived
             ? ''
             : 'cursor-pointer'}"
+          data-project-header={project.id}
           use:tip={isRemoteOrigin
             ? boiteOffline
               ? t("sidebar.onBoiteOffline", {
@@ -1472,7 +1531,7 @@
             <button
               type="button"
               data-nav-row
-              class="min-w-0 flex-1 truncate-safe text-left text-base font-medium leading-[19px] text-foreground/90 transition group-hover/project:text-foreground"
+              class="min-w-0 flex-1 truncate-safe text-left text-base font-medium leading-[19px] text-foreground transition group-hover/project:text-foreground"
               use:tip={project.cwd}
               onclick={() => {
                 if (consumeDragClick(project.id)) return;
@@ -1513,7 +1572,7 @@
                  The card is the thing you are in. -->
             <button
               type="button"
-              class="row-action touch-reveal rounded p-1 text-muted-foreground/0 transition hover:bg-accent hover:text-foreground focus-visible:text-foreground group-hover/block:text-muted-foreground group-focus-within/block:text-muted-foreground"
+              class="row-action touch-reveal rounded p-1 text-muted-2 transition hover:bg-accent hover:text-foreground focus-visible:text-foreground group-hover/block:text-muted-foreground group-focus-within/block:text-muted-foreground"
               class:is-open={launcher?.projectId === project.id}
               onclick={(e) => toggleLauncher(project.id, e)}
               data-drag-block
@@ -1526,7 +1585,7 @@
             </button>
             <button
               type="button"
-              class="row-action touch-reveal rounded p-1 text-muted-foreground/0 transition hover:bg-accent hover:text-foreground focus-visible:text-foreground group-hover/block:text-muted-foreground group-focus-within/block:text-muted-foreground"
+              class="row-action touch-reveal rounded p-1 text-muted-2 transition hover:bg-accent hover:text-foreground focus-visible:text-foreground group-hover/block:text-muted-foreground group-focus-within/block:text-muted-foreground"
               onclick={(e) => openProjectContextMenu(project, e)}
               data-drag-block
               aria-label={t("sidebar.projectOptions")}
@@ -1546,13 +1605,13 @@
             : []}
           {@const dragInThisProject =
             liveDrag?.kind === "thread" && liveDrag.projectId === project.id}
-          {@const rowGapClass = glowDesign ? "space-y-1" : "space-y-px"}
           <!-- The row used to live inline in the live list. It is a snippet
                now because the drawer draws the same card under the cut, and
                two copies of this markup is how they would drift. -->
           {#snippet threadItem(
             thread: Thread,
             threadIdx: number,
+            jumpIndex: number | null,
             reorderable: boolean,
             depth: number,
             stack: Thread[],
@@ -1583,11 +1642,22 @@
               {@const fresh = justFinished(thread.id)}
               <!-- Ctrl+1..9 only ever meant the current project's live
                    threads. Numbering the drawer would put two rows labelled 1
-                   on screen, and numbering every project would put four. -->
-              {@const digit =
-                reorderable && jumpModifier.down && project.id === app.currentProjectId
-                  ? jumpDigit(threadIdx)
+                   on screen, and numbering every project would put four.
+                   `jumpIndex` is the row's place in the unfolded list, so
+                   folding a group past the tenth row renumbers nothing. -->
+              {@const slot =
+                reorderable && jumpIndex !== null && project.id === app.currentProjectId
+                  ? jumpDigit(jumpIndex)
                   : null}
+              <!-- The badge is the modifier's business; the chord itself stays
+                   in the row's accessible name whether or not a key is down,
+                   because a screen reader has no modifier to hold. -->
+              {@const digit = jumpModifier.down ? slot : null}
+              {@const rowName = thread.title ?? thread.label}
+              {@const chord = slot === null ? null : jumpChord(slot)}
+              {@const rowLabel = chord
+                ? t("sidebar.threadRowJump", { name: rowName, chord })
+                : rowName}
               <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
               <li
                 transition:slide={rowMotion}
@@ -1617,18 +1687,16 @@
                      semantics. The row is now one button that fills the card,
                      with the actions as siblings painting over it. -->
                 <div
-                  class="thread-card relative flex cursor-pointer items-center gap-2 rounded-sm px-1.5 py-1 transition {isActive
+                  class="thread-card glow relative flex cursor-pointer items-center gap-2 rounded-sm px-1.5 py-1 transition {isActive
                     ? 'text-foreground'
                     : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground'}"
                   class:selected={isActive}
-                  class:just-finished={fresh && !glowDesign}
                   class:mcp-touch={mcpPulse.has(thread.id)}
-                  class:glow={glowDesign}
-                  class:fresh={glowDesign && fresh}
-                  data-state={glowDesign ? visual.state : undefined}
-                  style:--tone={glowDesign ? TONE_COLOR[visual.tone] : undefined}
+                  class:fresh
+                  data-state={visual.state}
+                  style:--tone={TONE_COLOR[visual.tone]}
                 >
-                  {#if glowDesign && visual.state === "working"}
+                  {#if visual.state === "working"}
                     <!-- One light crossing the card, along the axis the card
                          actually has. Its predecessors were two dots walking the
                          perimeter on a motion path: on a row eight times wider
@@ -1645,7 +1713,7 @@
                       type="button"
                       data-nav-row
                       class="absolute inset-0 cursor-pointer rounded-sm"
-                      aria-label={thread.title ?? thread.label}
+                      aria-label={rowLabel}
                       onclick={() => {
                         if (consumeDragClick(thread.id)) return;
                         // Opening it is reading it: the arrival flash has said
@@ -1667,7 +1735,7 @@
                          the moment the modifier goes down, and a list that
                          jumps under a held key is worse than no hint. -->
                     <span
-                      class="pointer-events-none absolute left-1.5 z-[var(--z-chrome)] flex size-4 items-center justify-center rounded-xs bg-[var(--color-surface-3)] text-2xs font-semibold tabular-nums text-foreground shadow-e1"
+                      class="pointer-events-none absolute left-1.5 z-[var(--z-chrome)] flex size-[18px] items-center justify-center rounded-xs bg-[var(--color-surface-3)] text-xs font-semibold tabular-nums text-foreground shadow-e1"
                       aria-hidden="true"
                     >
                       {digit}
@@ -1677,14 +1745,8 @@
                     status={displayThreadStatus(thread)}
                     iconKey={thread.iconKey}
                     color={threadIconColor(thread)}
-                    asleep={thread.autoSlept ?? false}
                     {keepAwake}
-                    design={settings.state.sidebarDesign}
-                    showLogo={showLogos}
-                    revealLogo={revealedThreadId === thread.id}
-                    onToggleKeepAwake={() => app.toggleThreadKeepAwake(thread.id)}
                     title={glyphTitle(thread)}
-                    label={t("sidebar.toggleKeepAwake")}
                   />
                   {#if renaming && renaming.kind === "thread" && renaming.id === thread.id}
                     <!-- Ring, not border, and the row's own line-height: an
@@ -1728,7 +1790,7 @@
                   <button
                     type="button"
                     data-no-drag
-                    class="touch-reveal relative flex size-4 shrink-0 items-center justify-center rounded-xs text-muted-foreground/70 opacity-0 transition hover:bg-danger/20 hover:text-danger focus-visible:opacity-100 group-hover/thread:opacity-100 group-focus-within/thread:opacity-100"
+                    class="touch-reveal relative flex size-4 shrink-0 items-center justify-center rounded-xs text-muted-2 opacity-0 transition hover:bg-danger/20 hover:text-danger focus-visible:opacity-100 group-hover/thread:opacity-100 group-focus-within/thread:opacity-100"
                     onclick={(e) => {
                       e.stopPropagation();
                       requestRemoveThread(thread.id);
@@ -1774,21 +1836,55 @@
                now `0 0 12px -3px`, which is a nine-pixel bloom rather than a
                thirteen-pixel one, and every pixel of gap is a thread the
                sidebar stops showing. -->
-          {@const liveRows = visibleDelegationRows(live, stacksOpen)}
+          {@const fold = foldedRows(project.id)}
           {#if live.length > 0}
             <ul
-              class="px-1 {settledCount > 0 ? 'pb-0.5' : 'pb-1'} {rowGapClass}"
+              class="px-1 {settledCount > 0 ? 'pb-0.5' : 'pb-1'} space-y-1"
               data-thread-list
               data-project-id={project.id}
+              id={`threads-${project.id}`}
               use:rowFlip={{
-                key: () => liveRows.map((r) => r.thread.id).join(","),
+                key: () => fold.rows.map((r) => r.thread.id).join(","),
                 enabled: () => !liveDrag,
               }}
             >
-              {#each liveRows as { thread, depth, stack, foldedCount, expandable }, threadIdx (thread.id)}
-                {@render threadItem(thread, threadIdx, true, depth, stack, foldedCount, expandable)}
+              {#each fold.rows as { thread, depth, stack, foldedCount, expandable, slot }, threadIdx (thread.id)}
+                {@render threadItem(thread, threadIdx, slot, true, depth, stack, foldedCount, expandable)}
               {/each}
             </ul>
+          {/if}
+
+          <!-- The cut a long project gets. Spelled like the settled drawer's
+               toggle below it because it is the same gesture on the same list,
+               and two ways of saying "there is more under here" in one column
+               is one too many. The difference is who decided: that drawer holds
+               what the user filed away, this one holds what the sidebar ran out
+               of room for, which is why the count is on the label. -->
+          {#if fold.foldable}
+            <div class="mx-1 mb-1">
+              <button
+                type="button"
+                data-drag-block
+                class="flex w-full items-center gap-1 rounded-sm px-1.5 py-1 text-sm text-muted-foreground transition hover:bg-accent/40 hover:text-foreground"
+                class:text-foreground={fold.unfolded}
+                onclick={(e) => {
+                  e.stopPropagation();
+                  settings.setSidebarUnfolded(project.id, !fold.unfolded);
+                }}
+                aria-expanded={fold.unfolded}
+                aria-controls={`threads-${project.id}`}
+                use:tip={t("sidebar.foldedRows")}
+              >
+                <ChevronRight
+                  class="size-3 shrink-0 transition-transform {fold.unfolded ? 'rotate-90' : ''}"
+                />
+                {fold.unfolded
+                  ? t("sidebar.showFewer")
+                  : fold.hidden === 1
+                    ? t("sidebar.showMoreOne")
+                    : t("sidebar.showMore", { count: String(fold.hidden) })}
+              </button>
+            </div>
           {/if}
 
           <!-- The cut between the two piles. It used to sit under the whole
@@ -1807,7 +1903,7 @@
               <button
                 type="button"
                 data-drag-block
-                class="flex w-full items-center gap-1 rounded-sm px-1.5 py-1 text-2xs text-muted-foreground transition hover:bg-accent/40 hover:text-foreground"
+                class="flex w-full items-center gap-1 rounded-sm px-1.5 py-1 text-sm text-muted-foreground transition hover:bg-accent/40 hover:text-foreground"
                 class:text-foreground={open}
                 onclick={(e) => {
                   e.stopPropagation();
@@ -1826,14 +1922,14 @@
               {#if open}
                 {@const settledRows = visibleDelegationRows(settled, stacksOpen)}
                 <ul
-                  class="px-0.5 pb-0.5 {rowGapClass}"
+                  class="px-0.5 pb-0.5 space-y-1"
                   use:rowFlip={{
                     key: () => settledRows.map((r) => r.thread.id).join(","),
                     enabled: () => !liveDrag,
                   }}
                 >
                   {#each settledRows as { thread, depth, stack, foldedCount, expandable }, threadIdx (thread.id)}
-                    {@render threadItem(thread, threadIdx, false, depth, stack, foldedCount, expandable)}
+                    {@render threadItem(thread, threadIdx, null, false, depth, stack, foldedCount, expandable)}
                   {/each}
                 </ul>
               {/if}
@@ -1845,17 +1941,28 @@
     {/each}
   </div>
 
-  <button
-    type="button"
-    class="absolute -right-px top-0 z-10 h-full w-1 cursor-col-resize transition hover:bg-foreground/10 after:absolute after:inset-y-0 after:-inset-x-1.5 after:content-[''] {resizing ? 'bg-foreground/20' : 'bg-transparent'}"
+  <!-- A separator, not a button: it sits at a width between two bounds and the
+       arrows move it there. The two rules below read `separator` as
+       decoration; a separator with a value and bounds is the window-splitter
+       pattern, and it is focusable and keyboard-driven by definition. -->
+  <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+  <div
+    class="absolute -right-px top-0 z-10 h-full w-1 cursor-col-resize transition hover:bg-foreground/10 focus-visible:focus-ring-inset focus-visible:bg-foreground/20 after:absolute after:inset-y-0 after:-inset-x-1.5 after:content-[''] {resizing ? 'bg-foreground/20' : 'bg-transparent'}"
     use:resizeHandle={{
       onResize,
       onStateChange: (r) => (resizing = r),
     }}
+    role="separator"
+    aria-orientation="vertical"
+    aria-valuenow={settings.state.sidebarWidth}
+    aria-valuemin={SIDEBAR_MIN_WIDTH}
+    aria-valuemax={SIDEBAR_MAX_WIDTH}
     aria-label={t("sidebar.resizeSidebar")}
     use:tip={t("sidebar.resizeSidebar")}
-    tabindex="-1"
-  ></button>
+    tabindex="0"
+    onkeydown={onResizeKeydown}
+  ></div>
 </aside>
 
 {#if launcher}
@@ -1869,6 +1976,7 @@
     data-launcher-root
     role="menu"
     tabindex="-1"
+    use:focusTrap
     class="launcher-menu fixed z-[var(--z-popover)] flex flex-col overflow-hidden"
     style:left="{launcherPos.x}px"
     style:top="{launcherPos.y}px"
@@ -1902,10 +2010,7 @@
       status={displayThreadStatus(threadDragGhost.thread)}
       iconKey={threadDragGhost.thread.iconKey}
       color={threadIconColor(threadDragGhost.thread)}
-      asleep={threadDragGhost.thread.autoSlept ?? false}
       keepAwake={(threadDragGhost.thread.keepAwake ?? false) && !!threadDragGhost.thread.ptyId}
-      design={settings.state.sidebarDesign}
-      showLogo={showLogos}
     />
     <span
       class="min-w-0 flex-1 truncate-safe text-left text-base leading-[19px]"
@@ -1931,6 +2036,7 @@
     items={ctxMenu.items}
     x={ctxMenu.x}
     y={ctxMenu.y}
+    avoid={ctxMenu.avoid}
     onClose={closeContextMenu}
   />
 {/if}
@@ -1963,7 +2069,7 @@
      Reaching the popover means leaving the card, and the card is what reveals
      them — so the `+` you just pressed faded out from under your own pointer,
      taking the `…` next to it along. Written here rather than as a conditional
-     utility because it has to beat `text-muted-foreground/0`, and two Tailwind
+     utility because it has to beat `text-muted-2`, and two Tailwind
      classes setting the same property are resolved by stylesheet order, not by
      the order they appear in the attribute. */
   .project-block.launching .row-action {
@@ -2114,15 +2220,15 @@
      A line is free of that: no state draws one in white.
 
      Its own layer for two reasons. The card's own box-shadow is animated by
-     `mcp-touch` and `just-finished`, which would blow the selection away for a
-     second and a half; and ::before belongs to the state halo, which sets it
-     per state. That leaves ::after, which paints over the label rather than
-     under it — fine for a one-pixel perimeter, and it is also what keeps the
-     white line above the tone line the two rules both draw at `inset 0 0 0 1px`.
+     `mcp-touch`, which would blow the selection away for a second and a half;
+     and ::before belongs to the state halo, which sets it per state. That
+     leaves ::after, which paints over the label rather than under it — fine for
+     a one-pixel perimeter, and it is also what keeps the white line above the
+     tone line the two rules both draw at `inset 0 0 0 1px`.
 
-     -4px on the spread, tighter than the halo's -2px: the classic design stacks
-     rows a single pixel apart, and a white bloom at the halo's reach would land
-     on the two neighbours hard enough to read as three selected rows. */
+     -4px on the spread, tighter than the halo's -2px: a white bloom at the
+     halo's reach lands on the two neighbouring rows hard enough to read as
+     three selected ones. */
   .thread-card.selected::after {
     content: "";
     position: absolute;
@@ -2134,23 +2240,6 @@
       0 0 12px -4px color-mix(in srgb, var(--color-foreground) 60%, transparent);
   }
 
-  /* A thread that finished and has not been read. It blinks green to violet
-     until something takes the mark back — see `boite-finish-blink`. */
-  .thread-card.just-finished {
-    animation: boite-finish-blink 2.4s ease-in-out infinite;
-  }
-
-  /* Reduced motion still needs the answer, just not the movement: the card
-     holds the green ring the blink starts on. */
-  @media (prefers-reduced-motion: reduce) {
-    .thread-card.just-finished {
-      animation: none;
-      box-shadow:
-        inset 0 0 0 1px color-mix(in srgb, var(--color-success) 70%, transparent),
-        0 0 12px 1px color-mix(in srgb, var(--color-success) 24%, transparent);
-    }
-  }
-
   /* This agent just changed something in Boite itself rather than in its own
      terminal. Violet, not green: green is a thread finishing, and this is the
      app being driven from outside while the thread carries on. */
@@ -2158,10 +2247,11 @@
     animation: boite-mcp-pulse 1.6s var(--ease-out-quint) forwards;
   }
 
-  /* ---- The glow design ---------------------------------------------------
-     Opt-in, and the whole of it hangs off `.thread-card.glow` with the state on
-     a data attribute. `--tone` is the state's colour, written by the markup
-     from threadVisual().
+  /* ---- The lit row -------------------------------------------------------
+     The only design there is, and the whole of it hangs off `.thread-card.glow`
+     with the state on a data attribute. `--tone` is the state's colour, written
+     by the markup from threadVisual(). The class is kept as the hook every rule
+     below already reads.
 
      The idea it keeps: a thread's state is worth the whole row, not a mark you
      have to look at. What it drops is the way the first cut spent that idea --

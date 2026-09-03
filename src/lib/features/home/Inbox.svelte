@@ -1,6 +1,5 @@
 <script lang="ts">
   import { app } from "$lib/app/store.svelte";
-  import { backend } from "$lib/backend";
   import type { OrchestratorAction } from "$lib/backend/types";
   import { notifications } from "$lib/features/notifications/store.svelte";
   import { t } from "$lib/i18n/index.svelte";
@@ -8,6 +7,7 @@
   import { formatAgo, formatSpan } from "$lib/shared/utils/relative-time";
   import { threadActivitySince } from "$lib/features/thread/activity.svelte";
   import { home, openHomeThread, type InboxItem } from "./store.svelte";
+  import { orchestratorActions } from "./actions.svelte";
   import DashboardCard from "$lib/features/project/DashboardCard.svelte";
   import InboxIcon from "@lucide/svelte/icons/inbox";
 
@@ -70,24 +70,11 @@
   }
 
   // What the orchestrators caused, for the undo offers under the live items.
-  // Loaded when the card mounts and after each undo, not polled: the list
-  // moves when the orchestrator acts, and the card is redrawn on those wakes.
-  let actions = $state<OrchestratorAction[]>([]);
-  let undoing = $state<string | null>(null);
-
-  const undoable = $derived(actions.filter((a) => a.undoable && a.undoneAt === null));
-
-  async function loadActions() {
-    try {
-      actions = (await backend().conduct?.actions({ limit: 20 })) ?? [];
-    } catch {
-      actions = [];
-    }
-  }
-
-  $effect(() => {
-    void loadActions();
-  });
+  // The list is `actions.svelte.ts` now, and HomePage loads it: the merge rule
+  // that draws one "nothing waiting" card instead of two has to read it before
+  // deciding whether this card is drawn at all.
+  const undoable = $derived(orchestratorActions.undoable);
+  const undoing = $derived(orchestratorActions.undoing);
 
   function actionLine(action: OrchestratorAction): string {
     const name = action.objectId ? threadName(action.objectId) : "?";
@@ -97,16 +84,12 @@
   }
 
   async function undoAction(action: OrchestratorAction) {
-    undoing = action.id;
     try {
-      await backend().conduct?.undo({ actionId: action.id });
+      await orchestratorActions.undo(action.id);
     } catch (err) {
       // The bus refuses by name (busy thread, already undone); the sentence
       // is the answer and it is shown as it came.
       notifications.error(t("home.undoFailed", { error: String(err) }));
-    } finally {
-      undoing = null;
-      void loadActions();
     }
   }
 </script>
@@ -126,25 +109,25 @@
           >
             {#if item.kind === "approval"}
               {@const line = approvalLine(item)}
-              <span class="block w-full truncate text-base text-foreground/80">{line.title}</span>
-              <span class="block w-full truncate text-xs text-muted-foreground/80">{line.detail}</span>
+              <span class="block w-full truncate text-base text-foreground">{line.title}</span>
+              <span class="block w-full truncate text-sm text-muted-2">{line.detail}</span>
             {:else if item.kind === "waiting"}
-              <span class="block w-full truncate text-base text-foreground/80">
+              <span class="block w-full truncate text-base text-foreground">
                 {item.thread.title ?? item.thread.label}
               </span>
               <span class="flex w-full items-center justify-between gap-2">
-                <span class="truncate text-xs text-muted-foreground/80">{waitingLine(item)}</span>
-                <span class="shrink-0 text-2xs text-muted-foreground/70">
+                <span class="truncate text-sm text-muted-2">{waitingLine(item)}</span>
+                <span class="shrink-0 text-xs text-muted-2">
                   {projectName(item.thread.projectId)}
                 </span>
               </span>
             {:else}
-              <span class="block w-full truncate text-base text-foreground/80">
+              <span class="block w-full truncate text-base text-foreground">
                 {item.thread.title ?? item.thread.label}
               </span>
               <span class="flex w-full items-center justify-between gap-2">
-                <span class="truncate text-xs text-muted-foreground/80">{delegationLine(item)}</span>
-                <span class="shrink-0 text-2xs text-muted-foreground/70">
+                <span class="truncate text-sm text-muted-2">{delegationLine(item)}</span>
+                <span class="shrink-0 text-xs text-muted-2">
                   {projectName(item.thread.projectId)}
                 </span>
               </span>
@@ -157,12 +140,12 @@
            dismissal brought back, both stamps on rows. -->
       {#each undoable as action (action.id)}
         <li class="flex items-center gap-2 rounded-sm px-1.5 py-1.5">
-          <span class="min-w-0 flex-1 truncate text-xs text-muted-foreground/80">
+          <span class="min-w-0 flex-1 truncate text-sm text-muted-2">
             {actionLine(action)}
           </span>
           <button
             type="button"
-            class="shrink-0 rounded-md border border-border px-2 py-0.5 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground disabled:opacity-40"
+            class="shrink-0 rounded-md border border-edge px-2 py-0.5 text-sm text-muted-foreground transition hover:border-foreground/30 hover:text-foreground disabled:opacity-40"
             disabled={undoing !== null}
             onclick={() => void undoAction(action)}
           >

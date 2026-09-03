@@ -1,6 +1,7 @@
 <script lang="ts">
   import { fade, scale } from "svelte/transition";
   import { t } from "$lib/i18n/index.svelte";
+  import { focusTrap } from "$lib/shared/actions/focusTrap";
 
   type Props = {
     open: boolean;
@@ -23,27 +24,19 @@
     onCancel,
   }: Props = $props();
 
-  let dialogEl: HTMLDivElement | null = $state(null);
   let confirmBtn: HTMLButtonElement | null = $state(null);
   let cancelBtn: HTMLButtonElement | null = $state(null);
 
-  $effect(() => {
-    if (!open) return;
-    // A destructive dialog opens with the keyboard on Cancel. It used to open on
-    // Confirm, which put "kill every running agent and discard every unsaved
-    // buffer" one stray Enter away, and the guard meant to prevent that could
-    // not work: it only fired when focus was outside the dialog, and focus had
-    // just been moved inside it.
-    const target = danger ? cancelBtn : confirmBtn;
-    if (!target) return;
-    // Captured before we steal focus and restored on close: otherwise
-    // confirming leaves the keyboard on a removed button, which lands on
-    // <body>, and the terminal you were typing in silently stops receiving
-    // keys until you click it again.
-    const previous = document.activeElement as HTMLElement | null;
-    target.focus();
-    return () => previous?.focus?.();
-  });
+  // A destructive dialog opens with the keyboard on Cancel. It used to open on
+  // Confirm, which put "kill every running agent and discard every unsaved
+  // buffer" one stray Enter away, and the guard meant to prevent that could not
+  // work: it only fired when focus was outside the dialog, and focus had just
+  // been moved inside it.
+  //
+  // Taking the keyboard and giving it back is `use:focusTrap` below. Without the
+  // give-back, confirming leaves it on a removed button, which lands on <body>,
+  // and the terminal you were typing in silently stops taking keys.
+  const initialFocus = $derived(danger ? cancelBtn : confirmBtn);
 
   function backdropClick(e: MouseEvent) {
     if (e.target === e.currentTarget) onCancel();
@@ -60,25 +53,8 @@
     // No window-level Enter handler. The dialog opens with one of its two
     // buttons focused and a focused button already activates on Enter, so the
     // handler that used to live here added nothing except a way for a keypress
-    // aimed somewhere else to confirm.
-    if (e.key === "Tab") {
-      // Minimal focus trap: keep Tab cycling inside the dialog.
-      const focusables = dialogEl?.querySelectorAll<HTMLElement>("button");
-      if (!focusables || focusables.length === 0) return;
-      const first = focusables[0];
-      const last = focusables[focusables.length - 1];
-      const active = document.activeElement;
-      if (!dialogEl?.contains(active)) {
-        e.preventDefault();
-        first.focus();
-      } else if (!e.shiftKey && active === last) {
-        e.preventDefault();
-        first.focus();
-      } else if (e.shiftKey && active === first) {
-        e.preventDefault();
-        last.focus();
-      }
-    }
+    // aimed somewhere else to confirm. Tab is `use:focusTrap`'s, which cycles
+    // the same two buttons for every surface in the app rather than only here.
   }
 </script>
 
@@ -96,9 +72,9 @@
     transition:fade={{ duration: 120 }}
   >
     <div
-      bind:this={dialogEl}
       class="surface-dialog w-[360px] overflow-hidden"
       transition:scale={{ duration: 140, start: 0.97 }}
+      use:focusTrap={{ initial: initialFocus }}
     >
       <div class="px-5 py-4">
         <h2 id="confirm-title" class="text-sm font-semibold tracking-tight text-foreground">
@@ -114,7 +90,7 @@
         <button
           bind:this={cancelBtn}
           type="button"
-          class="press rounded-md px-3 py-1.5 text-xs text-muted-foreground transition hover:bg-accent hover:text-foreground"
+          class="press rounded-md px-3 py-1.5 text-sm text-muted-foreground transition hover:bg-accent hover:text-foreground"
           onclick={onCancel}
         >
           {cancelLabel}
@@ -122,7 +98,7 @@
         <button
           bind:this={confirmBtn}
           type="button"
-          class="press rounded-md px-3 py-1.5 text-xs font-medium transition {danger
+          class="press rounded-md px-3 py-1.5 text-sm font-medium transition {danger
             ? 'bg-danger text-white hover:bg-danger/90'
             : 'bg-foreground text-background hover:bg-foreground/90'}"
           onclick={onConfirm}

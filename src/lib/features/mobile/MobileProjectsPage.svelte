@@ -8,6 +8,7 @@
   import { pickAndAddProject } from "$lib/features/project/api";
   import { openProjectDashboard } from "$lib/features/project/dashboard";
   import { closeThreadWithConfirm } from "$lib/features/thread/api";
+  import { FOLD_LIMIT, foldRows } from "$lib/features/project/sidebar-fold";
   import { t } from "$lib/i18n/index.svelte";
   import type { Thread, ThreadStatus } from "$lib/types";
   import StatusDot from "$lib/shared/components/StatusDot.svelte";
@@ -18,6 +19,7 @@
   import FolderPlus from "@lucide/svelte/icons/folder-plus";
   import LayoutDashboard from "@lucide/svelte/icons/layout-dashboard";
   import X from "@lucide/svelte/icons/x";
+  import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import Unlink2 from "@lucide/svelte/icons/unlink-2";
   import { rowFlip } from "$lib/shared/actions/rowFlip.svelte";
 
@@ -38,6 +40,30 @@
   function displayStatus(thread: Thread): ThreadStatus {
     if (app.unboundByDedup.includes(thread.id)) return "error";
     return visibleStatus(thread.status, !!thread.ptyId);
+  }
+
+  // Which projects the user has opened past the tenth row. Not persisted: this
+  // page is opened, read and left, where the sidebar's fold state belongs to a
+  // column that stays on screen all day.
+  let unfolded = $state<Record<string, boolean>>({});
+
+  /**
+   * A row the fold may never hide: work in flight, and the terminal on screen.
+   *
+   * `depth` is what `foldRows` cuts on, and every row here is a top-level one:
+   * the phone draws a flat list, so a block is a row and the cut never lands
+   * between a parent and a child the way it can in the sidebar.
+   */
+  function foldedThreads(projectId: string, threads: Thread[]) {
+    const rows = threads.map((thread) => ({ depth: 0, thread }));
+    const foldable = rows.length > FOLD_LIMIT;
+    const open = unfolded[projectId] ?? false;
+    const pinned = (row: { thread: Thread }) => {
+      const status = displayStatus(row.thread);
+      if (status === "running" || status === "waiting") return true;
+      return app.activeThreadId === row.thread.id;
+    };
+    return { ...foldRows(rows, pinned, !foldable || open), foldable, open };
   }
 
   function openThread(thread: Thread) {
@@ -86,7 +112,7 @@
     <h2 class="text-sm font-semibold text-foreground">{t("sidebar.projects")}</h2>
     <button
       type="button"
-      class="flex min-h-11 items-center gap-1.5 rounded-lg border border-border bg-[var(--color-surface-2)] px-3 py-2 text-base font-medium text-foreground/90 transition active:bg-[var(--color-surface-3)]"
+      class="flex min-h-11 items-center gap-1.5 rounded-lg border border-edge bg-[var(--color-surface-2)] px-3 py-2 text-base font-medium text-foreground transition active:bg-[var(--color-surface-3)]"
       onclick={() => void pickAndAddProject()}
     >
       <FolderPlus class="size-4" />
@@ -155,7 +181,7 @@
               </button>
               <button
                 type="button"
-                class="flex size-11 shrink-0 items-center justify-center rounded-lg text-foreground/80 transition hover:bg-accent active:bg-accent/70"
+                class="flex size-11 shrink-0 items-center justify-center rounded-lg text-foreground transition hover:bg-accent active:bg-accent/70"
                 onclick={() => launchInto(project.id)}
                 aria-label={t("mobile.newTerminalIn", { project: projectDisplayName(project) })}
               >
@@ -164,11 +190,13 @@
             </div>
 
             {#if threads.length > 0}
+              {@const fold = foldedThreads(project.id, threads)}
+              {@const shown = fold.rows.map((r) => r.thread)}
               <ul
                 class="border-t border-border"
-                use:rowFlip={{ key: () => threads.map((x) => x.id).join(",") }}
+                use:rowFlip={{ key: () => shown.map((x) => x.id).join(",") }}
               >
-                {#each threads as thread (thread.id)}
+                {#each shown as thread (thread.id)}
                   {@const isActive = app.activeThreadId === thread.id}
                   <li class="flex min-h-11 items-center gap-3 px-3 py-2.5 {isActive ? 'bg-[var(--color-surface-2)]' : ''}">
                     <button
@@ -182,7 +210,7 @@
                         keepAwake={(thread.keepAwake ?? false) && !!thread.ptyId}
                       />
                       <ShortcutIcon iconKey={thread.iconKey} size={15} color={threadIconColor(thread)} />
-                      <span class="min-w-0 flex-1 truncate text-base text-foreground/80">
+                      <span class="min-w-0 flex-1 truncate text-base text-foreground">
                         {thread.title ?? thread.label}
                       </span>
                     </button>
@@ -192,7 +220,7 @@
                     {#if isDelegated(thread)}
                       <button
                         type="button"
-                        class="flex size-11 shrink-0 items-center justify-center rounded-lg text-muted-foreground/70 transition hover:bg-accent hover:text-foreground active:bg-accent/70"
+                        class="flex size-11 shrink-0 items-center justify-center rounded-lg text-muted-2 transition hover:bg-accent hover:text-foreground active:bg-accent/70"
                         onclick={() => app.detachDelegation(thread.id)}
                         aria-label={t("sidebar.detachDelegation")}
                       >
@@ -201,7 +229,7 @@
                     {/if}
                     <button
                       type="button"
-                      class="ml-2 flex size-11 shrink-0 items-center justify-center rounded-lg border-l border-border/60 text-muted-foreground/70 transition hover:bg-danger/20 hover:text-danger active:bg-danger/30"
+                      class="ml-2 flex size-11 shrink-0 items-center justify-center rounded-lg border-l border-border/60 text-muted-2 transition hover:bg-danger/20 hover:text-danger active:bg-danger/30"
                       onclick={() => void closeThreadWithConfirm(thread.id)}
                       aria-label={t("mobile.closeTerminal", { name: thread.label })}
                     >
@@ -210,6 +238,27 @@
                   </li>
                 {/each}
               </ul>
+              <!-- A project with 24 terminals drew 24 rows here and the card ran
+                   past the screen twice over. Same cut as the sidebar, same
+                   words, and no memory of it: the rows under the fold are the
+                   ones nobody has touched in days. -->
+              {#if fold.foldable}
+                <button
+                  type="button"
+                  class="flex min-h-11 w-full items-center gap-1.5 border-t border-border px-3 text-sm text-muted-foreground transition active:bg-accent/40"
+                  onclick={() => (unfolded[project.id] = !fold.open)}
+                  aria-expanded={fold.open}
+                >
+                  <ChevronRight
+                    class="size-4 shrink-0 transition-transform {fold.open ? 'rotate-90' : ''}"
+                  />
+                  {fold.open
+                    ? t("sidebar.showFewer")
+                    : fold.hidden === 1
+                      ? t("sidebar.showMoreOne")
+                      : t("sidebar.showMore", { count: String(fold.hidden) })}
+                </button>
+              {/if}
             {/if}
           </section>
         {/each}

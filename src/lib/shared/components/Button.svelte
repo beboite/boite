@@ -65,7 +65,7 @@
   }: Props = $props();
 
   const SIZES: Record<Size, string> = {
-    sm: "h-6 text-2xs gap-1",
+    sm: "h-6 text-xs gap-1",
     md: "h-7 text-xs gap-1.5",
     lg: "h-9 text-sm gap-2",
   };
@@ -76,11 +76,11 @@
     primary:
       "bg-foreground text-[var(--color-surface)] hover:opacity-90 border border-transparent",
     secondary:
-      "border border-border bg-[var(--color-surface-2)] text-foreground hover:border-foreground/30",
+      "border border-edge bg-[var(--color-surface-2)] text-foreground hover:border-foreground/30",
     ghost:
       "border border-transparent text-muted-foreground hover:bg-[var(--color-surface-3)] hover:text-foreground",
     danger:
-      "border border-border text-muted-foreground hover:border-[var(--color-danger)] hover:text-[var(--color-danger)]",
+      "border border-edge text-muted-foreground hover:border-[var(--color-danger)] hover:text-[var(--color-danger)]",
   };
 
   const classes = $derived(

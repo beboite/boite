@@ -437,7 +437,7 @@
         type="text"
         autocomplete="off"
         spellcheck="false"
-        class="w-full bg-transparent text-xs text-foreground placeholder:text-muted-foreground/70 focus:outline-none"
+        class="w-full bg-transparent text-sm text-foreground placeholder:text-muted-2 focus:outline-none focus-visible:focus-ring-inset"
         placeholder={t("fastpick.search")}
         aria-label={t("fastpick.search")}
       />
@@ -446,12 +446,12 @@
 
   <div class="flex min-h-0 flex-col scroll-pane overflow-y-auto p-1">
     {#if fastpick.loading}
-      <div class="px-2 py-1.5 text-xs text-muted-foreground">{t("common.loading")}</div>
+      <div class="px-2 py-1.5 text-sm text-muted-foreground">{t("common.loading")}</div>
     {:else if fastpick.error}
-      <div class="px-2 py-1.5 text-xs text-danger">{fastpick.error}</div>
+      <div class="px-2 py-1.5 text-sm text-danger">{fastpick.error}</div>
     {:else if pane === "harness"}
       {#if fastpick.harnesses.length === 0}
-        <div class="px-2 py-1.5 text-xs text-muted-foreground">
+        <div class="px-2 py-1.5 text-sm text-muted-foreground">
           {t("fastpick.noHarness")}
         </div>
       {/if}
@@ -459,7 +459,7 @@
         <button
           type="button"
           role="menuitem"
-          class="flex items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-foreground/80 transition hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none"
+          class="flex items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-foreground transition hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none"
           onclick={() => pickHarness(h.id)}
         >
           <ShortcutIcon iconKey={iconKeyForKind(h.kind)} size={14} color={null} />
@@ -473,7 +473,7 @@
         <button
           type="button"
           role="menuitem"
-          class="flex items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-foreground/80 transition hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none"
+          class="flex items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-foreground transition hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none"
           onclick={() => pickProvider(p.id)}
         >
           <span class="min-w-0 truncate font-medium">{p.name}</span>
@@ -489,7 +489,7 @@
                before walking in: the model list is going to be the three of them at once. -->
           {#if keys.length > 1}
             <span
-              class="flex shrink-0 items-center gap-0.5 text-2xs text-muted-foreground/70"
+              class="flex shrink-0 items-center gap-0.5 text-xs text-muted-2"
               title={t("fastpick.keyCount", { count: keys.length })}
             >
               <KeyRound class="size-2.5" />
@@ -502,25 +502,25 @@
       {/each}
     {:else if pane === "model"}
       {#if providerId && fastpick.loadingModels === providerId}
-        <div class="px-2 py-1.5 text-xs text-muted-foreground">{t("common.loading")}</div>
+        <div class="px-2 py-1.5 text-sm text-muted-foreground">{t("common.loading")}</div>
       {:else if providerId && fastpick.modelsError[providerId]}
-        <div class="px-2 py-1.5 text-xs text-danger">
+        <div class="px-2 py-1.5 text-sm text-danger">
           {fastpick.modelsError[providerId]}
         </div>
       {:else if models}
-        <div class="px-2 pb-1 text-2xs text-muted-foreground/70">
+        <div class="px-2 pb-1 text-xs text-muted-2">
           {sourceLabel(models.source)}{query ? ` · ${shown.length}/${items.length}` : ""}
         </div>
         <!-- fastpick already writes which credential failed and why, so the line is shown
              rather than replaced: a key whose catalogue never arrived is a list that is
              quietly short, and the reason is usually the fix. -->
         {#each models.source.failed ?? [] as failure (failure)}
-          <div class="px-2 pb-1 text-2xs leading-snug text-[var(--color-warning)]">
+          <div class="px-2 pb-1 text-xs leading-snug text-[var(--color-warning)]">
             {failure}
           </div>
         {/each}
         {#if shown.length === 0}
-          <div class="px-2 py-1.5 text-xs text-muted-foreground">
+          <div class="px-2 py-1.5 text-sm text-muted-foreground">
             {t("fastpick.noMatch")}
           </div>
         {/if}
@@ -533,7 +533,7 @@
             <button
               type="button"
               role="menuitem"
-              class="flex min-w-0 flex-1 items-baseline gap-2 rounded px-2 py-1.5 text-left text-sm text-foreground/80 transition group-hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none"
+              class="flex min-w-0 flex-1 items-baseline gap-2 rounded px-2 py-1.5 text-left text-sm text-foreground transition group-hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none"
               onclick={(e) => pickModel(m, e.shiftKey)}
             >
               <span class="min-w-0 truncate font-medium">{nameOf(m)}</span>
@@ -544,7 +544,7 @@
                 {@const key = keyForModel(usableKeys, m)}
                 {#if key}
                   <span
-                    class="min-w-0 max-w-28 shrink truncate text-2xs text-muted-foreground/70"
+                    class="min-w-0 max-w-28 shrink truncate text-xs text-muted-2"
                     class:text-danger={key.needsKey && !key.keyPresent}
                     title={key.needsKey && !key.keyPresent ? t("fastpick.noKey") : keyLabel(key)}
                   >
@@ -553,7 +553,7 @@
                 {/if}
               {/if}
               {#if m.contextWindow}
-                <span class="shrink-0 tabular-nums text-2xs font-medium text-muted-foreground/70">
+                <span class="shrink-0 tabular-nums text-xs font-medium text-muted-2">
                   {Math.round(m.contextWindow / 1000)}K
                 </span>
               {/if}
@@ -567,7 +567,7 @@
             {#if hasOptions}
               <button
                 type="button"
-                class="flex shrink-0 items-center rounded-r border-l border-border/60 px-1.5 text-muted-foreground/70 transition hover:bg-[var(--color-surface-3)] hover:text-foreground focus-visible:bg-[var(--color-surface-3)] focus-visible:text-foreground focus-visible:outline-none group-hover:text-foreground/70"
+                class="flex shrink-0 items-center rounded-r border-l border-border/60 px-1.5 text-muted-2 transition hover:bg-[var(--color-surface-3)] hover:text-foreground focus-visible:bg-[var(--color-surface-3)] focus-visible:text-foreground focus-visible:outline-none group-hover:text-muted-foreground"
                 onclick={(e) => openOptions(m, e)}
                 aria-label={t("fastpick.options")}
                 use:tip={t("fastpick.options")}
@@ -580,7 +580,7 @@
       {/if}
     {:else if pane === "options" && model}
       {#if harness?.supportsEffort && model.effort.length > 0}
-        <div class="px-2 pb-1 pt-1 text-2xs uppercase tracking-wide text-muted-foreground/70">
+        <div class="px-2 pb-1 pt-1 text-xs uppercase tracking-wide text-muted-2">
           {t("fastpick.effort")}
         </div>
         {#each model.effort as level (level)}
@@ -588,7 +588,7 @@
             type="button"
             role="menuitemradio"
             aria-checked={effort === level}
-            class="flex items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-foreground/80 transition hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none"
+            class="flex items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-foreground transition hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none"
             onclick={() => (effort = level)}
           >
             <span
@@ -609,7 +609,7 @@
            section on an empty match hid the door with it. -->
       {#if harness?.supportsSystemPrompts && (promptStems.length > 0 || fastpick.allPrompts.length > 0)}
         <div
-          class="flex items-center gap-2 px-2 pb-1 pt-2 text-2xs uppercase tracking-wide text-muted-foreground/70"
+          class="flex items-center gap-2 px-2 pb-1 pt-2 text-xs uppercase tracking-wide text-muted-2"
         >
           <span>{t("fastpick.systemPrompt")}</span>
           <!-- The same door `a` opens in fastpick's own menu: the files matching the model
@@ -619,7 +619,7 @@
           {#if fastpick.allPrompts.length > model.prompts.length}
             <button
               type="button"
-              class="ml-auto rounded px-1 py-0.5 text-2xs normal-case transition hover:bg-accent hover:text-foreground"
+              class="ml-auto rounded px-1 py-0.5 text-xs normal-case transition hover:bg-accent hover:text-foreground"
               class:text-foreground={allPrompts}
               onclick={() => (allPrompts = !allPrompts)}
             >
@@ -632,7 +632,7 @@
             type="button"
             role="menuitemcheckbox"
             aria-checked={promptChecked(stem)}
-            class="flex items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-foreground/80 transition hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none"
+            class="flex items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-foreground transition hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none"
             onclick={() => togglePrompt(stem)}
           >
             <span
@@ -645,7 +645,7 @@
                 <Check class="size-2.5 text-[var(--color-surface-2)]" strokeWidth={3} />
               {/if}
             </span>
-            <span class="min-w-0 truncate text-xs">{stem}</span>
+            <span class="min-w-0 truncate text-sm">{stem}</span>
           </button>
         {/each}
       {/if}

@@ -39,7 +39,7 @@
   {#if installed}
     <button
       type="button"
-      class="rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-1 text-xs text-foreground transition hover:border-foreground/30 disabled:cursor-not-allowed disabled:opacity-40"
+      class="rounded-md border border-edge bg-[var(--color-surface-2)] px-2.5 py-1 text-sm text-foreground transition hover:border-foreground/30 disabled:cursor-not-allowed disabled:opacity-40"
       disabled={codexSwitcher.switching}
       onclick={() => void saveCurrent()}
     >

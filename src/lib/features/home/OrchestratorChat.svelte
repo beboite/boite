@@ -5,28 +5,36 @@
   import { settings } from "$lib/features/settings/store.svelte";
   import DashboardCard from "$lib/features/project/DashboardCard.svelte";
   import Button from "$lib/shared/components/Button.svelte";
+  import ContextMenu from "$lib/shared/components/ContextMenu.svelte";
+  import { tip } from "$lib/shared/actions/tooltip";
+  import type { ContextMenuItem } from "$lib/shared/components/ContextMenu.svelte";
   import ChatMessage from "./ChatMessage.svelte";
   import VoiceButton from "$lib/features/voice/VoiceButton.svelte";
   import { voice } from "$lib/features/voice/store.svelte";
   import MessageSquareIcon from "@lucide/svelte/icons/message-square";
+  import ChevronDown from "@lucide/svelte/icons/chevron-down";
 
   /**
    * `fill` is home's layout asking for the whole column. Off, the card keeps the
    * bounded height a dashboard tile needs, which is what every other surface
    * embedding this wants.
+   *
+   * `hint` is the launcher layout, where this is one card among Start and
+   * Recent rather than the page: it draws the line above the input that says
+   * what the two keys do.
    */
-  let { fill = false }: { fill?: boolean } = $props();
+  let { fill = false, hint = false }: { fill?: boolean; hint?: boolean } = $props();
 
   let draft = $state("");
   let list: HTMLUListElement | null = $state(null);
 
   // One thread per scope: the workspace, plus every project the orchestrator
-  // watches while the per-project experiment is armed. Switching scopes swaps
-  // the conversation shown; each keeps its own cursor in the store.
+  // watches. Switching scopes swaps the conversation shown; each keeps its own
+  // cursor in the store. No flag of its own any more: `enabledFor` already
+  // answers false for every project while the workspace experiment is off, so
+  // the list empties itself and this chat is not drawn at all.
   const scopes = $derived(
-    settings.state.experimentOrchestratorPerProject
-      ? app.projects.filter((p) => !p.archived && orchestrator.enabledFor(p.id))
-      : [],
+    app.projects.filter((p) => !p.archived && orchestrator.enabledFor(p.id)),
   );
 
   // A scope that vanished under the selector (project archived, override cut)
@@ -60,8 +68,46 @@
   });
 
   const voiceOn = $derived(
-    settings.state.experimentVoice && settings.state.voiceStt !== "off",
+    settings.state.experimentWorkspace && settings.state.voiceStt !== "off",
   );
+
+  // The scope was a native <select> on a page where every other control is
+  // custom. Same menu the sidebar's context menus use, opened under the button
+  // that names the current scope.
+  const scopeName = $derived(
+    orchestrator.scope === null
+      ? t("orchestrator.scopeWorkspace")
+      : (scopes.find((p) => p.id === orchestrator.scope)?.name ??
+        t("orchestrator.scopeWorkspace")),
+  );
+
+  let scopeMenu = $state<{
+    x: number;
+    y: number;
+    avoid: { top: number; bottom: number };
+  } | null>(null);
+
+  const scopeItems: ContextMenuItem[] = $derived([
+    {
+      label: t("orchestrator.scopeWorkspace"),
+      checked: orchestrator.scope === null,
+      action: () => (orchestrator.scope = null),
+    },
+    ...scopes.map((project) => ({
+      label: project.name,
+      checked: orchestrator.scope === project.id,
+      action: () => (orchestrator.scope = project.id),
+    })),
+  ]);
+
+  function openScopeMenu(event: MouseEvent) {
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    scopeMenu = {
+      x: rect.left,
+      y: rect.bottom,
+      avoid: { top: rect.top, bottom: rect.bottom },
+    };
+  }
 
   async function send() {
     voice.cancelAutoSend();
@@ -86,16 +132,18 @@
   {#snippet icon()}<MessageSquareIcon class="size-3.5" />{/snippet}
   {#snippet actions()}
     {#if scopes.length > 0}
-      <select
-        class="max-w-36 rounded-md border border-border bg-[var(--color-surface-2)] px-1.5 py-0.5 text-xs text-muted-foreground outline-none focus:border-foreground/30"
+      <button
+        type="button"
+        class="flex max-w-36 items-center gap-1 rounded-md border border-edge bg-[var(--color-surface-2)] px-1.5 py-0.5 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground focus-visible:focus-ring-inset"
         aria-label={t("orchestrator.scopeLabel")}
-        bind:value={orchestrator.scope}
+        aria-haspopup="menu"
+        aria-expanded={scopeMenu !== null}
+        use:tip={t("orchestrator.scopePick")}
+        onclick={openScopeMenu}
       >
-        <option value={null}>{t("orchestrator.scopeWorkspace")}</option>
-        {#each scopes as project (project.id)}
-          <option value={project.id}>{project.name}</option>
-        {/each}
-      </select>
+        <span class="min-w-0 truncate">{scopeName}</span>
+        <ChevronDown class="size-3 shrink-0 opacity-60" />
+      </button>
     {/if}
   {/snippet}
   <div class="flex flex-col {fill ? 'h-full min-h-0' : 'max-h-80 min-h-40'}">
@@ -114,12 +162,16 @@
       </ul>
     {/if}
     {#if voice.pendingSend}
-      <p class="border-t border-border px-3 pt-1.5 text-xs text-muted-foreground">
+      <p class="border-t border-border px-3 pt-1.5 text-sm text-muted-foreground">
         {t("voice.sending")}
+      </p>
+    {:else if hint}
+      <p class="border-t border-border px-3 pt-1.5 text-sm text-muted-2">
+        {t("orchestrator.composerHint")}
       </p>
     {/if}
     <div
-      class="flex items-end gap-2 border-border px-2.5 py-2 {voice.pendingSend
+      class="flex items-end gap-2 border-border px-2.5 py-2 {voice.pendingSend || hint
         ? ''
         : 'border-t'}"
     >
@@ -128,11 +180,22 @@
           onTranscript={(text) => (draft = text)}
           onAutoSend={() => void send()}
         />
+        {#if settings.state.voicePushToTalk}
+          <!-- The chord was documented in the experiments tab and nowhere the
+               microphone is. It is the button's tooltip and this chip now.
+               Wrapped rather than hidden directly: `kbd.kbd` in app.css sets a
+               display Tailwind's `hidden` cannot outrank. A phone has no
+               keyboard to hold, so the chip is desktop only. -->
+          <span class="hidden shrink-0 self-center whitespace-nowrap sm:block">
+            <kbd class="kbd">{t("voice.pushToTalkChord")}</kbd>
+          </span>
+        {/if}
       {/if}
       <textarea
         rows="1"
-        class="max-h-24 min-h-9 flex-1 resize-none rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-1.5 text-sm text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-foreground/30"
+        class="max-h-24 min-h-9 flex-1 resize-none rounded-md border border-edge bg-[var(--color-surface-2)] px-2.5 py-1.5 text-sm text-foreground outline-none placeholder:text-muted-2 focus:border-foreground/30"
         placeholder={t("orchestrator.placeholder")}
+        aria-label={t("orchestrator.inputLabel")}
         bind:value={draft}
         onkeydown={onKeydown}
         disabled={orchestrator.posting}
@@ -148,3 +211,13 @@
     </div>
   </div>
 </DashboardCard>
+
+{#if scopeMenu}
+  <ContextMenu
+    items={scopeItems}
+    x={scopeMenu.x}
+    y={scopeMenu.y}
+    avoid={scopeMenu.avoid}
+    onClose={() => (scopeMenu = null)}
+  />
+{/if}

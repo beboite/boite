@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  stateTokenOf,
-  threadVisual,
-  type ThreadVisualState,
-} from "./threadVisual";
+import { threadVisual } from "./threadVisual";
 
 const base = { asleep: false, keepAwake: false } as const;
 
@@ -70,7 +66,6 @@ describe("threadVisual", () => {
   // restarted" and put a sleeping badge on every row on screen.
   it("draws a thread that has never run as nothing", () => {
     expect(threadVisual({ ...base, status: "idle" }).state).toBe("cold");
-    expect(stateTokenOf("cold")).toBe(null);
   });
 
   // The one sleeping row that keeps the bright colour. It is dimmed by `--lit`
@@ -84,23 +79,5 @@ describe("threadVisual", () => {
     expect(
       threadVisual({ status: "done", asleep: true, keepAwake: true }),
     ).toEqual({ state: "sleeping", tone: "awake" });
-  });
-
-  // `cold` is the exception and is tested above: it has nothing to say, so the
-  // glyph falls back to the agent's logo rather than to an empty circle.
-  it("gives every state that has one a token, so hiding the logos never empties the glyph", () => {
-    const states: ThreadVisualState[] = [
-      "working",
-      "waiting",
-      "finished",
-      "ready",
-      "sleeping",
-      "failed",
-    ];
-    const tokens = states.map(stateTokenOf);
-    expect(tokens.every(Boolean)).toBe(true);
-    // Distinct, because two states sharing a mark is the same hole in a
-    // different shape: the row would show something and still not say which.
-    expect(new Set(tokens).size).toBe(states.length);
   });
 });

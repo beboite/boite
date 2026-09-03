@@ -153,7 +153,7 @@
       <!-- A pane an agent is steering with no visible sign is the wrong
            product, so the mark sits before the address rather than after it. -->
       <span
-        class="flex shrink-0 items-center gap-1 rounded-xs bg-[var(--color-surface-2)] px-1 py-0.5 text-2xs text-muted-foreground"
+        class="flex shrink-0 items-center gap-1 rounded-xs bg-[var(--color-surface-2)] px-1 py-0.5 text-xs text-muted-foreground"
         use:tip={t("browser.drivenByTitle", { agent: driver?.label ?? drivenBy })}
       >
         <Bot class="size-3" />
@@ -164,12 +164,12 @@
          a browser showing a page, and the whole difference is what it cannot
          do; the button beside it spells that out. -->
     <span
-      class="shrink-0 rounded-xs bg-[var(--color-surface-2)] px-1 py-0.5 text-2xs text-muted-foreground"
+      class="shrink-0 rounded-xs bg-[var(--color-surface-2)] px-1 py-0.5 text-xs text-muted-foreground"
     >
       {t("browser.previewChip")}
     </span>
-    <span class="min-w-0 flex-1 truncate text-2xs" use:tip={url}>
-      <span class="text-foreground/80">{address.host}</span><span
+    <span class="min-w-0 flex-1 truncate text-xs" use:tip={url}>
+      <span class="text-foreground">{address.host}</span><span
         class="text-muted-foreground">{address.rest}</span
       >
     </span>
@@ -230,21 +230,21 @@
 
   {#if !browserNote.read}
     <div
-      class="shrink-0 border-b border-border bg-[var(--color-surface-2)] px-2.5 py-2 text-2xs"
+      class="shrink-0 border-b border-border bg-[var(--color-surface-2)] px-2.5 py-2 text-xs"
     >
       <p class="font-medium text-foreground">{t("browser.noteTitle")}</p>
       <p class="mt-1 text-muted-foreground">{t("browser.noteBody")}</p>
       <div class="mt-2 flex flex-wrap items-center gap-1.5">
         <button
           type="button"
-          class="rounded-md border border-border bg-[var(--color-surface)] px-2 py-1 text-2xs text-foreground transition hover:bg-[var(--color-surface-3)]"
+          class="rounded-md border border-edge bg-[var(--color-surface)] px-2 py-1 text-xs text-foreground transition hover:bg-[var(--color-surface-3)]"
           onclick={() => void openUrl(url)}
         >
           {t("browser.openExternal")}
         </button>
         <button
           type="button"
-          class="rounded-md px-2 py-1 text-2xs text-muted-foreground transition hover:text-foreground"
+          class="rounded-md px-2 py-1 text-xs text-muted-foreground transition hover:text-foreground"
           onclick={() => browserNote.markRead()}
         >
           {t("browser.noteGotIt")}
@@ -275,7 +275,7 @@
       <div
         class="absolute inset-0 flex items-center justify-center bg-[var(--color-surface)]"
       >
-        <p class="text-2xs text-muted-foreground/70">{t("common.loading")}</p>
+        <p class="text-xs text-muted-2">{t("common.loading")}</p>
       </div>
     {/if}
 
@@ -286,23 +286,23 @@
       <div
         class="absolute inset-x-0 bottom-0 border-t border-border bg-[var(--color-surface)]/95 px-3 py-2 backdrop-blur"
       >
-        <p class="text-2xs font-medium text-foreground">
+        <p class="text-xs font-medium text-foreground">
           {t("browser.stalledTitle")}
         </p>
-        <p class="mt-0.5 text-2xs text-muted-foreground">
+        <p class="mt-0.5 text-xs text-muted-foreground">
           {t("browser.mayRefuse")}
         </p>
         <div class="mt-1.5 flex flex-wrap items-center gap-1.5">
           <button
             type="button"
-            class="rounded-md border border-border bg-[var(--color-surface-2)] px-2 py-1 text-2xs text-foreground transition hover:bg-[var(--color-surface-3)]"
+            class="rounded-md border border-edge bg-[var(--color-surface-2)] px-2 py-1 text-xs text-foreground transition hover:bg-[var(--color-surface-3)]"
             onclick={() => void openUrl(url)}
           >
             {t("browser.openExternal")}
           </button>
           <button
             type="button"
-            class="rounded-md px-2 py-1 text-2xs text-muted-foreground transition hover:text-foreground"
+            class="rounded-md px-2 py-1 text-xs text-muted-foreground transition hover:text-foreground"
             onclick={() => browserPanes.reload(paneId)}
           >
             {t("browser.reload")}

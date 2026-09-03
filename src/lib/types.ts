@@ -137,9 +137,9 @@ export type LocaleSetting = "system" | "en" | "fr";
 /**
  * Where the window goes when Boite starts.
  *
- * `home` only lands while `experimentHome` is on. `last` leaves the existing
- * boot path alone. `project` is also what a launch resolves to whenever the
- * experiment is off, whatever this field says.
+ * `home` only lands while `experimentWorkspace` is on. `last` leaves the
+ * existing boot path alone. `project` is also what a launch resolves to whenever
+ * the experiment is off, whatever this field says.
  */
 export type OpenOnLaunch = "home" | "project" | "last";
 
@@ -234,32 +234,6 @@ export interface Settings {
    * safe default for something that writes into a home directory.
    */
   syncSources: Record<string, boolean>;
-  /**
-   * Which of git, files and todo the side panel is showing, or null when it is
-   * closed.
-   *
-   * These three describe the project you are on rather than a document you are
-   * working in, so they share one column and one width instead of each taking
-   * a slice of the layout: picking a tab changes what the panel holds and never
-   * where anything is. A panel that has to sit beside one particular terminal
-   * is detached into a pane from the panel's own header, which is the case the
-   * column cannot serve.
-   *
-   * This field is the last choice made, and it answers for a project that has
-   * never been on screen and for being on no project at all. What a project
-   * remembers is in `rightPanelByProject`.
-   */
-  rightPanel: RightPanelTab;
-  /**
-   * What each project had open, keyed by project id.
-   *
-   * One column for the whole window meant a repository with nothing to commit
-   * still opened on git because the last project had, and closing it there lost
-   * it for the project that wanted it. The panels describe a project, so which
-   * one is up is the project's own answer.
-   */
-  rightPanelByProject: Record<string, RightPanelTab>;
-  rightPanelWidth: number;
   gitSplitFraction: number;
   gitAutoFetch: boolean;
   gitAutoFetchSeconds: number;
@@ -305,45 +279,26 @@ export interface Settings {
    */
   colorByModel: boolean;
   /**
-   * Which of the two sidebar designs the thread rows are drawn in.
+   * Which projects are drawing their whole thread list rather than the first
+   * ten rows.
    *
-   * They answer the same question in opposite registers, so this is a choice
-   * rather than a feature flag. `classic` rings the agent's logo, which is
-   * legible once you look at it and silent at rest. `signal` puts the state on a
-   * 2px rail down the card's left edge and sweeps it while an agent is working,
-   * which is catchable out of the corner of an eye and stays out of the row's
-   * own space. `features/thread/threadVisual.ts` decides what either draws.
-   */
-  sidebarDesign: SidebarDesign;
-  /**
-   * Whether the agent's own logo is drawn on the row at all.
+   * Persisted rather than session-scoped, unlike the settled drawer and the
+   * delegation piles: those hide threads the user filed away themselves, while
+   * this one is the sidebar deciding on its own that a project is too long. A
+   * user who says "no, show me all 24" is correcting the app, and an answer
+   * that has to be given again on every launch is not an answer.
    *
-   * Off, the glyph carries a mark for what the thread is doing instead — one per
-   * state, never an empty slot — and hovering the row brings the logo back. The
-   * classic design has one thing to put in the glyph and ignores this.
+   * Ids of the unfolded projects rather than a map of booleans: a project the
+   * user removes then leaves nothing behind but a dead id, and the list is
+   * read as a set on every draw anyway.
    */
-  sidebarHarnessLogos: boolean;
+  sidebarUnfoldedProjects: string[];
   /**
-   * Experiment: replace the side panel's three tabs with one anchored info box
-   * over the terminals: current branch, the todo an agent claimed, the last
-   * commit, and up to ten of them on hover. Off draws the classic column.
-   */
-  experimentInfoBox: boolean;
-  /**
-   * Where that box sits on every terminal. One value for the window, not per
-   * thread: a drag on any pane is the next pane's position too.
-   */
-  infoBoxAnchor: InfoBoxAnchor;
-  /**
-   * Whether the box is folded to its header. Same scope as the anchor.
+   * Whether the info box strip is folded to its branch and state cells. One
+   * value for the window, not per thread: a fold on any pane is what the next
+   * pane draws too.
    */
   infoBoxCollapsed: boolean;
-  /**
-   * Experiment: let the sidebar order itself instead of following the dragged
-   * order. Arming it moves nothing on its own — `smartSortBy` starts at
-   * `manual`, so the rows hold still until an order is actually picked.
-   */
-  experimentSmartSort: boolean;
   /**
    * Experiment: a whip over the whole window, thrown from a titlebar button.
    * Purely cosmetic — it cracks, it makes a noise, and it reaches no terminal:
@@ -359,27 +314,24 @@ export interface Settings {
   smartSortBy: SmartSortBy;
   smartSortDirection: SortDirection;
   /**
-   * Experiment: a workspace home with live agents, token use, and an inbox.
-   * Off keeps launch on a project, whatever `openOnLaunch` says.
+   * Experiment: the workspace layer, as one switch.
+   *
+   * It was four — home, orchestrator, per-project orchestrators, voice — and
+   * they were one feature seen from four angles: the orchestrator's chat is
+   * drawn inside home and nowhere else, voice is that chat's microphone, and
+   * per-project scopes are the orchestrator's own roster. Arming any one of the
+   * four alone produced a surface with no way in or a way in with no surface.
+   *
+   * Device-scoped on purpose: arming is a per-device decision (this glass shows
+   * the chat), while everything the orchestrator *is* — its agent, its autonomy,
+   * its caps — is workspace configuration below, because the thread runs on the
+   * workspace and every device must agree on what it may do.
    */
-  experimentHome: boolean;
+  experimentWorkspace: boolean;
   /**
    * Where the window goes when Boite starts. Resolved by `resolveLaunchView`.
    */
   openOnLaunch: OpenOnLaunch;
-  /**
-   * Experiment: the orchestrator layer. Device-scoped on purpose: arming is a
-   * per-device decision (this glass shows the chat), while everything the
-   * orchestrator *is* — its agent, its autonomy, its caps — is workspace
-   * configuration below, because the thread runs on the workspace and every
-   * device must agree on what it may do.
-   */
-  experimentOrchestrator: boolean;
-  /**
-   * Experiment: per-project orchestrators. Read by `orchestratorEnabledFor`
-   * only while `experimentOrchestrator` is on. Device-scoped like its parent.
-   */
-  experimentOrchestratorPerProject: boolean;
   /**
    * The harness the orchestrator runs, in `thread_spawn`'s agent vocabulary
    * (a plain key or a `fastpick:provider:model` combo). Null means none was
@@ -404,12 +356,8 @@ export interface Settings {
    * search and transcripts. The refusal is named, never an empty answer.
    */
   orchestratorBlindProjects: string[];
-  /**
-   * Experiment: voice in and out of the orchestrator chat. Device-scoped, and
-   * so is every knob under it: a microphone and a speaker are properties of
-   * this glass, not of the workspace.
-   */
-  experimentVoice: boolean;
+  // Voice in and out of the orchestrator chat. Device-scoped end to end: a
+  // microphone and a speaker are properties of this glass, not of the workspace.
   /** How speech becomes text. Off means the mic button is not drawn at all. */
   voiceStt: VoiceStt;
   /** How the orchestrator's `aloud` line becomes sound. */
@@ -442,9 +390,9 @@ export type VoiceStt = "off" | "webspeech" | "whisper";
 export type VoiceTts = "off" | "webspeech";
 
 /**
- * What the smart-sort experiment orders the sidebar by.
+ * What the sidebar orders itself by.
  *
- * `manual` is the dragged order and the state the toggle arms into. `activity`
+ * `manual` is the dragged order and the default. `activity`
  * follows the threads: a project ranks by its most recently active one, and the
  * threads inside it rank the same way. `alphabetical` reads the project names
  * and leaves each project's threads where the user dragged them.
@@ -463,29 +411,6 @@ export type SmartSortBy = "manual" | "activity" | "alphabetical";
 export type WhipSound = "synth" | "sampled" | "meme";
 
 export type SortDirection = "asc" | "desc";
-
-/**
- * The eight docks the info box can snap to: four corners and the midpoint of
- * each edge. Mid-top and mid-bottom are `top-center` / `bottom-center`.
- */
-export type InfoBoxAnchor =
-  | "top-left"
-  | "top-center"
-  | "top-right"
-  | "mid-left"
-  | "mid-right"
-  | "bottom-left"
-  | "bottom-center"
-  | "bottom-right";
-
-/**
- * The sidebar's two thread-row designs.
- *
- * A string rather than the `sidebarThreadGlow` boolean it replaces: the boolean
- * was named after one design's decoration, so a third design or a renamed second
- * one could not be spelled at all. `SettingsStore` migrates the old key.
- */
-export type SidebarDesign = "classic" | "glow";
 
 // Animation preference: "system" follows prefers-reduced-motion, "on"/"off"
 // override the OS either way.
@@ -510,21 +435,11 @@ export type ThemeId =
  * What the user picked, which is one more thing than a palette: "system"
  * follows prefers-color-scheme and every other value overrides the OS.
  *
- * A palette rather than a boolean, for the same reason `SidebarDesign` is:
- * a `darkMode: boolean` cannot spell "follow the OS" and cannot be extended to
- * a third palette without renaming every call site. `theme/appearance.ts`
- * resolves it.
+ * A palette rather than a boolean: a `darkMode: boolean` cannot spell "follow
+ * the OS" and cannot be extended to a third palette without renaming every call
+ * site. `theme/appearance.ts` resolves it.
  */
 export type ThemeMode = "system" | ThemeId;
-
-/**
- * Which tab the side panel is on, or null when it is closed.
- *
- * The same three names as `PanelKind` in the pane tree, and deliberately so: a
- * panel is the same panel whether it is docked in the column or detached into a
- * pane, and the detach button hands one straight to the other.
- */
-export type RightPanelTab = "git" | "explorer" | "todo" | null;
 
 /**
  * Where a todo stands. `claimed` exists because an agent that can tick its own

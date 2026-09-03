@@ -6,7 +6,13 @@
   import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
   import type { MessageKey } from "$lib/i18n/index.svelte";
   import { LOCALE_OPTIONS, t } from "$lib/i18n/index.svelte";
-  import type { MotionMode, ThemeId, ThemeMode } from "$lib/types";
+  import type {
+    MotionMode,
+    SmartSortBy,
+    SortDirection,
+    ThemeId,
+    ThemeMode,
+  } from "$lib/types";
   import { ACCENT_COLOR, type ModelAccent } from "$lib/features/fastpick/accent";
   import { THEMES } from "$lib/theme/themes";
   import {
@@ -50,6 +56,33 @@
     { id: "mobile", labelKey: "appearance.mobile" },
     { id: "pc", labelKey: "appearance.pc" },
   ];
+
+  /**
+   * How the sidebar orders its threads.
+   *
+   * These two rows used to hang under an "smart ordering" experiment switch.
+   * The ordering is no longer optional, so the switch is gone and the choice it
+   * guarded moved here, beside the other things that decide what the window
+   * looks like. `manual` is the dragged order and stays the default: the
+   * feature is that you can pick, not that something reorders behind you.
+   */
+  const SORT_MODES: { id: SmartSortBy; labelKey: MessageKey }[] = [
+    { id: "manual", labelKey: "appearance.sortManual" },
+    { id: "activity", labelKey: "appearance.sortActivity" },
+    { id: "alphabetical", labelKey: "appearance.sortAlpha" },
+  ];
+
+  const SORT_DIRECTIONS: { id: SortDirection; labelKey: MessageKey }[] = [
+    { id: "asc", labelKey: "appearance.sortAsc" },
+    { id: "desc", labelKey: "appearance.sortDescending" },
+  ];
+
+  const sortManual = $derived(settings.state.smartSortBy === "manual");
+
+  const RADIO =
+    "rounded-md border px-3 py-1 text-sm transition border-border bg-[var(--color-surface-2)] text-muted-foreground hover:border-foreground/30 hover:text-foreground";
+  const RADIO_ON =
+    "rounded-md border px-3 py-1 text-sm transition border-foreground/40 bg-[var(--color-surface-3)] text-foreground";
 
   const MOTION_MODES: { id: MotionMode; labelKey: MessageKey }[] = [
     { id: "system", labelKey: "appearance.motionSystem" },
@@ -113,6 +146,15 @@
       Number((e.currentTarget as HTMLInputElement).value),
     );
   }
+
+  const uiThumbPct = $derived(
+    ((settings.state.uiScalePercent - 75) / (150 - 75)) * 100,
+  );
+  const terminalThumbPct = $derived(
+    ((settings.state.terminalFontScalePercent - TERMINAL_SCALE_MIN) /
+      (TERMINAL_SCALE_MAX - TERMINAL_SCALE_MIN)) *
+      100,
+  );
 </script>
 
 {#snippet preview(theme: ThemeId)}
@@ -162,7 +204,7 @@
   </div>
 
   {#if anyAcrylic}
-    <p class="mt-2 text-2xs leading-relaxed text-muted-foreground">
+    <p class="mt-2 text-sm text-muted-foreground">
       {t("appearance.themeAcrylicNote")}
     </p>
   {/if}
@@ -176,7 +218,7 @@
   {#snippet actions()}
     <button
       type="button"
-      class="flex items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-1 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
+      class="flex items-center gap-1.5 rounded-md border border-edge bg-[var(--color-surface-2)] px-2.5 py-1 text-sm text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
       onclick={reset}
       use:tip={t("appearance.resetScale")}
     >
@@ -186,20 +228,27 @@
   {/snippet}
 
   <div class="flex items-center gap-3">
-    <span class="w-9 tabular-nums text-2xs text-muted-foreground/70">75%</span>
-    <input
-      type="range"
-      min="75"
-      max="150"
-      step="5"
-      value={settings.state.uiScalePercent}
-      oninput={onSlider}
-      class="ui-slider min-w-0 flex-1"
-      aria-label={t("appearance.uiScale")}
-    />
-    <span class="w-12 text-right tabular-nums text-xs font-semibold text-foreground">
-      {settings.state.uiScalePercent}%
-    </span>
+    <span class="w-9 shrink-0 tabular-nums text-xs text-muted-2">75%</span>
+    <div class="relative min-w-0 flex-1 pt-5">
+      <span
+        class="pointer-events-none absolute top-0 text-xs font-semibold tabular-nums text-foreground"
+        style:left="{uiThumbPct}%"
+        style:transform="translateX(-{uiThumbPct}%)"
+      >
+        {settings.state.uiScalePercent}%
+      </span>
+      <input
+        type="range"
+        min="75"
+        max="150"
+        step="5"
+        value={settings.state.uiScalePercent}
+        oninput={onSlider}
+        class="ui-slider min-w-0 w-full"
+        aria-label={t("appearance.uiScale")}
+      />
+    </div>
+    <span class="w-9 shrink-0 text-right tabular-nums text-xs text-muted-2">150%</span>
   </div>
 </SettingsCard>
 
@@ -209,8 +258,8 @@
   description={t("appearance.fontsDesc")}
 >
   <div class="flex flex-col gap-2.5">
-    <label class="flex items-center gap-3 text-xs text-muted-foreground">
-      <span class="w-24 shrink-0">{t("appearance.fontUi")}</span>
+    <label class="flex items-center gap-3 text-sm text-muted-foreground">
+      <span class="w-24 shrink-0 truncate">{t("appearance.fontUi")}</span>
       <select
         class="font-select min-w-0 flex-1"
         value={settings.state.uiFontFamily ?? ""}
@@ -226,8 +275,8 @@
       </select>
     </label>
 
-    <label class="flex items-center gap-3 text-xs text-muted-foreground">
-      <span class="w-24 shrink-0">{t("appearance.fontTerminal")}</span>
+    <label class="flex items-center gap-3 text-sm text-muted-foreground">
+      <span class="w-24 shrink-0 truncate">{t("appearance.fontTerminal")}</span>
       <select
         class="font-select min-w-0 flex-1"
         value={settings.state.terminalFontFamily ?? ""}
@@ -265,7 +314,7 @@
   {#snippet actions()}
     <button
       type="button"
-      class="flex items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-1 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
+      class="flex items-center gap-1.5 rounded-md border border-edge bg-[var(--color-surface-2)] px-2.5 py-1 text-sm text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
       onclick={() => settings.setTerminalFontScalePercent(100)}
       use:tip={t("appearance.resetTerminalSize")}
     >
@@ -275,21 +324,30 @@
   {/snippet}
 
   <div class="flex items-center gap-3">
-    <span class="w-9 tabular-nums text-2xs text-muted-foreground/70">
+    <span class="w-9 shrink-0 tabular-nums text-xs text-muted-2">
       {TERMINAL_SCALE_MIN}%
     </span>
-    <input
-      type="range"
-      min={TERMINAL_SCALE_MIN}
-      max={TERMINAL_SCALE_MAX}
-      step="5"
-      value={settings.state.terminalFontScalePercent}
-      oninput={onTerminalScale}
-      class="ui-slider min-w-0 flex-1"
-      aria-label={t("appearance.terminalSize")}
-    />
-    <span class="w-12 text-right tabular-nums text-xs font-semibold text-foreground">
-      {settings.state.terminalFontScalePercent}%
+    <div class="relative min-w-0 flex-1 pt-5">
+      <span
+        class="pointer-events-none absolute top-0 text-xs font-semibold tabular-nums text-foreground"
+        style:left="{terminalThumbPct}%"
+        style:transform="translateX(-{terminalThumbPct}%)"
+      >
+        {settings.state.terminalFontScalePercent}%
+      </span>
+      <input
+        type="range"
+        min={TERMINAL_SCALE_MIN}
+        max={TERMINAL_SCALE_MAX}
+        step="5"
+        value={settings.state.terminalFontScalePercent}
+        oninput={onTerminalScale}
+        class="ui-slider min-w-0 w-full"
+        aria-label={t("appearance.terminalSize")}
+      />
+    </div>
+    <span class="w-9 shrink-0 text-right tabular-nums text-xs text-muted-2">
+      {TERMINAL_SCALE_MAX}%
     </span>
   </div>
 </SettingsCard>
@@ -310,10 +368,10 @@
         type="button"
         role="radio"
         aria-checked={on}
-        class="rounded-md border px-3 py-1 text-xs transition
+        class="rounded-md border px-3 py-1 text-sm transition
           {on
             ? 'border-foreground/40 bg-[var(--color-surface-3)] text-foreground'
-            : 'border-border bg-[var(--color-surface-2)] text-muted-foreground hover:border-foreground/30 hover:text-foreground'}"
+            : 'border-edge bg-[var(--color-surface-2)] text-muted-foreground hover:border-foreground/30 hover:text-foreground'}"
         onclick={() => {
           if (mode.id === "auto") settings.unpinLayout();
           else settings.setMobileLayout(mode.id === "mobile");
@@ -322,6 +380,63 @@
         {t(mode.labelKey)}
       </button>
     {/each}
+  </div>
+</SettingsCard>
+
+<SettingsCard
+  title={t("appearance.sort")}
+  anchor="appearance.sort"
+  description={t("appearance.sortDesc")}
+>
+  <div class="flex flex-col gap-2">
+    <div
+      class="flex flex-wrap items-center gap-1.5"
+      role="radiogroup"
+      aria-label={t("appearance.sort")}
+    >
+      <span class="w-20 shrink-0 truncate text-sm text-muted-foreground">
+        {t("appearance.sortOrder")}
+      </span>
+      {#each SORT_MODES as mode (mode.id)}
+        <button
+          type="button"
+          role="radio"
+          aria-checked={settings.state.smartSortBy === mode.id}
+          class={settings.state.smartSortBy === mode.id ? RADIO_ON : RADIO}
+          onclick={() => settings.setSmartSortBy(mode.id)}
+        >
+          {t(mode.labelKey)}
+        </button>
+      {/each}
+    </div>
+    <!-- Disabled rather than hidden while the order is manual: a row that
+         vanishes reads as lost. -->
+    <div
+      class="flex flex-wrap items-center gap-1.5"
+      class:opacity-50={sortManual}
+      role="radiogroup"
+      aria-label={t("appearance.sortDirection")}
+      use:tip={sortManual ? t("appearance.sortDirManual") : undefined}
+    >
+      <span class="w-20 shrink-0 truncate text-sm text-muted-foreground">
+        {t("appearance.sortDirection")}
+      </span>
+      {#each SORT_DIRECTIONS as direction (direction.id)}
+        <button
+          type="button"
+          role="radio"
+          aria-checked={settings.state.smartSortDirection === direction.id}
+          aria-disabled={sortManual}
+          class={settings.state.smartSortDirection === direction.id ? RADIO_ON : RADIO}
+          onclick={() => {
+            if (sortManual) return;
+            settings.setSmartSortDirection(direction.id);
+          }}
+        >
+          {t(direction.labelKey)}
+        </button>
+      {/each}
+    </div>
   </div>
 </SettingsCard>
 
@@ -335,7 +450,7 @@
 {#if settings.state.colorByModel}
   <div class="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-3 pb-1">
     {#each ACCENTS as accent (accent.id)}
-      <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
+      <span class="flex items-center gap-1.5 text-sm text-muted-foreground">
         <span
           class="size-2 shrink-0 rounded-full"
           style:background-color={ACCENT_COLOR[accent.id]}
@@ -353,10 +468,10 @@
         type="button"
         role="radio"
         aria-checked={settings.state.motionMode === mode.id}
-        class="rounded-md border px-3 py-1 text-xs transition
+        class="rounded-md border px-3 py-1 text-sm transition
           {settings.state.motionMode === mode.id
             ? 'border-foreground/40 bg-[var(--color-surface-3)] text-foreground'
-            : 'border-border bg-[var(--color-surface-2)] text-muted-foreground hover:border-foreground/30 hover:text-foreground'}"
+            : 'border-edge bg-[var(--color-surface-2)] text-muted-foreground hover:border-foreground/30 hover:text-foreground'}"
         onclick={() => settings.setMotionMode(mode.id)}
       >
         {t(mode.labelKey)}
@@ -372,10 +487,10 @@
         type="button"
         role="radio"
         aria-checked={settings.state.locale === option.id}
-        class="rounded-md border px-3 py-1 text-xs transition
+        class="rounded-md border px-3 py-1 text-sm transition
           {settings.state.locale === option.id
             ? 'border-foreground/40 bg-[var(--color-surface-3)] text-foreground'
-            : 'border-border bg-[var(--color-surface-2)] text-muted-foreground hover:border-foreground/30 hover:text-foreground'}"
+            : 'border-edge bg-[var(--color-surface-2)] text-muted-foreground hover:border-foreground/30 hover:text-foreground'}"
         onclick={() => settings.setLocale(option.id)}
       >
         {t(option.labelKey)}
@@ -392,7 +507,7 @@
     background: var(--color-surface-2);
     color: var(--color-foreground);
     padding: 3px 8px;
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     font-family: inherit;
   }
   .font-select:hover {
@@ -490,7 +605,7 @@
 
   .swatch-label {
     padding: 0 2px 1px;
-    font-size: var(--text-2xs);
+    font-size: var(--text-sm);
     color: var(--color-muted-foreground);
   }
   .theme-swatch.selected .swatch-label {

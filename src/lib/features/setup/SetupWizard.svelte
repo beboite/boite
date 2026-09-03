@@ -3,7 +3,7 @@
   import { backend } from "$lib/backend";
   import { SETUP_STEPS, type SetupDraft } from "./steps";
   import BoiteLogo from "$lib/shared/components/BoiteLogo.svelte";
-  import { restoreFocus } from "$lib/shared/keyboard/overlay";
+  import { focusTrap } from "$lib/shared/actions/focusTrap";
   import { t, LOCALE_OPTIONS } from "$lib/i18n/index.svelte";
   import { reportSettingsSnapshot } from "./telemetry";
 
@@ -12,18 +12,7 @@
 
   const draft = $state<SetupDraft>({ shortcuts: [], modeB: false });
 
-  let dialogEl = $state<HTMLDivElement | null>(null);
   let nextBtn = $state<HTMLButtonElement | null>(null);
-
-  // Same shape as ConfirmDialog. The wizard is the whole screen on a first run,
-  // and it used to open with the keyboard on nothing: Tab started from the top of
-  // the document instead of inside the dialog.
-  $effect(() => {
-    const previous = document.activeElement as HTMLElement | null;
-    const surface = dialogEl;
-    (nextBtn ?? dialogEl)?.focus();
-    return () => restoreFocus(previous, surface);
-  });
 
   const total = SETUP_STEPS.length;
   const current = $derived(step > 0 ? (SETUP_STEPS[step - 1] ?? null) : null);
@@ -69,7 +58,6 @@
        own heading, so the dialog names itself there instead of pointing at an id
        that is no longer in the document. -->
   <div
-    bind:this={dialogEl}
     class="surface-dialog modal flex w-[min(94vw,540px)] flex-col gap-4 p-6 outline-none {current?.id ===
     'telemetry'
       ? 'deal-mode'
@@ -79,6 +67,7 @@
     aria-labelledby={step === 0 ? "setup-title" : undefined}
     aria-label={step === 0 ? undefined : t("setup.title")}
     tabindex="-1"
+    use:focusTrap={{ initial: nextBtn }}
   >
     <div class="flex justify-center gap-1.5" aria-hidden="true">
       {#each Array(total + 1) as _, i (i)}
@@ -101,19 +90,19 @@
                 v{__APP_VERSION__}
               </span>
             </h2>
-            <p class="max-w-sm text-xs leading-relaxed text-muted-foreground">{t("setup.desc")}</p>
+            <p class="max-w-sm text-sm text-muted-foreground">{t("setup.desc")}</p>
           </div>
 
           <div class="flex items-center justify-center gap-2">
-            <span class="text-xs text-muted-foreground">{t("setup.language")}</span>
+            <span class="text-sm text-muted-foreground">{t("setup.language")}</span>
             <div class="flex gap-1.5">
               {#each LOCALE_OPTIONS as lang (lang.id)}
                 <button
                   type="button"
-                  class="rounded-md border px-2.5 py-1 text-xs transition {settings.state
+                  class="rounded-md border px-2.5 py-1 text-sm transition {settings.state
                     .locale === lang.id
                     ? 'border-foreground/40 bg-[var(--color-surface-3)] text-foreground'
-                    : 'border-border bg-[var(--color-surface-2)] text-muted-foreground hover:border-foreground/30 hover:text-foreground'}"
+                    : 'border-edge bg-[var(--color-surface-2)] text-muted-foreground hover:border-foreground/30 hover:text-foreground'}"
                   onclick={() => settings.setLocale(lang.id)}
                 >
                   {t(lang.labelKey)}
@@ -139,7 +128,7 @@
         <button
           type="button"
           onclick={() => void skipWizard()}
-          class="rounded-lg border border-border px-3.5 py-2 text-xs font-medium text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
+          class="rounded-lg border border-border px-3.5 py-2 text-sm font-medium text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
         >
           {t("setup.skip")}
         </button>
@@ -147,7 +136,7 @@
         <button
           type="button"
           onclick={() => (step -= 1)}
-          class="rounded-lg border border-border px-3.5 py-2 text-xs font-medium text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
+          class="rounded-lg border border-border px-3.5 py-2 text-sm font-medium text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
         >
           {t("setup.back")}
         </button>
@@ -156,7 +145,7 @@
         bind:this={nextBtn}
         type="button"
         onclick={next}
-        class="rounded-lg bg-foreground px-5 py-2.5 text-xs font-bold text-background transition hover:bg-foreground/90"
+        class="rounded-lg bg-foreground px-5 py-2.5 text-sm font-bold text-background transition hover:bg-foreground/90"
       >
         {isLast ? t("setup.finish") : t("setup.continue")}
       </button>

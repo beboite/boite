@@ -12,6 +12,7 @@
   import { isDeviceMacOS } from "$lib/storage/platform.svelte";
   import { notifications } from "$lib/features/notifications/store.svelte";
   import { t } from "$lib/i18n/index.svelte";
+  import { whenSentence, type WhenPhrases } from "./when-sentence";
 
   /**
    * Every command Boite has, and what it answers to.
@@ -61,18 +62,60 @@
 
   const CHIP =
     "rounded-md border border-border bg-[var(--color-surface-2)] px-2 py-0.5 font-medium text-foreground";
+
+  let showWhen = $state(false);
+
+  const whenPhrases: WhenPhrases = $derived({
+    or: t("keybindings.whenOr"),
+    and: t("keybindings.whenAnd"),
+    not: t("keybindings.whenNot"),
+    tokens: {
+      settingsOpen: t("keybindings.token.settingsOpen"),
+      editorFocus: t("keybindings.token.editorFocus"),
+      projectFocus: t("keybindings.token.projectFocus"),
+      homeFocus: t("keybindings.token.homeFocus"),
+      overlayOpen: t("keybindings.token.overlayOpen"),
+      terminalFocus: t("keybindings.token.terminalFocus"),
+      paletteOpen: t("keybindings.token.paletteOpen"),
+      modalOpen: t("keybindings.token.modalOpen"),
+      inputFocus: t("keybindings.token.inputFocus"),
+      hasThread: t("keybindings.token.hasThread"),
+    },
+  });
 </script>
 
 <div class="flex items-start justify-between gap-3 px-3">
   <p class="text-sm text-muted-foreground">{t("keybindings.intro")}</p>
-  <button
-    type="button"
-    class="shrink-0 rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground disabled:opacity-40"
-    disabled={!keybindings.customized}
-    onclick={resetAll}
-  >
-    {t("keybindings.resetAll")}
-  </button>
+  <div class="flex shrink-0 items-center gap-2">
+    <button
+      type="button"
+      role="switch"
+      aria-checked={showWhen}
+      class="flex items-center gap-2 rounded-md px-2 py-1 text-sm text-muted-foreground transition hover:text-foreground"
+      onclick={() => (showWhen = !showWhen)}
+    >
+      {t("keyboard.showWhen")}
+      <span
+        class="relative h-4 w-7 rounded-full transition-colors {showWhen
+          ? 'bg-foreground'
+          : 'bg-[var(--color-surface-3)]'}"
+      >
+        <span
+          class="absolute top-0.5 left-0.5 size-3 rounded-full bg-background shadow-sm transition-transform {showWhen
+            ? 'translate-x-3'
+            : 'translate-x-0'}"
+        ></span>
+      </span>
+    </button>
+    <button
+      type="button"
+      class="shrink-0 rounded-md border border-edge px-2.5 py-1 text-sm text-muted-foreground transition hover:border-foreground/30 hover:text-foreground disabled:opacity-40"
+      disabled={!keybindings.customized}
+      onclick={resetAll}
+    >
+      {t("keybindings.resetAll")}
+    </button>
+  </div>
 </div>
 
 {#each KEY_COMMAND_GROUPS as group (group.id)}
@@ -93,14 +136,14 @@
         <span class="min-w-0 flex-1 truncate text-sm">{commandLabel(command.id)}</span>
 
         {#if !shipped}
-          <span class="text-[0.65rem] text-muted-foreground">{t("keybindings.changed")}</span>
+          <span class="text-xs text-muted-foreground">{t("keybindings.changed")}</span>
         {/if}
 
         <button
           type="button"
           class="rounded-md border px-2 py-0.5 text-xs transition {recording
             ? 'border-foreground/50 bg-[var(--color-surface-3)] text-foreground'
-            : 'border-transparent text-muted-foreground hover:border-border hover:text-foreground'}"
+            : 'border-transparent text-muted-foreground hover:border-edge hover:text-foreground'}"
           aria-label={t("keybindings.record")}
           onclick={() => (recording ? (keybindings.recording = null) : startRecording(command.id))}
         >
@@ -120,7 +163,7 @@
         {#if recording}
           <button
             type="button"
-            class="rounded-md border border-border px-2 py-0.5 text-xs text-muted-foreground transition hover:text-foreground"
+            class="rounded-md border border-edge px-2 py-0.5 text-sm text-muted-foreground transition hover:text-foreground"
             onclick={() => (keybindings.recording = null)}
           >
             {t("keybindings.recordCancel")}
@@ -138,16 +181,18 @@
           <RotateCcw class="size-3.5" />
         </button>
 
-        {#if rules.length > 0}
-          <span class="w-full pl-0 text-[0.65rem] text-muted-foreground">
+        {#if showWhen && rules.length > 0}
+          <span class="w-full pl-0 text-sm text-muted-foreground">
             {rules[0].when
-              ? t("keybindings.when", { clause: rules[0].when })
+              ? t("keybindings.when", {
+                  clause: whenSentence(rules[0].when, whenPhrases),
+                })
               : t("keybindings.whenAlways")}
           </span>
         {/if}
 
         {#each conflicts as conflict (conflict.other + conflict.key)}
-          <span class="flex w-full items-center gap-1 text-[0.65rem] text-[var(--color-warning)]">
+          <span class="flex w-full items-center gap-1 text-sm text-[var(--color-warning)]">
             <TriangleAlert class="size-3 shrink-0" />
             {conflict.shadowed
               ? t("keybindings.conflictShadowed", { other: commandLabel(conflict.other) })

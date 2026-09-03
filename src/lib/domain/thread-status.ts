@@ -50,6 +50,22 @@ export function isParked(status: ThreadStatus): boolean {
 }
 
 /**
+ * The launch failed before there was ever a process, so this row stands for
+ * nothing that ran.
+ *
+ * `error` is written in two places, and only one of them is this: the spawn
+ * catch, where no PTY was ever installed. The other is a PTY that came up and
+ * then reported an error, which had a process and counts as a terminal. The
+ * difference is the `ptyId` the row is not carrying.
+ *
+ * Starting a terminal in a folder that is no longer there is the case this
+ * exists for: nothing was launched, and the title bar still counted a terminal.
+ */
+export function neverStarted(status: ThreadStatus, hasPty: boolean): boolean {
+  return status === "error" && !hasPty;
+}
+
+/**
  * What the dot should say, which is not always what the row stores.
  *
  * A thread parked by a workspace switch keeps its PTY alive while its status

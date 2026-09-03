@@ -1,6 +1,7 @@
 <script lang="ts">
   import { fade, scale } from "svelte/transition";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
+  import { focusTrap } from "$lib/shared/actions/focusTrap";
   import { palette } from "./store.svelte";
   import { app } from "$lib/app/store.svelte";
   import { projectScripts } from "$lib/features/project/scripts.svelte";
@@ -23,6 +24,8 @@
   import { openBrowserPane } from "./open-url";
   import { rankRows, sectionTitleKeyAt, type PaletteRow } from "./rank";
   import { paletteSearch } from "./search.svelte";
+  import Highlight from "./Highlight.svelte";
+  import Check from "@lucide/svelte/icons/check";
 
   // The local filter alone. The workspace query has its own, longer one in
   // `content.ts`: a fuzzy match over a few hundred strings is a frame, a round
@@ -263,6 +266,7 @@
       transition:scale={{ duration: 120, start: 0.98 }}
       onkeydown={handleKeydown}
       role="presentation"
+      use:focusTrap
     >
       <input
         bind:this={inputEl}
@@ -271,7 +275,8 @@
         placeholder={t(PLACEHOLDER[liveMode])}
         spellcheck="false"
         autocomplete="off"
-        class="w-full border-b border-border bg-transparent px-4 py-3 text-sm text-foreground outline-none placeholder:text-muted-foreground/60"
+        class="w-full border-b border-edge bg-transparent px-4 py-3 text-sm text-foreground focus:outline-none focus-visible:focus-ring-inset placeholder:text-muted-2"
+        aria-label={t("palette.inputLabel")}
         role="combobox"
         aria-expanded="true"
         aria-controls="palette-list"
@@ -284,11 +289,11 @@
         class="scroll-pane overflow-y-auto py-1"
       >
         {#if liveMode === "url"}
-          <p class="px-4 py-6 text-center text-xs text-muted-foreground">
+          <p class="px-4 py-6 text-center text-sm text-muted-foreground">
             {t("palette.urlHint")}
           </p>
         {:else if visible.length === 0}
-          <p class="px-4 py-6 text-center text-xs text-muted-foreground">
+          <p class="px-4 py-6 text-center text-sm text-muted-foreground">
             {liveMode === "files" && parsed.term.trim().length < FILE_SEARCH_MIN
               ? t("palette.filesHint")
               : t("palette.noMatch")}
@@ -297,7 +302,7 @@
         {#each visible as row, i (row.c.id)}
           {@const title = sectionTitleAt(i)}
           {#if title}
-            <p class="px-4 pt-2.5 pb-1 text-2xs font-semibold tracking-wider text-muted-foreground/60 uppercase">
+            <p class="px-4 pt-2.5 pb-1 text-xs font-semibold tracking-wider text-muted-2 uppercase">
               {title}
             </p>
           {/if}
@@ -306,10 +311,11 @@
             id="palette-item-{i}"
             role="option"
             aria-selected={i === activeIndex}
+            aria-current={row.c.current ? "true" : undefined}
             class="flex w-full items-center gap-2 px-4 py-1.5 text-left text-base
               {i === activeIndex
                 ? 'bg-[var(--color-surface-3)] text-foreground'
-                : 'text-foreground/80 hover:bg-[var(--color-surface-2)]'}"
+                : 'text-foreground hover:bg-[var(--color-surface-2)]'}"
             onpointerenter={() => (activeIndex = i)}
             onclick={() => runCommand(row.c)}
           >
@@ -324,22 +330,31 @@
                  command's name, so the excerpt takes the room and the badge
                  says which of the three places it came from. -->
             {#if row.c.badgeKey}
-              <span class="shrink-0 text-2xs font-semibold tracking-wider text-muted-foreground/60 uppercase">
+              <span class="shrink-0 text-xs font-semibold tracking-wider text-muted-2 uppercase">
                 {t(row.c.badgeKey)}
               </span>
-              <span class="min-w-0 flex-1 truncate text-sm">{row.label}</span>
+              <span class="min-w-0 flex-1 truncate text-sm">
+                <Highlight text={row.label} ranges={row.matchedField === "label" ? row.ranges : undefined} />
+              </span>
               {#if row.hint}
-                <span class="max-w-[40%] shrink-0 truncate text-xs text-muted-foreground/70">
-                  {row.hint}
+                <span class="max-w-[40%] shrink-0 truncate text-sm text-muted-2">
+                  <Highlight text={row.hint} ranges={row.matchedField === "hint" ? row.ranges : undefined} />
                 </span>
               {/if}
             {:else}
-              <span class="min-w-0 truncate">{row.label}</span>
+              <span class="min-w-0 truncate">
+                <Highlight text={row.label} ranges={row.matchedField === "label" ? row.ranges : undefined} />
+              </span>
               {#if row.hint}
-                <span class="min-w-0 flex-1 truncate text-xs text-muted-foreground/70">
-                  {row.hint}
+                <span class="min-w-0 flex-1 truncate text-sm text-muted-2">
+                  <Highlight text={row.hint} ranges={row.matchedField === "hint" ? row.ranges : undefined} />
                 </span>
               {/if}
+            {/if}
+            {#if row.c.current}
+              <span class="ml-auto shrink-0 text-foreground" aria-hidden="true">
+                <Check class="size-3.5" />
+              </span>
             {/if}
           </button>
         {/each}

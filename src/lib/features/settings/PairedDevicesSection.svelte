@@ -111,12 +111,12 @@
   description={pairing ? t("devices.description") : t("devices.localOnly")}
 >
   {#if !pairing}
-    <p class="text-sm text-muted-foreground/80">{t("devices.localOnlyDetail")}</p>
+    <p class="text-sm text-muted-2">{t("devices.localOnlyDetail")}</p>
   {:else}
     {#if loading}
-      <p class="text-sm text-muted-foreground/80">{t("common.loading")}</p>
+      <p class="text-sm text-muted-2">{t("common.loading")}</p>
     {:else if devices.length === 0}
-      <p class="text-sm text-muted-foreground/80">{t("devices.none")}</p>
+      <p class="text-sm text-muted-2">{t("devices.none")}</p>
     {:else}
       <ul class="flex flex-col gap-1.5">
         {#each devices as row (row.id)}
@@ -128,12 +128,12 @@
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-2">
                 <span class="truncate text-sm text-foreground">{row.label}</span>
-                <span class="shrink-0 text-xs text-muted-foreground/70">{row.kind}</span>
+                <span class="shrink-0 text-xs text-muted-2">{row.kind}</span>
                 {#if row.revokedAt}
                   <span class="shrink-0 text-xs text-danger">{t("devices.revoked")}</span>
                 {/if}
               </div>
-              <p class="truncate text-xs text-muted-foreground/70">
+              <p class="truncate text-sm text-muted-2">
                 {row.scopes.join(", ") || t("devices.noScopes")}
                 &middot;
                 {row.lastSeenAt
@@ -168,10 +168,10 @@
     anchor="devices.inviteTitle"
     description={t("devices.inviteDesc")}
   >
-    <label class="flex flex-col gap-1 text-xs text-muted-foreground">
+    <label class="flex flex-col gap-1 text-sm text-muted-foreground">
       {t("devices.inviteLabel")}
       <input
-        class="rounded-md border border-border bg-[var(--color-surface)] px-3 py-2 text-sm text-foreground outline-none focus:border-[var(--color-success)]"
+        class="rounded-md border border-edge bg-[var(--color-surface)] px-3 py-2 text-sm text-foreground outline-none focus:border-[var(--color-success)]"
         bind:value={label}
         placeholder={t("devices.invitePlaceholder")}
         autocomplete="off"
@@ -185,19 +185,19 @@
           aria-pressed={chosen.includes(scope)}
           class="rounded-md border px-2 py-1 text-xs transition {chosen.includes(scope)
             ? 'border-foreground/40 bg-[var(--color-surface-3)] text-foreground'
-            : 'border-border text-muted-foreground hover:text-foreground'}"
+            : 'border-edge text-muted-foreground hover:text-foreground'}"
           onclick={() => toggle(scope)}
         >
           {t(`devices.scope.${scope}`)}
         </button>
       {/each}
     </div>
-    <p class="text-xs text-muted-foreground/70">{t("devices.scopeHint")}</p>
+    <p class="text-sm text-muted-2">{t("devices.scopeHint")}</p>
 
     <button
       type="button"
       disabled={inviting || chosen.length === 0}
-      class="self-start rounded-md border border-border bg-[var(--color-surface-2)] px-3 py-1.5 text-sm text-foreground transition hover:bg-[var(--color-surface-3)] disabled:opacity-50"
+      class="self-start rounded-md border border-edge bg-[var(--color-surface-2)] px-3 py-1.5 text-sm text-foreground transition hover:bg-[var(--color-surface-3)] disabled:opacity-50"
       onclick={createInvite}
     >
       {t("devices.inviteAction")}
@@ -225,13 +225,13 @@
             {/each}
           </svg>
         {/if}
-        <p class="text-xs text-muted-foreground">{t("devices.inviteOnce")}</p>
-        <code class="w-full break-all rounded bg-[var(--color-surface-3)] px-2 py-1 text-xs text-foreground">
+        <p class="text-sm text-muted-foreground">{t("devices.inviteOnce")}</p>
+        <code class="w-full break-all rounded bg-[var(--color-surface-3)] px-2 py-1 text-sm text-foreground">
           {invite.url}
         </code>
         <button
           type="button"
-          class="rounded-md border border-border px-3 py-1.5 text-sm text-foreground transition hover:bg-[var(--color-surface-3)]"
+          class="rounded-md border border-edge px-3 py-1.5 text-sm text-foreground transition hover:bg-[var(--color-surface-3)]"
           onclick={copyLink}
         >
           {t("devices.copyLink")}

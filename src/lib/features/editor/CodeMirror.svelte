@@ -180,7 +180,12 @@
   div :global(.cm-editor) {
     height: 100%;
   }
+  /* CodeMirror's own `outline: 1px dotted` is what this used to remove, and it
+     removed every trace of focus with it: the editor fills its pane, so a
+     keyboard user reaching it had nothing on screen saying so. The app's ring,
+     drawn inside the pane because a pane is clipped at its edge. */
   div :global(.cm-editor.cm-focused) {
-    outline: none;
+    outline: 2px solid color-mix(in srgb, var(--color-foreground) 45%, transparent);
+    outline-offset: -2px;
   }
 </style>

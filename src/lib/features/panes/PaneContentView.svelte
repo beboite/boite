@@ -59,7 +59,7 @@
       {@const EditorComp = EditorView.current}
       <EditorComp inPane {paneId} paneProjectId={projectId} />
     {:else}
-      <div class="flex h-full items-center justify-center text-xs text-muted-foreground/70">
+      <div class="flex h-full items-center justify-center text-sm text-muted-2">
         {t("common.loading")}
       </div>
     {/if}
@@ -70,7 +70,7 @@
         <OverviewComp {project} onOpenThread={openThread} />
       </div>
     {:else}
-      <div class="flex h-full items-center justify-center text-xs text-muted-foreground/70">
+      <div class="flex h-full items-center justify-center text-sm text-muted-2">
         {t("common.loading")}
       </div>
     {/if}

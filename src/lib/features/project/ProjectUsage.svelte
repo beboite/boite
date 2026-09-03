@@ -41,8 +41,13 @@
    * freed the calendar to take the whole width — it was a fixed 636px grid in a
    * flexible column, so a card the width of two others ended in dead space.
    */
-  type Props = { project: Project };
-  let { project }: Props = $props();
+  /**
+   * `hideCalendar` is the page saying the card is too narrow for a year: a
+   * 53-column grid under 400px is a smear, not a picture, and the figures on
+   * the line above it are the part that still reads.
+   */
+  type Props = { project: Project; hideCalendar?: boolean; class?: string };
+  let { project, hideCalendar = false, class: klass = "" }: Props = $props();
 
   const WEEKS = 53;
   const DAY_MS = 86_400_000;
@@ -236,6 +241,18 @@
    */
   const activeDays = $derived(cells.filter((c) => !c.future && c.total > 0));
 
+  /**
+   * A year of empty squares is not a picture of anything.
+   *
+   * With one coloured cell in it the calendar was still the largest element on
+   * the dashboard of a project that had been run twice, and every square in it
+   * was an assertion that nothing happened that day, made 370 times. Under two
+   * the card keeps its totals and offers the year rather than insisting on it.
+   */
+  const sparse = $derived(activeDays.length < 2);
+  let showYear = $state(false);
+  const calendar = $derived(!hideCalendar && (!sparse || showYear));
+
   const missingLabel = $derived(
     (report?.missing ?? []).map((m) => m.charAt(0).toUpperCase() + m.slice(1)).join(", "),
   );
@@ -415,7 +432,7 @@
   });
 </script>
 
-<DashboardCard title={t("project.tokens")} class="lg:col-span-2">
+<DashboardCard title={t("project.tokens")} class={klass}>
   {#snippet icon()}<Coins class="size-3.5" />{/snippet}
   {#snippet actions()}
     <button
@@ -440,12 +457,12 @@
          year of the lightest square is an assertion about every one of those
          days. The refresh in the header is the way out and is already there. -->
     <p class="text-sm text-muted-foreground">{t("project.tokensUnreachable")}</p>
-    <p class="mt-1 text-xs text-muted-foreground/70">
+    <p class="mt-1 text-sm text-muted-2">
       {t("project.tokensUnreachableHint")}
     </p>
   {:else if total === 0}
     <p class="text-sm text-muted-foreground">{t("project.tokensNone")}</p>
-    <p class="mt-1 text-xs text-muted-foreground/70">
+    <p class="mt-1 text-sm text-muted-2">
       {missingLabel
         ? t("project.tokensMissing", { agents: missingLabel })
         : t("project.tokensOnly")}
@@ -456,10 +473,10 @@
          put the headline figure at the bottom of the hole. -->
     <div class="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
       <p class="font-semibold tabular-nums text-2xl leading-none text-foreground">{fmt(total)}</p>
-      <p class="text-xs text-muted-foreground/70">{t("project.tokensRange")}</p>
+      <p class="text-sm text-muted-2">{t("project.tokensRange")}</p>
       <span class="flex-1"></span>
       {#if report.sessions > 0}
-        <p class="tabular-nums text-xs text-muted-foreground/70">
+        <p class="tabular-nums text-xs text-muted-2">
           {t("project.tokensSessions", { count: report.sessions })}
         </p>
       {/if}
@@ -474,7 +491,7 @@
         <li class="flex min-w-0 items-center gap-2">
           <ShortcutIcon iconKey={providerIcon(model.provider)} size={13} />
           <span
-            class="w-24 shrink-0 truncate text-sm text-foreground/80"
+            class="w-24 shrink-0 truncate text-sm text-foreground"
             use:tip={model.model}
             aria-hidden="true"
           >
@@ -512,18 +529,30 @@
       {/each}
     </ul>
 
+    {#if sparse && !hideCalendar}
+      <button
+        type="button"
+        class="mt-2 text-sm text-muted-foreground underline-offset-2 transition hover:text-foreground hover:underline"
+        onclick={() => (showYear = !showYear)}
+        aria-expanded={showYear}
+      >
+        {showYear ? t("project.tokensHideYear") : t("project.tokensShowYear")}
+      </button>
+    {/if}
+
+    {#if calendar}
     <!-- Sized by the card, not by the year: every column is a fraction of the
          width, so the calendar ends where the card does. -->
     <div class="cal mt-3">
       <span></span>
       <div class="cal-months" aria-hidden="true">
         {#each monthMarks as label, w (w)}
-          <span class="text-2xs whitespace-nowrap text-muted-foreground/60">{label ?? ""}</span>
+          <span class="text-xs whitespace-nowrap text-muted-2">{label ?? ""}</span>
         {/each}
       </div>
       <div class="cal-weekdays" aria-hidden="true">
         {#each weekdayMarks as label, row (row)}
-          <span class="text-2xs leading-none text-muted-foreground/60">{label ?? ""}</span>
+          <span class="text-xs leading-none text-muted-2">{label ?? ""}</span>
         {/each}
       </div>
       <!-- One listener for the year rather than 371. `pointerover` fires once
@@ -559,7 +588,7 @@
       </div>
     </div>
     <div
-      class="mt-1.5 flex items-center justify-end gap-1 text-2xs text-muted-foreground/70"
+      class="mt-1.5 flex items-center justify-end gap-1 text-xs text-muted-2"
       aria-hidden="true"
     >
       <span>{t("project.tokensLess")}</span>
@@ -568,8 +597,9 @@
       {/each}
       <span>{t("project.tokensMore")}</span>
     </div>
+    {/if}
     {#if missingLabel}
-      <p class="mt-1 text-xs text-muted-foreground/70">
+      <p class="mt-1 text-sm text-muted-2">
         {t("project.tokensMissing", { agents: missingLabel })}
       </p>
     {/if}
@@ -586,7 +616,7 @@
     style:top="{cardTop}px"
     style:left="{cardLeft}px"
   >
-    <p class="whitespace-nowrap text-2xs text-muted-foreground">{cardDay}</p>
+    <p class="whitespace-nowrap text-xs text-muted-foreground">{cardDay}</p>
     <p class="whitespace-nowrap tabular-nums text-sm font-medium text-foreground">
       {hovered.cell.total > 0
         ? t("project.tokensSpent", { total: fmt(hovered.cell.total) })
@@ -629,8 +659,15 @@
     box-shadow: 0 0 0 0 transparent;
     transition: box-shadow 80ms ease-out;
   }
+  /* A pointer on a square gets no box: the ring it already grows says which one
+     is being read. The keyboard gets one, because a 9px cell moving its own
+     shadow by a pixel is not something a caret can be found by. */
   .cal-cell:focus {
     outline: none;
+  }
+  .cal-cell:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--color-foreground) 45%, transparent);
+    outline-offset: 2px;
   }
   .cal-today {
     box-shadow: 0 0 0 1px var(--color-muted-foreground);

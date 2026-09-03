@@ -150,7 +150,7 @@
   }
 
   const rowClass =
-    "flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1 text-left text-xs text-foreground/80 transition hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-40";
+    "flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1 text-left text-sm text-foreground transition hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:focus-ring-inset disabled:cursor-not-allowed disabled:opacity-40";
 </script>
 
 <!-- Compact carries no surface of its own: it is the contents of a popover, and
@@ -180,21 +180,21 @@
       {#if onBoite}
         <!-- The list changed machine when the project did, and nothing else on
              screen says which one these shells belong to. -->
-        <span class="ml-auto shrink-0 text-2xs text-muted-foreground/70">
+        <span class="ml-auto shrink-0 text-xs text-muted-2">
           {t("sidebar.onBoite", { name: workspace.info.name || "boite" })}
         </span>
       {/if}
     </div>
     <div class="flex min-h-0 flex-col scroll-pane overflow-y-auto p-1.5">
       {#if shells.length === 0}
-        <div class="px-2 py-1.5 text-xs text-muted-foreground">
+        <div class="px-2 py-1.5 text-sm text-muted-foreground">
           {t("shell.noneDetected")}
         </div>
       {/if}
       {#each shells as shell (shell.id)}
         <button type="button" class={rowClass} onclick={(e) => void pickShell(shell, e.shiftKey)}>
           <span class="min-w-0 truncate font-medium">{shell.label}</span>
-          <span class="ml-auto shrink-0 text-2xs text-muted-foreground/70">
+          <span class="ml-auto shrink-0 text-xs text-muted-2">
             {shell.id}
           </span>
         </button>
@@ -222,7 +222,7 @@
           type="button"
           class={compact
             ? rowClass
-            : "press group flex shrink-0 items-center gap-1.5 rounded-md border border-transparent bg-[var(--color-surface-2)] px-2.5 py-1 text-xs text-foreground/80 hover:border-border hover:bg-[var(--color-surface-3)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"}
+            : "press group flex shrink-0 items-center gap-1.5 rounded-md border border-transparent bg-[var(--color-surface-2)] px-2.5 py-1 text-sm text-foreground hover:border-edge hover:bg-[var(--color-surface-3)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"}
           disabled={!shortcut.command.trim()}
           onclick={(e) => void launch(shortcut.id, e.shiftKey)}
           oncontextmenu={(e) => {
@@ -242,7 +242,7 @@
       {#if settings.state.shortcuts.length === 0}
         <button
           type="button"
-          class="shrink-0 text-xs text-muted-foreground transition hover:text-foreground"
+          class="shrink-0 text-sm text-muted-foreground transition hover:text-foreground"
           onclick={openSettings}
         >
           {t("shortcuts.addShortcuts")}
@@ -275,7 +275,7 @@
         <div class="group flex items-stretch rounded-md transition hover:bg-accent">
           <button
             type="button"
-            class="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1 text-left text-xs text-muted-foreground transition group-hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none"
+            class="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1 text-left text-sm text-muted-foreground transition group-hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none"
             onclick={(e) => void launchDefaultShell(e.shiftKey)}
             use:tip={defaultShell
               ? t("shell.launchNamed", { name: defaultShell.label })
@@ -286,7 +286,7 @@
           </button>
           <button
             type="button"
-            class="flex shrink-0 items-center rounded-r-md border-l border-border/60 px-1.5 text-muted-foreground/70 transition hover:bg-[var(--color-surface-3)] hover:text-foreground focus-visible:bg-[var(--color-surface-3)] focus-visible:text-foreground focus-visible:outline-none group-hover:text-foreground/70 disabled:cursor-not-allowed disabled:opacity-40"
+            class="flex shrink-0 items-center rounded-r-md border-l border-border/60 px-1.5 text-muted-2 transition hover:bg-[var(--color-surface-3)] hover:text-foreground focus-visible:bg-[var(--color-surface-3)] focus-visible:text-foreground focus-visible:outline-none group-hover:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-40"
             disabled={shells.length === 0}
             onclick={() => (pane = "shell")}
             aria-label={t("shell.pick")}

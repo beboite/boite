@@ -108,7 +108,7 @@
     {/if}
   {/snippet}
 
-  <p class="mb-2.5 text-xs leading-relaxed text-muted-foreground">
+  <p class="mb-2.5 text-sm text-muted-foreground">
     {t("project.mcpDesc")}
   </p>
 
@@ -137,5 +137,5 @@
     </div>
   {/if}
 
-  <p class="mt-2 text-xs text-muted-foreground/70">{t("project.mcpNextLaunch")}</p>
+  <p class="mt-2 text-sm text-muted-2">{t("project.mcpNextLaunch")}</p>
 </DashboardCard>

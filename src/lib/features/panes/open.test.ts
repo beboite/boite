@@ -44,13 +44,15 @@ vi.mock("$lib/features/notifications/store.svelte", () => ({
 import {
   anchorPaneId,
   anchorProjectId,
+  closeMobilePane,
   closePanelPane,
   openPane,
   panePresence,
   panelRatio,
   splitFocused,
+  togglePanelPane,
 } from "./open";
-import { paneStore, countLeaves, leafNodesOf } from "./store.svelte";
+import { paneStore, countLeaves, leafNodesOf, MAX_LEAVES } from "./store.svelte";
 
 function threads(...rows: [string, string][]) {
   app.threads = rows.map(([id, projectId]) => ({ id, projectId }));
@@ -123,8 +125,9 @@ describe("openPane", () => {
   it("says the group is full rather than failing quietly", () => {
     threads(["t1", "p"]);
     app.activeThreadId = "t1";
-    for (const kind of ["git", "todo"] as const) openPane({ kind });
-    openPane({ kind: "browser", url: "http://localhost:1/" });
+    for (let i = 1; i < MAX_LEAVES; i++) {
+      openPane({ kind: "browser", url: `http://localhost:${i}/` });
+    }
     expect(errors).toEqual([]);
 
     expect(openPane({ kind: "dashboard" })).toBe(null);
@@ -197,8 +200,8 @@ describe("panePresence and closePanelPane", () => {
   it("says so when there is no detached panel to close", () => {
     threads(["t1", "p"]);
     app.activeThreadId = "t1";
-    // What tells the titlebar button to fall through to the docked column
-    // instead of swallowing the click.
+    // What tells a caller holding a panel kind that there was nothing of it on
+    // screen, rather than that it closed something.
     expect(closePanelPane("todo")).toBe(false);
   });
 
@@ -222,6 +225,40 @@ describe("panePresence and closePanelPane", () => {
 
 });
 
+/**
+ * The title bar's three buttons. They used to toggle a docked column, which is
+ * gone, and a button that only ever opened would have been a button you could
+ * not undo.
+ */
+describe("togglePanelPane", () => {
+  it("opens it, then closes it when the second press finds it focused", () => {
+    threads(["t1", "p"]);
+    app.activeThreadId = "t1";
+
+    togglePanelPane("git");
+    const pane = panePresence("git");
+    expect(pane).toBeTruthy();
+    expect(paneStore.groupOf("t1")!.focusedPaneId).toBe(pane);
+
+    togglePanelPane("git");
+    expect(panePresence("git")).toBe(null);
+    expect(countLeaves(paneStore.groupOf("t1")!.root)).toBe(1);
+  });
+
+  it("focuses a pane that is open but not focused, rather than closing it", () => {
+    threads(["t1", "p"]);
+    app.activeThreadId = "t1";
+
+    togglePanelPane("git");
+    const pane = panePresence("git")!;
+    paneStore.setFocused(paneStore.groupOf("t1")!.id, "t1");
+
+    togglePanelPane("git");
+    expect(panePresence("git")).toBe(pane);
+    expect(paneStore.groupOf("t1")!.focusedPaneId).toBe(pane);
+  });
+});
+
 describe("panelRatio", () => {
   it("is a column of about 320px, whatever the window is wide", () => {
     paneStore.setViewport(2560, 1400);
@@ -232,6 +269,31 @@ describe("panelRatio", () => {
     paneStore.setViewport(600, 800);
     expect(panelRatio()).toBeLessThanOrEqual(0.6);
     expect(panelRatio()).toBeGreaterThanOrEqual(0.12);
+  });
+});
+
+describe("closeMobilePane", () => {
+  it("leaves the group's other panes, which is what the strip then shows", () => {
+    threads(["t1", "p"]);
+    app.activeThreadId = "t1";
+    const git = openPane({ kind: "git" })!;
+
+    expect(closeMobilePane(git)).toBe(true);
+    expect(paneStore.groupOf("t1")).toBeTruthy();
+    expect(panePresence("git")).toBeNull();
+    expect(countLeaves(paneStore.groupOf("t1")!.root)).toBe(1);
+  });
+
+  it("puts the project overview where the last pane was, never an empty tab", () => {
+    app.selectedProjectId = "p";
+    const todo = openPane({ kind: "todo" })!;
+    expect(paneStore.groups).toHaveLength(1);
+
+    expect(closeMobilePane(todo)).toBe(true);
+    expect(paneStore.groups).toHaveLength(1);
+    const root = paneStore.groups[0].root;
+    expect(leafNodesOf(root).map((l) => l.content.kind)).toEqual(["dashboard"]);
+    expect(paneStore.groups[0].projectId).toBe("p");
   });
 });
 

@@ -393,7 +393,7 @@
         <!-- The build every row below is compared against, spelled out rather
              than left implicit: "behind" is only meaningful next to it. -->
         <span
-          class="shrink-0 tabular-nums text-2xs text-muted-foreground"
+          class="shrink-0 tabular-nums text-xs text-muted-foreground"
           use:tip={t("workspace.versionThis")}
         >
           v{__APP_VERSION__}
@@ -418,7 +418,7 @@
         <Layers class="size-4 shrink-0 text-muted-foreground" />
         <span class="flex min-w-0 flex-1 flex-col leading-tight">
           <span class="font-medium text-foreground">{t("workspace.dynamicMode")}</span>
-          <span class="truncate text-xs text-muted-foreground">
+          <span class="truncate text-sm text-muted-foreground">
             {t("workspace.dynamicDesc")}
           </span>
         </span>
@@ -451,7 +451,7 @@
           )}
           <span class="flex min-w-0 flex-1 flex-col leading-tight">
             <span class="truncate font-medium text-foreground">{labelOf(b)}</span>
-            <span class="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+            <span class="flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground">
               <span class="truncate">{hostOf(b.url)}</span>
               <!-- A boite that is behind is worth seeing before switching to
                    it, so it is tinted rather than left as one number among
@@ -459,7 +459,7 @@
                    showing a blank, which reads as "up to date". -->
               {#if version}
                 <span
-                  class={`shrink-0 tabular-nums text-2xs ${behind ? "rounded bg-warning/15 px-1 font-medium text-warning" : "text-muted-foreground/70"}`}
+                  class={`shrink-0 tabular-nums text-xs ${behind ? "rounded bg-warning/15 px-1 font-medium text-warning" : "text-muted-2"}`}
                   use:tip={behind
                     ? t("workspace.versionBehind", {
                         version,
@@ -470,14 +470,14 @@
                   v{version}
                 </span>
               {:else}
-                <span class="shrink-0 text-2xs text-muted-foreground/60">
+                <span class="shrink-0 text-xs text-muted-2">
                   {t("workspace.versionUnknown")}
                 </span>
               {/if}
             </span>
           </span>
           {#if active}
-            <span class="shrink-0 text-2xs uppercase tracking-wide text-muted-foreground">
+            <span class="shrink-0 text-xs uppercase tracking-wide text-muted-foreground">
               {#if connected}
                 {t("workspace.connStateConnected")}
               {:else if workspace.connection === "connecting"}
@@ -489,7 +489,7 @@
           {:else if b.enabled}
             <!-- The state of a connection this device holds without standing on
                  it, which is the only place that answers for one. -->
-            <span class="shrink-0 text-2xs uppercase tracking-wide text-muted-foreground">
+            <span class="shrink-0 text-xs uppercase tracking-wide text-muted-foreground">
               {environmentPhase(b.id)}
             </span>
           {/if}
@@ -507,7 +507,7 @@
         {#if !active}
           <button
             type="button"
-            class={`flex shrink-0 items-center justify-center rounded-lg transition hover:bg-accent ${mobile ? "w-11" : "w-9"} ${b.enabled ? "text-foreground" : "text-muted-foreground/60"}`}
+            class={`flex shrink-0 items-center justify-center rounded-lg transition hover:bg-accent ${mobile ? "w-11" : "w-9"} ${b.enabled ? "text-foreground" : "text-muted-2"}`}
             onclick={() => toggleKeepConnected(b)}
             aria-label={t("workspace.keepConnected")}
             use:tip={b.enabled
@@ -530,7 +530,7 @@
 
       {#if active}
         <div class="mb-1 flex flex-col gap-2.5 rounded-lg bg-[var(--color-background)] px-2.5 py-2.5">
-          <label class="flex flex-col gap-1 text-2xs uppercase tracking-wide text-muted-foreground">
+          <label class="flex flex-col gap-1 text-xs uppercase tracking-wide text-muted-foreground">
             {t("workspace.name")}
             <input
               bind:value={nameDraft}
@@ -543,7 +543,7 @@
             />
           </label>
           <div class="flex flex-col gap-1.5">
-            <span class="text-2xs uppercase tracking-wide text-muted-foreground">
+            <span class="text-xs uppercase tracking-wide text-muted-foreground">
               {t("workspace.color")}
             </span>
             <div class={`flex flex-wrap ${mobile ? "gap-2.5" : "gap-2"}`}>
@@ -581,7 +581,7 @@
           <span class="text-base font-semibold text-foreground">{t("workspace.addServer")}</span>
         </div>
 
-        <label class="flex flex-col gap-1 text-2xs uppercase tracking-wide text-muted-foreground">
+        <label class="flex flex-col gap-1 text-xs uppercase tracking-wide text-muted-foreground">
           {t("workspace.serverUrl")}
           <input
             bind:value={addUrl}
@@ -589,10 +589,10 @@
             spellcheck="false"
             autocapitalize="off"
             autocomplete="off"
-            class="w-full rounded-md border border-border bg-[var(--color-background)] px-3 py-2.5 font-mono text-sm normal-case tracking-normal text-foreground outline-none focus:border-foreground/40"
+            class="w-full rounded-md border border-edge bg-[var(--color-background)] px-3 py-2.5 font-mono text-sm normal-case tracking-normal text-foreground outline-none focus:border-foreground/40"
           />
         </label>
-        <label class="flex flex-col gap-1 text-2xs uppercase tracking-wide text-muted-foreground">
+        <label class="flex flex-col gap-1 text-xs uppercase tracking-wide text-muted-foreground">
           {t("workspace.token")}
           <input
             bind:value={addToken}
@@ -600,7 +600,7 @@
             placeholder="••••••••"
             spellcheck="false"
             autocomplete="off"
-            class="w-full rounded-md border border-border bg-[var(--color-background)] px-3 py-2.5 text-sm normal-case tracking-normal text-foreground outline-none focus:border-foreground/40"
+            class="w-full rounded-md border border-edge bg-[var(--color-background)] px-3 py-2.5 text-sm normal-case tracking-normal text-foreground outline-none focus:border-foreground/40"
           />
         </label>
 
@@ -627,13 +627,13 @@
       </div>
     {:else}
       {#if device.boites.length === 0 && !isTauri}
-        <p class={`text-muted-foreground/70 ${mobile ? "px-3 py-2 text-sm" : "px-2.5 py-2 text-sm"}`}>
+        <p class={`text-muted-2 ${mobile ? "px-3 py-2 text-sm" : "px-2.5 py-2 text-sm"}`}>
           {t("workspace.noServers")}
         </p>
       {/if}
       <button
         type="button"
-        class={`mt-0.5 flex items-center gap-2.5 rounded-lg border border-dashed border-border text-left text-muted-foreground transition hover:border-foreground/30 hover:bg-accent hover:text-foreground ${mobile ? "px-3 py-3 text-sm" : "px-2.5 py-2 text-base"}`}
+        class={`mt-0.5 flex items-center gap-2.5 rounded-lg border border-dashed border-edge text-left text-muted-foreground transition hover:border-foreground/30 hover:bg-accent hover:text-foreground ${mobile ? "px-3 py-3 text-sm" : "px-2.5 py-2 text-base"}`}
         onclick={openAdd}
       >
         <Plus class="size-4 shrink-0" />
@@ -644,9 +644,13 @@
 {/snippet}
 
 <div bind:this={triggerRoot} class="pointer-events-auto relative flex items-center">
+  <!-- 44px and a third of the width on a phone: the pill is the first thing in
+       the one bar that layout gets, and at 24px tall it was the smallest target
+       in the app. The desktop keeps the row height it shares with the title
+       bar's other controls. -->
   <button
     type="button"
-    class="flex max-w-[40vw] items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface)] px-2 py-0.5 text-xs text-foreground transition hover:bg-[var(--color-surface-2)]"
+    class={`flex items-center gap-1.5 rounded-md border border-edge bg-[var(--color-surface)] text-foreground transition hover:bg-[var(--color-surface-2)] ${mobile ? "min-h-11 max-w-[32vw] px-2.5 py-1 text-sm" : "max-w-[40vw] px-2 py-0.5 text-xs"}`}
     onclick={toggle}
     aria-haspopup="dialog"
     aria-expanded={open}

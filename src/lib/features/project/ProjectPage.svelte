@@ -38,7 +38,7 @@ import { projectDisplayName } from "$lib/shared/project-label";
 {#if !project}
   <div class="flex h-full items-center justify-center">
     <div class="flex flex-col items-center gap-3 text-center">
-      <span class="text-muted-foreground/50"><BoiteLogo size={48} /></span>
+      <span class="text-muted-2"><BoiteLogo size={48} /></span>
       <p class="text-sm text-muted-foreground">{t("project.pickOne")}</p>
     </div>
   </div>
@@ -48,11 +48,11 @@ import { projectDisplayName } from "$lib/shared/project-label";
       {#if project.icon}
         <img src={project.icon} alt="" class="size-4 shrink-0 rounded-sm object-cover" />
       {/if}
-      <span class="truncate text-xs font-medium text-foreground/90">
+      <span class="truncate text-xs font-medium text-foreground">
         {projectDisplayName(project)}
       </span>
       {#if isScratch(project)}
-        <span class="truncate text-xs text-muted-foreground/70">
+        <span class="truncate text-sm text-muted-2">
           {t("project.scratchNotice")}
         </span>
       {/if}

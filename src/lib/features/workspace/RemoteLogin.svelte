@@ -88,18 +88,18 @@
 <div class="flex h-full w-full items-center justify-center bg-[var(--color-background)] p-6">
   <form onsubmit={submit} class="flex w-full max-w-sm flex-col gap-4">
     <div class="mb-2 flex flex-col items-center gap-3">
-      <span class="text-muted-foreground/60"><BoiteLogo size={48} /></span>
+      <span class="text-muted-2"><BoiteLogo size={48} /></span>
       <h1 class="text-sm text-muted-foreground">{t("workspace.loginTitle")}</h1>
     </div>
 
-    <label class="flex flex-col gap-1 text-xs text-muted-foreground">
+    <label class="flex flex-col gap-1 text-sm text-muted-foreground">
       {t("workspace.serverUrl")}
       <!-- type/inputmode url: this is the one screen where a phone user has to
            type a ws:// URL, and the stock keyboard has no slash or colon on its
            first layer. -->
       <input
         bind:this={urlInput}
-        class="rounded-md border border-border bg-[var(--color-surface)] px-3 py-2 font-mono text-sm text-foreground outline-none focus:border-[var(--color-success)]"
+        class="rounded-md border border-edge bg-[var(--color-surface)] px-3 py-2 font-mono text-sm text-foreground outline-none focus:border-[var(--color-success)]"
         type="url"
         inputmode="url"
         bind:value={url}
@@ -110,25 +110,25 @@
       />
     </label>
 
-    <label class="flex flex-col gap-1 text-xs text-muted-foreground">
+    <label class="flex flex-col gap-1 text-sm text-muted-foreground">
       {t("workspace.pairingToken")}
       <input
         bind:this={tokenInput}
-        class="rounded-md border border-border bg-[var(--color-surface)] px-3 py-2 text-sm text-foreground outline-none focus:border-[var(--color-success)]"
+        class="rounded-md border border-edge bg-[var(--color-surface)] px-3 py-2 text-sm text-foreground outline-none focus:border-[var(--color-success)]"
         type="password"
         bind:value={token}
         autocomplete="off"
       />
-      <span class="text-xs text-muted-foreground/70">{t("workspace.pairingHint")}</span>
+      <span class="text-sm text-muted-2">{t("workspace.pairingHint")}</span>
     </label>
 
     {#if pairError}
-      <p class="text-xs text-danger">{pairError}</p>
+      <p class="text-sm text-danger">{pairError}</p>
     {:else if failMessage}
       <div class="flex flex-col gap-1">
-        <p class="text-xs text-danger">{failMessage}</p>
+        <p class="text-sm text-danger">{failMessage}</p>
         {#if attempt?.detail}
-          <p class="text-xs text-muted-foreground/70">{attempt.detail}</p>
+          <p class="text-sm text-muted-2">{attempt.detail}</p>
         {/if}
       </div>
     {/if}
@@ -136,7 +136,7 @@
     <button
       type="submit"
       disabled={busy || !token.trim()}
-      class="rounded-md border border-border bg-[var(--color-surface-2)] px-3 py-2 text-sm text-foreground transition hover:bg-[var(--color-surface-3)] disabled:opacity-50"
+      class="rounded-md border border-edge bg-[var(--color-surface-2)] px-3 py-2 text-sm text-foreground transition hover:bg-[var(--color-surface-3)] disabled:opacity-50"
     >
       {busy ? t("workspace.connecting") : t("workspace.pairThisDevice")}
     </button>

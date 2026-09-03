@@ -153,7 +153,7 @@
   </div>
 
   {#if error}
-    <div class="flex flex-1 items-center justify-center px-4 text-center text-xs text-[var(--color-danger)]">
+    <div class="flex flex-1 items-center justify-center px-4 text-center text-sm text-[var(--color-danger)]">
       {error}
     </div>
   {:else}

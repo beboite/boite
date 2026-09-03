@@ -270,8 +270,11 @@ pub fn run() {
                 title: app.config().product_name.clone().unwrap_or_else(|| "Boite".into()),
                 width: 1280.0,
                 height: 800.0,
-                min_width: Some(720.0),
-                min_height: Some(480.0),
+                // Under 900px the desktop layout has nowhere to put the
+                // sidebar, the panes and the title bar at once (UX audit,
+                // finding 10); the phone layout is opt-in from Appearance.
+                min_width: Some(900.0),
+                min_height: Some(560.0),
                 decorations: false,
                 transparent: true,
                 visible: false,

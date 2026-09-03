@@ -38,6 +38,7 @@
   {#if status === "running"}
     <span
       class="inline-flex size-2.5 shrink-0 items-center justify-center text-awake"
+      role="img"
       aria-label={t("status.keptAwake")}
       use:tip={t("status.keptAwakeHint")}
     >
@@ -46,6 +47,7 @@
   {:else}
     <span
       class="inline-block size-2.5 shrink-0 rounded-full bg-awake"
+      role="img"
       aria-label={t("status.keptAwake")}
       use:tip={t("status.keptAwakeHint")}
     ></span>
@@ -53,6 +55,7 @@
 {:else if asleep}
   <span
     class="inline-flex size-2.5 shrink-0 items-center justify-center text-success"
+    role="img"
     aria-label={t("status.asleep")}
     use:tip={t("status.asleepHint")}
   >
@@ -65,6 +68,7 @@
 {:else if status === "running"}
   <span
     class="inline-flex size-2.5 shrink-0 items-center justify-center text-warning"
+    role="img"
     aria-label={statusLabel}
     use:tip={statusLabel}
   >
@@ -76,12 +80,14 @@
        only thing that will move it is the user. -->
   <span
     class="dot-waiting inline-block size-2.5 shrink-0 rounded-full bg-warning"
+    role="img"
     aria-label={statusLabel}
     use:tip={statusLabel}
   ></span>
 {:else}
   <span
     class="inline-block size-2.5 shrink-0 rounded-full {colorByStatus[status]}"
+    role="img"
     aria-label={statusLabel}
     use:tip={statusLabel}
   ></span>

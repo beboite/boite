@@ -97,7 +97,7 @@
     border: 1px solid color-mix(in srgb, var(--color-danger) 50%, transparent);
     background: color-mix(in srgb, var(--color-background) 70%, transparent);
     padding: 5px 10px;
-    font-size: 11px;
+    font-size: var(--text-xs);
     font-weight: 600;
     color: var(--color-danger);
   }

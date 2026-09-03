@@ -3,6 +3,8 @@ import { logger } from "$lib/shared/services/logger.svelte";
 import { uuid } from "$lib/shared/utils/uuid";
 import type { PendingApproval } from "$lib/backend/types";
 import type { WorkspaceOrigin } from "$lib/types";
+import { notifications } from "$lib/features/notifications/store.svelte";
+import { t } from "$lib/i18n/index.svelte";
 
 /**
  * Questions the user has to answer, from wherever they come.
@@ -174,6 +176,11 @@ class ApprovalStore {
     } catch (err) {
       logger.error("approvals", "decide failed", String(err));
       await this.reload();
+      notifications.error(
+        t("approval.decideAllFailed"),
+        undefined,
+        err instanceof Error ? err.message : String(err),
+      );
     } finally {
       this.deciding = this.deciding.filter((x) => x !== id);
     }

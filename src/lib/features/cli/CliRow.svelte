@@ -197,9 +197,9 @@ ${cmd}` : cmd;
     </span>
     <span class="min-w-0 flex-1">
       <span class="flex items-baseline gap-1.5">
-        <span class="truncate text-xs font-medium text-foreground">{label}</span>
+        <span class="truncate text-sm font-medium text-foreground">{label}</span>
         {#if row.version}
-          <span class="shrink-0 tabular-nums text-xs text-muted-foreground/70">v{row.version}</span>
+          <span class="shrink-0 tabular-nums text-xs text-muted-2">v{row.version}</span>
         {/if}
         {#if primaryAction === "update" && latest}
           <span class="shrink-0 tabular-nums text-xs text-[var(--color-warning)]">v{latest}</span>
@@ -215,7 +215,7 @@ ${cmd}` : cmd;
               : "var(--color-border)"}
         ></span>
         <span
-          class="truncate text-xs text-muted-foreground"
+          class="truncate text-sm text-muted-foreground"
           title={row.path ?? row.unlinked ?? undefined}
         >
           {#if !row.installed && row.unlinked}
@@ -284,7 +284,7 @@ ${cmd}` : cmd;
        twice over, and ten rows repeating either is the noise this drops. What is
        left is the one case a reader has to act on: the manager is missing. -->
   {#if blocked}
-    <p class="flex flex-wrap items-baseline gap-2 text-xs leading-snug text-muted-foreground/70">
+    <p class="flex flex-wrap items-baseline gap-2 text-sm text-muted-2">
       <span>{t(blocked.key, { tool: blocked.tool ?? "" })}</span>
       {#if blocked.url}
         <a
@@ -302,7 +302,7 @@ ${cmd}` : cmd;
 
   {#if job}
     <div class="flex items-center justify-between gap-2">
-      <span class="text-xs leading-snug {phaseClass}">{phaseText}</span>
+      <span class="text-sm {phaseClass}">{phaseText}</span>
       {#if settled(job)}
         <div class="flex shrink-0 items-center gap-2">
           {#if job.phase !== "done" && job.kind === "install"}
@@ -342,7 +342,7 @@ ${cmd}` : cmd;
 
   {#if installer && terminalVerdict}
     <div class="flex items-center justify-between gap-2">
-      <span class="text-xs leading-snug {terminalClass}">{terminalVerdict}</span>
+      <span class="text-sm {terminalClass}">{terminalVerdict}</span>
       {#if !installer.busy}
         <div class="flex shrink-0 items-center gap-2">
           {#if installer.status === "failed" || installer.status === "cancelled"}
@@ -363,10 +363,10 @@ ${cmd}` : cmd;
 
   {#if installer && (installer.busy || installer.lines.length > 0)}
     <div
-      class="max-h-40 overflow-y-auto rounded-md border border-border bg-[var(--color-titlebar)] p-2 font-mono text-xs leading-snug"
+      class="max-h-40 overflow-y-auto rounded-md border border-border bg-[var(--color-titlebar)] p-2 font-mono text-sm"
     >
       {#each installer.lines as line}
-        <div class="break-words whitespace-pre-wrap text-foreground/80">{line}</div>
+        <div class="break-words whitespace-pre-wrap text-foreground">{line}</div>
       {/each}
     </div>
   {/if}

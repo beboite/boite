@@ -107,7 +107,7 @@
 </script>
 
 {#if loadFailed}
-  <p class="px-1 text-xs text-muted-foreground">{t("privacy.loadFailed")}</p>
+  <p class="px-1 text-sm text-muted-foreground">{t("privacy.loadFailed")}</p>
 {:else if telemetry}
   <SettingsCard title={t("privacy.stop")} anchor="privacy.stop" description={t("privacy.stopDesc")}>
     <ToggleSetting
@@ -130,7 +130,7 @@
       <button
         type="button"
         disabled={exportBusy || (!telemetry.installIdSet && !telemetry.forgetPending)}
-        class="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground transition hover:border-foreground/30 disabled:opacity-50"
+        class="rounded-lg border border-edge px-3 py-1.5 text-sm font-medium text-foreground transition hover:border-foreground/30 disabled:opacity-50"
         onclick={() => void exportEvents()}
       >
         {t("privacy.exportAction")}
@@ -139,7 +139,7 @@
         <button
           type="button"
           disabled={forgetBusy}
-          class="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground transition hover:border-foreground/30 disabled:opacity-50"
+          class="rounded-lg border border-edge px-3 py-1.5 text-sm font-medium text-foreground transition hover:border-foreground/30 disabled:opacity-50"
           onclick={() => void retryForget()}
         >
           {t("privacy.forgetRetry")}
@@ -147,7 +147,7 @@
       {/if}
     </div>
     {#if telemetry.forgetPending}
-      <p class="mt-2 text-xs text-muted-foreground">{t("privacy.forgetPending")}</p>
+      <p class="mt-2 text-sm text-muted-foreground">{t("privacy.forgetPending")}</p>
     {/if}
   </SettingsCard>
 {/if}
@@ -155,7 +155,7 @@
 <SettingsCard title={t("privacy.doc")} anchor="privacy.doc" description={t("privacy.docDesc")}>
   <button
     type="button"
-    class="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground transition hover:border-foreground/30"
+    class="rounded-lg border border-edge px-3 py-1.5 text-sm font-medium text-foreground transition hover:border-foreground/30"
     onclick={() => void openUrl(DOC_URL)}
   >
     {t("privacy.docLink")}

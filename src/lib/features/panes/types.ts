@@ -75,8 +75,28 @@ export interface PaneGroup {
 
 export type DropSide = "top" | "bottom" | "left" | "right";
 
-export const MAX_LEAVES = 4;
+/**
+ * Panes in one group.
+ *
+ * Four was a stand-in for "a screen only holds so much", and it was the wrong
+ * shape of answer: it refused a fifth pane on a 4K monitor and allowed a fourth
+ * on a 1280px laptop where all four were unreadable. What a screen holds is a
+ * width question, and MIN_COLUMN_PX is the one that answers it. This stays as
+ * the ceiling on the tree itself, high enough not to be what the user meets
+ * first.
+ */
+export const MAX_LEAVES = 8;
 export const MIN_RATIO = 0.12;
+/**
+ * The narrowest a pane may be and still be given a column of its own.
+ *
+ * Below this a terminal wraps mid-word, the git panel's file rows are all
+ * ellipsis and the explorer shows indentation instead of names, so a split that
+ * would land there is turned on its side and the new pane goes under its
+ * neighbour instead. 240px is where the file rows in `GitPanel` stop
+ * truncating.
+ */
+export const MIN_COLUMN_PX = 240;
 /**
  * Floor a pane in pixels, not only as a fraction of its parent.
  *

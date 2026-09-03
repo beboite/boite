@@ -20,9 +20,16 @@
 export const GROUP_ATTRIBUTE = "data-pane-group";
 export const SHOWN_ATTRIBUTE = "data-pane-shown";
 
-/** For a caller that already has the leaf element in hand. */
+/**
+ * For a caller that already has the leaf element in hand.
+ *
+ * The nearest mark wins, which is what makes the phone's answer right: it draws
+ * one pane of a group at a time and marks each leaf, so a leaf that is hidden
+ * inside a group that is on screen says no. On the desktop no leaf carries the
+ * attribute and the search reaches the group wrapper, as it always did.
+ */
 export function shownIn(el: Element | null | undefined): boolean {
-  return el?.closest(`[${GROUP_ATTRIBUTE}]`)?.getAttribute(SHOWN_ATTRIBUTE) === "true";
+  return el?.closest(`[${SHOWN_ATTRIBUTE}]`)?.getAttribute(SHOWN_ATTRIBUTE) === "true";
 }
 
 /**

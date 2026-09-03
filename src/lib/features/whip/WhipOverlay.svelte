@@ -3,6 +3,7 @@
   import { whip } from "$lib/features/whip/store.svelte";
   import { playCrack, primeCrackSound, closeCrackAudio } from "$lib/features/whip/crack";
   import { settings } from "$lib/features/settings/store.svelte";
+  import { motionReduced } from "$lib/theme/motion";
   import { WhipRope, WHIP, segmentBezier, type Point } from "$lib/features/whip/physics";
 
   /**
@@ -13,9 +14,12 @@
    * deliberately absent — an agent's turn is not a thing a cosmetic toy gets to
    * end.
    *
-   * The canvas exists only while a rope does. Between cracks this component is
-   * a pointer listener and nothing else, so the experiment left on costs a
-   * `pointermove` handler rather than a frame loop.
+   * The canvas exists only while a rope does, and a rope lives `WHIP.restMs`.
+   * The throw is the whole feature; what came after it was a line hanging over
+   * the sidebar until somebody guessed that clicking it let go. Between cracks
+   * this component is a pointer listener and nothing else, so the experiment
+   * left on costs a `pointermove` handler rather than a frame loop, and the
+   * whip at rest is the coiled glyph in the title bar.
    */
 
   let canvas = $state<HTMLCanvasElement | null>(null);
@@ -61,6 +65,13 @@
     // context this builds wants that gesture behind it. Fetching the sample now
     // means the first crack of the throw is already the noise that was picked.
     void primeCrackSound(settings.state.whipSound);
+    // Reduced motion takes the animation, not the toy: the crack is a noise and
+    // the whip at rest is a glyph in the title bar, so both still happen and
+    // nothing is drawn over the window.
+    if (motionReduced()) {
+      playCrack(settings.state.whipSound);
+      return;
+    }
     // Centre is the fallback for a pointer that has not moved since boot,
     // which is every launch driven by the keyboard.
     rope = new WhipRope(
@@ -79,6 +90,14 @@
     if (rope) rope.dropping = true;
   });
 
+  /** Drops the rope and the loop with it. Nothing is drawn after this. */
+  function retire() {
+    rope = null;
+    whip.active = false;
+    if (frame) cancelAnimationFrame(frame);
+    frame = 0;
+  }
+
   function start() {
     if (frame) return;
     carried = 0;
@@ -87,6 +106,13 @@
       frame = requestAnimationFrame(tick);
       const current = rope;
       if (!current) return;
+
+      // Before the step and before the draw: the frame that crosses restMs
+      // clears the canvas by unmounting it rather than drawing one more rope.
+      if (current.spent(now)) {
+        retire();
+        return;
+      }
 
       // Fixed steps: every number in WHIP is tuned per 60Hz frame, and read
       // raw on a 144Hz screen the same flick throws the rope less than half as
@@ -102,10 +128,7 @@
       if (cracked) playCrack(settings.state.whipSound);
 
       if (current.gone(bounds)) {
-        rope = null;
-        whip.active = false;
-        cancelAnimationFrame(frame);
-        frame = 0;
+        retire();
         return;
       }
       draw(current, bounds);

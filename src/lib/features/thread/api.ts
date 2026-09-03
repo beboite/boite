@@ -709,9 +709,11 @@ export async function closeThreadWithConfirm(threadId: string): Promise<boolean>
   if (!thread) return false;
   if (settings.state.confirmCloseThread) {
     const ok = await confirmDialog.ask({
-      title: "Close thread?",
-      message: `Close ${thread.title ?? thread.label}? Running process will be killed.`,
-      confirmLabel: "Close thread",
+      title: t("thread.closeConfirm.title"),
+      message: t("thread.closeConfirm.message", {
+        title: thread.title ?? thread.label,
+      }),
+      confirmLabel: t("thread.closeConfirm.confirm"),
       danger: true,
     });
     if (!ok) return false;
@@ -734,8 +736,13 @@ export async function stopThread(threadId: string) {
   if (previousPtyId) {
     try {
       await ptyKill(previousPtyId, true);
-    } catch {
+    } catch (err) {
       // already exited
+      notifications.error(
+        t("thread.stopFailed"),
+        undefined,
+        err instanceof Error ? err.message : String(err),
+      );
     }
   }
 }

@@ -12,19 +12,24 @@ import {
 import { openProjectDashboard } from "$lib/features/project/dashboard";
 import { projectScripts } from "$lib/features/project/scripts.svelte";
 import { resolveIconKey } from "$lib/shared/icons/detect";
-import { t } from "$lib/i18n/index.svelte";
+import { LOCALE_OPTIONS, t } from "$lib/i18n/index.svelte";
 import type { MessageKey } from "$lib/i18n/index.svelte";
 import { isDeviceMacOS } from "$lib/storage/platform.svelte";
 import { formatCombo } from "$lib/shared/keyboard/combo";
 import { keybindings } from "$lib/features/settings/keybindings.svelte";
-import { anchorPaneId, openPane } from "$lib/features/panes/open";
+import { anchorPaneId, openPane, togglePanelPane } from "$lib/features/panes/open";
 import { paneStore } from "$lib/features/panes/store.svelte";
 import { openTodo } from "$lib/features/todo/open";
 import { contentRowId } from "./content";
 import type { WorkspaceHit } from "$lib/backend/types";
 import type { PaneContent, PanelKind } from "$lib/features/panes/types";
-import type { IconKey } from "$lib/types";
+import type { IconKey, ThemeMode } from "$lib/types";
 import type { PaletteMode } from "./modes";
+import { SETTINGS_CATALOGUE } from "$lib/features/settings/catalogue";
+import { goToSetting, settingEntryVisible } from "$lib/features/settings/navigate.svelte";
+import { THEMES } from "$lib/theme/themes";
+import { goHome } from "$lib/features/home/goHome";
+import { shortcutAgentHint } from "$lib/features/shortcut/agent-hint";
 
 import type { PaletteSection } from "./sections";
 
@@ -57,6 +62,11 @@ export interface PaletteCommand {
    * platform, since `mod` is the Command key on macOS and Ctrl everywhere else.
    */
   chord?: string;
+  /**
+   * This row is the value already in force (a theme, a layout, a language).
+   * Drawn as a check and `aria-current`, never as a different action.
+   */
+  current?: boolean;
   /** Same glyph the sidebar row wears, so a thread is recognised before it is read. */
   icon?: { key: IconKey; color: string | null };
   /**
@@ -135,7 +145,7 @@ export function buildPaletteCommands(): PaletteCommand[] {
       section: "actions",
       labelKey: "palette.launchShortcut",
       labelParams: { label: shortcut.label },
-      hint: shortcut.command,
+      hint: shortcutAgentHint(shortcut.command),
       icon: {
         key: resolveIconKey(shortcut.iconKey, shortcut.label, shortcut.command),
         color: shortcut.iconColor ?? null,
@@ -198,10 +208,61 @@ export function buildPaletteCommands(): PaletteCommand[] {
       id: "action:home",
       section: "actions",
       labelKey: "home.title",
+      chord: chordFor("view.goHome"),
+      run: () => void goHome(),
+    });
+  }
+
+  const THEME_MODES: { id: ThemeMode; labelKey: MessageKey }[] = [
+    { id: "system", labelKey: "appearance.themeSystem" },
+    ...THEMES.map((theme) => ({
+      id: theme.id as ThemeMode,
+      labelKey: theme.labelKey,
+    })),
+  ];
+  for (const mode of THEME_MODES) {
+    commands.push({
+      id: `action:theme:${mode.id}`,
+      section: "actions",
+      labelKey: "palette.theme",
+      labelParams: { name: t(mode.labelKey) },
+      current: settings.state.themeMode === mode.id,
+      run: () => settings.setThemeMode(mode.id),
+    });
+  }
+
+  const LAYOUT_MODES: { id: "auto" | "mobile" | "pc"; labelKey: MessageKey }[] = [
+    { id: "auto", labelKey: "appearance.layoutAuto" },
+    { id: "mobile", labelKey: "appearance.mobile" },
+    { id: "pc", labelKey: "appearance.pc" },
+  ];
+  for (const mode of LAYOUT_MODES) {
+    const on =
+      mode.id === "auto"
+        ? !settings.state.layoutPinned
+        : settings.state.layoutPinned &&
+          settings.state.mobileLayout === (mode.id === "mobile");
+    commands.push({
+      id: `action:layout:${mode.id}`,
+      section: "actions",
+      labelKey: "palette.layout",
+      labelParams: { name: t(mode.labelKey) },
+      current: on,
       run: () => {
-        app.view = "home";
-        app.mobileTab = "home";
+        if (mode.id === "auto") settings.unpinLayout();
+        else settings.setMobileLayout(mode.id === "mobile");
       },
+    });
+  }
+
+  for (const option of LOCALE_OPTIONS) {
+    commands.push({
+      id: `action:locale:${option.id}`,
+      section: "actions",
+      labelKey: "palette.language",
+      labelParams: { name: t(option.labelKey) },
+      current: settings.state.locale === option.id,
+      run: () => settings.setLocale(option.id),
     });
   }
 
@@ -244,30 +305,26 @@ export function buildPaletteCommands(): PaletteCommand[] {
     });
   }
 
-  // Git, files and the todo list show in the docked column, which is where they
-  // live: asking for git from the palette means the same thing as clicking git
-  // in the titlebar, and neither should rearrange the panes.
-  //
-  // The info-box experiment replaces that column, and these three used to be
-  // dropped outright while it was on — the titlebar hides its buttons for the
-  // same reason, so turning the experiment on left no way at all to reach the
-  // todo list, the git panel or the files. Setting a panel nothing renders was
-  // the thing to avoid, not offering the three: with the column gone they open
-  // in a pane, which is where every other non-terminal surface already goes.
-  const panelCommands: [PanelKind, MessageKey][] = [
-    ["git", "panes.openGit"],
-    ["explorer", "panes.openExplorer"],
-    ["todo", "panes.openTodo"],
+  // Git, files and the todo list open as pane leaves, like every other
+  // non-terminal surface. There used to be a switch here: a docked column for
+  // most people and a pane under the info-box experiment, with the two commands
+  // meaning different things depending on a setting nobody had in mind while
+  // typing. The column is gone, so there is one answer and one place a panel
+  // can be.
+  const panelCommands: [PanelKind, MessageKey, string][] = [
+    ["git", "panes.openGit", "pane.toggleGit"],
+    ["explorer", "panes.openExplorer", "pane.toggleFiles"],
+    ["todo", "panes.openTodo", "pane.toggleTodo"],
   ];
-  for (const [kind, labelKey] of panelCommands) {
+  for (const [kind, labelKey, command] of panelCommands) {
     commands.push({
       id: `panel:${kind}`,
       section: "panes",
       labelKey,
-      run: () =>
-        settings.state.experimentInfoBox
-          ? void openPane({ kind })
-          : settings.setRightPanel(app.currentProjectId, kind),
+      chord: chordFor(command),
+      run: () => {
+        togglePanelPane(kind);
+      },
     });
   }
 
@@ -314,6 +371,18 @@ export function buildPaletteCommands(): PaletteCommand[] {
     // in the window.
     mode: "url",
   });
+
+  for (const entry of SETTINGS_CATALOGUE) {
+    if (!settingEntryVisible(entry)) continue;
+    commands.push({
+      id: `setting:${entry.key}`,
+      section: "settings",
+      labelKey: "palette.setting",
+      labelParams: { label: t(entry.key) },
+      hint: entry.descKey ? t(entry.descKey) : undefined,
+      run: () => goToSetting(entry.tab, entry.key),
+    });
+  }
 
   for (const project of app.sortedProjects) {
     commands.push({

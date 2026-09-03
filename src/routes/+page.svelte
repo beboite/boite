@@ -30,18 +30,18 @@
   import { statusEngine } from "$lib/features/thread/statusEngine";
   import { watchWindowFocus } from "$lib/app/focus.svelte";
   import PaneShell from "$lib/features/panes/PaneShell.svelte";
-  import SidePanel from "$lib/features/panes/SidePanel.svelte";
   import PaneOverlay from "$lib/features/panes/PaneOverlay.svelte";
   import { parseThreadLink } from "$lib/domain/awareness";
   import PaneDropOverlay from "$lib/features/panes/PaneDropOverlay.svelte";
   import GitPanel from "$lib/features/git/GitPanel.svelte";
   import ExplorerPanel from "$lib/features/explorer/ExplorerPanel.svelte";
-  // Already in the entry graph through SidePanel, so the phone's tab costs
-  // nothing the window was not downloading anyway.
+  // Already in the entry graph as a pane leaf, so the phone's tab costs nothing
+  // the window was not downloading anyway.
   import TodoPanel from "$lib/features/todo/TodoPanel.svelte";
   import MobileTopBar from "$lib/features/mobile/MobileTopBar.svelte";
   import MobileBottomBar from "$lib/features/mobile/MobileBottomBar.svelte";
   import MobileProjectsPage from "$lib/features/mobile/MobileProjectsPage.svelte";
+  import { infoBoxInset } from "$lib/features/infobox/strip";
   import { lazyComponent, prefetchWhenIdle } from "$lib/shared/lazy.svelte";
   import { syncStore } from "$lib/features/sync/store.svelte";
   import { t } from "$lib/i18n/index.svelte";
@@ -108,8 +108,8 @@
   const WhipView = lazyComponent(
     () => import("$lib/features/whip/WhipOverlay.svelte"),
   );
-  // The anchored info box, for an experiment that is off by default. Behind
-  // import(), a boot that never switches it on never fetches it.
+  // The strip above every terminal. Behind import() so it lands with the
+  // terminal chunk rather than in the first paint, and never at all on a phone.
   const InfoBoxView = lazyComponent(
     () => import("$lib/features/infobox/ProjectInfoBox.svelte"),
   );
@@ -187,11 +187,19 @@
     );
   });
 
+  // Selecting a thread focuses its pane, and that is all: the write is
+  // untracked because it used to read the field it writes, which subscribed the
+  // effect to its own output (AGENTS.md, rule 4). Every later focus change in
+  // that group — a panel opened beside the terminal, a chip tapped on the
+  // phone's pane strip — re-ran this and was put straight back on the thread.
   $effect(() => {
     const id = app.activeThreadId;
     if (!id) return;
     const g = paneStore.groupOf(id);
-    if (g && g.focusedPaneId !== id) g.focusedPaneId = id;
+    if (!g) return;
+    untrack(() => {
+      if (g.focusedPaneId !== id) g.focusedPaneId = id;
+    });
   });
 
   // The project the app came up on. Nobody asked for a thread in it — it is
@@ -468,7 +476,13 @@
   // the first throw, or the rope spawns wherever the pointer was at boot.
   $effect(() => {
     if (settings.state.experimentWhip) void WhipView.ensure();
-    if (settings.state.experimentInfoBox) void InfoBoxView.ensure();
+  });
+
+  // The info box is no longer behind a flag, so its chunk is fetched as soon as
+  // there is a terminal view to draw it over rather than when a switch is
+  // flipped.
+  $effect(() => {
+    if (!mobile) void InfoBoxView.ensure();
   });
 
   // The launch pull, and deliberately not part of the boot.
@@ -496,16 +510,9 @@
   });
 
   // Opening the Files or Git panel is the strongest signal that a file or a
-  // diff is about to be opened; warm the editor before the click lands. Read
-  // off the panes: whether one of those panels is up is a question the pane
-  // tree answers, and the titlebar's own memory of which one is up whether or
-  // not anything is open.
+  // diff is about to be opened; warm the editor before the click lands. The
+  // pane tree is the whole answer now that those panels have no other home.
   $effect(() => {
-    const docked = settings.rightPanelFor(app.currentProjectId);
-    if (docked === "git" || docked === "explorer") {
-      prefetchWhenIdle(EditorView);
-      return;
-    }
     if (panePresence("git") || panePresence("explorer")) {
       prefetchWhenIdle(EditorView);
     }
@@ -579,7 +586,7 @@
     <main class="relative flex min-w-0 flex-1 flex-col" use:toastArea>
       {#if !app.ready}
         <div class="flex h-full items-center justify-center">
-          <p class="text-xs text-muted-foreground/60">{t("common.loading")}</p>
+          <p class="text-sm text-muted-2">{t("common.loading")}</p>
         </div>
       {:else}
         <div
@@ -592,7 +599,7 @@
           {#if app.threads.length === 0 && !activeGroupId}
             <div class="flex h-full items-center justify-center">
               <div class="flex flex-col items-center gap-4 text-center">
-                <span class="text-muted-foreground/40">
+                <span class="text-muted-2">
                   <BoiteLogo size={64} />
                 </span>
                 <p class="text-sm text-muted-foreground">
@@ -605,7 +612,7 @@
                 {#if app.projects.length === 0}
                   <button
                     type="button"
-                    class="rounded-md border border-border bg-[var(--color-surface)] px-3 py-1.5 text-sm text-foreground transition hover:bg-[var(--color-surface-2)]"
+                    class="rounded-md border border-edge bg-[var(--color-surface)] px-3 py-1.5 text-sm text-foreground transition hover:bg-[var(--color-surface-2)]"
                     onclick={() => addProject()}
                   >
                     {t("common.chooseFolder")}
@@ -629,11 +636,11 @@
                 class="flex flex-col items-center gap-5 rounded-lg border border-border bg-[var(--color-surface)]/60 px-10 py-8 shadow-e2"
                 in:fade={{ duration: DUR.slow, easing: easeOutQuint }}
               >
-                <span class="text-muted-foreground/30"><BoiteLogo size={40} /></span>
+                <span class="text-muted-2"><BoiteLogo size={40} /></span>
                 <p class="text-base text-muted-foreground">
                   {t("welcome.pickThread")}
                 </p>
-                <div class="grid grid-cols-[auto_auto] gap-x-6 gap-y-2 text-xs text-muted-foreground/70">
+                <div class="grid grid-cols-[auto_auto] gap-x-6 gap-y-2 text-xs text-muted-2">
                   {#each WELCOME_KEYS as row, i (row.label)}
                     <span
                       class="text-right"
@@ -683,17 +690,30 @@
                 style:visibility={visible ? "visible" : "hidden"}
                 aria-hidden={!visible}
               >
-                <PaneShell {group} />
+                <PaneShell {group} {mobile} />
               </div>
             {/each}
 
             {#each app.threads as thread (thread.id)}
               {@const group = paneStore.groupOf(thread.id)}
+              <!-- On a phone the group draws one pane at a time, so being in the
+                   group on screen is no longer enough to be on the screen: the
+                   terminals of the other panes are laid out at the same
+                   rectangle and would stack on top of the one being read. -->
               {@const visible =
-                group?.id === activeGroupId && terminalActive}
+                group?.id === activeGroupId &&
+                terminalActive &&
+                (!mobile || group.focusedPaneId === thread.id)}
               {@const focused =
                 visible && group?.focusedPaneId === thread.id}
               {@const rect = group ? paneStore.rectFor(thread.id, group, visible) : null}
+              <!-- The info box is a strip across the top of this column, so the
+                   terminal starts under it rather than beside it. Decided here
+                   and not inside the box: the row and the inset have to be the
+                   same number or output ends up under it again, which is what
+                   the floating card did to the first four lines. Panes too
+                   narrow for a readable row get neither. -->
+              {@const stripShown = Boolean(!mobile && rect && rect.w >= 420)}
               {#if activated[thread.id] && rect && group}
                 <div
                   class="absolute"
@@ -716,12 +736,17 @@
                        ones whose handles came from it: one environment's. A
                        boite going down no longer tears down the local terminals
                        it has nothing to do with. -->
-                  {#key workspace.epochOf(thread.origin)}
-                    {#if TerminalView.current}
-                      {@const TerminalComp = TerminalView.current}
-                      <TerminalComp {thread} {visible} {focused} />
-                    {/if}
-                  {/key}
+                  <div
+                    class="absolute inset-x-0 bottom-0"
+                    style:top="{infoBoxInset(stripShown)}px"
+                  >
+                    {#key workspace.epochOf(thread.origin)}
+                      {#if TerminalView.current}
+                        {@const TerminalComp = TerminalView.current}
+                        <TerminalComp {thread} {visible} {focused} />
+                      {/if}
+                    {/key}
+                  </div>
                   <!-- A thread that lives on the dropped boite: what is typed
                        into it is going nowhere, and the pane is the only place
                        that can say so about this thread rather than about the
@@ -732,16 +757,14 @@
                     {focused}
                     offline={boiteDown && thread.origin === "remote"}
                   />
-                  <!-- The experiment that replaces the column, one per
-                       terminal: in split view each pane runs its own worktree,
-                       so a single box over the whole area could only ever
-                       describe one of them. The box docks itself inside the
-                       pane (corners and edge midpoints), so it takes the whole
-                       pane area rather than a corner of it. After the pane
-                       overlay in the DOM and at the same z, so it draws over
-                       the ring rather than under it. Panes too narrow to hold
-                       it (it would cover the terminal it describes) get none. -->
-                  {#if !mobile && settings.state.experimentInfoBox && rect.w >= 420 && InfoBoxView.current}
+                  <!-- One strip per terminal: in split view each pane runs its
+                       own worktree, so a single row over the whole area could
+                       only ever describe one of them, and a git pane opened
+                       beside the terminal leaves the row spanning the terminal
+                       column alone. After the pane overlay in the DOM and at
+                       the same z, so it draws over the ring rather than under
+                       it. -->
+                  {#if stripShown && InfoBoxView.current}
                     {@const InfoBoxComp = InfoBoxView.current}
                     <InfoBoxComp {thread} {visible} {focused} />
                   {/if}
@@ -777,7 +800,7 @@
               {@const HomeComp = HomeView.current}
               <HomeComp />
             {:else}
-              <div class="flex h-full items-center justify-center text-xs text-muted-foreground/70">
+              <div class="flex h-full items-center justify-center text-sm text-muted-2">
                 {t("common.loading")}
               </div>
             {/if}
@@ -790,7 +813,7 @@
               {@const PluginsComp = PluginsView.current}
               <PluginsComp />
             {:else}
-              <div class="flex h-full items-center justify-center text-xs text-muted-foreground/70">
+              <div class="flex h-full items-center justify-center text-sm text-muted-2">
                 {t("common.loading")}
               </div>
             {/if}
@@ -803,7 +826,7 @@
               {@const EditorComp = EditorView.current}
               <EditorComp />
             {:else}
-              <div class="flex h-full items-center justify-center text-xs text-muted-foreground/70">
+              <div class="flex h-full items-center justify-center text-sm text-muted-2">
                 {t("common.loading")}
               </div>
             {/if}
@@ -841,12 +864,6 @@
         {/if}
       {/if}
     </main>
-
-    <!-- Outside <main>, beside it: the column describes the project rather than
-         whatever view is up. -->
-    {#if !mobile && app.ready && !homeActive && !settings.state.experimentInfoBox && settings.rightPanelFor(app.currentProjectId)}
-      <SidePanel />
-    {/if}
   </div>
   {/if}
   {/key}

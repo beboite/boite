@@ -3,12 +3,34 @@
   import type { LayoutNode, PaneGroup } from "./types";
   import { MIN_PANE_PX, MIN_RATIO, SPLITTER_PX } from "./types";
   import PaneContentView from "./PaneContentView.svelte";
+  import PaneStrip from "./PaneStrip.svelte";
   import { paneLabel } from "./label";
-  import { findSplit } from "./tree";
+  import { findSplit, leafNodesOf } from "./tree";
   import { t } from "$lib/i18n/index.svelte";
 
-  type Props = { group: PaneGroup };
-  let { group }: Props = $props();
+  /**
+   * `mobile` comes from the page rather than the settings store: the shell is
+   * the one component that has to draw the same group two ways, and a prop is
+   * what lets the desktop branch below stay exactly what it was.
+   */
+  type Props = { group: PaneGroup; mobile?: boolean };
+  let { group, mobile = false }: Props = $props();
+
+  const leaves = $derived(leafNodesOf(group.root));
+  // The chip strip earns its 44px when there is a choice to make, and when the
+  // one pane on screen is a panel the user has no other way out of. A phone
+  // showing a single terminal keeps the whole screen, which is what it is for.
+  const stripShown = $derived(
+    mobile && (leaves.length > 1 || leaves[0]?.content.kind !== "thread"),
+  );
+  // `focusedPaneId` is the group's own answer to "which pane", persisted with
+  // the tree and already moved by every opener; the phone reuses it rather than
+  // keeping a second idea of the active pane that the two could disagree about.
+  const activePaneId = $derived(
+    leaves.some((l) => l.paneId === group.focusedPaneId)
+      ? group.focusedPaneId
+      : (leaves[0]?.paneId ?? group.focusedPaneId),
+  );
 
   // The rect is the pane's BODY, not the pane: a thread's terminal is positioned
   // over this rectangle from the page, and including the header would slide
@@ -65,6 +87,93 @@
     };
   }
 
+  // What an arrow key moves the divider by, and what Shift moves it by. A
+  // divider that can only be dragged cannot be moved at all without a pointer,
+  // which is what `tabindex="-1"` on every handle in the app used to admit.
+  const STEP_PX = 24;
+  const BIG_STEP_PX = 96;
+
+  /**
+   * The two ratios either side of a splitter once it has moved by `delta`.
+   *
+   * Whichever floor bites first: the fraction, or the pixel width below which a
+   * terminal stops being readable. A ratio r takes total*r/allRatios pixels, so
+   * the pixel floor in ratio terms is MIN_PANE_PX*allRatios/total. Capped at
+   * half the pair's share, or a narrow window would pin the divider.
+   */
+  function movedPair(
+    ratios: readonly number[],
+    index: number,
+    delta: number,
+    total: number,
+    ratioTotal: number,
+  ): [number, number] {
+    let a = ratios[index] + delta;
+    let b = ratios[index + 1] - delta;
+    const pairSum = ratios[index] + ratios[index + 1];
+    const min = Math.min(
+      Math.max(MIN_RATIO, (MIN_PANE_PX * ratioTotal) / total),
+      pairSum / 2,
+    );
+    if (a < min) {
+      b -= min - a;
+      a = min;
+    }
+    if (b < min) {
+      a -= min - b;
+      b = min;
+    }
+    return [a, b];
+  }
+
+  /** The parent's usable length, gutters taken off, or 0 when it has none. */
+  function splitTotal(
+    nodeAtSplit: { children: readonly unknown[] },
+    dir: "row" | "column",
+    parent: HTMLElement,
+  ): number {
+    const parentRect = parent.getBoundingClientRect();
+    // The ratios only share out what is left after the splitters, so measuring
+    // against the full parent made every delta short by SPLITTER_PX*(n-1)/total:
+    // the divider lagged behind the cursor, and the gap grew with the pane count.
+    const gutters = SPLITTER_PX * (nodeAtSplit.children.length - 1);
+    return (dir === "row" ? parentRect.width : parentRect.height) - gutters;
+  }
+
+  function nudge(
+    splitId: string,
+    index: number,
+    dir: "row" | "column",
+    el: HTMLElement,
+    px: number,
+  ) {
+    const parent = el.parentElement as HTMLElement | null;
+    const nodeAtSplit = findSplit(group.root, splitId);
+    if (!parent || !nodeAtSplit) return;
+    const total = splitTotal(nodeAtSplit, dir, parent);
+    if (total <= 0) return;
+    const ratioTotal = nodeAtSplit.ratios.reduce((sum, r) => sum + r, 0) || 1;
+    const ratios = [...nodeAtSplit.ratios];
+    const [a, b] = movedPair(ratios, index, px / total, total, ratioTotal);
+    ratios[index] = a;
+    ratios[index + 1] = b;
+    paneStore.setRatios(group.id, splitId, ratios);
+  }
+
+  function splitterKeydown(
+    splitId: string,
+    index: number,
+    dir: "row" | "column",
+    e: KeyboardEvent,
+  ) {
+    const back = dir === "row" ? "ArrowLeft" : "ArrowUp";
+    const forward = dir === "row" ? "ArrowRight" : "ArrowDown";
+    if (e.key !== back && e.key !== forward) return;
+    e.preventDefault();
+    const step = e.shiftKey ? BIG_STEP_PX : STEP_PX;
+    nudge(splitId, index, dir, e.currentTarget as HTMLElement, e.key === forward ? step : -step);
+  }
+
   function startDrag(
     splitId: string,
     index: number,
@@ -75,14 +184,9 @@
     e.preventDefault();
     const parent = el.parentElement as HTMLElement | null;
     if (!parent) return;
-    const parentRect = parent.getBoundingClientRect();
     const nodeAtSplit = findSplit(group.root, splitId);
     if (!nodeAtSplit) return;
-    // The ratios only share out what is left after the splitters, so measuring
-    // against the full parent made every delta short by SPLITTER_PX*(n-1)/total:
-    // the divider lagged behind the cursor, and the gap grew with the pane count.
-    const gutters = SPLITTER_PX * (nodeAtSplit.children.length - 1);
-    const total = (dir === "row" ? parentRect.width : parentRect.height) - gutters;
+    const total = splitTotal(nodeAtSplit, dir, parent);
     if (total <= 0) return;
     // Ratios are flex-grow values, so they are proportional rather than
     // normalised; the pixel width of one cell is total * ratio / ratioTotal.
@@ -93,26 +197,13 @@
 
     const move = (ev: PointerEvent) => {
       const coord = dir === "row" ? ev.clientX : ev.clientY;
-      const delta = (coord - startCoord) / total;
-      let a = startRatios[index] + delta;
-      let b = startRatios[index + 1] - delta;
-      // Whichever floor bites first: the fraction, or the pixel width below which
-      // a terminal stops being readable. A ratio r takes total*r/allRatios pixels,
-      // so the pixel floor in ratio terms is MIN_PANE_PX*allRatios/total. Capped
-      // at half the pair's share, or a narrow window would pin the divider.
-      const pairSum = startRatios[index] + startRatios[index + 1];
-      const min = Math.min(
-        Math.max(MIN_RATIO, (MIN_PANE_PX * ratioTotal) / total),
-        pairSum / 2,
+      const [a, b] = movedPair(
+        startRatios,
+        index,
+        (coord - startCoord) / total,
+        total,
+        ratioTotal,
       );
-      if (a < min) {
-        b -= min - a;
-        a = min;
-      }
-      if (b < min) {
-        a -= min - b;
-        b = min;
-      }
       const ratios = [...startRatios];
       ratios[index] = a;
       ratios[index + 1] = b;
@@ -166,23 +257,85 @@
           {@render renderNode(child)}
         </div>
         {#if i < node.children.length - 1}
-          <button
-            type="button"
+          {@const share = Math.round(
+            (node.ratios[i] / (node.ratios.reduce((sum, r) => sum + r, 0) || 1)) * 100,
+          )}
+          <!-- A separator rather than a button: it has a position on a scale
+               and the arrows move it, which is not what pressing a button
+               means. It was a button and therefore announced as one, with a
+               name that promised a resize nothing but a pointer could do.
+               The two rules below read `separator` as decoration; a separator
+               with a value and bounds is the window-splitter pattern, and it is
+               focusable and keyboard-driven by definition. -->
+          <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+          <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+          <div
             class="splitter"
             class:row={node.dir === "row"}
             class:column={node.dir === "column"}
+            role="separator"
+            tabindex="0"
+            aria-orientation={node.dir === "row" ? "vertical" : "horizontal"}
+            aria-valuenow={share}
+            aria-valuemin={0}
+            aria-valuemax={100}
             aria-label={t("panes.resize")}
             onpointerdown={(e) => startDrag(node.id, i, node.dir, e.currentTarget, e)}
-          ></button>
+            onkeydown={(e) => splitterKeydown(node.id, i, node.dir, e)}
+          ></div>
         {/if}
       {/each}
     </div>
   {/if}
 {/snippet}
 
-<div class="pane-shell-root">
-  {@render renderNode(group.root)}
-</div>
+{#if mobile}
+  <!-- One pane on screen, the rest behind the strip. Stacked rather than
+       unmounted, and hidden with `visibility` like every other group in the
+       app: a terminal the user swapped away from goes on running, a browser
+       pane an agent is driving goes on loading, and a chip tap is a repaint
+       rather than a mount. Each pane is laid out at the full body either way,
+       so switching costs no measurement and no reflow of the terminal. -->
+  <div class="pane-shell-mobile">
+    {#if stripShown}
+      <PaneStrip {group} {leaves} {activePaneId} />
+    {/if}
+    <div class="mobile-body">
+      {#each leaves as leaf (leaf.paneId)}
+        {@const shown = leaf.paneId === activePaneId}
+        <!-- The mark goes on the leaf only to say no. `visible.ts` reads the
+             nearest one, so a pane the phone has switched away from answers no
+             to the screenshot and to the window's description of itself, while
+             the one on screen carries nothing and the question reaches the
+             group wrapper — which is where "is this group the one being drawn"
+             is still answered. -->
+        <div
+          class="mobile-pane"
+          data-pane-leaf={leaf.paneId}
+          data-pane-shown={shown ? undefined : "false"}
+          role="group"
+          aria-label={paneLabel(leaf.content)}
+          aria-hidden={!shown}
+          style:visibility={shown ? "visible" : "hidden"}
+        >
+          <div class="pane-body" use:measure={leaf.paneId}>
+            {#if leaf.content.kind !== "thread"}
+              <PaneContentView
+                content={leaf.content}
+                projectId={group.projectId}
+                paneId={leaf.paneId}
+              />
+            {/if}
+          </div>
+        </div>
+      {/each}
+    </div>
+  </div>
+{:else}
+  <div class="pane-shell-root">
+    {@render renderNode(group.root)}
+  </div>
+{/if}
 
 <style>
   /* Nothing between the viewport and a lone leaf: no padding, no border, no
@@ -200,6 +353,30 @@
   }
   .pane-shell-root > :global(*) {
     flex: 1;
+    min-width: 0;
+    min-height: 0;
+  }
+  /* The phone's shell: the strip keeps its own height and the body takes what
+     is left, and every pane in that body is the same rectangle. */
+  .pane-shell-mobile {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+  }
+  .mobile-body {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+  }
+  .mobile-pane {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
     min-width: 0;
     min-height: 0;
   }
@@ -272,5 +449,13 @@
   .splitter:hover,
   .splitter:active {
     background: var(--color-border-strong);
+  }
+  /* 4px of gutter with nothing in it: the ring is the only way to tell which
+     divider the arrows are about to move. Drawn inside, because a splitter that
+     grew by two pixels on focus would push the terminals either side of it. */
+  .splitter:focus-visible {
+    background: var(--color-border-strong);
+    outline: 2px solid color-mix(in srgb, var(--color-foreground) 45%, transparent);
+    outline-offset: -2px;
   }
 </style>

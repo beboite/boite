@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { t } from "$lib/i18n/index.svelte";
   import { settingAnchorId } from "$lib/features/settings/catalogue";
 
   type Props = {
@@ -8,8 +7,6 @@
     /** See SettingsCard: the key this is labelled with, for settings search. */
     anchor?: string;
     enabled: boolean;
-    onLabel?: string;
-    offLabel?: string;
     onToggle: () => void;
   };
   let {
@@ -17,8 +14,6 @@
     description = "",
     anchor,
     enabled,
-    onLabel = t("common.on"),
-    offLabel = t("common.off"),
     onToggle,
   }: Props = $props();
 </script>
@@ -30,21 +25,19 @@
   role="switch"
   id={anchor ? settingAnchorId(anchor) : undefined}
   aria-checked={enabled}
-  class="group scroll-mt-4 flex w-full items-center justify-between gap-3 rounded-lg border border-border bg-[var(--color-surface)] px-3 py-2.5 text-left transition hover:border-foreground/25"
+  aria-label={label}
+  class="group scroll-mt-4 flex w-full items-center justify-between gap-3 rounded-lg border border-edge bg-[var(--color-surface)] px-3 py-2.5 text-left transition hover:border-foreground/25"
   onclick={onToggle}
 >
   <div class="min-w-0 flex-1">
-    <div class="text-xs font-medium text-foreground">{label}</div>
+    <div class="text-sm font-medium text-foreground">{label}</div>
     {#if description}
-      <div class="mt-0.5 text-xs leading-snug text-muted-foreground">
+      <div class="mt-0.5 text-sm text-muted-foreground">
         {description}
       </div>
     {/if}
   </div>
-  <div class="flex shrink-0 items-center gap-2.5">
-    <span class="text-2xs font-medium uppercase tracking-wider {enabled ? 'text-foreground' : 'text-muted-foreground/70'}">
-      {enabled ? onLabel : offLabel}
-    </span>
+  <div class="flex shrink-0 items-center">
     <span
       class="relative h-4 w-7 rounded-full transition-colors {enabled
         ? 'bg-foreground'

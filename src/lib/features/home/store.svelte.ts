@@ -10,6 +10,12 @@ import type { Thread } from "$lib/types";
 /** A waiting thread lands in the inbox after this, not the moment a dialog appears. */
 export const WAITING_INBOX_MS = 2 * 60 * 1000;
 
+/** How long after the last orchestrator line the workspace counts as quiet. */
+export const QUIET_ORCHESTRATOR_MS = 60 * 60 * 1000;
+
+/** How many rows the "Recent" card holds. */
+export const RECENT_THREAD_LIMIT = 10;
+
 export type InboxItem =
   | { id: string; kind: "delegation"; thread: Thread }
   | { id: string; kind: "approval"; approval: ApprovalItem }
@@ -47,8 +53,54 @@ export function inboxOf(input: {
   return items;
 }
 
+/**
+ * Nothing is happening in this workspace, so Home can be a launcher.
+ *
+ * Two readings, both required: no thread running or waiting, and the
+ * orchestrator silent for an hour. A page that flipped on the thread list alone
+ * would swap layout under a conversation someone is still reading.
+ */
+export function isQuiet(input: {
+  threads: readonly Thread[];
+  lastOrchestratorAt: number | null;
+  now: number;
+}): boolean {
+  if (liveThreadsOf(input.threads).length > 0) return false;
+  if (input.lastOrchestratorAt === null) return true;
+  return input.now - input.lastOrchestratorAt >= QUIET_ORCHESTRATOR_MS;
+}
+
+/**
+ * When a thread last did something, for the "Recent" ordering.
+ *
+ * `threadActivitySince` is the status engine's stamp and only exists for this
+ * session; a settled thread falls back to when it was put away, and a row
+ * nothing ever moved to its creation.
+ */
+export function threadRecency(
+  thread: Thread,
+  since: (threadId: string) => number | null,
+): number {
+  return since(thread.id) ?? thread.settledAt ?? thread.createdAt;
+}
+
+export function recentThreadsOf(input: {
+  threads: readonly Thread[];
+  since: (threadId: string) => number | null;
+  limit?: number;
+}): Thread[] {
+  return [...input.threads]
+    .sort((a, b) => threadRecency(b, input.since) - threadRecency(a, input.since))
+    .slice(0, input.limit ?? RECENT_THREAD_LIMIT);
+}
+
 class HomeStore {
   liveThreads: Thread[] = $derived(liveThreadsOf(app.threads));
+
+  /** The ten rows the launcher layout offers, newest first, every project. */
+  recent: Thread[] = $derived.by(() =>
+    recentThreadsOf({ threads: app.threads, since: threadActivitySince }),
+  );
 
   inbox: InboxItem[] = $derived.by(() =>
     inboxOf({

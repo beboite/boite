@@ -131,14 +131,14 @@
         {t("cli.uninstallQuestion")}
       </p>
       {#if !row.managed}
-        <p class="mt-2 text-xs leading-snug text-[var(--color-warning)]">{t("cli.notManaged")}</p>
+        <p class="mt-2 text-sm text-[var(--color-warning)]">{t("cli.notManaged")}</p>
       {/if}
 
       <button
         type="button"
         role="switch"
         aria-checked={keepData}
-        class="mt-3 flex w-full items-start gap-3 rounded-md border border-border bg-[var(--color-surface-2)] px-3 py-2 text-left transition hover:border-foreground/30"
+        class="mt-3 flex w-full items-start gap-3 rounded-md border border-edge bg-[var(--color-surface-2)] px-3 py-2 text-left transition hover:border-foreground/30"
         onclick={() => (keepData = !keepData)}
       >
         <span
@@ -151,8 +151,8 @@
           ></span>
         </span>
         <span class="min-w-0">
-          <span class="block text-xs font-medium text-foreground">{t("cli.keepData")}</span>
-          <span class="mt-0.5 block text-xs leading-snug text-muted-foreground">
+          <span class="block text-sm font-medium text-foreground">{t("cli.keepData")}</span>
+          <span class="mt-0.5 block text-sm text-muted-foreground">
             {keepData ? t("cli.keepDataDesc") : t("cli.wipeDesc")}
           </span>
         </span>
@@ -160,13 +160,13 @@
 
       <div class="mt-3">
         {#if paths === null}
-          <p class="text-xs text-muted-foreground">{t("cli.dataLoading")}</p>
+          <p class="text-sm text-muted-foreground">{t("cli.dataLoading")}</p>
         {:else if paths.length === 0}
-          <p class="text-xs text-muted-foreground">{t("cli.dataNone")}</p>
+          <p class="text-sm text-muted-foreground">{t("cli.dataNone")}</p>
         {:else}
           <ul class="max-h-32 overflow-y-auto rounded-md border border-border bg-[var(--color-titlebar)] p-2">
             {#each paths as entry (entry.path)}
-              <li class="flex items-baseline justify-between gap-3 py-0.5 text-xs">
+              <li class="flex items-baseline justify-between gap-3 py-0.5 text-sm">
                 <span
                   class="min-w-0 truncate font-mono {keepData
                     ? 'text-muted-foreground'
@@ -175,7 +175,7 @@
                 >
                   {entry.path}
                 </span>
-                <span class="shrink-0 tabular-nums text-muted-foreground/70">
+                <span class="shrink-0 tabular-nums text-xs text-muted-2">
                   {size(entry.bytes)}
                 </span>
               </li>
@@ -191,14 +191,14 @@
       <button
         bind:this={cancelBtn}
         type="button"
-        class="rounded-md px-3 py-1.5 text-xs text-muted-foreground transition hover:bg-accent hover:text-foreground"
+        class="rounded-md px-3 py-1.5 text-sm text-muted-foreground transition hover:bg-accent hover:text-foreground"
         onclick={onClose}
       >
         {t("common.cancel")}
       </button>
       <button
         type="button"
-        class="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition {keepData
+        class="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition {keepData
           ? 'bg-foreground text-background hover:bg-foreground/90'
           : 'bg-danger text-white hover:bg-danger/90'}"
         onclick={confirm}

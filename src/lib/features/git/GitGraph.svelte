@@ -688,12 +688,12 @@
       <div
         class="flex min-w-0 flex-1 items-center gap-1.5 pl-1 pr-2"
       >
-        <span class="min-w-0 flex-1 truncate text-sm text-foreground/80">
+        <span class="min-w-0 flex-1 truncate text-sm text-foreground">
           {row.commit.summary}
         </span>
         {#each row.refBadges as badge (badge.ref)}
           <span
-            class="shrink-0 rounded px-1.5 py-px text-2xs font-medium {badge.isHead
+            class="shrink-0 rounded px-1.5 py-px text-xs font-medium {badge.isHead
               ? 'bg-[var(--color-success)]/15 text-[var(--color-success)]'
               : 'bg-[var(--color-surface-3)] text-muted-foreground'}"
           >
@@ -701,12 +701,12 @@
           </span>
         {/each}
         {#if row.hiddenRefs > 0}
-          <span class="shrink-0 rounded bg-[var(--color-surface-3)] px-1.5 py-px tabular-nums text-2xs font-medium text-muted-foreground/70">
+          <span class="shrink-0 rounded bg-[var(--color-surface-3)] px-1.5 py-px tabular-nums text-xs font-medium text-muted-2">
             +{row.hiddenRefs}
           </span>
         {/if}
         <span
-          class="shrink-0 tabular-nums text-2xs text-muted-foreground/50"
+          class="shrink-0 tabular-nums text-xs text-muted-2"
         >
           {relTime(row.commit.time)}
         </span>
@@ -735,26 +735,26 @@
       {c.summary}
     </div>
     <div class="mt-2 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
-      <span class="tabular-nums font-medium text-foreground/70">{c.shortSha}</span>
-      <span class="text-muted-foreground/50">·</span>
-      <span class="text-muted-foreground/80">{c.author}</span>
+      <span class="tabular-nums font-medium text-muted-foreground">{c.shortSha}</span>
+      <span class="text-muted-2">·</span>
+      <span class="text-muted-2">{c.author}</span>
       {#if c.email}
-        <span class="text-muted-foreground/50">&lt;{c.email}&gt;</span>
+        <span class="text-muted-2">&lt;{c.email}&gt;</span>
       {/if}
     </div>
-    <div class="mt-1 text-xs text-muted-foreground/60">
+    <div class="mt-1 text-xs text-muted-2">
       {fmtTime(c.time)}
     </div>
     <div class="mt-2 flex items-center gap-2 tabular-nums text-xs font-medium">
-      <span class={c.additions > 0 ? "text-[var(--color-success)]" : "text-muted-foreground/50"}>
+      <span class={c.additions > 0 ? "text-[var(--color-success)]" : "text-muted-2"}>
         +{c.additions}
       </span>
-      <span class={c.deletions > 0 ? "text-danger" : "text-muted-foreground/50"}>
+      <span class={c.deletions > 0 ? "text-danger" : "text-muted-2"}>
         -{c.deletions}
       </span>
     </div>
     {#if c.localOnly}
-      <div class="mt-1.5 flex items-center gap-1 text-2xs text-[var(--color-warning)]">
+      <div class="mt-1.5 flex items-center gap-1 text-xs text-[var(--color-warning)]">
         <span class="inline-block size-1.5 rounded-full bg-[var(--color-warning)]"></span>
         {t("git.localNotPushed")}
       </div>
@@ -765,7 +765,7 @@
           {@const clean = r.replace(/^HEAD -> /, "")}
           {@const isHead = r.startsWith("HEAD")}
           <span
-            class="rounded px-1.5 py-px text-2xs font-medium {isHead
+            class="rounded px-1.5 py-px text-xs font-medium {isHead
               ? 'bg-[var(--color-success)]/15 text-[var(--color-success)]'
               : 'bg-[var(--color-surface-3)] text-muted-foreground'}"
           >

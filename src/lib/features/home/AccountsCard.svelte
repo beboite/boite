@@ -23,6 +23,19 @@
     antigravity: "plugin.kebaccAntigravity",
   };
 
+  // "5h 0%  7d 0%" repeated on every row, with nothing saying what 5h was. The
+  // window becomes a column with a header instead; a label no switcher of ours
+  // uses is kept as it came rather than dropped.
+  const WINDOW_HEADER: Record<string, MessageKey> = {
+    "5h": "home.accountsWindow5h",
+    "7d": "home.accountsWindow7d",
+  };
+
+  function windowHeader(label: string): string {
+    const key = WINDOW_HEADER[label.trim().toLowerCase()];
+    return key ? t(key) : label;
+  }
+
   let picked = $state<AccountProvider>("claude");
 
   const enabled = $derived(
@@ -59,6 +72,19 @@
 
   const accounts = $derived(accountsFor(tab));
 
+  /** Every window any row reports, in the order the first row named them. */
+  const columns = $derived([
+    ...new Set(accounts.flatMap((row) => row.windows.map((w) => w.label))),
+  ]);
+
+  function cell(row: AccountRow, label: string): string {
+    const window = row.windows.find((w) => w.label === label);
+    if (!window) return "";
+    const percent = windowPercent(window);
+    const reset = formatReset(window.reset, relativeClock.now);
+    return [percent, reset].filter(Boolean).join(" ");
+  }
+
   function tabLabel(id: AccountProvider): string {
     return kebaccSwitcher.labelOf(id) ?? t(LABEL[id]);
   }
@@ -93,7 +119,7 @@
         {#each enabled as id (id)}
           <button
             type="button"
-            class="rounded-sm px-1.5 py-0.5 text-2xs uppercase tracking-wider transition {tab === id
+            class="rounded-sm px-1.5 py-0.5 text-xs uppercase tracking-wider transition {tab === id
               ? 'bg-accent text-foreground'
               : 'text-muted-foreground hover:bg-accent hover:text-foreground'}"
             aria-pressed={tab === id}
@@ -109,12 +135,24 @@
     {:else if accounts.length === 0}
       <p class="px-3.5 pb-3 text-sm text-muted-foreground">{t("home.noAccounts")}</p>
     {:else}
+      {#if columns.length > 0}
+        <div
+          class="flex items-baseline gap-2 px-3.5 pb-1 text-xs uppercase tracking-wider text-muted-2"
+        >
+          <span class="min-w-0 flex-1 truncate">{t("home.accountsColumn")}</span>
+          {#each columns as label (label)}
+            <span class="w-24 shrink-0 truncate text-right" use:tip={windowHeader(label)}>
+              {windowHeader(label)}
+            </span>
+          {/each}
+        </div>
+      {/if}
       <ul class="flex max-h-64 flex-col overflow-y-auto px-2 pb-2">
         {#each accounts as account (account.id)}
           <li>
             <button
               type="button"
-              class="group flex w-full items-baseline gap-2 rounded-sm px-1.5 py-1.5 text-left text-xs transition hover:bg-accent {account.active
+              class="flex w-full items-baseline gap-2 rounded-sm px-1.5 py-1.5 text-left text-xs transition hover:bg-accent {account.active
                 ? 'bg-accent font-medium text-foreground'
                 : switching
                   ? 'opacity-60'
@@ -124,22 +162,17 @@
               use:tip={account.active ? t("plugin.current") : null}
               onclick={() => void activate(account)}
             >
-              <span
-                class="min-w-0 truncate text-foreground [@media(hover:hover)]:blur-[6px] [@media(hover:hover)]:transition [@media(hover:hover)]:group-hover:blur-none [@media(hover:hover)]:group-focus-visible:blur-none"
-              >
+              <!-- The name was blurred until hover, unconditionally, on a card
+                   whose whole job is saying which login is live. No privacy
+                   setting ever gated it, so nothing is left to gate. -->
+              <span class="min-w-0 flex-1 truncate text-sm text-foreground">
                 {account.email}
               </span>
-              <span class="ml-auto flex min-w-0 shrink-0 flex-wrap justify-end gap-x-2 text-muted-foreground/70">
-                {#each account.windows as window (window.label)}
-                  {@const percent = windowPercent(window)}
-                  {@const reset = formatReset(window.reset, relativeClock.now)}
-                  {#if percent || reset}
-                    <span class="tabular-nums">
-                      {window.label}{percent ? ` ${percent}` : ""}{reset ? ` ${reset}` : ""}
-                    </span>
-                  {/if}
-                {/each}
-              </span>
+              {#each columns as label (label)}
+                <span class="w-24 shrink-0 truncate text-right tabular-nums text-muted-2">
+                  {cell(account, label)}
+                </span>
+              {/each}
             </button>
           </li>
         {/each}
