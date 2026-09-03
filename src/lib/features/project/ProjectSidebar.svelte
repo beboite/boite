@@ -141,31 +141,6 @@
   });
 
   /**
-   * The signal design, and what it does to the glyph.
-   *
-   * Two separate answers on purpose: where the state is painted is the design,
-   * and whether the agent's logo stays on the row is a second question that only
-   * exists once the glyph has something else to show. With the classic design
-   * the logo is all the glyph ever holds, so the second toggle does not apply.
-   */
-  const glowDesign = $derived(settings.state.sidebarDesign === "glow");
-  const showLogos = $derived(!glowDesign || settings.state.sidebarHarnessLogos);
-
-  /**
-   * Hovering a row brings its agent's logo back.
-   *
-   * It used to be a 260ms press, which cost the row's own click: letting go
-   * after asking "which agent is this" had to be swallowed, so the answer and
-   * the opening were the same gesture and only one of them could win. On touch
-   * it was worse, because `longPress` opened the context menu on top of the
-   * reveal at 500ms. The list already tracks the hovered row for the panels, and
-   * a hover costs nothing.
-   */
-  const revealedThreadId = $derived(
-    showLogos ? null : paneStore.hoveredThreadId,
-  );
-
-  /**
    * Arrow keys over the projects and their threads.
    *
    * The list is the app's main navigation and Tab was the only way through it,
@@ -585,15 +560,13 @@
     paneStore.dropPreview = null;
   }
 
-  // While smart sort is armed, the rendered order IS the smart order, so
+  // While a computed order is picked, the rendered order IS that order, so
   // persisting it through setProjectOrder/setThreadOrder would overwrite the
   // hand-made order with a computed one — silently, since the visible list is
-  // re-sorted right back. The experiment is device-scoped and the orders are
+  // re-sorted right back. The choice is device-scoped and the orders are
   // workspace-scoped, so one device would clobber every other's arrangement.
   function smartSortArmed(): boolean {
-    return (
-      settings.state.experimentSmartSort && settings.state.smartSortBy !== "manual"
-    );
+    return settings.state.smartSortBy !== "manual";
   }
 
   function commitProjectDrag(drag: DragState) {
@@ -930,10 +903,7 @@
     }
     // The per-project override, cycled: inherit, on, off. The label carries
     // where it stands; the overview holds the same choice as a select.
-    if (
-      settings.state.experimentOrchestrator &&
-      settings.state.experimentOrchestratorPerProject
-    ) {
+    if (settings.state.experimentWorkspace) {
       const own = settings.state.orchestratorByProject[project.id] ?? null;
       const state =
         own === "on"
@@ -1546,7 +1516,6 @@
             : []}
           {@const dragInThisProject =
             liveDrag?.kind === "thread" && liveDrag.projectId === project.id}
-          {@const rowGapClass = glowDesign ? "space-y-1" : "space-y-px"}
           <!-- The row used to live inline in the live list. It is a snippet
                now because the drawer draws the same card under the cut, and
                two copies of this markup is how they would drift. -->
@@ -1617,18 +1586,16 @@
                      semantics. The row is now one button that fills the card,
                      with the actions as siblings painting over it. -->
                 <div
-                  class="thread-card relative flex cursor-pointer items-center gap-2 rounded-sm px-1.5 py-1 transition {isActive
+                  class="thread-card glow relative flex cursor-pointer items-center gap-2 rounded-sm px-1.5 py-1 transition {isActive
                     ? 'text-foreground'
                     : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground'}"
                   class:selected={isActive}
-                  class:just-finished={fresh && !glowDesign}
                   class:mcp-touch={mcpPulse.has(thread.id)}
-                  class:glow={glowDesign}
-                  class:fresh={glowDesign && fresh}
-                  data-state={glowDesign ? visual.state : undefined}
-                  style:--tone={glowDesign ? TONE_COLOR[visual.tone] : undefined}
+                  class:fresh
+                  data-state={visual.state}
+                  style:--tone={TONE_COLOR[visual.tone]}
                 >
-                  {#if glowDesign && visual.state === "working"}
+                  {#if visual.state === "working"}
                     <!-- One light crossing the card, along the axis the card
                          actually has. Its predecessors were two dots walking the
                          perimeter on a motion path: on a row eight times wider
@@ -1677,11 +1644,7 @@
                     status={displayThreadStatus(thread)}
                     iconKey={thread.iconKey}
                     color={threadIconColor(thread)}
-                    asleep={thread.autoSlept ?? false}
                     {keepAwake}
-                    design={settings.state.sidebarDesign}
-                    showLogo={showLogos}
-                    revealLogo={revealedThreadId === thread.id}
                     onToggleKeepAwake={() => app.toggleThreadKeepAwake(thread.id)}
                     title={glyphTitle(thread)}
                     label={t("sidebar.toggleKeepAwake")}
@@ -1777,7 +1740,7 @@
           {@const liveRows = visibleDelegationRows(live, stacksOpen)}
           {#if live.length > 0}
             <ul
-              class="px-1 {settledCount > 0 ? 'pb-0.5' : 'pb-1'} {rowGapClass}"
+              class="px-1 {settledCount > 0 ? 'pb-0.5' : 'pb-1'} space-y-1"
               data-thread-list
               data-project-id={project.id}
               use:rowFlip={{
@@ -1826,7 +1789,7 @@
               {#if open}
                 {@const settledRows = visibleDelegationRows(settled, stacksOpen)}
                 <ul
-                  class="px-0.5 pb-0.5 {rowGapClass}"
+                  class="px-0.5 pb-0.5 space-y-1"
                   use:rowFlip={{
                     key: () => settledRows.map((r) => r.thread.id).join(","),
                     enabled: () => !liveDrag,
@@ -1902,10 +1865,7 @@
       status={displayThreadStatus(threadDragGhost.thread)}
       iconKey={threadDragGhost.thread.iconKey}
       color={threadIconColor(threadDragGhost.thread)}
-      asleep={threadDragGhost.thread.autoSlept ?? false}
       keepAwake={(threadDragGhost.thread.keepAwake ?? false) && !!threadDragGhost.thread.ptyId}
-      design={settings.state.sidebarDesign}
-      showLogo={showLogos}
     />
     <span
       class="min-w-0 flex-1 truncate-safe text-left text-base leading-[19px]"
@@ -2114,15 +2074,15 @@
      A line is free of that: no state draws one in white.
 
      Its own layer for two reasons. The card's own box-shadow is animated by
-     `mcp-touch` and `just-finished`, which would blow the selection away for a
-     second and a half; and ::before belongs to the state halo, which sets it
-     per state. That leaves ::after, which paints over the label rather than
-     under it — fine for a one-pixel perimeter, and it is also what keeps the
-     white line above the tone line the two rules both draw at `inset 0 0 0 1px`.
+     `mcp-touch`, which would blow the selection away for a second and a half;
+     and ::before belongs to the state halo, which sets it per state. That
+     leaves ::after, which paints over the label rather than under it — fine for
+     a one-pixel perimeter, and it is also what keeps the white line above the
+     tone line the two rules both draw at `inset 0 0 0 1px`.
 
-     -4px on the spread, tighter than the halo's -2px: the classic design stacks
-     rows a single pixel apart, and a white bloom at the halo's reach would land
-     on the two neighbours hard enough to read as three selected rows. */
+     -4px on the spread, tighter than the halo's -2px: a white bloom at the
+     halo's reach lands on the two neighbouring rows hard enough to read as
+     three selected ones. */
   .thread-card.selected::after {
     content: "";
     position: absolute;
@@ -2134,23 +2094,6 @@
       0 0 12px -4px color-mix(in srgb, var(--color-foreground) 60%, transparent);
   }
 
-  /* A thread that finished and has not been read. It blinks green to violet
-     until something takes the mark back — see `boite-finish-blink`. */
-  .thread-card.just-finished {
-    animation: boite-finish-blink 2.4s ease-in-out infinite;
-  }
-
-  /* Reduced motion still needs the answer, just not the movement: the card
-     holds the green ring the blink starts on. */
-  @media (prefers-reduced-motion: reduce) {
-    .thread-card.just-finished {
-      animation: none;
-      box-shadow:
-        inset 0 0 0 1px color-mix(in srgb, var(--color-success) 70%, transparent),
-        0 0 12px 1px color-mix(in srgb, var(--color-success) 24%, transparent);
-    }
-  }
-
   /* This agent just changed something in Boite itself rather than in its own
      terminal. Violet, not green: green is a thread finishing, and this is the
      app being driven from outside while the thread carries on. */
@@ -2158,10 +2101,11 @@
     animation: boite-mcp-pulse 1.6s var(--ease-out-quint) forwards;
   }
 
-  /* ---- The glow design ---------------------------------------------------
-     Opt-in, and the whole of it hangs off `.thread-card.glow` with the state on
-     a data attribute. `--tone` is the state's colour, written by the markup
-     from threadVisual().
+  /* ---- The lit row -------------------------------------------------------
+     The only design there is, and the whole of it hangs off `.thread-card.glow`
+     with the state on a data attribute. `--tone` is the state's colour, written
+     by the markup from threadVisual(). The class is kept as the hook every rule
+     below already reads.
 
      The idea it keeps: a thread's state is worth the whole row, not a mark you
      have to look at. What it drops is the way the first cut spent that idea --

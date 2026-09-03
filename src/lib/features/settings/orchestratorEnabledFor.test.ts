@@ -2,15 +2,14 @@ import { describe, expect, it } from "vitest";
 import { orchestratorEnabledFor } from "./orchestratorEnabledFor";
 
 const armed = {
-  experimentOrchestrator: true,
-  experimentOrchestratorPerProject: false,
+  experimentWorkspace: true,
   orchestratorAgent: "claude",
   orchestratorByProject: {} as Record<string, "on" | "off">,
 };
 
 describe("orchestratorEnabledFor", () => {
   it("is off everywhere when the experiment is off", () => {
-    const s = { ...armed, experimentOrchestrator: false };
+    const s = { ...armed, experimentWorkspace: false };
     expect(orchestratorEnabledFor(s, null)).toBe(false);
     expect(orchestratorEnabledFor(s, "p1")).toBe(false);
   });
@@ -26,15 +25,9 @@ describe("orchestratorEnabledFor", () => {
     expect(orchestratorEnabledFor(armed, "p1")).toBe(true);
   });
 
-  it("ignores per-project overrides while that experiment is off", () => {
-    const s = { ...armed, orchestratorByProject: { p1: "off" as const } };
-    expect(orchestratorEnabledFor(s, "p1")).toBe(true);
-  });
-
-  it("honours per-project overrides when that experiment is on", () => {
+  it("honours per-project overrides", () => {
     const s = {
       ...armed,
-      experimentOrchestratorPerProject: true,
       orchestratorByProject: { p1: "off" as const, p2: "on" as const },
     };
     expect(orchestratorEnabledFor(s, "p1")).toBe(false);

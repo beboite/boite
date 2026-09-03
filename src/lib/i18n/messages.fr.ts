@@ -168,6 +168,17 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "appearance.layoutAuto": "Automatique",
   "appearance.mobile": "Mobile",
   "appearance.pc": "PC",
+  "appearance.sort": "Ordre de la barre latérale",
+  "appearance.sortDesc":
+    "Comment la barre latérale range projets et threads. Manuel est l'ordre dans lequel vous les avez glissés.",
+  "appearance.sortOrder": "Trier par",
+  "appearance.sortManual": "Manuel",
+  "appearance.sortActivity": "Dernière tâche lancée",
+  "appearance.sortAlpha": "Nom du projet",
+  "appearance.sortDirection": "Direction",
+  "appearance.sortAsc": "Croissant",
+  "appearance.sortDescending": "Décroissant",
+  "appearance.sortDirManual": "La direction s'applique une fois un ordre choisi.",
   "appearance.colorByModel": "Couleur selon le modèle",
   "appearance.colorByModelDesc": "Teinte l'icône d'un agent selon le modèle qui lui répond. Threads fastpick uniquement.",
   "appearance.accentClaude": "Claude, servi ailleurs",
@@ -187,19 +198,9 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
 
   "experiments.intro":
     "Chacune remplace un pan entier de l'interface. On peut revenir en arrière sans risque.",
-  "experiments.home": "Accueil",
-  "experiments.homeDesc":
-    "Un accueil d'espace de travail : agents en vie, consommation de tokens de tous les projets, et une boîte de ce qui vous attend.",
-  "experiments.sidebarDesign": "Lignes de thread",
-  "experiments.sidebarDesignDesc":
-    "Classique entoure le logo de l'agent avec l'état du thread. Lumineux allume toute la ligne avec, et y fait traverser une lumière pendant qu'un agent travaille.",
-  "experiments.designClassic": "Classique",
-  "experiments.designGlow": "Lumineux",
-  "experiments.harnessLogos": "Afficher les logos des agents",
-  "experiments.harnessLogosDesc":
-    "Désactivé, chaque ligne porte une marque de ce que fait son thread, et survoler une ligne y ramène son logo.",
-  "experiments.harnessLogosClassic":
-    "Le design classique n'a rien à mettre à la place du logo, il en affiche donc toujours un.",
+  "experiments.workspace": "Espace de travail",
+  "experiments.workspaceDesc":
+    "Active l'Accueil, l'orchestrateur auquel on y parle, ses orchestrateurs par projet, et la voix dans les deux sens de cette conversation.",
   "experiments.infoBox": "Boîte d'infos du projet",
   "experiments.infoBoxDesc":
     "Remplace les onglets du panneau latéral par une boîte au-dessus des terminaux : la branche courante, le todo qu'un agent s'est attribué, le dernier commit — et les dix derniers au survol.",
@@ -220,29 +221,11 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "infoBox.doneSummary": "terminées",
 
 
-  "experiments.smartSort": "Rangement intelligent",
-  "experiments.smartSortDesc":
-    "La barre latérale ordonne projets et threads elle-même. Cocher ne déplace rien : les lignes ne bougent pas tant qu'un ordre n'est pas choisi ci-dessous.",
-  "experiments.smartSortOrder": "Trier par",
-  "experiments.smartSortManual": "Manuel",
-  "experiments.smartSortActivity": "Dernière tâche lancée",
-  "experiments.smartSortAlpha": "Nom du projet",
-  "experiments.smartSortDirection": "Direction",
-  "experiments.smartSortAsc": "Croissant",
-  "experiments.smartSortDescending": "Décroissant",
-  "experiments.smartSortDirManual": "La direction s'applique une fois un ordre choisi.",
-
-  "experiments.orchestrator": "Orchestrateur",
-  "experiments.orchestratorDesc": "Un agent au niveau du workspace, joignable depuis l'Accueil. Il observe le pouls et répond ; rien ne tourne avant votre premier message.",
   "experiments.orchestratorAgent": "Agent",
   "experiments.orchestratorBrokered": "Cet agent tourne sur un endpoint brokeré. Gardez les secrets hors de ce que l'orchestrateur peut lire.",
   "experiments.orchestratorCloseTitle": "Fermer les orchestrateurs ?",
   "experiments.orchestratorCloseAsk": "{count} threads orchestrateurs sont encore vivants. Les ranger avec l'experiment ? Les travailleurs qu'ils ont ouverts restent.",
   "experiments.orchestratorCloseConfirm": "Ranger",
-  "experiments.orchestratorPerProject": "Orchestrateurs par projet",
-  "experiments.orchestratorPerProjectDesc": "Chaque projet peut porter son propre orchestrateur, activé ou coupé, à côté du global. Couper ce réglage restaure un orchestrateur global sans effacer les choix.",
-  "experiments.voice": "Voix",
-  "experiments.voiceDesc": "Parler à l'orchestrateur et entendre ses réponses. La capture et la synthèse restent sur cet appareil ; seul du texte traverse le réseau.",
   "voice.stt": "Entrée voix",
   "voice.tts": "Sortie voix",
   "voice.off": "coupé",

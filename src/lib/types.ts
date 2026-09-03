@@ -137,9 +137,9 @@ export type LocaleSetting = "system" | "en" | "fr";
 /**
  * Where the window goes when Boite starts.
  *
- * `home` only lands while `experimentHome` is on. `last` leaves the existing
- * boot path alone. `project` is also what a launch resolves to whenever the
- * experiment is off, whatever this field says.
+ * `home` only lands while `experimentWorkspace` is on. `last` leaves the
+ * existing boot path alone. `project` is also what a launch resolves to whenever
+ * the experiment is off, whatever this field says.
  */
 export type OpenOnLaunch = "home" | "project" | "last";
 
@@ -305,25 +305,6 @@ export interface Settings {
    */
   colorByModel: boolean;
   /**
-   * Which of the two sidebar designs the thread rows are drawn in.
-   *
-   * They answer the same question in opposite registers, so this is a choice
-   * rather than a feature flag. `classic` rings the agent's logo, which is
-   * legible once you look at it and silent at rest. `signal` puts the state on a
-   * 2px rail down the card's left edge and sweeps it while an agent is working,
-   * which is catchable out of the corner of an eye and stays out of the row's
-   * own space. `features/thread/threadVisual.ts` decides what either draws.
-   */
-  sidebarDesign: SidebarDesign;
-  /**
-   * Whether the agent's own logo is drawn on the row at all.
-   *
-   * Off, the glyph carries a mark for what the thread is doing instead — one per
-   * state, never an empty slot — and hovering the row brings the logo back. The
-   * classic design has one thing to put in the glyph and ignores this.
-   */
-  sidebarHarnessLogos: boolean;
-  /**
    * Experiment: replace the side panel's three tabs with one anchored info box
    * over the terminals: current branch, the todo an agent claimed, the last
    * commit, and up to ten of them on hover. Off draws the classic column.
@@ -339,12 +320,6 @@ export interface Settings {
    */
   infoBoxCollapsed: boolean;
   /**
-   * Experiment: let the sidebar order itself instead of following the dragged
-   * order. Arming it moves nothing on its own — `smartSortBy` starts at
-   * `manual`, so the rows hold still until an order is actually picked.
-   */
-  experimentSmartSort: boolean;
-  /**
    * Experiment: a whip over the whole window, thrown from a titlebar button.
    * Purely cosmetic — it cracks, it makes a noise, and it reaches no terminal:
    * no interrupt, no keystroke, no prompt.
@@ -359,27 +334,24 @@ export interface Settings {
   smartSortBy: SmartSortBy;
   smartSortDirection: SortDirection;
   /**
-   * Experiment: a workspace home with live agents, token use, and an inbox.
-   * Off keeps launch on a project, whatever `openOnLaunch` says.
+   * Experiment: the workspace layer, as one switch.
+   *
+   * It was four — home, orchestrator, per-project orchestrators, voice — and
+   * they were one feature seen from four angles: the orchestrator's chat is
+   * drawn inside home and nowhere else, voice is that chat's microphone, and
+   * per-project scopes are the orchestrator's own roster. Arming any one of the
+   * four alone produced a surface with no way in or a way in with no surface.
+   *
+   * Device-scoped on purpose: arming is a per-device decision (this glass shows
+   * the chat), while everything the orchestrator *is* — its agent, its autonomy,
+   * its caps — is workspace configuration below, because the thread runs on the
+   * workspace and every device must agree on what it may do.
    */
-  experimentHome: boolean;
+  experimentWorkspace: boolean;
   /**
    * Where the window goes when Boite starts. Resolved by `resolveLaunchView`.
    */
   openOnLaunch: OpenOnLaunch;
-  /**
-   * Experiment: the orchestrator layer. Device-scoped on purpose: arming is a
-   * per-device decision (this glass shows the chat), while everything the
-   * orchestrator *is* — its agent, its autonomy, its caps — is workspace
-   * configuration below, because the thread runs on the workspace and every
-   * device must agree on what it may do.
-   */
-  experimentOrchestrator: boolean;
-  /**
-   * Experiment: per-project orchestrators. Read by `orchestratorEnabledFor`
-   * only while `experimentOrchestrator` is on. Device-scoped like its parent.
-   */
-  experimentOrchestratorPerProject: boolean;
   /**
    * The harness the orchestrator runs, in `thread_spawn`'s agent vocabulary
    * (a plain key or a `fastpick:provider:model` combo). Null means none was
@@ -404,12 +376,8 @@ export interface Settings {
    * search and transcripts. The refusal is named, never an empty answer.
    */
   orchestratorBlindProjects: string[];
-  /**
-   * Experiment: voice in and out of the orchestrator chat. Device-scoped, and
-   * so is every knob under it: a microphone and a speaker are properties of
-   * this glass, not of the workspace.
-   */
-  experimentVoice: boolean;
+  // Voice in and out of the orchestrator chat. Device-scoped end to end: a
+  // microphone and a speaker are properties of this glass, not of the workspace.
   /** How speech becomes text. Off means the mic button is not drawn at all. */
   voiceStt: VoiceStt;
   /** How the orchestrator's `aloud` line becomes sound. */
@@ -442,9 +410,9 @@ export type VoiceStt = "off" | "webspeech" | "whisper";
 export type VoiceTts = "off" | "webspeech";
 
 /**
- * What the smart-sort experiment orders the sidebar by.
+ * What the sidebar orders itself by.
  *
- * `manual` is the dragged order and the state the toggle arms into. `activity`
+ * `manual` is the dragged order and the default. `activity`
  * follows the threads: a project ranks by its most recently active one, and the
  * threads inside it rank the same way. `alphabetical` reads the project names
  * and leaves each project's threads where the user dragged them.
@@ -478,15 +446,6 @@ export type InfoBoxAnchor =
   | "bottom-center"
   | "bottom-right";
 
-/**
- * The sidebar's two thread-row designs.
- *
- * A string rather than the `sidebarThreadGlow` boolean it replaces: the boolean
- * was named after one design's decoration, so a third design or a renamed second
- * one could not be spelled at all. `SettingsStore` migrates the old key.
- */
-export type SidebarDesign = "classic" | "glow";
-
 // Animation preference: "system" follows prefers-reduced-motion, "on"/"off"
 // override the OS either way.
 export type MotionMode = "system" | "on" | "off";
@@ -510,10 +469,9 @@ export type ThemeId =
  * What the user picked, which is one more thing than a palette: "system"
  * follows prefers-color-scheme and every other value overrides the OS.
  *
- * A palette rather than a boolean, for the same reason `SidebarDesign` is:
- * a `darkMode: boolean` cannot spell "follow the OS" and cannot be extended to
- * a third palette without renaming every call site. `theme/appearance.ts`
- * resolves it.
+ * A palette rather than a boolean: a `darkMode: boolean` cannot spell "follow
+ * the OS" and cannot be extended to a third palette without renaming every call
+ * site. `theme/appearance.ts` resolves it.
  */
 export type ThemeMode = "system" | ThemeId;
 

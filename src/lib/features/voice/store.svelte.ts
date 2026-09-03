@@ -52,7 +52,7 @@ class VoiceStore {
       return;
     }
     const enabled =
-      settings.state.experimentVoice &&
+      settings.state.experimentWorkspace &&
       settings.state.voiceTts === "webspeech" &&
       ttsSupported();
     const voiceName = settings.state.voiceName;

@@ -3,13 +3,7 @@ import { resolveLaunchView } from "./resolveLaunchView";
 import type { OpenOnLaunch } from "$lib/types";
 import type { HomeAvailabilitySettings } from "./homeAvailable";
 
-const OFF: HomeAvailabilitySettings = {
-  experimentHome: false,
-  experimentOrchestrator: false,
-  experimentOrchestratorPerProject: false,
-  orchestratorAgent: null,
-  orchestratorByProject: {},
-};
+const OFF: HomeAvailabilitySettings = { experimentWorkspace: false };
 
 function at(open: OpenOnLaunch, over: Partial<HomeAvailabilitySettings> = {}) {
   return { ...OFF, ...over, openOnLaunch: open };
@@ -22,29 +16,17 @@ describe("resolveLaunchView", () => {
     expect(resolveLaunchView(at("last"))).toBe("project");
   });
 
-  it("honours home when the experiment is on", () => {
-    expect(resolveLaunchView(at("home", { experimentHome: true }))).toBe("home");
+  it("honours home when the workspace experiment is on", () => {
+    expect(resolveLaunchView(at("home", { experimentWorkspace: true }))).toBe("home");
   });
 
-  it("honours home when the orchestrator alone is armed", () => {
-    expect(
-      resolveLaunchView(
-        at("home", { experimentOrchestrator: true, orchestratorAgent: "claude" }),
-      ),
-    ).toBe("home");
-  });
-
-  it("still returns project when the orchestrator is armed without an agent", () => {
-    expect(resolveLaunchView(at("home", { experimentOrchestrator: true }))).toBe(
+  it("honours project when the experiment is on", () => {
+    expect(resolveLaunchView(at("project", { experimentWorkspace: true }))).toBe(
       "project",
     );
   });
 
-  it("honours project when the experiment is on", () => {
-    expect(resolveLaunchView(at("project", { experimentHome: true }))).toBe("project");
-  });
-
   it("honours last when the experiment is on", () => {
-    expect(resolveLaunchView(at("last", { experimentHome: true }))).toBe("last");
+    expect(resolveLaunchView(at("last", { experimentWorkspace: true }))).toBe("last");
   });
 });

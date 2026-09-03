@@ -166,6 +166,17 @@ export const EN_MESSAGES = {
   "appearance.layoutAuto": "Automatic",
   "appearance.mobile": "Mobile",
   "appearance.pc": "PC",
+  "appearance.sort": "Sidebar order",
+  "appearance.sortDesc":
+    "How the sidebar arranges projects and threads. Manual is the order you dragged them into.",
+  "appearance.sortOrder": "Order by",
+  "appearance.sortManual": "Manual",
+  "appearance.sortActivity": "Last given work",
+  "appearance.sortAlpha": "Project name",
+  "appearance.sortDirection": "Direction",
+  "appearance.sortAsc": "Ascending",
+  "appearance.sortDescending": "Descending",
+  "appearance.sortDirManual": "Direction applies once an order is picked.",
   "appearance.colorByModel": "Colour by model",
   "appearance.colorByModelDesc": "Tint an agent's icon with the model answering it. fastpick threads only.",
   "appearance.accentClaude": "Claude, served elsewhere",
@@ -185,19 +196,9 @@ export const EN_MESSAGES = {
 
   "experiments.intro":
     "Each of these replaces a whole piece of the interface. They are safe to flip back.",
-  "experiments.home": "Home",
-  "experiments.homeDesc":
-    "A workspace home: live agents, token use across every project, and an inbox of what is waiting on you.",
-  "experiments.sidebarDesign": "Thread rows",
-  "experiments.sidebarDesignDesc":
-    "Classic rings the agent's logo with the thread's state. Glow lights the whole row with it, and runs a light across the row while an agent works.",
-  "experiments.designClassic": "Classic",
-  "experiments.designGlow": "Glow",
-  "experiments.harnessLogos": "Show agent logos",
-  "experiments.harnessLogosDesc":
-    "Off, each row shows a mark for what its thread is doing, and hovering a row brings its logo back.",
-  "experiments.harnessLogosClassic":
-    "The classic design has nothing to put in the logo's place, so it always shows one.",
+  "experiments.workspace": "Workspace",
+  "experiments.workspaceDesc":
+    "Turns on Home, the orchestrator you talk to from it, its per-project scopes, and voice in and out of that chat.",
   "experiments.infoBox": "Project info box",
   "experiments.infoBoxDesc":
     "Replaces the side panel's tabs with one box over the terminals: the branch you are on, the todo an agent claimed, the latest commit — and the last ten when you hover it.",
@@ -218,29 +219,11 @@ export const EN_MESSAGES = {
   "infoBox.doneSummary": "done",
 
 
-  "experiments.smartSort": "Smart ordering",
-  "experiments.smartSortDesc":
-    "The sidebar orders projects and threads itself. Arming this moves nothing: the rows hold still until you pick an order below.",
-  "experiments.smartSortOrder": "Order by",
-  "experiments.smartSortManual": "Manual",
-  "experiments.smartSortActivity": "Last given work",
-  "experiments.smartSortAlpha": "Project name",
-  "experiments.smartSortDirection": "Direction",
-  "experiments.smartSortAsc": "Ascending",
-  "experiments.smartSortDescending": "Descending",
-  "experiments.smartSortDirManual": "Direction applies once an order is picked.",
-
-  "experiments.orchestrator": "Orchestrator",
-  "experiments.orchestratorDesc": "A workspace-level agent you talk to from Home. It watches the pulse and answers; nothing runs until your first message.",
   "experiments.orchestratorAgent": "Agent",
   "experiments.orchestratorBrokered": "This agent runs on a brokered endpoint. Keep secrets out of what the orchestrator can read.",
   "experiments.orchestratorCloseTitle": "Close the orchestrators?",
   "experiments.orchestratorCloseAsk": "{count} orchestrator threads are still live. Put them away with the experiment? The workers they opened stay.",
   "experiments.orchestratorCloseConfirm": "Put away",
-  "experiments.orchestratorPerProject": "Per-project orchestrators",
-  "experiments.orchestratorPerProjectDesc": "Each project can carry its own orchestrator, on or off, beside the global one. Switching this off restores one global orchestrator without erasing the choices.",
-  "experiments.voice": "Voice",
-  "experiments.voiceDesc": "Talk to the orchestrator and hear its answers. Capture and synthesis stay on this device; only text crosses the wire.",
   "voice.stt": "Speech in",
   "voice.tts": "Speech out",
   "voice.off": "off",

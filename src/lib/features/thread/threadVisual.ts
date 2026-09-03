@@ -137,36 +137,3 @@ export function threadVisual(input: ThreadVisualInput): ThreadVisual {
   }
 }
 
-/**
- * The mark that stands where the agent's logo stands when the logos are off.
- *
- * Total on purpose. Its predecessor answered for two states out of six and left
- * the other four with nothing to draw, so turning the logos off emptied the
- * glyph rather than changing it: a row that was working showed a bare circle,
- * which reads as a component that failed to render.
- *
- * The names are shapes rather than characters, so the one place that picks a
- * glyph for each is the component that draws it.
- */
-export type ThreadToken = "dot" | "ask" | "check" | "ring" | "zed" | "bang";
-
-/**
- * `cold` has none, and that is the answer rather than a gap.
- *
- * Every other state has something to say about a run. A row that has never been
- * started has not earned a mark, so the glyph slot falls back to the agent's
- * logo — which is the one thing about that row worth reading.
- */
-const TOKENS: Record<ThreadVisualState, ThreadToken | null> = {
-  working: "dot",
-  waiting: "ask",
-  finished: "check",
-  ready: "ring",
-  sleeping: "zed",
-  cold: null,
-  failed: "bang",
-};
-
-export function stateTokenOf(state: ThreadVisualState): ThreadToken | null {
-  return TOKENS[state];
-}
