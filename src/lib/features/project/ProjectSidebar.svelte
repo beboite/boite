@@ -1634,9 +1634,7 @@
                     iconKey={thread.iconKey}
                     color={threadIconColor(thread)}
                     {keepAwake}
-                    onToggleKeepAwake={() => app.toggleThreadKeepAwake(thread.id)}
                     title={glyphTitle(thread)}
-                    label={t("sidebar.toggleKeepAwake")}
                   />
                   {#if renaming && renaming.kind === "thread" && renaming.id === thread.id}
                     <!-- Ring, not border, and the row's own line-height: an

@@ -2,6 +2,7 @@
   import type { ThreadStatus } from "$lib/types";
   import type { IconKey } from "$lib/types";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
+  import { t } from "$lib/i18n/index.svelte";
 
   /**
    * One mark per thread, carrying what it is and how it is doing.
@@ -15,13 +16,11 @@
    * fact. What is left is the logo on its own, and keep-awake is a violet pip on
    * the corner rather than a tint on the mark, because the mark is already
    * spending its colour on the state.
-   *
-   * It stays the keep-awake toggle, which is the one affordance the dot owned:
-   * losing it would have moved a one-click setting into a context menu.
    */
   type Props = {
     status: ThreadStatus;
     iconKey?: IconKey;
+    agent?: string;
     /** The model tint, when the thread came from fastpick. */
     color?: string | null;
     keepAwake?: boolean;
@@ -36,17 +35,74 @@
   let {
     status,
     iconKey = null,
+    agent,
     color = null,
     keepAwake = false,
     size = 20,
     inert = false,
-    onToggleKeepAwake,
     title,
     label,
   }: Props = $props();
 
   const glyphSize = $derived(Math.round(size * 0.7));
 
+  function agentNameFromIcon(key?: IconKey): string {
+    switch (key) {
+      case "claude":
+        return "Claude";
+      case "codex":
+        return "Codex";
+      case "opencode":
+        return "Opencode";
+      case "cursor":
+        return "Cursor";
+      case "antigravity":
+        return "Antigravity";
+      case "copilot":
+        return "Copilot";
+      case "grok":
+        return "Grok";
+      case "hermes":
+        return "Hermes";
+      case "pi":
+        return "Pi";
+      case "muse":
+        return "Muse";
+      case "bun":
+        return "Bun";
+      case "terminal":
+      default:
+        return "Terminal";
+    }
+  }
+
+  const resolvedAgent = $derived(agent ?? agentNameFromIcon(iconKey));
+
+  const computedLabel = $derived.by(() => {
+    if (label) return label;
+    if (keepAwake) {
+      return t("glyph.keepAwake", { agent: resolvedAgent });
+    }
+    switch (status) {
+      case "running":
+        return t("glyph.running", { agent: resolvedAgent });
+      case "waiting":
+        return t("glyph.waiting", { agent: resolvedAgent });
+      case "ready":
+        return t("glyph.ready", { agent: resolvedAgent });
+      case "done":
+        return t("glyph.done", { agent: resolvedAgent });
+      case "exited":
+        return t("glyph.exited", { agent: resolvedAgent });
+      case "error":
+        return t("glyph.error", { agent: resolvedAgent });
+      case "stopped":
+        return t("glyph.stopped", { agent: resolvedAgent });
+      case "idle":
+      default:
+        return t("glyph.idle", { agent: resolvedAgent });
+    }
+  });
 </script>
 
 {#snippet body()}
@@ -56,36 +112,17 @@
   {/if}
 {/snippet}
 
-<!-- Two branches rather than one <svelte:element>: the interactive form has to
-     be a real button to be reachable by keyboard, and the inert form has to not
-     be one at all, because every place that renders it is already inside a
-     button or an aria-hidden drag ghost. -->
-{#if inert}
-  <span
-    class="glyph inert"
-    style:width="{size}px"
-    style:height="{size}px"
-    {title}
-  >
-    {@render body()}
-  </span>
-{:else}
-  <button
-    type="button"
-    class="glyph"
-    style:width="{size}px"
-    style:height="{size}px"
-    onclick={(e) => {
-      e.stopPropagation();
-      onToggleKeepAwake?.();
-    }}
-    {title}
-    aria-label={label}
-    data-no-drag
-  >
-    {@render body()}
-  </button>
-{/if}
+<span
+  class="glyph"
+  class:inert
+  role="img"
+  style:width="{size}px"
+  style:height="{size}px"
+  {title}
+  aria-label={computedLabel}
+>
+  {@render body()}
+</span>
 
 <style>
   /* The glyph is the logo and nothing else. No ring, no track, no second
@@ -101,7 +138,7 @@
     border: 0;
     border-radius: var(--radius-sm);
     background: transparent;
-    cursor: pointer;
+    cursor: default;
   }
   .glyph.inert {
     cursor: default;
