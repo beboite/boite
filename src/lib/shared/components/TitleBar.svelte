@@ -23,6 +23,7 @@
   import GitBranch from "@lucide/svelte/icons/git-branch";
   import FolderTree from "@lucide/svelte/icons/folder-tree";
   import ListTodo from "@lucide/svelte/icons/list-todo";
+  import House from "@lucide/svelte/icons/house";
   import BoiteLogo from "$lib/shared/components/BoiteLogo.svelte";
   import UpdateBadge from "$lib/features/updater/UpdateBadge.svelte";
   import ContextMenu from "$lib/shared/components/ContextMenu.svelte";
@@ -309,6 +310,20 @@
     >
       <BoiteLogo size={17} />
     </button>
+    {#if homeShown}
+      <button
+        type="button"
+        class="press flex h-7 items-center justify-center rounded-md px-2 transition {onHome
+          ? 'bg-accent text-foreground'
+          : 'text-muted-foreground hover:bg-accent hover:text-foreground'}"
+        onclick={goHome}
+        use:tip={onHome ? t("common.backToTerminal") : t("titlebar.home")}
+        aria-label={onHome ? t("common.backToTerminal") : t("titlebar.home")}
+        aria-pressed={onHome}
+      >
+        <House class="size-[15px]" />
+      </button>
+    {/if}
     <button
       type="button"
       class="press flex h-7 items-center justify-center rounded-md px-2 transition {app.view ===
